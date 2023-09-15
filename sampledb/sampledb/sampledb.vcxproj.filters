@@ -1,0 +1,22 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="src">
+      <UniqueIdentifier>{9560f9a9-c6dd-4b6c-9b32-ada7955c0346}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\sampledb">
+      <UniqueIdentifier>{5c517a16-18c9-473d-bb25-f88cdca4031c}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <DCompile Include="..\src\sampledb\sampledb.d">
+      <Filter>src\sampledb</Filter>
+    </DCompile>
+    <DCompile Include="..\src\sampledb\selfrefptr.d">
+      <Filter>src\sampledb</Filter>
+    </DCompile>
+    <DCompile Include="..\src\sampledb\stream.d">
+      <Filter>src\sampledb</Filter>
+    </DCompile>
+  </ItemGroup>
+</Project>
