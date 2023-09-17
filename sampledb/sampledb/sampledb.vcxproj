@@ -35,6 +35,8 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <DCompile Include="..\src\sampledb\block.d" />
+    <DCompile Include="..\src\sampledb\realtime.d" />
     <DCompile Include="..\src\sampledb\sampledb.d" />
     <DCompile Include="..\src\sampledb\selfrefptr.d" />
     <DCompile Include="..\src\sampledb\stream.d" />
@@ -218,6 +220,7 @@
     </ClCompile>
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
+      <ImportPaths>..\sampledb\src;%(ImportPaths)</ImportPaths>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -239,6 +242,7 @@
       <DebugCode>Release</DebugCode>
       <Optimizer>true</Optimizer>
       <Inliner>true</Inliner>
+      <ImportPaths>..\sampledb\src;%(ImportPaths)</ImportPaths>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -298,6 +302,7 @@
     </ClCompile>
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
+      <ImportPaths>..\sampledb\src;%(ImportPaths)</ImportPaths>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -319,6 +324,7 @@
       <DebugCode>Release</DebugCode>
       <Optimizer>true</Optimizer>
       <Inliner>true</Inliner>
+      <ImportPaths>..\sampledb\src;%(ImportPaths)</ImportPaths>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>

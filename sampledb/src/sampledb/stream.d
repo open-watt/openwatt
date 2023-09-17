@@ -1,93 +1,120 @@
-module stream;
+module sampledb.stream;
 
-import std.datetime;
+import std.algorithm : max;
+import sampledb.block;
+import sampledb.realtime;
 
-// for energy meters, Accumulator with time res 100hz and 16bit T is very accurate
-
-enum EndTime = ulong.max;
-
-enum StreamType : ubyte
-{
-    Auto,
-    Accumulator,    // stream of time values between increments
-    DenseDelta,     // regularly cadenced accumulating data
-    SparseDelta,    // irregularly cadenced accumulating data
-    DenseSample,    // regularly cadenced absolute/noisy data
-    SparseSample    // irregularly cadenced absolute/noisy data
-}
-
-
-enum DataType : ubyte
-{
-    Integer,
-    Float,
-    String,
-    Custom
-}
-
+public import sampledb.block : StreamType, DataType;
 
 enum Flags : ubyte
 {
-    AutoType,
-    AutoResolution,
+	AutoType = 1 << 0,
+	AutoResolution = 1 << 1,
 }
 
-enum InsertHint : uint
-{
-    None = 0,
-    Sorted = 1 << 0
-}
 
 struct BlockTreeNode
 {
-    ulong startTime, endTime, halfTime;
-    BlockMeta* block;
-    BlockTreeNode* left, right;
-}
-
-struct BlockMeta
-{
-    ulong startTime, endTime;
-	void[] blockData;
-
-	int numSamples;
-
-    // statistics
-    int numOoOInserts = 0;
-    int numLargesamples = 0;
-
-    BlockMeta* prevBlock, nextBlock;
-    BlockTreeNode* treeNode;
-}
-
-struct Sample(TimeT = ulong, RecordT = uint)
-{
-    TimeT time;
-    RecordT record;
+	RealTime startTime, endTime, halfTime;
+	BlockMeta* block;
+	BlockTreeNode* left, right;
 }
 
 class Stream
 {
-    string name;
+	string name;
 
-    ulong timeResolution; // 100th's of seconds
-    // TODO: stream start time
+	ulong timeResolution; // 100th's of seconds
+	RealTime streamStartRealTime;
 
-    StreamType streamType;
-    DataType dataType;
-    ushort customDataSize;
-    Flags flags;
+	StreamType streamType;
+	DataType dataType;
+	ushort customDataSize;
+	ubyte flags;
 
-    // TODO: block sizes, elements-per-block, etc...
+	size_t sampleSize;
+	size_t elementsPerBlock;
 
-    BlockTreeNode* root;
+	BlockTreeNode* root;
+	BlockMeta* tail;
 
-    void Insert(TimeT = ulong, RecordT = uint)(Sample!(TimeT, RecordT)[] samples, uint hints = InsertHint.None)
-    {
-    }
+	this(StreamType streamType, DataType dataType, uint millisecondsPerSample = 10, ubyte flags = Flags.AutoType | Flags.AutoType)
+	{
+		timeResolution = millisecondsPerSample / 10;
+
+		this.streamType = streamType;
+		this.dataType = dataType;
+		customDataSize = 0;
+		this.flags = flags;
+
+		// assume int or float for now
+		sampleSize = ushort.sizeof;
+		if (streamType >= StreamType.DenseSample)
+			sampleSize = Sample!(ushort, short).sizeof;
+
+		enum maxBlockSize = 1024 * 1024 * 1; // 1 meg blocks?
+		const samplesPerMinute = 6000 / timeResolution;
+		const samplesPer15Min = 6000 * 15 / timeResolution;
+		const samplesPerHour = 6000 * 60 / timeResolution;
+		const samplesPerDay = 6000 * 60 * 24 / timeResolution;
+
+		if (sampleSize * (6000 * 60 * 24 / timeResolution) < maxBlockSize)
+			elementsPerBlock = 6000 * 60 * 24 / timeResolution;
+		else if (sampleSize * (6000 * 60 / timeResolution) < maxBlockSize)
+			elementsPerBlock = 6000 * 60 / timeResolution;
+		else if (sampleSize * (6000 * 15 / timeResolution) < maxBlockSize)
+			elementsPerBlock = 6000 * 15 / timeResolution;
+		else
+			elementsPerBlock = 6000 / timeResolution;
+
+		root = new BlockTreeNode;
+		root.startTime = RealTime.min;
+		root.endTime = RealTime.max;
+		root.halfTime = RealTime.max;
+		root.left = null;
+		root.right = null;
+		root.block = new BlockMeta;
+		tail = root.block;
+
+		root.block.Allocate(streamType, dataType, sampleSize * elementsPerBlock, root); // TODO: some extra for occasional over-size samples?
+	}
+
+	void Insert(TimeT = ulong, RecordT = uint)(Sample!(TimeT, RecordT)[] samples, uint hints = InsertHint.None)
+	{
+		// TODO: only dense streams for now...
+		assert(0);
+	}
 
 	void Insert(RecordT = uint)(RecordT[] samples, uint hints = InsertHint.None)
-    {
-    }
+	{
+		switch (streamType)
+		{
+		case StreamType.Accumulator:
+			assert(RecordT.stringof == "ushort");
+
+			BlockMeta* block = tail;
+
+			while (samples)
+			{
+				samples = block.Insert(samples, hints);
+
+				// TODO: if there are more samples, then we need a new block...
+				assert(!samples);
+			}
+			break;
+		case StreamType.DenseDelta:
+			break;
+		case StreamType.SparseDelta:
+			break;
+		case StreamType.DenseSample:
+			break;
+		case StreamType.SparseSample:
+			break;
+		default:
+			assert(0);
+		}
+	}
+
+private:
 
 }

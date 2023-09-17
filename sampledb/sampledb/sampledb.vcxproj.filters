@@ -18,5 +18,11 @@
     <DCompile Include="..\src\sampledb\stream.d">
       <Filter>src\sampledb</Filter>
     </DCompile>
+    <DCompile Include="..\src\sampledb\realtime.d">
+      <Filter>src\sampledb</Filter>
+    </DCompile>
+    <DCompile Include="..\src\sampledb\block.d">
+      <Filter>src\sampledb</Filter>
+    </DCompile>
   </ItemGroup>
 </Project>
