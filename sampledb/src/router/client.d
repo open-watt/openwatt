@@ -8,6 +8,11 @@ import router.serial : SerialParams;
 
 class Client
 {
+    this(string name)
+	{
+		this.name = name;
+	}
+
 	bool createModbus(Connection connection, const ModbusProfile* profile = null)
 	{
         this.connection = connection;
@@ -65,7 +70,7 @@ class Client
 
         Request* request = response.request;
 
-        ubyte[1024] buffer;
+        ubyte[1024] buffer = void;
         ubyte[] packet;
         switch (connection.modbus.protocol)
 		{
@@ -101,12 +106,15 @@ class Client
         if (success && packet.raw)
 		{
             request = new Request;
+            request.client = this;
+            request.packet = packet;
 		}
 
         return request;
 	}
 
 public:
+    string name;
     Connection connection;
 
     Protocol protocol;
@@ -126,4 +134,17 @@ struct Request
 {
     Client client;
     Packet packet;
+
+    string toString() const
+	{
+        import router.modbus.message: getFunctionCodeName;
+        import std.format;
+
+		if (client.protocol == Protocol.Modbus)
+		{
+    		return format("%s --> %s :: %s", client.name, packet.modbus.frame.toString, packet.modbus.message.toString);
+		}
+
+        return format("%s --> :: %s", packet.raw[]);
+	}
 }

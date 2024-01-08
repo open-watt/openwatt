@@ -18,7 +18,7 @@ void main()
     ModbusProfile* se_meter_profile = new ModbusProfile;
     se_meter_profile.populateRegs(solarEdgeRegs);
 
-    Client se_inverter = new Client();
+    Client se_inverter = new Client("se_inverter");
     se_inverter.createEthernetModbus("192.168.3.7", 8001, EthernetMethod.TCP, 2, ModbusProtocol.RTU, se_meter_profile);
 
     Device se_meter = new Device("se_meter");
@@ -28,7 +28,18 @@ void main()
     while (true)
 	{
         Request* req = se_inverter.poll();
+        if (req)
+		{
+            writeln(req.toString);
+			se_meter.sendModbusRequest(req);
+		}
+
         Response* resp = se_meter.poll();
+        if (resp)
+		{
+            writeln(resp.toString);
+            se_inverter.sendModbusResponse(resp);
+		}
 
 //        const(ubyte)[] packet = tcpConnection.poll();
 //        const(ubyte)[] packet2 = tcpConnection2.poll();

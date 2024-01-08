@@ -89,7 +89,7 @@ class Connection
 
     bool poll(out Packet packet)
 	{
-		ubyte[1024] buffer;
+		ubyte[1024] buffer = void;
 
         packet.raw = null;
         packet.modbus = null;
@@ -224,7 +224,7 @@ private:
 
     void appendInput(const(ubyte)[] data)
 	{
-		if (data.length > inputBuffer.length - inputLen)
+		while (data.length > inputBuffer.length - inputLen)
 		{
 			if (inputBuffer.length == 0)
 				inputBuffer = new ubyte[1024];
@@ -245,6 +245,7 @@ private:
 
         ubyte[] r = inputBuffer[0 .. bytes].dup;
 		inputLen -= bytes;
+        assert(inputLen < 1 || inputLen > 3);
 
 		for (size_t i = 0; i < inputLen; i += bytes)
 		{
@@ -252,6 +253,7 @@ private:
 			size_t copy = min(inputLen - i, bytes);
 			inputBuffer[i .. i + copy] = inputBuffer[i + bytes .. i + bytes + copy];
 		}
+        inputBuffer[inputLen .. inputLen + bytes] = 0;
 
         return r;
 	}

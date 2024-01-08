@@ -42,6 +42,12 @@ struct ModbusPDU
     ubyte[ModbusMessageDataMaxLength] buffer;
     ushort length;
     inout(ubyte)[] data() inout { return buffer[0..length]; }
+
+    string toString() const
+	{
+        import std.format, std.digest;
+        return format("%s: %s", getFunctionCodeName(functionCode), data.toHexString);
+	}
 }
 
 align(2) struct ModbusFrame
@@ -64,6 +70,16 @@ align(2) struct ModbusFrame
         align(1) ushort transactionId;
         enum ushort protocolId = 0; // alwayus 0 (make this a variable if this is ever discovered to be not true
         align(1) ushort length;
+	}
+
+    string toString() const
+	{
+        import std.format;
+        if (protocol == Protocol.RTU)
+            return format("rtu(%d)", rtu.address);
+        else if (protocol == Protocol.TCP)
+            return format("tcp(%d, tx%d)", tcp.unitId, tcp.transactionId);
+        assert(0);
 	}
 }
 
@@ -121,8 +137,8 @@ ptrdiff_t getMessage(const(ubyte)[] data, out ModbusMessage msg, Protocol protoc
             return -1;
 
         msg.message.length = cast(short)(msg.frame.tcp.length - 2);
-        msg.message.data[0 .. msg.message.length] = data[8 .. 8 + msg.message.length];
-        msg.message.data[msg.message.length .. $] = 0;
+        msg.message.buffer[0 .. msg.message.length] = data[8 .. 8 + msg.message.length];
+        msg.message.buffer[msg.message.length .. $] = 0;
 
         return 6 + msg.frame.tcp.length;
 	}
@@ -143,8 +159,8 @@ ptrdiff_t getMessage(const(ubyte)[] data, out ModbusMessage msg, Protocol protoc
 		return -1;
 
 	msg.message.length = cast(short)(rtuPacket.length - 4);
-	msg.message.data[0 .. msg.message.length] = rtuPacket[2 .. 2 + msg.message.length];
-	msg.message.data[msg.message.length .. $] = 0;
+	msg.message.buffer[0 .. msg.message.length] = rtuPacket[2 .. $-2];
+	msg.message.buffer[msg.message.length .. $] = 0;
 
     return rtuPacket.length;
 }
@@ -213,7 +229,7 @@ inout(ubyte)[] crawlForRTU(inout(ubyte)[] data, ushort* rcrc = null)
 
             if (rcrc)
                 *rcrc = crc;
-            return data[0 .. pos + 2];
+            return data[0 .. pos + 3];
 		}
 	}
 

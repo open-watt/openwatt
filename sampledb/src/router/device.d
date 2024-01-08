@@ -69,8 +69,10 @@ class Device
 		{
             // if there's a request in flight, we need to queue...
             if (modbus.pendingRequests.length > 0)
+			{
                 modbus.requestQueue ~= request;
-            return true;
+                return true;
+			}
 		}
 
         if (request.client.modbus.profile != modbus.profile &&
@@ -80,7 +82,7 @@ class Device
             assert(0);
 		}
 
-        ubyte[1024] buffer;
+        ubyte[1024] buffer = void;
         ubyte[] packet;
         switch (connection.modbus.protocol)
 		{
@@ -119,24 +121,24 @@ class Device
             response = new Response;
             response.device = this;
             response.packet = packet;
-		}
 
-        if (protocol == Protocol.Modbus)
-		{
-            response.request = popPendingRequest(connection.modbus.protocol == ModbusProtocol.TCP ? packet.modbus.frame.tcp.transactionId : 0);
+			if (protocol == Protocol.Modbus)
+			{
+				response.request = popPendingRequest(connection.modbus.protocol == ModbusProtocol.TCP ? packet.modbus.frame.tcp.transactionId : 0);
 
-            if (connection.modbus.protocol != ModbusProtocol.TCP)
-		    {
-                // there are requests in the queue; we'll dispatch the next one...
-                Request* req = popModbusRequest();
-                if (req)
-                    sendModbusRequest(req);
+				if (connection.modbus.protocol != ModbusProtocol.TCP)
+				{
+					// there are requests in the queue; we'll dispatch the next one...
+					Request* req = popModbusRequest();
+					if (req)
+						sendModbusRequest(req);
+				}
 			}
-		}
-        else
-		{
-            // TODO: how do we associate the request?
-            assert(0);
+			else
+			{
+				// TODO: how do we associate the request?
+				assert(0);
+			}
 		}
 
         return response;
@@ -205,4 +207,16 @@ struct Response
     Device device;
     Request* request;
 	Packet packet;
+
+	string toString() const
+	{
+        import router.modbus.message: getFunctionCodeName;
+        import std.format;
+
+        if (device.protocol == Protocol.Modbus)
+		{
+			return format("%s <-- %s :: %s", request.client.name, device.name, packet.modbus.message.toString);
+		}
+        return format("%s <-- %s :: %s", request.client.name, device.name, packet.raw[]);
+	}
 }
