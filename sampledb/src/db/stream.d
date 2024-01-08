@@ -1,6 +1,4 @@
-module stream;
-
-import std.datetime;
+module db.stream;
 
 // for energy meters, Accumulator with time res 100hz and 16bit T is very accurate
 

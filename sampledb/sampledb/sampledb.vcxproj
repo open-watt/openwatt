@@ -35,9 +35,21 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <DCompile Include="..\src\sampledb\sampledb.d" />
-    <DCompile Include="..\src\sampledb\selfrefptr.d" />
-    <DCompile Include="..\src\sampledb\stream.d" />
+    <DCompile Include="..\src\db\package.d" />
+    <DCompile Include="..\src\db\selfrefptr.d" />
+    <DCompile Include="..\src\db\stream.d" />
+    <DCompile Include="..\src\db\value.d" />
+    <DCompile Include="..\src\main.d" />
+    <DCompile Include="..\src\router\client.d" />
+    <DCompile Include="..\src\router\connection.d" />
+    <DCompile Include="..\src\router\device.d" />
+    <DCompile Include="..\src\router\modbus\coding.d" />
+    <DCompile Include="..\src\router\modbus\message.d" />
+    <DCompile Include="..\src\router\modbus\profile\package.d" />
+    <DCompile Include="..\src\router\modbus\profile\solaredge_meter.d" />
+    <DCompile Include="..\src\router\modbus\util.d" />
+    <DCompile Include="..\src\router\serial.d" />
+    <DCompile Include="..\src\util\package.d" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E12D037A-40C8-4F1B-B8B3-DE527A1E9D41}</ProjectGuid>
@@ -218,6 +230,7 @@
     </ClCompile>
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
+      <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
