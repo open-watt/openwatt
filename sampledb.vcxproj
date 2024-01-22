@@ -54,6 +54,10 @@
     <DCompile Include="src\router\serial.d" />
     <DCompile Include="src\util\package.d" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include=".editorconfig" />
+    <None Include=".gitignore" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E12D037A-40C8-4F1B-B8B3-DE527A1E9D41}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>

@@ -21,31 +21,63 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <DCompile Include="src\db\package.d" />
-    <DCompile Include="src\db\selfrefptr.d" />
-    <DCompile Include="src\db\stream.d" />
-    <DCompile Include="src\db\value.d" />
-    <DCompile Include="src\main.d" />
-    <DCompile Include="src\router\client.d" />
-    <DCompile Include="src\router\connection.d" />
-    <DCompile Include="src\router\device.d" />
-    <DCompile Include="src\router\modbus\coding.d" />
-    <DCompile Include="src\router\modbus\message.d" />
-    <DCompile Include="src\router\modbus\profile\package.d" />
-    <DCompile Include="src\router\modbus\util.d" />
-    <DCompile Include="src\router\serial.d" />
-    <DCompile Include="src\util\package.d" />
     <DCompile Include="src\router\modbus\profile\goodwe_smart_meter.d">
       <Filter>src\router\modbus\profile</Filter>
     </DCompile>
-    <DCompile Include="..\src\router\modbus\profile\goodwe_ems.d">
+    <DCompile Include="src\router\modbus\profile\solaredge_meter.d">
       <Filter>src\router\modbus\profile</Filter>
     </DCompile>
-    <DCompile Include="..\src\router\modbus\profile\solaredge_meter.d">
+    <DCompile Include="src\router\modbus\profile\goodwe_ems.d">
       <Filter>src\router\modbus\profile</Filter>
     </DCompile>
-    <DCompile Include="..\src\router\modbus\profile\pace_bms.d">
+    <DCompile Include="src\router\modbus\profile\pace_bms.d">
       <Filter>src\router\modbus\profile</Filter>
     </DCompile>
+    <DCompile Include="src\router\modbus\profile\package.d">
+      <Filter>src\router\modbus\profile</Filter>
+    </DCompile>
+    <DCompile Include="src\db\package.d">
+      <Filter>src\db</Filter>
+    </DCompile>
+    <DCompile Include="src\util\package.d">
+      <Filter>src\util</Filter>
+    </DCompile>
+    <DCompile Include="src\router\modbus\coding.d">
+      <Filter>src\router\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\router\modbus\util.d">
+      <Filter>src\router\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\router\modbus\message.d">
+      <Filter>src\router\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\main.d">
+      <Filter>src</Filter>
+    </DCompile>
+    <DCompile Include="src\db\selfrefptr.d">
+      <Filter>src\db</Filter>
+    </DCompile>
+    <DCompile Include="src\db\stream.d">
+      <Filter>src\db</Filter>
+    </DCompile>
+    <DCompile Include="src\db\value.d">
+      <Filter>src\db</Filter>
+    </DCompile>
+    <DCompile Include="src\router\client.d">
+      <Filter>src\router</Filter>
+    </DCompile>
+    <DCompile Include="src\router\connection.d">
+      <Filter>src\router</Filter>
+    </DCompile>
+    <DCompile Include="src\router\device.d">
+      <Filter>src\router</Filter>
+    </DCompile>
+    <DCompile Include="src\router\serial.d">
+      <Filter>src\router</Filter>
+    </DCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include=".editorconfig" />
+    <None Include=".gitignore" />
   </ItemGroup>
 </Project>
