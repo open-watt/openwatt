@@ -18,99 +18,99 @@ enum Transport
 
 enum Protocol
 {
-    Modbus,
-    HTTPPoll,
-    Other // Raw?
+	Modbus,
+	HTTPPoll,
+	Other // Raw?
 }
 
 enum EthernetMethod
 {
-    TCP,
-    UDP
+	TCP,
+	UDP
 }
 
 struct Packet
 {
-    const(ubyte)[] raw;
-    ModbusMessage* modbus;
+	const(ubyte)[] raw;
+	ModbusMessage* modbus;
 }
 
 class Connection
 {
-    bool openSerialModbus(string device, ref in SerialParams params, ubyte address)
+	bool openSerialModbus(string device, ref in SerialParams params, ubyte address)
 	{
-        transport = Transport.Serial;
-        serial.device = device;
-        serial.params = params;
+		transport = Transport.Serial;
+		serial.device = device;
+		serial.params = params;
 
-        protocol = Protocol.Modbus;
-        modbus.protocol = ModbusProtocol.RTU;
-        modbus.address = address;
+		protocol = Protocol.Modbus;
+		modbus.protocol = ModbusProtocol.RTU;
+		modbus.address = address;
 
-        // open serial stream...
-        serial.serialPort.open(device, params);
+		// open serial stream...
+		serial.serialPort.open(device, params);
 
-        return true;
+		return true;
 	}
 
 	bool createEthernetModbus(string host, ushort port, EthernetMethod method, ubyte unitId, ModbusProtocol modbusProtocol = ModbusProtocol.Unknown)
 	{
-        transport = Transport.Ethernet;
-        ethernet.host = host;
-        ethernet.port = port;
-        ethernet.method = method;
+		transport = Transport.Ethernet;
+		ethernet.host = host;
+		ethernet.port = port;
+		ethernet.method = method;
 
-        protocol = Protocol.Modbus;
-        modbus.protocol = modbusProtocol;
-        modbus.address = unitId;
+		protocol = Protocol.Modbus;
+		modbus.protocol = modbusProtocol;
+		modbus.address = unitId;
 
-        switch (method)
+		switch (method)
 		{
-            case EthernetMethod.TCP:
-			    // try and connect to server...
-			    ethernet.socket = new TcpSocket();
-			    ethernet.socket.connect(new InternetAddress(host, port));
-                break;
-            case EthernetMethod.UDP:
-                // maybe we need to bind to receive messages?
-                assert(0);
-                break;
-            default:
-                assert(0);
+			case EthernetMethod.TCP:
+				// try and connect to server...
+				ethernet.socket = new TcpSocket();
+				ethernet.socket.connect(new InternetAddress(host, port));
+				break;
+			case EthernetMethod.UDP:
+				// maybe we need to bind to receive messages?
+				assert(0);
+				break;
+			default:
+				assert(0);
 		}
 
-        return true;
+		return true;
 	}
 
-    bool linkEstablished()
+	bool linkEstablished()
 	{
-        return false;
+		return false;
 	}
 
-    bool poll(out Packet packet)
+	bool poll(out Packet packet)
 	{
 		ubyte[1024] buffer = void;
 
-        packet.raw = null;
-        packet.modbus = null;
+		packet.raw = null;
+		packet.modbus = null;
 
-        switch (transport)
-        {
-            case Transport.Serial:
-                ptrdiff_t length;
-                do
+		switch (transport)
+		{
+			case Transport.Serial:
+				ptrdiff_t length;
+				do
 				{
-                    length = serial.serialPort.read(buffer);
-                    if (length <= 0)
-                        break;
-                    appendInput(buffer[0 .. length]);
+					length = serial.serialPort.read(buffer);
+					if (length <= 0)
+						break;
+					appendInput(buffer[0 .. length]);
 				}
-                while (length == buffer.sizeof);
-                break;
-            case Transport.Ethernet:
-                switch (ethernet.method)
+				while (length == buffer.sizeof);
+				break;
+			case Transport.Ethernet:
+				switch (ethernet.method)
 				{
-                    case EthernetMethod.TCP:
+					case EthernetMethod.TCP:
 						SocketSet readSet = new SocketSet;
 						readSet.add(ethernet.socket);
 						if (Socket.select(readSet, null, null, dur!"usecs"(0)))
@@ -119,87 +119,87 @@ class Connection
 							if (length > 0)
 								appendInput(buffer[0 .. length]);
 						}
-                        break;
-                    case EthernetMethod.UDP:
-                        assert(0);
-                    default:
-                        assert(0);
+						break;
+					case EthernetMethod.UDP:
+						assert(0);
+					default:
+						assert(0);
 				}
-                break;
-            default:
-                assert(0);
+				break;
+			default:
+				assert(0);
 		}
 
-        if (inputLen != 0)
+		if (inputLen != 0)
 		{
 			// Check for complete packet based on the protocol
-            switch (protocol)
+			switch (protocol)
 			{
-                case Protocol.Modbus:
-                    packet.modbus = new ModbusMessage;
-                    ptrdiff_t len = inputBuffer[0 .. inputLen].getMessage(*packet.modbus, modbus.protocol);
-                    if (len < 0)
+				case Protocol.Modbus:
+					packet.modbus = new ModbusMessage;
+					ptrdiff_t len = inputBuffer[0 .. inputLen].getMessage(*packet.modbus, modbus.protocol);
+					if (len < 0)
 					{
-                        // what to do? purge the buffer and start over maybe?
-                        assert(0);
-                        return false;
+						// what to do? purge the buffer and start over maybe?
+						assert(0);
+						return false;
 					}
-                    if (len > 0)
+					if (len > 0)
 					{
-                        packet.raw = takeInput(len);
-                        if (modbus.protocol == ModbusProtocol.Unknown)
-                            modbus.protocol = packet.modbus.frame.protocol;
+						packet.raw = takeInput(len);
+						if (modbus.protocol == ModbusProtocol.Unknown)
+							modbus.protocol = packet.modbus.frame.protocol;
 					}
-                    return true;
+					return true;
 
-                default:
-                    assert(0);
+				default:
+					assert(0);
 			}
 		}
 
-        return true;
-    }
+		return true;
+	}
 
-    void write(const(ubyte[]) data)
+	void write(const(ubyte[]) data)
 	{
-        switch (transport)
-        {
-            case Transport.Serial:
+		switch (transport)
+		{
+			case Transport.Serial:
 				serial.serialPort.write(data);
-                break;
-            case Transport.Ethernet:
-                switch (ethernet.method)
+				break;
+			case Transport.Ethernet:
+				switch (ethernet.method)
 				{
-                    case EthernetMethod.TCP:
+					case EthernetMethod.TCP:
 						ethernet.socket.send(data);
-                        break;
-                    case EthernetMethod.UDP:
-                        assert(0);
-                    default:
-                        assert(0);
+						break;
+					case EthernetMethod.UDP:
+						assert(0);
+					default:
+						assert(0);
 				}
-                break;
-            default:
-                assert(0);
+				break;
+			default:
+				assert(0);
 		}
-    }
+	}
 
-    Transport transport;
-    Protocol protocol;
+	Transport transport;
+	Protocol protocol;
 
 	union
 	{
 		Serial serial;
 		Ethernet ethernet;
 	}
-    union
+	union
 	{
-        Modbus modbus;
+		Modbus modbus;
 	}
 
 private:
 	ubyte[] inputBuffer;
-    size_t inputLen;
+	size_t inputLen;
 
 	struct Serial
 	{
@@ -216,13 +216,13 @@ private:
 		Socket socket;
 	}
 
-    struct Modbus
+	struct Modbus
 	{
 		ModbusProtocol protocol;
 		ubyte address;
 	}
 
-    void appendInput(const(ubyte)[] data)
+	void appendInput(const(ubyte)[] data)
 	{
 		while (data.length > inputBuffer.length - inputLen)
 		{
@@ -239,13 +239,13 @@ private:
 		inputLen += data.length;
 	}
 
-    ubyte[] takeInput(size_t bytes)
+	ubyte[] takeInput(size_t bytes)
 	{
-        assert(bytes <= inputLen);
+		assert(bytes <= inputLen);
 
-        ubyte[] r = inputBuffer[0 .. bytes].dup;
+		ubyte[] r = inputBuffer[0 .. bytes].dup;
 		inputLen -= bytes;
-        assert(inputLen < 1 || inputLen > 3);
+		assert(inputLen < 1 || inputLen > 3);
 
 		for (size_t i = 0; i < inputLen; i += bytes)
 		{
@@ -253,8 +253,8 @@ private:
 			size_t copy = min(inputLen - i, bytes);
 			inputBuffer[i .. i + copy] = inputBuffer[i + bytes .. i + bytes + copy];
 		}
-        inputBuffer[inputLen .. inputLen + bytes] = 0;
+		inputBuffer[inputLen .. inputLen + bytes] = 0;
 
-        return r;
+		return r;
 	}
 }

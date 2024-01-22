@@ -9,17 +9,17 @@ struct ValueDesc
 		Current,
 		Power,
 		Energy,
-        PowerFactor,
+		PowerFactor,
 		SOC, // state of charge
 		SOH, // state of health
 	}
 	enum Unit
 	{
-        Bool,
-        Integer,
-        Float,
-        String,
-        Percentage,
+		Bool,
+		Integer,
+		Float,
+		String,
+		Percentage,
 		Volts,
 		Amps,
 		Watts,

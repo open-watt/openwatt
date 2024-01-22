@@ -8,123 +8,123 @@ import router.serial : SerialParams;
 
 class Client
 {
-    this(string name)
+	this(string name)
 	{
 		this.name = name;
 	}
 
 	bool createModbus(Connection connection, const ModbusProfile* profile = null)
 	{
-        this.connection = connection;
+		this.connection = connection;
 
 		protocol = Protocol.Modbus;
-        modbus.profile = profile;
+		modbus.profile = profile;
 
-        return true;
+		return true;
 	}
 
-    bool createSerialModbus(string device, ref in SerialParams params, ubyte address, const ModbusProfile* profile = null)
+	bool createSerialModbus(string device, ref in SerialParams params, ubyte address, const ModbusProfile* profile = null)
 	{
-        connection = new Connection;
-        connection.openSerialModbus(device, params, address);
+		connection = new Connection;
+		connection.openSerialModbus(device, params, address);
 
-        protocol = Protocol.Modbus;
-        modbus.profile = profile;
+		protocol = Protocol.Modbus;
+		modbus.profile = profile;
 
-        return true;
+		return true;
 	}
 
 	bool createEthernetModbus(string host, ushort port, EthernetMethod method, ubyte unitId, ModbusProtocol modbusProtocol = ModbusProtocol.Unknown, const ModbusProfile* profile = null)
 	{
 		connection = new Connection;
-        connection.createEthernetModbus(host, port, method, unitId, modbusProtocol);
+		connection.createEthernetModbus(host, port, method, unitId, modbusProtocol);
 
-        protocol = Protocol.Modbus;
-        modbus.profile = profile;
+		protocol = Protocol.Modbus;
+		modbus.profile = profile;
 
-        return true;
+		return true;
 	}
 
 	bool linkEstablished()
 	{
-        return false;
+		return false;
 	}
 
 	bool sendResponse(Response* response)
 	{
-        // send response
-        return false;
+		// send response
+		return false;
 	}
 
 	bool sendModbusResponse(Response* response)
 	{
 		assert(protocol == Protocol.Modbus);
-        assert(response.device.protocol == Protocol.Modbus);
+		assert(response.device.protocol == Protocol.Modbus);
 
-        if (response.device.modbus.profile != modbus.profile &&
-            response.device.modbus.profile && modbus.profile)
+		if (response.device.modbus.profile != modbus.profile &&
+			response.device.modbus.profile && modbus.profile)
 		{
 			// TODO: if the profiles are mismatching, then we need to translate...
-            assert(0);
+			assert(0);
 		}
 
-        Request* request = response.request;
+		Request* request = response.request;
 
-        ubyte[1024] buffer = void;
-        ubyte[] packet;
-        switch (connection.modbus.protocol)
+		ubyte[1024] buffer = void;
+		ubyte[] packet;
+		switch (connection.modbus.protocol)
 		{
-            case ModbusProtocol.RTU:
-                packet = frameRTUMessage(request.packet.modbus.frame.rtu.address,
+			case ModbusProtocol.RTU:
+				packet = frameRTUMessage(request.packet.modbus.frame.rtu.address,
 										 response.packet.modbus.message.functionCode,
 										 response.packet.modbus.message.data,
 										 buffer);
-                break;
-            case ModbusProtocol.TCP:
-                packet = frameTCPMessage(request.packet.modbus.frame.tcp.transactionId,
+				break;
+			case ModbusProtocol.TCP:
+				packet = frameTCPMessage(request.packet.modbus.frame.tcp.transactionId,
 										 request.packet.modbus.frame.tcp.unitId,
 										 request.packet.modbus.message.functionCode,
 										 request.packet.modbus.message.data,
 										 buffer);
-                break;
-            default:
-                assert(0);
+				break;
+			default:
+				assert(0);
 		}
 
-        connection.write(packet);
+		connection.write(packet);
 
-        // send formatted modbus response
-        return true;
+		// send formatted modbus response
+		return true;
 	}
 
-    Request* poll()
+	Request* poll()
 	{
-        Request* request = null;
+		Request* request = null;
 
-        Packet packet;
-        bool success = connection.poll(packet);
-        if (success && packet.raw)
+		Packet packet;
+		bool success = connection.poll(packet);
+		if (success && packet.raw)
 		{
-            request = new Request;
-            request.client = this;
-            request.packet = packet;
+			request = new Request;
+			request.client = this;
+			request.packet = packet;
 		}
 
-        return request;
+		return request;
 	}
 
 public:
-    string name;
-    Connection connection;
+	string name;
+	Connection connection;
 
-    Protocol protocol;
-    union
+	Protocol protocol;
+	union
 	{
-        Modbus modbus;
+		Modbus modbus;
 	}
 
 private:
-    struct Modbus
+	struct Modbus
 	{
 		const(ModbusProfile)* profile;
 	}
@@ -132,19 +132,19 @@ private:
 
 struct Request
 {
-    Client client;
-    Packet packet;
+	Client client;
+	Packet packet;
 
-    string toString() const
+	string toString() const
 	{
-        import router.modbus.message: getFunctionCodeName;
-        import std.format;
+		import router.modbus.message: getFunctionCodeName;
+		import std.format;
 
 		if (client.protocol == Protocol.Modbus)
 		{
-    		return format("%s --> %s :: %s", client.name, packet.modbus.frame.toString, packet.modbus.message.toString);
+			return format("%s --> %s :: %s", client.name, packet.modbus.frame.toString, packet.modbus.message.toString);
 		}
 
-        return format("%s --> :: %s", packet.raw[]);
+		return format("%s --> :: %s", packet.raw[]);
 	}
 }
