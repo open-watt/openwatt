@@ -1,0 +1,50 @@
+# Local cruft
+*.ll
+*.s
+*.bc
+*.ast
+src/parser/
+src/parser/
+lib/bdwgc-gc7_4_4/
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# Visual Studio junk
+*.opendb
+*.db
+*.sdf
+*.user
+*.ilk
+*.pdb
+
+# folders
+.vs
+Debug
+x64
