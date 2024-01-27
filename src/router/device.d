@@ -1,12 +1,15 @@
 module router.device;
 
+import std.datetime : Duration, MonoTime, msecs;
 import std.stdio;
 
-import router.client : Request;
-import router.connection;
-import router.modbus.message : frameRTUMessage, frameTCPMessage, ModbusPDU, ModbusProtocol = Protocol;
-import router.modbus.profile;
-import router.serial : SerialParams;
+import db.value;
+
+
+enum DeviceType : uint
+{
+	Modbus = 0x00F0D805,
+}
 
 enum RequestStatus
 {
@@ -16,25 +19,47 @@ enum RequestStatus
 	Error
 };
 
-struct Response
+class Request
 {
-	Device device;
-	Request* request;
-	Packet packet;
-	RequestStatus status;
+	alias ResponseHandler = void delegate(Response response);
 
-	string toString() const
+	MonoTime requestTime;
+	ResponseHandler responseHandler;
+
+	this(ResponseHandler responseHandler)
 	{
-		import router.modbus.message: getFunctionCodeName;
+		this.responseHandler = responseHandler;
+	}
+
+	ValueDesc*[] readValues() { return null; }
+	Value[] writeValues() { return null; }
+
+	override string toString() const
+	{
+		import std.format;
+		assert(0, "TODO");
+		//		return format("%s --> :: %s", packet[]);
+	}
+}
+
+class Response
+{
+	RequestStatus status;
+	Device device;
+	Request request;
+
+	Value[] values() { return null; }
+
+	override string toString() const
+	{
 		import std.format;
 
+		assert(request);
+
 		if (status == RequestStatus.Timeout)
-			return format("%s <-- %s :: REQUEST TIMEOUT", request ? request.client.name : "", device.name);
-		if (device.protocol == Protocol.Modbus)
-		{
-			return format("%s <-- %s :: %s", request ? request.client.name : "", device.name, packet.modbus.message.toString);
-		}
-		return format("%s <-- %s :: %s", request ? request.client.name : "", device.name, packet.raw[]);
+			return format("<-- %s :: REQUEST TIMEOUT", device.name);
+		assert(0, "TODO");
+//		return format("%s <-- %s :: %s", request ? request.client.name : "", device.name, packet[]);
 	}
 }
 
@@ -46,56 +71,132 @@ class Device
 		this.name = name;
 	}
 
-	bool createModbus(Connection connection, const ModbusProfile* profile = null)
-	{
-		this.connection = connection;
-
-		protocol = Protocol.Modbus;
-		modbus.profile = profile;
-
-		return true;
-	}
-
-	bool createSerialModbus(string device, ref in SerialParams params, ubyte address, const ModbusProfile* profile = null)
-	{
-		connection = new Connection;
-		connection.openSerialModbus(device, params, address);
-
-		protocol = Protocol.Modbus;
-		modbus.profile = profile;
-
-		return true;
-	}
-
-	bool createEthernetModbus(string host, ushort port, EthernetMethod method, ubyte unitId, ModbusProtocol modbusProtocol, const ModbusProfile* profile = null)
-	{
-		assert(modbusProtocol != ModbusProtocol.Unknown, "Can't guess modbus protocol for slave devices");
-
-		connection = new Connection;
-		connection.createEthernetModbus(host, port, method, unitId, modbusProtocol);
-
-		protocol = Protocol.Modbus;
-		modbus.profile = profile;
-
-		return true;
-	}
-
 	bool linkEstablished()
 	{
 		return false;
 	}
 
-	bool requestData(Request* request)
+	bool sendRequest(Request request)
 	{
+		request.requestTime = MonoTime.currTime;
+
 		// request data by high-level id
 		return false;
 	}
 
+	void poll()
+	{
+		// check if any requests have timed out...
+		MonoTime now = MonoTime.currTime;
+
+		for (size_t i = 0; i < pendingRequests.length; ++i)
+		{
+			if (pendingRequests[i].request.requestTime + requestTimeout < now)
+			{
+				Request request = pendingRequests[i].request;
+				if (i < pendingRequests.length - 1)
+					pendingRequests[i] = pendingRequests[$ - 1];
+				--pendingRequests.length;
+
+				Response response = new Response();
+				response.status = RequestStatus.Timeout;
+				response.device = this;
+				response.request = request;
+
+				request.responseHandler(response);
+			}
+		}
+	}
+
+	string name;
+	DeviceType devType;
+	Duration requestTimeout;
+
+private:
+	PendingRequest[] pendingRequests;
+
+	struct PendingRequest
+	{
+		ushort requestId;
+		Request request;
+	}
+
+	Request popPendingRequest(ushort requestId)
+	{
+		if (pendingRequests.length == 0)
+			return null;
+
+		Request request = null;
+		size_t i = 0;
+		for (; i < pendingRequests.length; ++i)
+		{
+			if (pendingRequests[i].requestId == requestId)
+			{
+				request = pendingRequests[i].request;
+				if (i < pendingRequests.length - 1)
+					pendingRequests[i] = pendingRequests[$ - 1];
+				--pendingRequests.length;
+				return request;
+			}
+		}
+		return null;
+	}
+}
+
+
+// MODBUS
+import router.modbus.connection;
+import router.modbus.message;
+import router.modbus.profile;
+
+class ModbusDevice : Device
+{
+	this(string name, Connection connection, ubyte address, const ModbusProfile* profile = null)
+	{
+		super(name);
+		devType = DeviceType.Modbus;
+		requestTimeout = msecs(1000);
+		this.connection = connection;
+		this.address = address;
+		this.profile = profile;
+
+		assert(connection.connParams.mode == Mode.Slave);
+	}
+
+	override bool linkEstablished()
+	{
+		return connection.linkEstablished;
+	}
+
+	override bool sendRequest(Request request)
+	{
+		request.requestTime = MonoTime.currTime;
+
+		ModbusRequest modbusRequest = cast(ModbusRequest)request;
+		if (modbusRequest)
+		{
+			int x = 0;
+
+			// forward the modbus frame if the profile matches...
+
+			ushort requestId = connection.sendRequest(address, &modbusRequest.pdu, &receiveResponsePacket);
+			if (requestId != cast(ushort)-1)
+			{
+				pendingRequests ~= PendingRequest(requestId, request);
+				return true;
+			}
+		}
+
+		// encode and send response
+		//...
+		assert(0);
+
+		return false;
+	}
+/+
 	bool forwardModbusRequest(Request* request)
 	{
 		assert(request.client.protocol == Protocol.Modbus);
-
-		ModbusPDU* pdu = &request.packet.modbus.message;
 
 		if (request.client.modbus.profile != modbus.profile &&
 			request.client.modbus.profile && modbus.profile)
@@ -104,186 +205,72 @@ class Device
 			assert(0);
 		}
 
-		return sendModbusRequest(&request.packet.modbus.message, request);
+		return sendModbusRequest(&request.modbus.pdu, request);
 	}
 
-	bool sendModbusRequest(ModbusPDU* message, Request* request = null)
+	bool sendModbusRequest(ModbusPDU* message, Request* request)
 	{
 		assert(protocol == Protocol.Modbus);
 
-		if (connection.modbus.protocol != ModbusProtocol.TCP)
-		{
-			// if there's a request in flight, we need to queue...
-			if (modbus.pendingRequests.length > 0)
-			{
-				modbus.requestQueue ~= Modbus.QueuedRequest(message, request);
-				return true;
-			}
-		}
-
-		ubyte[1024] buffer = void;
-		ubyte[] packet;
-		switch (connection.modbus.protocol)
-		{
-			case ModbusProtocol.RTU:
-				packet = frameRTUMessage(connection.modbus.address,
-										 message.functionCode,
-										 message.data,
-										 buffer);
-				modbus.pendingRequests ~= Modbus.PendingRequest(Modbus.QueuedRequest(message, request), 0, MonoTime.currTime);
-				break;
-			case ModbusProtocol.TCP:
-				packet = frameTCPMessage(modbus.nextTransactionId,
-										 connection.modbus.address,
-										 message.functionCode,
-										 message.data,
-										 buffer);
-				modbus.pendingRequests ~= Modbus.PendingRequest(Modbus.QueuedRequest(message, request), modbus.nextTransactionId++, MonoTime.currTime);
-				break;
-			default:
-				assert(0);
-		}
-
-		connection.write(packet);
-
-		return true;
+		return modbus.connection.sendRequest(modbus.address, message, request);
 	}
-
-	Response* poll()
-	{
-		Response* response = null;
-
-		Packet packet;
-		bool success = connection.poll(packet);
-		if (success && packet.raw)
-		{
-			response = new Response;
-			response.device = this;
-			response.packet = packet;
-			response.status = RequestStatus.Success;
-
-			if (protocol == Protocol.Modbus)
-			{
-				Modbus.QueuedRequest req = modbus.popPendingRequest(connection.modbus.protocol == ModbusProtocol.TCP ? packet.modbus.frame.tcp.transactionId : 0);
-				response.request = req.request;
-
-				if (connection.modbus.protocol != ModbusProtocol.TCP)
-				{
-					// there are requests in the queue; we'll dispatch the next one...
-					req = modbus.popModbusRequest();
-					if (req.message)
-						sendModbusRequest(req.message, req.request);
-				}
-			}
-			else
-			{
-				// TODO: how do we associate the request?
-				assert(0);
-			}
-		}
-		else
-		{
-			if (protocol == Protocol.Modbus)
-			{
-				// check for request timeouts
-				MonoTime earliestTime = MonoTime.max;
-				ushort transactionId;
-				for (int i = 0; i < modbus.pendingRequests.length; ++i)
-				{
-					if (i == 0 || modbus.pendingRequests[i].requestTime < earliestTime)
-					{
-						earliestTime = modbus.pendingRequests[i].requestTime;
-						transactionId = modbus.pendingRequests[i].transactionId;
-					}
-				}
-				if (modbus.pendingRequests.length > 0 && earliestTime + requestTimeout < MonoTime.currTime)
-				{
-					response = new Response;
-					response.device = this;
-					response.status = RequestStatus.Timeout;
-
-					Modbus.QueuedRequest req = modbus.popPendingRequest(transactionId);
-					response.request = req.request;
-
-					if (connection.modbus.protocol != ModbusProtocol.TCP)
-					{
-						// there are requests in the queue; we'll dispatch the next one...
-						req = modbus.popModbusRequest();
-						if (req.message)
-							sendModbusRequest(req.message, req.request);
-					}
-				}
-			}
-		}
-
-		return response;
-	}
-
-public:
-	import std.datetime : Duration, MonoTime, msecs;
-
-	string name;
-	Connection connection;
-
-	Protocol protocol;
-	union
-	{
-		Modbus modbus;
-	}
-
-	Duration requestTimeout = msecs(1000);
-
++/
 private:
-	struct Modbus
+	Connection connection;
+	ubyte address;
+	const(ModbusProfile)* profile;
+
+//	RegValue[int] regValues;
+
+	void receiveResponsePacket(Packet packet, ushort requestId, MonoTime time)
 	{
-		struct QueuedRequest
-		{
-			ModbusPDU* message;
-			Request* request;
-		}
-		struct PendingRequest
-		{
-			QueuedRequest request;
-			ushort transactionId;
-			MonoTime requestTime;
-		}
+		Request request = popPendingRequest(requestId);
+		if (!request)
+			return;
 
-		const(ModbusProfile)* profile;
-		PendingRequest[] pendingRequests;
-		QueuedRequest[] requestQueue;
-		RegValue[int] regValues;
-		short nextTransactionId;
+		ModbusResponse response = new ModbusResponse();
+		response.status = RequestStatus.Success;
+		response.device = this;
+		response.request = request;
+		response.frame = packet.frame;
+		response.pdu = packet.pdu;
 
-		QueuedRequest popModbusRequest()
-		{
-			if (requestQueue.length == 0)
-				return QueuedRequest();
-			QueuedRequest next = requestQueue[0];
-			for (size_t i = 1; i < requestQueue.length; ++i)
-				requestQueue[i - 1] = requestQueue[i];
-			--requestQueue.length;
-			return next;
-		}
+		request.responseHandler(response);
+	}
+}
 
-		QueuedRequest popPendingRequest(ushort transactionId)
-		{
-			if (pendingRequests.length == 0)
-				return QueuedRequest();
+class ModbusRequest : Request
+{
+	ModbusFrame frame;
+	ModbusPDU pdu;
 
-			QueuedRequest r = QueuedRequest();
-			size_t i = 0;
-			for (; i < pendingRequests.length; ++i)
-			{
-				if (pendingRequests[i].transactionId == transactionId)
-				{
-					r = pendingRequests[i].request;
-					break;
-				}
-			}
-			for (; i < pendingRequests.length - 1; ++i)
-				pendingRequests[i] = pendingRequests[i + 1];
-			--pendingRequests.length;
-			return r;
-		}
+	this(ResponseHandler responseHandler, ModbusPDU* message, ubyte address = 0)
+	{
+		super(responseHandler);
+		frame.address = address;
+		pdu = *message;
+	}
+
+	override string toString() const
+	{
+		import std.format;
+		return format("--> %s :: %s", frame.toString, pdu.toString);
+	}
+}
+
+class ModbusResponse : Response
+{
+	ModbusFrame frame;
+	ModbusPDU pdu;
+
+	override string toString() const
+	{
+		import std.format;
+
+		assert(request);
+
+		if (status == RequestStatus.Timeout)
+			return format("<-- %s :: REQUEST TIMEOUT", device.name);
+		return format("<-- %s :: %s", device.name, pdu.toString);
 	}
 }

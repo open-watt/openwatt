@@ -1,10 +1,10 @@
 module router.client;
 
-import router.connection;
-import router.device : Response;
-import router.modbus.message : frameRTUMessage, frameTCPMessage, ModbusPDU, ModbusProtocol = Protocol;
-import router.modbus.profile;
-import router.serial : SerialParams;
+import std.datetime : Duration, MonoTime, msecs;
+
+import db.value;
+import router.device;
+
 
 class Client
 {
@@ -13,138 +13,97 @@ class Client
 		this.name = name;
 	}
 
-	bool createModbus(Connection connection, const ModbusProfile* profile = null)
-	{
-		this.connection = connection;
-
-		protocol = Protocol.Modbus;
-		modbus.profile = profile;
-
-		return true;
-	}
-
-	bool createSerialModbus(string device, ref in SerialParams params, ubyte address, const ModbusProfile* profile = null)
-	{
-		connection = new Connection;
-		connection.openSerialModbus(device, params, address);
-
-		protocol = Protocol.Modbus;
-		modbus.profile = profile;
-
-		return true;
-	}
-
-	bool createEthernetModbus(string host, ushort port, EthernetMethod method, ubyte unitId, ModbusProtocol modbusProtocol = ModbusProtocol.Unknown, const ModbusProfile* profile = null)
-	{
-		connection = new Connection;
-		connection.createEthernetModbus(host, port, method, unitId, modbusProtocol);
-
-		protocol = Protocol.Modbus;
-		modbus.profile = profile;
-
-		return true;
-	}
-
 	bool linkEstablished()
 	{
 		return false;
 	}
 
-	bool sendResponse(Response* response)
+	void sendResponse(Response response)
 	{
 		// send response
-		return false;
+		//...
 	}
 
-	bool sendModbusResponse(Response* response)
+	Request poll()
 	{
-		assert(protocol == Protocol.Modbus);
-		assert(response.device.protocol == Protocol.Modbus);
-
-		if (response.device.modbus.profile != modbus.profile &&
-			response.device.modbus.profile && modbus.profile)
-		{
-			// TODO: if the profiles are mismatching, then we need to translate...
-			assert(0);
-		}
-
-		Request* request = response.request;
-
-		ubyte[1024] buffer = void;
-		ubyte[] packet;
-		switch (connection.modbus.protocol)
-		{
-			case ModbusProtocol.RTU:
-				packet = frameRTUMessage(request.packet.modbus.frame.rtu.address,
-										 response.packet.modbus.message.functionCode,
-										 response.packet.modbus.message.data,
-										 buffer);
-				break;
-			case ModbusProtocol.TCP:
-				packet = frameTCPMessage(request.packet.modbus.frame.tcp.transactionId,
-										 request.packet.modbus.frame.tcp.unitId,
-										 request.packet.modbus.message.functionCode,
-										 request.packet.modbus.message.data,
-										 buffer);
-				break;
-			default:
-				assert(0);
-		}
-
-		connection.write(packet);
-
-		// send formatted modbus response
-		return true;
-	}
-
-	Request* poll()
-	{
-		Request* request = null;
-
-		Packet packet;
-		bool success = connection.poll(packet);
-		if (success && packet.raw)
-		{
-			request = new Request;
-			request.client = this;
-			request.packet = packet;
-		}
-
-		return request;
+		return null;
 	}
 
 public:
 	string name;
-	Connection connection;
 
-	Protocol protocol;
-	union
+	DeviceType devType;
+}
+
+
+// MODBUS
+import router.modbus.connection;
+import router.modbus.message;
+import router.modbus.profile;
+class ModbusClient : Client
+{
+
+	this(string name, Connection connection)
 	{
-		Modbus modbus;
+		super(name);
+		devType = DeviceType.Modbus;
+		connection = connection;
+
+		assert(connection.connParams.mode == Mode.Master);
+		connection.connParams.unsolicitedPacketHandler = &receiveRequest;
+	}
+
+	override Request poll()
+	{
+		if (pendingRequests.length == 0)
+			return null;
+		Request r = pendingRequests[0];
+		pendingRequests = pendingRequests[1..$];
+		return r;
+	}
+
+	override void sendResponse(Response response)
+	{
+		// TODO: see if this response matches a pending request...
+
+		ModbusResponse modbusResponse = cast(ModbusResponse)response;
+		if (modbusResponse)
+		{
+			ModbusDevice modbusDevice = cast(ModbusDevice)response.device;
+			ModbusRequest modbusRequest = cast(ModbusRequest)response.request;
+			assert(modbusDevice && modbusRequest);
+
+			// forward the modbus frame if the profile matches...
+//			if (response.device.modbus.profile != modbus.profile &&
+//				response.device.modbus.profile && modbus.profile)
+			if (false) // TODO: how to properly match profile?
+			{
+				// TODO: if the profiles are mismatching, then we need to translate...
+				assert(0);
+			}
+
+			bool r = connection.sendMessage(modbusRequest.frame.address, &modbusResponse.pdu, modbusRequest.frame.protocol == ModbusProtocol.TCP ? modbusRequest.frame.tcp.transactionId : 0);
+		}
+
+		// format and send response
+		//...
 	}
 
 private:
-	struct Modbus
+	Connection connection;
+
+	// TODO: each device address needs a profile...
+	// maybe we can create a client with an address->profile map?
+	// or is the map external and something to do with the router perhaps?
+//	const(ModbusProfile)* profile;
+
+	ModbusRequest[] pendingRequests;
+
+	void receiveRequest(Packet packet, ushort requestId, MonoTime time)
 	{
-		const(ModbusProfile)* profile;
-	}
-}
-
-struct Request
-{
-	Client client;
-	Packet packet;
-
-	string toString() const
-	{
-		import router.modbus.message: getFunctionCodeName;
-		import std.format;
-
-		if (client.protocol == Protocol.Modbus)
-		{
-			return format("%s --> %s :: %s", client.name, packet.modbus.frame.toString, packet.modbus.message.toString);
-		}
-
-		return format("%s --> :: %s", packet.raw[]);
+		ModbusRequest req = new ModbusRequest(&sendResponse, &packet.pdu);
+		req.requestTime = time;
+		req.frame = packet.frame;
+		pendingRequests ~= req;
 	}
 }

@@ -100,7 +100,7 @@ private:
 }
 
 
-ModbusMessageData parseModbusMessage(RequestType type, ref ModbusPDU pdu, void[] buffer = null)
+ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, void[] buffer = null)
 {
 	ModbusMessageData result;
 	result.type = type;
@@ -283,7 +283,18 @@ ModbusMessageData parseModbusMessage(RequestType type, ref ModbusPDU pdu, void[]
 }
 
 
-RegValue[] decodeValues(ref const ModbusMessageData messageData, const ModbusProfile* profile, ushort register = 0, ushort count = 0, RegValue[] buffer = null)
+RegValue[] decodeValues(ref const ModbusPDU request, ref const ModbusPDU response, const ModbusProfile* profile, RegValue[] buffer = null)
+{
+	// assert that there are values in the response...
+	// TODO:
+
+	void[256] tmp = void;
+	ModbusMessageData reqData = parseModbusMessage(RequestType.Request, request, tmp);
+	ModbusMessageData resData = parseModbusMessage(RequestType.Response, response, tmp);
+	return decodeValues(resData, profile, reqData.rw.readAddress, reqData.rw.readCount, buffer);
+}
+
+RegValue[] decodeValues(ref const ModbusMessageData messageData, const ModbusProfile* profile, ushort startRegister = 0, ushort count = 0, RegValue[] buffer = null)
 {
 	assert(profile);
 
@@ -304,7 +315,7 @@ RegValue[] decodeValues(ref const ModbusMessageData messageData, const ModbusPro
 		case FunctionCode.WriteMultipleRegisters:
 			if (messageData.type == RequestType.Request)
 			{
-				register = messageData.rw.writeAddress;
+				startRegister = messageData.rw.writeAddress;
 				count = messageData.rw.writeCount;
 				goto do_it;
 			}
@@ -315,16 +326,66 @@ RegValue[] decodeValues(ref const ModbusMessageData messageData, const ModbusPro
 	return null;
 
 do_it:
-	register += regAdjust[messageData.functionCode];
+	startRegister += regAdjust[messageData.functionCode];
 
 	RegValue[] values;
 
 	ushort i = 0;
 	while (i < count)
 	{
-		if (register in profile.regInfoById)
+		ushort reg = cast(ushort)(startRegister + i);
+		if (reg in profile.regInfoById)
 		{
+			RegValue val = RegValue(&profile.regInfoById[reg]);
+
+			final switch (val.info.type)
+			{
+				case RecordType.uint16:
+				case RecordType.bf16:
+				case RecordType.enum16:
+					val.u = messageData.rw.values[i++];
+					break;
+				case RecordType.int16:
+					val.i = cast(short)messageData.rw.values[i++];
+					break;
+				case RecordType.uint32:
+				case RecordType.int32:
+				case RecordType.float32:
+				case RecordType.bf32:
+				case RecordType.enum32:
+					assert(val.info.seqLen == 2 && i < count - 1);
+					const ModbusRegInfo* nextReg = &profile.regInfoById[reg + 1];
+					assert(nextReg.refReg == reg && nextReg.seqOffset == 1);
+					val.u = messageData.rw.values[i] << 16 | messageData.rw.values[i + 1];
+					i += 2;
+					if (val.info.type == RecordType.int32)
+						val.i = cast(int)val.u;
+					break;
+				case RecordType.uint8H:
+					val.u = messageData.rw.values[i++] >> 8;
+					break;
+				case RecordType.int8H:
+					val.i = cast(byte)(messageData.rw.values[i++] >> 8);
+					break;
+				case RecordType.uint8L:
+					val.u = messageData.rw.values[i++] && 0xFF;
+					break;
+				case RecordType.int8L:
+					val.i = cast(byte)(messageData.rw.values[i++] && 0xFF);
+					break;
+				case RecordType.exp10:
+					assert(false);
+				case RecordType.str:
+					assert(i + val.info.seqLen <= count);
+					val.words[0 .. val.info.seqLen] = messageData.rw.values[i .. i + val.info.seqLen];
+					i += val.info.seqLen;
+					break;
+			}
+
+			values ~= val;
 		}
+		else
+			++i;
 	}
 
 	return values;

@@ -68,10 +68,12 @@ enum ExceptionCode : ubyte
 	GatewayTargetDeviceFailedToRespond = 0x0B, // Specialized for Modbus gateways. Sent when slave fails to respond
 }
 
-enum Protocol : byte
+enum ModbusProtocol : byte
 {
 	Unknown = -1,
-	RTU = 0,
+	None = 0,
+	RTU,
+	ASCII,
 	TCP
 }
 
@@ -99,7 +101,8 @@ struct ModbusPDU
 
 align(2) struct ModbusFrame
 {
-	Protocol protocol;
+	ModbusProtocol protocol;
+	ubyte address;
 	union
 	{
 		RTU rtu;
@@ -108,32 +111,24 @@ align(2) struct ModbusFrame
 
 	struct RTU
 	{
-		ubyte address;
-		align(1) ushort crc;
+		ushort crc;
 	}
 	struct TCP
 	{
-		ubyte unitId;
-		align(1) ushort transactionId;
+		ushort transactionId;
 		enum ushort protocolId = 0; // alwayus 0 (make this a variable if this is ever discovered to be not true
-		align(1) ushort length;
+		ushort length;
 	}
 
 	string toString() const
 	{
 		import std.format;
-		if (protocol == Protocol.RTU)
-			return format("rtu(%d)", rtu.address);
-		else if (protocol == Protocol.TCP)
-			return format("tcp(%d, tx%d)", tcp.unitId, tcp.transactionId);
+		if (protocol == ModbusProtocol.RTU)
+			return format("rtu(%d)", address);
+		else if (protocol == ModbusProtocol.TCP)
+			return format("tcp(%d, tx%d)", address, tcp.transactionId);
 		assert(0);
 	}
-}
-
-struct ModbusMessage
-{
-	ModbusFrame frame;
-	ModbusPDU message;
 }
 
 string getFunctionCodeName(FunctionCode functionCode)
@@ -162,43 +157,47 @@ string getExceptionCodeString(ExceptionCode exceptionCode)
 	return null;
 }
 
-Protocol guessProtocol(const(ubyte)[] data)
+ModbusProtocol guessProtocol(const(ubyte)[] data)
 {
 	// TODO: modbus ascii?
 
 	if (data.length < 4)
-		return Protocol.Unknown;
+		return ModbusProtocol.Unknown;
 	if (data.guessTCP())
-		return Protocol.TCP;
+		return ModbusProtocol.TCP;
 	if (crawlForRTU(data) != null)
-		return Protocol.RTU;
-	return Protocol.Unknown;
+		return ModbusProtocol.RTU;
+	return ModbusProtocol.Unknown;
 }
 
-ptrdiff_t getMessage(const(ubyte)[] data, out ModbusMessage msg, Protocol protocol = Protocol.Unknown)
+ptrdiff_t getMessage(const(ubyte)[] data, out ModbusPDU msg, ModbusFrame* frame = null, ModbusProtocol protocol = ModbusProtocol.Unknown)
 {
-	if (protocol == Protocol.TCP || (protocol == Protocol.Unknown && data.guessTCP()))
+	ModbusFrame tFrame;
+	if (!frame)
+		frame = &tFrame;
+
+	if (protocol == ModbusProtocol.TCP || (protocol == ModbusProtocol.Unknown && data.guessTCP()))
 	{
-		msg.frame.protocol = Protocol.TCP;
-		msg.frame.tcp.transactionId = data[0..2].bigEndianToNative!ushort;
-		msg.frame.tcp.length = data[4..6].bigEndianToNative!ushort;
-		msg.frame.tcp.unitId = data[6];
+		frame.protocol = ModbusProtocol.TCP;
+		frame.tcp.transactionId = data[0..2].bigEndianToNative!ushort;
+		frame.tcp.length = data[4..6].bigEndianToNative!ushort;
+		frame.address = data[6];
 
 		if (data[2..4].bigEndianToNative!ushort != 0 ||
-			msg.frame.tcp.length < 2 || msg.frame.tcp.length > ModbusMessageDataMaxLength + 2)
+			frame.tcp.length < 2 || frame.tcp.length > ModbusMessageDataMaxLength + 2)
 			return -1; // invalid frame
-		if (6 + msg.frame.tcp.length < data.length)
+		if (6 + frame.tcp.length < data.length)
 			return 0; // not enough data
 
-		msg.message.functionCode = cast(FunctionCode)data[7];
-		if (!msg.message.functionCode.validFunctionCode())
+		msg.functionCode = cast(FunctionCode)data[7];
+		if (!msg.functionCode.validFunctionCode())
 			return -1;
 
-		msg.message.length = cast(short)(msg.frame.tcp.length - 2);
-		msg.message.buffer[0 .. msg.message.length] = data[8 .. 8 + msg.message.length];
-		msg.message.buffer[msg.message.length .. $] = 0;
+		msg.length = cast(short)(frame.tcp.length - 2);
+		msg.buffer[0 .. msg.length] = data[8 .. 8 + msg.length];
+		msg.buffer[msg.length .. $] = 0;
 
-		return 6 + msg.frame.tcp.length;
+		return 6 + frame.tcp.length;
 	}
 
 	// TODO: if protocol is ASCII...
@@ -208,20 +207,20 @@ ptrdiff_t getMessage(const(ubyte)[] data, out ModbusMessage msg, Protocol protoc
 	if (!rtuPacket)
 		return 0;
 
-	msg.frame.protocol = Protocol.RTU;
-	msg.frame.rtu.address = data[0];
-	msg.frame.rtu.crc = crc;
+	frame.protocol = ModbusProtocol.RTU;
+	frame.address = data[0];
+	frame.rtu.crc = crc;
 
-	msg.message.functionCode = cast(FunctionCode)data[1];
-	if (!msg.message.functionCode.validFunctionCode())
+	msg.functionCode = cast(FunctionCode)data[1];
+	if (!msg.functionCode.validFunctionCode())
 		return -1;
 
-	msg.message.length = cast(short)(rtuPacket.length - 4);
-	if (msg.message.length > msg.message.buffer.length)
+	msg.length = cast(short)(rtuPacket.length - 4);
+	if (msg.length > msg.buffer.length)
 		return -1;
 
-	msg.message.buffer[0 .. msg.message.length] = rtuPacket[2 .. $-2];
-	msg.message.buffer[msg.message.length .. $] = 0;
+	msg.buffer[0 .. msg.length] = rtuPacket[2 .. $-2];
+	msg.buffer[msg.length .. $] = 0;
 
 	return rtuPacket.length;
 }
@@ -376,6 +375,8 @@ inout(ubyte)[] crawlForRTU(inout(ubyte)[] data, ushort* rcrc = null)
 	// crawl through the buffer accumulating a CRC and looking for the following bytes to match
 	ushort crc = 0xFFFF;
 	ushort next = data[0] | cast(ushort)data[1] << 8;
+	ushort lastCRC = 0xFFFF;
+	size_t lastCRCPos = 0;
 	for (size_t pos = 0; pos < data.length - 2; ++pos)
 	{
 		// massage in the next byte
@@ -397,12 +398,18 @@ inout(ubyte)[] crawlForRTU(inout(ubyte)[] data, ushort* rcrc = null)
 		// if the running CRC matches the next word, we probably have an RTU packet delimiter
 		if (crc == next)
 		{
-			// TODO: should we check the function code is valid?
-
-			if (rcrc)
-				*rcrc = crc;
-			return data[0 .. pos + 3];
+			lastCRC = crc;
+			lastCRCPos = pos;
 		}
+	}
+
+	if (lastCRCPos)
+	{
+		// TODO: should we check the function code is valid?
+
+		if (rcrc)
+			*rcrc = lastCRC;
+		return data[0 .. lastCRCPos + 3];
 	}
 
 	// didn't find anything...
@@ -422,7 +429,7 @@ bool guessTCP(const(ubyte)[] data)
 	{
 		// if the length matches the buffer size, it's a good bet!
 		if (data.length == 6 + length)
-			return Protocol.TCP;
+			return true;
 
 		// if there's additional bytes, we may have multiple packets in sequence...
 		if (data.length >= 6 + length + 6)
@@ -431,7 +438,7 @@ bool guessTCP(const(ubyte)[] data)
 			protoId = data[6 + length + 2 .. 6 + length + 4][0..2].bigEndianToNative!ushort;
 			length = data[6 + length + 4 .. 6 + length + 6][0..2].bigEndianToNative!ushort;
 			if (protoId == 0 && length >= 2 && length <= ModbusPDU.sizeof + 1)
-				return Protocol.TCP;
+				return true;
 		}
 	}
 

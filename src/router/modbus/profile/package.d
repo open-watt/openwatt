@@ -1,6 +1,6 @@
 module router.modbus.profile;
 
-import std.math	: PI;
+import std.math	: PI, pow;
 import std.format;
 
 enum RecordType : ubyte
@@ -203,7 +203,7 @@ struct ModbusRegInfo
 
 struct RegValue
 {
-	this(ModbusRegInfo* info)
+	this(const ModbusRegInfo* info)
 	{
 		this.info = info;
 		words[] = 0;
@@ -215,68 +215,137 @@ struct RegValue
 		ushort exp;
 	}
 
-	ModbusRegInfo* info;
+	const ModbusRegInfo* info;
 	union
 	{
-		ushort u16;
-		short i16;
-		uint u32;
-		int i32;
-		float f32;
+		ulong u;
+		long i;
+		double f;
 		E e;
 		ushort[12] words;
+	}
+
+//	auto opCast(T)()
+//	{
+//		static if (is(T : double))
+//		{
+//		}
+//	}
+
+	double toFloat()
+	{
+		final switch (info.type) with (RecordType)
+		{
+			case uint16:
+			case uint32:
+			case uint8H:
+			case uint8L:
+			case bf16:
+			case bf32:
+			case enum16:
+			case enum32:
+				return cast(double)u;
+			case int16:
+			case int32:
+			case int8H:
+			case int8L:
+				return cast(double)i;
+			case float32:
+				return f;
+			case exp10:
+				return pow(cast(double)e.val, e.exp);
+			case str:
+				return double.nan;
+		}
 	}
 
 	string toString()
 	{
 		import std.conv : to;
-		import std.math : pow;
+
+		string s;
 
 		final switch (info.type) with (RecordType)
 		{
 			case uint16:
-				return u16.to!string;
-			case int16:
-				return i16.to!string;
 			case uint32:
-				return u32.to!string;
-			case int32:
-				return i32.to!string;
 			case uint8H:
-				return (cast(ubyte)(u16 >> 8)).to!string;
 			case uint8L:
-				return (cast(ubyte)(u16 & 0xFF)).to!string;
+				s = u.to!string;
+				break;
+			case int16:
+			case int32:
 			case int8H:
-				return (cast(byte)(u16 >> 8)).to!string;
 			case int8L:
-				return (cast(byte)(u16 & 0xFF)).to!string;
-			case exp10:
-				return pow(cast(float)e.val, e.exp).to!string;
+				s = i.to!string;
+				break;
 			case float32:
-				return f32.to!string;
+				s = f.to!string;
+				break;
+			case exp10:
+				s = pow(cast(double)e.val, e.exp).to!string;
+				break;
 			case bf16:
-				return "TODO";
-			case bf32:
-				return "TODO";
-			case enum16:
-				if (u16 < info.fields.length)
-					return info.fields[u16];
-				else
-					return u16.to!string;
-			case enum32:
-				if (u32 < info.fields.length)
-					return info.fields[u32];
-				else
-					return u32.to!string;
-			case str:
-				char[] s = (cast(char*)words.ptr)[0 .. words.sizeof];
-				for (size_t i = 0; i < words.sizeof; ++i)
+				for (auto i = 0; i < 16; ++i)
 				{
-					if (s[i] == '\0')
-						return s[0 .. i].idup;
+					if (info.fields)
+					{
+						if (u & (1 << i))
+						{
+							if (s)
+								s ~= " | ";
+							s ~= info.fields[i];
+						}
+					}
+					else
+						s ~= (u & (1 << i)) ? "X" : "O";
 				}
-				return s[].idup;
+				s = s ? s : "NONE";
+				break;
+			case bf32:
+				for (auto i = 0; i < 32; ++i)
+				{
+					if (info.fields)
+					{
+						if (u & (1 << i))
+						{
+							if (s)
+								s ~= " | ";
+							s ~= info.fields[i];
+						}
+					}
+					else
+						s ~= (u & (1 << i)) ? "X" : "O";
+				}
+				s = s ? s : "NONE";
+				break;
+			case enum16:
+				if (u < info.fields.length)
+					s = info.fields[u];
+				else
+					s = u.to!string;
+				break;
+			case enum32:
+				if (u < info.fields.length)
+					s = info.fields[u];
+				else
+					s = u.to!string;
+				break;
+			case str:
+				assert(info.seqLen <= words.sizeof);
+				char[] c = (cast(char*)words.ptr)[0 .. info.seqLen];
+				for (size_t i = 0; i < c.length; ++i)
+				{
+					if (c[i] == '\0')
+					{
+						s = c[0 .. i].idup;
+						break;
+					}
+				}
+				s = s ? s : c[].idup;
+				break;
 		}
+		return info.name ~ ": " ~ s;
 	}
 }
 

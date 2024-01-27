@@ -66,14 +66,14 @@
     <DCompile Include="src\router\client.d">
       <Filter>src\router</Filter>
     </DCompile>
-    <DCompile Include="src\router\connection.d">
-      <Filter>src\router</Filter>
-    </DCompile>
     <DCompile Include="src\router\device.d">
       <Filter>src\router</Filter>
     </DCompile>
     <DCompile Include="src\router\serial.d">
       <Filter>src\router</Filter>
+    </DCompile>
+    <DCompile Include="src\router\modbus\connection.d">
+      <Filter>src\router\modbus</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>

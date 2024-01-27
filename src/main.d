@@ -4,11 +4,11 @@ import std.format;
 import std.stdio;
 
 import router.client;
-import router.connection;
 import router.device;
 
 import router.modbus.coding;
-import router.modbus.message; alias ModbusProtocol = router.modbus.message.Protocol;
+import router.modbus.connection;
+import router.modbus.message;
 import router.modbus.profile;
 import router.modbus.profile.solaredge_meter;
 import router.modbus.profile.goodwe_ems;
@@ -49,10 +49,10 @@ void main()
 //	msg = frameRTUMessage(1, tmp.functionCode, tmp.data);
 //	writeln(msg[]);
 
-	Client se_inverter = new Client("se_inverter");
-	se_inverter.createEthernetModbus("192.168.3.7", 8003, EthernetMethod.TCP, 2, ModbusProtocol.RTU, se_meter_profile);
-	Device se_meter = new Device("se_meter");
-	se_meter.createEthernetModbus("192.168.3.7", 8006, EthernetMethod.TCP, 2, ModbusProtocol.RTU, se_meter_profile);
+//	Client se_inverter = new Client("se_inverter");
+//	se_inverter.createEthernetModbus("192.168.3.7", 8003, EthernetMethod.TCP, 2, ModbusProtocol.RTU, se_meter_profile);
+//	Device se_meter = new Device("se_meter");
+//	se_meter.createEthernetModbus("192.168.3.7", 8006, EthernetMethod.TCP, 2, ModbusProtocol.RTU, se_meter_profile);
 
 	// goodwe/pace testing
 //	Device goodwe_ems = new Device("goodwe_ems");
@@ -63,13 +63,33 @@ void main()
 //	ModbusPDU ems_req = createMessageRead(cast(ushort)(baseReg + reg++));
 //	goodwe_ems.sendModbusRequest(&ems_req);
 
-	Device[2] pace_bms = [ new Device("pace_bms"), new Device("pace_bms") ];
-	pace_bms[0].createEthernetModbus("192.168.3.7", 8008, EthernetMethod.TCP, 1, ModbusProtocol.RTU, pace_bms_profile);
-	pace_bms[1].createEthernetModbus("192.168.3.7", 8008, EthernetMethod.TCP, 2, ModbusProtocol.RTU, pace_bms_profile);
+	Connection port8 = Connection.createEthernetModbus("192.168.3.7", 8008, EthernetMethod.TCP, ModbusProtocol.RTU, ConnectionParams());
+	ModbusDevice[2] pace_bms = [
+		new ModbusDevice("pace_bms", port8, 1, pace_bms_profile),
+		new ModbusDevice("pace_bms", port8, 2, pace_bms_profile)
+	];
 
 	int bmsId = 0;
+
+	void pace_handler(Response resp)
+	{
+		if (resp.status == RequestStatus.Success)
+		{
+			writeln(resp.toString);
+//			decodeValues(resp).writeln;
+//				parseModbusMessage(RequestType.Response, resp.packet.modbus.message).writeln;
+		}
+		else
+			writeln(resp.toString);
+
+		bmsId = 1 - bmsId;
+		ModbusPDU bms_req = createMessage_Read(40000, 37);
+		pace_bms[bmsId].sendRequest(new ModbusRequest(&pace_handler, &bms_req));
+	}
+
+	// kick the fucker off...
 	ModbusPDU bms_req = createMessage_Read(40000, 37);
-	pace_bms[bmsId].sendModbusRequest(&bms_req);
+	pace_bms[bmsId].sendRequest(new ModbusRequest(&pace_handler, &bms_req));
 
 
 	import std.datetime;
@@ -77,23 +97,28 @@ void main()
 
 	while (true)
 	{
+		port8.poll();
+		pace_bms[0].poll();
+		pace_bms[1].poll();
+
+
 		// goodwe/pace testing: send some test requests...
 //		ModbusPDU bms_req = createMessageRead(40001, 1);
 //		pace_bms.sendModbusRequest(&bms_req);
 
 		// solaredge meter relay
-		Request* req = se_inverter.poll();
-		if (req)
-		{
-			writeln(req.toString);
-			se_meter.forwardModbusRequest(req);
-		}
-		Response* resp = se_meter.poll();
-		if (resp)
-		{
-			writeln(resp.toString);
-			se_inverter.sendModbusResponse(resp);
-		}
+//		Request* req = se_inverter.poll();
+//		if (req)
+//		{
+//			writeln(req.toString);
+//			se_meter.forwardModbusRequest(req);
+//		}
+//		Response* resp = se_meter.poll();
+//		if (resp)
+//		{
+//			writeln(resp.toString);
+//			se_inverter.sendModbusResponse(resp);
+//		}
 
 		// goodwe/pace testing
 //		resp = goodwe_ems.poll();
@@ -115,24 +140,6 @@ void main()
 //
 //			reg += 10;
 //		}
-		resp = pace_bms[0].poll();
-		if (!resp)
-			resp = pace_bms[1].poll();
-		if (resp)
-		{
-			if (resp)
-			{
-				if (resp.status == RequestStatus.Success)
-					parseModbusMessage(RequestType.Response, resp.packet.modbus.message).writeln;
-				else
-					writeln(resp.toString);
-				bmsId = 1 - bmsId;
-			}
-
-			bms_req = createMessage_Read(40000, 37);
-			pace_bms[bmsId].sendModbusRequest(&bms_req);
-		}
-
 
 
 //		const(ubyte)[] packet = tcpConnection.poll();

@@ -11,7 +11,7 @@ enum ModbusRegInfo[] paceBmsRegs = [
 	ModbusRegInfo(40004, RecordType.uint16, "remainCapacity", "10mAh", "Remaining battery capacity"),
 	ModbusRegInfo(40005, RecordType.uint16, "fullCapacity", "10mAh", "Full battery capacity"),
 	ModbusRegInfo(40006, RecordType.uint16, "designCapacity", "10mAh", "Design capacity of the battery"),
-	ModbusRegInfo(40007, RecordType.bf16, "cycleCounts", null, "Number of battery cycle counts"),
+	ModbusRegInfo(40007, RecordType.uint16, "cycleCounts", null, "Number of battery cycle counts"),
 	ModbusRegInfo(40009, RecordType.bf16, "warningFlag", null, "Warning flags", ["Cell Overvoltage", "Cell Voltage Low", "Pack Overvoltage", "Pack Voltage Low", "Charging Overcurrent", "Discharging Overcurrent", null, null, "Charging Temp High", "Discharging Temp High", "Charging Temp Low", "Discharging Temp Low", "Environment Temp High", "Environment Temp Low", "MOSFET Temp High", "SOC Low"]),
 	ModbusRegInfo(40010, RecordType.bf16, "protectionFlag", null, "Protection flags", ["Cell Overvoltage", "Cell Voltage Low", "Pack Overvoltage", "Pack Voltage Low", "Charging Overcurrent", "Discharging Overcurrent", "Short Circuit", "Charger Overvoltage", "Charging Temp High", "Discharging Temp High", "Charging Temp Low", "Discharging Temp Low", "MOSFET Temp High", "Environment Temp High", "Environment Temp Low", null]),
 	ModbusRegInfo(40011, RecordType.bf16, "statusFaultFlag", null, "Status and fault flags", ["Charging MOSFET Fault", "Discharging MOSFET Fault", "Temperature Sensor Fault", null, "Battery Cell Fault", "Front End Sampling Communication Fault", null, null, "Charging", "Discharging", "Charging MOSFET On", "Discharging MOSFET On", "Charging Limiter On", null, "Charger Inversed", "Heater On"]),

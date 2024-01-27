@@ -33,3 +33,15 @@ struct ValueDesc
 	string description;
 }
 
+struct Value
+{
+	ValueDesc* desc;
+	union
+	{
+		bool b;
+		long i;
+		double f;
+		string s;
+		void[] data;
+	}
+}
