@@ -19,6 +19,9 @@
     <Filter Include="src\router\modbus\profile">
       <UniqueIdentifier>{d74b0e76-0264-4e38-a6cf-a3bd6be27eb3}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\manager">
+      <UniqueIdentifier>{a7edf0a4-cbca-4a75-bf4f-548fe4b7764d}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\goodwe_smart_meter.d">
@@ -66,14 +69,26 @@
     <DCompile Include="src\router\client.d">
       <Filter>src\router</Filter>
     </DCompile>
-    <DCompile Include="src\router\device.d">
-      <Filter>src\router</Filter>
-    </DCompile>
     <DCompile Include="src\router\serial.d">
       <Filter>src\router</Filter>
     </DCompile>
     <DCompile Include="src\router\modbus\connection.d">
       <Filter>src\router\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\util\log.d">
+      <Filter>src\util</Filter>
+    </DCompile>
+    <DCompile Include="src\db\device.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\db\component.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\element.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\router\server.d">
+      <Filter>src\router</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>

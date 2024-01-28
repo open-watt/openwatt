@@ -3,7 +3,7 @@ module router.client;
 import std.datetime : Duration, MonoTime, msecs;
 
 import db.value;
-import router.device;
+import router.server;
 
 
 class Client
@@ -32,7 +32,7 @@ class Client
 public:
 	string name;
 
-	DeviceType devType;
+	ServerType devType;
 }
 
 
@@ -46,7 +46,7 @@ class ModbusClient : Client
 	this(string name, Connection connection)
 	{
 		super(name);
-		devType = DeviceType.Modbus;
+		devType = ServerType.Modbus;
 		connection = connection;
 
 		assert(connection.connParams.mode == Mode.Master);
@@ -69,20 +69,20 @@ class ModbusClient : Client
 		ModbusResponse modbusResponse = cast(ModbusResponse)response;
 		if (modbusResponse)
 		{
-			ModbusDevice modbusDevice = cast(ModbusDevice)response.device;
+			ModbusServer modbusServer = cast(ModbusServer)response.server;
 			ModbusRequest modbusRequest = cast(ModbusRequest)response.request;
-			assert(modbusDevice && modbusRequest);
+			assert(modbusServer && modbusRequest);
 
 			// forward the modbus frame if the profile matches...
-//			if (response.device.modbus.profile != modbus.profile &&
-//				response.device.modbus.profile && modbus.profile)
+//			if (response.server.modbus.profile != modbus.profile &&
+//				response.server.modbus.profile && modbus.profile)
 			if (false) // TODO: how to properly match profile?
 			{
 				// TODO: if the profiles are mismatching, then we need to translate...
 				assert(0);
 			}
 
-			bool r = connection.sendMessage(modbusRequest.frame.address, &modbusResponse.pdu, modbusRequest.frame.protocol == ModbusProtocol.TCP ? modbusRequest.frame.tcp.transactionId : 0);
+			ptrdiff_t r = connection.sendMessage(modbusRequest.frame.address, &modbusResponse.pdu, modbusRequest.frame.protocol == ModbusProtocol.TCP ? modbusRequest.frame.tcp.transactionId : 0);
 		}
 
 		// format and send response
@@ -92,7 +92,7 @@ class ModbusClient : Client
 private:
 	Connection connection;
 
-	// TODO: each device address needs a profile...
+	// TODO: each server address needs a profile...
 	// maybe we can create a client with an address->profile map?
 	// or is the map external and something to do with the router perhaps?
 //	const(ModbusProfile)* profile;

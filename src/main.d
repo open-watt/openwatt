@@ -4,7 +4,7 @@ import std.format;
 import std.stdio;
 
 import router.client;
-import router.device;
+import router.server;
 
 import router.modbus.coding;
 import router.modbus.connection;
@@ -51,11 +51,11 @@ void main()
 
 //	Client se_inverter = new Client("se_inverter");
 //	se_inverter.createEthernetModbus("192.168.3.7", 8003, EthernetMethod.TCP, 2, ModbusProtocol.RTU, se_meter_profile);
-//	Device se_meter = new Device("se_meter");
+//	Server se_meter = new Server("se_meter");
 //	se_meter.createEthernetModbus("192.168.3.7", 8006, EthernetMethod.TCP, 2, ModbusProtocol.RTU, se_meter_profile);
 
 	// goodwe/pace testing
-//	Device goodwe_ems = new Device("goodwe_ems");
+//	Server goodwe_ems = new Server("goodwe_ems");
 //	goodwe_ems.createEthernetModbus("192.168.3.7", 8001, EthernetMethod.TCP, 247, ModbusProtocol.RTU, goodwe_ems_profile);
 
 //	enum baseReg = 30000;
@@ -64,9 +64,9 @@ void main()
 //	goodwe_ems.sendModbusRequest(&ems_req);
 
 	Connection port8 = Connection.createEthernetModbus("192.168.3.7", 8008, EthernetMethod.TCP, ModbusProtocol.RTU, ConnectionParams());
-	ModbusDevice[2] pace_bms = [
-		new ModbusDevice("pace_bms", port8, 1, pace_bms_profile),
-		new ModbusDevice("pace_bms", port8, 2, pace_bms_profile)
+	ModbusServer[2] pace_bms = [
+		new ModbusServer("pace_bms", port8, 1, pace_bms_profile),
+		new ModbusServer("pace_bms", port8, 2, pace_bms_profile)
 	];
 
 	int bmsId = 0;
@@ -82,13 +82,13 @@ void main()
 		else
 			writeln(resp.toString);
 
-		bmsId = 1 - bmsId;
-		ModbusPDU bms_req = createMessage_Read(40000, 37);
+//		bmsId = 1 - bmsId;
+		ModbusPDU bms_req = createMessage_Read(40000, 1);
 		pace_bms[bmsId].sendRequest(new ModbusRequest(&pace_handler, &bms_req));
 	}
 
 	// kick the fucker off...
-	ModbusPDU bms_req = createMessage_Read(40000, 37);
+	ModbusPDU bms_req = createMessage_Read(40000, 1);
 	pace_bms[bmsId].sendRequest(new ModbusRequest(&pace_handler, &bms_req));
 
 
@@ -222,6 +222,6 @@ void main()
 		// ...
 
 		import core.thread;
-		Thread.sleep(dur!"msecs"(10));
+		Thread.sleep(dur!"msecs"(1));
 	}
 }

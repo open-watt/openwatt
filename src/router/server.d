@@ -1,12 +1,14 @@
-module router.device;
+module router.server;
 
 import std.datetime : Duration, MonoTime, msecs;
 import std.stdio;
 
 import db.value;
 
+import util.log;
 
-enum DeviceType : uint
+
+enum ServerType : uint
 {
 	Modbus = 0x00F0D805,
 }
@@ -31,24 +33,23 @@ class Request
 		this.responseHandler = responseHandler;
 	}
 
-	ValueDesc*[] readValues() { return null; }
-	Value[] writeValues() { return null; }
+	ValueDesc*[] readValues() const { return null; }
+	Value[] writeValues() const { return null; }
 
 	override string toString() const
 	{
 		import std.format;
-		assert(0, "TODO");
-		//		return format("%s --> :: %s", packet[]);
+		return format("%s", cast(void*)this);
 	}
 }
 
 class Response
 {
 	RequestStatus status;
-	Device device;
+	Server server;
 	Request request;
 
-	Value[] values() { return null; }
+	Value[] values() const { return null; }
 
 	override string toString() const
 	{
@@ -57,14 +58,15 @@ class Response
 		assert(request);
 
 		if (status == RequestStatus.Timeout)
-			return format("<-- %s :: REQUEST TIMEOUT", device.name);
-		assert(0, "TODO");
-//		return format("%s <-- %s :: %s", request ? request.client.name : "", device.name, packet[]);
+			return format("%s: TIMEOUT (%s)", cast(void*)this, server.name);
+		else if (status == RequestStatus.Error)
+			return format("%s: ERROR (%s)", cast(void*)this, server.name);
+		return format("%s: RESPONSE (%s) - ", request, server.name, values);
 	}
 }
 
 
-class Device
+class Server
 {
 	this(string name)
 	{
@@ -89,10 +91,12 @@ class Device
 		// check if any requests have timed out...
 		MonoTime now = MonoTime.currTime;
 
-		for (size_t i = 0; i < pendingRequests.length; ++i)
+		for (size_t i = 0; i < pendingRequests.length; )
 		{
 			if (pendingRequests[i].request.requestTime + requestTimeout < now)
 			{
+				debug writeDebug("requestTimeout: ", cast(void*)pendingRequests[i].request, " - elapsed: ", now - pendingRequests[i].request.requestTime);
+
 				Request request = pendingRequests[i].request;
 				if (i < pendingRequests.length - 1)
 					pendingRequests[i] = pendingRequests[$ - 1];
@@ -100,16 +104,18 @@ class Device
 
 				Response response = new Response();
 				response.status = RequestStatus.Timeout;
-				response.device = this;
+				response.server = this;
 				response.request = request;
 
 				request.responseHandler(response);
 			}
+			else
+				++i;
 		}
 	}
 
 	string name;
-	DeviceType devType;
+	ServerType devType;
 	Duration requestTimeout;
 
 private:
@@ -149,13 +155,13 @@ import router.modbus.connection;
 import router.modbus.message;
 import router.modbus.profile;
 
-class ModbusDevice : Device
+class ModbusServer : Server
 {
 	this(string name, Connection connection, ubyte address, const ModbusProfile* profile = null)
 	{
 		super(name);
-		devType = DeviceType.Modbus;
-		requestTimeout = msecs(1000);
+		devType = ServerType.Modbus;
+		requestTimeout = connection.connParams.timeoutThreshold.msecs;
 		this.connection = connection;
 		this.address = address;
 		this.profile = profile;
@@ -175,10 +181,9 @@ class ModbusDevice : Device
 		ModbusRequest modbusRequest = cast(ModbusRequest)request;
 		if (modbusRequest)
 		{
-			int x = 0;
+			debug writeDebug("forwardModbusMessage: ", name, " --> ", request);
 
 			// forward the modbus frame if the profile matches...
-
 			ushort requestId = connection.sendRequest(address, &modbusRequest.pdu, &receiveResponsePacket);
 			if (requestId != cast(ushort)-1)
 			{
@@ -215,10 +220,12 @@ class ModbusDevice : Device
 		return modbus.connection.sendRequest(modbus.address, message, request);
 	}
 +/
+
+	const(ModbusProfile)* profile;
+
 private:
 	Connection connection;
 	ubyte address;
-	const(ModbusProfile)* profile;
 
 //	RegValue[int] regValues;
 
@@ -226,11 +233,16 @@ private:
 	{
 		Request request = popPendingRequest(requestId);
 		if (!request)
+		{
+			debug writeDebug("discardResponse (no pending request): ", requestId, packet);
 			return;
+		}
+
+		debug writeDebug("receiveResponse: ", requestId, ", ", packet);
 
 		ModbusResponse response = new ModbusResponse();
 		response.status = RequestStatus.Success;
-		response.device = this;
+		response.server = this;
 		response.request = request;
 		response.frame = packet.frame;
 		response.pdu = packet.pdu;
@@ -254,7 +266,7 @@ class ModbusRequest : Request
 	override string toString() const
 	{
 		import std.format;
-		return format("--> %s :: %s", frame.toString, pdu.toString);
+		return format("%s: %s::%s", super.toString(), frame.toString, pdu.toString);
 	}
 }
 
@@ -270,7 +282,7 @@ class ModbusResponse : Response
 		assert(request);
 
 		if (status == RequestStatus.Timeout)
-			return format("<-- %s :: REQUEST TIMEOUT", device.name);
-		return format("<-- %s :: %s", device.name, pdu.toString);
+			return format("<-- %s :: REQUEST TIMEOUT", server.name);
+		return format("<-- %s :: %s", server.name, pdu.toString);
 	}
 }

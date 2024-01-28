@@ -334,9 +334,9 @@ do_it:
 	while (i < count)
 	{
 		ushort reg = cast(ushort)(startRegister + i);
-		if (reg in profile.regInfoById)
+		if (reg in profile.regById)
 		{
-			RegValue val = RegValue(&profile.regInfoById[reg]);
+			RegValue val = RegValue(profile.regById[reg]);
 
 			final switch (val.info.type)
 			{
@@ -354,7 +354,7 @@ do_it:
 				case RecordType.bf32:
 				case RecordType.enum32:
 					assert(val.info.seqLen == 2 && i < count - 1);
-					const ModbusRegInfo* nextReg = &profile.regInfoById[reg + 1];
+					const ModbusRegInfo* nextReg = profile.regById[reg + 1];
 					assert(nextReg.refReg == reg && nextReg.seqOffset == 1);
 					val.u = messageData.rw.values[i] << 16 | messageData.rw.values[i + 1];
 					i += 2;

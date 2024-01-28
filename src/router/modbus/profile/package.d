@@ -1,7 +1,9 @@
 module router.modbus.profile;
 
-import std.math	: PI, pow;
+import std.algorithm : map;
+import std.ascii : toLower;
 import std.format;
+import std.math	: PI, pow;
 
 enum RecordType : ubyte
 {
@@ -23,6 +25,23 @@ enum RecordType : ubyte
 }
 enum RecordType_str(ushort len) = cast(RecordType)(RecordType.str + len - 1);
 
+enum Access : byte
+{
+	Read,
+	Write,
+	ReadWrite
+}
+
+enum Frequency : ubyte
+{
+	Realtime = 0,
+	High,	// ie, seconds
+	Medium,	// ie, 10s seconds
+	Low,	// ie, minutes
+	Constant,
+	Configuration
+}
+
 enum Unit : uint
 {
 	none = 0,
@@ -32,8 +51,8 @@ enum Unit : uint
 	gram,
 	second,
 	cycle,
-	coulomb,
-	joule,
+	coulomb, // base unit for amperehour
+	joule,   // base unit for watthour
 	volt,
 	ohm,
 	farad,
@@ -73,6 +92,7 @@ enum Unit : uint
 
 	// derivatives
 	hertz = derivative(cycle, second),
+	rpm = derivative(cycle, minute),
 	ampere = derivative(coulomb, second),
 	watt = derivative(joule, second),
 	pascal = derivative(newton, squaremetre),
@@ -161,34 +181,31 @@ struct ModbusRegInfo
 	ushort reg;			// register address; 5 digits with register type; ie 30001, 40001, etc
 	ushort refReg;
 	RecordType type = RecordType.uint16; // register type; ie uint16, float, etc. Strings use RecordType_str!(len)
+	Access access = Access.Read;
 	ubyte seqLen = 1;
 	ubyte seqOffset;
 	string name;		// field name; ie "soc", "voltage", "power", etc
-	string units;		// units of measure; ie "%", "10mV", "kWh", etc
+	string units;		// units of measure; ie "%", "kWh", "10mV+1000", etc
+	string displayUnits;
+	Frequency updateFrequency = Frequency.Medium;
 	string desc;		// readable field description
 	string[] fields;	// enum or bitfield names; ie [ "off", "on" ], [ "charging", "discharging" ], etc
+	string[] fieldDesc;
 
-	this(int reg, RecordType type = RecordType.uint16, string name = null, string units = null, string desc = null, string[] fields = null)
+	this(int reg, string type = "u16", string name = null, string units = null, string displayUnits = null, Frequency updateFrequency = Frequency.Medium, string desc = null, string[] fields = null, string[] fieldDesc = null)
 	{
 		this.reg = cast(ushort)reg;
 		this.refReg = this.reg;
-		this.type = type >= RecordType.str ? RecordType.str : type;
-		this.seqLen = type >= RecordType.str ? cast(ubyte)(type - RecordType.str + 1) : seqLens[type];
+		parseTypeString(type);
 		this.name = name ? name : format("reg%d", reg).idup;
 		this.units = units;
+		this.units = displayUnits ? displayUnits : units;
+		this.updateFrequency = updateFrequency;
 		this.desc = desc;
 		this.fields = fields;
+		this.fields = fieldDesc;
 	}
-	this(int reg, string name, string units = null, string desc = null)
-	{
-		this.reg = cast(ushort)reg;
-		this.refReg = this.reg;
-		this.type = RecordType.uint16;
-		this.seqLen = seqLens[RecordType.uint16];
-		this.name = name ? name : format("reg%d", reg).idup;
-		this.units = units;
-		this.desc = desc;
-	}
+
 	this(int reg, int refReg, int seqIndex)
 	{
 		this.reg = cast(ushort)reg;
@@ -198,6 +215,50 @@ struct ModbusRegInfo
 		this.units = null;
 		this.desc = null;
 		this.fields = null;
+	}
+
+private:
+	void parseTypeString(string type)
+	{
+		foreach (i; 0 .. RecordType.max + 1)
+		{
+			string ts = typeStrings[i];
+			if (type.length >= ts.length && type[0..ts.length] == ts[])
+			{
+				this.type = cast(RecordType)i;
+
+				size_t j = i + 1;
+				if (i == RecordType.str)
+				{
+					assert(type.length > 3, "String type needs length, eg: \"str10\"");
+					this.seqLen = 0;
+					for (; j < type.length; ++j)
+					{
+						if (type[j] < '0' || type[j] > '9')
+							break;
+						this.seqLen = cast(ubyte)(this.seqLen*10 + type[j] - '0');
+					}
+					assert(this.seqLen > 0, "String length must be greater than 0");
+				}
+				else
+					this.seqLen = seqLens[this.type];
+
+				if (j < type.length && type[j] == '/' && j + 1 < type.length)
+				{
+					++j;
+					if (type[j] == 'R')
+					{
+						if (j + 1 < type.length && type[j + 1] == 'W')
+							this.access = Access.ReadWrite;
+						else
+							this.access = Access.Read;
+					}
+					else if (type[j] == 'W')
+						this.access = Access.Write;
+				}
+				break;
+			}
+		}
 	}
 }
 
@@ -351,24 +412,20 @@ struct RegValue
 
 struct ModbusProfile
 {
-	ModbusRegInfo[int] regInfoById;
+	ModbusRegInfo[] registers;
+	ModbusRegInfo*[int] regById;
 	ModbusRegInfo*[string] regByName;
 
 	// TODO: populate from json, yaml, etc
 
 	void populateRegs(ModbusRegInfo[] regs)
 	{
-		foreach (r; regs)
-		{
-			regInfoById[r.reg] = r;
+		registers = regs;
 
-			if (r.seqOffset == 0)
-			{
-				ModbusRegInfo* info = &regInfoById[r.reg];
-				regByName[r.name] = info;
-				for (int i = 1; i < r.seqLen; ++i)
-					regInfoById[r.reg + i] = ModbusRegInfo(r.reg + i, r.reg, i);
-			}
+		foreach (ref r; regs)
+		{
+			regById[r.reg] = &r;
+			regByName[r.name] = &r;
 		}
 	}
 }

@@ -101,7 +101,7 @@ struct ModbusPDU
 
 align(2) struct ModbusFrame
 {
-	ModbusProtocol protocol;
+	ModbusProtocol protocol = ModbusProtocol.None;
 	ubyte address;
 	union
 	{
@@ -127,6 +127,8 @@ align(2) struct ModbusFrame
 			return format("rtu(%d)", address);
 		else if (protocol == ModbusProtocol.TCP)
 			return format("tcp(%d, tx%d)", address, tcp.transactionId);
+		else if (protocol == ModbusProtocol.None)
+			return format("(%d)", address);
 		assert(0);
 	}
 }

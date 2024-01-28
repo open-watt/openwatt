@@ -4,5 +4,5 @@ import router.modbus.profile;
 
 enum ModbusRegInfo[] goodWeSmartMeterRegs = [
 	// Device Information Data Registers
-	ModbusRegInfo(40000, RecordType.uint16, ""), // 
+	ModbusRegInfo(40000, "u16", ""), // 
 ];
