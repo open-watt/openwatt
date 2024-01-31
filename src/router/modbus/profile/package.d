@@ -26,7 +26,7 @@ enum RecordType : ubyte
 }
 enum RecordType_str(ushort len) = cast(RecordType)(RecordType.str + len - 1);
 
-enum Access : byte
+enum Access : ubyte
 {
 	Read,
 	Write,

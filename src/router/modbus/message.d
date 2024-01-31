@@ -85,9 +85,10 @@ enum ModbusProtocol : byte
 	TCP
 }
 
-enum RequestType : ubyte
+enum RequestType : byte
 {
-	Request,
+	Unknown = -1,
+	Request = 0,
 	Response
 }
 

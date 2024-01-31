@@ -66,6 +66,9 @@ void main()
 //	ModbusPDU ems_req = createMessageRead(cast(ushort)(baseReg + reg++));
 //	goodwe_ems.sendModbusRequest(&ems_req);
 
+	Connection port4 = Connection.createEthernetModbus("192.168.3.7", 8004, EthernetMethod.TCP, ModbusProtocol.RTU, ConnectionParams(Mode.SnoopBus));
+	ModbusServer solaredge_meter = new ModbusServer("solaredge_meter", port4, 2, se_meter_profile);
+
 	Connection port8 = Connection.createEthernetModbus("192.168.3.7", 8008, EthernetMethod.TCP, ModbusProtocol.RTU, ConnectionParams());
 	ModbusServer[2] pace_bms = [
 		new ModbusServer("pace_bms", port8, 1, pace_bms_profile),
@@ -94,6 +97,9 @@ void main()
 	ModbusPDU bms_req = createMessage_Read(RegisterType.HoldingRegister, 0, 1);
 //	pace_bms[bmsId].sendRequest(new ModbusRequest(&pace_handler, &bms_req));
 
+	Device solaredge;
+	solaredge.addComponent(createComponentForModbusServer("meter", "Meter", solaredge.addServer(solaredge_meter), solaredge_meter));
+	solaredge.finalise();
 
 	Device pace;
 	pace.addComponent(createComponentForModbusServer("pack1", "Pack 1", pace.addServer(pace_bms[0]), pace_bms[0]));
@@ -105,6 +111,11 @@ void main()
 
 	while (true)
 	{
+		port4.poll();
+		solaredge_meter.poll();
+
+		solaredge.update();
+
 		port8.poll();
 		pace_bms[0].poll();
 		pace_bms[1].poll();

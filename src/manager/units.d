@@ -43,6 +43,22 @@ UnitDef unitConversion(UnitDef from, UnitDef to)
 	return UnitDef(from.scale*to.scale, from.offset*to.scale + to.offset);
 }
 
+UnitDef getUnitConv(string unit)
+{
+	static UnitDef[string] cache;
+	if (!unit)
+		return UnitDef();
+	UnitDef* cached = unit in cache;
+	if (cached)
+		return *cached;
+	return cache[unit] = unit.parseUnitDef;
+}
+
+UnitDef getUnitConv(string from, string to)
+{
+	return unitConversion(from.getUnitConv, to.getUnitConv);
+}
+
 UnitDef parseUnitDef(string unitDef)
 {
 	double multiple = 1;

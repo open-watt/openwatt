@@ -37,9 +37,9 @@ struct ModbusMessageData
 			case FunctionCode.WriteMultipleCoils:
 			case FunctionCode.WriteMultipleRegisters:
 				if (rw.readCount)
-					result = format("Read: %d (%d)", rw.readAddress, rw.readCount);
+					result = format("Read: %d (%d)", rw.readRegister, rw.readCount);
 				if (rw.writeCount)
-					result ~= format("%sWrite: %d (%d)", result ? ", " : "", rw.writeAddress, rw.writeCount);
+					result ~= format("%sWrite: %d (%d)", result ? ", " : "", rw.writeRegister, rw.writeCount);
 				if (rw.values.length > 0)
 				{
 					result ~= format("%sValues: %s", result ? "\n  " : "", rw.values[]);
@@ -85,9 +85,9 @@ struct ModbusMessageData
 private:
 	struct ReadWrite
 	{
-		ushort readAddress;
+		ushort readRegister;
 		ushort readCount;
-		ushort writeAddress;
+		ushort writeRegister;
 		ushort writeCount;
 		ushort[] values;
 	}
@@ -114,7 +114,7 @@ ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, 
 		case FunctionCode.ReadDiscreteInputs:
 			if (type == RequestType.Request)
 			{
-				result.rw.readAddress = data[0..2].bigEndianToNative!ushort;
+				result.rw.readRegister = data[0..2].bigEndianToNative!ushort;
 				result.rw.readCount = data[2..4].bigEndianToNative!ushort;
 			}
 			else if (type == RequestType.Response)
@@ -136,7 +136,7 @@ ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, 
 		case FunctionCode.ReadInputRegisters:
 			if (type == RequestType.Request)
 			{
-				result.rw.readAddress = data[0..2].bigEndianToNative!ushort;
+				result.rw.readRegister = data[0..2].bigEndianToNative!ushort;
 				result.rw.readCount = data[2..4].bigEndianToNative!ushort;
 			}
 			else if (type == RequestType.Response)
@@ -160,7 +160,7 @@ ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, 
 		case FunctionCode.WriteSingleCoil:
 			if (data.length >= 4)
 			{
-				result.rw.writeAddress = data[0..2].bigEndianToNative!ushort;
+				result.rw.writeRegister = data[0..2].bigEndianToNative!ushort;
 				result.rw.writeCount = 1;
 
 				result.rw.values = (cast(ushort[])buffer)[0 .. 1];
@@ -174,7 +174,7 @@ ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, 
 		case FunctionCode.WriteSingleRegister:
 			if (data.length >= 4)
 			{
-				result.rw.writeAddress = data[0..2].bigEndianToNative!ushort;
+				result.rw.writeRegister = data[0..2].bigEndianToNative!ushort;
 				result.rw.writeCount = 1;
 
 				result.rw.values = (cast(ushort[])buffer)[0 .. 1];
@@ -202,7 +202,7 @@ ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, 
 		case FunctionCode.WriteMultipleCoils:
 			if (data.length >= 5)
 			{
-				result.rw.writeAddress = data[0..2].bigEndianToNative!ushort;
+				result.rw.writeRegister = data[0..2].bigEndianToNative!ushort;
 				ushort count = data[2..4].bigEndianToNative!ushort;
 				result.rw.writeCount = count;
 
@@ -225,7 +225,7 @@ ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, 
 		case FunctionCode.WriteMultipleRegisters:
 			if (data.length >= 5)
 			{
-				result.rw.writeAddress = data[0..2].bigEndianToNative!ushort;
+				result.rw.writeRegister = data[0..2].bigEndianToNative!ushort;
 				ushort count = data[2..4].bigEndianToNative!ushort;
 				result.rw.writeCount = count;
 

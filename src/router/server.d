@@ -3,10 +3,9 @@ module router.server;
 import std.datetime : Duration, MonoTime, msecs;
 import std.stdio;
 
-import db.value;
+import manager.element : Value;
 
 import util.log;
-
 
 enum ServerType : uint
 {
@@ -35,8 +34,8 @@ class Request
 		this.userData = userData;
 	}
 
-	ValueDesc*[] readValues() const { return null; }
-	Value[] writeValues() const { return null; }
+//	ValueDesc*[] readValues() const { return null; }
+//	Value[] writeValues() const { return null; }
 
 	override string toString() const
 	{
@@ -52,11 +51,11 @@ class Response
 	Request request;
 	MonoTime responseTime;
 
-	Value[] values() const { return null; }
+	KVP[string] values() { return null; }
 
 	Duration latency() const { return responseTime - request.requestTime; }
 
-	override string toString() const
+	override string toString()
 	{
 		import std.format;
 
@@ -67,6 +66,12 @@ class Response
 		else if (status == RequestStatus.Error)
 			return format("%s: ERROR (%s)", cast(void*)this, server.name);
 		return format("%s: RESPONSE (%s) - ", request, server.name, values);
+	}
+
+	struct KVP
+	{
+		string element;
+		Value value;
 	}
 }
 
@@ -160,11 +165,14 @@ private:
 import router.modbus.connection;
 import router.modbus.message;
 import router.modbus.profile;
+import router.modbus.util;
 
 class ModbusServer : Server
 {
 	this(string name, Connection connection, ubyte address, const ModbusProfile* profile = null)
 	{
+		assert(connection.connParams.mode != Mode.Master);
+
 		super(name);
 		devType = ServerType.Modbus;
 		requestTimeout = connection.connParams.timeoutThreshold.msecs;
@@ -172,7 +180,11 @@ class ModbusServer : Server
 		this.address = address;
 		this.profile = profile;
 
-		assert(connection.connParams.mode == Mode.Slave);
+		if (connection.connParams.mode == Mode.SnoopBus)
+		{
+			userUnsolicitedPacketHandler = connection.connParams.unsolicitedPacketHandler;
+			connection.connParams.unsolicitedPacketHandler = &snoopHandler;
+		}
 	}
 
 	override bool linkEstablished()
@@ -180,8 +192,17 @@ class ModbusServer : Server
 		return connection.linkEstablished;
 	}
 
+	bool isBusSnooping() const
+	{
+		return connection.connParams.mode == Mode.SnoopBus;
+	}
+
 	override bool sendRequest(Request request)
 	{
+		// users can't place requests to a snooped bus
+		if (connection.connParams.mode == Mode.SnoopBus)
+			return false;
+
 		request.requestTime = MonoTime.currTime;
 
 		ModbusRequest modbusRequest = cast(ModbusRequest)request;
@@ -207,11 +228,16 @@ class ModbusServer : Server
 
 	const(ModbusProfile)* profile;
 
+	Request.ResponseHandler snoopBusMessageHandler;
+	void[] snoopBusMessageUserData;
+
 private:
 	Connection connection;
 	ubyte address;
 
-//	RegValue[int] regValues;
+	Packet prevSnoopPacket;
+	MonoTime prevPacketTime;
+	PacketHandler userUnsolicitedPacketHandler = null;
 
 	void receiveResponsePacket(Packet packet, ushort requestId, MonoTime time)
 	{
@@ -229,10 +255,80 @@ private:
 		response.server = this;
 		response.request = request;
 		response.responseTime = time;
+		response.profile = profile;
 		response.frame = packet.frame;
 		response.pdu = packet.pdu;
 
 		request.responseHandler(response, request.userData);
+	}
+
+	void snoopHandler(Packet packet, ushort requestId, MonoTime time)
+	{
+		assert(snoopBusMessageHandler, "Snooped bus requires `snoopBusMessageHandler`");
+
+		// check the packet regards the device we're interested in, and that we have 2 packets in sequence
+		if (packet.frame.address == address)
+		{
+			// check if packet is a response to the last request we captured
+			if (confirmReqRespSeq(prevSnoopPacket.pdu, packet.pdu))
+			{
+				// fabricate a Request for prevSnoopPacket
+				ModbusRequest request = new ModbusRequest(null, &prevSnoopPacket.pdu, 0, null);
+				request.frame = prevSnoopPacket.frame;
+				request.requestTime = prevPacketTime;
+
+				// fabricate a Response for packet
+				ModbusResponse response = new ModbusResponse();
+				response.status = RequestStatus.Success;
+				response.server = this;
+				response.request = request;
+				response.responseTime = time;
+				response.profile = profile;
+				response.frame = packet.frame;
+				response.pdu = packet.pdu;
+
+				// what do we do with it now?!
+				snoopBusMessageHandler(response, snoopBusMessageUserData);
+
+				prevSnoopPacket = Packet();
+				return;
+			}
+			else
+			{
+				prevSnoopPacket = packet;
+				prevPacketTime = time;
+			}
+		}
+		else
+			prevSnoopPacket = Packet();
+
+		// if the user wants the packets, we'll forward them
+		if (userUnsolicitedPacketHandler)
+			userUnsolicitedPacketHandler(packet, requestId, time);
+	}
+
+	static bool confirmReqRespSeq(ref const ModbusPDU req, ref const ModbusPDU resp)
+	{
+		if (req.functionCode != resp.functionCode)
+			return false;
+		switch (req.functionCode)
+		{
+			case FunctionCode.ReadCoils:
+			case FunctionCode.ReadDiscreteInputs:
+				if (req.length == 4 && req.data[2..4].bigEndianToNative!ushort <= 2000 &&
+					resp.data[0] == resp.length - 1 && resp.data[0] == (req.data[2..4].bigEndianToNative!ushort + 7) / 8)
+					return true;
+				break;
+			case FunctionCode.ReadHoldingRegisters:
+			case FunctionCode.ReadInputRegisters:
+				if (req.length == 4 && req.data[2..4].bigEndianToNative!ushort <= 123 &&
+					resp.data[0] == resp.length - 1 && resp.data[0] == req.data[2..4].bigEndianToNative!ushort * 2)
+					return true;
+				break;
+			default:
+				break;
+		}
+		return false;
 	}
 }
 
@@ -257,8 +353,91 @@ class ModbusRequest : Request
 
 class ModbusResponse : Response
 {
+	const(ModbusProfile)* profile;
 	ModbusFrame frame;
 	ModbusPDU pdu;
+
+	override KVP[string] values()
+	{
+		import std.string : stripRight;
+		import manager.units;
+		import router.modbus.coding;
+
+		if (cachedValues)
+			return cachedValues;
+
+		ModbusRequest modbusRequest = cast(ModbusRequest)request;
+
+		void[512] temp = void;
+		ModbusMessageData data = parseModbusMessage(RequestType.Request, modbusRequest.pdu, temp);
+		ushort readReg = data.rw.readRegister;
+		ushort readCount = data.rw.readCount;
+		data = parseModbusMessage(RequestType.Response, pdu, temp);
+
+		for (ushort i = 0; i < readCount; ++i)
+		{
+			const ModbusRegInfo** pRegInfo = readReg + i in profile.regById;
+			if (pRegInfo)
+			{
+				const ModbusRegInfo* regInfo = *pRegInfo;
+				if (i + regInfo.seqLen > readCount)
+					continue;
+
+				UnitDef unitConv = getUnitConv(regInfo.units, regInfo.displayUnits);
+				// TODO: if unitConv is integer, then don't coerce to floats...
+
+				Value value;
+				final switch (regInfo.type)
+				{
+					case RecordType.uint16:
+						value = Value(data.rw.values[i] * unitConv.scale + unitConv.offset);
+						break;
+					case RecordType.int16:
+						value = Value(cast(short)data.rw.values[i] * unitConv.scale + unitConv.offset);
+						break;
+					case RecordType.uint32:
+						value = Value((data.rw.values[i] << 16 | data.rw.values[i + 1]) * unitConv.scale + unitConv.offset);
+						break;
+					case RecordType.int32:
+						value = Value(cast(int)(data.rw.values[i] << 16 | data.rw.values[i + 1]) * unitConv.scale + unitConv.offset);
+						break;
+					case RecordType.uint8H:
+						value = Value((data.rw.values[i] >> 8) * unitConv.scale + unitConv.offset);
+						break;
+					case RecordType.uint8L:
+						value = Value((data.rw.values[i] & 0xFF) * unitConv.scale + unitConv.offset);
+						break;
+					case RecordType.int8H:
+						value = Value(cast(byte)(data.rw.values[i] >> 8) * unitConv.scale + unitConv.offset);
+						break;
+					case RecordType.int8L:
+						value = Value(cast(byte)(data.rw.values[i] & 0xFF) * unitConv.scale + unitConv.offset);
+						break;
+					case RecordType.exp10:
+						assert(false);
+					case RecordType.float32:
+//						uint f = data.rw.values[i] << 16 | data.rw.values[i + 1];
+						uint f = data.rw.values[i + 1] << 16 | data.rw.values[i]; // seems to use little endian?
+						value = Value(*cast(float*)&f * unitConv.scale + unitConv.offset);
+						break;
+					case RecordType.bf16:
+					case RecordType.enum16:
+						value = Value(data.rw.values[i]);
+						break;
+					case RecordType.bf32:
+					case RecordType.enum32:
+						value = Value(data.rw.values[i] << 16 | data.rw.values[i + 1]);
+						break;
+					case RecordType.str:
+						const(char)[] str = cast(const(char)[])data.rw.values[i .. i + regInfo.seqLen];
+						value = Value(str.stripRight.idup);
+						break;
+				}
+				cachedValues[regInfo.name] = KVP(regInfo.name, value);
+			}
+		}
+		return cachedValues;
+	}
 
 	override string toString() const
 	{
@@ -270,4 +449,7 @@ class ModbusResponse : Response
 			return format("<-- %s :: REQUEST TIMEOUT", server.name);
 		return format("<-- %s :: %s", server.name, pdu.toString);
 	}
+
+private:
+	KVP[string] cachedValues;
 }
