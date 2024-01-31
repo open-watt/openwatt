@@ -35,14 +35,15 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <DCompile Include="src\db\component.d" />
-    <DCompile Include="src\db\device.d" />
     <DCompile Include="src\db\package.d" />
     <DCompile Include="src\db\selfrefptr.d" />
     <DCompile Include="src\db\stream.d" />
     <DCompile Include="src\db\value.d" />
     <DCompile Include="src\main.d" />
+    <DCompile Include="src\manager\component.d" />
+    <DCompile Include="src\manager\device.d" />
     <DCompile Include="src\manager\element.d" />
+    <DCompile Include="src\manager\units.d" />
     <DCompile Include="src\router\client.d" />
     <DCompile Include="src\router\modbus\coding.d" />
     <DCompile Include="src\router\modbus\connection.d" />

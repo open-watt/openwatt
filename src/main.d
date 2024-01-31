@@ -14,6 +14,9 @@ import router.modbus.profile.solaredge_meter;
 import router.modbus.profile.goodwe_ems;
 import router.modbus.profile.pace_bms;
 
+import manager.component;
+import manager.device;
+import manager.element;
 
 void main()
 {
@@ -27,25 +30,25 @@ void main()
 	import std.digest : toHexString;
 
 	ModbusPDU tmp;
-	tmp = createMessage_Read(40000 + 0x0000, 10);
+	tmp = createMessage_Read(RegisterType.HoldingRegister, 0x0000, 10);
 	frameRTUMessage(0, tmp.functionCode, tmp.data).toHexString.writeln;
-	tmp = createMessage_Read(40000 + 0x0000, 10);
+	tmp = createMessage_Read(RegisterType.HoldingRegister, 0x0000, 10);
 	frameRTUMessage(1, tmp.functionCode, tmp.data).toHexString.writeln;
-	tmp = createMessage_Read(40000 + 0x0000, 10);
+	tmp = createMessage_Read(RegisterType.HoldingRegister, 0x0000, 10);
 	frameRTUMessage(2, tmp.functionCode, tmp.data).toHexString.writeln;
-//	tmp = createMessage_Read(30000 + 0x0010, 3);
+//	tmp = createMessage_Read(RegisterType.InputRegister, 0x0010, 3);
 //	frameRTUMessage(1, tmp.functionCode, tmp.data).toHexString.writeln;
-//	tmp = createMessage_Read(30000 + 0x0100, 2);
+//	tmp = createMessage_Read(RegisterType.InputRegister, 0x0100, 2);
 //	frameRTUMessage(1, tmp.functionCode, tmp.data).toHexString.writeln;
-//	tmp = createMessage_Read(30000 + 0x0200, 8);
+//	tmp = createMessage_Read(RegisterType.InputRegister, 0x0200, 8);
 //	frameRTUMessage(1, tmp.functionCode, tmp.data).toHexString.writeln;
-//	tmp = createMessage_Read(30000 + 0x0210, 5);
+//	tmp = createMessage_Read(RegisterType.InputRegister, 0x0210, 5);
 //	frameRTUMessage(1, tmp.functionCode, tmp.data).toHexString.writeln;
-//	tmp = createMessage_Read(30000 + 0x0500, 44);
+//	tmp = createMessage_Read(RegisterType.InputRegister, 0x0500, 44);
 //	frameRTUMessage(1, tmp.functionCode, tmp.data).toHexString.writeln;
 
 
-//	tmp = createMessage_Read(40001, 1);
+//	tmp = createMessage_Read(RegisterType.HoldingRegister, 1, 1);
 //	msg = frameRTUMessage(1, tmp.functionCode, tmp.data);
 //	writeln(msg[]);
 
@@ -71,7 +74,7 @@ void main()
 
 	int bmsId = 0;
 
-	void pace_handler(Response resp)
+	void pace_handler(Response resp, void[])
 	{
 		if (resp.status == RequestStatus.Success)
 		{
@@ -83,14 +86,19 @@ void main()
 			writeln(resp.toString);
 
 //		bmsId = 1 - bmsId;
-		ModbusPDU bms_req = createMessage_Read(40000, 1);
+		ModbusPDU bms_req = createMessage_Read(RegisterType.HoldingRegister, 0, 1);
 		pace_bms[bmsId].sendRequest(new ModbusRequest(&pace_handler, &bms_req));
 	}
 
 	// kick the fucker off...
-	ModbusPDU bms_req = createMessage_Read(40000, 1);
-	pace_bms[bmsId].sendRequest(new ModbusRequest(&pace_handler, &bms_req));
+	ModbusPDU bms_req = createMessage_Read(RegisterType.HoldingRegister, 0, 1);
+//	pace_bms[bmsId].sendRequest(new ModbusRequest(&pace_handler, &bms_req));
 
+
+	Device pace;
+	pace.addComponent(createComponentForModbusServer("pack1", "Pack 1", pace.addServer(pace_bms[0]), pace_bms[0]));
+	pace.addComponent(createComponentForModbusServer("pack2", "Pack 2", pace.addServer(pace_bms[1]), pace_bms[1]));
+	pace.finalise();
 
 	import std.datetime;
 	auto time = MonoTime.currTime;
@@ -101,6 +109,7 @@ void main()
 		pace_bms[0].poll();
 		pace_bms[1].poll();
 
+		pace.update();
 
 		// goodwe/pace testing: send some test requests...
 //		ModbusPDU bms_req = createMessageRead(40001, 1);

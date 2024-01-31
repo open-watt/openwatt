@@ -27,7 +27,7 @@ version(Windows)
 	{
 		HANDLE hCom = INVALID_HANDLE_VALUE;
 
-		void open(string device, ref in SerialParams params = SerialParams())
+		void open(string device, SerialParams params = SerialParams())
 		{
 			wchar[256] buf;
 			wstring wstr = device.to!wstring;

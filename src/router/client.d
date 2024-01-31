@@ -18,7 +18,7 @@ class Client
 		return false;
 	}
 
-	void sendResponse(Response response)
+	void sendResponse(Response response, void[])
 	{
 		// send response
 		//...
@@ -62,7 +62,7 @@ class ModbusClient : Client
 		return r;
 	}
 
-	override void sendResponse(Response response)
+	override void sendResponse(Response response, void[])
 	{
 		// TODO: see if this response matches a pending request...
 

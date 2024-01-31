@@ -78,17 +78,20 @@
     <DCompile Include="src\util\log.d">
       <Filter>src\util</Filter>
     </DCompile>
-    <DCompile Include="src\db\device.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\db\component.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
     <DCompile Include="src\manager\element.d">
       <Filter>src\manager</Filter>
     </DCompile>
     <DCompile Include="src\router\server.d">
       <Filter>src\router</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\units.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\component.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\device.d">
+      <Filter>src\manager</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>

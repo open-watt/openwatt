@@ -23,14 +23,16 @@ enum RequestStatus
 
 class Request
 {
-	alias ResponseHandler = void delegate(Response response);
+	alias ResponseHandler = void delegate(Response response, void[] userData);
 
 	MonoTime requestTime;
 	ResponseHandler responseHandler;
+	void[] userData;
 
-	this(ResponseHandler responseHandler)
+	this(ResponseHandler responseHandler, void[] userData = null)
 	{
 		this.responseHandler = responseHandler;
+		this.userData = userData;
 	}
 
 	ValueDesc*[] readValues() const { return null; }
@@ -48,8 +50,11 @@ class Response
 	RequestStatus status;
 	Server server;
 	Request request;
+	MonoTime responseTime;
 
 	Value[] values() const { return null; }
+
+	Duration latency() const { return responseTime - request.requestTime; }
 
 	override string toString() const
 	{
@@ -106,8 +111,9 @@ class Server
 				response.status = RequestStatus.Timeout;
 				response.server = this;
 				response.request = request;
+				response.responseTime = now;
 
-				request.responseHandler(response);
+				request.responseHandler(response, request.userData);
 			}
 			else
 				++i;
@@ -198,28 +204,6 @@ class ModbusServer : Server
 
 		return false;
 	}
-/+
-	bool forwardModbusRequest(Request* request)
-	{
-		assert(request.client.protocol == Protocol.Modbus);
-
-		if (request.client.modbus.profile != modbus.profile &&
-			request.client.modbus.profile && modbus.profile)
-		{
-			// TODO: if the profiles are mismatching, then we need to translate...
-			assert(0);
-		}
-
-		return sendModbusRequest(&request.modbus.pdu, request);
-	}
-
-	bool sendModbusRequest(ModbusPDU* message, Request* request)
-	{
-		assert(protocol == Protocol.Modbus);
-
-		return modbus.connection.sendRequest(modbus.address, message, request);
-	}
-+/
 
 	const(ModbusProfile)* profile;
 
@@ -244,10 +228,11 @@ private:
 		response.status = RequestStatus.Success;
 		response.server = this;
 		response.request = request;
+		response.responseTime = time;
 		response.frame = packet.frame;
 		response.pdu = packet.pdu;
 
-		request.responseHandler(response);
+		request.responseHandler(response, request.userData);
 	}
 }
 
@@ -256,9 +241,9 @@ class ModbusRequest : Request
 	ModbusFrame frame;
 	ModbusPDU pdu;
 
-	this(ResponseHandler responseHandler, ModbusPDU* message, ubyte address = 0)
+	this(ResponseHandler responseHandler, ModbusPDU* message, ubyte address = 0, void[] userData = null)
 	{
-		super(responseHandler);
+		super(responseHandler, userData);
 		frame.address = address;
 		pdu = *message;
 	}

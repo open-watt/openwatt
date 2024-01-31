@@ -4,6 +4,14 @@ import router.modbus.util;
 
 enum ModbusMessageDataMaxLength = 252;
 
+enum RegisterType : ubyte
+{
+	Coil = 0,
+	DiscreteInput,
+	InputRegister,
+	HoldingRegister
+}
+
 enum FunctionCode : ubyte
 {
 	ReadCoils = 0x01, // Read the status of coils in a slave device
@@ -259,36 +267,20 @@ ubyte[] frameTCPMessage(ushort transactionId, ubyte unitId, FunctionCode functio
 	return result;
 }
 
-ModbusPDU createMessage_Read(ushort register, ushort registerCount = 1)
+ModbusPDU createMessage_Read(RegisterType type, ushort register, ushort registerCount = 1)
 {
 	ModbusPDU pdu;
 
-	if (register < 10000)
-		pdu.functionCode = FunctionCode.ReadCoils;
-	else if (register < 20000)
-	{
-		pdu.functionCode = FunctionCode.ReadDiscreteInputs;
-		register -= 10000;
-	}
-	else if (register < 30000)
-		assert(0); // what is this?
-	else if (register < 40000)
-	{
-		pdu.functionCode = FunctionCode.ReadInputRegisters;
-		register -= 30000;
-	}
-	else if (register < 100000)
-	{
-		pdu.functionCode = FunctionCode.ReadHoldingRegisters;
-		register -= 40000;
-	}
-	else
-		assert(0);
+	immutable FunctionCode[] codeForRegType = [
+		FunctionCode.ReadCoils,
+		FunctionCode.ReadDiscreteInputs,
+		FunctionCode.ReadInputRegisters,FunctionCode.ReadHoldingRegisters
+	];
 
+	pdu.functionCode = codeForRegType[type];
 	pdu.buffer[0..2] = register.nativeToBigEndian;
 	pdu.buffer[2..4] = registerCount.nativeToBigEndian;
 	pdu.length = 4;
-
 	return pdu;
 }
 
