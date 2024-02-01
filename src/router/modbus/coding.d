@@ -75,9 +75,8 @@ struct ModbusMessageData
 			case FunctionCode.MaskWriteRegister:
 			case FunctionCode.ReadAndWriteMultipleRegisters:
 			case FunctionCode.ReadFIFOQueue:
-				break;
 			default:
-				break;
+				assert(0);
 		}
 		return result;
 	}
@@ -254,22 +253,28 @@ ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, 
 			break;
 
 		case FunctionCode.ReadFileRecord:
+			assert(0);
 			break;
 
 		case FunctionCode.WriteFileRecord:
+			assert(0);
 			break;
 
 		case FunctionCode.MaskWriteRegister:
+			assert(0);
 			break;
 
 		case FunctionCode.ReadAndWriteMultipleRegisters:
+			assert(0);
 			break;
 
 		case FunctionCode.ReadFIFOQueue:
+			assert(0);
 			break;
 
 		default:
 			writeln("Unsupported Function Code");
+			assert(0);
 			break;
 	}
 

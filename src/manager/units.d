@@ -169,10 +169,14 @@ immutable UnitDef[string] siUnitMap = [
 	"V":	UnitDef(1),			// volt
 	"A":	UnitDef(1),			// ampere
 	"W":	UnitDef(1),			// watt
+	"VA":	UnitDef(1),			// voltamp
+	"VAR":	UnitDef(1),			// voltamp-reactive
 	"C":	UnitDef(1.0/3600),	// coulomb
 	"Ah":	UnitDef(1),			// amperehour
 	"J":	UnitDef(1.0/3600),	// joule
 	"Wh":	UnitDef(1),			// watthour
+	"VAh":	UnitDef(1),			// voltamphour
+	"VARh":	UnitDef(1),			// voltamp-reactivehour
 	"Ω":	UnitDef(1),			// ohm
 	"ohms":	UnitDef(1),			// ohm
 	"F":	UnitDef(1),			// farad
@@ -184,6 +188,15 @@ immutable UnitDef[string] siUnitMap = [
 ];
 
 immutable UnitDef[string] absoluteUnitMap = [
+	"%":		UnitDef(0.01),				// percent
+	"pc":		UnitDef(0.01),				// percent
+	"pct":		UnitDef(0.01),				// percent
+	"percent":	UnitDef(0.01),				// percent
+	"‰":		UnitDef(0.001),				// permille
+	"pm":		UnitDef(0.01),				// percent
+	"pml":		UnitDef(0.01),				// percent
+	"permille":	UnitDef(0.001),				// permille
+	"ppm":		UnitDef(0.000001),			// parts per million
 	"in":		UnitDef(0.0254),			// inch
 	"\"":		UnitDef(0.0254),			// inch
 	"ft":		UnitDef(0.3048),			// foot
@@ -213,6 +226,8 @@ immutable UnitDef[string] absoluteUnitMap = [
 	"min":		UnitDef(60),				// minute
 	"h":		UnitDef(3600),				// hour
 	"d":		UnitDef(86400),				// day
+	"deg":		UnitDef(1.0/360),			// degrees
+	"rad":		UnitDef(1.0/(2*PI)),		// radians
 	"ftlb":		UnitDef(1.3558179483314 / 3600),// foot-pound
 	"ft-lb":	UnitDef(1.3558179483314 / 3600),// foot-pound
 	"ft lb":	UnitDef(1.3558179483314 / 3600),// foot-pound

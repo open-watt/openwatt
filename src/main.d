@@ -21,7 +21,7 @@ import manager.element;
 void main()
 {
 	ModbusProfile* se_meter_profile = new ModbusProfile;
-	se_meter_profile.populateRegs(solarEdgeRegs);
+	se_meter_profile.populateRegs(WND_WR_MB_Regs);
 	ModbusProfile* goodwe_ems_profile = new ModbusProfile;
 	goodwe_ems_profile.populateRegs(goodWeEmsRegs);
 	ModbusProfile* pace_bms_profile = new ModbusProfile;

@@ -10,13 +10,16 @@ enum RecordType : ubyte
 {
 	uint16 = 0,
 	int16,
+	uint32le,
 	uint32,
+	int32le,
 	int32,
 	uint8H,	// masked access
 	uint8L, // masked access
 	int8H, // masked access
 	int8L, // masked access
 	exp10, // power of 10
+	float32le,
 	float32,
 	bf16,
 	bf32,
@@ -174,8 +177,8 @@ struct ModbusProfile
 
 private:
 
-immutable ubyte[] seqLens = [ 1, 1, 2, 2, 1, 1, 1, 1, 1, 2, 1, 2, 1, 2 ];
-immutable string[] typeStrings = [ "u16", "i16", "u32", "i32", "u8", "u8", "i8", "i8", "e10", "f32", "bf16", "bf32", "enum16", "enum32", "str" ];
+immutable ubyte[] seqLens = [ 1, 1, 2, 2, 2, 2, 1, 1, 1, 1, 1, 2, 2, 1, 2, 1, 2 ];
+immutable string[] typeStrings = [ "u16", "i16", "u32le", "u32", "i32le", "i32", "u8h", "u8l", "i8h", "i8l", "e10", "f32le", "f32", "bf16", "bf32", "enum16", "enum32", "str" ];
 
 static assert(seqLens.length == RecordType.max);
 static assert(typeStrings.length == RecordType.max + 1);

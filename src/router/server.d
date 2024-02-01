@@ -398,8 +398,14 @@ class ModbusResponse : Response
 					case RecordType.uint32:
 						value = Value((data.rw.values[i] << 16 | data.rw.values[i + 1]) * unitConv.scale + unitConv.offset);
 						break;
+					case RecordType.uint32le:
+						value = Value((data.rw.values[i + 1] << 16 | data.rw.values[i]) * unitConv.scale + unitConv.offset);
+						break;
 					case RecordType.int32:
 						value = Value(cast(int)(data.rw.values[i] << 16 | data.rw.values[i + 1]) * unitConv.scale + unitConv.offset);
+						break;
+					case RecordType.int32le:
+						value = Value(cast(int)(data.rw.values[i + 1] << 16 | data.rw.values[i]) * unitConv.scale + unitConv.offset);
 						break;
 					case RecordType.uint8H:
 						value = Value((data.rw.values[i] >> 8) * unitConv.scale + unitConv.offset);
@@ -416,7 +422,10 @@ class ModbusResponse : Response
 					case RecordType.exp10:
 						assert(false);
 					case RecordType.float32:
-//						uint f = data.rw.values[i] << 16 | data.rw.values[i + 1];
+						uint f = data.rw.values[i] << 16 | data.rw.values[i + 1];
+						value = Value(*cast(float*)&f * unitConv.scale + unitConv.offset);
+						break;
+					case RecordType.float32le:
 						uint f = data.rw.values[i + 1] << 16 | data.rw.values[i]; // seems to use little endian?
 						value = Value(*cast(float*)&f * unitConv.scale + unitConv.offset);
 						break;
