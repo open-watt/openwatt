@@ -275,7 +275,8 @@ ModbusPDU createMessage_Read(RegisterType type, ushort register, ushort register
 	immutable FunctionCode[] codeForRegType = [
 		FunctionCode.ReadCoils,
 		FunctionCode.ReadDiscreteInputs,
-		FunctionCode.ReadInputRegisters,FunctionCode.ReadHoldingRegisters
+		FunctionCode.ReadInputRegisters,
+		FunctionCode.ReadHoldingRegisters
 	];
 
 	pdu.functionCode = codeForRegType[type];
@@ -285,16 +286,16 @@ ModbusPDU createMessage_Read(RegisterType type, ushort register, ushort register
 	return pdu;
 }
 
-ModbusPDU createMessage_Write(ushort register, ushort value)
+ModbusPDU createMessage_Write(RegisterType type, ushort register, ushort value)
 {
-	return createMessage_Write(register, (&value)[0..1]);
+	return createMessage_Write(type, register, (&value)[0..1]);
 }
 
-ModbusPDU createMessage_Write(ushort register, ushort[] values)
+ModbusPDU createMessage_Write(RegisterType type, ushort register, ushort[] values)
 {
 	ModbusPDU pdu;
 
-	if (register < 10000)
+	if (type == RegisterType.Coil)
 	{
 		pdu.buffer[0..2] = register.nativeToBigEndian;
 
@@ -317,15 +318,9 @@ ModbusPDU createMessage_Write(ushort register, ushort[] values)
 				pdu.buffer[5 + i/8] |= (values[i] ? 1 : 0) << (i % 8);
 		}
 	}
-	else if (register < 20000)
-		assert(0); // can't write to discrete inputs
-	else if (register < 30000)
-		assert(0); // what is this?
-	else if (register < 40000)
-		assert(0); // can't write to input registers
-	else if (register < 50000)
+	else if (type == RegisterType.HoldingRegister)
 	{
-		pdu.buffer[0..2] = (cast(ushort)(register - 40000)).nativeToBigEndian;
+		pdu.buffer[0..2] = register.nativeToBigEndian;
 
 		if (values.length == 1)
 		{

@@ -48,6 +48,7 @@
     <DCompile Include="src\router\modbus\coding.d" />
     <DCompile Include="src\router\modbus\connection.d" />
     <DCompile Include="src\router\modbus\message.d" />
+    <DCompile Include="src\router\modbus\profile\goodwe.d" />
     <DCompile Include="src\router\modbus\profile\goodwe_ems.d" />
     <DCompile Include="src\router\modbus\profile\goodwe_smart_meter.d" />
     <DCompile Include="src\router\modbus\profile\pace_bms.d" />

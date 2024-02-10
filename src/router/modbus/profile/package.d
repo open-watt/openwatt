@@ -43,6 +43,7 @@ enum Frequency : ubyte
 	Medium,	// ie, 10s seconds
 	Low,	// ie, minutes
 	Constant,
+	OnDemand,
 	Configuration
 }
 

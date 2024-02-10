@@ -3,13 +3,19 @@ module router.modbus.profile.solaredge_meter;
 import router.modbus.profile;
 
 
+//
 // WattNode® Wide-RaNge for Modbus®
-// Model: WND-WR-MB
-
+// Model: WND-WR-MB, WND-M1-MB, WND-M0-MB
+// https://www.onetemp.com.au/Attachment/DownloadFile?downloadId=3210
+//
 // Previously:
 // WattNode® WNC/RWNC Power Meters for Modbus®
 // Models: WNC-3Y-208-MB, WNC-3Y-400-MB, WNC-3Y-480-MB, WNC-3Y-600-MB, WNC-3D-240-MB, WNC-3D-400-MB, WNC-3D-480-MB
 //         RWNC-3Y-208-MB, RWNC-3Y-400-MB, RWNC-3Y-480-MB, RWNC-3Y-600-MB, RWNC-3D-240-MB, RWNC-3D-400-MB, RWNC-3D-480-MB
+// https://ctlsys.com/wp-content/uploads/2016/10/WNC-Modbus-Manual-V18c.pdf
+//
+// SolarEdge: SE-MTR-3Y-400V-A, SE-RGMTR-3D-208V-A, SE-WND-3Y400-MB-K2...
+//
 
 enum ModbusRegInfo[] WND_WR_MB_Regs = [
 	// FLOAT:
@@ -175,91 +181,91 @@ enum ModbusRegInfo[] WND_WR_MB_Regs = [
 	ModbusRegInfo(41361, "u16", "PulseCount", null, null, Frequency.Medium, "I/O pin pulse count"),					  // WNC/RWNC meters
 	+/
 	// Configuration Register List
-	ModbusRegInfo(41600, "u16/RW", "ConfigPasscode", null, null, Frequency.Medium, "Optional passcode to prevent unauthorized changes to configuration"),
-	ModbusRegInfo(41602, "u16/RW", "CtAmps", "A", null, Frequency.Medium, "Assign global current transformer rated current"),
-	ModbusRegInfo(41603, "u16/RW", "CtAmps1", "A", null, Frequency.Medium, "CT1 rated current (0 to 30000)"),
-	ModbusRegInfo(41604, "u16/RW", "CtAmps2", "A", null, Frequency.Medium, "CT2 rated current (0 to 30000)"),
-	ModbusRegInfo(41605, "u16/RW", "CtAmps3", "A", null, Frequency.Medium, "CT3 rated current (0 to 30000)"),
-	ModbusRegInfo(41606, "u16/RW", "CtDirections", null, null, Frequency.Medium, "Optionally invert CT orientations (0 to 7)"),
-	ModbusRegInfo(41607, "u16/RW", "Averaging", null, null, Frequency.Medium, "Configure measurement averaging"),
-	ModbusRegInfo(41608, "u16/RW", "PowerIntScale", "W", null, Frequency.Medium, "Integer power register scaling (0 to 10000)"),
-	ModbusRegInfo(41609, "u16/RW", "DemPerMins", "m", null, Frequency.Medium, "Demand period (1 to 720)"),
-	ModbusRegInfo(41610, "u16/RW", "DemSubints", null, null, Frequency.Medium, "Number of demand subintervals (1 to 10)"),
-	ModbusRegInfo(41611, "u16/RW", "GainAdjust1", "0.0001", null, Frequency.Medium, "CT1 gain adjustment (5000 to 20000)"),
-	ModbusRegInfo(41612, "u16/RW", "GainAdjust2", "0.0001", null, Frequency.Medium, "CT2 gain adjustment (5000 to 20000)"),
-	ModbusRegInfo(41613, "u16/RW", "GainAdjust3", "0.0001", null, Frequency.Medium, "CT3 gain adjustment (5000 to 20000)"),
-	ModbusRegInfo(41614, "u16/RW", "PhaseAdjust1", "0.001deg", "deg", Frequency.Medium, "CT1 phase angle adjust (-8000 to 8000)"),
-	ModbusRegInfo(41615, "u16/RW", "PhaseAdjust2", "0.001deg", "deg", Frequency.Medium, "CT2 phase angle adjust (-8000 to 8000)"),
-	ModbusRegInfo(41616, "u16/RW", "PhaseAdjust3", "0.001deg", "deg", Frequency.Medium, "CT3 phase angle adjust (-8000 to 8000)"),
-	ModbusRegInfo(41617, "u16/RW", "CreepLimit", "ppm", null, Frequency.Medium, "Minimum current and power for readings"),
-	ModbusRegInfo(41618, "u16/RW", "PhaseOffset", null, null, Frequency.Medium, "Not used. Included for WNC compatibility."),
-	ModbusRegInfo(41619, "u16/RW", "ZeroEnergy", null, null, Frequency.Medium, "Write 1 to zero all resettable energy registers"),
-	ModbusRegInfo(41620, "u16/RW", "ZeroDemand", null, null, Frequency.Medium, "Write 1 to zero all demand values"),
-	ModbusRegInfo(41621, "u16/RW", "CurrentIntScale", null, null, Frequency.Medium, "Scale factor for integer currents (0 to 32767)"),
-	ModbusRegInfo(41622, "u16/RW", "IoPinMode", null, null, Frequency.Medium, "I/O pin mode for Option IO or SSR (0 to 8)"), // WNC/RWNC meters
-	ModbusRegInfo(41623, "u16/RW", "MeterConfig1", null, null, Frequency.Medium, "Configure voltage for meter element 1"),
-	ModbusRegInfo(41624, "u16/RW", "MeterConfig2", null, null, Frequency.Medium, "Configure voltage for meter element 2"),
-	ModbusRegInfo(41625, "u16/RW", "MeterConfig3", null, null, Frequency.Medium, "Configure voltage for meter element 3"),
-	ModbusRegInfo(41627, "u16/RW", "ChangeCounter", null, null, Frequency.Medium, "Count of configuration changes"),
-	ModbusRegInfo(41628, "f32le/RW", "NominalCtVolts1", "V", null, Frequency.Medium, "CT1, Voltage of full scale CT signal"),
-	ModbusRegInfo(41630, "f32le/RW", "NominalCtVolts2", "V", null, Frequency.Medium, "CT2, Voltage of full scale CT signal"),
-	ModbusRegInfo(41632, "f32le/RW", "NominalCtVolts3", "V", null, Frequency.Medium, "CT3, Voltage of full scale CT signal"),
-	ModbusRegInfo(41635, "u16/RW", "ConnectionType", null, null, Frequency.Medium, "Shortcut to set all three MeterConfig registers"),
-	ModbusRegInfo(41636, "u16/RW", "VoltsNoiseFloor", "0.1%", "%", Frequency.Medium, "Minimum voltage as a percentage."),
-	ModbusRegInfo(41637, "u16/RW", "CtMonitoring", null, null, Frequency.Medium, "Configure disconnected CT detection (0 to 2)"),
-	ModbusRegInfo(41638, "f32le/RW", "PtRatio", null, null, Frequency.Medium, "Potential transformer ratio (0.05 to 300.0)"),
-	ModbusRegInfo(41684, "u16/RW", "OptSignedCurrent", null, null, Frequency.Medium, "Report signed current. 0=current always positive, 1=current sign matches the sign of the active power."),
-	ModbusRegInfo(41685, "u16/RW", "OptEnergySumMethod", null, null, Frequency.Medium, "Option to specify how meter elements are summed."),
+	ModbusRegInfo(41600, "u16/RW", "ConfigPasscode", null, null, Frequency.Configuration, "Optional passcode to prevent unauthorized changes to configuration"),
+	ModbusRegInfo(41602, "u16/RW", "CtAmps", "A", null, Frequency.Configuration, "Assign global current transformer rated current"),
+	ModbusRegInfo(41603, "u16/RW", "CtAmps1", "A", null, Frequency.Configuration, "CT1 rated current (0 to 30000)"),
+	ModbusRegInfo(41604, "u16/RW", "CtAmps2", "A", null, Frequency.Configuration, "CT2 rated current (0 to 30000)"),
+	ModbusRegInfo(41605, "u16/RW", "CtAmps3", "A", null, Frequency.Configuration, "CT3 rated current (0 to 30000)"),
+	ModbusRegInfo(41606, "u16/RW", "CtDirections", null, null, Frequency.Configuration, "Optionally invert CT orientations (0 to 7)"),
+	ModbusRegInfo(41607, "u16/RW", "Averaging", null, null, Frequency.Configuration, "Configure measurement averaging"),
+	ModbusRegInfo(41608, "u16/RW", "PowerIntScale", "W", null, Frequency.Configuration, "Integer power register scaling (0 to 10000)"),
+	ModbusRegInfo(41609, "u16/RW", "DemPerMins", "m", null, Frequency.Configuration, "Demand period (1 to 720)"),
+	ModbusRegInfo(41610, "u16/RW", "DemSubints", null, null, Frequency.Configuration, "Number of demand subintervals (1 to 10)"),
+	ModbusRegInfo(41611, "u16/RW", "GainAdjust1", "0.0001", null, Frequency.Configuration, "CT1 gain adjustment (5000 to 20000)"),
+	ModbusRegInfo(41612, "u16/RW", "GainAdjust2", "0.0001", null, Frequency.Configuration, "CT2 gain adjustment (5000 to 20000)"),
+	ModbusRegInfo(41613, "u16/RW", "GainAdjust3", "0.0001", null, Frequency.Configuration, "CT3 gain adjustment (5000 to 20000)"),
+	ModbusRegInfo(41614, "u16/RW", "PhaseAdjust1", "0.001deg", "deg", Frequency.Configuration, "CT1 phase angle adjust (-8000 to 8000)"),
+	ModbusRegInfo(41615, "u16/RW", "PhaseAdjust2", "0.001deg", "deg", Frequency.Configuration, "CT2 phase angle adjust (-8000 to 8000)"),
+	ModbusRegInfo(41616, "u16/RW", "PhaseAdjust3", "0.001deg", "deg", Frequency.Configuration, "CT3 phase angle adjust (-8000 to 8000)"),
+	ModbusRegInfo(41617, "u16/RW", "CreepLimit", "ppm", null, Frequency.Configuration, "Minimum current and power for readings"),
+	ModbusRegInfo(41618, "u16/RW", "PhaseOffset", null, null, Frequency.Configuration, "Not used. Included for WNC compatibility."),
+	ModbusRegInfo(41619, "u16/RW", "ZeroEnergy", null, null, Frequency.Configuration, "Write 1 to zero all resettable energy registers"),
+	ModbusRegInfo(41620, "u16/RW", "ZeroDemand", null, null, Frequency.Configuration, "Write 1 to zero all demand values"),
+	ModbusRegInfo(41621, "u16/RW", "CurrentIntScale", null, null, Frequency.Configuration, "Scale factor for integer currents (0 to 32767)"),
+	ModbusRegInfo(41622, "u16/RW", "IoPinMode", null, null, Frequency.Configuration, "I/O pin mode for Option IO or SSR (0 to 8)"), // WNC/RWNC meters
+	ModbusRegInfo(41623, "u16/RW", "MeterConfig1", null, null, Frequency.Configuration, "Configure voltage for meter element 1"),
+	ModbusRegInfo(41624, "u16/RW", "MeterConfig2", null, null, Frequency.Configuration, "Configure voltage for meter element 2"),
+	ModbusRegInfo(41625, "u16/RW", "MeterConfig3", null, null, Frequency.Configuration, "Configure voltage for meter element 3"),
+	ModbusRegInfo(41627, "u16/RW", "ChangeCounter", null, null, Frequency.Configuration, "Count of configuration changes"),
+	ModbusRegInfo(41628, "f32le/RW", "NominalCtVolts1", "V", null, Frequency.Configuration, "CT1, Voltage of full scale CT signal"),
+	ModbusRegInfo(41630, "f32le/RW", "NominalCtVolts2", "V", null, Frequency.Configuration, "CT2, Voltage of full scale CT signal"),
+	ModbusRegInfo(41632, "f32le/RW", "NominalCtVolts3", "V", null, Frequency.Configuration, "CT3, Voltage of full scale CT signal"),
+	ModbusRegInfo(41635, "u16/RW", "ConnectionType", null, null, Frequency.Configuration, "Shortcut to set all three MeterConfig registers"),
+	ModbusRegInfo(41636, "u16/RW", "VoltsNoiseFloor", "0.1%", "%", Frequency.Configuration, "Minimum voltage as a percentage."),
+	ModbusRegInfo(41637, "u16/RW", "CtMonitoring", null, null, Frequency.Configuration, "Configure disconnected CT detection (0 to 2)"),
+	ModbusRegInfo(41638, "f32le/RW", "PtRatio", null, null, Frequency.Configuration, "Potential transformer ratio (0.05 to 300.0)"),
+	ModbusRegInfo(41684, "u16/RW", "OptSignedCurrent", null, null, Frequency.Configuration, "Report signed current. 0=current always positive, 1=current sign matches the sign of the active power."),
+	ModbusRegInfo(41685, "u16/RW", "OptEnergySumMethod", null, null, Frequency.Configuration, "Option to specify how meter elements are summed."),
 	// Communication Register List
-	ModbusRegInfo(41650, "u16/RW", "ApplyComConfig", null, null, Frequency.Medium, "Writing 1234 applies the configuration settings below. Reads 1 if pending changes not applied yet."),
-	ModbusRegInfo(41651, "u16/RW", "Address", null, null, Frequency.Medium, "Modbus address"),
-	ModbusRegInfo(41652, "u16/RW", "BaudRate", null, null, Frequency.Medium, "1 = 1200 baud, 2 = 2400 baud, 3 = 4800 baud, 4 = 9600 baud, 5 = 19200 baud, 6 = 38400 baud, 7 = 57600 baud, 8 = 76800 baud, 9 = 115200 baud"),
-	ModbusRegInfo(41653, "u16/RW", "ParityMode", null, null, Frequency.Medium, "0 = 8N1 (no parity, one stop bit) 1 = 8E1 (even parity, one stop bit) 2 = 8N2 (no parity, two stop bits)"),
-	ModbusRegInfo(41654, "u16/RW", "ModbusMode", null, null, Frequency.Medium, "0 = RTU"),
-	ModbusRegInfo(41655, "u16/RW", "ReplyDelay", null, null, Frequency.Medium, "Minimum Modbus reply delay: 0 to 20 ms (default: 5ms)"),
-	ModbusRegInfo(41656, "u32le/RW", "SerialNumberKey", null, null, Frequency.Medium, "Serial number of meter to change Modbus address"),
-	ModbusRegInfo(41658, "u16/RW", "NewAddress", null, null, Frequency.Medium, "New Modbus address for meter with SerialNumberKey"),
+	ModbusRegInfo(41650, "u16/RW", "ApplyComConfig", null, null, Frequency.Configuration, "Writing 1234 applies the configuration settings below. Reads 1 if pending changes not applied yet."),
+	ModbusRegInfo(41651, "u16/RW", "Address", null, null, Frequency.Configuration, "Modbus address"),
+	ModbusRegInfo(41652, "u16/RW", "BaudRate", null, null, Frequency.Configuration, "1 = 1200 baud, 2 = 2400 baud, 3 = 4800 baud, 4 = 9600 baud, 5 = 19200 baud, 6 = 38400 baud, 7 = 57600 baud, 8 = 76800 baud, 9 = 115200 baud"),
+	ModbusRegInfo(41653, "u16/RW", "ParityMode", null, null, Frequency.Configuration, "0 = 8N1 (no parity, one stop bit) 1 = 8E1 (even parity, one stop bit) 2 = 8N2 (no parity, two stop bits)"),
+	ModbusRegInfo(41654, "u16/RW", "ModbusMode", null, null, Frequency.Configuration, "0 = RTU"),
+	ModbusRegInfo(41655, "u16/RW", "ReplyDelay", null, null, Frequency.Configuration, "Minimum Modbus reply delay: 0 to 20 ms (default: 5ms)"),
+	ModbusRegInfo(41656, "u32le/RW", "SerialNumberKey", null, null, Frequency.Configuration, "Serial number of meter to change Modbus address"),
+	ModbusRegInfo(41658, "u16/RW", "NewAddress", null, null, Frequency.Configuration, "New Modbus address for meter with SerialNumberKey"),
 	// Diagnostic Register List
 	ModbusRegInfo(41700, "u32le", "SerialNumber", null, null, Frequency.Constant, "The WattNode meter serial number"),
-	ModbusRegInfo(41702, "u32le", "UptimeSecs", "s", null, Frequency.Medium, "Time in seconds since last power on"),
-	ModbusRegInfo(41704, "u32le", "TotalSecs", "s", null, Frequency.Medium, "Seconds Total seconds of operation"), // (preserved across power failures)
-	ModbusRegInfo(41706, "u16", "Model", null, null, Frequency.Medium, "Encoded WattNode model"),
-	ModbusRegInfo(41707, "u16", "Version", null, null, Frequency.Medium, "Firmware version"),
-	ModbusRegInfo(41709, "u16", "ErrorStatusQueue", null, null, Frequency.Medium, "List of recent errors and events"),
-	ModbusRegInfo(41710, "u16", "PowerFailCount1", null, null, Frequency.Medium, "Power failure count"),
-	ModbusRegInfo(41711, "u16", "CrcErrorCount", null, null, Frequency.Medium, "Count of Modbus CRC communication errors"),
-	ModbusRegInfo(41712, "u16", "FrameErrorCount", null, null, Frequency.Medium, "Count of Modbus framing errors"),
-	ModbusRegInfo(41713, "u16", "PacketErrorCount", null, null, Frequency.Medium, "Count of bad Modbus packets"),
-	ModbusRegInfo(41714, "u16", "OverrunCount", null, null, Frequency.Medium, "Count of Modbus buffer overruns"),
-	ModbusRegInfo(41715, "u16", "ErrorStatus1", null, null, Frequency.Medium, "Newest error or event (0 = no errors)"),
-	ModbusRegInfo(41716, "u16", "ErrorStatus2", null, null, Frequency.Medium, "Next oldest error or event"),
-	ModbusRegInfo(41717, "u16", "ErrorStatus3", null, null, Frequency.Medium, "Next oldest error or event"),
-	ModbusRegInfo(41718, "u16", "ErrorStatus4", null, null, Frequency.Medium, "Next oldest error or event"),
-	ModbusRegInfo(41719, "u16", "ErrorStatus5", null, null, Frequency.Medium, "Next oldest error or event"),
-	ModbusRegInfo(41720, "u16", "ErrorStatus6", null, null, Frequency.Medium, "Next oldest error or event"),
-	ModbusRegInfo(41721, "u16", "ErrorStatus7", null, null, Frequency.Medium, "Next oldest error or event"),
-	ModbusRegInfo(41722, "u16", "ErrorStatus8", null, null, Frequency.Medium, "Oldest error or event"),
-	ModbusRegInfo(41759, "u16", "CtStatus1", null, null, Frequency.Medium, "Status of CT1 disconnect detection: 0 = Normal or no monitoring, 1 = CT disconnected, 2 = CT reconnected (was disconnected)"),
-	ModbusRegInfo(41760, "u16", "CtStatus2", null, null, Frequency.Medium, "Status of CT2 disconnect detection"),
-	ModbusRegInfo(41761, "u16", "CtStatus3", null, null, Frequency.Medium, "Status of CT3 disconnect detection"),
+	ModbusRegInfo(41702, "u32le", "UptimeSecs", "s", null, Frequency.OnDemand, "Time in seconds since last power on"),
+	ModbusRegInfo(41704, "u32le", "TotalSecs", "s", null, Frequency.OnDemand, "Seconds Total seconds of operation"), // (preserved across power failures)
+	ModbusRegInfo(41706, "u16", "Model", null, null, Frequency.OnDemand, "Encoded WattNode model"),
+	ModbusRegInfo(41707, "u16", "Version", null, null, Frequency.OnDemand, "Firmware version"),
+	ModbusRegInfo(41709, "u16", "ErrorStatusQueue", null, null, Frequency.OnDemand, "List of recent errors and events"),
+	ModbusRegInfo(41710, "u16", "PowerFailCount1", null, null, Frequency.OnDemand, "Power failure count"),
+	ModbusRegInfo(41711, "u16", "CrcErrorCount", null, null, Frequency.OnDemand, "Count of Modbus CRC communication errors"),
+	ModbusRegInfo(41712, "u16", "FrameErrorCount", null, null, Frequency.OnDemand, "Count of Modbus framing errors"),
+	ModbusRegInfo(41713, "u16", "PacketErrorCount", null, null, Frequency.OnDemand, "Count of bad Modbus packets"),
+	ModbusRegInfo(41714, "u16", "OverrunCount", null, null, Frequency.OnDemand, "Count of Modbus buffer overruns"),
+	ModbusRegInfo(41715, "u16", "ErrorStatus1", null, null, Frequency.OnDemand, "Newest error or event (0 = no errors)"),
+	ModbusRegInfo(41716, "u16", "ErrorStatus2", null, null, Frequency.OnDemand, "Next oldest error or event"),
+	ModbusRegInfo(41717, "u16", "ErrorStatus3", null, null, Frequency.OnDemand, "Next oldest error or event"),
+	ModbusRegInfo(41718, "u16", "ErrorStatus4", null, null, Frequency.OnDemand, "Next oldest error or event"),
+	ModbusRegInfo(41719, "u16", "ErrorStatus5", null, null, Frequency.OnDemand, "Next oldest error or event"),
+	ModbusRegInfo(41720, "u16", "ErrorStatus6", null, null, Frequency.OnDemand, "Next oldest error or event"),
+	ModbusRegInfo(41721, "u16", "ErrorStatus7", null, null, Frequency.OnDemand, "Next oldest error or event"),
+	ModbusRegInfo(41722, "u16", "ErrorStatus8", null, null, Frequency.OnDemand, "Oldest error or event"),
+	ModbusRegInfo(41759, "u16", "CtStatus1", null, null, Frequency.OnDemand, "Status of CT1 disconnect detection: 0 = Normal or no monitoring, 1 = CT disconnected, 2 = CT reconnected (was disconnected)"),
+	ModbusRegInfo(41760, "u16", "CtStatus2", null, null, Frequency.OnDemand, "Status of CT2 disconnect detection"),
+	ModbusRegInfo(41761, "u16", "CtStatus3", null, null, Frequency.OnDemand, "Status of CT3 disconnect detection"),
 	// Option Information Registers
-	ModbusRegInfo(41708, "u16", "Options", null, null, Frequency.Medium, "Meter options as a bit field"),
-	ModbusRegInfo(41723, "u16", "OptCtAmps1", null, null, Frequency.Medium, "Option CT - CT1 CtAmps"),
-	ModbusRegInfo(41724, "u16", "OptCtAmps2", null, null, Frequency.Medium, "Option CT - CT2 CtAmps"),
-	ModbusRegInfo(41725, "u16", "OptCtAmps3", null, null, Frequency.Medium, "Option CT - CT3 CtAmps"),
-	ModbusRegInfo(41726, "u16", "OptModbusMode", null, null, Frequency.Medium, "Not supported on the WND-series WattNode"),
-	ModbusRegInfo(41727, "u16", "OptAddress", null, null, Frequency.Medium, "Option AD - Factory assigned Modbus address"),
-	ModbusRegInfo(41728, "u16", "OptBaudRate", null, null, Frequency.Medium, "Factory assigned baud rate"),
-	ModbusRegInfo(41729, "u16", "OptParityMode", null, null, Frequency.Medium, "Option EP - Factory assigned even parity"),
-	ModbusRegInfo(41730, "u16", "Opt232", null, null, Frequency.Medium, "Option 232 - RS-232 interface installed"),   // WNC/RWNC meters
-	ModbusRegInfo(41731, "u16", "OptTTL", null, null, Frequency.Medium, "Option TTL - TTL interface installed"),	  // WNC/RWNC meters
-	ModbusRegInfo(41732, "u16", "OptIO", null, null, Frequency.Medium, "Option IO - Digital I/O and pulse counter"),  // WNC/RWNC meters
-	ModbusRegInfo(41733, "u16", "OptX5", null, null, Frequency.Medium, "Option X5 - 5 Vdc @ 60 mA power output"),	  // WNC/RWNC meters
-	ModbusRegInfo(41734, "u16", "OptSSR", null, null, Frequency.Medium, "Option SSR - Solid-state relay output"),	  // WNC/RWNC meters
-	ModbusRegInfo(41735, "u16", "OptIoPinMode", null, null, Frequency.Medium, "Option value for IoPinMode register"), // WNC/RWNC meters
-	ModbusRegInfo(41736, "u16", "OptLockedConfig", null, null, Frequency.Medium, "Option L - Factory locked configuration settings"),
-	ModbusRegInfo(41737, "u16", "OptFastPower", null, null, Frequency.Medium, "Not supported on the WND-series WattNode"),
-	ModbusRegInfo(41738, "u16", "OptRs485Termination", null, null, Frequency.Medium, "DIP switch 7 controls RS-485 termination. This is standard on the WND-WR-MB."),
-	ModbusRegInfo(41739, "u16", "OptOemFeatures", null, null, Frequency.Medium, "Factory option for OEM features"),
-	ModbusRegInfo(41740, "u16", "OptNrEnergies", null, null, Frequency.Medium, "Factory option for all energies non-resettable"),
+	ModbusRegInfo(41708, "u16", "Options", null, null, Frequency.OnDemand, "Meter options as a bit field"),
+	ModbusRegInfo(41723, "u16", "OptCtAmps1", null, null, Frequency.OnDemand, "Option CT - CT1 CtAmps"),
+	ModbusRegInfo(41724, "u16", "OptCtAmps2", null, null, Frequency.OnDemand, "Option CT - CT2 CtAmps"),
+	ModbusRegInfo(41725, "u16", "OptCtAmps3", null, null, Frequency.OnDemand, "Option CT - CT3 CtAmps"),
+	ModbusRegInfo(41726, "u16", "OptModbusMode", null, null, Frequency.OnDemand, "Not supported on the WND-series WattNode"),
+	ModbusRegInfo(41727, "u16", "OptAddress", null, null, Frequency.OnDemand, "Option AD - Factory assigned Modbus address"),
+	ModbusRegInfo(41728, "u16", "OptBaudRate", null, null, Frequency.OnDemand, "Factory assigned baud rate"),
+	ModbusRegInfo(41729, "u16", "OptParityMode", null, null, Frequency.OnDemand, "Option EP - Factory assigned even parity"),
+	ModbusRegInfo(41730, "u16", "Opt232", null, null, Frequency.OnDemand, "Option 232 - RS-232 interface installed"),   // WNC/RWNC meters
+	ModbusRegInfo(41731, "u16", "OptTTL", null, null, Frequency.OnDemand, "Option TTL - TTL interface installed"),	  // WNC/RWNC meters
+	ModbusRegInfo(41732, "u16", "OptIO", null, null, Frequency.OnDemand, "Option IO - Digital I/O and pulse counter"),  // WNC/RWNC meters
+	ModbusRegInfo(41733, "u16", "OptX5", null, null, Frequency.OnDemand, "Option X5 - 5 Vdc @ 60 mA power output"),	  // WNC/RWNC meters
+	ModbusRegInfo(41734, "u16", "OptSSR", null, null, Frequency.OnDemand, "Option SSR - Solid-state relay output"),	  // WNC/RWNC meters
+	ModbusRegInfo(41735, "u16", "OptIoPinMode", null, null, Frequency.OnDemand, "Option value for IoPinMode register"), // WNC/RWNC meters
+	ModbusRegInfo(41736, "u16", "OptLockedConfig", null, null, Frequency.OnDemand, "Option L - Factory locked configuration settings"),
+	ModbusRegInfo(41737, "u16", "OptFastPower", null, null, Frequency.OnDemand, "Not supported on the WND-series WattNode"),
+	ModbusRegInfo(41738, "u16", "OptRs485Termination", null, null, Frequency.OnDemand, "DIP switch 7 controls RS-485 termination. This is standard on the WND-WR-MB."),
+	ModbusRegInfo(41739, "u16", "OptOemFeatures", null, null, Frequency.OnDemand, "Factory option for OEM features"),
+	ModbusRegInfo(41740, "u16", "OptNrEnergies", null, null, Frequency.OnDemand, "Factory option for all energies non-resettable"),
 ];

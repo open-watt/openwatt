@@ -177,8 +177,8 @@ immutable UnitDef[string] siUnitMap = [
 	"Wh":	UnitDef(1),			// watthour
 	"VAh":	UnitDef(1),			// voltamphour
 	"VARh":	UnitDef(1),			// voltamp-reactivehour
-	"Ω":	UnitDef(1),			// ohm
-	"ohms":	UnitDef(1),			// ohm
+	"Ω":	UnitDef(1),			// ohm (shuold we accept O ?)
+	"ohm":	UnitDef(1),			// ohm
 	"F":	UnitDef(1),			// farad
 	"N":	UnitDef(1),			// newton
 	"Pa":	UnitDef(1),			// pascal
