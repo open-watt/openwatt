@@ -276,6 +276,7 @@ private:
 	Address remote;
 }
 
+
 import core.atomic;
 import core.sync.mutex;
 import core.thread;
@@ -316,6 +317,11 @@ class Server
 		mutex.lock();
 		serverSocket = null;
 		mutex.unlock();
+	}
+
+	bool running()
+	{
+		return isRunning.atomicLoad();
 	}
 
 	Socket getNewConnection()
@@ -367,12 +373,5 @@ private:
 				// I think this means the socket was destroyed?
 			}
 		}
-	}
-
-	void handleTCPConnection(TcpSocket clientSocket)
-	{
-		// Create a TCPStream with the clientSocket to send/receive data
-		// Example: auto stream = new TCPStream(clientSocket);
-		// Use stream.send() and stream.receive() to communicate
 	}
 }

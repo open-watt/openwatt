@@ -38,12 +38,12 @@
     <DCompile Include="src\db\package.d" />
     <DCompile Include="src\db\selfrefptr.d" />
     <DCompile Include="src\db\stream.d" />
-    <DCompile Include="src\db\value.d" />
     <DCompile Include="src\main.d" />
     <DCompile Include="src\manager\component.d" />
     <DCompile Include="src\manager\device.d" />
     <DCompile Include="src\manager\element.d" />
     <DCompile Include="src\manager\units.d" />
+    <DCompile Include="src\manager\value.d" />
     <DCompile Include="src\router\client.d" />
     <DCompile Include="src\router\modbus\coding.d" />
     <DCompile Include="src\router\modbus\connection.d" />
@@ -222,6 +222,12 @@
     </ClCompile>
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
+      <ImportPaths>src/</ImportPaths>
+      <StringImportPaths>conf/</StringImportPaths>
+      <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
+      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
+      <PreviewIn>true</PreviewIn>
+      <CppStandard>fromCpp</CppStandard>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -243,6 +249,12 @@
       <DebugCode>Release</DebugCode>
       <Optimizer>true</Optimizer>
       <Inliner>true</Inliner>
+      <ImportPaths>src/</ImportPaths>
+      <StringImportPaths>conf/</StringImportPaths>
+      <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
+      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
+      <PreviewIn>true</PreviewIn>
+      <CppStandard>fromCpp</CppStandard>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -263,6 +275,11 @@
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
       <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
+      <ImportPaths>src/</ImportPaths>
+      <StringImportPaths>conf/</StringImportPaths>
+      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
+      <PreviewIn>true</PreviewIn>
+      <CppStandard>fromCpp</CppStandard>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -284,6 +301,12 @@
       <DebugCode>Release</DebugCode>
       <Optimizer>true</Optimizer>
       <Inliner>true</Inliner>
+      <ImportPaths>src/</ImportPaths>
+      <StringImportPaths>conf/</StringImportPaths>
+      <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
+      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
+      <PreviewIn>true</PreviewIn>
+      <CppStandard>fromCpp</CppStandard>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -303,6 +326,12 @@
     </ClCompile>
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
+      <ImportPaths>src/</ImportPaths>
+      <StringImportPaths>conf/</StringImportPaths>
+      <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
+      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
+      <PreviewIn>true</PreviewIn>
+      <CppStandard>fromCpp</CppStandard>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -324,6 +353,12 @@
       <DebugCode>Release</DebugCode>
       <Optimizer>true</Optimizer>
       <Inliner>true</Inliner>
+      <ImportPaths>src/</ImportPaths>
+      <StringImportPaths>conf/</StringImportPaths>
+      <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
+      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
+      <PreviewIn>true</PreviewIn>
+      <CppStandard>fromCpp</CppStandard>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -343,6 +378,12 @@
     </ClCompile>
     <DCompile>
       <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
+      <ImportPaths>src/</ImportPaths>
+      <StringImportPaths>conf/</StringImportPaths>
+      <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
+      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
+      <PreviewIn>true</PreviewIn>
+      <CppStandard>fromCpp</CppStandard>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -364,6 +405,12 @@
       <DebugCode>Release</DebugCode>
       <Optimizer>true</Optimizer>
       <Inliner>true</Inliner>
+      <ImportPaths>src/</ImportPaths>
+      <StringImportPaths>conf/</StringImportPaths>
+      <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
+      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
+      <PreviewIn>true</PreviewIn>
+      <CppStandard>fromCpp</CppStandard>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>

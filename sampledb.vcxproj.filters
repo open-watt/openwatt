@@ -66,9 +66,6 @@
     <DCompile Include="src\db\stream.d">
       <Filter>src\db</Filter>
     </DCompile>
-    <DCompile Include="src\db\value.d">
-      <Filter>src\db</Filter>
-    </DCompile>
     <DCompile Include="src\router\client.d">
       <Filter>src\router</Filter>
     </DCompile>
@@ -110,6 +107,9 @@
     </DCompile>
     <DCompile Include="src\util\queue.d">
       <Filter>src\util</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\value.d">
+      <Filter>src\manager</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>

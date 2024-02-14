@@ -5,6 +5,7 @@ import std.stdio;
 import manager.device;
 import manager.element;
 import manager.units;
+import manager.value;
 
 import router.modbus.profile;
 import router.server;

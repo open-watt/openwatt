@@ -26,7 +26,7 @@ version(Windows)
 
 	class SerialStream : Stream
 	{
-		this(string device, ref in SerialParams serialParams, StreamOptions options = StreamOptions.None)
+		this(string device, in SerialParams serialParams, StreamOptions options = StreamOptions.None)
 		{
 			this.device = device;
 			this.params = serialParams;
@@ -161,7 +161,7 @@ else version(Posix)
 
 	class SerialStream : Stream
 	{
-		this(string device, ref in SerialParams serialParams, StreamOptions options = StreamOptions.None)
+		this(string device, in SerialParams serialParams, StreamOptions options = StreamOptions.None)
 		{
 			this.device = device;
 			this.params = serialParams;

@@ -70,7 +70,7 @@ alias PacketHandler = void delegate(Packet packet, ushort requestId, MonoTime ti
 
 class Connection
 {
-	static Connection createSerialModbus(string device, ref in SerialParams serialParams, ConnectionParams connectionParams)
+	static Connection createSerialModbus(string device, in SerialParams serialParams, ConnectionParams connectionParams)
 	{
 		Connection c = new Connection;
 		c.transport = Transport.Serial;

@@ -8,6 +8,7 @@ import std.string : stripRight;
 
 import manager.component;
 import manager.element;
+import manager.value;
 
 import router.modbus.message;
 import router.modbus.profile;
