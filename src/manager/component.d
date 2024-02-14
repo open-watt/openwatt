@@ -22,8 +22,18 @@ private:
 		ModbusResponse modbusResponse = cast(ModbusResponse)response;
 
 		Response.KVP[string] values = response.values;
-
-		foreach (i, e; elements)
+/+
+		if (!modbusResponse.profile)
+		{
+			import std.algorithm : sort;
+			import std.array : array;
+			// HACK: no profile; we'll just print the data for diagnostic...
+			foreach (v; values.byValue.array.sort!((a, b) => a.element[] < b.element[]))
+				writeln(v.element, ": ", v.value);
+			return;
+		}
++/
+		foreach (ref e; elements)
 		{
 			Response.KVP* kvp = e.id in values;
 			if (kvp)
@@ -51,7 +61,7 @@ private:
 						assert(0);
 				}
 
-				writeln(e.id, ": ", e.latest, e.unit);
+//				writeln(e.id, ": ", e.latest, e.unit);
 			}
 		}
 	}
@@ -76,26 +86,29 @@ Component* createComponentForModbusServer(string id, string name, int serverId, 
 	component.id = id;
 	component.name = name;
 
-	// Create elements for each modbus register
-	Element[] elements = new Element[modbusServer.profile.registers.length];
-	component.elements = elements;
-
-	foreach (size_t i, ref const ModbusRegInfo reg; modbusServer.profile.registers)
+	if (modbusServer.profile)
 	{
-		elements[i].id = reg.name;
-		elements[i].name = reg.desc;
-		elements[i].unit = reg.displayUnits;
-		elements[i].method = Element.Method.Sample;
-		elements[i].type = modbusRegTypeToElementTypeMap[reg.type]; // maybe some numeric values should remain integer?
-		elements[i].arrayLen = 0;
-		elements[i].sampler = new Sampler(serverId, cast(void*)&reg);
-		elements[i].sampler.convert = unitConversion(reg.units, reg.displayUnits);
-		elements[i].sampler.updateIntervalMs = updateIntervalMap[reg.updateFrequency];
-	}
+		// Create elements for each modbus register
+		Element[] elements = new Element[modbusServer.profile.registers.length];
+		component.elements = elements;
 
-	// populate the id lookup table
-	foreach (ref Element element; component.elements)
-		component.elementsById[element.id] = &element;
+		foreach (size_t i, ref const ModbusRegInfo reg; modbusServer.profile.registers)
+		{
+			elements[i].id = reg.name;
+			elements[i].name = reg.desc;
+			elements[i].unit = reg.displayUnits;
+			elements[i].method = Element.Method.Sample;
+			elements[i].type = modbusRegTypeToElementTypeMap[reg.type]; // maybe some numeric values should remain integer?
+			elements[i].arrayLen = 0;
+			elements[i].sampler = new Sampler(serverId, cast(void*)&reg);
+			elements[i].sampler.convert = unitConversion(reg.units, reg.displayUnits);
+			elements[i].sampler.updateIntervalMs = updateIntervalMap[reg.updateFrequency];
+		}
+
+		// populate the id lookup table
+		foreach (ref Element element; component.elements)
+			component.elementsById[element.id] = &element;
+	}
 
 	if (modbusServer.isBusSnooping())
 		modbusServer.snoopBusMessageHandler = &component.modbusSnoopBusHandler;

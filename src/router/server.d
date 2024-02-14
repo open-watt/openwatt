@@ -374,8 +374,23 @@ class ModbusResponse : Response
 		ushort readCount = data.rw.readCount;
 		data = parseModbusMessage(RequestType.Response, pdu, temp);
 
+		if (data.functionCode >= 128)
+		{
+			// exception!
+			writeln("Modbus exception - function: ", cast(FunctionCode)(data.functionCode - 128), " data: ", data.exceptionStatus);
+			return null;
+		}
+
 		for (ushort i = 0; i < readCount; ++i)
 		{
+			if (!profile)
+			{
+				import std.format;
+				string reg = format("reg%d", readReg + i);
+				cachedValues[reg] = KVP(reg, Value(data.rw.values[i]));
+				continue;
+			}
+
 			const ModbusRegInfo** pRegInfo = readReg + i in profile.regById;
 			if (pRegInfo)
 			{
@@ -438,8 +453,14 @@ class ModbusResponse : Response
 						value = Value(data.rw.values[i] << 16 | data.rw.values[i + 1]);
 						break;
 					case RecordType.str:
-						const(char)[] str = cast(const(char)[])data.rw.values[i .. i + regInfo.seqLen];
-						value = Value(str.stripRight.idup);
+						char[256] tmp;
+						assert(regInfo.seqLen <= tmp.sizeof/2);
+						for (size_t j = 0; j < regInfo.seqLen; ++j)
+						{
+							tmp[j*2] = cast(char)(data.rw.values[i + j] >> 8);
+							tmp[j*2 + 1] = cast(char)(data.rw.values[i + j] & 0xFF);
+						}
+						value = Value(tmp.stripRight.idup);
 						break;
 				}
 				cachedValues[regInfo.name] = KVP(regInfo.name, value);

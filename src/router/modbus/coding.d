@@ -107,7 +107,11 @@ ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, 
 
 	const(ubyte)[] data = pdu.data;
 
-	switch (pdu.functionCode)
+	if (pdu.functionCode >= 128)
+	{
+		result.exceptionStatus = pdu.data[0];
+	}
+	else switch (pdu.functionCode)
 	{
 		case FunctionCode.ReadCoils:
 		case FunctionCode.ReadDiscreteInputs:

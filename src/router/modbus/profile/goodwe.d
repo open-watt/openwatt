@@ -18,7 +18,7 @@ enum ModbusRegInfo[] goodWeRegs = [
 	ModbusRegInfo(40000+0x0010, "u16/RW", "", null, null, Frequency.Medium, "RTC Year/Month (13-99/1-12)"),
 	ModbusRegInfo(40000+0x0011, "u16/RW", "", null, null, Frequency.Medium, "RTC Date/Hour (1-31/0-23)"),
 	ModbusRegInfo(40000+0x0012, "u16/RW", "", null, null, Frequency.Medium, "RTC Minute/Second (0-59/0-59)"),
-	ModbusRegInfo(40000+0x0100, "u16/W", "%", null, null, Frequency.Medium, "Range of real power adjust (0% ~ 100% of rated real power)"),
+	ModbusRegInfo(40000+0x0100, "u16/W", "", "%", null, Frequency.Medium, "Range of real power adjust (0% ~ 100% of rated real power)"),
 	ModbusRegInfo(40000+0x0101, "u16/W", "", null, null, Frequency.Medium, "Range of reactive power adjust (1‐10 as 0.99‐0.9 lagging, 90‐100 as leading 0.90‐1)"),
 	ModbusRegInfo(40000+0x0200, "str8", "", null, null, Frequency.Medium, "Serial Numbe Of Inverter"),
 	ModbusRegInfo(40000+0x0210, "str5", "", null, null, Frequency.Medium, "Model Name of Inverter"),
