@@ -56,13 +56,15 @@
     <DCompile Include="src\router\modbus\profile\package.d" />
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d" />
     <DCompile Include="src\router\modbus\util.d" />
+    <DCompile Include="src\router\mqtt\broker.d" />
     <DCompile Include="src\router\serial.d" />
     <DCompile Include="src\router\server.d" />
+    <DCompile Include="src\router\stream.d" />
     <DCompile Include="src\util\log.d" />
     <DCompile Include="src\util\package.d" />
+    <DCompile Include="src\util\queue.d" />
   </ItemGroup>
   <ItemGroup>
-    <None Include=".editorconfig" />
     <None Include=".gitignore" />
   </ItemGroup>
   <PropertyGroup Label="Globals">

@@ -3,6 +3,7 @@ module router.serial;
 import std.format;
 import std.stdio;
 
+import router.stream;
 
 struct SerialParams
 {
@@ -23,11 +24,16 @@ version(Windows)
 	import std.conv : to;
 	import std.string : toStringz;
 
-	struct SerialPort
+	class SerialStream : Stream
 	{
-		HANDLE hCom = INVALID_HANDLE_VALUE;
+		this(string device, ref in SerialParams serialParams, StreamOptions options = StreamOptions.None)
+		{
+			this.device = device;
+			this.params = serialParams;
+			this.options = options;
+		}
 
-		void open(string device, SerialParams params = SerialParams())
+		override bool connect()
 		{
 			wchar[256] buf;
 			wstring wstr = device.to!wstring;
@@ -39,7 +45,7 @@ version(Windows)
 			if (hCom == INVALID_HANDLE_VALUE)
 			{
 				writeln("CreateFile failed with error %d.\n", GetLastError());
-				return;
+				return false;
 			}
 
 			DCB dcbSerialParams;
@@ -51,7 +57,7 @@ version(Windows)
 				hCom = INVALID_HANDLE_VALUE;
 
 				writeln("GetCommState failed with error %d.\n", GetLastError());
-				return;
+				return false;
 			}
 
 			dcbSerialParams.BaudRate = DWORD(params.baudRate);
@@ -65,7 +71,7 @@ version(Windows)
 				hCom = INVALID_HANDLE_VALUE;
 
 				writeln("Error to Setting DCB Structure.\n");
-				return;
+				return false;
 			}
 
 			COMMTIMEOUTS timeouts = {};
@@ -80,18 +86,25 @@ version(Windows)
 				hCom = INVALID_HANDLE_VALUE;
 
 				writeln("Error to Setting Time outs.\n");
-				return;
+				return false;
 			}
 
 			writeln(format("Opened %s: 0x%x", device, hCom));
+			return true;
 		}
 
-		void close()
+		override void disconnect()
 		{
 			CloseHandle(hCom);
+			hCom = INVALID_HANDLE_VALUE;
 		}
 
-		ptrdiff_t read(void[] buffer)
+		override bool connected()
+		{
+			return hCom == INVALID_HANDLE_VALUE;
+		}
+
+		override ptrdiff_t read(ubyte[] buffer)
 		{
 			DWORD bytesRead;
 			if (ReadFile(hCom, buffer.ptr, cast(DWORD)buffer.length, &bytesRead, null))
@@ -105,10 +118,10 @@ version(Windows)
 			}
 		}
 
-		ptrdiff_t write(const(void[]) buffer)
+		override ptrdiff_t write(const ubyte[] data)
 		{
 			DWORD bytesWritten;
-			if (WriteFile(hCom, buffer.ptr, cast(DWORD)buffer.length, &bytesWritten, null))
+			if (WriteFile(hCom, data.ptr, cast(DWORD)data.length, &bytesWritten, null))
 			{
 				return bytesWritten;
 			}
@@ -118,6 +131,24 @@ version(Windows)
 				return -1;
 			}
 		}
+
+		override ptrdiff_t pending()
+		{
+			// TODO:?
+			assert(0);
+		}
+
+		override ptrdiff_t flush()
+		{
+			// TODO: just read until can't read anymore?
+			assert(0);
+		}
+
+	private:
+		HANDLE hCom = INVALID_HANDLE_VALUE;
+		string device;
+		SerialParams params;
+		StreamOptions options;
 	}
 }
 else version(Posix)
@@ -128,11 +159,16 @@ else version(Posix)
 	import core.stdc.stdint : ptrdiff_t;
 	import std.string : toStringz;
 
-	struct SerialPort
+	class SerialStream : Stream
 	{
-		int fd = -1;
+		this(string device, ref in SerialParams serialParams, StreamOptions options = StreamOptions.None)
+		{
+			this.device = device;
+			this.params = serialParams;
+			this.options = options;
+		}
 
-		void open(string device, ref in SerialParams params = SerialParams())
+		override bool connect()
 		{
 			fd = core.sys.posix.fcntl.open(device.toStringz(), O_RDWR | O_NOCTTY | O_NDELAY);
 			if (fd == -1)
@@ -171,24 +207,32 @@ else version(Posix)
 			{
 				// Handle error
 			}
+			return true;
 		}
 
-		void close()
+		override void disconnect()
 		{
 			close(fd);
+			fd = -1;
 		}
 
-		ptrdiff_t read(void[] buffer)
+		override ptrdiff_t read(ubyte[] buffer)
 		{
 			ssize_t bytesRead = read(fd, buffer.ptr, buffer.length);
 			return bytesRead;
 		}
 
-		ptrdiff_t write(const(void[]) buffer)
+		override ptrdiff_t write(const ubyte[] data)
 		{
 			ssize_t bytesWritten = write(fd, buffer.ptr, buffer.length);
 			return bytesWritten;
 		}
+
+	private:
+		int fd = -1;
+		string device;
+		SerialParams params;
+		StreamOptions options;
 	}
 }
 else

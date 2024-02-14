@@ -12,6 +12,7 @@ import router.modbus.coding;
 import router.modbus.message;
 import router.modbus.util;
 import router.serial;
+import router.stream;
 
 import util.log;
 
@@ -82,7 +83,8 @@ class Connection
 		assert(!(connectionParams.options & ConnectionOptions.SupportSimultaneousRequests) || c.protocol == ModbusProtocol.TCP, "RTU transport does not support simultaneous requests.");
 
 		// open serial stream...
-		c.serial.serialPort.open(device, serialParams);
+		c.stream = new SerialStream(device, serialParams);
+		c.stream.connect();
 
 		// TODO: if open fails, report error
 
@@ -105,8 +107,8 @@ class Connection
 		{
 			case EthernetMethod.TCP:
 				// try and connect to server...
-				c.ethernet.socket = new TcpSocket();
-				c.ethernet.socket.connect(new InternetAddress(host, port));
+				c.stream = new TCPStream(host, port, StreamOptions.NonBlocking);
+				c.stream.connect();
 				break;
 			case EthernetMethod.UDP:
 				// maybe we need to bind to receive messages?
@@ -129,41 +131,15 @@ class Connection
 		MonoTime now = MonoTime.currTime;
 
 		ubyte[1024] buffer = void;
-		switch (transport)
+		ptrdiff_t length;
+		do
 		{
-			case Transport.Serial:
-				ptrdiff_t length;
-				do
-				{
-					length = serial.serialPort.read(buffer);
-					if (length <= 0)
-						break;
-					appendInput(buffer[0 .. length]);
-				}
-				while (length == buffer.sizeof);
+			length = stream.read(buffer);
+			if (length <= 0)
 				break;
-			case Transport.Ethernet:
-				switch (ethernet.method)
-				{
-					case EthernetMethod.TCP:
-						SocketSet readSet = new SocketSet;
-						readSet.add(ethernet.socket);
-						if (Socket.select(readSet, null, null, dur!"usecs"(0)))
-						{
-							auto length = ethernet.socket.receive(buffer);
-							if (length > 0)
-								appendInput(buffer[0 .. length]);
-						}
-						break;
-					case EthernetMethod.UDP:
-						assert(0);
-					default:
-						assert(0);
-				}
-				break;
-			default:
-				assert(0);
+			appendInput(buffer[0 .. length]);
 		}
+		while (length == buffer.sizeof);
 
 		if (inputLen != 0)
 		{
@@ -279,6 +255,7 @@ class Connection
 	}
 
 private:
+	Stream stream;
 	ubyte[] inputBuffer;
 	size_t inputLen;
 
@@ -292,7 +269,6 @@ private:
 	{
 		string device;
 		SerialParams params;
-		SerialPort serialPort;
 	}
 
 	struct Ethernet
@@ -300,7 +276,6 @@ private:
 		string host;
 		ushort port;
 		EthernetMethod method;
-		Socket socket;
 	}
 
 	struct QueuedRequest
@@ -348,27 +323,8 @@ private:
 
 	ptrdiff_t write(const(ubyte[]) data)
 	{
-		switch (transport)
-		{
-			case Transport.Serial:
-				serial.serialPort.write(data);
-				return data.length;
-			case Transport.Ethernet:
-				switch (ethernet.method)
-				{
-					case EthernetMethod.TCP:
-						ethernet.socket.send(data);
-						return data.length;
-					case EthernetMethod.UDP:
-						assert(0);
-					default:
-						assert(0);
-				}
-				break;
-			default:
-				assert(0);
-		}
-		return -1;
+		size_t r = stream.write(data);
+		return r;
 	}
 
 	bool sendRequest(QueuedRequest request)

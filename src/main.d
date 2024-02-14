@@ -36,7 +36,6 @@ void main()
 //	ModbusPDU ems_req = createMessageRead(cast(ushort)(baseReg + reg++));
 //	goodwe_ems.sendModbusRequest(&ems_req);
 
-/+
 	// SolarEdge inverter<->meter comms
 	ModbusProfile* se_meter_profile = new ModbusProfile;
 	se_meter_profile.populateRegs(WND_WR_MB_Regs);
@@ -56,7 +55,6 @@ void main()
 	Device goodwe;
 	goodwe.addComponent(createComponentForModbusServer("meter", "Meter", goodwe.addServer(goodwe_meter), goodwe_meter));
 	goodwe.finalise();
-+/
 
 	// PACE BMS
 	ModbusProfile* pace_bms_profile = new ModbusProfile;
@@ -71,7 +69,7 @@ void main()
 	pace.addComponent(createComponentForModbusServer("pack1", "Pack 1", pace.addServer(pace_bms[0]), pace_bms[0]));
 	pace.addComponent(createComponentForModbusServer("pack2", "Pack 2", pace.addServer(pace_bms[1]), pace_bms[1]));
 	pace.finalise();
-
+/+
 	// GoodWe inverter<->meter comms
 	ModbusProfile* goodwe_profile = new ModbusProfile;
 	goodwe_profile.populateRegs(goodWeInverterRegs);
@@ -81,18 +79,17 @@ void main()
 	Device goodwe_inv;
 	goodwe_inv.addComponent(createComponentForModbusServer("inverter", "Inverter", goodwe_inv.addServer(goodwe_inverter), goodwe_inverter));
 	goodwe_inv.finalise();
-
++/
 	int i = 0;
 	while (true)
 	{
 		// TODO: polling is pretty lame! data connections should be in threads and receive data immediately
 		// processing should happen in a processing thread which waits on a semaphore for jobs in a queue (submit from comms threads?)
 
-		port7.poll();
-		goodwe_inverter.poll();
-		goodwe_inv.update();
+//		port7.poll();
+//		goodwe_inverter.poll();
+//		goodwe_inv.update();
 
-/+
 		port1.poll();
 		solaredge_meter.poll();
 		solaredge.update();
@@ -140,7 +137,6 @@ void main()
 			writeln("reg341: ", goodwe.components["meter"].elementsById["reg341"].currentValue);
 			i = 0;
 		}
-+/
 
 		port4.poll();
 		pace_bms[0].poll();

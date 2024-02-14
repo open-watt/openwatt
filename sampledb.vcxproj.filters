@@ -22,6 +22,9 @@
     <Filter Include="src\manager">
       <UniqueIdentifier>{a7edf0a4-cbca-4a75-bf4f-548fe4b7764d}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\router\mqtt">
+      <UniqueIdentifier>{472209e2-d2ed-49cc-b915-ed5b816317e0}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\goodwe_smart_meter.d">
@@ -99,9 +102,17 @@
     <DCompile Include="src\router\modbus\profile\goodwe_inverter.d">
       <Filter>src\router\modbus\profile</Filter>
     </DCompile>
+    <DCompile Include="src\router\mqtt\broker.d">
+      <Filter>src\router\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\router\stream.d">
+      <Filter>src\router</Filter>
+    </DCompile>
+    <DCompile Include="src\util\queue.d">
+      <Filter>src\util</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
-    <None Include=".editorconfig" />
     <None Include=".gitignore" />
   </ItemGroup>
 </Project>
