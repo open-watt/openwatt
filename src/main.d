@@ -16,6 +16,7 @@ import router.modbus.profile.goodwe_ems;
 import router.modbus.profile.goodwe_inverter;
 import router.modbus.profile.goodwe_smart_meter;
 import router.modbus.profile.pace_bms;
+import router.stream;
 
 import manager.component;
 import manager.device;
@@ -23,24 +24,16 @@ import manager.element;
 
 void main()
 {
-
-	// goodwe testing
-//	ModbusProfile* goodwe_ems_profile = new ModbusProfile;
-//	goodwe_ems_profile.populateRegs(goodWeEmsRegs);
-//
-//	Server goodwe_ems = new Server("goodwe_ems");
-//	goodwe_ems.createEthernetModbus("192.168.3.7", 8001, EthernetMethod.TCP, 247, ModbusProtocol.RTU, goodwe_ems_profile);
-//
-//	enum baseReg = 30000;
-//	ushort reg = 0;
-//	ModbusPDU ems_req = createMessageRead(cast(ushort)(baseReg + reg++));
-//	goodwe_ems.sendModbusRequest(&ems_req);
+	TCPStream port1 = new TCPStream("192.168.3.7", 8001, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+	TCPStream port4 = new TCPStream("192.168.3.7", 8004, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+	TCPStream port5 = new TCPStream("192.168.3.7", 8005, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+	TCPStream port7 = new TCPStream("192.168.3.7", 8007, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
 
 	// SolarEdge inverter<->meter comms
 	ModbusProfile* se_meter_profile = new ModbusProfile;
 	se_meter_profile.populateRegs(WND_WR_MB_Regs);
-	Connection port1 = Connection.createEthernetModbus("192.168.3.7", 8001, EthernetMethod.TCP, ModbusProtocol.RTU, ConnectionParams(Mode.SnoopBus));
-	ModbusServer solaredge_meter = new ModbusServer("solaredge_meter", port1, 2, se_meter_profile);
+	Connection port1_mb = new Connection(port1, ModbusProtocol.RTU, ConnectionParams(Mode.SnoopBus, logDataStream: "log/se_meter"));
+	ModbusServer solaredge_meter = new ModbusServer("solaredge_meter", port1_mb, 2, se_meter_profile);
 
 	Device solaredge;
 	solaredge.addComponent(createComponentForModbusServer("meter", "Meter", solaredge.addServer(solaredge_meter), solaredge_meter));
@@ -49,8 +42,8 @@ void main()
 	// GoodWe inverter<->meter comms
 	ModbusProfile* goodwe_meter_profile = new ModbusProfile;
 	goodwe_meter_profile.populateRegs(goodWeSmartMeterRegs);
-	Connection port5 = Connection.createEthernetModbus("192.168.3.7", 8005, EthernetMethod.TCP, ModbusProtocol.RTU, ConnectionParams(Mode.SnoopBus));
-	ModbusServer goodwe_meter = new ModbusServer("goodwe_meter", port5, 3, goodwe_meter_profile);
+	Connection port5_mb = new Connection(port5, ModbusProtocol.RTU, ConnectionParams(Mode.SnoopBus, logDataStream: "log/goodwe_meter"));
+	ModbusServer goodwe_meter = new ModbusServer("goodwe_meter", port5_mb, 3, goodwe_meter_profile);
 
 	Device goodwe;
 	goodwe.addComponent(createComponentForModbusServer("meter", "Meter", goodwe.addServer(goodwe_meter), goodwe_meter));
@@ -59,42 +52,40 @@ void main()
 	// PACE BMS
 	ModbusProfile* pace_bms_profile = new ModbusProfile;
 	pace_bms_profile.populateRegs(paceBmsRegs);
-	Connection port4 = Connection.createEthernetModbus("192.168.3.7", 8004, EthernetMethod.TCP, ModbusProtocol.RTU, ConnectionParams());
+	Connection port4_mb = new Connection(port4, ModbusProtocol.RTU, ConnectionParams(logDataStream: "log/pace"));
 	ModbusServer[2] pace_bms = [
-		new ModbusServer("pace_bms", port4, 1, pace_bms_profile),
-		new ModbusServer("pace_bms", port4, 2, pace_bms_profile)
+		new ModbusServer("pace_bms", port4_mb, 1, pace_bms_profile),
+		new ModbusServer("pace_bms", port4_mb, 2, pace_bms_profile)
 	];
 
 	Device pace;
 	pace.addComponent(createComponentForModbusServer("pack1", "Pack 1", pace.addServer(pace_bms[0]), pace_bms[0]));
 	pace.addComponent(createComponentForModbusServer("pack2", "Pack 2", pace.addServer(pace_bms[1]), pace_bms[1]));
 	pace.finalise();
+
 /+
 	// GoodWe inverter<->meter comms
 	ModbusProfile* goodwe_profile = new ModbusProfile;
 	goodwe_profile.populateRegs(goodWeInverterRegs);
-	Connection port7 = Connection.createEthernetModbus("192.168.3.7", 8007, EthernetMethod.TCP, ModbusProtocol.RTU, ConnectionParams());
-	ModbusServer goodwe_inverter = new ModbusServer("goodwe_meter", port7, 247, goodwe_profile);
+	Connection port7_mb = Connection.createEthernetModbus(port7, ModbusProtocol.RTU, ConnectionParams());
+	ModbusServer goodwe_inverter = new ModbusServer("goodwe_meter", port7_mb, 247, goodwe_profile);
 
 	Device goodwe_inv;
 	goodwe_inv.addComponent(createComponentForModbusServer("inverter", "Inverter", goodwe_inv.addServer(goodwe_inverter), goodwe_inverter));
 	goodwe_inv.finalise();
 +/
+
 	int i = 0;
 	while (true)
 	{
 		// TODO: polling is pretty lame! data connections should be in threads and receive data immediately
 		// processing should happen in a processing thread which waits on a semaphore for jobs in a queue (submit from comms threads?)
 
-//		port7.poll();
-//		goodwe_inverter.poll();
-//		goodwe_inv.update();
-
-		port1.poll();
+		port1_mb.poll();
 		solaredge_meter.poll();
 		solaredge.update();
 
-		port5.poll();
+		port5_mb.poll();
 		goodwe_meter.poll();
 		goodwe.update();
 
@@ -138,10 +129,14 @@ void main()
 			i = 0;
 		}
 
-		port4.poll();
+		port4_mb.poll();
 		pace_bms[0].poll();
 		pace_bms[1].poll();
 		pace.update();
+
+//		port7_mb.poll();
+//		goodwe_inverter.poll();
+//		goodwe_inv.update();
 
 		// Process program logic
 		// ...

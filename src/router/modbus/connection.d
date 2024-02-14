@@ -2,6 +2,7 @@ module router.modbus.connection;
 
 import std.container.array;
 import std.datetime;
+import std.file;
 import std.socket;
 import std.stdio;
 debug import std.digest;
@@ -46,11 +47,12 @@ enum ConnectionOptions : uint
 struct ConnectionParams
 {
 	Mode mode = Mode.Slave;
-	int pollingInterval = 0;     // issue requests no more requently than this
-	int pollingDelay = 40;       // wait this long after a response before issuing another request
-	int timeoutThreshold = 1000;  // timeout for pending requests
+	int pollingInterval = 0;		// issue requests no more requently than this
+	int pollingDelay = 40;			// wait this long after a response before issuing another request
+	int timeoutThreshold = 1000;	// timeout for pending requests
 	ConnectionOptions options = ConnectionOptions.None;
 	PacketHandler unsolicitedPacketHandler = null;
+	string logDataStream;			// log filename
 }
 
 struct Packet
@@ -70,55 +72,26 @@ alias PacketHandler = void delegate(Packet packet, ushort requestId, MonoTime ti
 
 class Connection
 {
-	static Connection createSerialModbus(string device, in SerialParams serialParams, ConnectionParams connectionParams)
+	this(Stream stream, ModbusProtocol modbusProtocol, ConnectionParams connectionParams)
 	{
-		Connection c = new Connection;
-		c.transport = Transport.Serial;
-		c.protocol = ModbusProtocol.RTU;
-		c.connParams = connectionParams;
-
-		c.serial.device = device;
-		c.serial.params = serialParams;
-
-		assert(!(connectionParams.options & ConnectionOptions.SupportSimultaneousRequests) || c.protocol == ModbusProtocol.TCP, "RTU transport does not support simultaneous requests.");
-
-		// open serial stream...
-		c.stream = new SerialStream(device, serialParams);
-		c.stream.connect();
-
-		// TODO: if open fails, report error
-
-		return c;
-	}
-
-	static Connection createEthernetModbus(string host, ushort port, EthernetMethod method, ModbusProtocol modbusProtocol, ConnectionParams params)
-	{
-		Connection c = new Connection;
-
-		c.transport = Transport.Ethernet;
-		c.protocol = modbusProtocol;
-		c.connParams = params;
-
-		c.ethernet.host = host;
-		c.ethernet.port = port;
-		c.ethernet.method = method;
-
-		switch (method)
+		this.stream = stream;
+		if (cast(SerialStream)stream)
 		{
-			case EthernetMethod.TCP:
-				// try and connect to server...
-				c.stream = new TCPStream(host, port, StreamOptions.NonBlocking);
-				c.stream.connect();
-				break;
-			case EthernetMethod.UDP:
-				// maybe we need to bind to receive messages?
-				assert(0);
-				break;
-			default:
-				assert(0);
+			this.transport = Transport.Serial;
+			assert(modbusProtocol == ModbusProtocol.RTU, "Serial modbus only supports RTU transport.");
+			assert(!(connectionParams.options & ConnectionOptions.SupportSimultaneousRequests), "RTU transport does not support simultaneous requests.");
 		}
+		else
+			this.transport = Transport.Ethernet;
 
-		return c;
+		this.protocol = modbusProtocol;
+		this.connParams = connectionParams;
+
+		if (connectionParams.logDataStream)
+			this.logStream = openLogFile(connectionParams.logDataStream);
+
+		if (!stream.connected())
+			stream.connect();
 	}
 
 	bool linkEstablished()
@@ -137,6 +110,8 @@ class Connection
 			length = stream.read(buffer);
 			if (length <= 0)
 				break;
+			if (connParams.logDataStream)
+				logStream.rawWrite(buffer[0 .. length]);
 			appendInput(buffer[0 .. length]);
 		}
 		while (length == buffer.sizeof);
@@ -265,6 +240,8 @@ private:
 	MonoTime lastReqTime;
 	MonoTime lastRespTime;
 
+	File logStream;
+
 	struct Serial
 	{
 		string device;
@@ -324,6 +301,8 @@ private:
 	ptrdiff_t write(const(ubyte[]) data)
 	{
 		size_t r = stream.write(data);
+		if (connParams.logDataStream)
+			logStream.rawWrite(data);
 		return r;
 	}
 
@@ -382,5 +361,27 @@ private:
 		inputBuffer[inputLen .. inputLen + bytes] = 0;
 
 		return r;
+	}
+
+	static File openLogFile(string name)
+	{
+		import std.conv : to;
+
+		int i = 0;
+		do
+		{
+			string t = name;
+			if (i > 0)
+				t ~= '.' ~ i.to!string;
+			t ~= ".log";
+			if (!exists(t))
+			{
+				File f;
+				f.open(t, "ab");
+				return f;
+			}
+		}
+		while (++i < 100000);
+		return File();
 	}
 }
