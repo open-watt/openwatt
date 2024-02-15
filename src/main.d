@@ -26,38 +26,53 @@ import manager.element;
 import util.string;
 
 Stream[string] streams;
+Connection[string] modbus_connections;
+ModbusServer[string] modbus_servers;
+ModbusProfile*[string] modbus_profiles;
 
 void main()
 {
+	// populate some builtin modbus profiles...
+	ModbusProfile* mb_profile = new ModbusProfile;
+	mb_profile.populateRegs(WND_WR_MB_Regs);
+	modbus_profiles["se_meter_profile"] = mb_profile;
+
+	mb_profile = new ModbusProfile;
+	mb_profile.populateRegs(goodWeSmartMeterRegs);
+	modbus_profiles["goodwe_meter_profile"] = mb_profile;
+
+	mb_profile = new ModbusProfile;
+	mb_profile.populateRegs(paceBmsRegs);
+	modbus_profiles["pace_bms_profile"] = mb_profile;
+
+	mb_profile = new ModbusProfile;
+	mb_profile.populateRegs(goodWeInverterRegs);
+	modbus_profiles["goodwe_profile"] = mb_profile;
+
+	// load config files
 	loadConfig("conf/monitor.conf");
 
+
+	// TODO: transform into config...
+
 	// SolarEdge inverter<->meter comms
-	ModbusProfile* se_meter_profile = new ModbusProfile;
-	se_meter_profile.populateRegs(WND_WR_MB_Regs);
-	Connection port1_mb = new Connection(streams["port1"], ModbusProtocol.RTU, ConnectionParams(Mode.SnoopBus, logDataStream: "log/se_meter"));
-	ModbusServer solaredge_meter = new ModbusServer("solaredge_meter", port1_mb, 2, se_meter_profile);
+	Server solaredge_meter = modbus_servers["se_meter"];
 
 	Device solaredge;
 	solaredge.addComponent(createComponentForModbusServer("meter", "Meter", solaredge.addServer(solaredge_meter), solaredge_meter));
 	solaredge.finalise();
 
 	// GoodWe inverter<->meter comms
-	ModbusProfile* goodwe_meter_profile = new ModbusProfile;
-	goodwe_meter_profile.populateRegs(goodWeSmartMeterRegs);
-	Connection port5_mb = new Connection(streams["port5"], ModbusProtocol.RTU, ConnectionParams(Mode.SnoopBus, logDataStream: "log/goodwe_meter"));
-	ModbusServer goodwe_meter = new ModbusServer("goodwe_meter", port5_mb, 3, goodwe_meter_profile);
+	Server goodwe_meter = modbus_servers["goodwe_meter"];
 
 	Device goodwe;
 	goodwe.addComponent(createComponentForModbusServer("meter", "Meter", goodwe.addServer(goodwe_meter), goodwe_meter));
 	goodwe.finalise();
 
 	// PACE BMS
-	ModbusProfile* pace_bms_profile = new ModbusProfile;
-	pace_bms_profile.populateRegs(paceBmsRegs);
-	Connection port4_mb = new Connection(streams["port4"], ModbusProtocol.RTU, ConnectionParams(logDataStream: "log/pace"));
-	ModbusServer[2] pace_bms = [
-		new ModbusServer("pace_bms", port4_mb, 1, pace_bms_profile),
-		new ModbusServer("pace_bms", port4_mb, 2, pace_bms_profile)
+	Server[2] pace_bms = [
+		modbus_servers["pace_bms_pack1"],
+		modbus_servers["pace_bms_pack2"]
 	];
 
 	Device pace;
@@ -67,10 +82,7 @@ void main()
 
 /+
 	// GoodWe inverter<->meter comms
-	ModbusProfile* goodwe_profile = new ModbusProfile;
-	goodwe_profile.populateRegs(goodWeInverterRegs);
-	Connection port7_mb = Connection.createEthernetModbus(streams["port7"], ModbusProtocol.RTU, ConnectionParams());
-	ModbusServer goodwe_inverter = new ModbusServer("goodwe_meter", port7_mb, 247, goodwe_profile);
+	Server goodwe_inverter = modbus_servers["goodwe_ems"];
 
 	Device goodwe_inv;
 	goodwe_inv.addComponent(createComponentForModbusServer("inverter", "Inverter", goodwe_inv.addServer(goodwe_inverter), goodwe_inverter));
@@ -82,15 +94,15 @@ void main()
 	{
 		Stream.update();
 
+		foreach (connection; modbus_connections)
+			connection.poll();
+		foreach (server; modbus_servers)
+			server.poll();
+
 		// TODO: polling is pretty lame! data connections should be in threads and receive data immediately
 		// processing should happen in a processing thread which waits on a semaphore for jobs in a queue (submit from comms threads?)
 
-		port1_mb.poll();
-		solaredge_meter.poll();
 		solaredge.update();
-
-		port5_mb.poll();
-		goodwe_meter.poll();
 		goodwe.update();
 
 		if (i++ == 10)
@@ -133,13 +145,8 @@ void main()
 			i = 0;
 		}
 
-		port4_mb.poll();
-		pace_bms[0].poll();
-		pace_bms[1].poll();
 		pace.update();
 
-//		port7_mb.poll();
-//		goodwe_inverter.poll();
 //		goodwe_inv.update();
 
 		// Process program logic
@@ -154,24 +161,197 @@ void main()
 void loadConfig(string file)
 {
 	import std.conv: to;
+	import std.uni : toLower;
 
 	ConfItem confRoot = parseConfigFile("conf/monitor.conf");
 
 	foreach (ref item; confRoot.subItems)
 	{
-		if (item.name[] == "connections")
+		switch (item.name)
 		{
-			foreach (ref conn; item.subItems)
-			{
-				if (conn.name[] == "tcp-client")
+			case "global":
+				// read global settings:
+				//  loglevel
+				//  ...
+				break;
+
+			case "connections":
+				foreach (ref conn; item.subItems)
 				{
-					string name, addr, port, options = conn.value;
-					name = options.split!','();
-					port = options.split!','();
-					addr = port.split!':'();
-					streams[name] = new TCPStream(addr, port.to!ushort, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+					if (conn.name[] == "tcp-client")
+					{
+						string name, addr, port, options = conn.value;
+						name = options.split!','();
+						port = options.split!','();
+						addr = port.split!':'();
+						streams[name] = new TCPStream(addr, port.to!ushort, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+					}
 				}
-			}
+				break;
+
+			case "modbus":
+				foreach (ref mb; item.subItems)
+				{
+					switch (mb.name)
+					{
+						case "connection":
+							string name;
+							Stream stream;
+							Mode mode;
+							ModbusProtocol protocol;
+							string logFile;
+
+							foreach (ref param; mb.subItems)
+							{
+								switch (param.name)
+								{
+									case "name":
+										name = param.value;
+										break;
+
+									case "tcp-server":
+										break;
+
+									case "tcp-client":
+										string addr, port, options = param.value;
+										port = options.split!','();
+										addr = port.split!':'();
+										ushort p = port.to!ushort;
+										stream = new TCPStream(addr, p ? p : 502, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+										break;
+
+									case "udp-server":
+										break;
+
+									case "udp-client":
+										break;
+
+									case "serial":
+										break;
+
+									case "protocol":
+										switch (param.value.toLower)
+										{
+											case "tcp": protocol = ModbusProtocol.TCP; break;
+											case "rtu": protocol = ModbusProtocol.RTU; break;
+											case "ascii": protocol = ModbusProtocol.ASCII; break;
+											default: writeln("Invalid modbus protocol: ", param.value);
+										}
+										break;
+
+									case "mode":
+										switch (param.value)
+										{
+											case "master": mode = Mode.Master; break;
+											case "client": mode = Mode.Master; break;
+											case "slave": mode = Mode.Slave; break;
+											case "server": mode = Mode.Slave; break;
+											case "snoop": mode = Mode.SnoopBus; break;
+											case "snoopbus": mode = Mode.SnoopBus; break;
+											default: writeln("Invalid modbus connection mode: ", param.value);
+										}
+										break;
+
+									case "logFile":
+										if (!param.value.empty)
+											logFile = param.value;
+										else
+										{
+											assert(!name.empty, "Connection has no name for logfile.");
+											logFile = "log/modbus/" ~ name;
+										}
+										break;
+
+									default:
+										writeln("Invalid token: ", param.name);
+								}
+							}
+
+							// TODO: make these runtime error messages instead of assert's...
+							assert(name !in modbus_connections);
+							assert(stream);
+							assert(protocol != ModbusProtocol.Unknown);
+
+							modbus_connections[name] = new Connection(stream, protocol, ConnectionParams(mode, logDataStream: logFile));
+							break;
+
+						case "slave":
+							string name;
+							string connection;
+							ubyte address;
+							string profile;
+
+							foreach (ref param; mb.subItems)
+							{
+								switch (param.name)
+								{
+									case "name":
+										name = param.value;
+										break;
+
+									case "connection":
+										connection = param.value;
+										break;
+
+									case "address":
+										address = param.value.to!ubyte;
+										break;
+
+									case "profile":
+										profile = param.value;
+										break;
+
+									default:
+										writeln("Invalid token: ", param.name);
+								}
+							}
+
+							assert(name !in modbus_servers);
+							assert(connection in modbus_connections);
+							assert(profile in modbus_profiles);
+
+							modbus_servers[name] = new ModbusServer(name, modbus_connections[connection], address, modbus_profiles[profile]);
+							break;
+
+						case "master":
+							foreach (ref param; mb.subItems)
+							{
+								switch (param.name)
+								{
+									case "name":
+										break;
+
+									case "address":
+										foreach (ref addr; param.subItems)
+										{
+											switch (addr.name)
+											{
+												case "type":
+													break;
+
+												case "registers":
+													break;
+
+												default:
+													writeln("Invalid token: ", addr.name);
+											}
+										}
+										break;
+
+									default:
+										writeln("Invalid token: ", param.name);
+								}
+							}
+							break;
+
+						default:
+							writeln("Invalid token: ", mb.name);
+					}
+				}
+				break;
+
+			default:
+				writeln("Invalid token: ", item.name);
 		}
 	}
 }

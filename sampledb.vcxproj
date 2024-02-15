@@ -60,6 +60,7 @@
     <DCompile Include="src\router\mqtt\broker.d" />
     <DCompile Include="src\router\serial.d" />
     <DCompile Include="src\router\server.d" />
+    <DCompile Include="src\router\snmp\package.d" />
     <DCompile Include="src\router\stream.d" />
     <DCompile Include="src\util\log.d" />
     <DCompile Include="src\util\package.d" />

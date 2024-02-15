@@ -171,8 +171,6 @@ class ModbusServer : Server
 {
 	this(string name, Connection connection, ubyte address, const ModbusProfile* profile = null)
 	{
-		assert(connection.connParams.mode != Mode.Master);
-
 		super(name);
 		devType = ServerType.Modbus;
 		requestTimeout = connection.connParams.timeoutThreshold.msecs;

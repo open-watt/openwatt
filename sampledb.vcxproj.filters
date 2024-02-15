@@ -25,6 +25,9 @@
     <Filter Include="src\router\mqtt">
       <UniqueIdentifier>{472209e2-d2ed-49cc-b915-ed5b816317e0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\router\snmp">
+      <UniqueIdentifier>{b9888748-2443-4eeb-a6af-9bf275df32a6}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\goodwe_smart_meter.d">
@@ -116,6 +119,9 @@
     </DCompile>
     <DCompile Include="src\util\string.d">
       <Filter>src\util</Filter>
+    </DCompile>
+    <DCompile Include="src\router\snmp\package.d">
+      <Filter>src\router\snmp</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>
