@@ -40,6 +40,7 @@
     <DCompile Include="src\db\stream.d" />
     <DCompile Include="src\main.d" />
     <DCompile Include="src\manager\component.d" />
+    <DCompile Include="src\manager\config.d" />
     <DCompile Include="src\manager\device.d" />
     <DCompile Include="src\manager\element.d" />
     <DCompile Include="src\manager\units.d" />
@@ -63,6 +64,7 @@
     <DCompile Include="src\util\log.d" />
     <DCompile Include="src\util\package.d" />
     <DCompile Include="src\util\queue.d" />
+    <DCompile Include="src\util\string.d" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

@@ -111,6 +111,12 @@
     <DCompile Include="src\manager\value.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\manager\config.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\util\string.d">
+      <Filter>src\util</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

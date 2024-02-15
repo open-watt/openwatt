@@ -12,10 +12,21 @@ enum StreamOptions
 	NonBlocking = 1 << 0, // Non-blocking IO
 	ReverseConnect = 1 << 1, // For TCP connections where remote will initiate connection
 	KeepAlive = 1 << 2, // Attempt reconnection on connection drops
+	BufferData = 1 << 3, // Buffer read/write data when stream is not ready
 }
 
 abstract class Stream
 {
+	shared static this()
+	{
+		mutex = new Mutex();
+	}
+
+	this(StreamOptions options)
+	{
+		this.options = options;
+	}
+
 	// Method to initiate a connection
 	abstract bool connect();
 
@@ -24,14 +35,6 @@ abstract class Stream
 
 	// Check if the stream is connected
 	abstract bool connected();
-
-	// Method to reconnect the stream in case the connection is lost
-	void reconnect()
-	{
-		if (connected())
-			disconnect();
-		connect();
-	}
 
 	// Read data from the stream
 	abstract ptrdiff_t read(ubyte[] buffer);
@@ -44,15 +47,77 @@ abstract class Stream
 
 	// Flush the receive buffer (return number of bytes destroyed)
 	abstract ptrdiff_t flush();
+
+	// Update for all streams; monitor status, attempt reconnections, etc.
+	static void update()
+	{
+		MonoTime now = MonoTime.currTime;
+
+		mutex.lock();
+		for (size_t i = 0; i < streams.length; )
+		{
+			// Opportunity for the stream to perform regular updates
+			streams[i].poll();
+
+			if (!streams[i].live.atomicLoad())
+			{
+				if (streams[i].options & StreamOptions.KeepAlive)
+				{
+					if (now - streams[i].lastConnectAttempt >= 1000.msecs)
+					{
+						if (streams[i].connect())
+						{
+							streams[i].lastConnectAttempt = MonoTime();
+							streams[i].live.atomicStore(true);
+						}
+						else
+							streams[i].lastConnectAttempt = now;
+					}
+				}
+				else
+				{
+					// TODO: clean up the stream?
+					//...
+
+					streams = streams[0 .. i] ~ streams[i + 1 .. $];
+				}
+			}
+
+			++i;
+		}
+		mutex.unlock();
+	}
+
+package:
+	import core.atomic;
+
+	__gshared Mutex mutex;
+	__gshared Stream[] streams;
+
+	shared bool live;
+	StreamOptions options;
+	MonoTime lastConnectAttempt;
+
+	// Poll the stream
+	void poll()
+	{
+	}
+
+	void addStream()
+	{
+		mutex.lock();
+		streams ~= this;
+		mutex.unlock();
+	}
 }
 
 class TCPStream : Stream
 {
 	this(string host, ushort port, StreamOptions options = StreamOptions.None)
 	{
+		super(options);
 		this.host = host;
 		this.port = port;
-		this.options = options;
 
 		Address[] addrs = getAddress(host, port);
 		if (addrs.length == 0)
@@ -70,31 +135,55 @@ class TCPStream : Stream
 	{
 		if (options & StreamOptions.ReverseConnect)
 		{
-			// create listening socket and wait for incoming connection from the expected client
-			assert(0);
+			reverseConnectServer = new TCPServer(port, (Socket client, void* userData)
+			{
+				TCPStream stream = cast(TCPStream)userData;
+
+				if (client.remoteAddress == stream.remote)
+				{
+					stream.reverseConnectServer.stop();
+					stream.reverseConnectServer = null;
+
+					client.blocking = !(stream.options & StreamOptions.NonBlocking);
+
+					stream.socket = client;
+					stream.live.atomicStore(true);
+				}
+				else
+					client.close();
+			}, cast(void*)this);
+			reverseConnectServer.start();
 		}
-
-		socket = new TcpSocket();
-		socket.connect(remote);
-
-		if (!socket.isAlive)
+		else
 		{
-			socket.close();
-			socket = null;
-			return false;
-		}
+			socket = new TcpSocket();
+			socket.connect(remote);
 
-		socket.blocking = !(options & StreamOptions.NonBlocking);
+			if (!socket.isAlive)
+			{
+				socket.close();
+				socket = null;
+				return false;
+			}
+
+			socket.blocking = !(options & StreamOptions.NonBlocking);
+		}
 
 		return true;
 	}
 
 	override void disconnect()
 	{
+		if (reverseConnectServer !is null)
+		{
+			reverseConnectServer.stop();
+			reverseConnectServer = null;
+		}
+
 		if (socket !is null)
 		{
-			//			if (socket.isAlive)
-			socket.shutdown(SocketShutdown.BOTH);
+//			if (socket.isAlive)
+				socket.shutdown(SocketShutdown.BOTH);
 			socket.close();
 			socket = null;
 		}
@@ -202,20 +291,20 @@ class TCPStream : Stream
 	}
 
 private:
-	Socket socket;
 	string host;
 	ushort port;
-	StreamOptions options;
 	Address remote;
+	Socket socket;
+	TCPServer reverseConnectServer;
 }
 
 class UDPStream : Stream
 {
 	this(string host, ushort port, StreamOptions options = StreamOptions.None)
 	{
+		super(options);
 		this.host = host;
 		this.port = port;
-		this.options = options;
 
 		Address[] addrs = getAddress(host, port);
 		if (addrs.length == 0)
@@ -272,7 +361,6 @@ private:
 	UdpSocket socket;
 	string host;
 	ushort port;
-	StreamOptions options;
 	Address remote;
 }
 
@@ -290,12 +378,16 @@ enum ServerOptions
 	JustOne = 1 << 0, // Only accept one connection then terminate the server
 }
 
-class Server
+class TCPServer
 {
-	this(ushort port, ServerOptions options = ServerOptions.None)
+	alias NewConnection = void function(Socket client, void* userData);
+
+	this(ushort port, NewConnection callback, void* userData, ServerOptions options = ServerOptions.None)
 	{
 		this.port = port;
 		this.options = options;
+		this.connectionCallback = callback;
+		this.userData = userData;
 		mutex = new Mutex;
 	}
 
@@ -312,10 +404,12 @@ class Server
 	void stop()
 	{
 		isRunning.atomicStore(false);
-		serverSocket.close();
-
 		mutex.lock();
-		serverSocket = null;
+		if (serverSocket)
+		{
+			serverSocket.close();
+			serverSocket = null;
+		}
 		mutex.unlock();
 	}
 
@@ -324,25 +418,15 @@ class Server
 		return isRunning.atomicLoad();
 	}
 
-	Socket getNewConnection()
-	{
-		mutex.lock();
-		if (newClients.length == 0)
-			return null;
-		Socket conn = newClients[0];
-		newClients = newClients[1 .. $];
-		mutex.unlock();
-		return conn;
-	}
-
 private:
-	ushort port;
 	ServerOptions options;
-	Mutex mutex;
+	ushort port;
 	shared bool isRunning;
+	NewConnection connectionCallback;
+	void* userData;
 	TcpSocket serverSocket;
-	Socket[] newClients;
 	Thread listenThread;
+	Mutex mutex;
 
 	void acceptConnections()
 	{
@@ -358,13 +442,11 @@ private:
 				auto clientSocket = server.accept();
 				writeln("Accepted TCP connection from ", clientSocket.remoteAddress.toString());
 
-				mutex.lock();
-				newClients ~= clientSocket;
-				mutex.unlock();
+				connectionCallback(clientSocket, userData);
 
 				if (options & ServerOptions.JustOne)
 				{
-					isRunning.atomicStore(false);
+					stop();
 					break;
 				}
 			}

@@ -19,20 +19,22 @@ import router.modbus.profile.pace_bms;
 import router.stream;
 
 import manager.component;
+import manager.config;
 import manager.device;
 import manager.element;
 
+import util.string;
+
+Stream[string] streams;
+
 void main()
 {
-	TCPStream port1 = new TCPStream("192.168.3.7", 8001, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
-	TCPStream port4 = new TCPStream("192.168.3.7", 8004, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
-	TCPStream port5 = new TCPStream("192.168.3.7", 8005, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
-	TCPStream port7 = new TCPStream("192.168.3.7", 8007, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+	loadConfig("conf/monitor.conf");
 
 	// SolarEdge inverter<->meter comms
 	ModbusProfile* se_meter_profile = new ModbusProfile;
 	se_meter_profile.populateRegs(WND_WR_MB_Regs);
-	Connection port1_mb = new Connection(port1, ModbusProtocol.RTU, ConnectionParams(Mode.SnoopBus, logDataStream: "log/se_meter"));
+	Connection port1_mb = new Connection(streams["port1"], ModbusProtocol.RTU, ConnectionParams(Mode.SnoopBus, logDataStream: "log/se_meter"));
 	ModbusServer solaredge_meter = new ModbusServer("solaredge_meter", port1_mb, 2, se_meter_profile);
 
 	Device solaredge;
@@ -42,7 +44,7 @@ void main()
 	// GoodWe inverter<->meter comms
 	ModbusProfile* goodwe_meter_profile = new ModbusProfile;
 	goodwe_meter_profile.populateRegs(goodWeSmartMeterRegs);
-	Connection port5_mb = new Connection(port5, ModbusProtocol.RTU, ConnectionParams(Mode.SnoopBus, logDataStream: "log/goodwe_meter"));
+	Connection port5_mb = new Connection(streams["port5"], ModbusProtocol.RTU, ConnectionParams(Mode.SnoopBus, logDataStream: "log/goodwe_meter"));
 	ModbusServer goodwe_meter = new ModbusServer("goodwe_meter", port5_mb, 3, goodwe_meter_profile);
 
 	Device goodwe;
@@ -52,7 +54,7 @@ void main()
 	// PACE BMS
 	ModbusProfile* pace_bms_profile = new ModbusProfile;
 	pace_bms_profile.populateRegs(paceBmsRegs);
-	Connection port4_mb = new Connection(port4, ModbusProtocol.RTU, ConnectionParams(logDataStream: "log/pace"));
+	Connection port4_mb = new Connection(streams["port4"], ModbusProtocol.RTU, ConnectionParams(logDataStream: "log/pace"));
 	ModbusServer[2] pace_bms = [
 		new ModbusServer("pace_bms", port4_mb, 1, pace_bms_profile),
 		new ModbusServer("pace_bms", port4_mb, 2, pace_bms_profile)
@@ -67,7 +69,7 @@ void main()
 	// GoodWe inverter<->meter comms
 	ModbusProfile* goodwe_profile = new ModbusProfile;
 	goodwe_profile.populateRegs(goodWeInverterRegs);
-	Connection port7_mb = Connection.createEthernetModbus(port7, ModbusProtocol.RTU, ConnectionParams());
+	Connection port7_mb = Connection.createEthernetModbus(streams["port7"], ModbusProtocol.RTU, ConnectionParams());
 	ModbusServer goodwe_inverter = new ModbusServer("goodwe_meter", port7_mb, 247, goodwe_profile);
 
 	Device goodwe_inv;
@@ -78,6 +80,8 @@ void main()
 	int i = 0;
 	while (true)
 	{
+		Stream.update();
+
 		// TODO: polling is pretty lame! data connections should be in threads and receive data immediately
 		// processing should happen in a processing thread which waits on a semaphore for jobs in a queue (submit from comms threads?)
 
@@ -143,5 +147,31 @@ void main()
 
 		import core.thread;
 		Thread.sleep(dur!"msecs"(1));
+	}
+}
+
+
+void loadConfig(string file)
+{
+	import std.conv: to;
+
+	ConfItem confRoot = parseConfigFile("conf/monitor.conf");
+
+	foreach (ref item; confRoot.subItems)
+	{
+		if (item.name[] == "connections")
+		{
+			foreach (ref conn; item.subItems)
+			{
+				if (conn.name[] == "tcp-client")
+				{
+					string name, addr, port, options = conn.value;
+					name = options.split!','();
+					port = options.split!','();
+					addr = port.split!':'();
+					streams[name] = new TCPStream(addr, port.to!ushort, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+				}
+			}
+		}
 	}
 }

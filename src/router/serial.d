@@ -28,9 +28,9 @@ version(Windows)
 	{
 		this(string device, in SerialParams serialParams, StreamOptions options = StreamOptions.None)
 		{
+			super(options);
 			this.device = device;
 			this.params = serialParams;
-			this.options = options;
 		}
 
 		override bool connect()
@@ -148,7 +148,6 @@ version(Windows)
 		HANDLE hCom = INVALID_HANDLE_VALUE;
 		string device;
 		SerialParams params;
-		StreamOptions options;
 	}
 }
 else version(Posix)
