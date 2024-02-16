@@ -5,7 +5,7 @@ import std.format;
 
 enum Level
 {
-	Error,
+	Error = 0,
 	Warning,
 	Info,
 	Debug

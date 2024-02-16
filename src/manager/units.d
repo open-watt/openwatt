@@ -40,7 +40,7 @@ UnitDef unitConversion(string from, string to)
 
 UnitDef unitConversion(UnitDef from, UnitDef to)
 {
-	return UnitDef(from.scale*to.scale, from.offset*to.scale + to.offset);
+	return UnitDef(from.scale/to.scale, (from.offset - to.offset)/to.scale);
 }
 
 UnitDef getUnitConv(string unit)

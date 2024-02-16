@@ -50,12 +50,10 @@ enum Frequency : ubyte
 struct ModbusRegInfo
 {
 	ushort reg;			// register address; 5 digits with register type; ie 30001, 40001, etc
-	ushort refReg;
 	RegisterType regType = RegisterType.HoldingRegister;
 	RecordType type = RecordType.uint16; // register type; ie uint16, float, etc. Strings use RecordType_str!(len)
 	Access access = Access.Read;
 	ubyte seqLen = 1;
-	ubyte seqOffset;
 	string name;		// field name; ie "soc", "voltage", "power", etc
 	string units;		// units of measure; ie "%", "kWh", "10mV+1000", etc
 	string displayUnits;
@@ -89,7 +87,6 @@ struct ModbusRegInfo
 			this.reg = cast(ushort)(reg - 40000);
 		}
 
-		this.refReg = this.reg;
 		parseTypeString(type);
 		this.name = name ? name : format("reg%d", reg).idup;
 		this.units = units;
@@ -103,8 +100,6 @@ struct ModbusRegInfo
 	this(int reg, int refReg, int seqIndex)
 	{
 		this.reg = cast(ushort)reg;
-		this.refReg = cast(ushort)refReg;
-		this.seqOffset = cast(ubyte)seqIndex;
 		this.name = null;
 		this.units = null;
 		this.desc = null;
@@ -163,6 +158,11 @@ struct ModbusProfile
 	ModbusRegInfo*[string] regByName;
 
 	// TODO: populate from json, yaml, etc
+
+	this(ModbusRegInfo[] regs)
+	{
+		populateRegs(regs);
+	}
 
 	void populateRegs(ModbusRegInfo[] regs)
 	{

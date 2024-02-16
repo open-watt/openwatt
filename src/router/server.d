@@ -206,7 +206,7 @@ class ModbusServer : Server
 		ModbusRequest modbusRequest = cast(ModbusRequest)request;
 		if (modbusRequest)
 		{
-			debug writeDebug("forwardModbusMessage: ", name, " --> ", request);
+			writeInfo("Send modbus request to '", name, "'");
 
 			// forward the modbus frame if the profile matches...
 			ushort requestId = connection.sendRequest(address, &modbusRequest.pdu, &receiveResponsePacket);
@@ -217,11 +217,8 @@ class ModbusServer : Server
 			}
 		}
 
-		// encode and send response
-		//...
+		// TODO: should non-modbus requests attempt to be translated based on the profile?
 		assert(0);
-
-		return false;
 	}
 
 	const(ModbusProfile)* profile;
@@ -242,11 +239,11 @@ private:
 		Request request = popPendingRequest(requestId);
 		if (!request)
 		{
-			debug writeDebug("discardResponse (no pending request): ", requestId, packet);
+			writeInfo("Discard modbus response from '", name, "'; no pending request");
 			return;
 		}
 
-		debug writeDebug("receiveResponse: ", requestId, ", ", packet);
+		writeInfo("Received modbus response from '", name, "'");
 
 		ModbusResponse response = new ModbusResponse();
 		response.status = RequestStatus.Success;
@@ -270,6 +267,8 @@ private:
 			// check if packet is a response to the last request we captured
 			if (confirmReqRespSeq(prevSnoopPacket.pdu, packet.pdu))
 			{
+				writeInfo("Snooped modbus transaction on '", name, "'");
+
 				// fabricate a Request for prevSnoopPacket
 				ModbusRequest request = new ModbusRequest(null, &prevSnoopPacket.pdu, 0, null);
 				request.frame = prevSnoopPacket.frame;
@@ -452,13 +451,13 @@ class ModbusResponse : Response
 						break;
 					case RecordType.str:
 						char[256] tmp;
-						assert(regInfo.seqLen <= tmp.sizeof/2);
+						assert(regInfo.seqLen*2 <= tmp.sizeof);
 						for (size_t j = 0; j < regInfo.seqLen; ++j)
 						{
 							tmp[j*2] = cast(char)(data.rw.values[i + j] >> 8);
 							tmp[j*2 + 1] = cast(char)(data.rw.values[i + j] & 0xFF);
 						}
-						value = Value(tmp.stripRight.idup);
+						value = Value(tmp[0..regInfo.seqLen*2].stripRight.idup);
 						break;
 				}
 				cachedValues[regInfo.name] = KVP(regInfo.name, value);

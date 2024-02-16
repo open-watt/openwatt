@@ -62,6 +62,7 @@
     <DCompile Include="src\router\server.d" />
     <DCompile Include="src\router\snmp\package.d" />
     <DCompile Include="src\router\stream.d" />
+    <DCompile Include="src\util\dbg.d" />
     <DCompile Include="src\util\log.d" />
     <DCompile Include="src\util\package.d" />
     <DCompile Include="src\util\queue.d" />

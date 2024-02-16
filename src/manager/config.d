@@ -15,7 +15,6 @@ struct ConfItem
 	ConfItem[] subItems;
 }
 
-
 ConfItem parseConfig(string text)
 {
 	struct ParseStack
@@ -31,18 +30,18 @@ ConfItem parseConfig(string text)
 
 	while (!text.empty)
 	{
-		string line = text.takeLine();
+		string line = text.takeLine;
 		ulong indent;
 		line = line.stripIndentation(indent);
-		line = line.trimComment!CommentDelimiter();
+		line = line.trimComment!CommentDelimiter;
 		if (line.empty)
 			continue;
 
 		string key, value = line;
 		if (line[0] == DirectiveDelimiter)
-			key = value.split!' '();
+			key = value.split!' ';
 		else
-			key = value.split!':'();
+			key = value.split!':';
 
 		if (indent > stack[depth].indent)
 		{

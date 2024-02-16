@@ -123,6 +123,9 @@
     <DCompile Include="src\router\snmp\package.d">
       <Filter>src\router\snmp</Filter>
     </DCompile>
+    <DCompile Include="src\util\dbg.d">
+      <Filter>src\util</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

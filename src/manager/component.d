@@ -62,7 +62,7 @@ private:
 						assert(0);
 				}
 
-//				writeln(e.id, ": ", e.latest, e.unit);
+				writeln(e.id, ": ", e.latest, e.unit);
 			}
 		}
 	}

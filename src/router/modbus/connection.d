@@ -15,6 +15,7 @@ import router.modbus.util;
 import router.serial;
 import router.stream;
 
+import util.dbg;
 import util.log;
 
 
@@ -124,7 +125,8 @@ class Connection
 			if (len < 0)
 			{
 				// what to do? purge the buffer and start over maybe?
-				assert(0);
+				dbgAssert(0);
+				inputLen = 0;
 			}
 			if (len > 0)
 			{
