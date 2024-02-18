@@ -10,6 +10,8 @@ import manager.value;
 import router.modbus.profile;
 import router.server;
 
+import util.log;
+
 struct Component
 {
 	string id;
@@ -21,6 +23,7 @@ private:
 	void modbusSnoopBusHandler(Response response, void[] userData)
 	{
 		ModbusResponse modbusResponse = cast(ModbusResponse)response;
+		string name = response.server.name;
 
 		Response.KVP[string] values = response.values;
 /+
@@ -62,7 +65,7 @@ private:
 						assert(0);
 				}
 
-				writeln(e.id, ": ", e.latest, e.unit);
+				writeDebug("Modbus - ", name, '.', e.id, ": ", e.latest, e.unit);
 			}
 		}
 	}

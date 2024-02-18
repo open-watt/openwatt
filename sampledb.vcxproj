@@ -58,6 +58,8 @@
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d" />
     <DCompile Include="src\router\modbus\util.d" />
     <DCompile Include="src\router\mqtt\broker.d" />
+    <DCompile Include="src\router\mqtt\client.d" />
+    <DCompile Include="src\router\mqtt\util.d" />
     <DCompile Include="src\router\serial.d" />
     <DCompile Include="src\router\server.d" />
     <DCompile Include="src\router\snmp\package.d" />
@@ -363,6 +365,7 @@
       <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
+      <DebugInfo>Mago</DebugInfo>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -415,6 +418,7 @@
       <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
+      <DebugInfo>Mago</DebugInfo>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>

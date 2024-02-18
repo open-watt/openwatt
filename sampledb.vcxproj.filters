@@ -126,6 +126,12 @@
     <DCompile Include="src\util\dbg.d">
       <Filter>src\util</Filter>
     </DCompile>
+    <DCompile Include="src\router\mqtt\client.d">
+      <Filter>src\router\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\router\mqtt\util.d">
+      <Filter>src\router\mqtt</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

@@ -206,7 +206,7 @@ class ModbusServer : Server
 		ModbusRequest modbusRequest = cast(ModbusRequest)request;
 		if (modbusRequest)
 		{
-			writeInfo("Send modbus request to '", name, "'");
+			writeInfo("Modbus - Send request to '", name, "'");
 
 			// forward the modbus frame if the profile matches...
 			ushort requestId = connection.sendRequest(address, &modbusRequest.pdu, &receiveResponsePacket);
@@ -239,11 +239,11 @@ private:
 		Request request = popPendingRequest(requestId);
 		if (!request)
 		{
-			writeInfo("Discard modbus response from '", name, "'; no pending request");
+			writeInfo("Modbus - Discard response from '", name, "'; no pending request");
 			return;
 		}
 
-		writeInfo("Received modbus response from '", name, "'");
+		writeInfo("Modbus - Received response from '", name, "'");
 
 		ModbusResponse response = new ModbusResponse();
 		response.status = RequestStatus.Success;
@@ -267,7 +267,7 @@ private:
 			// check if packet is a response to the last request we captured
 			if (confirmReqRespSeq(prevSnoopPacket.pdu, packet.pdu))
 			{
-				writeInfo("Snooped modbus transaction on '", name, "'");
+				writeInfo("Modbus - Snooped transaction on '", name, "'");
 
 				// fabricate a Request for prevSnoopPacket
 				ModbusRequest request = new ModbusRequest(null, &prevSnoopPacket.pdu, 0, null);

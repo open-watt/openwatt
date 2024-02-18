@@ -118,7 +118,7 @@ string split(Separator...)(ref string s, ref char sep)
 string unQuote(string s)
 {
 	if (s.empty)
-		return null;
+		return s;
 	if (s[0] == '"' && s[$-1] == '"' || s[0] == '\'' && s[$-1] == '\'')
 		return s[1 .. $-1].unEscape;
 	else if (s[0] == '`' && s[$-1] == '`')
@@ -167,4 +167,19 @@ string unEscape(string s)
 			t[len++] = s[i];
 	}
 	return t ? t[0..len].idup : s;
+}
+
+bool wildcardMatch(string wildcard, string value)
+{
+	// TODO: write this function...
+
+	// HACK: we just use this for tail wildcards right now...
+	for (size_t i = 0; i < wildcard.length; ++i)
+	{
+		if (wildcard[i] == '*')
+			return true;
+		if (wildcard[i] != value[i])
+			return false;
+	}
+	return wildcard.length == value.length;
 }

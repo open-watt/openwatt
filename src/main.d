@@ -16,6 +16,7 @@ import router.modbus.profile.goodwe_ems;
 import router.modbus.profile.goodwe_inverter;
 import router.modbus.profile.goodwe_smart_meter;
 import router.modbus.profile.pace_bms;
+import router.mqtt.broker;
 import router.stream;
 
 import manager.component;
@@ -31,6 +32,7 @@ Connection[string] modbus_connections;
 ModbusServer[string] modbus_servers;
 ModbusProfile*[string] modbus_profiles;
 Device*[string] devices;
+MQTTBroker broker;
 
 void main()
 {
@@ -58,6 +60,9 @@ void main()
 	while (true)
 	{
 		Stream.update();
+
+		if (broker)
+			broker.update();
 
 		// TODO: polling is pretty lame! data connections should be in threads and receive data immediately
 		// processing should happen in a processing thread which waits on a semaphore for jobs in a queue (submit from comms threads?)
@@ -218,6 +223,73 @@ void loadConfig(string file)
 			// TODO: proper error message
 			assert(device.id);
 			devices[device.id] = device;
+			break;
+
+		case "mqtt":
+			foreach (ref mqtt; item.subItems) switch (mqtt.name)
+			{
+				case "broker":
+					MQTTBrokerOptions options;
+
+					foreach (ref opt; mqtt.subItems) switch (opt.name)
+					{
+						case "port":
+							options.port = opt.value.to!ushort;
+							break;
+
+						case "flags":
+							while (!opt.value.empty)
+							{
+								string flag = opt.value.split!'|'.toLower;
+								switch (flag)
+								{
+									case "allowanonymous":
+										options.flags |= MQTTBrokerOptions.Flags.AllowAnonymousLogin;
+										break;
+
+									default:
+										writeln("Unknown MQTT broker flag: ", flag);
+								}
+							}
+							break;
+
+						case "credentials":
+							foreach (ref cred; opt.subItems)
+							{
+								MQTTClientCredentials clientCreds = MQTTClientCredentials(cred.name.unQuote, cred.value.unQuote);
+
+								foreach (ref list; cred.subItems) switch (list.name)
+								{
+									case "whitelist":
+										assert(0); // whitelist topics
+										break;
+
+									case "blacklist":
+										assert(0); // blackist topics
+										break;
+
+									default:
+										writeln("Invalid token: ", mqtt.name);
+								}
+								options.clientCredentials ~= clientCreds;
+							}
+							break;
+
+						case "client-timeout-override":
+							options.clientTimeoutOverride = opt.value.to!uint;
+							break;
+
+						default:
+							writeln("Invalid token: ", mqtt.name);
+					}
+
+					broker = new MQTTBroker(options);
+					broker.start();
+					break;
+
+				default:
+					writeln("Invalid token: ", mqtt.name);
+			}
 			break;
 
 		case "modbus":
@@ -454,9 +526,7 @@ ModbusProfile* parseModbusProfile(ConfItem conf)
 							// TODO: make this a warning message, no asserts!
 							assert(!tail.empty);
 							do
-							{
 								fields ~= tail.split!','(sep).unQuote;
-							}
 							while (sep != '\0');
 							break;
 
@@ -465,9 +535,7 @@ ModbusProfile* parseModbusProfile(ConfItem conf)
 							// TODO: make this a warning message, no asserts!
 							assert(!tail.empty);
 							do
-							{
 								fieldDesc ~= tail.split!','(sep).unQuote;
-							}
 							while (sep != '\0');
 							break;
 

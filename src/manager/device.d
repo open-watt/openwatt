@@ -14,6 +14,8 @@ import router.modbus.message;
 import router.modbus.profile;
 import router.server;
 
+import util.log;
+
 struct Device
 {
 	string id;
@@ -173,6 +175,7 @@ private:
 	{
 		ModbusResponse modbusResponse = cast(ModbusResponse)response;
 		ModbusReqElement[] thisReq = cast(ModbusReqElement[])userData;
+		string name = response.server.name;
 
 		Response.KVP[string] values = response.values;
 
@@ -219,7 +222,7 @@ private:
 						assert(0);
 				}
 
-				writeln(e.element.id, ": ", e.element.latest, e.element.unit);
+				writeDebug("Modbus - ", name, '.', e.element.id, ": ", e.element.latest, e.element.unit);
 			}
 		}
 	}

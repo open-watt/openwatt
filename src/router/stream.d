@@ -36,6 +36,10 @@ abstract class Stream
 	// Check if the stream is connected
 	abstract bool connected();
 
+	abstract string remoteName();
+
+	abstract void setOpts(StreamOptions options);
+
 	// Read data from the stream
 	abstract ptrdiff_t read(ubyte[] buffer);
 
@@ -194,6 +198,18 @@ class TCPStream : Stream
 		return !(socket is null || !socket.isAlive);
 	}
 
+	override string remoteName()
+	{
+		return host;
+	}
+
+	override void setOpts(StreamOptions options)
+	{
+		this.options = options;
+		if (socket)
+			socket.blocking = !(options & StreamOptions.NonBlocking);
+	}
+
 	override ptrdiff_t read(ubyte[] buffer)
 	{
 		if (!connected())
@@ -296,6 +312,17 @@ private:
 	Address remote;
 	Socket socket;
 	TCPServer reverseConnectServer;
+
+	this(Socket socket, ushort port)
+	{
+		super(StreamOptions.None);
+		this.port = port;
+		remote = socket.remoteAddress;
+		host = remote.toString;
+
+		this.socket = socket;
+		live.atomicStore(true);
+	}
 }
 
 class UDPStream : Stream
@@ -380,7 +407,7 @@ enum ServerOptions
 
 class TCPServer
 {
-	alias NewConnection = void function(Socket client, void* userData);
+	alias NewConnection = void function(TCPStream client, void* userData);
 
 	this(ushort port, NewConnection callback, void* userData, ServerOptions options = ServerOptions.None)
 	{
@@ -419,14 +446,26 @@ class TCPServer
 	}
 
 private:
+	alias NewRawConnection = void function(Socket client, void* userData);
+
 	ServerOptions options;
-	ushort port;
+	immutable ushort port;
 	shared bool isRunning;
 	NewConnection connectionCallback;
+	NewRawConnection rawConnectionCallback;
 	void* userData;
 	TcpSocket serverSocket;
 	Thread listenThread;
 	Mutex mutex;
+
+	this(ushort port, NewRawConnection callback, void* userData, ServerOptions options = ServerOptions.None)
+	{
+		this.port = port;
+		this.options = options;
+		this.rawConnectionCallback = callback;
+		this.userData = userData;
+		mutex = new Mutex;
+	}
 
 	void acceptConnections()
 	{
@@ -442,7 +481,10 @@ private:
 				auto clientSocket = server.accept();
 				writeln("Accepted TCP connection from ", clientSocket.remoteAddress.toString());
 
-				connectionCallback(clientSocket, userData);
+				if (rawConnectionCallback)
+					rawConnectionCallback(clientSocket, userData);
+				else if (connectionCallback)
+					connectionCallback(new TCPStream(clientSocket, port), userData);
 
 				if (options & ServerOptions.JustOne)
 				{
