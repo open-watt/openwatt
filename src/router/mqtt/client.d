@@ -1,13 +1,13 @@
 module router.mqtt.client;
 
-import std.datetime : Duration, MonoTime, msecs, seconds;
 import std.range : empty;
+
+import urt.log;
+import urt.time;
 
 import router.mqtt.broker;
 import router.mqtt.util;
 import router.stream;
-
-import urt.log;
 
 enum MQTTPacketType : byte
 {
@@ -86,7 +86,7 @@ struct Client
 	{
 		this.broker = broker;
 		this.stream = stream;
-		lastContactTime = MonoTime.currTime;
+		lastContactTime = getTime();
 	}
 
 	void terminate()
@@ -163,7 +163,7 @@ struct Client
 //				publish("tele/obk125DAED5/SENSOR", null, 0, false, false);
 		}
 
-		MonoTime now = MonoTime.currTime;
+		MonoTime now = getTime();
 
 		// read data from the client stream
 		ubyte[1024] buffer;

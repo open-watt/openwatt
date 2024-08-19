@@ -1,10 +1,13 @@
 module router.modbus.connection;
 
 import std.container.array;
-import std.datetime;
 import std.file;
 import std.socket;
 import std.stdio;
+
+import urt.log;
+import urt.string;
+import urt.time;
 
 import core.lifetime;
 
@@ -12,9 +15,6 @@ import router.modbus.coding;
 import router.modbus.message;
 import router.modbus.util;
 import router.stream;
-
-import urt.log;
-import urt.string;
 
 
 enum Transport : ubyte
@@ -102,7 +102,7 @@ class Connection
 
 	void poll()
 	{
-		MonoTime now = MonoTime.currTime;
+		MonoTime now = getTime();
 
 		ubyte[1024] buffer = void;
 		ptrdiff_t length;
@@ -115,7 +115,7 @@ class Connection
 				logStream.rawWrite(buffer[0 .. length]);
 			appendInput(buffer[0 .. length]);
 
-			debug writeDebug(now.printTime, " - Modbus - Recv '", name, "': ", cast(void[])buffer[0..length]);
+			debug writeDebug(now, " - Modbus - Recv '", name, "': ", cast(void[])buffer[0..length]);
 		}
 		while (length == buffer.sizeof);
 
@@ -129,13 +129,13 @@ class Connection
 				if (len < 0)
 				{
 					// there was an error in the data stream; i guess we just discard the buffer...?
-					writeWarning(now.printTime, " - Modbus - Error in stream. Discarding input buffer: ", cast(void[])inputBuffer[0..inputLen]);
+					writeWarning(now, " - Modbus - Error in stream. Discarding input buffer: ", cast(void[])inputBuffer[0..inputLen]);
 					inputLen = 0;
 				}
 				else if (inputLen >= 256)
 				{
 					// there should be at least one complete message... we must have lost synchronisation with the stream?
-					writeWarning(now.printTime, " - Modbus - >256 bytes in queue but no valid message. Discarding input buffer: ", cast(void[])inputBuffer[0..inputLen]);
+					writeWarning(now, " - Modbus - >256 bytes in queue but no valid message. Discarding input buffer: ", cast(void[])inputBuffer[0..inputLen]);
 					// TODO: it's likely only the first few bytes are corrupt followed by a series of good packets
 					//       we may want to scan for the start of the start of the next good packet rather than clearing the whole buffer?
 					inputLen = 0;
@@ -188,7 +188,7 @@ class Connection
 			{
 				PendingRequest* req = &pendingRequests[i];
 
-				debug writeDebug((now - pendingRequests[i].requestTime).printTime, " - Modbus - Timeout req: ", req.request.requestId, ", elapsed: ", (now - req.requestTime).total!"msecs", "ms");
+				debug writeDebug(now - pendingRequests[i].requestTime, " - Modbus - Timeout req: ", req.request.requestId, ", elapsed: ", (now - req.requestTime).as!"msecs", "ms");
 
 				req.request.timeoutHandler(req.request.requestId, now);
 
@@ -202,7 +202,7 @@ class Connection
 		}
 
 		// lodge queued request
-		now = MonoTime.currTime;
+		now = getTime();
 		Duration sinceLastReq = now - lastReqTime;
 		Duration sinceLastResp = now - lastRespTime;
 		if (pendingRequests.length == 0 && requestQueue.length > 0 &&
@@ -212,7 +212,7 @@ class Connection
 			QueuedRequest next;
 			if (popQueuedRequest(next))
 			{
-//				debug writeDebug(now.printTime, " - Modbus - Send queued: ", next.requestId, ", elapsed: ", sinceLastReq.total!"msecs", "ms, delay: ", sinceLastResp.total!"msecs", "ms");
+//				debug writeDebug(now.printTime, " - Modbus - Send queued: ", next.requestId, ", elapsed: ", sinceLastReq.as!"msecs", "ms, delay: ", sinceLastResp.as!"msecs", "ms");
 				sendRequest(next.move);
 			}
 		}
@@ -348,7 +348,7 @@ private:
 
 	bool sendRequest(QueuedRequest request)
 	{
-		MonoTime now = MonoTime.currTime;
+		MonoTime now = getTime();
 		Duration sinceLastReq = now - lastReqTime;
 		Duration sinceLastResp = now - lastRespTime;
 		if ((connParams.pollingInterval && sinceLastReq < connParams.pollingInterval.msecs) ||
@@ -364,7 +364,7 @@ private:
 		pendingRequests ~= PendingRequest(request, transactionId, now);
 		lastReqTime = now;
 
-		debug writeDebugf("{0} - Modbus - Send req {1}: {2}", now.printTime, request.requestId, cast(void[])frameRTUMessage(request.address, request.message.functionCode, request.message.data));
+		debug writeDebugf("{0} - Modbus - Send req {1}: {2}", now, request.requestId, cast(void[])frameRTUMessage(request.address, request.message.functionCode, request.message.data));
 
 		return bytes > 0;
 	}

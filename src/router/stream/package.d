@@ -2,7 +2,8 @@ module router.stream;
 
 import core.atomic;
 import core.sync.mutex;
-import core.time;
+
+import urt.time;
 
 public import router.stream.bridge;
 public import router.stream.serial;
@@ -63,7 +64,7 @@ abstract class Stream
 	// Update for all streams; monitor status, attempt reconnections, etc.
 	static void update()
 	{
-		MonoTime now = MonoTime.currTime;
+		MonoTime now = getTime();
 
 		mutex.lock();
 		for (size_t i = 0; i < streams.length; )

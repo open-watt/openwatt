@@ -183,10 +183,8 @@ void main()
 		// Process program logic
 		// ...
 
-		import std.datetime : MonoTime, Duration;
-		printTime(MonoTime.currTime);
-
 		import core.thread;
-		Thread.sleep(dur!"msecs"(1));
+		import core.time : std_dur = dur;
+		Thread.sleep(std_dur!"msecs"(1));
 	}
 }

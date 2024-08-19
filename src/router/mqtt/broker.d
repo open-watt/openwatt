@@ -2,13 +2,13 @@ module router.mqtt.broker;
 
 import core.sync.mutex;
 
-import std.datetime : Duration, MonoTime, msecs, seconds;
 import std.range : empty;
+
+import urt.string;
+import urt.time;
 
 import router.mqtt.client;
 import router.stream;
-
-import urt.string;
 
 struct MQTTClientCredentials
 {
@@ -129,7 +129,7 @@ class MQTTBroker
 		}
 
 		// update sessions
-		MonoTime now = MonoTime.currTime;
+		MonoTime now = getTime();
 		string[16] itemsToRemove;
 		size_t numItemsToRemove = 0;
 		foreach (ref session; sessions)

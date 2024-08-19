@@ -19,3 +19,14 @@ public import urt.platform;
 public import urt.processor;
 public import urt.traits;
 public import urt.util;
+
+
+pragma(crt_constructor)
+void crt_bootup()
+{
+	import urt.time : initClock;
+	initClock();
+
+	import urt.dbg : setupAssertHandler;
+	setupAssertHandler();
+}

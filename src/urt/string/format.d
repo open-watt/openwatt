@@ -209,17 +209,19 @@ struct DefFormat(T)
 		}
 		else static if (is(T == ulong) || is(T == long))
 		{
+			import urt.conv : formatInt;
+
 			// TODO: what formats are interesting for ints?
 
+			bool showSign = false;
 			bool leadingZeroes = false;
-			const neg = is(T == long) && value < 0;
-			bool sign = neg;
-			ptrdiff_t padding = 0;
-			int base_or_mask = 10, shift = 0;
-			char hexAdjust = 'A' - '9' - 1;
+			bool toLower = false;
+			uint padding = 0;
+			uint base = 10;
+
 			if (format.length && format[0] == '+')
 			{
-				sign = true;
+				showSign = true;
 				format.popFront;
 			}
 			if (format.length && format[0] == '0')
@@ -230,77 +232,34 @@ struct DefFormat(T)
 			if (format.length && format[0].isNumeric)
 			{
 				bool success;
-				padding = format.parseInt(success);
+				padding = cast(uint)format.parseInt(success);
 			}
 			if (format.length)
 			{
 				char b = format[0] | 0x20;
 				if (b == 'x')
 				{
-					base_or_mask = 15;
-					shift = 4;
-					hexAdjust |= format[0] & 0x20;
+					base = 16;
+					toLower = format[0] == 'x' && buffer.ptr;
 				}
 				else if (b == 'b')
-				{
-					base_or_mask = 1;
-					shift = 1;
-				}
+					base = 2;
 				else if (b == 'o')
-				{
-					base_or_mask = 7;
-					shift = 3;
-				}
+					base = 8;
 				else if (b == 'd')
-					base_or_mask = 10;
+					base = 10;
 				format.popFront;
 			}
 
-			static if (is(T == ulong))
-				ulong i = value;
-			else
-				long i = neg ? -value : value;
-			size_t numLen = 0;
-			char[64] t = void;
-			do
-			{
-				if (buffer.ptr)
-				{
-					int d = cast(int)(shift ? i&base_or_mask : i%base_or_mask);
-					t[numLen] = cast(char)('0' + d);
-					if (d > 9)
-						t[numLen] += hexAdjust;
-				}
-				++numLen;
-				i = shift ? i >> shift : i / base_or_mask;
-			} while (i != 0);
+			size_t len = formatInt(value, buffer, base, padding, leadingZeroes ? '0' : ' ', showSign);
 
-			size_t len = numLen;
-			size_t numOffset = 0;
-			if (len < padding)
+			if (toLower)
 			{
-				if (buffer.ptr)
-				{
-					numOffset = padding - len;
-					buffer.ptr[0..numOffset] = leadingZeroes ? '0' : ' ';
-				}
-				len = padding;
-			}
-			else if (sign)
-			{
-				numOffset = 1;
-				++len;
+				for (size_t i = 0; i < len; ++i)
+					if (cast(uint)(buffer.ptr[i] - 'A') < 26)
+						buffer.ptr[i] |= 0x20;
 			}
 
-			if (buffer.ptr)
-			{
-				if (sign)
-					buffer.ptr[leadingZeroes ? 0 : numOffset - 1] = neg ? '-' : '+';
-
-				// number is written little endian, so we need to reverse it
-				while (numLen > 0)
-					buffer.ptr[numOffset++] = t[--numLen];
-			}
 			return len;
 		}
 		else static if (is(T == ubyte) || is(T == ushort) || is(T == uint))

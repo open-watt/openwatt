@@ -128,6 +128,7 @@
     <DCompile Include="src\urt\string\string.d" />
     <DCompile Include="src\urt\string\tailstring.d" />
     <DCompile Include="src\urt\string\uni.d" />
+    <DCompile Include="src\urt\time.d" />
     <DCompile Include="src\urt\traits.d" />
     <DCompile Include="src\urt\util.d" />
     <DCompile Include="src\urt\vector.d" />
@@ -326,6 +327,7 @@
       <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
+      <EnableDebugMixin>true</EnableDebugMixin>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -351,6 +353,7 @@
       <CppStandard>fromCpp</CppStandard>
       <Unittest>true</Unittest>
       <Main>true</Main>
+      <EnableDebugMixin>true</EnableDebugMixin>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -379,6 +382,7 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <BoundsCheck>Off</BoundsCheck>
+      <EnableDebugMixin>true</EnableDebugMixin>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -404,6 +408,7 @@
       <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
+      <EnableDebugMixin>true</EnableDebugMixin>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -429,6 +434,7 @@
       <CppStandard>fromCpp</CppStandard>
       <Unittest>true</Unittest>
       <Main>true</Main>
+      <EnableDebugMixin>true</EnableDebugMixin>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -457,6 +463,7 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <BoundsCheck>Off</BoundsCheck>
+      <EnableDebugMixin>true</EnableDebugMixin>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -482,6 +489,7 @@
       <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
+      <EnableDebugMixin>true</EnableDebugMixin>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -511,6 +519,7 @@
       <CppStandard>fromCpp</CppStandard>
       <DebugInfo>Mago</DebugInfo>
       <BoundsCheck>Off</BoundsCheck>
+      <EnableDebugMixin>true</EnableDebugMixin>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -536,6 +545,7 @@
       <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
+      <EnableDebugMixin>true</EnableDebugMixin>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -565,6 +575,7 @@
       <CppStandard>fromCpp</CppStandard>
       <DebugInfo>Mago</DebugInfo>
       <BoundsCheck>Off</BoundsCheck>
+      <EnableDebugMixin>true</EnableDebugMixin>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>

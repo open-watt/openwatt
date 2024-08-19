@@ -1,7 +1,11 @@
 module router.modbus.server;
 
-import std.datetime : Duration, MonoTime, msecs;
 import std.stdio;
+
+import urt.endian;
+import urt.log;
+import urt.string;
+import urt.time;
 
 public import router.server;
 
@@ -12,10 +16,6 @@ import router.modbus.connection;
 import router.modbus.message;
 import router.modbus.profile;
 import router.modbus.util;
-
-import urt.endian;
-import urt.log;
-import urt.string;
 
 class ModbusServer : Server
 {
@@ -51,12 +51,12 @@ class ModbusServer : Server
 		if (connection.connParams.mode == Mode.SnoopBus)
 			return false;
 
-		request.requestTime = MonoTime.currTime;
+		request.requestTime = getTime();
 
 		ModbusRequest modbusRequest = cast(ModbusRequest)request;
 		if (modbusRequest)
 		{
-			writeInfof("{0} - Modbus - Send request {1} to '{2}'", request.requestTime.printTime, cast(void*)request, name);
+			writeInfof("{0} - Modbus - Send request {1} to '{2}'", request.requestTime, cast(void*)request, name);
 
 			// forward the modbus frame if the profile matches...
 			ushort requestId = connection.sendRequest(address, &modbusRequest.pdu, &receiveResponsePacket, &timeoutHandler);
@@ -139,11 +139,11 @@ private:
 		Request request = popPendingRequest(requestId);
 		if (!request)
 		{
-			writeWarning(time.printTime, " - Modbus - Discard response from '", name, "'; no pending request");
+			writeWarning(time, " - Modbus - Discard response from '", name, "'; no pending request");
 			return;
 		}
 
-		writeInfo(time.printTime, " - Modbus - Received response ", cast(void*)request, " from '", name, "' after ", (time - request.requestTime).total!"msecs", "ms");
+		writeInfo(time, " - Modbus - Received response ", cast(void*)request, " from '", name, "' after ", (time - request.requestTime).as!"msecs", "ms");
 
 		ModbusResponse response = new ModbusResponse();
 		response.status = RequestStatus.Success;
@@ -162,7 +162,7 @@ private:
 		Request request = popPendingRequest(requestId);
 		if (request)
 		{
-			writeWarning(time.printTime, " - Modbus - Request timeout ", cast(void*)request, " after ", (time - request.requestTime).total!"msecs", "ms");
+			writeWarning(time, " - Modbus - Request timeout ", cast(void*)request, " after ", (time - request.requestTime).as!"msecs", "ms");
 
 			ModbusResponse response = new ModbusResponse();
 			response.status = RequestStatus.Timeout;
@@ -185,7 +185,7 @@ private:
 			// check if packet is a response to the last request we captured
 			if (confirmReqRespSeq(prevSnoopPacket.pdu, packet.pdu))
 			{
-				writeInfo(time.printTime, " - Modbus - Snooped transaction on '", name, "'");
+				writeInfo(time, " - Modbus - Snooped transaction on '", name, "'");
 
 				if (snoopBusMessageHandler)
 				{

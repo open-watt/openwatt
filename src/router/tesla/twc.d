@@ -115,27 +115,19 @@ import router.stream;
 import urt.endian;
 import urt.log;
 import urt.string;
+import urt.time;
 
 
 import std.stdio;
-import std.datetime;
 import std.conv;
 import std.math;
 import std.array;
-
-import std.format : format;
-import std.regex : regex, matchFirst;
-
-import std.algorithm : min;
-
-import std.algorithm : max;
-import std.datetime : Clock, SysTime, minutes, seconds;
-
-import std.algorithm : min;
+import std.algorithm : min, max;
 import std.array : appender;
-import std.datetime : Clock;
+import std.datetime : Clock, SysTime;
 import std.format : format;
 import std.random : uniform;
+import std.regex : regex, matchFirst;
 import std.stdio : writeln;
 
 enum debugLevel = 10;
@@ -384,7 +376,7 @@ class TeslaWallConnector : Server
 
 	override void poll()
 	{
-		MonoTime now = MonoTime.currTime;
+		MonoTime now = getTime();
 
 		ubyte[1024] buffer = void;
 		ptrdiff_t bytes = stream.read(buffer);

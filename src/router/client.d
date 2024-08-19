@@ -1,6 +1,6 @@
 module router.client;
 
-import std.datetime : Duration, MonoTime, msecs;
+import urt.time : Duration, MonoTime, msecs;
 
 import router.server;
 

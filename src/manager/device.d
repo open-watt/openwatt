@@ -2,7 +2,6 @@ module manager.device;
 
 import std.algorithm;
 import std.array;
-import std.datetime : Duration, MonoTime, msecs;
 
 import manager.component;
 import manager.element;
@@ -14,6 +13,7 @@ import router.server;
 
 import urt.log;
 import urt.string;
+import urt.time;
 
 
 struct Device
@@ -41,14 +41,14 @@ struct Device
 			}
 		}
 
-		lastPoll = MonoTime.currTime;
+		lastPoll = getTime();
 
 		return true;
 	}
 
 	void update()
 	{
-		MonoTime now = MonoTime.currTime;
+		MonoTime now = getTime();
 		Duration elapsed = now - lastPoll;
 		lastPoll = now;
 

@@ -1,6 +1,6 @@
 module router.modbus.client;
 
-import std.datetime : Duration, MonoTime, msecs;
+import urt.time : Duration, MonoTime, msecs;
 
 public import router.client;
 

@@ -98,7 +98,7 @@ struct Sampler
 	bool function(Sampler* a, Sampler* b) lessThan;
 
 	//...
-	import core.time;
+	import urt.time;
 	Duration nextSample;
 	bool inFlight;
 	bool constantSampled;

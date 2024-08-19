@@ -155,9 +155,12 @@ ubyte log2(T)(T x)
 	if (isSomeInt!T)
 {
 	ubyte result = 0;
-	if (T.sizeof > 4 && x >= 1<<32) { x >>= 32; result += 32; }
-	if (T.sizeof > 2 && x >= 1<<16) { x >>= 16; result += 16; }
-	if (T.sizeof > 1 && x >= 1<<8)  { x >>= 8;  result += 8; }
+	static if (T.sizeof > 4)
+		if (x >= 1<<32)				{ x >>= 32; result += 32; }
+	static if (T.sizeof > 2)
+		if (x >= 1<<16)				{ x >>= 16; result += 16; }
+	static if (T.sizeof > 1)
+		if (x >= 1<<8)				{ x >>= 8;  result += 8; }
 	if (x >= 1<<4)					{ x >>= 4;  result += 4; }
 	if (x >= 1<<2)					{ x >>= 2;  result += 2; }
 	if (x >= 1<<1)					{           result += 1; }

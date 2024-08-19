@@ -4,8 +4,6 @@ public import urt.string.ascii;
 public import urt.string.string;
 public import urt.string.tailstring;
 
-import std.datetime : MonoTime, Duration;
-
 enum TempStringBufferLen = 1024;
 enum TempStringMaxLen = TempStringBufferLen / 2;
 
@@ -26,7 +24,7 @@ char[] allocTempString(size_t len) nothrow @nogc
 	return s_tempStringBuffer[0 .. len];
 }
 
-size_t strlen(const(char)* cstring)
+size_t strlen(const(char)* cstring) pure nothrow @nogc
 {
 	const(char)* end = cstring;
 	while (*end != '\0')
@@ -323,36 +321,4 @@ ulong fnv1aHash64(const(char)[] s) pure nothrow @nogc
         hash *= 0x100000001B3; // 64-bit FNV prime
     }
     return hash;
-}
-
-const(char)[] printTime(MonoTime time)
-{
-	import urt.string.format;
-
-	__gshared MonoTime startTime;
-	__gshared bool firstTime = true;
-	if (firstTime)
-	{
-		startTime = MonoTime.currTime;
-		firstTime = false;
-	}
-
-	long ms = (time.ticks - startTime.ticks) * 1000 / MonoTime.ticksPerSecond;
-	long sec = ms / 1000;
-	long min = sec / 60;
-	long hr = min / 60;
-	static char[128] buffer;
-	return format(buffer, "{0,02}:{1,02}:{2,02}.{3,03}", hr, min % 60, sec % 60, ms % 1000);
-}
-
-const(char)[] printTime(Duration dur)
-{
-	import urt.string.format;
-
-	long ms = dur.total!"msecs";
-	long sec = ms / 1000;
-	long min = sec / 60;
-	long hr = min / 60;
-	static char[128] buffer;
-	return format(buffer, "{0,02}:{1,02}:{2,02}.{3,03}", hr, min % 60, sec % 60, ms % 1000);
 }

@@ -12,8 +12,7 @@ void breakpoint() pure nothrow @nogc
 
 private:
 
-pragma(crt_constructor)
-void setupAssertHandler()
+package(urt) void setupAssertHandler()
 {
 	import core.exception : assertHandler;
 	assertHandler = &urt_assert;

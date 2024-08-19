@@ -1,6 +1,5 @@
 module router.server;
 
-import std.datetime : Duration, MonoTime, msecs;
 import std.stdio;
 
 import manager.element;
@@ -8,6 +7,7 @@ import manager.value;
 
 import urt.log;
 import urt.string;
+import urt.time;
 
 enum ServerType : uint
 {
@@ -92,7 +92,7 @@ class Server
 
 	bool sendRequest(Request request)
 	{
-		request.requestTime = MonoTime.currTime;
+		request.requestTime = getTime();
 
 		// request data by high-level id
 		return false;

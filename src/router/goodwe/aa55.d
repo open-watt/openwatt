@@ -1,6 +1,5 @@
 module router.goodwe.aa55;
 
-import core.time;
 import std.socket;
 import std.stdio;
 
@@ -13,6 +12,7 @@ import router.stream.udp;
 
 import urt.log;
 import urt.string;
+import urt.time;
 
 
 enum GoodWeControlCode : ubyte
@@ -74,7 +74,7 @@ class GoodWeServer : Server
 
 	override bool sendRequest(Request request)
 	{
-		request.requestTime = MonoTime.currTime;
+		request.requestTime = getTime();
 
 		if (inFlight)
 		{
@@ -87,7 +87,7 @@ class GoodWeServer : Server
 		GoodWeRequest goodweRequest = cast(GoodWeRequest)request;
 		if (goodweRequest)
 		{
-			writeInfof("{0} - GOODWE - Send request {1} to '{2}'", request.requestTime.printTime, cast(void*)request, name);
+			writeInfof("{0} - GOODWE - Send request {1} to '{2}'", request.requestTime, cast(void*)request, name);
 
 			assert(goodweRequest.requestData.data.length < 256);
 
@@ -115,7 +115,7 @@ class GoodWeServer : Server
 		{
 			import router.modbus.message;
 
-			writeInfof("{0} - GOODWE - Send modbus request {1} to '{2}'", request.requestTime.printTime, cast(void*)request, name);
+			writeInfof("{0} - GOODWE - Send modbus request {1} to '{2}'", request.requestTime, cast(void*)request, name);
 
 			ubyte[] packet;
 			packet = frameRTUMessage(modbusRequest.frame.address,
@@ -134,7 +134,7 @@ class GoodWeServer : Server
 
 	override void poll()
 	{
-		MonoTime now = MonoTime.currTime;
+		MonoTime now = getTime();
 
 		ubyte[1024] buffer = void;
 		ptrdiff_t r = stream.read(buffer);
@@ -180,7 +180,7 @@ class GoodWeServer : Server
 					assert(resp.responseData.controlCode == goodweRequest.requestData.controlCode);
 					assert(resp.responseData.functionCode == (0x80 | goodweRequest.requestData.functionCode));
 
-					writeInfo(now.printTime, " - GOODWE - Received response ", cast(void*)goodweRequest, " from '", name, "' after ", (now - goodweRequest.requestTime).total!"msecs", "ms");
+					writeInfo(now, " - GOODWE - Received response ", cast(void*)goodweRequest, " from '", name, "' after ", (now - goodweRequest.requestTime).as!"msecs", "ms");
 
 					response = resp;
 				}
@@ -201,7 +201,7 @@ class GoodWeServer : Server
 					ptrdiff_t len = buffer[2 .. r].getMessage(resp.pdu, &resp.frame, ModbusProtocol.RTU);
 					assert(len == r - 2);
 
-					writeInfo(now.printTime, " - GOODWE - Received modbus response ", cast(void*)modbusRequest, " from '", name, "' after ", (now - modbusRequest.requestTime).total!"msecs", "ms");
+					writeInfo(now, " - GOODWE - Received modbus response ", cast(void*)modbusRequest, " from '", name, "' after ", (now - modbusRequest.requestTime).as!"msecs", "ms");
 
 					response = resp;
 				}
@@ -221,7 +221,7 @@ class GoodWeServer : Server
 			// timeout in-flight requests...
 			if (now - inFlight.requestTime > 500.msecs)
 			{
-				writeWarning(now.printTime, " - GOODWE - Request timeout ", cast(void*)inFlight, " after ", (now - inFlight.requestTime).total!"msecs", "ms");
+				writeWarning(now, " - GOODWE - Request timeout ", cast(void*)inFlight, " after ", (now - inFlight.requestTime).as!"msecs", "ms");
 
 				// send timeout response and discard the request...
 				Response response = new Response();
