@@ -2,7 +2,9 @@ module router.modbus.profile.goodwe_smart_meter;
 
 import router.modbus.profile;
 
-enum ModbusRegInfo[] goodWeSmartMeterRegs = [
+ModbusRegInfo[] goodWeSmartMeterRegs()
+{
+	return [
 	// Device Information Data Registers
 	ModbusRegInfo(40306, "u16", "voltage", "0.1V", "V"),
 	ModbusRegInfo(40307, "u16", "reg307"), // 71 - 74
@@ -39,3 +41,5 @@ enum ModbusRegInfo[] goodWeSmartMeterRegs = [
 	ModbusRegInfo(40342, "i16", "pf1_2", "0.001", "1"), // WW 5
 	ModbusRegInfo(40343, "u16", "freq", "0.01Hz", "Hz"), // 
 ];
+
+}

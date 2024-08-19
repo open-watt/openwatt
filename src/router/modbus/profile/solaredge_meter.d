@@ -17,7 +17,9 @@ import router.modbus.profile;
 // SolarEdge: SE-MTR-3Y-400V-A, SE-RGMTR-3D-208V-A, SE-WND-3Y400-MB-K2...
 //
 
-enum ModbusRegInfo[] WND_WR_MB_Regs = [
+ModbusRegInfo[] WND_WR_MB_Regs()
+{
+	return [
 	// FLOAT:
 	// Energy Registers (preserved across power failures)
 	ModbusRegInfo(41000, "f32le/RW", "EnergySum", "kWh", null, Frequency.Medium, "Total net (bidirectional) energy"),
@@ -63,10 +65,10 @@ enum ModbusRegInfo[] WND_WR_MB_Regs = [
 	ModbusRegInfo(41134, "f32le/RW", "EnergyApp2", "kVAh", null, Frequency.Medium, "Apparent energy, meter element 2"),
 	ModbusRegInfo(41136, "f32le/RW", "EnergyApp3", "kVAh", null, Frequency.Medium, "Apparent energy, meter element 3"),
 	// Reactive and Apparent Power Registers
-	ModbusRegInfo(41146, "f32le", "PowerReacSum", "VAR", null, Frequency.Medium, "Total reactive power"),
-	ModbusRegInfo(41148, "f32le", "PowerReac1", "VAR", null, Frequency.Medium, "Reactive power, meter element 1"),
-	ModbusRegInfo(41150, "f32le", "PowerReac2", "VAR", null, Frequency.Medium, "Reactive power, meter element 2"),
-	ModbusRegInfo(41152, "f32le", "PowerReac3", "VAR", null, Frequency.Medium, "Reactive power, meter element 3"),
+	ModbusRegInfo(41146, "f32le", "PowerReacSum", "var", null, Frequency.Medium, "Total reactive power"),
+	ModbusRegInfo(41148, "f32le", "PowerReac1", "var", null, Frequency.Medium, "Reactive power, meter element 1"),
+	ModbusRegInfo(41150, "f32le", "PowerReac2", "var", null, Frequency.Medium, "Reactive power, meter element 2"),
+	ModbusRegInfo(41152, "f32le", "PowerReac3", "var", null, Frequency.Medium, "Reactive power, meter element 3"),
 	ModbusRegInfo(41154, "f32le", "PowerAppSum", "VA", null, Frequency.Medium, "Total apparent power"),
 	ModbusRegInfo(41156, "f32le", "PowerApp1", "VA", null, Frequency.Medium, "Apparent power, meter element 1"),
 	ModbusRegInfo(41158, "f32le", "PowerApp2", "VA", null, Frequency.Medium, "Apparent power, meter element 2"),
@@ -141,10 +143,10 @@ enum ModbusRegInfo[] WND_WR_MB_Regs = [
 	ModbusRegInfo(41334, "u32le/RW", "EnergyApp2", "0.1kVAh", "kVAh", Frequency.Medium, "Apparent energy, meter element 2"),
 	ModbusRegInfo(41336, "u32le/RW", "EnergyApp3", "0.1kVAh", "kVAh", Frequency.Medium, "Apparent energy, meter element 3"),
 	// Reactive and Apparent Power Registers
-	ModbusRegInfo(41342, "u16", "PowerReacSum", null, null, Frequency.Medium, "Total reactive power VAR"),
-	ModbusRegInfo(41343, "u16", "PowerReac1", null, null, Frequency.Medium, "Reactive power VAR, meter element 1"),
-	ModbusRegInfo(41344, "u16", "PowerReac2", null, null, Frequency.Medium, "Reactive power VAR, meter element 2"),
-	ModbusRegInfo(41345, "u16", "PowerReac3", null, null, Frequency.Medium, "Reactive power VAR, meter element 3"),
+	ModbusRegInfo(41342, "u16", "PowerReacSum", null, null, Frequency.Medium, "Total reactive power var"),
+	ModbusRegInfo(41343, "u16", "PowerReac1", null, null, Frequency.Medium, "Reactive power var, meter element 1"),
+	ModbusRegInfo(41344, "u16", "PowerReac2", null, null, Frequency.Medium, "Reactive power var, meter element 2"),
+	ModbusRegInfo(41345, "u16", "PowerReac3", null, null, Frequency.Medium, "Reactive power var, meter element 3"),
 	ModbusRegInfo(41346, "u16", "PowerAppSum", null, null, Frequency.Medium, "Total apparent power VA" ),
 	ModbusRegInfo(41347, "u16", "PowerApp1", null, null, Frequency.Medium, "Apparent power VA, meter element 1"),
 	ModbusRegInfo(41348, "u16", "PowerApp2", null, null, Frequency.Medium, "Apparent power VA, meter element 2"),
@@ -269,3 +271,5 @@ enum ModbusRegInfo[] WND_WR_MB_Regs = [
 	ModbusRegInfo(41739, "u16", "OptOemFeatures", null, null, Frequency.OnDemand, "Factory option for OEM features"),
 	ModbusRegInfo(41740, "u16", "OptNrEnergies", null, null, Frequency.OnDemand, "Factory option for all energies non-resettable"),
 ];
+
+}

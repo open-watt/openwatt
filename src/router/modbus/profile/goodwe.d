@@ -7,7 +7,9 @@ import router.modbus.profile;
 // https://downloads.vodnici.net/uploads/wpforo/attachments/483/4349-1GoodweModbusPROTOCOLHybrid-ENV1-3EMseries.pdf
 //
 
-enum ModbusRegInfo[] goodWeRegs = [
+ModbusRegInfo[] goodWeRegs()
+{
+	return [
 	// 
 	ModbusRegInfo(40000+0x0000, "u16/RW", "", "0.1V", "V", Frequency.Medium, "Lowest Feeding Voltage of PV (280v-600v)"),
 	ModbusRegInfo(40000+0x0001, "u16/RW", "", "s", null, Frequency.Medium, "Reconnect Time (30s-300s)"),
@@ -160,3 +162,5 @@ enum ModbusRegInfo[] goodWeRegs = [
 	ModbusRegInfo(40000+0x059D, "u16", "bMeterConnectStatus", null, null, Frequency.Medium, "Meter Status: 1:OK, 2:Reverse, 3:CT Error, 0:NG"),
 	ModbusRegInfo(40000+0x059E, "u16", "MeterConnectStatus", null, null, Frequency.Medium, "Meter Status: 1:OK, 2:Reverse, 3:CT Error, 0:NG"),
 ];
+
+}

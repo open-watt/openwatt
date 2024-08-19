@@ -1,42 +1,42 @@
 module router.mqtt.util;
 
-As[] take(As = ubyte)(ref ubyte[] buffer, size_t n)
+inout(As)[] take(As = ubyte)(ref inout(ubyte)[] buffer, size_t n)
 {
-	ubyte[] r = buffer[0 .. n*As.sizeof];
+	inout(ubyte)[] r = buffer[0 .. n*As.sizeof];
 	buffer = buffer[n*As.sizeof .. $];
-	return cast(As[])r;
+	return cast(inout(As)[])r;
 }
 
-ubyte take(T : ubyte)(ref ubyte[] buffer)
+ubyte take(T : ubyte)(ref const(ubyte)[] buffer)
 {
 	ubyte r = buffer[0];
 	buffer = buffer[1 .. $];
 	return r;
 }
 
-ushort take(T : ushort)(ref ubyte[] buffer)
+ushort take(T : ushort)(ref const(ubyte)[] buffer)
 {
 	ushort r = (buffer[0] << 8) | buffer[1];
 	buffer = buffer[2 .. $];
 	return r;
 }
 
-uint take(T : uint)(ref ubyte[] buffer)
+uint take(T : uint)(ref const(ubyte)[] buffer)
 {
 	uint r = (buffer[0] << 24) | (buffer[1] << 16) | (buffer[2] << 8) | buffer[3];
 	buffer = buffer[4 .. $];
 	return r;
 }
 
-T take(T : const char[])(ref ubyte[] buffer)
+inout(U)[] take(T : U[], U)(ref inout(ubyte)[] buffer)
 {
 	ushort len = (buffer[0] << 8) | buffer[1];
-	T r = cast(T)buffer[2 .. 2 + len];
+	inout(U)[] r = cast(inout(U)[])buffer[2 .. 2 + len];
 	buffer = buffer[2 + len .. $];
 	return r;
 }
 
-uint takeVarInt(ref ubyte[] buffer)
+uint takeVarInt(ref const(ubyte)[] buffer)
 {
 	uint r = buffer[0];
 	if (r < 128)
@@ -66,7 +66,7 @@ uint takeVarInt(ref ubyte[] buffer)
 }
 
 
-void put(ref ubyte[] buffer, const ubyte[] val)
+void put(ref ubyte[] buffer, const(ubyte)[] val)
 {
 	buffer[0 .. val.length] = val[];
 	buffer = buffer[val.length .. $];
@@ -94,7 +94,7 @@ void put(ref ubyte[] buffer, uint val)
 	buffer = buffer[2 .. $];
 }
 
-void put(ref ubyte[] buffer, const char[] val)
+void put(ref ubyte[] buffer, const(char)[] val)
 {
 	buffer.put(cast(ushort)val.length);
 	buffer.put(cast(ubyte[])val);

@@ -1,8 +1,6 @@
 module manager.config;
 
-import std.file;
-
-import util.string;
+import urt.string;
 
 
 enum DirectiveDelimiter = '$';
@@ -80,11 +78,22 @@ ConfItem parseConfig(string text)
 	return root;
 }
 
-ConfItem parseConfigFile(string filename)
+ConfItem parseConfigFile(const(char)[] filename)
 {
-	string text = filename.readText();
-	return parseConfig(text);
+	try
+	{
+		import std.file : readText;
+		string conf = filename.readText();
+		return parseConfig(conf);
+	}
+	catch (Exception e)
+	{
+		// TODO: warn user that can't load profile...
+		assert(false);
+	}
+	return ConfItem();
 }
+
 
 private:
 

@@ -1,9 +1,11 @@
-module router.serial;
+module router.stream.serial;
 
 import std.format;
 import std.stdio;
 
-import router.stream;
+public import router.stream;
+
+import urt.string.format;
 
 struct SerialParams
 {

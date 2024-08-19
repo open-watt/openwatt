@@ -33,22 +33,49 @@
       <Configuration>Release LDC</Configuration>
       <Platform>x64</Platform>
     </ProjectConfiguration>
+    <ProjectConfiguration Include="UnitTest|Win32">
+      <Configuration>UnitTest</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="UnitTest|x64">
+      <Configuration>UnitTest</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\db\package.d" />
     <DCompile Include="src\db\selfrefptr.d" />
     <DCompile Include="src\db\stream.d" />
+    <DCompile Include="src\devices\goodwe\scanner.d" />
     <DCompile Include="src\main.d" />
     <DCompile Include="src\manager\component.d" />
     <DCompile Include="src\manager\config.d" />
+    <DCompile Include="src\manager\console\builtin_commands.d" />
+    <DCompile Include="src\manager\console\command.d" />
+    <DCompile Include="src\manager\console\expression.d" />
+    <DCompile Include="src\manager\console\package.d" />
+    <DCompile Include="src\manager\console\session.d" />
     <DCompile Include="src\manager\device.d" />
     <DCompile Include="src\manager\element.d" />
+    <DCompile Include="src\manager\instance.d" />
+    <DCompile Include="src\manager\iface.d" />
+    <DCompile Include="src\manager\log.d" />
+    <DCompile Include="src\manager\package.d" />
+    <DCompile Include="src\manager\plugin.d" />
+    <DCompile Include="src\manager\protocol\modbus.d" />
+    <DCompile Include="src\manager\protocol\package.d" />
+    <DCompile Include="src\manager\stream.d" />
+    <DCompile Include="src\manager\subscriber.d" />
     <DCompile Include="src\manager\units.d" />
     <DCompile Include="src\manager\value.d" />
     <DCompile Include="src\router\client.d" />
+    <DCompile Include="src\router\goodwe\aa55.d" />
+    <DCompile Include="src\router\goodwe\package.d" />
+    <DCompile Include="src\router\modbus\client.d" />
     <DCompile Include="src\router\modbus\coding.d" />
     <DCompile Include="src\router\modbus\connection.d" />
     <DCompile Include="src\router\modbus\message.d" />
+    <DCompile Include="src\router\modbus\package.d" />
     <DCompile Include="src\router\modbus\profile\goodwe.d" />
     <DCompile Include="src\router\modbus\profile\goodwe_ems.d" />
     <DCompile Include="src\router\modbus\profile\goodwe_inverter.d" />
@@ -56,19 +83,54 @@
     <DCompile Include="src\router\modbus\profile\pace_bms.d" />
     <DCompile Include="src\router\modbus\profile\package.d" />
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d" />
+    <DCompile Include="src\router\modbus\server.d" />
     <DCompile Include="src\router\modbus\util.d" />
     <DCompile Include="src\router\mqtt\broker.d" />
     <DCompile Include="src\router\mqtt\client.d" />
     <DCompile Include="src\router\mqtt\util.d" />
-    <DCompile Include="src\router\serial.d" />
+    <DCompile Include="src\router\scanner.d" />
     <DCompile Include="src\router\server.d" />
     <DCompile Include="src\router\snmp\package.d" />
-    <DCompile Include="src\router\stream.d" />
-    <DCompile Include="src\util\dbg.d" />
-    <DCompile Include="src\util\log.d" />
-    <DCompile Include="src\util\package.d" />
-    <DCompile Include="src\util\queue.d" />
-    <DCompile Include="src\util\string.d" />
+    <DCompile Include="src\router\stream\bridge.d" />
+    <DCompile Include="src\router\stream\filter.d" />
+    <DCompile Include="src\router\stream\package.d" />
+    <DCompile Include="src\router\stream\serial.d" />
+    <DCompile Include="src\router\stream\tcp.d" />
+    <DCompile Include="src\router\stream\udp.d" />
+    <DCompile Include="src\router\tesla\package.d" />
+    <DCompile Include="src\router\tesla\twc.d" />
+    <DCompile Include="src\urt\algorithm.d" />
+    <DCompile Include="src\urt\compiler.d" />
+    <DCompile Include="src\urt\conv.d" />
+    <DCompile Include="src\urt\dbg.d" />
+    <DCompile Include="src\urt\endian.d" />
+    <DCompile Include="src\urt\intrinsic\package.d" />
+    <DCompile Include="src\urt\io.d" />
+    <DCompile Include="src\urt\list.d" />
+    <DCompile Include="src\urt\log.d" />
+    <DCompile Include="src\urt\mem\alloc.d" />
+    <DCompile Include="src\urt\mem\allocator.d" />
+    <DCompile Include="src\urt\mem\package.d" />
+    <DCompile Include="src\urt\mem\refman.d" />
+    <DCompile Include="src\urt\mem\region.d" />
+    <DCompile Include="src\urt\mem\ring.d" />
+    <DCompile Include="src\urt\mem\scratchpad.d" />
+    <DCompile Include="src\urt\mem\string.d" />
+    <DCompile Include="src\urt\mem\temp.d" />
+    <DCompile Include="src\urt\package.d" />
+    <DCompile Include="src\urt\platform.d" />
+    <DCompile Include="src\urt\processor.d" />
+    <DCompile Include="src\urt\range.d" />
+    <DCompile Include="src\urt\string\ansi.d" />
+    <DCompile Include="src\urt\string\ascii.d" />
+    <DCompile Include="src\urt\string\format.d" />
+    <DCompile Include="src\urt\string\package.d" />
+    <DCompile Include="src\urt\string\string.d" />
+    <DCompile Include="src\urt\string\tailstring.d" />
+    <DCompile Include="src\urt\string\uni.d" />
+    <DCompile Include="src\urt\traits.d" />
+    <DCompile Include="src\urt\util.d" />
+    <DCompile Include="src\urt\vector.d" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />
@@ -94,6 +156,13 @@
     <CharacterSet>Unicode</CharacterSet>
     <DCompiler>DMD</DCompiler>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <DCompiler>DMD</DCompiler>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>false</UseDebugLibraries>
@@ -103,6 +172,13 @@
     <DCompiler>DMD</DCompiler>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <DCompiler>DMD</DCompiler>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>$(DefaultPlatformToolset)</PlatformToolset>
@@ -155,10 +231,16 @@
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
   </ImportGroup>
   <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -182,12 +264,22 @@
     <IntDir>build\$(Platform)\$(Configuration)\</IntDir>
     <OutDir>bin\$(Platform)\$(Configuration)\</OutDir>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">
+    <LinkIncremental>true</LinkIncremental>
+    <IntDir>build\$(Platform)\$(Configuration)\</IntDir>
+    <OutDir>bin\$(Platform)\$(Configuration)\</OutDir>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
     <IntDir>build\$(Platform)\$(Configuration)\</IntDir>
     <OutDir>bin\$(Platform)\$(Configuration)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <LinkIncremental>true</LinkIncremental>
+    <IntDir>build\$(Platform)\$(Configuration)\</IntDir>
+    <OutDir>bin\$(Platform)\$(Configuration)\</OutDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">
     <LinkIncremental>true</LinkIncremental>
     <IntDir>build\$(Platform)\$(Configuration)\</IntDir>
     <OutDir>bin\$(Platform)\$(Configuration)\</OutDir>
@@ -240,6 +332,31 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>WIN32;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+    <DCompile>
+      <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
+      <ImportPaths>src/</ImportPaths>
+      <StringImportPaths>conf/</StringImportPaths>
+      <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
+      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
+      <PreviewIn>true</PreviewIn>
+      <CppStandard>fromCpp</CppStandard>
+      <Unittest>true</Unittest>
+      <Main>true</Main>
+    </DCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -261,6 +378,7 @@
       <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
+      <BoundsCheck>Off</BoundsCheck>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -292,6 +410,31 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <SDLCheck>true</SDLCheck>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+    <DCompile>
+      <CRuntimeLibrary>MultiThreadedDebug</CRuntimeLibrary>
+      <PreviewRvalueRefParam>true</PreviewRvalueRefParam>
+      <ImportPaths>src/</ImportPaths>
+      <StringImportPaths>conf/</StringImportPaths>
+      <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
+      <PreviewIn>true</PreviewIn>
+      <CppStandard>fromCpp</CppStandard>
+      <Unittest>true</Unittest>
+      <Main>true</Main>
+    </DCompile>
+    <Link>
+      <SubSystem>Console</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
@@ -313,6 +456,7 @@
       <PreviewNoSharedAccess>true</PreviewNoSharedAccess>
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
+      <BoundsCheck>Off</BoundsCheck>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -366,6 +510,7 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <DebugInfo>Mago</DebugInfo>
+      <BoundsCheck>Off</BoundsCheck>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -419,6 +564,7 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <DebugInfo>Mago</DebugInfo>
+      <BoundsCheck>Off</BoundsCheck>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>

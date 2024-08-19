@@ -5,18 +5,16 @@ import std.datetime;
 import std.file;
 import std.socket;
 import std.stdio;
-debug import std.digest;
 
 import core.lifetime;
 
 import router.modbus.coding;
 import router.modbus.message;
 import router.modbus.util;
-import router.serial;
 import router.stream;
 
-import util.dbg;
-import util.log;
+import urt.log;
+import urt.string;
 
 
 enum Transport : ubyte
@@ -48,7 +46,7 @@ enum ConnectionOptions : uint
 struct ConnectionParams
 {
 	Mode mode = Mode.Slave;
-	int pollingInterval = 0;		// issue requests no more requently than this
+	int pollingInterval = 0;		// issue requests no more frequently than this
 	int pollingDelay = 40;			// wait this long after a response before issuing another request
 	int timeoutThreshold = 1000;	// timeout for pending requests
 	ConnectionOptions options = ConnectionOptions.None;
@@ -70,11 +68,13 @@ struct Packet
 }
 
 alias PacketHandler = void delegate(Packet packet, ushort requestId, MonoTime time);
+alias TimeoutHandler = void delegate(ushort requestId, MonoTime time);
 
 class Connection
 {
-	this(Stream stream, ModbusProtocol modbusProtocol, ConnectionParams connectionParams)
+	this(string name, Stream stream, ModbusProtocol modbusProtocol, ConnectionParams connectionParams)
 	{
+		this.name = name;
 		this.stream = stream;
 		if (cast(SerialStream)stream)
 		{
@@ -114,6 +114,8 @@ class Connection
 			if (connParams.logDataStream)
 				logStream.rawWrite(buffer[0 .. length]);
 			appendInput(buffer[0 .. length]);
+
+			debug writeDebug(now.printTime, " - Modbus - Recv '", name, "': ", cast(void[])buffer[0..length]);
 		}
 		while (length == buffer.sizeof);
 
@@ -122,14 +124,45 @@ class Connection
 			// Check for complete packet based on the protocol
 			Packet packet;
 			ptrdiff_t len = inputBuffer[0 .. inputLen].getMessage(packet.pdu, &packet.frame, protocol);
-			if (len < 0)
+			if (len <= 0)
 			{
-				// what to do? purge the buffer and start over maybe?
-				dbgAssert(0);
-				inputLen = 0;
+				if (len < 0)
+				{
+					// there was an error in the data stream; i guess we just discard the buffer...?
+					writeWarning(now.printTime, " - Modbus - Error in stream. Discarding input buffer: ", cast(void[])inputBuffer[0..inputLen]);
+					inputLen = 0;
+				}
+				else if (inputLen >= 256)
+				{
+					// there should be at least one complete message... we must have lost synchronisation with the stream?
+					writeWarning(now.printTime, " - Modbus - >256 bytes in queue but no valid message. Discarding input buffer: ", cast(void[])inputBuffer[0..inputLen]);
+					// TODO: it's likely only the first few bytes are corrupt followed by a series of good packets
+					//       we may want to scan for the start of the start of the next good packet rather than clearing the whole buffer?
+					inputLen = 0;
+				}
+				// in this case, the packet doesn't look corrupt, so maybe we just have an incomplete (split) packet...
+				// thing is; I don't know what cases where a <256 byte ethernet packet would be split, and RS485 serial reads should also not report incomplete packets (?)
+				// ... is this a problem case? we'll just wait, when we exceed 256 bytes, then we can determine we have a corrupt packet.
 			}
-			if (len > 0)
+			else
 			{
+				debug // TODO: REMOVE ME!
+				{
+					if (inputLen > 0)
+					{
+						import router.modbus.util;
+						// confirm that the following bytes appear to start a new packet...
+						if (inputBuffer[0] > 247)
+						{
+							int x = 0;
+						}
+						if (inputLen > 1 && !(cast(FunctionCode)inputBuffer[1]).validFunctionCode)
+						{
+							int x = 0;
+						}
+					}
+				}
+
 				assert(protocol != ModbusProtocol.RTU || pendingRequests.length <= 1);
 
 				lastRespTime = now;
@@ -137,9 +170,6 @@ class Connection
 
 				PendingRequest req;
 				bool r = popPendingRequest(protocol == ModbusProtocol.TCP ? packet.frame.tcp.transactionId : 0, req);
-
-				debug writeDebug("recvModbusMessage - req: ", r ? req.request.requestId : -1, ", bytes: ", packet.data.length, ", data: ", packet.data.toHexString);
-
 				if (!r)
 				{
 					// we got an unsolicited message
@@ -156,7 +186,11 @@ class Connection
 		{
 			if (now - pendingRequests[i].requestTime > connParams.timeoutThreshold.msecs)
 			{
-				debug writeDebug("modbusMessageTimeout - req: ", pendingRequests[i].request.requestId, ", elapsed: ", (now - pendingRequests[i].requestTime).total!"msecs");
+				PendingRequest* req = &pendingRequests[i];
+
+				debug writeDebug((now - pendingRequests[i].requestTime).printTime, " - Modbus - Timeout req: ", req.request.requestId, ", elapsed: ", (now - req.requestTime).total!"msecs", "ms");
+
+				req.request.timeoutHandler(req.request.requestId, now);
 
 				// drop pending message
 				if (i < pendingRequests.length - 1)
@@ -167,16 +201,18 @@ class Connection
 				++i;
 		}
 
-		// lodge queued requests
+		// lodge queued request
 		now = MonoTime.currTime;
+		Duration sinceLastReq = now - lastReqTime;
+		Duration sinceLastResp = now - lastRespTime;
 		if (pendingRequests.length == 0 && requestQueue.length > 0 &&
-			((connParams.pollingInterval && now - lastReqTime > connParams.pollingInterval.msecs) ||
-			 (connParams.pollingDelay && now - lastRespTime > connParams.pollingDelay.msecs)))
+			((connParams.pollingInterval && sinceLastReq > connParams.pollingInterval.msecs) ||
+			 (connParams.pollingDelay && sinceLastResp > connParams.pollingDelay.msecs)))
 		{
 			QueuedRequest next;
 			if (popQueuedRequest(next))
 			{
-				debug writeDebug("lodgeQueued - req: ", next.requestId, ", elapsed: ", now - lastReqTime);
+//				debug writeDebug(now.printTime, " - Modbus - Send queued: ", next.requestId, ", elapsed: ", sinceLastReq.total!"msecs", "ms, delay: ", sinceLastResp.total!"msecs", "ms");
 				sendRequest(next.move);
 			}
 		}
@@ -207,16 +243,16 @@ class Connection
 		return write(packet);
 	}
 
-	ushort sendRequest(ubyte address, ModbusPDU* message, PacketHandler responseHandler)
+	ushort sendRequest(ubyte address, ModbusPDU* message, PacketHandler responseHandler, TimeoutHandler timeoutHandler)
 	{
 		const canSimRequest = protocol == ModbusProtocol.TCP && (connParams.options & ConnectionOptions.SupportSimultaneousRequests);
 		if (!canSimRequest && pendingRequests.length > 0)
 		{
-			requestQueue ~= QueuedRequest(address, nextTransactionId, message, responseHandler);
+			requestQueue ~= QueuedRequest(address, nextTransactionId, message, responseHandler, timeoutHandler);
 			return nextTransactionId++;
 		}
 
-		if (sendRequest(QueuedRequest(address, nextTransactionId, message, responseHandler)))
+		if (sendRequest(QueuedRequest(address, nextTransactionId, message, responseHandler, timeoutHandler)))
 			return nextTransactionId++;
 		return cast(ushort)-1;
 	}
@@ -232,6 +268,7 @@ class Connection
 	}
 
 private:
+	string name;
 	Stream stream;
 	ubyte[] inputBuffer;
 	size_t inputLen;
@@ -263,6 +300,7 @@ private:
 		ushort requestId;
 		ModbusPDU* message;
 		PacketHandler responseHandler;
+		TimeoutHandler timeoutHandler;
 	}
 
 	struct PendingRequest
@@ -311,26 +349,27 @@ private:
 	bool sendRequest(QueuedRequest request)
 	{
 		MonoTime now = MonoTime.currTime;
-		if ((connParams.pollingInterval && now - lastReqTime < connParams.pollingInterval.msecs) ||
-			(connParams.pollingDelay && now - lastRespTime < connParams.pollingDelay.msecs))
+		Duration sinceLastReq = now - lastReqTime;
+		Duration sinceLastResp = now - lastRespTime;
+		if ((connParams.pollingInterval && sinceLastReq < connParams.pollingInterval.msecs) ||
+			(connParams.pollingDelay && sinceLastResp < connParams.pollingDelay.msecs))
 		{
-			debug writeDebug("deferModbusMessage - req: ", request.requestId, ", elapsed: ", now - lastReqTime);
+//			debug writeDebug(now.printTime, " - Modbus - Queue req: ", request.requestId, ", elapsed: ", sinceLastReq.total!"msecs", "ms, delay: ", sinceLastResp.total!"msecs", "ms");
  			requestQueue ~= request;
 			return true;
 		}
 
 		ushort transactionId = protocol == ModbusProtocol.TCP ? request.requestId : 0;
 		ptrdiff_t bytes = sendMessage(request.address, request.message, transactionId);
-		pendingRequests ~= PendingRequest(request, transactionId, MonoTime.currTime);
+		pendingRequests ~= PendingRequest(request, transactionId, now);
 		lastReqTime = now;
 
-		debug writeDebug("sendModbusMessage - req: ", request.requestId, ", bytes: ", bytes);
+		debug writeDebugf("{0} - Modbus - Send req {1}: {2}", now.printTime, request.requestId, cast(void[])frameRTUMessage(request.address, request.message.functionCode, request.message.data));
 
 		return bytes > 0;
 	}
 
-	void appendInput(const(ubyte)[] data)
-	{
+	void appendInput(const(ubyte)[] data)	{
 		while (data.length > inputBuffer.length - inputLen)
 		{
 			if (inputBuffer.length == 0)
@@ -352,11 +391,10 @@ private:
 
 		ubyte[] r = inputBuffer[0 .. bytes].dup;
 		inputLen -= bytes;
-		assert(inputLen < 1 || inputLen > 3); // WHY THIS ASSERT?
 
 		for (size_t i = 0; i < inputLen; i += bytes)
 		{
-			import std.algorithm : min;
+			import urt.util : min;
 			size_t copy = min(inputLen - i, bytes);
 			inputBuffer[i .. i + copy] = inputBuffer[i + bytes .. i + bytes + copy];
 		}

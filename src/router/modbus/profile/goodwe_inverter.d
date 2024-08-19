@@ -2,7 +2,9 @@ module router.modbus.profile.goodwe_inverter;
 
 import router.modbus.profile;
 
-enum ModbusRegInfo[] goodWeInverterRegs = [
+ModbusRegInfo[] goodWeInverterRegs()
+{
+	return [
 	ModbusRegInfo(40000, "u16", "reg0000"),
 	ModbusRegInfo(42000, "str8", "serialNumber"),
 	ModbusRegInfo(42008, "u16", "modbusAddress"),
@@ -255,6 +257,8 @@ enum ModbusRegInfo[] goodWeInverterRegs = [
 //	ModbusRegInfo(5, "u16", "reg"),
 //	ModbusRegInfo(5, "u16", "reg"),
 ];
+
+}
 
 /+
 Query reg: 0 <-- goodwe_ems :: ReadHoldingRegisters: 020001

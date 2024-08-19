@@ -1,8 +1,5 @@
 module main;
 
-import std.format;
-import std.stdio;
-
 import router.client;
 import router.server;
 
@@ -10,68 +7,131 @@ import router.modbus.coding;
 import router.modbus.connection;
 import router.modbus.message;
 import router.modbus.profile;
-import router.modbus.profile.solaredge_meter;
-import router.modbus.profile.goodwe;
-import router.modbus.profile.goodwe_ems;
-import router.modbus.profile.goodwe_inverter;
-import router.modbus.profile.goodwe_smart_meter;
-import router.modbus.profile.pace_bms;
+import router.modbus.server;
 import router.mqtt.broker;
 import router.stream;
 
+import manager;
 import manager.component;
+import manager.console.session;
 import manager.config;
 import manager.device;
 import manager.element;
+import manager.instance;
+import manager.units;
 
-import util.dbg;
-import util.string;
+import urt.io;
+import urt.log;
+import urt.mem.string;
+import urt.string;
+import urt.string.format;
 
-Stream[string] streams;
-Connection[string] modbus_connections;
-ModbusServer[string] modbus_servers;
-ModbusProfile*[string] modbus_profiles;
-Device*[string] devices;
-MQTTBroker broker;
 
 void main()
 {
-	// populate some builtin modbus profiles...
-	ModbusProfile* mb_profile = new ModbusProfile;
-	mb_profile.populateRegs(WND_WR_MB_Regs);
-	modbus_profiles["se_meter"] = mb_profile;
+	// init the string heap with 1mb!
+//	initStringHeap(1024*1024); // TODO: uncomment when remove the module constructor...
 
-	mb_profile = new ModbusProfile;
-	mb_profile.populateRegs(goodWeSmartMeterRegs);
-	modbus_profiles["goodwe_meter"] = mb_profile;
+	// TODO: prime the string cache with common strings, like unit names and common variable names
+	//       the idea is to make dedup lookups much faster...
 
-	mb_profile = new ModbusProfile;
-	mb_profile.populateRegs(goodWeInverterRegs);
-	modbus_profiles["goodwe"] = mb_profile;
+	ApplicationInstance app = getGlobalInstance.createInstance("app");
+
+	// execute startup script
+	string conf;
+	try
+	{
+		import std.file : readText;
+		conf = "conf/startup.conf".readText();
+	}
+	catch (Exception e)
+	{
+		// TODO: warn user that can't load profile...
+		assert(false);
+	}
+	ConsoleSession s = new ConsoleSession(&app.console);
+	s.setInput(conf);
 
 	// load config files
-	loadConfig("conf/monitor.conf");
+	app.loadConfig("conf/monitor.conf");
+
 
 //	ModbusProfile* profile = loadModbusProfile("conf/modbus_profiles/pace_bms.conf");
 //	for (size_t i = 0; i < profile.registers.length; ++i)
 //		dbgAssert(modbus_profiles["se_meter"].registers[i] == profile.registers[i]);
 
+//	import router.goodwe.aa55;
+//	GoodWeServer goodwe = new GoodWeServer("GW5000-SBP-G2", "192.168.3.4");
+//
+//	void respFun(Response response, void[] userData) {
+//		GoodWeResponse r = cast(GoodWeResponse)response;
+//		if (r)
+//		{
+//			writeln(r.values);
+//		}
+//		ModbusResponse r2 = cast(ModbusResponse)response;
+//		if (r2)
+//		{
+//			writeln(r2.values);
+//		}
+//	}
+//
+//	goodwe.sendRequest(new GoodWeRequest(&respFun, GoodWeRequestData(controlCode: GoodWeControlCode.Read, GoodWeFunctionCode.QueryIdInfo)));
+////	goodwe.sendRequest(new GoodWeRequest(&respFun, GoodWeRequestData(controlCode: GoodWeControlCode.Register, GoodWeFunctionCode.OfflineQuery)));
+//
+//	goodwe.sendRequest(new ModbusRequest(&respFun, FunctionCode.ReadHoldingRegisters, [0x88, 0xB8, 0x00, 0x21], 0xF7));
+
+	/+
+-	35000 - 33  Device infio
+-	37000 - 15  BMS info
+-	47504 - 11  Export power control
+-	37060 - 16  Battery SN
+-	write multiple: 45200 - 3 [6148, 1550, 8461]  UPDATE THE CLOCK
+	47504 - 11
+-	47595 - 3   Load switch settings
+	35000 - 33
+-	35100 - 125 Inverter running data
+-	36000 - 27  Meter data
+	37000 - 15
+	37060 - 16
+-	45248 - 7   Some operating params
+-	36043 - 6   Meter sub-data
+-	47745 - 18  UNKNOWN
+-	36197 - 1   UNKNOWN
+-	47001 - 2   Meter check...
+-	47000 - 1   Operating mode
+-	45350 - 9   Battery charge.discharge protection params
+-	35365 - 1   No idea; near some meter energy stats
+	47504 - 11
+	35000 - 33
+	35100 - 125
+	36000 - 27
+	37000 - 15
+	37060 - 16
+	45248 - 7
+	36043 - 6
+	47745 - 18
+	47595 - 3
+	36197 - 1
+	47001 - 2
+	47000 - 1
+	45350 - 9
+	35365 - 1
+	47504 - 11
+	35000 - 33
+	35100 - 125
+	36000 - 27
+	37000 - 15
+	37060 - 16
+	+/
+
+
 	int i = 0;
 	while (true)
 	{
-		Stream.update();
+		getGlobalInstance.update();
 
-		if (broker)
-			broker.update();
-
-		// TODO: polling is pretty lame! data connections should be in threads and receive data immediately
-		// processing should happen in a processing thread which waits on a semaphore for jobs in a queue (submit from comms threads?)
-		foreach (connection; modbus_connections)
-			connection.poll();
-		foreach (server; modbus_servers)
-			server.poll();
-		foreach (device; devices)
-			device.update();
+//		goodwe.poll();
 
 /+
 		if (i++ == 10)
@@ -123,461 +183,10 @@ void main()
 		// Process program logic
 		// ...
 
+		import std.datetime : MonoTime, Duration;
+		printTime(MonoTime.currTime);
+
 		import core.thread;
 		Thread.sleep(dur!"msecs"(1));
 	}
-}
-
-
-void loadConfig(string file)
-{
-	import std.conv : to;
-	import std.uni : toLower;
-
-	ConfItem confRoot = parseConfigFile("conf/monitor.conf");
-
-	foreach (ref item; confRoot.subItems) switch (item.name)
-	{
-		case "global":
-			foreach (ref opt; item.subItems) switch (opt.name)
-			{
-				case "loglevel":
-					import util.log;
-					foreach (i, level; levelNames)
-					{
-						if (opt.value.unQuote.toLower[] == level.toLower[])
-							logLevel = cast(Level)i;
-					}
-					break;
-
-				default:
-					writeln("Invalid token: ", opt.name);
-			}
-			break;
-
-		case "connections":
-			foreach (ref conn; item.subItems)
-			{
-				if (conn.name[] == "tcp-client")
-				{
-					string name, addr, port, options, tail = conn.value;
-					name = tail.split!','.unQuote;
-					port = tail.split!',';
-					addr = port.split!':'.unQuote;
-					options = tail.split!',';
-					// TODO: if !tail.empty, warn about unexpected data...
-					streams[name] = new TCPStream(addr, port.to!ushort, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
-				}
-			}
-			break;
-
-		case "device":
-			Device* device = new Device;
-
-			foreach (ref dev; item.subItems) switch (dev.name)
-			{
-				case "id":
-					device.id = dev.value.unQuote;
-					break;
-
-				case "name":
-					device.name = dev.value.unQuote;
-					break;
-
-				case "component":
-					break;
-
-				case "modbus-component":
-					string id, name, server;
-					foreach (ref com; dev.subItems) switch (com.name)
-					{
-						case "id":
-							id = com.value.unQuote;
-							break;
-						case "name":
-							name = com.value.unQuote;
-							break;
-						case "server":
-							server = com.value.unQuote;
-							break;
-						default:
-							writeln("Invalid token: ", com.name);
-					}
-
-					// TODO: proper error message
-					assert(server in modbus_servers);
-
-					ModbusServer srv = modbus_servers[server];
-
-					int serverId = device.addServer(srv);
-					Component* component = createComponentForModbusServer(id, name, serverId, srv);
-					device.addComponent(component);
-					break;
-
-				default:
-					writeln("Invalid token: ", dev.name);
-			}
-
-			device.finalise();
-
-			// TODO: proper error message
-			assert(device.id);
-			devices[device.id] = device;
-			break;
-
-		case "mqtt":
-			foreach (ref mqtt; item.subItems) switch (mqtt.name)
-			{
-				case "broker":
-					MQTTBrokerOptions options;
-
-					foreach (ref opt; mqtt.subItems) switch (opt.name)
-					{
-						case "port":
-							options.port = opt.value.to!ushort;
-							break;
-
-						case "flags":
-							while (!opt.value.empty)
-							{
-								string flag = opt.value.split!'|'.toLower;
-								switch (flag)
-								{
-									case "allowanonymous":
-										options.flags |= MQTTBrokerOptions.Flags.AllowAnonymousLogin;
-										break;
-
-									default:
-										writeln("Unknown MQTT broker flag: ", flag);
-								}
-							}
-							break;
-
-						case "credentials":
-							foreach (ref cred; opt.subItems)
-							{
-								MQTTClientCredentials clientCreds = MQTTClientCredentials(cred.name.unQuote, cred.value.unQuote);
-
-								foreach (ref list; cred.subItems) switch (list.name)
-								{
-									case "whitelist":
-										assert(0); // whitelist topics
-										break;
-
-									case "blacklist":
-										assert(0); // blackist topics
-										break;
-
-									default:
-										writeln("Invalid token: ", mqtt.name);
-								}
-								options.clientCredentials ~= clientCreds;
-							}
-							break;
-
-						case "client-timeout-override":
-							options.clientTimeoutOverride = opt.value.to!uint;
-							break;
-
-						default:
-							writeln("Invalid token: ", mqtt.name);
-					}
-
-					broker = new MQTTBroker(options);
-					broker.start();
-					break;
-
-				default:
-					writeln("Invalid token: ", mqtt.name);
-			}
-			break;
-
-		case "modbus":
-			foreach (ref mb; item.subItems) switch (mb.name)
-			{
-				case "connection":
-					string name;
-					Stream stream;
-					Mode mode;
-					ModbusProtocol protocol;
-					string logFile;
-
-					foreach (ref param; mb.subItems) switch (param.name)
-					{
-						case "name":
-							name = param.value.unQuote;
-							break;
-
-						case "tcp-server":
-							break;
-
-						case "tcp-client":
-							string addr, port, options = param.value;
-							port = options.split!',';
-							addr = port.split!':'.unQuote;
-							ushort p = port.to!ushort;
-							stream = new TCPStream(addr, p ? p : 502, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
-							break;
-
-						case "udp-server":
-							break;
-
-						case "udp-client":
-							break;
-
-						case "serial":
-							break;
-
-						case "protocol":
-							switch (param.value.unQuote.toLower)
-							{
-								case "tcp": protocol = ModbusProtocol.TCP; break;
-								case "rtu": protocol = ModbusProtocol.RTU; break;
-								case "ascii": protocol = ModbusProtocol.ASCII; break;
-								default: writeln("Invalid modbus protocol: ", param.value);
-							}
-							break;
-
-						case "mode":
-							switch (param.value.unQuote.toLower)
-							{
-								case "master": mode = Mode.Master; break;
-								case "client": mode = Mode.Master; break;
-								case "slave": mode = Mode.Slave; break;
-								case "server": mode = Mode.Slave; break;
-								case "snoop": mode = Mode.SnoopBus; break;
-								case "snoopbus": mode = Mode.SnoopBus; break;
-								default: writeln("Invalid modbus connection mode: ", param.value);
-							}
-							break;
-
-						case "logFile":
-							if (!param.value.empty)
-								logFile = param.value.unQuote;
-							else
-							{
-								assert(!name.empty, "Connection has no name for logfile.");
-								logFile = "log/modbus/" ~ name;
-							}
-							break;
-
-						default:
-							writeln("Invalid token: ", param.name);
-					}
-
-					// TODO: make these runtime error messages instead of assert's...
-					assert(name !in modbus_connections);
-					assert(stream);
-					assert(protocol != ModbusProtocol.Unknown);
-
-					modbus_connections[name] = new Connection(stream, protocol, ConnectionParams(mode, logDataStream: logFile));
-					break;
-
-				case "slave":
-					string name;
-					string connection;
-					ubyte address;
-					string profileName;
-
-					foreach (ref param; mb.subItems) switch (param.name)
-					{
-						case "name":
-							name = param.value.unQuote;
-							break;
-
-						case "connection":
-							connection = param.value.unQuote;
-							break;
-
-						case "address":
-							address = param.value.to!ubyte;
-							break;
-
-						case "profile":
-							profileName = param.value.unQuote;
-							break;
-
-						default:
-							writeln("Invalid token: ", param.name);
-					}
-
-					if (profileName !in modbus_profiles)
-					{
-						// try and load profile...
-						string filename = "conf/modbus_profiles/" ~ profileName ~ ".conf";
-						try
-						{
-							import std.file : readText;
-							string conf = filename.readText();
-							ModbusProfile* profile = parseModbusProfile(conf);
-							modbus_profiles[profileName] = profile;
-						}
-						catch (Exception e)
-						{
-							// TODO: warn user that can't load profile...
-						}
-					}
-
-					// TODO: all this should me warning messages, not asserts
-					assert(name !in modbus_servers);
-					assert(connection in modbus_connections);
-					assert(profileName in modbus_profiles);
-
-					modbus_servers[name] = new ModbusServer(name, modbus_connections[connection], address, modbus_profiles[profileName]);
-					break;
-
-				case "master":
-					foreach (ref param; mb.subItems)
-					{
-						switch (param.name)
-						{
-							case "name":
-								break;
-
-							case "address":
-								foreach (ref addr; param.subItems) switch (addr.name)
-								{
-									case "type":
-										break;
-
-									case "registers":
-										break;
-
-									default:
-										writeln("Invalid token: ", addr.name);
-								}
-								break;
-
-							default:
-								writeln("Invalid token: ", param.name);
-						}
-					}
-					break;
-
-				default:
-					writeln("Invalid token: ", mb.name);
-			}
-			break;
-
-		default:
-			writeln("Invalid token: ", item.name);
-	}
-}
-
-ModbusProfile* loadModbusProfile(string filename)
-{
-	ConfItem root = parseConfigFile(filename);
-	return parseModbusProfile(root);
-}
-
-ModbusProfile* parseModbusProfile(string conf)
-{
-	ConfItem root = parseConfig(conf);
-	return parseModbusProfile(root);
-}
-
-ModbusProfile* parseModbusProfile(ConfItem conf)
-{
-	import std.conv : to;
-	import std.uni : toLower;
-
-	ModbusRegInfo[] registers;
-
-	foreach (ref rootItem; conf.subItems) switch (rootItem.name)
-	{
-		case "registers":
-			foreach (ref regItem; rootItem.subItems) switch (regItem.name)
-			{
-				case "reg":
-					// parse register details
-					string register, type, units, id, displayUnits, freq, desc;
-					string[] fields, fieldDesc;
-
-					string extra, tail = regItem.value;
-					char sep;
-					register = tail.split!(',', ':')(sep);
-					assert(sep == ',');
-					type = tail.split!(',', ':')(sep).unQuote;
-					assert(sep == ',');
-					string t = tail.split!(',', ':')(sep);
-					if (sep == ':')
-						extra = t;
-					else
-					{
-						units = t.unQuote;
-						extra = tail.split!':';
-					}
-					if (!extra.empty)
-						regItem.subItems = ConfItem(extra, tail) ~ regItem.subItems;
-
-					foreach (ref regConf; regItem.subItems) switch (regConf.name)
-					{
-						case "desc":
-							tail = regConf.value;
-							id = tail.split!','.unQuote;
-							displayUnits = tail.split!','.unQuote;
-							freq = tail.split!','.unQuote;
-							desc = tail.split!','.unQuote;
-							// TODO: if !tail.empty, warn about unexpected data...
-							break;
-
-						case "valueid":
-							tail = regConf.value;
-							// TODO: make this a warning message, no asserts!
-							assert(!tail.empty);
-							do
-								fields ~= tail.split!','(sep).unQuote;
-							while (sep != '\0');
-							break;
-
-						case "valuedesc":
-							tail = regConf.value;
-							// TODO: make this a warning message, no asserts!
-							assert(!tail.empty);
-							do
-								fieldDesc ~= tail.split!','(sep).unQuote;
-							while (sep != '\0');
-							break;
-
-						case "map-local":
-							// TODO:
-							break;
-
-						case "map-mb":
-							// TODO:
-							break;
-
-						default:
-							writeln("Invalid token: ", regConf.name);
-					}
-
-					Frequency frequency = Frequency.Medium;
-					if (!freq.empty) switch (freq.toLower)
-					{
-						case "realtime":	frequency = Frequency.Realtime;			break;
-						case "high":		frequency = Frequency.High;				break;
-						case "medium":		frequency = Frequency.Medium;			break;
-						case "low":			frequency = Frequency.Low;				break;
-						case "const":		frequency = Frequency.Constant;			break;
-						case "ondemand":	frequency = Frequency.OnDemand;			break;
-						case "config":		frequency = Frequency.Configuration;	break;
-						default: writeln("Invalid frequency value: ", freq);
-					}
-
-					registers ~= ModbusRegInfo(register.to!int, type, id, units, displayUnits, frequency, desc, fields, fieldDesc);
-					break;
-
-				default:
-					writeln("Invalid token: ", regItem.name);
-			}
-			break;
-
-		default:
-			writeln("Invalid token: ", rootItem.name);
-	}
-
-	if (registers.empty)
-		return null;
-
-	return new ModbusProfile(registers);
 }

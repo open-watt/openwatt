@@ -1,14 +1,12 @@
 module router.modbus.coding;
 
-import std.conv;
-import std.format;
-import std.stdio;
+import urt.endian;
+import urt.string.format;
+import urt.io;
 
 import router.modbus.message;
 import router.modbus.profile;
 import router.modbus.util;
-
-import util;
 
 
 struct ModbusMessageData
@@ -37,12 +35,12 @@ struct ModbusMessageData
 			case FunctionCode.WriteMultipleCoils:
 			case FunctionCode.WriteMultipleRegisters:
 				if (rw.readCount)
-					result = format("Read: %d (%d)", rw.readRegister, rw.readCount);
+					result ~= tformat("Read: {0} ({1})", rw.readRegister, rw.readCount);
 				if (rw.writeCount)
-					result ~= format("%sWrite: %d (%d)", result ? ", " : "", rw.writeRegister, rw.writeCount);
+					result ~= tformat("%sWrite: {0} ({1})", result ? ", " : "", rw.writeRegister, rw.writeCount);
 				if (rw.values.length > 0)
 				{
-					result ~= format("%sValues: %s", result ? "\n  " : "", rw.values[]);
+					result ~= tformat("{0}Values: {1}", result ? "\n  " : "", rw.values[]);
 
 //					import std.algorithm, std.range;
 //					result ~= format("\n  hex: %s", rw.values[].map!(i => format("%04x ", i)).fold!((x, y) => x ~ y));

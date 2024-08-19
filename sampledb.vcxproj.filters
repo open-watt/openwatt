@@ -4,9 +4,6 @@
     <Filter Include="src">
       <UniqueIdentifier>{9560f9a9-c6dd-4b6c-9b32-ada7955c0346}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\util">
-      <UniqueIdentifier>{9c7cd652-4bde-4873-9283-8c52be3d1b6c}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\db">
       <UniqueIdentifier>{5d186ff6-592c-44bc-99a8-f871c74d47b3}</UniqueIdentifier>
     </Filter>
@@ -28,6 +25,39 @@
     <Filter Include="src\router\snmp">
       <UniqueIdentifier>{b9888748-2443-4eeb-a6af-9bf275df32a6}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\router\stream">
+      <UniqueIdentifier>{e1c51f7a-999b-4f32-97d6-9364d012699e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\devices">
+      <UniqueIdentifier>{84643f1c-1a0e-42b4-a548-df49e1005d4f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\devices\goodwe">
+      <UniqueIdentifier>{40945e90-884d-42fe-af71-ebfa344845cc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\router\goodwe">
+      <UniqueIdentifier>{a67ded80-224a-4703-a3a0-d4df1bb6a2a6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\router\tesla">
+      <UniqueIdentifier>{9e30a0ce-3be3-4c81-822d-c1b59d0af556}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\urt">
+      <UniqueIdentifier>{304f8331-b3de-4bb9-81b7-b8514ee0958c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\urt\mem">
+      <UniqueIdentifier>{fcaa78bd-2cef-4deb-bc67-416b480d0710}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\urt\string">
+      <UniqueIdentifier>{154e5d1e-c3fd-402b-b106-1067742ac9bc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\manager\console">
+      <UniqueIdentifier>{5b7f73d6-de14-482f-86a8-89a77e2af436}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\urt\intrinsic">
+      <UniqueIdentifier>{4df84de2-6358-4722-b319-08d25bd2f6ac}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\manager\protocol">
+      <UniqueIdentifier>{8703eac1-773f-4d5b-8170-1fd230ebcf22}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\goodwe_smart_meter.d">
@@ -47,9 +77,6 @@
     </DCompile>
     <DCompile Include="src\db\package.d">
       <Filter>src\db</Filter>
-    </DCompile>
-    <DCompile Include="src\util\package.d">
-      <Filter>src\util</Filter>
     </DCompile>
     <DCompile Include="src\router\modbus\coding.d">
       <Filter>src\router\modbus</Filter>
@@ -72,14 +99,8 @@
     <DCompile Include="src\router\client.d">
       <Filter>src\router</Filter>
     </DCompile>
-    <DCompile Include="src\router\serial.d">
-      <Filter>src\router</Filter>
-    </DCompile>
     <DCompile Include="src\router\modbus\connection.d">
       <Filter>src\router\modbus</Filter>
-    </DCompile>
-    <DCompile Include="src\util\log.d">
-      <Filter>src\util</Filter>
     </DCompile>
     <DCompile Include="src\manager\element.d">
       <Filter>src\manager</Filter>
@@ -105,32 +126,203 @@
     <DCompile Include="src\router\mqtt\broker.d">
       <Filter>src\router\mqtt</Filter>
     </DCompile>
-    <DCompile Include="src\router\stream.d">
-      <Filter>src\router</Filter>
-    </DCompile>
-    <DCompile Include="src\util\queue.d">
-      <Filter>src\util</Filter>
-    </DCompile>
     <DCompile Include="src\manager\value.d">
       <Filter>src\manager</Filter>
     </DCompile>
     <DCompile Include="src\manager\config.d">
       <Filter>src\manager</Filter>
     </DCompile>
-    <DCompile Include="src\util\string.d">
-      <Filter>src\util</Filter>
-    </DCompile>
     <DCompile Include="src\router\snmp\package.d">
       <Filter>src\router\snmp</Filter>
-    </DCompile>
-    <DCompile Include="src\util\dbg.d">
-      <Filter>src\util</Filter>
     </DCompile>
     <DCompile Include="src\router\mqtt\client.d">
       <Filter>src\router\mqtt</Filter>
     </DCompile>
     <DCompile Include="src\router\mqtt\util.d">
       <Filter>src\router\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\router\stream\package.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
+    <DCompile Include="src\router\stream\tcp.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
+    <DCompile Include="src\router\stream\udp.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
+    <DCompile Include="src\router\stream\serial.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
+    <DCompile Include="src\router\scanner.d">
+      <Filter>src\router</Filter>
+    </DCompile>
+    <DCompile Include="src\devices\goodwe\scanner.d">
+      <Filter>src\devices\goodwe</Filter>
+    </DCompile>
+    <DCompile Include="src\router\goodwe\aa55.d">
+      <Filter>src\router\goodwe</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\instance.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\plugin.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\package.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\router\modbus\package.d">
+      <Filter>src\router\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\router\modbus\server.d">
+      <Filter>src\router\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\router\modbus\client.d">
+      <Filter>src\router\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\router\goodwe\package.d">
+      <Filter>src\router\goodwe</Filter>
+    </DCompile>
+    <DCompile Include="src\router\tesla\twc.d">
+      <Filter>src\router\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\router\stream\bridge.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
+    <DCompile Include="src\router\tesla\package.d">
+      <Filter>src\router\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\io.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\range.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\traits.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\mem\alloc.d">
+      <Filter>src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\mem\allocator.d">
+      <Filter>src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\mem\package.d">
+      <Filter>src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\mem\refman.d">
+      <Filter>src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\mem\ring.d">
+      <Filter>src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\mem\scratchpad.d">
+      <Filter>src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\mem\string.d">
+      <Filter>src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\mem\temp.d">
+      <Filter>src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\string\format.d">
+      <Filter>src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\string\package.d">
+      <Filter>src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\string\string.d">
+      <Filter>src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\string\tailstring.d">
+      <Filter>src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\subscriber.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\log.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\command.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\package.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\session.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\list.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\vector.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\platform.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\processor.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\compiler.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\intrinsic\package.d">
+      <Filter>src\urt\intrinsic</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\package.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\util.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\builtin_commands.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\expression.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\iface.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\stream.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\protocol\package.d">
+      <Filter>src\manager\protocol</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\protocol\modbus.d">
+      <Filter>src\manager\protocol</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\mem\region.d">
+      <Filter>src\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\string\ansi.d">
+      <Filter>src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\endian.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\dbg.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\algorithm.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\string\ascii.d">
+      <Filter>src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\string\uni.d">
+      <Filter>src\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="src\router\stream\filter.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\conv.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\log.d">
+      <Filter>src\urt</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>

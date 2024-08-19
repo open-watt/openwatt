@@ -1,5 +1,7 @@
 module router.modbus.message;
 
+import urt.endian;
+
 import router.modbus.util;
 
 enum ModbusMessageDataMaxLength = 252;
@@ -94,6 +96,13 @@ enum RequestType : byte
 
 struct ModbusPDU
 {
+	this(FunctionCode functionCode, const(ubyte)[] data)
+	{
+		this.functionCode = functionCode;
+		this.buffer[0 .. data.length] = data[];
+		this.length = cast(ushort)data.length;
+	}
+
 	FunctionCode functionCode;
 	ubyte[ModbusMessageDataMaxLength] buffer;
 	ushort length;
@@ -189,6 +198,9 @@ ptrdiff_t getMessage(const(ubyte)[] data, out ModbusPDU msg, ModbusFrame* frame 
 
 	if (protocol == ModbusProtocol.TCP || (protocol == ModbusProtocol.Unknown && data.guessTCP()))
 	{
+		if (data.length < 8)
+			return 0;
+
 		frame.protocol = ModbusProtocol.TCP;
 		frame.tcp.transactionId = data[0..2].bigEndianToNative!ushort;
 		frame.tcp.length = data[4..6].bigEndianToNative!ushort;
@@ -213,6 +225,16 @@ ptrdiff_t getMessage(const(ubyte)[] data, out ModbusPDU msg, ModbusFrame* frame 
 
 	// TODO: if protocol is ASCII...
 
+	if (data.length < 2)
+		return 0;
+	FunctionCode functionCode = cast(FunctionCode)data[1];
+	if (!functionCode.validFunctionCode())
+		return -1;
+	if (data[0] > 247) // TODO: we can check if the address has ever been seen on this bus before... (except the first few messages)
+		return -1;
+	if (data.length < 4)
+		return 0;
+
 	ushort crc;
 	const(ubyte)[] rtuPacket = data.crawlForRTU(&crc);
 	if (!rtuPacket)
@@ -222,10 +244,7 @@ ptrdiff_t getMessage(const(ubyte)[] data, out ModbusPDU msg, ModbusFrame* frame 
 	frame.address = data[0];
 	frame.rtu.crc = crc;
 
-	msg.functionCode = cast(FunctionCode)data[1];
-	if (!msg.functionCode.validFunctionCode())
-		return -1;
-
+	msg.functionCode = functionCode;
 	msg.length = cast(short)(rtuPacket.length - 4);
 	if (msg.length > msg.buffer.length)
 		return -1;
@@ -360,46 +379,93 @@ ModbusPDU createMessage_GetDeviceInformation()
 
 private:
 
+inout(ubyte)[] parseRTU(inout(ubyte)[] data, ushort* rcrc = null)
+{
+	if (data.length < 4)
+		return null;
+
+	ushort crc = calculateModbusCRC(data[0 .. $-2]);
+	if (crc == data[$-2..$][0..2].littleEndianToNative!ushort)
+	{
+		if (rcrc)
+			*rcrc = crc;
+		return data[0 .. $-2];
+	}
+	return null;
+}
+
 inout(ubyte)[] crawlForRTU(inout(ubyte)[] data, ushort* rcrc = null)
 {
+	if (data.length < 4)
+		return null;
+
+	enum NumCRC = 8;
+	ushort[NumCRC] foundCRC;
+	size_t[NumCRC] foundCRCPos;
+	int numfoundCRC = 0;
+
 	// crawl through the buffer accumulating a CRC and looking for the following bytes to match
 	ushort crc = 0xFFFF;
 	ushort next = data[0] | cast(ushort)data[1] << 8;
-	ushort lastCRC = 0xFFFF;
-	size_t lastCRCPos = 0;
-	for (size_t pos = 0; pos < data.length - 2; ++pos)
+	size_t len = data.length < 256 ? data.length : 256;
+	for (size_t pos = 2; pos < len; )
 	{
-		// massage in the next byte
-		crc ^= next & 0xFF;
-		for (int i = 8; i != 0; i--)
-		{
-			if ((crc & 0x0001) != 0)
-			{
-				crc >>= 1;
-				crc ^= 0xA001;
-			}
-			else
-				crc >>= 1;
-		}
+		ubyte index = (next & 0xFF) ^ cast(ubyte)crc;
+		crc = (crc >> 8) ^ crc_table[index];
 
 		// get the next word in sequence
-		next = next >> 8 | cast(ushort)data[pos + 2] << 8;
+		next = next >> 8 | cast(ushort)data[pos++] << 8;
 
 		// if the running CRC matches the next word, we probably have an RTU packet delimiter
 		if (crc == next)
 		{
-			lastCRC = crc;
-			lastCRCPos = pos;
+			foundCRC[numfoundCRC] = crc;
+			foundCRCPos[numfoundCRC++] = pos;
+			if (numfoundCRC == NumCRC)
+				break;
 		}
 	}
 
-	if (lastCRCPos)
+	if (numfoundCRC > 0)
 	{
-		// TODO: should we check the function code is valid?
+		int bestMatch = 0;
+
+		if (numfoundCRC > 1)
+		{
+			// if we matched multiple CRC's in the buffer, then we need to work out which CRC is not a false-positive...
+			int[NumCRC] score;
+			for (int i = 0; i < numfoundCRC; ++i)
+			{
+				// if the CRC is at the end of the buffer, we have a single complete message, and that's a really good indicator
+				if (foundCRCPos[i] == data.length)
+					score[i] += 10;
+				else if (foundCRCPos[i] <= data.length - 2)
+				{
+					// we can check the bytes following the CRC appear to begin a new message...
+					// confirm the function code is valid
+					if (validFunctionCode(cast(FunctionCode)data[foundCRCPos[i] + 1]))
+						score[i] += 5;
+					// we can also give a nudge if the address looks plausible
+					ubyte addr = data[foundCRCPos[i]];
+					if (addr >= 1 && addr <= 247)
+					{
+						if (addr <= 4 || addr >= 245)
+							score[i] += 2; // very small or very big addresses are more likely
+						else
+							score[i] += 1;
+					}
+				}
+			}
+			for (int i = 1; i < numfoundCRC; ++i)
+			{
+				if (score[i] > score[i - 1])
+					bestMatch = i;
+			}
+		}
 
 		if (rcrc)
-			*rcrc = lastCRC;
-		return data[0 .. lastCRCPos + 3];
+			*rcrc = foundCRC[bestMatch];
+		return data[0 .. foundCRCPos[bestMatch]];
 	}
 
 	// didn't find anything...

@@ -2,7 +2,9 @@ module router.modbus.profile.goodwe_ems;
 
 import router.modbus.profile;
 
-enum ModbusRegInfo[] goodWeEmsRegs = [
+ModbusRegInfo[] goodWeEmsRegs()
+{
+	return [
 	// Device Information Data Registers
 	ModbusRegInfo(45000, "u16", ""), // Modbus protocol version RO U16 N/A 1 1
 	ModbusRegInfo(45001, "u16", ""), // Rated power RO U16 N/A 1 1
@@ -351,6 +353,8 @@ enum ModbusRegInfo[] goodWeEmsRegs = [
 	ModbusRegInfo(48462, "u16", ""), // Dispatch Soc RO U16 % 1 1
 	ModbusRegInfo(48463, "u16", ""), // Dispatch Mode RO U16 NA 1 1
 ];
+
+}
 
 /+
 Query reg: 0 <-- goodwe_ems :: ReadHoldingRegisters: 020001

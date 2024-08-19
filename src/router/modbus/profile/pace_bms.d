@@ -2,7 +2,9 @@ module router.modbus.profile.pace_bms;
 
 import router.modbus.profile;
 
-enum ModbusRegInfo[] paceBmsRegs = [
+ModbusRegInfo[] paceBmsRegs()
+{
+	return [
 	// Data acquisition
 	ModbusRegInfo(40000, "i16", "current", "10mA", "A", Frequency.Realtime, "Current flow. Positive: Charging, Negative: Discharging"),
 	ModbusRegInfo(40001, "u16", "packVoltage", "10mV", "V", Frequency.Medium, "Voltage of the pack"),
@@ -109,3 +111,5 @@ enum ModbusRegInfo[] paceBmsRegs = [
 	ModbusRegInfo(40160, "str10", "modelSN", null, null, Frequency.Constant, "Model Serial Number provided by BMS manufacturer"),
 	ModbusRegInfo(40170, "str10", "packSN", null, null, Frequency.Constant, "PACK Serial Number provided by PACK manufacturer"),
 ];
+
+}

@@ -170,13 +170,13 @@ immutable UnitDef[string] siUnitMap = [
 	"A":	UnitDef(1),			// ampere
 	"W":	UnitDef(1),			// watt
 	"VA":	UnitDef(1),			// voltamp
-	"VAR":	UnitDef(1),			// voltamp-reactive
+	"var":	UnitDef(1),			// voltamp-reactive
 	"C":	UnitDef(1.0/3600),	// coulomb
 	"Ah":	UnitDef(1),			// amperehour
 	"J":	UnitDef(1.0/3600),	// joule
 	"Wh":	UnitDef(1),			// watthour
 	"VAh":	UnitDef(1),			// voltamphour
-	"VARh":	UnitDef(1),			// voltamp-reactivehour
+	"varh":	UnitDef(1),			// voltamp-reactivehour
 	"Ω":	UnitDef(1),			// ohm (shuold we accept O ?)
 	"ohm":	UnitDef(1),			// ohm
 	"F":	UnitDef(1),			// farad
@@ -193,8 +193,8 @@ immutable UnitDef[string] absoluteUnitMap = [
 	"pct":		UnitDef(0.01),				// percent
 	"percent":	UnitDef(0.01),				// percent
 	"‰":		UnitDef(0.001),				// permille
-	"pm":		UnitDef(0.01),				// percent
-	"pml":		UnitDef(0.01),				// percent
+	"pm":		UnitDef(0.01),				// permille
+	"pml":		UnitDef(0.01),				// permille
 	"permille":	UnitDef(0.001),				// permille
 	"ppm":		UnitDef(0.000001),			// parts per million
 	"in":		UnitDef(0.0254),			// inch

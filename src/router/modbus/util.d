@@ -3,30 +3,6 @@ module router.modbus.util;
 import router.modbus.message : FunctionCode;
 
 
-ushort bigEndianToNative(T)(ref const ubyte[2] bytes)
-	if (is(T == ushort))
-{
-	return cast(ushort)bytes[0] << 8 | bytes[1];
-}
-ushort littleEndianToNative(T)(ref const ubyte[2] bytes)
-	if (is(T == ushort))
-{
-	return bytes[0] | cast(ushort)bytes[1] << 8;
-}
-
-
-ubyte[2] nativeToBigEndian(ushort u16)
-{
-	ubyte[2] res = [ u16 >> 8, u16 & 0xFF ];
-	return res;
-}
-ubyte[2] nativeToLittleEndian(ushort u16)
-{
-	ubyte[2] res = [ u16 & 0xFF, u16 >> 8 ];
-	return res;
-}
-
-
 ushort calculateModbusCRC(const ubyte[] buf)
 {
 	ushort crc = 0xFFFF;
@@ -40,14 +16,29 @@ ushort calculateModbusCRC(const ubyte[] buf)
 
 bool validFunctionCode(FunctionCode functionCode)
 {
-	enum validCodes = 0b1111100111001100111111110;
-	if ((1 << functionCode) & validCodes)
-		return true;
-	return functionCode == FunctionCode.MEI;
+	if (functionCode & 0x80)
+		functionCode ^= 0x80;
+
+	version (X86_64) // TODO: use something more general!
+	{
+		enum ulong validCodes = 0b10000000000000000001111100111001100111111110;
+		if (functionCode >= 64) // TODO: REMOVE THIS LINE (DMD BUG!)
+			return false;		// TODO: REMOVE THIS LINE (DMD BUG!)
+		return ((1uL << functionCode) & validCodes) != 0;
+	}
+	else
+	{
+		enum uint validCodes = 0b1111100111001100111111110;
+		if (functionCode >= 32) // TODO: REMOVE THIS LINE (DMD BUG!)
+			return false;		// TODO: REMOVE THIS LINE (DMD BUG!)
+		if ((1 << functionCode) & validCodes)
+			return true;
+		return functionCode == FunctionCode.MEI;
+	}
 }
 
 
-private:
+package:
 
 immutable ushort[256] crc_table = [
 	0x0000, 0xC0C1, 0xC181, 0x0140, 0xC301, 0x03C0, 0x0280, 0xC241,
