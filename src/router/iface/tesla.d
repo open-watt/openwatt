@@ -127,7 +127,7 @@ class TeslaInterface : BaseInterface
 
 			if (!message.receiver)
 			{
-				p.dst = MACAddress([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF]);
+				p.dst = MACAddress.broadcast;
 			}
 			else
 			{
@@ -152,7 +152,7 @@ private:
 	MACAddress generateMac(const(char)[] name, ushort address)
 	{
 		uint crc = name.ethernetCRC();
-		return MACAddress([0x02, 0x13, 0x37, crc & 0xFF, address >> 8, address & 0xFF]);
+		return MACAddress(0x02, 0x13, 0x37, crc & 0xFF, address >> 8, address & 0xFF);
 	}
 
 	DeviceMap* findServerByMac(MACAddress mac)

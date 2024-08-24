@@ -150,7 +150,7 @@ class ModbusInterface : BaseInterface
 
 				MACAddress targetMac = void;
 				if (frameInfo.address == 0)
-					targetMac = MACAddress([0xFF,0xFF,0xFF,0xFF,0xFF,0xFF]);
+					targetMac = MACAddress.broadcast;
 				else
 				{
 					ServerMap* map = findServerByLocalAddress(frameInfo.address);
@@ -223,7 +223,7 @@ private:
 	MACAddress generateMac(const(char)[] name, ubyte localAddress)
 	{
 		uint crc = name.ethernetCRC();
-		return MACAddress([0x02, 0x13, 0x37, crc & 0xFF, (crc >> 8) & 0xFF, localAddress]);
+		return MACAddress(0x02, 0x13, 0x37, crc & 0xFF, (crc >> 8) & 0xFF, localAddress);
 	}
 
 	ServerMap* findServerByMac(MACAddress mac)

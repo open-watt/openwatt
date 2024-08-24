@@ -48,10 +48,13 @@ template Nullable(T)
 	{
 		T value = T.nan;
 
-		bool opEquals(typeof(null)) const => value is T.nan;
-		bool opEquals(T v) const => value == v; // because nan doesn't compare with anything
+		bool opEquals(typeof(null)) const
+			=> value is T.nan;
+		bool opEquals(T v) const
+			=> value == v; // because nan doesn't compare with anything
 
-		bool opCast(T)() const if (T == bool) => value !is T.nan;
+		bool opCast(T : bool)() const
+			=> value !is T.nan;
 
 		void opAssign(typeof(null))
 		{

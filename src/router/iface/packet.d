@@ -7,13 +7,28 @@ struct MACAddress
 {
 	nothrow @nogc:
 
-	enum broadcast = MACAddress([ 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF ]);
-	enum lldp      = MACAddress([ 0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E ]);
+	// well-known mac addresses
+	enum broadcast = MACAddress(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
+	enum lldp      = MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E);
 
-	ubyte[6] b = [ 0, 0, 0, 0, 0, 0 ];
+	ubyte[6] b;
+
+	this(ubyte[6] b...) pure
+	{
+		this.b = b;
+	}
+
+	bool opCast(T : bool)() const pure
+		=> b[0] | b[1] | b[2] | b[3] | b[4] | b[5];
 
 	bool opEquals(ref MACAddress rhs) const pure
-		=> b[] == rhs.b[];
+		=> b == rhs.b;
+
+	bool opEquals(const(ubyte)[6] bytes) const pure
+		=> b == bytes;
+
+	bool isBroadcast() const pure
+		=> b == broadcast.b;
 
 	import urt.string.format : FormatArg;
 	ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const

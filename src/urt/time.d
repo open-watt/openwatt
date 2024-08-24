@@ -61,7 +61,7 @@ pure nothrow @nogc:
 	enum max = Duration(long.max);
 	enum min = Duration(long.min);
 
-	bool opCast(T)() const if (is(T == bool))
+	bool opCast(T : bool)() const
 		=> ticks != 0;
 
 	T opCast(T)() const if (isSomeFloat!T)
@@ -113,7 +113,8 @@ pure nothrow @nogc:
 		return timeToString(as!"msecs", buffer);
 	}
 
-	auto __debugOverview() const => cast(double)this;
+	auto __debugOverview() const
+		=> cast(double)this;
 }
 
 Duration dur(string base)(long value)
@@ -138,9 +139,9 @@ Duration dur(string base)(long value)
 		static assert(false, "Invalid base");
 }
 
-Duration nsecs(long value) pure => dur!"msecs"(value);
-Duration usecs(long value) pure => dur!"usecs"(value);
-Duration msecs(long value) pure => dur!"msecs"(value);
+Duration nsecs(long value) pure   => dur!"nsecs"(value);
+Duration usecs(long value) pure   => dur!"usecs"(value);
+Duration msecs(long value) pure   => dur!"msecs"(value);
 Duration seconds(long value) pure => dur!"seconds"(value);
 
 MonoTime getTime()
@@ -160,24 +161,17 @@ MonoTime getTime()
 }
 
 Duration getAppTime()
-{
-	return getTime() - bootTime;
-}
+	=> getTime() - bootTime;
 
 Duration appTime(MonoTime t)
-{
-	return t - bootTime;
-}
+	=> t - bootTime;
 
 Duration abs(Duration d) pure
-{
-	return Duration(d.ticks < 0 ? -d.ticks : d.ticks);
-}
+	=> Duration(d.ticks < 0 ? -d.ticks : d.ticks);
 
 long toNanoseconds(Duration dur) pure
-{
-	return dur.ticks *= nsecMultiplier;
-}
+	=> dur.ticks *= nsecMultiplier;
+
 
 private:
 

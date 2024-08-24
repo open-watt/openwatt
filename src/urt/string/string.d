@@ -107,8 +107,7 @@ struct String
 		return ((len << 7) & 0x7F) | (ptr[-2] & 0x7F);
 	}
 
-	bool opCast(T)() const pure nothrow @nogc
-		if (is(T == bool))
+	bool opCast(T : bool)() const pure nothrow @nogc
 	{
 		return ptr != null && ptr[-1] != 0;
 	}

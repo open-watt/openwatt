@@ -47,8 +47,7 @@ if (is(T == ubyte) || is(T == ushort))
 		return offset == 0 ? 0 : _length((cast(const(char)*)&this) + offset);
 	}
 
-	bool opCast(T)() const pure nothrow @nogc
-		if (is(T == bool))
+	bool opCast(T : bool)() const pure nothrow @nogc
 	{
 		return offset != 0;
 	}

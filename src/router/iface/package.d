@@ -73,7 +73,7 @@ class BaseInterface
 		this.name = name;
 		this.type = type;
 
-		mac = MACAddress([0, 0, 0, 0, 0, 0]);
+		mac = MACAddress();
 	}
 
 	void update()
