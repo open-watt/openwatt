@@ -186,7 +186,7 @@ unittest
 	assert(ring.empty);
 
 	// test fixed buffer, with no overwrites
-	RingBuffer!(16, void) ring2;
+	RingBuffer!(16) ring2;
 	assert(ring2.write(t) == 10);
 	assert(ring2.write(t) == 5);
 	assert(ring2.pending == 15);
@@ -196,7 +196,7 @@ unittest
 	assert(buffer[10 .. 15] == t[0 .. 5]);
 
 	// test with overwriting old data
-	RingBuffer!(16, void, Options.on_overflow_drop_old) ring3;
+	RingBuffer!(16, Options.on_overflow_drop_old) ring3;
 	assert(ring3.write(t) == 10);
 	assert(ring3.write(t) == 10);
 	assert(ring3.pending == 15);
@@ -214,7 +214,7 @@ unittest
 	assert(buffer[6 .. 15] == t[0 .. 9]);
 
 	// test overflow of data keeps tail of stream
-	RingBuffer!(6, void, Options.on_overflow_drop_old) ring4;
+	RingBuffer!(6, Options.on_overflow_drop_old) ring4;
 	assert(ring4.write(t) == 5);
 	assert(ring4.pending == 5);
 	assert(ring4.available == 0);

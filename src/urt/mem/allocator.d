@@ -268,10 +268,10 @@ unittest
 	}
 
 	Allocator a = new Mallocator;
-	S* s = a.alloc!S(10);
-	a.free(s);
-	C c = a.alloc!C();
-	a.free(c);
+	S* s = a.allocT!S(10);
+	a.freeT(s);
+	C c = a.allocT!C();
+	a.freeT(c);
 	S[] arr = a.allocArray!S(10, 10);
 	a.freeArray(arr[]);
 }
