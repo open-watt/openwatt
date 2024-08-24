@@ -1,4 +1,4 @@
-module router.mqtt.util;
+module protocol.mqtt.util;
 
 inout(As)[] take(As = ubyte)(ref inout(ubyte)[] buffer, size_t n)
 {

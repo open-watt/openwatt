@@ -1,11 +1,11 @@
 module router.stream.serial;
 
-import std.format;
-import std.stdio;
+import urt.io;
+import urt.string.format;
+
+import manager.plugin;
 
 public import router.stream;
-
-import urt.string.format;
 
 struct SerialParams
 {
@@ -30,7 +30,7 @@ version(Windows)
 	{
 		this(string device, in SerialParams serialParams, StreamOptions options = StreamOptions.None)
 		{
-			super(options);
+			super("serial", options);
 			this.device = device;
 			this.params = serialParams;
 		}
@@ -46,7 +46,7 @@ version(Windows)
 			hCom = CreateFile(buf.ptr, GENERIC_READ | GENERIC_WRITE, 0, null, OPEN_EXISTING, 0, null);
 			if (hCom == INVALID_HANDLE_VALUE)
 			{
-				writeln("CreateFile failed with error %d.\n", GetLastError());
+				writeln("CreateFile failed with error: ", GetLastError());
 				return false;
 			}
 
@@ -58,7 +58,7 @@ version(Windows)
 				CloseHandle(hCom);
 				hCom = INVALID_HANDLE_VALUE;
 
-				writeln("GetCommState failed with error %d.\n", GetLastError());
+				writeln("GetCommState failed with error: ", GetLastError());
 				return false;
 			}
 
@@ -72,7 +72,7 @@ version(Windows)
 				CloseHandle(hCom);
 				hCom = INVALID_HANDLE_VALUE;
 
-				writeln("Error to Setting DCB Structure.\n");
+				writeln("Error to Setting DCB Structure.");
 				return false;
 			}
 
@@ -87,11 +87,11 @@ version(Windows)
 				CloseHandle(hCom);
 				hCom = INVALID_HANDLE_VALUE;
 
-				writeln("Error to Setting Time outs.\n");
+				writeln("Error to Setting Time outs.");
 				return false;
 			}
 
-			writeln(format("Opened %s: 0x%x", device, hCom));
+			writeln(tformat("Opened {0}: 0x{1,x}", device, hCom));
 			return true;
 		}
 
@@ -239,4 +239,19 @@ else version(Posix)
 else
 {
 	static assert(false, "No serial implementation!");
+}
+
+
+class SerialStreamModule : Plugin
+{
+	mixin RegisterModule!"stream.serial";
+
+	override void init()
+	{
+	}
+
+	class Instance : Plugin.Instance
+	{
+		mixin DeclareInstance;
+	}
 }

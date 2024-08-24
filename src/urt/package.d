@@ -15,6 +15,7 @@ enum bool BranchMoreExpensiveThanStore = false;
 // I reckon this stuff should always be available...
 // ...but we really need to keep these guys under control!
 public import urt.compiler;
+public import urt.meta;
 public import urt.platform;
 public import urt.processor;
 public import urt.traits;

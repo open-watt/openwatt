@@ -33,7 +33,7 @@ class Session
 				m_currentCommand = null;
 
 				commandFinished(commandData, state);
-				allocator.free(commandData);
+				allocator.freeT(commandData);
 
 				// untaken input should be fed back into the command line
 				const(char)[] input = takeInput();
@@ -50,7 +50,7 @@ class Session
 	{
 		if (m_currentCommand)
 		{
-			allocator.free(m_currentCommand);
+			allocator.freeT(m_currentCommand);
 			m_currentCommand = null;
 		}
 

@@ -1,4 +1,4 @@
-module router.mqtt.broker;
+module protocol.mqtt.broker;
 
 import core.sync.mutex;
 
@@ -7,8 +7,11 @@ import std.range : empty;
 import urt.string;
 import urt.time;
 
-import router.mqtt.client;
+import protocol.mqtt.client;
+
 import router.stream;
+import router.stream.tcp;
+
 
 struct MQTTClientCredentials
 {

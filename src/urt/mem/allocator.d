@@ -46,7 +46,7 @@ class Allocator
 
 //	abstract size_t getUsableSize(void* p); // get the usable size for an allocation...
 
-	final T* alloc(T, Args...)(Args args) nothrow
+	final T* allocT(T, Args...)(Args args) nothrow
 		if (!is(T == class))
 	{
 		import core.lifetime : emplace, forward;
@@ -60,7 +60,7 @@ class Allocator
 		return item;
 	}
 
-	final T alloc(T, Args...)(Args args) nothrow
+	final T allocT(T, Args...)(Args args) nothrow
 		if (is(T == class))
 	{
 		import core.lifetime : emplace, forward;
@@ -95,7 +95,7 @@ class Allocator
 		return items;
 	}
 
-	final void free(T)(T* item) nothrow
+	final void freeT(T)(T* item) nothrow
 		if (!is(T == class))
 	{
 		try
@@ -107,7 +107,7 @@ class Allocator
 		free((cast(void*)item)[0..T.sizeof]);
 	}
 
-	final void free(T)(T item) nothrow
+	final void freeT(T)(T item) nothrow
 		if (is(T == class))
 	{
 		try

@@ -41,6 +41,14 @@ nothrow @nogc:
 		}
 		return 0;
 	}
+
+	auto __debugOverview() const
+	{
+		import urt.mem.temp;
+		char[] b = cast(char[])talloc(64);
+		size_t len = toString(b, null, null);
+		return b[0..len];
+	}
 }
 
 struct Duration
@@ -49,14 +57,14 @@ pure nothrow @nogc:
 
 	long ticks;
 
-	enum Duration zero = Duration(0);
-	enum Duration max = Duration(long.max);
-	enum Duration min = Duration(long.min);
+	enum zero = Duration(0);
+	enum max = Duration(long.max);
+	enum min = Duration(long.min);
 
 	bool opCast(T)() const if (is(T == bool))
 		=> ticks != 0;
 
-	bool opCast(T)() const if (isSomeFloat!T)
+	T opCast(T)() const if (isSomeFloat!T)
 		=> cast(T)ticks / cast(T)ticksPerSecond;
 
 	bool opEquals(Duration b) const
@@ -104,6 +112,8 @@ pure nothrow @nogc:
 	{
 		return timeToString(as!"msecs", buffer);
 	}
+
+	auto __debugOverview() const => cast(double)this;
 }
 
 Duration dur(string base)(long value)
@@ -231,6 +241,6 @@ unittest
 	assert(tconcat(msecs(3_600_000*3 + 60_000*47 + 1000*34 + 123))[] == "03:47:34.123");
 	assert(tconcat(msecs(3_600_000*-123))[] == "-123:00:00.000");
 
-	assert(MonoTime().toString(null, null, null) == 14);
+	assert(getTime().toString(null, null, null) == 14);
 	assert(tconcat(getTime())[0..2] == "T+");
 }

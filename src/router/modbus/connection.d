@@ -15,6 +15,7 @@ import router.modbus.coding;
 import router.modbus.message;
 import router.modbus.util;
 import router.stream;
+import router.stream.serial;
 
 
 enum Transport : ubyte

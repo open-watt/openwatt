@@ -1,10 +1,8 @@
 module manager.log;
 
-import manager;
 import manager.console;
 import manager.console.command;
 import manager.console.session;
-import manager.config;
 import manager.plugin;
 
 import urt.log;
@@ -21,49 +19,33 @@ enum Category
 
 class LogModule : Plugin
 {
-	enum string PluginName = "log";
-
-	this()
-	{
-		super(PluginName);
-	}
-
-	override Instance initInstance(ApplicationInstance instance)
-	{
-		return new Instance(this, instance);
-	}
+	mixin RegisterModule!"log";
 
 	class Instance : Plugin.Instance
 	{
-		LogModule plugin;
+		mixin DeclareInstance;
 
-		this(LogModule plugin, ApplicationInstance instance)
+		override void init()
 		{
-			super(instance);
-			this.plugin = plugin;
-
-			instance.console.registerCommands("/log", [
-				new LogCommand(instance.console, "info", Category.Info, this),
-				new LogCommand(instance.console, "warn", Category.Warning, this),
-				new LogCommand(instance.console, "error", Category.Error, this),
-				new LogCommand(instance.console, "alert", Category.Alert, this),
-				new LogCommand(instance.console, "debug", Category.Debug, this)
+			app.console.registerCommands("/log", [
+				new LogCommand(app.console, "info", Category.Info, this),
+				new LogCommand(app.console, "warn", Category.Warning, this),
+				new LogCommand(app.console, "error", Category.Error, this),
+				new LogCommand(app.console, "alert", Category.Alert, this),
+				new LogCommand(app.console, "debug", Category.Debug, this)
 			]);
 		}
 
+		import manager.config;
 		override void parseConfig(ref ConfItem conf)
 		{
+			// TODO:...
 		}
 	}
 }
 
 
 private:
-
-shared static this()
-{
-	getGlobalInstance.registerPlugin(new LogModule);
-}
 
 class LogCommand : Command
 {

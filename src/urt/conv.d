@@ -131,60 +131,27 @@ size_t formatInt(long value, char[] buffer, uint base = 10, uint width = 0, char
 
 	assert(base >= 2 && base <= 36, "Invalid base");
 
-	const uint shift = base.isPowerOf2 ? base.log2 : 0;
 	const bool neg = value < 0;
 	showSign |= neg;
 
 	long i = neg ? -value : value;
 
+	// HACK: we could special case this one special number...
+	assert(i >= 0, "Value can not be long.min");
+
 	char[64] t = void;
 	uint numLen = 0;
-	if (!buffer.ptr)
+	// TODO: if this is a hot function, the if's could be hoisted outside the loop.
+	//       there are 8 permutations...
+	//       also, some platforms might prefer a lookup table than `d < 10 ? ... : ...`
+	for (; i != 0; i /= base)
 	{
-		if (shift)
+		if (buffer.ptr)
 		{
-			for (; i != 0; ++numLen)
-				i = i >> shift;
+			int d = cast(int)(i % base);
+			t.ptr[numLen] = cast(char)((d < 10 ? '0' : 'A' - 10) + d);
 		}
-		else
-		{
-			for (; i != 0; ++numLen)
-				i = i / base;
-		}
-	}
-	else if (base <= 10)
-	{
-		if (shift)
-		{
-			uint mask = base - 1;
-			for (; i != 0; i >>= shift)
-				t.ptr[numLen++] = cast(char)('0' + (i & mask));
-		}
-		else
-		{
-			for (; i != 0; i /= base)
-				t.ptr[numLen++] = cast(char)('0' + (i % base));
-		}
-	}
-	else
-	{
-		if (shift)
-		{
-			uint mask = base - 1;
-			for (; i != 0; i >>= shift)
-			{
-				int d = cast(int)(i & mask);
-				t.ptr[numLen++] = cast(char)((d > 9 ? 'A' - 10 : '0') + d);
-			}
-		}
-		else
-		{
-			for (; i != 0; i /= base)
-			{
-				int d = cast(int)(i % base);
-				t.ptr[numLen++] = cast(char)((d > 9 ? 'A' - 10 : '0') + d);
-			}
-		}
+		++numLen;
 	}
 	if (numLen == 0)
 	{

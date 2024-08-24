@@ -17,34 +17,42 @@ GlobalInstance getGlobalInstance()
 class GlobalInstance
 {
 	ApplicationInstance[string] instances;
-	Plugin[] plugins;
+	Plugin[] modules;
 
 	import router.modbus.profile;
 
 	void registerPlugin(Plugin plugin)
 	{
-		foreach (p; plugins)
-			assert(p.name[] != plugin.name);
+		import urt.string.format;
 
-		plugin.id = plugins.length;
-		plugins ~= plugin;
+		foreach (p; modules)
+			assert(p.moduleName[] != plugin.moduleName, tconcat("Module '", plugin.moduleName, "' already registered"));
 
-		plugin.init(this);
+		plugin.moduleId = modules.length;
+		modules ~= plugin;
+
+		plugin.init();
 
 		foreach (app; instances)
 		{
-			Plugin.Instance pluginInstance = plugin.initInstance(app);
+			Plugin.Instance pluginInstance = plugin.createInstance(app);
 			app.pluginInstance ~= pluginInstance;
 		}
 	}
 
-	Plugin getPlugin(const(char)[] name)
+	Plugin getModule(const(char)[] name)
 	{
-		foreach (plugin; plugins)
-			if (plugin.name[] == name[])
+		foreach (plugin; modules)
+			if (plugin.moduleName[] == name[])
 				return plugin;
 		return null;
 	}
+
+	Module getModule(Module)()
+	{
+		return cast(Module)getModule(Module.ModuleName);
+	}
+
 
 	ApplicationInstance createInstance(string name)
 	{
@@ -54,10 +62,10 @@ class GlobalInstance
 
 		instances[name] = app;
 
-		app.pluginInstance = new Plugin.Instance[plugins.length];
-		foreach (i; 0 .. plugins.length)
+		app.pluginInstance = new Plugin.Instance[modules.length];
+		foreach (i; 0 .. modules.length)
 		{
-			Plugin.Instance pluginInstance = plugins[i].initInstance(app);
+			Plugin.Instance pluginInstance = modules[i].createInstance(app);
 			app.pluginInstance[i] = pluginInstance;
 		}
 
@@ -66,15 +74,15 @@ class GlobalInstance
 
 	void update()
 	{
-		foreach (plugin; plugins)
-			plugin.preUpdate(this);
+		foreach (plugin; modules)
+			plugin.preUpdate();
 
 		foreach(app; instances)
 		{
 			app.update();
 		}
 
-		foreach (plugin; plugins)
-			plugin.postUpdate(this);
+		foreach (plugin; modules)
+			plugin.postUpdate();
 	}
 }

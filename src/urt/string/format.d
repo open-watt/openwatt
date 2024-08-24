@@ -342,14 +342,14 @@ struct DefFormat(T)
 		{
 			return defToString!(const char[])(cast(const char[])value[], buffer, format, formatArgs);
 		}
-		//		else static if (is(T : const(wchar)[]))
+//		else static if (is(T : const(wchar)[]))
 //		{
 //		}
 //		else static if (is (T : const(U)[], U : dchar))
 //		{
 //			// TODO: UTF ENCODE...
 //		}
-		else static if (is(T == void[]))
+		else static if (is(T == void[]) || is(T == const(void)[]))
 		{
 			if (!buffer.ptr)
 				return value.length*3 - 1;
@@ -357,7 +357,7 @@ struct DefFormat(T)
 			char[] hex = toHexString(cast(ubyte[])value, buffer, 1);
 			return hex.length;
 		}
-		else static if (is(T : U[], U))
+		else static if (is(T : const U[], U))
 		{
 			// arrays of other stuff
 			size_t len = 1;
@@ -415,6 +415,10 @@ struct DefFormat(T)
 				return 0;
 			buffer[T.stringof.length + 1 + len] = ')';
 			return T.stringof.length + 2 + len;
+		}
+		else if (is(T == const))
+		{
+			return defToString!(Unqual!T)(cast()value, buffer, format, formatArgs);
 		}
 		else
 			static assert(false, "Not implemented for type: ", T.stringof);

@@ -13,6 +13,7 @@ import manager.plugin;
 import manager.units;
 import manager.value;
 
+import router.stream.tcp;
 import router.tesla.twc;
 
 import urt.log;
@@ -22,34 +23,22 @@ import urt.string;
 
 class TeslaPlugin : Plugin
 {
-	enum string PluginName = "tesla";
+	mixin RegisterModule!"tesla";
 
-	this()
+	override void init()
 	{
-		super(PluginName);
-	}
-
-	override void init(GlobalInstance global)
-	{
-	}
-
-	override Instance initInstance(ApplicationInstance instance)
-	{
-		return new Instance(this, instance);
 	}
 
 	class Instance : Plugin.Instance
 	{
-		TeslaPlugin plugin;
+		mixin DeclareInstance;
+
 		TeslaWallConnector[string] twcs;
 
-		this(TeslaPlugin plugin, ApplicationInstance instance)
+		override void init()
 		{
-			super(instance);
-			this.plugin = plugin;
-
 			// register modbus component
-			instance.registerComponentType("twc-component", &createTWCComponent);
+			app.registerComponentType("twc-component", &createTWCComponent);
 		}
 
 		override void preUpdate()
@@ -78,10 +67,8 @@ class TeslaPlugin : Plugin
 
 						case "stream":
 							const(char)[] streamName = param.value.unQuote;
-							Stream* s = streamName in app.streams;
-							if (s)
-								stream = *s;
-							else
+							stream = app.moduleInstance!StreamModule.getStream(streamName);
+							if (!stream)
 								writeln("Invalid stream: ", streamName);
 							break;
 
@@ -110,8 +97,9 @@ class TeslaPlugin : Plugin
 					}
 
 					twcs[id] = new TeslaWallConnector(id, stream);
-
+/+
 					app.servers[id] = twcs[id];
++/
 					break;
 
 				default:
@@ -136,7 +124,7 @@ class TeslaPlugin : Plugin
 				default:
 					writeln("Invalid token: ", com.name);
 			}
-
+/+
 			Server* pServer = server in app.servers;
 			// TODO: proper error message
 			assert(pServer, "No server");
@@ -150,14 +138,11 @@ class TeslaPlugin : Plugin
 			component.name = addString(name);
 
 			return component;
++/
+			return null;
 		}
 	}
 }
 
 
 private:
-
-shared static this()
-{
-	getGlobalInstance.registerPlugin(new TeslaPlugin);
-}

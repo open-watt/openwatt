@@ -99,6 +99,8 @@ struct String
 
 	size_t length() const pure nothrow @nogc
 	{
+		if (!ptr)
+			return 0;
 		ushort len = ptr[-1];
 		if (len < 128)
 			return len;

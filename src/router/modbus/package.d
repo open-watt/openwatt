@@ -20,19 +20,17 @@ import router.modbus.connection;
 import router.modbus.message;
 import router.modbus.profile;
 import router.modbus.server;
+import router.stream;
+import router.stream.tcp;
+
 
 class ModbusPlugin : Plugin
 {
-	enum string PluginName = "modbus";
+	mixin RegisterModule!"modbus";
 
 	ModbusProfile*[string] profiles;
 
-	this()
-	{
-		super(PluginName);
-	}
-
-	override void init(GlobalInstance global)
+	override void init()
 	{
 		import router.modbus.profile.solaredge_meter;
 		import router.modbus.profile.goodwe;
@@ -54,11 +52,6 @@ class ModbusPlugin : Plugin
 		registerProfile("goodwe", mb_profile);
 	}
 
-	override Instance initInstance(ApplicationInstance instance)
-	{
-		return new Instance(this, instance);
-	}
-
 	void registerProfile(string name, ModbusProfile* profile)
 	{
 		assert(!getProfile(name));
@@ -75,16 +68,14 @@ class ModbusPlugin : Plugin
 
 	class Instance : Plugin.Instance
 	{
-		ModbusPlugin plugin;
+		mixin DeclareInstance;
+
 		Connection[string] connections;
 
-		this(ModbusPlugin plugin, ApplicationInstance instance)
+		override void init()
 		{
-			super(instance);
-			this.plugin = plugin;
-
 			// register modbus component
-			instance.registerComponentType("modbus-component", &createModbusComponent);
+			app.registerComponentType("modbus-component", &createModbusComponent);
 		}
 
 		override void preUpdate()
@@ -117,11 +108,9 @@ class ModbusPlugin : Plugin
 
 						case "stream":
 							const(char)[] streamName = param.value.unQuote;
-							Stream* s = streamName in app.streams;
-							if (s)
-								stream = *s;
-							else
-								writeln("Invalid stream: ", param.value);
+							stream = app.moduleInstance!StreamModule.getStream(streamName);
+							if (!stream)
+								writeln("Invalid stream: ", streamName);
 							break;
 
 						case "tcp-server":
@@ -240,6 +229,7 @@ class ModbusPlugin : Plugin
 
 					// TODO: all this should be warning messages, not asserts
 					// TODO: messages should have config file+line
+/+
 					assert(name !in app.servers);
 					if (connection !in connections)
 					{
@@ -249,7 +239,7 @@ class ModbusPlugin : Plugin
 
 					Connection conn = connections[connection];
 
-					ModbusProfile* profile = plugin.getProfile(profileName);
+					ModbusProfile* profile = this.outer.getProfile(profileName);
 					if (!profile)
 					{
 						import urt.mem.temp;
@@ -259,6 +249,7 @@ class ModbusPlugin : Plugin
 					assert(profile);
 
 					app.servers[name] = new ModbusServer(name, conn, address, profile);
++/
 					break;
 
 				case "master":
@@ -311,7 +302,7 @@ class ModbusPlugin : Plugin
 				default:
 					writeln("Invalid token: ", com.name);
 			}
-
+/+
 			Server* pServer = server in app.servers;
 			// TODO: proper error message
 			assert(pServer, "No server");
@@ -353,17 +344,14 @@ class ModbusPlugin : Plugin
 				modbusServer.snoopBusMessageHandler = &(new SnoopHandler(component).snoopBusHandler);
 
 			return component;
++/
+			return null;
 		}
 	}
 }
 
 
 private:
-
-shared static this()
-{
-	getGlobalInstance.registerPlugin(new ModbusPlugin);
-}
 
 immutable uint[Frequency.max + 1] updateIntervalMap = [
 	50,		// realtime

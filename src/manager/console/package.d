@@ -10,6 +10,7 @@ import urt.util;
 
 public import manager.console.builtin_commands;
 public import manager.console.command;
+public import manager.console.expression;
 public import manager.console.session;
 
 

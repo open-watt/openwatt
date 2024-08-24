@@ -8,7 +8,8 @@ struct List(T, bool DL = false, bool Invasive = false)
 		{
 			T value;
 			Item* next;
-			Item* prev;
+			static if (DL)
+				Item* prev;
 		}
 		alias ListItem = Item;
 	}

@@ -3,24 +3,32 @@ module manager.plugin;
 import manager;
 import manager.config : ConfItem;
 
+
 class Plugin
 {
-	string name;
-	size_t id = -1;
+	GlobalInstance global;
+	string moduleName;
+	size_t moduleId = -1;
 
-	this(string name)
+	this(GlobalInstance global, string name)
 	{
-		this.name = name;
+		this.global = global;
+		this.moduleName = name;
 	}
 
-	void init(GlobalInstance global)
+	void init()
 	{
 	}
 
-	Instance initInstance(ApplicationInstance instance)
+	void preUpdate()
 	{
-		return null;
 	}
+
+	void postUpdate()
+	{
+	}
+
+	abstract Instance createInstance(ApplicationInstance instance);
 
 	class Instance
 	{
@@ -32,6 +40,10 @@ class Plugin
 			this.app = app;
 		}
 
+		void init()
+		{
+		}
+
 		void parseConfig(ref ConfItem conf)
 		{
 		}
@@ -40,17 +52,49 @@ class Plugin
 		{
 		}
 
+		void update()
+		{
+		}
+
 		void postUpdate()
 		{
 		}
 	}
+}
 
+// helper template to register a plugin
+mixin template RegisterModule(string name)
+{
+	import manager : GlobalInstance, ApplicationInstance;
 
-	void preUpdate(GlobalInstance global)
+	enum string ModuleName = name;
+	alias ThisClass = __traits(parent, ModuleName);
+
+	shared static this()
 	{
+		import manager : getGlobalInstance;
+		getGlobalInstance.registerPlugin(new ThisClass(getGlobalInstance()));
 	}
 
-	void postUpdate(GlobalInstance global)
+	this(GlobalInstance global)
 	{
+		super(global, ModuleName);
+	}
+
+	override Instance createInstance(ApplicationInstance instance)
+	{
+		return new Instance(instance);
+	}
+}
+
+mixin template DeclareInstance()
+{
+//	ThisClass outer() inout pure nothrow @nogc { return cast(ThisClass)this.outer; }
+
+	this(ApplicationInstance instance)
+	{
+		super(instance);
+
+		init();
 	}
 }

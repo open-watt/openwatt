@@ -7,6 +7,9 @@ enum isSomeInt(T) = is(T == byte) || is(T == ubyte) || is(T == short) || is(T ==
 enum isSomeFloat(T) = is(T == float) || is(T == double) || is(T == real);
 enum isIntegral(T) = is(T == bool) || isSomeInt!T || isSomeChar!T;
 
+enum isSignedInt(T) = is(T == byte) || is(T == short) || is(T == int) || is(T == long);
+enum isUnsignedInt(T) = is(T == ubyte) || is(T == ushort) || is(T == uint) || is(T == ulong);
+
 alias Unconst(T : const U, U) = U;
 
 template Unqual(T : const U, U)

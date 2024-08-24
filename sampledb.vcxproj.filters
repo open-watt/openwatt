@@ -19,9 +19,6 @@
     <Filter Include="src\manager">
       <UniqueIdentifier>{a7edf0a4-cbca-4a75-bf4f-548fe4b7764d}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\router\mqtt">
-      <UniqueIdentifier>{472209e2-d2ed-49cc-b915-ed5b816317e0}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\router\snmp">
       <UniqueIdentifier>{b9888748-2443-4eeb-a6af-9bf275df32a6}</UniqueIdentifier>
     </Filter>
@@ -57,6 +54,27 @@
     </Filter>
     <Filter Include="src\manager\protocol">
       <UniqueIdentifier>{8703eac1-773f-4d5b-8170-1fd230ebcf22}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\router\iface">
+      <UniqueIdentifier>{0e965bb7-e2d4-44f9-a982-88df797db1fb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\protocol">
+      <UniqueIdentifier>{e3d26653-740a-4de4-ad46-6df4e33023d0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\protocol\modbus">
+      <UniqueIdentifier>{aba64285-47d8-4af3-a4bf-5284dbbeea44}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\router\port">
+      <UniqueIdentifier>{b7012d9a-641d-492c-8634-9dbdb9c38a25}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\protocol\mqtt">
+      <UniqueIdentifier>{ff7e033e-b5f6-472c-8460-916db93b4dbe}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\urt\meta">
+      <UniqueIdentifier>{de3ea41c-cef1-43ef-8c98-70f80a0b9ba8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\protocol\tesla">
+      <UniqueIdentifier>{54587164-3374-4538-ad23-3865c5baffef}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -123,9 +141,6 @@
     <DCompile Include="src\router\modbus\profile\goodwe_inverter.d">
       <Filter>src\router\modbus\profile</Filter>
     </DCompile>
-    <DCompile Include="src\router\mqtt\broker.d">
-      <Filter>src\router\mqtt</Filter>
-    </DCompile>
     <DCompile Include="src\manager\value.d">
       <Filter>src\manager</Filter>
     </DCompile>
@@ -134,12 +149,6 @@
     </DCompile>
     <DCompile Include="src\router\snmp\package.d">
       <Filter>src\router\snmp</Filter>
-    </DCompile>
-    <DCompile Include="src\router\mqtt\client.d">
-      <Filter>src\router\mqtt</Filter>
-    </DCompile>
-    <DCompile Include="src\router\mqtt\util.d">
-      <Filter>src\router\mqtt</Filter>
     </DCompile>
     <DCompile Include="src\router\stream\package.d">
       <Filter>src\router\stream</Filter>
@@ -282,12 +291,6 @@
     <DCompile Include="src\manager\console\expression.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
-    <DCompile Include="src\manager\iface.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\stream.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
     <DCompile Include="src\manager\protocol\package.d">
       <Filter>src\manager\protocol</Filter>
     </DCompile>
@@ -315,9 +318,6 @@
     <DCompile Include="src\urt\string\uni.d">
       <Filter>src\urt\string</Filter>
     </DCompile>
-    <DCompile Include="src\router\stream\filter.d">
-      <Filter>src\router\stream</Filter>
-    </DCompile>
     <DCompile Include="src\urt\conv.d">
       <Filter>src\urt</Filter>
     </DCompile>
@@ -326,6 +326,51 @@
     </DCompile>
     <DCompile Include="src\urt\time.d">
       <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\bridge.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\modbus.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\package.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\modbus\package.d">
+      <Filter>src\protocol\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\router\port\package.d">
+      <Filter>src\router\port</Filter>
+    </DCompile>
+    <DCompile Include="src\router\port\serial.d">
+      <Filter>src\router\port</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\broker.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\client.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\package.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\util.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\meta\nullable.d">
+      <Filter>src\urt\meta</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\packet.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\meta\package.d">
+      <Filter>src\urt\meta</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\tesla.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\twc.d">
+      <Filter>src\protocol\tesla</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>

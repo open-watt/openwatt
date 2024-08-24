@@ -24,11 +24,17 @@ enum FunctionCode : ubyte
 	WriteSingleRegister = 0x06, // Write a single holding register in the slave
 	ReadExceptionStatus = 0x07, // Read the contents of eight Exception Status outputs in a slave
 	Diagnostics = 0x08, // Various sub-functions for diagnostics and testing
+	Program484 = 0x09, // EXOTIC: Program the 484
+	Poll484 = 0x0A, // EXOTIC: Poll the 484
 	GetComEventCounter = 0x0B, // Get the status of the communication event counter in the slave
 	GetComEventLog = 0x0C, // Retrieve the slave's communication event log
+	ProgramController = 0x0D, // EXOTIC: Program the controller
+	PollController = 0x0E, // EXOTIC: Poll the controller
 	WriteMultipleCoils = 0x0F, // Write multiple coils in a slave device
 	WriteMultipleRegisters = 0x10, // Write multiple registers in a slave device
 	ReportServerID = 0x11, // Request the unique identifier of a slave
+	Program884_M84 = 0x12, // EXOTIC: Program the 884 or M84
+	ResetCommLink = 0x13, // EXOTIC: Reset the communication link
 	ReadFileRecord = 0x14, // Read the contents of a file record in the slave
 	WriteFileRecord = 0x15, // Write to a file record in the slave
 	MaskWriteRegister = 0x16, // Modify the contents of a register using a combination of AND and OR
@@ -66,6 +72,7 @@ enum FunctionCodeName(FunctionCode code) = getFunctionCodeName(code);
 
 enum ExceptionCode : ubyte
 {
+	None = 0,
 	IllegalFunction = 0x01, // The function code received in the query is not an allowable action for the slave
 	IllegalDataAddress = 0x02, // The data address received in the query is not an allowable address for the slave
 	IllegalDataValue = 0x03, // A value contained in the query data field is not an allowable value for the slave

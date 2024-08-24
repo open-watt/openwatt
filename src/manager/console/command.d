@@ -112,12 +112,12 @@ inout(char)[] takeIdentifier(ref inout(char)[] s) pure nothrow @nogc
 {
 	if (s.length == 0)
 		return s[0..0];
-	if (!isAlpha(s[0]) && s[0] != '_')
+	if (!isAlpha(s[0]) && s[0] != '-' && s[0] != '_')
 		return s[0..0];
 	size_t i = 1;
 	for (; i < s.length; ++i)
 	{
-		if (!isAlphaNumeric(s[i]) && s[i] != '_')
+		if (!isAlphaNumeric(s[i]) && s[i] != '-' && s[i] != '_')
 			break;
 	}
 	inout(char)[] r = s[0 .. i];

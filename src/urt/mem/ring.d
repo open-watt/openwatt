@@ -16,7 +16,7 @@ enum Options : ubyte
 }
 
 
-struct RingBuffer(size_t _capacity = 0, T = void, Options options = Options.on_overflow_fail)
+struct RingBuffer(size_t _capacity = 0, Options options = Options.on_overflow_fail)
 {
 	static assert(_capacity < 2L ^^ 32, "Capacity must be <= 2^^32");
 

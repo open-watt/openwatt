@@ -2,26 +2,12 @@ module manager.protocol.modbus;
 
 import urt.string;
 
-import manager;
-import manager.console;
-import manager.console.command;
-import manager.console.session;
 import manager.plugin;
 
 /+
 class ModbusModule : Plugin
 {
-	enum string PluginName = "modbus";
-
-	this()
-	{
-		super(PluginName);
-	}
-
-	override Instance initInstance(ApplicationInstance instance)
-	{
-		return new Instance(this, instance);
-	}
+	mixin RegisterModule!"modbus";
 
 	class Instance : Plugin.Instance
 	{
@@ -46,8 +32,4 @@ class ModbusModule : Plugin
 
 private:
 
-shared static this()
-{
-	getGlobalInstance.registerPlugin(new ModbusModule);
-}
 +/

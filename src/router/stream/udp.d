@@ -3,9 +3,11 @@ module router.stream.udp;
 import std.socket;
 import std.stdio;
 
-public import router.stream;
-
 import urt.string.format;
+
+import manager.plugin;
+
+public import router.stream;
 
 
 class UDPStream : Stream
@@ -14,7 +16,7 @@ class UDPStream : Stream
 	{
 		// TODO: if remoteHost is a broadcast address and options doesn't have `AllowBroadcast`, make a warning...
 
-		super(options);
+		super("udp", options);
 		this.localHost = localHost;
 		this.localPort = localPort;
 		this.remoteHost = remoteHost;
@@ -175,4 +177,19 @@ private:
 	ushort remotePort;
 	Address local;
 	Address remote;
+}
+
+
+class UDPStreamModule : Plugin
+{
+	mixin RegisterModule!"stream.udp";
+
+	override void init()
+	{
+	}
+
+	class Instance : Plugin.Instance
+	{
+		mixin DeclareInstance;
+	}
 }

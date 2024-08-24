@@ -1,12 +1,13 @@
-module router.mqtt.client;
+module protocol.mqtt.client;
 
 import std.range : empty;
 
 import urt.log;
 import urt.time;
 
-import router.mqtt.broker;
-import router.mqtt.util;
+import protocol.mqtt.broker;
+import protocol.mqtt.util;
+
 import router.stream;
 
 enum MQTTPacketType : byte

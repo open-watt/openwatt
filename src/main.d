@@ -1,15 +1,10 @@
 module main;
 
-import router.client;
-import router.server;
-
-import router.modbus.coding;
-import router.modbus.connection;
-import router.modbus.message;
-import router.modbus.profile;
-import router.modbus.server;
-import router.mqtt.broker;
-import router.stream;
+import urt.io;
+import urt.log;
+import urt.mem.string;
+import urt.string;
+import urt.string.format;
 
 import manager;
 import manager.component;
@@ -20,11 +15,17 @@ import manager.element;
 import manager.instance;
 import manager.units;
 
-import urt.io;
-import urt.log;
-import urt.mem.string;
-import urt.string;
-import urt.string.format;
+import protocol.mqtt.broker;
+
+import router.client;
+import router.server;
+
+import router.modbus.coding;
+import router.modbus.connection;
+import router.modbus.message;
+import router.modbus.profile;
+import router.modbus.server;
+import router.stream;
 
 
 void main()
@@ -53,7 +54,7 @@ void main()
 	s.setInput(conf);
 
 	// load config files
-	app.loadConfig("conf/monitor.conf");
+//	app.loadConfig("conf/monitor.conf");
 
 
 //	ModbusProfile* profile = loadModbusProfile("conf/modbus_profiles/pace_bms.conf");

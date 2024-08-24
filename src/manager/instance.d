@@ -12,11 +12,10 @@ import manager.element;
 import manager.plugin;
 import manager.units;
 
-import router.modbus.connection;
-import router.modbus.profile;
-import router.mqtt.broker;
-import router.server;
-import router.stream;
+//import router.modbus.connection;
+//import router.modbus.profile;
+//import router.mqtt.broker;
+//import router.server;
 
 import urt.log;
 import urt.io;
@@ -30,7 +29,6 @@ alias CreateComponentFunc = Component* delegate(Device* device, ref ConfItem con
 class ApplicationInstance
 {
 	string name;
-
 	GlobalInstance global;
 	Plugin.Instance[] pluginInstance;
 
@@ -38,9 +36,6 @@ class ApplicationInstance
 
 	Console console;
 
-	MQTTBroker broker;
-	Stream[string] streams;
-	Server[string] servers;
 	Device*[String] devices;
 
 	// database...
@@ -52,17 +47,17 @@ class ApplicationInstance
 		console = Console(this, String("console".addString), Mallocator.instance);
 	}
 
-	Plugin.Instance getPluginInstance(string name)
+	Plugin.Instance moduleInstance(string name)
 	{
-		foreach (i; 0 .. global.plugins.length)
-			if (global.plugins[i].name[] == name[])
+		foreach (i; 0 .. global.modules.length)
+			if (global.modules[i].moduleName[] == name[])
 				return pluginInstance[i];
 		return null;
 	}
 
-	I.Instance getPluginInstance(I)()
+	I.Instance moduleInstance(I)()
 	{
-		return cast(I.Instance)getPluginInstance(I.PluginName);
+		return cast(I.Instance)moduleInstance(I.ModuleName);
 	}
 
 	void registerComponentType(string type, CreateComponentFunc createFunc)
@@ -75,15 +70,13 @@ class ApplicationInstance
 		foreach (plugin; pluginInstance)
 			plugin.preUpdate();
 
-		Stream.update();
-
-		if (broker)
-			broker.update();
+		foreach (plugin; pluginInstance)
+			plugin.update();
 
 		// TODO: polling is pretty lame! data connections should be in threads and receive data immediately
 		// processing should happen in a processing thread which waits on a semaphore for jobs in a queue (submit from comms threads?)
-		foreach (server; servers)
-			server.poll();
+//		foreach (server; servers)
+//			server.poll();
 		foreach (device; devices)
 			device.update();
 
@@ -187,7 +180,7 @@ class ApplicationInstance
 				assert(device.id);
 				devices[device.id] = device;
 				break;
-
+/+
 			case "mqtt":
 				foreach (ref mqtt; confItem.subItems) switch (mqtt.name)
 				{
@@ -254,10 +247,10 @@ class ApplicationInstance
 						writeln("Invalid token: ", mqtt.name);
 				}
 				break;
-
++/
 			default:
 				// check to see if item name matches a plugin
-				Plugin.Instance plugin = getPluginInstance(confItem.name);
+				Plugin.Instance plugin = moduleInstance(confItem.name);
 				if (plugin)
 					plugin.parseConfig(confItem);
 				else

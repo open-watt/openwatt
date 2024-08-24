@@ -25,34 +25,24 @@ import urt.string;
 
 class GoodWePlugin : Plugin
 {
-	enum string PluginName = "goodwe";
+	mixin RegisterModule!"goodwe";
 
 	ModbusPlugin modbus;
 
-	this()
-	{
-		super(PluginName);
-	}
-
-	override Instance initInstance(ApplicationInstance instance)
-	{
-		return new Instance(this, instance);
-	}
+	int poo;
 
 	class Instance : Plugin.Instance
 	{
-		GoodWePlugin plugin;
+		mixin DeclareInstance;
+
 		ModbusPlugin.Instance modbus;
 
-		this(GoodWePlugin plugin, ApplicationInstance instance)
+		override void init()
 		{
-			super(instance);
-			this.plugin = plugin;
-
-			modbus = instance.getPluginInstance!ModbusPlugin;
+			modbus = app.moduleInstance!ModbusPlugin;
 
 			// register modbus component
-			instance.registerComponentType("goodwe-component", &createGoodWeComponent);
+			app.registerComponentType("goodwe-component", &createGoodWeComponent);
 		}
 
 		override void parseConfig(ref ConfItem conf)
@@ -99,10 +89,11 @@ class GoodWePlugin : Plugin
 
 					// TODO: all this should be warning messages, not asserts
 					// TODO: messages should have config file+line
-					assert(name !in app.servers);
 //					assert(profile);
-
+/+
+					assert(name !in app.servers);
 					app.servers[name] = new GoodWeServer(name, host.idup);//, model, address);
++/
 					break;
 
 				case "scan":
@@ -131,7 +122,7 @@ class GoodWePlugin : Plugin
 				default:
 					writeln("Invalid token: ", com.name);
 			}
-
+/+
 			Server* pServer = server in app.servers;
 			// TODO: proper error message
 			assert(pServer, "No server");
@@ -143,7 +134,7 @@ class GoodWePlugin : Plugin
 			Component* component = new Component;
 			component.id = addString(id);
 			component.name = addString(name);
-
++/
 //			if (goodweServer.profile)
 //			{
 //				// Create elements for each modbus register
@@ -169,18 +160,14 @@ class GoodWePlugin : Plugin
 //					component.elementsById[element.id] = &element;
 //			}
 
-			return component;
+//			return component;
+			return null;
 		}
 	}
 }
 
 
 private:
-
-shared static this()
-{
-	getGlobalInstance.registerPlugin(new GoodWePlugin);
-}
 
 immutable uint[Frequency.max + 1] updateIntervalMap = [
 	50,		// realtime

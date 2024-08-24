@@ -7,6 +7,13 @@ import std.socket;
 import std.concurrency;
 import std.stdio;
 
+import urt.conv;
+import urt.string;
+import urt.string.format;
+
+import manager.console;
+import manager.plugin;
+
 public import router.stream;
 
 
@@ -14,7 +21,7 @@ class TCPStream : Stream
 {
 	this(string host, ushort port, StreamOptions options = StreamOptions.None)
 	{
-		super(options);
+		super("tcp-client", options);
 		this.host = host;
 		this.port = port;
 
@@ -210,7 +217,7 @@ private:
 
 	this(Socket socket, ushort port)
 	{
-		super(StreamOptions.None);
+		super("serial", StreamOptions.None);
 		this.port = port;
 		remote = socket.remoteAddress;
 		host = remote.toString;
@@ -320,3 +327,149 @@ private:
 		}
 	}
 }
+
+class TCPStreamTypeInfo : StreamTypeInfo
+{
+	this()
+	{
+		super(StringLit!"tcp-client");
+	}
+
+	override TCPStream create(KVP[] params)
+	{
+//		return new TCPStream();
+		return null;
+	}
+}
+
+class TCPStreamModule : Plugin
+{
+	mixin RegisterModule!"stream.tcp";
+
+	override void init()
+	{
+//		global.getModule!StreamModule.registerStreamType(new TCPStreamTypeInfo);
+	}
+
+	class Instance : Plugin.Instance
+	{
+		mixin DeclareInstance;
+
+		StreamModule.Instance streamModule() => app.moduleInstance!StreamModule;
+
+		override void init()
+		{
+			app.console.registerCommand("/stream", new TCPStreamCommand(app.console, this));
+		}
+	}
+}
+
+class TCPStreamCommand : Collection
+{
+	TCPStreamModule.Instance instance;
+
+	this(ref Console console, TCPStreamModule.Instance instance)
+	{
+		import urt.mem.string;
+
+		super(console, StringLit!"tcp-client", cast(Collection.Features)(Collection.Features.AddRemove | Collection.Features.SetUnset | Collection.Features.EnableDisable | Collection.Features.Print | Collection.Features.Comment));
+		this.instance = instance;
+	}
+
+	override const(char)[][] getItems()
+	{
+		import urt.mem.allocator;
+		auto streams = instance.app.moduleInstance!StreamModule.streams;
+		const(char)[][] items = tempAllocator.allocArray!(const(char)[])(streams.keys.length);
+		size_t count = 0;
+		foreach (i, k; streams.keys)
+			if (cast(TCPStream)streams.values[i])
+				items[count++] = k;
+		return items[0..count];
+	}
+
+	override void add(KVP[] params)
+	{
+		string name;
+		const(char)[] address;
+		Token* portToken;
+
+		foreach (ref p; params)
+		{
+			if (p.k.type != Token.Type.Identifier)
+				goto bad_parameter;
+			switch (p.k.token[])
+			{
+				case "name":
+					if (p.v.type == Token.Type.String)
+						name = p.v.token[].unQuote.idup;
+					else
+						name = p.v.token[].idup;
+					// TODO: confirm that the stream does not already exist!
+					break;
+				case "address":
+					address = p.v.token[];
+					break;
+				case "port":
+					portToken = &p.v;
+					break;
+				default:
+				bad_parameter:
+					session.writeLine("Invalid parameter name: ", p.k.token);
+					return;
+			}
+		}
+
+		auto streams = &instance.streamModule.streams;
+
+		if (name.empty)
+		{
+			foreach (i; 0 .. ushort.max)
+			{
+				const(char)[] tname = i == 0 ? "tcp-stream" : tconcat("tcp-stream", i);
+				if (tname !in *streams)
+				{
+					name = tname.idup;
+					break;
+				}
+			}
+		}
+
+		const(char)[] portSuffix = address;
+		address = portSuffix.split!':';
+		size_t port = 0;
+
+		if (portToken)
+		{
+			if (portSuffix)
+				return session.writeLine("Port specified twice");
+			portSuffix = portToken.token;
+		}
+
+		size_t taken;
+		if (!portToken || portToken.type == Token.Type.Number)
+			port = portSuffix.parseInt(&taken);
+		if (taken == 0)
+			return session.writeLine("Port must be numeric: ", portSuffix);
+		if (port - 1 > ushort.max - 1)
+			return session.writeLine("Invalid port number (1-65535): ", port);
+
+		(*streams)[name] = new TCPStream(address.idup, cast(ushort)port, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+	}
+
+	override void remove(const(char)[] item)
+	{
+		int x = 0;
+	}
+
+	override void set(const(char)[] item, KVP[] params)
+	{
+		int x = 0;
+	}
+
+	override void print(KVP[] params)
+	{
+		int x = 0;
+	}
+}
+

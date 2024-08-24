@@ -1,6 +1,5 @@
 module urt.mem;
 
-public import urt.mem.alloc;
+public import core.lifetime : emplace, copyEmplace, moveEmplace, forward, move;
+
 public import urt.mem.allocator;
-public import urt.mem.temp;
-public import urt.mem.scratchpad;
