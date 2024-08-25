@@ -79,9 +79,9 @@ if (is(T == ubyte) || is(T == ushort))
 	size_t toHash() const pure nothrow @nogc
 	{
 		static if (size_t.sizeof == 4)
-			return fnv1aHash(toString());
+			return fnv1aHash(cast(ubyte[])toString());
 		else
-			return fnv1aHash64(toString());
+			return fnv1aHash64(cast(ubyte[])toString());
 	}
 
 private:

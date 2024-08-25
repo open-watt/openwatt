@@ -378,6 +378,9 @@
     <DCompile Include="src\manager\console\function_command.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\inet.d">
+      <Filter>src\protocol</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

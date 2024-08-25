@@ -141,9 +141,9 @@ struct String
 	size_t toHash() const pure nothrow @nogc
 	{
 		static if (size_t.sizeof == 4)
-			return fnv1aHash(ptr[0 .. length]);
+			return fnv1aHash(cast(ubyte[])ptr[0 .. length]);
 		else
-			return fnv1aHash64(ptr[0 .. length]);
+			return fnv1aHash64(cast(ubyte[])ptr[0 .. length]);
 	}
 
 private:

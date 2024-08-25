@@ -52,6 +52,11 @@ struct FormatArg
 			// wrap in a delegate that adjusts for format + args...
 			static assert(false);
 		}
+		else static if (__traits(compiles, value.toString(buffer, "format") == 0))
+		{
+			// wrap in a delegate that adjusts for format...
+			static assert(false);
+		}
 		else static if (__traits(compiles, value.toString(buffer) == 0))
 		{
 			// wrap in a delegate...

@@ -27,6 +27,7 @@ long parseInt(const(char)[] str, size_t* bytesTaken = null, ulong* fixedPointDiv
 	ulong divisor = 1;
 	bool neg = false;
 	bool hasPoint = false;
+	bool atLeastOneDigit = false;
 
 	if (str.length == 0)
 		goto done;
@@ -56,12 +57,16 @@ long parseInt(const(char)[] str, size_t* bytesTaken = null, ulong* fixedPointDiv
 		uint digit = getDigit(str[i]);
 		if (digit >= base)
 		{
-			// i guess we should error if we encounter a digit out-of-base???
-			value = 0;
-			i = 0;
+			// if we have taken at least 1 digit, then we can consider this the end of the string...
+			if (!atLeastOneDigit)
+			{
+				value = 0;
+				i = 0;
+			}
 			break;
 		}
 		value = value*base + digit;
+		atLeastOneDigit = true;
 		if (hasPoint)
 			divisor *= base;
 	}

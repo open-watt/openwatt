@@ -23,6 +23,10 @@ template Nullable(T)
 		enum ubyte NullValue = 0xFF;
 		private ubyte _value = NullValue;
 
+		this(typeof(null))
+		{
+			_value = NullValue;
+		}
 		this(T v)
 		{
 			_value = v;
@@ -60,6 +64,10 @@ template Nullable(T)
 		enum T NullValue = isSignedInt!T ? T.min : T.max;
 		T value = NullValue;
 
+		this(typeof(null))
+		{
+			value = NullValue;
+		}
 		this(T v)
 		{
 			value = v;
@@ -94,6 +102,10 @@ template Nullable(T)
 		enum T NullValue = T.nan;
 		T value = NullValue;
 
+		this(typeof(null))
+		{
+			value = NullValue;
+		}
 		this(T v)
 		{
 			value = v;

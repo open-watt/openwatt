@@ -301,23 +301,23 @@ bool wildcardMatch(const(char)[] wildcard, const(char)[] value)
 	return wildcard.length == value.length;
 }
 
-uint fnv1aHash(const(char)[] s) pure nothrow @nogc
+uint fnv1aHash(const(ubyte)[] s) pure nothrow @nogc
 {
     uint hash = 0x811C9DC5; // 32-bit FNV offset basis
-    foreach (char c; s)
+    foreach (ubyte c; s)
 	{
-        hash ^= cast(ubyte)c;
+        hash ^= c;
         hash *= 0x01000193; // 32-bit FNV prime
     }
     return hash;
 }
 
-ulong fnv1aHash64(const(char)[] s) pure nothrow @nogc
+ulong fnv1aHash64(const(ubyte)[] s) pure nothrow @nogc
 {
     ulong hash = 0XCBF29CE484222325; // 64-bit FNV offset basis
-    foreach (char c; s)
+    foreach (ubyte c; s)
 	{
-        hash ^= cast(ubyte)c;
+        hash ^= c;
         hash *= 0x100000001B3; // 64-bit FNV prime
     }
     return hash;

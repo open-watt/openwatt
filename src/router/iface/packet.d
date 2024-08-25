@@ -88,6 +88,32 @@ nothrow @nogc:
 		return 17;
 	}
 
+	bool fromString(const(char)[] s, size_t* taken)
+	{
+		import urt.conv;
+		import urt.string.ascii;
+
+		if (s.length != 17)
+			return false;
+		for (size_t n = 0; n < 17; ++n)
+		{
+			if (n % 3 == 2)
+			{
+				if (s[n] != ':')
+					return false;
+			}
+			else if (!isHex(s[n]))
+				return false;
+		}
+
+		for (size_t i = 0; i < 6; ++i)
+			b[i] = cast(ubyte)parseInt(s[i*3 .. i*3 + 2], null, null, 16);
+
+		if (taken)
+			*taken = 17;
+		return true;
+	}
+
 	auto __debugOverview()
 	{
 		import urt.mem;

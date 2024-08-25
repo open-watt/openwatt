@@ -67,6 +67,7 @@
     <DCompile Include="src\manager\subscriber.d" />
     <DCompile Include="src\manager\units.d" />
     <DCompile Include="src\manager\value.d" />
+    <DCompile Include="src\protocol\inet.d" />
     <DCompile Include="src\protocol\modbus\package.d" />
     <DCompile Include="src\protocol\mqtt\broker.d" />
     <DCompile Include="src\protocol\mqtt\client.d" />
