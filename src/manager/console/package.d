@@ -4,13 +4,14 @@ import manager.instance;
 
 import urt.string.format;
 import urt.string;
-import urt.mem.allocator;
+import urt.mem;
 
 import urt.util;
 
 public import manager.console.builtin_commands;
 public import manager.console.command;
 public import manager.console.expression;
+public import manager.console.function_command;
 public import manager.console.session;
 
 
@@ -223,6 +224,12 @@ struct Console
 		foreach (cmd; commands)
 			s.addCommand(cmd);
 	}
+
+	void registerCommand(alias method, Instance)(const(char)[] _scope, Instance instance)
+	{
+		return registerCommand(_scope, FunctionCommand.create!method(this, instance));
+	}
+
 
     void unregisterCommand(const(char)[] _scope, const(char)[] command)
 	{

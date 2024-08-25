@@ -1,6 +1,6 @@
 module urt.string.string;
 
-import urt.mem.allocator;
+import urt.mem;
 import urt.mem.string : CacheString;
 import urt.string : fnv1aHash, fnv1aHash64;
 import urt.string.tailstring : TailString;
@@ -8,7 +8,12 @@ import urt.string.tailstring : TailString;
 import core.lifetime : move;
 
 
-enum String StringLit(string s) = s.makeString;
+//enum String StringLit(string s) = s.makeString;
+template StringLit(S...) if (S.length == 1 && is(typeof(S[0]) : const(char)[]))
+{
+	enum String StringLit = S.makeString;
+}
+
 
 String makeString(const(char)[] s) nothrow
 {

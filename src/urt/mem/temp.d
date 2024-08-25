@@ -1,6 +1,6 @@
 module urt.mem.temp;
 
-import urt.mem.allocator;
+import urt.mem;
 
 version = DebugTempAlloc;
 

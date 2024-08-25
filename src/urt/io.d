@@ -2,6 +2,9 @@ module urt.io;
 
 import core.stdc.stdio;
 
+
+nothrow @nogc:
+
 int write(const(char)[] str)
 {
 	return printf("%.*s", cast(int)str.length, str.ptr);

@@ -11,6 +11,9 @@ nothrow @nogc:
 
 	ulong ticks;
 
+	bool opCast(T : bool)() const
+		=> ticks != 0;
+
 	bool opEquals(MonoTime b) const pure
 		=> ticks == b.ticks;
 
@@ -32,7 +35,7 @@ nothrow @nogc:
 	import urt.string.format : FormatArg;
 	ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const
 	{
-		size_t len = timeToString(appTime(this).as!"msecs", buffer.length > 2 ? buffer[2..$] : buffer);
+		size_t len = timeToString((ticks != 0 ? appTime(this) : Duration()).as!"msecs", buffer.length > 2 ? buffer[2..$] : buffer);
 		if (len)
 		{
 			if (buffer.length > 2)

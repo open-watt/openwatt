@@ -12,9 +12,9 @@ class BridgeInterface : BaseInterface
 {
 	BaseInterface[] members;
 
-	this(String name)
+	this(InterfaceModule.Instance m, String name)
 	{
-		super(name, StringLit!"bridge");
+		super(m, name, StringLit!"bridge");
 	}
 
 	bool addMember(BaseInterface iface)
@@ -25,6 +25,9 @@ class BridgeInterface : BaseInterface
 				return false;
 		}
 		members ~= iface;
+
+		iface.subscribe(&incomingPacket, PacketFilter());
+
 		return true;
 	}
 
@@ -48,6 +51,10 @@ class BridgeInterface : BaseInterface
 	}
 
 	override void update()
+	{
+	}
+
+	void incomingPacket(ref const Packet packet, BaseInterface srcInterface) nothrow @nogc
 	{
 	}
 }

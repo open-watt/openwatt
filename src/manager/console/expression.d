@@ -6,6 +6,8 @@ import urt.string;
 
 struct Token
 {
+pure nothrow @nogc:
+
 	enum Type : byte
 	{
 		Error = -1,
@@ -36,16 +38,16 @@ struct Token
 		this.ptr = token.ptr;
 	}
 
-	Type type() => cast(Type)(type_len >> 24);
-	const(char)[] token() => ptr[0 .. type_len & 0xFFFFFF];
+	Type type() const => cast(Type)(type_len >> 24);
+	const(char)[] token() const => ptr[0 .. type_len & 0xFFFFFF];
 
 private:
 	const(char)* ptr = null;
 	uint type_len = 0;
 
 	struct Val { Type _type; const(char)[] _token; const(char)* ptr; uint type_len; }
-	auto __debugOverview() => Val(type, token, ptr, type_len);
-	auto __debugExpanded() => Val(type, token, ptr, type_len);
+	auto __debugOverview() const => Val(type, token, ptr, type_len);
+	auto __debugExpanded() const => Val(type, token, ptr, type_len);
 }
 
 struct KVP
@@ -339,7 +341,7 @@ Token takePair(ref const(char)[] text)
 	}
 }
 
-Token.Type determineTokenType(const(char)[] token)
+Token.Type determineTokenType(const(char)[] token) pure nothrow @nogc
 {
 	Token.Type type = Token.Type.Token;
 	if (token.length == 0)

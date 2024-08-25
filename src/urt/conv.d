@@ -1,5 +1,6 @@
 module urt.conv;
 
+import urt.meta;
 import urt.string;
 
 // on error or not-a-number cases, bytesTaken will contain 0
@@ -207,3 +208,33 @@ unittest
 	len = formatInt(-123, buffer, 10, 6);
 	assert(buffer[0 .. len] == "  -123");
 }
+
+
+
+
+/+
+size_t formatStruct(T)(ref T value, char[] buffer) nothrow @nogc
+{
+	import urt.string.format;
+
+	static assert(is(T == struct), "T must be some struct");
+
+	alias args = value.tupleof;
+//	alias args = AliasSeq!(value.tupleof);
+//	alias args = InterleaveSeparator!(", ", value.tupleof);
+//	pragma(msg, args);
+	return concat(buffer, args).length;
+}
+
+unittest
+{
+	import router.iface;
+
+	Packet p;
+
+	char[1024] buffer;
+	size_t len = formatStruct(p, buffer);
+	assert(buffer[0 .. len] == "Packet()");
+
+}
++/

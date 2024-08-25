@@ -32,16 +32,14 @@ class TeslaInterface : BaseInterface
 
 	DeviceMap[] devices;
 
-	this(String name, Stream stream)
+	this(InterfaceModule.Instance m, String name, Stream stream)
 	{
-		super(name, StringLit!"tesla-twc");
+		super(m, name, StringLit!"tesla-twc");
 		this.stream = stream;
 
 		// how much buffer do we need? messages are 17-19 bytes...
 		sendBufferLen = 512;
-		recvBufferLen = 512;
-
-		buffer = defaultAllocator.alloc(sendBufferLen + recvBufferLen).ptr;
+		buffer = defaultAllocator.alloc(sendBufferLen).ptr;
 	}
 
 	override void update()
@@ -110,7 +108,9 @@ class TeslaInterface : BaseInterface
 			if (!r)
 				return;
 
-			Packet* p = createPacket(now, EtherType.ENMS, msg);
+			Packet p = Packet(msg);
+			p.creationTime = now;
+			p.etherType = EtherType.ENMS;
 			p.etherSubType = ENMS_SubType.TeslaTWC;
 
 			DeviceMap* map = findServerByAddress(message.sender);
@@ -144,7 +144,7 @@ class TeslaInterface : BaseInterface
 				p.dst = map.mac;
 			}
 
-			//???
+			dispatch(p);
 		}
 	}
 
@@ -189,7 +189,7 @@ class TeslaInterfaceModule : Plugin
 
 		override void init()
 		{
-			app.console.registerCommand("/interface", new TeslaInterfaceCommand(app.console, this));
+			app.console.registerCommand!add("/interface/tesla-twc", this);
 		}
 
 		override void update()
@@ -197,100 +197,40 @@ class TeslaInterfaceModule : Plugin
 			foreach (ref i; interfaces)
 				i.update();
 		}
+
+		void add(Session session, const(char)[] name, const(char)[] stream)
+		{
+			Stream s = app.moduleInstance!StreamModule.getStream(stream);
+			if (!s)
+			{
+				session.writeLine("Stream does not exist: ", stream);
+				return;
+			}
+
+			if (name.empty)
+			{
+				foreach (i; 0 .. ushort.max)
+				{
+					const(char)[] tname = i == 0 ? "tesla-twc" : tconcat("tesla-twc", i);
+					if (tname.makeString(tempAllocator()) !in interfaces)
+					{
+						name = tname.makeString(defaultAllocator());
+						break;
+					}
+				}
+			}
+			String n = name.makeString(defaultAllocator());
+
+			interfaces[n] = new TeslaInterface(app.moduleInstance!InterfaceModule, n, s);
+
+			// HACK: we'll print packets that we receive...
+			interfaces[n].subscribe((ref const Packet p, BaseInterface i) {
+				import urt.io;
+				writef("{0}: TWC packet received {1}-->{2} [{3}]\n", i.name, p.src, p.dst, p.data);
+			}, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.TeslaTWC));
+		}
 	}
 }
 
 
 private:
-
-class TeslaInterfaceCommand : Collection
-{
-	import manager.console.expression;
-
-	TeslaInterfaceModule.Instance instance;
-
-	this(ref Console console, TeslaInterfaceModule.Instance instance)
-	{
-		import urt.mem.string;
-
-		super(console, StringLit!"tesla-twc", cast(Collection.Features)(Collection.Features.AddRemove | Collection.Features.SetUnset | Collection.Features.EnableDisable | Collection.Features.Print | Collection.Features.Comment));
-		this.instance = instance;
-	}
-
-	override const(char)[][] getItems()
-	{
-		return null;
-	}
-
-	override void add(KVP[] params)
-	{
-		String name;
-		Stream stream;
-
-		foreach (ref p; params)
-		{
-			if (p.k.type != Token.Type.Identifier)
-				goto bad_parameter;
-			switch (p.k.token[])
-			{
-				case "name":
-					if (p.v.type == Token.Type.String)
-						name = p.v.token[].unQuote.makeString(defaultAllocator());
-					else
-						name = p.v.token[].makeString(defaultAllocator());
-					break;
-					// TODO: confirm that the stream does not already exist!
-				case "stream":
-					const(char)[] streamName;
-					if (p.v.type == Token.Type.String)
-						streamName = p.v.token[].unQuote;
-					else
-						streamName = p.v.token[];
-
-					stream = instance.app.moduleInstance!StreamModule.getStream(streamName);
-
-					if (!stream)
-					{
-						session.writeLine("Stream does not exist: ", streamName);
-						return;
-					}
-					break;
-				default:
-				bad_parameter:
-					session.writeLine("Invalid parameter name: ", p.k.token);
-					return;
-			}
-		}
-
-		if (name.empty)
-		{
-			foreach (i; 0 .. ushort.max)
-			{
-				const(char)[] tname = i == 0 ? "tesla-twc" : tconcat("tesla-twc", i);
-				if (tname.makeString(tempAllocator()) !in instance.interfaces)
-				{
-					name = tname.makeString(defaultAllocator());
-					break;
-				}
-			}
-		}
-
-		instance.interfaces[name] = new TeslaInterface(name, stream);
-	}
-
-	override void remove(const(char)[] item)
-	{
-		int x = 0;
-	}
-
-	override void set(const(char)[] item, KVP[] params)
-	{
-		int x = 0;
-	}
-
-	override void print(KVP[] params)
-	{
-		int x = 0;
-	}
-}
-

@@ -1,6 +1,7 @@
 module router.iface.modbus;
 
 import urt.mem;
+import urt.meta.nullable;
 import urt.string;
 import urt.string.format;
 import urt.time;
@@ -56,17 +57,15 @@ class ModbusInterface : BaseInterface
 	MACAddress masterMac;
 	ModbusFrameType expectMessageType = ModbusFrameType.Unknown;
 
-	this(String name, Stream stream, ModbusProtocol protocol, bool isMaster)
+	this(InterfaceModule.Instance m, String name, Stream stream, ModbusProtocol protocol, bool isMaster)
 	{
-		super(name, StringLit!"modbus");
+		super(m, name, StringLit!"modbus");
 		this.stream = stream;
 		this.protocol = protocol;
 		this.isBusMaster = isMaster;
 
 		sendBufferLen = 4 * 1024;
-		recvBufferLen = 4 * 1024;
-
-		buffer = defaultAllocator.alloc(sendBufferLen + recvBufferLen).ptr;
+		buffer = defaultAllocator.alloc(sendBufferLen).ptr;
 
 		if (!isMaster)
 			masterMac = generateMac(name, 0xFF);
@@ -190,10 +189,14 @@ class ModbusInterface : BaseInterface
 					// we'll need to discard messages until we get one that we know, and then we can predict future messages from there...
 					if (type != ModbusFrameType.Unknown)
 					{
-						Packet* p = createPacket(now, EtherType.ENMS, message);
+						Packet p = Packet(message);
+						p.creationTime = now;
 						p.src = type == ModbusFrameType.Request ? masterMac : targetMac;
 						p.dst = type == ModbusFrameType.Request ? targetMac : masterMac;
+						p.etherType = EtherType.ENMS;
 						p.etherSubType = ENMS_SubType.Modbus;
+
+						dispatch(p);
 
 						expectMessageType = type == ModbusFrameType.Request ? ModbusFrameType.Response : ModbusFrameType.Request;
 					}
@@ -270,7 +273,7 @@ class ModbusInterfaceModule : Plugin
 
 		override void init()
 		{
-			app.console.registerCommand("/interface", new ModbusInterfaceCommand(app.console, this));
+			app.console.registerCommand!add("/interface/modbus", this);
 		}
 
 		override void update()
@@ -278,132 +281,67 @@ class ModbusInterfaceModule : Plugin
 			foreach (ref i; interfaces)
 				i.update();
 		}
+
+		// /interface/modbus/add command
+		// TODO: protocol enum!
+		void add(Session session, const(char)[] name, const(char)[] stream, const(char)[] protocol, Nullable!bool master)
+		{
+			// is it an error to not specify a stream?
+			assert(stream, "'stream' must be specified");
+
+			Stream s = app.moduleInstance!StreamModule.getStream(stream);
+
+			ModbusProtocol p = ModbusProtocol.Unknown;
+			switch (protocol)
+			{
+				case "rtu":
+					p = ModbusProtocol.RTU;
+					break;
+				case "tcp":
+					p = ModbusProtocol.TCP;
+					break;
+				case "ascii":
+					p = ModbusProtocol.ASCII;
+					break;
+				default:
+					session.writeLine("Invalid modbus protocol '", protocol, "', expect 'rtu|tcp|ascii'.");
+					return;
+			}
+			if (p == ModbusProtocol.Unknown)
+			{
+				if (s && s.type == "tcp-client") // TODO: UDP here too... but what is the type called?
+					p = ModbusProtocol.TCP;
+				else
+					p = ModbusProtocol.RTU;
+			}
+
+			if (name.empty)
+			{
+				foreach (i; 0 .. ushort.max)
+				{
+					const(char)[] tname = i == 0 ? "modbus" : tconcat("modbus", i);
+					if (tname.makeString(tempAllocator()) !in interfaces)
+					{
+						name = tname.makeString(defaultAllocator());
+						break;
+					}
+				}
+			}
+			String n = name.makeString(defaultAllocator());
+
+			interfaces[n] = new ModbusInterface(app.moduleInstance!InterfaceModule, n, s, p, master ? master.value : false);
+
+			// HACK: we'll print packets that we receive...
+			interfaces[n].subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {
+				import urt.io;
+				writef("{0}: Modbus packet received: {1}->{2} [{3}]\n", i.name, p.src, p.dst, p.data);
+			}, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
+		}
 	}
 }
 
 
 private:
-
-class ModbusInterfaceCommand : Collection
-{
-	import manager.console.expression;
-
-	ModbusInterfaceModule.Instance instance;
-
-	this(ref Console console, ModbusInterfaceModule.Instance instance)
-	{
-		import urt.mem.string;
-
-		super(console, StringLit!"modbus", cast(Collection.Features)(Collection.Features.AddRemove | Collection.Features.SetUnset | Collection.Features.EnableDisable | Collection.Features.Print | Collection.Features.Comment));
-		this.instance = instance;
-	}
-
-	override const(char)[][] getItems()
-	{
-		return null;
-	}
-
-	override void add(KVP[] params)
-	{
-		String name;
-		Stream stream;
-		ModbusProtocol protocol = ModbusProtocol.Unknown;
-		bool master = false;
-
-		foreach (ref p; params)
-		{
-			if (p.k.type != Token.Type.Identifier)
-				goto bad_parameter;
-			switch (p.k.token[])
-			{
-				case "name":
-					if (p.v.type == Token.Type.String)
-						name = p.v.token[].unQuote.makeString(defaultAllocator());
-					else
-						name = p.v.token[].makeString(defaultAllocator());
-					break;
-					// TODO: confirm that the stream does not already exist!
-				case "stream":
-					const(char)[] streamName;
-					if (p.v.type == Token.Type.String)
-						streamName = p.v.token[].unQuote;
-					else
-						streamName = p.v.token[];
-
-					stream = instance.app.moduleInstance!StreamModule.getStream(streamName);
-
-					if (!stream)
-					{
-						session.writeLine("Stream does not exist: ", streamName);
-						return;
-					}
-					break;
-				case "protocol":
-					switch (p.v.token[])
-					{
-						case "rtu":
-							protocol = ModbusProtocol.RTU;
-							break;
-						case "tcp":
-							protocol = ModbusProtocol.TCP;
-							break;
-						case "ascii":
-							protocol = ModbusProtocol.ASCII;
-							break;
-						default:
-							session.writeLine("Invalid modbus protocol '", p.v.token, "', expect 'rtu|tcp|ascii'.");
-							return;
-					}
-					break;
-				case "master":
-					master = p.v.token[] == "true";
-					break;
-				default:
-				bad_parameter:
-					session.writeLine("Invalid parameter name: ", p.k.token);
-					return;
-			}
-		}
-
-		if (name.empty)
-		{
-			foreach (i; 0 .. ushort.max)
-			{
-				const(char)[] tname = i == 0 ? "modbus" : tconcat("modbus", i);
-				if (tname.makeString(tempAllocator()) !in instance.interfaces)
-				{
-					name = tname.makeString(defaultAllocator());
-					break;
-				}
-			}
-		}
-
-		if (protocol == ModbusProtocol.Unknown)
-		{
-			if (stream.type == "tcp-client") // TODO: UDP here too... but what is the type called?
-				protocol = ModbusProtocol.TCP;
-			else
-				protocol = ModbusProtocol.RTU;
-		}
-
-		instance.interfaces[name] = new ModbusInterface(name, stream, protocol, master);
-	}
-
-	override void remove(const(char)[] item)
-	{
-		int x = 0;
-	}
-
-	override void set(const(char)[] item, KVP[] params)
-	{
-		int x = 0;
-	}
-
-	override void print(KVP[] params)
-	{
-		int x = 0;
-	}
-}
 
 
 enum ModbusFrameType : ubyte

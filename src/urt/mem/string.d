@@ -1,6 +1,6 @@
 module urt.mem.string;
 
-import urt.mem.allocator;
+import urt.mem;
 import urt.string;
 
 

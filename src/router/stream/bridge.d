@@ -113,11 +113,11 @@ class BridgeStream : Stream
 			{
 				bytes = streams[i].read(buf);
 
-				debug
-				{
-					if (bytes)
-						writeDebugf("From {0}:\n{1}\n", i, cast(void[])buf[0..bytes]);
-				}
+//				debug
+//				{
+//					if (bytes)
+//						writeDebugf("From {0}:\n{1}\n", i, cast(void[])buf[0..bytes]);
+//				}
 
 				if (bytes == 0)
 					break;
@@ -154,113 +154,45 @@ class BridgeStreamModule : Plugin
 	{
 		mixin DeclareInstance;
 
-//		StreamModule.Instance streamModule() => app.moduleInstance!StreamModule;
-
 		override void init()
 		{
-			app.console.registerCommand("/stream", new BridgeStreamCommand(app.console, this));
-		}
-	}
-}
-
-
-class BridgeStreamCommand : Collection
-{
-	BridgeStreamModule.Instance instance;
-
-	this(ref Console console, BridgeStreamModule.Instance instance)
-	{
-		import urt.mem.string;
-
-		super(console, StringLit!"bridge", cast(Collection.Features)(Collection.Features.AddRemove | Collection.Features.SetUnset | Collection.Features.EnableDisable | Collection.Features.Print | Collection.Features.Comment));
-		this.instance = instance;
-	}
-
-	override const(char)[][] getItems()
-	{
-		import urt.mem.allocator;
-		auto streams = instance.app.moduleInstance!StreamModule.streams;
-		const(char)[][] items = tempAllocator.allocArray!(const(char)[])(streams.keys.length);
-		size_t count = 0;
-		foreach (i, k; streams.keys)
-			if (cast(BridgeStream)streams.values[i])
-				items[count++] = k;
-		return items[0..count];
-	}
-
-	override void add(KVP[] params)
-	{
-		string name;
-		const(char)[] source;
-
-		foreach (ref p; params)
-		{
-			if (p.k.type != Token.Type.Identifier)
-				goto bad_parameter;
-			switch (p.k.token[])
-			{
-				case "name":
-					if (p.v.type == Token.Type.String)
-						name = p.v.token[].unQuote.idup;
-					else
-						name = p.v.token[].idup;
-					// TODO: confirm that the stream does not already exist!
-					break;
-				case "source":
-					source = p.v.token[];
-					break;
-				default:
-				bad_parameter:
-					session.writeLine("Invalid parameter name: ", p.k.token);
-					return;
-			}
+			app.console.registerCommand!add("/stream/bridge", this);
 		}
 
-		auto streams = &instance.app.moduleInstance!StreamModule.streams;
 
-		if (name.empty)
+		// TODO: source should be an array, and let the external code separate and validate the array args...
+		void add(Session session, const(char)[] name, const(char)[] source)
 		{
-			foreach (i; 0 .. ushort.max)
+			auto streams = &app.moduleInstance!StreamModule.streams;
+
+			if (name.empty)
 			{
-				const(char)[] tname = i == 0 ? "bridge" : tconcat("bridge", i);
-				if (tname !in *streams)
+				foreach (i; 0 .. ushort.max)
 				{
-					name = tname.idup;
-					break;
+					const(char)[] tname = i == 0 ? "bridge" : tconcat("bridge", i);
+					if (tname !in *streams)
+					{
+						name = tname.idup;
+						break;
+					}
 				}
 			}
+
+			// parse source streams...
+			const(char)[] streamName;
+			Stream[] sourceStreams;
+			while (true)
+			{
+				streamName = source.split!',';
+				if (!streamName)
+					break;
+
+				Stream* s = streamName in *streams;
+				if (s)
+					sourceStreams ~= *s;
+			}
+
+			(*streams)[name] = new BridgeStream(StreamOptions.NonBlocking | StreamOptions.KeepAlive, sourceStreams);
 		}
-
-		// parse source streams...
-		const(char)[] streamName;
-		Stream[] sourceStreams;
-		while (true)
-		{
-			streamName = source.split!',';
-			if (!streamName)
-				break;
-
-			Stream* s = streamName in *streams;
-			if (s)
-				sourceStreams ~= *s;
-		}
-
-		(*streams)[name] = new BridgeStream(StreamOptions.NonBlocking | StreamOptions.KeepAlive, sourceStreams);
-	}
-
-	override void remove(const(char)[] item)
-	{
-		int x = 0;
-	}
-
-	override void set(const(char)[] item, KVP[] params)
-	{
-		int x = 0;
-	}
-
-	override void print(KVP[] params)
-	{
-		int x = 0;
 	}
 }
-

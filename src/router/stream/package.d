@@ -4,6 +4,7 @@ import core.lifetime;
 
 import urt.conv;
 import urt.mem.string;
+import urt.meta.nullable;
 import urt.string;
 import urt.string.format;
 import urt.time;
@@ -118,7 +119,7 @@ class StreamModule : Plugin
 
 		override void init()
 		{
-			app.console.registerCommand("/", new StreamCommand(app.console, this));
+			app.console.registerCommand!add("/stream", this);
 		}
 
 		Stream getStream(const(char)[] name)
@@ -163,145 +164,69 @@ class StreamModule : Plugin
 				}
 			}
 		}
+
+		void add(Session session, const(char)[] name, const(char)[] type, const(char)[] address, const(char)[] source, Nullable!int port)
+		{
+			if (name.empty)
+			{
+				foreach (i; 0 .. ushort.max)
+				{
+					const(char)[] tname = i == 0 ? type : tconcat(type, i);
+					if (tname !in streams)
+					{
+						name = tname.idup;
+						break;
+					}
+				}
+			}
+
+			switch (type)
+			{
+				case "tcp-client":
+					const(char)[] portSuffix = address;
+					address = portSuffix.split!':';
+					uint portNumber = 0;
+
+					if (port)
+					{
+						if (portSuffix)
+							return session.writeLine("Port specified twice");
+						portNumber = port.value;
+					}
+
+					size_t taken;
+					if (!port)
+					{
+						portNumber = cast(uint)portSuffix.parseInt(&taken);
+						if (taken == 0)
+							return session.writeLine("Port must be numeric: ", portSuffix);
+					}
+					if (portNumber - 1 > ushort.max - 1)
+						return session.writeLine("Invalid port number (1-65535): ", portNumber);
+
+//					instance.streams[name] = new TCPStream(address.idup, cast(ushort)port, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+					break;
+
+				case "bridge":
+					Stream[] bridgeStreams;
+					while (!source.empty)
+					{
+						const(char)[] stream = source.split!','.unQuote;
+						Stream* s = stream in streams;
+						if (!s)
+							return session.writeLine("Stream doesn't exist: ", stream);
+						bridgeStreams ~= *s;
+					}
+//					(*streams)[name] = new BridgeStream(StreamOptions.NonBlocking | StreamOptions.KeepAlive, bridgeStreams);
+					break;
+
+				default:
+					session.writeLine("Invalid stream type: ", type);
+					return;
+			}
+		}
 	}
 }
 
 
 private:
-
-class StreamCommand : Collection
-{
-	import manager.console.expression;
-
-	StreamModule.Instance instance;
-
-	this(ref Console console, StreamModule.Instance instance)
-	{
-		import urt.mem.string;
-
-		super(console, StringLit!"stream", cast(Collection.Features)(Collection.Features.AddRemove | Collection.Features.SetUnset | Collection.Features.EnableDisable | Collection.Features.Print | Collection.Features.Comment));
-		this.instance = instance;
-	}
-
-	override const(char)[][] getItems()
-	{
-		import urt.mem.allocator;
-		const(char)[][] items = tempAllocator.allocArray!(const(char)[])(instance.streams.keys.length);
-		foreach (i, k; instance.streams.keys)
-			items[i] = k;
-		return items;
-	}
-
-	override void add(KVP[] params)
-	{
-		string name;
-		const(char)[] type;
-		const(char)[] address;
-		const(char)[] source;
-		Token* portToken;
-
-		foreach (ref p; params)
-		{
-			if (p.k.type != Token.Type.Identifier)
-				goto bad_parameter;
-			switch (p.k.token[])
-			{
-				case "name":
-					if (p.v.type == Token.Type.String)
-						name = p.v.token[].unQuote.idup;
-					else
-						name = p.v.token[].idup;
-					break;
-				case "type":
-					type = p.v.token[];
-					break;
-				case "address":
-					address = p.v.token[];
-					break;
-				case "source":
-					source = p.v.token[];
-					break;
-				case "port":
-					portToken = &p.v;
-					break;
-				default:
-				bad_parameter:
-					session.writeLine("Invalid parameter name: ", p.k.token);
-					return;
-			}
-		}
-
-		if (name.empty)
-		{
-			foreach (i; 0 .. ushort.max)
-			{
-				const(char)[] tname = i == 0 ? type : tconcat(type, i);
-				if (tname !in instance.streams)
-				{
-					name = tname.idup;
-					break;
-				}
-			}
-		}
-
-		switch (type)
-		{
-			case "tcp-client":
-				const(char)[] portSuffix = address;
-				address = portSuffix.split!':';
-				size_t port = 0;
-
-				if (portToken)
-				{
-					if (portSuffix)
-						return session.writeLine("Port specified twice");
-					portSuffix = portToken.token;
-				}
-
-				size_t taken;
-				if (!portToken || portToken.type == Token.Type.Number)
-					port = portSuffix.parseInt(&taken);
-				if (taken == 0)
-					return session.writeLine("Port must be numeric: ", portSuffix);
-				if (port - 1 > ushort.max - 1)
-					return session.writeLine("Invalid port number (1-65535): ", port);
-
-//				instance.streams[name] = new TCPStream(address.idup, cast(ushort)port, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
-				break;
-
-			case "bridge":
-				Stream[] bridgeStreams;
-				auto streams = &instance.streams;
-				while (!source.empty)
-				{
-					const(char)[] stream = source.split!','.unQuote;
-					Stream* s = stream in *streams;
-					if (!s)
-						return session.writeLine("Stream doesn't exist: ", stream);
-					bridgeStreams ~= *s;
-				}
-//				(*streams)[name] = new BridgeStream(StreamOptions.NonBlocking | StreamOptions.KeepAlive, bridgeStreams);
-				break;
-
-			default:
-				session.writeLine("Invalid stream type: ", type);
-				return;
-		}
-	}
-
-	override void remove(const(char)[] item)
-	{
-		int x = 0;
-	}
-
-	override void set(const(char)[] item, KVP[] params)
-	{
-		int x = 0;
-	}
-
-	override void print(KVP[] params)
-	{
-		int x = 0;
-	}
-}
-

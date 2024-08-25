@@ -42,7 +42,7 @@ class ApplicationInstance
 
 	this()
 	{
-		import urt.mem.allocator;
+		import urt.mem;
 
 		console = Console(this, String("console".addString), Mallocator.instance);
 	}

@@ -372,6 +372,12 @@
     <DCompile Include="src\protocol\tesla\twc.d">
       <Filter>src\protocol\tesla</Filter>
     </DCompile>
+    <DCompile Include="src\urt\meta\tuple.d">
+      <Filter>src\urt\meta</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\function_command.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

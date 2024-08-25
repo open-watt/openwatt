@@ -21,18 +21,39 @@ enum BufferOverflowBehaviour : byte
 
 struct PacketFilter
 {
+	alias FilterCallback = bool delegate(ref const Packet p) nothrow @nogc;
+
 	MACAddress src;
 	MACAddress dst;
 	ushort etherType;
 	ushort enmsSubType;
 	ushort vlan;
-	bool function(ref const Packet p) filter;
+	FilterCallback customFilter;
+
+	bool match(ref Packet p)
+	{
+		if (etherType && p.etherType != etherType)
+			return false;
+		if (enmsSubType && p.etherSubType != enmsSubType)
+			return false;
+		if (vlan && p.vlan != vlan)
+			return false;
+		if (src && p.src != src)
+			return false;
+		if (dst && p.dst != dst)
+			return false;
+		if (customFilter)
+			return customFilter(p);
+		return true;
+	}
 }
 
 struct InterfaceSubscriber
 {
+	alias IncomingPacketHandler = void delegate(ref const Packet p, BaseInterface i) nothrow @nogc;
+
 	PacketFilter filter;
-	void function(ref const Packet p) recvPacket;
+	IncomingPacketHandler recvPacket;
 }
 
 struct InterfaceStatus
@@ -58,22 +79,34 @@ struct InterfaceStatus
 
 class BaseInterface
 {
+	InterfaceModule.Instance mod_iface;
+
 	String name;
 	String type;
 
 	MACAddress mac;
+	MACAddress[] discovered;
 
 	InterfaceSubscriber[] subscribers;
 
 	BufferOverflowBehaviour sendBehaviour;
 	BufferOverflowBehaviour recvBehaviour;
 
-	this(String name, String type)
+	this(InterfaceModule.Instance m, String name, String type)
 	{
+		this.mod_iface = m;
 		this.name = name;
 		this.type = type;
 
 		mac = MACAddress();
+		mod_iface.addAddress(mac, this);
+	}
+
+	~this()
+	{
+		foreach(ref a; discovered)
+			mod_iface.removeAddress(a);
+		mod_iface.removeAddress(mac);
 	}
 
 	void update()
@@ -81,10 +114,12 @@ class BaseInterface
 	}
 
 	final size_t packetsPending() => sendQueue.length;
-	final size_t packetsAvailable() => recvQueue.length;
-
 	final size_t bytesPending() => sendUse();
-	final size_t bytesAvailable() => recvUse();
+
+	void subscribe(InterfaceSubscriber.IncomingPacketHandler packetHandler, PacketFilter filter)
+	{
+		subscribers ~= InterfaceSubscriber(filter, packetHandler);
+	}
 
 	ptrdiff_t send(const(void)[] packet)
 	{
@@ -126,87 +161,63 @@ class BaseInterface
 		return packet.length;
 	}
 
-	ptrdiff_t recv(void[] buffer, MonoTime* timestamp)
-	{
-		if (recvQueue.empty)
-			return 0;
-
-		size_t packetLen = recvQueue[0].length;
-		if (!buffer.ptr)
-			return packetLen;
-		if (buffer.length < packetLen)
-			return -1;
-
-		if (timestamp)
-			*timestamp = recvQueue[0].creationTime;
-
-		buffer[0 .. packetLen] = recvQueue[0].data;
-		recvBufferReadCursor = (recvBufferReadCursor + packetLen) % recvBufferLen;
-
-		recvQueue = recvQueue[1 .. $];
-
-		return packetLen;
-	}
-
 package:
-	Packet[] recvQueue;
 	Packet[] sendQueue;
 
 	void* buffer;
 
 	uint sendBufferLen = 32 * 1024;
-	uint recvBufferLen = 64 * 1024;
 	uint sendBufferReadCursor;
 	uint sendBufferWriteCursor;
-	uint recvBufferReadCursor;
-	uint recvBufferWriteCursor;
 
 	final void[] sendBuffer() => buffer[0 .. sendBufferLen];
-	final void[] recvBuffer() => buffer[sendBufferLen .. sendBufferLen + recvBufferLen];
 
 	final size_t sendAvail() => sendBufferWriteCursor > sendBufferReadCursor ? sendBufferLen - sendBufferWriteCursor + sendBufferReadCursor : sendBufferReadCursor - sendBufferWriteCursor;
 	final size_t sendUse() => sendBufferWriteCursor > sendBufferReadCursor ? sendBufferWriteCursor - sendBufferReadCursor : sendBufferLen - sendBufferReadCursor + sendBufferWriteCursor;
-	final size_t recvAvail() => recvBufferWriteCursor > recvBufferReadCursor ? recvBufferLen - recvBufferWriteCursor + recvBufferReadCursor : recvBufferReadCursor - recvBufferWriteCursor;
-	final size_t recvUse() => recvBufferWriteCursor > recvBufferReadCursor ? recvBufferWriteCursor - recvBufferWriteCursor : recvBufferLen - recvBufferReadCursor + recvBufferWriteCursor;
 
-	Packet* createPacket(MonoTime creationTime, ushort etherType, const(void)[] packet)
+	size_t findMacAddress(MACAddress mac)
 	{
-		if (packet.length > recvBufferLen - recvBufferWriteCursor)
+		foreach (i, ref a; discovered)
 		{
-			// we won't split the message, we'll just discard data until there's enough room at the start of the buffer again
-			while (recvBufferReadCursor < packet.length)
+			if (a == mac)
+				return i;
+		}
+		return -1;
+	}
+
+	void addMacAddress(MACAddress mac)
+	{
+		if (findMacAddress(mac) == -1)
+		{
+			discovered ~= mac;
+
+			// add to global mac table!
+		}
+	}
+
+	void dispatch(ref Packet packet)
+	{
+		// check if we ever saw the sender before...
+		bool found = false;
+		foreach (i, ref a; discovered)
+		{
+			if (packet.src == a)
 			{
-				final switch (recvBehaviour)
-				{
-					case BufferOverflowBehaviour.DropOldest:
-						recvBufferReadCursor += recvQueue[0].length;
-						if (recvBufferReadCursor >= recvBufferLen)
-							recvBufferReadCursor -= recvBufferLen;
-						recvQueue = recvQueue[1 .. $];
-						break;
-					case BufferOverflowBehaviour.DropNewest:
-						assert(false);
-						break;
-					case BufferOverflowBehaviour.Fail:
-						assert(false);
-						break;
-				}
+				found = true;
+				break;
 			}
-			recvBufferWriteCursor = 0;
+		}
+		if (!found)
+		{
+			discovered ~= packet.src;
+			mod_iface.addAddress(packet.src, this);
 		}
 
-		void[] bufferedMessage = recvBuffer[recvBufferWriteCursor .. recvBufferWriteCursor + packet.length];
-		recvBufferWriteCursor += packet.length;
-
-		bufferedMessage[] = packet[];
-
-		recvQueue ~= Packet();
-		Packet* p = &recvQueue[$-1];
-		p.creationTime = creationTime;
-		p.etherType = etherType;
-		p.length = cast(ushort)bufferedMessage.length;
-		p.ptr = bufferedMessage.ptr;
-		return p;
+		foreach (ref subscriber; subscribers)
+		{
+			if (subscriber.filter.match(packet))
+				subscriber.recvPacket(packet, this);
+		}
 	}
 }
 
@@ -219,53 +230,31 @@ class InterfaceModule : Plugin
 	{
 		mixin DeclareInstance;
 
+		BaseInterface[MACAddress] macTable;
+
 		override void init()
 		{
-			app.console.registerCommand("/", new InterfaceCommand(app.console, this));
+		}
+
+		final void addAddress(MACAddress mac, BaseInterface iface)
+		{
+			macTable[mac] = iface;
+		}
+
+		final void removeAddress(MACAddress mac)
+		{
+			macTable.remove(mac);
+		}
+
+		final BaseInterface whoHas(MACAddress mac)
+		{
+			BaseInterface* i = mac in macTable;
+			if (i)
+				return *i;
+			return null;
 		}
 	}
 }
 
 
 private:
-
-class InterfaceCommand : Collection
-{
-	import manager.console.expression;
-
-	InterfaceModule.Instance instance;
-
-	this(ref Console console, InterfaceModule.Instance instance)
-	{
-		import urt.mem.string;
-
-		super(console, StringLit!"interface", cast(Collection.Features)(Collection.Features.AddRemove | Collection.Features.SetUnset | Collection.Features.EnableDisable | Collection.Features.Print | Collection.Features.Comment));
-		this.instance = instance;
-	}
-
-	override const(char)[][] getItems()
-	{
-		return null;
-	}
-
-	override void add(KVP[] params)
-	{
-		int x = 0;
-	}
-
-	override void remove(const(char)[] item)
-	{
-		int x = 0;
-	}
-
-	override void set(const(char)[] item, KVP[] params)
-	{
-		int x = 0;
-	}
-
-	override void print(KVP[] params)
-	{
-		int x = 0;
-	}
-}
-

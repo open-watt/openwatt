@@ -53,6 +53,7 @@
     <DCompile Include="src\manager\console\builtin_commands.d" />
     <DCompile Include="src\manager\console\command.d" />
     <DCompile Include="src\manager\console\expression.d" />
+    <DCompile Include="src\manager\console\function_command.d" />
     <DCompile Include="src\manager\console\package.d" />
     <DCompile Include="src\manager\console\session.d" />
     <DCompile Include="src\manager\device.d" />
@@ -126,6 +127,7 @@
     <DCompile Include="src\urt\mem\temp.d" />
     <DCompile Include="src\urt\meta\nullable.d" />
     <DCompile Include="src\urt\meta\package.d" />
+    <DCompile Include="src\urt\meta\tuple.d" />
     <DCompile Include="src\urt\package.d" />
     <DCompile Include="src\urt\platform.d" />
     <DCompile Include="src\urt\processor.d" />

@@ -16,6 +16,43 @@ template Nullable(T)
 }
 
 template Nullable(T)
+	if (isBoolean!T)
+{
+	struct Nullable
+	{
+		enum ubyte NullValue = 0xFF;
+		private ubyte _value = NullValue;
+
+		this(T v)
+		{
+			_value = v;
+		}
+
+		bool value() const
+			=> _value == 1;
+
+		bool opCast(T : bool)() const
+			=> value != NullValue;
+
+		bool opEquals(typeof(null)) const
+			=> _value == NullValue;
+		bool opEquals(T v) const
+			=> _value == cast(ubyte)v;
+
+		void opAssign(typeof(null))
+		{
+			_value = NullValue;
+		}
+		void opAssign(U)(U v)
+			if (is(U : T))
+		{
+			assert(v != NullValue);
+			_value = cast(ubyte)v;
+		}
+	}
+}
+
+template Nullable(T)
 	if (isSomeInt!T)
 {
 	struct Nullable
@@ -23,10 +60,18 @@ template Nullable(T)
 		enum T NullValue = isSignedInt!T ? T.min : T.max;
 		T value = NullValue;
 
-		bool opEquals(typeof(null)) const => value == NullValue;
-		bool opEquals(T v) const => value != NullValue && value == v;
+		this(T v)
+		{
+			value = v;
+		}
 
-		bool opCast(t)() const if (T == bool) => value != NullValue;
+		bool opCast(T : bool)() const
+			=> value != NullValue;
+
+		bool opEquals(typeof(null)) const
+			=> value == NullValue;
+		bool opEquals(T v) const
+			=> value != NullValue && value == v;
 
 		void opAssign(typeof(null))
 		{
@@ -46,19 +91,25 @@ template Nullable(T)
 {
 	struct Nullable
 	{
-		T value = T.nan;
+		enum T NullValue = T.nan;
+		T value = NullValue;
+
+		this(T v)
+		{
+			value = v;
+		}
+
+		bool opCast(T : bool)() const
+			=> value !is NullValue;
 
 		bool opEquals(typeof(null)) const
-			=> value is T.nan;
+			=> value is NullValue;
 		bool opEquals(T v) const
 			=> value == v; // because nan doesn't compare with anything
 
-		bool opCast(T : bool)() const
-			=> value !is T.nan;
-
 		void opAssign(typeof(null))
 		{
-			value = T.nan;
+			value = NullValue;
 		}
 		void opAssign(U)(U v)
 			if (is(U : T))
@@ -66,11 +117,4 @@ template Nullable(T)
 			value = v;
 		}
 	}
-}
-
-
-unittest
-{
-
-
 }
