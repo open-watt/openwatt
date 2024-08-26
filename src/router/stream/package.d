@@ -46,17 +46,17 @@ abstract class Stream
 	abstract void disconnect();
 
 	// Check if the stream is connected
-	abstract bool connected();
+	abstract bool connected() nothrow @nogc;
 
 	abstract string remoteName();
 
 	abstract void setOpts(StreamOptions options);
 
 	// Read data from the stream
-	abstract ptrdiff_t read(ubyte[] buffer);
+	abstract ptrdiff_t read(ubyte[] buffer) nothrow @nogc;
 
 	// Write data to the stream
-	abstract ptrdiff_t write(const ubyte[] data);
+	abstract ptrdiff_t write(const ubyte[] data) nothrow @nogc;
 
 	// Return the number of bytes in the read buffer
 	abstract ptrdiff_t pending();

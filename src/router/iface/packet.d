@@ -173,7 +173,7 @@ package:
 }
 
 
-uint ethernetCRC(const(void)[] data)
+uint ethernetCRC(const(void)[] data) pure nothrow @nogc
 {
 	uint crc = 0;
 	for (size_t n = 0; n < data.length; ++n)

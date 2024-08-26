@@ -47,7 +47,7 @@ class ApplicationInstance
 		console = Console(this, String("console".addString), Mallocator.instance);
 	}
 
-	Plugin.Instance moduleInstance(string name)
+	Plugin.Instance moduleInstance(string name) pure nothrow @nogc
 	{
 		foreach (i; 0 .. global.modules.length)
 			if (global.modules[i].moduleName[] == name[])
@@ -55,7 +55,7 @@ class ApplicationInstance
 		return null;
 	}
 
-	I.Instance moduleInstance(I)()
+	I.Instance moduleInstance(I)() pure nothrow @nogc
 	{
 		return cast(I.Instance)moduleInstance(I.ModuleName);
 	}

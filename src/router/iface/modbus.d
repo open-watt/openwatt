@@ -30,6 +30,7 @@ struct ServerMap
 	MACAddress mac;
 	ubyte localAddress;
 	ubyte universalAddress;
+	ModbusInterface iface;
 }
 
 struct ModbusRequest
@@ -48,8 +49,6 @@ class ModbusInterface : BaseInterface
 	ModbusProtocol protocol;
 	bool isBusMaster;
 
-	ServerMap[] servers;
-
 	// if we are the bus master
 	ModbusRequest[] pendingRequests;
 
@@ -64,11 +63,15 @@ class ModbusInterface : BaseInterface
 		this.protocol = protocol;
 		this.isBusMaster = isMaster;
 
-		sendBufferLen = 4 * 1024;
-		buffer = defaultAllocator.alloc(sendBufferLen).ptr;
-
 		if (!isMaster)
-			masterMac = generateMac(name, 0xFF);
+		{
+			masterMac = generateMacAddress();
+			masterMac.b[5] = 0xFF;
+			addAddress(masterMac, this);
+		}
+
+		status.linkStatusChangeTime = getTime();
+		status.linkStatus = stream.connected;
 
 		// TODO: warn the user if they configure an interface to use modbus tcp over a serial line
 		//       user needs to be warned that data corruption may occur!
@@ -143,74 +146,9 @@ class ModbusInterface : BaseInterface
 					assert(length < 260);
 					continue read_loop;
 				}
-
-				// drop the address byte since we have it in frameInfo...
-				message = message[1 .. $];
-
-				MACAddress targetMac = void;
-				if (frameInfo.address == 0)
-					targetMac = MACAddress.broadcast;
-				else
-				{
-					ServerMap* map = findServerByLocalAddress(frameInfo.address);
-					if (!map)
-					{
-						// apparently this is the first time we've seen this guy...
-						//							map = defaultAllocator.allocT!ServerMap();
-						servers ~= ServerMap();
-						map = &servers[$-1];
-
-						map.name = tconcat(name[], '.', map.localAddress).makeString(defaultAllocator());
-						map.localAddress = frameInfo.address;
-						map.mac = generateMac(name, map.localAddress);
-						map.universalAddress = map.mac.b[5];
-					}
-					targetMac = map.mac;
-				}
-
-				if (isBusMaster)
-				{
-					// if we ARE the bus master, then we expect to receive packets in response to queued requests
-					// those queued requests will know the dest mac address...
-
-
-				}
-				else
-				{
-
-					// TODO: if the time since the last packet is longer than the modbus timeout,
-					//       we should ignore expectMessageType and expect a request packet..
-
-					ModbusFrameType type = frameInfo.frameType;
-					if (type == ModbusFrameType.Unknown)
-						type = expectMessageType;
-
-					// we can't buffer this message if we don't know if its a request or a response...
-					// we'll need to discard messages until we get one that we know, and then we can predict future messages from there...
-					if (type != ModbusFrameType.Unknown)
-					{
-						Packet p = Packet(message);
-						p.creationTime = now;
-						p.src = type == ModbusFrameType.Request ? masterMac : targetMac;
-						p.dst = type == ModbusFrameType.Request ? targetMac : masterMac;
-						p.etherType = EtherType.ENMS;
-						p.etherSubType = ENMS_SubType.Modbus;
-
-						dispatch(p);
-
-						expectMessageType = type == ModbusFrameType.Request ? ModbusFrameType.Response : ModbusFrameType.Request;
-					}
-					else
-					{
-						assert(false);
-					}
-				}
-
 				offset += taken;
 
-				// TODO: some debug logging of the incoming packet stream?
-				import urt.log;
-//				debug writeDebug("Modbus packet received from interface: '", name, "' (", message.length, ")[ ", message[], " ]");
+				incomingPacket(message, now, frameInfo);
 			}
 
 			// we've eaten the whole buffer...
@@ -219,44 +157,97 @@ class ModbusInterface : BaseInterface
 		while (true);
 	}
 
+	override bool send(ref const Packet packet) nothrow @nogc
+	{
+		if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.Modbus)
+			return false;
+
+		// if we're not a bus master, we can only send packets destined for the master
+		if (!isBusMaster && packet.dst != masterMac)
+			return false;
+
+		// we need to frame this up and send...
+		//... but if we are the bus master, then we need to queue incoming requests to let the server respond...
+
+		++status.sendPackets;
+		status.sendBytes += packet.data.length;
+		return true;
+	}
+
 private:
 	ubyte[260] tail;
 	ushort tailBytes;
 
-	MACAddress generateMac(const(char)[] name, ubyte localAddress)
+	final void incomingPacket(const(void)[] message, MonoTime recvTime, ref ModbusFrameInfo frameInfo)
 	{
-		uint crc = name.ethernetCRC();
-		return MACAddress(0x02, 0x13, 0x37, crc & 0xFF, (crc >> 8) & 0xFF, localAddress);
-	}
+		// TODO: some debug logging of the incoming packet stream?
+//		import urt.log;
+//		debug writeDebug("Modbus packet received from interface: '", name, "' (", message.length, ")[ ", message[], " ]");
 
-	ServerMap* findServerByMac(MACAddress mac)
-	{
-		foreach (ref s; servers)
-		{
-			if (s.mac == mac)
-				return &s;
-		}
-		return null;
-	}
+		// drop the address byte since we have it in frameInfo...
+		message = message[1 .. $];
 
-	ServerMap* findServerByLocalAddress(ubyte localAddress)
-	{
-		foreach (ref s; servers)
+		MACAddress targetMac = void;
+		if (frameInfo.address == 0)
+			targetMac = MACAddress.broadcast;
+		else
 		{
-			if (s.localAddress == localAddress)
-				return &s;
-		}
-		return null;
-	}
+			auto modbus = mod_iface.app.moduleInstance!ModbusInterfaceModule();
 
-	ServerMap* findServerByUniversalAddress(ubyte universalAddress)
-	{
-		foreach (ref s; servers)
-		{
-			if (s.universalAddress == universalAddress)
-				return &s;
+			// we probably need to find a way to cache these lookups.
+			// doing this every packet feels kinda bad...
+			ServerMap* map = modbus.findServerByUniversalAddress(frameInfo.address);
+			if (!map)
+			{
+				map = modbus.findServerByLocalAddress(frameInfo.address);
+				if (map.iface !is this)
+					map = null;
+			}
+
+			if (!map)
+			{
+				// apparently this is the first time we've seen this guy...
+				map = modbus.addRemoteServer(null, this, frameInfo.address, null);
+			}
+			targetMac = map.mac;
 		}
-		return null;
+
+		if (isBusMaster)
+		{
+			// if we ARE the bus master, then we expect to receive packets in response to queued requests
+			// those queued requests will know the dest mac address...
+
+			assert(false);
+		}
+		else
+		{
+			// TODO: if the time since the last packet is longer than the modbus timeout,
+			//       we should ignore expectMessageType and expect a request packet..
+
+			ModbusFrameType type = frameInfo.frameType;
+			if (type == ModbusFrameType.Unknown)
+				type = expectMessageType;
+
+			// we can't buffer this message if we don't know if its a request or a response...
+			// we'll need to discard messages until we get one that we know, and then we can predict future messages from there...
+			if (type != ModbusFrameType.Unknown)
+			{
+				Packet p = Packet(message);
+				p.creationTime = recvTime;
+				p.src = type == ModbusFrameType.Request ? masterMac : targetMac;
+				p.dst = type == ModbusFrameType.Request ? targetMac : masterMac;
+				p.etherType = EtherType.ENMS;
+				p.etherSubType = ENMS_SubType.Modbus;
+
+				dispatch(p);
+
+				expectMessageType = type == ModbusFrameType.Request ? ModbusFrameType.Response : ModbusFrameType.Request;
+			}
+			else
+			{
+				assert(false);
+			}
+		}
 	}
 }
 
@@ -269,17 +260,81 @@ class ModbusInterfaceModule : Plugin
 	{
 		mixin DeclareInstance;
 
-		BaseInterface[String] interfaces;
+		ServerMap[ubyte] remoteServers;
 
 		override void init()
 		{
 			app.console.registerCommand!add("/interface/modbus", this);
+			app.console.registerCommand!remote_server_add("/interface/modbus/remote-server", this, "add");
 		}
 
-		override void update()
+		ServerMap* findServerByName(const(char)[] name) nothrow @nogc
 		{
-			foreach (ref i; interfaces)
-				i.update();
+			try foreach (ref map; remoteServers)
+			{
+				if (map.name[] == name)
+					return &map;
+			}
+			catch(Exception) {}
+			return null;
+		}
+
+		ServerMap* findServerByMac(MACAddress mac) nothrow @nogc
+		{
+			try foreach (ref map; remoteServers)
+			{
+				if (map.mac == mac)
+					return &map;
+			}
+			catch(Exception) {}
+			return null;
+		}
+
+		ServerMap* findServerByLocalAddress(ubyte localAddress) nothrow @nogc
+		{
+			try foreach (ref map; remoteServers)
+			{
+				if (map.localAddress == localAddress)
+					return &map;
+			}
+			catch(Exception) {}
+			return null;
+		}
+
+		ServerMap* findServerByUniversalAddress(ubyte universalAddress) nothrow @nogc
+		{
+			return universalAddress in remoteServers;
+		}
+
+		ServerMap* addRemoteServer(const(char)[] name, ModbusInterface iface, ubyte address, const(char)[] profile, ubyte universalAddress = 0)
+		{
+			if (!name)
+				name = tconcat(iface.name[], '.', address);
+
+			ServerMap map;
+			map.name = name.makeString(defaultAllocator());
+			map.mac = iface.generateMacAddress();
+			map.mac.b[5] = address;
+
+			if (!universalAddress)
+			{
+				universalAddress = map.mac.b[4] ^ address;
+				while (universalAddress in remoteServers)
+					++universalAddress;
+			}
+			else
+				assert(universalAddress !in remoteServers, "Universal address already in use.");
+
+			map.localAddress = address;
+			map.universalAddress = universalAddress;
+			map.iface = iface;
+
+			//profile...
+
+			remoteServers[universalAddress] = map;
+			iface.addAddress(map.mac, iface);
+
+			return universalAddress in remoteServers;
 		}
 
 		// /interface/modbus/add command
@@ -315,27 +370,66 @@ class ModbusInterfaceModule : Plugin
 					p = ModbusProtocol.RTU;
 			}
 
+			auto mod_if = app.moduleInstance!InterfaceModule;
+
 			if (name.empty)
-			{
-				foreach (i; 0 .. ushort.max)
-				{
-					const(char)[] tname = i == 0 ? "modbus" : tconcat("modbus", i);
-					if (tname.makeString(tempAllocator()) !in interfaces)
-					{
-						name = tname.makeString(defaultAllocator());
-						break;
-					}
-				}
-			}
+				name = mod_if.generateInterfaceName("modbus");
 			String n = name.makeString(defaultAllocator());
 
-			interfaces[n] = new ModbusInterface(app.moduleInstance!InterfaceModule, n, s, p, master ? master.value : false);
+			ModbusInterface iface = defaultAllocator.allocT!ModbusInterface(mod_if, n.move, s, p, master ? master.value : false);
+			mod_if.addInterface(iface);
 
-			// HACK: we'll print packets that we receive...
-			interfaces[n].subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {
-				import urt.io;
-				writef("{0}: Modbus packet received: {1}->{2} [{3}]\n", i.name, p.src, p.dst, p.data);
-			}, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
+//			// HACK: we'll print packets that we receive...
+//			iface.subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {
+//				import urt.io;
+//
+//				auto modbus = app.moduleInstance!ModbusInterfaceModule;
+//				ServerMap* src = modbus.findServerByMac(p.src);
+//				ServerMap* dst = modbus.findServerByMac(p.dst);
+//				const(char)[] srcName = src ? src.name[] : tconcat(p.src);
+//				const(char)[] dstName = dst ? dst.name[] : tconcat(p.dst);
+//				writef("{0}: Modbus packet received: ( {1} -> {2} )  [{3}]\n", i.name, srcName, dstName, p.data);
+//			}, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
+		}
+
+
+		void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, const(char)[] profile, ubyte universal_address = 0)
+		{
+			if (!_interface)
+			{
+				session.writeLine("Interface must be specified.");
+				return;
+			}
+			if (!address)
+			{
+				session.writeLine("Local address must be specified.");
+				return;
+			}
+
+			BaseInterface iface = app.moduleInstance!InterfaceModule.findInterface(_interface);
+			if (!iface)
+			{
+				session.writeLine("Interface '", _interface, "' not found.");
+				return;
+			}
+			ModbusInterface modbusInterface = cast(ModbusInterface)iface;
+			if (!modbusInterface)
+			{
+				session.writeLine("Interface '", _interface, "' is not a modbus interface.");
+				return;
+			}
+
+			if (universal_address)
+			{
+				ServerMap* t = universal_address in remoteServers;
+				if (t)
+				{
+					session.writeLine("Universal address '", universal_address, "' already in use by '", t.name, "'.");
+					return;
+				}
+			}
+
+			addRemoteServer(name, modbusInterface, address, profile, universal_address);
 		}
 	}
 }

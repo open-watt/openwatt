@@ -19,9 +19,6 @@
     <Filter Include="src\manager">
       <UniqueIdentifier>{a7edf0a4-cbca-4a75-bf4f-548fe4b7764d}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\router\snmp">
-      <UniqueIdentifier>{b9888748-2443-4eeb-a6af-9bf275df32a6}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\router\stream">
       <UniqueIdentifier>{e1c51f7a-999b-4f32-97d6-9364d012699e}</UniqueIdentifier>
     </Filter>
@@ -75,6 +72,9 @@
     </Filter>
     <Filter Include="src\protocol\tesla">
       <UniqueIdentifier>{54587164-3374-4538-ad23-3865c5baffef}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\protocol\snmp">
+      <UniqueIdentifier>{f9e366d8-35ce-4a70-9f0e-3ab303fb1bdb}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -147,9 +147,6 @@
     <DCompile Include="src\manager\config.d">
       <Filter>src\manager</Filter>
     </DCompile>
-    <DCompile Include="src\router\snmp\package.d">
-      <Filter>src\router\snmp</Filter>
-    </DCompile>
     <DCompile Include="src\router\stream\package.d">
       <Filter>src\router\stream</Filter>
     </DCompile>
@@ -197,9 +194,6 @@
     </DCompile>
     <DCompile Include="src\router\stream\bridge.d">
       <Filter>src\router\stream</Filter>
-    </DCompile>
-    <DCompile Include="src\router\tesla\package.d">
-      <Filter>src\router\tesla</Filter>
     </DCompile>
     <DCompile Include="src\urt\io.d">
       <Filter>src\urt</Filter>
@@ -380,6 +374,15 @@
     </DCompile>
     <DCompile Include="src\protocol\inet.d">
       <Filter>src\protocol</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\modbus\client.d">
+      <Filter>src\protocol\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\modbus\server.d">
+      <Filter>src\protocol\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\snmp\package.d">
+      <Filter>src\protocol\snmp</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>

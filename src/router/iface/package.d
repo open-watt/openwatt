@@ -85,9 +85,11 @@ class BaseInterface
 	String type;
 
 	MACAddress mac;
-	MACAddress[] discovered;
+	BaseInterface[MACAddress] macTable;
 
 	InterfaceSubscriber[] subscribers;
+
+	InterfaceStatus status;
 
 	BufferOverflowBehaviour sendBehaviour;
 	BufferOverflowBehaviour recvBehaviour;
@@ -98,120 +100,64 @@ class BaseInterface
 		this.name = name;
 		this.type = type;
 
-		mac = MACAddress();
-		mod_iface.addAddress(mac, this);
-	}
-
-	~this()
-	{
-		foreach(ref a; discovered)
-			mod_iface.removeAddress(a);
-		mod_iface.removeAddress(mac);
+		mac = generateMacAddress();
+		addAddress(mac, this);
 	}
 
 	void update()
 	{
 	}
 
-	final size_t packetsPending() => sendQueue.length;
-	final size_t bytesPending() => sendUse();
+	ref const(InterfaceStatus) getStatus() const
+		=> status;
 
 	void subscribe(InterfaceSubscriber.IncomingPacketHandler packetHandler, PacketFilter filter)
 	{
 		subscribers ~= InterfaceSubscriber(filter, packetHandler);
 	}
 
-	ptrdiff_t send(const(void)[] packet)
+	abstract bool send(ref const Packet packet) nothrow @nogc;
+
+	final void addAddress(MACAddress mac, BaseInterface iface)
 	{
-		// TODO: derived interfaces should probably just transmit the data immediately, or do their own send buffering
-		//       ...so, maybe delete all this send buffering code!
+		assert(mac !in macTable, "MAC address already in use!");
+		macTable[mac] = iface;
+	}
 
-		if (packet.length == 0)
-			return 0;
-		if (packet.length > sendBufferLen)
-			return -1;
-		while (packet.length > sendAvail())
-		{
-			final switch (sendBehaviour)
-			{
-				case BufferOverflowBehaviour.Fail:
-					return -1;
-				case BufferOverflowBehaviour.DropOldest:
-					sendBufferReadCursor += sendQueue[0].length;
-					if (sendBufferReadCursor >= sendBufferLen)
-						sendBufferReadCursor -= sendBufferLen;
-					sendQueue = sendQueue[1 .. $];
-					break;
-				case BufferOverflowBehaviour.DropNewest:
-					return 0; // TODO: should this return 0, or should return packet.length? (ie, indicate it was sent, but drop it)
-			}
-		}
+	final void removeAddress(MACAddress mac)
+	{
+		macTable.remove(mac);
+	}
 
-		if (sendBufferWriteCursor + packet.length > sendBufferLen)
-		{
-			size_t split = sendBufferLen - sendBufferWriteCursor;
-			sendBuffer[sendBufferWriteCursor .. sendBufferLen] = packet[0 .. split];
-			sendBuffer[0 .. packet.length - split] = packet[split .. $];
-		}
-		else
-			sendBuffer[sendBufferWriteCursor .. sendBufferWriteCursor + packet.length] = packet[];
-
-		assert(false, "TODO: we can't split the packet, we need to wrap and palce the whole thing at the start, and synth a packet struct...");
-
-		return packet.length;
+	final BaseInterface findMacAddress(MACAddress mac) nothrow @nogc
+	{
+		BaseInterface* i = mac in macTable;
+		if (i)
+			return *i;
+		return null;
 	}
 
 package:
 	Packet[] sendQueue;
 
-	void* buffer;
-
-	uint sendBufferLen = 32 * 1024;
-	uint sendBufferReadCursor;
-	uint sendBufferWriteCursor;
-
-	final void[] sendBuffer() => buffer[0 .. sendBufferLen];
-
-	final size_t sendAvail() => sendBufferWriteCursor > sendBufferReadCursor ? sendBufferLen - sendBufferWriteCursor + sendBufferReadCursor : sendBufferReadCursor - sendBufferWriteCursor;
-	final size_t sendUse() => sendBufferWriteCursor > sendBufferReadCursor ? sendBufferWriteCursor - sendBufferReadCursor : sendBufferLen - sendBufferReadCursor + sendBufferWriteCursor;
-
-	size_t findMacAddress(MACAddress mac)
+	MACAddress generateMacAddress() pure nothrow @nogc
 	{
-		foreach (i, ref a; discovered)
-		{
-			if (a == mac)
-				return i;
-		}
-		return -1;
-	}
-
-	void addMacAddress(MACAddress mac)
-	{
-		if (findMacAddress(mac) == -1)
-		{
-			discovered ~= mac;
-
-			// add to global mac table!
-		}
+		uint crc = name.ethernetCRC();
+		MACAddress addr = MACAddress(0x02, 0x13, 0x37, crc & 0xFF, (crc >> 8) & 0xFF, (crc >> 16) & 0xFF);
+		if (addr.b[5] < 100 || addr.b[5] >= 240)
+			addr.b[5] ^= 0x80;
+		return addr;
 	}
 
 	void dispatch(ref Packet packet)
 	{
+		// update the stats
+		++status.recvPackets;
+		status.revcBytes += packet.length;
+
 		// check if we ever saw the sender before...
-		bool found = false;
-		foreach (i, ref a; discovered)
-		{
-			if (packet.src == a)
-			{
-				found = true;
-				break;
-			}
-		}
-		if (!found)
-		{
-			discovered ~= packet.src;
-			mod_iface.addAddress(packet.src, this);
-		}
+		if (findMacAddress(packet.src) is null)
+			addAddress(packet.src, this);
 
 		foreach (ref subscriber; subscribers)
 		{
@@ -230,29 +176,53 @@ class InterfaceModule : Plugin
 	{
 		mixin DeclareInstance;
 
-		BaseInterface[MACAddress] macTable;
+		BaseInterface[const(char)[]] interfaces;
 
 		override void init()
 		{
 		}
 
-		final void addAddress(MACAddress mac, BaseInterface iface)
+		override void update()
 		{
-			macTable[mac] = iface;
+			foreach (i; interfaces)
+				i.update();
 		}
 
-		final void removeAddress(MACAddress mac)
+		const(char)[] generateInterfaceName(const(char)[] prefix)
 		{
-			macTable.remove(mac);
-		}
-
-		final BaseInterface whoHas(MACAddress mac)
-		{
-			BaseInterface* i = mac in macTable;
-			if (i)
-				return *i;
+			if (prefix !in interfaces)
+				return prefix;
+			for (size_t i = 0; i < ushort.max; i++)
+			{
+				const(char)[] name = tconcat(prefix, i);
+				if (name !in interfaces)
+					return name;
+			}
 			return null;
 		}
+
+		final void addInterface(BaseInterface iface)
+		{
+			assert(iface.name[] !in interfaces, "Interface already exists");
+			interfaces[iface.name[]] = iface;
+		}
+
+		final void removeInterface(BaseInterface iface)
+		{
+			assert(iface.name[] in interfaces, "Interface not found");
+			interfaces.remove(iface.name[]);
+		}
+
+		final BaseInterface findInterface(const(char)[] name)
+		{
+			foreach (i; interfaces)
+				if (i.name[] == name[])
+					return i;
+			return null;
+		}
+
+	private:
+
 	}
 }
 

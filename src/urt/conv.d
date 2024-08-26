@@ -86,22 +86,14 @@ unittest
 	assert(parseInt("123") == 123);
 	assert(parseInt("+123.456") == 123);
 	assert(parseInt("-123.456", null, null, 10) == -123);
-	assert(parseInt("123.456", null, &divisor, 10) == 123456);
-	assert(divisor == 1000);
-	assert(parseInt("123.456.789", &taken, &divisor, 16) == 1193046);
-	assert(taken == 7);
-	assert(divisor == 4096);
+	assert(parseInt("123.456", null, &divisor, 10) == 123456 && divisor == 1000);
+	assert(parseInt("123.456.789", &taken, &divisor, 16) == 1193046 && taken == 7 && divisor == 4096);
 	assert(parseInt("11001", null, null, 2) == 25);
-	assert(parseInt("-AbCdE.f", null, &divisor, 16) == -11259375);
-	assert(divisor == 16);
-	assert(parseInt("123abc", &taken, null, 10) == 0);
-	assert(taken == 0);
-	assert(parseInt("!!!", &taken, null, 10) == 0);
-	assert(taken == 0);
-	assert(parseInt("-!!!", &taken, null, 10) == 0);
-	assert(taken == 0);
-	assert(parseInt("Wow", &taken, null, 36) == 42368);
-	assert(taken == 3);
+	assert(parseInt("-AbCdE.f", null, &divisor, 16) == -11259375 && divisor == 16);
+	assert(parseInt("123abc", &taken, null, 10) == 123 && taken == 3);
+	assert(parseInt("!!!", &taken, null, 10) == 0 && taken == 0);
+	assert(parseInt("-!!!", &taken, null, 10) == 0 && taken == 0);
+	assert(parseInt("Wow", &taken, null, 36) == 42368 && taken == 3);
 }
 
 
@@ -124,10 +116,8 @@ unittest
 	assert(parseFloat("123.456") == 123.456);
 	assert(parseFloat("+123.456") == 123.456);
 	assert(parseFloat("-123.456.789") == -123.456);
-	assert(parseFloat("1101.11", &taken, 2) == 13.75);
-	assert(taken == 7);
-	assert(parseFloat("xyz", &taken) is double.nan);
-	assert(taken == 0);
+	assert(parseFloat("1101.11", &taken, 2) == 13.75 && taken == 7);
+	assert(parseFloat("xyz", &taken) is double.nan && taken == 0);
 }
 
 

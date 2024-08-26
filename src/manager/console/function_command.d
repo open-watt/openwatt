@@ -6,6 +6,7 @@ import urt.meta.nullable;
 import urt.meta.tuple;
 import urt.traits;
 import urt.string;
+import urt.string.format;
 
 public import manager.console; 
 public import manager.console.command; 
@@ -17,9 +18,8 @@ class FunctionCommand : Command
 {
 	alias GenericCall = const(char)[] function(Session, KVP[], void*);
 
-	static FunctionCommand create(alias fun, Instance)(ref Console console, Instance i)
+	static FunctionCommand create(alias fun, Instance)(ref Console console, Instance i, const(char)[] commandName = null)
 	{
-
 		static assert(is(Parameters!fun[0] == Session), "First parameter must be manager.console.session.Session for command hander function");
 
 		enum FunctionName = transformCommandName(__traits(identifier, fun));
@@ -46,7 +46,7 @@ class FunctionCommand : Command
 			}
 		}
 
-		return defaultAllocator().allocT!FunctionCommand(console, StringLit!FunctionName, cast(void*)i, &functionAdapter);
+		return defaultAllocator().allocT!FunctionCommand(console, commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName, cast(void*)i, &functionAdapter);
 	}
 
 
@@ -101,6 +101,7 @@ private:
 
 char[] transformCommandName(const(char)[] name)
 {
+	name = name.length > 0 && name[0] == '_' ? name[1 .. $] : name;
 	char[] result = name.dup;
 	foreach (i, c; result)
 	{
@@ -144,7 +145,7 @@ auto makeArgTuple(alias F)(KVP[] args, out bool success)
 					break arg;
 			}
 			default:
-				assert(false, "Can't do it!");
+				assert(false, tconcat("Unknown parameter '", key, "'"));
 				break;
 		}
 	}

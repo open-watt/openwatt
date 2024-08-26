@@ -96,9 +96,20 @@ class TCPStream : Stream
 		}
 	}
 
-	override bool connected()
+	final bool connected_impl()
 	{
 		return !(socket is null || !socket.isAlive);
+	}
+
+	override bool connected() nothrow @nogc
+	{
+		// HACK!!!
+		try {
+			auto d = &connected_impl;
+			return (cast(bool delegate() nothrow @nogc)d)();
+		}
+		catch (Exception)
+			return false;
 	}
 
 	override string remoteName()
@@ -113,7 +124,18 @@ class TCPStream : Stream
 			socket.blocking = !(options & StreamOptions.NonBlocking);
 	}
 
-	override ptrdiff_t read(ubyte[] buffer)
+	override ptrdiff_t read(ubyte[] buffer) nothrow @nogc
+	{
+		// HACK!!!
+		try {
+			auto d = &read_impl;
+			return (cast(ptrdiff_t delegate(ubyte[]) nothrow @nogc)d)(buffer);
+		}
+		catch (Exception)
+			return -1;
+	}
+
+	final ptrdiff_t read_impl(ubyte[] buffer)
 	{
 		if (!connected())
 		{
@@ -147,7 +169,18 @@ class TCPStream : Stream
 		return cast(size_t) r;
 	}
 
-	override ptrdiff_t write(const ubyte[] data)
+	override ptrdiff_t write(const ubyte[] data) nothrow @nogc
+	{
+		// HACK!!!
+		try {
+			auto d = &write_impl;
+			return (cast(ptrdiff_t delegate(const ubyte[]) nothrow @nogc)d)(data);
+		}
+		catch (Exception)
+			return -1;
+	}
+
+	final ptrdiff_t write_impl(const ubyte[] data)
 	{
 		if (!connected())
 		{

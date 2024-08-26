@@ -225,9 +225,9 @@ struct Console
 			s.addCommand(cmd);
 	}
 
-	void registerCommand(alias method, Instance)(const(char)[] _scope, Instance instance)
+	void registerCommand(alias method, Instance)(const(char)[] _scope, Instance instance, const(char)[] commandName = null)
 	{
-		return registerCommand(_scope, FunctionCommand.create!method(this, instance));
+		return registerCommand(_scope, FunctionCommand.create!method(this, instance, commandName));
 	}
 
 

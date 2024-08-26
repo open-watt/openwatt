@@ -13,9 +13,8 @@ struct ModbusEndpoint
 	Interface busInterface;
 	MACAddress macAddress;
 	ubyte localAddress;
+	ubyte universalAddress;
 }
-
-
 
 
 class ModbusProtocolModule : Plugin
