@@ -198,10 +198,8 @@ struct IPv6Addr
 	ptrdiff_t fromString(const(char)[] str)
 	{
 		ushort[8] t;
-
+		size_t offset = 0;
 		assert(false);
-
-		s = t;
 		return offset;
 	}
 
@@ -362,22 +360,16 @@ struct InetAddress
 		if (addressFamily == AddressFamily.IPv4)
 		{
 			offset = addr.ipv4.toString(tmp, null, null);
-			if (port)
-			{
-				tmp[offset++] = ':';
-				offset += port.formatInt(tmp[offset..$]);
-			}
+			tmp[offset++] = ':';
+			offset += port.formatInt(tmp[offset..$]);
 		}
 		else
 		{
 			tmp[0] = '[';
 			offset = 1 + addr.ipv6.toString(tmp[1 .. $], null, null);
 			tmp[offset++] = ']';
-			if (port)
-			{
-				tmp[offset++] = ':';
-				offset += port.formatInt(tmp[offset..$]);
-			}
+			tmp[offset++] = ':';
+			offset += port.formatInt(tmp[offset..$]);
 		}
 
 		if (tmp.ptr == stackBuffer.ptr)
@@ -387,8 +379,54 @@ struct InetAddress
 
 	ptrdiff_t fromString(const(char)[] s)
 	{
-		assert(false);
-		return 0;
+		AddressFamily af;
+		IPAddr a4 = void;
+		IPv6Addr a6 = void;
+		ushort port = 0;
+		size_t taken = 0;
+
+		// take address
+		if (s.length >= 4 && (s[1] == '.' || s[2] == '.' || s[3] == '.'))
+			af = AddressFamily.IPv4;
+		else
+			af = AddressFamily.IPv6;
+		if (af == AddressFamily.IPv4)
+		{
+			taken = a4.fromString(s);
+			if (taken == 0)
+				return 0;
+		}
+		else
+		{
+			if (s.length > 0 && s[0] == '[')
+				++taken;
+			size_t t = a6.fromString(s[taken..$]);
+			if (t == 0)
+				return 0;
+			if (s[0] == '[' && (s.length < t + 2 || s[t + taken++] != ']'))
+				return 0;
+			taken += t;
+		}
+
+		// take port
+		if (s.length > taken && s[taken] == ':')
+		{
+			size_t t;
+			ulong p = s[++taken..$].parseInt(&t);
+			if (t == 0 || p > 0xFFFF)
+				return 0;
+			taken += t;
+			port = cast(ushort)p;
+		}
+
+		// success! store results..
+		addressFamily = af;
+		this.port = port;
+		if (af == AddressFamily.IPv4)
+			addr.ipv4 = a4;
+		else
+			addr.ipv6 = a6;
+		return taken;
 	}
 
 	auto __debugOverview()
@@ -425,10 +463,10 @@ unittest
 	assert(tmp[0 .. IPv6Addr(0, 0, 0, 0, 0, 0, 0, 1).toString(tmp, null, null)] == "::1");
 	assert(tmp[0 .. IPv6Addr(0, 0, 0, 0, 0, 0, 0, 0).toString(tmp, null, null)] == "::");
 
-//	IPv6Addr addr;
-//	assert(addr.fromString("::2") == 3 && addr == IPv6Addr(0, 0, 0, 0, 0, 0, 0, 2));
-//	assert(addr.fromString("1::2") == 3 && addr == IPv6Addr(1, 0, 0, 0, 0, 0, 0, 2));
-//	assert(addr.fromString("2001:db8::1/24") == 14 && addr == IPv6Addr(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
+//	IPv6Addr addr6;
+//	assert(addr6.fromString("::2") == 3 && addr6 == IPv6Addr(0, 0, 0, 0, 0, 0, 0, 2));
+//	assert(addr6.fromString("1::2") == 3 && addr6 == IPv6Addr(1, 0, 0, 0, 0, 0, 0, 2));
+//	assert(addr6.fromString("2001:db8::1/24") == 14 && addr6 == IPv6Addr(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1));
 
 	assert(tmp[0 .. IPv6Subnet(IPv6Addr(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1), 24).toString(tmp, null, null)] == "2001:db8::1/24");
 	assert(tmp[0 .. IPv6Subnet(IPv6Addr(), 0).toString(tmp, null, null)] == "::/0");
@@ -439,7 +477,14 @@ unittest
 
 	assert(tmp[0 .. InetAddress(IPAddr(192, 168, 0, 1), 12345).toString(tmp, null, null)] == "192.168.0.1:12345");
 	assert(tmp[0 .. InetAddress(IPAddr(10, 0, 0, 0), 21).toString(tmp, null, null)] == "10.0.0.0:21");
+
 	assert(tmp[0 .. InetAddress(IPv6Addr(0x2001, 0xdb8, 0, 1, 0, 0, 0, 1), 12345).toString(tmp, null, null)] == "[2001:db8:0:1::1]:12345");
 	assert(tmp[0 .. InetAddress(IPv6Addr(), 21).toString(tmp, null, null)] == "[::]:21");
 
+	InetAddress address;
+	assert(address.fromString("192.168.0.1:21") == 14 && address == InetAddress(IPAddr(192, 168, 0, 1), 21));
+	assert(address.fromString("10.0.0.1:12345") == 14 && address == InetAddress(IPAddr(10, 0, 0, 1), 12345));
+
+//	assert(address.fromString("[2001:db8:0:1::1]:12345") == 14 && address == InetAddress(IPv6Addr(0x2001, 0xdb8, 0, 1, 0, 0, 0, 1), 12345));
+//	assert(address.fromString("[::]:21") == 14 && address == InetAddress(IPv6Addr(), 21));
 }
