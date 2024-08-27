@@ -1,8 +1,9 @@
 module router.stream.udp;
 
 import std.socket;
-import std.stdio;
 
+import urt.io;
+import urt.string;
 import urt.string.format;
 
 import manager.plugin;
@@ -12,11 +13,13 @@ public import router.stream;
 
 class UDPStream : Stream
 {
-	this(ushort remotePort, string remoteHost = "255.255.255.255", ushort localPort = 0, string localHost = "0.0.0.0", StreamOptions options = StreamOptions.None)
+	this(String name, ushort remotePort, string remoteHost = "255.255.255.255", ushort localPort = 0, string localHost = "0.0.0.0", StreamOptions options = StreamOptions.None)
 	{
+		import core.lifetime;
+
 		// TODO: if remoteHost is a broadcast address and options doesn't have `AllowBroadcast`, make a warning...
 
-		super("udp", options);
+		super(name.move, "udp", options);
 		this.localHost = localHost;
 		this.localPort = localPort;
 		this.remoteHost = remoteHost;

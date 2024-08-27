@@ -35,7 +35,7 @@ class Command
 	this(ref Console console, String name)
 	{
 		m_console = &console;
-		this.name = name;
+		this.name = name.move;
 	}
 
 	final ApplicationInstance appInstance() pure nothrow @nogc => m_console.appInstance;

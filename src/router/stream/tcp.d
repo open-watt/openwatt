@@ -8,6 +8,7 @@ import std.concurrency;
 import std.stdio;
 
 import urt.conv;
+import urt.mem;
 import urt.meta.nullable;
 import urt.string;
 import urt.string.format;
@@ -20,9 +21,11 @@ public import router.stream;
 
 class TCPStream : Stream
 {
-	this(string host, ushort port, StreamOptions options = StreamOptions.None)
+	this(String name, string host, ushort port, StreamOptions options = StreamOptions.None)
 	{
-		super("tcp-client", options);
+		import core.lifetime;
+
+		super(name.move, "tcp-client", options);
 		this.host = host;
 		this.port = port;
 
@@ -249,9 +252,11 @@ private:
 	Socket socket;
 	TCPServer reverseConnectServer;
 
-	this(Socket socket, ushort port)
+	this(String name, Socket socket, ushort port)
 	{
-		super("serial", StreamOptions.None);
+		import core.lifetime;
+
+		super(name.move, "serial", StreamOptions.None);
 		this.port = port;
 		remote = socket.remoteAddress;
 		host = remote.toString;
@@ -346,7 +351,7 @@ private:
 				if (rawConnectionCallback)
 					rawConnectionCallback(clientSocket, userData);
 				else if (connectionCallback)
-					connectionCallback(new TCPStream(clientSocket, port), userData);
+					connectionCallback(new TCPStream(StringLit!"tcp-server", clientSocket, port), userData);
 
 				if (options & ServerOptions.JustOne)
 				{
@@ -362,19 +367,6 @@ private:
 	}
 }
 
-class TCPStreamTypeInfo : StreamTypeInfo
-{
-	this()
-	{
-		super(StringLit!"tcp-client");
-	}
-
-	override TCPStream create(KVP[] params)
-	{
-//		return new TCPStream();
-		return null;
-	}
-}
 
 class TCPStreamModule : Plugin
 {
@@ -382,7 +374,6 @@ class TCPStreamModule : Plugin
 
 	override void init()
 	{
-//		global.getModule!StreamModule.registerStreamType(new TCPStreamTypeInfo);
 	}
 
 	class Instance : Plugin.Instance
@@ -396,20 +387,10 @@ class TCPStreamModule : Plugin
 
 		void add(Session session, const(char)[] name, const(char)[] address, Nullable!int port)
 		{
-			auto streams = &app.moduleInstance!StreamModule.streams;
+			auto mod_stream = app.moduleInstance!StreamModule;
 
 			if (name.empty)
-			{
-				foreach (i; 0 .. ushort.max)
-				{
-					const(char)[] tname = i == 0 ? "tcp-stream" : tconcat("tcp-stream", i);
-					if (tname !in *streams)
-					{
-						name = tname.idup;
-						break;
-					}
-				}
-			}
+				mod_stream.generateStreamName("tcp-stream");
 
 			const(char)[] portSuffix = address;
 			address = portSuffix.split!':';
@@ -432,7 +413,10 @@ class TCPStreamModule : Plugin
 			if (portNumber - 1 > ushort.max - 1)
 				return session.writeLine("Invalid port number (1-65535): ", portNumber);
 
-			(*streams)[name] = new TCPStream(address.idup, cast(ushort)portNumber, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+			String n = name.makeString(defaultAllocator);
+
+			TCPStream stream = defaultAllocator.allocT!TCPStream(n.move, address.idup, cast(ushort)portNumber, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+			mod_stream.addStream(stream);
 		}
 	}
 }

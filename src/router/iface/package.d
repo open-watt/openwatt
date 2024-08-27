@@ -96,9 +96,11 @@ class BaseInterface
 
 	this(InterfaceModule.Instance m, String name, String type)
 	{
+		import core.lifetime;
+
 		this.mod_iface = m;
-		this.name = name;
-		this.type = type;
+		this.name = name.move;
+		this.type = type.move;
 
 		mac = generateMacAddress();
 		addAddress(mac, this);
@@ -142,8 +144,10 @@ package:
 
 	MACAddress generateMacAddress() pure nothrow @nogc
 	{
+		enum ushort MAGIC = 0x1337;
+
 		uint crc = name.ethernetCRC();
-		MACAddress addr = MACAddress(0x02, 0x13, 0x37, crc & 0xFF, (crc >> 8) & 0xFF, (crc >> 16) & 0xFF);
+		MACAddress addr = MACAddress(0x02, MAGIC >> 8, MAGIC & 0xFF, crc & 0xFF, (crc >> 8) & 0xFF, (crc >> 16) & 0xFF);
 		if (addr.b[5] < 100 || addr.b[5] >= 240)
 			addr.b[5] ^= 0x80;
 		return addr;

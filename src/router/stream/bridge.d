@@ -1,6 +1,7 @@
 module router.stream.bridge;
 
 import urt.log;
+import urt.mem;
 import urt.string;
 import urt.string.format;
 
@@ -11,9 +12,11 @@ public import router.stream;
 
 class BridgeStream : Stream
 {
-	this(StreamOptions options, Stream[] streams...)
+	this(String name, StreamOptions options, Stream[] streams...)
 	{
-		super("bridge", options);
+		import core.lifetime;
+
+		super(name.move, "bridge", options);
 
 		this.streams = streams;
 	}
@@ -163,20 +166,10 @@ class BridgeStreamModule : Plugin
 		// TODO: source should be an array, and let the external code separate and validate the array args...
 		void add(Session session, const(char)[] name, const(char)[] source)
 		{
-			auto streams = &app.moduleInstance!StreamModule.streams;
+			auto mod_stream = app.moduleInstance!StreamModule;
 
 			if (name.empty)
-			{
-				foreach (i; 0 .. ushort.max)
-				{
-					const(char)[] tname = i == 0 ? "bridge" : tconcat("bridge", i);
-					if (tname !in *streams)
-					{
-						name = tname.idup;
-						break;
-					}
-				}
-			}
+				name = mod_stream.generateStreamName("bridge");
 
 			// parse source streams...
 			const(char)[] streamName;
@@ -187,12 +180,15 @@ class BridgeStreamModule : Plugin
 				if (!streamName)
 					break;
 
-				Stream* s = streamName in *streams;
+				Stream* s = streamName in mod_stream.streams;
 				if (s)
 					sourceStreams ~= *s;
 			}
 
-			(*streams)[name] = new BridgeStream(StreamOptions.NonBlocking | StreamOptions.KeepAlive, sourceStreams);
+			String n = name.makeString(defaultAllocator());
+
+			BridgeStream stream = defaultAllocator.allocT!BridgeStream(n.move, StreamOptions.NonBlocking | StreamOptions.KeepAlive, sourceStreams);
+			mod_stream.addStream(stream);
 		}
 	}
 }

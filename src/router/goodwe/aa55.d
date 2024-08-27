@@ -1,7 +1,6 @@
 module router.goodwe.aa55;
 
 import std.socket;
-import std.stdio;
 
 import manager.value;
 
@@ -11,6 +10,7 @@ import router.modbus.server;
 import router.stream.udp;
 
 import urt.log;
+import urt.mem;
 import urt.string;
 import urt.time;
 
@@ -56,7 +56,7 @@ class GoodWeServer : Server
 	this(string name, string inverterAddr)
 	{
 		super(name);
-		stream = new UDPStream(8899, inverterAddr, options: StreamOptions.NonBlocking | StreamOptions.AllowBroadcast);
+		stream = new UDPStream(name.makeString(defaultAllocator()), 8899, inverterAddr, options: StreamOptions.NonBlocking | StreamOptions.AllowBroadcast);
 		stream.connect();
 
 		sendRequest(new GoodWeRequest(&probeFunc, GoodWeRequestData(controlCode: GoodWeControlCode.Read, GoodWeFunctionCode.QueryIdInfo)));

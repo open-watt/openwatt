@@ -31,10 +31,12 @@ enum StreamOptions
 
 abstract class Stream
 {
+	String name;
 	CacheString type;
 
-	this(const(char)[] type, StreamOptions options)
+	this(String name, const(char)[] type, StreamOptions options)
 	{
+		this.name = name.move;
 		this.type = addString(type);
 		this.options = options;
 	}
@@ -75,51 +77,18 @@ package:
 	MonoTime lastConnectAttempt;
 }
 
-class StreamTypeInfo
-{
-	String name;
-
-	this(String name)
-	{
-		this.name = name.move;
-	}
-
-	abstract Stream create(KVP[] params);
-
-	// TODO: parse command line stuff...
-}
-
 class StreamModule : Plugin
 {
 	mixin RegisterModule!"stream";
-
-	StreamTypeInfo[] streamTypes;
-
-	void registerStreamType(StreamTypeInfo streamTypeInfo)
-	{
-		assert(!getStreamType(streamTypeInfo.name), "Stream type already registered");
-		streamTypes ~= streamTypeInfo;
-	}
-
-	StreamTypeInfo getStreamType(const(char)[] type)
-	{
-		foreach (s; streamTypes)
-		{
-			if (s.name == type)
-				return s;
-		}
-		return null;
-	}
 
 	class Instance : Plugin.Instance
 	{
 		mixin DeclareInstance;
 
-		Stream[string] streams;
+		Stream[const(char)[]] streams;
 
 		override void init()
 		{
-			app.console.registerCommand!add("/stream", this);
 		}
 
 		Stream getStream(const(char)[] name)
@@ -165,65 +134,37 @@ class StreamModule : Plugin
 			}
 		}
 
-		void add(Session session, const(char)[] name, const(char)[] type, const(char)[] address, const(char)[] source, Nullable!int port)
+		const(char)[] generateStreamName(const(char)[] prefix)
 		{
-			if (name.empty)
+			if (prefix !in streams)
+				return prefix;
+			for (size_t i = 0; i < ushort.max; i++)
 			{
-				foreach (i; 0 .. ushort.max)
-				{
-					const(char)[] tname = i == 0 ? type : tconcat(type, i);
-					if (tname !in streams)
-					{
-						name = tname.idup;
-						break;
-					}
-				}
+				const(char)[] name = tconcat(prefix, i);
+				if (name !in streams)
+					return name;
 			}
+			return null;
+		}
 
-			switch (type)
-			{
-				case "tcp-client":
-					const(char)[] portSuffix = address;
-					address = portSuffix.split!':';
-					uint portNumber = 0;
+		final void addStream(Stream stream)
+		{
+			assert(stream.name[] !in streams, "Stream already exists");
+			streams[stream.name[]] = stream;
+		}
 
-					if (port)
-					{
-						if (portSuffix)
-							return session.writeLine("Port specified twice");
-						portNumber = port.value;
-					}
+		final void removeStream(Stream stream)
+		{
+			assert(stream.name[] in streams, "Stream not found");
+			streams.remove(stream.name[]);
+		}
 
-					size_t taken;
-					if (!port)
-					{
-						portNumber = cast(uint)portSuffix.parseInt(&taken);
-						if (taken == 0)
-							return session.writeLine("Port must be numeric: ", portSuffix);
-					}
-					if (portNumber - 1 > ushort.max - 1)
-						return session.writeLine("Invalid port number (1-65535): ", portNumber);
-
-//					instance.streams[name] = new TCPStream(address.idup, cast(ushort)port, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
-					break;
-
-				case "bridge":
-					Stream[] bridgeStreams;
-					while (!source.empty)
-					{
-						const(char)[] stream = source.split!','.unQuote;
-						Stream* s = stream in streams;
-						if (!s)
-							return session.writeLine("Stream doesn't exist: ", stream);
-						bridgeStreams ~= *s;
-					}
-//					(*streams)[name] = new BridgeStream(StreamOptions.NonBlocking | StreamOptions.KeepAlive, bridgeStreams);
-					break;
-
-				default:
-					session.writeLine("Invalid stream type: ", type);
-					return;
-			}
+		final Stream findStream(const(char)[] name)
+		{
+			foreach (s; streams)
+				if (s.name[] == name[])
+					return s;
+			return null;
 		}
 	}
 }

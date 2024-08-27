@@ -1,6 +1,7 @@
 module router.stream.serial;
 
 import urt.io;
+import urt.string;
 import urt.string.format;
 
 import manager.plugin;
@@ -28,9 +29,11 @@ version(Windows)
 
 	class SerialStream : Stream
 	{
-		this(string device, in SerialParams serialParams, StreamOptions options = StreamOptions.None)
+		this(String name, string device, in SerialParams serialParams, StreamOptions options = StreamOptions.None)
 		{
-			super("serial", options);
+			import core.lifetime;
+
+			super(name.move, "serial", options);
 			this.device = device;
 			this.params = serialParams;
 		}
