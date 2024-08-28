@@ -12,7 +12,7 @@ public import router.stream;
 
 class BridgeStream : Stream
 {
-	this(String name, StreamOptions options, Stream[] streams...)
+	this(String name, StreamOptions options, Stream[] streams...) nothrow @nogc
 	{
 		import core.lifetime;
 
@@ -164,7 +164,7 @@ class BridgeStreamModule : Plugin
 
 
 		// TODO: source should be an array, and let the external code separate and validate the array args...
-		void add(Session session, const(char)[] name, const(char)[] source)
+		void add(Session session, const(char)[] name, const(char)[][] source)
 		{
 			auto mod_stream = app.moduleInstance!StreamModule;
 
@@ -172,17 +172,12 @@ class BridgeStreamModule : Plugin
 				name = mod_stream.generateStreamName("bridge");
 
 			// parse source streams...
-			const(char)[] streamName;
 			Stream[] sourceStreams;
-			while (true)
+			foreach (s; source)
 			{
-				streamName = source.split!',';
-				if (!streamName)
-					break;
-
-				Stream* s = streamName in mod_stream.streams;
-				if (s)
-					sourceStreams ~= *s;
+				Stream* stream = s in mod_stream.streams;
+				if (stream)
+					sourceStreams ~= *stream;
 			}
 
 			String n = name.makeString(defaultAllocator());

@@ -72,6 +72,16 @@ void tfree(void[] mem) nothrow @nogc
 }
 
 
+char[] tstring(T)(auto ref T value)
+{
+	import urt.string.format : toString;
+	char[] r = toString(value, cast(char[])tempMem[allocOffset..$]);
+	if (r.length == 0)
+		r = toString(value, cast(char[])tempMem[0..TempMemSize / 2]);
+	allocOffset += r.length;
+	return r;
+}
+
 char[] tconcat(Args...)(ref Args args)
 {
 	import urt.string.format : concat;

@@ -3,13 +3,13 @@ module router.stream.tcp;
 import core.atomic;
 import core.sync.mutex;
 import core.thread;
-import std.socket;
 import std.concurrency;
-import std.stdio;
 
 import urt.conv;
+import urt.io;
 import urt.mem;
 import urt.meta.nullable;
+import urt.socket;
 import urt.string;
 import urt.string.format;
 
@@ -21,23 +21,20 @@ public import router.stream;
 
 class TCPStream : Stream
 {
-	this(String name, string host, ushort port, StreamOptions options = StreamOptions.None)
+nothrow @nogc:
+
+	this(String name, String host, ushort port, StreamOptions options = StreamOptions.None)
 	{
 		import core.lifetime;
 
 		super(name.move, "tcp-client", options);
-		this.host = host;
-		this.port = port;
 
-		Address[] addrs = getAddress(host, port);
-		if (addrs.length == 0)
-		{
+		InetAddress[2] addrs;
+		size_t r = getAddress(host, port, addrs);
+		if (r == 0)
 			assert(0);
-		}
-		else if (addrs.length > 1)
-		{
+		else if (r > 1)
 			writeln("TODO: what do to with additional addresses?");
-		}
 		remote = addrs[0];
 	}
 
@@ -45,38 +42,33 @@ class TCPStream : Stream
 	{
 		if (options & StreamOptions.ReverseConnect)
 		{
-			reverseConnectServer = new TCPServer(port, (Socket client, void* userData)
-			{
-				TCPStream stream = cast(TCPStream)userData;
-
-				if (client.remoteAddress == stream.remote)
-				{
-					stream.reverseConnectServer.stop();
-					stream.reverseConnectServer = null;
-
-					client.blocking = !(stream.options & StreamOptions.NonBlocking);
-
-					stream.socket = client;
-					stream.live.atomicStore(true);
-				}
-				else
-					client.close();
-			}, cast(void*)this);
-			reverseConnectServer.start();
+//			reverseConnectServer = new TCPServer(port, (Socket client, void* userData)
+//			{
+//				TCPStream stream = cast(TCPStream)userData;
+//
+//				if (client.remoteAddress == stream.remote)
+//				{
+//					stream.reverseConnectServer.stop();
+//					stream.reverseConnectServer = null;
+//
+//					client.blocking = !(stream.options & StreamOptions.NonBlocking);
+//
+//					stream.socket = client;
+//					stream.live.atomicStore(true);
+//				}
+//				else
+//					client.close();
+//			}, cast(void*)this);
+//			reverseConnectServer.start();
 		}
 		else
 		{
-			socket = new TcpSocket();
-			socket.connect(remote);
+			if (!CreateSocket(AddressFamily.IPv4, SocketType.Stream, Protocol.TCP, socket))
+				assert(false, "Couldn't create socket");
+			if (!socket.Connect(remote))
+				assert(false, "Failed to connect");
 
-			if (!socket.isAlive)
-			{
-				socket.close();
-				socket = null;
-				return false;
-			}
-
-			socket.blocking = !(options & StreamOptions.NonBlocking);
+			SetSocketOption(socket, SocketOption.NonBlocking, !!(options & StreamOptions.NonBlocking));
 		}
 
 		return true;
@@ -84,62 +76,51 @@ class TCPStream : Stream
 
 	override void disconnect()
 	{
-		if (reverseConnectServer !is null)
-		{
-			reverseConnectServer.stop();
-			reverseConnectServer = null;
-		}
+//		if (reverseConnectServer !is null)
+//		{
+//			reverseConnectServer.stop();
+//			reverseConnectServer = null;
+//		}
 
-		if (socket !is null)
+		if (socket)
 		{
 //			if (socket.isAlive)
-			socket.shutdown(SocketShutdown.BOTH);
-			socket.close();
+			socket.ShutdownSocket(SocketShutdownMode.ReadWrite);
+			socket.CloseSocket();
 			socket = null;
 		}
 	}
 
-	final bool connected_impl()
+	override bool connected()
 	{
-		return !(socket is null || !socket.isAlive);
+		// TODO: does this actually work?!
+		ubyte[1] buffer;
+		size_t bytesReceived;
+		Result r = Recv(socket, null, MsgFlags.Peek, &bytesReceived);
+		if (r == Result.Success)
+			return true;
+		SocketResult sr = r.GetSocketResult;
+		if (sr == SocketResult.Again || sr == SocketResult.WouldBlock)
+			return true;
+		return false;
 	}
 
-	override bool connected() nothrow @nogc
+	override const(char)[] remoteName()
 	{
-		// HACK!!!
-		try {
-			auto d = &connected_impl;
-			return (cast(bool delegate() nothrow @nogc)d)();
-		}
-		catch (Exception)
-			return false;
-	}
-
-	override string remoteName()
-	{
-		return host;
+		return tstring(remote);
 	}
 
 	override void setOpts(StreamOptions options)
 	{
 		this.options = options;
 		if (socket)
-			socket.blocking = !(options & StreamOptions.NonBlocking);
+		{
+			SetSocketOption(socket, SocketOption.NonBlocking, !!(options & StreamOptions.NonBlocking));
+		}
 	}
 
 	override ptrdiff_t read(ubyte[] buffer) nothrow @nogc
 	{
-		// HACK!!!
-		try {
-			auto d = &read_impl;
-			return (cast(ptrdiff_t delegate(ubyte[]) nothrow @nogc)d)(buffer);
-		}
-		catch (Exception)
-			return -1;
-	}
-
-	final ptrdiff_t read_impl(ubyte[] buffer)
-	{
 		if (!connected())
 		{
 			if (options & StreamOptions.KeepAlive)
@@ -152,13 +133,15 @@ class TCPStream : Stream
 				return -1;
 		}
 
-		long r = socket.receive(buffer);
-		if (r == Socket.ERROR)
+		size_t bytes;
+		Result r = socket.Recv(buffer, MsgFlags.None, &bytes);
+		if (r != Result.Success)
 		{
-			if (wouldHaveBlocked())
+			SocketResult sr = r.GetSocketResult;
+			if (sr == SocketResult.WouldBlock)
 				return 0;
 
-			socket.close();
+			socket.CloseSocket();
 			socket = null;
 
 			// HACK: we'll need a threaded/background keep-alive strategy, but this hack might do for the moment
@@ -169,22 +152,11 @@ class TCPStream : Stream
 			}
 			return -1;
 		}
-		return cast(size_t) r;
+		return bytes;
 	}
 
 	override ptrdiff_t write(const ubyte[] data) nothrow @nogc
 	{
-		// HACK!!!
-		try {
-			auto d = &write_impl;
-			return (cast(ptrdiff_t delegate(const ubyte[]) nothrow @nogc)d)(data);
-		}
-		catch (Exception)
-			return -1;
-	}
-
-	final ptrdiff_t write_impl(const ubyte[] data)
-	{
 		if (!connected())
 		{
 			if (options & StreamOptions.KeepAlive)
@@ -197,13 +169,15 @@ class TCPStream : Stream
 				return -1;
 		}
 
-		long r = socket.send(data);
-		if (r == Socket.ERROR)
+		size_t bytes;
+		Result r = socket.Send(data, MsgFlags.None, &bytes);
+		if (r != Result.Success)
 		{
-			if (wouldHaveBlocked())
+			SocketResult sr = r.GetSocketResult;
+			if (sr == SocketResult.WouldBlock)
 				return 0;
 
-			socket.close();
+			socket.CloseSocket();
 			socket = null;
 
 			// HACK: we'll need a threaded/background keep-alive strategy, but this hack might do for the moment
@@ -214,7 +188,7 @@ class TCPStream : Stream
 			}
 			return -1;
 		}
-		return cast(size_t) r;
+		return bytes;
 	}
 
 	override ptrdiff_t pending()
@@ -230,13 +204,15 @@ class TCPStream : Stream
 				return -1;
 		}
 
-		long r = socket.receive(null, SocketFlags.PEEK);
-		if (r == 0 || r == Socket.ERROR)
+		size_t bytes;
+		Result r = socket.Recv(null, MsgFlags.Peek, &bytes);
+		if (r != Result.Success)
 		{
-			socket.close();
+//			SocketResult sr = r.GetSocketResult;
+			socket.CloseSocket();
 			socket = null;
 		}
-		return cast(size_t) r;
+		return bytes;
 	}
 
 	override ptrdiff_t flush()
@@ -246,26 +222,23 @@ class TCPStream : Stream
 	}
 
 private:
-	string host;
-	ushort port;
-	Address remote;
+	InetAddress remote;
 	Socket socket;
-	TCPServer reverseConnectServer;
+//	TCPServer reverseConnectServer;
 
 	this(String name, Socket socket, ushort port)
 	{
 		import core.lifetime;
 
 		super(name.move, "serial", StreamOptions.None);
-		this.port = port;
-		remote = socket.remoteAddress;
-		host = remote.toString;
+		socket.GetPeerName(remote);
 
 		this.socket = socket;
 		live.atomicStore(true);
 	}
 }
 
+/+
 enum ServerOptions
 {
 	None = 0,
@@ -321,7 +294,7 @@ private:
 	NewConnection connectionCallback;
 	NewRawConnection rawConnectionCallback;
 	void* userData;
-	TcpSocket serverSocket;
+	Socket serverSocket;
 	Thread listenThread;
 	Mutex mutex;
 
@@ -366,7 +339,7 @@ private:
 		}
 	}
 }
-
++/
 
 class TCPStreamModule : Plugin
 {
@@ -414,8 +387,9 @@ class TCPStreamModule : Plugin
 				return session.writeLine("Invalid port number (1-65535): ", portNumber);
 
 			String n = name.makeString(defaultAllocator);
+			String a = address.makeString(defaultAllocator);
 
-			TCPStream stream = defaultAllocator.allocT!TCPStream(n.move, address.idup, cast(ushort)portNumber, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+			TCPStream stream = defaultAllocator.allocT!TCPStream(n.move, a.move, cast(ushort)portNumber, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
 			mod_stream.addStream(stream);
 		}
 	}

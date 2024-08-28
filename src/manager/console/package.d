@@ -113,7 +113,7 @@ struct Console
 		if (is(SessionType : Session))
     {
 		assert(false);
-        Session* session = m_allocator.alloc!Session(this, args.forward);
+        Session* session = m_allocator.alloc!Session(this, forward!args);
         session.m_console = this;
         session.SetPrompt(m_prompt);
         m_sessions ~= session;

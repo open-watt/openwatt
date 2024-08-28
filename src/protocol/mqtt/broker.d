@@ -72,7 +72,7 @@ class MQTTBroker
 {
 	const MQTTBrokerOptions options;
 
-	TCPServer server;
+//	TCPServer server;
 	Stream[] newConnections;
 	Client[] clients;
 	Session[string] sessions;
@@ -95,17 +95,17 @@ class MQTTBroker
 	{
 		this.options = options;
 		mutex = new Mutex;
-		server = new TCPServer(options.port, &newConnection, cast(void*)this);
+//		server = new TCPServer(options.port, &newConnection, cast(void*)this);
 	}
 
 	void start()
 	{
-		server.start();
+//		server.start();
 	}
 
 	void stop()
 	{
-		server.stop();
+//		server.stop();
 	}
 
 	void update()

@@ -1,5 +1,18 @@
 module urt.string.ascii;
 
+
+
+char[] toLower(const(char)[] str) pure nothrow
+{
+	return toLower(str, new char[str.length]);
+}
+
+char[] toUpper(const(char)[] str) pure nothrow
+{
+	return toUpper(str, new char[str.length]);
+}
+
+
 nothrow @nogc:
 
 // 1 = alpha, 2 = numeric, 4 = white, 8 = newline

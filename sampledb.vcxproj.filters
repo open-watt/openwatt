@@ -372,9 +372,6 @@
     <DCompile Include="src\manager\console\function_command.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\inet.d">
-      <Filter>src\protocol</Filter>
-    </DCompile>
     <DCompile Include="src\protocol\modbus\client.d">
       <Filter>src\protocol\modbus</Filter>
     </DCompile>
@@ -383,6 +380,27 @@
     </DCompile>
     <DCompile Include="src\protocol\snmp\package.d">
       <Filter>src\protocol\snmp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\master.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\system.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\map.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\lifetime.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\socket.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\inet.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\math.d">
+      <Filter>src\urt</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>

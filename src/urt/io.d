@@ -31,9 +31,7 @@ int writeln(Args...)(ref Args args)
 	import urt.string.format;
 	import urt.mem.temp;
 
-	size_t len = concat(null, args).length;
-	const(char)[] t = concat(cast(char[])talloc(len), args);
-	return writeln(t);
+	return tconcat(args).writeln;
 }
 
 int writef(Args...)(const(char)[] fmt, ref Args args)

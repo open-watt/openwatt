@@ -12,7 +12,7 @@ enum Level
 
 immutable string[] levelNames = [ "Error", "Warning", "Info", "Debug" ];
 
-__gshared Level logLevel = Level.Debug;
+__gshared Level logLevel = Level.Info;
 
 void writeDebug(T...)(ref T things) { writeLog(Level.Debug, things); }
 void writeInfo(T...)(ref T things) { writeLog(Level.Info, things); }

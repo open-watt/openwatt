@@ -187,7 +187,7 @@ struct Value(C)
 
 	this(Args...)(auto ref Args args)
 	{
-		value.emplace(args.forward);
+		value.emplace(forward!args);
 	}
 
 	~this()

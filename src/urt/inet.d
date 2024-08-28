@@ -1,15 +1,19 @@
-module protocol.inet;
+module urt.inet;
 
 import urt.conv;
 import urt.meta.nullable;
 import urt.string.format;
 
+nothrow @nogc:
 
-enum AddressFamily : ubyte
+
+enum AddressFamily : byte
 {
-	Unknown,
+	Unknown = -1,
+	Unspecified = 0,
+	Unix,
 	IPv4,
-	IPv6
+	IPv6,
 }
 
 
@@ -17,9 +21,14 @@ struct IPAddr
 {
 nothrow @nogc:
 
+	enum any = IPAddr(0, 0, 0, 0);
+	enum loopback = IPAddr(127, 0, 0, 1);
 	enum broadcast = IPAddr(255, 255, 255, 255);
+	enum none = IPAddr(255, 255, 255, 255);
 
-	align(4) ubyte[4] b;
+	ref uint address() const @property => *cast(uint*)b.ptr;
+	void address(uint v) @property { *cast(uint*)b.ptr = v; }
+	ubyte[4] b;
 
 	this(ubyte[4] b...) pure
 	{
@@ -215,6 +224,8 @@ struct IPv6Addr
 
 struct IPSubnet
 {
+nothrow @nogc:
+
 	IPAddr addr;
 	ubyte prefixLen;
 
@@ -267,6 +278,8 @@ struct IPSubnet
 
 struct IPv6Subnet
 {
+nothrow @nogc:
+
 	IPv6Addr addr;
 	ubyte prefixLen;
 
@@ -317,38 +330,57 @@ struct IPv6Subnet
 	}
 }
 
+struct MulticastGroup
+{
+    IPAddr address;
+    IPAddr iface;
+}
+
 struct InetAddress
 {
-	union Addr
+nothrow @nogc:
+
+	struct IPv4
 	{
-		IPAddr ipv4;
-		IPv6Addr ipv6;
+		IPAddr addr;
+		ushort port;
+	}
+	struct IPv6
+	{
+		IPv6Addr addr;
+		ushort port;
+		uint flowInfo;
+		uint scopeId;
+	}
+	struct Addr
+	{
+		IPv4 ipv4;
+		IPv6 ipv6;
 	}
 
-	AddressFamily addressFamily;
-	ushort port;
-	Addr addr;
+	AddressFamily family;
+	Addr _a;
 
 	this(IPAddr addr, ushort port)
 	{
-		addressFamily = AddressFamily.IPv4;
-		this.addr.ipv4 = addr;
-		this.port = port;
+		family = AddressFamily.IPv4;
+		this._a.ipv4.addr = addr;
+		this._a.ipv4.port = port;
 	}
 
 	this(IPv6Addr addr, ushort port)
 	{
-		addressFamily = AddressFamily.IPv6;
-		this.addr.ipv6 = addr;
-		this.port = port;
+		family = AddressFamily.IPv6;
+		this._a.ipv6.addr = addr;
+		this._a.ipv6.port = port;
 	}
 
 	size_t toHash() const pure
 	{
-		if (addressFamily == AddressFamily.IPv4)
-			return addr.ipv4.toHash() ^ port;
+		if (family == AddressFamily.IPv4)
+			return _a.ipv4.addr.toHash() ^ _a.ipv4.port;
 		else
-			return addr.ipv6.toHash() ^ port;
+			return _a.ipv6.addr.toHash() ^ _a.ipv6.port;
 	}
 
 	ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const pure
@@ -357,19 +389,19 @@ struct InetAddress
 		char[] tmp = buffer.length < stackBuffer.sizeof ? stackBuffer : buffer;
 
 		size_t offset = void;
-		if (addressFamily == AddressFamily.IPv4)
+		if (family == AddressFamily.IPv4)
 		{
-			offset = addr.ipv4.toString(tmp, null, null);
+			offset = _a.ipv4.addr.toString(tmp, null, null);
 			tmp[offset++] = ':';
-			offset += port.formatInt(tmp[offset..$]);
+			offset += _a.ipv4.port.formatInt(tmp[offset..$]);
 		}
 		else
 		{
 			tmp[0] = '[';
-			offset = 1 + addr.ipv6.toString(tmp[1 .. $], null, null);
+			offset = 1 + _a.ipv6.addr.toString(tmp[1 .. $], null, null);
 			tmp[offset++] = ']';
 			tmp[offset++] = ':';
-			offset += port.formatInt(tmp[offset..$]);
+			offset += _a.ipv6.port.formatInt(tmp[offset..$]);
 		}
 
 		if (tmp.ptr == stackBuffer.ptr)
@@ -420,12 +452,19 @@ struct InetAddress
 		}
 
 		// success! store results..
-		addressFamily = af;
-		this.port = port;
+		family = af;
 		if (af == AddressFamily.IPv4)
-			addr.ipv4 = a4;
+		{
+			_a.ipv4.addr = a4;
+			_a.ipv4.port = port;
+		}
 		else
-			addr.ipv6 = a6;
+		{
+			_a.ipv6.addr = a6;
+			_a.ipv6.port = port;
+			_a.ipv6.flowInfo = 0;
+			_a.ipv6.scopeId = 0;
+		}
 		return taken;
 	}
 

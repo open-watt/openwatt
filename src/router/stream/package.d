@@ -3,6 +3,7 @@ module router.stream;
 import core.lifetime;
 
 import urt.conv;
+import urt.map;
 import urt.mem.string;
 import urt.meta.nullable;
 import urt.string;
@@ -34,10 +35,10 @@ abstract class Stream
 	String name;
 	CacheString type;
 
-	this(String name, const(char)[] type, StreamOptions options)
+	this(String name, const(char)[] type, StreamOptions options) nothrow @nogc
 	{
 		this.name = name.move;
-		this.type = addString(type);
+		this.type = type.addString();
 		this.options = options;
 	}
 
@@ -50,7 +51,7 @@ abstract class Stream
 	// Check if the stream is connected
 	abstract bool connected() nothrow @nogc;
 
-	abstract string remoteName();
+	abstract const(char)[] remoteName();
 
 	abstract void setOpts(StreamOptions options);
 
@@ -86,6 +87,7 @@ class StreamModule : Plugin
 		mixin DeclareInstance;
 
 		Stream[const(char)[]] streams;
+		Map!(const(char)[], Stream) macTable;
 
 		override void init()
 		{

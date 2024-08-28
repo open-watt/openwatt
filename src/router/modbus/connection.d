@@ -1,8 +1,6 @@
 module router.modbus.connection;
 
-import std.container.array;
 import std.file;
-import std.socket;
 import std.stdio;
 
 import urt.log;

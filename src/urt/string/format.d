@@ -4,7 +4,7 @@ import urt.string;
 import urt.traits;
 import urt.util;
 
-public import urt.mem.temp : tformat, tconcat;
+public import urt.mem.temp : tformat, tconcat, tstring;
 
 
 nothrow @nogc:
@@ -16,6 +16,18 @@ debug
 
 alias StringifyFunc = ptrdiff_t delegate(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) nothrow @nogc;
 alias IntifyFunc = ptrdiff_t delegate() nothrow @nogc;
+
+
+char[] toString(T)(auto ref T value, char[] buffer)
+{
+	import urt.string.format : FormatArg;
+
+	debug InFormatFunction = true;
+	FormatArg a = FormatArg(value);
+	char[] r = a.getString(buffer, null, null);
+	debug InFormatFunction = false;
+	return r;
+}
 
 char[] concat(Args...)(char[] buffer, ref Args args)
 {

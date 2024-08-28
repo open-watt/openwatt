@@ -56,7 +56,7 @@ class ModbusInterface : BaseInterface
 	MACAddress masterMac;
 	ModbusFrameType expectMessageType = ModbusFrameType.Unknown;
 
-	this(InterfaceModule.Instance m, String name, Stream stream, ModbusProtocol protocol, bool isMaster)
+	this(InterfaceModule.Instance m, String name, Stream stream, ModbusProtocol protocol, bool isMaster) nothrow @nogc
 	{
 		super(m, name, StringLit!"modbus");
 		this.stream = stream;
@@ -81,10 +81,16 @@ class ModbusInterface : BaseInterface
 
 	override void update()
 	{
-		if (!stream.connected)
-			return;
-
 		MonoTime now = getTime();
+
+		bool connected = stream.connected();
+		if (connected != status.linkStatus)
+		{
+			status.linkStatus = connected;
+			status.linkStatusChangeTime = now;
+		}
+		if (!connected)
+			return;
 
 		ubyte[1024] buffer = void;
 		buffer[0 .. tailBytes] = tail[0 .. tailBytes];
@@ -245,7 +251,8 @@ private:
 			}
 			else
 			{
-				assert(false);
+				// just ignore the message I guess until we can get back on the rails...
+//				assert(false);
 			}
 		}
 	}
@@ -462,12 +469,12 @@ __gshared immutable ushort[25] functionLens = [
 
 int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
 {
-	if (data.length < 4)
+	if (data.length < 4) // @unlikely
 		return 0;
 
 	// check the address is in the valid range
 	ubyte address = data[0];
-	if (address >= 248 && address <= 255)
+	if (address >= 248 && address <= 255) // @unlikely
 		return 0;
 	frameInfo.address = address;
 
@@ -475,14 +482,14 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
 	ubyte f = data[1];
 	FunctionCode fc = cast(FunctionCode)(f & 0x7F);
 	ushort fnData = fc < functionLens.length ? functionLens[f] : fc == 0x2B ? 0xFFFF : 0;
-	if (fnData == 0)
+	if (fnData == 0) // @unlikely
 		return 0;
 	frameInfo.functionCode = fc;
 
 	// exceptions are always 3 bytes
 	ubyte reqLength = void;
 	ubyte resLength = void;
-	if (f & 0x80)
+	if (f & 0x80) // @unlikely
 	{
 		frameInfo.exceptionCode = cast(ExceptionCode)data[2];
 		frameInfo.frameType = ModbusFrameType.Response;
@@ -492,14 +499,14 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
 
 	// zero bytes (broadcast address) are common in data streams, and if the function code can't broadcast, we can exclude this packet
 	// NOTE: this can only catch 10 bad bytes in the second byte position... maybe not worth the if()?
-//	else if (address == 0 && (fFlags & 2) == 0)
+//	else if (address == 0 && (fFlags & 2) == 0) // @unlikely
 //	{
 //		frameId.invalidFrame = true;
 //		return false;
 //	}
 
 	// if the function code can determine the length...
-	else if (fnData != 0xFFFF)
+	else if (fnData != 0xFFFF) // @likely
 	{
 		// TODO: we can instead load these bytes separately if the bit-shifting is worse than loads...
 		reqLength = fnData & 0xF;
@@ -514,11 +521,11 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
 	else
 	{
 		// scan for a CRC...
-		assert(false);
+		assert(false, "TODO");
 	}
 
 	int failResult = 0;
-	if (reqLength != resLength)
+	if (reqLength != resLength) // @likely
 	{
 		ubyte length = void, smallerLength = void;
 		ModbusFrameType type = void, smallerType = void;
@@ -537,7 +544,7 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
 			smallerType = ModbusFrameType.Request;
 		}
 
-		if (data.length >= length + 2)
+		if (data.length >= length + 2) // @likely
 		{
 			uint crc2 = calculateModbusCRC2(data[0 .. length], smallerLength);
 
@@ -562,7 +569,7 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
 	}
 
 	// check we have enough data...
-	if (data.length < reqLength + 2)
+	if (data.length < reqLength + 2) // @unlikely
 		return -1;
 
 	ushort crc = calculateModbusCRC(data[0 .. reqLength]);

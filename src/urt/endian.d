@@ -1,5 +1,9 @@
 module urt.endian;
 
+import urt.traits;
+
+nothrow @nogc:
+
 
 ushort bigEndianToNative(T)(ref const ubyte[2] bytes)
 	if (is(T == ushort))
@@ -41,4 +45,22 @@ ubyte[4] nativeToLittleEndian(uint u32)
 {
 	ubyte[4] res = [ u32 & 0xFF, (u32 >> 8) & 0xFF, (u32 >> 16) & 0xFF, u32 >> 24 ];
 	return res;
+}
+
+
+void storeBigEndian(T)(T* target, T val) if (isSomeInt!T)
+{
+	(cast(ubyte*)target)[0..T.sizeof] = nativeToBigEndian(val);
+}
+void storeLittleEndian(T)(T* target, T val) if (isSomeInt!T)
+{
+	(cast(ubyte*)target)[0..T.sizeof] = nativeToLittle(val);
+}
+T loadBigEndian(T)(const(T)* src) if (isSomeInt!T)
+{
+	return bigEndianToNative!T((cast(ubyte*)src)[0..T.sizeof]);
+}
+T loadLittleEndian(T)(const(T)* src) if (isSomeInt!T)
+{
+	return littleEndianToNative!T((cast(ubyte*)src)[0..T.sizeof]);
 }

@@ -17,12 +17,12 @@ enum TWCMessageType : byte
 	_FBEE,
 	_FBEF,
 	_FBF1,
-	ChargeInfo,
+	ChargeInfo,				// FDEB
 	_FDEC, // ???
-	TWCSerialNumber,
-	VIN1,
-	VIN2,
-	VIN3,
+	TWCSerialNumber,		// FDED
+	VIN1,					// FDEE
+	VIN2,					// FDEF
+	VIN3,					// FDF1
 }
 
 enum TWCState : ubyte
@@ -225,7 +225,7 @@ bool parseTWCMessage(const(ubyte)[] data, out TWCMessage msg)
 
 private:
 
-__gshared immutable ushort[] messageCode = [
+__gshared immutable ushort[17] messageCode = [
 	0xFCE1, 0xFBE2, 0xFDE2, 0xFBE0,
 	0xFDE0, 0xFBEB, 0xFBEC, 0xFBED,
 	0xFBEE, 0xFBEF, 0xFBF1, 0xFDEB,

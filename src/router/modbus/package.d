@@ -121,7 +121,7 @@ class ModbusPlugin : Plugin
 							port = options.split!',';
 							addr = port.split!':'.unQuote;
 							ushort p = cast(ushort)port.parseInt;
-							stream = new TCPStream("wow".makeString(), addr.idup, p ? p : 502, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+							stream = new TCPStream("wow".makeString(), addr.makeString(), p ? p : 502, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
 							break;
 
 						case "udp-server":

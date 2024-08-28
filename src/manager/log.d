@@ -1,12 +1,12 @@
 module manager.log;
 
+import urt.log;
+import urt.string;
+
 import manager.console;
 import manager.console.command;
 import manager.console.session;
 import manager.plugin;
-
-import urt.log;
-import urt.string;
 
 enum Category
 {

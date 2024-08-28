@@ -28,6 +28,17 @@ nothrow @nogc:
 	bool opEquals(const(ubyte)[6] bytes) const pure
 		=> b == bytes;
 
+	int opCmp(ref const MACAddress rhs) const pure
+	{
+		for (size_t i = 0; i < 6; ++i)
+		{
+			int c = rhs.b[i] - b[i];
+			if (c != 0)
+				return c;
+		}
+		return 0;
+	}
+
 	bool isBroadcast() const pure
 		=> b == broadcast.b;
 

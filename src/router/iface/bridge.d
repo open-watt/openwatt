@@ -15,7 +15,7 @@ class BridgeInterface : BaseInterface
 {
 	BaseInterface[] members;
 
-	this(InterfaceModule.Instance m, String name)
+	this(InterfaceModule.Instance m, String name)  nothrow @nogc
 	{
 		super(m, name, StringLit!"bridge");
 	}

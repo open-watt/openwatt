@@ -114,7 +114,7 @@ uint getStringHeapRemaining() nothrow @nogc
 	return cast(uint)stringHeap.length - stringHeapCursor;
 }
 
-CacheString addString(const(char)[] str, bool dedup = true)
+CacheString addString(const(char)[] str, bool dedup = true) nothrow @nogc
 {
 	// null string
 	if (str.length == 0)

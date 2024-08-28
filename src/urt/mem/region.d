@@ -33,7 +33,7 @@ struct Region
 		if (is(T == struct))
 	{
 		import core.lifetime : emplace, forward;
-		return (cast(T*)alloc(T.sizeof, T.alignof).ptr).emplace(args.forward);
+		return (cast(T*)alloc(T.sizeof, T.alignof).ptr).emplace(forward!args);
 	}
 
 	C alloc(C, Args...)(auto ref Args args) @nogc

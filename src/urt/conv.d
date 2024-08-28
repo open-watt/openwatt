@@ -2,9 +2,13 @@ module urt.conv;
 
 import urt.meta;
 import urt.string;
+public import urt.string.format : toString;
+
+nothrow @nogc:
+
 
 // on error or not-a-number cases, bytesTaken will contain 0
-long parseInt(const(char)[] str, size_t* bytesTaken = null, ulong* fixedPointDivisor = null, int base = 10) pure nothrow @nogc
+long parseInt(const(char)[] str, size_t* bytesTaken = null, ulong* fixedPointDivisor = null, int base = 10) pure
 {
 	assert(base > 1 && base <= 36, "Invalid base");
 
@@ -98,7 +102,7 @@ unittest
 
 
 // on error or not-a-number, result will be nan and bytesTaken will contain 0
-double parseFloat(const(char)[] str, size_t* bytesTaken = null, int base = 10) pure nothrow @nogc
+double parseFloat(const(char)[] str, size_t* bytesTaken = null, int base = 10) pure
 {
 	size_t taken = void;
 	ulong div = void;
@@ -121,7 +125,7 @@ unittest
 }
 
 
-size_t formatInt(long value, char[] buffer, uint base = 10, uint width = 0, char fill = ' ', bool showSign = false) pure nothrow @nogc
+size_t formatInt(long value, char[] buffer, uint base = 10, uint width = 0, char fill = ' ', bool showSign = false) pure
 {
 	import urt.util : isPowerOf2, log2, max;
 

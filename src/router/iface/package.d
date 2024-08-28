@@ -1,7 +1,9 @@
 module router.iface;
 
 import urt.conv;
+import urt.map;
 import urt.mem.ring;
+import urt.mem.string;
 import urt.string;
 import urt.string.format;
 import urt.time;
@@ -82,10 +84,10 @@ class BaseInterface
 	InterfaceModule.Instance mod_iface;
 
 	String name;
-	String type;
+	CacheString type;
 
 	MACAddress mac;
-	BaseInterface[MACAddress] macTable;
+	Map!(MACAddress, BaseInterface) macTable;
 
 	InterfaceSubscriber[] subscribers;
 
@@ -94,13 +96,13 @@ class BaseInterface
 	BufferOverflowBehaviour sendBehaviour;
 	BufferOverflowBehaviour recvBehaviour;
 
-	this(InterfaceModule.Instance m, String name, String type)
+	this(InterfaceModule.Instance m, String name, const(char)[] type) nothrow @nogc
 	{
 		import core.lifetime;
 
 		this.mod_iface = m;
 		this.name = name.move;
-		this.type = type.move;
+		this.type = type.addString();
 
 		mac = generateMacAddress();
 		addAddress(mac, this);
@@ -120,13 +122,13 @@ class BaseInterface
 
 	abstract bool send(ref const Packet packet) nothrow @nogc;
 
-	final void addAddress(MACAddress mac, BaseInterface iface)
+	final void addAddress(MACAddress mac, BaseInterface iface) nothrow @nogc
 	{
 		assert(mac !in macTable, "MAC address already in use!");
 		macTable[mac] = iface;
 	}
 
-	final void removeAddress(MACAddress mac)
+	final void removeAddress(MACAddress mac) nothrow @nogc
 	{
 		macTable.remove(mac);
 	}

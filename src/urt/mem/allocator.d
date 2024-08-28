@@ -178,6 +178,94 @@ class NoGCAllocator : Allocator
 	}
 
 	abstract override void free(void[] mem) nothrow @nogc;
+
+	final T* allocT(T, Args...)(auto ref Args args) nothrow @nogc
+		if (!is(T == class))
+	{
+		import core.lifetime : emplace, forward;
+		T* item = cast(T*)alloc(T.sizeof, T.alignof).ptr;
+		try
+			item.emplace(forward!args);
+		catch(Exception e)
+		{
+			assert(false, e.msg);
+		}
+		return item;
+	}
+
+	final T allocT(T, Args...)(auto ref Args args) nothrow @nogc
+		if (is(T == class))
+	{
+		import core.lifetime : emplace, forward;
+		T item = cast(T)alloc(__traits(classInstanceSize, T), __traits(classInstanceAlignment, T)).ptr;
+		try
+			item.emplace(forward!args);
+		catch(Exception e)
+		{
+			assert(false, e.msg);
+		}
+		return item;
+	}
+
+	final T[] allocArray(T, Args...)(size_t count, auto ref Args args) nothrow @nogc
+		if (!is(T == class))
+	{
+		if (count == 0)
+			return null;
+
+		import core.lifetime : emplace, forward;
+		T[] items = cast(T[])alloc(T.sizeof * count, T.alignof);
+		try
+		{
+			for (size_t i = 0; i < count - 1; ++i)
+				emplace(&items[i], args);
+			emplace(&items[$-1], forward!args);
+		}
+		catch(Exception e)
+		{
+			assert(false, e.msg);
+		}
+		return items;
+	}
+
+	final void freeT(T)(T* item) nothrow @nogc
+		if (!is(T == class))
+	{
+		try
+			destroy!false(*item);
+		catch(Exception e)
+		{
+			assert(false, e.msg);
+		}
+		free((cast(void*)item)[0..T.sizeof]);
+	}
+
+	final void freeT(T)(T item) nothrow @nogc
+		if (is(T == class))
+	{
+		try
+			item.destroy!false;
+		catch(Exception e)
+		{
+			assert(false, e.msg);
+		}
+		free((cast(void*)item)[0..__traits(classInstanceSize, T)]);
+	}
+
+	final void freeArray(T)(T[] items) nothrow @nogc
+		if (!is(T == class))
+	{
+		try
+		{
+			foreach(ref i; items)
+				i.destroy!false;
+		}
+		catch(Exception e)
+		{
+			assert(false, e.msg);
+		}
+		free(cast(void[])items[]);
+	}
 }
 
 class Mallocator : NoGCAllocator

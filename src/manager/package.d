@@ -1,5 +1,7 @@
 module manager;
 
+import urt.mem.allocator;
+
 public import manager.instance;
 import manager.plugin;
 

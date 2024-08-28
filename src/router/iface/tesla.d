@@ -31,7 +31,7 @@ class TeslaInterface : BaseInterface
 {
 	Stream stream;
 
-	this(InterfaceModule.Instance m, String name, Stream stream)
+	this(InterfaceModule.Instance m, String name, Stream stream) nothrow @nogc
 	{
 		super(m, name, StringLit!"tesla-twc");
 		this.stream = stream;

@@ -34,19 +34,35 @@ class FunctionCommand : Command
 				// but we'll need to improve the API to report error status
 				return null;
 			}
-			static if (is(ReturnType!fun == void))
+			static if (is(__traits(parent, fun)))
 			{
-				__traits(getMember, cast(__traits(parent, fun))instance, __traits(identifier, fun))(session, args.expand);
-				return null;
+				static if (is(ReturnType!fun == void))
+				{
+					__traits(getMember, cast(__traits(parent, fun))instance, __traits(identifier, fun))(session, args.expand);
+					return null;
+				}
+				else
+				{
+					auto r = __traits(getMember, cast(__traits(parent, fun))instance, __traits(identifier, fun))(session, args.expand);
+					return tconcat(r);
+				}
 			}
 			else
 			{
-				auto r = __traits(getMember, cast(__traits(parent, fun))instance, __traits(identifier, fun))(session, args.expand);
-				return tconcat(r);
+				static if (is(ReturnType!fun == void))
+				{
+					fun(session, args.expand);
+					return null;
+				}
+				else
+				{
+					auto r = fun(session, args.expand);
+					return tconcat(r);
+				}
 			}
 		}
 
-		return defaultAllocator().allocT!FunctionCommand(console, commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName, cast(void*)i, &functionAdapter);
+		return new FunctionCommand(console, commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName, cast(void*)i, &functionAdapter);
 	}
 
 
@@ -215,35 +231,53 @@ bool tokenToValue(S : const(char)[])(ref const Token t, out S r) nothrow @nogc
 	return true;
 }
 
-/+
-T tokenToValue(T)(Token t) if (is(T U == enum))
+bool tokenToValue(T)(ref const Token t, out T r) nothrow @nogc if (is(T U == enum))
+{
+	// try and parse a key from the string...
+	const(char)[] v = tokenValue(t, false);
+	if (!v)
+		return false;
+	switch (v)
+	{
+		static foreach(E; __traits(allMembers, T))
+		{
+			case Alias!(toLower(E)):
+				r = __traits(getMember, T, E);
+				return true;
+		}
+		default:
+			break;
+	}
+
+	// else parse the base type?
+//	const(char)[] v = tokenValue(t, false);
+
+	return false;
+}
+
+bool tokenToValue(T : U[], U)(ref const Token t, out T r) nothrow @nogc if (!is(U : char))
 {
 	const(char)[] v = tokenValue(t, false);
-}
-+/
-
-
-bool tokenToValue(T)(ref const Token t, out T r) nothrow @nogc if (is(T : U[], U))
-{
-	const(char)[] v = tokenValue(t, true);
 
 	// TODO: this is tricky, because we need to split on ',' but also need to re-tokenise all the elements...
 	//       trouble is; what if the whole token is a string? did it even detect the token type correctly in the first place?
 
-	const(char)[] t = v;
+	const(char)[] tmp = v;
 	int numArgs = 0;
-	while (t.split(','))
+	while (tmp.split(','))
 		++numArgs;
 
-	r = tempAllocator().allocArray(U, numArgs);
+	r = tempAllocator().allocArray!U(numArgs);
 	int i = 0;
 	while (!v.empty)
 	{
-		if (!tokenToValue!U(v.split(','), r[i++]))
+		if (!tokenToValue!U(Token(v.split(',')), r[i++]))
 			return false;
 	}
 	return true;
 }
+
+
 
 bool tokenToValue(T : Nullable!U, U)(ref const Token t, out T r) nothrow @nogc
 {

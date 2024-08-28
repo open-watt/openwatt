@@ -10,6 +10,7 @@ import manager.config;
 import manager.device;
 import manager.element;
 import manager.plugin;
+import manager.system;
 import manager.units;
 
 //import router.modbus.connection;
@@ -45,6 +46,9 @@ class ApplicationInstance
 		import urt.mem;
 
 		console = Console(this, String("console".addString), Mallocator.instance);
+
+		console.registerCommand!log_level("/system", this);
+
 	}
 
 	Plugin.Instance moduleInstance(string name) pure nothrow @nogc
