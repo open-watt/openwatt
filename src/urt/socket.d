@@ -3,12 +3,15 @@ module urt.socket;
 public import urt.endian;
 public import urt.inet;
 public import urt.mem;
+public import urt.result;
 public import urt.time;
 
 version (Windows)
 {
 	import core.sys.windows.windows;
-	import core.sys.windows.winsock2;
+	import core.sys.windows.winsock2 :
+		_bind = bind, _listen = listen, _connect = connect, _accept = accept,
+		_send = send, _sendto = sendto, _recv = recv, _recvfrom = recvfrom;
 
 	version = HasIPv6;
 
@@ -70,7 +73,7 @@ enum SocketShutdownMode : ubyte
     ReadWrite
 }
 
-enum SocketOption
+enum SocketOption : ubyte
 {
     // not traditionally a 'socket option', but this is way more convenient
     NonBlocking,
@@ -114,12 +117,35 @@ enum SocketOption
 
 enum MsgFlags : ubyte
 {
-    None        = 0x00000000,
+    None        = 0,
     OOB         = 1 << 0,
     Peek        = 1 << 1,
     Confirm     = 1 << 2,
     NoSig       = 1 << 3,
     //...
+}
+
+enum AddressInfoFlags : ubyte
+{
+    None        = 0,
+    Passive     = 1 << 0,
+    CanonName   = 1 << 1,
+    NumericHost = 1 << 2,
+    NumericServ = 1 << 3,
+    All         = 1 << 4,
+    AddrConfig  = 1 << 5,
+    V4Mapped    = 1 << 6,
+    FQDN        = 1 << 7,
+}
+
+enum PollEvents : ubyte
+{
+    None        = 0,
+    Read        = 1 << 0,
+    Write       = 1 << 1,
+    Error       = 1 << 2,
+    HangUp      = 1 << 3,
+    Invalid     = 1 << 4,
 }
 
 
@@ -137,43 +163,18 @@ private:
 }
 
 
-struct Result
-{
-	enum Success = Result();
-
-	uint systemCode = 0;
-
-	bool opCast(T : bool)() const
-		=> systemCode == 0;
-
-	bool succeeded() const
-		=> systemCode == 0;
-	bool failed() const
-		=> systemCode != 0;
-}
-
-// Internal error codes
-enum InternalCode
-{
-    Success = 0,
-    BufferTooSmall,
-    InvalidParameter,
-    Unsupported
-}
-
-
-Result CreateSocket(AddressFamily af, SocketType type, Protocol proto, out Socket socket)
+Result create_socket(AddressFamily af, SocketType type, Protocol proto, out Socket socket)
 {
 	version (HasUnixSocket) {} else
 	    assert(af != AddressFamily.Unix, "Unix sockets not supported on this platform!");
 
     socket.handle = .socket(s_addressFamily[af], s_socketType[type], s_protocol[proto]);
     if (socket == Socket.invalid)
-        return SocketGetLastError();
+        return socket_getlasterror();
     return Result.Success;
 }
 
-Result CloseSocket(Socket socket)
+Result close_socket(Socket socket)
 {
 	version (Windows)
 		int result = closesocket(socket.handle);
@@ -182,7 +183,7 @@ Result CloseSocket(Socket socket)
 	else
 	    assert(false, "Not implemented!");
     if (result < 0)
-        return SocketGetLastError();
+        return socket_getlasterror();
 
 //    {
 //        LockGuard<SharedMutex> lock(s_noSignalMut);
@@ -192,7 +193,7 @@ Result CloseSocket(Socket socket)
     return Result.Success;
 }
 
-Result ShutdownSocket(Socket socket, SocketShutdownMode how)
+Result shutdown_socket(Socket socket, SocketShutdownMode how)
 {
     int t = int(how);
     switch (how)
@@ -214,56 +215,56 @@ Result ShutdownSocket(Socket socket, SocketShutdownMode how)
     }
 
     if (shutdown(socket.handle, t) < 0)
-        return SocketGetLastError();
+        return socket_getlasterror();
     return Result.Success;
 }
 
-Result Bind(Socket socket, ref const InetAddress address)
+Result bind(Socket socket, ref const InetAddress address)
 {
     ubyte[512] buffer = void;
     size_t addrLen;
-    sockaddr* sockAddr = MakeSockaddr(address, buffer, addrLen);
+    sockaddr* sockAddr = make_sockaddr(address, buffer, addrLen);
     assert(sockAddr, "Invalid socket address");
 
-    if (bind(socket.handle, sockAddr, cast(int)addrLen) < 0)
-        return SocketGetLastError();
+    if (_bind(socket.handle, sockAddr, cast(int)addrLen) < 0)
+        return socket_getlasterror();
     return Result.Success;
 }
 
-Result Listen(Socket socket, uint backlog = -1)
+Result listen(Socket socket, uint backlog = -1)
 {
-    if (listen(socket.handle, int(backlog & 0x7FFFFFFF)) < 0)
-        return SocketGetLastError();
+    if (_listen(socket.handle, int(backlog & 0x7FFFFFFF)) < 0)
+        return socket_getlasterror();
     return Result.Success;
 }
 
-Result Connect(Socket socket, ref const InetAddress address)
+Result connect(Socket socket, ref const InetAddress address)
 {
     ubyte[512] buffer = void;
     size_t addrLen;
-    sockaddr* sockAddr = MakeSockaddr(address, buffer, addrLen);
+    sockaddr* sockAddr = make_sockaddr(address, buffer, addrLen);
     assert(sockAddr, "Invalid socket address");
 
-    if (connect(socket.handle, sockAddr, cast(int)addrLen) < 0)
-        return SocketGetLastError();
+    if (_connect(socket.handle, sockAddr, cast(int)addrLen) < 0)
+        return socket_getlasterror();
     return Result.Success;
 }
 
-Result Accept(Socket socket, out Socket connection, InetAddress* connectingSocketAddress = null)
+Result accept(Socket socket, out Socket connection, InetAddress* connectingSocketAddress = null)
 {
     char[sockaddr_storage.sizeof] buffer = void;
     sockaddr* addr = cast(sockaddr*)buffer.ptr;
     socklen_t size = buffer.sizeof;
 
-    connection.handle = accept(socket.handle, addr, &size);
+    connection.handle = _accept(socket.handle, addr, &size);
     if (connection == Socket.invalid)
-        return SocketGetLastError();
+        return socket_getlasterror();
     else if (connectingSocketAddress)
-        *connectingSocketAddress = MakeSocketAddress(addr);
+        *connectingSocketAddress = make_InetAddress(addr);
     return Result.Success;
 }
 
-Result Send(Socket socket, const(void)[] message, MsgFlags flags = MsgFlags.None, size_t* bytesSent = null)
+Result send(Socket socket, const(void)[] message, MsgFlags flags = MsgFlags.None, size_t* bytesSent = null)
 {
     Result r = Result.Success;
 
@@ -275,10 +276,10 @@ Result Send(Socket socket, const(void)[] message, MsgFlags flags = MsgFlags.None
 //        }
 //    }
 
-    ptrdiff_t sent = send(socket.handle, message.ptr, cast(int)message.length, MapMessageFlags(flags));
+    ptrdiff_t sent = _send(socket.handle, message.ptr, cast(int)message.length, map_message_flags(flags));
     if (sent < 0)
     {
-        r = SocketGetLastError();
+        r = socket_getlasterror();
         sent = 0;
     }
     if (bytesSent)
@@ -286,14 +287,14 @@ Result Send(Socket socket, const(void)[] message, MsgFlags flags = MsgFlags.None
     return r;
 }
 
-Result SendTo(Socket socket, const(void)[] message, MsgFlags flags = MsgFlags.None, const InetAddress* address = null, size_t* bytesSent = null)
+Result sendto(Socket socket, const(void)[] message, MsgFlags flags = MsgFlags.None, const InetAddress* address = null, size_t* bytesSent = null)
 {
     ubyte[sockaddr_storage.sizeof] tmp = void;
     size_t addrLen;
     sockaddr* sockAddr = null;
     if (address)
     {
-        sockAddr = MakeSockaddr(*address, tmp, addrLen);
+        sockAddr = make_sockaddr(*address, tmp, addrLen);
         assert(sockAddr, "Invalid socket address");
     }
 
@@ -306,10 +307,10 @@ Result SendTo(Socket socket, const(void)[] message, MsgFlags flags = MsgFlags.No
 //    }
 
     Result r = Result.Success;
-    ptrdiff_t sent = sendto(socket.handle, message.ptr, cast(int)message.length, MapMessageFlags(flags), sockAddr, cast(int)addrLen);
+    ptrdiff_t sent = _sendto(socket.handle, message.ptr, cast(int)message.length, map_message_flags(flags), sockAddr, cast(int)addrLen);
     if (sent < 0)
     {
-        r = SocketGetLastError();
+        r = socket_getlasterror();
         sent = 0;
     }
     if (bytesSent)
@@ -317,10 +318,10 @@ Result SendTo(Socket socket, const(void)[] message, MsgFlags flags = MsgFlags.No
     return r;
 }
 
-Result Recv(Socket socket, void[] buffer, MsgFlags flags = MsgFlags.None, size_t* bytesReceived)
+Result recv(Socket socket, void[] buffer, MsgFlags flags = MsgFlags.None, size_t* bytesReceived)
 {
     Result r = Result.Success;
-    ptrdiff_t bytes = recv(socket.handle, buffer.ptr, cast(int)buffer.length, MapMessageFlags(flags));
+    ptrdiff_t bytes = _recv(socket.handle, buffer.ptr, cast(int)buffer.length, map_message_flags(flags));
     if (bytes > 0)
         *bytesReceived = bytes;
     else
@@ -339,10 +340,10 @@ Result Recv(Socket socket, void[] buffer, MsgFlags flags = MsgFlags.None, size_t
         }
         else
         {
-            Result error = SocketGetLastError();
+            Result error = socket_getlasterror();
             // TODO: Do we want a better way to distinguish between receiving a 0-length packet vs no-data (which looks like an error)?
             //       Is a zero-length packet possible to detect in TCP streams? Makes more sense for recvfrom...
-            SocketResult sr = GetSocketResult(error);
+            SocketResult sr = get_SocketResult(error);
             if (sr != SocketResult.Again && sr != SocketResult.WouldBlock)
                 r = error;
         }
@@ -350,33 +351,33 @@ Result Recv(Socket socket, void[] buffer, MsgFlags flags = MsgFlags.None, size_t
     return r;
 }
 
-Result RecvFrom(Socket socket, void[] buffer, MsgFlags flags = MsgFlags.None, InetAddress* senderAddress = null, size_t* bytesReceived)
+Result recvfrom(Socket socket, void[] buffer, MsgFlags flags = MsgFlags.None, InetAddress* senderAddress = null, size_t* bytesReceived)
 {
     char[sockaddr_storage.sizeof] addrBuffer = void;
     sockaddr* addr = cast(sockaddr*)addrBuffer.ptr;
     socklen_t size = addrBuffer.sizeof;
 
     Result r = Result.Success;
-    ptrdiff_t bytes = recvfrom(socket.handle, buffer.ptr, cast(int)buffer.length, MapMessageFlags(flags), addr, &size);
+    ptrdiff_t bytes = _recvfrom(socket.handle, buffer.ptr, cast(int)buffer.length, map_message_flags(flags), addr, &size);
     if (bytes >= 0)
         *bytesReceived = bytes;
     else
     {
         *bytesReceived = 0;
 
-        Result error = SocketGetLastError();
-        SocketResult sockRes = GetSocketResult(error);
+        Result error = socket_getlasterror();
+        SocketResult sockRes = get_SocketResult(error);
         if (sockRes != SocketResult.NoBuffer && // buffers full
             sockRes != SocketResult.ConnectionRefused && // posix error
             sockRes != SocketResult.ConnectionReset) // !!! windows may report this error, but it appears to mean something different on posix
             r = error;
     }
     if (r && senderAddress)
-        *senderAddress = MakeSocketAddress(addr);
+        *senderAddress = make_InetAddress(addr);
     return r;
 }
 
-Result SetSocketOption(Socket socket, SocketOption option, const(void)* optval, size_t optlen)
+Result set_socket_option(Socket socket, SocketOption option, const(void)* optval, size_t optlen)
 {
     Result r = Result.Success;
 
@@ -416,7 +417,7 @@ Result SetSocketOption(Socket socket, SocketOption option, const(void)* optval, 
 //    }
 
     // determine the option 'level'
-    OptLevel level = GetOptLevel(option);
+    OptLevel level = get_optlevel(option);
 	version (HasIPv6) {} else
 	    assert(level != OptLevel.IPv6 && level != OptLevel.ICMPv6, "Platform does not support IPv6!");
 
@@ -499,43 +500,43 @@ Result SetSocketOption(Socket socket, SocketOption option, const(void)* optval, 
     return r;
 }
 
-Result SetSocketOption(Socket socket, SocketOption option, bool value)
+Result set_socket_option(Socket socket, SocketOption option, bool value)
 {
     const OptInfo* optInfo = &s_socketOptions[option];
     if (optInfo.rtType == OptType.Unsupported)
         return InternalResult(InternalCode.Unsupported);
     assert(optInfo.rtType == OptType.Bool, "Incorrect option value type for call");
-    return SetSocketOption(socket, option, &value, bool.sizeof);
+    return set_socket_option(socket, option, &value, bool.sizeof);
 }
 
-Result SetSocketOption(Socket socket, SocketOption option, int value)
+Result set_socket_option(Socket socket, SocketOption option, int value)
 {
     const OptInfo* optInfo = &s_socketOptions[option];
     if (optInfo.rtType == OptType.Unsupported)
         return InternalResult(InternalCode.Unsupported);
     assert(optInfo.rtType == OptType.Int, "Incorrect option value type for call");
-    return SetSocketOption(socket, option, &value, int.sizeof);
+    return set_socket_option(socket, option, &value, int.sizeof);
 }
 
-Result SetSocketOption(Socket socket, SocketOption option, Duration value)
+Result set_socket_option(Socket socket, SocketOption option, Duration value)
 {
     const OptInfo* optInfo = &s_socketOptions[option];
     if (optInfo.rtType == OptType.Unsupported)
         return InternalResult(InternalCode.Unsupported);
     assert(optInfo.rtType == OptType.Duration, "Incorrect option value type for call");
-    return SetSocketOption(socket, option, &value, Duration.sizeof);
+    return set_socket_option(socket, option, &value, Duration.sizeof);
 }
 
-Result SetSocketOption(Socket socket, SocketOption option, IPAddr value)
+Result set_socket_option(Socket socket, SocketOption option, IPAddr value)
 {
     const OptInfo* optInfo = &s_socketOptions[option];
     if (optInfo.rtType == OptType.Unsupported)
         return InternalResult(InternalCode.Unsupported);
     assert(optInfo.rtType == OptType.INAddress, "Incorrect option value type for call");
-    return SetSocketOption(socket, option, &value, IPAddr.sizeof);
+    return set_socket_option(socket, option, &value, IPAddr.sizeof);
 }
 
-Result GetSocketOption(Socket socket, SocketOption option, void* output, size_t outputlen)
+Result get_socket_option(Socket socket, SocketOption option, void* output, size_t outputlen)
 {
     Result r = Result.Success;
 
@@ -547,7 +548,7 @@ Result GetSocketOption(Socket socket, SocketOption option, void* output, size_t 
     assert(option != SocketOption.NonBlocking, "Socket option NonBlocking cannot be get");
 
     // determine the option 'level'
-    OptLevel level = GetOptLevel(option);
+    OptLevel level = get_optlevel(option);
 	version (HasIPv6)
 	    assert(level != OptLevel.IPv6 && level != OptLevel.ICMPv6, "Platform does not support IPv6!");
 
@@ -636,43 +637,43 @@ Result GetSocketOption(Socket socket, SocketOption option, void* output, size_t 
     return r;
 }
 
-Result GetSocketOption(Socket socket, SocketOption option, out bool output)
+Result get_socket_option(Socket socket, SocketOption option, out bool output)
 {
     const OptInfo* optInfo = &s_socketOptions[option];
     if (optInfo.rtType == OptType.Unsupported)
         return InternalResult(InternalCode.Unsupported);
     assert(optInfo.rtType == OptType.Bool, "Incorrect option value type for call");
-    return GetSocketOption(socket, option, &output, bool.sizeof);
+    return get_socket_option(socket, option, &output, bool.sizeof);
 }
 
-Result GetSocketOption(Socket socket, SocketOption option, out int output)
+Result get_socket_option(Socket socket, SocketOption option, out int output)
 {
     const OptInfo* optInfo = &s_socketOptions[option];
     if (optInfo.rtType == OptType.Unsupported)
         return InternalResult(InternalCode.Unsupported);
     assert(optInfo.rtType == OptType.Int, "Incorrect option value type for call");
-    return GetSocketOption(socket, option, &output, int.sizeof);
+    return get_socket_option(socket, option, &output, int.sizeof);
 }
 
-Result GetSocketOption(Socket socket, SocketOption option, out Duration output)
+Result get_socket_option(Socket socket, SocketOption option, out Duration output)
 {
     const OptInfo* optInfo = &s_socketOptions[option];
     if (optInfo.rtType == OptType.Unsupported)
         return InternalResult(InternalCode.Unsupported);
     assert(optInfo.rtType == OptType.Duration, "Incorrect option value type for call");
-    return GetSocketOption(socket, option, &output, Duration.sizeof);
+    return get_socket_option(socket, option, &output, Duration.sizeof);
 }
 
-Result GetSocketOption(Socket socket, SocketOption option, out IPAddr output)
+Result get_socket_option(Socket socket, SocketOption option, out IPAddr output)
 {
     const OptInfo* optInfo = &s_socketOptions[option];
     if (optInfo.rtType == OptType.Unsupported)
         return InternalResult(InternalCode.Unsupported);
     assert(optInfo.rtType == OptType.INAddress, "Incorrect option value type for call");
-    return GetSocketOption(socket, option, &output, IPAddr.sizeof);
+    return get_socket_option(socket, option, &output, IPAddr.sizeof);
 }
 
-Result SetKeepAlive(Socket socket, bool enable, Duration keepIdle, Duration keepInterval, int keepCount)
+Result set_keepalive(Socket socket, bool enable, Duration keepIdle, Duration keepInterval, int keepCount)
 {
 	version (Windows)
 	{
@@ -683,12 +684,12 @@ Result SetKeepAlive(Socket socket, bool enable, Duration keepIdle, Duration keep
 
 		uint bytesReturned = 0;
 		if (WSAIoctl(socket.handle, SIO_KEEPALIVE_VALS, &alive, alive.sizeof, null, 0, &bytesReturned, null, null) < 0)
-			return SocketGetLastError();
+			return socket_getlasterror();
 		return Result.Success;
 	}
 	else
 	{
-		Result res = SetSocketOption(socket, SocketOption.KeepAlive, enable);
+		Result res = set_socket_option(socket, SocketOption.KeepAlive, enable);
 		if (!enable || res != Result.Success)
 			return res;
 		version (Darwin)
@@ -706,22 +707,22 @@ Result SetKeepAlive(Socket socket, bool enable, Duration keepIdle, Duration keep
 			// Note that the following code uses seconds value but above configuration uses
 			// milliseconds value.
 
-			return SetSocketOption(socket, SocketOption.TCP_KeepAlive, keepIdle);
+			return set_socket_option(socket, SocketOption.TCP_KeepAlive, keepIdle);
 		}
 		else
 		{
-			res = SetSocketOption(socket, SocketOption.TCP_KeepIdle, keepIdle);
+			res = set_socket_option(socket, SocketOption.TCP_KeepIdle, keepIdle);
 			if (res != Result.Success)
 				return res;
-			res = SetSocketOption(socket, SocketOption.TCP_KeepIntvl, keepInterval);
+			res = set_socket_option(socket, SocketOption.TCP_KeepIntvl, keepInterval);
 			if (res != Result.Success)
 				return res;
-			return SetSocketOption(socket, SocketOption.TCP_KeepCnt, keepCount);
+			return set_socket_option(socket, SocketOption.TCP_KeepCnt, keepCount);
 		}
 	}
 }
 
-Result GetPeerName(Socket socket, out InetAddress name)
+Result get_peer_name(Socket socket, out InetAddress name)
 {
     char[sockaddr_storage.sizeof] buffer;
     sockaddr* addr = cast(sockaddr*)buffer;
@@ -729,13 +730,13 @@ Result GetPeerName(Socket socket, out InetAddress name)
 
     int fail = getpeername(socket.handle, addr, &bufferLen);
     if (fail == 0)
-        name = MakeSocketAddress(addr);
+        name = make_InetAddress(addr);
     else
-        return SocketGetLastError();
+        return socket_getlasterror();
     return Result.Success;
 }
 
-Result GetSockName(Socket socket, out InetAddress name)
+Result get_socket_name(Socket socket, out InetAddress name)
 {
     char[sockaddr_storage.sizeof] buffer;
     sockaddr* addr = cast(sockaddr*)buffer;
@@ -743,23 +744,171 @@ Result GetSockName(Socket socket, out InetAddress name)
 
     int fail = getsockname(socket.handle, addr, &bufferLen);
     if (fail == 0)
-        name = MakeSocketAddress(addr);
+        name = make_InetAddress(addr);
     else
-        return SocketGetLastError();
+        return socket_getlasterror();
     return Result.Success;
 }
 
-Result GetHostName(char* name, size_t len)
+Result get_hostname(char* name, size_t len)
 {
     int fail = gethostname(name, cast(int)len);
     if (fail)
-        return SocketGetLastError();
+        return socket_getlasterror();
     return Result.Success;
+}
+
+Result get_address_info(const(char)[] nodeName, const(char)[] serviceName, AddressInfo* hints, out AddressInfoResolver result)
+{
+	import urt.mem.temp : tstringz;
+
+    addrinfo tmpHints;
+    if (hints)
+    {
+        // translate hints...
+        tmpHints.ai_flags = map_addrinfo_flags(hints.flags);
+        tmpHints.ai_family = s_addressFamily[hints.family];
+        tmpHints.ai_socktype = s_socketType[hints.sockType];
+        tmpHints.ai_protocol = s_protocol[hints.protocol];
+        tmpHints.ai_canonname = cast(char*)hints.canonName; // HAX!
+        tmpHints.ai_addrlen = 0;
+        tmpHints.ai_addr = null;
+        tmpHints.ai_next = null;
+    }
+
+    addrinfo* res;
+    int err = getaddrinfo(nodeName.tstringz, serviceName.tstringz, hints ? &tmpHints : null, &res);
+    if (err != 0)
+        return Result(err);
+
+	// if it was used previously
+	if (result.m_internal[0])
+		freeaddrinfo(cast(addrinfo*)result.m_internal[0]);
+
+	result.m_internal[0] = res;
+	result.m_internal[1] = res;
+
+	return Result.Success;
+}
+
+Result poll(PollFd[] pollFds, Duration timeout, out uint numEvents)
+{
+    enum MaxFds = 512;
+    assert(pollFds.length <= MaxFds, "Too many fds!");
+	version (Windows)
+	    WSAPOLLFD[MaxFds] fds;
+	else version (Posix)
+	    pollfd[MaxFds] fds;
+    for (size_t i = 0; i < pollFds.length; ++i)
+    {
+        fds[i].fd = pollFds[i].socket.handle;
+        fds[i].revents = 0;
+        fds[i].events = ((pollFds[i].requestEvents & PollEvents.Read)  ? POLLRDNORM : 0) |
+						((pollFds[i].requestEvents & PollEvents.Write) ? POLLWRNORM : 0);
+    }
+	version (Windows)
+	    int r = WSAPoll(fds.ptr, cast(uint)pollFds.length, timeout.ticks < 0 ? -1 : cast(int)timeout.as!"msecs");
+	else version (Posix)
+	    int r = poll(fds, nfds_t(pollFds.length), timeout.ns < 0 ? -1 : cast(int)timeout.as!"msecs");
+	else
+		assert(false, "Not implemented!");
+    if (r < 0)
+    {
+        numEvents = 0;
+        return socket_getlasterror();
+    }
+    numEvents = r;
+    for (size_t i = 0; i < pollFds.length; ++i)
+    {
+        pollFds[i].returnEvents = cast(PollEvents)(
+									((fds[i].revents & POLLRDNORM) ? PollEvents.Read    : 0) |
+									((fds[i].revents & POLLWRNORM) ? PollEvents.Write   : 0) |
+									((fds[i].revents & POLLERR)    ? PollEvents.Error   : 0) |
+									((fds[i].revents & POLLHUP)    ? PollEvents.HangUp  : 0) |
+									((fds[i].revents & POLLNVAL)   ? PollEvents.Invalid : 0));
+    }
+    return Result.Success;
+}
+
+Result poll(ref PollFd pollFd, Duration timeout, out uint numEvents)
+{
+    return poll((&pollFd)[0..1], timeout, numEvents);
+}
+
+struct AddressInfo
+{
+    AddressInfoFlags flags;
+    AddressFamily family;
+    SocketType sockType;
+    Protocol protocol;
+    const(char)* canonName; // Note: this memory is valid until the next call to `next_address`, or until `AddressInfoResolver` is destroyed
+    InetAddress address;
+}
+
+struct AddressInfoResolver
+{
+nothrow @nogc:
+
+	// TODO: this should be a MOVE ONLY construction
+	// @disable the COPY constructor!
+    this(AddressInfoResolver rh)
+    {
+		m_internal[] = rh.m_internal[];
+        rh.m_internal[0] = null;
+        rh.m_internal[1] = null;
+    }
+
+	~this()
+	{
+		if (m_internal[0])
+			freeaddrinfo(cast(addrinfo*)m_internal[0]);
+	}
+
+	// TODO: this should be a MOVE ONLY assignment!
+	// @disable the COPY assignment!
+    ref AddressInfoResolver opAssign(AddressInfoResolver rh)
+    {
+//        if (&rh == &this)
+//            return this;
+        this.destroy();
+        m_internal[0] = rh.m_internal[0];
+        m_internal[1] = rh.m_internal[1];
+        rh.m_internal[0] = null;
+        rh.m_internal[1] = null;
+        return this;
+    }
+
+	bool next_address(AddressInfo* addressInfo)
+	{
+		if (!m_internal[1])
+			return false;
+
+		addrinfo* info = cast(addrinfo*)(m_internal[1]);
+		m_internal[1] = info.ai_next;
+
+		addressInfo.flags = AddressInfoFlags.None; // info.ai_flags is only used for 'hints'
+		addressInfo.family = map_address_family(info.ai_family);
+		addressInfo.sockType = cast(int)info.ai_socktype ? map_socket_type(info.ai_socktype) : SocketType.Unknown;
+		addressInfo.protocol = map_protocol(info.ai_protocol);
+		addressInfo.canonName = info.ai_canonname;
+		addressInfo.address = make_InetAddress(info.ai_addr);
+		return true;
+	}
+
+    void*[2] m_internal = [ null, null ];
+}
+
+struct PollFd
+{
+    Socket socket;
+    PollEvents requestEvents;
+    PollEvents returnEvents;
+    void* userData;
 }
 
 
 
-Result SocketGetLastError()
+Result socket_getlasterror()
 {
 	version (Windows)
 	    return Result(WSAGetLastError());
@@ -767,7 +916,7 @@ Result SocketGetLastError()
 	    return Result(errno);
 }
 
-Result GetSocketError(Socket socket)
+Result get_socket_error(Socket socket)
 {
     Result r;
     socklen_t optlen = r.systemCode.sizeof;
@@ -777,41 +926,9 @@ Result GetSocketError(Socket socket)
     return r;
 }
 
-version (Windows)
-{
-	Result InternalResult(InternalCode code)
-	{
-		switch (code)
-		{
-			case InternalCode.Success: return Result(0);
-			case InternalCode.BufferTooSmall: return Result(ERROR_INSUFFICIENT_BUFFER);
-			case InternalCode.InvalidParameter: return Result(ERROR_INVALID_PARAMETER);
-			default: return Result(ERROR_INVALID_FUNCTION); // InternalCode.Unsupported
-		}
-	}
-}
-else version (Posix)
-{
-	Result PosixResult(int err)
-		=> Result(err + kPOSIXErrorBase);
-	Result ErrnoResult()
-		=> Result(errno + kPOSIXErrorBase);
-
-	Result InternalResult(InternalCode code)
-	{
-		switch (code)
-		{
-			case InternalCode.Success: return Result(0);
-			case InternalCode.BufferTooSmall: return Result(ERANGE + kPOSIXErrorBase);
-			case InternalCode.InvalidParameter: return Result(EINVAL + kPOSIXErrorBase);
-			default: return Result(ENOTSUP + kPOSIXErrorBase); // InternalCode.Unsupported
-		}
-	}
-}
-
 // TODO: !!!
 enum Result ConnectionClosedResult = Result(-12345); 
-SocketResult GetSocketResult(Result result)
+SocketResult get_SocketResult(Result result)
 {
     if (result)
         return SocketResult.Success;
@@ -862,64 +979,7 @@ SocketResult GetSocketResult(Result result)
 }
 
 
-
-// TODO: implement something like getaddrinfo...
-
-// but for now we wrap the D lib...
-
-size_t getAddress(const(char)[] host, ushort port, InetAddress[] outAddresses) nothrow @nogc
-{
-	import std.socket;
-
-	// HACK CALL @nogc FUNCTION
-	auto t = &__traits(getOverloads, std.socket, "getAddress")[1];
-
-	Address[] addrs;
-	try
-		addrs = (cast(Address[] function(scope const(char)[], ushort) @nogc)t)(host, port);
-	catch (Exception)
-		return 0;
-
-	size_t numResults = 0;
-	for (size_t i = 0; i < addrs.length; i++)
-	{
-		if (i == outAddresses.length)
-			return i;
-		InetAddress* a = &outAddresses[numResults++];
-		switch (addrs[i].addressFamily)
-		{
-			case std.socket.AddressFamily.INET:
-				a.family = urt.inet.AddressFamily.IPv4;
-				assert(addrs[i].nameLen == sockaddr_in.sizeof);
-				sockaddr_in* ain = cast(sockaddr_in*)addrs[i].name;
-				a._a.ipv4.addr.b[0] = ain.sin_addr.S_un.S_un_b.s_b1;
-				a._a.ipv4.addr.b[1] = ain.sin_addr.S_un.S_un_b.s_b2;
-				a._a.ipv4.addr.b[2] = ain.sin_addr.S_un.S_un_b.s_b3;
-				a._a.ipv4.addr.b[3] = ain.sin_addr.S_un.S_un_b.s_b4;
-				a._a.ipv4.port = loadBigEndian(&ain.sin_port);
-				break;
-			case std.socket.AddressFamily.INET6:
-				a.family = urt.inet.AddressFamily.IPv6;
-				assert(addrs[i].nameLen == sockaddr_in6.sizeof);
-				sockaddr_in6* ain6 = cast(sockaddr_in6*)addrs[i].name;
-				for (size_t j = 0; j < 8; j++)
-					a._a.ipv6.addr.s[j] = loadBigEndian(&ain6.sin6_addr.in6_u.u6_addr16[j]);
-				a._a.ipv6.port = loadBigEndian(&ain6.sin6_port);
-				a._a.ipv6.flowInfo = loadBigEndian(&ain6.sin6_flowinfo);
-				a._a.ipv6.scopeId = loadBigEndian(&ain6.sin6_scope_id);
-				break;
-			default:
-				break;
-		}
-	}
-	return numResults;
-}
-
-
-
-
-
-sockaddr* MakeSockaddr(ref const InetAddress address, ubyte[] buffer, out size_t addrLen)
+sockaddr* make_sockaddr(ref const InetAddress address, ubyte[] buffer, out size_t addrLen)
 {
     sockaddr* sockAddr = cast(sockaddr*)buffer.ptr;
 
@@ -1007,10 +1067,10 @@ sockaddr* MakeSockaddr(ref const InetAddress address, ubyte[] buffer, out size_t
     return sockAddr;
 }
 
-InetAddress MakeSocketAddress(const(sockaddr)* sockAddress)
+InetAddress make_InetAddress(const(sockaddr)* sockAddress)
 {
     InetAddress addr;
-    addr.family = GetAddressFamily(sockAddress.sa_family);
+    addr.family = map_address_family(sockAddress.sa_family);
     switch (addr.family)
     {
         case AddressFamily.IPv4:
@@ -1080,7 +1140,7 @@ InetAddress MakeSocketAddress(const(sockaddr)* sockAddress)
 
 private:
 
-enum OptLevel
+enum OptLevel : ubyte
 {
     Socket,
     IP,
@@ -1091,7 +1151,7 @@ enum OptLevel
     UDP,
 }
 
-enum OptType
+enum OptType : ubyte
 {
     Unsupported,
     Bool,
@@ -1110,9 +1170,10 @@ enum OptType
 
 __gshared immutable ubyte[] s_optTypeSize = [ 0, bool.sizeof, int.sizeof, int.sizeof, int.sizeof, Duration.sizeof, IPAddr.sizeof, MulticastGroup.sizeof, linger.sizeof ];
 
+
 struct OptInfo
 {
-    int option;
+    short option;
     OptType rtType;
     OptType platformType;
 }
@@ -1123,7 +1184,7 @@ __gshared immutable ushort[AddressFamily.max+1] s_addressFamily = [
     AF_INET,
     AF_INET6
 ];
-AddressFamily GetAddressFamily(int addressFamily)
+AddressFamily map_address_family(int addressFamily)
 {
     if (addressFamily == AF_INET)
         return AddressFamily.IPv4;
@@ -1142,7 +1203,7 @@ __gshared immutable int[SocketType.max+1] s_socketType = [
     SOCK_DGRAM,
     SOCK_RAW
 ];
-SocketType GetSocketType(int sockType)
+SocketType map_socket_type(int sockType)
 {
     if (sockType == SOCK_STREAM)
         return SocketType.Stream;
@@ -1161,7 +1222,7 @@ __gshared immutable int[Protocol.max+1] s_protocol = [
     IPPROTO_ICMP,
     IPPROTO_RAW
 ];
-Protocol GetProtocol(int protocol)
+Protocol map_protocol(int protocol)
 {
     if (protocol == IPPROTO_TCP)
         return Protocol.TCP;
@@ -1269,7 +1330,7 @@ else version (Darwin)
 else
 	static assert(false, "TODO");
 
-int MapMessageFlags(MsgFlags flags)
+int map_message_flags(MsgFlags flags)
 {
     int r = 0;
     if (flags & MsgFlags.OOB) r |= MSG_OOB;
@@ -1282,7 +1343,22 @@ int MapMessageFlags(MsgFlags flags)
     return r;
 }
 
-OptLevel GetOptLevel(SocketOption opt)
+int map_addrinfo_flags(AddressInfoFlags flags)
+{
+    int r = 0;
+    if (flags & AddressInfoFlags.Passive) r |= AI_PASSIVE;
+    if (flags & AddressInfoFlags.CanonName) r |= AI_CANONNAME;
+    if (flags & AddressInfoFlags.NumericHost) r |= AI_NUMERICHOST;
+    if (flags & AddressInfoFlags.NumericServ) r |= AI_NUMERICSERV;
+    if (flags & AddressInfoFlags.All) r |= AI_ALL;
+    if (flags & AddressInfoFlags.AddrConfig) r |= AI_ADDRCONFIG;
+    if (flags & AddressInfoFlags.V4Mapped) r |= AI_V4MAPPED;
+	version (Windows)
+	    if (flags & AddressInfoFlags.FQDN) r |= AI_FQDN;
+    return r;
+}
+
+OptLevel get_optlevel(SocketOption opt)
 {
     if (opt < SocketOption.FirstIpOption) return OptLevel.Socket;
     else if (opt < SocketOption.FirstIpv6Option) return OptLevel.IP;
@@ -1309,4 +1385,45 @@ version (Windows)
 	{
 		WSACleanup();
 	}
+}
+
+
+
+
+
+version (Windows)
+{
+	// stuff that's missing from the windows headers...
+
+	enum: int {
+		AI_NUMERICSERV = 0x0008,
+		AI_ALL = 0x0100,
+		AI_V4MAPPED = 0x0800,
+		AI_FQDN = 0x4000,
+	}
+
+	struct pollfd
+	{
+		SOCKET  fd;        // Socket handle
+		SHORT   events;    // Requested events to monitor
+		SHORT   revents;   // Returned events indicating status
+	}
+	alias WSAPOLLFD = pollfd;
+	alias PWSAPOLLFD = pollfd*;
+	alias LPWSAPOLLFD = pollfd*;
+
+	enum: int {
+		POLLIN = 0x0001,
+		POLLPRI = 0x0002,
+		POLLOUT = 0x0004,
+		POLLERR = 0x0008,
+		POLLHUP = 0x0010,
+		POLLNVAL = 0x0020,
+		POLLRDNORM = 0x0040,
+		POLLRDBAND = 0x0080,
+		POLLWRNORM = 0x0100,
+		POLLWRBAND = 0x0200
+	}
+
+	extern(C) int WSAPoll(LPWSAPOLLFD fdArray, uint fds, int timeout);
 }

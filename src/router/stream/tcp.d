@@ -23,19 +23,21 @@ class TCPStream : Stream
 {
 nothrow @nogc:
 
-	this(String name, String host, ushort port, StreamOptions options = StreamOptions.None)
+	this(String name, const(char)[] host, ushort port, StreamOptions options = StreamOptions.None)
 	{
 		import core.lifetime;
 
 		super(name.move, "tcp-client", options);
 
-		InetAddress[2] addrs;
-		size_t r = getAddress(host, port, addrs);
-		if (r == 0)
+		AddressInfo addrInfo;
+		addrInfo.family = AddressFamily.IPv4;
+		addrInfo.sockType = SocketType.Stream;
+		addrInfo.protocol = Protocol.TCP;
+		AddressInfoResolver results;
+		get_address_info(host, port.tstring, &addrInfo, results);
+		if (!results.next_address(&addrInfo))
 			assert(0);
-		else if (r > 1)
-			writeln("TODO: what do to with additional addresses?");
-		remote = addrs[0];
+		remote = addrInfo.address;
 	}
 
 	override bool connect()
@@ -63,12 +65,12 @@ nothrow @nogc:
 		}
 		else
 		{
-			if (!CreateSocket(AddressFamily.IPv4, SocketType.Stream, Protocol.TCP, socket))
+			if (!create_socket(AddressFamily.IPv4, SocketType.Stream, Protocol.TCP, socket))
 				assert(false, "Couldn't create socket");
-			if (!socket.Connect(remote))
+			if (!socket.connect(remote))
 				assert(false, "Failed to connect");
 
-			SetSocketOption(socket, SocketOption.NonBlocking, !!(options & StreamOptions.NonBlocking));
+			set_socket_option(socket, SocketOption.NonBlocking, !!(options & StreamOptions.NonBlocking));
 		}
 
 		return true;
@@ -85,8 +87,8 @@ nothrow @nogc:
 		if (socket)
 		{
 //			if (socket.isAlive)
-			socket.ShutdownSocket(SocketShutdownMode.ReadWrite);
-			socket.CloseSocket();
+			socket.shutdown_socket(SocketShutdownMode.ReadWrite);
+			socket.close_socket();
 			socket = null;
 		}
 	}
@@ -96,10 +98,10 @@ nothrow @nogc:
 		// TODO: does this actually work?!
 		ubyte[1] buffer;
 		size_t bytesReceived;
-		Result r = Recv(socket, null, MsgFlags.Peek, &bytesReceived);
+		Result r = recv(socket, null, MsgFlags.Peek, &bytesReceived);
 		if (r == Result.Success)
 			return true;
-		SocketResult sr = r.GetSocketResult;
+		SocketResult sr = r.get_SocketResult;
 		if (sr == SocketResult.Again || sr == SocketResult.WouldBlock)
 			return true;
 		return false;
@@ -115,7 +117,7 @@ nothrow @nogc:
 		this.options = options;
 		if (socket)
 		{
-			SetSocketOption(socket, SocketOption.NonBlocking, !!(options & StreamOptions.NonBlocking));
+			set_socket_option(socket, SocketOption.NonBlocking, !!(options & StreamOptions.NonBlocking));
 		}
 	}
 
@@ -134,14 +136,14 @@ nothrow @nogc:
 		}
 
 		size_t bytes;
-		Result r = socket.Recv(buffer, MsgFlags.None, &bytes);
+		Result r = socket.recv(buffer, MsgFlags.None, &bytes);
 		if (r != Result.Success)
 		{
-			SocketResult sr = r.GetSocketResult;
+			SocketResult sr = r.get_SocketResult;
 			if (sr == SocketResult.WouldBlock)
 				return 0;
 
-			socket.CloseSocket();
+			socket.close_socket();
 			socket = null;
 
 			// HACK: we'll need a threaded/background keep-alive strategy, but this hack might do for the moment
@@ -170,14 +172,14 @@ nothrow @nogc:
 		}
 
 		size_t bytes;
-		Result r = socket.Send(data, MsgFlags.None, &bytes);
+		Result r = socket.send(data, MsgFlags.None, &bytes);
 		if (r != Result.Success)
 		{
-			SocketResult sr = r.GetSocketResult;
+			SocketResult sr = r.get_SocketResult;
 			if (sr == SocketResult.WouldBlock)
 				return 0;
 
-			socket.CloseSocket();
+			socket.close_socket();
 			socket = null;
 
 			// HACK: we'll need a threaded/background keep-alive strategy, but this hack might do for the moment
@@ -205,11 +207,11 @@ nothrow @nogc:
 		}
 
 		size_t bytes;
-		Result r = socket.Recv(null, MsgFlags.Peek, &bytes);
+		Result r = socket.recv(null, MsgFlags.Peek, &bytes);
 		if (r != Result.Success)
 		{
-//			SocketResult sr = r.GetSocketResult;
-			socket.CloseSocket();
+//			SocketResult sr = r.get_SocketResult;
+			socket.close_socket();
 			socket = null;
 		}
 		return bytes;
@@ -231,7 +233,7 @@ private:
 		import core.lifetime;
 
 		super(name.move, "serial", StreamOptions.None);
-		socket.GetPeerName(remote);
+		socket.get_peer_name(remote);
 
 		this.socket = socket;
 		live.atomicStore(true);

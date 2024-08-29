@@ -24,13 +24,7 @@ char[] allocTempString(size_t len) nothrow @nogc
 	return s_tempStringBuffer[0 .. len];
 }
 
-size_t strlen(const(char)* cstring) pure nothrow @nogc
-{
-	const(char)* end = cstring;
-	while (*end != '\0')
-		++end;
-	return end - cstring;
-}
+public import urt.mem : strlen;
 
 bool empty(T)(T[] arr)
 {

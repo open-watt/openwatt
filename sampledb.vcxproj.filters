@@ -402,6 +402,12 @@
     <DCompile Include="src\urt\math.d">
       <Filter>src\urt</Filter>
     </DCompile>
+    <DCompile Include="src\urt\file.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\result.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

@@ -71,13 +71,31 @@ void tfree(void[] mem) nothrow @nogc
 	// maybe do some debug accounting...?
 }
 
+char* tstringz(const(char)[] str) nothrow @nogc
+{
+	if (str.length > TempMemSize / 2)
+		return null;
+
+	size_t len = str.length;
+	if (allocOffset + len + 1 > TempMemSize)
+		allocOffset = 0;
+
+	char* r = cast(char*)tempMem.ptr + allocOffset;
+	r[0 .. len] = str[];
+	r[len] = '\0';
+	allocOffset += len + 1;
+	return r;
+}
 
 char[] tstring(T)(auto ref T value)
 {
 	import urt.string.format : toString;
 	char[] r = toString(value, cast(char[])tempMem[allocOffset..$]);
 	if (r.length == 0)
+	{
+		allocOffset = 0;
 		r = toString(value, cast(char[])tempMem[0..TempMemSize / 2]);
+	}
 	allocOffset += r.length;
 	return r;
 }
@@ -87,7 +105,10 @@ char[] tconcat(Args...)(ref Args args)
 	import urt.string.format : concat;
 	char[] r = concat(cast(char[])tempMem[allocOffset..$], args);
 	if (r.length == 0)
+	{
+		allocOffset = 0;
 		r = concat(cast(char[])tempMem[0..TempMemSize / 2], args);
+	}
 	allocOffset += r.length;
 	return r;
 }
@@ -97,7 +118,10 @@ char[] tformat(Args...)(const(char)[] fmt, ref Args args)
 	import urt.string.format : format;
 	char[] r = format(cast(char[])tempMem[allocOffset..$], fmt, args);
 	if (r.length == 0)
+	{
+		allocOffset = 0;
 		r = format(cast(char[])tempMem[0..TempMemSize / 2], fmt, args);
+	}
 	allocOffset += r.length;
 	return r;
 }

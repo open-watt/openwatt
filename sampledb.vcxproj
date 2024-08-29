@@ -115,6 +115,7 @@
     <DCompile Include="src\urt\conv.d" />
     <DCompile Include="src\urt\dbg.d" />
     <DCompile Include="src\urt\endian.d" />
+    <DCompile Include="src\urt\file.d" />
     <DCompile Include="src\urt\inet.d" />
     <DCompile Include="src\urt\intrinsic\package.d" />
     <DCompile Include="src\urt\io.d" />
@@ -139,6 +140,7 @@
     <DCompile Include="src\urt\platform.d" />
     <DCompile Include="src\urt\processor.d" />
     <DCompile Include="src\urt\range.d" />
+    <DCompile Include="src\urt\result.d" />
     <DCompile Include="src\urt\socket.d" />
     <DCompile Include="src\urt\string\ansi.d" />
     <DCompile Include="src\urt\string\ascii.d" />
