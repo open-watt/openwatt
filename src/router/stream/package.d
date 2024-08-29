@@ -23,11 +23,17 @@ import manager.plugin;
 enum StreamOptions
 {
 	None = 0,
+
+	// Should non-blocking be a thing like this? I think it's up to the stream to work out how it wants to operate...
 	NonBlocking = 1 << 0, // Non-blocking IO
+
 	ReverseConnect = 1 << 1, // For TCP connections where remote will initiate connection
-	KeepAlive = 1 << 2, // Attempt reconnection on connection drops
+	OnDemand = 	1 << 2, // Only connect on demand
 	BufferData = 1 << 3, // Buffer read/write data when stream is not ready
 	AllowBroadcast = 1 << 4, // Allow broadcast messages
+
+	// TODO: DELETE THIS ONE, it should be default behaviour!
+	KeepAlive = 1 << 2, // Attempt reconnection on connection drops
 }
 
 abstract class Stream

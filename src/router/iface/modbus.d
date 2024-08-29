@@ -104,7 +104,7 @@ class ModbusInterface : BaseInterface
 			ptrdiff_t r = stream.read(buffer[readOffset .. $]);
 			if (r < 0)
 			{
-				assert(false, "what causes read to fail?");
+				assert(false, "TODO: what causes read to fail?");
 				break read_loop;
 			}
 			if (r == 0)
@@ -187,8 +187,8 @@ private:
 	final void incomingPacket(const(void)[] message, MonoTime recvTime, ref ModbusFrameInfo frameInfo)
 	{
 		// TODO: some debug logging of the incoming packet stream?
-//		import urt.log;
-//		debug writeDebug("Modbus packet received from interface: '", name, "' (", message.length, ")[ ", message[], " ]");
+		import urt.log;
+		debug writeDebug("Modbus packet received from interface: '", name, "' (", message.length, ")[ ", message[], " ]");
 
 		// drop the address byte since we have it in frameInfo...
 		message = message[1 .. $];
