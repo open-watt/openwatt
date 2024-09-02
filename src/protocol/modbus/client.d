@@ -1,5 +1,8 @@
 module protocol.modbus.client;
 
+import urt.lifetime;
+import urt.string;
+
 import protocol.modbus;
 
 import router.iface;
@@ -9,14 +12,20 @@ class ModbusClient
 {
 	ModbusProtocolModule.Instance m;
 
+	String name;
 	BaseInterface iface;
 
-	this(ModbusProtocolModule.Instance m, const(char)[] iface)
+	this(ModbusProtocolModule.Instance m, String name, BaseInterface _interface) nothrow @nogc
 	{
 		this.m = m;
-		this.iface = m.app.moduleInstance!InterfaceModule().findInterface(iface);
+		this.name = name.move;
+		this.iface = _interface;
+
+		_interface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
 	}
 
-	// TODO: place modbus request...
-
+	void incomingPacket(ref const Packet p, BaseInterface i) nothrow @nogc
+	{
+		assert(false);
+	}
 }

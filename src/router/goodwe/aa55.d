@@ -109,7 +109,7 @@ class GoodWeServer : Server
 			inFlight = request;
 			return true;
 		}
-
+/+
 		ModbusRequest modbusRequest = cast(ModbusRequest)request;
 		if (modbusRequest)
 		{
@@ -127,7 +127,7 @@ class GoodWeServer : Server
 			inFlight = request;
 			return true;
 		}
-
++/
 		// TODO: should other requests attempt to be translated based on the profile?
 		assert(0);
 	}
@@ -184,7 +184,7 @@ class GoodWeServer : Server
 
 					response = resp;
 				}
-
+/+
 				ModbusRequest modbusRequest = cast(ModbusRequest)inFlight;
 				if (modbusRequest)
 				{
@@ -205,7 +205,7 @@ class GoodWeServer : Server
 
 					response = resp;
 				}
-
++/
 				inFlight.responseHandler(response, inFlight.userData);
 				inFlight = null;
 			}

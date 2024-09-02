@@ -8,10 +8,12 @@ import router.modbus.message;
 import router.modbus.profile;
 import router.modbus.util;
 
+import router.iface.modbus;
+
 
 struct ModbusMessageData
 {
-	RequestType type;
+	ModbusFrameType type;
 	FunctionCode functionCode;
 	union
 	{
@@ -97,7 +99,7 @@ private:
 }
 
 
-ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, void[] buffer = null)
+ModbusMessageData parseModbusMessage(ModbusFrameType type, ref const ModbusPDU pdu, void[] buffer = null)
 {
 	ModbusMessageData result;
 	result.type = type;
@@ -113,12 +115,12 @@ ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, 
 	{
 		case FunctionCode.ReadCoils:
 		case FunctionCode.ReadDiscreteInputs:
-			if (type == RequestType.Request)
+			if (type == ModbusFrameType.Request)
 			{
 				result.rw.readRegister = data[0..2].bigEndianToNative!ushort;
 				result.rw.readCount = data[2..4].bigEndianToNative!ushort;
 			}
-			else if (type == RequestType.Response)
+			else if (type == ModbusFrameType.Response)
 			{
 				ubyte byteCount = data[0];
 				ushort count = byteCount * 8;
@@ -135,12 +137,12 @@ ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, 
 
 		case FunctionCode.ReadHoldingRegisters:
 		case FunctionCode.ReadInputRegisters:
-			if (type == RequestType.Request)
+			if (type == ModbusFrameType.Request)
 			{
 				result.rw.readRegister = data[0..2].bigEndianToNative!ushort;
 				result.rw.readCount = data[2..4].bigEndianToNative!ushort;
 			}
-			else if (type == RequestType.Response)
+			else if (type == ModbusFrameType.Response)
 			{
 				ubyte byteCount = data[0];
 				ushort count = byteCount / 2;
@@ -184,7 +186,7 @@ ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, 
 			break;
 
 		case FunctionCode.ReadExceptionStatus:
-			if (type == RequestType.Response)
+			if (type == ModbusFrameType.Response)
 				result.exceptionStatus = data[0];
 			break;
 
@@ -207,7 +209,7 @@ ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, 
 				ushort count = data[2..4].bigEndianToNative!ushort;
 				result.rw.writeCount = count;
 
-				if (type == RequestType.Request) // response doesn't include data
+				if (type == ModbusFrameType.Request) // response doesn't include data
 				{
 					ubyte byteCount = data[4];
 					assert(byteCount == (count + 7) / 8);
@@ -230,7 +232,7 @@ ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, 
 				ushort count = data[2..4].bigEndianToNative!ushort;
 				result.rw.writeCount = count;
 
-				if (type == RequestType.Request) // response doesn't include data
+				if (type == ModbusFrameType.Request) // response doesn't include data
 				{
 					ubyte byteCount = data[4];
 					assert(byteCount == count*2);
@@ -250,7 +252,7 @@ ModbusMessageData parseModbusMessage(RequestType type, ref const ModbusPDU pdu, 
 			break;
 
 		case FunctionCode.ReportServerID:
-			if (type == RequestType.Response)
+			if (type == ModbusFrameType.Response)
 				result.serverId = cast(const(char)[])data[1 .. 1 + data[0]];
 			break;
 

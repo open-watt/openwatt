@@ -16,7 +16,7 @@ import router.modbus.connection;
 import router.modbus.message;
 import router.modbus.profile;
 import router.modbus.util;
-
+/+
 class ModbusServer : Server
 {
 	this(string name, Connection connection, ubyte address, const ModbusProfile* profile = null)
@@ -308,7 +308,6 @@ private:
 
 class ModbusRequest : Request
 {
-	ModbusFrame frame;
 	ModbusPDU pdu;
 
 	this(ResponseHandler responseHandler, ModbusPDU* message, ubyte address = 0, void[] userData = null)
@@ -333,7 +332,6 @@ class ModbusRequest : Request
 class ModbusResponse : Response
 {
 	const(ModbusProfile)* profile;
-	ModbusFrame frame;
 	ModbusPDU pdu;
 
 	override KVP[string] values()
@@ -489,3 +487,4 @@ class ModbusResponse : Response
 private:
 	KVP[string] cachedValues;
 }
++/

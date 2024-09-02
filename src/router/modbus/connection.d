@@ -16,25 +16,7 @@ import router.stream;
 import router.stream.serial;
 
 
-enum Transport : ubyte
-{
-	Serial,
-	Ethernet
-};
-
-enum EthernetMethod : ubyte
-{
-	TCP,
-	UDP
-}
-
-enum Mode : ubyte
-{
-	Slave,
-	Master,
-	SnoopBus
-};
-
+/+
 enum ConnectionOptions : uint
 {
 	None = 0,
@@ -51,19 +33,6 @@ struct ConnectionParams
 	ConnectionOptions options = ConnectionOptions.None;
 	PacketHandler unsolicitedPacketHandler = null;
 	string logDataStream;			// log filename
-}
-
-struct Packet
-{
-	ubyte[] data;
-	ModbusPDU pdu;
-	ModbusFrame frame;
-
-	string toString() const
-	{
-		import std.format;
-		return format("%s->%s", frame, pdu);
-	}
 }
 
 alias PacketHandler = void delegate(Packet packet, ushort requestId, MonoTime time);
@@ -424,3 +393,4 @@ private:
 		return File();
 	}
 }
++/

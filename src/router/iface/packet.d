@@ -4,6 +4,29 @@ import urt.string.format : FormatArg;
 import urt.time;
 
 
+enum EtherType : ushort
+{
+	IP4  = 0x0800,	// Internet Protocol version 4 (IPv4)
+	ARP  = 0x0806,	// Address Resolution Protocol (ARP)
+	WOL  = 0x0842,	// Wake-on-LAN
+	VLAN = 0x8100,	// IEEE 802.1Q VLAN tag
+	IP6  = 0x86DD,	// Internet Protocol version 6 (IPv6)
+	QinQ = 0x88A8,	// Service VLAN tag identifier (S-Tag) on Q-in-Q tunnel
+	ENMS = 0x88B5,	// OUR PROGRAM: this is the official experimental ethertype for development use
+	MTik = 0x88BF,	// MikroTik RoMON
+	LLDP = 0x88CC,	// Link Layer Discovery Protocol (LLDP)
+	HPGP = 0x88E1,	// HomePlug Green PHY (HPGP)
+}
+
+enum ENMS_SubType : ushort
+{
+	AgentDiscover		= 0x0001, // probably need some way to find peers on the network?
+	Modbus				= 0x0010, // modbus
+	Zigbee				= 0x0020, // zigbee
+	TeslaTWC			= 0x0030, // tesla-twc
+}
+
+
 struct MACAddress
 {
 nothrow @nogc:
@@ -135,28 +158,6 @@ nothrow @nogc:
 	auto __debugExpanded() => b[];
 }
 
-
-enum EtherType : ushort
-{
-	IP4  = 0x0800,	// Internet Protocol version 4 (IPv4)
-	ARP  = 0x0806,	// Address Resolution Protocol (ARP)
-	WOL  = 0x0842,	// Wake-on-LAN
-	VLAN = 0x8100,	// IEEE 802.1Q VLAN tag
-	IP6  = 0x86DD,	// Internet Protocol version 6 (IPv6)
-	QinQ = 0x88A8,	// Service VLAN tag identifier (S-Tag) on Q-in-Q tunnel
-	ENMS = 0x88B5,	// OUR PROGRAM: this is the official experimental ethertype for development use
-	MTik = 0x88BF,	// MikroTik RoMON
-	LLDP = 0x88CC,	// Link Layer Discovery Protocol (LLDP)
-	HPGP = 0x88E1,	// HomePlug Green PHY (HPGP)
-}
-
-enum ENMS_SubType : ushort
-{
-	AgentDiscover		= 0x0001, // probably need some way to find peers on the network?
-	Modbus				= 0x0010, // modbus
-	Zigbee				= 0x0020, // zigbee
-	TeslaTWC			= 0x0030, // tesla-twc
-}
 
 struct Packet
 {

@@ -22,7 +22,7 @@ import urt.log;
 import urt.mem.string;
 import urt.string;
 
-
+/+
 class GoodWePlugin : Plugin
 {
 	mixin RegisterModule!"goodwe";
@@ -184,3 +184,4 @@ static bool elementLessThan(Sampler* a, Sampler* b)
 	const ModbusRegInfo* breg = cast(ModbusRegInfo*)b.samplerData;
 	return areg.reg < breg.reg;
 }
++/

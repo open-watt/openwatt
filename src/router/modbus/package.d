@@ -23,7 +23,7 @@ import router.modbus.server;
 import router.stream;
 import router.stream.tcp;
 
-
+/+
 class ModbusPlugin : Plugin
 {
 	mixin RegisterModule!"modbus";
@@ -504,3 +504,4 @@ class ModbusCommand : Command
 		return null;
 	}
 }
++/

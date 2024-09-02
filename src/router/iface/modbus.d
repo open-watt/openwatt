@@ -24,6 +24,13 @@ enum ModbusProtocol : byte
 	ASCII
 }
 
+enum ModbusFrameType : ubyte
+{
+	Unknown,
+	Request,
+	Response
+}
+
 struct ServerMap
 {
 	String name;
@@ -444,13 +451,6 @@ class ModbusInterfaceModule : Plugin
 
 private:
 
-
-enum ModbusFrameType : ubyte
-{
-	Unknown,
-	Request,
-	Response
-}
 
 struct ModbusFrameInfo
 {

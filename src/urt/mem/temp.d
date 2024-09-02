@@ -30,7 +30,7 @@ void[] talloc(size_t size) nothrow @nogc
 
 	return mem;
 }
- 
+
 void[] tallocAligned(size_t size, size_t alignment) nothrow @nogc
 {
 	assert(false);

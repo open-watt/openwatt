@@ -89,7 +89,9 @@ class BaseInterface
 	MACAddress mac;
 	Map!(MACAddress, BaseInterface) macTable;
 
-	InterfaceSubscriber[] subscribers;
+	InterfaceSubscriber[4] subscribers;
+	ubyte numSubscribers;
+
 
 	InterfaceStatus status;
 
@@ -115,9 +117,9 @@ class BaseInterface
 	ref const(InterfaceStatus) getStatus() const
 		=> status;
 
-	void subscribe(InterfaceSubscriber.IncomingPacketHandler packetHandler, PacketFilter filter)
+	void subscribe(InterfaceSubscriber.IncomingPacketHandler packetHandler, ref const PacketFilter filter) nothrow @nogc
 	{
-		subscribers ~= InterfaceSubscriber(filter, packetHandler);
+		subscribers[numSubscribers++] = InterfaceSubscriber(filter, packetHandler);
 	}
 
 	abstract bool send(ref const Packet packet) nothrow @nogc;
@@ -165,7 +167,7 @@ package:
 		if (findMacAddress(packet.src) is null)
 			addAddress(packet.src, this);
 
-		foreach (ref subscriber; subscribers)
+		foreach (ref subscriber; subscribers[0..numSubscribers])
 		{
 			if (subscriber.filter.match(packet))
 				subscriber.recvPacket(packet, this);

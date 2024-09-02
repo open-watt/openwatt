@@ -9,7 +9,7 @@ import router.modbus.connection;
 import router.modbus.message;
 import router.modbus.profile;
 import router.modbus.server;
-
+/+
 class ModbusClient : Client
 {
 	this(string name, Connection connection)
@@ -76,3 +76,4 @@ private:
 		pendingRequests ~= req;
 	}
 }
++/
