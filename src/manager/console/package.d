@@ -21,10 +21,10 @@ public import manager.console.session;
 /// \returns Pointer to the console instance, or `nullptr` if no console with that name exists.
 Console* FindConsole(const(char)[] identifier)
 {
-    Console* instance = s_consoleInstances;
-    while (instance && instance.m_identifier != identifier[])
-        instance = instance.m_nextConsoleInstance;
-    return instance;
+	Console* instance = s_consoleInstances;
+	while (instance && instance.m_identifier != identifier[])
+		instance = instance.m_nextConsoleInstance;
+	return instance;
 }
 
 
@@ -82,7 +82,7 @@ struct Console
 	}
 
 	/// Update the console instance. This will update all attached sessions.
-    void update()
+	void update()
 	{
 		foreach (session; m_sessions)
 		{
@@ -93,35 +93,35 @@ struct Console
 		}
 	}
 
-    /// Get the console's identifier
-    const(char)[] identifier() { return m_identifier; }
+	/// Get the console's identifier
+	const(char)[] identifier() { return m_identifier; }
 
-    /// Get the console's prompt string
-    const(char)[] getPrompt() { return m_prompt; }
+	/// Get the console's prompt string
+	const(char)[] getPrompt() { return m_prompt; }
 
-    /// Set the prompt that text-based sessions will show when accepting commands.
-    String setPrompt(String prompt)
+	/// Set the prompt that text-based sessions will show when accepting commands.
+	String setPrompt(String prompt)
 	{
 		return m_prompt.swap(prompt);
 	}
 
-    /// Create a new session instance of the type `Session` (derived from Session) bound to this console instance.
-    /// \param args
-    ///  Constructor args forwarded to `Session`'s constructor.
-    /// \returns A pointer to the new session instance.
+	/// Create a new session instance of the type `Session` (derived from Session) bound to this console instance.
+	/// \param args
+	///  Constructor args forwarded to `Session`'s constructor.
+	/// \returns A pointer to the new session instance.
 	Session* createSession(SessionType, Args...)(auto ref Args args)
 		if (is(SessionType : Session))
-    {
+	{
 		assert(false);
-        Session* session = m_allocator.alloc!Session(this, forward!args);
-        session.m_console = this;
-        session.SetPrompt(m_prompt);
-        m_sessions ~= session;
-        return session;
-    }
+		Session* session = m_allocator.alloc!Session(this, forward!args);
+		session.m_console = this;
+		session.SetPrompt(m_prompt);
+		m_sessions ~= session;
+		return session;
+	}
 
-    // TODO: don't like this API, it should be a method of Session...
-    CommandState execute(Session session, const(char)[] cmdLine)
+	// TODO: don't like this API, it should be a method of Session...
+	CommandState execute(Session session, const(char)[] cmdLine)
 	{
 		assert(session.m_currentCommand is null, "TODO: gotta do something about concurrent command execution...");
 
@@ -137,11 +137,11 @@ struct Console
 	}
 
 
-    /// Request auto-completion for the given incomplete command line string.
-    /// \param cmdLine
-    ///  A command line string to attempt completion.
-    /// \returns A new command line with the attempted auto-completion applied. If no completion was applicable, the result is `cmdLine` as given.
-    String complete(String cmdLine) const
+	/// Request auto-completion for the given incomplete command line string.
+	/// \param cmdLine
+	///  A command line string to attempt completion.
+	/// \returns A new command line with the attempted auto-completion applied. If no completion was applicable, the result is `cmdLine` as given.
+	String complete(String cmdLine) const
 	{
 		assert(false);
 //		bcStringView args = cmdLine;
@@ -167,12 +167,12 @@ struct Console
 		return String();
 	}
 
-    /// Suggest a list of completion terms for the current incomplete command line.
-    /// If a command line tail does not end on whitespace, the tail is taken to be a partially typed arguments, and filters the possible arguments by the partial prefix.
-    /// \param cmdLine
-    ///  A command line string to analyse for auto-complete suggestions.
-    /// \returns A filtered list of possible completion terms.
-    String[] suggest(const(char)[] cmdLine) const
+	/// Suggest a list of completion terms for the current incomplete command line.
+	/// If a command line tail does not end on whitespace, the tail is taken to be a partially typed arguments, and filters the possible arguments by the partial prefix.
+	/// \param cmdLine
+	///  A command line string to analyse for auto-complete suggestions.
+	/// \returns A filtered list of possible completion terms.
+	String[] suggest(const(char)[] cmdLine) const
 	{
 		assert(false);
 //		bcStringView args = cmdLine;
@@ -231,7 +231,7 @@ struct Console
 	}
 
 
-    void unregisterCommand(const(char)[] _scope, const(char)[] command)
+	void unregisterCommand(const(char)[] _scope, const(char)[] command)
 	{
 		Scope s = cast(Scope)findCommand(_scope);
 		assert(s !is null, tconcat("No scope: ", _scope));
@@ -240,17 +240,17 @@ struct Console
 		// TODO
 	}
 
-    void unregisterCommands(const(char)[] _scope, const(char)[][] commands)
-    {
+	void unregisterCommands(const(char)[] _scope, const(char)[][] commands)
+	{
 		Scope s = cast(Scope)findCommand(_scope);
 		assert(s !is null, tconcat("No scope: ", _scope));
 
-        foreach (cmd; commands)
+		foreach (cmd; commands)
 		{
 			assert(false);
 			// TODO
 		}
-    }
+	}
 
 
 
@@ -345,19 +345,19 @@ struct Console
 	}
 
 package:
-    NoGCAllocator m_allocator;
-    NoGCAllocator m_tempAllocator;
+	NoGCAllocator m_allocator;
+	NoGCAllocator m_tempAllocator;
 
-    String m_identifier;
-    String m_prompt;
+	String m_identifier;
+	String m_prompt;
 
-//    bcHashMap<bcString, dcDebugCommand*> m_commands;
-//    bcHashSet<dcConsoleSession*> m_sessions;
+//	bcHashMap<bcString, dcDebugCommand*> m_commands;
+//	bcHashSet<dcConsoleSession*> m_sessions;
 	Command[String] m_commands;
 	Session[] m_sessions;
 
 
-    Console* m_nextConsoleInstance = null;
+	Console* m_nextConsoleInstance = null;
 }
 
 

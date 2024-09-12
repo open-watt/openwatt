@@ -5,10 +5,10 @@ nothrow @nogc:
 
 enum InternalCode
 {
-    Success = 0,
-    BufferTooSmall,
-    InvalidParameter,
-    Unsupported
+	Success = 0,
+	BufferTooSmall,
+	InvalidParameter,
+	Unsupported
 }
 
 struct Result

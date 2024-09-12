@@ -8,21 +8,21 @@ import urt.util;
 
 class Session
 {
-    this(Console* console)
+	this(Console* console)
 	{
 		m_console = console;
 		m_prompt = "> ";
 		curScope = console.getRoot;
 	}
 
-    ~this()
+	~this()
 	{
 		closeSession();
 	}
 
-    /// Update the session.
-    /// This is called periodically from the session's console instances `Update()` method.
-    void update()
+	/// Update the session.
+	/// This is called periodically from the session's console instances `Update()` method.
+	void update()
 	{
 		if (m_currentCommand)
 		{
@@ -42,11 +42,11 @@ class Session
 		}
 	}
 
-    /// Test if the session is attached to a console instance. A detached session is effectively 'closed', and ready to be cleaned up.
-    final bool isAttached() => m_console != null;
+	/// Test if the session is attached to a console instance. A detached session is effectively 'closed', and ready to be cleaned up.
+	final bool isAttached() => m_console != null;
 
-    /// Close this session and detach from the bound console instance.
-    void closeSession()
+	/// Close this session and detach from the bound console instance.
+	void closeSession()
 	{
 		if (m_currentCommand)
 		{
@@ -64,7 +64,7 @@ class Session
 	}
 
 
-    abstract void writeOutput(const(char)[] text, bool newline);
+	abstract void writeOutput(const(char)[] text, bool newline);
 
 	pragma(inline, true) final void write(Args...)(ref Args args)
 		if (Args.length == 1 && is(Args[0] : const(char)[]))
@@ -96,7 +96,7 @@ class Session
 		writeOutput(concat(text, args, '\n'), false);
 	}
 
-    final void writef(Args...)(const(char)[] format, ref Args args)
+	final void writef(Args...)(const(char)[] format, ref Args args)
 	{
 		import urt.string.format;
 
@@ -104,20 +104,20 @@ class Session
 		format(text, format, args).writeOutput;
 	}
 
-    bool showPrompt(bool show)
+	bool showPrompt(bool show)
 	{
 		return m_showPrompt.swap(show);
 	}
 
-    const(char)[] setPrompt(const(char)[] prompt)
+	const(char)[] setPrompt(const(char)[] prompt)
 	{
 		return m_prompt.swap(prompt);
 	}
 
-    // TODO: I don't like this API... needs work!
-    final const(char[]) getInput() => m_buffer;
+	// TODO: I don't like this API... needs work!
+	final const(char[]) getInput() => m_buffer;
 
-    const(char)[] setInput(const(char)[] text)
+	const(char)[] setInput(const(char)[] text)
 	{
 		import core.lifetime : move;
 
@@ -128,7 +128,7 @@ class Session
 		return old;
 	}
 
-    ptrdiff_t appendInput(const(char)[] text)
+	ptrdiff_t appendInput(const(char)[] text)
 	{
 		assert(m_console != null, "Session was closed!");
 		assert(!m_currentCommand);
@@ -313,7 +313,7 @@ class Session
 		return len;
 	}
 
-    const(char)[] takeInput()
+	const(char)[] takeInput()
 	{
 		import core.lifetime : move;
 
@@ -324,44 +324,44 @@ class Session
 	}
 
 
-    /// \returns The width of the terminal in characters.
-    final uint width() => m_width;
+	/// \returns The width of the terminal in characters.
+	final uint width() => m_width;
 
-    /// \returns The height of the terminal in characters.
-    final uint height() => m_height;
+	/// \returns The height of the terminal in characters.
+	final uint height() => m_height;
 
-    /// Set the size of the console. Some session types may not support this feature.
-    void setConsoleSize(uint width, uint height)
+	/// Set the size of the console. Some session types may not support this feature.
+	void setConsoleSize(uint width, uint height)
 	{
 		m_width = width;
 		m_height = height;
 	}
 
 package:
-    /// Called immediately before console commands are executed.
-    /// It may be used, for instance, to update any visual state required by the session on execution of a command.
-    /// \param command
-    ///  The complete command line being executed.
-    void enterCommand(const(char)[] command)
+	/// Called immediately before console commands are executed.
+	/// It may be used, for instance, to update any visual state required by the session on execution of a command.
+	/// \param command
+	///  The complete command line being executed.
+	void enterCommand(const(char)[] command)
 	{
 	}
 
-    /// Called immediately after console commands complete, or are aborted.
-    /// It may be used, for instance, to update any visual state required by the session on completion of a command.
-    /// \param commandData
-    ///  The command state for the completing command.
-    /// \param state
-    ///  The completion state of the command. This can determine if the command completed, or was aborted.
-    void commandFinished(CommandState commandState, CommandCompletionState state)
+	/// Called immediately after console commands complete, or are aborted.
+	/// It may be used, for instance, to update any visual state required by the session on completion of a command.
+	/// \param commandData
+	///  The command state for the completing command.
+	/// \param state
+	///  The completion state of the command. This can determine if the command completed, or was aborted.
+	void commandFinished(CommandState commandState, CommandCompletionState state)
 	{
 	}
 
-    /// Called when suggestions should be presented to the user.
-    /// Session implementations may implement this method to customise how to display the suggestions. For instance, show
-    /// a tooltip that the user can select from, etc. Default implementation will write the suggestions to the output stream.
-    /// \param suggestions
-    ///  Set of suggestion that apply to the current context
-    void showSuggestions(const(String)[] suggestions)
+	/// Called when suggestions should be presented to the user.
+	/// Session implementations may implement this method to customise how to display the suggestions. For instance, show
+	/// a tooltip that the user can select from, etc. Default implementation will write the suggestions to the output stream.
+	/// \param suggestions
+	///  Set of suggestion that apply to the current context
+	void showSuggestions(const(String)[] suggestions)
 	{
 		assert(false);
 //		uint32 max = 0;
@@ -385,11 +385,11 @@ package:
 	}
 
 
-    // Internal stuff...
-    final Allocator allocator() => m_console.m_allocator;
-    final Allocator tempAllocator() => m_console.m_tempAllocator;
+	// Internal stuff...
+	final Allocator allocator() => m_console.m_allocator;
+	final Allocator tempAllocator() => m_console.m_tempAllocator;
 
-    final void receiveInput(const(char)[] input)
+	final void receiveInput(const(char)[] input)
 	{
 		if (m_currentCommand)
 			m_buffer ~= input;
@@ -429,7 +429,7 @@ package:
 		}
 	}
 
-    final bool execute(const(char)[] command)
+	final bool execute(const(char)[] command)
 	{
 		// TODO: command history!
 //		AddToHistory(command);
@@ -451,7 +451,7 @@ package:
 		return m_currentCommand is null;
 	}
 
-    final void addToHistory(String line)
+	final void addToHistory(String line)
 	{
 		assert(false);
 //		if (!line.IsEmpty() && (m_history.empty() || line != m_history.back()))
@@ -464,30 +464,30 @@ package:
 	}
 
 
-    Console* m_console;
-    CommandState m_currentCommand = null;
+	Console* m_console;
+	CommandState m_currentCommand = null;
 
 	Scope curScope = null;
 	// TODO: remove the GC, swap for container!!
 	String[String] localVariables;
 
-    uint m_width = 80;
-    uint m_height = 24;
+	uint m_width = 80;
+	uint m_height = 24;
 
-    bool m_showPrompt = true;
-    bool m_suggestionPending = false;
+	bool m_showPrompt = true;
+	bool m_suggestionPending = false;
 
-    const(char)[] m_prompt;
-    const(char)[] m_buffer;
-    uint m_position = 0;
+	const(char)[] m_prompt;
+	const(char)[] m_buffer;
+	uint m_position = 0;
 
 //	list<String> m_history;
 //	list<String>::iterator m_historyCursor;
 	const(char)[][] m_history;
 	uint m_historyCursor = 0;
-    const(char)[] m_historyHead;
+	const(char)[] m_historyHead;
 
-//    Vector<dcDebugConsole*> m_sessionStack;
+//	Vector<dcDebugConsole*> m_sessionStack;
 	Console*[] m_sessionStack;
 }
 
@@ -498,7 +498,7 @@ class StringSession : Session
 		super(console);
 	}
 
-    const(char[]) getOutput() const pure nothrow @nogc
+	const(char[]) getOutput() const pure nothrow @nogc
 	{
 		return m_output;
 	}
@@ -514,16 +514,16 @@ class StringSession : Session
 		m_output = null;
 	}
 
-    override void writeOutput(const(char)[] text, bool newline)
-    {
+	override void writeOutput(const(char)[] text, bool newline)
+	{
 		if (newline)
 			m_output ~= text ~ '\n';
 		else
 			m_output ~= text;
-    }
+	}
 
 private:
-    char[] m_output;
+	char[] m_output;
 }
 
 class ConsoleSession : Session
@@ -533,12 +533,12 @@ class ConsoleSession : Session
 		super(console);
 	}
 
-    override void writeOutput(const(char)[] text, bool newline)
-    {
+	override void writeOutput(const(char)[] text, bool newline)
+	{
 		import urt.io;
 		if (newline)
 			write(text);
 		else
 			writeln(text);
-    }
+	}
 }

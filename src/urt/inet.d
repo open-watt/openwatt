@@ -332,8 +332,8 @@ nothrow @nogc:
 
 struct MulticastGroup
 {
-    IPAddr address;
-    IPAddr iface;
+	IPAddr address;
+	IPAddr iface;
 }
 
 struct InetAddress

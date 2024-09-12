@@ -16,9 +16,9 @@ import urt.string;
 
 enum CommandCompletionState : ubyte
 {
-    InProgress, ///< Command is still in progress
-    Finished,   ///< Command execution has finished
-    Cancelled,  ///< Command was aborted for some reason
+	InProgress, ///< Command is still in progress
+	Finished,   ///< Command execution has finished
+	Cancelled,  ///< Command was aborted for some reason
 }
 
 class CommandState
@@ -87,9 +87,9 @@ class Command
 
 package:
 	final NoGCAllocator allocator() => m_console.m_allocator;
-    final NoGCAllocator tempAllocator() => m_console.m_tempAllocator;
+	final NoGCAllocator tempAllocator() => m_console.m_tempAllocator;
 
-    Console* m_console;
+	Console* m_console;
 	Scope parent = null;
 }
 

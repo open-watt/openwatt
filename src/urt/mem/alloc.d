@@ -67,13 +67,13 @@ void[] reallocAligned(void[] mem, size_t newSize, size_t alignment) nothrow @nog
 	assert(isPowerOf2(alignment), "Alignment must be a power of two!");
 
 	void[] newAlloc = newSize > 0 ? allocAligned(newSize, alignment) : null;
-    if (newAlloc !is null && mem !is null)
-    {
+	if (newAlloc !is null && mem !is null)
+	{
 		size_t toCopy = min(mem.length, newSize);
 		newAlloc[0 .. toCopy] = mem[0 .. toCopy];
-    }
+	}
 	freeAligned(mem);
-    return newAlloc;
+	return newAlloc;
 }
 
 // NOTE: This function is only compatible with allocAligned!

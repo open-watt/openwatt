@@ -48,7 +48,7 @@ class ModbusPlugin : Plugin
 		registerProfile("goodwe_meter", mb_profile);
 
 		mb_profile = new ModbusProfile;
-        mb_profile.populateRegs(goodWeInverterRegs);
+		mb_profile.populateRegs(goodWeInverterRegs);
 		registerProfile("goodwe", mb_profile);
 	}
 
@@ -191,10 +191,10 @@ class ModbusPlugin : Plugin
 					assert(protocol != ModbusProtocol.Unknown);
 
 					ConnectionParams params = ConnectionParams(mode:             mode,
-															   pollingInterval:  interval,
-															   pollingDelay:     delay,
-															   timeoutThreshold: timeout,
-															   logDataStream:    logFile.idup);
+					                                           pollingInterval:  interval,
+					                                           pollingDelay:     delay,
+					                                           timeoutThreshold: timeout,
+					                                           logDataStream:    logFile.idup);
 
 					connections[name] = new Connection(name, stream, protocol, params);
 					break;

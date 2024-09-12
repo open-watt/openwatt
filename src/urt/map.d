@@ -20,10 +20,10 @@ struct Compare(T)
 }
 //struct Compare(T : const(char)[])
 //{
-//  ptrdiff_t opCall(String a, String b)
-//  {
-//    return a.cmp(b);
-//  }
+//	ptrdiff_t opCall(String a, String b)
+//	{
+//		return a.cmp(b);
+//	}
 //}
 
 struct KVP(K, V)
@@ -64,11 +64,11 @@ nothrow @nogc:
 
 	// TODO: copy ctor, move ctor, etc...
 
-	//  this(KeyValuePair[] arr)
-	//  {
-	//    foreach (ref kvp; arr)
-	//      insert(kvp.key, kvp.value);
-	//  }
+//	this(KeyValuePair[] arr)
+//	{
+//		foreach (ref kvp; arr)
+//			insert(kvp.key, kvp.value);
+//	}
 
 	~this()
 	{
@@ -302,25 +302,25 @@ nothrow @nogc:
 		return get(key) != null;
 	}
 /+
-  AVLTree<K, V>& operator =(const AVLTree<K, V> &rh)
-  {
-    if (this != &rh)
-    {
-      this.~AVLTree();
-      epConstruct(this) AVLTree<K, V>(rh);
-    }
-    return *this;
-  }
+	AVLTree<K, V>& operator =(const AVLTree<K, V> &rh)
+	{
+		if (this != &rh)
+		{
+			this.~AVLTree();
+			epConstruct(this) AVLTree<K, V>(rh);
+		}
+		return *this;
+	}
 
-  AVLTree<K, V>& operator =(AVLTree<K, V> &&rval)
-  {
-    if (this != &rval)
-    {
-      this.~AVLTree();
-      epConstruct(this) AVLTree<K, V>(std::move(rval));
-    }
-    return *this;
-  }
+	AVLTree<K, V>& operator =(AVLTree<K, V> &&rval)
+	{
+		if (this != &rval)
+		{
+			this.~AVLTree();
+			epConstruct(this) AVLTree<K, V>(std::move(rval));
+		}
+		return *this;
+	}
 +/
 
 	Iterator begin()
@@ -605,17 +605,17 @@ private:
 		return _pRoot;
 	}
 
-	//  static Node* clone(Node* pOld)
-	//  {
-	//    if (!pOld)
-	//      return null;
-	//
-	//    Node* pNew = Allocator.instance.allocT!Node(pOld.kvp);
-	//    pNew.height = pOld.height;
-	//    pNew.left = clone(pOld.left);
-	//    pNew.right = clone(pOld.right);
-	//    return pNew;
-	//  }
+//	static Node* clone(Node* pOld)
+//	{
+//		if (!pOld)
+//			return null;
+//
+//		Node* pNew = Allocator.instance.allocT!Node(pOld.kvp);
+//		pNew.height = pOld.height;
+//		pNew.left = clone(pOld.left);
+//		pNew.right = clone(pOld.right);
+//		return pNew;
+//	}
 
 public:
 	struct Iterator
@@ -654,22 +654,22 @@ public:
 			return node.kvp.value;
 		}
 
-		//    KVPRef<const K, const V> operator*() const
-		//    {
-		//      return KVPRef<const K, const V>(key(), value());
-		//    }
-		//    KVPRef<const K, V> operator*()
-		//    {
-		//      return KVPRef<const K, V>(key(), value());
-		//    }
-		//    const V* operator.() const
-		//    {
-		//      return &value();
-		//    }
-		//    V* operator.()
-		//    {
-		//      return &value();
-		//    }
+//		KVPRef<const K, const V> operator*() const
+//		{
+//			return KVPRef<const K, const V>(key(), value());
+//		}
+//		KVPRef<const K, V> operator*()
+//		{
+//			return KVPRef<const K, V>(key(), value());
+//		}
+//		const V* operator.() const
+//		{
+//			return &value();
+//		}
+//		V* operator.()
+//		{
+//			return &value();
+//		}
 
 		inout(Node)* getNode(ulong s, ulong d) inout
 		{
@@ -785,37 +785,37 @@ nothrow @nogc:
 template<typename K, typename V, typename PredFunctor, typename Allocator>
 ptrdiff_t epStringify(Slice<char> buffer, String epUnusedParam(format), const AVLTree<K, V, PredFunctor, Allocator> &tree, const VarArg* epUnusedParam(pArgs))
 {
-  size_t offset = 0;
-  if (buffer)
-    offset += String("{ ").copyTo(buffer);
-  else
-    offset += String("{ ").length;
+	size_t offset = 0;
+	if (buffer)
+		offset += String("{ ").copyTo(buffer);
+	else
+		offset += String("{ ").length;
 
-  bool bFirst = true;
-  for (auto &&kvp : tree)
-  {
-    if (!bFirst)
-    {
-      if (buffer)
-        offset += String(", ").copyTo(buffer.drop(offset));
-      else
-        offset += String(", ").length;
-    }
-    else
-      bFirst = false;
+	bool bFirst = true;
+	for (auto &&kvp : tree)
+	{
+		if (!bFirst)
+		{
+			if (buffer)
+				offset += String(", ").copyTo(buffer.drop(offset));
+			else
+				offset += String(", ").length;
+		}
+		else
+			bFirst = false;
 
-    if (buffer)
-      offset += epStringify(buffer.drop(offset), null, kvp, null);
-    else
-      offset += epStringify(null, null, kvp, null);
-  }
+		if (buffer)
+			offset += epStringify(buffer.drop(offset), null, kvp, null);
+		else
+			offset += epStringify(null, null, kvp, null);
+	}
 
-  if (buffer)
-    offset += String(" }").copyTo(buffer.drop(offset));
-  else
-    offset += String(" }").length;
+	if (buffer)
+		offset += String(" }").copyTo(buffer.drop(offset));
+	else
+		offset += String(" }").length;
 
-  return offset;
+	return offset;
 }
 +/
 

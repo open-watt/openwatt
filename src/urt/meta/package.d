@@ -8,9 +8,9 @@ alias AliasSeq(TList...) = TList;
 
 template staticMap(alias fun, args...)
 {
-    alias staticMap = AliasSeq!();
-    static foreach (arg; args)
-        staticMap = AliasSeq!(staticMap, fun!arg);
+	alias staticMap = AliasSeq!();
+	static foreach (arg; args)
+		staticMap = AliasSeq!(staticMap, fun!arg);
 }
 
 template InterleaveSeparator(alias sep, Args...)

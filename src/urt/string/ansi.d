@@ -75,28 +75,28 @@ char[] stripDecoration(char[] text) pure
 
 char[] stripDecoration(const(char)[] text, char[] buffer) pure
 {
-    size_t len = text.length, outLen = 0;
-    char* dst = buffer.ptr;
-    const(char)* src = text.ptr;
+	size_t len = text.length, outLen = 0;
+	char* dst = buffer.ptr;
+	const(char)* src = text.ptr;
 	bool writeOutput = text.ptr != buffer.ptr;
-    for (size_t i = 0; i < len;)
-    {
-        char c = src[i];
-        if (c == '\x1b' && len >= i + 4 && src[i + 1] == '[')
-        {
-            size_t j = i + 2;
-            while (j < len && ((src[j] >= '0' && src[j] <= '9') || src[j] == ';'))
-                ++j;
-            if (j < len && src[j] == 'm')
-            {
-                i = j + 1;
+	for (size_t i = 0; i < len;)
+	{
+		char c = src[i];
+		if (c == '\x1b' && len >= i + 4 && src[i + 1] == '[')
+		{
+			size_t j = i + 2;
+			while (j < len && ((src[j] >= '0' && src[j] <= '9') || src[j] == ';'))
+				++j;
+			if (j < len && src[j] == 'm')
+			{
+				i = j + 1;
 				writeOutput = true;
-                continue;
-            }
-        }
-        if (BranchMoreExpensiveThanStore || writeOutput)
-            dst[outLen] = c; // skip stores where unnecessary (probably the common case)
-        ++outLen;
-    }
-    return buffer[0 .. outLen];
+				continue;
+			}
+		}
+		if (BranchMoreExpensiveThanStore || writeOutput)
+			dst[outLen] = c; // skip stores where unnecessary (probably the common case)
+		++outLen;
+	}
+	return buffer[0 .. outLen];
 }

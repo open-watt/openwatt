@@ -15,25 +15,25 @@ enum bool isSomeFloat(T) = is(T == float) || is(T == double) || is(T == real);
 
 template isUnsigned(T)
 {
-    static if (!__traits(isUnsigned, T))
-        enum isUnsigned = false;
-    else static if (is(T U == enum))
-        enum isUnsigned = isUnsigned!U;
-    else
-        enum isUnsigned = __traits(isZeroInit, T) // Not char, wchar, or dchar.
-            && !is(immutable T == immutable bool) && !is(T == __vector);
+	static if (!__traits(isUnsigned, T))
+		enum isUnsigned = false;
+	else static if (is(T U == enum))
+		enum isUnsigned = isUnsigned!U;
+	else
+		enum isUnsigned = __traits(isZeroInit, T) // Not char, wchar, or dchar.
+			&& !is(immutable T == immutable bool) && !is(T == __vector);
 }
 
 enum bool isSigned(T) = __traits(isArithmetic, T) && !__traits(isUnsigned, T) && is(T : real);
 
 template isSomeChar(T)
 {
-    static if (!__traits(isUnsigned, T))
-        enum isSomeChar = false;
-    else static if (is(T U == enum))
-        enum isSomeChar = isSomeChar!U;
-    else
-        enum isSomeChar = !__traits(isZeroInit, T);
+	static if (!__traits(isUnsigned, T))
+		enum isSomeChar = false;
+	else static if (is(T U == enum))
+		enum isSomeChar = isSomeChar!U;
+	else
+		enum isSomeChar = !__traits(isZeroInit, T);
 }
 
 enum bool isSomeFunction(alias T) = is(T == return) || is(typeof(T) == return) || is(typeof(&T) == return);
@@ -42,16 +42,16 @@ enum bool isDelegate(alias T) = is(typeof(T) == delegate) || is(T == delegate);
 
 template isCallable(alias callable)
 {
-    static if (is(typeof(&callable.opCall) == delegate))
-        enum bool isCallable = true;
-    else static if (is(typeof(&callable.opCall) V : V*) && is(V == function))
-        enum bool isCallable = true;
-    else static if (is(typeof(&callable.opCall!()) TemplateInstanceType))
-        enum bool isCallable = isCallable!TemplateInstanceType;
-    else static if (is(typeof(&callable!()) TemplateInstanceType))
-        enum bool isCallable = isCallable!TemplateInstanceType;
-    else
-        enum bool isCallable = isSomeFunction!callable;
+	static if (is(typeof(&callable.opCall) == delegate))
+		enum bool isCallable = true;
+	else static if (is(typeof(&callable.opCall) V : V*) && is(V == function))
+		enum bool isCallable = true;
+	else static if (is(typeof(&callable.opCall!()) TemplateInstanceType))
+		enum bool isCallable = isCallable!TemplateInstanceType;
+	else static if (is(typeof(&callable!()) TemplateInstanceType))
+		enum bool isCallable = isCallable!TemplateInstanceType;
+	else
+		enum bool isCallable = isSomeFunction!callable;
 }
 
 
@@ -59,10 +59,10 @@ alias Unconst(T : const U, U) = U;
 
 template Unqual(T : const U, U)
 {
-    static if (is(U == shared V, V))
-        alias Unqual = V;
-    else
-        alias Unqual = U;
+	static if (is(U == shared V, V))
+		alias Unqual = V;
+	else
+		alias Unqual = U;
 }
 
 template Unsigned(T)
@@ -132,73 +132,73 @@ template Signed(T)
 template ReturnType(alias func)
 	if (isCallable!func)
 {
-    static if (is(FunctionTypeOf!func R == return))
-        alias ReturnType = R;
-    else
-        static assert(0, "argument has no return type");
+	static if (is(FunctionTypeOf!func R == return))
+		alias ReturnType = R;
+	else
+		static assert(0, "argument has no return type");
 }
 
 template Parameters(alias func)
 	if (isCallable!func)
 {
-    static if (is(FunctionTypeOf!func P == function))
-        alias Parameters = P;
-    else
-        static assert(0, "argument has no parameters");
+	static if (is(FunctionTypeOf!func P == function))
+		alias Parameters = P;
+	else
+		static assert(0, "argument has no parameters");
 }
 
 template ParameterIdentifierTuple(alias func)
 	if (isCallable!func)
 {
-    static if (is(FunctionTypeOf!func PT == __parameters))
-    {
-        alias ParameterIdentifierTuple = AliasSeq!();
-        static foreach (i; 0 .. PT.length)
-        {
-            static if (!isFunctionPointer!func && !isDelegate!func
-                       // Unnamed parameters yield CT error.
-                       && is(typeof(__traits(identifier, PT[i .. i+1])))
+	static if (is(FunctionTypeOf!func PT == __parameters))
+	{
+		alias ParameterIdentifierTuple = AliasSeq!();
+		static foreach (i; 0 .. PT.length)
+		{
+			static if (!isFunctionPointer!func && !isDelegate!func
+					   // Unnamed parameters yield CT error.
+					   && is(typeof(__traits(identifier, PT[i .. i+1])))
 						   // Filter out unnamed args, which look like (Type) instead of (Type name).
 						   && PT[i].stringof != PT[i .. i+1].stringof[1..$-1])
-            {
-                ParameterIdentifierTuple = AliasSeq!(ParameterIdentifierTuple,
+			{
+				ParameterIdentifierTuple = AliasSeq!(ParameterIdentifierTuple,
 													 __traits(identifier, PT[i .. i+1]));
-            }
-            else
-            {
-                ParameterIdentifierTuple = AliasSeq!(ParameterIdentifierTuple, "");
-            }
-        }
-    }
-    else
-    {
-        static assert(0, func.stringof ~ " is not a function");
-        // avoid pointless errors
-        alias ParameterIdentifierTuple = AliasSeq!();
-    }
+			}
+			else
+			{
+				ParameterIdentifierTuple = AliasSeq!(ParameterIdentifierTuple, "");
+			}
+		}
+	}
+	else
+	{
+		static assert(0, func.stringof ~ " is not a function");
+		// avoid pointless errors
+		alias ParameterIdentifierTuple = AliasSeq!();
+	}
 }
 
 template FunctionTypeOf(alias func)
 	if (isCallable!func)
 {
-    static if ((is(typeof(& func) Fsym : Fsym*) && is(Fsym == function)) || is(typeof(& func) Fsym == delegate))
-        alias FunctionTypeOf = Fsym; // HIT: (nested) function symbol
-    else static if (is(typeof(& func.opCall) Fobj == delegate) || is(typeof(& func.opCall!()) Fobj == delegate))
-        alias FunctionTypeOf = Fobj; // HIT: callable object
-    else static if ((is(typeof(& func.opCall) Ftyp : Ftyp*) && is(Ftyp == function)) ||
+	static if ((is(typeof(& func) Fsym : Fsym*) && is(Fsym == function)) || is(typeof(& func) Fsym == delegate))
+		alias FunctionTypeOf = Fsym; // HIT: (nested) function symbol
+	else static if (is(typeof(& func.opCall) Fobj == delegate) || is(typeof(& func.opCall!()) Fobj == delegate))
+		alias FunctionTypeOf = Fobj; // HIT: callable object
+	else static if ((is(typeof(& func.opCall) Ftyp : Ftyp*) && is(Ftyp == function)) ||
 					(is(typeof(& func.opCall!()) Ftyp : Ftyp*) && is(Ftyp == function)))
-        alias FunctionTypeOf = Ftyp; // HIT: callable type
-    else static if (is(func T) || is(typeof(func) T))
-    {
-        static if (is(T == function))
-            alias FunctionTypeOf = T;    // HIT: function
-        else static if (is(T Fptr : Fptr*) && is(Fptr == function))
-            alias FunctionTypeOf = Fptr; // HIT: function pointer
-        else static if (is(T Fdlg == delegate))
-            alias FunctionTypeOf = Fdlg; // HIT: delegate
-        else
-            static assert(0);
-    }
-    else
-        static assert(0);
+		alias FunctionTypeOf = Ftyp; // HIT: callable type
+	else static if (is(func T) || is(typeof(func) T))
+	{
+		static if (is(T == function))
+			alias FunctionTypeOf = T;	// HIT: function
+		else static if (is(T Fptr : Fptr*) && is(Fptr == function))
+			alias FunctionTypeOf = Fptr; // HIT: function pointer
+		else static if (is(T Fdlg == delegate))
+			alias FunctionTypeOf = Fdlg; // HIT: delegate
+		else
+			static assert(0);
+	}
+	else
+		static assert(0);
 }
