@@ -122,7 +122,19 @@ class BaseInterface
 		subscribers[numSubscribers++] = InterfaceSubscriber(filter, packetHandler);
 	}
 
-	abstract bool send(ref const Packet packet) nothrow @nogc;
+	bool send(MACAddress dest, const(void)[] message, EtherType type, ENMS_SubType subType = ENMS_SubType.Unspecified) nothrow @nogc
+	{
+		Packet p = Packet(message);
+		p.src = mac;
+		p.dst = dest;
+		p.vlan = 0; // TODO: if this is a vlan interface?
+		p.etherType = type;
+		p.etherSubType = subType;
+		p.creationTime = getTime();
+		return forward(p);
+	}
+
+	abstract bool forward(ref const Packet packet) nothrow @nogc;
 
 	final void addAddress(MACAddress mac, BaseInterface iface) nothrow @nogc
 	{

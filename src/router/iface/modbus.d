@@ -1,5 +1,6 @@
 module router.iface.modbus;
 
+import urt.endian;
 import urt.mem;
 import urt.meta.nullable;
 import urt.string;
@@ -46,7 +47,7 @@ struct ModbusRequest
 	MACAddress requestFrom;
 	ubyte localServerAddress;
 	ushort sequenceNumber;
-	Packet* bufferedPacket;
+	const(Packet)* bufferedPacket;
 }
 
 class ModbusInterface : BaseInterface
@@ -57,7 +58,8 @@ class ModbusInterface : BaseInterface
 	bool isBusMaster;
 
 	// if we are the bus master
-	ModbusRequest[] pendingRequests;
+	ModbusRequest[8] pendingRequests;
+	size_t numPending = 0;
 
 	// if we are not the bus master
 	MACAddress masterMac;
@@ -170,20 +172,82 @@ class ModbusInterface : BaseInterface
 		while (true);
 	}
 
-	override bool send(ref const Packet packet) nothrow @nogc
+	override bool forward(ref const Packet packet) nothrow @nogc
 	{
+		// can only handle modbus packets
 		if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.Modbus)
 			return false;
 
-		// if we're not a bus master, we can only send packets destined for the master
-		if (!isBusMaster && packet.dst != masterMac)
-			return false;
+		auto modbus = mod_iface.app.moduleInstance!ModbusInterfaceModule();
 
-		// we need to frame this up and send...
-		//... but if we are the bus master, then we need to queue incoming requests to let the server respond...
+		ushort length = 0;
+		ubyte address = 0;
+		ubyte[260] buffer;
+
+		if (isBusMaster)
+		{
+			if (packet.dst != MACAddress.broadcast)
+			{
+				ServerMap* map = modbus.findServerByMac(packet.dst);
+				if (!map)
+					return false; // we don't know who this server is!
+				if (map.iface !is this)
+					assert(false); // what happened here? why did this interface receive the message?
+				address = map.localAddress;
+
+				// we need to queue the request so we can return the response to the sender...
+				pendingRequests[numPending++] = ModbusRequest(getTime(), packet.src, map.localAddress, 0, &packet);
+			}
+		}
+		else
+		{
+			// if we're not a bus master, we can only send packets destined for the master
+			if (packet.dst != masterMac)
+				return false;
+
+			// the packet is a response to the master; just frame it and send it...
+			ServerMap* map = modbus.findServerByMac(packet.src);
+			if (!map)
+				return false; // how did we even get a response if we don't know who the server is?
+
+			if (map.iface is this)
+			{
+				address = map.localAddress;
+				assert(false, "this should be impossible; because it should have served its own response...?");
+			}
+			else
+				address = map.universalAddress;
+		}
+
+		// frame it up and send...
+		final switch (protocol)
+		{
+			case ModbusProtocol.Unknown:
+				assert(false, "Modbus protocol not specified");
+			case ModbusProtocol.RTU:
+				length = cast(ushort)(1 + packet.data.length);
+				buffer[0] = address;
+				buffer[1 .. length] = cast(ubyte[])packet.data[];
+				buffer[length .. length + 2][0 .. 2] = calculateModbusCRC(buffer[0 .. length]).nativeToLittleEndian;
+				length += 2;
+				break;
+			case ModbusProtocol.TCP:
+				assert(false);
+			case ModbusProtocol.ASCII:
+				assert(false);
+		}
+
+		ptrdiff_t written = stream.write(buffer[0 .. length]);
+		if (written <= 0)
+		{
+			// what could have gone wrong here?
+			// proper error handling?
+			assert(false);
+		}
 
 		++status.sendPackets;
 		status.sendBytes += packet.data.length;
+		// TODO: or should we record `length`? payload bytes, or full protocol bytes?
 		return true;
 	}
 
@@ -348,6 +412,9 @@ class ModbusInterfaceModule : Plugin
 			remoteServers[universalAddress] = map;
 			iface.addAddress(map.mac, iface);
 
+			import urt.log;
+			debug writeDebugf("Create modbus server {0} - '{1}'  uid: {2}  at: {3}({4})", map.mac, map.name, map.universalAddress, iface.name, map.localAddress);
+
 			return universalAddress in remoteServers;
 		}
 
@@ -359,6 +426,11 @@ class ModbusInterfaceModule : Plugin
 			assert(stream, "'stream' must be specified");
 
 			Stream s = app.moduleInstance!StreamModule.getStream(stream);
+			if (!s)
+			{
+				session.writeLine("Stream does not exist: ", stream);
+				return;
+			}
 
 			ModbusProtocol p = ModbusProtocol.Unknown;
 			switch (protocol)
@@ -392,6 +464,9 @@ class ModbusInterfaceModule : Plugin
 
 			ModbusInterface iface = defaultAllocator.allocT!ModbusInterface(mod_if, n.move, s, p, master ? master.value : false);
 			mod_if.addInterface(iface);
+
+			import urt.log;
+			debug writeDebugf("Create modbus interface {0} - '{1}'", iface.mac, name);
 
 //			// HACK: we'll print packets that we receive...
 //			iface.subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {
@@ -451,6 +526,7 @@ class ModbusInterfaceModule : Plugin
 
 private:
 
+nothrow @nogc:
 
 struct ModbusFrameInfo
 {
@@ -469,6 +545,22 @@ __gshared immutable ushort[25] functionLens = [
 
 int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
 {
+	// RTU has no sync markers, so we need to get pretty creative to validate frames!
+	// 1: packets are delimited by a 2-byte CRC, so any sequence of bytes where the running CRC is followed by 2 bytes with that value might be a frame...
+	// 2: but 2-byte CRC's aren't good enough protection against false positives! (they appear semi-regularly), so...
+	// 3:  a. we can exclude packets that start with an invalid function code
+	//     b. we can exclude packets to the broadcast address (0), with a function code that can't broadcast
+	//     c. we can then try and determine the expected packet length, and check the CRC only at the length offsets
+	//     d. failing all that, we can crawl the buffer for a CRC...
+	//     e. if we don't find a packet, repeat starting at the next BYTE...
+
+	// ... losing stream sync might have a high computational cost!
+	// we might determine that in practise it's superior to just drop the whole buffer and wait for new data which is probably aligned to the bitstream to arrive?
+
+	// NOTE: it's also worth noting, that some of our stream validity checks exclude non-standard protocol...
+	//       for instance, we exclude any function code that's not in the spec. What if an implementation invents their own function codes?
+	//       maybe it should be an interface flag to control whether it accepts non-standard streams, and relax validation checking?
+
 	if (data.length < 4) // @unlikely
 		return 0;
 
@@ -583,27 +675,10 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
 
 size_t parseRTU(const(ubyte)[] data, out const(void)[] message, out ModbusFrameInfo frameInfo)
 {
-	// the stream might have corruption or noise, RTU frames could be anywhere, so we'll scan forward searching for the next frame...
-	// RTU has no sync markers, so we need to get pretty creative!
-	// 1: packets are delimited by a 2-byte CRC, so any sequence of bytes where the running CRC is followed by 2 bytes with that value might be a frame...
-	// 2: but 2-byte CRC's aren't good enough protection against false positives! (they appear semi-regularly), so...
-	// 3:  a. we can exclude packets that start with an invalid function code
-	//     b. we can exclude packets to the broadcast address (0), with a function code that can't broadcast
-	//     c. we can then try and determine the expected packet length, and check the CRC only at the length offsets
-	//     d. failing all that, we can crawl the buffer for a CRC...
-	//     e. if we don't find a packet, repeat starting at the next BYTE...
-
-	// ... losing stream sync might have a high computational cost!
-	// we might determine that in practise it's superior to just drop the whole buffer and wait for new data which is probably aligned to the bitstream to arrive?
-
-
-	// NOTE: it's also worth noting, that some of our stream validity checks exclude non-standard protocol...
-	//       for instance, we exclude any function code that's not in the spec. What if an implementation invents their own function codes?
-	//       maybe it should be an interface flag to control whether it accepts non-standard streams, and relax validation checking?
-
 	if (data.length < 4)
 		return 0;
 
+	// the stream might have corruption or noise, RTU frames could be anywhere, so we'll scan forward searching for the next frame...
 	size_t offset = 0;
 	for (; offset < data.length - 4; ++offset)
 	{

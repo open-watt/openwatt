@@ -38,6 +38,7 @@ nothrow @nogc:
 		if (!results.next_address(&addrInfo))
 			assert(0);
 		remote = addrInfo.address;
+		connect();
 	}
 
 	override bool connect()

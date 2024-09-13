@@ -56,10 +56,41 @@ class BridgeInterface : BaseInterface
 	{
 	}
 
-	override bool send(ref const Packet packet) nothrow @nogc
+	override bool forward(ref const Packet packet) nothrow @nogc
 	{
-		// work out where it's gotta go...
-		return false;
+		if (packet.dst != MACAddress.broadcast)
+		{
+			// see if we've cached the target intertface...
+			BaseInterface i = findMacAddress(packet.dst);
+
+			// if not; see if any of our interfaces knows where it is...
+			if (!i)
+			{
+				foreach (m; members)
+				{
+					i = m.findMacAddress(packet.dst);
+					if (i)
+					{
+						// cache the dest locally
+						addAddress(packet.dst, i);
+						break;
+					}
+				}
+			}
+
+			// if we found it
+			if (i)
+				return i.forward(packet);
+		}
+
+		// otherwise, send it everywhere!
+		foreach (m; members)
+		{
+			bool success = m.forward(packet);
+			if (!success)
+				continue; // what even here? is it bad if one interface fails to send?
+		}
+		return true;
 	}
 
 	void incomingPacket(ref const Packet packet, BaseInterface srcInterface) nothrow @nogc
@@ -79,7 +110,7 @@ class BridgeInterface : BaseInterface
 						return;
 
 					// forward the message
-					dstInterface.send(packet);
+					dstInterface.forward(packet);
 
 					debug writeDebug(name, ": forward: ", srcInterface.name, "(", packet.src, ") -> ", dstInterface.name, "(", packet.dst, ") [", packet.data, "]");
 					return;
@@ -92,7 +123,7 @@ class BridgeInterface : BaseInterface
 		foreach (member; members)
 		{
 			if (member !is srcInterface)
-				member.send(packet);
+				member.forward(packet);
 		}
 
 		debug writeDebug(name, ": broadcast: ", srcInterface.name, "(", packet.src, ") -> * [", packet.data, "]");
@@ -126,6 +157,9 @@ class BrudgeInterfaceModule : Plugin
 
 			BridgeInterface iface = defaultAllocator.allocT!BridgeInterface(mod_if, n.move);
 			mod_if.addInterface(iface);
+
+			import urt.log;
+			debug writeDebugf("Create bridge interface {0} - '{1}'", iface.mac, name);
 
 //			// HACK: we'll print packets that we receive...
 //			iface.subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {

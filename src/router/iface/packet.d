@@ -20,11 +20,15 @@ enum EtherType : ushort
 
 enum ENMS_SubType : ushort
 {
+	Unspecified			= 0x0000,
 	AgentDiscover		= 0x0001, // probably need some way to find peers on the network?
 	Modbus				= 0x0010, // modbus
 	Zigbee				= 0x0020, // zigbee
 	TeslaTWC			= 0x0030, // tesla-twc
 }
+
+
+enum MACAddress MAC(string addr) = (){ MACAddress a; assert(a.fromString(addr), "Not a mac address"); return a; }();
 
 
 struct MACAddress
@@ -122,7 +126,7 @@ nothrow @nogc:
 		return 17;
 	}
 
-	bool fromString(const(char)[] s, size_t* taken)
+	bool fromString(const(char)[] s, size_t* taken = null)
 	{
 		import urt.conv;
 		import urt.string.ascii;

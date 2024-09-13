@@ -91,14 +91,15 @@ struct ModbusPDU
 {
 	this(FunctionCode functionCode, const(ubyte)[] data)
 	{
+		assert(data.length <= ModbusMessageDataMaxLength);
 		this.functionCode = functionCode;
 		this.buffer[0 .. data.length] = data[];
-		this.length = cast(ushort)data.length;
+		this.length = cast(ubyte)data.length;
 	}
 
 	FunctionCode functionCode;
 	ubyte[ModbusMessageDataMaxLength] buffer;
-	ushort length;
+	ubyte length;
 	inout(ubyte)[] data() inout { return buffer[0..length]; }
 
 	string toString() const
@@ -182,7 +183,7 @@ ModbusPDU createMessage_Write(RegisterType type, ushort register, ushort[] value
 			pdu.functionCode = FunctionCode.WriteMultipleCoils;
 			pdu.buffer[2..4] = (cast(ushort)values.length).nativeToBigEndian;
 			pdu.buffer[4] = cast(ubyte)(values.length + 7) / 8;
-			pdu.length = 5 + pdu.buffer[4];
+			pdu.length = cast(ubyte)(5 + pdu.buffer[4]);
 			pdu.buffer[5 .. 5 + pdu.buffer[4]] = 0;
 			for (size_t i = 0; i < values.length; ++i)
 				pdu.buffer[5 + i/8] |= (values[i] ? 1 : 0) << (i % 8);
@@ -205,7 +206,7 @@ ModbusPDU createMessage_Write(RegisterType type, ushort register, ushort[] value
 			pdu.functionCode = FunctionCode.WriteMultipleRegisters;
 			pdu.buffer[2..4] = (cast(ushort)values.length).nativeToBigEndian;
 			pdu.buffer[4] = cast(ubyte)(values.length * 2);
-			pdu.length = 5 + pdu.buffer[4];
+			pdu.length = cast(ubyte)(5 + pdu.buffer[4]);
 			for (size_t i = 0; i < values.length; ++i)
 				pdu.buffer[5 + i*2 .. 7 + i*2][0..2] = values[i].nativeToBigEndian;
 		}

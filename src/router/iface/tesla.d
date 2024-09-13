@@ -100,7 +100,7 @@ class TeslaInterface : BaseInterface
 		}
 	}
 
-	override bool send(ref const Packet packet) nothrow @nogc
+	override bool forward(ref const Packet packet) nothrow @nogc
 	{
 		if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.TeslaTWC)
 			return false;
@@ -220,6 +220,9 @@ class TeslaInterfaceModule : Plugin
 
 			TeslaInterface iface = defaultAllocator.allocT!TeslaInterface(app.moduleInstance!InterfaceModule, n.move, s);
 			app.moduleInstance!InterfaceModule().addInterface(iface);
+
+			import urt.log;
+			debug writeDebugf("Create tesla-twc interface {0} - '{1}'", iface.mac, name);
 
 			// HACK: we'll print packets that we receive...
 			iface.subscribe((ref const Packet p, BaseInterface i) {
