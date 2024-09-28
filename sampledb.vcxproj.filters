@@ -414,5 +414,6 @@
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />
+    <None Include=".editorconfig" />
   </ItemGroup>
 </Project>

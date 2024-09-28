@@ -156,6 +156,7 @@
     <DCompile Include="src\urt\vector.d" />
   </ItemGroup>
   <ItemGroup>
+    <None Include=".editorconfig" />
     <None Include=".gitignore" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
