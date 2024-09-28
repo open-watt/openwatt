@@ -25,6 +25,8 @@ class BridgeInterface : BaseInterface
 		assert(iface !is this, "Cannot add a bridge to itself!");
 		assert(members.length < 256, "Too many members in the bridge!");
 
+        ubyte port = cast(ubyte)members.length;
+
 		foreach (member; members)
 		{
 			if (iface is member)
@@ -32,7 +34,28 @@ class BridgeInterface : BaseInterface
 		}
 		members ~= iface;
 
-		iface.subscribe(&incomingPacket, PacketFilter(), cast(void*)(members.length - 1));
+		iface.subscribe(&incomingPacket, PacketFilter(), cast(void*)port);
+
+        import router.iface.modbus;
+        ModbusInterface mb = cast(ModbusInterface)iface;
+        if (mb)
+        {
+            ushort vlan = 0;
+
+            if (!mb.isBusMaster)
+                macTable.insert(mb.masterMac, port, vlan);
+
+            auto mod = mod_iface.app.moduleInstance!ModbusInterfaceModule;
+            if (mod)
+            {
+                foreach (addr, ref map; mod.remoteServers)
+                {
+                    if (map.iface is iface)
+                        macTable.insert(map.mac, port, vlan);
+                }
+            }
+        }
+
 		return true;
 	}
 

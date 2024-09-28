@@ -698,11 +698,13 @@ size_t parseRTU(const(ubyte)[] data, out const(void)[] message, out ModbusFrameI
 
 size_t parseTCP(const(ubyte)[] data, out const(void)[] message, out ModbusFrameInfo frameInfo)
 {
+    assert(false);
 	return 0;
 }
 
 size_t parseASCII(const(ubyte)[] data, out const(void)[] message, out ModbusFrameInfo frameInfo)
 {
+    assert(false);
 	return 0;
 }
 

@@ -287,7 +287,11 @@ private:
 	ushort maxElements;
 
 	ubyte hash(MACAddress mac) const pure
-		=> mac.b[0] ^ mac.b[1] ^ mac.b[2] ^ mac.b[3] ^ mac.b[4] ^ mac.b[5];
+    {
+        ushort* s = cast(ushort*)mac.b.ptr;
+        ushort hash = s[0] ^ s[1] ^ (0xF1 * (mac.b[4] >> 8)) ^ (0x25 * (mac.b[5] & 0xFF));
+        return cast(ubyte)(hash ^ (hash >> 8));
+    }
 
 	void removeFromSlot(ubyte slot, ushort element) pure
 	{
