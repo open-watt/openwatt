@@ -218,7 +218,7 @@ class ModbusInterface : BaseInterface
 		}
 		else
 		{
-			// if we're not a bus master, we can only send packets destined for the master
+			// if we're not a bus master, we can only send response packets destined for the master
 			if (packet.dst != masterMac)
 				return false;
 
@@ -229,8 +229,8 @@ class ModbusInterface : BaseInterface
 
 			if (map.iface is this)
 			{
+				assert(false, "This should be impossible; it should have served its own response...?");
 				address = map.localAddress;
-				assert(false, "this should be impossible; because it should have served its own response...?");
 			}
 			else
 				address = map.universalAddress;
@@ -272,92 +272,93 @@ private:
 	ubyte[260] tail;
 	ushort tailBytes;
 
-	final void incomingPacket(const(void)[] message, MonoTime recvTime, ref ModbusFrameInfo frameInfo)
-	{
-		// TODO: some debug logging of the incoming packet stream?
-		import urt.log;
-		debug writeDebug("Modbus packet received from interface: '", name, "' (", message.length, ")[ ", message[], " ]");
+    final void incomingPacket(const(void)[] message, MonoTime recvTime, ref ModbusFrameInfo frameInfo)
+    {
+        // TODO: some debug logging of the incoming packet stream?
+        debug {
+            import urt.log;
+            writeDebug("Modbus packet received from interface: '", name, "' (", message.length, ")[ ", message[], " ]");
+        }
 
-		// drop the address byte since we have it in frameInfo...
-		message = message[1 .. $];
+        // if we are the bus master, then we can only receive responses...
+        ModbusFrameType type = isBusMaster ? ModbusFrameType.Response : frameInfo.frameType;
 
-		MACAddress targetMac = void;
-		if (frameInfo.address == 0)
-			targetMac = MACAddress.broadcast;
-		else
-		{
-			auto modbus = mod_iface.app.moduleInstance!ModbusInterfaceModule();
+        // TODO: if the time since the last packet is longer than the modbus timeout,
+        //       we should ignore expectMessageType and expect a request packet..
+        if (type == ModbusFrameType.Unknown)
+            type = expectMessageType;
 
-			// we probably need to find a way to cache these lookups.
-			// doing this every packet feels kinda bad...
-			ServerMap* map = modbus.findServerByUniversalAddress(frameInfo.address);
-			if (!map)
-				map = modbus.findServerByLocalAddress(frameInfo.address, this);
-			if (!map)
-			{
-				// apparently this is the first time we've seen this guy...
-				map = modbus.addRemoteServer(null, this, frameInfo.address, null);
-			}
-			targetMac = map.mac;
-		}
+        MACAddress frameMac = void;
+        if (frameInfo.address == 0)
+            frameMac = MACAddress.broadcast;
+        else
+        {
+            auto modbus = mod_iface.app.moduleInstance!ModbusInterfaceModule();
 
-		if (isBusMaster)
-		{
-			// if we ARE the bus master, then we expect to receive packets in response to queued requests
-			// those queued requests will know the dest mac address...
+            // we probably need to find a way to cache these lookups.
+            // doing this every packet feels kinda bad...
 
+            // if we are the bus master, then incoming packets are responses from slaves
+            //    ...so the address must be their local bus address
+            // if we are not the bus master, then it could be a request from a master to a local or remote slave, or a response from a local slave
+            //    ...the response is local, so it can only be a universal address if it's a request!
+            ServerMap* map = modbus.findServerByLocalAddress(frameInfo.address, this);
+            if (!map && type == ModbusFrameType.Request)
+                map = modbus.findServerByUniversalAddress(frameInfo.address);
+            if (!map)
+            {
+                // apparently this is the first time we've seen this guy...
+                // this should be impossible if we're the bus master, because we must know anyone we sent a request to...
+                // so, it must be a response from a local slave we don't know, requested by a local master...
+
+                // let's confirm and then record their existence...
+                assert(!isBusMaster && type == ModbusFrameType.Response, "This should be impossible...?");
+
+                // we won't bother generating a universal address since 3rd party's can't send requests anyway, because we're not the bus master!
+                map = modbus.addRemoteServer(null, this, frameInfo.address, null);
+            }
+            frameMac = map.mac;
+        }
+
+        Packet p = Packet(message);
+        p.creationTime = recvTime;
+        p.etherType = EtherType.ENMS;
+        p.etherSubType = ENMS_SubType.Modbus;
+
+        if (isBusMaster)
+        {
+            // if we are the bus master, we expect to receive packets in response to queued requests
             for (size_t i = 0; i < numPending; ++i)
             {
                 auto req = &pendingRequests[i];
                 if (req.localServerAddress != frameInfo.address)
                     continue;
 
-                Packet p = Packet(message);
-                p.creationTime = recvTime;
-                p.src = targetMac;
+                p.src = frameMac;
                 p.dst = req.requestFrom;
-                p.etherType = EtherType.ENMS;
-                p.etherSubType = ENMS_SubType.Modbus;
-
                 dispatch(p);
 
+                // remove the request from the queue
                 for (size_t j = i; j < numPending - 1; ++j)
                     pendingRequests[j] = pendingRequests[j + 1];
                 --numPending;
                 break;
             }
-		}
-		else
-		{
-			// TODO: if the time since the last packet is longer than the modbus timeout,
-			//       we should ignore expectMessageType and expect a request packet..
+        }
+        else
+        {
+            // we can't dispatch this message if we don't know if its a request or a response...
+            // we'll need to discard messages until we get one that we know, and then we can predict future messages from there
+            if (type == ModbusFrameType.Unknown)
+                return;
 
-			ModbusFrameType type = frameInfo.frameType;
-			if (type == ModbusFrameType.Unknown)
-				type = expectMessageType;
+            p.src = type == ModbusFrameType.Request ? masterMac : frameMac;
+            p.dst = type == ModbusFrameType.Request ? frameMac : masterMac;
+            dispatch(p);
 
-			// we can't buffer this message if we don't know if its a request or a response...
-			// we'll need to discard messages until we get one that we know, and then we can predict future messages from there...
-			if (type != ModbusFrameType.Unknown)
-			{
-				Packet p = Packet(message);
-				p.creationTime = recvTime;
-				p.src = type == ModbusFrameType.Request ? masterMac : targetMac;
-				p.dst = type == ModbusFrameType.Request ? targetMac : masterMac;
-				p.etherType = EtherType.ENMS;
-				p.etherSubType = ENMS_SubType.Modbus;
-
-				dispatch(p);
-
-				expectMessageType = type == ModbusFrameType.Request ? ModbusFrameType.Response : ModbusFrameType.Request;
-			}
-			else
-			{
-				// just ignore the message I guess until we can get back on the rails...
-//				assert(false);
-			}
-		}
-	}
+            expectMessageType = type == ModbusFrameType.Request ? ModbusFrameType.Response : ModbusFrameType.Request;
+        }
+    }
 }
 
 
@@ -719,7 +720,7 @@ size_t parseRTU(const(ubyte)[] data, out const(void)[] message, out ModbusFrameI
 		if (length == 0)
 			continue;
 
-		message = data[offset .. offset + length];
+		message = data[offset + 1 .. offset + length];
 		return length + 2;
 	}
 

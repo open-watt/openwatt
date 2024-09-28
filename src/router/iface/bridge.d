@@ -36,6 +36,7 @@ class BridgeInterface : BaseInterface
 
 		iface.subscribe(&incomingPacket, PacketFilter(), cast(void*)port);
 
+        // For modbus member interfaces, we'll pre-populate the MAC table with known device addresses...
         import router.iface.modbus;
         ModbusInterface mb = cast(ModbusInterface)iface;
         if (mb)
