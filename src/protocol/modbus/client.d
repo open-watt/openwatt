@@ -49,7 +49,7 @@ private:
 
 	PendingRequest[] pending;
 
-	void incomingPacket(ref const Packet p, BaseInterface i) nothrow @nogc
+	void incomingPacket(ref const Packet p, BaseInterface i, void* userData) nothrow @nogc
 	{
 		assert(false);
 	}

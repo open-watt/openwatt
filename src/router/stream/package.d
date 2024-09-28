@@ -93,7 +93,6 @@ class StreamModule : Plugin
 		mixin DeclareInstance;
 
 		Stream[const(char)[]] streams;
-		Map!(const(char)[], Stream) macTable;
 
 		override void init()
 		{

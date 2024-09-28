@@ -225,7 +225,7 @@ class TeslaInterfaceModule : Plugin
 			debug writeDebugf("Create tesla-twc interface {0} - '{1}'", iface.mac, name);
 
 			// HACK: we'll print packets that we receive...
-			iface.subscribe((ref const Packet p, BaseInterface i) {
+			iface.subscribe((ref const Packet p, BaseInterface i, void* u) {
 				import urt.io;
 				writef("{0}: TWC packet received {1}-->{2} [{3}]\n", i.name, p.src, p.dst, p.data);
 			}, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.TeslaTWC));

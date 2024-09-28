@@ -13,15 +13,18 @@ import router.iface;
 
 class BridgeInterface : BaseInterface
 {
-	BaseInterface[] members;
-
 	this(InterfaceModule.Instance m, String name)  nothrow @nogc
 	{
 		super(m, name, StringLit!"bridge");
+
+		macTable = MACTable(16, 256, 60);
 	}
 
 	bool addMember(BaseInterface iface)
 	{
+		assert(iface !is this, "Cannot add a bridge to itself!");
+		assert(members.length < 256, "Too many members in the bridge!");
+
 		foreach (member; members)
 		{
 			if (iface is member)
@@ -29,7 +32,7 @@ class BridgeInterface : BaseInterface
 		}
 		members ~= iface;
 
-		iface.subscribe(&incomingPacket, PacketFilter());
+		iface.subscribe(&incomingPacket, PacketFilter(), cast(void*)(members.length - 1));
 		return true;
 	}
 
@@ -39,6 +42,14 @@ class BridgeInterface : BaseInterface
 			return false;
 
 		members = members[0 .. index] ~ members[index + 1 .. $];
+
+		// TODO: update the MAC table to adjust all the port numbers!
+		assert(false);
+
+		// TODO: all the subscriber userData's are wrong!!!
+		//       we need to unsubscribe and resubscribe all the members...
+		assert(false);
+
 		return true;
 	}
 
@@ -54,79 +65,72 @@ class BridgeInterface : BaseInterface
 
 	override void update()
 	{
+		macTable.update();
 	}
 
 	override bool forward(ref const Packet packet) nothrow @nogc
 	{
-		if (packet.dst != MACAddress.broadcast)
-		{
-			// see if we've cached the target intertface...
-			BaseInterface i = findMacAddress(packet.dst);
-
-			// if not; see if any of our interfaces knows where it is...
-			if (!i)
-			{
-				foreach (m; members)
-				{
-					i = m.findMacAddress(packet.dst);
-					if (i)
-					{
-						// cache the dest locally
-						addAddress(packet.dst, i);
-						break;
-					}
-				}
-			}
-
-			// if we found it
-			if (i)
-				return i.forward(packet);
-		}
-
-		// otherwise, send it everywhere!
-		foreach (m; members)
-		{
-			bool success = m.forward(packet);
-			if (!success)
-				continue; // what even here? is it bad if one interface fails to send?
-		}
+		send(packet);
 		return true;
 	}
 
-	void incomingPacket(ref const Packet packet, BaseInterface srcInterface) nothrow @nogc
+protected:
+	BaseInterface[] members;
+	MACTable macTable;
+
+	void incomingPacket(ref const Packet packet, BaseInterface srcInterface, void* userData) nothrow @nogc
 	{
-		if (packet.dst != MACAddress.broadcast)
+		ubyte srcPort = cast(ubyte)cast(size_t)userData;
+
+		// TODO: should we check and strip a vlan tag?
+		ushort srcVlan = 0;
+
+		if (!packet.src.isMulticast)
+			macTable.insert(packet.src, srcPort, srcVlan);
+
+		send(packet, srcPort);
+
+		debug
 		{
-			// find the destination...
-			foreach (member; members)
+			ubyte dstPort;
+			ushort dstVlan;
+			if (macTable.get(packet.dst, dstPort, dstVlan))
 			{
-				BaseInterface dstInterface = member.findMacAddress(packet.dst);
-				if (dstInterface)
-				{
-					assert(dstInterface is member, "How does an interface hold a mac record for another interface?");
+				if (dstPort != srcPort)
+					writeDebug(name, ": forward: ", srcInterface.name, "(", packet.src, ") -> ", members[dstPort].name, "(", packet.dst, ") [", packet.data, "]");
+			}
+			else
+				writeDebug(name, ": broadcast: ", srcInterface.name, "(", packet.src, ") -> * [", packet.data, "]");
+		}
+	}
 
-					// we don't send it back the way it came...
-					if (dstInterface is srcInterface)
-						return;
+	void send(ref const Packet packet, int srcPort = -1) nothrow @nogc
+	{
+		if (!packet.dst.isMulticast)
+		{
+			ubyte dstPort;
+			ushort dstVlan;
+			if (macTable.get(packet.dst, dstPort, dstVlan))
+			{
+				// TODO: what should we do about the vlan thing?
 
-					// forward the message
-					dstInterface.forward(packet);
-
-					debug writeDebug(name, ": forward: ", srcInterface.name, "(", packet.src, ") -> ", dstInterface.name, "(", packet.dst, ") [", packet.data, "]");
+				// we don't send it back the way it came...
+				if (dstPort == srcPort)
 					return;
-				}
+
+				// forward the message
+				members[dstPort].forward(packet);
+				return;
 			}
 		}
 
 		// we don't know who it belongs to!
 		// we just broadcast it, and maybe we'll catch the dst mac when the remote replies...
-		foreach (member; members)
+		foreach (i, member; members)
 		{
-			if (member !is srcInterface)
+			if (i != srcPort)
 				member.forward(packet);
 		}
-
-		debug writeDebug(name, ": broadcast: ", srcInterface.name, "(", packet.src, ") -> * [", packet.data, "]");
 	}
 }
 

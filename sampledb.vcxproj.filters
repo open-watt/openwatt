@@ -408,6 +408,9 @@
     <DCompile Include="src\urt\result.d">
       <Filter>src\urt</Filter>
     </DCompile>
+    <DCompile Include="src\router\iface\mac.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

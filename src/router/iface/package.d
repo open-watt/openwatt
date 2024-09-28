@@ -52,10 +52,11 @@ struct PacketFilter
 
 struct InterfaceSubscriber
 {
-	alias IncomingPacketHandler = void delegate(ref const Packet p, BaseInterface i) nothrow @nogc;
+	alias IncomingPacketHandler = void delegate(ref const Packet p, BaseInterface i, void* u) nothrow @nogc;
 
 	PacketFilter filter;
 	IncomingPacketHandler recvPacket;
+	void* userData;
 }
 
 struct InterfaceStatus
@@ -117,9 +118,9 @@ class BaseInterface
 	ref const(InterfaceStatus) getStatus() const
 		=> status;
 
-	void subscribe(InterfaceSubscriber.IncomingPacketHandler packetHandler, ref const PacketFilter filter) nothrow @nogc
+	void subscribe(InterfaceSubscriber.IncomingPacketHandler packetHandler, ref const PacketFilter filter, void* userData = null) nothrow @nogc
 	{
-		subscribers[numSubscribers++] = InterfaceSubscriber(filter, packetHandler);
+		subscribers[numSubscribers++] = InterfaceSubscriber(filter, packetHandler, userData);
 	}
 
 	bool send(MACAddress dest, const(void)[] message, EtherType type, ENMS_SubType subType = ENMS_SubType.Unspecified) nothrow @nogc
@@ -182,7 +183,7 @@ package:
 		foreach (ref subscriber; subscribers[0..numSubscribers])
 		{
 			if (subscriber.filter.match(packet))
-				subscriber.recvPacket(packet, this);
+				subscriber.recvPacket(packet, this, subscriber.userData);
 		}
 	}
 }

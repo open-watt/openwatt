@@ -1,7 +1,8 @@
 module router.iface.packet;
 
-import urt.string.format : FormatArg;
 import urt.time;
+
+public import router.iface.mac;
 
 
 enum EtherType : ushort
@@ -25,141 +26,6 @@ enum ENMS_SubType : ushort
 	Modbus				= 0x0010, // modbus
 	Zigbee				= 0x0020, // zigbee
 	TeslaTWC			= 0x0030, // tesla-twc
-}
-
-
-enum MACAddress MAC(string addr) = (){ MACAddress a; assert(a.fromString(addr), "Not a mac address"); return a; }();
-
-
-struct MACAddress
-{
-nothrow @nogc:
-
-	// well-known mac addresses
-	enum broadcast		= MACAddress(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
-	enum lldp_multicast	= MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E);
-
-	align(2) ubyte[6] b;
-
-	this(ubyte[6] b...) pure
-	{
-		this.b = b;
-	}
-
-	bool opCast(T : bool)() const pure
-		=> (b[0] | b[1] | b[2] | b[3] | b[4] | b[5]) != 0;
-
-	bool opEquals(ref const MACAddress rhs) const pure
-		=> b == rhs.b;
-
-	bool opEquals(const(ubyte)[6] bytes) const pure
-		=> b == bytes;
-
-	int opCmp(ref const MACAddress rhs) const pure
-	{
-		for (size_t i = 0; i < 6; ++i)
-		{
-			int c = rhs.b[i] - b[i];
-			if (c != 0)
-				return c;
-		}
-		return 0;
-	}
-
-	bool isBroadcast() const pure
-		=> b == broadcast.b;
-
-	size_t toHash() const pure
-	{
-		ushort* s = cast(ushort*)b.ptr;
-
-		// TODO: this is just a big hack!
-		//       let's investigate a reasonable implementation!
-
-		size_t hash;
-		static if (is(size_t == ulong))
-		{
-			// incorporate all bits
-			hash = 0xBAADF00DDEADB33F ^ (cast(ulong)s[0] << 0) ^ (cast(ulong)s[0] << 37);
-			hash ^= (cast(ulong)s[1] << 14) ^ (cast(ulong)s[1] << 51);
-			hash ^= (cast(ulong)s[2] << 28) ^ (cast(ulong)s[2] << 7);
-
-			// additional mixing
-			hash ^= (hash >> 13);
-			hash ^= (hash >> 29);
-			hash ^= 0xA5A5A5A5A5A5A5A5;
-		}
-		else
-		{
-			hash = 0xDEADB33F ^ s[0];
-			hash ^= (cast(uint)s[1] << 16);
-			hash = (hash << 5) | (hash >> 27);  // 5-bit rotate left
-			hash ^= s[2];
-			hash ^= 0xA5A5A5A5;
-		}
-		return hash;
-	}
-
-	ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const
-	{
-		if (!buffer.ptr)
-			return 17;
-		if (buffer.length < 17)
-			return 0;
-		buffer[0]  = hexDigits[b[0] >> 4];
-		buffer[1]  = hexDigits[b[0] & 0xF];
-		buffer[2]  = ':';
-		buffer[3]  = hexDigits[b[1] >> 4];
-		buffer[4]  = hexDigits[b[1] & 0xF];
-		buffer[5]  = ':';
-		buffer[6]  = hexDigits[b[2] >> 4];
-		buffer[7]  = hexDigits[b[2] & 0xF];
-		buffer[8]  = ':';
-		buffer[9]  = hexDigits[b[3] >> 4];
-		buffer[10] = hexDigits[b[3] & 0xF];
-		buffer[11] = ':';
-		buffer[12] = hexDigits[b[4] >> 4];
-		buffer[13] = hexDigits[b[4] & 0xF];
-		buffer[14] = ':';
-		buffer[15] = hexDigits[b[5] >> 4];
-		buffer[16] = hexDigits[b[5] & 0xF];
-		return 17;
-	}
-
-	bool fromString(const(char)[] s, size_t* taken = null)
-	{
-		import urt.conv;
-		import urt.string.ascii;
-
-		if (s.length != 17)
-			return false;
-		for (size_t n = 0; n < 17; ++n)
-		{
-			if (n % 3 == 2)
-			{
-				if (s[n] != ':')
-					return false;
-			}
-			else if (!isHex(s[n]))
-				return false;
-		}
-
-		for (size_t i = 0; i < 6; ++i)
-			b[i] = cast(ubyte)parseInt(s[i*3 .. i*3 + 2], null, null, 16);
-
-		if (taken)
-			*taken = 17;
-		return true;
-	}
-
-	auto __debugOverview()
-	{
-		import urt.mem;
-		char[] buffer = cast(char[])tempAllocator.alloc(17);
-		ptrdiff_t len = toString(buffer, null, null);
-		return buffer[0 .. len];
-	}
-	auto __debugExpanded() => b[];
 }
 
 
@@ -202,8 +68,6 @@ uint ethernetCRC(const(void)[] data) pure nothrow @nogc
 
 
 private:
-
-__gshared immutable char[16] hexDigits = "0123456789ABCDEF";
 
 __gshared immutable uint[16] crc_table = [
 	0x4DBDF21C, 0x500AE278, 0x76D3D2D4, 0x6B64C2B0,

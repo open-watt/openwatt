@@ -158,7 +158,7 @@ class NoGCAllocator : Allocator
 {
 	abstract override void[] alloc(size_t bytes, size_t alignment = DefaultAlign) nothrow @nogc;
 
-	override void[] realloc(void[] mem, size_t newSize, size_t alignment = DefaultAlign) nothrow
+	override void[] realloc(void[] mem, size_t newSize, size_t alignment = DefaultAlign) nothrow @nogc
 	{
 		void[] newMem = alloc(newSize, alignment);
 		if (newMem != null)
@@ -172,7 +172,7 @@ class NoGCAllocator : Allocator
 		return newMem;
 	}
 
-	override void[] expand(void[] mem, size_t newSize) nothrow
+	override void[] expand(void[] mem, size_t newSize) nothrow @nogc
 	{
 		return null;
 	}
