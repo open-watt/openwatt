@@ -56,6 +56,7 @@ class ModbusInterface : BaseInterface
 
 	ModbusProtocol protocol;
 	bool isBusMaster;
+    ushort requestTimeout = 500; // default 500ms? longer?
 
 	// if we are the bus master
 	ModbusRequest[8] pendingRequests;
@@ -92,6 +93,22 @@ class ModbusInterface : BaseInterface
 	{
 		MonoTime now = getTime();
 
+        // check for timeouts
+        for (size_t i = 0; i < numPending; ++i)
+        {
+            auto req = &pendingRequests[i];
+            if (now - req.requestTime > 500.msecs)
+            {
+                for (size_t j = i; j < numPending - 1; ++j)
+                    pendingRequests[j] = pendingRequests[j + 1];
+                --numPending;
+
+                // TODO: do we need to send any queued messages?
+                assert(false);
+            }
+        }
+
+        // check for data
 		bool connected = stream.connected();
 		if (connected != status.linkStatus)
 		{
@@ -186,7 +203,7 @@ class ModbusInterface : BaseInterface
 
 		if (isBusMaster)
 		{
-			if (packet.dst != MACAddress.broadcast)
+			if (!packet.dst.isBroadcast)
 			{
 				ServerMap* map = modbus.findServerByMac(packet.dst);
 				if (!map)
@@ -275,12 +292,7 @@ private:
 			// doing this every packet feels kinda bad...
 			ServerMap* map = modbus.findServerByUniversalAddress(frameInfo.address);
 			if (!map)
-			{
-				map = modbus.findServerByLocalAddress(frameInfo.address);
-				if (map.iface !is this)
-					map = null;
-			}
-
+				map = modbus.findServerByLocalAddress(frameInfo.address, this);
 			if (!map)
 			{
 				// apparently this is the first time we've seen this guy...
@@ -294,7 +306,26 @@ private:
 			// if we ARE the bus master, then we expect to receive packets in response to queued requests
 			// those queued requests will know the dest mac address...
 
-			assert(false);
+            for (size_t i = 0; i < numPending; ++i)
+            {
+                auto req = &pendingRequests[i];
+                if (req.localServerAddress != frameInfo.address)
+                    continue;
+
+                Packet p = Packet(message);
+                p.creationTime = recvTime;
+                p.src = targetMac;
+                p.dst = req.requestFrom;
+                p.etherType = EtherType.ENMS;
+                p.etherSubType = ENMS_SubType.Modbus;
+
+                dispatch(p);
+
+                for (size_t j = i; j < numPending - 1; ++j)
+                    pendingRequests[j] = pendingRequests[j + 1];
+                --numPending;
+                break;
+            }
 		}
 		else
 		{
@@ -368,11 +399,11 @@ class ModbusInterfaceModule : Plugin
 			return null;
 		}
 
-		ServerMap* findServerByLocalAddress(ubyte localAddress) nothrow @nogc
+		ServerMap* findServerByLocalAddress(ubyte localAddress, BaseInterface iface) nothrow @nogc
 		{
 			try foreach (ref map; remoteServers)
 			{
-				if (map.localAddress == localAddress)
+				if (map.localAddress == localAddress && map.iface is iface)
 					return &map;
 			}
 			catch(Exception) {}

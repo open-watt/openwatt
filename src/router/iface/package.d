@@ -32,7 +32,7 @@ struct PacketFilter
 	ushort vlan;
 	FilterCallback customFilter;
 
-	bool match(ref Packet p)
+	bool match(ref const Packet p) nothrow @nogc
 	{
 		if (etherType && p.etherType != etherType)
 			return false;
@@ -170,7 +170,7 @@ package:
 		return addr;
 	}
 
-	void dispatch(ref Packet packet)
+	void dispatch(ref const Packet packet) nothrow @nogc
 	{
 		// update the stats
 		++status.recvPackets;

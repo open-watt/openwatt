@@ -10,7 +10,7 @@ import router.iface;
 import router.modbus.message;
 
 
-alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref ModbusPDU response, MonoTime responseTime);
+alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref ModbusPDU response, MonoTime responseTime) nothrow @nogc;
 
 class ModbusClient
 {
@@ -28,14 +28,18 @@ class ModbusClient
 		_interface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
 	}
 
-	void sendRequest(ref const MACAddress server, ref const ModbusPDU request, ModbusResponseHandler responseHandler)
+    ~this()
+    {
+        // TODO: unsubscribe!
+    }
+
+	void sendRequest(ref const MACAddress server, ref const ModbusPDU request, ModbusResponseHandler responseHandler) nothrow
 	{
-		pending ~= PendingRequest(getTime(), request, server);
+		pending ~= PendingRequest(getTime(), request, server, responseHandler);
 		PendingRequest* r = &pending[$-1];
 
-		// format packet and transmit...
-
-		void[] msg = (cast(void*)&request)[0 .. 1 + request.length];
+        // send the packet
+		void[] msg = (cast(void*)&request)[0 .. 1 + request.data.length];
 		iface.send(server, msg, EtherType.ENMS, ENMS_SubType.Modbus);
 	}
 
@@ -45,12 +49,27 @@ private:
 		MonoTime requestTime;
 		ModbusPDU request;
 		MACAddress server;
+        ModbusResponseHandler responseHandler;
 	}
 
 	PendingRequest[] pending;
 
-	void incomingPacket(ref const Packet p, BaseInterface i, void* userData) nothrow @nogc
+	void incomingPacket(ref const Packet p, BaseInterface iface, void* userData) nothrow @nogc
 	{
-		assert(false);
+        foreach (i, ref PendingRequest req; pending)
+        {
+            if (p.src != req.server)
+                continue;
+
+            // this appears to be the message we're waiting for!
+            auto message = cast(const(ubyte)[])p.data[];
+            ModbusPDU response = ModbusPDU(cast(FunctionCode)message[0], message[1 .. $]);
+            req.responseHandler(req.request, response, p.creationTime);
+
+            // HACK! remove the pending request...
+            debug
+                pending = pending[0 .. i] ~ pending[i + 1 .. $];
+            return;
+        }
 	}
 }

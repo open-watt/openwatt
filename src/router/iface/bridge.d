@@ -111,20 +111,29 @@ protected:
 		if (!packet.src.isMulticast)
 			macTable.insert(packet.src, srcPort, srcVlan);
 
-		send(packet, srcPort);
+        if (packet.dst == mac)
+        {
+            // we're the destination!
+            // we don't need to forward it, just deliver it to the upper layer...
+            dispatch(packet);
+        }
+        else
+        {
+            send(packet, srcPort);
 
-		debug
-		{
-			ubyte dstPort;
-			ushort dstVlan;
-			if (macTable.get(packet.dst, dstPort, dstVlan))
-			{
-				if (dstPort != srcPort)
-					writeDebug(name, ": forward: ", srcInterface.name, "(", packet.src, ") -> ", members[dstPort].name, "(", packet.dst, ") [", packet.data, "]");
-			}
-			else
-				writeDebug(name, ": broadcast: ", srcInterface.name, "(", packet.src, ") -> * [", packet.data, "]");
-		}
+            debug
+            {
+                ubyte dstPort;
+                ushort dstVlan;
+                if (macTable.get(packet.dst, dstPort, dstVlan))
+                {
+                    if (dstPort != srcPort)
+                        writeDebug(name, ": forward: ", srcInterface.name, "(", packet.src, ") -> ", members[dstPort].name, "(", packet.dst, ") [", packet.data, "]");
+                }
+                else
+                    writeDebug(name, ": broadcast: ", srcInterface.name, "(", packet.src, ") -> * [", packet.data, "]");
+            }
+        }
 	}
 
 	void send(ref const Packet packet, int srcPort = -1) nothrow @nogc

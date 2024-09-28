@@ -372,8 +372,8 @@ ModbusProfile* parseModbusProfile(ConfItem conf)
 
 private:
 
-immutable ubyte[] seqLens = [ 1, 1, 2, 2, 2, 2, 4, 4, 4, 4, 1, 1, 1, 1, 1, 2, 2, 4, 4, 1, 2, 4, 1, 2, 2 ];
-immutable string[] typeStrings = [ "u16", "i16", "u32le", "u32", "i32le", "i32", "u64le", "u64", "i64le", "i64", "u8h", "u8l", "i8h", "i8l", "e10", "f32le", "f32", "f64le", "f64", "bf16", "bf32", "bf64", "enum16", "enum32", "enumf32", "str" ];
+__gshared immutable ubyte[] seqLens = [ 1, 1, 2, 2, 2, 2, 4, 4, 4, 4, 1, 1, 1, 1, 1, 2, 2, 4, 4, 1, 2, 4, 1, 2, 2 ];
+__gshared immutable string[] typeStrings = [ "u16", "i16", "u32le", "u32", "i32le", "i32", "u64le", "u64", "i64le", "i64", "u8h", "u8l", "i8h", "i8l", "e10", "f32le", "f32", "f64le", "f64", "bf16", "bf32", "bf64", "enum16", "enum32", "enumf32", "str" ];
 
 static assert(seqLens.length == RecordType.max);
 static assert(typeStrings.length == RecordType.max + 1);

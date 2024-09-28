@@ -242,7 +242,7 @@ char[] toHexString(const(ubyte[]) data, char[] buffer, uint group = 0, uint seco
 	if (buffer.length < 2)
 		return null;
 
-	static immutable char[16] hex = "0123456789ABCDEF";
+	__gshared immutable char[16] hex = "0123456789ABCDEF";
 	size_t mask = group - 1;
 	size_t secondMask = secondaryGroup - 1;
 

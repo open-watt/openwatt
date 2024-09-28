@@ -89,6 +89,10 @@ enum ExceptionCode : ubyte
 
 struct ModbusPDU
 {
+nothrow @nogc:
+	FunctionCode functionCode;
+	inout(ubyte)[] data() inout { return buffer[0..length]; }
+
 	this(FunctionCode functionCode, const(ubyte)[] data)
 	{
 		assert(data.length <= ModbusMessageDataMaxLength);
@@ -97,22 +101,21 @@ struct ModbusPDU
 		this.length = cast(ubyte)data.length;
 	}
 
-	FunctionCode functionCode;
+    const(char)[] toString() const
+    {
+        import urt.string.format;
+        if (functionCode & 0x80)
+            return tformat("exception: {0}({1}) - {2}", data[0], getFunctionCodeName(cast(FunctionCode)(functionCode & 0x7F)), getExceptionCodeString(cast(ExceptionCode)data[0]));
+        return tformat("{0}: {1}", getFunctionCodeName(functionCode), cast(void[])data);
+    }
+
+private:
 	ubyte[ModbusMessageDataMaxLength] buffer;
 	ubyte length;
-	inout(ubyte)[] data() inout { return buffer[0..length]; }
-
-	string toString() const
-	{
-		import std.format, std.digest;
-		if (functionCode & 0x80)
-			return format("exception: %d(%s) - %s", data[0], getFunctionCodeName(cast(FunctionCode)(functionCode & 0x7F)), getExceptionCodeString(cast(ExceptionCode)data[0]));
-		return format("%s: %s", getFunctionCodeName(functionCode), data.toHexString);
-	}
 }
 
 
-string getFunctionCodeName(FunctionCode functionCode)
+string getFunctionCodeName(FunctionCode functionCode) nothrow @nogc
 {
 	__gshared immutable string[FunctionCode.ReadFIFOQueue] functionCodeName = [
 		"ReadCoils", "ReadDiscreteInputs", "ReadHoldingRegisters", "ReadInputRegisters", "WriteSingleCoil",
@@ -127,7 +130,7 @@ string getFunctionCodeName(FunctionCode functionCode)
 	return null;
 }
 
-string getExceptionCodeString(ExceptionCode exceptionCode)
+string getExceptionCodeString(ExceptionCode exceptionCode) nothrow @nogc
 {
 	__gshared immutable string[ExceptionCode.GatewayTargetDeviceFailedToRespond] exceptionCodeName = [
 		"IllegalFunction", "IllegalDataAddress", "IllegalDataValue", "SlaveDeviceFailure", "Acknowledge",
@@ -139,11 +142,11 @@ string getExceptionCodeString(ExceptionCode exceptionCode)
 }
 
 
-ModbusPDU createMessage_Read(RegisterType type, ushort register, ushort registerCount = 1)
+ModbusPDU createMessage_Read(RegisterType type, ushort register, ushort registerCount = 1) nothrow @nogc
 {
 	ModbusPDU pdu;
 
-	immutable FunctionCode[] codeForRegType = [
+	__gshared immutable FunctionCode[4] codeForRegType = [
 		FunctionCode.ReadCoils,
 		FunctionCode.ReadDiscreteInputs,
 		FunctionCode.ReadInputRegisters,
@@ -157,12 +160,12 @@ ModbusPDU createMessage_Read(RegisterType type, ushort register, ushort register
 	return pdu;
 }
 
-ModbusPDU createMessage_Write(RegisterType type, ushort register, ushort value)
+ModbusPDU createMessage_Write(RegisterType type, ushort register, ushort value) nothrow @nogc
 {
 	return createMessage_Write(type, register, (&value)[0..1]);
 }
 
-ModbusPDU createMessage_Write(RegisterType type, ushort register, ushort[] values)
+ModbusPDU createMessage_Write(RegisterType type, ushort register, ushort[] values) nothrow @nogc
 {
 	ModbusPDU pdu;
 
@@ -217,7 +220,7 @@ ModbusPDU createMessage_Write(RegisterType type, ushort register, ushort[] value
 	return pdu;
 }
 
-ModbusPDU createMessage_GetDeviceInformation()
+ModbusPDU createMessage_GetDeviceInformation() nothrow @nogc
 {
 	ModbusPDU pdu;
 	pdu.functionCode = FunctionCode.MEI;
