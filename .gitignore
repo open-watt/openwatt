@@ -1,4 +1,5 @@
 # Local cruft
+*.log
 *.ll
 *.s
 *.bc
@@ -12,6 +13,7 @@ lib/bdwgc-gc7_4_4/
 *.lo
 *.o
 *.obj
+*.bin
 
 # Precompiled Headers
 *.gch
