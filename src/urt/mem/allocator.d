@@ -228,6 +228,18 @@ class NoGCAllocator : Allocator
 		return items;
 	}
 
+	final T[] allocArray(T)(size_t count) nothrow @nogc
+		if (is(T == class))
+	{
+		if (count == 0)
+			return null;
+
+		T[] items = cast(T[])alloc(T.sizeof * count, T.alignof);
+		for (size_t i = 0; i < count - 1; ++i)
+			items[i] = null;
+		return items;
+	}
+
 	final void freeT(T)(T* item) nothrow @nogc
 		if (!is(T == class))
 	{
@@ -243,8 +255,12 @@ class NoGCAllocator : Allocator
 	final void freeT(T)(T item) nothrow @nogc
 		if (is(T == class))
 	{
+        // HACK: since druntime can't actually destroy a @nogc class!
+        void function(T) nothrow destroyFun = &destroy!(false, T);
+        auto forceDestroy = cast(void function(T) nothrow @nogc)destroyFun;
+
 		try
-			item.destroy!false;
+			forceDestroy(item);
 		catch(Exception e)
 		{
 			assert(false, e.msg);
@@ -264,6 +280,12 @@ class NoGCAllocator : Allocator
 		{
 			assert(false, e.msg);
 		}
+		free(cast(void[])items[]);
+	}
+
+	final void freeArray(T)(T[] items) nothrow @nogc
+		if (is(T == class))
+	{
 		free(cast(void[])items[]);
 	}
 }
