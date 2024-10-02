@@ -7,6 +7,7 @@ import std.concurrency;
 
 import urt.conv;
 import urt.io;
+import urt.log;
 import urt.mem;
 import urt.meta.nullable;
 import urt.socket;
@@ -25,8 +26,6 @@ nothrow @nogc:
 
 	this(String name, const(char)[] host, ushort port, StreamOptions options = StreamOptions.None)
 	{
-		import core.lifetime;
-
 		super(name.move, "tcp-client", options);
 
 		AddressInfo addrInfo;
@@ -88,8 +87,8 @@ nothrow @nogc:
 		if (socket)
 		{
 //			if (socket.isAlive)
-			socket.shutdown_socket(SocketShutdownMode.ReadWrite);
-			socket.close_socket();
+			socket.shutdown(SocketShutdownMode.ReadWrite);
+			socket.close();
 			socket = null;
 		}
 	}
@@ -144,7 +143,7 @@ nothrow @nogc:
 			if (sr == SocketResult.WouldBlock)
 				return 0;
 
-			socket.close_socket();
+			socket.close();
 			socket = null;
 
 			// HACK: we'll need a threaded/background keep-alive strategy, but this hack might do for the moment
@@ -180,7 +179,7 @@ nothrow @nogc:
 			if (sr == SocketResult.WouldBlock)
 				return 0;
 
-			socket.close_socket();
+			socket.close();
 			socket = null;
 
 			// HACK: we'll need a threaded/background keep-alive strategy, but this hack might do for the moment
@@ -212,7 +211,7 @@ nothrow @nogc:
 		if (r != Result.Success)
 		{
 //			SocketResult sr = r.get_SocketResult;
-			socket.close_socket();
+			socket.close();
 			socket = null;
 		}
 		return bytes;
@@ -224,16 +223,15 @@ nothrow @nogc:
 		assert(0);
 	}
 
-private:
+    // TODO: this is a bug! uncomment this bad boy!!
+//private:
 	InetAddress remote;
 	Socket socket;
 //	TCPServer reverseConnectServer;
 
 	this(String name, Socket socket, ushort port)
 	{
-		import core.lifetime;
-
-		super(name.move, "serial", StreamOptions.None);
+		super(name.move, "tcp-client", StreamOptions.None);
 		socket.get_peer_name(remote);
 
 		this.socket = socket;
@@ -241,7 +239,6 @@ private:
 	}
 }
 
-/+
 enum ServerOptions
 {
 	None = 0,
@@ -250,99 +247,112 @@ enum ServerOptions
 
 class TCPServer
 {
-	alias NewConnection = void function(TCPStream client, void* userData);
+nothrow @nogc:
 
-	this(ushort port, NewConnection callback, void* userData, ServerOptions options = ServerOptions.None)
-	{
-		this.port = port;
-		this.options = options;
-		this.connectionCallback = callback;
-		this.userData = userData;
-		mutex = new Mutex;
-	}
+    alias NewConnection = void delegate(TCPStream client, void* userData) nothrow @nogc;
 
-	void start()
-	{
-		serverSocket = new TcpSocket();
-		serverSocket.bind(new InternetAddress(port));
-		serverSocket.listen(10); // Listen with a queue of 10 connections
-		isRunning.atomicStore(true);
-		writeln("TCP server listening on port ", port);
-		listenThread = new Thread(&acceptConnections).start();
-	}
+    this(String name, ushort port, NewConnection callback, void* userData, ServerOptions options = ServerOptions.None) nothrow @nogc
+    {
+        this.name = name.move;
+        this.port = port;
+        this.options = options;
+        this.connectionCallback = callback;
+        this.userData = userData;
 
-	void stop()
-	{
-		isRunning.atomicStore(false);
-		mutex.lock();
-		if (serverSocket)
-		{
-			serverSocket.close();
-			serverSocket = null;
-		}
-		mutex.unlock();
-	}
+        start();
+    }
 
-	bool running()
-	{
-		return isRunning.atomicLoad();
-	}
+    ~this()
+    {
+        stop();
+    }
+
+    void start() nothrow @nogc
+    {
+        // TODO: should we just accept multiple calls to start() and ignore if already running?
+        assert(!isRunning, "Already started");
+
+        Result r = create_socket(AddressFamily.IPv4, SocketType.Stream, Protocol.TCP, serverSocket);
+        if (r.failed)
+            assert(false, "Couldn't create socket! TODO: handle error more good");
+        r = serverSocket.set_socket_option(SocketOption.NonBlocking, true);
+        if (r.failed)
+            assert(false, "Couldn't set non-blocking! TODO: handle error more good");
+        r = serverSocket.bind(InetAddress(IPAddr.any, port));
+        if (r.failed)
+            assert(false, "Bind failed! TODO: handle error more good");
+        r = serverSocket.listen();
+        if (r.failed)
+            assert(false, "Listen failed! TODO: handle error more good");
+
+        isRunning = true;
+
+        writeInfo("TCP server listening on port ", port);
+    }
+
+    void stop()
+    {
+        assert(isRunning, "Not started");
+
+        isRunning = false;
+
+        serverSocket.close();
+        serverSocket = null;
+    }
+
+    bool running()
+    {
+        return isRunning;
+    }
+
+    // TODO: remove this, we should use threads instead of polling!
+    void update()
+    {
+        Socket conn;
+        InetAddress remoteAddr;
+        Result r = serverSocket.accept(conn, &remoteAddr);
+        if (r.failed)
+        {
+            if (r.get_SocketResult == SocketResult.WouldBlock)
+                return;
+            // TODO: handle error more good?
+            assert(false);
+        }
+
+        assert(conn);
+
+        if (options & ServerOptions.JustOne)
+            stop();
+
+//        if (rawConnectionCallback)
+//            rawConnectionCallback(conn, userData);
+//        else if (connectionCallback)
+        if (connectionCallback)
+            connectionCallback(defaultAllocator().allocT!TCPStream(name, conn, port), userData);
+    }
 
 private:
-	alias NewRawConnection = void function(Socket client, void* userData);
+    alias NewRawConnection = void function(Socket client, void* userData) nothrow @nogc;
 
-	ServerOptions options;
-	immutable ushort port;
-	shared bool isRunning;
-	NewConnection connectionCallback;
-	NewRawConnection rawConnectionCallback;
-	void* userData;
-	Socket serverSocket;
-	Thread listenThread;
-	Mutex mutex;
+    String name;
+    ServerOptions options;
+    ushort port;
+    bool isRunning;
+    NewConnection connectionCallback;
+//    NewRawConnection rawConnectionCallback;
+    void* userData;
+    Socket serverSocket;
 
-	this(ushort port, NewRawConnection callback, void* userData, ServerOptions options = ServerOptions.None)
-	{
-		this.port = port;
-		this.options = options;
-		this.rawConnectionCallback = callback;
-		this.userData = userData;
-		mutex = new Mutex;
-	}
-
-	void acceptConnections()
-	{
-		mutex.lock();
-		TcpSocket server = serverSocket;
-		mutex.unlock();
-		if (!server)
-			return;
-		while (isRunning.atomicLoad())
-		{
-			try
-			{
-				auto clientSocket = server.accept();
-				writeln("Accepted TCP connection from ", clientSocket.remoteAddress.toString());
-
-				if (rawConnectionCallback)
-					rawConnectionCallback(clientSocket, userData);
-				else if (connectionCallback)
-					connectionCallback(new TCPStream(StringLit!"tcp-server", clientSocket, port), userData);
-
-				if (options & ServerOptions.JustOne)
-				{
-					stop();
-					break;
-				}
-			}
-			catch (Exception e)
-			{
-				// I think this means the socket was destroyed?
-			}
-		}
-	}
+//    this(ushort port, NewRawConnection callback, void* userData, ServerOptions options = ServerOptions.None)
+//    {
+//        this.port = port;
+//        this.options = options;
+//        this.rawConnectionCallback = callback;
+//        this.userData = userData;
+//        mutex = new Mutex;
+//    }
 }
-+/
+
 
 class TCPStreamModule : Plugin
 {

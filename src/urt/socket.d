@@ -11,7 +11,8 @@ version (Windows)
 	import core.sys.windows.windows;
 	import core.sys.windows.winsock2 :
 		_bind = bind, _listen = listen, _connect = connect, _accept = accept,
-		_send = send, _sendto = sendto, _recv = recv, _recvfrom = recvfrom;
+		_send = send, _sendto = sendto, _recv = recv, _recvfrom = recvfrom,
+		_shutdown = shutdown;
 
 	version = HasIPv6;
 
@@ -174,7 +175,7 @@ Result create_socket(AddressFamily af, SocketType type, Protocol proto, out Sock
 	return Result.Success;
 }
 
-Result close_socket(Socket socket)
+Result close(Socket socket)
 {
 	version (Windows)
 		int result = closesocket(socket.handle);
@@ -193,7 +194,7 @@ Result close_socket(Socket socket)
 	return Result.Success;
 }
 
-Result shutdown_socket(Socket socket, SocketShutdownMode how)
+Result shutdown(Socket socket, SocketShutdownMode how)
 {
 	int t = int(how);
 	switch (how)
@@ -214,7 +215,7 @@ Result shutdown_socket(Socket socket, SocketShutdownMode how)
 			assert(false, "Invalid `how`");
 	}
 
-	if (shutdown(socket.handle, t) < 0)
+	if (_shutdown(socket.handle, t) < 0)
 		return socket_getlasterror();
 	return Result.Success;
 }
