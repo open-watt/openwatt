@@ -40,6 +40,8 @@ nothrow @nogc:
 
 	override CommandState execute(Session session, const(char)[] cmdLine)
 	{
+		import urt.string.format : tconcat;
+
 		cmdLine = cmdLine.trimCmdLine;
 		if (cmdLine.frontIs('/'))
 			cmdLine = cmdLine[1..$].trimCmdLine;
@@ -80,7 +82,7 @@ nothrow @nogc:
 				return cmd.execute(session, cmdLine);
 		}
 
-		session.writeOutput("Error: no command ``", true);
+		session.writeOutput(tconcat("Error: no command `", identifier[], "`"), true);
 		return null;
 	}
 }

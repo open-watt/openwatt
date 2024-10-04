@@ -31,6 +31,18 @@ bool empty(T)(T[] arr)
 	return arr.length == 0;
 }
 
+bool startsWith(const(char)[] s, const(char)[] prefix) pure nothrow @nogc
+{
+    if (s.length < prefix.length)
+        return false;
+    for (size_t i = 0; i < prefix.length; ++i)
+    {
+        if (s[i] != prefix[i])
+            return false;
+    }
+    return true;
+}
+
 ref inout(char) popFront(ref inout(char)[] buffer) pure nothrow @nogc
 {
 	debug assert(buffer.length > 0);

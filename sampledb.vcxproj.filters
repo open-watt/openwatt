@@ -76,6 +76,9 @@
     <Filter Include="src\protocol\snmp">
       <UniqueIdentifier>{f9e366d8-35ce-4a70-9f0e-3ab303fb1bdb}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\telnet">
+      <UniqueIdentifier>{f9218558-feb4-40d3-b5bb-db924d553f6a}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\goodwe_smart_meter.d">
@@ -408,8 +411,17 @@
     <DCompile Include="src\router\iface\mac.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\telnet\server.d">
+      <Filter>src\protocol\telnet</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\telnet\session.d">
+      <Filter>src\protocol\telnet</Filter>
+    </DCompile>
     <DCompile Include="src\manager\console\session.d">
       <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\telnet\package.d">
+      <Filter>src\protocol\telnet</Filter>
     </DCompile>
     <DCompile Include="src\urt\array.d">
       <Filter>src\urt</Filter>

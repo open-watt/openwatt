@@ -131,7 +131,7 @@ nothrow @nogc:
 	// TODO: don't like this API, it should be a method of Session...
 	CommandState execute(Session session, const(char)[] cmdLine)
 	{
-		assert(session.m_currentCommand is null, "TODO: gotta do something about concurrent command execution...");
+		assert(session._currentCommand is null, "TODO: gotta do something about concurrent command execution...");
 
 		Scope s = session.curScope;
 

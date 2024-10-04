@@ -77,6 +77,9 @@
     <DCompile Include="src\protocol\mqtt\package.d" />
     <DCompile Include="src\protocol\mqtt\util.d" />
     <DCompile Include="src\protocol\snmp\package.d" />
+    <DCompile Include="src\protocol\telnet\package.d" />
+    <DCompile Include="src\protocol\telnet\server.d" />
+    <DCompile Include="src\protocol\telnet\session.d" />
     <DCompile Include="src\protocol\tesla\master.d" />
     <DCompile Include="src\protocol\tesla\twc.d" />
     <DCompile Include="src\router\client.d" />

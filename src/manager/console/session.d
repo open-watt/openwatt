@@ -6,6 +6,7 @@ import urt.array;
 import urt.map;
 import urt.mem;
 import urt.string;
+import urt.string.ansi;
 import urt.util;
 
 class Session
@@ -132,7 +133,8 @@ nothrow @nogc:
 		assert(m_console != null, "Session was closed!");
 		assert(!m_currentCommand);
 
-//		m_buffer.Reserve(m_buffer.Size() + text.Size());
+		assert(m_buffer.length + text.length <= MaxStringLen, "Exceeds max string length");
+		m_buffer.reserve(cast(ushort)(m_buffer.length + text.length));
 
 		const(char)* t = text.ptr;
 		size_t len = text.length;
@@ -150,7 +152,7 @@ nothrow @nogc:
 
 				// NVT command...
 				// do we care about any of these?
-//				BC_REF(opt);
+				//...
 			}
 			else if (t[i] == '\x03')
 			{
@@ -169,7 +171,7 @@ nothrow @nogc:
 			{
 				if (m_position > 0)
 				{
-					m_buffer = m_buffer[0 .. $-1];
+					m_buffer.erase(-1, 1);
 					--m_position;
 				}
 			}
@@ -203,100 +205,99 @@ nothrow @nogc:
 //					}
 //				}
 			}
-			else if (t[i] == '\x1b' && i + 1 < len && t[i + 1] == '[')
+			else if (t[i] == '\x1b' && i + 1 < len && (t[i + 1] == '[' || t[i + 1] == 'O'))
 			{
-				assert(false);
-//				// ANSI sequences...
-//				if (StartsWith(t + i, ANSI_DEL))
-//				{
-//					if (m_position < m_buffer.Size())
-//						m_buffer.Erase(m_position, 1);
-//					take = sizeof(ANSI_DEL) - 1;
-//				}
-//				else if (StartsWith(t + i, ANSI_ARROW_UP))
-//				{
-//					if (m_historyCursor != m_history.begin())
-//					{
-//						if (m_historyCursor == m_history.end())
-//							m_historyHead = bcMove(m_buffer);
-//						m_historyCursor--;
-//						m_buffer = *m_historyCursor;
-//						m_position = m_buffer.Size();
-//					}
-//					take = sizeof(ANSI_ARROW_UP) - 1;
-//				}
-//				else if (StartsWith(t + i, ANSI_ARROW_DOWN))
-//				{
-//					if (m_historyCursor != m_history.end())
-//					{
-//						m_historyCursor++;
-//						if (m_historyCursor != m_history.end())
-//							m_buffer = *m_historyCursor;
-//						else
-//						{
-//							m_buffer = bcMove(m_historyHead);
-//							m_historyHead.Clear();
-//						}
-//						m_position = m_buffer.Size();
-//					}
-//					take = sizeof(ANSI_ARROW_DOWN) - 1;
-//				}
-//				else if (StartsWith(t + i, ANSI_ARROW_LEFT))
-//				{
-//					if (m_position > 0)
-//						--m_position;
-//					take = sizeof(ANSI_ARROW_LEFT) - 1;
-//				}
-//				else if (StartsWith(t + i, ANSI_ARROW_RIGHT))
-//				{
-//					if (m_position < m_buffer.Size())
-//						++m_position;
-//					take = sizeof(ANSI_ARROW_RIGHT) - 1;
-//				}
-//				else if (StartsWith(t + i, "\x1b[1;5D")) // CTRL_LEFT
-//				{
-//					bool passedAny = false;
-//					while (m_position > 0)
-//					{
-//						if (m_buffer[m_position - 1] == ' ' && passedAny)
-//							break;
-//						if (m_buffer[--m_position] != ' ')
-//							passedAny = true;
-//					}
-//					take = sizeof("\x1b[1;5D") - 1;
-//				}
-//				else if (StartsWith(t + i, "\x1b[1;5C")) // CTRL_RIGHT
-//				{
-//					bool passedAny = false;
-//					while (m_position < m_buffer.Size())
-//					{
-//						if (m_buffer[m_position] != ' ')
-//							passedAny = true;
-//						if (m_buffer[m_position++] == ' ' && passedAny)
-//							break;
-//					}
-//					take = sizeof("\x1b[1;5C") - 1;
-//				}
-//				else if (StartsWith(t + i, ANSI_HOME1))
-//				{
-//					m_position = 0;
-//					take = sizeof(ANSI_HOME1) - 1;
-//				}
-//				else if (StartsWith(t + i, ANSI_HOME2) || StartsWith(t + i, ANSI_HOME3))
-//				{
-//					m_position = 0;
-//					take = sizeof(ANSI_HOME2) - 1;
-//				}
-//				else if (StartsWith(t + i, ANSI_END1))
-//				{
-//					m_position = m_buffer.Size();
-//					take = sizeof(ANSI_END1) - 1;
-//				}
-//				else if (StartsWith(t + i, ANSI_END2) || StartsWith(t + i, ANSI_END3))
-//				{
-//					m_position = m_buffer.Size();
-//					take = sizeof(ANSI_END2) - 1;
-//				}
+				// ANSI sequences...
+				if (t[i .. len].startsWith(ANSI_DEL))
+				{
+					if (m_position < m_buffer.length)
+						m_buffer.erase(m_position, 1);
+					take = ANSI_DEL.length;
+				}
+				else if (t[i .. len].startsWith(ANSI_ARROW_UP))
+				{
+					if (m_historyCursor > 0)
+					{
+						if (m_historyCursor == m_history.length)
+							m_historyHead = m_buffer.move;
+						m_historyCursor--;
+						m_buffer = m_history[m_historyCursor][];
+						m_position = cast(uint)m_buffer.length;
+					}
+					take = ANSI_ARROW_UP.length;
+				}
+				else if (t[i .. len].startsWith(ANSI_ARROW_DOWN))
+				{
+					if (m_historyCursor < m_history.length)
+					{
+						m_historyCursor++;
+						if (m_historyCursor != m_history.length)
+							m_buffer = m_history[m_historyCursor];
+						else
+						{
+							m_buffer = m_historyHead.move;
+							m_historyHead.clear();
+						}
+						m_position = cast(uint)m_buffer.length;
+					}
+					take = ANSI_ARROW_DOWN.length;
+				}
+				else if (t[i .. len].startsWith(ANSI_ARROW_LEFT))
+				{
+					if (m_position > 0)
+						--m_position;
+					take = ANSI_ARROW_LEFT.length;
+				}
+				else if (t[i .. len].startsWith(ANSI_ARROW_RIGHT))
+				{
+					if (m_position < m_buffer.length)
+						++m_position;
+					take = ANSI_ARROW_RIGHT.length;
+				}
+				else if (t[i .. len].startsWith("\x1b[1;5D") || t[i .. len].startsWith("\x1bOD")) // CTRL_LEFT
+				{
+					bool passedAny = false;
+					while (m_position > 0)
+					{
+						if (m_buffer[m_position - 1] == ' ' && passedAny)
+							break;
+						if (m_buffer[--m_position] != ' ')
+							passedAny = true;
+					}
+					take = t[i .. len].startsWith("\x1bOD") ? "\x1bOD".length : "\x1b[1;5D".length;
+				}
+				else if (t[i .. len].startsWith("\x1b[1;5C") || t[i .. len].startsWith("\x1bOC")) // CTRL_RIGHT
+				{
+					bool passedAny = false;
+					while (m_position < m_buffer.length)
+					{
+						if (m_buffer[m_position] != ' ')
+							passedAny = true;
+						if (m_buffer[m_position++] == ' ' && passedAny)
+							break;
+					}
+					take = t[i .. len].startsWith("\x1bOC") ? "\x1bOC".length : "\x1b[1;5C".length;
+				}
+				else if (t[i .. len].startsWith(ANSI_HOME1))
+				{
+					m_position = 0;
+					take = ANSI_HOME1.length;
+				}
+				else if (t[i .. len].startsWith(ANSI_HOME2) || t[i .. len].startsWith(ANSI_HOME3))
+				{
+					m_position = 0;
+					take = ANSI_HOME2.length;
+				}
+				else if (t[i .. len].startsWith(ANSI_END1))
+				{
+					m_position = cast(uint)m_buffer.length;
+					take = ANSI_END1.length;
+				}
+				else if (t[i .. len].startsWith(ANSI_END2) || t[i .. len].startsWith(ANSI_END3))
+				{
+					m_position = cast(uint)m_buffer.length;
+					take = ANSI_END2.length;
+				}
 			}
 			else
 			{
@@ -425,8 +426,8 @@ protected:
 		}
 	}
 
-package:
-    // Internal stuff...
+protected:
+
     final NoGCAllocator allocator() pure
         => m_console.m_allocator;
     final NoGCAllocator tempAllocator() pure
@@ -435,8 +436,8 @@ package:
 	final bool execute(const(char)[] command)
 	{
 		// TODO: command history!
-//		AddToHistory(command);
-//		m_historyHead.Clear();
+		addToHistory(command);
+		m_historyHead.clear();
 
 		enterCommand(command);
 
@@ -454,24 +455,20 @@ package:
 		return m_currentCommand is null;
 	}
 
-	final void addToHistory(String line)
+	final void addToHistory(const(char)[] line)
 	{
-		assert(false);
-//		if (!line.IsEmpty() && (m_history.empty() || line != m_history.back()))
-//		{
-//			m_history.push_back(line);
-//			if (m_history.size() > 50)
-//				m_history.pop_front();
-//		}
-//		m_historyCursor = m_history.end();
+		if (!line.empty && (m_history.empty || line[] != m_history[$-1]))
+		{
+			m_history.pushBack(MutableString!0(line));
+			if (m_history.length > 50)
+				m_history.popFront();
+		}
+		m_historyCursor = cast(uint)m_history.length;
 	}
 
 
-	Console* m_console;
 	CommandState m_currentCommand = null;
 
-	Scope curScope = null;
-	// TODO: remove the GC, swap for container!!
 	Map!(String, String) localVariables;
 
 	uint m_width = 80;
@@ -486,19 +483,24 @@ package:
 
 //	list<String> m_history;
 //	list<String>::iterator m_historyCursor;
-	const(char)[][] m_history;
+	// TODO: swap to SharedString, and also swap to List
+	Array!(MutableString!0) m_history;
 	uint m_historyCursor = 0;
-	const(char)[] m_historyHead;
+	MutableString!0 m_historyHead;
 
 	Array!(Console*) m_sessionStack;
 
-protected:
-	final CommandState _currentCommand() => m_currentCommand;
-	final const(char)[] _prompt() => m_prompt;
-	final const(char)[] _buffer() => m_buffer;
-	final uint _position() => m_position;
-	final bool _showPrompt() => m_showPrompt;
-	final bool _suggestionPending() => m_suggestionPending;
+package:
+
+	Console* m_console;
+	Scope curScope = null;
+
+	final ref auto _currentCommand() => m_currentCommand;
+	final ref auto _prompt() => m_prompt;
+	final ref auto _buffer() => m_buffer;
+	final ref auto _position() => m_position;
+	final ref auto _showPrompt() => m_showPrompt;
+	final ref auto _suggestionPending() => m_suggestionPending;
 }
 
 class StringSession : Session
