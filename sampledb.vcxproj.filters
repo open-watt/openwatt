@@ -411,6 +411,9 @@
     <DCompile Include="src\router\iface\mac.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
+    <DCompile Include="src\urt\array.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

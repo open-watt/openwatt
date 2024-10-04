@@ -112,6 +112,7 @@
     <DCompile Include="src\router\stream\udp.d" />
     <DCompile Include="src\router\tesla\twc.d" />
     <DCompile Include="src\urt\algorithm.d" />
+    <DCompile Include="src\urt\array.d" />
     <DCompile Include="src\urt\compiler.d" />
     <DCompile Include="src\urt\conv.d" />
     <DCompile Include="src\urt\dbg.d" />
