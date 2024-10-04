@@ -7,7 +7,7 @@ alias TailString1 =	TailString!ubyte;
 alias TailString2 =	TailString!ushort;
 
 struct TailString(T)
-if (is(T == ubyte) || is(T == ushort))
+	if (is(T == ubyte) || is(T == ushort))
 {
 	alias toString this;
 

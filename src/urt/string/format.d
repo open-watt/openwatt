@@ -29,16 +29,71 @@ char[] toString(T)(auto ref T value, char[] buffer)
 	return r;
 }
 
-char[] concat(Args...)(char[] buffer, ref Args args)
+char[] concat(Args...)(char[] buffer, auto ref Args args)
 {
-	debug InFormatFunction = true;
-	FormatArg[Args.length] argFuncs;
-	// TODO: no need to collect int-ify functions in the arg set...
-	static foreach(i, arg; args)
-		argFuncs[i] = FormatArg(arg);
-	char[] r = concatImpl(buffer, argFuncs);
-	debug InFormatFunction = false;
-	return r;
+    static if (Args.length == 0)
+    {
+        return buffer.ptr[0 .. 0];
+    }
+    else static if ((Args.length == 1 && allAreStrings!Args) || allConstCorrectStrings!Args)
+    {
+        // this implementation handles pure string concatenations
+        if (!buffer.ptr)
+        {
+            size_t length = 0;
+            static foreach (i, s; args)
+            {
+                static if (is(typeof(s) : char))
+                    length += 1;
+                else
+                    length += s.length;
+            }
+            return (cast(char*)null)[0 .. length];
+        }
+        size_t offset = 0;
+        static foreach (i, s; args)
+        {
+            static if (is(typeof(s) : char))
+            {
+                if (buffer.length < offset + 1)
+                    return buffer[];
+                buffer.ptr[offset] = s;
+                ++offset;
+            }
+            else
+            {
+                if (buffer.length < offset + s.length)
+                {
+                    buffer.ptr[offset .. buffer.length] = s[0 .. buffer.length - offset];
+                    return buffer[];
+                }
+                buffer.ptr[offset .. offset + s.length] = s.ptr[0 .. s.length];
+                offset += s.length;
+            }
+        }
+        return buffer.ptr[0 .. offset];
+    }
+    static if (allAreStrings!Args)
+    {
+        // TODO: why can't inline this?!
+//        pragma(inline, true);
+
+        // avoid duplicate instantiations with different attributes...
+        return concat!(constCorrectedStrings!Args)(buffer, args);
+    }
+    else
+    {
+        // this implementation handles all the other kinds of things!
+
+        debug InFormatFunction = true;
+        FormatArg[Args.length] argFuncs;
+        // TODO: no need to collect int-ify functions in the arg set...
+        static foreach(i, arg; args)
+            argFuncs[i] = FormatArg(arg);
+        char[] r = concatImpl(buffer, argFuncs);
+        debug InFormatFunction = false;
+        return r;
+    }
 }
 
 char[] format(Args...)(char[] buffer, const(char)[] fmt, ref Args args)
@@ -739,4 +794,38 @@ unittest
 	else
 		assert(r == "00 00 00 01 00 00 00 02 00 00 00 1E");
 
+}
+
+
+
+// a template that tests is all template args are a char array, or a char
+template allAreStrings(Args...)
+{
+    static if (Args.length == 1)
+        enum allAreStrings = is(Args[0] : const(char[])) || is(isSomeChar!(Args[0]));
+    else
+        enum allAreStrings = (is(Args[0] : const(char[])) || is(isSomeChar!(Args[0]))) && allAreStrings!(Args[1 .. $]);
+}
+
+template allConstCorrectStrings(Args...)
+{
+    static if (Args.length == 1)
+        enum allConstCorrectStrings = is(Args[0] == const(char[])) || is(Args[0] == const char);
+    else
+        enum allConstCorrectStrings = (is(Args[0] == const(char[])) || is(Args[0] == const char)) && allConstCorrectStrings!(Args[1 .. $]);
+}
+
+template constCorrectedStrings(Args...)
+{
+    import urt.meta : AliasSeq;
+    alias constCorrectedStrings = AliasSeq!();
+    static foreach (Ty; Args)
+    {
+        static if (is(Ty : const(char)[]))
+            constCorrectedStrings = AliasSeq!(constCorrectedStrings, const(char[]));
+        else static if (isSomeChar!Ty)
+            constCorrectedStrings = AliasSeq!(constCorrectedStrings, const(char));
+        else
+            static assert(false, "Argument must be a char array or a char: ", T);
+    }
 }
