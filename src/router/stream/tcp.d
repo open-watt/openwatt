@@ -121,7 +121,7 @@ nothrow @nogc:
 		}
 	}
 
-	override ptrdiff_t read(ubyte[] buffer) nothrow @nogc
+	override ptrdiff_t read(void[] buffer) nothrow @nogc
 	{
 		if (!connected())
 		{
@@ -157,7 +157,7 @@ nothrow @nogc:
 		return bytes;
 	}
 
-	override ptrdiff_t write(const ubyte[] data) nothrow @nogc
+	override ptrdiff_t write(const void[] data) nothrow @nogc
 	{
 		if (!connected())
 		{

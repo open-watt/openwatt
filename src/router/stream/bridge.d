@@ -59,7 +59,7 @@ nothrow @nogc:
 		this.options = options;
 	}
 
-	override ptrdiff_t read(ubyte[] buffer)
+	override ptrdiff_t read(void[] buffer)
 	{
 		size_t read;
 		if (buffer.length < m_inputBuffer.length)
@@ -77,7 +77,7 @@ nothrow @nogc:
 		return read;
 	}
 
-	override ptrdiff_t write(const ubyte[] data)
+	override ptrdiff_t write(const void[] data)
 	{
 		foreach (i; 0 .. m_streams.length)
 		{

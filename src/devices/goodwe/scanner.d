@@ -14,7 +14,7 @@ GOODWE scanning works like this:
 	UDPStream udp = new UDPStream(48899, options: StreamOptions.AllowBroadcast);
 	udp.connect();
 
-	udp.write(cast(ubyte[])"WIFIKIT-214028-READ");
+	udp.write("WIFIKIT-214028-READ");
 	ubyte[1024] buffer;
 	udp.read(buffer);
 	udp.read(buffer);

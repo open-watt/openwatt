@@ -111,7 +111,7 @@ version(Windows)
 			return hCom == INVALID_HANDLE_VALUE;
 		}
 
-		override ptrdiff_t read(ubyte[] buffer)
+		override ptrdiff_t read(void[] buffer)
 		{
 			DWORD bytesRead;
 			if (ReadFile(hCom, buffer.ptr, cast(DWORD)buffer.length, &bytesRead, null))
@@ -125,7 +125,7 @@ version(Windows)
 			}
 		}
 
-		override ptrdiff_t write(const ubyte[] data)
+		override ptrdiff_t write(const void[] data)
 		{
 			DWORD bytesWritten;
 			if (WriteFile(hCom, data.ptr, cast(DWORD)data.length, &bytesWritten, null))

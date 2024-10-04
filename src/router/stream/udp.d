@@ -85,18 +85,18 @@ class UDPStream : Stream
 //		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.BROADCAST, (options & StreamOptions.AllowBroadcast) ? 1 : 0);
 	}
 
-	override ptrdiff_t read(ubyte[] buffer) nothrow @nogc
+	override ptrdiff_t read(void[] buffer) nothrow @nogc
 	{
 		// HACK!!!
 		try {
 			auto d = &read_impl;
-			return (cast(ptrdiff_t delegate(ubyte[]) nothrow @nogc)d)(buffer);
+			return (cast(ptrdiff_t delegate(void[]) nothrow @nogc)d)(buffer);
 		}
 		catch (Exception)
 			return -1;
 	}
 
-	final ptrdiff_t read_impl(ubyte[] buffer)
+	final ptrdiff_t read_impl(void[] buffer)
 	{
 		Address from;
 		long r = socket.receiveFrom(buffer, from);
@@ -113,18 +113,18 @@ class UDPStream : Stream
 		return cast(ptrdiff_t)r;
 	}
 
-	override ptrdiff_t write(const ubyte[] data) nothrow @nogc
+	override ptrdiff_t write(const void[] data) nothrow @nogc
 	{
 		// HACK!!!
 		try {
 			auto d = &write_impl;
-			return (cast(ptrdiff_t delegate(const ubyte[]) nothrow @nogc)d)(data);
+			return (cast(ptrdiff_t delegate(const void[]) nothrow @nogc)d)(data);
 		}
 		catch (Exception)
 			return -1;
 	}
 
-	final ptrdiff_t write_impl(const ubyte[] data)
+	final ptrdiff_t write_impl(const void[] data)
 	{
 		long r = socket.sendTo(data, remote);
 		if (r == Socket.ERROR)
