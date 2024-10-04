@@ -61,7 +61,7 @@ struct Expression
 	Token* root;
 }
 
-Token takeToken(ref const(char)[] cmdLine)
+Token takeToken(ref const(char)[] cmdLine) pure nothrow @nogc
 {
 	// take the next token, delimited by space, and also some special characters
 
@@ -123,7 +123,7 @@ unittest
 	assert(takeTokenTest("{...}abc").type == Token.Type.Error);
 }
 
-KVP takeKVP(ref const(char)[] cmdLine)
+KVP takeKVP(ref const(char)[] cmdLine) pure nothrow @nogc
 {
 	KVP r;
 	r.k = cmdLine.takeToken;
@@ -295,7 +295,7 @@ Token parseToken(const(char)[] cmdLine)
 +/
 
 
-Token takePair(ref const(char)[] text)
+Token takePair(ref const(char)[] text) pure nothrow @nogc
 {
 	if (text.length == 0)
 		return Token(Token.Type.None, null);

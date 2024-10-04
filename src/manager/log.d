@@ -27,13 +27,15 @@ class LogModule : Plugin
 
 		override void init()
 		{
-			app.console.registerCommands("/log", [
-				new LogCommand(app.console, "info", Category.Info, this),
-				new LogCommand(app.console, "warn", Category.Warning, this),
-				new LogCommand(app.console, "error", Category.Error, this),
-				new LogCommand(app.console, "alert", Category.Alert, this),
-				new LogCommand(app.console, "debug", Category.Debug, this)
-			]);
+			Command[5] commands = [
+				app.allocator.allocT!LogCommand(app.console, "info", Category.Info, this),
+				app.allocator.allocT!LogCommand(app.console, "warn", Category.Warning, this),
+				app.allocator.allocT!LogCommand(app.console, "error", Category.Error, this),
+				app.allocator.allocT!LogCommand(app.console, "alert", Category.Alert, this),
+				app.allocator.allocT!LogCommand(app.console, "debug", Category.Debug, this)
+			];
+
+			app.console.registerCommands("/log", commands);
 		}
 
 		import manager.config;
@@ -49,6 +51,8 @@ private:
 
 class LogCommand : Command
 {
+nothrow @nogc:
+
 	LogModule.Instance instance;
 	Category category;
 

@@ -52,6 +52,7 @@
     <DCompile Include="src\manager\config.d" />
     <DCompile Include="src\manager\console\builtin_commands.d" />
     <DCompile Include="src\manager\console\command.d" />
+    <DCompile Include="src\manager\console\console.d" />
     <DCompile Include="src\manager\console\expression.d" />
     <DCompile Include="src\manager\console\function_command.d" />
     <DCompile Include="src\manager\console\package.d" />

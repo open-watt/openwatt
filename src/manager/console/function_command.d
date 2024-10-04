@@ -16,7 +16,9 @@ public import manager.console.session;
 
 class FunctionCommand : Command
 {
-	alias GenericCall = const(char)[] function(Session, KVP[], void*);
+nothrow @nogc:
+
+	alias GenericCall = const(char)[] function(Session, KVP[], void*) nothrow @nogc;
 
 	static FunctionCommand create(alias fun, Instance)(ref Console console, Instance i, const(char)[] commandName = null)
 	{
@@ -62,7 +64,7 @@ class FunctionCommand : Command
 			}
 		}
 
-		return new FunctionCommand(console, commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName, cast(void*)i, &functionAdapter);
+		return console.m_allocator.allocT!FunctionCommand(console, commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName, cast(void*)i, &functionAdapter);
 	}
 
 

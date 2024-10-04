@@ -29,6 +29,8 @@ version(Windows)
 
 	class SerialStream : Stream
 	{
+	nothrow @nogc:
+
 		this(String name, string device, in SerialParams serialParams, StreamOptions options = StreamOptions.None)
 		{
 			import core.lifetime;
@@ -41,12 +43,12 @@ version(Windows)
 		override bool connect()
 		{
 			wchar[256] buf;
-			wstring wstr = device.to!wstring;
-			assert(wstr.length < buf.length);
-			buf[0..wstr.length] = wstr[];
-			buf[wstr.length] = 0;
-
-			hCom = CreateFile(buf.ptr, GENERIC_READ | GENERIC_WRITE, 0, null, OPEN_EXISTING, 0, null);
+//			wstring wstr = device.to!wstring;
+//			assert(wstr.length < buf.length);
+//			buf[0..wstr.length] = wstr[];
+//			buf[wstr.length] = 0;
+//
+//			hCom = CreateFile(buf.ptr, GENERIC_READ | GENERIC_WRITE, 0, null, OPEN_EXISTING, 0, null);
 			if (hCom == INVALID_HANDLE_VALUE)
 			{
 				writeln("CreateFile failed with error: ", GetLastError());

@@ -30,9 +30,11 @@ class CommandState
 
 class Command
 {
+nothrow @nogc:
+
 	const String name;
 
-	this(ref Console console, String name)
+	this(ref Console console, String name) nothrow @nogc
 	{
 		m_console = &console;
 		this.name = name.move;
@@ -94,7 +96,9 @@ package:
 }
 
 
-bool isValidIdentifier(const(char)[] s)
+nothrow @nogc:
+
+bool isValidIdentifier(const(char)[] s) pure
 {
 	if (s.length == 0)
 		return false;
@@ -109,7 +113,7 @@ bool isValidIdentifier(const(char)[] s)
 	return true;
 }
 
-inout(char)[] takeIdentifier(ref inout(char)[] s) pure nothrow @nogc
+inout(char)[] takeIdentifier(ref inout(char)[] s) pure
 {
 	if (s.length == 0)
 		return s[0..0];
@@ -126,7 +130,7 @@ inout(char)[] takeIdentifier(ref inout(char)[] s) pure nothrow @nogc
 	return r;
 }
 
-inout(char)[] trimCmdLine(inout(char)[] s) pure nothrow @nogc
+inout(char)[] trimCmdLine(inout(char)[] s) pure
 {
 	while(s.length > 0)
 	{
@@ -140,12 +144,12 @@ inout(char)[] trimCmdLine(inout(char)[] s) pure nothrow @nogc
 	return s;
 }
 
-bool frontIs(const(char)[] s, char c)
+bool frontIs(const(char)[] s, char c) pure
 {
 	return s.length > 0 && s[0] == c;
 }
 
-bool frontIs(const(char)[] s, const(char)[] s2)
+bool frontIs(const(char)[] s, const(char)[] s2) pure
 {
 	return s.length >= s2.length && s[0..s2.length] == s2[];
 }

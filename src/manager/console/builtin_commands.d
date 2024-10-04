@@ -1,5 +1,6 @@
 module manager.console.builtin_commands;
 
+import urt.array;
 import urt.mem;
 import urt.string;
 
@@ -7,16 +8,20 @@ import manager.console;
 import manager.console.command;
 import manager.console.expression;
 
+nothrow @nogc:
+
 
 class Scope : Command
 {
+nothrow @nogc:
+
 	this(ref Console console, String scopeName, Command[] children...)
 	{
 		super(console, scopeName);
 		commands ~= children;
 	}
 
-	Command[] commands;
+	Array!Command commands;
 
 	bool addCommand(Command cmd)
 	{

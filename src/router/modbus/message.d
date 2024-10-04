@@ -91,7 +91,6 @@ struct ModbusPDU
 {
 nothrow @nogc:
 	FunctionCode functionCode;
-	inout(ubyte)[] data() inout { return buffer[0..length]; }
 
 	this(FunctionCode functionCode, const(ubyte)[] data)
 	{
@@ -100,6 +99,9 @@ nothrow @nogc:
 		this.buffer[0 .. data.length] = data[];
 		this.length = cast(ubyte)data.length;
 	}
+
+    inout(ubyte)[] data() inout
+        => buffer[0..length];
 
     const(char)[] toString() const
     {

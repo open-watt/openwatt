@@ -1,5 +1,6 @@
 module router.iface.bridge;
 
+import urt.array;
 import urt.log;
 import urt.mem;
 import urt.string;
@@ -13,7 +14,9 @@ import router.iface;
 
 class BridgeInterface : BaseInterface
 {
-	this(InterfaceModule.Instance m, String name)  nothrow @nogc
+nothrow @nogc:
+
+	this(InterfaceModule.Instance m, String name)
 	{
 		super(m, name, StringLit!"bridge");
 
@@ -65,7 +68,7 @@ class BridgeInterface : BaseInterface
 		if (index >= members.length)
 			return false;
 
-		members = members[0 .. index] ~ members[index + 1 .. $];
+		members.remove(index);
 
 		// TODO: update the MAC table to adjust all the port numbers!
 		assert(false);
@@ -92,17 +95,17 @@ class BridgeInterface : BaseInterface
 		macTable.update();
 	}
 
-	override bool forward(ref const Packet packet) nothrow @nogc
+	override bool forward(ref const Packet packet)
 	{
 		send(packet);
 		return true;
 	}
 
 protected:
-	BaseInterface[] members;
+	Array!BaseInterface members;
 	MACTable macTable;
 
-	void incomingPacket(ref const Packet packet, BaseInterface srcInterface, void* userData) nothrow @nogc
+	void incomingPacket(ref const Packet packet, BaseInterface srcInterface, void* userData)
 	{
 		ubyte srcPort = cast(ubyte)cast(size_t)userData;
 
@@ -168,7 +171,7 @@ protected:
 }
 
 
-class BrudgeInterfaceModule : Plugin
+class BridgeInterfaceModule : Plugin
 {
 	mixin RegisterModule!"interface.bridge";
 
@@ -184,7 +187,7 @@ class BrudgeInterfaceModule : Plugin
 
 		// /interface/modbus/add command
 		// TODO: protocol enum!
-		void add(Session session, const(char)[] name)
+		void add(Session session, const(char)[] name) nothrow @nogc
 		{
 			auto mod_if = app.moduleInstance!InterfaceModule;
 
@@ -205,7 +208,7 @@ class BrudgeInterfaceModule : Plugin
 //			}, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
 		}
 
-		void port_add(Session session, const(char)[] bridge, const(char)[] _interface)
+		void port_add(Session session, const(char)[] bridge, const(char)[] _interface) nothrow @nogc
 		{
 			auto mod_if = app.moduleInstance!InterfaceModule;
 

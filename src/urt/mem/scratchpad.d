@@ -2,6 +2,9 @@ module urt.mem.scratchpad;
 
 import urt.util;
 
+nothrow @nogc:
+
+
 enum size_t MaxScratchpadSize = 2048;
 enum size_t NumScratchBuffers = 4;
 

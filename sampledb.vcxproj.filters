@@ -252,9 +252,6 @@
     <DCompile Include="src\manager\console\package.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
-    <DCompile Include="src\manager\console\session.d">
-      <Filter>src\manager\console</Filter>
-    </DCompile>
     <DCompile Include="src\urt\list.d">
       <Filter>src\urt</Filter>
     </DCompile>
@@ -411,8 +408,14 @@
     <DCompile Include="src\router\iface\mac.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
+    <DCompile Include="src\manager\console\session.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
     <DCompile Include="src\urt\array.d">
       <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\console.d">
+      <Filter>src\manager\console</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>

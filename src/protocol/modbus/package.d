@@ -42,7 +42,7 @@ class ModbusProtocolModule : Plugin
 //				client.update();
 		}
 
-		void add_client(Session session, const(char)[] name, const(char)[] _interface)
+		void add_client(Session session, const(char)[] name, const(char)[] _interface) nothrow @nogc
 		{
 			auto mod_if = app.moduleInstance!InterfaceModule;
 			BaseInterface i = mod_if.findInterface(_interface);

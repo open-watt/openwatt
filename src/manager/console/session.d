@@ -2,15 +2,19 @@ module manager.console.session;
 
 import manager.console;
 
-import urt.string;
+import urt.array;
+import urt.map;
 import urt.mem;
+import urt.string;
 import urt.util;
 
 class Session
 {
-	this(Console* console)
+nothrow @nogc:
+
+	this(ref Console console)
 	{
-		m_console = console;
+		m_console = &console;
 		m_prompt = "> ";
 		curScope = console.getRoot;
 	}
@@ -43,7 +47,8 @@ class Session
 	}
 
 	/// Test if the session is attached to a console instance. A detached session is effectively 'closed', and ready to be cleaned up.
-	final bool isAttached() => m_console != null;
+	final bool isAttached() pure
+		=> m_console != null;
 
 	/// Close this session and detach from the bound console instance.
 	void closeSession()
@@ -55,10 +60,7 @@ class Session
 		}
 
 		if (m_sessionStack.length)
-		{
-			m_console = m_sessionStack[$-1];
-			m_sessionStack = m_sessionStack[0..$-1];
-		}
+			m_console = m_sessionStack.popBack();
 		else
 			m_console = null;
 	}
@@ -105,27 +107,24 @@ class Session
 	}
 
 	bool showPrompt(bool show)
-	{
-		return m_showPrompt.swap(show);
-	}
+		=> m_showPrompt.swap(show);
 
 	const(char)[] setPrompt(const(char)[] prompt)
-	{
-		return m_prompt.swap(prompt);
-	}
+		=> m_prompt.swap(prompt);
 
 	// TODO: I don't like this API... needs work!
-	final const(char[]) getInput() => m_buffer;
+	final const(char[]) getInput()
+		=> m_buffer;
 
-	const(char)[] setInput(const(char)[] text)
+	MutableString!0 setInput(const(char)[] text)
 	{
 		import core.lifetime : move;
 
-		const(char)[] old = m_buffer.move;
+		MutableString!0 old = m_buffer.move;
 		m_buffer = null;
 		m_position = 0;
-		receiveInput(text.move);
-		return old;
+		receiveInput(text);
+		return old.move;
 	}
 
 	ptrdiff_t appendInput(const(char)[] text)
@@ -301,8 +300,7 @@ class Session
 			}
 			else
 			{
-//				m_buffer.Insert(m_position, t + i, take);
-				m_buffer = m_buffer[0 .. m_position] ~ t[i .. i + take] ~ m_buffer[m_position .. $];
+				m_buffer.insert(m_position, t[i .. i + take]);
 				m_position += take;
 			}
 
@@ -313,14 +311,14 @@ class Session
 		return len;
 	}
 
-	const(char)[] takeInput()
+	MutableString!0 takeInput()
 	{
 		import core.lifetime : move;
 
-		const(char)[] take = m_buffer.move;
+		MutableString!0 take = m_buffer.move;
 		m_buffer = null;
 		m_position = 0;
-		return take;
+		return take.move;
 	}
 
 
@@ -337,7 +335,7 @@ class Session
 		m_height = height;
 	}
 
-package:
+protected:
 	/// Called immediately before console commands are executed.
 	/// It may be used, for instance, to update any visual state required by the session on execution of a command.
 	/// \param command
@@ -384,16 +382,12 @@ package:
 //		WriteLine(text);
 	}
 
-
-	// Internal stuff...
-	final Allocator allocator() => m_console.m_allocator;
-	final Allocator tempAllocator() => m_console.m_tempAllocator;
-
 	final void receiveInput(const(char)[] input)
 	{
 		if (m_currentCommand)
 			m_buffer ~= input;
 
+		MutableString!0 inputBackup;
 		while (!m_currentCommand && !input.empty)
 		{
 			ptrdiff_t taken = appendInput(input);
@@ -411,7 +405,8 @@ package:
 				if (input[taken] == '\r' && taken + 1 < input.length && input[taken + 1] == '\n')
 					++taken;
 
-				const(char)[] command = takeInput().trimCmdLine;
+				MutableString!0 cmdInput = takeInput();
+				const(char)[] command = cmdInput.trimCmdLine;
 				m_buffer = input[taken + 1 .. $];
 
 				if (command.empty || execute(command))
@@ -421,13 +416,21 @@ package:
 						return;
 
 					// command was instantaneous; take leftover input and continue
-					input = takeInput();
+					inputBackup = takeInput();
+					input = inputBackup[];
 				}
 			}
 			else
 				break;
 		}
 	}
+
+package:
+    // Internal stuff...
+    final NoGCAllocator allocator() pure
+        => m_console.m_allocator;
+    final NoGCAllocator tempAllocator() pure
+        => m_console.m_tempAllocator;
 
 	final bool execute(const(char)[] command)
 	{
@@ -469,7 +472,7 @@ package:
 
 	Scope curScope = null;
 	// TODO: remove the GC, swap for container!!
-	String[String] localVariables;
+	Map!(String, String) localVariables;
 
 	uint m_width = 80;
 	uint m_height = 24;
@@ -478,7 +481,7 @@ package:
 	bool m_suggestionPending = false;
 
 	const(char)[] m_prompt;
-	const(char)[] m_buffer;
+	MutableString!0 m_buffer;
 	uint m_position = 0;
 
 //	list<String> m_history;
@@ -487,29 +490,37 @@ package:
 	uint m_historyCursor = 0;
 	const(char)[] m_historyHead;
 
-//	Vector<dcDebugConsole*> m_sessionStack;
-	Console*[] m_sessionStack;
+	Array!(Console*) m_sessionStack;
+
+protected:
+	final CommandState _currentCommand() => m_currentCommand;
+	final const(char)[] _prompt() => m_prompt;
+	final const(char)[] _buffer() => m_buffer;
+	final uint _position() => m_position;
+	final bool _showPrompt() => m_showPrompt;
+	final bool _suggestionPending() => m_suggestionPending;
 }
 
 class StringSession : Session
 {
-	this(Console* console)
+nothrow @nogc:
+
+	this(ref Console console)
 	{
 		super(console);
 	}
 
-	const(char[]) getOutput() const pure nothrow @nogc
+	const(char[]) getOutput() const pure
 	{
 		return m_output;
 	}
 
-	char[] takeOutput() pure nothrow @nogc
+	MutableString!0 takeOutput()
 	{
-		import urt.util;
-		return m_output.swap(null);
+		return m_output.move;
 	}
 
-	void clearOutput() pure nothrow @nogc
+	void clearOutput()
 	{
 		m_output = null;
 	}
@@ -517,18 +528,20 @@ class StringSession : Session
 	override void writeOutput(const(char)[] text, bool newline)
 	{
 		if (newline)
-			m_output ~= text ~ '\n';
+			m_output.concat(text, '\n');
 		else
 			m_output ~= text;
 	}
 
 private:
-	char[] m_output;
+	MutableString!0 m_output;
 }
 
 class ConsoleSession : Session
 {
-	this(Console* console)
+nothrow @nogc:
+
+	this(ref Console console)
 	{
 		super(console);
 	}

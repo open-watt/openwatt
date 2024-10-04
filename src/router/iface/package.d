@@ -82,6 +82,8 @@ struct InterfaceStatus
 
 class BaseInterface
 {
+nothrow @nogc:
+
 	InterfaceModule.Instance mod_iface;
 
 	String name;
@@ -196,8 +198,9 @@ class InterfaceModule : Plugin
 	class Instance : Plugin.Instance
 	{
 		mixin DeclareInstance;
+	nothrow @nogc:
 
-		BaseInterface[const(char)[]] interfaces;
+		Map!(const(char)[], BaseInterface) interfaces;
 
 		override void init()
 		{
@@ -224,14 +227,14 @@ class InterfaceModule : Plugin
 
 		final void addInterface(BaseInterface iface)
 		{
-			assert(iface.name[] !in interfaces, "Interface already exists");
-			interfaces[iface.name[]] = iface;
+			assert(iface.name !in interfaces, "Interface already exists");
+			interfaces[iface.name] = iface;
 		}
 
 		final void removeInterface(BaseInterface iface)
 		{
-			assert(iface.name[] in interfaces, "Interface not found");
-			interfaces.remove(iface.name[]);
+			assert(iface.name in interfaces, "Interface not found");
+			interfaces.remove(iface.name);
 		}
 
 		final BaseInterface findInterface(const(char)[] name)

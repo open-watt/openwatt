@@ -1,5 +1,6 @@
 module router.iface.tesla;
 
+import urt.map;
 import urt.mem;
 import urt.string;
 import urt.string.format;
@@ -29,6 +30,8 @@ struct DeviceMap
 
 class TeslaInterface : BaseInterface
 {
+nothrow @nogc:
+
 	Stream stream;
 
 	this(InterfaceModule.Instance m, String name, Stream stream) nothrow @nogc
@@ -197,15 +200,16 @@ class TeslaInterfaceModule : Plugin
 	class Instance : Plugin.Instance
 	{
 		mixin DeclareInstance;
+	nothrow @nogc:
 
-		DeviceMap[ushort] devices;
+		Map!(ushort, DeviceMap) devices;
 
 		override void init()
 		{
 			app.console.registerCommand!add("/interface/tesla-twc", this);
 		}
 
-		void add(Session session, const(char)[] name, const(char)[] stream)
+		void add(Session session, const(char)[] name, const(char)[] stream) nothrow @nogc
 		{
 			Stream s = app.moduleInstance!StreamModule.getStream(stream);
 			if (!s)
@@ -234,23 +238,21 @@ class TeslaInterfaceModule : Plugin
 
 		DeviceMap* findServerByName(const(char)[] name) nothrow @nogc
 		{
-			try foreach (ref map; devices)
+			foreach (ref map; devices)
 			{
-				if (map.name[] == name)
+				if (map.name[] == name[])
 					return &map;
 			}
-			catch(Exception) {}
 			return null;
 		}
 
 		DeviceMap* findServerByMac(MACAddress mac) nothrow @nogc
 		{
-			try foreach (ref map; devices)
+			foreach (ref map; devices)
 			{
 				if (map.mac == mac)
 					return &map;
 			}
-			catch(Exception) {}
 			return null;
 		}
 
@@ -274,10 +276,8 @@ class TeslaInterfaceModule : Plugin
 //				++map.mac.b[5];
 			map.iface = iface;
 
-			devices[address] = map;
 			iface.addAddress(map.mac, iface);
-
-			return address in devices;
+			return devices.insert(address, map);
 		}
 	}
 }

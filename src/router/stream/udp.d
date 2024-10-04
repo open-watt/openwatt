@@ -49,21 +49,21 @@ class UDPStream : Stream
 
 	override bool connect()
 	{
-		socket = new UdpSocket();
-		socket.bind(local);
-		socket.blocking = !(options & StreamOptions.NonBlocking);
-		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.BROADCAST, (options & StreamOptions.AllowBroadcast) ? 1 : 0);
+//		socket = new UdpSocket();
+//		socket.bind(local);
+//		socket.blocking = !(options & StreamOptions.NonBlocking);
+//		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.BROADCAST, (options & StreamOptions.AllowBroadcast) ? 1 : 0);
 		return true;
 	}
 
 	override void disconnect()
 	{
-		if (socket !is null)
-		{
-			socket.shutdown(SocketShutdown.BOTH);
-			socket.close();
-			socket = null;
-		}
+//		if (socket !is null)
+//		{
+//			socket.shutdown(SocketShutdown.BOTH);
+//			socket.close();
+//			socket = null;
+//		}
 	}
 
 	override bool connected() nothrow @nogc
@@ -76,12 +76,13 @@ class UDPStream : Stream
 		return remoteHost;
 	}
 
-	override void setOpts(StreamOptions options)
+	override void setOpts(StreamOptions options) nothrow @nogc
 	{
 		this.options = options;
-		if (socket)
-			socket.blocking = !(options & StreamOptions.NonBlocking);
-		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.BROADCAST, (options & StreamOptions.AllowBroadcast) ? 1 : 0);
+		assert(false);
+//		if (socket)
+//			socket.blocking = !(options & StreamOptions.NonBlocking);
+//		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.BROADCAST, (options & StreamOptions.AllowBroadcast) ? 1 : 0);
 	}
 
 	override ptrdiff_t read(ubyte[] buffer) nothrow @nogc
@@ -168,24 +169,25 @@ class UDPStream : Stream
 
 	override ptrdiff_t pending()
 	{
-		if (!connected())
-		{
-			if (options & StreamOptions.KeepAlive)
-			{
-				connect();
-				return 0;
-			}
-			else
-				return -1;
-		}
-
-		long r = socket.receive(null, SocketFlags.PEEK);
-		if (r == 0 || r == Socket.ERROR)
-		{
-			socket.close();
-			socket = null;
-		}
-		return cast(size_t) r;
+//		if (!connected())
+//		{
+//			if (options & StreamOptions.KeepAlive)
+//			{
+//				connect();
+//				return 0;
+//			}
+//			else
+//				return -1;
+//		}
+//
+//		long r = socket.receive(null, SocketFlags.PEEK);
+//		if (r == 0 || r == Socket.ERROR)
+//		{
+//			socket.close();
+//			socket = null;
+//		}
+//		return cast(size_t) r;
+		return 0;
 	}
 
 	override ptrdiff_t flush()
@@ -195,7 +197,7 @@ class UDPStream : Stream
 	}
 
 private:
-	UdpSocket socket;
+	Socket socket;
 	string localHost;
 	string remoteHost;
 	ushort localPort;

@@ -273,17 +273,9 @@ nothrow @nogc:
         assert(!isRunning, "Already started");
 
         Result r = create_socket(AddressFamily.IPv4, SocketType.Stream, Protocol.TCP, serverSocket);
-        if (r.failed)
-            assert(false, "Couldn't create socket! TODO: handle error more good");
         r = serverSocket.set_socket_option(SocketOption.NonBlocking, true);
-        if (r.failed)
-            assert(false, "Couldn't set non-blocking! TODO: handle error more good");
         r = serverSocket.bind(InetAddress(IPAddr.any, port));
-        if (r.failed)
-            assert(false, "Bind failed! TODO: handle error more good");
         r = serverSocket.listen();
-        if (r.failed)
-            assert(false, "Listen failed! TODO: handle error more good");
 
         isRunning = true;
 
@@ -371,7 +363,7 @@ class TCPStreamModule : Plugin
 			app.console.registerCommand!add("/stream/tcp-client", this);
 		}
 
-		void add(Session session, const(char)[] name, const(char)[] address, Nullable!int port)
+		void add(Session session, const(char)[] name, const(char)[] address, Nullable!int port) nothrow @nogc
 		{
 			auto mod_stream = app.moduleInstance!StreamModule;
 
@@ -399,10 +391,10 @@ class TCPStreamModule : Plugin
 			if (portNumber - 1 > ushort.max - 1)
 				return session.writeLine("Invalid port number (1-65535): ", portNumber);
 
-			String n = name.makeString(defaultAllocator);
-			String a = address.makeString(defaultAllocator);
+			String n = name.makeString(app.allocator);
+			String a = address.makeString(app.allocator);
 
-			TCPStream stream = defaultAllocator.allocT!TCPStream(n.move, a.move, cast(ushort)portNumber, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+			TCPStream stream = app.allocator.allocT!TCPStream(n.move, a.move, cast(ushort)portNumber, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
 			mod_stream.addStream(stream);
 		}
 	}

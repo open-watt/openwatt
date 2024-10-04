@@ -20,6 +20,7 @@ import manager.units;
 
 import urt.log;
 import urt.io;
+import urt.mem.allocator;
 import urt.mem.string;
 import urt.mem.temp;
 import urt.string;
@@ -30,6 +31,10 @@ alias CreateComponentFunc = Component* delegate(Device* device, ref ConfItem con
 class ApplicationInstance
 {
 	string name;
+
+	NoGCAllocator allocator;
+	NoGCAllocator tempAllocator;
+
 	GlobalInstance global;
 	Plugin.Instance[] pluginInstance;
 
@@ -41,15 +46,19 @@ class ApplicationInstance
 
 	// database...
 
-	this()
-	{
-		import urt.mem;
+    this()
+    {
+        import urt.mem;
 
-		console = Console(this, String("console".addString), Mallocator.instance);
+        allocator = defaultAllocator;
+        tempAllocator = tempAllocator;
 
-		console.registerCommand!log_level("/system", this);
+        console = Console(this, String("console".addString), Mallocator.instance);
 
-	}
+        console.setPrompt(StringLit!"enermon > ");
+
+        console.registerCommand!log_level("/system", this);
+    }
 
 	Plugin.Instance moduleInstance(string name) pure nothrow @nogc
 	{

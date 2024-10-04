@@ -1,6 +1,8 @@
 module router.iface.modbus;
 
+import urt.conv;
 import urt.endian;
+import urt.map;
 import urt.mem;
 import urt.meta.nullable;
 import urt.string;
@@ -52,6 +54,8 @@ struct ModbusRequest
 
 class ModbusInterface : BaseInterface
 {
+nothrow @nogc:
+
 	Stream stream;
 
 	ModbusProtocol protocol;
@@ -199,7 +203,7 @@ class ModbusInterface : BaseInterface
 
 		ushort length = 0;
 		ubyte address = 0;
-		ubyte[260] buffer;
+		ubyte[520] buffer;
 
 		if (isBusMaster)
 		{
@@ -242,6 +246,7 @@ class ModbusInterface : BaseInterface
 			case ModbusProtocol.Unknown:
 				assert(false, "Modbus protocol not specified");
 			case ModbusProtocol.RTU:
+				// frame the packet
 				length = cast(ushort)(1 + packet.data.length);
 				buffer[0] = address;
 				buffer[1 .. length] = cast(ubyte[])packet.data[];
@@ -251,7 +256,19 @@ class ModbusInterface : BaseInterface
 			case ModbusProtocol.TCP:
 				assert(false);
 			case ModbusProtocol.ASCII:
-				assert(false);
+                // calculate the LRC
+                ubyte lrc = address;
+                foreach (b; cast(ubyte[])packet.data[])
+                    lrc += cast(ubyte)b;
+                lrc = cast(ubyte)-lrc;
+
+                // format the packet
+                buffer[0] = ':';
+                formatInt(address, cast(char[])buffer[1..3], 16, 2, '0');
+                length = cast(ushort)(3 + toHexString(cast(ubyte[])packet.data[], cast(char[])buffer[3..$]).length);
+                formatInt(lrc, cast(char[])buffer[length .. length + 2], 16, 2, '0');
+                (cast(char[])buffer)[length + 2 .. length + 4] = "\r\n";
+                length += 4;
 		}
 
 		ptrdiff_t written = stream.write(buffer[0 .. length]);
@@ -309,10 +326,10 @@ private:
             {
                 // apparently this is the first time we've seen this guy...
                 // this should be impossible if we're the bus master, because we must know anyone we sent a request to...
-                // so, it must be a response from a local slave we don't know, requested by a local master...
+                // so, it must be a communication from a local master with a local slave we don't know...
 
                 // let's confirm and then record their existence...
-                assert(!isBusMaster && type == ModbusFrameType.Response, "This should be impossible...?");
+                assert(!isBusMaster, "This should be impossible...?");
 
                 // we won't bother generating a universal address since 3rd party's can't send requests anyway, because we're not the bus master!
                 map = modbus.addRemoteServer(null, this, frameInfo.address, null);
@@ -369,8 +386,9 @@ class ModbusInterfaceModule : Plugin
 	class Instance : Plugin.Instance
 	{
 		mixin DeclareInstance;
+    nothrow @nogc:
 
-		ServerMap[ubyte] remoteServers;
+		Map!(ubyte, ServerMap) remoteServers;
 
 		override void init()
 		{
@@ -582,7 +600,7 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
 	// 2: but 2-byte CRC's aren't good enough protection against false positives! (they appear semi-regularly), so...
 	// 3:  a. we can exclude packets that start with an invalid function code
 	//     b. we can exclude packets to the broadcast address (0), with a function code that can't broadcast
-	//     c. we can then try and determine the expected packet length, and check the CRC only at the length offsets
+	//     c. we can then try and determine the expected packet length, and check for CRC only at the length offsets
 	//     d. failing all that, we can crawl the buffer for a CRC...
 	//     e. if we don't find a packet, repeat starting at the next BYTE...
 

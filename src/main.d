@@ -50,7 +50,7 @@ void main()
 		// TODO: warn user that can't load profile...
 		assert(false);
 	}
-	ConsoleSession s = new ConsoleSession(&app.console);
+	ConsoleSession s = new ConsoleSession(app.console);
 	s.setInput(conf);
 
 	// load config files

@@ -196,7 +196,7 @@ ubyte[] frameMsg(ubyte[] msg)
 	return t.dup;
 }
 
-ubyte[] unescapeMsg(ubyte[] msg)
+ubyte[] unescapeMsg(ubyte[] msg) nothrow @nogc
 {
 	size_t offset = 0;
 	for (size_t i = 0; i < msg.length; i++)

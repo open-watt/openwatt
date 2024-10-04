@@ -38,6 +38,8 @@ enum StreamOptions
 
 abstract class Stream
 {
+nothrow @nogc:
+
 	String name;
 	CacheString type;
 
@@ -47,6 +49,12 @@ abstract class Stream
 		this.type = type.addString();
 		this.options = options;
 	}
+
+    ~this()
+    {
+        // TODO: should we check if it's already disconnected before calling this?
+        disconnect();
+    }
 
 	// Method to initiate a connection
 	abstract bool connect();
@@ -59,7 +67,7 @@ abstract class Stream
 
 	abstract const(char)[] remoteName();
 
-	abstract void setOpts(StreamOptions options);
+	abstract void setOpts(StreamOptions options) nothrow @nogc;
 
 	// Read data from the stream
 	abstract ptrdiff_t read(ubyte[] buffer) nothrow @nogc;
@@ -91,8 +99,9 @@ class StreamModule : Plugin
 	class Instance : Plugin.Instance
 	{
 		mixin DeclareInstance;
+	nothrow @nogc:
 
-		Stream[const(char)[]] streams;
+		Map!(const(char)[], Stream) streams;
 
 		override void init()
 		{

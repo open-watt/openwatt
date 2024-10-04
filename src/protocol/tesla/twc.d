@@ -2,6 +2,8 @@ module protocol.tesla.twc;
 
 import urt.endian;
 
+nothrow @nogc:
+
 
 enum TWCMessageType : byte
 {
