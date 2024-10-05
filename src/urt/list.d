@@ -2,31 +2,31 @@ module urt.list;
 
 struct List(T, bool DL = false, bool Invasive = false)
 {
-	static if (!Invasive)
-	{
-		struct Item
-		{
-			T value;
-			Item* next;
-			static if (DL)
-				Item* prev;
-		}
-		alias ListItem = Item;
-	}
-	else
-		alias ListItem = T;
+    static if (!Invasive)
+    {
+        struct Item
+        {
+            Item* next;
+            static if (DL)
+                Item* prev;
+            T value;
+        }
+        alias ListItem = Item;
+    }
+    else
+        alias ListItem = T;
 
-	struct Iterator
-	{
-		ListItem* current;
-	}
+    struct Iterator
+    {
+        ListItem* current;
+    }
 
-	ListItem* head;
-	static if (DL)
-		ListItem* tail;
-	size_t length;
+    ListItem* head;
+    static if (DL)
+        ListItem* tail;
+    size_t length;
 
-	// TODO: allocator...
+    // TODO: allocator...
 }
 
 alias InvasiveList(T) = List!(T, false, true);

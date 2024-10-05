@@ -25,9 +25,9 @@ public import urt.util;
 pragma(crt_constructor)
 void crt_bootup()
 {
-	import urt.time : initClock;
-	initClock();
+    import urt.time : initClock;
+    initClock();
 
-	import urt.dbg : setupAssertHandler;
-	setupAssertHandler();
+    import urt.dbg : setupAssertHandler;
+    setupAssertHandler();
 }

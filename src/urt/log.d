@@ -4,10 +4,10 @@ import urt.io;
 
 enum Level
 {
-	Error = 0,
-	Warning,
-	Info,
-	Debug
+    Error = 0,
+    Warning,
+    Info,
+    Debug
 }
 
 immutable string[] levelNames = [ "Error", "Warning", "Info", "Debug" ];
@@ -26,14 +26,14 @@ void writeErrorf(T...)(const(char)[] format, ref T things) { writeLogf(Level.Err
 
 void writeLog(T...)(Level level, ref T things)
 {
-	if (level > logLevel)
-		return;
-	writeln(levelNames[level], ": ", things);
+    if (level > logLevel)
+        return;
+    writeln(levelNames[level], ": ", things);
 }
 
 void writeLogf(T...)(Level level, const(char)[] format, ref T things)
 {
-	if (level > logLevel)
-		return;
-	writelnf("{-2}: {@-1}", things, levelNames[level], format);
+    if (level > logLevel)
+        return;
+    writelnf("{-2}: {@-1}", things, levelNames[level], format);
 }
