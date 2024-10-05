@@ -141,9 +141,9 @@ struct Array(T, size_t EmbedCount = 0)
     ~this()
     {
         if (hasAllocation())
-            defaultAllocator().freeArray(array);
+            defaultAllocator().freeArray(ptr[0 .. _length]);
         else static if (!is(T == class))
-            foreach (ref e; array)
+            foreach (ref e; ptr[0 .. _length])
                 e.destroy!false();
     }
 
@@ -167,14 +167,20 @@ nothrow @nogc:
     ref Array!(T, Count) concat(Things...)(auto ref Things things);
 
     bool empty() const
-        => array.length == 0;
+        => _length == 0;
     size_t length() const
-        => array.length;
+        => _length;
 
     ref inout(T) front() inout
-        => array[0];
+    {
+        debug assert(_length > 0, "Range error");
+        return ptr[0];
+    }
     ref inout(T) back() inout
-        => array[$ - 1];
+    {
+        debug assert(_length > 0, "Range error");
+        return ptr[_length - 1];
+    }
 
     ref T pushFront()
         => pushFront(T.init);
@@ -185,26 +191,26 @@ nothrow @nogc:
     {
         static if (is(T == class))
         {
-            size_t len = array.length;
+            uint len = _length;
             reserve(len + 1);
-            array = array.ptr[0 .. len + 1];
-            for (size_t i = len; i > 0; --i)
-                array[i] = array[i-1];
-            array[0] = item;
-            return array[0];
+            _length = len + 1;
+            for (uint i = len; i > 0; --i)
+                ptr[i] = ptr[i-1];
+            ptr[0] = item;
+            return ptr[0];
         }
         else
         {
-            size_t len = array.length;
+            uint len = _length;
             reserve(len + 1);
-            array = array.ptr[0 .. len + 1];
-            for (size_t i = len; i > 0; --i)
+            _length = len + 1;
+            for (uint i = len; i > 0; --i)
             {
-                emplace!T(&array.ptr[i], array.ptr[i-1].move);
-                array.ptr[i-1].destroy!false();
+                emplace!T(&ptr[i], ptr[i-1].move);
+                ptr[i-1].destroy!false();
             }
-            emplace!T(&array.ptr[0], item.move);
-            return array[0];
+            emplace!T(&ptr[0], item.move);
+            return ptr[0];
         }
     }
 
@@ -212,19 +218,19 @@ nothrow @nogc:
     {
         static if (is(T == class))
         {
-            size_t len = array.length;
+            uint len = _length;
             reserve(len + 1);
-            array = array.ptr[0 .. len + 1];
-            array[len] = item;
-            return array[len];
+            _length = len + 1;
+            ptr[len] = item;
+            return ptr[len];
         }
         else
         {
-            size_t len = array.length;
+            uint len = _length;
             reserve(len + 1);
-            array = array.ptr[0 .. len + 1];
-            emplace!T(&array.ptr[len], item.move);
-            return array[len];
+            _length = len + 1;
+            emplace!T(&ptr[len], item.move);
+            return ptr[len];
         }
     }
 
@@ -233,23 +239,21 @@ nothrow @nogc:
         // TODO: this should be removed and uses replaced with a queue container
         static if (is(T == class))
         {
-            T copy = array.ptr[0];
-            for (size_t i = 1; i < array.length; ++i)
-                array.ptr[i-1] = array.ptr[i];
-            array.ptr[array.length-1] = null;
-            array = array.ptr[0 .. array.length-1];
+            T copy = ptr[0];
+            for (uint i = 1; i < _length; ++i)
+                ptr[i-1] = ptr[i];
+            ptr[--_length] = null;
             return copy;
         }
         else
         {
-            T copy = T(array.ptr[0].move);
-            for (size_t i = 1; i < array.length; ++i)
+            T copy = ptr[0].move;
+            for (uint i = 1; i < _length; ++i)
             {
-                array.ptr[i-1].destroy!false();
-                emplace!T(&array.ptr[i-1], array.ptr[i].move);
+                ptr[i-1].destroy!false();
+                emplace!T(&ptr[i-1], ptr[i].move);
             }
-            array.ptr[array.length-1].destroy!false();
-            array = array.ptr[0 .. array.length-1];
+            ptr[--_length].destroy!false();
             return copy.move;
         }
     }
@@ -258,18 +262,18 @@ nothrow @nogc:
     {
         static if (is(T == class))
         {
-            size_t last = array.length-1;
-            T copy = array.ptr[last];
-            array.ptr[last] = null;
-            array = array.ptr[0 .. last];
+            uint last = _length-1;
+            T copy = ptr[last];
+            ptr[last] = null;
+            _length = last;
             return copy;
         }
         else
         {
-            size_t last = array.length-1;
-            T copy = T(array.ptr[last].move);
-            array.ptr[last].destroy!false();
-            array = array.ptr[0 .. last];
+            uint last = _length-1;
+            T copy = ptr[last].move;
+            ptr[last].destroy!false();
+            _length = last;
             return copy.move;
         }
     }
@@ -279,40 +283,46 @@ nothrow @nogc:
         assert(false);
     }
 
-    void remove(const(T)* pItem)                { remove(array.indexOfElement(pItem)); }
-    void removeFirst(ref const T item)          { remove(array.findFirst(item)); }
+    void remove(const(T)* pItem)                { remove(ptr[0 .. _length].indexOfElement(pItem)); }
+    void removeFirst(ref const T item)          { remove(ptr[0 .. _length].findFirst(item)); }
 
     void removeSwapLast(size_t i)
     {
         assert(false);
     }
 
-    void removeSwapLast(const(T)* pItem)        { removeSwapLast(array.indexOfElement(pItem)); }
-    void removeFirstSwapLast(ref const T item)  { removeSwapLast(array.findFirst(item)); }
+    void removeSwapLast(const(T)* pItem)        { removeSwapLast(ptr[0 .. _length].indexOfElement(pItem)); }
+    void removeFirstSwapLast(ref const T item)  { removeSwapLast(ptr[0 .. _length].findFirst(item)); }
 
     inout(T)[] getBuffer() inout
-        => hasAllocation() ? array.ptr[0 .. ec.allocCount] : EmbedCount ? ec.embed[] : null;
+        => hasAllocation() ? ptr[0 .. ec.allocCount] : EmbedCount ? ec.embed[] : null;
 
     bool opCast(T : bool)() const
-        => array.length != 0;
+        => _length != 0;
 
     size_t opDollar() const
-        => array.length;
+        => _length;
 
     // full slice: arr[]
     inout(T)[] opIndex() inout
-        => array[];
+        => ptr[0 .. _length];
 
     // array indexing: arr[i]
     ref inout(T) opIndex(size_t i) inout
-        => array[i];
+    {
+        debug assert(i < _length, "Range error");
+        return ptr[i];
+    }
 
-    // array slicing: arr[a .. b]
-    inout(T)[] opIndex(size_t[2] i) inout
-        => array[i[0] .. i[1]];
+    // array slicing: arr[x .. y]
+    inout(T)[] opIndex(uint[2] i) inout
+        => ptr[i[0] .. i[1]];
 
-    size_t[2] opSlice(size_t dim : 0)(size_t a, size_t b)
-        => [a, b];
+    uint[2] opSlice(size_t dim : 0)(size_t x, size_t y)
+    {
+        debug assert(y <= _length, "Range error");
+        return [cast(uint)x, cast(uint)y];
+    }
 
     void opOpAssign(string op : "~", U)(ref U el)
         if (is(U : T))
@@ -322,7 +332,7 @@ nothrow @nogc:
     void opOpAssign(string op : "~", U)(U[] arr)
         if (is(U : T))
     {
-        reserve(array.length + arr.length);
+        reserve(_length + arr.length);
         foreach (ref e; arr)
             pushBack(e);
     }
@@ -331,29 +341,30 @@ nothrow @nogc:
     {
         if (count > EmbedCount && count > allocCount())
         {
+            debug assert(count <= uint.max, "Exceed maximum size");
             T[] newArray = cast(T[])defaultAllocator().alloc(T.sizeof * count, T.alignof);
 
             // TODO: POD should memcpy... (including class)
 
             static if (is(T == class))
             {
-                for (size_t i = 0; i < array.length; ++i)
-                    newArray.ptr[i] = array.ptr[i];
+                for (uint i = 0; i < _length; ++i)
+                    newArray.ptr[i] = ptr[i];
             }
             else
             {
-                for (size_t i = 0; i < array.length; ++i)
+                for (uint i = 0; i < _length; ++i)
                 {
-                    emplace!T(&newArray[i], array[i].move);
-                    array[i].destroy!false();
+                    emplace!T(&newArray[i], ptr[i].move);
+                    ptr[i].destroy!false();
                 }
             }
 
             if (hasAllocation())
-                defaultAllocator().free(array);
+                defaultAllocator().free(ptr[0 .. _length]);
 
-            ec.allocCount = count;
-            array = newArray.ptr[0 .. array.length];
+            ec.allocCount = cast(uint)count;
+            ptr = newArray.ptr;
         }
     }
 
@@ -370,28 +381,29 @@ nothrow @nogc:
     void clear()
     {
         static if (!is(T == class))
-            for (size_t i = 0; i < array.length; ++i)
-                array[i].destroy!false();
-        array = array[0..0];
+            for (uint i = 0; i < _length; ++i)
+                ptr[i].destroy!false();
+        _length = 0;
     }
 
 private:
-    T[] array;
-
     union EC
     {
         T[EmbedCount] embed = void;
-        size_t allocCount;
+        uint allocCount;
     }
+
+    T* ptr;
+    uint _length;
     EC ec;
 
     bool hasAllocation() const
-        => array.ptr && (EmbedCount == 0 || array.ptr != ec.embed.ptr);
-    size_t allocCount() const
+        => ptr && (EmbedCount == 0 || ptr != ec.embed.ptr);
+    uint allocCount() const
         => hasAllocation() ? ec.allocCount : EmbedCount;
 
     pragma(inline, true)
-    static size_t numToAlloc(size_t i)
+    static uint numToAlloc(uint i)
     {
         // TODO: i'm sure we can imagine a better heuristic...
         return i > 16 ? i * 2 : 16;
