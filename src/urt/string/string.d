@@ -139,7 +139,7 @@ nothrow @nogc:
 
     inout(C)[] opSlice(size_t x, size_t y) inout pure
     {
-        debug assert(y <= length());
+        debug assert(y <= length(), "Range error");
         return ptr[x .. y];
     }
 
@@ -265,7 +265,7 @@ nothrow @nogc:
 
     inout(char)[] opSlice(size_t x, size_t y) inout pure
     {
-        debug assert(y <= length());
+        debug assert(y <= length(), "Range error");
         return ptr[x .. y];
     }
 

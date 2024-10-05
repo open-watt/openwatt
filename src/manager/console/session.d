@@ -31,7 +31,7 @@ nothrow @nogc:
 	{
 		if (m_currentCommand)
 		{
-			CommandCompletionState state = m_currentCommand.command.update(m_currentCommand);
+			CommandCompletionState state = m_currentCommand.update();
 			if (state == CommandCompletionState.Finished)
 			{
 				CommandState commandData = m_currentCommand;

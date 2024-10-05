@@ -1,5 +1,6 @@
 module protocol.modbus.client;
 
+import urt.array;
 import urt.lifetime;
 import urt.string;
 import urt.time;
@@ -9,8 +10,15 @@ import protocol.modbus;
 import router.iface;
 import router.modbus.message;
 
+enum ModbusErrorType
+{
+    Retrying,
+    Timeout,
+    Failed,
+}
 
-alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref ModbusPDU response, MonoTime responseTime) nothrow @nogc;
+alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref ModbusPDU response, MonoTime requestTime, MonoTime responseTime) nothrow @nogc;
+alias ModbusErrorHandler = void delegate(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime requestTime) nothrow @nogc;
 
 class ModbusClient
 {
@@ -33,28 +41,59 @@ class ModbusClient
         // TODO: unsubscribe!
     }
 
-    void sendRequest(ref const MACAddress server, ref const ModbusPDU request, ModbusResponseHandler responseHandler, ubyte numRetries = 0, ushort timeout = 500) nothrow
+    void sendRequest(ref const MACAddress server, ref const ModbusPDU request, ModbusResponseHandler responseHandler, ModbusErrorHandler errorHandler = null, ubyte numRetries = 0, ushort timeout = 500) nothrow @nogc
     {
-        pending ~= PendingRequest(getTime(), request, numRetries, timeout, server, responseHandler);
-        PendingRequest* r = &pending[$-1];
+        MonoTime now = getTime();
+        PendingRequest* r = &pending.pushBack(PendingRequest(now, now, request, numRetries, timeout, server, responseHandler, errorHandler));
 
         // send the packet
         void[] msg = (cast(void*)&request)[0 .. 1 + request.data.length];
         iface.send(server, msg, EtherType.ENMS, ENMS_SubType.Modbus);
     }
 
+    void update()
+    {
+        for (size_t i = 0; i < pending.length; )
+        {
+            PendingRequest* req = &pending[i];
+
+            MonoTime now = getTime();
+
+            if (req.retryTime + msecs(req.timeout) < now)
+            {
+                if (req.numRetries > 0)
+                {
+                    req.numRetries--;
+                    req.retryTime = now;
+                    void[] msg = (cast(void*)&req.request)[0 .. 1 + req.request.data.length];
+                    iface.send(req.server, msg, EtherType.ENMS, ENMS_SubType.Modbus);
+                    req.errorHandler(ModbusErrorType.Retrying, req.request, req.retryTime);
+                }
+                else
+                {
+                    req.errorHandler(ModbusErrorType.Timeout, req.request, req.requestTime);
+                    pending.remove(i);
+                    continue;
+                }
+            }
+            ++i;
+        }
+    }
+
 private:
     struct PendingRequest
     {
         MonoTime requestTime;
+        MonoTime retryTime;
         ModbusPDU request;
         ubyte numRetries;
         ushort timeout;
         MACAddress server;
         ModbusResponseHandler responseHandler;
+        ModbusErrorHandler errorHandler;
     }
 
-    PendingRequest[] pending;
+    Array!PendingRequest pending;
 
     void incomingPacket(ref const Packet p, BaseInterface iface, void* userData) nothrow @nogc
     {
@@ -66,11 +105,9 @@ private:
             // this appears to be the message we're waiting for!
             auto message = cast(const(ubyte)[])p.data[];
             ModbusPDU response = ModbusPDU(cast(FunctionCode)message[0], message[1 .. $]);
-            req.responseHandler(req.request, response, p.creationTime);
+            req.responseHandler(req.request, response, req.requestTime, p.creationTime);
 
-            // HACK! remove the pending request...
-            debug
-                pending = pending[0 .. i] ~ pending[i + 1 .. $];
+            pending.remove(i);
             return;
         }
     }

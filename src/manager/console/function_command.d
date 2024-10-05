@@ -14,11 +14,20 @@ public import manager.console.expression;
 public import manager.console.session; 
 
 
+class FunctionCommandState : CommandState
+{
+nothrow @nogc:
+    this(Session session)
+    {
+        super(session, null);
+    }
+}
+
 class FunctionCommand : Command
 {
 nothrow @nogc:
 
-	alias GenericCall = const(char)[] function(Session, KVP[], void*) nothrow @nogc;
+	alias GenericCall = const(char)[] function(Session, out FunctionCommandState state, KVP[], void*) nothrow @nogc;
 
 	static FunctionCommand create(alias fun, Instance)(ref Console console, Instance i, const(char)[] commandName = null)
 	{
@@ -26,7 +35,7 @@ nothrow @nogc:
 
 		enum FunctionName = transformCommandName(__traits(identifier, fun));
 
-		static const(char)[] functionAdapter(Session session, KVP[] parameters, void* instance)
+		static const(char)[] functionAdapter(Session session, out FunctionCommandState state, KVP[] parameters, void* instance)
 		{
 			bool success = false;
 			auto args = makeArgTuple!fun(parameters, success);
@@ -43,6 +52,11 @@ nothrow @nogc:
 					__traits(getMember, cast(__traits(parent, fun))instance, __traits(identifier, fun))(session, args.expand);
 					return null;
 				}
+				else static if (is(ReturnType!fun : FunctionCommandState))
+				{
+					state = __traits(getMember, cast(__traits(parent, fun))instance, __traits(identifier, fun))(session, args.expand);
+					return null;
+				}
 				else
 				{
 					auto r = __traits(getMember, cast(__traits(parent, fun))instance, __traits(identifier, fun))(session, args.expand);
@@ -54,6 +68,11 @@ nothrow @nogc:
 				static if (is(ReturnType!fun == void))
 				{
 					fun(session, args.expand);
+					return null;
+				}
+				else static if (is(ReturnType!fun : FunctionCommandState))
+				{
+					state = fun(session, args.expand);
 					return null;
 				}
 				else
@@ -75,7 +94,7 @@ nothrow @nogc:
 		this.fn = fn;
 	}
 
-	override CommandState execute(Session session, const(char)[] cmdLine)
+	override FunctionCommandState execute(Session session, const(char)[] cmdLine)
 	{
 		import urt.mem.scratchpad;
 		import urt.mem.region;
@@ -101,11 +120,15 @@ nothrow @nogc:
 				params[numParams++] = kvp;
 		}
 
-		const(char)[] result = fn(session, params[0 .. numParams], instance);
+		FunctionCommandState state;
+		const(char)[] result = fn(session, state, params[0 .. numParams], instance);
+		if (state)
+			state.command = this;
 
 		// TODO: when a function returns a token, it might be fed into the calling context?
+		assert(!(state && result), "Shouldn't return a latent state AND a result...");
 
-		return null;
+		return state;
 	}
 
 private:

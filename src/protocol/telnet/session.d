@@ -123,6 +123,8 @@ nothrow @nogc:
         }
 
         ptrdiff_t sent = m_stream.write(text[]);
+        if (newline)
+            sent = m_stream.write("\r\n");
     }
 
 //    override void WriteLine(const(char)[] line)
@@ -260,15 +262,15 @@ private:
 
         enum Clear = ANSI_ERASE_LINE ~ "\x1b[80D"; // clear and move left 80
 
-        char[] prompt = tformat("{0, ?1}{2}{3}{@5, ?4}", Clear, withErase, m_prompt, m_buffer, m_position < m_buffer.length, "\x1b[{6}D", m_buffer.length - m_position);
-//        bcString prompt(TempAllocator());
-//        if (withErase)
-//            prompt = ANSI_ERASE_LINE "\x1b[80D"; // clear and move left 80
-//        prompt.Append(m_prompt);
-//        prompt.Append(m_buffer);
-//        if (m_position < m_buffer.length)
-//            prompt.AppendFormat("\x1b[%dD", m_buffer.length - m_position);
+        if (m_position < m_buffer.length)
+        {
+            import urt.dbg;
+            breakpoint;
+            // CHECK THAT THE INDIRECT FORMAT STRING WORKS...
+            // then delete this code block...
+        }
 
+        char[] prompt = tformat("{0, ?1}{2}{3}{@5, ?4}", Clear, withErase, m_prompt, m_buffer, m_position < m_buffer.length, "\x1b[{6}D", m_buffer.length - m_position);
         ptrdiff_t sent = m_stream.write(prompt);
     }
 }

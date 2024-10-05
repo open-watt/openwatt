@@ -488,7 +488,20 @@ struct DefFormat(T)
 			buffer[T.stringof.length + 1 + len] = ')';
 			return T.stringof.length + 2 + len;
 		}
-		else if (is(T == const))
+        else static if (is(T == class))
+        {
+            const(char)[] t = value.toString();
+            if (!buffer.ptr)
+                return t.length;
+            if (buffer.length < t.length)
+            {
+                buffer[] = t[0 .. buffer.length];
+                return buffer.length;
+            }
+            buffer[0 .. t.length] = t[];
+            return t.length;
+        }
+		else static if (is(T == const))
 		{
 			return defToString!(Unqual!T)(cast()value, buffer, format, formatArgs);
 		}

@@ -270,7 +270,6 @@ nothrow @nogc:
 	void addCommand(Command command, Scope parent)
 	{
 		parent.addCommand(command);
-//		commands ~= command;
 	}
 
 	Command findCommand(const(char)[] cmdPath)
@@ -363,9 +362,8 @@ package:
 	String m_identifier;
 	String m_prompt;
 
-//	bcHashMap<bcString, dcDebugCommand*> m_commands;
-//	bcHashSet<dcConsoleSession*> m_sessions;
 	Map!(String, Command) m_commands;
+//	HashSet<dcConsoleSession*> m_sessions;
 	Array!Session m_sessions;
 
 	Console* m_nextConsoleInstance = null;

@@ -23,9 +23,22 @@ enum CommandCompletionState : ubyte
 
 class CommandState
 {
-	Console* manager;
-	Command command;
-	bool cancelPending = false;
+nothrow @nogc:
+
+    Session session;
+    Command command;
+    bool cancelPending = false;
+
+    this(Session session, Command command)
+    {
+        this.session = session;
+        this.command = command;
+    }
+
+    CommandCompletionState update()
+    {
+        return CommandCompletionState.Finished;
+    }
 }
 
 class Command
@@ -43,11 +56,6 @@ nothrow @nogc:
 	final ApplicationInstance appInstance() pure nothrow @nogc => m_console.appInstance;
 
 	abstract CommandState execute(Session session, const(char)[] cmdLine);
-
-	CommandCompletionState update(CommandState data)
-	{
-		return CommandCompletionState.Finished;
-	}
 
 	String complete(const(char)[] cmdLine) const
 	{

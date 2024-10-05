@@ -1,5 +1,6 @@
 module router.iface.modbus;
 
+import urt.array;
 import urt.conv;
 import urt.endian;
 import urt.map;
@@ -63,8 +64,7 @@ nothrow @nogc:
     ushort requestTimeout = 500; // default 500ms? longer?
 
 	// if we are the bus master
-	ModbusRequest[8] pendingRequests;
-	size_t numPending = 0;
+	Array!ModbusRequest pendingRequests;
 
 	// if we are not the bus master
 	MACAddress masterMac;
@@ -98,18 +98,18 @@ nothrow @nogc:
 		MonoTime now = getTime();
 
         // check for timeouts
-        for (size_t i = 0; i < numPending; ++i)
+        for (size_t i = 0; i < pendingRequests.length; )
         {
             auto req = &pendingRequests[i];
             if (now - req.requestTime > 500.msecs)
             {
-                for (size_t j = i; j < numPending - 1; ++j)
-                    pendingRequests[j] = pendingRequests[j + 1];
-                --numPending;
+                pendingRequests.remove(i);
 
                 // TODO: do we need to send any queued messages?
-                assert(false);
+//                assert(false);
             }
+            else
+                ++i;
         }
 
         // check for data
@@ -176,7 +176,7 @@ nothrow @nogc:
 				if (taken == 0)
 				{
 					readOffset = length - offset;
-					buffer[0 .. readOffset] = buffer[offset .. length];
+					memmove(buffer.ptr, buffer.ptr + offset, readOffset);
 					length = readOffset;
 					offset = 0;
 					assert(length < 260);
@@ -217,7 +217,7 @@ nothrow @nogc:
 				address = map.localAddress;
 
 				// we need to queue the request so we can return the response to the sender...
-				pendingRequests[numPending++] = ModbusRequest(getTime(), packet.src, map.localAddress, 0, &packet);
+				pendingRequests ~= ModbusRequest(getTime(), packet.src, map.localAddress, 0, &packet);
 			}
 		}
 		else
@@ -345,9 +345,8 @@ private:
         if (isBusMaster)
         {
             // if we are the bus master, we expect to receive packets in response to queued requests
-            for (size_t i = 0; i < numPending; ++i)
+            foreach (i, ref req; pendingRequests)
             {
-                auto req = &pendingRequests[i];
                 if (req.localServerAddress != frameInfo.address)
                     continue;
 
@@ -356,9 +355,7 @@ private:
                 dispatch(p);
 
                 // remove the request from the queue
-                for (size_t j = i; j < numPending - 1; ++j)
-                    pendingRequests[j] = pendingRequests[j + 1];
-                --numPending;
+                pendingRequests.remove(i);
                 break;
             }
         }

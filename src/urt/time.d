@@ -23,9 +23,6 @@ nothrow @nogc:
 	Duration opBinary(string op)(MonoTime rhs) const pure if (op == "-")
 		=> Duration(ticks - rhs.ticks);
 
-	Duration opBinary(string op)(Duration rhs) const pure if (op == "+" || op == "-")
-		=> MonoTime(mixin("ticks " ~ op ~ " rhs.ticks"));
-
 	MonoTime opBinary(string op)(Duration rhs) const pure if (op == "+" || op == "-")
 		=> MonoTime(mixin("ticks " ~ op ~ " rhs.ticks"));
 

@@ -280,7 +280,22 @@ nothrow @nogc:
 
     void remove(size_t i)
     {
-        assert(false);
+        static if (is(T == class))
+        {
+            for (size_t j = i + 1; j < _length; ++j)
+                ptr[j-1] = ptr[j];
+            ptr[--_length] = null;
+        }
+        else
+        {
+            ptr[i].destroy!false();
+            for (size_t j = i + 1; j < _length; ++j)
+            {
+                emplace!T(&ptr[j-1], ptr[j].move);
+                ptr[j].destroy!false();
+            }
+            --_length;
+        }
     }
 
     void remove(const(T)* pItem)                { remove(ptr[0 .. _length].indexOfElement(pItem)); }
@@ -288,7 +303,17 @@ nothrow @nogc:
 
     void removeSwapLast(size_t i)
     {
-        assert(false);
+        static if (is(T == class))
+        {
+            ptr[i] = ptr[--_length];
+            ptr[_length] = null;
+        }
+        else
+        {
+            ptr[i].destroy!false();
+            emplace!T(&ptr[i], ptr[--_length].move);
+            ptr[_length].destroy!false();
+        }
     }
 
     void removeSwapLast(const(T)* pItem)        { removeSwapLast(ptr[0 .. _length].indexOfElement(pItem)); }
