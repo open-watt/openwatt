@@ -6,7 +6,6 @@ import urt.io;
 
 import router.modbus.message;
 import router.modbus.profile;
-import router.modbus.util;
 
 import router.iface.modbus;
 

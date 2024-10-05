@@ -88,9 +88,7 @@ struct Element
 
 struct Sampler
 {
-	import router.server : Server; // TODO: can we separate this from the router package?
-
-	Server server;
+	void* server; // Server
 	void* samplerData;
 	void* dbRef;
 	UnitDef convert;

@@ -1,3 +1,0 @@
-module router.scanner;
-
-// TODO: implement a device scanner, and implement an interface for plug-in scanning logic...

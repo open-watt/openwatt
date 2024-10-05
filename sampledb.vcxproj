@@ -63,8 +63,6 @@
     <DCompile Include="src\manager\log.d" />
     <DCompile Include="src\manager\package.d" />
     <DCompile Include="src\manager\plugin.d" />
-    <DCompile Include="src\manager\protocol\modbus.d" />
-    <DCompile Include="src\manager\protocol\package.d" />
     <DCompile Include="src\manager\subscriber.d" />
     <DCompile Include="src\manager\system.d" />
     <DCompile Include="src\manager\units.d" />
@@ -82,7 +80,6 @@
     <DCompile Include="src\protocol\telnet\session.d" />
     <DCompile Include="src\protocol\tesla\master.d" />
     <DCompile Include="src\protocol\tesla\twc.d" />
-    <DCompile Include="src\router\client.d" />
     <DCompile Include="src\router\goodwe\aa55.d" />
     <DCompile Include="src\router\goodwe\package.d" />
     <DCompile Include="src\router\iface\bridge.d" />
@@ -91,11 +88,8 @@
     <DCompile Include="src\router\iface\package.d" />
     <DCompile Include="src\router\iface\packet.d" />
     <DCompile Include="src\router\iface\tesla.d" />
-    <DCompile Include="src\router\modbus\client.d" />
     <DCompile Include="src\router\modbus\coding.d" />
-    <DCompile Include="src\router\modbus\connection.d" />
     <DCompile Include="src\router\modbus\message.d" />
-    <DCompile Include="src\router\modbus\package.d" />
     <DCompile Include="src\router\modbus\profile\goodwe.d" />
     <DCompile Include="src\router\modbus\profile\goodwe_ems.d" />
     <DCompile Include="src\router\modbus\profile\goodwe_inverter.d" />
@@ -104,11 +98,8 @@
     <DCompile Include="src\router\modbus\profile\package.d" />
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d" />
     <DCompile Include="src\router\modbus\server.d" />
-    <DCompile Include="src\router\modbus\util.d" />
     <DCompile Include="src\router\port\package.d" />
     <DCompile Include="src\router\port\serial.d" />
-    <DCompile Include="src\router\scanner.d" />
-    <DCompile Include="src\router\server.d" />
     <DCompile Include="src\router\stream\bridge.d" />
     <DCompile Include="src\router\stream\package.d" />
     <DCompile Include="src\router\stream\serial.d" />
@@ -158,7 +149,6 @@
     <DCompile Include="src\urt\time.d" />
     <DCompile Include="src\urt\traits.d" />
     <DCompile Include="src\urt\util.d" />
-    <DCompile Include="src\urt\vector.d" />
   </ItemGroup>
   <ItemGroup>
     <None Include=".editorconfig" />

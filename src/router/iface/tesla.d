@@ -16,9 +16,6 @@ import router.iface;
 import router.iface.packet;
 import router.stream;
 
-// TODO: delete this nonsense!
-import router.tesla.twc;
-
 
 struct DeviceMap
 {
@@ -284,3 +281,29 @@ class TeslaInterfaceModule : Plugin
 
 
 private:
+
+ubyte[] unescapeMsg(ubyte[] msg) nothrow @nogc
+{
+	size_t offset = 0;
+	for (size_t i = 0; i < msg.length; i++)
+	{
+		if (msg[i] == 0xDB)
+		{
+			if (++i >= msg.length)
+				return null;
+			else if (msg[i] == 0xDC)
+				msg[offset++] = 0xC0;
+			else if (msg[i] == 0xDD)
+				msg[offset++] = 0xDB;
+			else
+				return null;
+		}
+		else
+		{
+			if (offset < i)
+				msg[offset] = msg[i];
+			offset++;
+		}
+	}
+	return msg[0 .. offset];
+}

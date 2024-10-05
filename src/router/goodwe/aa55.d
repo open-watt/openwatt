@@ -4,8 +4,6 @@ import std.socket;
 
 import manager.value;
 
-public import router.server;
-
 import router.modbus.server;
 import router.stream.udp;
 
@@ -50,8 +48,8 @@ struct GoodWeRequestData
 	GoodWeFunctionCode functionCode;
 	ubyte[] data;
 }
-
-class GoodWeServer : Server
+/+
+class GoodWeServer
 {
 	this(string name, string inverterAddr)
 	{
@@ -67,12 +65,12 @@ class GoodWeServer : Server
 		stream.disconnect();
 	}
 
-	override bool linkEstablished()
+	bool linkEstablished()
 	{
 		return commEstablished;
 	}
 
-	override bool sendRequest(Request request)
+	bool sendRequest(Request request)
 	{
 		request.requestTime = getTime();
 
@@ -132,7 +130,7 @@ class GoodWeServer : Server
 		assert(0);
 	}
 
-	override void poll()
+	void poll()
 	{
 		MonoTime now = getTime();
 
@@ -363,3 +361,4 @@ private:
 	GoodWeRequestData responseData;
 	KVP[string] cachedValues;
 }
++/

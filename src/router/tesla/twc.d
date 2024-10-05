@@ -109,7 +109,6 @@ import std.socket : Socket, wouldHaveBlocked;
 
 import manager.element;
 
-public import router.server;
 import router.stream;
 
 import urt.endian;
@@ -349,7 +348,7 @@ fakeTWCID[0], fakeTWCID[1], slaveSign[0]));
 }
 +/
 
-class TeslaWallConnector : Server
+class TeslaWallConnector
 {
 	string id;
 	Stream stream;
@@ -363,18 +362,18 @@ class TeslaWallConnector : Server
 
 	this(string id, Stream stream)
 	{
-		super(id);
+//		super(id);
 
 		this.id = id;
 		this.stream = stream;
 	}
 
-	override bool linkEstablished()
+	bool linkEstablished()
 	{
 		return chargerOnline;
 	}
 
-	override void poll()
+	void poll()
 	{
 		MonoTime now = getTime();
 
@@ -432,16 +431,6 @@ class TeslaWallConnector : Server
 			decodeAndPrintMessage(msg);
 
 		}
-	}
-
-	override bool sendRequest(Request request)
-	{
-		// TODO: should non-modbus requests attempt to be translated based on the profile?
-		assert(0);
-	}
-
-	override void requestElements(Element*[] elements)
-	{
 	}
 
 private:

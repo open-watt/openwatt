@@ -2,8 +2,6 @@ module router.modbus.message;
 
 import urt.endian;
 
-import router.modbus.util;
-
 
 enum ModbusMessageDataMaxLength = 252;
 

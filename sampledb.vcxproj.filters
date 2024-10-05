@@ -49,9 +49,6 @@
     <Filter Include="src\urt\intrinsic">
       <UniqueIdentifier>{4df84de2-6358-4722-b319-08d25bd2f6ac}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\manager\protocol">
-      <UniqueIdentifier>{8703eac1-773f-4d5b-8170-1fd230ebcf22}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\router\iface">
       <UniqueIdentifier>{0e965bb7-e2d4-44f9-a982-88df797db1fb}</UniqueIdentifier>
     </Filter>
@@ -102,9 +99,6 @@
     <DCompile Include="src\router\modbus\coding.d">
       <Filter>src\router\modbus</Filter>
     </DCompile>
-    <DCompile Include="src\router\modbus\util.d">
-      <Filter>src\router\modbus</Filter>
-    </DCompile>
     <DCompile Include="src\router\modbus\message.d">
       <Filter>src\router\modbus</Filter>
     </DCompile>
@@ -117,17 +111,8 @@
     <DCompile Include="src\db\stream.d">
       <Filter>src\db</Filter>
     </DCompile>
-    <DCompile Include="src\router\client.d">
-      <Filter>src\router</Filter>
-    </DCompile>
-    <DCompile Include="src\router\modbus\connection.d">
-      <Filter>src\router\modbus</Filter>
-    </DCompile>
     <DCompile Include="src\manager\element.d">
       <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\router\server.d">
-      <Filter>src\router</Filter>
     </DCompile>
     <DCompile Include="src\manager\units.d">
       <Filter>src\manager</Filter>
@@ -162,9 +147,6 @@
     <DCompile Include="src\router\stream\serial.d">
       <Filter>src\router\stream</Filter>
     </DCompile>
-    <DCompile Include="src\router\scanner.d">
-      <Filter>src\router</Filter>
-    </DCompile>
     <DCompile Include="src\devices\goodwe\scanner.d">
       <Filter>src\devices\goodwe</Filter>
     </DCompile>
@@ -180,13 +162,7 @@
     <DCompile Include="src\manager\package.d">
       <Filter>src\manager</Filter>
     </DCompile>
-    <DCompile Include="src\router\modbus\package.d">
-      <Filter>src\router\modbus</Filter>
-    </DCompile>
     <DCompile Include="src\router\modbus\server.d">
-      <Filter>src\router\modbus</Filter>
-    </DCompile>
-    <DCompile Include="src\router\modbus\client.d">
       <Filter>src\router\modbus</Filter>
     </DCompile>
     <DCompile Include="src\router\goodwe\package.d">
@@ -258,9 +234,6 @@
     <DCompile Include="src\urt\list.d">
       <Filter>src\urt</Filter>
     </DCompile>
-    <DCompile Include="src\urt\vector.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
     <DCompile Include="src\urt\platform.d">
       <Filter>src\urt</Filter>
     </DCompile>
@@ -284,12 +257,6 @@
     </DCompile>
     <DCompile Include="src\manager\console\expression.d">
       <Filter>src\manager\console</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\protocol\package.d">
-      <Filter>src\manager\protocol</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\protocol\modbus.d">
-      <Filter>src\manager\protocol</Filter>
     </DCompile>
     <DCompile Include="src\urt\mem\region.d">
       <Filter>src\urt\mem</Filter>

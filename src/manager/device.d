@@ -9,7 +9,6 @@ import manager.value;
 
 import router.modbus.message;
 import router.modbus.profile;
-import router.server;
 
 import urt.log;
 import urt.string;
@@ -22,7 +21,7 @@ struct Device
 	String name;
 	Component*[String] components;
 
-	Server[] servers;
+//	Server[] servers;
 
 	void addComponent(Component* component)
 	{
@@ -92,8 +91,8 @@ struct Device
 			assert(!serverElements.empty);
 
 			// TODO: i'd love it if this module didn't reference the router!
-			Server server = serverElements.front.sampler.server;
-			server.requestElements(serverElements.array);
+//			Server server = serverElements.front.sampler.server;
+//			server.requestElements(serverElements.array);
 		}
 	}
 
