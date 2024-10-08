@@ -107,6 +107,13 @@ char[] format(Args...)(char[] buffer, const(char)[] fmt, ref Args args)
 	return r;
 }
 
+ptrdiff_t formatValue(T)(auto ref T value, char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs)
+{
+    static if (is(typeof(&value.toString) : StringifyFunc))
+        return value.toString(buffer, format, formatArgs);
+    else
+        return value.defFormat.toString(buffer, format, formatArgs);
+}
 
 struct FormatArg
 {

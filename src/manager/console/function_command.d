@@ -37,12 +37,11 @@ nothrow @nogc:
 
 		static const(char)[] functionAdapter(Session session, out FunctionCommandState state, KVP[] parameters, void* instance)
 		{
-			bool success = false;
-			auto args = makeArgTuple!fun(parameters, success);
-			if (!success)
+			const(char)[] error;
+			auto args = makeArgTuple!fun(parameters, error);
+			if (error)
 			{
-				// we should report some sort of error...
-				// but we'll need to improve the API to report error status
+				session.writeLine(error);
 				return null;
 			}
 			static if (is(__traits(parent, fun)))
@@ -152,7 +151,7 @@ char[] transformCommandName(const(char)[] name)
 	return result;
 }
 
-auto makeArgTuple(alias F)(KVP[] args, out bool success)
+auto makeArgTuple(alias F)(KVP[] args, out const(char)[] error)
 	if (isSomeFunction!F)
 {
 	import urt.meta;
@@ -161,14 +160,15 @@ auto makeArgTuple(alias F)(KVP[] args, out bool success)
 	alias ParamNames = ParameterIdentifierTuple!F[1 .. $];
 
 	Tuple!Params params;
-	success = true;
+	error = null;
+	bool[Params.length] gotArg;
 
 	outer: foreach (ref kvp; args)
 	{
 		// validate argument name...
 		if (kvp.k.type != Token.Type.Identifier)
 		{
-			success = false;
+			error = tconcat("Invalid parameter type");
 			break;
 		}
 
@@ -180,16 +180,31 @@ auto makeArgTuple(alias F)(KVP[] args, out bool success)
 				case Alias!(transformCommandName(ParamNames[i])):
 					if (!kvp.v.tokenToValue(params[i]))
 					{
-						success = false;
+						error = tconcat("Invalid argument: ", params[i]);
 						break outer;
 					}
+					gotArg[i] = true;
 					break arg;
 			}
 			default:
-				assert(false, tconcat("Unknown parameter '", key, "'"));
-				break;
+				error = tconcat("Unknown parameter '", key, "'");
+				break outer;
 		}
 	}
+
+    static foreach (i, P; Params)
+    {
+        static if (!is(P : Nullable!U, U))
+        {
+            if (!gotArg[i])
+            {
+                error = tconcat("Missing argument: ", Alias!(transformCommandName(ParamNames[i])));
+                goto done;
+            }
+        }
+    }
+
+done:
 	return params;
 }
 
@@ -213,7 +228,10 @@ bool tokenToValue(ref const Token t, out bool r) nothrow @nogc
 {
 	const(char)[] v = tokenValue(t, false);
 	if (!v)
-		return false;
+	{
+		r = true;
+		return true;
+	}
 	if (v[] == "true" || v[] == "yes")
 	{
 		r = true;
@@ -302,13 +320,11 @@ bool tokenToValue(T : U[], U)(ref const Token t, out T r) nothrow @nogc if (!is(
 	return true;
 }
 
-
-
 bool tokenToValue(T : Nullable!U, U)(ref const Token t, out T r) nothrow @nogc
 {
 	U tmp;
 	bool success = tokenToValue(t, tmp);
 	if (success)
-		r = tmp;
+		r = tmp.move;
 	return success;
 }

@@ -1,5 +1,6 @@
 module urt.meta.nullable;
 
+import urt.string.format : formatValue, FormatArg;
 import urt.traits;
 
 
@@ -36,7 +37,7 @@ template Nullable(T)
             => _value == 1;
 
         bool opCast(T : bool)() const
-            => value != NullValue;
+            => _value != NullValue;
 
         bool opEquals(typeof(null)) const
             => _value == NullValue;
@@ -52,6 +53,14 @@ template Nullable(T)
         {
             assert(v != NullValue);
             _value = cast(ubyte)v;
+        }
+
+        ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc
+        {
+            if (value == NullValue)
+                return formatValue(null, buffer, format, formatArgs);
+            else
+                return formatValue(value, buffer, format, formatArgs);
         }
     }
 }
@@ -91,6 +100,14 @@ template Nullable(T)
             assert(v != NullValue);
             value = v;
         }
+
+        ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc
+        {
+            if (value == NullValue)
+                return formatValue(null, buffer, format, formatArgs);
+            else
+                return formatValue(value, buffer, format, formatArgs);
+        }
     }
 }
 
@@ -127,6 +144,14 @@ template Nullable(T)
             if (is(U : T))
         {
             value = v;
+        }
+
+        ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc
+        {
+            if (value is NullValue)
+                return formatValue(null, buffer, format, formatArgs);
+            else
+                return formatValue(value, buffer, format, formatArgs);
         }
     }
 }
