@@ -104,6 +104,16 @@ class TCPStream : Stream
         this.options = options;
     }
 
+    void enableKeepAlive(bool enable, Duration keepIdle = seconds(10), Duration keepInterval = seconds(1), int keepCount = 10)
+    {
+        this.keepEnable = enable;
+        this.keepIdle = keepIdle;
+        this.keepInterval = keepInterval;
+        this.keepCount = keepCount;
+        if (socket)
+            set_keepalive(socket, enable, keepIdle, keepInterval, keepCount);
+    }
+
     override ptrdiff_t read(void[] buffer) nothrow @nogc
     {
         if (!live)
@@ -271,6 +281,9 @@ class TCPStream : Stream
             // let's just assert that the socket is writable to be sure...
             assert(fd.returnEvents & PollEvents.Write);
             live = true;
+
+            if (keepEnable)
+                set_keepalive(socket, keepEnable, keepIdle, keepInterval, keepCount);
         }
     }
 
@@ -281,6 +294,11 @@ class TCPStream : Stream
     Socket socket;
     MonoTime lastRetry;
 //    TCPServer reverseConnectServer;
+
+    bool keepEnable = false;
+    int keepCount = 10;
+    Duration keepIdle;
+    Duration keepInterval;
 
     this(String name, Socket socket, ushort port)
     {

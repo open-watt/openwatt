@@ -12,7 +12,7 @@ class TeslaTWCMaster
 
 	this(String name, BaseInterface iface)
 	{
-		import core.lifetime;
+		import urt.lifetime;
 
 		this.name = name.move;
 		this.iface = iface;

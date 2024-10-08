@@ -1,8 +1,5 @@
 module urt.lifetime;
 
-import core.lifetime;
-
-
 nothrow @nogc:
 
 

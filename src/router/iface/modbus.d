@@ -5,7 +5,6 @@ import urt.conv;
 import urt.endian;
 import urt.map;
 import urt.mem;
-import urt.meta.nullable;
 import urt.string;
 import urt.string.format;
 import urt.time;
@@ -82,6 +81,14 @@ nothrow @nogc:
 			masterMac = generateMacAddress();
 			masterMac.b[5] = 0xFF;
 			addAddress(masterMac, this);
+
+            // if we're not the master, we can't write to the bus unless we are responding...
+            // and if the stream is TCP, we'll never know if the remote has dropped the connection
+            // we'll enable keep-alive in tcp streams to to detect this...
+            import router.stream.tcp : TCPStream;
+            auto tcpStream = cast(TCPStream)stream;
+            if (tcpStream)
+                tcpStream.enableKeepAlive(true, seconds(10), seconds(1), 10);
 		}
 
 		status.linkStatusChangeTime = getTime();
@@ -200,7 +207,10 @@ nothrow @nogc:
 	{
 		// can only handle modbus packets
 		if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.Modbus)
+        {
+            ++status.sendDropped;
 			return false;
+        }
 
 		auto modbus = mod_iface.app.moduleInstance!ModbusInterfaceModule();
 
@@ -214,7 +224,10 @@ nothrow @nogc:
 			{
 				ServerMap* map = modbus.findServerByMac(packet.dst);
 				if (!map)
-					return false; // we don't know who this server is!
+                {
+                    ++status.sendDropped;
+                    return false; // we don't know who this server is!
+                }
 				if (map.iface !is this)
 					assert(false); // what happened here? why did this interface receive the message?
 				address = map.localAddress;
@@ -227,12 +240,18 @@ nothrow @nogc:
 		{
 			// if we're not a bus master, we can only send response packets destined for the master
 			if (packet.dst != masterMac)
-				return false;
+            {
+                ++status.sendDropped;
+                return false;
+            }
 
 			// the packet is a response to the master; just frame it and send it...
 			ServerMap* map = modbus.findServerByMac(packet.src);
 			if (!map)
+            {
+                ++status.sendDropped;
 				return false; // how did we even get a response if we don't know who the server is?
+            }
 
 			if (map.iface is this)
 			{
@@ -277,7 +296,9 @@ nothrow @nogc:
 		ptrdiff_t written = stream.write(buffer[0 .. length]);
 		if (written <= 0)
 		{
-			// what could have gone wrong here?
+            ++status.sendDropped;
+
+            // what could have gone wrong here?
 			// proper error handling?
 			assert(false);
 		}
@@ -467,6 +488,8 @@ class ModbusInterfaceModule : Plugin
 
 			return universalAddress in remoteServers;
 		}
+
+		import urt.meta.nullable;
 
 		// /interface/modbus/add command
 		// TODO: protocol enum!

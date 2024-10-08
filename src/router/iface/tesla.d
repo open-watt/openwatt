@@ -114,7 +114,10 @@ nothrow @nogc:
 	override bool forward(ref const Packet packet) nothrow @nogc
 	{
 		if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.TeslaTWC)
-			return false;
+        {
+            ++status.sendDropped;
+            return false;
+        }
 
 		const(ubyte)[] msg = cast(ubyte[])packet.data;
 
@@ -150,8 +153,7 @@ nothrow @nogc:
 		if (written != offset)
 		{
             debug writeDebug("Failed to write to stream '", stream.name, "'");
-            ++status.droppedPackets;
-            status.droppedBytes += packet.data.length;
+            ++status.sendDropped;
 			return false;
 		}
 

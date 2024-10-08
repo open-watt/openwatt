@@ -33,7 +33,7 @@ version(Windows)
 
 		this(String name, string device, in SerialParams serialParams, StreamOptions options = StreamOptions.None)
 		{
-			import core.lifetime;
+            import urt.lifetime;
 
 			super(name.move, "serial", options);
 			this.device = device;

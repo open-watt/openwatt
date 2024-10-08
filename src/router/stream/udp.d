@@ -15,7 +15,7 @@ class UDPStream : Stream
 {
 	this(String name, ushort remotePort, string remoteHost = "255.255.255.255", ushort localPort = 0, string localHost = "0.0.0.0", StreamOptions options = StreamOptions.None)
 	{
-		import core.lifetime;
+		import urt.lifetime;
 
 		// TODO: if remoteHost is a broadcast address and options doesn't have `AllowBroadcast`, make a warning...
 

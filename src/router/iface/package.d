@@ -65,12 +65,12 @@ struct InterfaceStatus
 	bool linkStatus;
 	int linkDowns;
 
+	ulong sendBytes;
+	ulong recvBytes;
 	uint sendPackets;
 	uint recvPackets;
-	uint droppedPackets;
-	ulong sendBytes;
-	ulong revcBytes;
-	ulong droppedBytes;
+	uint sendDropped;
+	uint recvDropped;
 }
 
 // MAC: 02:xx:xx:ra:nd:yy
@@ -103,9 +103,11 @@ nothrow @nogc:
 	BufferOverflowBehaviour sendBehaviour;
 	BufferOverflowBehaviour recvBehaviour;
 
+	BaseInterface master;
+
 	this(InterfaceModule.Instance m, String name, const(char)[] type) nothrow @nogc
 	{
-		import core.lifetime;
+		import urt.lifetime;
 
 		this.mod_iface = m;
 		this.name = name.move;
@@ -178,7 +180,7 @@ package:
 	{
 		// update the stats
 		++status.recvPackets;
-		status.revcBytes += packet.length;
+		status.recvBytes += packet.length;
 
 		// check if we ever saw the sender before...
 		if (findMacAddress(packet.src) is null)
@@ -206,6 +208,7 @@ class InterfaceModule : Plugin
 
 		override void init()
 		{
+			app.console.registerCommand!print("/interface", this);
 		}
 
 		override void update()
@@ -247,9 +250,73 @@ class InterfaceModule : Plugin
 			return null;
 		}
 
-	private:
+        import urt.meta.nullable;
 
-	}
+        // /interface/print command
+        void print(Session session, Nullable!bool stats)
+        {
+            import urt.util;
+
+            size_t nameLen = 4;
+            size_t typeLen = 4;
+            foreach (i, iface; interfaces)
+            {
+                nameLen = max(nameLen, iface.name.length);
+                typeLen = max(typeLen, iface.type.length);
+
+                // TODO: MTU stuff?
+            }
+
+            session.writeLine("Flags: R - RUNNING; S - SLAVE");
+            if (stats)
+            {
+                size_t rxLen = 7;
+                size_t txLen = 7;
+                size_t rpLen = 9;
+                size_t tpLen = 9;
+                size_t rdLen = 7;
+                size_t tdLen = 7;
+
+                foreach (i, iface; interfaces)
+                {
+                    rxLen = max(rxLen, iface.getStatus.recvBytes.formatInt(null));
+                    txLen = max(txLen, iface.getStatus.sendBytes.formatInt(null));
+                    rpLen = max(rpLen, iface.getStatus.recvPackets.formatInt(null));
+                    tpLen = max(tpLen, iface.getStatus.sendPackets.formatInt(null));
+                    rdLen = max(rdLen, iface.getStatus.recvDropped.formatInt(null));
+                    tdLen = max(tdLen, iface.getStatus.sendDropped.formatInt(null));
+                }
+
+                session.writef(" ID    {0, *1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",
+                               "NAME", nameLen,
+                               "RX-BYTE", rxLen, "TX-BYTE", txLen,
+                               "RX-PACKET", rpLen, "TX-PACKET", tpLen,
+                               "RX-DROP", rdLen, "TX-DROP", tdLen);
+
+                size_t i = 0;
+                foreach (iface; interfaces)
+                {
+                    session.writef("{0, 3} {1}{2} {3, *4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
+                                   i, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ',
+                                   iface.name, nameLen,
+                                   iface.getStatus.recvBytes, rxLen, iface.getStatus.sendBytes, txLen,
+                                   iface.getStatus.recvPackets, rpLen, iface.getStatus.sendPackets, tpLen,
+                                   iface.getStatus.recvDropped, rdLen, iface.getStatus.sendDropped, tdLen);
+                    ++i;
+                }
+            }
+            else
+            {
+                session.writef(" ID    {0, *1}  {2, *3}  MAC-ADDRESS\n", "NAME", nameLen, "TYPE", typeLen);
+                size_t i = 0;
+                foreach (iface; interfaces)
+                {
+                    session.writef("{0, 3} {6}{7}  {1, *2}  {3, *4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ');
+                    ++i;
+                }
+            }
+        }
+    }
 }
 
 

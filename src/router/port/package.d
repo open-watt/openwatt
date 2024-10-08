@@ -13,7 +13,7 @@ class Port
 
 	this(ApplicationInstance instance, String name, String type)
 	{
-		import core.lifetime;
+		import urt.lifetime;
 
 		this.instance = instance;
 		this.name = name.move;

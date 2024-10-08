@@ -3,6 +3,7 @@ module manager.console.session;
 import manager.console;
 
 import urt.array;
+import urt.lifetime;
 import urt.map;
 import urt.mem;
 import urt.string;
@@ -75,36 +76,34 @@ nothrow @nogc:
 		return writeOutput(args[0], false);
 	}
 
-	final void write(Args...)(ref Args args)
+	final void write(Args...)(auto ref Args args)
 		if (Args.length != 1 || !is(Args[0] : const(char)[]))
 	{
 		import urt.string.format;
 
 		char[1024] text;
-		writeOutput(concat(text, args), false);
+		writeOutput(concat(text, forward!args), false);
 	}
 
-	pragma(inline, true) final void writeLine(Args...)(ref Args args)
+	pragma(inline, true) final void writeLine(Args...)(auto ref Args args)
 		if (Args.length == 1 && is(Args[0] : const(char)[]))
 	{
 		return writeOutput(args[0], true);
 	}
 
-	final void writeLine(Args...)(ref Args args)
+	final void writeLine(Args...)(auto ref Args args)
 		if (Args.length != 1 || !is(Args[0] : const(char)[]))
 	{
 		import urt.string.format;
 
-		char[1024] text;
-		writeOutput(concat(text, args, '\n'), false);
+		writeOutput(tconcat(forward!args, '\n'), false);
 	}
 
-	final void writef(Args...)(const(char)[] format, ref Args args)
+	final void writef(Args...)(const(char)[] format, auto ref Args args)
 	{
 		import urt.string.format;
 
-		char[1024] text;
-		format(text, format, args).writeOutput;
+		writeOutput(tformat(format, forward!args), false);
 	}
 
 	bool showPrompt(bool show)
@@ -119,8 +118,6 @@ nothrow @nogc:
 
 	MutableString!0 setInput(const(char)[] text)
 	{
-		import core.lifetime : move;
-
 		MutableString!0 old = m_buffer.move;
 		m_buffer = null;
 		m_position = 0;
@@ -314,8 +311,6 @@ nothrow @nogc:
 
 	MutableString!0 takeInput()
 	{
-		import core.lifetime : move;
-
 		MutableString!0 take = m_buffer.move;
 		m_buffer = null;
 		m_position = 0;

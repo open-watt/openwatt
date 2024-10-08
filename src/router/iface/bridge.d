@@ -4,6 +4,7 @@ import urt.array;
 import urt.log;
 import urt.mem;
 import urt.string;
+import urt.time;
 
 import manager.console;
 import manager.instance;
@@ -16,28 +17,31 @@ class BridgeInterface : BaseInterface
 {
 nothrow @nogc:
 
-	this(InterfaceModule.Instance m, String name)
-	{
-		super(m, name, StringLit!"bridge");
+    this(InterfaceModule.Instance m, String name)
+    {
+        super(m, name, StringLit!"bridge");
 
-		macTable = MACTable(16, 256, 60);
-	}
+        macTable = MACTable(16, 256, 60);
 
-	bool addMember(BaseInterface iface)
-	{
-		assert(iface !is this, "Cannot add a bridge to itself!");
-		assert(members.length < 256, "Too many members in the bridge!");
+        status.linkStatus = true;
+        status.linkStatusChangeTime = getTime();
+    }
+
+    bool addMember(BaseInterface iface)
+    {
+        assert(iface !is this, "Cannot add a bridge to itself!");
+        assert(members.length < 256, "Too many members in the bridge!");
 
         ubyte port = cast(ubyte)members.length;
 
-		foreach (member; members)
-		{
-			if (iface is member)
-				return false;
-		}
-		members ~= iface;
+        // check is interface is already a slave
+        if (iface.master)
+            return false;
 
-		iface.subscribe(&incomingPacket, PacketFilter(), cast(void*)port);
+        members ~= iface;
+        iface.master = this;
+
+        iface.subscribe(&incomingPacket, PacketFilter(), cast(void*)port);
 
         // For modbus member interfaces, we'll pre-populate the MAC table with known device addresses...
         import router.iface.modbus;
@@ -60,14 +64,15 @@ nothrow @nogc:
             }
         }
 
-		return true;
-	}
+        return true;
+    }
 
 	bool removeMember(size_t index)
 	{
 		if (index >= members.length)
 			return false;
 
+		members[index].master = null;
 		members.remove(index);
 
 		// TODO: update the MAC table to adjust all the port numbers!
@@ -95,11 +100,15 @@ nothrow @nogc:
 		macTable.update();
 	}
 
-	override bool forward(ref const Packet packet)
-	{
-		send(packet);
-		return true;
-	}
+    override bool forward(ref const Packet packet)
+    {
+        send(packet);
+
+        ++status.sendPackets;
+        status.sendBytes += packet.data.length;
+
+    return true;
+    }
 
 protected:
 	Array!BaseInterface members;
@@ -218,13 +227,6 @@ class BridgeInterfaceModule : Plugin
 				session.writeLine("Bridge interface '", bridge, "' not found.");
 				return;
 			}
-			BaseInterface i = mod_if.findInterface(_interface);
-			if (i is null)
-			{
-				session.writeLine("Interface not found.");
-				return;
-			}
-
 			BridgeInterface bi = cast(BridgeInterface)b;
 			if (!bi)
 			{
@@ -232,9 +234,26 @@ class BridgeInterfaceModule : Plugin
 				return;
 			}
 
+			BaseInterface i = mod_if.findInterface(_interface);
+			if (i is null)
+			{
+				session.writeLine("Interface '", _interface, "' not found.");
+				return;
+			}
+            if (bi is i)
+            {
+                session.writeLine("Can't add a bridge to itself.");
+                return;
+            }
+            if (i.master)
+            {
+                session.writeLine("Interface '", _interface, "' is already a slave to '", i.master.name, "'.");
+                return;
+            }
+
 			if (!bi.addMember(i))
 			{
-				session.writeLine("Interface '", _interface, "' already a member of bridge '", bridge, "'.");
+				session.writeLine("Failed to add interface '", _interface, "' to bridge '", bridge, "'.");
 				return;
 			}
 		}

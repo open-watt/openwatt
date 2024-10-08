@@ -288,7 +288,8 @@ struct DefFormat(T)
 			bool showSign = false;
 			bool leadingZeroes = false;
 			bool toLower = false;
-			uint padding = 0;
+			bool varLen = false;
+			ptrdiff_t padding = 0;
 			uint base = 10;
 
 			if (format.length && format[0] == '+')
@@ -301,10 +302,21 @@ struct DefFormat(T)
 				leadingZeroes = true;
 				format.popFront;
 			}
+			if (format.length && format[0] == '*')
+			{
+				varLen = true;
+				format.popFront;
+			}
 			if (format.length && format[0].isNumeric)
 			{
 				bool success;
-				padding = cast(uint)format.parseInt(success);
+				padding = format.parseInt(success);
+				if (varLen)
+				{
+					if (padding < 0 || !formatArgs[padding].canInt)
+						return -1;
+					padding = formatArgs[padding].getInt;
+				}
 			}
 			if (format.length)
 			{
@@ -323,7 +335,7 @@ struct DefFormat(T)
 				format.popFront;
 			}
 
-			size_t len = formatInt(value, buffer, base, padding, leadingZeroes ? '0' : ' ', showSign);
+			size_t len = formatInt(value, buffer, base, cast(uint)padding, leadingZeroes ? '0' : ' ', showSign);
 
 			if (toLower)
 			{
@@ -406,7 +418,7 @@ struct DefFormat(T)
 			{
 				buffer.takeFront(len);
 				pad = buffer.length < padding ? buffer.length : padding;
-				buffer[0 .. len] = ' ';
+				buffer[0 .. pad] = ' ';
 			}
 			return pad + len;
 		}
@@ -560,7 +572,11 @@ char[] formatImpl(char[] buffer, const(char)[] format, const(FormatArg)[] args) 
 		write_char:
 			char c = format.popFront;
 			if (buffer.ptr)
+			{
+				if (buffer.length == 0)
+					break;
 				buffer.popFront = c;
+			}
 			++length;
 		}
 	}

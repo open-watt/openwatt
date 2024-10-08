@@ -1,6 +1,6 @@
 module urt.mem.allocator;
 
-
+import urt.lifetime;
 
 
 // TODO: this should be defined by platform/compiler/etc...
@@ -49,7 +49,6 @@ class Allocator
 	final T* allocT(T, Args...)(auto ref Args args) nothrow
 		if (!is(T == class))
 	{
-		import core.lifetime : emplace, forward;
 		T* item = cast(T*)alloc(T.sizeof, T.alignof).ptr;
 		try
 			item.emplace(forward!args);
@@ -63,7 +62,6 @@ class Allocator
 	final T allocT(T, Args...)(auto ref Args args) nothrow
 		if (is(T == class))
 	{
-		import core.lifetime : emplace, forward;
 		T item = cast(T)alloc(__traits(classInstanceSize, T), __traits(classInstanceAlignment, T)).ptr;
 		try
 			item.emplace(forward!args);
@@ -80,7 +78,6 @@ class Allocator
 		if (count == 0)
 			return null;
 
-		import core.lifetime : emplace, forward;
 		T[] items = cast(T[])alloc(T.sizeof * count, T.alignof);
 		try
 		{
@@ -182,7 +179,6 @@ class NoGCAllocator : Allocator
 	final T* allocT(T, Args...)(auto ref Args args) nothrow @nogc
 		if (!is(T == class))
 	{
-		import core.lifetime : emplace, forward;
 		T* item = cast(T*)alloc(T.sizeof, T.alignof).ptr;
 		try
 			item.emplace(forward!args);
@@ -196,7 +192,6 @@ class NoGCAllocator : Allocator
 	final T allocT(T, Args...)(auto ref Args args) nothrow @nogc
 		if (is(T == class))
 	{
-		import core.lifetime : emplace, forward;
 		T item = cast(T)alloc(__traits(classInstanceSize, T), __traits(classInstanceAlignment, T)).ptr;
 		try
 			item.emplace(forward!args);
@@ -213,7 +208,6 @@ class NoGCAllocator : Allocator
 		if (count == 0)
 			return null;
 
-		import core.lifetime : emplace, forward;
 		T[] items = cast(T[])alloc(T.sizeof * count, T.alignof);
 		try
 		{

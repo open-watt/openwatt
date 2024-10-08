@@ -1,8 +1,7 @@
 module router.stream;
 
-import core.lifetime;
-
 import urt.conv;
+import urt.lifetime;
 import urt.map;
 import urt.mem.string;
 import urt.meta.nullable;

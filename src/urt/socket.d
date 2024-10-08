@@ -693,35 +693,23 @@ Result set_keepalive(Socket socket, bool enable, Duration keepIdle, Duration kee
 	}
 	else
 	{
-		Result res = set_socket_option(socket, SocketOption.KeepAlive, enable);
+		Result res = set_socket_option(socket, SocketOption.KeepAlive, cast(int)enable);
 		if (!enable || res != Result.Success)
 			return res;
 		version (Darwin)
 		{
-			// Mac doesn't provide API for setting keep-alive interval and probe count.
-			// To set those values,
-			//
-			// run `sysctl - w net.inet.tcp.keepcnt = 3 net.inet.tcp.keepintvl = 10000`
-			//
-			// or edit /etc/sysctl.conf as follows,
-			// $ vi /etc/sysctl.conf
-			// net.inet.tcp.keepintvl = 10000
-			// net.inet.tcp.keepcnt = 3
-			//
-			// Note that the following code uses seconds value but above configuration uses
-			// milliseconds value.
-
-			return set_socket_option(socket, SocketOption.TCP_KeepAlive, keepIdle);
+			// OSX doesn't support setting keep-alive interval and probe count.
+			return set_socket_option(socket, SocketOption.TCP_KeepAlive, cast(int)keepIdle.as!"seconds");
 		}
 		else
 		{
-			res = set_socket_option(socket, SocketOption.TCP_KeepIdle, keepIdle);
+			res = set_socket_option(socket, SocketOption.TCP_KeepIdle, cast(int)keepIdle.as!"seconds");
 			if (res != Result.Success)
 				return res;
-			res = set_socket_option(socket, SocketOption.TCP_KeepIntvl, keepInterval);
+			res = set_socket_option(socket, SocketOption.TCP_KeepIntvl, cast(int)keepInterval.as!"seconds");
 			if (res != Result.Success)
 				return res;
-			return set_socket_option(socket, SocketOption.TCP_KeepCnt, keepCount);
+			return set_socket_option(socket, SocketOption.TCP_KeepCnt, cast(int)keepCount);
 		}
 	}
 }
