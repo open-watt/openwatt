@@ -1,9 +1,9 @@
 module router.stream.tcp;
 
-import core.atomic;
-import core.sync.mutex;
-import core.thread;
-import std.concurrency;
+//import core.atomic;
+//import core.sync.mutex;
+//import core.thread;
+//import std.concurrency;
 
 import urt.conv;
 import urt.io;
@@ -13,6 +13,7 @@ import urt.meta.nullable;
 import urt.socket;
 import urt.string;
 import urt.string.format;
+import urt.time;
 
 import manager.console;
 import manager.plugin;
@@ -22,232 +23,285 @@ public import router.stream;
 
 class TCPStream : Stream
 {
-nothrow @nogc:
+    nothrow @nogc:
 
-	this(String name, const(char)[] host, ushort port, StreamOptions options = StreamOptions.None)
-	{
-		super(name.move, "tcp-client", options);
+    this(String name, const(char)[] host, ushort port, StreamOptions options = StreamOptions.None)
+    {
+        super(name.move, "tcp-client", options);
 
-		AddressInfo addrInfo;
-		addrInfo.family = AddressFamily.IPv4;
-		addrInfo.sockType = SocketType.Stream;
-		addrInfo.protocol = Protocol.TCP;
-		AddressInfoResolver results;
-		get_address_info(host, port.tstring, &addrInfo, results);
-		if (!results.next_address(&addrInfo))
-			assert(0);
-		remote = addrInfo.address;
-		connect();
-	}
+        AddressInfo addrInfo;
+        addrInfo.family = AddressFamily.IPv4;
+        addrInfo.sockType = SocketType.Stream;
+        addrInfo.protocol = Protocol.TCP;
+        AddressInfoResolver results;
+        get_address_info(host, port.tstring, &addrInfo, results);
+        if (!results.next_address(&addrInfo))
+        {
+            // TODO: handle error case for no remote host...
+            assert(0);
+        }
+        remote = addrInfo.address;
+        update();
+    }
 
-	override bool connect()
-	{
-		if (options & StreamOptions.ReverseConnect)
-		{
-//			reverseConnectServer = new TCPServer(port, (Socket client, void* userData)
-//			{
-//				TCPStream stream = cast(TCPStream)userData;
-//
-//				if (client.remoteAddress == stream.remote)
-//				{
-//					stream.reverseConnectServer.stop();
-//					stream.reverseConnectServer = null;
-//
-//					client.blocking = !(stream.options & StreamOptions.NonBlocking);
-//
-//					stream.socket = client;
-//					stream.live.atomicStore(true);
-//				}
-//				else
-//					client.close();
-//			}, cast(void*)this);
-//			reverseConnectServer.start();
-		}
-		else
-		{
-			if (!create_socket(AddressFamily.IPv4, SocketType.Stream, Protocol.TCP, socket))
-				assert(false, "Couldn't create socket");
-			if (!socket.connect(remote))
-				assert(false, "Failed to connect");
+    override bool connect()
+    {
+        lastRetry = MonoTime();
+        update();
+        return true;
+    }
 
-			set_socket_option(socket, SocketOption.NonBlocking, !!(options & StreamOptions.NonBlocking));
-		}
+    override void disconnect()
+    {
+//        if (reverseConnectServer !is null)
+//        {
+//            reverseConnectServer.stop();
+//            reverseConnectServer = null;
+//        }
 
-		return true;
-	}
+        if (socket)
+        {
+//            if (socket.isAlive)
+            socket.shutdown(SocketShutdownMode.ReadWrite);
+            socket.close();
+            socket = null;
+            live = false;
+        }
+    }
 
-	override void disconnect()
-	{
-//		if (reverseConnectServer !is null)
-//		{
-//			reverseConnectServer.stop();
-//			reverseConnectServer = null;
-//		}
+    override bool connected()
+    {
+        if (!live)
+            return false;
 
-		if (socket)
-		{
-//			if (socket.isAlive)
-			socket.shutdown(SocketShutdownMode.ReadWrite);
-			socket.close();
-			socket = null;
-		}
-	}
+        // poll to see if the socket is actually alive...
 
-	override bool connected()
-	{
-		// TODO: does this actually work?!
-		ubyte[1] buffer;
-		size_t bytesReceived;
-		Result r = recv(socket, null, MsgFlags.Peek, &bytesReceived);
-		if (r == Result.Success)
-			return true;
-		SocketResult sr = r.get_SocketResult;
-		if (sr == SocketResult.Again || sr == SocketResult.WouldBlock)
-			return true;
-		return false;
-	}
+        // TODO: does this actually work?! and do we really even want this?
+        ubyte[1] buffer;
+        size_t bytesReceived;
+        Result r = recv(socket, null, MsgFlags.Peek, &bytesReceived);
+        if (r == Result.Success)
+            return true;
+        SocketResult sr = r.get_SocketResult;
+        if (sr == SocketResult.Again || sr == SocketResult.WouldBlock)
+            return true;
 
-	override const(char)[] remoteName()
-	{
-		return tstring(remote);
-	}
+        // something happened... we should try and reconnect I guess?
+        socket.close();
+        socket = Socket.invalid;
+        live = false;
 
-	override void setOpts(StreamOptions options)
-	{
-		this.options = options;
-		if (socket)
-		{
-			set_socket_option(socket, SocketOption.NonBlocking, !!(options & StreamOptions.NonBlocking));
-		}
-	}
+        return false;
+    }
 
-	override ptrdiff_t read(void[] buffer) nothrow @nogc
-	{
-		if (!connected())
-		{
-			if (options & StreamOptions.KeepAlive)
-			{
-				connect();
-				if (!connected())
-					return 0;
-			}
-			else
-				return -1;
-		}
+    override const(char)[] remoteName()
+    {
+        return tstring(remote);
+    }
 
-		size_t bytes;
-		Result r = socket.recv(buffer, MsgFlags.None, &bytes);
-		if (r != Result.Success)
-		{
-			SocketResult sr = r.get_SocketResult;
-			if (sr == SocketResult.WouldBlock)
-				return 0;
+    override void setOpts(StreamOptions options)
+    {
+        this.options = options;
+    }
 
-			socket.close();
-			socket = null;
+    override ptrdiff_t read(void[] buffer) nothrow @nogc
+    {
+        if (!live)
+            return 0;
 
-			// HACK: we'll need a threaded/background keep-alive strategy, but this hack might do for the moment
-			if (options & StreamOptions.KeepAlive)
-			{
-				connect();
-				return 0;
-			}
-			return -1;
-		}
-		return bytes;
-	}
+        size_t bytes = 0;
+        Result r = socket.recv(buffer, MsgFlags.None, &bytes);
+        if (r != Result.Success)
+        {
+            SocketResult sr = r.get_SocketResult;
+            if (sr == SocketResult.WouldBlock)
+                return 0;
 
-	override ptrdiff_t write(const void[] data) nothrow @nogc
-	{
-		if (!connected())
-		{
-			if (options & StreamOptions.KeepAlive)
-			{
-				connect();
-				if (!connected())
-					return 0;
-			}
-			else
-				return -1;
-		}
+            socket.close();
+            socket = Socket.invalid;
+            live = false;
+        }
+        return bytes;
+    }
 
-		size_t bytes;
-		Result r = socket.send(data, MsgFlags.None, &bytes);
-		if (r != Result.Success)
-		{
-			SocketResult sr = r.get_SocketResult;
-			if (sr == SocketResult.WouldBlock)
-				return 0;
+    override ptrdiff_t write(const void[] data) nothrow @nogc
+    {
+        if (live)
+        {
+            size_t bytes;
+            Result r = socket.send(data, MsgFlags.None, &bytes);
+            if (r != Result.Success)
+            {
+                SocketResult sr = r.get_SocketResult;
+                if (sr == SocketResult.WouldBlock)
+                    return 0;
 
-			socket.close();
-			socket = null;
+                socket.close();
+                socket = Socket.invalid;
+                live = false;
+            }
+            else
+                return bytes;
+        }
 
-			// HACK: we'll need a threaded/background keep-alive strategy, but this hack might do for the moment
-			if (options & StreamOptions.KeepAlive)
-			{
-				connect();
-				return 0;
-			}
-			return -1;
-		}
-		return bytes;
-	}
+        if (options & StreamOptions.BufferData)
+        {
+            assert(false, "TODO: buffer data for when the stream becomes available again");
+            // how long should buffered data linger? how big is the buffer?
+        }
 
-	override ptrdiff_t pending()
-	{
-		if (!connected())
-		{
-			if (options & StreamOptions.KeepAlive)
-			{
-				connect();
-				return 0;
-			}
-			else
-				return -1;
-		}
+        return 0;
+    }
 
-		size_t bytes;
-		Result r = socket.recv(null, MsgFlags.Peek, &bytes);
-		if (r != Result.Success)
-		{
-//			SocketResult sr = r.get_SocketResult;
-			socket.close();
-			socket = null;
-		}
-		return bytes;
-	}
+    override ptrdiff_t pending()
+    {
+        if (!live)
+            return 0;
 
-	override ptrdiff_t flush()
-	{
-		// TODO: read until can't read no more?
-		assert(0);
-	}
+        size_t bytes;
+        Result r = socket.recv(null, MsgFlags.Peek, &bytes);
+        assert(false, "TODO: not implemented...");
+        if (r != Result.Success)
+        {
+//            SocketResult sr = r.get_SocketResult;
+            socket.close();
+            socket = null;
+        }
+        return bytes;
+    }
+
+    override ptrdiff_t flush()
+    {
+        // TODO: read until can't read no more?
+        assert(0);
+    }
+
+    override void update()
+    {
+        // if it's live we have nothing to do
+        if (live)
+            return;
+
+        // a reverse-connect socket will be handled by a companion TCPServer
+        // TODO...
+        if (options & StreamOptions.ReverseConnect)
+        {
+            assert(false);
+            return;
+        }
+
+        // if the socket is invalid, we'll attempt to initiate a connection...
+        if (socket == Socket.invalid)
+        {
+            // we don't want to spam connection attempts...
+            MonoTime now = getTime();
+            if (now < lastRetry + seconds(5))
+                return;
+            lastRetry = now;
+
+            debug writeDebug("Connecting TCP stream '", name, "' to: ", remote);
+
+            Result r = create_socket(AddressFamily.IPv4, SocketType.Stream, Protocol.TCP, socket);
+            if (!r)
+            {
+                socket = Socket.invalid;
+                debug writeWarning("create_socket() failed with error: ", r.get_SocketResult());
+            }
+
+            set_socket_option(socket, SocketOption.NonBlocking, true);
+            r = socket.connect(remote);
+            if (r.succeeded)
+            {
+                live = true;
+                return;
+            }
+            else
+            {
+                version (Windows)
+                {
+                    if (r.get_SocketResult == SocketResult.WouldBlock)
+                        return;
+                }
+                else version (Posix)
+                {
+                    if (r.get_SocketResult == SocketResult.InProgress)
+                        return;
+                }
+                else
+                    static assert(0, "Unsupported platform?");
+
+                // something went wrong with the call to connect; we'll destroy the socket and try again later
+                socket.close();
+                socket = Socket.invalid;
+
+                debug writeWarning("socket.connect() failed with error: ", r.get_SocketResult());
+            }
+        }
+        else
+        {
+            // the socket is valid, but not live (waiting for connect() to complete)
+            // we'll poll it to see if it connected...
+
+            PollFd fd;
+            fd.socket = socket;
+            fd.requestEvents = PollEvents.Write;
+            uint numEvents;
+            Result r = poll(fd, Duration.zero, numEvents);
+            if (r.failed)
+            {
+                debug writeWarning("poll() failed with error: ", r.get_SocketResult);
+                // TODO: destroy socket and start over?
+                return;
+            }
+
+            // no events returned, still waiting...
+            if (numEvents == 0)
+                return;
+
+            // check error conditions
+            if (fd.returnEvents & (PollEvents.Error | PollEvents.HangUp | PollEvents.Invalid))
+            {
+                socket.close();
+                socket = Socket.invalid;
+                debug writeDebug("Connection failed: '", name, "' to ", remote);
+                return;
+            }
+
+            // this should be the only case left, we've successfully connected!
+            // let's just assert that the socket is writable to be sure...
+            assert(fd.returnEvents & PollEvents.Write);
+            live = true;
+        }
+    }
+
 
     // TODO: this is a bug! uncomment this bad boy!!
 //private:
-	InetAddress remote;
-	Socket socket;
-//	TCPServer reverseConnectServer;
+    InetAddress remote;
+    Socket socket;
+    MonoTime lastRetry;
+//    TCPServer reverseConnectServer;
 
-	this(String name, Socket socket, ushort port)
-	{
-		super(name.move, "tcp-client", StreamOptions.None);
-		socket.get_peer_name(remote);
+    this(String name, Socket socket, ushort port)
+    {
+        super(name.move, "tcp-client", StreamOptions.None);
+        socket.get_peer_name(remote);
 
-		this.socket = socket;
-		live.atomicStore(true);
-	}
+        this.socket = socket;
+        live = true;
+//        live.atomicStore(true);
+    }
 }
 
 enum ServerOptions
 {
-	None = 0,
-	JustOne = 1 << 0, // Only accept one connection then terminate the server
+    None = 0,
+    JustOne = 1 << 0, // Only accept one connection then terminate the server
 }
 
 class TCPServer
 {
-nothrow @nogc:
+    nothrow @nogc:
 
     alias NewConnection = void delegate(TCPStream client, void* userData) nothrow @nogc;
 
@@ -279,7 +333,7 @@ nothrow @nogc:
 
         isRunning = true;
 
-        writeInfo("TCP server listening on port ", port);
+        writeInfo("TCP server '", name , "' listening on port ", port);
     }
 
     void stop()
@@ -348,54 +402,54 @@ private:
 
 class TCPStreamModule : Plugin
 {
-	mixin RegisterModule!"stream.tcp";
+    mixin RegisterModule!"stream.tcp";
 
-	override void init()
-	{
-	}
+    override void init()
+    {
+    }
 
-	class Instance : Plugin.Instance
-	{
-		mixin DeclareInstance;
+    class Instance : Plugin.Instance
+    {
+        mixin DeclareInstance;
 
-		override void init()
-		{
-			app.console.registerCommand!add("/stream/tcp-client", this);
-		}
+        override void init()
+        {
+            app.console.registerCommand!add("/stream/tcp-client", this);
+        }
 
-		void add(Session session, const(char)[] name, const(char)[] address, Nullable!int port) nothrow @nogc
-		{
-			auto mod_stream = app.moduleInstance!StreamModule;
+        void add(Session session, const(char)[] name, const(char)[] address, Nullable!int port) nothrow @nogc
+        {
+            auto mod_stream = app.moduleInstance!StreamModule;
 
-			if (name.empty)
-				mod_stream.generateStreamName("tcp-stream");
+            if (name.empty)
+                mod_stream.generateStreamName("tcp-stream");
 
-			const(char)[] portSuffix = address;
-			address = portSuffix.split!':';
-			size_t portNumber = 0;
+            const(char)[] portSuffix = address;
+            address = portSuffix.split!':';
+            size_t portNumber = 0;
 
-			if (port)
-			{
-				if (portSuffix)
-					return session.writeLine("Port specified twice");
-				portNumber = port.value;
-			}
+            if (port)
+            {
+                if (portSuffix)
+                    return session.writeLine("Port specified twice");
+                portNumber = port.value;
+            }
 
-			size_t taken;
-			if (!port)
-			{
-				portNumber = portSuffix.parseInt(&taken);
-				if (taken == 0)
-					return session.writeLine("Port must be numeric: ", portSuffix);
-			}
-			if (portNumber - 1 > ushort.max - 1)
-				return session.writeLine("Invalid port number (1-65535): ", portNumber);
+            size_t taken;
+            if (!port)
+            {
+                portNumber = portSuffix.parseInt(&taken);
+                if (taken == 0)
+                    return session.writeLine("Port must be numeric: ", portSuffix);
+            }
+            if (portNumber - 1 > ushort.max - 1)
+                return session.writeLine("Invalid port number (1-65535): ", portNumber);
 
-			String n = name.makeString(app.allocator);
-			String a = address.makeString(app.allocator);
+            String n = name.makeString(app.allocator);
+            String a = address.makeString(app.allocator);
 
-			TCPStream stream = app.allocator.allocT!TCPStream(n.move, a.move, cast(ushort)portNumber, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
-			mod_stream.addStream(stream);
-		}
-	}
+            TCPStream stream = app.allocator.allocT!TCPStream(n.move, a.move, cast(ushort)portNumber, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+            mod_stream.addStream(stream);
+        }
+    }
 }

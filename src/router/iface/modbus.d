@@ -112,16 +112,19 @@ nothrow @nogc:
                 ++i;
         }
 
-        // check for data
-		bool connected = stream.connected();
-		if (connected != status.linkStatus)
-		{
-			status.linkStatus = connected;
-			status.linkStatusChangeTime = now;
-		}
-		if (!connected)
-			return;
+        // check the link status
+        bool isConnected = stream.connected();
+        if (isConnected != status.linkStatus)
+        {
+            status.linkStatus = isConnected;
+            status.linkStatusChangeTime = now;
+            if (!isConnected)
+                ++status.linkDowns;
+        }
+        if (!isConnected)
+            return;
 
+		// check for data
 		ubyte[1024] buffer = void;
 		buffer[0 .. tailBytes] = tail[0 .. tailBytes];
 		ptrdiff_t readOffset = tailBytes;

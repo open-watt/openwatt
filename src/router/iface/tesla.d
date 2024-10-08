@@ -1,5 +1,6 @@
 module router.iface.tesla;
 
+import urt.log;
 import urt.map;
 import urt.mem;
 import urt.string;
@@ -39,11 +40,21 @@ nothrow @nogc:
 
 	override void update()
 	{
-		if (!stream.connected)
-			return;
-
 		MonoTime now = getTime();
 
+        // check the link status
+        bool isConnected = stream.connected();
+        if (isConnected != status.linkStatus)
+        {
+            status.linkStatus = isConnected;
+            status.linkStatusChangeTime = now;
+            if (!isConnected)
+                ++status.linkDowns;
+        }
+        if (!isConnected)
+            return;
+
+		// check for data
 		ubyte[1024] buffer = void;
 		ptrdiff_t bytes = stream.read(buffer);
 		if (bytes < 0)
@@ -138,7 +149,9 @@ nothrow @nogc:
 		size_t written = stream.write(t[0..offset]);
 		if (written != offset)
 		{
-			assert(written == offset, "Write failed?");
+            debug writeDebug("Failed to write to stream '", stream.name, "'");
+            ++status.droppedPackets;
+            status.droppedBytes += packet.data.length;
 			return false;
 		}
 

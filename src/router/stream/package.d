@@ -81,15 +81,14 @@ nothrow @nogc:
 	// Flush the receive buffer (return number of bytes destroyed)
 	abstract ptrdiff_t flush();
 
-	// Poll the stream
-	void poll()
+	// Update the stream
+	void update()
 	{
 	}
 
 package:
 	bool live;
 	StreamOptions options;
-	MonoTime lastConnectAttempt;
 }
 
 class StreamModule : Plugin
@@ -118,36 +117,8 @@ class StreamModule : Plugin
 			// TODO: polling is super lame! data connections should be in threads and receive data immediately
 			// blocking read's in threads, or a select() loop...
 
-			MonoTime now = getTime();
-
 			foreach (stream; streams)
-			{
-				// Opportunity for the stream to perform regular updates
-				stream.poll();
-
-				if (!stream.live)
-				{
-					if (stream.options & StreamOptions.KeepAlive)
-					{
-						if (now - stream.lastConnectAttempt >= 1000.msecs)
-						{
-							if (stream.connect())
-							{
-								stream.lastConnectAttempt = MonoTime();
-								stream.live = true;
-							}
-							else
-								stream.lastConnectAttempt = now;
-						}
-					}
-					else
-					{
-						// TODO: clean up the stream?
-						//...
-						assert(false);
-					}
-				}
-			}
+				stream.update();
 		}
 
 		const(char)[] generateStreamName(const(char)[] prefix)

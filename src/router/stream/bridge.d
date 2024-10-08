@@ -17,7 +17,7 @@ nothrow @nogc:
 
 	this(String name, StreamOptions options, Stream[] streams...) nothrow @nogc
 	{
-		import core.lifetime;
+		import urt.lifetime;
 
 		super(name.move, "bridge", options);
 
@@ -103,7 +103,7 @@ nothrow @nogc:
 		return 0;
 	}
 
-	override void poll()
+	override void update()
 	{
 		// TODO: this is shit; polling periodically sucks, and will result in sync issues!
 		//       ideally, sleeping threads blocking on a read, fill an input buffer...

@@ -67,8 +67,10 @@ struct InterfaceStatus
 
 	uint sendPackets;
 	uint recvPackets;
+	uint droppedPackets;
 	ulong sendBytes;
 	ulong revcBytes;
+	ulong droppedBytes;
 }
 
 // MAC: 02:xx:xx:ra:nd:yy

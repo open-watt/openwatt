@@ -87,6 +87,7 @@ enum SocketOption : ubyte
 	RecvBufferLength,
 	ReuseAddress,
 	NoSigPipe,
+	Error,
 
 	// IP options
 	FirstIpOption,
@@ -622,6 +623,8 @@ Result get_socket_option(Socket socket, SocketOption option, void* output, size_
 		}
 	}
 
+    assert(optInfo.rtType != OptType.INAddress, "TODO: uncomment this block... for some reason, this block causes DMD to do a bad codegen!");
+/+
 	// Options expected in network-byte order
 	switch (optInfo.rtType)
 	{
@@ -634,7 +637,7 @@ Result get_socket_option(Socket socket, SocketOption option, void* output, size_
 		default:
 			break;
 	}
-
++/
 	return r;
 }
 
@@ -1276,6 +1279,7 @@ version (Windows) // BS_NETWORK_WINDOWS_VERSION >= _WIN32_WINNT_VISTA
 		OptInfo( SO_RCVBUF, OptType.Int, OptType.Int ),
 		OptInfo( SO_REUSEADDR, OptType.Bool, OptType.Int ),
 		OptInfo( -1, OptType.Bool, OptType.Unsupported ), // NoSignalPipe
+		OptInfo( SO_ERROR, OptType.Int, OptType.Int ),
 		OptInfo( IP_ADD_MEMBERSHIP, OptType.MulticastGroup, OptType.MulticastGroup ),
 		OptInfo( IP_MULTICAST_LOOP, OptType.Bool, OptType.Int ),
 		OptInfo( IP_MULTICAST_TTL, OptType.Int, OptType.Int ),
@@ -1297,6 +1301,7 @@ else version (linux) // BS_NETWORK_WINDOWS_VERSION >= _WIN32_WINNT_VISTA
 		OptInfo( SO_RCVBUF, OptType.Int, OptType.Int ),
 		OptInfo( SO_REUSEADDR, OptType.Bool, OptType.Int ),
 		OptInfo( -1, OptType.Bool, OptType.Unsupported ), // NoSignalPipe
+		OptInfo( SO_ERROR, OptType.Int, OptType.Int ),
 		OptInfo( IP_ADD_MEMBERSHIP, OptType.MulticastGroup, OptType.MulticastGroup ),
 		OptInfo( IP_MULTICAST_LOOP, OptType.Bool, OptType.Int ),
 		OptInfo( IP_MULTICAST_TTL, OptType.Int, OptType.Int ),
@@ -1318,6 +1323,7 @@ else version (Darwin)
 		OptInfo( SO_RCVBUF, OptType.Int, OptType.Int ),
 		OptInfo( SO_REUSEADDR, OptType.Bool, OptType.Int ),
 		OptInfo( SO_NOSIGPIPE, OptType.Bool, OptType.Int ),
+		OptInfo( SO_ERROR, OptType.Int, OptType.Int ),
 		OptInfo( IP_ADD_MEMBERSHIP, OptType.MulticastGroup, OptType.MulticastGroup ),
 		OptInfo( IP_MULTICAST_LOOP, OptType.Bool, OptType.Int ),
 		OptInfo( IP_MULTICAST_TTL, OptType.Int, OptType.Int ),

@@ -65,13 +65,11 @@ nothrow @nogc:
 			offset += b[i].formatInt(tmp[offset..$]);
 		}
 
-		if (buffer.ptr == null)
-			return offset;
-		if (buffer.length < offset)
-			return 0;
-
-		if (tmp.ptr == stackBuffer.ptr)
-			buffer[0 .. offset] = tmp[0 .. offset];
+        if (buffer.ptr && tmp.ptr == stackBuffer.ptr)
+        {
+            offset = buffer.length;
+            buffer[0 .. offset] = tmp[0 .. offset];
+        }
 		return offset;
 	}
 
@@ -194,13 +192,13 @@ struct IPv6Addr
 			++i;
 		}
 
-		if (buffer.ptr == null)
-			return offset;
-		if (buffer.length < offset)
-			return 0;
-
-		foreach (i, c; tmp[0 .. offset])
-			buffer[i] = c.toLower;
+        if (buffer.ptr)
+        {
+            if (buffer.length < offset)
+                offset = buffer.length;
+            foreach (i, c; tmp[0 .. offset])
+                buffer[i] = c.toLower;
+        }
 		return offset;
 	}
 
@@ -247,8 +245,11 @@ nothrow @nogc:
 		tmp[offset++] = '/';
 		offset += prefixLen.formatInt(tmp[offset..$]);
 
-		if (tmp.ptr == stackBuffer.ptr)
-			buffer[0 .. offset] = tmp[0 .. offset];
+        if (buffer.ptr && tmp.ptr == stackBuffer.ptr)
+        {
+            offset = buffer.length;
+            buffer[0 .. offset] = tmp[0 .. offset];
+        }
 		return offset;
 	}
 
@@ -301,8 +302,11 @@ nothrow @nogc:
 		tmp[offset++] = '/';
 		offset += prefixLen.formatInt(tmp[offset..$]);
 
-		if (tmp.ptr == stackBuffer.ptr)
-			buffer[0 .. offset] = tmp[0 .. offset];
+        if (buffer.ptr && tmp.ptr == stackBuffer.ptr)
+        {
+            offset = buffer.length;
+            buffer[0 .. offset] = tmp[0 .. offset];
+        }
 		return offset;
 	}
 
@@ -404,8 +408,11 @@ nothrow @nogc:
 			offset += _a.ipv6.port.formatInt(tmp[offset..$]);
 		}
 
-		if (tmp.ptr == stackBuffer.ptr)
-			buffer[0 .. offset] = tmp[0 .. offset];
+        if (buffer.ptr && tmp.ptr == stackBuffer.ptr)
+        {
+            offset = buffer.length;
+            buffer[0 .. offset] = tmp[0 .. offset];
+        }
 		return offset;
 	}
 
