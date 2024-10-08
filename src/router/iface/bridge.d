@@ -67,38 +67,38 @@ nothrow @nogc:
         return true;
     }
 
-	bool removeMember(size_t index)
-	{
-		if (index >= members.length)
-			return false;
+    bool removeMember(size_t index)
+    {
+        if (index >= members.length)
+            return false;
 
-		members[index].master = null;
-		members.remove(index);
+        members[index].master = null;
+        members.remove(index);
 
-		// TODO: update the MAC table to adjust all the port numbers!
-		assert(false);
+        // TODO: update the MAC table to adjust all the port numbers!
+        assert(false);
 
-		// TODO: all the subscriber userData's are wrong!!!
-		//       we need to unsubscribe and resubscribe all the members...
-		assert(false);
+        // TODO: all the subscriber userData's are wrong!!!
+        //       we need to unsubscribe and resubscribe all the members...
+        assert(false);
 
-		return true;
-	}
+        return true;
+    }
 
-	bool removeMember(const(char)[] name)
-	{
-		foreach (i, iface; members)
-		{
-			if (iface.name[] == name[])
-				return removeMember(i);
-		}
-		return false;
-	}
+    bool removeMember(const(char)[] name)
+    {
+        foreach (i, iface; members)
+        {
+            if (iface.name[] == name[])
+                return removeMember(i);
+        }
+        return false;
+    }
 
-	override void update()
-	{
-		macTable.update();
-	}
+    override void update()
+    {
+        macTable.update();
+    }
 
     override bool forward(ref const Packet packet)
     {
@@ -111,18 +111,18 @@ nothrow @nogc:
     }
 
 protected:
-	Array!BaseInterface members;
-	MACTable macTable;
+    Array!BaseInterface members;
+    MACTable macTable;
 
-	void incomingPacket(ref const Packet packet, BaseInterface srcInterface, void* userData)
-	{
-		ubyte srcPort = cast(ubyte)cast(size_t)userData;
+    void incomingPacket(ref const Packet packet, BaseInterface srcInterface, void* userData)
+    {
+        ubyte srcPort = cast(ubyte)cast(size_t)userData;
 
-		// TODO: should we check and strip a vlan tag?
-		ushort srcVlan = 0;
+        // TODO: should we check and strip a vlan tag?
+        ushort srcVlan = 0;
 
-		if (!packet.src.isMulticast)
-			macTable.insert(packet.src, srcPort, srcVlan);
+        if (!packet.src.isMulticast)
+            macTable.insert(packet.src, srcPort, srcVlan);
 
         if (packet.dst == mac)
         {
@@ -147,99 +147,99 @@ protected:
                     writeDebug(name, ": broadcast: ", srcInterface.name, "(", packet.src, ") -> * [", packet.data, "]");
             }
         }
-	}
+    }
 
-	void send(ref const Packet packet, int srcPort = -1) nothrow @nogc
-	{
-		if (!packet.dst.isMulticast)
-		{
-			ubyte dstPort;
-			ushort dstVlan;
-			if (macTable.get(packet.dst, dstPort, dstVlan))
-			{
-				// TODO: what should we do about the vlan thing?
+    void send(ref const Packet packet, int srcPort = -1) nothrow @nogc
+    {
+        if (!packet.dst.isMulticast)
+        {
+            ubyte dstPort;
+            ushort dstVlan;
+            if (macTable.get(packet.dst, dstPort, dstVlan))
+            {
+                // TODO: what should we do about the vlan thing?
 
-				// we don't send it back the way it came...
-				if (dstPort == srcPort)
-					return;
+                // we don't send it back the way it came...
+                if (dstPort == srcPort)
+                    return;
 
-				// forward the message
-				members[dstPort].forward(packet);
-				return;
-			}
-		}
+                // forward the message
+                members[dstPort].forward(packet);
+                return;
+            }
+        }
 
-		// we don't know who it belongs to!
-		// we just broadcast it, and maybe we'll catch the dst mac when the remote replies...
-		foreach (i, member; members)
-		{
-			if (i != srcPort)
-				member.forward(packet);
-		}
-	}
+        // we don't know who it belongs to!
+        // we just broadcast it, and maybe we'll catch the dst mac when the remote replies...
+        foreach (i, member; members)
+        {
+            if (i != srcPort)
+                member.forward(packet);
+        }
+    }
 }
 
 
 class BridgeInterfaceModule : Plugin
 {
-	mixin RegisterModule!"interface.bridge";
+    mixin RegisterModule!"interface.bridge";
 
-	class Instance : Plugin.Instance
-	{
-		mixin DeclareInstance;
+    class Instance : Plugin.Instance
+    {
+        mixin DeclareInstance;
 
-		override void init()
-		{
-			app.console.registerCommand!add("/interface/bridge", this);
-			app.console.registerCommand!port_add("/interface/bridge/port", this, "add");
-		}
+        override void init()
+        {
+            app.console.registerCommand!add("/interface/bridge", this);
+            app.console.registerCommand!port_add("/interface/bridge/port", this, "add");
+        }
 
-		// /interface/modbus/add command
-		// TODO: protocol enum!
-		void add(Session session, const(char)[] name) nothrow @nogc
-		{
-			auto mod_if = app.moduleInstance!InterfaceModule;
+        // /interface/modbus/add command
+        // TODO: protocol enum!
+        void add(Session session, const(char)[] name) nothrow @nogc
+        {
+            auto mod_if = app.moduleInstance!InterfaceModule;
 
-			if (name.empty)
-				name = mod_if.generateInterfaceName("bridge");
-			String n = name.makeString(defaultAllocator());
+            if (name.empty)
+                name = mod_if.generateInterfaceName("bridge");
+            String n = name.makeString(defaultAllocator());
 
-			BridgeInterface iface = defaultAllocator.allocT!BridgeInterface(mod_if, n.move);
-			mod_if.addInterface(iface);
+            BridgeInterface iface = defaultAllocator.allocT!BridgeInterface(mod_if, n.move);
+            mod_if.addInterface(iface);
 
-			import urt.log;
-			debug writeDebugf("Create bridge interface {0} - '{1}'", iface.mac, name);
+            import urt.log;
+            debug writeDebugf("Create bridge interface {0} - '{1}'", iface.mac, name);
 
-//			// HACK: we'll print packets that we receive...
-//			iface.subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {
-//				import urt.io;
-//				writef("{0}: packet received: ({1} -> {2} )  [{3}]\n", i.name, p.src, p.dst, p.data);
-//			}, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
-		}
+//            // HACK: we'll print packets that we receive...
+//            iface.subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {
+//                import urt.io;
+//                writef("{0}: packet received: ({1} -> {2} )  [{3}]\n", i.name, p.src, p.dst, p.data);
+//            }, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
+        }
 
-		void port_add(Session session, const(char)[] bridge, const(char)[] _interface) nothrow @nogc
-		{
-			auto mod_if = app.moduleInstance!InterfaceModule;
+        void port_add(Session session, const(char)[] bridge, const(char)[] _interface) nothrow @nogc
+        {
+            auto mod_if = app.moduleInstance!InterfaceModule;
 
-			BaseInterface b = mod_if.findInterface(bridge);
-			if (b is null)
-			{
-				session.writeLine("Bridge interface '", bridge, "' not found.");
-				return;
-			}
-			BridgeInterface bi = cast(BridgeInterface)b;
-			if (!bi)
-			{
-				session.writeLine("Interface '", bridge, "' is not a bridge.");
-				return;
-			}
+            BaseInterface b = mod_if.findInterface(bridge);
+            if (b is null)
+            {
+                session.writeLine("Bridge interface '", bridge, "' not found.");
+                return;
+            }
+            BridgeInterface bi = cast(BridgeInterface)b;
+            if (!bi)
+            {
+                session.writeLine("Interface '", bridge, "' is not a bridge.");
+                return;
+            }
 
-			BaseInterface i = mod_if.findInterface(_interface);
-			if (i is null)
-			{
-				session.writeLine("Interface '", _interface, "' not found.");
-				return;
-			}
+            BaseInterface i = mod_if.findInterface(_interface);
+            if (i is null)
+            {
+                session.writeLine("Interface '", _interface, "' not found.");
+                return;
+            }
             if (bi is i)
             {
                 session.writeLine("Can't add a bridge to itself.");
@@ -251,11 +251,11 @@ class BridgeInterfaceModule : Plugin
                 return;
             }
 
-			if (!bi.addMember(i))
-			{
-				session.writeLine("Failed to add interface '", _interface, "' to bridge '", bridge, "'.");
-				return;
-			}
-		}
-	}
+            if (!bi.addMember(i))
+            {
+                session.writeLine("Failed to add interface '", _interface, "' to bridge '", bridge, "'.");
+                return;
+            }
+        }
+    }
 }
