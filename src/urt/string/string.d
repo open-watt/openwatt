@@ -192,13 +192,20 @@ nothrow @nogc:
     BaseString!char _super;
     alias _super this;
 
-    this(typeof(null)) pure
-    {
-    }
+    this(this) @disable;
 
-    this(ref MutableString!Embed rh)
+    this(ref const typeof(this) rh)
     {
         this(rh[]);
+    }
+    this(size_t E)(ref const MutableString!E rh)
+        if (E != Embed)
+    {
+        this(rh[]);
+    }
+
+    this(typeof(null)) pure
+    {
     }
 
     this(const(char)[] s)
@@ -211,44 +218,48 @@ nothrow @nogc:
         ptr[0 .. s.length] = s[];
     }
 
-    this(size_t reserve)
+    ~this()
     {
-        debug assert(reserve <= MaxStringLen, "`reserve` exceeds max string length");
-        this.reserve(cast(ushort)reserve);
+        freeStringBuffer(ptr);
     }
 
-    ~this()
+    void opAssign(ref const typeof(this) rh)
+    {
+        opAssign(rh[]);
+    }
+    void opAssign(size_t E)(ref const MutableString!E rh)
+    {
+        opAssign(rh[]);
+    }
+
+    void opAssign(typeof(null))
     {
         clear();
     }
 
     void opAssign(char c)
     {
-        if (length() == 0)
-            reserve(1);
+        reserve(1);
         writeLength(1);
         ptr[0] = c;
     }
+
     void opAssign(const(char)[] s)
     {
         if (s == null)
         {
-            // NOTE: assigning null frees allocated buffers... is that what we want?
             clear();
             return;
         }
-        if (s.length > length())
-        {
-            debug assert(s.length <= MaxStringLen, "String too long");
-            reserve(cast(ushort)s.length);
-        }
+        debug assert(s.length <= MaxStringLen, "String too long");
+        reserve(cast(ushort)s.length);
         writeLength(s.length);
         ptr[0 .. s.length] = s[];
     }
 
-    void opOpAssign(string op: "~", Args)(Args args)
+    void opOpAssign(string op: "~", Things)(Things things)
     {
-        append(forward!args);
+        insert(length(), forward!things);
     }
 
     size_t opDollar() const pure
@@ -256,6 +267,12 @@ nothrow @nogc:
 
     inout(char)[] opIndex() inout pure
         => ptr[0 .. length()];
+
+    ref char opIndex(size_t i) pure
+    {
+        debug assert(i < length());
+        return ptr[i];
+    }
 
     char opIndex(size_t i) const pure
     {
@@ -269,31 +286,35 @@ nothrow @nogc:
         return ptr[x .. y];
     }
 
-    void append(Things...)(auto ref Things things)
+    ref MutableString!Embed append(Things...)(auto ref Things things)
     {
         insert(length(), forward!things);
+        return this;
     }
 
-    void appendFormat(Things...)(auto ref Things things)
+    ref MutableString!Embed appendFormat(Things...)(auto ref Things things)
     {
         insertFormat(length(), forward!things);
+        return this;
     }
 
-    void concat(Things...)(auto ref Things things)
+    ref MutableString!Embed concat(Things...)(auto ref Things things)
     {
         if (ptr)
             zeroLength();
         insert(0, forward!things);
+        return this;
     }
 
-    void format(Things...)(auto ref Things things)
+    ref MutableString!Embed format(Things...)(auto ref Things things)
     {
         if (ptr)
             zeroLength();
         insertFormat(0, forward!things);
+        return this;
     }
 
-    void insert(Things...)(size_t offset, auto ref Things things)
+    ref MutableString!Embed insert(Things...)(size_t offset, auto ref Things things)
     {
         import urt.string.format : _concat = concat;
         import urt.util : max, nextPowerOf2;
@@ -304,12 +325,12 @@ nothrow @nogc:
         size_t insertLen = _concat(null, things).length;
         size_t newLen = oldLen + insertLen;
         if (newLen == oldLen)
-            return;
+            return this;
         debug assert(newLen <= MaxStringLen, "String too long");
 
         size_t oldAlloc = allocated();
         ptr = newLen <= oldAlloc ? oldPtr : allocStringBuffer(max(16, cast(ushort)newLen + 4).nextPowerOf2 - 4);
-        memmove(ptr + offset + insertLen, ptr + offset, oldLen - offset);
+        memmove(ptr + offset + insertLen, oldPtr + offset, oldLen - offset);
         _concat(ptr[offset .. offset + insertLen], forward!things);
         writeLength(newLen);
 
@@ -318,9 +339,10 @@ nothrow @nogc:
             ptr[0 .. offset] = oldPtr[0 .. offset];
             freeStringBuffer(oldPtr);
         }
+        return this;
     }
 
-    void insertFormat(Things...)(size_t offset, auto ref Things things)
+    ref MutableString!Embed insertFormat(Things...)(size_t offset, auto ref Things things)
     {
         import urt.string.format : _format = format;
         import urt.util : max, nextPowerOf2;
@@ -331,12 +353,12 @@ nothrow @nogc:
         size_t insertLen = _format(null, things).length;
         size_t newLen = oldLen + insertLen;
         if (newLen == oldLen)
-            return;
+            return this;
         debug assert(newLen <= MaxStringLen, "String too long");
 
         size_t oldAlloc = allocated();
         ptr = newLen <= oldAlloc ? oldPtr : allocStringBuffer(max(16, cast(ushort)newLen + 4).nextPowerOf2 - 4);
-        memmove(ptr + offset + insertLen, ptr + offset, oldLen - offset);
+        memmove(ptr + offset + insertLen, oldPtr + offset, oldLen - offset);
         _format(ptr[offset .. offset + insertLen], forward!things);
         writeLength(newLen);
 
@@ -345,9 +367,10 @@ nothrow @nogc:
             ptr[0 .. offset] = oldPtr[0 .. offset];
             freeStringBuffer(oldPtr);
         }
+        return this;
     }
 
-    void erase(ptrdiff_t offset, size_t count)
+    ref MutableString!Embed erase(ptrdiff_t offset, size_t count)
     {
         size_t len = length();
         if (offset < 0)
@@ -356,6 +379,7 @@ nothrow @nogc:
         debug assert(eraseEnd <= len, "Out of bounds");
         memmove(ptr + offset, ptr + eraseEnd, len - eraseEnd);
         writeLength(len - count);
+        return this;
     }
 
     void reserve(ushort bytes)
@@ -376,8 +400,8 @@ nothrow @nogc:
 
     void clear()
     {
-        freeStringBuffer(ptr);
-        ptr = null;
+        if (ptr)
+            zeroLength();
     }
 
 private:

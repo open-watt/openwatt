@@ -307,14 +307,14 @@ bool tokenToValue(T : U[], U)(ref const Token t, out T r) nothrow @nogc if (!is(
 
     const(char)[] tmp = v;
     int numArgs = 0;
-    while (tmp.split(','))
+    while (tmp.split!',')
         ++numArgs;
 
     r = tempAllocator().allocArray!U(numArgs);
     int i = 0;
     while (!v.empty)
     {
-        if (!tokenToValue!U(Token(v.split(',')), r[i++]))
+        if (!tokenToValue!U(Token(v.split!','), r[i++]))
             return false;
     }
     return true;

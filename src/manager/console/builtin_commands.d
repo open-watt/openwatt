@@ -3,6 +3,7 @@ module manager.console.builtin_commands;
 import urt.array;
 import urt.mem;
 import urt.string;
+import urt.string.format : tconcat;
 
 import manager.console;
 import manager.console.command;
@@ -40,8 +41,6 @@ nothrow @nogc:
 
     override CommandState execute(Session session, const(char)[] cmdLine)
     {
-        import urt.string.format : tconcat;
-
         cmdLine = cmdLine.trimCmdLine;
         if (cmdLine.frontIs('/'))
             cmdLine = cmdLine[1..$].trimCmdLine;
@@ -84,6 +83,104 @@ nothrow @nogc:
 
         session.writeOutput(tconcat("Error: no command `", identifier[], "`"), true);
         return null;
+    }
+
+    override MutableString!0 complete(const(char)[] cmdLine)
+    {
+        version (ExcludeAutocomplete)
+            return null;
+        else
+        {
+            size_t i = 0;
+            if (cmdLine.frontIs('/'))
+                ++i;
+            while (i < cmdLine.length && isWhitespace(cmdLine[i]))
+                ++i;
+            if (i < cmdLine.length && cmdLine[i] == '/')
+                return MutableString!0(cmdLine);
+
+            size_t j = i;
+            while (j < cmdLine.length && !isWhitespace(cmdLine[j]) && cmdLine[j] != '/')
+                ++j;
+
+            if (j < cmdLine.length)
+            {
+                // cmd line is for child-command
+                foreach (Command cmd; commands)
+                {
+                    if (cmd.name[] == cmdLine[i..j])
+                        return cmd.complete(cmdLine[j..$]).insert(0, cmdLine[0..j]);
+                }
+                return MutableString!0(cmdLine);
+            }
+
+            // complete command name
+            struct Cmd
+            {
+                const(char)[] name;
+                bool isScope;
+            }
+            Array!Cmd cmds; // TODO: some static buffer would be nice!
+//            if (this !is m_console.root)
+//                cmds ~= Cmd("..", true);
+            foreach (Command cmd; commands)
+            {
+                if (cmd.name.startsWith(cmdLine[i..j]))
+                    cmds ~= Cmd(cmd.name[], cast(Scope)cmd !is null);
+            }
+            if (cmds.length == 0)
+                return MutableString!0(cmdLine);
+            if (cmds.length == 1)
+                return complete(tconcat(cmdLine[0..i], cmds[0].name[], cmds[0].isScope && (i == 0 || cmdLine[0] == '/') ? '/' : ' '));
+            size_t k = j-i;
+            outer: for (; k < cmds[0].name.length; ++k)
+            {
+                for (size_t l = 1; l < cmds.length; ++l)
+                    if (k >= cmds[l].name.length || cmds[l].name[k] != cmds[0].name[k])
+                        break outer;
+            }
+            return MutableString!0().concat(cmdLine[0..i], cmds[0].name[0 .. k]);
+        }
+    }
+
+    override Array!(MutableString!0) suggest(const(char)[] cmdLine)
+    {
+        version (ExcludeAutocomplete)
+            return null;
+        else
+        {
+            size_t i = 0;
+            while (i < cmdLine.length && !isWhitespace(cmdLine[i]) && cmdLine[i] != '/')
+                ++i;
+
+            if (i < cmdLine.length)
+            {
+                // cmd line is for child-command
+                foreach (Command cmd; commands)
+                {
+                    if (cmd.name[] == cmdLine[0 .. i])
+                    {
+                        size_t j = i;
+                        if (cast(Scope)cmd && j < cmdLine.length && cmdLine[j] == '/')
+                            ++j;
+                        while (j < cmdLine.length && isWhitespace(cmdLine[j]))
+                            ++j;
+                        return cmd.suggest(cmdLine[j..$]);
+                    }
+                }
+                return Array!(MutableString!0)();
+            }
+
+            Array!(MutableString!0) r;
+//            if (this !is m_console.root)
+//                r ~= MutableString!0("..");
+            foreach (Command cmd; commands)
+            {
+                if (cmd.name.startsWith(cmdLine))
+                    r ~= MutableString!0(cmd.name);
+            }
+            return r;
+        }
     }
 }
 
@@ -137,61 +234,6 @@ public:
     }
 };
 
-class dcEnterCommand : public dcDebugCommand
-{
-public:
-    dcEnterCommand(dcDebugConsole& console, const char* cmd)
-    : dcDebugCommand(console, cmd)
-{}
-
-    dcCommandState* Execute(dcConsoleSession& session, bcStringView cmdLine) override
-    {
-        bcStringView args = cmdLine;
-        bcStringView arg = dcTakeFirstToken(args);
-
-        if (arg.IsEmpty())
-        {
-            session.WriteLine(Help(args));
-            return nullptr;
-        }
-
-        // see if we can find the console
-        dcDebugConsole* toEnter = dcDebugConsole::FindConsole(arg);
-        if (!toEnter)
-        {
-            session.WriteF("No console: `%.*s`\n", int(arg.size()), arg.data());
-            return nullptr;
-        }
-
-        session.m_sessionStack.PushBack(session.m_console);
-        session.m_console = toEnter;
-
-        return nullptr;
-    }
-
-    bcVector<bcString> Suggest(bcStringView cmdLine) const override
-    {
-        bcVector<bcStringView> tokens = dcTokenizeCommandLine(cmdLine);
-
-        // only accepts one argument
-        if (tokens.Size() > 1 || (tokens.Size() == 1 && dcIsSeparator(cmdLine[cmdLine.Size() - 1])))
-            return bcVector<bcString>(Allocator());
-
-        // get command name suggestions
-        bcVector<bcString> consoles(Allocator());
-        // TODO: this is not threadsafe! adding/removing/iterating console instances should be mutex guarded
-        for (dcDebugConsole* console = dcDebugConsole::s_consoleInstances; console != nullptr; console = console->m_nextConsoleInstance)
-            consoles.PushBack(bcString{ Allocator(), console->m_identifier });
-        return consoles;
-    }
-
-    bcString Help(bcStringView) const override
-    {
-        return bcString{ Allocator(), "Enter a named terminal session.\r\n"
-                "Usage: `enter IDENTIFIER`" };
-    }
-};
-
 class dcExitCommand : public dcDebugCommand
 {
 public:
@@ -218,5 +260,4 @@ void RegisterBuiltinCommands(ref Console console)
 {
 //    console.RegisterCommand!ExitCommand("exit");
 //    console.RegisterCommand!HelpCommand("help");
-//    console.RegisterCommand!EnterCommand("enter");
 }

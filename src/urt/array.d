@@ -119,48 +119,82 @@ struct Array(T, size_t EmbedCount = 0)
         alias ElementType = T;
 
     // constructors
-    this(typeof(null)) {}
-//    this(Alloc_T, size_t count);
-//    this(Reserve_T, size_t count);
-//    this(Items...)(Concat_T, auto ref Items items);
-//    this(ref inout Array!(T, EmbedCount) val) inout;
-//    this(Array!(T, EmbedCount) rval);
 
-    // TODO: Array copy/move constructors for const promotion?
-//    this(U)(U *ptr, size_t length);
+    this(this) @disable;
+
+    this(ref typeof(this) val)
+    {
+        this(val[]);
+    }
+    this(size_t EC)(ref Array!(T, EC) val)
+        if (EC != EmbedCount)
+    {
+        this(val[]);
+    }
+
+    this(typeof(null)) {}
 
     this(U)(U[] arr)
         if (is(U : T))
     {
+        debug assert(arr.length <= uint.max);
         reserve(arr.length);
-        foreach (ref e; arr)
-            pushBack(e);
+        for (uint i = 0; i < arr.length; ++i)
+            emplace!T(&ptr[i], arr.ptr[i]);
+        _length = cast(uint)arr.length;
     }
 
-//    this(U, size_t N)(ref U[N] arr);
+    this(U, size_t N)(U[N] arr)
+        if (is(U : T))
+    {
+        this(arr[]);
+    }
+
+//    this(Alloc_T, size_t count);
+//    this(Reserve_T, size_t count);
+//    this(Items...)(Concat_T, auto ref Items items);
+
     ~this()
     {
+        clear();
         if (hasAllocation())
-            defaultAllocator().freeArray(ptr[0 .. _length]);
-        else static if (!is(T == class))
-            foreach (ref e; ptr[0 .. _length])
-                e.destroy!false();
+            defaultAllocator().free(ptr[0 .. _length]);
     }
 
 nothrow @nogc:
 
     // assignment
-//    ref inout(Array!(T, EmbedCount)) opAssign(ref inout Array!(T, EmbedCount) rh) inout;
-//    ref Array!(T, EmbedCount) opAssign(Array!(T, EmbedCount) rval);
-//    ref Array!(T, EmbedCount) opAssign(U)(U[] rh);
 
-    void opAssign(U)(U[] rh)
-        if (is(U : T))
+    void opAssign(ref typeof(this) val)
+    {
+        opAssign(val[]);
+    }
+    void opAssign(size_t EC)(ref Array!(T, EC) val)
+        if (EC != EmbedCount)
+    {
+        opAssign(val[]);
+    }
+
+    void opAssign(typeof(null))
     {
         clear();
-        reserve(rh.length);
-        foreach (ref e; rh)
-            pushBack(e);
+    }
+
+    void opAssign(U)(U[] arr)
+        if (is(U : T))
+    {
+        debug assert(arr.length <= uint.max);
+        clear();
+        reserve(arr.length);
+        for (uint i = 0; i < arr.length; ++i)
+            emplace!T(&ptr[i], arr.ptr[i]);
+        _length = cast(uint)arr.length;
+    }
+
+    void opAssign(U, size_t N)(U[N] arr)
+        if (is(U : T))
+    {
+        opAssign(arr[]);
     }
 
     // manipulation
@@ -187,7 +221,8 @@ nothrow @nogc:
     ref T pushBack()
         => pushBack(T.init);
 
-    ref T pushFront(T item)
+    ref T pushFront(U)(auto ref U item)
+        if (is(U : T))
     {
         static if (is(T == class))
         {
@@ -209,12 +244,13 @@ nothrow @nogc:
                 emplace!T(&ptr[i], ptr[i-1].move);
                 ptr[i-1].destroy!false();
             }
-            emplace!T(&ptr[0], item.move);
+            emplace!T(&ptr[0], forward!item);
             return ptr[0];
         }
     }
 
-    ref T pushBack(T item)
+    ref T pushBack(U)(auto ref U item)
+        if (is(U : T))
     {
         static if (is(T == class))
         {
@@ -229,7 +265,7 @@ nothrow @nogc:
             uint len = _length;
             reserve(len + 1);
             _length = len + 1;
-            emplace!T(&ptr[len], item.move);
+            emplace!T(&ptr[len], forward!item);
             return ptr[len];
         }
     }
@@ -349,11 +385,12 @@ nothrow @nogc:
         return [cast(uint)x, cast(uint)y];
     }
 
-    void opOpAssign(string op : "~", U)(ref U el)
+    void opOpAssign(string op : "~", U)(auto ref U el)
         if (is(U : T))
     {
-        pushBack(el);
+        pushBack(forward!el);
     }
+
     void opOpAssign(string op : "~", U)(U[] arr)
         if (is(U : T))
     {

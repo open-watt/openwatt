@@ -14,12 +14,14 @@ import manager.console.function_command;
 import manager.console.session;
 import manager.instance;
 
+nothrow @nogc:
+
 
 /// Find a console instance by name.
 /// \param identifier
 ///  Name of the console instance to find.
 /// \returns Pointer to the console instance, or `nullptr` if no console with that name exists.
-Console* FindConsole(const(char)[] identifier) nothrow @nogc
+Console* findConsole(const(char)[] identifier) nothrow @nogc
 {
     Console* instance = s_consoleInstances;
     while (instance && instance.m_identifier != identifier[])
@@ -48,7 +50,7 @@ nothrow @nogc:
 
         // add the console instance to the registry
         // TODO: this is not threadsafe! creating/destroying console instances should be threadsafe!
-        assert(FindConsole(identifier) is null, tconcat("Console '", identifier[], "' already exists!"));
+        assert(findConsole(identifier) is null, tconcat("Console '", identifier[], "' already exists!"));
         m_nextConsoleInstance = s_consoleInstances;
         s_consoleInstances = &this;
 
@@ -78,7 +80,7 @@ nothrow @nogc:
 //        }
     }
 
-    Scope getRoot() nothrow @nogc
+    inout(Scope) getRoot() inout nothrow @nogc
     {
         return root;
     }
@@ -149,30 +151,19 @@ nothrow @nogc:
     /// \param cmdLine
     ///  A command line string to attempt completion.
     /// \returns A new command line with the attempted auto-completion applied. If no completion was applicable, the result is `cmdLine` as given.
-    String complete(String cmdLine) const
+    MutableString!0 complete(const(char)[] cmdLine, Scope curScope)
     {
-        assert(false);
-//        bcStringView args = cmdLine;
-//        bcStringView command = dcTakeFirstToken(args);
-//
-//        // if we're trying to complete a command name
-//        if (command.IsEmpty() || (args.IsEmpty() && !dcIsSeparator(cmdLine[cmdLine.Size() - 1])))
-//        {
-//            bcVector<bcString> tokens = Suggest(command);
-//            if (!tokens.IsEmpty())
-//                cmdLine.Append(dcGetCompletionSuffix(command, tokens));
-//            return cmdLine;
-//        }
-//
-//        // see if we can find the command
-//        auto it = m_commands.Find(dcToLower(bcString{ m_tempAllocator, command }));
-//        if (it == nullptr)
-//            return cmdLine;
-//
-//        bcString result{ m_allocator, command };
-//        result.AppendMultiToString(' ', it->val->Complete(bcString{ m_tempAllocator, args }));
-//        return result;
-        return String();
+        version (ExcludeAutocomplete)
+            return null;
+        else
+        {
+            size_t i = 0;
+            while (i < cmdLine.length && (cmdLine[i] == ' ' || cmdLine[i] == '\t'))
+                 ++i;
+            if (i < cmdLine.length && cmdLine[i] == '/')
+                curScope = root;
+            return curScope.complete(cmdLine[i .. $]).insert(0, cmdLine[0 .. i]);
+        }
     }
 
     /// Suggest a list of completion terms for the current incomplete command line.
@@ -180,44 +171,24 @@ nothrow @nogc:
     /// \param cmdLine
     ///  A command line string to analyse for auto-complete suggestions.
     /// \returns A filtered list of possible completion terms.
-    String[] suggest(const(char)[] cmdLine) const
+    Array!(MutableString!0) suggest(const(char)[] cmdLine, Scope curScope)
     {
-        assert(false);
-//        bcStringView args = cmdLine;
-//        bcStringView command = dcTakeFirstToken(args);
-//
-//        if (command.IsEmpty() || (args.IsEmpty() && !dcIsSeparator(cmdLine[cmdLine.Size() - 1])))
-//        {
-//            if (command.IsEmpty())
-//            {
-//                bcVector<bcString> commands{ m_allocator };
-//                for (auto&& pair : m_commands)
-//                    commands.PushBack(pair.key);
-//                return commands;
-//            }
-//
-//            // gather commands
-//            bcVector<bcStringView> commands{ m_tempAllocator };
-//            for (auto&& pair : m_commands)
-//                commands.PushBack(pair.key);
-//
-//            // filter for partially typed command
-//            dcFilterTokens(commands, dcToLower(bcString{ m_tempAllocator, command }));
-//
-//            bcVector<bcString> filteredCommands{ m_allocator };
-//            for (bcStringView cmd : commands)
-//                filteredCommands.PushBack(bcString{ m_allocator, cmd });
-//            return filteredCommands;
-//        }
-//
-//        // see if we can find the command
-//        auto it = m_commands.Find(dcToLower(bcString{ m_tempAllocator, command }));
-//        if (it == nullptr)
-//            return bcVector<bcString>(m_allocator);
-//
-//        // request suggestions from the command
-//        return it->val->Suggest(args);
-        return null;
+        version (ExcludeAutocomplete)
+            return null;
+        else
+        {
+            size_t i = 0;
+            while (i < cmdLine.length && (cmdLine[i] == ' ' || cmdLine[i] == '\t'))
+                ++i;
+            if (i < cmdLine.length && cmdLine[i] == '/')
+            {
+                curScope = root;
+                ++i;
+                while (i < cmdLine.length && (cmdLine[i] == ' ' || cmdLine[i] == '\t'))
+                    ++i;
+            }
+            return curScope.suggest(cmdLine[i .. $]);
+        }
     }
 
     void registerCommand(const(char)[] _scope, Command command)
@@ -367,6 +338,48 @@ package:
     Array!Session m_sessions;
 
     Console* m_nextConsoleInstance = null;
+}
+
+
+bool isSeparator(char c)
+{
+    return c == ' ' || c == '\t';
+}
+
+MutableString!0 getCompletionSuffix(const(char)[] tokenStart, ref const Array!(MutableString!0) tokens)
+{
+    MutableString!0 result;
+    if (tokens.length == 0)
+        return result;
+    if (tokens.length == 1)
+    {
+        // only one token; we'll emit the token completion, and the following space
+        result = tokens[0][tokenStart.length .. tokens[0].length];
+        result ~= ' ';
+    }
+    else
+    {
+        // we emit as many characters are common between all tokens
+        size_t offset = tokenStart.length;
+        while (offset < tokens[0].length)
+        {
+            char c = tokens[0][offset];
+            bool same = true;
+            for (size_t i = 1; i < tokens.length; ++i)
+            {
+                if (offset >= tokens[i].length || tokens[i][offset] != c)
+                {
+                    same = false;
+                    break;
+                }
+            }
+            if (!same)
+                break;
+            ++offset;
+        }
+        result = tokens[0][tokenStart.length .. offset];
+    }
+    return result;
 }
 
 

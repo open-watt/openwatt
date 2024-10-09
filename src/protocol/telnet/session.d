@@ -27,17 +27,20 @@ nothrow @nogc:
 
         clientStream.setOpts(StreamOptions.NonBlocking);
 
-        ubyte[9] introduction = [ 0xff, 0xfb, 0x01,    // set NVT mode to say we will echo back characters
-                                  0xff, 0xfe, 0x01,    // set NVT requesting that the remote system not/dont echo back characters
-                                  0xff, 0xfb, 0x03 ];  // set NVT mode to supress go-ahead, stops remote clients from doing local linemode
+        ubyte[15] introduction = [ 0xff, 0xfb, 0x01,    // WILL echo back characters
+                                   0xff, 0xfe, 0x01,    // DON'T echo back characters
+                                   0xff, 0xfb, 0x03,    // WILL supress go-ahead, stops remote clients from doing local linemode
+                                   0xff, 0xfd, 0x1f,    // DO negotiate window size
+                                   0xff, 0xfd, 0x2a ];  // DO character set
 
         ptrdiff_t sent = clientStream.write(introduction);
 
-        assert(sent == 9);
+        assert(sent == 15);
     }
 
     ~this()
     {
+        closeSession();
     }
 
     override void update()
@@ -89,12 +92,21 @@ nothrow @nogc:
 
     override void closeSession()
     {
+        NoGCAllocator conAllocator;
+        if (isAttached())
+            conAllocator = allocator;
+
         super.closeSession();
 
         if (!isAttached())
         {
-            allocator.freeT(m_stream);
-            m_stream = null;
+            assert(conAllocator || !m_stream, "Why didn't the stream get freed before the console was lost?");
+
+            if (conAllocator)
+            {
+                conAllocator.freeT(m_stream);
+                m_stream = null;
+            }
         }
     }
 
@@ -127,28 +139,18 @@ nothrow @nogc:
             sent = m_stream.write("\r\n");
     }
 
-//    override void WriteLine(const(char)[] line)
-//    {
-//        bcString t(TempAllocator());
-//        t.Reserve(uint(line.size()) + 2);
-//        t.Assign(line.data(), uint(line.size()));
-//        t.Append("\r\n");
-//        Write({ t.Data(), t.length });
-//    }
+    override void showSuggestions(const(String)[] suggestions)
+    {
+        // move to next line
+        ptrdiff_t sent = m_stream.write("\r\n");
 
-//    override void ShowSuggestions(const bcVector<bcString>& suggestions)
-//    {
-//        // move to next line
-//        uint sent;
-//        send(m_stream, "\r\n", 2, MsgFlags.None, &sent);
-//
-//        // write the suggestions
-//        super.ShowSuggestions(suggestions);
-//
-//        // put the prompt back
-//        if (m_showPrompt)
-//            sendPromptAndBuffer(false);
-//    }
+        // write the suggestions
+        super.showSuggestions(suggestions);
+
+        // put the prompt back
+        if (m_showPrompt)
+            sendPromptAndBuffer(false);
+    }
 
     override bool showPrompt(bool show)
     {

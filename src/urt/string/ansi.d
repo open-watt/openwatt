@@ -68,6 +68,22 @@ enum ANSI_RESET = "\x1b[0m";
 
 nothrow @nogc:
 
+size_t parseANSICode(const(char)[] text)
+{
+    import urt.string.ascii : isNumeric;
+
+    if (text.length < 3 || text[0] != '\x1b')
+        return 0;
+    if (text[1] != '[' && text[1] != 'O')
+        return 0;
+    size_t i = 2;
+    for (; i < text.length && (text[i].isNumeric || text[i] == ';'); ++i)
+    {}
+    if (i == text.length)
+        return 0;
+    return i + 1;
+}
+
 char[] stripDecoration(char[] text) pure
 {
     return stripDecoration(text, text);

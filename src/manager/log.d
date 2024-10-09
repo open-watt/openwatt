@@ -1,5 +1,6 @@
 module manager.log;
 
+import urt.array;
 import urt.log;
 import urt.string;
 
@@ -127,16 +128,16 @@ nothrow @nogc:
 
 	version (ExcludeAutocomplete) {} else
 	{
-		override String complete(const(char)[] cmdLine) const
+		override MutableString!0 complete(const(char)[] cmdLine) const
 		{
 			assert(false);
-			return String(null);
+			return MutableString!0();
 		}
 
 
-		override String[] suggest(const(char)[] cmdLine) const
+		override Array!(MutableString!0) suggest(const(char)[] cmdLine) const
 		{
-			return null;
+			return Array!(MutableString!0)();
 		}
 	}
 

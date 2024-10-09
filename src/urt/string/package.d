@@ -148,7 +148,7 @@ inout(char)[] split(char Separator)(ref inout(char)[] s)
 	return t;
 }
 
-inout(char)[] split(Separator...)(ref inout(char)[] s, ref char sep)
+inout(char)[] split(Separator...)(ref inout(char)[] s, out char sep)
 {
 	sep = '\0';
 	int inQuotes = 0;

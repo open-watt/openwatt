@@ -4,6 +4,7 @@ import manager.console;
 
 import urt.array;
 import urt.lifetime;
+import urt.log;
 import urt.map;
 import urt.mem;
 import urt.string;
@@ -96,7 +97,7 @@ nothrow @nogc:
     {
         import urt.string.format;
 
-        writeOutput(tconcat(forward!args, '\n'), false);
+        writeOutput(tconcat(forward!args), true);
     }
 
     final void writef(Args...)(const(char)[] format, auto ref Args args)
@@ -140,25 +141,10 @@ nothrow @nogc:
         {
             size_t take = 1;
 
-            // handle NVT commands...?
-            if (t[i] == '\xff')
+            if (t[i] == '\x03')
             {
-                char opt = 0, cmd = t[++i];
-                if (cmd >= '\xfb' && cmd <= '\xfe')
-                    opt = t[++i];
-
-                // NVT command...
-                // do we care about any of these?
-                //...
-            }
-            else if (t[i] == '\x03')
-            {
-                // Ctrl-C
-                closeSession();
-
-                // store the tail of the input buffer so the outer context can claim it
-                m_buffer = text[i + 1 .. $];
-                return -1;
+                i += 1;
+                goto close_session;
             }
             else if (t[i] == '\r' || t[i] == '\n')
             {
@@ -166,6 +152,7 @@ nothrow @nogc:
             }
             else if (t[i] == '\b' || t[i] == '\x7f')
             {
+            erase_char:
                 if (m_position > 0)
                 {
                     m_buffer.erase(-1, 1);
@@ -174,44 +161,173 @@ nothrow @nogc:
             }
             else if (t[i] == '\t')
             {
-                assert(false);
-//                if (m_suggestionPending)
-//                {
-//                    bcVector<bcString> suggestions = m_console->Suggest(m_buffer);
-//                    if (!suggestions.IsEmpty())
-//                        ShowSuggestions(suggestions);
-//                }
-//                else
-//                {
-//                    bcString completeFrom(Allocator(), m_buffer.Data(), m_position);
-//                    bcString completed = m_console->Complete(completeFrom);
-//                    if (completed != completeFrom)
-//                    {
-//                        uint32 oldPos = m_position;
-//                        m_position = completed.Size();
-//                        completed.Append(m_buffer.Data() + oldPos, m_buffer.Size() - oldPos);
-//                        m_buffer = bcMove(completed);
-//                    }
-//                    else
-//                    {
-//                        m_suggestionPending = true;
-//
-//                        // advance i` since we skip the bottom part of the loop
-//                        i += take;
-//                        continue;
-//                    }
-//                }
+                if (m_suggestionPending)
+                {
+                    Array!(MutableString!0) suggestions = m_console.suggest(m_buffer, curScope);
+                    if (!suggestions.empty)
+                        showSuggestions(cast(String[])suggestions[]); // HACK: this is a brutal cast!!
+                }
+                else
+                {
+                    const(char)[] completeFrom = m_buffer[0 .. m_position];
+                    MutableString!0 completed = m_console.complete(completeFrom, curScope);
+                    if (completed[] != completeFrom[])
+                    {
+                        uint oldPos = m_position;
+                        m_position = cast(uint)completed.length;
+                        completed ~= m_buffer[oldPos .. $];
+                        m_buffer = completed.move;
+                    }
+                    else
+                    {
+                        m_suggestionPending = true;
+
+                        // advance i since we skip the bottom part of the loop
+                        i += take;
+                        continue;
+                    }
+                }
             }
-            else if (t[i] == '\x1b' && i + 1 < len && (t[i + 1] == '[' || t[i + 1] == 'O'))
+            else if (t[i] == '\xff')
             {
+                // NVT commands...
+                if (i >= len - 1)
+                    goto early_return;
+
+                take = 2;
+                char cmd = t[i + 1];
+
+                switch (cmd)
+                {
+                    case '\xf1': // NOP (No Operation)
+                        break;
+                    case '\xf2': // DM (Data Mark)
+                        // Used to mark the position in the data stream where a Telnet break or interruption occurred.
+                        break;
+                    case '\xf3': // BRK (Break)
+                        // Signals that the sender has initiated a break (interrupt) signal.
+                        // should probable terminate latent commands...?
+                        break;
+                    case '\xf4': // IP (Interrupt Process)
+                        // Used to interrupt the process running on the remote system.
+                        // should probable terminate latent commands...?
+                        break;
+                    case '\xf5': // AO (Abort Output)
+                        // Commands the remote system to stop sending output but allows the process to continue running.
+                        break;
+                    case '\xf6': // AYT (Are You There)
+                        // Used to check if the remote server is still connected and responding.
+                        break;
+                    case '\xf7': // EC (Erase Character)
+                        // Sent to instruct the remote system to erase the last character sent.
+                        goto erase_char;
+                    case '\xf8': // EL (Erase Line)
+                        // Instructs the remote system to erase the entire current line of input.
+                        m_buffer.clear();
+                        m_position = 0;
+                        break;
+                    case '\xf9': // GA (Go Ahead)
+                        // A command used to indicate that the sender is finished, and the receiver may start sending data. This is primarily used in "line-at-a-time" mode.
+                        break;
+                    case '\xfa':
+                        size_t subNvt = i + 2;
+                        while (subNvt < len - 1 && t[subNvt] != '\xff' && t[subNvt + 1] != '\xf0')
+                            ++subNvt;
+                        if (subNvt >= len - 1)
+                        {
+                            // this subnegotiation wasn't closed. we must have an incomplete stream...
+                            goto early_return;
+                        }
+
+                        take = subNvt + 2 - i;
+                        const(char)[] sub = t[i + 2 .. subNvt];
+
+                        if (sub.length > 0)
+                        {
+                            switch (sub[0])
+                            {
+                                case '\x1f': // WINDOW SIZE
+                                    if (sub.length == 5)
+                                    {
+                                        m_width = cast(uint)sub[1] << 8 | (cast(uint)sub[2]);
+                                        m_height = cast(uint)sub[3] << 8 | (cast(uint)sub[4]);
+                                    }
+                                    break;
+                                case '\x2a': // CHARSET
+                                    assert(false, "test this path");
+                                    break;
+                                default:
+                                    writeWarningf("Unsupported NVT subnegotiation: \\\\x{0, 02x}", cast(ubyte)sub[0]);
+                                    break;
+                            }
+                        }
+                        break;
+                    case '\xfb': // WILL
+                    case '\xfc': // WON'T
+                    case '\xfd': // DO
+                    case '\xfe': // DON'T
+                        if (i >= len - 2)
+                            goto early_return;
+
+                        // ECHO              = 1 (0x01)
+                        // SUPPRESS GO-AHEAD = 3 (0x03)
+                        // STATUS            = 5 (0x05)
+                        // TIMING MARK       = 6 (0x06)
+                        // TERMINAL TYPE     = 24 (0x18)
+                        // WINDOW SIZE       = 31 (0x1f)
+                        // CHARSET           = 42 (0x2a)
+
+                        take = 3;
+                        ubyte opt = t[i + 2];
+
+                        final switch (cmd)
+                        {
+                            case '\xfb': // WILL
+                                // This command is sent to indicate that the sender wishes to enable an option. It is typically followed by a byte that specifies which option the sender wants to enable.
+                                if (opt == 0x2a)
+                                {
+                                    assert(false, "this was never tested! not clear if we should transmit the space or not?");
+                                    // client has agreed to negotiate character set; we'll request UTF8...
+                                    write("\xff\xfa\x2a\x01 UTF-8\xff\xf0");
+                                }
+                                debug writeDebugf("Telnet: WILL {0}", cast(ubyte)opt);
+                                break;
+                            case '\xfc': // WON'T
+                                // Sent to indicate that the sender refuses to enable an option.
+                                debug writeDebugf("Telnet: WON'T {0}", cast(ubyte)opt);
+                                break;
+                            case '\xfd': // DO
+                                // This command is sent to indicate that the sender requests the receiver to enable an option.
+                                debug writeDebugf("Telnet: DO {0}", cast(ubyte)opt);
+                                break;
+                            case '\xfe': // DON'T
+                                // Sent to indicate that the sender requests the receiver to disable an option.
+                                debug writeDebugf("Telnet: DON'T {0}", cast(ubyte)opt);
+                                break;
+                        }
+                        break;
+                    case '\xff': // QUIT
+                        // This command indicates that the sender wants to close the Telnet connection.
+                        i += 2;
+                        goto close_session;
+                    default:
+                        // surprise NVT command?
+                        writeWarningf("Unknown NVT command: \\\\x{0, 02x}", cast(ubyte)cmd);
+                        break;
+                }
+            }
+            else if (size_t ansiLen = parseANSICode(t[i .. len]))
+            {
+                const(char)[] seq = t[i .. i + ansiLen];
+                take = ansiLen;
+
                 // ANSI sequences...
-                if (t[i .. len].startsWith(ANSI_DEL))
+                if (seq[] == ANSI_DEL)
                 {
                     if (m_position < m_buffer.length)
                         m_buffer.erase(m_position, 1);
-                    take = ANSI_DEL.length;
                 }
-                else if (t[i .. len].startsWith(ANSI_ARROW_UP))
+                else if (seq[] == ANSI_ARROW_UP)
                 {
                     if (m_historyCursor > 0)
                     {
@@ -221,9 +337,8 @@ nothrow @nogc:
                         m_buffer = m_history[m_historyCursor][];
                         m_position = cast(uint)m_buffer.length;
                     }
-                    take = ANSI_ARROW_UP.length;
                 }
-                else if (t[i .. len].startsWith(ANSI_ARROW_DOWN))
+                else if (seq[] == ANSI_ARROW_DOWN)
                 {
                     if (m_historyCursor < m_history.length)
                     {
@@ -237,21 +352,18 @@ nothrow @nogc:
                         }
                         m_position = cast(uint)m_buffer.length;
                     }
-                    take = ANSI_ARROW_DOWN.length;
                 }
-                else if (t[i .. len].startsWith(ANSI_ARROW_LEFT))
+                else if (seq[] == ANSI_ARROW_LEFT)
                 {
                     if (m_position > 0)
                         --m_position;
-                    take = ANSI_ARROW_LEFT.length;
                 }
-                else if (t[i .. len].startsWith(ANSI_ARROW_RIGHT))
+                else if (seq[] == ANSI_ARROW_RIGHT)
                 {
                     if (m_position < m_buffer.length)
                         ++m_position;
-                    take = ANSI_ARROW_RIGHT.length;
                 }
-                else if (t[i .. len].startsWith("\x1b[1;5D") || t[i .. len].startsWith("\x1bOD")) // CTRL_LEFT
+                else if (seq[] == "\x1b[1;5D" || seq[] == "\x1bOD") // CTRL_LEFT
                 {
                     bool passedAny = false;
                     while (m_position > 0)
@@ -261,9 +373,8 @@ nothrow @nogc:
                         if (m_buffer[--m_position] != ' ')
                             passedAny = true;
                     }
-                    take = t[i .. len].startsWith("\x1bOD") ? "\x1bOD".length : "\x1b[1;5D".length;
                 }
-                else if (t[i .. len].startsWith("\x1b[1;5C") || t[i .. len].startsWith("\x1bOC")) // CTRL_RIGHT
+                else if (seq[] == "\x1b[1;5C" || seq[] == "\x1bOC") // CTRL_RIGHT
                 {
                     bool passedAny = false;
                     while (m_position < m_buffer.length)
@@ -273,27 +384,22 @@ nothrow @nogc:
                         if (m_buffer[m_position++] == ' ' && passedAny)
                             break;
                     }
-                    take = t[i .. len].startsWith("\x1bOC") ? "\x1bOC".length : "\x1b[1;5C".length;
                 }
-                else if (t[i .. len].startsWith(ANSI_HOME1))
+                else if (seq[] == ANSI_HOME1)
                 {
                     m_position = 0;
-                    take = ANSI_HOME1.length;
                 }
-                else if (t[i .. len].startsWith(ANSI_HOME2) || t[i .. len].startsWith(ANSI_HOME3))
+                else if (seq[] == ANSI_HOME2 || seq[] == ANSI_HOME3)
                 {
                     m_position = 0;
-                    take = ANSI_HOME2.length;
                 }
-                else if (t[i .. len].startsWith(ANSI_END1))
+                else if (seq[] == ANSI_END1)
                 {
                     m_position = cast(uint)m_buffer.length;
-                    take = ANSI_END1.length;
                 }
-                else if (t[i .. len].startsWith(ANSI_END2) || t[i .. len].startsWith(ANSI_END3))
+                else if (seq[] == ANSI_END2 || seq[] == ANSI_END3)
                 {
                     m_position = cast(uint)m_buffer.length;
-                    take = ANSI_END2.length;
                 }
             }
             else
@@ -307,6 +413,15 @@ nothrow @nogc:
         }
 
         return len;
+
+    close_session:
+        // Ctrl-C
+        closeSession();
+
+    early_return:
+        // store the tail of the input buffer so the outer context can claim it
+        m_buffer = text[i .. $];
+        return -1;
     }
 
     MutableString!0 takeInput()
@@ -357,25 +472,24 @@ protected:
     ///  Set of suggestion that apply to the current context
     void showSuggestions(const(String)[] suggestions)
     {
-        assert(false);
-//        uint32 max = 0;
-//        for (auto& s : suggestions)
-//            max = max < s.Size() ? s.Size() : max;
-//
-//        bcString text{ TempAllocator() };
-//        uint32 lineOffset = 0;
-//        for (auto& s : suggestions)
-//        {
-//            if (lineOffset + max + 3 > GetWidth())
-//            {
-//                text.Append("\r\n");
-//                lineOffset = 0;
-//            }
-//            text.AppendFormat("   %-*s", (int)max, s.Data());
-//            lineOffset += max + 3;
-//        }
-//
-//        WriteLine(text);
+        size_t max = 0;
+        foreach (ref s; suggestions)
+            max = max < s.length ? s.length : max;
+
+        MutableString!0 text;
+        size_t lineOffset = 0;
+        foreach (ref s; suggestions)
+        {
+            if (lineOffset + max + 3 > m_width)
+            {
+                text ~= "\r\n";
+                lineOffset = 0;
+            }
+            text.appendFormat("   {0, *1}", s[], max);
+            lineOffset += max + 3;
+        }
+
+        writeLine(text);
     }
 
     final void receiveInput(const(char)[] input)
@@ -398,7 +512,7 @@ protected:
                 assert(input[taken] == '\r' || input[taken] == '\n', "Should only be here when user presses enter?");
 
                 // consume following '\n'??
-                if (input[taken] == '\r' && taken + 1 < input.length && input[taken + 1] == '\n')
+                if (input[taken] == '\r' && taken + 1 < input.length && (input[taken + 1] == '\n' || input[taken + 1] == '\0'))
                     ++taken;
 
                 MutableString!0 cmdInput = takeInput();

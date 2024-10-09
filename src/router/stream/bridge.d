@@ -22,7 +22,7 @@ nothrow @nogc:
         super(name.move, "bridge", options);
 
         this.m_streams = streams;
-        this.m_remoteName = MutableString!0(60);
+        this.m_remoteName.reserve(60);
 
         m_remoteName = "bridge[";
         foreach (i, s; streams)

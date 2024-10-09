@@ -5,6 +5,7 @@ import manager.console;
 import manager.console.builtin_commands;
 import manager.console.session;
 
+import urt.array;
 import urt.mem;
 import urt.meta.nullable;
 import urt.string;
@@ -57,27 +58,26 @@ nothrow @nogc:
 
     abstract CommandState execute(Session session, const(char)[] cmdLine);
 
-    String complete(const(char)[] cmdLine) const
+    MutableString!0 complete(const(char)[] cmdLine)
     {
         version (ExcludeAutocomplete)
             return null;
         else
         {
-            assert(false);
-//            bcVector<bcString> tokens = Suggest({ cmdLine.Data(), cmdLine.Size() });
-//            if (tokens.IsEmpty())
-//                return cmdLine;
-//            uint32 lastToken = cmdLine.Size();
-//            while (lastToken > 0 && !dcIsSeparator(cmdLine[lastToken - 1]))
-//                --lastToken;
-//            cmdLine.PushBack(dcGetCompletionSuffix({ cmdLine.Data() + lastToken, cmdLine.Size() - lastToken }, tokens).Data());
-//            return cmdLine;
-            return String(null);
+            MutableString!0 result = cmdLine;
+            Array!(MutableString!0) tokens = suggest(cmdLine);
+            if (tokens.empty)
+                return result;
+            size_t lastToken = cmdLine.length;
+            while (lastToken > 0 && !isSeparator(cmdLine[lastToken - 1]))
+                --lastToken;
+            result ~= getCompletionSuffix(cmdLine[lastToken .. cmdLine.length], tokens);
+            return result;
         }
     }
 
-
-    String[] suggest(const(char)[] cmdLine) const => null;
+    Array!(MutableString!0) suggest(const(char)[] cmdLine)
+        => Array!(MutableString!0)();
 
     const(char)[] help(const(char)[] args) const
     {

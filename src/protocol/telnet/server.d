@@ -26,26 +26,17 @@ nothrow @nogc:
         this.name = name.move;
         m_allocator = allocator;
         m_console = console;
-//        , m_listeners(allocator)
-//        , m_sessions(allocator)
 
         m_server = m_allocator.allocT!TCPServer(name, port, &acceptConnection, null);
     }
 
     ~this()
     {
-        m_server.stop();
+        m_allocator.freeT(m_server);
 
-//        for (dcTelnetSession* ts : m_sessions)
-//            m_allocator.Delete(ts);
-//
-//        for (auto&& listener : m_listeners)
-//        {
-//            if (listener.listenSocket != bcInvalidSocket)
-//                bcCloseSocket(listener.listenSocket);
-//        }
-//
-//        bcSocketTerminate();
+        foreach (TelnetSession s; m_sessions)
+            m_allocator.freeT(s);
+        m_sessions.clear();
     }
 
     /// Add a listening port to the server.
@@ -60,53 +51,7 @@ nothrow @nogc:
     /// \returns Returns `true` if the new port was registered successfully.
     bool addListenPort(Console* console, ushort listenPort, const(char)[] loginScript)
     {
-//        for (auto&& listener : m_listeners)
-//        {
-//            if (listener.listenPort == listenPort)
-//                return false;
-//        }
-//
-//        ListenPort newPort{
-//            listenPort,
-//                bcInvalidSocket,
-//                console,
-//                bcString{ m_allocator, loginScript ? loginScript : "" }
-//        };
-//
-//        bcAddressInfo hints;
-//        bcMemZero(&hints, sizeof(hints));
-//        hints.family = bcAddressFamily::Inet;
-//        hints.sockType = bcSocketType::Stream;
-//        hints.protocol = bcProtocol::TCP;
-//        hints.flags = bcAddressInfoFlags::Passive;
-//
-//        char portNumber[11];
-//        bcToString(portNumber, listenPort);
-//
-//        bcAddressInfoResolver aiResult;
-//        if (!bcGetAddressInfo(nullptr, portNumber, &hints, aiResult))
-//            return false;
-//
-//        bcAddressInfo ai;
-//        if (!aiResult.GetNextAddress(&ai))
-//            return false;
-//
-//        bcResult r = bcOpenSocket(ai.family, ai.sockType, ai.protocol, newPort.listenSocket);
-//        if (newPort.listenSocket == bcInvalidSocket)
-//            return false;
-//
-//        r = bcBind(newPort.listenSocket, ai.address);
-//        if (r)
-//            r = bcListen(newPort.listenSocket);
-//        if (!r)
-//        {
-//            bcCloseSocket(newPort.listenSocket);
-//            newPort.listenSocket = bcInvalidSocket;
-//            return false;
-//        }
-//
-//        m_listeners.PushBack(bcMove(newPort));
-//        return true;
+        // TODO: support multiple listening ports which direct to different console instasnces?
         return false;
     }
 
@@ -115,8 +60,11 @@ nothrow @nogc:
     {
         m_server.update();
 
-        foreach (i, s; m_sessions)
+        for (size_t i; i < m_sessions.length; )
         {
+            TelnetSession s = m_sessions[i];
+
+            // update session
             if (s.isAttached)
                 s.update();
 
@@ -124,61 +72,14 @@ nothrow @nogc:
             if (!s.isAttached)
             {
                 m_allocator.freeT(s);
-                // TODO: remove the item from the array!
-                assert(false);
+                m_sessions.removeSwapLast(i);
             }
+            else
+                ++i;
         }
-
-//        bcPollFd fds[128];
-//        size_t numSockets = 0;
-//        for (auto& listener : m_listeners)
-//        {
-//            if (listener.listenSocket == bcInvalidSocket)
-//                continue;
-//            fds[numSockets].socket = listener.listenSocket;
-//            fds[numSockets].requestEvents = bcPollEvents::Read;
-//            fds[numSockets].userData = &listener;
-//            ++numSockets;
-//        }
-//
-//        uint32 numEvents;
-//        bcResult r = bcPoll(fds, numSockets, bcDuration_Zero, numEvents);
-//        if (!r)
-//        {
-//            // poll failed?
-//        }
-//        for (uint32 i = 0; i < numSockets; ++i)
-//        {
-//            if (+(fds[i].returnEvents & bcPollEvents::Read))
-//            {
-//            dcTelnetServer::ListenPort& port = *static_cast<dcTelnetServer::ListenPort*>(fds[i].userData);
-//                acceptConnection(port);
-//            }
-//        }
-//
-//        // clean up closed sessions
-//        for (uint32 i = 0; i < m_sessions.Size(); )
-//        {
-//            dcTelnetSession* session = m_sessions[i];
-//            if (!session->IsAttached())
-//            {
-//                m_sessions.Erase(i);
-//                m_allocator.Delete(session);
-//            }
-//            else
-//                ++i;
-//        }
     }
 
 package:
-//    struct ListenPort
-//    {
-//        ushort listenPort;
-//        bcSocket listenSocket;
-//        dcDebugConsole* console;
-//        bcString loginScript;
-//    }
-
     NoGCAllocator m_allocator;
 
     Console* m_console;
