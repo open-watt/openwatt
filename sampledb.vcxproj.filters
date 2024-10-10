@@ -396,6 +396,9 @@
     <DCompile Include="src\manager\console\console.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\tesla\package.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

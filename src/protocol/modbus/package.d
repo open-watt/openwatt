@@ -25,7 +25,6 @@ class ModbusProtocolModule : Plugin
 		mixin DeclareInstance;
 
 		Map!(const(char)[], ModbusClient) clients;
-//		Server[string] servers;
 
 		override void init()
 		{

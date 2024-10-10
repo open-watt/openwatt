@@ -251,8 +251,19 @@ bool tokenToValue(I)(ref const Token t, out I r) nothrow @nogc if (isSomeInt!I)
     const(char)[] v = tokenValue(t, false);
     if (!v)
         return false;
+    int base = 10;
+    if (v.length > 2 && v[0..2] == "0x")
+    {
+        base = 16;
+        v = v[2 .. $];
+    }
+    if (v.length > 2 && v[0..2] == "0b")
+    {
+        base = 2;
+        v = v[2 .. $];
+    }
     size_t taken;
-    r = cast(I)v.parseInt(&taken);
+    r = cast(I)v.parseInt(&taken, null, base);
     return taken > 0;
 }
 

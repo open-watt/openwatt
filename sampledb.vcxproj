@@ -79,6 +79,7 @@
     <DCompile Include="src\protocol\telnet\server.d" />
     <DCompile Include="src\protocol\telnet\session.d" />
     <DCompile Include="src\protocol\tesla\master.d" />
+    <DCompile Include="src\protocol\tesla\package.d" />
     <DCompile Include="src\protocol\tesla\twc.d" />
     <DCompile Include="src\router\goodwe\aa55.d" />
     <DCompile Include="src\router\goodwe\package.d" />

@@ -157,6 +157,11 @@ nothrow @nogc:
             return false;
         }
 
+        debug {
+            import urt.io;
+            writef("{4} - {0}: TWC packet sent {1}-->{2} [{3}]\n", name, packet.src, packet.dst, packet.data, packet.creationTime);
+        }
+
         ++status.sendPackets;
         status.sendBytes += packet.data.length;
         // TODO: but should we record the ACTUAL protocol packet?
@@ -243,7 +248,7 @@ class TeslaInterfaceModule : Plugin
             // HACK: we'll print packets that we receive...
             iface.subscribe((ref const Packet p, BaseInterface i, void* u) {
                 import urt.io;
-                writef("{0}: TWC packet received {1}-->{2} [{3}]\n", i.name, p.src, p.dst, p.data);
+                writef("{4} - {0}: TWC packet recv {2}<--{1} [{3}]\n", i.name, p.src, p.dst, p.data, p.creationTime);
             }, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.TeslaTWC));
         }
 
@@ -289,6 +294,16 @@ class TeslaInterfaceModule : Plugin
             map.iface = iface;
 
             iface.addAddress(map.mac, iface);
+            return devices.insert(address, map);
+        }
+
+        DeviceMap* addServer(const(char)[] name, BaseInterface iface, ushort address)
+        {
+            DeviceMap map;
+            map.name = name.makeString(defaultAllocator());
+            map.address = address;
+            map.mac = iface.mac;
+//            map.iface = iface;
             return devices.insert(address, map);
         }
     }

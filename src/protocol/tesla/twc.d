@@ -7,24 +7,24 @@ nothrow @nogc:
 
 enum TWCMessageType : byte
 {
-	Unknown = -1,
-	MasterLinkReady1 = 0,	// FCE1
-	MasterLinkReady2,		// FBE2
-	SlaveLinkReady,			// FDE2
-	MasterHeartbeat,		// FBE0
-	SlaveHeartbeat,			// FDE0
-	_FBEB,
-	_FBEC,
-	_FBED,
-	_FBEE,
-	_FBEF,
-	_FBF1,
-	ChargeInfo,				// FDEB
-	_FDEC, // ???
-	TWCSerialNumber,		// FDED
-	VIN1,					// FDEE
-	VIN2,					// FDEF
-	VIN3,					// FDF1
+    Unknown = -1,
+    MasterLinkReady1 = 0,   // FCE1
+    MasterLinkReady2,       // FBE2
+    SlaveLinkReady,         // FDE2
+    MasterHeartbeat,        // FBE0
+    SlaveHeartbeat,         // FDE0
+    ReqChargeInfo,          // FBEB
+    Req_FBEC,               // FBEC
+    ReqTWCSerialNumber,     // FBED
+    ReqVIN1,                // FBEE
+    ReqVIN2,                // FBEF
+    ReqVIN3,                // FBF1
+    ChargeInfo,             // FDEB
+    _FDEC,                  // FDEC
+    TWCSerialNumber,        // FDED
+    VIN1,                   // FDEE
+    VIN2,                   // FDEF
+    VIN3,                   // FDF1
 }
 
 enum TWCState : ubyte
@@ -155,24 +155,20 @@ bool parseTWCMessage(const(ubyte)[] data, out TWCMessage msg)
 					goto case;
 				case 0x00:
 				case 0x03:
-					msg.heartbeat.current = params[3..5].bigEndianToNative!ushort;
+					msg.heartbeat.current = params[1..3].bigEndianToNative!ushort;
 					break;
 				default:
 					break;
 			}
 			break;
-		case TWCMessageType._FBEB:
-		case TWCMessageType._FBEC:
-		case TWCMessageType._FBED:
-		case TWCMessageType._FBEE:
-		case TWCMessageType._FBEF:
-		case TWCMessageType._FBF1:
+		case TWCMessageType.ReqChargeInfo:
+		case TWCMessageType.Req_FBEC:
+		case TWCMessageType.ReqTWCSerialNumber:
+		case TWCMessageType.ReqVIN1:
+		case TWCMessageType.ReqVIN2:
+		case TWCMessageType.ReqVIN3:
 			msg.sender = data[2..4].bigEndianToNative!ushort;
 			msg.receiver = data[4..6].bigEndianToNative!ushort;
-			if (!msg.ver == 2)
-				return false;
-			ubyte[9] params = data[6..15];
-			//...
 			break;
 		case TWCMessageType.ChargeInfo:
 			msg.sender = data[2..4].bigEndianToNative!ushort;
