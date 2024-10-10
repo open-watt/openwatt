@@ -154,10 +154,7 @@ nothrow @nogc:
             {
             erase_char:
                 if (m_position > 0)
-                {
-                    m_buffer.erase(-1, 1);
-                    --m_position;
-                }
+                    m_buffer.erase(--m_position, 1);
             }
             else if (t[i] == '\t')
             {

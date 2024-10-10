@@ -276,7 +276,9 @@ char[] toHexString(const(ubyte[]) data, uint group = 0, uint secondaryGroup = 0,
 {
 	import urt.mem.temp;
 
-	size_t len = data.length*2 + (group ? (data.length-1) / group : 0);
+	size_t len = data.length*2;
+	if (group && len > 0)
+		len += (data.length-1) / group;
 	return data.toHexString(cast(char[])talloc(len), group, secondaryGroup, seps);
 }
 

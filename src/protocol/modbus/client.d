@@ -22,6 +22,8 @@ alias ModbusErrorHandler = void delegate(ModbusErrorType errorType, ref const Mo
 
 class ModbusClient
 {
+nothrow @nogc:
+
     ModbusProtocolModule.Instance m;
 
     String name;

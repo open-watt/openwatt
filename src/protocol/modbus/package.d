@@ -33,10 +33,10 @@ class ModbusProtocolModule : Plugin
 			app.console.registerCommand!request_read("/protocol/modbus/client/request", this, "read");
 		}
 
-		override void update()
+		override void update() nothrow @nogc
 		{
-//			foreach(client; clients)
-//				client.update();
+			foreach(name, client; clients)
+				client.update();
 		}
 
 		void client_add(Session session, const(char)[] name, const(char)[] _interface) nothrow @nogc

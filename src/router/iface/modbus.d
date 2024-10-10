@@ -555,7 +555,7 @@ class ModbusInterfaceModule : Plugin
         }
 
 
-        void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, const(char)[] profile, ubyte universal_address = 0)
+        void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, const(char)[] profile, Nullable!ubyte universal_address)
         {
             if (!_interface)
             {
@@ -583,15 +583,15 @@ class ModbusInterfaceModule : Plugin
 
             if (universal_address)
             {
-                ServerMap* t = universal_address in remoteServers;
+                ServerMap* t = universal_address.value in remoteServers;
                 if (t)
                 {
-                    session.writeLine("Universal address '", universal_address, "' already in use by '", t.name, "'.");
+                    session.writeLine("Universal address '", universal_address.value, "' already in use by '", t.name, "'.");
                     return;
                 }
             }
 
-            addRemoteServer(name, modbusInterface, address, profile, universal_address);
+            addRemoteServer(name, modbusInterface, address, profile, universal_address ? universal_address.value : 0);
         }
     }
 }
@@ -646,7 +646,7 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
     // frames must start with a valid function code...
     ubyte f = data[1];
     FunctionCode fc = cast(FunctionCode)(f & 0x7F);
-    ushort fnData = fc < functionLens.length ? functionLens[f] : fc == 0x2B ? 0xFFFF : 0;
+    ushort fnData = fc < functionLens.length ? functionLens[fc] : fc == 0x2B ? 0xFFFF : 0;
     if (fnData == 0) // @unlikely
         return 0;
     frameInfo.functionCode = fc;
