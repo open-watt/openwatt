@@ -60,9 +60,7 @@ struct TWCMessage
 		Heartbeat heartbeat;
 		ChargeInfo chargeinfo;
 		char[11] sn;			// Charger serial number
-		char[7] vin1;			// VIN 1-7
-		char[7] vin2;			// VIN 8-14
-		char[3] vin3;			// VIN 15-17
+		char[7] vin;			// VIN bytes
 	}
 
 	struct LinkReady
@@ -197,21 +195,21 @@ bool parseTWCMessage(const(ubyte)[] data, out TWCMessage msg)
 			if (data.length != 19)
 				return false;
 			msg.ver = 2;
-			msg.vin1[] = cast(char[])data[4..11];
+			msg.vin[] = cast(char[])data[4..11];
 			break;
 		case TWCMessageType.VIN2:
 			msg.sender = data[2..4].bigEndianToNative!ushort;
 			if (data.length != 19)
 				return false;
 			msg.ver = 2;
-			msg.vin2[] = cast(char[])data[4..11];
+			msg.vin[] = cast(char[])data[4..11];
 			break;
 		case TWCMessageType.VIN3:
 			msg.sender = data[2..4].bigEndianToNative!ushort;
 			if (data.length != 19)
 				return false;
 			msg.ver = 2;
-			msg.vin3[] = cast(char[])data[4..7];
+			msg.vin[0..3] = cast(char[])data[4..7];
 			break;
 		default:
 			assert(false);
