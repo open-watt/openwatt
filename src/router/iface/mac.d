@@ -244,32 +244,37 @@ nothrow @nogc:
 		}
 	}
 
-	void update()
-	{
-		ubyte newTime = getAppTime().as!"minutes" & 0xFF;
-		if (newTime == curTime)
-			return;
+    void update()
+    {
+        // update once per second...
+        ubyte newTime = (getTime() - MonoTime()).as!"seconds" & 0xFF;
+        if (newTime == curTime)
+            return;
 
-		curTime = newTime;
-		for (size_t i = 0; i < table.length; ++i)
-		{
-			short element = table[i];
-			while (element >= 0)
-			{
-				uint elementTime = elements[element].detail >> 24;
-				int age = elementTime <= curTime ? curTime - elementTime : (0x100 - elementTime) + curTime;
+        curTime = newTime;
 
-				if (age > ttl)
-				{
-					removeFromSlot(cast(ubyte)i, element);
-					elements[element].next = freeListHead;
-					freeListHead = element;
-				}
-				else
-					element = elements[element].next;
-			}
-		}
-	}
+        // we'll just scan one hash map slot each update cycle
+        // get through them all every ~4 minutes
+        short element = table[scanSlot];
+        while (element >= 0)
+        {
+            uint elementTime = elements[element].detail >> 24;
+            int age = elementTime <= curTime ? curTime - elementTime : (0x100 - elementTime) + curTime;
+
+            if (age > ttl)
+            {
+                removeFromSlot(scanSlot, element);
+                ushort next = elements[element].next;
+                elements[element].next = freeListHead;
+                freeListHead = element;
+                element = next;
+            }
+            else
+                element = elements[element].next;
+        }
+        if (++scanSlot >= table.length)
+            scanSlot = 0;
+    }
 
 private:
 	struct Entry
@@ -285,6 +290,7 @@ private:
 	ubyte ttl;
 	short[256] table = -1;
 	ushort maxElements;
+    ubyte scanSlot = 0;
 
 	ubyte hash(MACAddress mac) const pure
     {
