@@ -87,9 +87,6 @@
     <DCompile Include="src\router\modbus\profile\goodwe_ems.d">
       <Filter>src\router\modbus\profile</Filter>
     </DCompile>
-    <DCompile Include="src\router\modbus\profile\pace_bms.d">
-      <Filter>src\router\modbus\profile</Filter>
-    </DCompile>
     <DCompile Include="src\router\modbus\profile\package.d">
       <Filter>src\router\modbus\profile</Filter>
     </DCompile>
@@ -397,6 +394,15 @@
       <Filter>src\manager\console</Filter>
     </DCompile>
     <DCompile Include="src\protocol\tesla\package.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sampler.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\modbus\sampler.d">
+      <Filter>src\protocol\modbus</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\sampler.d">
       <Filter>src\protocol\tesla</Filter>
     </DCompile>
   </ItemGroup>

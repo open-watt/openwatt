@@ -151,7 +151,7 @@ CacheString addString(const(char)[] str, bool dedup = true) nothrow @nogc
 }
 
 
-void* allocWithStringCache(size_t bytes, String[] cachedStrings, const(char[])[] strings)
+void* allocWithStringCache(size_t bytes, String[] cachedStrings, const(char[])[] strings) nothrow @nogc
 {
 	import urt.mem.alloc;
 

@@ -104,9 +104,8 @@ static inout(char)[] _getString(inout(char)* ptr) pure nothrow @nogc
 {
     ushort len = ptr[0];
     if (len < 128)
-        return ptr[1 .. 1 + len];
-    len = (len & 0x7F) | ((ptr[1] << 7) & 0x7F);
-    return ptr[2 .. 2 + len];
+        return (ptr + 1)[0 .. len];
+    return (ptr + 2)[0 .. (len ^ 0x80) | ((ptr[1] ^ 0x80) << 7)];
 }
 
 static size_t _length(const(char)* ptr) pure nothrow @nogc

@@ -8,9 +8,9 @@ enum ModbusMessageDataMaxLength = 252;
 enum RegisterType : ubyte
 {
 	Coil = 0,
-	DiscreteInput,
-	InputRegister,
-	HoldingRegister
+	DiscreteInput = 1,
+	InputRegister = 3,
+	HoldingRegister = 4
 }
 
 enum FunctionCode : ubyte
@@ -146,9 +146,10 @@ ModbusPDU createMessage_Read(RegisterType type, ushort register, ushort register
 {
 	ModbusPDU pdu;
 
-	__gshared immutable FunctionCode[4] codeForRegType = [
+	__gshared immutable FunctionCode[5] codeForRegType = [
 		FunctionCode.ReadCoils,
 		FunctionCode.ReadDiscreteInputs,
+		cast(FunctionCode)0,
 		FunctionCode.ReadInputRegisters,
 		FunctionCode.ReadHoldingRegisters
 	];

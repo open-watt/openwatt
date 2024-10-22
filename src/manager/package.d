@@ -1,6 +1,10 @@
 module manager;
 
+import urt.array;
+import urt.lifetime : move;
+import urt.map;
 import urt.mem.allocator;
+import urt.string;
 
 public import manager.instance;
 import manager.plugin;
@@ -9,17 +13,17 @@ import manager.plugin;
 __gshared GlobalInstance globalInstance;
 
 
-GlobalInstance getGlobalInstance()
+GlobalInstance getGlobalInstance() nothrow @nogc
 {
 	if (!globalInstance)
-		globalInstance = new GlobalInstance();
+		globalInstance = defaultAllocator().allocT!GlobalInstance();
 	return globalInstance;
 }
 
 class GlobalInstance
 {
-	ApplicationInstance[string] instances;
-	Plugin[] modules;
+	Map!(String, ApplicationInstance) instances;
+	Array!Plugin modules;
 
 	import router.modbus.profile;
 
@@ -42,7 +46,7 @@ class GlobalInstance
 		}
 	}
 
-	Plugin getModule(const(char)[] name)
+	Plugin getModule(const(char)[] name) nothrow @nogc
 	{
 		foreach (plugin; modules)
 			if (plugin.moduleName[] == name[])
@@ -50,21 +54,21 @@ class GlobalInstance
 		return null;
 	}
 
-	Module getModule(Module)()
+	Module getModule(Module)() nothrow @nogc
 	{
 		return cast(Module)getModule(Module.ModuleName);
 	}
 
 
-	ApplicationInstance createInstance(string name)
+	ApplicationInstance createInstance(String name) nothrow @nogc
 	{
-		ApplicationInstance app = new ApplicationInstance();
-		app.name = name;
+		ApplicationInstance app = defaultAllocator().allocT!ApplicationInstance();
+		app.name = name.move;
 		app.global = getGlobalInstance();
 
 		instances[name] = app;
 
-		app.pluginInstance = new Plugin.Instance[modules.length];
+		app.pluginInstance.resize(modules.length);
 		foreach (i; 0 .. modules.length)
 		{
 			Plugin.Instance pluginInstance = modules[i].createInstance(app);

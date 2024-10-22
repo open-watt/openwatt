@@ -26,10 +26,46 @@ char[] allocTempString(size_t len) nothrow @nogc
 
 public import urt.mem : strlen;
 
-bool empty(T)(T[] arr)
+char* tstringz(const(char)[] str) nothrow @nogc
 {
-	return arr.length == 0;
+    char[] buffer = allocTempString(str.length + 1);
+    buffer[0..str.length] = str[];
+    buffer[str.length] = 0;
+    return buffer.ptr;
 }
+
+wchar* twstringz(const(char)[] str) nothrow @nogc
+{
+    wchar[] buffer = cast(wchar[])allocTempString((str.length + 1) * 2);
+
+    // TODO: actually decode UTF8 into UTF16!!
+
+    foreach (i, c; str)
+        buffer[i] = c;
+    buffer[str.length] = 0;
+    return buffer.ptr;
+}
+
+bool empty(T)(T[] arr) pure nothrow @nogc
+{
+    return arr.length == 0;
+}
+
+int icmp(const(char)[] a, const(char)[] b) pure nothrow @nogc
+{
+    if (a.length != b.length)
+        return cast(int)(a.length - b.length);
+    for (size_t i = 0; i < a.length; ++i)
+    {
+        int diff = toLower(a[i]) - toLower(b[i]);
+        if (diff)
+            return diff;
+    }
+    return 0;
+}
+
+bool ieq(const(char)[] a, const(char)[] b) pure nothrow @nogc
+    => icmp(a, b) == 0;
 
 bool startsWith(const(char)[] s, const(char)[] prefix) pure nothrow @nogc
 {

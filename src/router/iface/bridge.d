@@ -208,7 +208,7 @@ class BridgeInterfaceModule : Plugin
             mod_if.addInterface(iface);
 
             import urt.log;
-            debug writeDebugf("Create bridge interface {0} - '{1}'", iface.mac, name);
+            writeInfo("Create bridge interface '", name, "' - ", iface.mac);
 
 //            // HACK: we'll print packets that we receive...
 //            iface.subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {
@@ -256,6 +256,8 @@ class BridgeInterfaceModule : Plugin
                 session.writeLine("Failed to add interface '", _interface, "' to bridge '", bridge, "'.");
                 return;
             }
+
+            writeInfo("Bridge port add - bridge: ", bridge, "  interface: ", _interface);
         }
     }
 }

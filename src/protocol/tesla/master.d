@@ -235,8 +235,7 @@ nothrow @nogc:
                 return;
             }
 
-            debug writeDebug("Charger ", c.name, "(", c.id, ") - SN: ", c.serialNumber[], "\n   ", c.voltage1, '/', c.voltage2, '/', c.voltage3, "V  ", cast(float)c.current/100, "A(", cast(float)c.maxCurrent / 100, "A)  ", c.totalPower, "W - ", c.chargerState(), "\n   VIN ", c.vin[]);
-
+            debug writeDebugf("Charger {0}({1,04x}) - SN: {2}\n   {3}/{4}/{5}V  {6}A({7}A)  {8}W - {9}\n   VIN {10}", c.name, c.id, c.serialNumber[], c.voltage1, c.voltage2, c.voltage3, cast(float)c.current/100, cast(float)c.maxCurrent / 100, c.totalPower, c.chargerState(), c.vin[]);
 
             message[0..2] = 0xFBE0.nativeToBigEndian;
 

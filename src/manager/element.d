@@ -8,6 +8,16 @@ import manager.value;
 
 import urt.string;
 
+nothrow @nogc:
+
+
+enum Access : ubyte
+{
+	Read,
+	Write,
+	ReadWrite
+}
+
 enum PageBits = 8;
 enum PageSize = 1 << PageBits;
 
@@ -32,6 +42,8 @@ private:
 
 struct Element
 {
+nothrow @nogc:
+
 	static ElementRef create()
 	{
 		ubyte page = numPages;
@@ -61,6 +73,8 @@ struct Element
 
 	Value latest;
 
+	Access access;
+
 	inout(Value) currentValue() inout
 	{
 		return latest;
@@ -76,24 +90,62 @@ struct Element
 		return null;
 	}
 
+    void setValue(T)(auto ref T v)
+    {
+        import urt.traits;
+
+        static if (is(T == int))
+        {
+            if (latest.asInt() != v)
+            {
+                latest = Value(v);
+                // TODO: signal subscribers...
+            }
+        }
+        else static if (is(T == float))
+        {
+            if (latest.asFloat() != v)
+            {
+                latest = Value(v);
+                // TODO: signal subscribers...
+            }
+        }
+        else static if (is(T : const(char)[]))
+        {
+            if (latest.asString() != v[])
+            {
+                latest = Value(v);
+                // TODO: signal subscribers...
+            }
+        }
+        else static if (is(T E == enum) && isSomeInt!E)
+            setValue(cast(int)v);
+        else static if (isSomeInt!T)
+            setValue(cast(int)v);
+        else static if (isSomeFloat!T)
+            setValue(cast(float)v);
+        else
+            static assert(false, "Not implemented");
+    }
+
 	union
 	{
 		Value function(Device* device, Component* component) calcFun;
-		Sampler* sampler;
+		SamplerData* sampler;
 	}
 
 	ubyte numSubscribers;
 	Subscriber subscribers;
 }
 
-struct Sampler
+struct SamplerData
 {
 	void* server; // Server
 	void* samplerData;
 	void* dbRef;
 	UnitDef convert;
 	int updateIntervalMs;
-	bool function(Sampler* a, Sampler* b) lessThan;
+	bool function(SamplerData* a, SamplerData* b) lessThan;
 
 	//...
 	import urt.time;

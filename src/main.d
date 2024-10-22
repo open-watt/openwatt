@@ -32,7 +32,7 @@ void main()
 	// TODO: prime the string cache with common strings, like unit names and common variable names
 	//       the idea is to make dedup lookups much faster...
 
-	ApplicationInstance app = getGlobalInstance.createInstance("app");
+	ApplicationInstance app = getGlobalInstance.createInstance(StringLit!"app");
 
 	// execute startup script
 	string conf;

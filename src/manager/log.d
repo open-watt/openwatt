@@ -38,12 +38,6 @@ class LogModule : Plugin
 
 			app.console.registerCommands("/log", commands);
 		}
-
-		import manager.config;
-		override void parseConfig(ref ConfItem conf)
-		{
-			// TODO:...
-		}
 	}
 }
 

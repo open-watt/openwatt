@@ -82,6 +82,14 @@ size_t findLast(T, U)(const(T)[] arr, U[] seq)
     return arr.length;
 }
 
+size_t findFirst(T)(const(T)[] arr, bool delegate(auto ref const T) nothrow @nogc pred)
+{
+    size_t i = 0;
+    while (i < arr.length && !pred(arr[i]))
+        ++i;
+    return i;
+}
+
 ptrdiff_t indexOfElement(T, U)(const(T)[] arr, const(U)* el)
 {
     if (el < arr.ptr || el >= arr.ptr + arr.length)
@@ -89,7 +97,7 @@ ptrdiff_t indexOfElement(T, U)(const(T)[] arr, const(U)* el)
     return el - arr.ptr;
 }
 
-inout(T)* search(T)(inout(T)[] arr, bool function(ref const T) nothrow @nogc pred)
+inout(T)* search(T)(inout(T)[] arr, bool delegate(ref const T) nothrow @nogc pred)
 {
     foreach (ref e; arr)
     {
@@ -144,7 +152,7 @@ struct Array(T, size_t EmbedCount = 0)
         _length = cast(uint)arr.length;
     }
 
-    this(U, size_t N)(U[N] arr)
+    this(U, size_t N)(ref U[N] arr)
         if (is(U : T))
     {
         this(arr[]);
@@ -216,10 +224,20 @@ nothrow @nogc:
         return ptr[_length - 1];
     }
 
-    ref T pushFront()
-        => pushFront(T.init);
-    ref T pushBack()
-        => pushBack(T.init);
+    static if (is(T == class))
+    {
+        ref T pushFront()
+            => pushFront(null);
+        ref T pushBack()
+            => pushBack(null);
+    }
+    else
+    {
+        ref T pushFront()
+            => pushFront(T.init);
+        ref T pushBack()
+            => pushBack(T.init);
+    }
 
     ref T pushFront(U)(auto ref U item)
         if (is(U : T))
@@ -356,7 +374,12 @@ nothrow @nogc:
     void removeFirstSwapLast(ref const T item)  { removeSwapLast(ptr[0 .. _length].findFirst(item)); }
 
     inout(T)[] getBuffer() inout
-        => hasAllocation() ? ptr[0 .. ec.allocCount] : EmbedCount ? ec.embed[] : null;
+    {
+        static if (EmbedCount > 0)
+            return hasAllocation() ? ptr[0 .. ec.allocCount] : ec.embed[];
+        else
+            return hasAllocation() ? ptr[0 .. ec.allocCount] : null;
+    }
 
     bool opCast(T : bool)() const
         => _length != 0;
@@ -437,7 +460,35 @@ nothrow @nogc:
 
     void resize(size_t count)
     {
-        assert(false);
+        if (count < _length)
+        {
+            static if (is(T == class))
+            {
+                for (ptrdiff_t i = _length - 1; i >= count; --i)
+                    ptr[i] = null;
+            }
+            else
+            {
+                for (ptrdiff_t i = _length - 1; i >= count; --i)
+                    ptr[i].destroy!false();
+            }
+            _length = cast(uint)count;
+        }
+        else
+        {
+            reserve(count);
+            static if (is(T == class))
+            {
+                foreach (i; _length .. count)
+                    ptr[i] = null;
+            }
+            else
+            {
+                foreach (i; _length .. count)
+                    emplace!T(&ptr[i]);
+            }
+            _length = cast(uint)count;
+        }
     }
 
     void clear()
@@ -451,7 +502,8 @@ nothrow @nogc:
 private:
     union EC
     {
-        T[EmbedCount] embed = void;
+        static if (EmbedCount > 0)
+            T[EmbedCount] embed = void;
         uint allocCount;
     }
 
@@ -460,7 +512,12 @@ private:
     EC ec;
 
     bool hasAllocation() const
-        => ptr && (EmbedCount == 0 || ptr != ec.embed.ptr);
+    {
+        static if (EmbedCount > 0)
+            return ptr && ptr != ec.embed.ptr;
+        else
+            return ptr != null;
+    }
     uint allocCount() const
         => hasAllocation() ? ec.allocCount : EmbedCount;
 
@@ -471,7 +528,7 @@ private:
         return i > 16 ? i * 2 : 16;
     }
 
-    auto __debugExpanded() const pure => this[];
+    auto __debugExpanded() const pure => ptr[0 .. _length];
 }
 
 

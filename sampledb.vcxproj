@@ -63,12 +63,14 @@
     <DCompile Include="src\manager\log.d" />
     <DCompile Include="src\manager\package.d" />
     <DCompile Include="src\manager\plugin.d" />
+    <DCompile Include="src\manager\sampler.d" />
     <DCompile Include="src\manager\subscriber.d" />
     <DCompile Include="src\manager\system.d" />
     <DCompile Include="src\manager\units.d" />
     <DCompile Include="src\manager\value.d" />
     <DCompile Include="src\protocol\modbus\client.d" />
     <DCompile Include="src\protocol\modbus\package.d" />
+    <DCompile Include="src\protocol\modbus\sampler.d" />
     <DCompile Include="src\protocol\modbus\server.d" />
     <DCompile Include="src\protocol\mqtt\broker.d" />
     <DCompile Include="src\protocol\mqtt\client.d" />
@@ -80,6 +82,7 @@
     <DCompile Include="src\protocol\telnet\session.d" />
     <DCompile Include="src\protocol\tesla\master.d" />
     <DCompile Include="src\protocol\tesla\package.d" />
+    <DCompile Include="src\protocol\tesla\sampler.d" />
     <DCompile Include="src\protocol\tesla\twc.d" />
     <DCompile Include="src\router\goodwe\aa55.d" />
     <DCompile Include="src\router\goodwe\package.d" />
@@ -95,7 +98,6 @@
     <DCompile Include="src\router\modbus\profile\goodwe_ems.d" />
     <DCompile Include="src\router\modbus\profile\goodwe_inverter.d" />
     <DCompile Include="src\router\modbus\profile\goodwe_smart_meter.d" />
-    <DCompile Include="src\router\modbus\profile\pace_bms.d" />
     <DCompile Include="src\router\modbus\profile\package.d" />
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d" />
     <DCompile Include="src\router\modbus\server.d" />
@@ -347,6 +349,7 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
+      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -373,6 +376,7 @@
       <Unittest>true</Unittest>
       <Main>true</Main>
       <EnableDebugMixin>true</EnableDebugMixin>
+      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -402,6 +406,7 @@
       <CppStandard>fromCpp</CppStandard>
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
+      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -428,6 +433,7 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
+      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -454,6 +460,7 @@
       <Unittest>true</Unittest>
       <Main>true</Main>
       <EnableDebugMixin>true</EnableDebugMixin>
+      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -483,6 +490,7 @@
       <CppStandard>fromCpp</CppStandard>
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
+      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -509,6 +517,7 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
+      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -539,6 +548,7 @@
       <DebugInfo>Mago</DebugInfo>
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
+      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -565,6 +575,7 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
+      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -595,6 +606,7 @@
       <DebugInfo>Mago</DebugInfo>
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
+      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>

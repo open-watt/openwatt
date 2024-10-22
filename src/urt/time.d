@@ -2,6 +2,11 @@ module urt.time;
 
 import urt.traits : isSomeFloat;
 
+version (Windows)
+{
+    import core.sys.windows.windows;
+    extern (C) void GetSystemTimePreciseAsFileTime(FILETIME* lpSystemTimeAsFileTime) nothrow @nogc;
+}
 
 nothrow @nogc:
 
@@ -27,7 +32,9 @@ struct MonoTime
         => MonoTime(mixin("ticks " ~ op ~ " rhs.ticks"));
 
     void opOpAssign(string op)(Duration rhs) pure if (op == "+" || op == "-")
-        => mixin("ticks " ~ op ~ "= rhs.ticks;");
+    {
+        mixin("ticks " ~ op ~ "= rhs.ticks;");
+    }
 
     import urt.string.format : FormatArg;
     ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const
@@ -81,9 +88,9 @@ struct Duration
 
     void opOpAssign(string op)(Duration rhs)
         if (op == "+" || op == "-")
-        {
-            mixin("ticks " ~ op ~ "= rhs.ticks;");
-        }
+    {
+        mixin("ticks " ~ op ~ "= rhs.ticks;");
+    }
 
     long as(string base)() const
     {
@@ -115,6 +122,85 @@ struct Duration
 
     auto __debugOverview() const
         => cast(double)this;
+}
+
+struct DateTime
+{
+nothrow @nogc:
+
+    short year;
+    ubyte month;
+    ubyte wday;
+    ubyte day;
+    ubyte hour;
+    ubyte minute;
+    ubyte second;
+    uint ns;
+
+    ushort msec() const => ns / 1_000_000;
+    uint usec() const => ns / 1_000;
+
+    bool leapYear() => year % 4 == 0 && (year % 100 != 0 || year % 400 == 0); // && year >= -44; <- this is the year leap years were invented...
+
+    Duration opBinary(string op)(DateTime rhs) const pure if (op == "-")
+    {
+        // complicated...
+        assert(false);
+    }
+
+    DateTime opBinary(string op)(Duration rhs) const if (op == "+" || op == "-")
+    {
+        // complicated...
+        assert(false);
+    }
+
+    void opOpAssign(string op)(Duration rhs) pure if (op == "+" || op == "-")
+    {
+        this = mixin("this " ~ op ~ " rhs;");
+    }
+
+    import urt.string.format : FormatArg;
+    ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const
+    {
+        import urt.conv : formatInt;
+
+        size_t offset = 0;
+        uint y = year;
+        if (year <= 0)
+        {
+            if (buffer.length < 3)
+                return 0;
+            y = -year + 1;
+            buffer[0 .. 3] = "BC ";
+            offset += 3;
+        }
+        offset += year.formatInt(buffer[offset..$]);
+        if (offset + 1 > buffer.length)
+            return offset;
+        buffer[offset++] = '-';
+        offset += month.formatInt(buffer[offset..$]);
+        if (offset + 1 > buffer.length)
+            return offset;
+        buffer[offset++] = '-';
+        offset += day.formatInt(buffer[offset..$]);
+        if (offset + 1 > buffer.length)
+            return offset;
+        buffer[offset++] = ' ';
+        offset += hour.formatInt(buffer[offset..$], 10, 2, '0');
+        if (offset + 1 > buffer.length)
+            return offset;
+        buffer[offset++] = ':';
+        offset += minute.formatInt(buffer[offset..$], 10, 2, '0');
+        if (offset + 1 > buffer.length)
+            return offset;
+        buffer[offset++] = ':';
+        offset += second.formatInt(buffer[offset..$], 10, 2, '0');
+        if (offset + 1 > buffer.length)
+            return offset;
+        buffer[offset++] = '.';
+        offset += (ns / 1_000_000).formatInt(buffer[offset..$], 10, 3, '0');
+        return offset;
+    }
 }
 
 Duration dur(string base)(long value)
@@ -160,11 +246,32 @@ MonoTime getTime()
     }
 }
 
+
+DateTime getDateTime()
+{
+    version (Windows)
+    {
+        FILETIME ftime;
+        GetSystemTimePreciseAsFileTime(&ftime);
+        return fileTimeToDateTime(*cast(ulong*)&ftime);
+    }
+    else
+        static assert(false, "TODO");
+}
+
+DateTime getDateTime(MonoTime time)
+{
+    version (Windows)
+        return fileTimeToDateTime(bootFileTime + time.ticks);
+    else
+        static assert(false, "TODO");
+}
+
 Duration getAppTime()
-=> getTime() - bootTime;
+=> getTime() - startTime;
 
 Duration appTime(MonoTime t)
-=> t - bootTime;
+=> t - startTime;
 
 Duration abs(Duration d) pure
 => Duration(d.ticks < 0 ? -d.ticks : d.ticks);
@@ -177,25 +284,40 @@ private:
 
 immutable uint ticksPerSecond;
 immutable uint nsecMultiplier;
-immutable MonoTime bootTime;
+immutable MonoTime startTime;
+
+version (Windows)
+    immutable ulong bootFileTime;
+
 
 package(urt) void initClock()
 {
-    cast()bootTime = getTime();
+    cast()startTime = getTime();
 
     version (Windows)
     {
         import core.sys.windows.windows;
+        import urt.util : min;
 
         LARGE_INTEGER freq;
         QueryPerformanceFrequency(&freq);
         cast()ticksPerSecond = cast(uint)freq.QuadPart;
         cast()nsecMultiplier = 1_000_000_000 / ticksPerSecond;
+
+        // we want the ftime for QPC 0; which should be the boot time
+        // we'll repeat this 100 times and take the minimum, and we should be within probably nanoseconds of the correct value
+        LARGE_INTEGER qpc;
+        ulong ftime, bootTime = ulong.max;
+        foreach (i; 0 .. 100)
+        {
+            QueryPerformanceCounter(&qpc);
+            GetSystemTimePreciseAsFileTime(cast(FILETIME*)&ftime);
+            bootTime = min(bootTime, ftime - qpc.QuadPart);
+        }
+        cast()bootFileTime = bootTime;
     }
     else
-    {
         static assert(false, "TODO");
-    }
 }
 
 ptrdiff_t timeToString(long ms, char[] buffer) pure
@@ -237,4 +359,31 @@ unittest
 
     assert(getTime().toString(null, null, null) == 14);
     assert(tconcat(getTime())[0..2] == "T+");
+}
+
+
+version (Windows)
+{
+    DateTime fileTimeToDateTime(ulong ftime)
+    {
+        version (BigEndian)
+            static assert(false, "Only works in little endian!");
+
+        SYSTEMTIME stime;
+        FileTimeToSystemTime(cast(FILETIME*)&ftime, &stime);
+
+        DateTime dt;
+        dt.year = stime.wYear;
+        dt.month = cast(ubyte)stime.wMonth;
+        dt.wday = cast(ubyte)stime.wDayOfWeek;
+        dt.day = cast(ubyte)stime.wDay;
+        dt.hour = cast(ubyte)stime.wHour;
+        dt.minute = cast(ubyte)stime.wMinute;
+        dt.second = cast(ubyte)stime.wSecond;
+        dt.ns = (ftime % 10_000_000) * 100;
+
+        debug assert(stime.wMilliseconds == dt.msec);
+
+        return dt;
+    }
 }

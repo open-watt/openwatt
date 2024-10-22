@@ -41,6 +41,7 @@ struct ServerMap
     ubyte localAddress;
     ubyte universalAddress;
     ModbusInterface iface;
+    String profile;
 }
 
 struct ModbusRequest
@@ -185,11 +186,18 @@ nothrow @nogc:
 
                 if (taken == 0)
                 {
-                    readOffset = length - offset;
-                    memmove(buffer.ptr, buffer.ptr + offset, readOffset);
-                    length = readOffset;
+                    import urt.util : min;
+
+                    // we didn't parse any packets
+                    // we might have a split packet, so we'll shuffle unread data to the front of the buffer
+                    // ...but we'll only keep at most one message worth!
+                    size_t remain = length - offset;
+                    size_t keepBytes = min(remain, 259);
+                    size_t trunc = remain - keepBytes;
+                    memmove(buffer.ptr, buffer.ptr + offset + trunc, keepBytes);
+                    length = keepBytes;
+                    readOffset = keepBytes;
                     offset = 0;
-                    assert(length < 260);
                     continue read_loop;
                 }
                 offset += taken;
@@ -229,7 +237,12 @@ nothrow @nogc:
                     return false; // we don't know who this server is!
                 }
                 if (map.iface !is this)
-                    assert(false); // what happened here? why did this interface receive the message?
+                {
+                    // this server belongs to a different interface, but this interface received it...
+                    // this probably happened because a bridge didn't know where to direct the packet.
+                    // we have 2 options; just forward it, or drop it... since we know it should be directed somewhere else...?
+                    return false; // this server belongs to a different interface...
+                }
                 address = map.localAddress;
 
                 // we need to queue the request so we can return the response to the sender...
@@ -300,7 +313,7 @@ nothrow @nogc:
 
             // what could have gone wrong here?
             // proper error handling?
-            assert(false);
+//            assert(false);
         }
 
         ++status.sendPackets;
@@ -318,7 +331,7 @@ private:
         // TODO: some debug logging of the incoming packet stream?
         debug {
             import urt.log;
-            writeDebug("Modbus packet received from interface: '", name, "' (", message.length, ")[ ", message[], " ]");
+//            writeDebug("Modbus packet received from interface: '", name, "' (", message.length, ")[ ", message[], " ]");
         }
 
         // if we are the bus master, then we can only receive responses...
@@ -353,7 +366,13 @@ private:
                 // so, it must be a communication from a local master with a local slave we don't know...
 
                 // let's confirm and then record their existence...
-                assert(!isBusMaster, "This should be impossible...?");
+                if (isBusMaster)
+                {
+                    // if we are the bus-master, it should have been impossible to receive a packet from an unknown guy
+                    // it's possibly a false packet from a corrupt bitstream, or there's another master on the bus!
+                    // we'll drop this packet to be safe...
+                    return;
+                }
 
                 // we won't bother generating a universal address since 3rd party's can't send requests anyway, because we're not the bus master!
                 map = modbus.addRemoteServer(null, this, frameInfo.address, null);
@@ -477,14 +496,13 @@ class ModbusInterfaceModule : Plugin
             map.localAddress = address;
             map.universalAddress = universalAddress;
             map.iface = iface;
-
-            //profile...
+            map.profile = profile.makeString(defaultAllocator());
 
             remoteServers[universalAddress] = map;
             iface.addAddress(map.mac, iface);
 
             import urt.log;
-            debug writeDebugf("Create modbus server {0} - '{1}'  uid: {2}  at: {3}({4})", map.mac, map.name, map.universalAddress, iface.name, map.localAddress);
+            writeInfof("Create modbus server '{0}' - mac: {1}  uid: {2}  at-interface: {3}({4})", map.name, map.mac, map.universalAddress, iface.name, map.localAddress);
 
             return universalAddress in remoteServers;
         }
@@ -539,7 +557,7 @@ class ModbusInterfaceModule : Plugin
             mod_if.addInterface(iface);
 
             import urt.log;
-            debug writeDebugf("Create modbus interface {0} - '{1}'", iface.mac, name);
+            writeInfo("Create modbus interface '", name, "' - ", iface.mac);
 
 //            // HACK: we'll print packets that we receive...
 //            iface.subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {
@@ -685,8 +703,14 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
     }
     else
     {
-        // scan for a CRC...
-        assert(false, "TODO");
+        // function length can't be determined; scan for a CRC...
+
+        // realistically, this is almost always a result of stream corruption...
+        // and the implementation is quite a lot of code!
+        const(ubyte)[] message = crawlForRTU(data, null);
+        if (message != null)
+            return cast(int)message.length;
+        return 0;
     }
 
     int failResult = 0;
@@ -762,7 +786,7 @@ size_t parseRTU(const(ubyte)[] data, out const(void)[] message, out ModbusFrameI
             continue;
 
         message = data[offset + 1 .. offset + length];
-        return length + 2;
+        return offset + length + 2;
     }
 
     // no packet was found in the stream... how odd!
@@ -781,12 +805,10 @@ size_t parseASCII(const(ubyte)[] data, out const(void)[] message, out ModbusFram
     return 0;
 }
 
-/+
-
 inout(ubyte)[] crawlForRTU(inout(ubyte)[] data, ushort* rcrc = null)
 {
-    if (data.length < 4)
-        return null;
+//    if (data.length < 4)
+//        return null;
 
     enum NumCRC = 8;
     ushort[NumCRC] foundCRC = void;
@@ -865,8 +887,7 @@ inout(ubyte)[] crawlForRTU(inout(ubyte)[] data, ushort* rcrc = null)
     // didn't find anything...
     return null;
 }
-+/
-/+
+
 bool validFunctionCode(FunctionCode functionCode)
 {
     if (functionCode & 0x80)
@@ -889,7 +910,6 @@ bool validFunctionCode(FunctionCode functionCode)
         return functionCode == FunctionCode.MEI;
     }
 }
-+/
 
 ushort calculateModbusCRC(const ubyte[] buf)
 {

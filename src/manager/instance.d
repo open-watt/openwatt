@@ -1,7 +1,14 @@
 module manager.instance;
 
-import std.conv : to;
-import std.uni : toLower;
+import urt.array;
+import urt.lifetime : move;
+import urt.log;
+import urt.io;
+import urt.map;
+import urt.mem.allocator;
+import urt.mem.string;
+import urt.mem.temp;
+import urt.string;
 
 import manager;
 import manager.console;
@@ -18,35 +25,28 @@ import manager.units;
 //import router.mqtt.broker;
 //import router.server;
 
-import urt.log;
-import urt.io;
-import urt.mem.allocator;
-import urt.mem.string;
-import urt.mem.temp;
-import urt.string;
-
 
 alias CreateComponentFunc = Component* delegate(Device* device, ref ConfItem config);
 
 class ApplicationInstance
 {
-	string name;
+    String name;
 
-	NoGCAllocator allocator;
-	NoGCAllocator tempAllocator;
+    NoGCAllocator allocator;
+    NoGCAllocator tempAllocator;
 
-	GlobalInstance global;
-	Plugin.Instance[] pluginInstance;
+    GlobalInstance global;
+    Array!(Plugin.Instance) pluginInstance;
 
-	CreateComponentFunc[string] customComponents;
+    Map!(String, CreateComponentFunc) customComponents;
 
-	Console console;
+    Console console;
 
-	Device*[String] devices;
+    Map!(const(char)[], Device*) devices;
 
-	// database...
+    // database...
 
-    this()
+    this() nothrow @nogc
     {
         import urt.mem;
 
@@ -58,216 +58,134 @@ class ApplicationInstance
         console.setPrompt(StringLit!"enermon > ");
 
         console.registerCommand!log_level("/system", this);
+
+        console.registerCommand!device_print("/device", this, "print");
     }
 
-	Plugin.Instance moduleInstance(string name) pure nothrow @nogc
-	{
-		foreach (i; 0 .. global.modules.length)
-			if (global.modules[i].moduleName[] == name[])
-				return pluginInstance[i];
-		return null;
-	}
+    Plugin.Instance moduleInstance(const(char)[] name) pure nothrow @nogc
+    {
+        foreach (i; 0 .. global.modules.length)
+            if (global.modules[i].moduleName[] == name[])
+                return pluginInstance[i];
+        return null;
+    }
 
-	I.Instance moduleInstance(I)() pure nothrow @nogc
-	{
-		return cast(I.Instance)moduleInstance(I.ModuleName);
-	}
+    I.Instance moduleInstance(I)() pure nothrow @nogc
+    {
+        return cast(I.Instance)moduleInstance(I.ModuleName);
+    }
 
-	void registerComponentType(string type, CreateComponentFunc createFunc)
-	{
-		customComponents[type] = createFunc;
-	}
+    void registerComponentType(String type, CreateComponentFunc createFunc)
+    {
+        customComponents.insert(type.move, createFunc);
+    }
 
-	void update()
-	{
-		foreach (plugin; pluginInstance)
-			plugin.preUpdate();
+    void update() nothrow @nogc
+    {
+        foreach (plugin; pluginInstance)
+            plugin.preUpdate();
 
-		foreach (plugin; pluginInstance)
-			plugin.update();
+        foreach (plugin; pluginInstance)
+            plugin.update();
 
-		// TODO: polling is pretty lame! data connections should be in threads and receive data immediately
-		// processing should happen in a processing thread which waits on a semaphore for jobs in a queue (submit from comms threads?)
-//		foreach (server; servers)
-//			server.poll();
-		foreach (device; devices)
-			device.update();
+        // TODO: polling is pretty lame! data connections should be in threads and receive data immediately
+        // processing should happen in a processing thread which waits on a semaphore for jobs in a queue (submit from comms threads?)
+//        foreach (server; servers)
+//            server.poll();
+        foreach (device; devices)
+            device.update();
 
-		foreach (plugin; pluginInstance)
-			plugin.postUpdate();
-	}
+        foreach (plugin; pluginInstance)
+            plugin.postUpdate();
+    }
 
-	void loadConfig(string filename)
-	{
-		ConfItem confRoot = parseConfigFile(filename);
 
-		foreach (ref confItem; confRoot.subItems) switch (confItem.name)
-		{
-			case "global":
-				foreach (ref opt; confItem.subItems) switch (opt.name)
-				{
-					case "loglevel":
-						foreach (i, level; levelNames)
-						{
-							if (opt.value.unQuote.toLower[] == level.toLower[])
-								logLevel = cast(Level)i;
-						}
-						break;
+    // /device/print command
+    import urt.meta.nullable;
+    void device_print(Session session, Nullable!(const(char)[]) _scope) nothrow @nogc
+    {
+        if (_scope)
+        {
+            // split on dots...
+        }
 
-					default:
-						writeln("Invalid token: ", opt.name);
-				}
-				break;
-/+
-			case "connections":
-				foreach (ref conn; confItem.subItems)
-				{
-					switch (conn.name)
-					{
-						case "tcp-client":
-							string name, addr, port, options, tail = conn.value;
-							name = tail.split!','.unQuote;
-							port = tail.split!',';
-							addr = port.split!':'.unQuote;
-							options = tail.split!',';
-							// TODO: if !tail.empty, warn about unexpected data...
-							streams[name] = new TCPStream(addr, port.to!ushort, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
-							break;
+        const(char)[] newLine = "";
+        foreach (dev; devices)
+        {
+            session.writeLine(newLine, dev.id, ": ", dev.name);
+            newLine = "\n";
+            foreach (c; dev.components)
+            {
+                session.writeLine("  ", c.id, ": ", c.name, " [", c.template_, "]");
+                foreach (e; c.elements)
+                {
+                    session.writef("    {0}{@5, ?4}: {2}{@7, ?6}\n", e.id, e.name, e.latest, e.unit, e.name.length > 0, " ({1})", e.unit.length > 0, " [{3}]");
+                }
+            }
+        }
 
-						case "bridge":
-							Stream[] bridgeStreams;
-							string name, tail = conn.value;
-							name = tail.split!','.unQuote;
-							while (!tail.empty)
-							{
-								string stream = tail.split!','.unQuote;
-								Stream* s = stream in streams;
-								if (s)
-									bridgeStreams ~= *s;
-								else
-									writeln("Stream not found: ", stream);
-							}
-							streams[name] = new BridgeStream(StreamOptions.NonBlocking | StreamOptions.KeepAlive, bridgeStreams);
-							break;
 
-						default:
-							writeln("Invalid token: ", conn.name);
-					}
-				}
-				break;
-+/
-			case "device":
-				Device* device = new Device;
+        /+
+        import urt.util;
 
-				foreach (ref devConf; confItem.subItems) switch (devConf.name)
-				{
-					case "id":
-						device.id = addString(devConf.value.unQuote);
-						break;
+        size_t nameLen = 4;
+        size_t typeLen = 4;
+        foreach (i, iface; interfaces)
+        {
+            nameLen = max(nameLen, iface.name.length);
+            typeLen = max(typeLen, iface.type.length);
 
-					case "name":
-						device.name = addString(devConf.value.unQuote);
-						break;
+            // TODO: MTU stuff?
+        }
 
-					case "component":
-						break;
+        session.writeLine("Flags: R - RUNNING; S - SLAVE");
+        if (stats)
+        {
+            size_t rxLen = 7;
+            size_t txLen = 7;
+            size_t rpLen = 9;
+            size_t tpLen = 9;
+            size_t rdLen = 7;
+            size_t tdLen = 7;
 
-					default:
-						if (devConf.name in customComponents)
-						{
-							CreateComponentFunc createFunc = customComponents[devConf.name];
-							Component* component = createFunc(device, devConf);
-							assert(component); // TODO: runtime error...
-							device.addComponent(component);
-						}
-						else
-						{
-							writeln("Invalid token: ", devConf.name);
-						}
-						break;
-				}
+            foreach (i, iface; interfaces)
+            {
+                rxLen = max(rxLen, iface.getStatus.recvBytes.formatInt(null));
+                txLen = max(txLen, iface.getStatus.sendBytes.formatInt(null));
+                rpLen = max(rpLen, iface.getStatus.recvPackets.formatInt(null));
+                tpLen = max(tpLen, iface.getStatus.sendPackets.formatInt(null));
+                rdLen = max(rdLen, iface.getStatus.recvDropped.formatInt(null));
+                tdLen = max(tdLen, iface.getStatus.sendDropped.formatInt(null));
+            }
 
-				device.finalise();
+            session.writef(" ID    {0, *1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",
+                           "NAME", nameLen,
+                           "RX-BYTE", rxLen, "TX-BYTE", txLen,
+                           "RX-PACKET", rpLen, "TX-PACKET", tpLen,
+                           "RX-DROP", rdLen, "TX-DROP", tdLen);
 
-				// TODO: proper error message
-				assert(device.id);
-				devices[device.id] = device;
-				break;
-/+
-			case "mqtt":
-				foreach (ref mqtt; confItem.subItems) switch (mqtt.name)
-				{
-					case "broker":
-						MQTTBrokerOptions options;
-
-						foreach (ref opt; mqtt.subItems) switch (opt.name)
-						{
-							case "port":
-								options.port = opt.value.to!ushort;
-								break;
-
-							case "flags":
-								while (!opt.value.empty)
-								{
-									string flag = opt.value.split!'|'.toLower;
-									switch (flag)
-									{
-										case "allowanonymous":
-											options.flags |= MQTTBrokerOptions.Flags.AllowAnonymousLogin;
-											break;
-
-										default:
-											writeln("Unknown MQTT broker flag: ", flag);
-									}
-								}
-								break;
-
-							case "credentials":
-								foreach (ref cred; opt.subItems)
-								{
-									MQTTClientCredentials clientCreds = MQTTClientCredentials(cred.name.unQuote.idup, cred.value.unQuote.idup);
-
-									foreach (ref list; cred.subItems) switch (list.name)
-									{
-										case "whitelist":
-											assert(0); // whitelist topics
-											break;
-
-										case "blacklist":
-											assert(0); // blackist topics
-											break;
-
-										default:
-											writeln("Invalid token: ", mqtt.name);
-									}
-									options.clientCredentials ~= clientCreds;
-								}
-								break;
-
-							case "client-timeout-override":
-								options.clientTimeoutOverride = opt.value.to!uint;
-								break;
-
-							default:
-								writeln("Invalid token: ", mqtt.name);
-						}
-
-						broker = new MQTTBroker(options);
-						broker.start();
-						break;
-
-					default:
-						writeln("Invalid token: ", mqtt.name);
-				}
-				break;
-+/
-			default:
-				// check to see if item name matches a plugin
-				Plugin.Instance plugin = moduleInstance(confItem.name);
-				if (plugin)
-					plugin.parseConfig(confItem);
-				else
-					writeln("Invalid token: ", confItem.name);
-		}
-	}
+            size_t i = 0;
+            foreach (iface; interfaces)
+            {
+                session.writef("{0, 3} {1}{2} {3, *4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
+                               i, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ',
+                               iface.name, nameLen,
+                               iface.getStatus.recvBytes, rxLen, iface.getStatus.sendBytes, txLen,
+                               iface.getStatus.recvPackets, rpLen, iface.getStatus.sendPackets, tpLen,
+                               iface.getStatus.recvDropped, rdLen, iface.getStatus.sendDropped, tdLen);
+                ++i;
+            }
+        }
+        else
+        {
+            session.writef(" ID    {0, *1}  {2, *3}  MAC-ADDRESS\n", "NAME", nameLen, "TYPE", typeLen);
+            size_t i = 0;
+            foreach (iface; interfaces)
+            {
+                session.writef("{0, 3} {6}{7}  {1, *2}  {3, *4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ');
+                ++i;
+            }
+        }
+        +/
+    }
 }

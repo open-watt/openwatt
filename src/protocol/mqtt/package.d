@@ -24,8 +24,8 @@ class MQTTModule : Plugin
 
 		override void update()
 		{
-			if (broker)
-				broker.update();
+//			if (broker)
+//				broker.update();
 		}
 	}
 }

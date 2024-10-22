@@ -243,7 +243,7 @@ class TeslaInterfaceModule : Plugin
             app.moduleInstance!InterfaceModule().addInterface(iface);
 
             import urt.log;
-            debug writeDebugf("Create tesla-twc interface {0} - '{1}'", iface.mac, name);
+            writeInfo("Create tesla-twc interface '", name, "' - ", iface.mac);
 
             // HACK: we'll print packets that we receive...
             iface.subscribe((ref const Packet p, BaseInterface i, void* u) {

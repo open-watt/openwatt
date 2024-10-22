@@ -194,12 +194,14 @@ auto makeArgTuple(alias F)(KVP[] args, out const(char)[] error)
 
     static foreach (i, P; Params)
     {
-        static if (!is(P : Nullable!U, U))
         {
-            if (!gotArg[i])
+            static if (!is(P : Nullable!U, U))
             {
-                error = tconcat("Missing argument: ", Alias!(transformCommandName(ParamNames[i])));
-                goto done;
+                if (!gotArg[i])
+                {
+                    error = tconcat("Missing argument: ", Alias!(transformCommandName(ParamNames[i])));
+                    goto done;
+                }
             }
         }
     }
@@ -245,7 +247,8 @@ bool tokenToValue(ref const Token t, out bool r) nothrow @nogc
     return false;
 }
 
-bool tokenToValue(I)(ref const Token t, out I r) nothrow @nogc if (isSomeInt!I)
+bool tokenToValue(I)(ref const Token t, out I r) nothrow @nogc
+    if (isSomeInt!I)
 {
     import urt.conv : parseInt;
     const(char)[] v = tokenValue(t, false);
@@ -267,7 +270,8 @@ bool tokenToValue(I)(ref const Token t, out I r) nothrow @nogc if (isSomeInt!I)
     return taken > 0;
 }
 
-bool tokenToValue(F)(ref const Token t, out F r) nothrow @nogc if (isSomeFloat!F)
+bool tokenToValue(F)(ref const Token t, out F r) nothrow @nogc
+    if (isSomeFloat!F)
 {
     import urt.conv : parseFloat;
     const(char)[] v = tokenValue(t, false);
@@ -285,7 +289,8 @@ bool tokenToValue(S : const(char)[])(ref const Token t, out S r) nothrow @nogc
     return true;
 }
 
-bool tokenToValue(T)(ref const Token t, out T r) nothrow @nogc if (is(T U == enum))
+bool tokenToValue(T)(ref const Token t, out T r) nothrow @nogc
+    if (is(T U == enum))
 {
     // try and parse a key from the string...
     const(char)[] v = tokenValue(t, false);
@@ -309,7 +314,8 @@ bool tokenToValue(T)(ref const Token t, out T r) nothrow @nogc if (is(T U == enu
     return false;
 }
 
-bool tokenToValue(T : U[], U)(ref const Token t, out T r) nothrow @nogc if (!is(U : char))
+bool tokenToValue(T : U[], U)(ref const Token t, out T r) nothrow @nogc
+    if (!is(U : char))
 {
     const(char)[] v = tokenValue(t, false);
 
@@ -338,4 +344,13 @@ bool tokenToValue(T : Nullable!U, U)(ref const Token t, out T r) nothrow @nogc
     if (success)
         r = tmp.move;
     return success;
+}
+
+bool tokenToValue(T)(ref const Token t, out T r) nothrow @nogc
+    if (is(T == struct))
+{
+    const(char)[] v = tokenValue(t, false);
+    size_t taken;
+    r.fromString(v, &taken);
+    return taken != 0;
 }

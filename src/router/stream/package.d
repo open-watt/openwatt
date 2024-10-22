@@ -35,12 +35,25 @@ enum StreamOptions
     KeepAlive =      1 << 2, // Attempt reconnection on connection drops
 }
 
+struct StreamStatus
+{
+    MonoTime linkStatusChangeTime;
+    bool linkStatus;
+    int linkDowns;
+    ulong sendBytes;
+    ulong recvBytes;
+    ulong sendDropped;
+    ulong recvDropped;
+}
+
 abstract class Stream
 {
 nothrow @nogc:
 
     String name;
     CacheString type;
+
+    StreamStatus status;
 
     this(String name, const(char)[] type, StreamOptions options) nothrow @nogc
     {
@@ -85,9 +98,12 @@ nothrow @nogc:
     {
     }
 
-package:
+protected:
     bool live;
     StreamOptions options;
+
+    uint bufferLen = 0;
+    void[] sendBuffer;
 }
 
 class StreamModule : Plugin

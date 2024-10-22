@@ -17,6 +17,39 @@ template Nullable(T)
 }
 
 template Nullable(T)
+    if (is(T == U[], U))
+{
+    struct Nullable
+    {
+        enum T NullValue = null;
+        private T _value = NullValue;
+
+        this(T v)
+        {
+            _value = v;
+        }
+
+        T value() const
+            => _value;
+
+        bool opCast(T : bool)() const
+            => _value != NullValue;
+
+        bool opEquals(T v) const
+            => _value == v;
+
+        void opAssign(U)(U v)
+            if (is(U : T))
+        {
+            _value = v;
+        }
+
+        ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc
+            => formatValue(value, buffer, format, formatArgs);
+    }
+}
+
+template Nullable(T)
     if (isBoolean!T)
 {
     struct Nullable
@@ -149,6 +182,65 @@ template Nullable(T)
         ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc
         {
             if (value is NullValue)
+                return formatValue(null, buffer, format, formatArgs);
+            else
+                return formatValue(value, buffer, format, formatArgs);
+        }
+    }
+}
+
+template Nullable(T)
+    if (is(T == struct))
+{
+    import urt.lifetime : moveEmplace;
+
+    struct Nullable
+    {
+        T value = void;
+        bool isValue = false;
+
+        this(typeof(null))
+        {
+            isValue = false;
+        }
+        this(T v)
+        {
+            moveEmplace(v, value);
+            isValue = true;
+        }
+
+        ~this()
+        {
+            if (isValue)
+                value.destroy();
+        }
+
+        bool opCast(T : bool)() const
+            => isValue;
+
+        bool opEquals(typeof(null)) const
+            => !isValue;
+        bool opEquals(T v) const
+            => isValue && value == v;
+
+        void opAssign(typeof(null))
+        {
+            if (isValue)
+                value.destroy();
+            isValue = false;
+        }
+        void opAssign(U)(U v)
+            if (is(U : T))
+        {
+            if (!isValue)
+                moveEmplace(v, value);
+            else
+                value = v;
+        }
+
+        ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc
+        {
+            if (!isValue)
                 return formatValue(null, buffer, format, formatArgs);
             else
                 return formatValue(value, buffer, format, formatArgs);

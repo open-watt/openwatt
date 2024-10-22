@@ -41,6 +41,7 @@ class TCPStream : Stream
             assert(0);
         }
         remote = addrInfo.address;
+        status.linkStatusChangeTime = getTime();
         update();
     }
 
@@ -63,9 +64,7 @@ class TCPStream : Stream
         {
 //            if (socket.isAlive)
             socket.shutdown(SocketShutdownMode.ReadWrite);
-            socket.close();
-            socket = null;
-            live = false;
+            closeLink();
         }
     }
 
@@ -87,9 +86,7 @@ class TCPStream : Stream
             return true;
 
         // something happened... we should try and reconnect I guess?
-        socket.close();
-        socket = Socket.invalid;
-        live = false;
+        closeLink();
 
         return false;
     }
@@ -124,13 +121,11 @@ class TCPStream : Stream
         if (r != Result.Success)
         {
             SocketResult sr = r.get_SocketResult;
-            if (sr == SocketResult.WouldBlock)
-                return 0;
-
-            socket.close();
-            socket = Socket.invalid;
-            live = false;
+            if (sr != SocketResult.WouldBlock)
+                closeLink();
+            return 0;
         }
+        status.recvBytes += bytes;
         return bytes;
     }
 
@@ -146,9 +141,7 @@ class TCPStream : Stream
                 if (sr == SocketResult.WouldBlock)
                     return 0;
 
-                socket.close();
-                socket = Socket.invalid;
-                live = false;
+                closeLink();
             }
             else
                 return bytes;
@@ -200,16 +193,15 @@ class TCPStream : Stream
             return;
         }
 
+        MonoTime now = getTime();
+
         // if the socket is invalid, we'll attempt to initiate a connection...
         if (socket == Socket.invalid)
         {
             // we don't want to spam connection attempts...
-            MonoTime now = getTime();
             if (now < lastRetry + seconds(5))
                 return;
             lastRetry = now;
-
-            debug writeDebug("Connecting TCP stream '", name, "' to: ", remote);
 
             Result r = create_socket(AddressFamily.IPv4, SocketType.Stream, Protocol.TCP, socket);
             if (!r)
@@ -273,18 +265,35 @@ class TCPStream : Stream
             {
                 socket.close();
                 socket = Socket.invalid;
-                debug writeDebug("Connection failed: '", name, "' to ", remote);
+                debug writeDebug("TCP stream connection failed: '", name, "' to ", remote);
                 return;
             }
 
             // this should be the only case left, we've successfully connected!
             // let's just assert that the socket is writable to be sure...
             assert(fd.returnEvents & PollEvents.Write);
-            live = true;
 
             if (keepEnable)
                 set_keepalive(socket, keepEnable, keepIdle, keepInterval, keepCount);
+
+            live = true;
+            status.linkStatus = true;
+            status.linkStatusChangeTime = now;
+
+            writeInfo("TCP stream '", name, "' link established.");
         }
+    }
+
+    void closeLink()
+    {
+        socket.close();
+        socket = Socket.invalid;
+        live = false;
+        status.linkStatus = true;
+        status.linkStatusChangeTime = getTime();
+        ++status.linkDowns;
+
+        writeWarning("TCP stream '", name, "' link down.");
     }
 
 
@@ -468,6 +477,8 @@ class TCPStreamModule : Plugin
 
             TCPStream stream = app.allocator.allocT!TCPStream(n.move, a.move, cast(ushort)portNumber, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
             mod_stream.addStream(stream);
+
+            writeInfof("Create TCP stream '{0}' - server: [{1}]:{2}", name, address, portNumber);
         }
     }
 }

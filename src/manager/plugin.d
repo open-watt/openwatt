@@ -1,19 +1,25 @@
 module manager.plugin;
 
+import urt.string;
+
 import manager;
 import manager.config : ConfItem;
 
 
 class Plugin
 {
+nothrow @nogc:
+
 	GlobalInstance global;
-	string moduleName;
+	String moduleName;
 	size_t moduleId = -1;
 
-	this(GlobalInstance global, string name)
+	this(GlobalInstance global, String name)
 	{
+		import urt.lifetime : move;
+
 		this.global = global;
-		this.moduleName = name;
+		this.moduleName = name.move;
 	}
 
 	void init()
@@ -32,6 +38,8 @@ class Plugin
 
 	class Instance
 	{
+	nothrow @nogc:
+
 		ApplicationInstance app;
 //		alias app = this;
 
@@ -41,10 +49,6 @@ class Plugin
 		}
 
 		void init()
-		{
-		}
-
-		void parseConfig(ref ConfItem conf)
 		{
 		}
 
@@ -76,25 +80,35 @@ mixin template RegisterModule(string name)
 		getGlobalInstance.registerPlugin(new ThisClass(getGlobalInstance()));
 	}
 
-	this(GlobalInstance global)
+	this(GlobalInstance global) nothrow @nogc
 	{
-		super(global, ModuleName);
+		super(global, StringLit!ModuleName);
 	}
 
-	override Instance createInstance(ApplicationInstance instance)
+	override Instance createInstance(ApplicationInstance instance) nothrow @nogc
 	{
-		return new Instance(instance);
+		// we must do a @nogc thunk, because language has no way to express initialisation of a class with outer pointer...
+		return (cast(Instance delegate(ApplicationInstance) nothrow @nogc)&createInstanceImpl)(instance);
 	}
+
+private:
+    Instance createInstanceImpl(ApplicationInstance instance) nothrow
+    {
+        return new Instance(instance);
+    }
 }
 
 mixin template DeclareInstance()
 {
 //	ThisClass outer() inout pure nothrow @nogc { return cast(ThisClass)this.outer; }
 
-	this(ApplicationInstance instance)
+	this(ApplicationInstance instance) nothrow
 	{
 		super(instance);
 
-		init();
+		try
+			init();
+		catch(Exception e)
+			assert(false);
 	}
 }

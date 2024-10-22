@@ -1,9 +1,17 @@
 module router.modbus.profile;
 
-import std.algorithm : map;
-import std.ascii : toLower;
-import std.format;
-import std.stdio;
+//import std.algorithm : map;
+//import std.format;
+//import std.stdio;
+
+import urt.array;
+import urt.conv;
+import urt.io;
+import urt.map;
+import urt.mem;
+import urt.mem.string;
+import urt.string;
+import urt.string.format;
 
 import manager.component;
 import manager.config;
@@ -12,10 +20,9 @@ import manager.instance;
 
 import router.modbus.message : RegisterType;
 
-import urt.mem.string;
-import urt.string;
-
 version = IncludeDescription;
+
+nothrow @nogc:
 
 
 enum RecordType : ubyte
@@ -69,6 +76,8 @@ enum Frequency : ubyte
 
 struct ModbusRegDesc
 {
+nothrow @nogc:
+
 	this() @disable;
 
 	static ModbusRegDesc* makeDesc(const(char)[] name, const(char)[] displayUnits, Frequency updateFrequency, const(char)[] description, const(char[])[] fields, const(char[])[] fieldDesc)
@@ -133,6 +142,8 @@ struct ModbusRegDesc
 
 struct ModbusRegInfo
 {
+nothrow @nogc:
+
 	ushort reg;			// register address; 5 digits with register type; ie 30001, 40001, etc
 	RegisterType regType = RegisterType.HoldingRegister;
 	Access access = Access.Read;
@@ -141,7 +152,7 @@ struct ModbusRegInfo
 	CacheString units;		// units of measure; ie "%", "kWh", "10mV+1000", etc
 	ModbusRegDesc* desc;
 
-	this(int reg, string type = "u16", string name = null, string units = null, string displayUnits = null, Frequency updateFrequency = Frequency.Medium, string desc = null, string[] fields = null, string[] fieldDesc = null)
+	this(int reg, const(char)[] type = "u16", const(char)[] name = null, const(char)[] units = null, const(char)[] displayUnits = null, Frequency updateFrequency = Frequency.Medium, const(char)[] desc = null, const(char)[][] fields = null, const(char)[][] fieldDesc = null)
 	{
 		if (reg < 10000)
 		{
@@ -170,7 +181,7 @@ struct ModbusRegInfo
 		this.units = addString(units);
 
 		char[16] temp;
-		this.desc = ModbusRegDesc.makeDesc(name ? name : format(temp, "reg{0}", reg), displayUnits ? displayUnits : units, updateFrequency, desc, fields, fieldDesc);
+		this.desc = ModbusRegDesc.makeDesc(name ? name : tformat(temp, "reg{0}", reg), displayUnits ? displayUnits : units, updateFrequency, desc, fields.move, fieldDesc.move);
 	}
 
 	this(int reg, int refReg, int seqIndex)
@@ -181,11 +192,11 @@ struct ModbusRegInfo
 	}
 
 private:
-	void parseTypeString(string type)
+	void parseTypeString(const(char)[] type)
 	{
 		foreach (ty; 0 .. RecordType.max + 1)
 		{
-			string ts = typeStrings[ty];
+			const(char)[] ts = typeStrings[ty];
 			if (type.length < ts.length || type[0..ts.length] != ts[])
 				continue;
 
@@ -225,50 +236,78 @@ private:
 	}
 }
 
+struct ElementTemplate
+{
+    enum Type
+    {
+        Constant,
+        Map
+    }
+
+    String id;
+    String value;
+    Type type;
+}
+
+struct ComponentTemplate
+{
+    String id;
+    String template_;
+    Array!ElementTemplate elements;
+
+    this(ref typeof(this) rh) nothrow @nogc
+    {
+        this.id = rh.id[].makeString(defaultAllocator());
+        this.template_ = rh.template_[].makeString(defaultAllocator());
+        this.elements = rh.elements[];
+    }
+}
+
 struct ModbusProfile
 {
-	ModbusRegInfo[] registers;
-	ModbusRegInfo*[int] regById;
-	ModbusRegInfo*[string] regByName;
+nothrow @nogc:
 
-	// TODO: populate from json, yaml, etc
+    Array!ModbusRegInfo registers;
+    Map!(ushort, ModbusRegInfo*) regById;
+    Map!(const(char)[], ModbusRegInfo*) regByName;
 
-	this(ModbusRegInfo[] regs)
-	{
-		populateRegs(regs);
-	}
+    Array!ComponentTemplate componentTemplates;
 
-	void populateRegs(ModbusRegInfo[] regs)
-	{
-		registers = regs;
 
-		foreach (ref r; regs)
-		{
-			regById[r.reg] = &r;
-			regByName[r.desc.name] = &r;
-		}
-	}
+    // TODO: populate from json, yaml, etc
+
+    this(Array!ModbusRegInfo regs, Array!ComponentTemplate components)
+    {
+        this.registers = regs.move;
+        this.componentTemplates = components.move;
+        populateRegs(registers);
+    }
+
+private:
+    void populateRegs(Array!ModbusRegInfo regs)
+    {
+        regById.clear();
+        regByName.clear();
+
+        foreach (ref r; registers)
+        {
+            regById.insert(r.reg, &r);
+            regByName.insert(r.desc.name[], &r);
+        }
+    }
 }
 
 
-ModbusProfile* loadModbusProfile(const(char)[] filename)
-{
-	ConfItem root = parseConfigFile(filename);
-	return parseModbusProfile(root);
-}
-
-ModbusProfile* parseModbusProfile(string conf)
+ModbusProfile* parseModbusProfile(const(char)[] conf, NoGCAllocator allocator = defaultAllocator())
 {
 	ConfItem root = parseConfig(conf);
 	return parseModbusProfile(root);
 }
 
-ModbusProfile* parseModbusProfile(ConfItem conf)
+ModbusProfile* parseModbusProfile(ConfItem conf, NoGCAllocator allocator = defaultAllocator())
 {
-	import std.conv : to;
-	import std.uni : toLower;
-
-	ModbusRegInfo[] registers;
+	Array!ModbusRegInfo registers;
+	Array!ComponentTemplate componentTemplates;
 
 	foreach (ref rootItem; conf.subItems) switch (rootItem.name)
 	{
@@ -277,34 +316,35 @@ ModbusProfile* parseModbusProfile(ConfItem conf)
 			{
 				case "reg":
 					// parse register details
-					string register, type, units, id, displayUnits, freq, desc;
-					string[] fields, fieldDesc;
+					const(char)[] register, type, units, id, displayUnits, freq, desc;
+					Array!(const(char)[]) fields, fieldDesc;
 
-					string extra, tail = regItem.value;
+					const(char)[] extra, tail = regItem.value;
 					char sep;
 					register = tail.split!(',', ':')(sep);
 					assert(sep == ',');
-					type = tail.split!(',', ':')(sep).unQuote.idup;
+					type = tail.split!(',', ':')(sep).unQuote;
 					assert(sep == ',');
-					string t = tail.split!(',', ':')(sep);
+					const(char)[] t = tail.split!(',', ':')(sep);
 					if (sep == ':')
 						extra = t;
 					else
 					{
-						units = t.unQuote.idup;
+						units = t.unQuote;
 						extra = tail.split!':';
 					}
 					if (!extra.empty)
-						regItem.subItems = ConfItem(extra, tail) ~ regItem.subItems;
+						regItem.subItems.pushFront(ConfItem(extra, tail));
+//						regItem.subItems = ConfItem(extra, tail) ~ regItem.subItems;
 
 					foreach (ref regConf; regItem.subItems) switch (regConf.name)
 					{
 						case "desc":
 							tail = regConf.value;
-							id = tail.split!','.unQuote.idup;
-							displayUnits = tail.split!','.unQuote.idup;
-							freq = tail.split!','.unQuote.idup;
-							desc = tail.split!','.unQuote.idup;
+							id = tail.split!','.unQuote;
+							displayUnits = tail.split!','.unQuote;
+							freq = tail.split!','.unQuote;
+							desc = tail.split!','.unQuote;
 							// TODO: if !tail.empty, warn about unexpected data...
 							break;
 
@@ -313,7 +353,7 @@ ModbusProfile* parseModbusProfile(ConfItem conf)
 							// TODO: make this a warning message, no asserts!
 							assert(!tail.empty);
 							do
-								fields ~= tail.split!','(sep).unQuote.idup;
+								fields ~= tail.split!','(sep).unQuote;
 							while (sep != '\0');
 							break;
 
@@ -322,7 +362,7 @@ ModbusProfile* parseModbusProfile(ConfItem conf)
 							// TODO: make this a warning message, no asserts!
 							assert(!tail.empty);
 							do
-								fieldDesc ~= tail.split!','(sep).unQuote.idup;
+								fieldDesc ~= tail.split!','(sep).unQuote;
 							while (sep != '\0');
 							break;
 
@@ -339,25 +379,68 @@ ModbusProfile* parseModbusProfile(ConfItem conf)
 					}
 
 					Frequency frequency = Frequency.Medium;
-					if (!freq.empty) switch (freq.toLower)
+					if (!freq.empty)
 					{
-						case "realtime":	frequency = Frequency.Realtime;			break;
-						case "high":		frequency = Frequency.High;				break;
-						case "medium":		frequency = Frequency.Medium;			break;
-						case "low":			frequency = Frequency.Low;				break;
-						case "const":		frequency = Frequency.Constant;			break;
-						case "ondemand":	frequency = Frequency.OnDemand;			break;
-						case "config":		frequency = Frequency.Configuration;	break;
-						default: writeln("Invalid frequency value: ", freq);
+						if (freq.ieq("realtime")) frequency = Frequency.Realtime;
+						else if (freq.ieq("high")) frequency = Frequency.High;
+						else if (freq.ieq("medium")) frequency = Frequency.Medium;
+						else if (freq.ieq("low")) frequency = Frequency.Low;
+						else if (freq.ieq("const")) frequency = Frequency.Constant;
+						else if (freq.ieq("ondemand")) frequency = Frequency.OnDemand;
+						else if (freq.ieq("config")) frequency = Frequency.Configuration;
+						else writeln("Invalid frequency value: ", freq);
 					}
 
-					registers ~= ModbusRegInfo(register.to!int, type, id, units, displayUnits, frequency, desc, fields, fieldDesc);
+					registers ~= ModbusRegInfo(register.to!int, type, id, units, displayUnits, frequency, desc, fields[], fieldDesc[]);
 					break;
 
 				default:
 					writeln("Invalid token: ", regItem.name);
 			}
 			break;
+
+        case "device-template":
+            foreach (ref item; rootItem.subItems) switch (item.name)
+            {
+                case "component":
+                    // component desc...
+
+                    ComponentTemplate* t = &componentTemplates.pushBack();
+                    ElementTemplate.Type ty = ElementTemplate.Type.Constant;
+
+                    foreach (ref cItem; item.subItems) switch (cItem.name)
+                    {
+                        case "id":
+                            t.id = cItem.value.unQuote.makeString(allocator);
+                            break;
+
+                        case "template":
+                            t.template_ = cItem.value.unQuote.makeString(allocator);
+                            break;
+
+                        case "element-map":
+                            ty = ElementTemplate.Type.Map;
+                            goto case;
+                        case "element":
+                            ElementTemplate* e = &t.elements.pushBack();
+                            e.type = ty;
+
+                            const(char)[] tail = cItem.value;
+                            e.id = tail.split!','.unQuote.makeString(allocator);
+                            e.value = tail.split!','.makeString(allocator);
+                            break;
+
+                        default:
+                            writeln("Invalid token: ", cItem.name);
+                            break;
+                    }
+                    break;
+
+                default:
+                    writeln("Invalid token: ", item.name);
+                    break;
+            }
+            break;
 
 		default:
 			writeln("Invalid token: ", rootItem.name);
@@ -366,7 +449,7 @@ ModbusProfile* parseModbusProfile(ConfItem conf)
 	if (registers.empty)
 		return null;
 
-	return new ModbusProfile(registers);
+	return allocator.allocT!ModbusProfile(registers.move, componentTemplates.move);
 }
 
 

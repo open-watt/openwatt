@@ -171,9 +171,9 @@ nothrow @nogc:
     }
 
 private:
-    auto __debugOverview() const pure => toString;
-    auto __debugExpanded() const pure => toString;
-    auto __debugStringView() const pure => toString;
+    auto __debugOverview() const pure => ptr[0 .. length];
+    auto __debugExpanded() const pure => ptr[0 .. length];
+    auto __debugStringView() const pure => ptr[0 .. length];
 
     this(inout(char)* str, typeof(null)) inout pure
     {
@@ -468,9 +468,9 @@ private:
         defaultAllocator().free(buffer[0 .. *cast(ushort*)buffer + 4]);
     }
 
-    auto __debugOverview() const pure => toString;
-    auto __debugExpanded() const pure => toString;
-    auto __debugStringView() const pure => toString;
+    auto __debugOverview() const pure => ptr[0 .. length];
+    auto __debugExpanded() const pure => ptr[0 .. length];
+    auto __debugStringView() const pure => ptr[0 .. length];
 }
 
 unittest
@@ -518,9 +518,9 @@ private:
     ref ushort refCount() const pure nothrow @nogc
         => *cast(ushort*)(ptr - 4);
 
-    auto __debugOverview() const pure => toString;
-    auto __debugExpanded() const pure => toString;
-    auto __debugStringView() const pure => toString;
+    auto __debugOverview() const pure => ptr[0 .. length];
+    auto __debugExpanded() const pure => ptr[0 .. length];
+    auto __debugStringView() const pure => ptr[0 .. length];
 }
 
 

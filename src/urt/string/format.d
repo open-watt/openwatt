@@ -85,13 +85,13 @@ char[] concat(Args...)(char[] buffer, auto ref Args args)
     {
         // this implementation handles all the other kinds of things!
 
-        debug InFormatFunction = true;
+        debug if (!__ctfe) InFormatFunction = true;
         FormatArg[Args.length] argFuncs;
         // TODO: no need to collect int-ify functions in the arg set...
         static foreach(i, arg; args)
             argFuncs[i] = FormatArg(arg);
         char[] r = concatImpl(buffer, argFuncs);
-        debug InFormatFunction = false;
+        debug if (!__ctfe) InFormatFunction = false;
         return r;
     }
 }
