@@ -46,10 +46,17 @@ struct ServerMap
 
 struct ModbusRequest
 {
+    ~this() nothrow @nogc
+    {
+        if (bufferedPacket)
+            defaultAllocator().free((cast(void*)bufferedPacket)[0 .. Packet.sizeof + bufferedPacket.length]);
+    }
+
     MonoTime requestTime;
     MACAddress requestFrom;
-    ubyte localServerAddress;
     ushort sequenceNumber;
+    ubyte localServerAddress;
+    bool inFlight;
     const(Packet)* bufferedPacket;
 }
 
@@ -61,7 +68,11 @@ nothrow @nogc:
 
     ModbusProtocol protocol;
     bool isBusMaster;
+    bool supportSimultaneousRequests = false;
     ushort requestTimeout = 500; // default 500ms? longer?
+    ushort queueTimeout = 500;   // same as request timeout?
+    ushort gapTime = 35;         // what's a reasonable RTU gap time?
+    MonoTime lastReceiveEvent;
 
     // if we are the bus master
     Array!ModbusRequest pendingRequests;
@@ -109,15 +120,31 @@ nothrow @nogc:
         for (size_t i = 0; i < pendingRequests.length; )
         {
             auto req = &pendingRequests[i];
-            if (now - req.requestTime > 500.msecs)
+            Duration elapsed = now - req.requestTime;
+            if (elapsed > (req.inFlight ? requestTimeout.msecs : queueTimeout.msecs))
             {
                 pendingRequests.remove(i);
-
-                // TODO: do we need to send any queued messages?
-//                assert(false);
+                if (!req.inFlight)
+                    ++status.sendDropped;
             }
             else
                 ++i;
+        }
+
+        // check for latent transmit
+        while (!pendingRequests.empty && !pendingRequests[0].inFlight && now - lastReceiveEvent >= gapTime.msecs)
+        {
+            if (forward(*pendingRequests[0].bufferedPacket))
+            {
+                // we'll reset the request time so it doesn't timeout straight away
+                pendingRequests[0].requestTime = now;
+                pendingRequests[0].inFlight = true;
+            }
+            else
+            {
+                // if send failed we won't try again
+                pendingRequests.remove(0);
+            }
         }
 
         // check the link status
@@ -241,12 +268,23 @@ nothrow @nogc:
                     // this server belongs to a different interface, but this interface received it...
                     // this probably happened because a bridge didn't know where to direct the packet.
                     // we have 2 options; just forward it, or drop it... since we know it should be directed somewhere else...?
+                    ++status.sendDropped;
                     return false; // this server belongs to a different interface...
                 }
                 address = map.localAddress;
 
+                // we can transmit immediately if simultaneous requests are accepted
+                // or if there are no messages currently queued, and we satisfied the message gap time
+                MonoTime now = getTime();
+                bool transmitImmediately = supportSimultaneousRequests || (pendingRequests.empty ? (now - lastReceiveEvent >= gapTime.msecs) : (&packet == pendingRequests[0].bufferedPacket));
+
                 // we need to queue the request so we can return the response to the sender...
-                pendingRequests ~= ModbusRequest(getTime(), packet.src, map.localAddress, 0, &packet);
+                // but check that it's not a re-send attempt of the head queued packet
+                if (pendingRequests.empty || &packet != pendingRequests[0].bufferedPacket)
+                    pendingRequests ~= ModbusRequest(now, packet.src, 0, map.localAddress, transmitImmediately, packet.clone());
+
+                if (!transmitImmediately)
+                    return true;
             }
         }
         else
@@ -309,11 +347,14 @@ nothrow @nogc:
         ptrdiff_t written = stream.write(buffer[0 .. length]);
         if (written <= 0)
         {
-            ++status.sendDropped;
-
             // what could have gone wrong here?
-            // proper error handling?
-//            assert(false);
+            // TODO: proper error handling?
+
+            // if the stream disconnected, maybe we should buffer the message incase it reconnects promptly?
+
+            // just drop it for now...
+            ++status.sendDropped;
+            return false;
         }
 
         ++status.sendPackets;
@@ -333,6 +374,8 @@ private:
             import urt.log;
 //            writeDebug("Modbus packet received from interface: '", name, "' (", message.length, ")[ ", message[], " ]");
         }
+
+        lastReceiveEvent = recvTime;
 
         // if we are the bus master, then we can only receive responses...
         ModbusFrameType type = isBusMaster ? ModbusFrameType.Response : frameInfo.frameType;
@@ -371,6 +414,7 @@ private:
                     // if we are the bus-master, it should have been impossible to receive a packet from an unknown guy
                     // it's possibly a false packet from a corrupt bitstream, or there's another master on the bus!
                     // we'll drop this packet to be safe...
+                    ++status.recvDropped;
                     return;
                 }
 
@@ -388,18 +432,63 @@ private:
         if (isBusMaster)
         {
             // if we are the bus master, we expect to receive packets in response to queued requests
-            foreach (i, ref req; pendingRequests)
+            if (!supportSimultaneousRequests)
             {
-                if (req.localServerAddress != frameInfo.address)
-                    continue;
+                // if there are no pending requests, then we probably received a late reply to something we timed out...
+                if (pendingRequests.empty)
+                {
+                    ++status.recvDropped;
+                    return;
+                }
 
-                p.src = frameMac;
-                p.dst = req.requestFrom;
-                dispatch(p);
+                // expect incoming messages are a response to the front message
+                if (pendingRequests[0].localServerAddress == frameInfo.address)
+                {
+                    p.src = frameMac;
+                    p.dst = pendingRequests[0].requestFrom;
+                    dispatch(p);
+                }
+                else
+                {
+                    // what if we get a message we don't expect?
+                    // one possible case is a delayed response from a server to a message we dismissed as a timeout...
+                    // this is a wonky case; we have choices
+                    //  1. don't dismiss the pending request, we may expect the response to come next
+                    //  2. dismiss the pending request, we have no good reason to believe it's still in flight
+                    //  3. dismiss ALL pending requests, because we may be out of cadence so drop everything to start over?
 
-                // remove the request from the queue
-                pendingRequests.remove(i);
-                break;
+                    // we'll do 2 for now...
+                    ++status.recvDropped;
+                }
+
+                pendingRequests.remove(0);
+            }
+            else
+            {
+                bool dispatched = false;
+
+                foreach (i, ref req; pendingRequests)
+                {
+                    if (req.localServerAddress != frameInfo.address)
+                        continue;
+
+                    p.src = frameMac;
+                    p.dst = req.requestFrom;
+                    dispatch(p);
+                    dispatched = true;
+
+                    // remove the request from the queue
+                    pendingRequests.remove(i);
+                    break;
+                }
+
+                if (!dispatched)
+                {
+                    // we received a packet with no pending request...
+                    // maybe it was a late response to a message that we already dismissed as timeout?
+                    // ...or something else?
+                    ++status.recvDropped;
+                }
             }
         }
         else
@@ -407,7 +496,10 @@ private:
             // we can't dispatch this message if we don't know if its a request or a response...
             // we'll need to discard messages until we get one that we know, and then we can predict future messages from there
             if (type == ModbusFrameType.Unknown)
+            {
+                ++status.recvDropped;
                 return;
+            }
 
             p.src = type == ModbusFrameType.Request ? masterMac : frameMac;
             p.dst = type == ModbusFrameType.Request ? frameMac : masterMac;

@@ -1,5 +1,6 @@
 module router.iface.packet;
 
+import urt.mem.allocator;
 import urt.time;
 
 public import router.iface.mac;
@@ -41,6 +42,15 @@ nothrow @nogc:
 
     const(void)[] data() const
         => ptr[0 .. length];
+
+    Packet* clone(NoGCAllocator allocator = defaultAllocator()) const
+    {
+        Packet* r = cast(Packet*)allocator.alloc(Packet.sizeof + length);
+        *r = this;
+        r.ptr = &r[1];
+        cast(void[])r.ptr[0 .. length] = data[];
+        return r;
+    }
 
     MonoTime creationTime; // time received, or time of call to send
     MACAddress src;
