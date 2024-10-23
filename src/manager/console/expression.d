@@ -85,7 +85,7 @@ Token takeToken(ref const(char)[] cmdLine) pure nothrow @nogc
     for (; end < cmdLine.length && !cmdLine[end].isWhitespace && cmdLine[end] != '='; ++end)
     {
         // handle escape characters
-        if (cmdLine[end] == '\\' && end < cmdLine.length)
+        if (cmdLine[end] == '\\' && end < cmdLine.length - 1)
         {
             end += 2;
             continue;

@@ -4,6 +4,7 @@ import urt.array;
 import urt.endian;
 import urt.log;
 import urt.time;
+import urt.util : alignUp;
 
 import manager.element;
 import manager.sampler;
@@ -170,29 +171,29 @@ private:
         ushort first = request.data[0..2].bigEndianToNative!ushort;
         ushort count = request.data[2..4].bigEndianToNative!ushort;
 
-        ubyte[] data;
-        ushort actual = response.data[0];
-        if (actual + 1 > response.data.length)
+        // do some integrity validation...
+        ushort responseBytes = response.data[0];
+        if (responseBytes + 1 > response.data.length)
         {
-            // if the PDU says it's longer than the actual packet, then we appear to have an incomplete or corrupt packet
             writeWarning("Incomplete or corrupt modbus response from ", server);
-            actual = 0; // mark that there are no bytes...
+            return;
         }
-        else if (response.functionCode != request.functionCode)
+        if (response.functionCode != request.functionCode)
         {
             // should be an exception? ...or some other corruption.
-            actual = 0;
-        }
-        else
-        {
-            data = response.data[1 .. 1 + actual];
-            if (kind <= 1)
-                actual *= 8;
-            else
-                actual /= 2;
+            return;
         }
 
-        debug writeDebugf("Response: [{0}{1,04x}:{2}({3})] - {4}", kind, first, count, actual, responseTime - requestTime);
+        // I don't think it's valid for a response length to not match the request?
+        // if this happens, it must be a response to a different request
+        if (kind < 2 && responseBytes * 8 != count.alignUp(8))
+            return;
+        else if (kind > 2 && responseBytes / 2 != count)
+            return;
+
+        debug writeDebugf("Response: [{0}{1,04x}:{2}] - {3}", kind, first, count, responseTime - requestTime);
+
+        ubyte[] data = response.data[1 .. 1 + responseBytes];
 
         foreach (ref e; elements)
         {
@@ -200,13 +201,8 @@ private:
                 continue;
 
             // release the in-flight flag
-//            assert(e.flags & 1, "How did we get a response for a register not marked as in-flight?");
+            assert(e.flags & 1, "How did we get a response for a register not marked as in-flight?");
             e.flags &= 0xFE;
-
-            // if the response was not valid, or we didn't get this register; don't record values
-            if (e.register >= first + actual)
-                continue;
-
             e.lastUpdate = responseTime;
 
             // if the value is constant, and we received a valid response, then we won't ask again

@@ -79,6 +79,7 @@ nothrow @nogc:
 
     // if we are not the bus master
     MACAddress masterMac;
+    ushort sequenceNumber;
     ModbusFrameType expectMessageType = ModbusFrameType.Unknown;
 
     this(InterfaceModule.Instance m, String name, Stream stream, ModbusProtocol protocol, bool isMaster) nothrow @nogc
@@ -87,6 +88,7 @@ nothrow @nogc:
         this.stream = stream;
         this.protocol = protocol;
         this.isBusMaster = isMaster;
+        this.supportSimultaneousRequests = protocol == ModbusProtocol.TCP;
 
         if (!isMaster)
         {
@@ -241,7 +243,7 @@ nothrow @nogc:
     override bool forward(ref const Packet packet) nothrow @nogc
     {
         // can only handle modbus packets
-        if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.Modbus)
+        if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.Modbus || packet.data.length < 3)
         {
             ++status.sendDropped;
             return false;
@@ -251,7 +253,6 @@ nothrow @nogc:
 
         ushort length = 0;
         ubyte address = 0;
-        ubyte[520] buffer;
 
         if (isBusMaster)
         {
@@ -281,7 +282,10 @@ nothrow @nogc:
                 // we need to queue the request so we can return the response to the sender...
                 // but check that it's not a re-send attempt of the head queued packet
                 if (pendingRequests.empty || &packet != pendingRequests[0].bufferedPacket)
-                    pendingRequests ~= ModbusRequest(now, packet.src, 0, map.localAddress, transmitImmediately, packet.clone());
+                {
+                    ushort sequenceNumber = (cast(ubyte[])packet.data)[0..2].bigEndianToNative!ushort;
+                    pendingRequests ~= ModbusRequest(now, packet.src, sequenceNumber, map.localAddress, transmitImmediately, packet.clone());
+                }
 
                 if (!transmitImmediately)
                     return true;
@@ -314,15 +318,18 @@ nothrow @nogc:
         }
 
         // frame it up and send...
+        const(ubyte)[] data = cast(ubyte[])packet.data[2 .. $]; // skip sequence number
+        ubyte[520] buffer = void;
+
         final switch (protocol)
         {
             case ModbusProtocol.Unknown:
                 assert(false, "Modbus protocol not specified");
             case ModbusProtocol.RTU:
                 // frame the packet
-                length = cast(ushort)(1 + packet.data.length);
+                length = cast(ushort)(1 + data.length);
                 buffer[0] = address;
-                buffer[1 .. length] = cast(ubyte[])packet.data[];
+                buffer[1 .. length] = data[];
                 buffer[length .. length + 2][0 .. 2] = calculateModbusCRC(buffer[0 .. length]).nativeToLittleEndian;
                 length += 2;
                 break;
@@ -331,14 +338,14 @@ nothrow @nogc:
             case ModbusProtocol.ASCII:
                 // calculate the LRC
                 ubyte lrc = address;
-                foreach (b; cast(ubyte[])packet.data[])
+                foreach (b; cast(ubyte[])data[])
                     lrc += cast(ubyte)b;
                 lrc = cast(ubyte)-lrc;
 
                 // format the packet
                 buffer[0] = ':';
                 formatInt(address, cast(char[])buffer[1..3], 16, 2, '0');
-                length = cast(ushort)(3 + toHexString(cast(ubyte[])packet.data[], cast(char[])buffer[3..$]).length);
+                length = cast(ushort)(3 + toHexString(data[], cast(char[])buffer[3..$]).length);
                 formatInt(lrc, cast(char[])buffer[length .. length + 2], 16, 2, '0');
                 (cast(char[])buffer)[length + 2 .. length + 4] = "\r\n";
                 length += 4;
@@ -358,7 +365,7 @@ nothrow @nogc:
         }
 
         ++status.sendPackets;
-        status.sendBytes += packet.data.length;
+        status.sendBytes += data.length;
         // TODO: or should we record `length`? payload bytes, or full protocol bytes?
         return true;
     }
@@ -375,15 +382,18 @@ private:
 //            writeDebug("Modbus packet received from interface: '", name, "' (", message.length, ")[ ", message[], " ]");
         }
 
-        lastReceiveEvent = recvTime;
-
         // if we are the bus master, then we can only receive responses...
         ModbusFrameType type = isBusMaster ? ModbusFrameType.Response : frameInfo.frameType;
+        if (type == ModbusFrameType.Unknown && expectMessageType != ModbusFrameType.Unknown)
+        {
+            // if we haven't seen a packet for longer than the timeout interval, then we can't trust our guess
+            if (recvTime - lastReceiveEvent > requestTimeout.msecs)
+                expectMessageType = ModbusFrameType.Unknown;
+            else
+                type = expectMessageType;
+        }
 
-        // TODO: if the time since the last packet is longer than the modbus timeout,
-        //       we should ignore expectMessageType and expect a request packet..
-        if (type == ModbusFrameType.Unknown)
-            type = expectMessageType;
+        lastReceiveEvent = recvTime;
 
         MACAddress frameMac = void;
         if (frameInfo.address == 0)
@@ -424,7 +434,9 @@ private:
             frameMac = map.mac;
         }
 
-        Packet p = Packet(message);
+        ubyte[255] buffer = void;
+        buffer[2 .. 2 + message.length] = cast(ubyte[])message[];
+        Packet p = Packet(buffer[0 .. 2 + message.length]);
         p.creationTime = recvTime;
         p.etherType = EtherType.ENMS;
         p.etherSubType = ENMS_SubType.Modbus;
@@ -446,6 +458,7 @@ private:
                 {
                     p.src = frameMac;
                     p.dst = pendingRequests[0].requestFrom;
+                    buffer[0 .. 2] = nativeToBigEndian(pendingRequests[0].sequenceNumber);
                     dispatch(p);
                 }
                 else
@@ -465,15 +478,25 @@ private:
             }
             else
             {
+                if (!frameInfo.hasSequenceNumber)
+                {
+                    // how can we supportSimultaneousRequests and not have a sequence number?
+                    // we must be using modbus TCP to supportSimultaneousRequests, no?
+                    assert(false);
+                }
+                ushort seq = frameInfo.sequenceNumber;
                 bool dispatched = false;
 
                 foreach (i, ref req; pendingRequests)
                 {
-                    if (req.localServerAddress != frameInfo.address)
+                    if (req.localServerAddress != frameInfo.address || req.sequenceNumber != seq)
                         continue;
 
                     p.src = frameMac;
                     p.dst = req.requestFrom;
+
+                    buffer[0 .. 2] = nativeToBigEndian(seq);
+
                     dispatch(p);
                     dispatched = true;
 
@@ -503,6 +526,16 @@ private:
 
             p.src = type == ModbusFrameType.Request ? masterMac : frameMac;
             p.dst = type == ModbusFrameType.Request ? frameMac : masterMac;
+
+            ushort seq = frameInfo.sequenceNumber;
+            if (!frameInfo.hasSequenceNumber)
+            {
+                if (type == ModbusFrameType.Request)
+                    ++sequenceNumber;
+                seq = sequenceNumber;
+            }
+            buffer[0 .. 2] = nativeToBigEndian(seq);
+
             dispatch(p);
 
             expectMessageType = type == ModbusFrameType.Request ? ModbusFrameType.Response : ModbusFrameType.Request;
@@ -714,6 +747,8 @@ nothrow @nogc:
 struct ModbusFrameInfo
 {
     ubyte address;
+    bool hasSequenceNumber;
+    ushort sequenceNumber;
     FunctionCode functionCode;
     ExceptionCode exceptionCode = ExceptionCode.None;
     ModbusFrameType frameType = ModbusFrameType.Unknown;

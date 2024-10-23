@@ -107,7 +107,7 @@ nothrow @nogc:
         ++status.sendPackets;
         status.sendBytes += packet.data.length;
 
-    return true;
+        return true;
     }
 
 protected:
