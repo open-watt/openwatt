@@ -27,6 +27,10 @@ nothrow @nogc:
     {
         this.client = client;
         this.server = server;
+
+        snooping = client.isSnooping;
+        if (snooping)
+            client.setSnoopHandler(&snoopHandler);
     }
 
     final override void update()
@@ -48,6 +52,9 @@ nothrow @nogc:
             elements = sorted.move;
             needsSort = false;
         }
+
+        if (snooping)
+            return;
 
         enum MaxRegs = 128;
         enum MaxGapSize = 16;
@@ -147,8 +154,9 @@ private:
     ModbusClient client;
     MACAddress server;
     Array!SampleElement elements;
-    bool needsSort = true;
     ushort retryTime = 500;
+    bool needsSort = true;
+    bool snooping;
 
     struct SampleElement
     {
@@ -162,7 +170,7 @@ private:
         MonoTime lastUpdate;
     }
 
-    void responseHandler(ref const ModbusPDU request, ref ModbusPDU response, MonoTime requestTime, MonoTime responseTime) nothrow @nogc
+    void responseHandler(ref const ModbusPDU request, ref ModbusPDU response, MonoTime requestTime, MonoTime responseTime)
     {
         ubyte kind = request.functionCode == FunctionCode.ReadHoldingRegisters ? 4 :
                      request.functionCode == FunctionCode.ReadInputRegisters ? 3 :
@@ -191,7 +199,7 @@ private:
         else if (kind > 2 && responseBytes / 2 != count)
             return;
 
-        debug writeDebugf("Response: [{0}{1,04x}:{2}] - {3}", kind, first, count, responseTime - requestTime);
+        debug writeDebugf("Response: {0}, [{1}{2,04x}:{3}] - {4}", server, kind, first, count, responseTime - requestTime);
 
         ubyte[] data = response.data[1 .. 1 + responseBytes];
 
@@ -200,14 +208,20 @@ private:
             if (e.regKind != kind || e.register < first || e.register >= first + count)
                 continue;
 
-            // release the in-flight flag
-            assert(e.flags & 1, "How did we get a response for a register not marked as in-flight?");
-            e.flags &= 0xFE;
             e.lastUpdate = responseTime;
 
-            // if the value is constant, and we received a valid response, then we won't ask again
-            if (e.sampleTimeMs == 0)
-                e.flags |= 2;
+            if (!snooping)
+            {
+                // release the in-flight flag
+                assert(e.flags & 1, "How did we get a response for a register not marked as in-flight?");
+                e.flags &= 0xFE;
+
+                // if the value is constant, and we received a valid response, then we won't ask again
+                if (e.sampleTimeMs == 0)
+                    e.flags |= 2;
+            }
+//            else
+//                debug writeDebugf("Got reg {0, 04x}: {1} ", e.register, e.element.id);
 
             // parse value from the response...
             ushort offset = cast(ushort)(e.register - first);
@@ -302,7 +316,7 @@ private:
         }
     }
 
-    void errorHandler(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime requestTime) nothrow @nogc
+    void errorHandler(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime requestTime)
     {
         ubyte kind = request.functionCode == FunctionCode.ReadHoldingRegisters ? 4 :
                      request.functionCode == FunctionCode.ReadInputRegisters ? 3 :
@@ -327,6 +341,15 @@ private:
         {
             // TODO: we might adjust the timeout threshold so that actual data failures happen sooner and don't block up the queue...
         }
+    }
+
+    void snoopHandler(ref const MACAddress server, ref const ModbusPDU request, ref ModbusPDU response, MonoTime requestTime, MonoTime responseTime)
+    {
+        // check it's a response from the server we're interested in
+        if (server != this.server)
+            return;
+
+        responseHandler(request, response, requestTime, responseTime);
     }
 }
 

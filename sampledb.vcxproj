@@ -97,7 +97,6 @@
     <DCompile Include="src\router\modbus\profile\goodwe.d" />
     <DCompile Include="src\router\modbus\profile\goodwe_ems.d" />
     <DCompile Include="src\router\modbus\profile\goodwe_inverter.d" />
-    <DCompile Include="src\router\modbus\profile\goodwe_smart_meter.d" />
     <DCompile Include="src\router\modbus\profile\package.d" />
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d" />
     <DCompile Include="src\router\modbus\server.d" />

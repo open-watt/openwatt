@@ -44,7 +44,7 @@ class ModbusProtocolModule : Plugin
 				client.update();
 		}
 
-		void client_add(Session session, const(char)[] name, const(char)[] _interface) nothrow @nogc
+		void client_add(Session session, const(char)[] name, const(char)[] _interface, Nullable!bool snoop) nothrow @nogc
 		{
 			auto mod_if = app.moduleInstance!InterfaceModule;
 
@@ -57,7 +57,7 @@ class ModbusProtocolModule : Plugin
 
 			String n = name.makeString(defaultAllocator());
 
-			ModbusClient client = defaultAllocator().allocT!ModbusClient(this, n.move, i);
+			ModbusClient client = defaultAllocator().allocT!ModbusClient(this, n.move, i, snoop ? snoop.value : false);
 			clients[client.name[]] = client;
 		}
 

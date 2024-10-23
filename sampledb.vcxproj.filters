@@ -78,9 +78,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <DCompile Include="src\router\modbus\profile\goodwe_smart_meter.d">
-      <Filter>src\router\modbus\profile</Filter>
-    </DCompile>
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d">
       <Filter>src\router\modbus\profile</Filter>
     </DCompile>
