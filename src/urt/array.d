@@ -224,7 +224,7 @@ nothrow @nogc:
         return ptr[_length - 1];
     }
 
-    static if (is(T == class))
+    static if (is(T == class) || is(T == interface))
     {
         ref T pushFront()
             => pushFront(null);
@@ -242,7 +242,7 @@ nothrow @nogc:
     ref T pushFront(U)(auto ref U item)
         if (is(U : T))
     {
-        static if (is(T == class))
+        static if (is(T == class) || is(T == interface))
         {
             uint len = _length;
             reserve(len + 1);
@@ -270,7 +270,7 @@ nothrow @nogc:
     ref T pushBack(U)(auto ref U item)
         if (is(U : T))
     {
-        static if (is(T == class))
+        static if (is(T == class) || is(T == interface))
         {
             uint len = _length;
             reserve(len + 1);
@@ -291,7 +291,7 @@ nothrow @nogc:
     T popFront()
     {
         // TODO: this should be removed and uses replaced with a queue container
-        static if (is(T == class))
+        static if (is(T == class) || is(T == interface))
         {
             T copy = ptr[0];
             for (uint i = 1; i < _length; ++i)
@@ -314,7 +314,7 @@ nothrow @nogc:
 
     T popBack()
     {
-        static if (is(T == class))
+        static if (is(T == class) || is(T == interface))
         {
             uint last = _length-1;
             T copy = ptr[last];
@@ -334,7 +334,7 @@ nothrow @nogc:
 
     void remove(size_t i)
     {
-        static if (is(T == class))
+        static if (is(T == class) || is(T == interface))
         {
             for (size_t j = i + 1; j < _length; ++j)
                 ptr[j-1] = ptr[j];
@@ -357,7 +357,7 @@ nothrow @nogc:
 
     void removeSwapLast(size_t i)
     {
-        static if (is(T == class))
+        static if (is(T == class) || is(T == interface))
         {
             ptr[i] = ptr[--_length];
             ptr[_length] = null;
@@ -431,7 +431,7 @@ nothrow @nogc:
 
             // TODO: POD should memcpy... (including class)
 
-            static if (is(T == class))
+            static if (is(T == class) || is(T == interface))
             {
                 for (uint i = 0; i < _length; ++i)
                     newArray.ptr[i] = ptr[i];
@@ -462,7 +462,7 @@ nothrow @nogc:
     {
         if (count < _length)
         {
-            static if (is(T == class))
+            static if (is(T == class) || is(T == interface))
             {
                 for (ptrdiff_t i = _length - 1; i >= count; --i)
                     ptr[i] = null;
@@ -477,7 +477,7 @@ nothrow @nogc:
         else
         {
             reserve(count);
-            static if (is(T == class))
+            static if (is(T == class) || is(T == interface))
             {
                 foreach (i; _length .. count)
                     ptr[i] = null;
@@ -493,7 +493,7 @@ nothrow @nogc:
 
     void clear()
     {
-        static if (!is(T == class))
+        static if (!is(T == class) && !is(T == interface))
             for (uint i = 0; i < _length; ++i)
                 ptr[i].destroy!false();
         _length = 0;
@@ -536,7 +536,7 @@ private:
 
 pragma(inline, true)
 bool elCmp(T)(const T a, const T b)
-    if (is(T == class))
+    if (is(T == class) || is(T == interface))
 {
     return a is b;
 }
@@ -550,7 +550,7 @@ bool elCmp(T)(const T a, const T b)
 
 pragma(inline, true)
 bool elCmp(T)(auto ref const T a, auto ref const T b)
-    if (!is(T == class) && !is(T == U[], U))
+    if (!is(T == class) && !is(T == interface) && !is(T == U[], U))
 {
     return a == b;
 }

@@ -184,7 +184,6 @@ class ModbusProtocolModule : Plugin
                                 ];
 
                                 e.unit = (*pReg).units.makeString(app.allocator);
-                                e.method = Element.Method.Sample;
                                 e.type = (*pReg).type < RecordType.str ? typeMap[(*pReg).type] : Value.Type.String;
                                 e.arrayLen = 0; // TODO: handle arrays?
                                 e.access = cast(manager.element.Access)(*pReg).access; // HACK: delete the rh type!

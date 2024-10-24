@@ -54,21 +54,21 @@ nothrow @nogc:
             {
                 case "targetCurrent":
                     // TODO: user can write to targetCurrent...
-                    e.setValue(charger.targetCurrent);
+                    e.value(charger.targetCurrent);
                     break;
-                case "state":           e.setValue(charger.chargerState);                               break;
-                case "maxCurrent":      e.setValue(charger.maxCurrent);                                 break;
-                case "current":         e.setValue((charger.flags & 2) ? charger.current : 0);          break;
-                case "voltage1":        e.setValue((charger.flags & 2) ? charger.voltage1 : 0);         break;
-                case "voltage2":        e.setValue((charger.flags & 2) ? charger.voltage2 : 0);         break;
-                case "voltage3":        e.setValue((charger.flags & 2) ? charger.voltage3 : 0);         break;
-                case "totalPower":      e.setValue((charger.flags & 2) ? charger.totalPower : 0);       break;
-                case "activePower1":    e.setValue((charger.flags & 2) ? charger.power1 : 0);           break;
-                case "activePower2":    e.setValue((charger.flags & 2) ? charger.power2 : 0);           break;
-                case "activePower3":    e.setValue((charger.flags & 2) ? charger.power3 : 0);           break;
-                case "lifetimeEnergy":  e.setValue((charger.flags & 2) ? charger.lifetimeEnergy : 0);   break;
-                case "serialNumber":    e.setValue((charger.flags & 4) ? charger.serialNumber : "");    break;
-                case "vin":             e.setValue((charger.flags & 0xF0) == 0xF ? charger.vin : "");   break;
+                case "state":           e.value(charger.chargerState);                               break;
+                case "maxCurrent":      e.value(charger.maxCurrent);                                 break;
+                case "current":         e.value((charger.flags & 2) ? charger.current : 0);          break;
+                case "voltage1":        e.value((charger.flags & 2) ? charger.voltage1 : 0);         break;
+                case "voltage2":        e.value((charger.flags & 2) ? charger.voltage2 : 0);         break;
+                case "voltage3":        e.value((charger.flags & 2) ? charger.voltage3 : 0);         break;
+                case "totalPower":      e.value((charger.flags & 2) ? charger.totalPower : 0);       break;
+                case "activePower1":    e.value((charger.flags & 2) ? charger.power1 : 0);           break;
+                case "activePower2":    e.value((charger.flags & 2) ? charger.power2 : 0);           break;
+                case "activePower3":    e.value((charger.flags & 2) ? charger.power3 : 0);           break;
+                case "lifetimeEnergy":  e.value((charger.flags & 2) ? charger.lifetimeEnergy : 0);   break;
+                case "serialNumber":    e.value((charger.flags & 4) ? charger.serialNumber : "");    break;
+                case "vin":             e.value((charger.flags & 0xF0) == 0xF ? charger.vin : "");   break;
                 default:
                     assert(false, "Invalid element for Tesla TWC");
             }

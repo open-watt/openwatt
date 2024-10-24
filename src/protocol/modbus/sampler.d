@@ -213,7 +213,6 @@ private:
             if (!snooping)
             {
                 // release the in-flight flag
-                assert(e.flags & 1, "How did we get a response for a register not marked as in-flight?");
                 e.flags &= 0xFE;
 
                 // if the value is constant, and we received a valid response, then we won't ask again
@@ -474,7 +473,7 @@ ubyte encodeType(Type type, ubyte arrayLen, Endian endian = Endian.BE_BE)
         return type;
 }
 
-bool decodeType(byte encoded, out Type type, out ubyte arrayLen, out Endian endian)
+bool decodeType(ubyte encoded, out Type type, out ubyte arrayLen, out Endian endian)
 {
     final switch (encoded >> 5)
     {
