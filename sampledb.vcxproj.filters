@@ -76,6 +76,9 @@
     <Filter Include="src\protocol\telnet">
       <UniqueIdentifier>{f9218558-feb4-40d3-b5bb-db924d553f6a}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\ezsp">
+      <UniqueIdentifier>{ba691bb2-9acf-4496-a2e1-134bf2130294}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d">
@@ -387,6 +390,9 @@
     <DCompile Include="src\urt\array.d">
       <Filter>src\urt</Filter>
     </DCompile>
+    <DCompile Include="src\urt\serial.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
     <DCompile Include="src\manager\console\console.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
@@ -401,6 +407,18 @@
     </DCompile>
     <DCompile Include="src\protocol\tesla\sampler.d">
       <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ezsp\package.d">
+      <Filter>src\protocol\ezsp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ezsp\ashv2.d">
+      <Filter>src\protocol\ezsp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ezsp\commands.d">
+      <Filter>src\protocol\ezsp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ezsp\client.d">
+      <Filter>src\protocol\ezsp</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>

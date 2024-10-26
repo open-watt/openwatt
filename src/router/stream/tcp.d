@@ -23,7 +23,7 @@ public import router.stream;
 
 class TCPStream : Stream
 {
-    nothrow @nogc:
+nothrow @nogc:
 
     this(String name, const(char)[] host, ushort port, StreamOptions options = StreamOptions.None)
     {
@@ -111,7 +111,7 @@ class TCPStream : Stream
             set_keepalive(socket, enable, keepIdle, keepInterval, keepCount);
     }
 
-    override ptrdiff_t read(void[] buffer) nothrow @nogc
+    override ptrdiff_t read(void[] buffer)
     {
         if (!live)
             return 0;
@@ -129,7 +129,7 @@ class TCPStream : Stream
         return bytes;
     }
 
-    override ptrdiff_t write(const void[] data) nothrow @nogc
+    override ptrdiff_t write(const void[] data)
     {
         if (live)
         {

@@ -247,3 +247,49 @@ template Nullable(T)
         }
     }
 }
+
+template Nullable(T)
+    if (is(T == enum))
+{
+    struct Nullable
+    {
+        T value;
+        bool isValue;
+
+        this(typeof(null))
+        {
+            isValue = false;
+        }
+        this(T v)
+        {
+            value = v;
+            isValue = true;
+        }
+
+        bool opCast(T : bool)() const
+            => isValue;
+
+        bool opEquals(typeof(null)) const
+            => !isValue;
+        bool opEquals(T v) const
+            => isValue && value == v;
+
+        void opAssign(typeof(null))
+        {
+            isValue = false;
+        }
+        void opAssign(T v)
+		{
+            value = v;
+            isValue = true;
+		}
+
+        ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc
+        {
+            if (!isValue)
+                return formatValue(null, buffer, format, formatArgs);
+            else
+                return formatValue(value, buffer, format, formatArgs);
+        }
+    }
+}

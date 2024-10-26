@@ -55,7 +55,7 @@ nothrow @nogc:
 
     StreamStatus status;
 
-    this(String name, const(char)[] type, StreamOptions options) nothrow @nogc
+    this(String name, const(char)[] type, StreamOptions options)
     {
         this.name = name.move;
         this.type = type.addString();
@@ -75,17 +75,17 @@ nothrow @nogc:
     abstract void disconnect();
 
     // Check if the stream is connected
-    abstract bool connected() nothrow @nogc;
+    abstract bool connected();
 
     abstract const(char)[] remoteName();
 
-    abstract void setOpts(StreamOptions options) nothrow @nogc;
+    abstract void setOpts(StreamOptions options);
 
     // Read data from the stream
-    abstract ptrdiff_t read(void[] buffer) nothrow @nogc;
+    abstract ptrdiff_t read(void[] buffer);
 
     // Write data to the stream
-    abstract ptrdiff_t write(const void[] data) nothrow @nogc;
+    abstract ptrdiff_t write(const void[] data);
 
     // Return the number of bytes in the read buffer
     abstract ptrdiff_t pending();
