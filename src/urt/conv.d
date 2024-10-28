@@ -210,6 +210,84 @@ unittest
 
 
 
+template to(T)
+{
+    import urt.traits;
+
+    static if (is(T == long))
+    {
+        long to(const(char)[] str)
+        {
+            int base = parseBasePrefix(str);
+            size_t taken;
+            long r = parseInt(str, &taken, null, base);
+            assert(taken == str.length, "String is not numeric");
+            return r;
+        }
+    }
+    else static if (is(T == double))
+    {
+        double to(const(char)[] str)
+        {
+            int base = parseBasePrefix(str);
+            size_t taken;
+            double r = parseFloat(str, &taken, base);
+            assert(taken == str.length, "String is not numeric");
+            return r;
+        }
+    }
+    else static if (isSomeInt!T) // call-through for other int types; reduce instantiation bloat
+    {
+        T to(const(char)[] str)
+            => cast(T)to!long(str);
+    }
+    else static if (isSomeFloat!T) // call-through for other float types; reduce instantiation bloat
+    {
+        T to(const(char)[] str)
+            => cast(T)to!double(str);
+    }
+    else static if (is(T == struct) || is(T == class))
+    {
+        // if aggregates have a fromString() function, we can use it to parse the string...
+        static assert(is(typeof(&(T.init).fromString) == bool delegate(const(char)[], ulong*) nothrow @nogc), "Aggregate requires 'fromString' member");
+
+        T to(const(char)[] str)
+        {
+            T r;
+            size_t taken;
+            bool success = r.fromString(str, &taken);
+            assert(success && taken == str.length, "Failed to parse string as " ~ T.stringof);
+            return r;
+        }
+    }
+    else static if (is(T : const(char)[]))
+    {
+        import urt.mem.allocator;
+
+        const(char)[] to(ref T, NoGCAllocator allocator = tempAllocator())
+        {
+            static assert(false, "TODO");
+        }
+    }
+}
+
+private:
+
+int parseBasePrefix(ref const(char)[] str)
+{
+    int base = 10;
+    if (str.length >= 2)
+    {
+        if (str[0..2] == "0x")
+            base = 16, str = str[2..$];
+        else if (str[0..2] == "0b")
+            base = 2, str = str[2..$];
+        else if (str[0..2] == "0o")
+            base = 8, str = str[2..$];
+    }
+    return base;
+}
+
 
 /+
 size_t formatStruct(T)(ref T value, char[] buffer) nothrow @nogc
