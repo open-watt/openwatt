@@ -285,7 +285,7 @@ char[] toHexString(const(ubyte[]) data, char[] buffer, uint group = 0, uint seco
 	import urt.util : isPowerOf2;
 	assert(group.isPowerOf2);
 	assert(secondaryGroup.isPowerOf2);
-	assert(secondaryGroup == 0 || seps.length > 1, "Secondary grouping requires additional separator");
+	assert((secondaryGroup == 0 && seps.length > 0) || seps.length > 1, "Secondary grouping requires additional separator");
 
 	if (buffer.length < 2)
 		return null;

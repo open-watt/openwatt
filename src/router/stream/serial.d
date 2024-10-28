@@ -228,11 +228,9 @@ version(Windows)
                     return false; // close the port?
                 }
             }
-            else
-            {
-                assert(false, "TODO: test this case");
-                return false; // close the port?
-            }
+
+            disconnect();
+            return false;
         }
 
         override const(char)[] remoteName()
@@ -399,13 +397,14 @@ class SerialStreamModule : Plugin
     class Instance : Plugin.Instance
     {
         mixin DeclareInstance;
+    nothrow @nogc:
 
         override void init()
         {
             app.console.registerCommand!add("/stream/serial", this);
         }
 
-        void add(Session session, const(char)[] name, const(char)[] device, int baud, Nullable!int data_bits, Nullable!float stop_bits, Nullable!Parity parity, Nullable!FlowControl flow_control) nothrow @nogc
+        void add(Session session, const(char)[] name, const(char)[] device, int baud, Nullable!int data_bits, Nullable!float stop_bits, Nullable!Parity parity, Nullable!FlowControl flow_control)
         {
             auto mod_stream = app.moduleInstance!StreamModule;
 

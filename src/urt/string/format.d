@@ -441,13 +441,28 @@ struct DefFormat(T)
 //			// TODO: UTF ENCODE...
 //		}
 		else static if (is(T == void[]) || is(T == const(void)[]))
-		{
-			if (!buffer.ptr)
-				return value.length*3 - 1;
+        {
+            int grp1 = 1, grp2 = 0;
+            if (format.length && format[0].isNumeric)
+            {
+                bool success;
+                grp1 = cast(int)format.parseInt(success);
+                if (success && format.length > 0 && format[0] == ':' &&
+                               format.length > 1 && format[1].isNumeric)
+                {
+                    format.popFront();
+                    grp2 = cast(int)format.parseInt(success);
+                }
+                if (!success)
+                    return -1;
+            }
 
-			char[] hex = toHexString(cast(ubyte[])value, buffer, 1);
-			return hex.length;
-		}
+            if (!buffer.ptr)
+                return value.length*2 + (value.length / grp1) - 1;
+
+            char[] hex = toHexString(cast(ubyte[])value, buffer, grp1, grp2);
+            return hex.length;
+        }
 		else static if (is(T : const U[], U))
 		{
 			// arrays of other stuff
@@ -492,21 +507,45 @@ struct DefFormat(T)
 		}
 		else static if (is(T B == enum))
 		{
-			if (!buffer.ptr)
-				return T.stringof.length + 2 + defToString!B(*cast(B*)&value, buffer, format, formatArgs);
+            // TODO: should probably return FQN ???
+            string key = null;
+            val: switch (value)
+            {
+                static foreach (i, KeyName; __traits(allMembers, T))
+                {
+                    static if (!EnumKeyIsDuplicate!(T, i))
+                    {
+                        case __traits(getMember, T, KeyName):
+                            key = KeyName;
+                            break val;
+                    }
+                }
+                default:
+                    if (!buffer.ptr)
+                        return T.stringof.length + 2 + defToString!B(cast(B)value, buffer, null, null);
 
-			// TODO: this is a lazy implementation!
-			// should probably include fqn, and should probably use keys where they match...
-			if (buffer.length < T.stringof.length + 1)
-				return 0;
-			buffer[0 .. T.stringof.length] = T.stringof;
-			buffer[T.stringof.length] = '(';
-			ptrdiff_t len = defToString!B(*cast(B*)&value, buffer[T.stringof.length + 1 .. $], format, formatArgs);
-			if (len <= 0 || buffer.length < T.stringof.length + 2 + len)
-				return 0;
-			buffer[T.stringof.length + 1 + len] = ')';
-			return T.stringof.length + 2 + len;
-		}
+                    if (buffer.length < T.stringof.length + 1)
+                        return 0;
+                    buffer[0 .. T.stringof.length] = T.stringof;
+                    buffer[T.stringof.length] = '(';
+                    ptrdiff_t len = defToString!B(*cast(B*)&value, buffer[T.stringof.length + 1 .. $], null, null);
+                    if (len <= 0 || buffer.length < T.stringof.length + 2 + len)
+                        return 0;
+                    buffer[T.stringof.length + 1 + len] = ')';
+                    return T.stringof.length + 2 + len;
+            }
+
+            if (!buffer.ptr)
+                return T.stringof.length + 1 + key.length;
+
+            size_t len = T.stringof.length + 1 + key.length;
+            if (buffer.length < len)
+                return 0;
+            buffer[0 .. T.stringof.length] = T.stringof;
+            buffer[T.stringof.length] = '.';
+            buffer[T.stringof.length + 1 .. len] = key[];
+            return len;
+        }
         else static if (is(T == class))
         {
             const(char)[] t = value.toString();
@@ -864,4 +903,15 @@ template constCorrectedStrings(Args...)
         else
             static assert(false, "Argument must be a char array or a char: ", T);
     }
+}
+
+template EnumKeyIsDuplicate(Enum, size_t item)
+{
+    alias Elements = __traits(allMembers, Enum);
+    enum Key = __traits(getMember, Enum, Elements[item]);
+    alias Exists = void;
+    static foreach (i; 0 .. item)
+        static if (Key == __traits(getMember, Enum, Elements[i]))
+            Exists = int;
+    enum EnumKeyIsDuplicate = is(Exists == int);
 }

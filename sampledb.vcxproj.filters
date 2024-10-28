@@ -79,6 +79,9 @@
     <Filter Include="src\protocol\ezsp">
       <UniqueIdentifier>{ba691bb2-9acf-4496-a2e1-134bf2130294}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\zigbee">
+      <UniqueIdentifier>{ba691bb2-9acf-4496-a2e1-134bf2130294}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d">
@@ -419,6 +422,18 @@
     </DCompile>
     <DCompile Include="src\protocol\ezsp\client.d">
       <Filter>src\protocol\ezsp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\zigbee\package.d">
+      <Filter>src\protocol\zigbee</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\zigbee\client.d">
+      <Filter>src\protocol\zigbee</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\zigbee\coordinator.d">
+      <Filter>src\protocol\zigbee</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\zigbee.d">
+      <Filter>src\router\iface</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>

@@ -31,7 +31,7 @@ nothrow @nogc:
 
     struct SendReq
     {
-        enum State { Available, ReadyToSend, PendingAck, Received }
+        enum State { Available, ReadyToSend, PendingAck }
         ushort offset;
         ubyte length;
         State state;
@@ -41,9 +41,7 @@ nothrow @nogc:
 
     ubyte[128] rxBuffer;
     ubyte[1024] transmitBuffer;
-    ubyte[1024] recvBuffer;
     SendReq[8] sendQueue;
-    SendReq[8] recvQueue;
     MonoTime lastEvent;
 
     ushort transmitOffset;
@@ -51,14 +49,16 @@ nothrow @nogc:
     ubyte rxOffset;
 
     ubyte txSeq;
-    ubyte txAck;
     ubyte rxSeq;
-    ubyte taken;
+    ubyte txAck;
 
     bool connecting = true;
     bool connected;
 
     ubyte ashVersion;
+
+    void delegate(const(ubyte)[] packet) nothrow @nogc packetCallback;
+
 
     this (Stream stream)
     {
@@ -67,6 +67,11 @@ nothrow @nogc:
 
     bool isConnected()
         => connected;
+
+    void setPacketCallback(void delegate(const(ubyte)[]) nothrow @nogc callback)
+    {
+        packetCallback = callback;
+    }
 
     void reset(bool reconnect = true)
     {
@@ -80,7 +85,6 @@ nothrow @nogc:
         rxOffset = 0;
         transmitOffset = recvOffset = 0;
         sendQueue[] = SendReq();
-        recvQueue[] = SendReq();
 
         lastEvent = MonoTime();
     }
@@ -215,8 +219,8 @@ nothrow @nogc:
                     if ((control & 0x60) == 0)
                     {
                         // ACK
-                        ubyte ack = control & 7;
-                        while (txAck != ack)
+                        ubyte ackNum = control & 7;
+                        while (txAck != ackNum)
                         {
                             // remote acknowledges some frames we've sent
                             if (sendQueue[txAck].state == SendReq.State.PendingAck)
@@ -224,15 +228,15 @@ nothrow @nogc:
                             txAck = (txAck + 1) & 7;
                         }
 
-                        writeDebug("ASHv2: ACK ", ack);
+                        writeDebug("ASHv2: ACK ", ackNum);
                     }
                     else if ((control & 0x60) == 0x20)
                     {
                         // NAK
                         writeDebug("ASHv2: NAK ", control & 7);
 
-                        // what am I supposed to do with a NAK?
-                        // am I supposed to resend something?
+                        // TODO: I'm meant to retransmit a buffered message
+                        //       ...but it's not clear from the control byte which message(/s) I should retransmit
                     }
                     else
                     {
@@ -244,8 +248,8 @@ nothrow @nogc:
                 else
                 {
                     // DATA
-                    ubyte ack = control & 7;
-                    while (txAck != ack)
+                    ubyte ackNum = control & 7;
+                    while (txAck != ackNum)
                     {
                         // remote acknowledges some frames we've sent
                         if (sendQueue[txAck].state == SendReq.State.PendingAck)
@@ -253,47 +257,37 @@ nothrow @nogc:
                         txAck = (txAck + 1) & 7;
                     }
 
-                    ubyte seq = control >> 4;
+                    ubyte frmNum = control >> 4;
                     bool retransmit = (control & 0x08) != 0;
 
-                    SendReq* req = &recvQueue[seq];
-
-                    if (req.state != SendReq.State.Available)
+                    if (retransmit)
                     {
-                        if (!retransmit)
+                        // we dispatch ACK's immediately, so if we receive a retransmit, either we missed the first message, or the ack wasn't received
+                        // TODO: if we missed it the first time, we must dispatch it now... how do we know?!
+                        int x = 0;
+                    }
+                    else
+                    {
+                        while (rxSeq != frmNum)
                         {
-                            // this frame hasn't been collected; we'll discard it
-                            // send a NAK to it retries:
-                            ashNak(seq, false);
-                            continue;
+                            // we missed a frame, we should request a retransmit
+                            ashNak(rxSeq, true);
+                            rxSeq = (rxSeq + 1) & 7;
                         }
-                        else
-                        {
-                            // it's already waiting for collection
-                            // we can ignore this (maybe we should check the bytes match the first message?
-                            continue;
-                        }
+                        rxSeq = (rxSeq + 1) & 7;
                     }
 
-                    if (recvOffset + frame.length > recvBuffer.length)
-                        recvOffset = 0;
-                    *req = SendReq(recvOffset, cast(ubyte)frame.length, SendReq.State.Received);
+                    ubyte[ASH_MAX_LENGTH] unrandom = void;
+                    randomise(frame, unrandom[0 .. frame.length]);
 
-                    randomise(frame, recvBuffer[recvOffset .. recvOffset + frame.length]);
-                    writeDebug("ASHv2: received data frame ", seq, ": ", cast(void[])recvBuffer[recvOffset .. recvOffset + frame.length]);
-                    recvOffset += cast(ushort)frame.length;
+                    writeDebug("ASHv2: received data frame ", frmNum, ": ", cast(void[])unrandom[0 .. frame.length]);
 
-                    while (seq < rxSeq)
-                    {
-                        // we missed some frames...
-                        // send a NAK to get them retransmitted
-                        ashNak(seq++, false);
-                    }
-                    ++rxSeq;
+                    ubyte curTxSeq = txSeq;
+                    packetCallback(unrandom[0 .. frame.length]);
 
-                    // TODO: if we have messages in the send queue; or messages to retry, send them, otherwise...
-                    // send an ACK
-                    ashAck(rxSeq, false);
+                    // if the message receive handler didn't send a response, then we should acknowledge the message
+                    if (txSeq == curTxSeq)
+                        ashAck(rxSeq, false);
                 }
             }
 
@@ -311,10 +305,10 @@ nothrow @nogc:
 
     bool send(const(ubyte)[] message)
     {
+        // TODO: what is the maximum length of an EZSP message?
         assert(message.length <= 128);
 
-        ubyte seq = txSeq++ & 7;
-        SendReq* req = &sendQueue[seq];
+        SendReq* req = &sendQueue[txSeq];
         if (req.state != SendReq.State.Available)
         {
             // TODO: we'll discard the existing message...
@@ -331,29 +325,15 @@ nothrow @nogc:
         transmitBuffer[transmitOffset .. transmitOffset + message.length] = message[];
         transmitOffset += cast(ushort)message.length;
 
-        if (connected)
-        {
-            if (ashSend(message, seq, rxSeq, false))
-            {
-                writeDebug("ASHv2: sent data frame ", seq, ": ", cast(void[])message);
+        if (!connected || !ashSend(message, txSeq, rxSeq, false))
+            return false;
 
-                req.state = SendReq.State.PendingAck;
-            }
-        }
+        writeDebug("ASHv2: sent data frame ", txSeq, ": ", cast(void[])message);
 
-        return false;
-    }
+        req.state = SendReq.State.PendingAck;
+        txSeq = (txSeq + 1) & 7;
 
-    const(ubyte)[] recv()
-    {
-        if (recvQueue[taken].state >= SendReq.State.Received)
-        {
-            const(ubyte)[] msg = recvBuffer[recvQueue[taken].offset .. recvQueue[taken].offset + recvQueue[taken].length];
-            recvQueue[taken].state = SendReq.State.Available;
-            ++taken;
-            return msg;
-        }
-        return null;
+        return true;
     }
 
 private:
@@ -365,7 +345,7 @@ private:
 
     bool ashAck(ubyte ack, bool ready, bool nak = false)
     {
-        ubyte[4] ackMsg = [ 0x80 | (nak ? 0x20 : 0) | (ready << 3) | ack, 0, 0, ASH_FLAG_BYTE ];
+        ubyte[4] ackMsg = [ 0x80 | (nak ? 0x20 : 0) | (ready << 3) | (ack & 7), 0, 0, ASH_FLAG_BYTE ];
         ackMsg[1..3] = crcCCITT(ackMsg[0..1]).nativeToBigEndian;
         return stream.write(ackMsg) == 4;
     }

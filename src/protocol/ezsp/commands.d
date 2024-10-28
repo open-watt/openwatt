@@ -717,11 +717,84 @@ enum sl_zigbee_sec_man_flags : ubyte {
     UNCONFIRMED_TRANSIENT_KEY = 4, // Transient key being added hasn't yet been verified.
 }
 
+// SL Status Codes.
+enum sl_status : uint
+{
+    OK = 0x0000, // No error.
+    FAIL = 0x0001, // Generic error.
+    INVALID_STATE = 0x0002, // Generic invalid state error.
+    NOT_READY = 0x0003, // Module is not ready for requested operation.
+    BUSY = 0x0004, // Module is busy and cannot carry out requested operation.
+    IN_PROGRESS = 0x0005, // Operation is in progress and not yet complete (pass or fail).
+    ABORT = 0x0006, // Operation aborted.
+    TIMEOUT = 0x0007, // Operation timed out.
+    PERMISSION = 0x0008, // Operation not allowed per permissions.
+    WOULD_BLOCK = 0x0009, // Non-blocking operation would block.
+    IDLE = 0x000A, // Operation/module is Idle, cannot carry requested operation.
+    IS_WAITING = 0x000B, // Operation cannot be done while construct is waiting.
+    NONE_WAITING = 0x000C, // No task/construct waiting/pending for that action/event.
+    SUSPENDED = 0x000D, // Operation cannot be done while construct is suspended.
+    NOT_AVAILABLE = 0x000E, // Feature not available due to software configuration.
+    NOT_SUPPORTED = 0x000F, // Feature not supported.
+    INITIALIZATION = 0x0010, // Initialization failed.
+    NOT_INITIALIZED = 0x0011, // Module has not been initialized.
+    ALREADY_INITIALIZED = 0x0012, // Module has already been initialized.
+    DELETED = 0x0013, // Object/construct has been deleted.
+    ISR = 0x0014, // Illegal call from ISR.
+    NETWORK_UP = 0x0015, // Illegal call because network is up.
+    NETWORK_DOWN = 0x0016, // Illegal call because network is down.
+    NOT_JOINED = 0x0017, // Failure due to not being joined in a network.
+    NO_BEACONS = 0x0018, // Invalid operation as there are no beacons.
+    ALLOCATION_FAILED = 0x0019, // Generic allocation error.
+    NO_MORE_RESOURCE = 0x001A, // No more resource available to perform the operation.
+    EMPTY = 0x001B, // Item/list/queue is empty.
+    FULL = 0x001C, // Item/list/queue is full.
+    WOULD_OVERFLOW = 0x001D, // Item would overflow.
+    HAS_OVERFLOWED = 0x001E, // Item/list/queue has been overflowed.
+    OWNERSHIP = 0x001F, // Generic ownership error.
+    IS_OWNER = 0x0020, // Already/still owning resource.
+    INVALID_PARAMETER = 0x0021, // Generic invalid argument or consequence of invalid argument.
+    NULL_POINTER = 0x0022, // Invalid null pointer received as argument.
+    INVALID_CONFIGURATION = 0x0023, // Invalid configuration provided.
+    INVALID_MODE = 0x0024, // Invalid mode.
+    INVALID_HANDLE = 0x0025, // Invalid handle.
+    INVALID_TYPE = 0x0026, // Invalid type for operation.
+    INVALID_INDEX = 0x0027, // Invalid index.
+    INVALID_RANGE = 0x0028, // Invalid range.
+    INVALID_KEY = 0x0029, // Invalid key.
+    INVALID_CREDENTIALS = 0x002A, // Invalid credentials.
+    INVALID_COUNT = 0x002B, // Invalid count.
+    INVALID_SIGNATURE = 0x002C, // Invalid signature / verification failed.
+    NOT_FOUND = 0x002D, // Item could not be found.
+    ALREADY_EXISTS = 0x002E, // Item already exists.
+    IO = 0x002F, // Generic I/O failure.
+    IO_TIMEOUT = 0x0030, // I/O failure due to timeout.
+    TRANSMIT = 0x0031, // Generic transmission error.
+    TRANSMIT_UNDERFLOW = 0x0032, // Transmit underflowed.
+    TRANSMIT_INCOMPLETE = 0x0033, // Transmit is incomplete.
+    TRANSMIT_BUSY = 0x0034, // Transmit is busy.
+    RECEIVE = 0x0035, // Generic reception error.
+    OBJECT_READ = 0x0036, // Failed to read on/via given object.
+    OBJECT_WRITE = 0x0037, // Failed to write on/via given object.
+    MESSAGE_TOO_LONG = 0x0038, // Message is too long.
+    ERRNO = 0x0101, // System error: errno is set and strerror can be used to fetch the error-message.
+    NET_MQTT_NO_CONN = 0x0841, // Not connected to a broker.
+    NET_MQTT_LOST_CONN = 0x0842, // Connection to broker lost.
+    NET_MQTT_PROTOCOL = 0x0843, // Protocol error.
+    NET_MQTT_TLS_HANDSHAKE = 0x0844, // TLS negotiation failed.
+    NET_MQTT_PAYLOAD_SIZE = 0x0845, // Payload size is too large.
+    NET_MQTT_NOT_SUPPORTED = 0x0846, // MQTTv5 properties are set but client is not using MQTTv5.
+    NET_MQTT_AUTH = 0x0847, // Authentication failed.
+    NET_MQTT_ACL_DENIED = 0x0848, // Access control list deny.
+    NET_MQTT_MALFORMED_UTF8 = 0x0849, // Malformed UTF-8 string in the specified MQTT-topic.
+    NET_MQTT_DUPLICATE_PROPERTY = 0x084A, // An MQTTv5 property is duplicated where it is forbidden.
+    NET_MQTT_QOS_NOT_SUPPORTED = 0x084B, // The requested QoS level is not supported by the broker.
+    NET_MQTT_OVERSIZE_PACKET = 0x084C, // Resulting packet will become larger than the broker supports.
+    PRINT_INFO_MESSAGE = 0x0900, // Only information message should be printed, without starting an application.
+}
+
 // 16-bit ZigBee network address.
 alias EmberNodeId = ushort;
-
-// See sl_status.h for an enumerated list.
-alias sl_status = uint;
 
 // 802.15.4 PAN ID.
 alias EmberPanId = ushort;
@@ -1164,7 +1237,7 @@ struct EmberTokenData {
 // The command allows the Host to specify the desired EZSP version and must be sent before any other command.
 // The response provides information about the firmware running on the NCP.
 struct EZSP_Version {
-    enum Command = 0x0000;
+    enum ushort Command = 0x0000;
     struct Request {
         ubyte desiredProtocolVersion; // The EZSP version the Host wishes to use. To successfully set the version and allow other commands, this must be same as EZSP_PROTOCOL_VERSION.
     }
@@ -1177,7 +1250,7 @@ struct EZSP_Version {
 
 // Reads a configuration value from the NCP.
 struct EZSP_GetConfigurationValue {
-    enum Command = 0x0052;
+    enum ushort Command = 0x0052;
     struct Request {
         EzspConfigId configId; // Identifies which configuration value to read.
     }
@@ -1189,7 +1262,7 @@ struct EZSP_GetConfigurationValue {
 
 // Writes a configuration value to the NCP. Configuration values can be modified by the Host after the NCP has reset. Once the status of the stack changes to EMBER_NETWORK_UP, configuration values can no longer be modified and this command will respond with EZSP_ERROR_INVALID_CALL.
 struct EZSP_SetConfigurationValue {
-    enum Command = 0x0053;
+    enum ushort Command = 0x0053;
     struct Request {
         EzspConfigId configId; // Identifies which configuration value to change.
         ushort value; // The new configuration value.
@@ -1201,7 +1274,7 @@ struct EZSP_SetConfigurationValue {
 
 // Read attribute data on NCP endpoints.
 struct EZSP_ReadAttribute {
-    enum Command = 0x0108;
+    enum ushort Command = 0x0108;
     struct Request {
         ubyte endpoint; // Endpoint
         ushort cluster; // Cluster.
@@ -1219,7 +1292,7 @@ struct EZSP_ReadAttribute {
 
 // Write attribute data on NCP endpoints.
 struct EZSP_WriteAttribute {
-    enum Command = 0x0109;
+    enum ushort Command = 0x0109;
     struct Request {
         ubyte endpoint; // Endpoint
         ushort cluster; // Cluster.
@@ -1239,7 +1312,7 @@ struct EZSP_WriteAttribute {
 
 // Configures endpoint information on the NCP. The NCP does not remember these settings after a reset. Endpoints can be added by the Host after the NCP has reset. Once the status of the stack changes to EMBER_NETWORK_UP, endpoints can no longer be added and this command will respond with EZSP_ERROR_INVALID_CALL.
 struct EZSP_AddEndpoint {
-    enum Command = 0x0002;
+    enum ushort Command = 0x0002;
     struct Request {
         ubyte endpoint; // The application endpoint to be added.
         ushort profileId; // The endpoint's application profile.
@@ -1257,7 +1330,7 @@ struct EZSP_AddEndpoint {
 
 // Allows the Host to change the policies used by the NCP to make fast decisions.
 struct EZSP_SetPolicy {
-    enum Command = 0x0055;
+    enum ushort Command = 0x0055;
     struct Request {
         EzspPolicyId policyId; // Identifies which policy to modify.
         EzspDecisionId decisionId; // The new decision for the specified policy.
@@ -1269,7 +1342,7 @@ struct EZSP_SetPolicy {
 
 // Allows the Host to read the policies used by the NCP to make fast decisions.
 struct EZSP_GetPolicy {
-    enum Command = 0x0056;
+    enum ushort Command = 0x0056;
     struct Request {
         EzspPolicyId policyId; // Identifies which policy to read.
     }
@@ -1281,7 +1354,7 @@ struct EZSP_GetPolicy {
 
 // Triggers a pan id update message.
 struct EZSP_SendPanIdUpdate {
-    enum Command = 0x0057;
+    enum ushort Command = 0x0057;
     struct Request {
         EmberPanId newPan; // The new Pan Id
     }
@@ -1292,7 +1365,7 @@ struct EZSP_SendPanIdUpdate {
 
 // Reads a value from the NCP.
 struct EZSP_GetValue {
-    enum Command = 0x00AA;
+    enum ushort Command = 0x00AA;
     struct Request {
         EzspValueId valueId; // Identifies which value to read.
     }
@@ -1305,7 +1378,7 @@ struct EZSP_GetValue {
 
 // Reads a value from the NCP but passes an extra argument specific to the value being retrieved.
 struct EZSP_GetExtendedValue {
-    enum Command = 0x0003;
+    enum ushort Command = 0x0003;
     struct Request {
         EzspExtendedValueId valueId; // Identifies which extended value ID to read.
         uint characteristics; // Identifies which characteristics of the extended value ID to read. These are specific to the value being read.
@@ -1319,7 +1392,7 @@ struct EZSP_GetExtendedValue {
 
 // Writes a value to the NCP.
 struct EZSP_SetValue {
-    enum Command = 0x00AB;
+    enum ushort Command = 0x00AB;
     struct Request {
         EzspValueId valueId; // Identifies which value to change.
         ubyte valueLength; // The length of the value parameter in bytes.
@@ -1332,7 +1405,7 @@ struct EZSP_SetValue {
 
 // Allows the Host to control the broadcast behaviour of a routing device used by the NCP
 struct EZSP_SetPassiveAckConfig {
-    enum Command = 0x0105;
+    enum ushort Command = 0x0105;
     struct Request {
         ubyte config; // Passive ack config enum.
         ubyte minAcksNeeded; // The minimum number of acknowledgments (re-broadcasts) to wait for until deeming the broadcast transmission complete.
@@ -1347,7 +1420,7 @@ struct EZSP_SetPassiveAckConfig {
 
 // A command which does nothing. The Host can use this to set the sleep mode or to check the status of the NCP.
 struct EZSP_Nop {
-    enum Command = 0x0005;
+    enum ushort Command = 0x0005;
     struct Request {
     }
     struct Response {
@@ -1356,7 +1429,7 @@ struct EZSP_Nop {
 
 // Variable length data from the Host is echoed back by the NCP. This command has no other effects and is designed for testing the link between the Host and NCP.
 struct EZSP_Echo {
-    enum Command = 0x0081;
+    enum ushort Command = 0x0081;
     struct Request {
         ubyte dataLength; // The length of the data parameter in bytes.
         ubyte[] data; // The data to be echoed back.
@@ -1369,7 +1442,7 @@ struct EZSP_Echo {
 
 // Indicates that the NCP received an invalid command.
 struct EZSP_InvalidCommand {
-    enum Command = 0x0058;
+    enum ushort Command = 0x0058;
     struct Request {
     }
     struct Response {
@@ -1379,7 +1452,7 @@ struct EZSP_InvalidCommand {
 
 // Allows the NCP to respond with a pending callback.
 struct EZSP_Callback {
-    enum Command = 0x0006;
+    enum ushort Command = 0x0006;
     struct Request {
     }
     struct Response {
@@ -1388,7 +1461,7 @@ struct EZSP_Callback {
 
 // Indicates that there are currently no pending callbacks.
 struct EZSP_NoCallbacks {
-    enum Command = 0x0007;
+    enum ushort Command = 0x0007;
     struct Request {
     }
     struct Response {
@@ -1397,7 +1470,7 @@ struct EZSP_NoCallbacks {
 
 // Sets a token (8 bytes of non-volatile storage) in the Simulated EEPROM of the NCP.
 struct EZSP_SetToken {
-    enum Command = 0x0009;
+    enum ushort Command = 0x0009;
     struct Request {
         ubyte tokenId; // Which token to set.
         ubyte[8] tokenData; // The data to write to the token.
@@ -1409,7 +1482,7 @@ struct EZSP_SetToken {
 
 // Retrieves a token (8 bytes of non-volatile storage) from the Simulated EEPROM of the NCP.
 struct EZSP_GetToken {
-    enum Command = 0x000A;
+    enum ushort Command = 0x000A;
     struct Request {
         ubyte tokenId; // Which token to read.
     }
@@ -1421,7 +1494,7 @@ struct EZSP_GetToken {
 
 // Retrieves a manufacturing token from the Flash Information Area of the NCP (except for EZSP_STACK_CAL_DATA which is managed by the stack).
 struct EZSP_GetMfgToken {
-    enum Command = 0x000B;
+    enum ushort Command = 0x000B;
     struct Request {
         EzspMfgTokenId tokenId; // Which manufacturing token to read.
     }
@@ -1433,7 +1506,7 @@ struct EZSP_GetMfgToken {
 
 // Sets a manufacturing token in the Customer Information Block (CIB) area of the NCP if that token currently unset (fully erased). Cannot be used with EZSP_STACK_CAL_DATA, EZSP_STACK_CAL_FILTER, EZSP_MFG_ASH_CONFIG, or EZSP_MFG_CBKE_DATA token.
 struct EZSP_SetMfgToken {
-    enum Command = 0x000C;
+    enum ushort Command = 0x000C;
     struct Request {
         EzspMfgTokenId tokenId; // Which manufacturing token to set.
         ubyte tokenDataLength; // The length of the tokenData parameter in bytes.
@@ -1446,7 +1519,7 @@ struct EZSP_SetMfgToken {
 
 // A callback invoked to inform the application that a stack token has changed.
 struct EZSP_StackTokenChangedHandler {
-    enum Command = 0x000D;
+    enum ushort Command = 0x000D;
     struct Request {
     }
     struct Response {
@@ -1456,7 +1529,7 @@ struct EZSP_StackTokenChangedHandler {
 
 // Returns a pseudorandom number.
 struct EZSP_GetRandomNumber {
-    enum Command = 0x0049;
+    enum ushort Command = 0x0049;
     struct Request {
     }
     struct Response {
@@ -1467,7 +1540,7 @@ struct EZSP_GetRandomNumber {
 
 // Sets a timer on the NCP. There are 2 independent timers available for use by the Host. A timer can be cancelled by setting time to 0 or units to EMBER_EVENT_INACTIVE.
 struct EZSP_SetTimer {
-    enum Command = 0x000E;
+    enum ushort Command = 0x000E;
     struct Request {
         ubyte timerId; // Which timer to set (0 or 1).
         ushort time; // The delay before the timerHandler callback will be generated. Note that the timer clock is free running and is not synchronized with this command. This means that the actual delay will be between time and (time - 1). The maximum delay is 32767.
@@ -1481,7 +1554,7 @@ struct EZSP_SetTimer {
 
 // Gets information about a timer. The Host can use this command to find out how much longer it will be before a previously set timer will generate a callback.
 struct EZSP_GetTimer {
-    enum Command = 0x004E;
+    enum ushort Command = 0x004E;
     struct Request {
         ubyte timerId; // Which timer to get information about (0 or 1).
     }
@@ -1494,7 +1567,7 @@ struct EZSP_GetTimer {
 
 // A callback from the timer.
 struct EZSP_TimerHandler {
-    enum Command = 0x000F;
+    enum ushort Command = 0x000F;
     struct Request {
     }
     struct Response {
@@ -1504,7 +1577,7 @@ struct EZSP_TimerHandler {
 
 // Sends a debug message from the Host to the Network Analyzer utility via the NCP.
 struct EZSP_DebugWrite {
-    enum Command = 0x0012;
+    enum ushort Command = 0x0012;
     struct Request {
         bool binaryMessage; // true if the message should be interpreted as binary data, false if the message should be interpreted as ASCII text.
         ubyte messageLength; // The length of the messageContents parameter in bytes.
@@ -1517,7 +1590,7 @@ struct EZSP_DebugWrite {
 
 // Retrieves and clears Ember counters. See the EmberCounterType enumeration for the counter types.
 struct EZSP_ReadAndClearCounters {
-    enum Command = 0x0065;
+    enum ushort Command = 0x0065;
     struct Request {
     }
     struct Response {
@@ -1527,7 +1600,7 @@ struct EZSP_ReadAndClearCounters {
 
 // Retrieves Ember counters. See the EmberCounterType enumeration for the counter types.
 struct EZSP_ReadCounters {
-    enum Command = 0x00F1;
+    enum ushort Command = 0x00F1;
     struct Request {
     }
     struct Response {
@@ -1537,7 +1610,7 @@ struct EZSP_ReadCounters {
 
 // This call is fired when a counter exceeds its threshold.
 struct EZSP_CounterRolloverHandler {
-    enum Command = 0x00F2;
+    enum ushort Command = 0x00F2;
     struct Request {
     }
     struct Response {
@@ -1547,7 +1620,7 @@ struct EZSP_CounterRolloverHandler {
 
 // Used to test that UART flow control is working correctly.
 struct EZSP_DelayTest {
-    enum Command = 0x009D;
+    enum ushort Command = 0x009D;
     struct Request {
         ushort delay; // Data will not be read from the host for this many milliseconds.
     }
@@ -1557,7 +1630,7 @@ struct EZSP_DelayTest {
 
 // This retrieves the status of the passed library ID to determine if it is compiled into the stack.
 struct EZSP_GetLibraryStatus {
-    enum Command = 0x0001;
+    enum ushort Command = 0x0001;
     struct Request {
         EmberLibraryId libraryId; // The ID of the library being queried.
     }
@@ -1568,7 +1641,7 @@ struct EZSP_GetLibraryStatus {
 
 // Allows the HOST to know whether the NCP is running the XNCP library. If so, the response contains also the manufacturer ID and the version number of the XNCP application that is running on the NCP.
 struct EZSP_GetXncpInfo {
-    enum Command = 0x0013;
+    enum ushort Command = 0x0013;
     struct Request {
     }
     struct Response {
@@ -1580,7 +1653,7 @@ struct EZSP_GetXncpInfo {
 
 // Provides the customer a custom EZSP frame. On the NCP, these frames are only handled if the XNCP library is included. On the NCP side these frames are handled in the emberXNcpIncomingCustomEzspMessageCallback() callback function.
 struct EZSP_CustomFrame {
-    enum Command = 0x0047;
+    enum ushort Command = 0x0047;
     struct Request {
         ubyte payloadLength; // The length of the custom frame payload (maximum 119 bytes).
         ubyte[] payload; // The payload of the custom frame.
@@ -1594,7 +1667,7 @@ struct EZSP_CustomFrame {
 
 // A callback indicating a custom EZSP message has been received.
 struct EZSP_CustomFrameHandler {
-    enum Command = 0x0054;
+    enum ushort Command = 0x0054;
     struct Request {
     }
     struct Response {
@@ -1605,7 +1678,7 @@ struct EZSP_CustomFrameHandler {
 
 // Returns the EUI64 ID of the local node.
 struct EZSP_GetEui64 {
-    enum Command = 0x0026;
+    enum ushort Command = 0x0026;
     struct Request {
     }
     struct Response {
@@ -1615,7 +1688,7 @@ struct EZSP_GetEui64 {
 
 // Returns the 16-bit node ID of the local node.
 struct EZSP_GetNodeId {
-    enum Command = 0x0027;
+    enum ushort Command = 0x0027;
     struct Request {
     }
     struct Response {
@@ -1625,7 +1698,7 @@ struct EZSP_GetNodeId {
 
 // Returns number of phy interfaces present.
 struct EZSP_GetPhyInterfaceCount {
-    enum Command = 0x00FC;
+    enum ushort Command = 0x00FC;
     struct Request {
     }
     struct Response {
@@ -1635,7 +1708,7 @@ struct EZSP_GetPhyInterfaceCount {
 
 // Returns the entropy source used for true random number generation.
 struct EZSP_GetTrueRandomEntropySource {
-    enum Command = 0x004F;
+    enum ushort Command = 0x004F;
     struct Request {
     }
     struct Response {
@@ -1648,7 +1721,7 @@ struct EZSP_GetTrueRandomEntropySource {
 
 // Sets the manufacturer code to the specified value. The manufacturer code is one of the fields of the node descriptor.
 struct EZSP_SetManufacturerCode {
-    enum Command = 0x0015;
+    enum ushort Command = 0x0015;
     struct Request {
         ushort code; // The manufacturer code for the local node.
     }
@@ -1658,7 +1731,7 @@ struct EZSP_SetManufacturerCode {
 
 // Sets the power descriptor to the specified value. The power descriptor is a dynamic value. Therefore, you should call this function whenever the value changes.
 struct EZSP_SetPowerDescriptor {
-    enum Command = 0x0016;
+    enum ushort Command = 0x0016;
     struct Request {
     }
     struct Response {
@@ -1668,7 +1741,7 @@ struct EZSP_SetPowerDescriptor {
 
 // Resume network operation after a reboot. The node retains its original type. This should be called on startup whether or not the node was previously part of a network. EMBER_NOT_JOINED is returned if the node is not part of a network. This command accepts options to control the network initialization.
 struct EZSP_NetworkInit {
-    enum Command = 0x0017;
+    enum ushort Command = 0x0017;
     struct Request {
         EmberNetworkInitStruct networkInitStruct; // An EmberNetworkInitStruct containing the options for initialization.
     }
@@ -1679,7 +1752,7 @@ struct EZSP_NetworkInit {
 
 // Returns a value indicating whether the node is joining, joined to, or leaving a network.
 struct EZSP_NetworkState {
-    enum Command = 0x0018;
+    enum ushort Command = 0x0018;
     struct Request {
     }
     struct Response {
@@ -1689,7 +1762,7 @@ struct EZSP_NetworkState {
 
 // A callback invoked when the status of the stack changes. If the status parameter equals EMBER_NETWORK_UP, then the getNetworkParameters command can be called to obtain the new network parameters. If any of the parameters are being stored in nonvolatile memory by the Host, the stored values should be updated.
 struct EZSP_StackStatusHandler {
-    enum Command = 0x0019;
+    enum ushort Command = 0x0019;
     struct Request {
     }
     struct Response {
@@ -1699,7 +1772,7 @@ struct EZSP_StackStatusHandler {
 
 // This function will start a scan.
 struct EZSP_StartScan {
-    enum Command = 0x001A;
+    enum ushort Command = 0x001A;
     struct Request {
         EzspNetworkScanType scanType; // Indicates the type of scan to be performed. Possible values are: EZSP_ENERGY_SCAN and EZSP_ACTIVE_SCAN. For each type, the respective callback for reporting results is: ener-gyScanResultHandler and networkFoundHandler. The energy scan and active scan report errors and completion via the scanCompleteHandler.
         uint channelMask; // Bits set as 1 indicate that this particular channel should be scanned. Bits set to 0 indicate that this particular channel should not be scanned. For example, a channelMask value of 0x00000001 would indicate that only channel 0 should be scanned. Valid channels range from 11 to 26 inclu-sive. This translates to a channel mask value of 0x07FFF800. As a convenience, a value of 0 is reinterpreted as the mask for the current channel.
@@ -1712,7 +1785,7 @@ struct EZSP_StartScan {
 
 // Reports the result of an energy scan for a single channel. The scan is not complete until the scanCompleteHandler callback is called.
 struct EZSP_EnergyScanResultHandler {
-    enum Command = 0x0048;
+    enum ushort Command = 0x0048;
     struct Request {
     }
     struct Response {
@@ -1723,7 +1796,7 @@ struct EZSP_EnergyScanResultHandler {
 
 // Reports that a network was found as a result of a prior call to startScan. Gives the network parameters useful for deciding which network to join.
 struct EZSP_NetworkFoundHandler {
-    enum Command = 0x001B;
+    enum ushort Command = 0x001B;
     struct Request {
     }
     struct Response {
@@ -1735,7 +1808,7 @@ struct EZSP_NetworkFoundHandler {
 
 // Returns the status of the current scan of type EZSP_ENERGY_SCAN or EZSP_ACTIVE_SCAN. EMBER_SUCCESS signals that the scan has completed. Other error conditions signify a failure to scan on the channel specified.
 struct EZSP_ScanCompleteHandler {
-    enum Command = 0x001C;
+    enum ushort Command = 0x001C;
     struct Request {
     }
     struct Response {
@@ -1746,7 +1819,7 @@ struct EZSP_ScanCompleteHandler {
 
 // Returns an unused panID and channel pair found via the find unused panId scan procedure.
 struct EZSP_UnusedPanIdFoundHandler {
-    enum Command = 0x00D2;
+    enum ushort Command = 0x00D2;
     struct Request {
     }
     struct Response {
@@ -1757,7 +1830,7 @@ struct EZSP_UnusedPanIdFoundHandler {
 
 // Starts a series of scans which will return an available panId.
 struct EZSP_FindUnusedPanId {
-    enum Command = 0x00D3;
+    enum ushort Command = 0x00D3;
     struct Request {
         uint channelMask; // The channels that will be scanned for available panIds.
         ubyte duration; // The duration of the procedure.
@@ -1769,7 +1842,7 @@ struct EZSP_FindUnusedPanId {
 
 // Terminates a scan in progress.
 struct EZSP_StopScan {
-    enum Command = 0x001D;
+    enum ushort Command = 0x001D;
     struct Request {
     }
     struct Response {
@@ -1779,7 +1852,7 @@ struct EZSP_StopScan {
 
 // Forms a new network by becoming the coordinator.
 struct EZSP_FormNetwork {
-    enum Command = 0x001E;
+    enum ushort Command = 0x001E;
     struct Request {
         EmberNetworkParameters parameters; // Specification of the new network.
     }
@@ -1790,7 +1863,7 @@ struct EZSP_FormNetwork {
 
 // Causes the stack to associate with the network using the specified network parameters. It can take several seconds for the stack to associate with the local network. Do not send messages until the stackStatusHandler callback informs you that the stack is up.
 struct EZSP_JoinNetwork {
-    enum Command = 0x001F;
+    enum ushort Command = 0x001F;
     struct Request {
         EmberNodeType nodeType; // Specification of the role that this node will have in the network. This role must not be EMBER_COORDINATOR. To be a coordinator, use the formNetwork command.
         EmberNetworkParameters parameters; // Specification of the network with which the node should associate.
@@ -1802,7 +1875,7 @@ struct EZSP_JoinNetwork {
 
 // Causes the stack to associate with the network using the specified network parameters in the beacon parameter. It can take several seconds for the stack to associate with the local network. Do not send messages until the stackStatusHandler callback informs you that the stack is up. Unlike ::emberJoinNetwork(), this function does not issue an active scan before joining. Instead, it will cause the local node to issue a MAC Association Request directly to the specified target node. It is assumed that the beacon parameter is an artifact after issuing an active scan. (For more information, see emberGetBestBeacon and emberGetNextBeacon.)
 struct EZSP_JoinNetworkDirectly {
-    enum Command = 0x003B;
+    enum ushort Command = 0x003B;
     struct Request {
         EmberNodeType localNodeType; // Specifies the role that this node will have in the network. This role must not be EMBER_COORDINATOR. To be a coordinator, use the formNetwork command.
         EmberBeaconData beacon; // Specifies the network with which the node should associate.
@@ -1816,7 +1889,7 @@ struct EZSP_JoinNetworkDirectly {
 
 // Causes the stack to leave the current network. This generates a stackStatusHandler callback to indicate that the network is down. The radio will not be used until after sending a formNetwork or joinNetwork command.
 struct EZSP_LeaveNetwork {
-    enum Command = 0x0020;
+    enum ushort Command = 0x0020;
     struct Request {
     }
     struct Response {
@@ -1826,7 +1899,7 @@ struct EZSP_LeaveNetwork {
 
 // The application may call this function when contact with the network has been lost. The most common usage case is when an end device can no longer communicate with its parent and wishes to find a new one. Another case is when a device has missed a Network Key update and no longer has the current Network Key. The stack will call ezspStackStatusHandler to indicate that the network is down, then try to re-establish contact with the network by performing an active scan, choosing a network with matching extended pan id, and sending a ZigBee network rejoin request. A second call to the ezspStackStatusHandler callback indicates either the success or the failure of the attempt. The process takes approximately 150 milliseconds per channel to complete. This call replaces the emberMobileNodeHasMoved API from EmberZNet 2.x, which used MAC association and consequently took half a second longer to complete.
 struct EZSP_FindAndRejoinNetwork {
-    enum Command = 0x0021;
+    enum ushort Command = 0x0021;
     struct Request {
         bool haveCurrentNetworkKey; // This parameter tells the stack whether to try to use the current network key. If it has the current network key it will perform a secure rejoin (encrypted). If this fails the device should try an unsecure rejoin. If the Trust Center allows the rejoin then the current Network Key will be sent encrypted using the device's Link Key.
         uint channelMask; // A mask indicating the channels to be scanned. See emberStartScan for format details. A value of 0 is reinterpreted as the mask for the current channel.
@@ -1838,7 +1911,7 @@ struct EZSP_FindAndRejoinNetwork {
 
 // Tells the stack to allow other nodes to join the network with this node as their parent. Joining is initially disabled by default.
 struct EZSP_PermitJoining {
-    enum Command = 0x0022;
+    enum ushort Command = 0x0022;
     struct Request {
         ubyte duration; // A value of 0x00 disables joining. A value of 0xFF enables joining. Any other value enables joining for that number of seconds.
     }
@@ -1849,7 +1922,7 @@ struct EZSP_PermitJoining {
 
 // Indicates that a child has joined or left.
 struct EZSP_ChildJoinHandler {
-    enum Command = 0x0023;
+    enum ushort Command = 0x0023;
     struct Request {
     }
     struct Response {
@@ -1863,7 +1936,7 @@ struct EZSP_ChildJoinHandler {
 
 // Sends a ZDO energy scan request. This request may only be sent by the current network manager and must be unicast, not broadcast. See ezsp-utils.h for related macros emberSetNetworkManagerRequest() and emberChangeChannelRequest().
 struct EZSP_EnergyScanRequest {
-    enum Command = 0x009C;
+    enum ushort Command = 0x009C;
     struct Request {
         EmberNodeId target; // The network address of the node to perform the scan.
         uint scanChannels; // A mask of the channels to be scanned.
@@ -1877,7 +1950,7 @@ struct EZSP_EnergyScanRequest {
 
 // Returns the current network parameters.
 struct EZSP_GetNetworkParameters {
-    enum Command = 0x0028;
+    enum ushort Command = 0x0028;
     struct Request {
     }
     struct Response {
@@ -1889,7 +1962,7 @@ struct EZSP_GetNetworkParameters {
 
 // Returns the current radio parameters based on phy index.
 struct EZSP_GetRadioParameters {
-    enum Command = 0x00FD;
+    enum ushort Command = 0x00FD;
     struct Request {
         ubyte phyIndex; // Desired index of phy interface for radio parameters.
     }
@@ -1901,7 +1974,7 @@ struct EZSP_GetRadioParameters {
 
 // Returns information about the children of the local node and the parent of the local node.
 struct EZSP_GetParentChildParameters {
-    enum Command = 0x0029;
+    enum ushort Command = 0x0029;
     struct Request {
     }
     struct Response {
@@ -1913,7 +1986,7 @@ struct EZSP_GetParentChildParameters {
 
 // Returns information about a child of the local node.
 struct EZSP_GetChildData {
-    enum Command = 0x004A;
+    enum ushort Command = 0x004A;
     struct Request {
         ubyte index; // The index of the child of interest in the child table. Possible indexes range from zero to EMBER_CHILD_TABLE_SIZE.
     }
@@ -1925,7 +1998,7 @@ struct EZSP_GetChildData {
 
 // Sets child data to the child table token.
 struct EZSP_SetChildData {
-    enum Command = 0x00AC;
+    enum ushort Command = 0x00AC;
     struct Request {
         ubyte index; // The index of the child of interest in the child table. Possible indexes range from zero to (EMBER_CHILD_TABLE_SIZE - 1).
         EmberChildData childData; // The data of the child.
@@ -1937,7 +2010,7 @@ struct EZSP_SetChildData {
 
 // Convert a child index to a node ID
 struct EZSP_ChildId {
-    enum Command = 0x0106;
+    enum ushort Command = 0x0106;
     struct Request {
         ubyte childIndex; // The index of the child of interest in the child table. Possible indexes range from zero to EMBER_CHILD_TABLE_SIZE.
     }
@@ -1948,7 +2021,7 @@ struct EZSP_ChildId {
 
 // Convert a node ID to a child index
 struct EZSP_Id {
-    enum Command = 0x0107;
+    enum ushort Command = 0x0107;
     struct Request {
         EmberNodeId childId; // The node ID of the child
     }
@@ -1959,7 +2032,7 @@ struct EZSP_Id {
 
 // Returns the source route table total size.
 struct EZSP_GetSourceRouteTableTotalSize {
-    enum Command = 0x00C3;
+    enum ushort Command = 0x00C3;
     struct Request {
     }
     struct Response {
@@ -1969,7 +2042,7 @@ struct EZSP_GetSourceRouteTableTotalSize {
 
 // Returns the number of filled entries in the source route table.
 struct EZSP_GetSourceRouteTableFilledSize {
-    enum Command = 0x00C2;
+    enum ushort Command = 0x00C2;
     struct Request {
     }
     struct Response {
@@ -1979,7 +2052,7 @@ struct EZSP_GetSourceRouteTableFilledSize {
 
 // Returns information about a source route table entry.
 struct EZSP_GetSourceRouteTableEntry {
-    enum Command = 0x00C1;
+    enum ushort Command = 0x00C1;
     struct Request {
         ubyte index; // The index of the entry of interest in the source route table. Possible indexes range from zero to SOURCE_ROUTE_TABLE_FILLED_SIZE.
     }
@@ -1992,7 +2065,7 @@ struct EZSP_GetSourceRouteTableEntry {
 
 // Returns the neighbor table entry at the given index. The number of active neighbors can be obtained using the neighborCount command.
 struct EZSP_GetNeighbor {
-    enum Command = 0x0079;
+    enum ushort Command = 0x0079;
     struct Request {
         ubyte index; // The index of the neighbor of interest. Neighbors are stored in ascending order by node id, with all unused entries at the end of the table.
     }
@@ -2004,7 +2077,7 @@ struct EZSP_GetNeighbor {
 
 // Returns EmberStatus depending on whether the frame counter of the node is found in the neighbor or child table. This function gets the last received frame counter as found in the Network Auxiliary header for the specified neighbor or child.
 struct EZSP_GetNeighborFrameCounter {
-    enum Command = 0x003E;
+    enum ushort Command = 0x003E;
     struct Request {
         EmberEUI64 eui64; // The EUI64 of the node.
     }
@@ -2016,7 +2089,7 @@ struct EZSP_GetNeighborFrameCounter {
 
 // Sets the frame counter for the neighbor or child.
 struct EZSP_SetNeighborFrameCounter {
-    enum Command = 0x00AD;
+    enum ushort Command = 0x00AD;
     struct Request {
         EmberEUI64 eui64; // The EUI64 of the node.
         uint frameCounter; // Return the frame counter of the node from the neighbor or child table.
@@ -2028,7 +2101,7 @@ struct EZSP_SetNeighborFrameCounter {
 
 // Sets the routing shortcut threshold to directly use a neighbor instead of performing routing.
 struct EZSP_SetRoutingShortcutThreshold {
-    enum Command = 0x00D0;
+    enum ushort Command = 0x00D0;
     struct Request {
         ubyte costThresh; // The routing shortcut threshold to configure.
     }
@@ -2039,7 +2112,7 @@ struct EZSP_SetRoutingShortcutThreshold {
 
 // Gets the routing shortcut threshold used to differentiate between directly using a neighbor vs. performing routing.
 struct EZSP_GetRoutingShortcutThreshold {
-    enum Command = 0x00D1;
+    enum ushort Command = 0x00D1;
     struct Request {
     }
     struct Response {
@@ -2049,7 +2122,7 @@ struct EZSP_GetRoutingShortcutThreshold {
 
 // Returns the number of active entries in the neighbor table.
 struct EZSP_NeighborCount {
-    enum Command = 0x007A;
+    enum ushort Command = 0x007A;
     struct Request {
     }
     struct Response {
@@ -2059,7 +2132,7 @@ struct EZSP_NeighborCount {
 
 // Returns the route table entry at the given index. The route table size can be obtained using the getConfigurationValue command.
 struct EZSP_GetRouteTableEntry {
-    enum Command = 0x007B;
+    enum ushort Command = 0x007B;
     struct Request {
         ubyte index; // The index of the route table entry of interest.
     }
@@ -2071,7 +2144,7 @@ struct EZSP_GetRouteTableEntry {
 
 // Sets the radio output power at which a node is operating. Ember radios have discrete power settings. For a list of available power settings, see the technical specification for the RF communication module in your Developer Kit. Note: Care should be taken when using this API on a running network, as it will directly impact the established link qualities neighboring nodes have with the node on which it is called. This can lead to disruption of existing routes and erratic network behavior.
 struct EZSP_SetRadioPower {
-    enum Command = 0x0099;
+    enum ushort Command = 0x0099;
     struct Request {
         int8s power; // Desired radio output power, in dBm.
     }
@@ -2082,7 +2155,7 @@ struct EZSP_SetRadioPower {
 
 // Sets the channel to use for sending and receiving messages. For a list of available radio channels, see the technical specification for the RF communication module in your Developer Kit. Note: Care should be taken when using this API, as all devices on a network must use the same channel.
 struct EZSP_SetRadioChannel {
-    enum Command = 0x009A;
+    enum ushort Command = 0x009A;
     struct Request {
         ubyte channel; // Desired radio channel.
     }
@@ -2093,7 +2166,7 @@ struct EZSP_SetRadioChannel {
 
 // Gets the channel in use for sending and receiving messages.
 struct EZSP_GetRadioChannel {
-    enum Command = 0x00FF;
+    enum ushort Command = 0x00FF;
     struct Request {
     }
     struct Response {
@@ -2103,7 +2176,7 @@ struct EZSP_GetRadioChannel {
 
 // Set the configured 802.15.4 CCA mode in the radio.
 struct EZSP_SetRadioIeee802154CcaMode {
-    enum Command = 0x0095;
+    enum ushort Command = 0x0095;
     struct Request {
         ubyte ccaMode; // A RAIL_IEEE802154_CcaMode_t value.
     }
@@ -2114,7 +2187,7 @@ struct EZSP_SetRadioIeee802154CcaMode {
 
 // Enable/disable concentrator support.
 struct EZSP_SetConcentrator {
-    enum Command = 0x0010;
+    enum ushort Command = 0x0010;
     struct Request {
         bool on; // If this bool is true the concentrator support is enabled. Otherwise is disabled. If this bool is false all the other arguments are ignored.
         ushort concentratorType; // Must be either EMBER_HIGH_RAM_CONCENTRATOR or EMBER_LOW_RAM_CONCENTRATOR. The former is used when the caller has enough memory to store source routes for the whole network. In that case, remote nodes stop sending route records once the concentrator has successfully received one. The latter is used when the concentrator has insufficient RAM to store all outbound source routes. In that case, route records are sent to the concentrator prior to every inbound APS unicast.
@@ -2131,7 +2204,7 @@ struct EZSP_SetConcentrator {
 
 // Sets the error code that is sent back from a router with a broken route.
 struct EZSP_SetBrokenRouteErrorCode {
-    enum Command = 0x0011;
+    enum ushort Command = 0x0011;
     struct Request {
         ubyte errorCode; // Desired error code.
     }
@@ -2142,7 +2215,7 @@ struct EZSP_SetBrokenRouteErrorCode {
 
 // This causes to initialize the desired radio interface other than native and form a new network by becoming the coordinator with same panId as native radio network.
 struct EZSP_MultiPhyStart {
-    enum Command = 0x00F8;
+    enum ushort Command = 0x00F8;
     struct Request {
         ubyte phyIndex; // Index of phy interface. The native phy index would be always zero hence valid phy index starts from one.
         ubyte page; // Desired radio channel page.
@@ -2157,7 +2230,7 @@ struct EZSP_MultiPhyStart {
 
 // This causes to bring down the radio interface other than native.
 struct EZSP_MultiPhyStop {
-    enum Command = 0x00F9;
+    enum ushort Command = 0x00F9;
     struct Request {
         ubyte phyIndex; // Index of phy interface. The native phy index would be always zero hence valid phy index starts from one.
     }
@@ -2168,7 +2241,7 @@ struct EZSP_MultiPhyStop {
 
 // Sets the radio output power for desired phy interface at which a node is operating. Ember radios have discrete power settings. For a list of available power settings, see the technical specification for the RF communication module in your Developer Kit. Note: Care should be taken when using this api on a running network, as it will directly impact the established link qualities neighboring nodes have with the node on which it is called. This can lead to disruption of existing routes and erratic network behavior.
 struct EZSP_MultiPhySetRadioPower {
-    enum Command = 0x00FA;
+    enum ushort Command = 0x00FA;
     struct Request {
         ubyte phyIndex; // Index of phy interface. The native phy index would be always zero hence valid phy index starts from one.
         byte power; // Desired radio output power, in dBm.
@@ -2180,7 +2253,7 @@ struct EZSP_MultiPhySetRadioPower {
 
 // Send Link Power Delta Request from a child to its parent
 struct EZSP_SendLinkPowerDeltaRequest {
-    enum Command = 0x00F7;
+    enum ushort Command = 0x00F7;
     struct Request {
     }
     struct Response {
@@ -2190,7 +2263,7 @@ struct EZSP_SendLinkPowerDeltaRequest {
 
 // Sets the channel for desired phy interface to use for sending and receiving messages. For a list of available radio pages and channels, see the technical specification for the RF communication module in your Developer Kit. Note: Care should be taken when using this API, as all devices on a network must use the same page and channel.
 struct EZSP_MultiPhySetRadioChannel {
-    enum Command = 0x00FB;
+    enum ushort Command = 0x00FB;
     struct Request {
         ubyte phyIndex; // Index of phy interface. The native phy index would be always zero hence valid phy index starts from one.
         ubyte page; // Desired radio channel page.
@@ -2203,7 +2276,7 @@ struct EZSP_MultiPhySetRadioChannel {
 
 // Obtains the current duty cycle state.
 struct EZSP_GetDutyCycleState {
-    enum Command = 0x0035;
+    enum ushort Command = 0x0035;
     struct Request {
     }
     struct Response {
@@ -2214,7 +2287,7 @@ struct EZSP_GetDutyCycleState {
 
 // Set the current duty cycle limits configuration. The Default limits set by stack if this call is not made.
 struct EZSP_SetDutyCycleLimitsInStack {
-    enum Command = 0x0040;
+    enum ushort Command = 0x0040;
     struct Request {
         EmberDutyCycleLimits limits; // The duty cycle limits configuration to utilize.
     }
@@ -2225,7 +2298,7 @@ struct EZSP_SetDutyCycleLimitsInStack {
 
 // Obtains the current duty cycle limits that were previously set by a call to emberSetDutyCycleLimitsInStack(), or the defaults set by the stack if no set call was made.
 struct EZSP_GetDutyCycleLimits {
-    enum Command = 0x004B;
+    enum ushort Command = 0x004B;
     struct Request {
     }
     struct Response {
@@ -2236,7 +2309,7 @@ struct EZSP_GetDutyCycleLimits {
 
 // Returns the duty cycle of the stack's connected children that are being monitored, up to maxDevices. It indicates the amount of overall duty cycle they have consumed (up to the suspend limit). The first entry is always the local stack's nodeId, and thus the total aggregate duty cycle for the device. The passed pointer arrayOfDeviceDutyCycles MUST have space for maxDevices.
 struct EZSP_GetCurrentDutyCycle {
-    enum Command = 0x004C;
+    enum ushort Command = 0x004C;
     struct Request {
         ubyte maxDevices; // Number of devices to retrieve consumed duty cycle.
     }
@@ -2248,7 +2321,7 @@ struct EZSP_GetCurrentDutyCycle {
 
 // Callback fires when the duty cycle state has changed
 struct EZSP_DutyCycleHandler {
-    enum Command = 0x004D;
+    enum ushort Command = 0x004D;
     struct Request {
     }
     struct Response {
@@ -2262,7 +2335,7 @@ struct EZSP_DutyCycleHandler {
 
 // Returns the first beacon in the cache. Beacons are stored in cache after issuing an active scan.
 struct EZSP_GetFirstBeacon {
-    enum Command = 0x003D;
+    enum ushort Command = 0x003D;
     struct Request {
     }
     struct Response {
@@ -2273,7 +2346,7 @@ struct EZSP_GetFirstBeacon {
 
 // Returns the next beacon in the cache. Beacons are stored in cache after issuing an active scan.
 struct EZSP_GetNextBeacon {
-    enum Command = 0x0004;
+    enum ushort Command = 0x0004;
     struct Request {
     }
     struct Response {
@@ -2284,7 +2357,7 @@ struct EZSP_GetNextBeacon {
 
 // Returns the number of cached beacons that have been collected from a scan.
 struct EZSP_GetNumStoredBeacons {
-    enum Command = 0x0008;
+    enum ushort Command = 0x0008;
     struct Request {
     }
     struct Response {
@@ -2294,7 +2367,7 @@ struct EZSP_GetNumStoredBeacons {
 
 // Clears all cached beacons that have been collected from a scan.
 struct EZSP_ClearStoredBeacons {
-    enum Command = 0x003C;
+    enum ushort Command = 0x003C;
     struct Request {
     }
     struct Response {
@@ -2303,7 +2376,7 @@ struct EZSP_ClearStoredBeacons {
 
 // This call sets the radio channel in the stack and propagates the information to the hardware.
 struct EZSP_SetLogicalAndRadioChannel {
-    enum Command = 0x00B9;
+    enum ushort Command = 0x00B9;
     struct Request {
         ubyte radioChannel; // The radio channel to be set.
     }
@@ -2314,7 +2387,7 @@ struct EZSP_SetLogicalAndRadioChannel {
 
 // Get the logical channel from the ZLL stack.
 struct EZSP_SetLogicalChannel {
-    enum Command = 0x00BA;
+    enum ushort Command = 0x00BA;
     struct Request {
     }
     struct Response {
@@ -2327,7 +2400,7 @@ struct EZSP_SetLogicalChannel {
 
 // Deletes all binding table entries.
 struct EZSP_ClearBindingTable {
-    enum Command = 0x002A;
+    enum ushort Command = 0x002A;
     struct Request {
     }
     struct Response {
@@ -2337,7 +2410,7 @@ struct EZSP_ClearBindingTable {
 
 // Sets an entry in the binding table.
 struct EZSP_SetBinding {
-    enum Command = 0x002B;
+    enum ushort Command = 0x002B;
     struct Request {
         ubyte index; // The index of a binding table entry.
         EmberBindingTableEntry value; // The contents of the binding entry.
@@ -2349,7 +2422,7 @@ struct EZSP_SetBinding {
 
 // Gets an entry from the binding table.
 struct EZSP_GetBinding {
-    enum Command = 0x002C;
+    enum ushort Command = 0x002C;
     struct Request {
         ubyte index; // The index of a binding table entry.
     }
@@ -2361,7 +2434,7 @@ struct EZSP_GetBinding {
 
 // Deletes a binding table entry.
 struct EZSP_DeleteBinding {
-    enum Command = 0x002D;
+    enum ushort Command = 0x002D;
     struct Request {
         ubyte index; // The index of a binding table entry.
     }
@@ -2372,7 +2445,7 @@ struct EZSP_DeleteBinding {
 
 // Indicates whether any messages are currently being sent using this binding table entry. Note that this command does not indicate whether a binding is clear. To determine whether a binding is clear, check whether the type field of the EmberBindingTableEntry has the value EMBER_UNUSED_BINDING.
 struct EZSP_BindingIsActive {
-    enum Command = 0x002E;
+    enum ushort Command = 0x002E;
     struct Request {
         ubyte index; // The index of a binding table entry.
     }
@@ -2383,7 +2456,7 @@ struct EZSP_BindingIsActive {
 
 // Returns the node ID for the binding's destination, if the ID is known. If a message is sent using the binding and the destination's ID is not known, the stack will discover the ID by broadcasting a ZDO address request. The application can avoid the need for this discovery by using setBindingRemoteNodeId when it knows the correct ID via some other means. The destination's node ID is forgotten when the binding is changed, when the local node reboots or, much more rarely, when the destination node changes its ID in response to an ID conflict.
 struct EZSP_GetBindingRemoteNodeId {
-    enum Command = 0x002F;
+    enum ushort Command = 0x002F;
     struct Request {
         ubyte index; // The index of a binding table entry.
     }
@@ -2394,7 +2467,7 @@ struct EZSP_GetBindingRemoteNodeId {
 
 // Set the node ID for the binding's destination. See getBindingRemoteNodeId for a description.
 struct EZSP_SetBindingRemoteNodeId {
-    enum Command = 0x0030;
+    enum ushort Command = 0x0030;
     struct Request {
         ubyte index; // The index of a binding table entry.
         EmberNodeId nodeId; // The short ID of the destination node.
@@ -2405,7 +2478,7 @@ struct EZSP_SetBindingRemoteNodeId {
 
 // The NCP used the external binding modification policy to decide how to handle a remote set binding request. The Host cannot change the current decision, but it can change the policy for future decisions using the setPolicy command. This frame is a response to the callback command.
 struct EZSP_RemoteSetBindingHandler {
-    enum Command = 0x0031;
+    enum ushort Command = 0x0031;
     struct Request {
     }
     struct Response {
@@ -2417,7 +2490,7 @@ struct EZSP_RemoteSetBindingHandler {
 
 // The NCP used the external binding modification policy to decide how to handle a remote delete binding request. The Host cannot change the current decision, but it can change the policy for future decisions using the setPolicy command. This frame is a response to the callback command.
 struct EZSP_RemoteDeleteBindingHandler {
-    enum Command = 0x0032;
+    enum ushort Command = 0x0032;
     struct Request {
     }
     struct Response {
@@ -2431,7 +2504,7 @@ struct EZSP_RemoteDeleteBindingHandler {
 
 // Returns the maximum size of the payload. The size depends on the security level in use.
 struct EZSP_MaximumPayloadLength {
-    enum Command = 0x0033;
+    enum ushort Command = 0x0033;
     struct Request {
     }
     struct Response {
@@ -2441,7 +2514,7 @@ struct EZSP_MaximumPayloadLength {
 
 // Sends a unicast message as per the ZigBee specification. The message will arrive at its destination only if there is a known route to the destination node. Setting the ENABLE_ROUTE_DISCOVERY option will cause a route to be discovered if none is known. Setting the FORCE_ROUTE_DISCOVERY option will force route discovery. Routes to end-device children of the local node are always known. Setting the APS_RETRY option will cause the message to be retransmitted until either a matching acknowledgement is received or three transmissions have been made. Note: Using the FORCE_ROUTE_DISCOVERY option will cause the first transmission to be consumed by a route request as part of discovery, so the application payload of this packet will not reach its destination on the first attempt. If you want the packet to reach its destination, the APS_RETRY option must be set so that another attempt is made to transmit the message with its application payload after the route has been constructed. Note: When sending fragmented messages, the stack will only assign a new APS sequence number for the first fragment of the message (i.e., EMBER_APS_OPTION_FRAGMENT is set and the low-order byte of the groupId field in the APS frame is zero). For all subsequent fragments of the same message, the application must set the sequence number field in the APS frame to the sequence number assigned by the stack to the first fragment.
 struct EZSP_SendUnicast {
-    enum Command = 0x0034;
+    enum ushort Command = 0x0034;
     struct Request {
         EmberOutgoingMessageType type; // Specifies the outgoing message type. Must be one of EMBER_OUTGOING_DIRECT, EMBER_OUTGOING_VIA_ADDRESS_TABLE, or EMBER_OUTGOING_VIA_BINDING.
         EmberNodeId indexOrDestination; // Depending on the type of addressing used, this is either the EmberNodeId of the destination, an index into the address table, or an index into the binding table.
@@ -2458,7 +2531,7 @@ struct EZSP_SendUnicast {
 
 // Sends a broadcast message as per the ZigBee specification.
 struct EZSP_SendBroadcast {
-    enum Command = 0x0036;
+    enum ushort Command = 0x0036;
     struct Request {
         EmberNodeId destination; // The destination to which to send the broadcast. This must be one of the three ZigBee broadcast addresses.
         EmberApsFrame apsFrame; // The APS frame for the message.
@@ -2475,7 +2548,7 @@ struct EZSP_SendBroadcast {
 
 // Sends a proxied broadcast message as per the ZigBee specification.
 struct EZSP_ProxyBroadcast {
-    enum Command = 0x0037;
+    enum ushort Command = 0x0037;
     struct Request {
         EmberNodeId source; // The source from which to send the broadcast.
         EmberNodeId destination; // The destination to which to send the broadcast. This must be one of the three ZigBee broadcast addresses.
@@ -2494,7 +2567,7 @@ struct EZSP_ProxyBroadcast {
 
 // Sends a multicast message to all endpoints that share a specific multicast ID and are within a specified number of hops of the sender.
 struct EZSP_SendMulticast {
-    enum Command = 0x0038;
+    enum ushort Command = 0x0038;
     struct Request {
         EmberApsFrame apsFrame; // The APS frame for the message. The multicast will be sent to the groupId in this frame.
         ubyte hops; // The message will be delivered to all nodes within this number of hops of the sender. A value of zero is converted to EMBER_MAX_HOPS.
@@ -2511,7 +2584,7 @@ struct EZSP_SendMulticast {
 
 // Sends a multicast message to all endpoints that share a specific multicast ID and are within a specified number of hops of the sender.
 struct EZSP_SendMulticastWithAlias {
-    enum Command = 0x003A;
+    enum ushort Command = 0x003A;
     struct Request {
         EmberApsFrame apsFrame; // The APS frame for the message. The multicast will be sent to the groupId in this frame.
         ubyte hops; // The message will be delivered to all nodes within this number of hops of the sender. A value of zero is converted to EMBER_MAX_HOPS.
@@ -2530,7 +2603,7 @@ struct EZSP_SendMulticastWithAlias {
 
 // Sends a reply to a received unicast message. The incomingMessageHandler callback for the unicast being replied to supplies the values for all the parameters except the reply itself.
 struct EZSP_SendReply {
-    enum Command = 0x0039;
+    enum ushort Command = 0x0039;
     struct Request {
         EmberNodeId sender; // Value supplied by incoming unicast.
         EmberApsFrame apsFrame; // Value supplied by incoming unicast.
@@ -2544,7 +2617,7 @@ struct EZSP_SendReply {
 
 // A callback indicating the stack has completed sending a message.
 struct EZSP_MessageSentHandler {
-    enum Command = 0x003F;
+    enum ushort Command = 0x003F;
     struct Request {
     }
     struct Response {
@@ -2564,7 +2637,7 @@ struct EZSP_MessageSentHandler {
 // Note that a concentrator does not automatically obtain routes to all network nodes after calling this function. Remote applications must first initiate an inbound APS unicast.
 // Many-to-one routes are not repaired automatically. Instead, the concentrator application must call this function to rediscover the routes as necessary, for example, upon failure of a retried APS message. The reason for this is that there is no scalable one-size-fits-all route repair strategy. A common and recommended strategy is for the concentrator application to refresh the routes by calling this function periodically.
 struct EZSP_SendManyToOneRouteRequest {
-    enum Command = 0x0041;
+    enum ushort Command = 0x0041;
     struct Request {
         ushort concentratorType; // Must be either EMBER_HIGH_RAM_CONCENTRATOR or EMBER_LOW_RAM_CONCENTRATOR. The former is used when the caller has enough memory to store source routes for the whole network. In that case, remote nodes stop sending route records once the concentrator has successfully received one. The latter is used when the concentrator has insufficient RAM to store all outbound source routes. In that case, route records are sent to the concentrator prior to every inbound APS unicast.
         ubyte radius; // The maximum number of hops the route request will be relayed. A radius of zero is converted to EMBER_MAX_HOPS.
@@ -2576,7 +2649,7 @@ struct EZSP_SendManyToOneRouteRequest {
 
 // Periodically request any pending data from our parent. Setting interval to 0 or units to EMBER_EVENT_INACTIVE will generate a single poll.
 struct EZSP_PollForData {
-    enum Command = 0x0042;
+    enum ushort Command = 0x0042;
     struct Request {
         ushort interval; // The time between polls. Note that the timer clock is free running and is not synchronized with this command. This means that the time will be between interval and (interval - 1). The maximum interval is 32767.
         EmberEventUnits units; // The units for interval.
@@ -2589,7 +2662,7 @@ struct EZSP_PollForData {
 
 // Indicates the result of a data poll to the parent of the local node.
 struct EZSP_PollCompleteHandler {
-    enum Command = 0x0043;
+    enum ushort Command = 0x0043;
     struct Request {
     }
     struct Response {
@@ -2599,7 +2672,7 @@ struct EZSP_PollCompleteHandler {
 
 // Indicates that the local node received a data poll from a child.
 struct EZSP_PollHandler {
-    enum Command = 0x0044;
+    enum ushort Command = 0x0044;
     struct Request {
     }
     struct Response {
@@ -2610,7 +2683,7 @@ struct EZSP_PollHandler {
 
 // A callback indicating a message has been received containing the EUI64 of the sender. This callback is called immediately before the incomingMessageHandler callback. It is not called if the incoming message did not contain the EUI64 of the sender.
 struct EZSP_IncomingSenderEui64Handler {
-    enum Command = 0x0062;
+    enum ushort Command = 0x0062;
     struct Request {
     }
     struct Response {
@@ -2620,7 +2693,7 @@ struct EZSP_IncomingSenderEui64Handler {
 
 // A callback indicating a message has been received.
 struct EZSP_IncomingMessageHandler {
-    enum Command = 0x0045;
+    enum ushort Command = 0x0045;
     struct Request {
     }
     struct Response {
@@ -2638,7 +2711,7 @@ struct EZSP_IncomingMessageHandler {
 
 // Sets source route discovery(MTORR) mode to on, off, reschedule
 struct EZSP_SetSourceRouteDiscoveryMode {
-    enum Command = 0x005A;
+    enum ushort Command = 0x005A;
     struct Request {
         ubyte mode; // Source route discovery mode: off:0, on:1, reschedule:2
     }
@@ -2649,7 +2722,7 @@ struct EZSP_SetSourceRouteDiscoveryMode {
 
 // A callback indicating that a many-to-one route to the concentrator with the given short and long id is available for use.
 struct EZSP_IncomingManyToOneRouteRequestHandler {
-    enum Command = 0x007D;
+    enum ushort Command = 0x007D;
     struct Request {
     }
     struct Response {
@@ -2661,7 +2734,7 @@ struct EZSP_IncomingManyToOneRouteRequestHandler {
 
 // A callback invoked when a route error message is received. The error indicates that a problem routing to or from the target node was encountered.
 struct EZSP_IncomingRouteErrorHandler {
-    enum Command = 0x0080;
+    enum ushort Command = 0x0080;
     struct Request {
     }
     struct Response {
@@ -2672,7 +2745,7 @@ struct EZSP_IncomingRouteErrorHandler {
 
 // A callback invoked when a network status/route error message is received. The error indicates that there was a problem sending/receiving messages from the target node
 struct EZSP_IncomingNetworkStatusHandler {
-    enum Command = 0x00C4;
+    enum ushort Command = 0x00C4;
     struct Request {
     }
     struct Response {
@@ -2683,7 +2756,7 @@ struct EZSP_IncomingNetworkStatusHandler {
 
 // Send the network key to a destination.
 struct EZSP_UnicastCurrentNetworkKey {
-    enum Command = 0x0050;
+    enum ushort Command = 0x0050;
     struct Request {
         EmberNodeId targetShort; // The destination node of the key.
         EmberEUI64 targetLong; // The long address of the destination node.
@@ -2696,7 +2769,7 @@ struct EZSP_UnicastCurrentNetworkKey {
 
 // Indicates whether any messages are currently being sent using this address table entry. Note that this function does not indicate whether the address table entry is unused. To determine whether an address table entry is unused, check the remote node ID. The remote node ID will have the value EMBER_TABLE_ENTRY_UNUSED_NODE_ID when the address table entry is not in use.
 struct EZSP_AddressTableEntryIsActive {
-    enum Command = 0x005B;
+    enum ushort Command = 0x005B;
     struct Request {
         ubyte addressTableIndex; // The index of an address table entry.
     }
@@ -2707,7 +2780,7 @@ struct EZSP_AddressTableEntryIsActive {
 
 // Sets the EUI64 of an address table entry. This function will also check other address table entries, the child table and the neighbor table to see if the node ID for the given EUI64 is already known. If known then this function will also set node ID. If not known it will set the node ID to EMBER_UNKNOWN_NODE_ID.
 struct EZSP_SetAddressTableRemoteEui64 {
-    enum Command = 0x005C;
+    enum ushort Command = 0x005C;
     struct Request {
         ubyte addressTableIndex; // The index of an address table entry.
         EmberEUI64 eui64; // The EUI64 to use for the address table entry.
@@ -2719,7 +2792,7 @@ struct EZSP_SetAddressTableRemoteEui64 {
 
 // Sets the short ID of an address table entry. Usually the application will not need to set the short ID in the address table. Once the remote EUI64 is set the stack is capable of figuring out the short ID on its own. However, in cases where the application does set the short ID, the application must set the remote EUI64 prior to setting the short ID.
 struct EZSP_SetAddressTableRemoteNodeId {
-    enum Command = 0x005D;
+    enum ushort Command = 0x005D;
     struct Request {
         ubyte addressTableIndex; // The index of an address table entry.
         EmberNodeId id; // The short ID corresponding to the remote node whose EUI64 is stored in the address table at the given index or EMBER_TABLE_ENTRY_UNUSED_NODE_ID which indicates that the entry stored in the address table at the given index is not in use.
@@ -2730,7 +2803,7 @@ struct EZSP_SetAddressTableRemoteNodeId {
 
 // Gets the EUI64 of an address table entry.
 struct EZSP_GetAddressTableRemoteEui64 {
-    enum Command = 0x005E;
+    enum ushort Command = 0x005E;
     struct Request {
         ubyte addressTableIndex; // The index of an address table entry.
     }
@@ -2741,7 +2814,7 @@ struct EZSP_GetAddressTableRemoteEui64 {
 
 // Gets the short ID of an address table entry.
 struct EZSP_GetAddressTableRemoteNodeId {
-    enum Command = 0x005F;
+    enum ushort Command = 0x005F;
     struct Request {
         ubyte addressTableIndex; // The index of an address table entry.
     }
@@ -2752,7 +2825,7 @@ struct EZSP_GetAddressTableRemoteNodeId {
 
 // Tells the stack whether or not the normal interval between retransmissions of a retried unicast message should be increased by EMBER_INDIRECT_TRANSMISSION_TIMEOUT. The interval needs to be increased when sending to a sleepy node so that the message is not retransmitted until the destination has had time to wake up and poll its parent. The stack will automatically extend the timeout: - For our own sleepy children. - When an address response is received from a parent on behalf of its child. - When an indirect transaction expiry route error is received. - When an end device announcement is received from a sleepy node.
 struct EZSP_SetExtendedTimeout {
-    enum Command = 0x007E;
+    enum ushort Command = 0x007E;
     struct Request {
         EmberEUI64 remoteEui64; // The address of the node for which the timeout is to be set.
         bool extendedTimeout; // true if the retry interval should be increased by EMBER_INDIRECT_TRANSMISSION_TIMEOUT. false if the normal retry interval should be used.
@@ -2763,7 +2836,7 @@ struct EZSP_SetExtendedTimeout {
 
 // Indicates whether or not the stack will extend the normal interval between retransmissions of a retried unicast message by EMBER_INDIRECT_TRANSMISSION_TIMEOUT.
 struct EZSP_GetExtendedTimeout {
-    enum Command = 0x007F;
+    enum ushort Command = 0x007F;
     struct Request {
         EmberEUI64 remoteEui64; // The address of the node for which the timeout is to be returned.
     }
@@ -2774,7 +2847,7 @@ struct EZSP_GetExtendedTimeout {
 
 // Replaces the EUI64, short ID and extended timeout setting of an address table entry. The previous EUI64, short ID and extended timeout setting are returned.
 struct EZSP_ReplaceAddressTableEntry {
-    enum Command = 0x0082;
+    enum ushort Command = 0x0082;
     struct Request {
         ubyte addressTableIndex; // The index of the address table entry that will be modified.
         EmberEUI64 newEui64; // The EUI64 to be written to the address table entry.
@@ -2791,7 +2864,7 @@ struct EZSP_ReplaceAddressTableEntry {
 
 // Returns the node ID that corresponds to the specified EUI64. The node ID is found by searching through all stack tables for the specified EUI64.
 struct EZSP_LookupNodeIdByEui64 {
-    enum Command = 0x0060;
+    enum ushort Command = 0x0060;
     struct Request {
         EmberEUI64 eui64; // The EUI64 of the node to look up.
     }
@@ -2802,7 +2875,7 @@ struct EZSP_LookupNodeIdByEui64 {
 
 // Returns the EUI64 that corresponds to the specified node ID. The EUI64 is found by searching through all stack tables for the specified node ID.
 struct EZSP_LookupEui64ByNodeId {
-    enum Command = 0x0061;
+    enum ushort Command = 0x0061;
     struct Request {
         EmberNodeId nodeId; // The short ID of the node to look up.
     }
@@ -2814,7 +2887,7 @@ struct EZSP_LookupEui64ByNodeId {
 
 // Gets an entry from the multicast table.
 struct EZSP_GetMulticastTableEntry {
-    enum Command = 0x0063;
+    enum ushort Command = 0x0063;
     struct Request {
         ubyte index; // The index of a multicast table entry.
     }
@@ -2826,7 +2899,7 @@ struct EZSP_GetMulticastTableEntry {
 
 // Sets an entry in the multicast table.
 struct EZSP_SetMulticastTableEntry {
-    enum Command = 0x0064;
+    enum ushort Command = 0x0064;
     struct Request {
         ubyte index; // The index of a multicast table entry
         EmberMulticastTableEntry value; // The contents of the multicast entry.
@@ -2838,7 +2911,7 @@ struct EZSP_SetMulticastTableEntry {
 
 // A callback invoked by the EmberZNet stack when an id conflict is discovered, that is, two different nodes in the network were found to be using the same short id. The stack automatically removes the conflicting short id from its internal tables (address, binding, route, neighbor, and child tables). The application should discontinue any other use of the id.
 struct EZSP_IdConflictHandler {
-    enum Command = 0x007C;
+    enum ushort Command = 0x007C;
     struct Request {
     }
     struct Response {
@@ -2848,7 +2921,7 @@ struct EZSP_IdConflictHandler {
 
 // Write the current node Id, PAN ID, or Node type to the tokens
 struct EZSP_WriteNodeData {
-    enum Command = 0x00FE;
+    enum ushort Command = 0x00FE;
     struct Request {
         bool erase; // Erase the node type or not
     }
@@ -2859,7 +2932,7 @@ struct EZSP_WriteNodeData {
 
 // Transmits the given message without modification. The MAC header is assumed to be configured in the message at the time this function is called.
 struct EZSP_SendRawMessage {
-    enum Command = 0x0096;
+    enum ushort Command = 0x0096;
     struct Request {
         ubyte messageLength; // The length of the messageContents parameter in bytes.
         ubyte[] messageContents; // The raw message.
@@ -2871,7 +2944,7 @@ struct EZSP_SendRawMessage {
 
 // Transmits the given message without modification. The MAC header is assumed to be configured in the message at the time this function is called.
 struct EZSP_SendRawMessageExtended {
-    enum Command = 0x0051;
+    enum ushort Command = 0x0051;
     struct Request {
         ubyte messageLength; // The length of the messageContents parameter in bytes.
         ubyte[] messageContents; // The raw message.
@@ -2885,7 +2958,7 @@ struct EZSP_SendRawMessageExtended {
 
 // A callback invoked by the EmberZNet stack when a MAC passthrough message is received.
 struct EZSP_MacPassthroughMessageHandler {
-    enum Command = 0x0097;
+    enum ushort Command = 0x0097;
     struct Request {
     }
     struct Response {
@@ -2899,7 +2972,7 @@ struct EZSP_MacPassthroughMessageHandler {
 
 // A callback invoked by the EmberZNet stack when a raw MAC message that has matched one of the application's configured MAC filters.
 struct EZSP_MacFilterMatchMessageHandler {
-    enum Command = 0x0046;
+    enum ushort Command = 0x0046;
     struct Request {
     }
     struct Response {
@@ -2914,7 +2987,7 @@ struct EZSP_MacFilterMatchMessageHandler {
 
 // A callback invoked by the EmberZNet stack when the MAC has finished transmitting a raw message.
 struct EZSP_RawTransmitCompleteHandler {
-    enum Command = 0x0098;
+    enum ushort Command = 0x0098;
     struct Request {
     }
     struct Response {
@@ -2924,7 +2997,7 @@ struct EZSP_RawTransmitCompleteHandler {
 
 // This function is useful to sleepy end devices. This function will set the retry interval (in milliseconds) for mac data poll. This interval is the time in milliseconds the device waits before retrying a data poll when a MAC level data poll fails for any reason.
 struct EZSP_SetMacPollFailureWaitTime {
-    enum Command = 0x00F4;
+    enum ushort Command = 0x00F4;
     struct Request {
         ubyte waitBeforeRetryIntervalMs; // Time in seconds the device waits before retrying a data poll when a MAC level data poll fails for any reason.
     }
@@ -2934,7 +3007,7 @@ struct EZSP_SetMacPollFailureWaitTime {
 
 // Sets the priority masks and related variables for choosing the best beacon.
 struct EZSP_SetBeaconClassificationParams {
-    enum Command = 0x00EF;
+    enum ushort Command = 0x00EF;
     struct Request {
     }
     struct Response {
@@ -2945,7 +3018,7 @@ struct EZSP_SetBeaconClassificationParams {
 
 // Gets the priority masks and related variables for choosing the best beacon.
 struct EZSP_GetBeaconClassificationParams {
-    enum Command = 0x00F3;
+    enum ushort Command = 0x00F3;
     struct Request {
     }
     struct Response {
@@ -2959,7 +3032,7 @@ struct EZSP_GetBeaconClassificationParams {
 
 // Sets the security state that will be used by the device when it forms or joins the network. This call should not be used when restoring saved network state via networkInit as this will result in a loss of security data and will cause communication problems when the device re-enters the network.
 struct EZSP_SetInitialSecurityState {
-    enum Command = 0x0068;
+    enum ushort Command = 0x0068;
     struct Request {
         EmberInitialSecurityState state; // The security configuration to be set.
     }
@@ -2970,7 +3043,7 @@ struct EZSP_SetInitialSecurityState {
 
 // Gets the current security state that is being used by a device that is joined in the network.
 struct EZSP_GetCurrentSecurityState {
-    enum Command = 0x0069;
+    enum ushort Command = 0x0069;
     struct Request {
     }
     struct Response {
@@ -2981,7 +3054,7 @@ struct EZSP_GetCurrentSecurityState {
 
 // Exports a key from security manager based on passed context.
 struct EZSP_ExportKey {
-    enum Command = 0x0114;
+    enum ushort Command = 0x0114;
     struct Request {
         sl_zb_sec_man_context context; // Metadata to identify the requested key.
     }
@@ -2993,7 +3066,7 @@ struct EZSP_ExportKey {
 
 // Imports a key into security manager based on passed context.
 struct EZSP_ImportKey {
-    enum Command = 0x0115;
+    enum ushort Command = 0x0115;
     struct Request {
         sl_zb_sec_man_context context; // Metadata to identify where the imported key should be stored.
         sl_zb_sec_man_key key; // The key to be imported.
@@ -3005,7 +3078,7 @@ struct EZSP_ImportKey {
 
 // A callback to inform the application that the Network Key has been updated and the node has been switched over to use the new key. The actual key being used is not passed up, but the sequence number is.
 struct EZSP_SwitchNetworkKeyHandler {
-    enum Command = 0x006e;
+    enum ushort Command = 0x006e;
     struct Request {
     }
     struct Response {
@@ -3015,7 +3088,7 @@ struct EZSP_SwitchNetworkKeyHandler {
 
 // This function searches through the Key Table and tries to find the entry that matches the passed search criteria.
 struct EZSP_FindKeyTableEntry {
-    enum Command = 0x0075;
+    enum ushort Command = 0x0075;
     struct Request {
         EmberEUI64 address; // The address to search for. Alternatively, all zeros may be passed in to search for the first empty entry.
         bool linkKey; // This indicates whether to search for an entry that contains a link key or a master key. true means to search for an entry with a Link Key.
@@ -3027,7 +3100,7 @@ struct EZSP_FindKeyTableEntry {
 
 // This function sends an APS TransportKey command containing the current trust center link key. The node to which the command is sent is specified via the short and long address arguments.
 struct EZSP_SendTrustCenterLinkKey {
-    enum Command = 0x0067;
+    enum ushort Command = 0x0067;
     struct Request {
         EmberNodeId destinationNodeId; // The short address of the node to which this command will be sent
         EmberEUI64 destinationEui64; // The long address of the node to which this command will be sent
@@ -3039,7 +3112,7 @@ struct EZSP_SendTrustCenterLinkKey {
 
 // This function erases the data in the key table entry at the specified index. If the index is invalid, false is returned.
 struct EZSP_EraseKeyTableEntry {
-    enum Command = 0x0076;
+    enum ushort Command = 0x0076;
     struct Request {
         ubyte index; // The index of entry to erase.
     }
@@ -3050,7 +3123,7 @@ struct EZSP_EraseKeyTableEntry {
 
 // This function clears the key table of the current network.
 struct EZSP_ClearKeyTable {
-    enum Command = 0x00B1;
+    enum ushort Command = 0x00B1;
     struct Request {
     }
     struct Response {
@@ -3060,7 +3133,7 @@ struct EZSP_ClearKeyTable {
 
 // A function to request a Link Key from the Trust Center with another device on the Network (which could be the Trust Center). A Link Key with the Trust Center is possible but the requesting device cannot be the Trust Center. Link Keys are optional in ZigBee Standard Security and thus the stack cannot know whether the other device supports them. If EMBER_REQUEST_KEY_TIMEOUT is non-zero on the Trust Center and the partner device is not the Trust Center, both devices must request keys with their partner device within the time period. The Trust Center only supports one outstanding key request at a time and therefore will ignore other requests. If the timeout is zero then the Trust Center will immediately respond and not wait for the second request. The Trust Center will always immediately respond to requests for a Link Key with it. Sleepy devices should poll at a higher rate until a response is received or the request times out. The success or failure of the request is returned via ezspZigbeeKeyEstablishmentHandler(...).
 struct EZSP_RequestLinkKey {
-    enum Command = 0x0014;
+    enum ushort Command = 0x0014;
     struct Request {
         EmberEUI64 partner; // This is the IEEE address of the partner device that will share the link key.
     }
@@ -3071,7 +3144,7 @@ struct EZSP_RequestLinkKey {
 
 // Requests a new link key from the Trust Center. This function starts by sending a Node Descriptor request to the Trust Center to verify its R21+ stack version compliance. A Request Key message will then be sent, followed by a Verify Key Confirm message.
 struct EZSP_UpdateTcLinkKey {
-    enum Command = 0x006C;
+    enum ushort Command = 0x006C;
     struct Request {
         ubyte maxAttempts; // The maximum number of attempts a node should make when sending the Node Descriptor, Request Key, and Verify Key Confirm messages. The number of attempts resets for each message type sent (e.g., if maxAttempts is 3, up to 3 Node Descriptors are sent, up to 3 Request Keys, and up to 3 Verify Key Confirm messages are sent).
     }
@@ -3082,7 +3155,7 @@ struct EZSP_UpdateTcLinkKey {
 
 // This is a callback that indicates the success or failure of an attempt to establish a key with a partner device.
 struct EZSP_ZigbeeKeyEstablishmentHandler {
-    enum Command = 0x009B;
+    enum ushort Command = 0x009B;
     struct Request {
     }
     struct Response {
@@ -3093,7 +3166,7 @@ struct EZSP_ZigbeeKeyEstablishmentHandler {
 
 // Clear all of the transient link keys from RAM.
 struct EZSP_ClearTransientLinkKeys {
-    enum Command = 0x006B;
+    enum ushort Command = 0x006B;
     struct Request {
     }
     struct Response {
@@ -3102,7 +3175,7 @@ struct EZSP_ClearTransientLinkKeys {
 
 // Retrieve information about the current and alternate network key, excluding their contents.
 struct EZSP_GetNetworkKeyInfo {
-    enum Command = 0x0116;
+    enum ushort Command = 0x0116;
     struct Request {
     }
     struct Response {
@@ -3113,7 +3186,7 @@ struct EZSP_GetNetworkKeyInfo {
 
 // Retrieve metadata about an APS link key. Does not retrieve contents.
 struct EZSP_GetApsKeyInfo {
-    enum Command = 0x010C;
+    enum ushort Command = 0x010C;
     struct Request {
         sl_zb_sec_man_context context_in; // Context used to input information about key.
     }
@@ -3126,7 +3199,7 @@ struct EZSP_GetApsKeyInfo {
 
 // Import an application link key into the key table.
 struct EZSP_ImportLinkKey {
-    enum Command = 0x010E;
+    enum ushort Command = 0x010E;
     struct Request {
         ubyte index; // Index where this key is to be imported to.
         EmberEUI64 address; // EUI64 this key is associated with.
@@ -3139,7 +3212,7 @@ struct EZSP_ImportLinkKey {
 
 // Export the link key at given index from the key table.
 struct EZSP_ExportLinkKeyByIndex {
-    enum Command = 0x010F;
+    enum ushort Command = 0x010F;
     struct Request {
         ubyte index; // Index of key to export.
     }
@@ -3153,7 +3226,7 @@ struct EZSP_ExportLinkKeyByIndex {
 
 // Export the link key associated with the given EUI from the key table.
 struct EZSP_ExportLinkKeyByEui {
-    enum Command = 0x010D;
+    enum ushort Command = 0x010D;
     struct Request {
         EmberEUI64 eui; // EUI64 associated with the key to export.
     }
@@ -3167,7 +3240,7 @@ struct EZSP_ExportLinkKeyByEui {
 
 // Check whether a key context can be used to load a valid key.
 struct EZSP_CheckKeyContext {
-    enum Command = 0x0110;
+    enum ushort Command = 0x0110;
     struct Request {
         sl_zb_sec_man_context context; // Context struct to check the validity of.
     }
@@ -3178,7 +3251,7 @@ struct EZSP_CheckKeyContext {
 
 // Import a transient link key.
 struct EZSP_ImportTransientKey {
-    enum Command = 0x0111;
+    enum ushort Command = 0x0111;
     struct Request {
         EmberEUI64 eui64; // EUI64 associated with this transient key.
         sl_zb_sec_man_key plaintext_key; // The key to import.
@@ -3191,7 +3264,7 @@ struct EZSP_ImportTransientKey {
 
 // Export a transient link key from a given table index.
 struct EZSP_ExportTransientKeyByIndex {
-    enum Command = 0x0112;
+    enum ushort Command = 0x0112;
     struct Request {
         ubyte index; // Index to export from.
     }
@@ -3205,7 +3278,7 @@ struct EZSP_ExportTransientKeyByIndex {
 
 // Export a transient link key associated with a given EUI64
 struct EZSP_ExportTransientKeyByEui {
-    enum Command = 0x0113;
+    enum ushort Command = 0x0113;
     struct Request {
         EmberEUI64 eui; // Index to export from.
     }
@@ -3222,7 +3295,7 @@ struct EZSP_ExportTransientKeyByEui {
 
 // The NCP used the trust center behavior policy to decide whether to allow a new node to join the network. The Host cannot change the current decision, but it can change the policy for future decisions using the setPolicy command.
 struct EZSP_TrustCenterJoinHandler {
-    enum Command = 0x0024;
+    enum ushort Command = 0x0024;
     struct Request {
     }
     struct Response {
@@ -3236,7 +3309,7 @@ struct EZSP_TrustCenterJoinHandler {
 
 // This function broadcasts a new encryption key, but does not tell the nodes in the network to start using it. To tell nodes to switch to the new key, use emberSendNetworkKeySwitch(). This is only valid for the Trust Center/Coordinator. It is up to the application to determine how quickly to send the Switch Key after sending the alternate encryption key.
 struct EZSP_BroadcastNextNetworkKey {
-    enum Command = 0x0073;
+    enum ushort Command = 0x0073;
     struct Request {
         EmberKeyData key; // An optional pointer to a 16-byte encryption key (EMBER_ENCRYPTION_KEY_SIZE). An all zero key may be passed in, which will cause the stack to randomly generate a new key.
     }
@@ -3247,7 +3320,7 @@ struct EZSP_BroadcastNextNetworkKey {
 
 // This function broadcasts a switch key message to tell all nodes to change to the sequence number of the previously sent Alternate Encryption Key.
 struct EZSP_BroadcastNetworkKeySwitch {
-    enum Command = 0x0074;
+    enum ushort Command = 0x0074;
     struct Request {
     }
     struct Response {
@@ -3257,7 +3330,7 @@ struct EZSP_BroadcastNetworkKeySwitch {
 
 // This routine processes the passed chunk of data and updates the hash context based on it. If the 'finalize' parameter is not set, then the length of the data passed in must be a multiple of 16. If the 'finalize' parameter is set then the length can be any value up 1-16, and the final hash value will be calculated.
 struct EZSP_AesMmoHash {
-    enum Command = 0x006F;
+    enum ushort Command = 0x006F;
     struct Request {
         EmberAesMmoHashContext context; // The hash context to update.
         bool finalize; // This indicates whether the final hash value should be calculated
@@ -3272,7 +3345,7 @@ struct EZSP_AesMmoHash {
 
 // This command sends an APS remove device using APS encryption to the destination indicating either to remove itself from the network, or one of its children.
 struct EZSP_RemoveDevice {
-    enum Command = 0x00A8;
+    enum ushort Command = 0x00A8;
     struct Request {
         EmberNodeId destShort; // The node ID of the device that will receive the message
         EmberEUI64 destLong; // The long address (EUI64) of the device that will receive the message.
@@ -3285,7 +3358,7 @@ struct EZSP_RemoveDevice {
 
 // This command will send a unicast transport key message with a new NWK key to the specified device. APS encryption using the device's existing link key will be used.
 struct EZSP_UnicastNwkKeyUpdate {
-    enum Command = 0x00A9;
+    enum ushort Command = 0x00A9;
     struct Request {
         EmberNodeId destShort; // The node ID of the device that will receive the message
         EmberEUI64 destLong; // The long address (EUI64) of the device that will receive the message.
@@ -3301,7 +3374,7 @@ struct EZSP_UnicastNwkKeyUpdate {
 
 // This call starts the generation of the ECC Ephemeral Public/Private key pair. When complete it stores the private key. The results are returned via ezspGenerateCbkeKeysHandler().
 struct EZSP_GenerateCbkeKeys {
-    enum Command = 0x00A4;
+    enum ushort Command = 0x00A4;
     struct Request {
     }
     struct Response {
@@ -3311,7 +3384,7 @@ struct EZSP_GenerateCbkeKeys {
 
 // A callback by the Crypto Engine indicating that a new ephemeral public/private key pair has been generated. The public/private key pair is stored on the NCP, but only the associated public key is returned to the host. The node's associated certificate is also returned.
 struct EZSP_GenerateCbkeKeysHandler {
-    enum Command = 0x009E;
+    enum ushort Command = 0x009E;
     struct Request {
     }
     struct Response {
@@ -3322,7 +3395,7 @@ struct EZSP_GenerateCbkeKeysHandler {
 
 // Calculates the SMAC verification keys for both the initiator and responder roles of CBKE using the passed parameters and the stored public/private key pair previously generated with ezspGenerateKeysRetrieveCert(). It also stores the unverified link key data in temporary storage on the NCP until the key establishment is complete.
 struct EZSP_CalculateSmacs {
-    enum Command = 0x009F;
+    enum ushort Command = 0x009F;
     struct Request {
         bool amInitiator; // The role of this device in the Key Establishment protocol.
         EmberCertificateData partnerCertificate; // The key establishment partner's implicit certificate.
@@ -3335,7 +3408,7 @@ struct EZSP_CalculateSmacs {
 
 // A callback to indicate that the NCP has finished calculating the Secure Message Authentication Codes (SMAC) for both the initiator and responder. The associated link key is kept in temporary storage until the host tells the NCP to store or discard the key via emberClearTemporaryDataMaybeStoreLinkKey().
 struct EZSP_CalculateSmacsHandler {
-    enum Command = 0x00A0;
+    enum ushort Command = 0x00A0;
     struct Request {
     }
     struct Response {
@@ -3347,7 +3420,7 @@ struct EZSP_CalculateSmacsHandler {
 
 // This call starts the generation of the ECC 283k1 curve Ephemeral Public/Private key pair. When complete it stores the private key. The results are returned via ezspGenerateCbkeKeysHandler283k1().
 struct EZSP_GenerateCbkeKeys283k1 {
-    enum Command = 0x00E8;
+    enum ushort Command = 0x00E8;
     struct Request {
     }
     struct Response {
@@ -3357,7 +3430,7 @@ struct EZSP_GenerateCbkeKeys283k1 {
 
 // A callback by the Crypto Engine indicating that a new 283k1 ephemeral public/private key pair has been generated. The public/private key pair is stored on the NCP, but only the associated public key is returned to the host. The node's associated certificate is also returned.
 struct EZSP_GenerateCbkeKeysHandler283k1 {
-    enum Command = 0x00E9;
+    enum ushort Command = 0x00E9;
     struct Request {
     }
     struct Response {
@@ -3368,7 +3441,7 @@ struct EZSP_GenerateCbkeKeysHandler283k1 {
 
 // Calculates the SMAC verification keys for both the initiator and responder roles of CBKE for the 283k1 ECC curve using the passed parameters and the stored public/private key pair previously generated with ezspGenerateKeysRetrieveCert283k1(). It also stores the unverified link key data in temporary storage on the NCP until the key establishment is complete.
 struct EZSP_CalculateSmacs283k1 {
-    enum Command = 0x00EA;
+    enum ushort Command = 0x00EA;
     struct Request {
         bool amInitiator; // The role of this device in the Key Establishment protocol.
         EmberCertificate283k1Data partnerCertificate; // The key establishment partner's implicit certificate.
@@ -3381,7 +3454,7 @@ struct EZSP_CalculateSmacs283k1 {
 
 // A callback to indicate that the NCP has finished calculating the Secure Message Authentication Codes (SMAC) for both the initiator and responder for the CBKE 283k1 Library. The associated link key is kept in temporary storage until the host tells the NCP to store or discard the key via emberClearTemporaryDataMaybeStoreLinkKey().
 struct EZSP_CalculateSmacsHandler283k1 {
-    enum Command = 0x00EB;
+    enum ushort Command = 0x00EB;
     struct Request {
     }
     struct Response {
@@ -3393,7 +3466,7 @@ struct EZSP_CalculateSmacsHandler283k1 {
 
 // LEGACY FUNCTION: This functionality has been replaced by a single bit in the EmberApsFrame, EMBER_APS_OPTION_DSA_SIGN. Devices wishing to send signed messages should use that as it requires fewer function calls and message buffering. The dsaSignHandler response is still called when EMBER_APS_OPTION_DSA_SIGN is used. However, this function is still supported. This function begins the process of signing the passed message contained within the messageContents array. If no other ECC operation is going on, it will immediately return with EMBER_OPERATION_IN_PROGRESS to indicate the start of ECC operation. It will delay a period of time to let APS retries take place, but then it will shut down the radio and consume the CPU processing until the signing is complete. This may take up to 1 second. The signed message will be returned in the dsaSignHandler response. Note that the last byte of the messageContents passed to this function has special significance. As the typical use case for DSA signing is to sign the ZCL payload of a DRLC Report Event Status message in SE 1.0, there is often both a signed portion (ZCL payload) and an unsigned portion (ZCL header). The last byte in the content of messageToSign is therefore used as a special indicator to signify how many bytes of leading data in the array should be excluded during the signing process. If the signature needs to cover the entire array (all bytes except the last one), the caller should ensure that the last byte of messageContents is 0x00. When the signature operation is complete, this final byte will be replaced by the signature type indicator (0x01 for ECDSA signatures), and the actual signature will be appended to the original contents after this byte.
 struct EZSP_DsaSign {
-    enum Command = 0x00A6;
+    enum ushort Command = 0x00A6;
     struct Request {
         ubyte messageLength; // The length of the messageContents parameter in bytes.
         ubyte[] messageContents; // The message contents for which to create a signature. Per above notes, this may include a leading portion of data not included in the signature, in which case the last byte of this array should be set to the index of the first byte to be considered for signing. Otherwise, the last byte of messageContents should be 0x00 to indicate that a signature should occur across the entire contents.
@@ -3405,7 +3478,7 @@ struct EZSP_DsaSign {
 
 // The handler that returns the results of the signing operation. On success, the signature will be appended to the original message (including the signature type indicator that replaced the startIndex field for the signing) and both are returned via this callback.
 struct EZSP_DsaSignHandler {
-    enum Command = 0x00A7;
+    enum ushort Command = 0x00A7;
     struct Request {
     }
     struct Response {
@@ -3417,7 +3490,7 @@ struct EZSP_DsaSignHandler {
 
 // Verify that signature of the associated message digest was signed by the private key of the associated certificate.
 struct EZSP_DsaVerify {
-    enum Command = 0x00A3;
+    enum ushort Command = 0x00A3;
     struct Request {
         EmberMessageDigest digest; // The AES-MMO message digest of the signed data. If dsaSign command was used to generate the signature for this data, the final byte (replaced by signature type of 0x01) in the messageContents array passed to dsaSign is included in the hash context used for the digest calculation.
         EmberCertificateData signerCertificate; // The certificate of the signer. Note that the signer's certificate and the verifier's certificate must both be issued by the same Certificate Authority, so they should share the same CA Public Key.
@@ -3430,7 +3503,7 @@ struct EZSP_DsaVerify {
 
 // This callback is executed by the stack when the DSA verification has completed and has a result. If the result is EMBER_SUCCESS, the signature is valid. If the result is EMBER_SIGNATURE_VERIFY_FAILURE then the signature is invalid. If the result is anything else then the signature verify operation failed and the validity is unknown.
 struct EZSP_DsaVerifyHandler {
-    enum Command = 0x0078;
+    enum ushort Command = 0x0078;
     struct Request {
     }
     struct Response {
@@ -3440,7 +3513,7 @@ struct EZSP_DsaVerifyHandler {
 
 // Verify that signature of the associated message digest was signed by the private key of the associated certificate.
 struct EZSP_DsaVerify283k1 {
-    enum Command = 0x00B0;
+    enum ushort Command = 0x00B0;
     struct Request {
         EmberMessageDigest digest; // The AES-MMO message digest of the signed data. If dsaSign command was used to generate the signature for this data, the final byte (replaced by signature type of 0x01) in the messageContents array passed to dsaSign is included in the hash context used for the digest calculation.
         EmberCertificate283k1Data signerCertificate; // The certificate of the signer. Note that the signer's certificate and the verifier's certificate must both be issued by the same Certificate Authority, so they should share the same CA Public Key.
@@ -3453,7 +3526,7 @@ struct EZSP_DsaVerify283k1 {
 
 // Sets the device's CA public key, local certificate, and static private key on the NCP associated with this node.
 struct EZSP_SetPreinstalledCbkeData {
-    enum Command = 0x00A2;
+    enum ushort Command = 0x00A2;
     struct Request {
         EmberPublicKeyData caPublic; // The Certificate Authority's public key.
         EmberCertificateData myCert; // The node's new certificate signed by the CA.
@@ -3466,7 +3539,7 @@ struct EZSP_SetPreinstalledCbkeData {
 
 // Sets the device's 283k1 curve CA public key, local certificate, and static private key on the NCP associated with this node.
 struct EZSP_SavePreinstalledCbkeData283k1 {
-    enum Command = 0x00ED;
+    enum ushort Command = 0x00ED;
     struct Request {
     }
     struct Response {
@@ -3479,7 +3552,7 @@ struct EZSP_SavePreinstalledCbkeData283k1 {
 
 // Activate use of mfglib test routines and enables the radio receiver to report packets it receives to the mfgLibRxHandler() callback. These packets will not be passed up with a CRC failure. All other mfglib functions will return an error until the mfglibStart() has been called
 struct EZSP_MfglibStart {
-    enum Command = 0x0083;
+    enum ushort Command = 0x0083;
     struct Request {
         bool rxCallback; // true to generate a mfglibRxHandler callback when a packet is received.
     }
@@ -3490,7 +3563,7 @@ struct EZSP_MfglibStart {
 
 // Deactivate use of mfglib test routines; restores the hardware to the state it was in prior to mfglibStart() and stops receiving packets started by mfglibStart() at the same time.
 struct EZSP_MfglibEnd {
-    enum Command = 0x0084;
+    enum ushort Command = 0x0084;
     struct Request {
     }
     struct Response {
@@ -3500,7 +3573,7 @@ struct EZSP_MfglibEnd {
 
 // Starts transmitting an unmodulated tone on the currently set channel and power level. Upon successful return, the tone will be transmitting. To stop transmitting tone, application must call mfglibStopTone(), allowing it the flexibility to determine its own criteria for tone duration (time, event, etc.)
 struct EZSP_MfglibStartTone {
-    enum Command = 0x0085;
+    enum ushort Command = 0x0085;
     struct Request {
     }
     struct Response {
@@ -3510,7 +3583,7 @@ struct EZSP_MfglibStartTone {
 
 // Stops transmitting tone started by mfglibStartTone().
 struct EZSP_MfglibStopTone {
-    enum Command = 0x0086;
+    enum ushort Command = 0x0086;
     struct Request {
     }
     struct Response {
@@ -3520,7 +3593,7 @@ struct EZSP_MfglibStopTone {
 
 // Starts transmitting a random stream of characters. This is so that the radio modulation can be measured.
 struct EZSP_MfglibStartStream {
-    enum Command = 0x0087;
+    enum ushort Command = 0x0087;
     struct Request {
     }
     struct Response {
@@ -3530,7 +3603,7 @@ struct EZSP_MfglibStartStream {
 
 // Stops transmitting a random stream of characters started by mfglibStartStream().
 struct EZSP_MfglibStopStream {
-    enum Command = 0x0088;
+    enum ushort Command = 0x0088;
     struct Request {
     }
     struct Response {
@@ -3540,7 +3613,7 @@ struct EZSP_MfglibStopStream {
 
 // Sends a single packet consisting of the following bytes: packetLength, packetContents[0], ... , packetContents[packetLength - 3], CRC[0], CRC[1]. The total number of bytes sent is packetLength + 1. The radio replaces the last two bytes of packetContents[] with the 16-bit CRC for the packet.
 struct EZSP_MfglibSendPacket {
-    enum Command = 0x0089;
+    enum ushort Command = 0x0089;
     struct Request {
         ubyte packetLength; // The length of the packetContents parameter in bytes. Must be greater than 3 and less than 123.
         ubyte[] packetContents; // The packet to send. The last two bytes will be replaced with the 16-bit CRC.
@@ -3552,7 +3625,7 @@ struct EZSP_MfglibSendPacket {
 
 // Sets the radio channel. Calibration occurs if this is the first time the channel has been used.
 struct EZSP_MfglibSetChannel {
-    enum Command = 0x008A;
+    enum ushort Command = 0x008A;
     struct Request {
         ubyte channel; // The channel to switch to. Valid values are 11 to 26.
     }
@@ -3563,7 +3636,7 @@ struct EZSP_MfglibSetChannel {
 
 // Returns the current radio channel, as previously set via mfglibSetChannel().
 struct EZSP_MfglibGetChannel {
-    enum Command = 0x008B;
+    enum ushort Command = 0x008B;
     struct Request {
     }
     struct Response {
@@ -3573,7 +3646,7 @@ struct EZSP_MfglibGetChannel {
 
 // First select the transmit power mode, and then include a method for selecting the radio transmit power. The valid power settings depend upon the specific radio in use. Ember radios have discrete power settings, and then requested power is rounded to a valid power setting; the actual power output is available to the caller via mfglibGetPower().
 struct EZSP_MfglibSetPower {
-    enum Command = 0x008C;
+    enum ushort Command = 0x008C;
     struct Request {
         ushort txPowerMode; // Power mode. Refer to txPowerModes in stack/include/ember-types.h for possible values.
         ubyte power; // Power in units of dBm. Refer to radio data sheet for valid range.
@@ -3585,7 +3658,7 @@ struct EZSP_MfglibSetPower {
 
 // Returns the current radio power setting, as previously set via mfglibSetPower().
 struct EZSP_MfglibGetPower {
-    enum Command = 0x008D;
+    enum ushort Command = 0x008D;
     struct Request {
     }
     struct Response {
@@ -3595,7 +3668,7 @@ struct EZSP_MfglibGetPower {
 
 // A callback indicating a packet with a valid CRC has been received.
 struct EZSP_MfglibRxHandler {
-    enum Command = 0x008E;
+    enum ushort Command = 0x008E;
     struct Request {
     }
     struct Response {
@@ -3611,7 +3684,7 @@ struct EZSP_MfglibRxHandler {
 
 // Quits the current application and launches the standalone bootloader (if installed) The function returns an error if the standalone bootloader is not present
 struct EZSP_LaunchStandaloneBootloader {
-    enum Command = 0x008F;
+    enum ushort Command = 0x008F;
     struct Request {
         ubyte mode; // Controls the mode in which the standalone bootloader will run. See the app. note for full details. Options are: STANDALONE_BOOTLOADER_NORMAL_MODE: Will listen for an over-the-air image transfer on the current channel with current power settings. STANDALONE_BOOTLOADER_RECOVERY_MODE: Will listen for an over-the-air image transfer on the default channel with default power settings. Both modes also allow an image transfer to begin with XMODEM over the serial protocol's Bootloader Frame.
     }
@@ -3622,7 +3695,7 @@ struct EZSP_LaunchStandaloneBootloader {
 
 // Transmits the given bootload message to a neighboring node using a specific 802.15.4 header that allows the EmberZNet stack as well as the bootloader to recognize the message, but will not interfere with other ZigBee stacks.
 struct EZSP_SendBootloadMessage {
-    enum Command = 0x0090;
+    enum ushort Command = 0x0090;
     struct Request {
         bool broadcast; // If true, the destination address and pan id are both set to the broadcast address.
         EmberEUI64 destEui64; // The EUI64 of the target node. Ignored if the broadcast field is set to true.
@@ -3636,7 +3709,7 @@ struct EZSP_SendBootloadMessage {
 
 // Detects if the standalone bootloader is installed, and if so returns the installed version. If not return 0xffff. A returned version of 0x1234 would indicate version 1.2 build 34. Also return the node's version of PLAT, MICRO and PHY.
 struct EZSP_GetStandaloneBootloaderVersionPlatMicroPhy {
-    enum Command = 0x0091;
+    enum ushort Command = 0x0091;
     struct Request {
     }
     struct Response {
@@ -3649,7 +3722,7 @@ struct EZSP_GetStandaloneBootloaderVersionPlatMicroPhy {
 
 // A callback invoked by the EmberZNet stack when a bootload message is received.
 struct EZSP_IncomingBootloadMessageHandler {
-    enum Command = 0x0092;
+    enum ushort Command = 0x0092;
     struct Request {
     }
     struct Response {
@@ -3663,7 +3736,7 @@ struct EZSP_IncomingBootloadMessageHandler {
 
 // A callback invoked by the EmberZNet stack when the MAC has finished transmitting a bootload message.
 struct EZSP_BootloadTransmitCompleteHandler {
-    enum Command = 0x0093;
+    enum ushort Command = 0x0093;
     struct Request {
     }
     struct Response {
@@ -3675,7 +3748,7 @@ struct EZSP_BootloadTransmitCompleteHandler {
 
 // Perform AES encryption on plaintext using key.
 struct EZSP_AesEncrypt {
-    enum Command = 0x0094;
+    enum ushort Command = 0x0094;
     struct Request {
         ubyte[16] plaintext; // 16 bytes of plaintext.
         ubyte[16] key; // The 16-byte encryption key to use.
@@ -3687,7 +3760,7 @@ struct EZSP_AesEncrypt {
 
 // A bootloader method for selecting the radio channel. This routine only works for sending and receiving bootload packets. Does not correctly do ZigBee stack changes. NOTE: this API is not safe to call on multi-network devices and it will return failure when so. Use of the ember/ezspSetRadioChannel APIs are multi-network safe and are recommended instead.
 struct EZSP_OverrideCurrentChannel {
-    enum Command = 0x0095;
+    enum ushort Command = 0x0095;
     struct Request {
         ubyte channel; // The channel to switch to. Valid values are 11 to 26.
     }
@@ -3701,7 +3774,7 @@ struct EZSP_OverrideCurrentChannel {
 
 // A consolidation of ZLL network operations with similar signatures; specifically, forming and joining networks or touch-linking.
 struct EZSP_ZllNetworkOps {
-    enum Command = 0x00B2;
+    enum ushort Command = 0x00B2;
     struct Request {
         EmberZllNetwork networkInfo; // Information about the network.
         EzspZllNetworkOperation op; // Operation indicator.
@@ -3714,7 +3787,7 @@ struct EZSP_ZllNetworkOps {
 
 // This call will cause the device to setup the security information used in its network. It must be called prior to forming, starting, or joining a network.
 struct EZSP_ZllSetInitialSecurityState {
-    enum Command = 0x00B3;
+    enum ushort Command = 0x00B3;
     struct Request {
         EmberKeyData networkKey; // ZLL Network key.
         EmberZllInitialSecurityState securityState; // Initial security state of the network.
@@ -3726,7 +3799,7 @@ struct EZSP_ZllSetInitialSecurityState {
 
 // This call will update ZLL security token information. Unlike emberZllSetInitialSecurityState, this can be called while a network is already established.
 struct EZSP_ZllSetSecurityStateWithoutKey {
-    enum Command = 0x00CF;
+    enum ushort Command = 0x00CF;
     struct Request {
         EmberZllInitialSecurityState securityState; // Security state of the network.
     }
@@ -3737,7 +3810,7 @@ struct EZSP_ZllSetSecurityStateWithoutKey {
 
 // This call will initiate a ZLL network scan on all the specified channels.
 struct EZSP_ZllStartScan {
-    enum Command = 0x00B4;
+    enum ushort Command = 0x00B4;
     struct Request {
         uint channelMask; // The range of channels to scan.
         byte radioPowerForScan; // The radio output power used for the scan requests.
@@ -3750,7 +3823,7 @@ struct EZSP_ZllStartScan {
 
 // This call will change the mode of the radio so that the receiver is on for a specified amount of time when the device is idle.
 struct EZSP_ZllSetRxOnWhenIdle {
-    enum Command = 0x00B5;
+    enum ushort Command = 0x00B5;
     struct Request {
         uint durationMs; // The duration in milliseconds to leave the radio on.
     }
@@ -3761,7 +3834,7 @@ struct EZSP_ZllSetRxOnWhenIdle {
 
 // This call is fired when a ZLL network scan finds a ZLL network.
 struct EZSP_ZllNetworkFoundHandler {
-    enum Command = 0x00B6;
+    enum ushort Command = 0x00B6;
     struct Request {
     }
     struct Response {
@@ -3775,7 +3848,7 @@ struct EZSP_ZllNetworkFoundHandler {
 
 // This call is fired when a ZLL network scan is complete.
 struct EZSP_ZllScanCompleteHandler {
-    enum Command = 0x00B7;
+    enum ushort Command = 0x00B7;
     struct Request {
     }
     struct Response {
@@ -3785,7 +3858,7 @@ struct EZSP_ZllScanCompleteHandler {
 
 // This call is fired when network and group addresses are assigned to a remote mode in a network start or network join request.
 struct EZSP_ZllAddressAssignmentHandler {
-    enum Command = 0x00B8;
+    enum ushort Command = 0x00B8;
     struct Request {
     }
     struct Response {
@@ -3797,7 +3870,7 @@ struct EZSP_ZllAddressAssignmentHandler {
 
 // This call is fired when the device is a target of a touch link.
 struct EZSP_ZllTouchLinkTargetHandler {
-    enum Command = 0x00BB;
+    enum ushort Command = 0x00BB;
     struct Request {
     }
     struct Response {
@@ -3807,7 +3880,7 @@ struct EZSP_ZllTouchLinkTargetHandler {
 
 // Get the ZLL tokens.
 struct EZSP_ZllGetTokens {
-    enum Command = 0x00BC;
+    enum ushort Command = 0x00BC;
     struct Request {
     }
     struct Response {
@@ -3818,7 +3891,7 @@ struct EZSP_ZllGetTokens {
 
 // Set the ZLL data token.
 struct EZSP_ZllSetDataToken {
-    enum Command = 0x00BD;
+    enum ushort Command = 0x00BD;
     struct Request {
         EmberTokTypeStackZllData data; // Data token to be set.
     }
@@ -3828,7 +3901,7 @@ struct EZSP_ZllSetDataToken {
 
 // Set the ZLL data token bitmask to reflect the ZLL network state.
 struct EZSP_ZllSetNonZllNetwork {
-    enum Command = 0x00BF;
+    enum ushort Command = 0x00BF;
     struct Request {
     }
     struct Response {
@@ -3837,7 +3910,7 @@ struct EZSP_ZllSetNonZllNetwork {
 
 // Is this a ZLL network?
 struct EZSP_IsZllNetwork {
-    enum Command = 0x00BE;
+    enum ushort Command = 0x00BE;
     struct Request {
     }
     struct Response {
@@ -3847,7 +3920,7 @@ struct EZSP_IsZllNetwork {
 
 // This call sets the radio's default idle power mode.
 struct EZSP_ZllSetRadioIdleMode {
-    enum Command = 0x00D4;
+    enum ushort Command = 0x00D4;
     struct Request {
         EmberRadioPowerMode mode; // The power mode to be set.
     }
@@ -3857,7 +3930,7 @@ struct EZSP_ZllSetRadioIdleMode {
 
 // This call sets the default node type for a factory new ZLL device.
 struct EZSP_ZllSetNodeType {
-    enum Command = 0x00D5;
+    enum ushort Command = 0x00D5;
     struct Request {
         EmberNodeType nodeType; // The node type to be set.
     }
@@ -3867,7 +3940,7 @@ struct EZSP_ZllSetNodeType {
 
 // This call sets additional capability bits in the ZLL state.
 struct EZSP_ZllSetAdditionalState {
-    enum Command = 0x00D6;
+    enum ushort Command = 0x00D6;
     struct Request {
         ushort state; // A mask with the bits to be set or cleared.
     }
@@ -3877,7 +3950,7 @@ struct EZSP_ZllSetAdditionalState {
 
 // Is there a ZLL (Touchlink) operation in progress?
 struct EZSP_ZllOperationInProgress {
-    enum Command = 0x00D7;
+    enum ushort Command = 0x00D7;
     struct Request {
     }
     struct Response {
@@ -3887,7 +3960,7 @@ struct EZSP_ZllOperationInProgress {
 
 // Is the ZLL radio on when idle mode active?
 struct EZSP_ZllRxOnWhenIdleGetActive {
-    enum Command = 0x00D8;
+    enum ushort Command = 0x00D8;
     struct Request {
     }
     struct Response {
@@ -3897,7 +3970,7 @@ struct EZSP_ZllRxOnWhenIdleGetActive {
 
 // Get the primary ZLL (touchlink) channel mask.
 struct EZSP_GetZllPrimaryChannelMask {
-    enum Command = 0x00D9;
+    enum ushort Command = 0x00D9;
     struct Request {
     }
     struct Response {
@@ -3907,7 +3980,7 @@ struct EZSP_GetZllPrimaryChannelMask {
 
 // Get the secondary ZLL (touchlink) channel mask.
 struct EZSP_GetZllSecondaryChannelMask {
-    enum Command = 0x00DA;
+    enum ushort Command = 0x00DA;
     struct Request {
     }
     struct Response {
@@ -3917,7 +3990,7 @@ struct EZSP_GetZllSecondaryChannelMask {
 
 // Set the primary ZLL (touchlink) channel mask
 struct EZSP_SetZllPrimaryChannelMask {
-    enum Command = 0x00DB;
+    enum ushort Command = 0x00DB;
     struct Request {
         uint zllPrimaryChannelMask; // The primary ZLL channel mask
     }
@@ -3927,7 +4000,7 @@ struct EZSP_SetZllPrimaryChannelMask {
 
 // Set the secondary ZLL (touchlink) channel mask.
 struct EZSP_SetZllSecondaryChannelMask {
-    enum Command = 0x00DC;
+    enum ushort Command = 0x00DC;
     struct Request {
         uint zllSecondaryChannelMask; // The secondary ZLL channel mask
     }
@@ -3937,7 +4010,7 @@ struct EZSP_SetZllSecondaryChannelMask {
 
 // Clear ZLL stack tokens.
 struct EZSP_ZllClearTokens {
-    enum Command = 0x0025;
+    enum ushort Command = 0x0025;
     struct Request {
     }
     struct Response {
@@ -3949,7 +4022,7 @@ struct EZSP_ZllClearTokens {
 
 // Sets whether to use parent classification when processing beacons during a join or rejoin. Parent classification considers whether a received beacon indicates trust center connectivity and long uptime on the network
 struct EZSP_SetParentClassificationEnabled {
-    enum Command = 0x00E7;
+    enum ushort Command = 0x00E7;
     struct Request {
         bool enabled; // Enable or disable parent classification
     }
@@ -3959,7 +4032,7 @@ struct EZSP_SetParentClassificationEnabled {
 
 // Gets whether to use parent classification when processing beacons during a join or rejoin. Parent classification considers whether a received beacon indicates trust center connectivity and long uptime on the network
 struct EZSP_GetParentClassificationEnabled {
-    enum Command = 0x00F0;
+    enum ushort Command = 0x00F0;
     struct Request {
     }
     struct Response {
@@ -3969,7 +4042,7 @@ struct EZSP_GetParentClassificationEnabled {
 
 // sets the device uptime to be long or short
 struct EZSP_SetLongUpTime {
-    enum Command = 0x00E3;
+    enum ushort Command = 0x00E3;
     struct Request {
         bool hasLongUpTime; // if the uptime is long or not
     }
@@ -3979,7 +4052,7 @@ struct EZSP_SetLongUpTime {
 
 // sets the hub connectivity to be true or false
 struct EZSP_SetHubConnectivity {
-    enum Command = 0x00E4;
+    enum ushort Command = 0x00E4;
     struct Request {
         bool connected; // if the hub is connected or not
     }
@@ -3989,7 +4062,7 @@ struct EZSP_SetHubConnectivity {
 
 // checks if the device uptime is long or short
 struct EZSP_IsUpTimeLong {
-    enum Command = 0x00E5;
+    enum ushort Command = 0x00E5;
     struct Request {
     }
     struct Response {
@@ -4002,7 +4075,7 @@ struct EZSP_IsUpTimeLong {
 
 // checks if the hub is connected or not
 struct EZSP_IsHubConnected {
-    enum Command = 0x00E6;
+    enum ushort Command = 0x00E6;
     struct Request {
     }
     struct Response {
@@ -4012,7 +4085,7 @@ struct EZSP_IsHubConnected {
 
 // Update the GP Proxy table based on a GP pairing.
 struct EZSP_GpProxyTableProcessGpPairing {
-    enum Command = 0x00C9;
+    enum ushort Command = 0x00C9;
     struct Request {
         uint options; // The options field of the GP Pairing command.
         EmberGpAddress addr; // The target GPD.
@@ -4032,7 +4105,7 @@ struct EZSP_GpProxyTableProcessGpPairing {
 
 // Adds/removes an entry from the GP Tx Queue.
 struct EZSP_DGpSend {
-    enum Command = 0x00C6;
+    enum ushort Command = 0x00C6;
     struct Request {
         bool action; // The action to perform on the GP TX queue (true to add, false to remove).
         bool useCca; // Whether to use ClearChannelAssessment when transmitting the GPDF.
@@ -4050,7 +4123,7 @@ struct EZSP_DGpSend {
 
 // A callback to the GP endpoint to indicate the result of the GPDF transmission.
 struct EZSP_DGpSentHandler {
-    enum Command = 0x00C7;
+    enum ushort Command = 0x00C7;
     struct Request {
     }
     struct Response {
@@ -4061,7 +4134,7 @@ struct EZSP_DGpSentHandler {
 
 // A callback invoked by the ZigBee GP stack when a GPDF is received.
 struct EZSP_GpepIncomingMessageHandler {
-    enum Command = 0x00C5;
+    enum ushort Command = 0x00C5;
     struct Request {
     }
     struct Response {
@@ -4084,7 +4157,7 @@ struct EZSP_GpepIncomingMessageHandler {
 
 // Retrieves the proxy table entry stored at the passed index.
 struct EZSP_GpProxyTableGetEntry {
-    enum Command = 0x00C8;
+    enum ushort Command = 0x00C8;
     struct Request {
         ubyte proxyIndex; // The index of the requested proxy table entry.
     }
@@ -4096,7 +4169,7 @@ struct EZSP_GpProxyTableGetEntry {
 
 // Finds the index of the passed address in the gp table.
 struct EZSP_GpProxyTableLookup {
-    enum Command = 0x00C0;
+    enum ushort Command = 0x00C0;
     struct Request {
         EmberGpAddress addr; // The address to search for
     }
@@ -4107,7 +4180,7 @@ struct EZSP_GpProxyTableLookup {
 
 // Retrieves the sink table entry stored at the passed index.
 struct EZSP_GpSinkTableGetEntry {
-    enum Command = 0x00DD;
+    enum ushort Command = 0x00DD;
     struct Request {
         ubyte sinkIndex; // The index of the requested sink table entry.
     }
@@ -4119,7 +4192,7 @@ struct EZSP_GpSinkTableGetEntry {
 
 // Finds the index of the passed address in the gp table.
 struct EZSP_GpSinkTableLookup {
-    enum Command = 0x00DE;
+    enum ushort Command = 0x00DE;
     struct Request {
         EmberGpAddress addr; // The address to search for.
     }
@@ -4130,7 +4203,7 @@ struct EZSP_GpSinkTableLookup {
 
 // Retrieves the sink table entry stored at the passed index.
 struct EZSP_GpSinkTableSetEntry {
-    enum Command = 0x00DF;
+    enum ushort Command = 0x00DF;
     struct Request {
         ubyte sinkIndex; // The index of the requested sink table entry.
         EmberGpSinkTableEntry entry; // An EmberGpSinkTableEntry struct containing a copy of the sink entry to be updated.
@@ -4142,7 +4215,7 @@ struct EZSP_GpSinkTableSetEntry {
 
 // Removes the sink table entry stored at the passed index.
 struct EZSP_GpSinkTableRemoveEntry {
-    enum Command = 0x00E0;
+    enum ushort Command = 0x00E0;
     struct Request {
         ubyte sinkIndex; // The index of the requested sink table entry.
     }
@@ -4152,7 +4225,7 @@ struct EZSP_GpSinkTableRemoveEntry {
 
 // Finds or allocates a sink entry
 struct EZSP_GpSinkTableFindOrAllocateEntry {
-    enum Command = 0x00E1;
+    enum ushort Command = 0x00E1;
     struct Request {
         EmberGpAddress addr; // An EmberGpAddress struct containing a copy of the gpd address to be found.
     }
@@ -4163,7 +4236,7 @@ struct EZSP_GpSinkTableFindOrAllocateEntry {
 
 // Clear the entire sink table
 struct EZSP_GpSinkTableClearAll {
-    enum Command = 0x00E2;
+    enum ushort Command = 0x00E2;
     struct Request {
     }
     struct Response {
@@ -4172,7 +4245,7 @@ struct EZSP_GpSinkTableClearAll {
 
 // Initializes Sink Table
 struct EZSP_GpSinkTableInit {
-    enum Command = 0x0070;
+    enum ushort Command = 0x0070;
     struct Request {
     }
     struct Response {
@@ -4181,7 +4254,7 @@ struct EZSP_GpSinkTableInit {
 
 // Sets security framecounter in the sink table
 struct EZSP_GpSinkTableSetSecurityFrameCounter {
-    enum Command = 0x00F5;
+    enum ushort Command = 0x00F5;
     struct Request {
         ubyte index; // Index to the Sink table
         uint sfc; // Security Frame Counter
@@ -4192,7 +4265,7 @@ struct EZSP_GpSinkTableSetSecurityFrameCounter {
 
 // Puts the GPS in commissioning mode.
 struct EZSP_GpSinkCommission {
-    enum Command = 0x010A;
+    enum ushort Command = 0x010A;
     struct Request {
         ubyte options; // commissioning options
         ushort gpmAddrForSecurity; // gpm address for security.
@@ -4206,7 +4279,7 @@ struct EZSP_GpSinkCommission {
 
 // Clears all entries within the translation table.
 struct EZSP_GpTranslationTableClear {
-    enum Command = 0x010B;
+    enum ushort Command = 0x010B;
     struct Request {
     }
     struct Response {
@@ -4218,7 +4291,7 @@ struct EZSP_GpTranslationTableClear {
 
 // Return number of active entries in sink table.
 struct EZSP_GpSinkTableGetNumberOfActiveEntries {
-    enum Command = 0x0118;
+    enum ushort Command = 0x0118;
     struct Request {
     }
     struct Response {
@@ -4228,7 +4301,7 @@ struct EZSP_GpSinkTableGetNumberOfActiveEntries {
 
 // Gets the total number of tokens.
 struct EZSP_GetTokenCount {
-    enum Command = 0x0100;
+    enum ushort Command = 0x0100;
     struct Request {
     }
     struct Response {
@@ -4238,7 +4311,7 @@ struct EZSP_GetTokenCount {
 
 // Gets the token information for a single token at provided index
 struct EZSP_GetTokenInfo {
-    enum Command = 0x0101;
+    enum ushort Command = 0x0101;
     struct Request {
         ubyte index; // Index of the token in the token table for which information is needed.
     }
@@ -4250,7 +4323,7 @@ struct EZSP_GetTokenInfo {
 
 // Gets the token data for a single token with provided key
 struct EZSP_GetTokenData {
-    enum Command = 0x0102;
+    enum ushort Command = 0x0102;
     struct Request {
         uint token; // Key of the token in the token table for which data is needed.
         uint index; // Index in case of the indexed token.
@@ -4263,7 +4336,7 @@ struct EZSP_GetTokenData {
 
 // Sets the token data for a single token with provided key
 struct EZSP_SetTokenData {
-    enum Command = 0x0103;
+    enum ushort Command = 0x0103;
     struct Request {
         uint token; // Key of the token in the token table for which data is to be set.
         uint index; // Index in case of the indexed token.
@@ -4276,7 +4349,7 @@ struct EZSP_SetTokenData {
 
 // Reset the node by calling halReboot.
 struct EZSP_ResetNode {
-    enum Command = 0x0104;
+    enum ushort Command = 0x0104;
     struct Request {
     }
     struct Response {
@@ -4285,7 +4358,7 @@ struct EZSP_ResetNode {
 
 // Run GP security test vectors.
 struct EZSP_GpSecurityTestVectors {
-    enum Command = 0x0117;
+    enum ushort Command = 0x0117;
     struct Request {
     }
     struct Response {
@@ -4295,7 +4368,7 @@ struct EZSP_GpSecurityTestVectors {
 
 // Factory reset all configured Zigbee tokens.
 struct EZSP_TokenFactoryReset {
-    enum Command = 0x0077;
+    enum ushort Command = 0x0077;
     struct Request {
         bool excludeOutgoingFC; // Exclude network and APS outgoing frame counter tokens.
         bool excludeBootCounter; // Exclude stack boot counter token.

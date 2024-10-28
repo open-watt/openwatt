@@ -1,5 +1,6 @@
 module protocol.ezsp;
 
+import urt.endian;
 import urt.lifetime;
 import urt.map;
 import urt.mem.allocator;
@@ -24,6 +25,7 @@ class EZSPProtocolModule : Plugin
     class Instance : Plugin.Instance
     {
         mixin DeclareInstance;
+    nothrow @nogc:
 
         Map!(const(char)[], EZSPClient) clients;
 
@@ -32,13 +34,20 @@ class EZSPProtocolModule : Plugin
             app.console.registerCommand!client_add("/protocol/ezsp/client", this, "add");
         }
 
-        override void update() nothrow @nogc
+        EZSPClient getClient(const(char)[] client)
+        {
+            if (auto c = client in clients)
+                return *c;
+            return null;
+        }
+
+        override void update()
         {
             foreach(name, client; clients)
                 client.update();
         }
 
-        void client_add(Session session, const(char)[] name, const(char)[] stream) nothrow @nogc
+        void client_add(Session session, const(char)[] name, const(char)[] stream)
         {
             auto mod_stream = app.moduleInstance!StreamModule;
 
@@ -53,7 +62,7 @@ class EZSPProtocolModule : Plugin
             }
 
             if (name.empty)
-                mod_stream.generateStreamName("serial-stream");
+                mod_stream.generateStreamName("ezsp");
 
             NoGCAllocator a = app.allocator;
 
@@ -63,5 +72,72 @@ class EZSPProtocolModule : Plugin
 
 //            writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);
         }
+    }
+}
+
+
+size_t ezspSerialise(T)(ref T data, ubyte[] buffer)
+{
+    static assert(!is(T == class) && !is(T == interface) && !is(T == U*, U), T.stringof ~ " is not POD");
+
+    static if (is(T == struct))
+    {
+        size_t length = 0;
+        static foreach(ref m; s.tupleof)
+        {
+            alias M = typeof(m);
+            size_t len = ezspSerialise(m, buffer[length..$]);
+            if (len == 0)
+                return 0;
+            length += len;
+        }
+        return length;
+    }
+    else static if (is(T == ubyte[N], size_t N))
+    {
+        if (buffer.length < N)
+            return 0;
+        buffer[0 .. N] = data;
+        return N;
+    }
+    else
+    {
+        if (buffer.length < T.sizeof)
+            return 0;
+        buffer[0 .. T.sizeof] = nativeToLittleEndian(data);
+        return T.sizeof;
+    }
+}
+
+size_t ezspDeserialise(T)(const(ubyte)[] data, out T t)
+{
+    static assert(!is(T == class) && !is(T == interface) && !is(T == U*, U), T.stringof ~ " is not POD");
+
+    static if (is(T == struct))
+    {
+        size_t offset = 0;
+        alias tup = t.tupleof;
+        static foreach(i; 0..tup.length)
+        {{
+            size_t took = data[offset..$].ezspDeserialise(tup[i]);
+            if (took == 0)
+                return 0;
+            offset += took;
+        }}
+        return offset;
+    }
+    else static if (is(T == ubyte[N], size_t N))
+    {
+        if (data.length < N)
+            return 0;
+        t = data[0 .. N];
+        return N;
+    }
+    else
+    {
+        if (data.length < T.sizeof)
+            return 0;
+        t = data[0 .. T.sizeof].littleEndianToNative!T;
+        return T.sizeof;
     }
 }

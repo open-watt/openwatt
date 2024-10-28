@@ -13,6 +13,16 @@ enum bool isSignedInt(T) = is(T == byte) || is(T == short) || is(T == int) || is
 enum bool isUnsignedInt(T) = is(T == ubyte) || is(T == ushort) || is(T == uint) || is(T == ulong);
 enum bool isSomeFloat(T) = is(T == float) || is(T == double) || is(T == real);
 
+enum bool isEnum(T) = is(T == enum);
+template enumType(T)
+    if (isEnum!T)
+{
+    static if (is(T E == enum))
+        alias enumType = E;
+    else
+        static assert(false, "How this?");
+}
+
 template isUnsigned(T)
 {
     static if (!__traits(isUnsigned, T))
