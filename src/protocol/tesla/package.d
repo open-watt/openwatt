@@ -27,6 +27,7 @@ class TeslaProtocolModule : Plugin
 	class Instance : Plugin.Instance
 	{
 		mixin DeclareInstance;
+    nothrow @nogc:
 
 		Map!(const(char)[], TeslaTWCMaster) twcMasters;
 
@@ -43,7 +44,7 @@ class TeslaProtocolModule : Plugin
 				m.update();
 		}
 
-		void twc_add(Session session, const(char)[] name, const(char)[] _interface, ushort id, float max_current) nothrow @nogc
+		void twc_add(Session session, const(char)[] name, const(char)[] _interface, ushort id, float max_current)
 		{
 			auto mod_if = app.moduleInstance!InterfaceModule;
 
@@ -76,7 +77,7 @@ class TeslaProtocolModule : Plugin
             master.addCharger(n.move, id, cast(ushort)(max_current * 100));
         }
 
-        void twc_set(Session session, const(char)[] name, float target_current) nothrow @nogc
+        void twc_set(Session session, const(char)[] name, float target_current)
         {
             auto mod_if = app.moduleInstance!TeslaInterfaceModule;
 
@@ -87,7 +88,7 @@ class TeslaProtocolModule : Plugin
             }
         }
 
-        void device_add(Session session, const(char)[] id, Nullable!MACAddress mac, Nullable!ushort slave_id, Nullable!(const(char)[]) name) nothrow @nogc
+        void device_add(Session session, const(char)[] id, Nullable!MACAddress mac, Nullable!ushort slave_id, Nullable!(const(char)[]) name)
         {
             import manager.component;
             import manager.device;

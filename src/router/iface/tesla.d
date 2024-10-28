@@ -226,7 +226,7 @@ class TeslaInterfaceModule : Plugin
             app.console.registerCommand!add("/interface/tesla-twc", this);
         }
 
-        void add(Session session, const(char)[] name, const(char)[] stream) nothrow @nogc
+        void add(Session session, const(char)[] name, const(char)[] stream)
         {
             Stream s = app.moduleInstance!StreamModule.getStream(stream);
             if (!s)
@@ -253,7 +253,7 @@ class TeslaInterfaceModule : Plugin
         }
 
 
-        DeviceMap* findServerByName(const(char)[] name) nothrow @nogc
+        DeviceMap* findServerByName(const(char)[] name)
         {
             foreach (ref map; devices)
             {
@@ -263,7 +263,7 @@ class TeslaInterfaceModule : Plugin
             return null;
         }
 
-        DeviceMap* findServerByMac(MACAddress mac) nothrow @nogc
+        DeviceMap* findServerByMac(MACAddress mac)
         {
             foreach (ref map; devices)
             {
@@ -273,7 +273,7 @@ class TeslaInterfaceModule : Plugin
             return null;
         }
 
-        DeviceMap* findServerByAddress(ushort address) nothrow @nogc
+        DeviceMap* findServerByAddress(ushort address)
         {
             return address in devices;
         }

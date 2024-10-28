@@ -438,13 +438,14 @@ class TCPStreamModule : Plugin
     class Instance : Plugin.Instance
     {
         mixin DeclareInstance;
+    nothrow @nogc:
 
         override void init()
         {
             app.console.registerCommand!add("/stream/tcp-client", this);
         }
 
-        void add(Session session, const(char)[] name, const(char)[] address, Nullable!int port) nothrow @nogc
+        void add(Session session, const(char)[] name, const(char)[] address, Nullable!int port)
         {
             auto mod_stream = app.moduleInstance!StreamModule;
 

@@ -157,6 +157,7 @@ class BridgeStreamModule : Plugin
     class Instance : Plugin.Instance
     {
         mixin DeclareInstance;
+    nothrow @nogc:
 
         override void init()
         {
@@ -165,7 +166,7 @@ class BridgeStreamModule : Plugin
 
 
         // TODO: source should be an array, and let the external code separate and validate the array args...
-        void add(Session session, const(char)[] name, const(char)[][] source) nothrow @nogc
+        void add(Session session, const(char)[] name, const(char)[][] source)
         {
             auto mod_stream = app.moduleInstance!StreamModule;
 

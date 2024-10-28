@@ -18,6 +18,8 @@ import router.iface.packet;
 import router.modbus.message;
 import router.stream;
 
+nothrow @nogc:
+
 
 enum ModbusProtocol : byte
 {
@@ -561,7 +563,7 @@ class ModbusInterfaceModule : Plugin
             app.console.registerCommand!remote_server_add("/interface/modbus/remote-server", this, "add");
         }
 
-        ServerMap* findServerByName(const(char)[] name) nothrow @nogc
+        ServerMap* findServerByName(const(char)[] name)
         {
             try foreach (ref map; remoteServers)
             {
@@ -572,7 +574,7 @@ class ModbusInterfaceModule : Plugin
             return null;
         }
 
-        ServerMap* findServerByMac(MACAddress mac) nothrow @nogc
+        ServerMap* findServerByMac(MACAddress mac)
         {
             try foreach (ref map; remoteServers)
             {
@@ -583,7 +585,7 @@ class ModbusInterfaceModule : Plugin
             return null;
         }
 
-        ServerMap* findServerByLocalAddress(ubyte localAddress, BaseInterface iface) nothrow @nogc
+        ServerMap* findServerByLocalAddress(ubyte localAddress, BaseInterface iface)
         {
             try foreach (ref map; remoteServers)
             {
@@ -594,7 +596,7 @@ class ModbusInterfaceModule : Plugin
             return null;
         }
 
-        ServerMap* findServerByUniversalAddress(ubyte universalAddress) nothrow @nogc
+        ServerMap* findServerByUniversalAddress(ubyte universalAddress)
         {
             return universalAddress in remoteServers;
         }
@@ -741,8 +743,6 @@ class ModbusInterfaceModule : Plugin
 
 
 private:
-
-nothrow @nogc:
 
 struct ModbusFrameInfo
 {

@@ -27,6 +27,7 @@ class ModbusProtocolModule : Plugin
 	class Instance : Plugin.Instance
 	{
 		mixin DeclareInstance;
+    nothrow @nogc:
 
 		Map!(const(char)[], ModbusClient) clients;
 
@@ -38,13 +39,13 @@ class ModbusProtocolModule : Plugin
 			app.console.registerCommand!request_read_device_id("/protocol/modbus/client/request", this, "read-device-id");
 		}
 
-		override void update() nothrow @nogc
+		override void update()
 		{
 			foreach(name, client; clients)
 				client.update();
 		}
 
-		void client_add(Session session, const(char)[] name, const(char)[] _interface, Nullable!bool snoop) nothrow @nogc
+		void client_add(Session session, const(char)[] name, const(char)[] _interface, Nullable!bool snoop)
 		{
 			auto mod_if = app.moduleInstance!InterfaceModule;
 
@@ -55,13 +56,14 @@ class ModbusProtocolModule : Plugin
 				return;
 			}
 
-			String n = name.makeString(defaultAllocator());
+            // TODO: generate name if not supplied
+			String n = name.makeString(app.allocator);
 
-			ModbusClient client = defaultAllocator().allocT!ModbusClient(this, n.move, i, snoop ? snoop.value : false);
+			ModbusClient client = app.allocator.allocT!ModbusClient(this, n.move, i, snoop ? snoop.value : false);
 			clients[client.name[]] = client;
 		}
 
-        void device_add(Session session, const(char)[] id, const(char)[] _client, const(char)[] slave, Nullable!(const(char)[]) name, Nullable!(const(char)[]) _profile) nothrow @nogc
+        void device_add(Session session, const(char)[] id, const(char)[] _client, const(char)[] slave, Nullable!(const(char)[]) name, Nullable!(const(char)[]) _profile)
         {
             if (id in app.devices)
             {
@@ -210,7 +212,7 @@ class ModbusProtocolModule : Plugin
             app.allocator.free(file);
         }
 
-        RequestState request_read(Session session, const(char)[] client, const(char)[] slave, const(char)[] reg_type, ushort first, ushort count = 1) nothrow @nogc
+        RequestState request_read(Session session, const(char)[] client, const(char)[] slave, const(char)[] reg_type, ushort first, ushort count = 1)
         {
             MACAddress addr;
             ModbusClient c = lookupClientAndMAC(session, client, slave, addr);
@@ -250,7 +252,7 @@ class ModbusProtocolModule : Plugin
             return state;
         }
 
-        RequestState request_read_device_id(Session session, const(char)[] client, const(char)[] slave) nothrow @nogc
+        RequestState request_read_device_id(Session session, const(char)[] client, const(char)[] slave)
         {
             MACAddress addr;
             ModbusClient c = lookupClientAndMAC(session, client, slave, addr);
@@ -265,7 +267,7 @@ class ModbusProtocolModule : Plugin
             return state;
         }
 
-        ModbusClient lookupClientAndSlave(Session session, const(char)[] client, const(char)[] slave, out ServerMap* map) nothrow @nogc
+        ModbusClient lookupClientAndSlave(Session session, const(char)[] client, const(char)[] slave, out ServerMap* map)
         {
             auto c = client in clients;
             if(c is null)
@@ -280,7 +282,7 @@ class ModbusProtocolModule : Plugin
             return *c;
         }
 
-        ModbusClient lookupClientAndMAC(Session session, const(char)[] client, const(char)[] slave, out MACAddress addr) nothrow @nogc
+        ModbusClient lookupClientAndMAC(Session session, const(char)[] client, const(char)[] slave, out MACAddress addr)
         {
             ServerMap* map;
             ModbusClient c = lookupClientAndSlave(session, client, slave, map);
@@ -301,7 +303,7 @@ class ModbusProtocolModule : Plugin
 
 class RequestState : FunctionCommandState
 {
-    nothrow @nogc:
+nothrow @nogc:
 
     MutableString!0 slave;
     bool finished = false;
@@ -312,7 +314,7 @@ class RequestState : FunctionCommandState
         this.slave = MutableString!0(slave);
     }
 
-    override CommandCompletionState update() nothrow @nogc
+    override CommandCompletionState update()
     {
         // TODO: how to handle request cancellation? if we bail, then the client will try and call a dead delegate...
 
@@ -321,13 +323,13 @@ class RequestState : FunctionCommandState
         return CommandCompletionState.InProgress;
     }
 
-    void responseHandler(ref const ModbusPDU request, ref ModbusPDU response, MonoTime requestTime, MonoTime responseTime) nothrow @nogc
+    void responseHandler(ref const ModbusPDU request, ref ModbusPDU response, MonoTime requestTime, MonoTime responseTime)
     {
         session.writeLine("Response from ", slave[], " in ", (responseTime - requestTime).as!"msecs", "ms: ", toHexString(response.data[1..$], 2, 4, "_ "));
         finished = true;
     }
 
-    void errorHandler(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime requestTime) nothrow @nogc
+    void errorHandler(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime requestTime)
     {
         Duration reqDuration = getTime() - requestTime;
         if (errorType == ModbusErrorType.Timeout)

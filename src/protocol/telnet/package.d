@@ -21,6 +21,7 @@ class TelnetModule : Plugin
     class Instance : Plugin.Instance
     {
         mixin DeclareInstance;
+    nothrow @nogc:
 
         Map!(const(char)[], TelnetServer) servers;
 
@@ -31,7 +32,7 @@ class TelnetModule : Plugin
             // create telnet server
         }
 
-        override void update() nothrow @nogc
+        override void update()
         {
             foreach (server; servers)
                 server.update();
@@ -40,7 +41,7 @@ class TelnetModule : Plugin
 //                (*i).update();
         }
 
-        void add_server(Session session, const(char)[] name, ushort port) nothrow @nogc
+        void add_server(Session session, const(char)[] name, ushort port)
         {
             auto mod_if = app.moduleInstance!InterfaceModule;
 

@@ -187,6 +187,7 @@ class BridgeInterfaceModule : Plugin
     class Instance : Plugin.Instance
     {
         mixin DeclareInstance;
+    nothrow @nogc:
 
         override void init()
         {
@@ -196,7 +197,7 @@ class BridgeInterfaceModule : Plugin
 
         // /interface/modbus/add command
         // TODO: protocol enum!
-        void add(Session session, const(char)[] name) nothrow @nogc
+        void add(Session session, const(char)[] name)
         {
             auto mod_if = app.moduleInstance!InterfaceModule;
 
@@ -217,7 +218,7 @@ class BridgeInterfaceModule : Plugin
 //            }, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
         }
 
-        void port_add(Session session, const(char)[] bridge, const(char)[] _interface) nothrow @nogc
+        void port_add(Session session, const(char)[] bridge, const(char)[] _interface)
         {
             auto mod_if = app.moduleInstance!InterfaceModule;
 

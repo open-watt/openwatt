@@ -25,6 +25,7 @@ class LogModule : Plugin
 	class Instance : Plugin.Instance
 	{
 		mixin DeclareInstance;
+	nothrow @nogc
 
 		override void init()
 		{
