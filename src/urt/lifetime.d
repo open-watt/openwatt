@@ -1,7 +1,5 @@
 module urt.lifetime;
 
-nothrow @nogc:
-
 
 T* emplace(T)(T* chunk) @safe pure
 {
@@ -192,18 +190,18 @@ template forward(args...)
 }
 
 
-void move(T)(ref T source, ref T target)
+void move(T)(ref T source, ref T target) nothrow @nogc
 {
     moveImpl(target, source);
 }
 
-T move(T)(return scope ref T source)
+T move(T)(return scope ref T source) nothrow @nogc
 {
     return moveImpl(source);
 }
 
 
-private void moveImpl(T)(scope ref T target, return scope ref T source)
+private void moveImpl(T)(scope ref T target, return scope ref T source) nothrow @nogc
 {
     import core.internal.traits : hasElaborateDestructor;
 
@@ -218,7 +216,7 @@ private void moveImpl(T)(scope ref T target, return scope ref T source)
     moveEmplaceImpl(target, source);
 }
 
-private T moveImpl(T)(return scope ref T source)
+private T moveImpl(T)(return scope ref T source) nothrow @nogc
 {
     // Properly infer safety from moveEmplaceImpl as the implementation below
     // might void-initialize pointers in result and hence needs to be @trusted
@@ -227,7 +225,7 @@ private T moveImpl(T)(return scope ref T source)
     return trustedMoveImpl(source);
 }
 
-private T trustedMoveImpl(T)(return scope ref T source) @trusted
+private T trustedMoveImpl(T)(return scope ref T source) @trusted nothrow @nogc
 {
     T result = void;
     moveEmplaceImpl(result, source);
@@ -394,7 +392,7 @@ template _d_delstructImpl(T)
 
 // wipes source after moving
 pragma(inline, true)
-private void wipe(T, Init...)(return scope ref T source, ref const scope Init initializer) @trusted
+private void wipe(T, Init...)(return scope ref T source, ref const scope Init initializer) @trusted nothrow @nogc
 if (!Init.length ||
     ((Init.length == 1) && (is(immutable T == immutable Init[0]))))
 {
