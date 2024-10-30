@@ -10,14 +10,33 @@ version (Windows)
 
 nothrow @nogc:
 
-struct MonoTime
+
+enum Clock
 {
-    nothrow @nogc:
+    SystemTime,
+    Monotonic,
+}
+
+alias MonoTime = Time!(Clock.Monotonic);
+alias SysTime = Time!(Clock.SystemTime);
+
+struct Time(Clock clock)
+{
+nothrow @nogc:
 
     ulong ticks;
 
     bool opCast(T : bool)() const
         => ticks != 0;
+
+    T opCast(T)() const
+        if (is(T == Time!c, Clock c) && c != clock)
+    {
+        static if (clock == Clock.Monotonic && c == Clock.SystemTime)
+            return SysTime(ticks + bootFileTime);
+        else
+            return MonoTime(ticks - bootFileTime);
+    }
 
     bool opEquals(MonoTime b) const pure
         => ticks == b.ticks;
@@ -25,11 +44,22 @@ struct MonoTime
     int opCmp(MonoTime b) const pure
         => ticks < b.ticks ? -1 : ticks > b.ticks ? 1 : 0;
 
-    Duration opBinary(string op)(MonoTime rhs) const pure if (op == "-")
-        => Duration(ticks - rhs.ticks);
+    Duration opBinary(string op, Clock c)(Time!c rhs) const pure if (op == "-")
+    {
+        ulong t1 = ticks;
+        ulong t2 = rhs.ticks;
+        static if (clock != c)
+        {
+            static if (clock == Clock.Monotonic)
+                t1 += bootFileTime;
+            else
+                t2 += bootFileTime;
+        }
+        return Duration(t1 - t2);
+    }
 
-    MonoTime opBinary(string op)(Duration rhs) const pure if (op == "+" || op == "-")
-        => MonoTime(mixin("ticks " ~ op ~ " rhs.ticks"));
+    Time opBinary(string op)(Duration rhs) const pure if (op == "+" || op == "-")
+        => Time(mixin("ticks " ~ op ~ " rhs.ticks"));
 
     void opOpAssign(string op)(Duration rhs) pure if (op == "+" || op == "-")
     {
@@ -234,11 +264,23 @@ MonoTime getTime()
 {
     version (Windows)
     {
-        import core.sys.windows.windows;
-
         LARGE_INTEGER now;
         QueryPerformanceCounter(&now);
         return MonoTime(now.QuadPart);
+    }
+    else
+    {
+        static assert(false, "TODO");
+    }
+}
+
+SysTime getSysTime()
+{
+    version (Windows)
+    {
+        FILETIME ft;
+        GetSystemTimePreciseAsFileTime(&ft);
+        return SysTime(*cast(ulong*)&ft);
     }
     else
     {
@@ -250,34 +292,29 @@ MonoTime getTime()
 DateTime getDateTime()
 {
     version (Windows)
-    {
-        FILETIME ftime;
-        GetSystemTimePreciseAsFileTime(&ftime);
-        return fileTimeToDateTime(*cast(ulong*)&ftime);
-    }
+        return fileTimeToDateTime(getSysTime());
     else
         static assert(false, "TODO");
 }
 
-DateTime getDateTime(MonoTime time)
+DateTime getDateTime(SysTime time)
 {
     version (Windows)
-        return fileTimeToDateTime(bootFileTime + time.ticks);
+        return fileTimeToDateTime(time);
     else
         static assert(false, "TODO");
 }
 
 Duration getAppTime()
-=> getTime() - startTime;
+    => getTime() - startTime;
 
 Duration appTime(MonoTime t)
-=> t - startTime;
+    => t - startTime;
+Duration appTime(SysTime t)
+    => cast(MonoTime)t - startTime;
 
 Duration abs(Duration d) pure
-=> Duration(d.ticks < 0 ? -d.ticks : d.ticks);
-
-long toNanoseconds(Duration dur) pure
-=> dur.ticks *= nsecMultiplier;
+    => Duration(d.ticks < 0 ? -d.ticks : d.ticks);
 
 
 private:
@@ -364,13 +401,13 @@ unittest
 
 version (Windows)
 {
-    DateTime fileTimeToDateTime(ulong ftime)
+    DateTime fileTimeToDateTime(SysTime ftime)
     {
         version (BigEndian)
             static assert(false, "Only works in little endian!");
 
         SYSTEMTIME stime;
-        FileTimeToSystemTime(cast(FILETIME*)&ftime, &stime);
+        FileTimeToSystemTime(cast(FILETIME*)&ftime.ticks, &stime);
 
         DateTime dt;
         dt.year = stime.wYear;
@@ -380,7 +417,7 @@ version (Windows)
         dt.hour = cast(ubyte)stime.wHour;
         dt.minute = cast(ubyte)stime.wMinute;
         dt.second = cast(ubyte)stime.wSecond;
-        dt.ns = (ftime % 10_000_000) * 100;
+        dt.ns = (ftime.ticks % 10_000_000) * 100;
 
         debug assert(stime.wMilliseconds == dt.msec);
 
