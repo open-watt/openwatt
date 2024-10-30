@@ -71,12 +71,14 @@ bool startsWith(const(char)[] s, const(char)[] prefix) pure nothrow @nogc
 {
     if (s.length < prefix.length)
         return false;
-    for (size_t i = 0; i < prefix.length; ++i)
-    {
-        if (s[i] != prefix[i])
-            return false;
-    }
-    return true;
+    return s[0 .. prefix.length] == prefix[];
+}
+
+bool endsWith(const(char)[] s, const(char)[] suffix) pure nothrow @nogc
+{
+    if (s.length < suffix.length)
+        return false;
+    return s[$ - suffix.length .. $] == suffix[];
 }
 
 ref inout(char) popFront(ref inout(char)[] buffer) pure nothrow @nogc

@@ -1,6 +1,7 @@
 module urt.mem;
 
 public import core.lifetime : copyEmplace;
+public import core.stdc.stddef : wchar_t;
 
 public import urt.lifetime : emplace, moveEmplace, forward, move;
 public import urt.mem.allocator;
@@ -20,4 +21,10 @@ nothrow @nogc:
     int strcmp(const char* s1, const char* s2);
     char* strcpy(char* dest, const char* src);
     char* strcat(char* dest, const char* src);
+
+    size_t wcslen(const wchar_t* s);
+//    wchar_t* wcscpy(wchar_t* dest, const wchar_t* src);
+//    wchar_t* wcscat(wchar_t* dest, const wchar_t* src);
+//    wchar_t* wcsncpy(wchar_t* dest, const wchar_t* src, size_t n);
+//    wchar_t* wcsncat(wchar_t* dest, const wchar_t* src, size_t n);
 }
