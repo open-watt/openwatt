@@ -10,10 +10,14 @@ alias SystemTime = void;
 version(Windows)
 {
     import core.sys.windows.winbase;
+    import core.sys.windows.windows;
     import core.sys.windows.windef : MAX_PATH;
     import core.sys.windows.winnt;
 
     import urt.string : twstringz;
+
+    enum FILE_NAME_OPENED = 0x8;
+    extern(C) { nothrow @nogc: int GetFinalPathNameByHandleW(void *hFile, wchar *lpszFilePath, uint cchFilePath, uint dwFlags); }
 }
 else
 {
