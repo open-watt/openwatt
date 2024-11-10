@@ -10,6 +10,8 @@ import urt.mem;
 import urt.string;
 import urt.string.ansi;
 import urt.util;
+import urt.file;
+import urt.result;
 
 class Session
 {
@@ -568,6 +570,42 @@ protected:
             m_history.pushBack(MutableString!0(line));
             if (m_history.length > 50)
                 m_history.popFront();
+
+            if (m_historyFile.is_open)
+            {
+                static bool WriteToFile(char[] text, ref File file) {
+                    size_t bytesWritten;
+                    Result result = file.write(text, bytesWritten);
+                    if (result.succeeded && bytesWritten == text.length)
+                        return true;
+
+                    writeError("Error writing session history.");
+                    return false;
+                };
+
+                m_historyFile.set_pos(0);
+                size_t totalSize;
+                bool success = true;
+                foreach (entry; m_history)
+                {
+                    success = WriteToFile(entry, m_historyFile);
+                    if (!success)
+                        break;
+
+                    totalSize += entry.length;
+
+                    success = WriteToFile(cast(char[])"\n", m_historyFile);
+                    if (!success)
+                        break;
+
+                    totalSize += 1;
+                }
+
+                if (success)
+                    m_historyFile.set_size(totalSize);
+                else
+                    m_historyFile.close();
+            }
         }
         m_historyCursor = cast(uint)m_history.length;
     }
@@ -593,6 +631,7 @@ protected:
     Array!(MutableString!0) m_history;
     uint m_historyCursor = 0;
     MutableString!0 m_historyHead;
+    File m_historyFile;
 
     Array!(Console*) m_sessionStack;
 

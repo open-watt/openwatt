@@ -8,6 +8,10 @@ import manager.console;
 import manager.console.session;
 
 import router.stream;
+import urt.file;
+import urt.result;
+import urt.log;
+import urt.mem.allocator;
 
 nothrow @nogc:
 
@@ -36,10 +40,15 @@ nothrow @nogc:
         ptrdiff_t sent = clientStream.write(introduction);
 
         assert(sent == 15);
+
+        parseHistory();
     }
 
     ~this()
     {
+        if (m_historyFile.is_open())
+            m_historyFile.close();
+
         closeSession();
     }
 
@@ -274,5 +283,48 @@ private:
 
         char[] prompt = tformat("{0, ?1}{2}{3}{@5, ?4}", Clear, withErase, m_prompt, m_buffer, m_position < m_buffer.length, "\x1b[{6}D", m_buffer.length - m_position);
         ptrdiff_t sent = m_stream.write(prompt);
+    }
+
+    final void parseHistory()
+    {
+        Result result = open(m_historyFile, ".telnet_history", FileOpenMode.ReadWrite);
+        if (result.failed)
+        {
+            writeError("Error opening telnet history :", result.systemCode);
+            return;
+        }
+
+        size_t fileSize = m_historyFile.get_size();
+        
+        void[] mem = defaultAllocator().alloc(fileSize);
+        if (mem == null)
+        {
+            writeError("Error allocating memory for telnet history :", result.systemCode);
+            return;
+        }
+
+        scope(exit)
+            defaultAllocator().free(mem);
+
+        m_historyFile.read(mem, fileSize);
+
+        char[]buff = cast(char[])mem;
+        outer: while (buff.length > 0)
+        {
+            foreach (i, c; buff)
+            {
+                if (c == '\r' || c == '\n')
+                {
+                    immutable size_t skip = buff[i] == '\r' && buff[i+1] == '\n' ? 2 : 1;
+
+                    if (buff.length == skip)
+                        break outer;
+
+                    m_history ~= MutableString!0(buff.takeFront(i + skip).trim);
+                    break;
+                }
+            }
+        }
+        m_historyCursor = cast(uint)m_history.length;
     }
 }
