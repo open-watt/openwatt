@@ -170,7 +170,7 @@ ubyte log2(T)(T x)
 
 enum Default = DefaultInit.init;
 
-struct Value(C)
+struct InPlace(C)
 	if (is(C == class))
 {
 	import core.lifetime;

@@ -450,6 +450,9 @@
     <DCompile Include="src\urt\encoding.d">
       <Filter>src\urt</Filter>
     </DCompile>
+    <DCompile Include="src\urt\fibre.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\dns\mdns.d">
       <Filter>src\protocol\dns</Filter>
     </DCompile>

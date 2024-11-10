@@ -128,6 +128,7 @@
     <DCompile Include="src\urt\digest\md5.d" />
     <DCompile Include="src\urt\encoding.d" />
     <DCompile Include="src\urt\endian.d" />
+    <DCompile Include="src\urt\fibre.d" />
     <DCompile Include="src\urt\file.d" />
     <DCompile Include="src\urt\hash.d" />
     <DCompile Include="src\urt\format\json.d" />
@@ -166,6 +167,7 @@
     <DCompile Include="src\urt\string\string.d" />
     <DCompile Include="src\urt\string\tailstring.d" />
     <DCompile Include="src\urt\string\uni.d" />
+    <DCompile Include="src\urt\system.d" />
     <DCompile Include="src\urt\time.d" />
     <DCompile Include="src\urt\traits.d" />
     <DCompile Include="src\urt\util.d" />
