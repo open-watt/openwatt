@@ -4,11 +4,17 @@ public import urt.string.ascii;
 public import urt.string.string;
 public import urt.string.tailstring;
 
+// seful string operations defined elsewhere
+public import urt.array : empty, popFront, popBack, takeFront, takeBack;
+public import urt.mem : strlen;
+
+
 enum TempStringBufferLen = 1024;
 enum TempStringMaxLen = TempStringBufferLen / 2;
 
 static char[TempStringBufferLen] s_tempStringBuffer;
 static size_t s_tempStringBufferPos = 0;
+
 
 char[] allocTempString(size_t len) nothrow @nogc
 {
@@ -23,8 +29,6 @@ char[] allocTempString(size_t len) nothrow @nogc
 	s_tempStringBufferPos = len;
 	return s_tempStringBuffer[0 .. len];
 }
-
-public import urt.mem : strlen;
 
 char* tstringz(const(char)[] str) nothrow @nogc
 {
@@ -44,11 +48,6 @@ wchar* twstringz(const(char)[] str) nothrow @nogc
         buffer[i] = c;
     buffer[str.length] = 0;
     return buffer.ptr;
-}
-
-bool empty(T)(T[] arr) pure nothrow @nogc
-{
-    return arr.length == 0;
 }
 
 int icmp(const(char)[] a, const(char)[] b) pure nothrow @nogc
@@ -79,20 +78,6 @@ bool endsWith(const(char)[] s, const(char)[] suffix) pure nothrow @nogc
     if (s.length < suffix.length)
         return false;
     return s[$ - suffix.length .. $] == suffix[];
-}
-
-ref inout(char) popFront(ref inout(char)[] buffer) pure nothrow @nogc
-{
-	debug assert(buffer.length > 0);
-	buffer = buffer.ptr[1..buffer.length];
-	return buffer.ptr[-1];
-}
-
-ref inout(char) popBack(ref inout(char)[] buffer) pure nothrow @nogc
-{
-	debug assert(buffer.length > 0);
-	buffer = buffer.ptr[0..buffer.length - 1];
-	return buffer.ptr[buffer.length];
 }
 
 inout(char)[] trim(bool Front = true, bool Back = true)(inout(char)[] s) pure nothrow @nogc
@@ -126,22 +111,6 @@ inout(char)[] trimComment(char Delimiter)(inout(char)[] s)
 	while(i > 0 && (s[i-1] == ' ' || s[i-1] == '\t'))
 		--i;
 	return s[0 .. i];
-}
-
-inout(char)[] takeFront(ref inout(char)[] s, size_t count) pure nothrow @nogc
-{
-	assert(count <= s.length);
-	inout(char)[] t = s.ptr[0 .. count];
-	s = s.ptr[count .. s.length];
-	return t;
-}
-
-inout(char)[] takeBack(ref inout(char)[] s, size_t count) pure nothrow @nogc
-{
-	assert(count <= s.length);
-	inout(char)[] t = s.ptr[s.length - count .. s.length];
-	s = s.ptr[0 .. s.length - count];
-	return t;
 }
 
 inout(char)[] takeLine(ref inout(char)[] s) pure nothrow @nogc

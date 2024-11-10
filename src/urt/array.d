@@ -22,6 +22,57 @@ T[] pop(T)(ref T[] arr, ptrdiff_t n)
 //Slice<T> take(ptrdiff_t n)
 //Slice<T> drop(ptrdiff_t n)
 
+bool empty(T)(T[] arr) pure nothrow @nogc
+{
+    return arr.length == 0;
+}
+
+ref inout(T) popFront(T)(ref inout(T)[] buffer) pure nothrow @nogc
+{
+	debug assert(buffer.length > 0);
+	buffer = buffer.ptr[1..buffer.length];
+	return buffer.ptr[-1];
+}
+
+ref inout(T) popBack(T)(ref inout(T)[] buffer) pure nothrow @nogc
+{
+	debug assert(buffer.length > 0);
+	buffer = buffer.ptr[0..buffer.length - 1];
+	return buffer.ptr[buffer.length];
+}
+
+inout(T)[] takeFront(T)(ref inout(T)[] s, size_t count) pure nothrow @nogc
+{
+	assert(count <= s.length);
+	inout(T)[] t = s.ptr[0 .. count];
+	s = s.ptr[count .. s.length];
+	return t;
+}
+
+ref inout(T)[N] takeFront(size_t N, T)(ref inout(T)[] s) pure nothrow @nogc
+{
+	assert(N <= s.length);
+	inout(T)* t = s.ptr;
+	s = s.ptr[N .. s.length];
+	return t[0..N];
+}
+
+inout(T)[] takeBack(T)(ref inout(T)[] s, size_t count) pure nothrow @nogc
+{
+	assert(count <= s.length);
+	inout(T)[] t = s.ptr[s.length - count .. s.length];
+	s = s.ptr[0 .. s.length - count];
+	return t;
+}
+
+ref inout(T)[N] takeBack(size_t N, T)(ref inout(T)[] s) pure nothrow @nogc
+{
+	assert(N <= s.length);
+	inout(T)* t = s.ptr + s.length - N;
+	s = s.ptr[0 .. s.length - N];
+	return t[0..N];
+}
+
 bool exists(T)(const(T)[] arr, auto ref const T el, size_t *pIndex = null)
 {
     foreach (i, ref e; arr)
@@ -128,7 +179,16 @@ struct Array(T, size_t EmbedCount = 0)
 
     // constructors
 
-    this(this) @disable;
+    // TODO: DELETE POSTBLIT!
+    this(this)
+    {
+        T[] t = this[];
+
+        ptr = null;
+        _length = 0;
+        ec.allocCount = 0;
+        this = t[];
+    }
 
     this(ref typeof(this) val)
     {
@@ -352,8 +412,8 @@ nothrow @nogc:
         }
     }
 
-    void remove(const(T)* pItem)                { remove(ptr[0 .. _length].indexOfElement(pItem)); }
-    void removeFirst(ref const T item)          { remove(ptr[0 .. _length].findFirst(item)); }
+    void remove(const(T)* pItem)                    { remove(ptr[0 .. _length].indexOfElement(pItem)); }
+    void removeFirst(U)(ref const U item)           { remove(ptr[0 .. _length].findFirst(item)); }
 
     void removeSwapLast(size_t i)
     {
@@ -370,8 +430,8 @@ nothrow @nogc:
         }
     }
 
-    void removeSwapLast(const(T)* pItem)        { removeSwapLast(ptr[0 .. _length].indexOfElement(pItem)); }
-    void removeFirstSwapLast(ref const T item)  { removeSwapLast(ptr[0 .. _length].findFirst(item)); }
+    void removeSwapLast(const(T)* pItem)            { removeSwapLast(ptr[0 .. _length].indexOfElement(pItem)); }
+    void removeFirstSwapLast(U)(ref const U item)   { removeSwapLast(ptr[0 .. _length].findFirst(item)); }
 
     inout(T)[] getBuffer() inout
     {

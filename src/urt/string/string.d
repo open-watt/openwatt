@@ -13,9 +13,27 @@ enum MaxStringLen = 0x3FFF;
 
 
 //enum String StringLit(string s) = s.makeString;
-template StringLit(S...) if (S.length == 1 && is(typeof(S[0]) : const(char)[]))
+template StringLit(const(char)[] lit, bool zeroTerminate = true)
 {
-    enum String StringLit = S.makeString;
+    private enum LenBytes = lit.length < 128 ? 1 : 2;
+    private enum LitLen = LenBytes + lit.length + (zeroTerminate ? 1 : 0);
+    private enum char[LitLen] LiteralData = () {
+        char[LitLen] buffer;
+        if (LenBytes == 2)
+        {
+            buffer[0] = cast(char)(lit.length & 0x7F) | 0x80;
+            buffer[1] = cast(char)(lit.length >> 7) | 0x80;
+        }
+        else
+            buffer[0] = cast(char)(lit.length & 0x7F);
+        buffer[LenBytes .. LenBytes + lit.length] = lit[];
+        static if (zeroTerminate)
+            buffer[$-1] = '\0'; // add a zero terminator for good measure
+        return buffer;
+    }();
+    private __gshared immutable literal = LiteralData;
+
+    enum String StringLit = String(literal.ptr + LenBytes, null);
 }
 
 
@@ -61,7 +79,12 @@ nothrow @nogc:
 
     this(typeof(null)) pure
     {
-        ptr = null;
+        this.ptr = null;
+    }
+
+    this(ref inout typeof(this) rhs) inout pure
+    {
+        this.ptr = rhs.ptr;
     }
 
 /+
@@ -177,7 +200,7 @@ private:
 
     this(inout(char)* str, typeof(null)) inout pure
     {
-        ptr = str;
+        this.ptr = str;
     }
 }
 
@@ -192,7 +215,14 @@ nothrow @nogc:
     BaseString!char _super;
     alias _super this;
 
-    this(this) @disable;
+    // TODO: DELETE POSTBLIT!
+    this(this)
+    {
+        // HACK! THIS SHOULDN'T EXIST, USE COPY-CTOR INSTEAD
+        const(char)[] t = this[];
+        ptr = null;
+        this = t[];
+    }
 
     this(ref const typeof(this) rh)
     {

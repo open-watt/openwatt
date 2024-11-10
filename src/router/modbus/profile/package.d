@@ -255,6 +255,8 @@ struct ComponentTemplate
     String template_;
     Array!ElementTemplate elements;
 
+    this(this) @disable;
+
     this(ref typeof(this) rh) nothrow @nogc
     {
         this.id = rh.id[].makeString(defaultAllocator());

@@ -37,7 +37,9 @@ nothrow @nogc:
 
     Array!Subscriber subscribers;
 
-    const(Value) value() const
+    this(this) @disable;
+
+    ref const(Value) value() const
     {
         return latest;
     }

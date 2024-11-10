@@ -40,6 +40,7 @@ nothrow @nogc:
 //    Command[] commands;
 
     this() @disable;
+    this(this) @disable;
 
     this(ApplicationInstance appInstance, String identifier, NoGCAllocator allocator, NoGCAllocator tempAllocator = null)
     {
