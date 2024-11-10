@@ -204,7 +204,7 @@ nothrow @nogc:
         if (roundRobinIndex < 0)
         {
             ubyte[15] message = 0;
-            message[0..2] = (roundRobinIndex++ < -5 ? 0xFCE1 : 0xFBE2).nativeToBigEndian;
+            message[0..2] = ushort(roundRobinIndex++ < -5 ? 0xFCE1 : 0xFBE2).nativeToBigEndian;
             message[2..4] = id.nativeToBigEndian;
             message[4] = sig;
             iface.send(MACAddress.broadcast, message[], EtherType.ENMS, ENMS_SubType.TeslaTWC);
@@ -237,7 +237,7 @@ nothrow @nogc:
 
             debug writeDebugf("Charger {0}({1,04x}) - SN: {2}\n   {3}/{4}/{5}V  {6}A({7}A)  {8}W - {9}\n   VIN {10}", c.name, c.id, c.serialNumber[], c.voltage1, c.voltage2, c.voltage3, cast(float)c.current/100, cast(float)c.maxCurrent / 100, c.totalPower, c.chargerState(), c.vin[]);
 
-            message[0..2] = 0xFBE0.nativeToBigEndian;
+            message[0..2] = ushort(0xFBE0).nativeToBigEndian;
 
             switch (c.state)
             {
