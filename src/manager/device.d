@@ -1,6 +1,7 @@
 module manager.device;
 
 import urt.array;
+import urt.lifetime;
 import urt.log;
 import urt.string;
 import urt.time;
@@ -17,43 +18,18 @@ nothrow @nogc:
 
 
 
-struct Device
+extern(C++)
+class Device : Component
 {
+extern(D):
 nothrow @nogc:
 
-	String id;
-	String name;
-	Array!(Component*) components;
+    this(String id)
+    {
+        super(id.move);
+    }
 
 	Array!Sampler samplers;
-
-//	Server[] servers;
-
-    this(this) @disable;
-
-    void addComponent(Component* component) // TODO: include sampler here...
-    {
-        foreach (Component* c; components)
-        {
-            if (c.name[] == component.name[])
-            {
-                debug assert(false, "Component '" ~ component.name ~ "' already exists in device '" ~ name ~ "'");
-                assert(false, "Already exists");
-                return;
-            }
-        }
-        components.pushBack(component);
-    }
-
-    Component* findComponent(const(char)[] name)
-    {
-        foreach (Component* c; components)
-        {
-            if (c.name[] == name[])
-                return c;
-        }
-        return null;
-    }
 
 	bool finalise()
 	{
