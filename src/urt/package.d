@@ -24,6 +24,9 @@ void crt_bootup()
     import urt.time : initClock;
     initClock();
 
+    import urt.rand;
+    initRand();
+
     import urt.dbg : setupAssertHandler;
     setupAssertHandler();
 
