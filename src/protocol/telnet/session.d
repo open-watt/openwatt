@@ -290,40 +290,31 @@ private:
         Result result = open(m_historyFile, ".telnet_history", FileOpenMode.ReadWrite);
         if (result.failed)
         {
-            writeError("Error opening telnet history :", result.systemCode);
+            writeError("Error opening telnet history :", result.get_FileResult);
             return;
         }
 
         size_t fileSize = m_historyFile.get_size();
-        
-        void[] mem = defaultAllocator().alloc(fileSize);
+
+        char[] mem = cast(char[])allocator.alloc(fileSize);
         if (mem == null)
         {
-            writeError("Error allocating memory for telnet history :", result.systemCode);
+            writeError("Error allocating memory for telnet history");
             return;
         }
 
         scope(exit)
-            defaultAllocator().free(mem);
+            allocator.free(mem);
 
         m_historyFile.read(mem, fileSize);
 
-        char[]buff = cast(char[])mem;
-        outer: while (buff.length > 0)
+        char[] buff = mem.trim;
+        while (!buff.empty)
         {
-            foreach (i, c; buff)
-            {
-                if (c == '\r' || c == '\n')
-                {
-                    immutable size_t skip = buff[i] == '\r' && buff[i+1] == '\n' ? 2 : 1;
-
-                    if (buff.length == skip)
-                        break outer;
-
-                    m_history ~= MutableString!0(buff.takeFront(i + skip).trim);
-                    break;
-                }
-            }
+            // take the next line
+            const(char)[] line = buff.split!('\n', false);
+            if (!line.empty)
+                m_history ~= MutableString!0(line);
         }
         m_historyCursor = cast(uint)m_history.length;
     }
