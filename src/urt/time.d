@@ -154,6 +154,53 @@ struct Duration
         => cast(double)this;
 }
 
+struct Timer(Duration timeout = Duration.zero)
+{
+nothrow @nogc:
+    MonoTime startTime;
+
+    static if (timeout == Duration.zero)
+        alias m_timeout = timeout;
+    else
+    {
+        Duration m_timeout;
+
+        void setTimeout(Duration timeout)
+        {
+            m_timeout = timeout;
+        }
+    }
+
+    void reset()
+    {
+        startTime = getTime();
+    }
+    void reset(MonoTime now)
+    {
+        startTime = now;
+    }
+
+    bool expired() const
+        => getTime() - startTime >= m_timeout;
+    bool expired(MonoTime now) const
+        => now - startTime >= m_timeout;
+
+    Duration elapsed() const
+        => getTime() - startTime;
+    Duration elapsed(MonoTime now) const
+        => now - startTime;
+
+    Duration remaining() const
+        => m_timeout - (getTime() - startTime);
+    Duration remaining(MonoTime now) const
+        => m_timeout - (now - startTime);
+
+    Duration expiredDuration() const
+        => -remaining();
+    Duration expiredDuration(MonoTime now) const
+        => -remaining(now);
+}
+
 struct DateTime
 {
 nothrow @nogc:
