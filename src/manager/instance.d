@@ -54,6 +54,7 @@ class ApplicationInstance
         console.setPrompt(StringLit!"enermon > ");
 
         console.registerCommand!log_level("/system", this);
+        console.registerCommand!set_hostname("/system", this);
 
         console.registerCommand!device_print("/device", this, "print");
     }
