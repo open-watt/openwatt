@@ -17,9 +17,15 @@ import urt.string;
 
 enum CommandCompletionState : ubyte
 {
-    InProgress, ///< Command is still in progress
-    Finished,   ///< Command execution has finished
-    Cancelled,  ///< Command was aborted for some reason
+    InProgress,         ///< Command is still in progress
+    CancelRequested,    ///< A cancel has been requested
+    CancelPending,      ///< Waiting for cancellation to complete
+
+    // These are finishing states, command will stop
+    Finished,           ///< Command execution has finished
+    Cancelled,          ///< Command was aborted for some reason
+    Error,              ///< Command was aborted for some reason
+    Timeout,            ///< Command was aborted for some reason
 }
 
 class CommandState
@@ -28,7 +34,7 @@ nothrow @nogc:
 
     Session session;
     Command command;
-    bool cancelPending = false;
+    CommandCompletionState state;
 
     this(Session session, Command command)
     {
