@@ -40,8 +40,14 @@ nothrow @nogc:
         length = cast(ushort)data.length;
     }
 
-    const(void)[] data() const
+    const(void)[] data() const @property
         => ptr[0 .. length];
+
+    void data(const(void[]) payload) @property
+    {
+        ptr = payload.ptr;
+        length = cast(ushort)payload.length;
+    }
 
     Packet* clone(NoGCAllocator allocator = defaultAllocator()) const
     {
