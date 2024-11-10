@@ -442,6 +442,9 @@ struct DefFormat(T)
 //		}
 		else static if (is(T == void[]) || is(T == const(void)[]))
         {
+            if (!value.length)
+                return 0;
+
             int grp1 = 1, grp2 = 0;
             if (format.length && format[0].isNumeric)
             {
@@ -563,6 +566,50 @@ struct DefFormat(T)
 		{
 			return defToString!(Unqual!T)(cast()value, buffer, format, formatArgs);
 		}
+        else static if (is(T == struct))
+        {
+            // general structs
+            size_t len = T.stringof.length + 1;
+            if (buffer.ptr)
+            {
+                if (buffer.length < T.stringof.length + 1)
+                    return 0;
+                buffer[0 .. T.stringof.length] = T.stringof;
+                buffer[T.stringof.length] = '(';
+            }
+
+            static foreach (i; 0 .. value.tupleof.length)
+            {{
+                static if (i > 0)
+                {
+                    if (buffer.ptr)
+                    {
+                        if (len + 1 >= buffer.length)
+                            return len;
+                        buffer[len .. len + 2] = ", ";
+                    }
+                    len += 2;
+                }
+
+                FormatArg arg = FormatArg(value.tupleof[i]);
+                if (buffer.ptr)
+                {
+                    size_t argLen = arg.getString(buffer.ptr[len .. buffer.length], null, null).length;
+                    len += argLen;
+                }
+                else
+                    len += arg.getLength(format, null);
+
+            }}
+
+            if (buffer.ptr)
+            {
+                if (len == buffer.length)
+                    return 0;
+                buffer[len] = ')';
+            }
+            return ++len;
+        }
 		else
 			static assert(false, "Not implemented for type: ", T.stringof);
 	}
