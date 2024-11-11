@@ -128,14 +128,15 @@ pragma(inline, true) ubyte[1] nativeToEndian(bool little, T)(T u8)
 ubyte[2] nativeToEndian(bool little, T)(T u16)
     if (is(T == ushort) || is(T == short) || is(T == wchar))
 {
+    ushort i = u16;
     static if (little)
     {
-        ubyte[2] res = [ u16 & 0xFF, u16 >> 8 ];
+        ubyte[2] res = [ i & 0xFF, i >> 8 ];
         return res;
     }
     else
     {
-        ubyte[2] res = [ u16 >> 8, u16 & 0xFF ];
+        ubyte[2] res = [ i >> 8, i & 0xFF ];
         return res;
     }
 }
