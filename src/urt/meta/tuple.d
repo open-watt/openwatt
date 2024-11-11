@@ -313,6 +313,8 @@ template Tuple(Specs...)
 				}
 				else
 				{
+					import urt.util : swap;
+
 					// Use swap-and-destroy to optimize rvalue assignment
 					swap!(Tuple!Types)(this, rhs);
 				}
@@ -639,3 +641,18 @@ alias extractType(alias spec) = spec.Type;
 alias extractName(alias spec) = spec.name;
 
 alias Identity(alias A) = A;
+
+enum areBuildCompatibleTuples(Tup1, Tup2) = isTuple!Tup2 && is(typeof({
+                                                                        static assert(Tup1.Types.length == Tup2.Types.length);
+                                                                        static foreach (i; 0 .. Tup1.Types.length)
+                                                                            static assert(isBuildable!(Tup1.Types[i], Tup2.Types[i]));
+                                                                      }));
+enum isBuildable(T, U) = is(typeof({ U u = U.init; T t = u; }));
+
+private template OriginalType(T)
+{
+    static if (is(T EType == enum))
+        alias OriginalType = .OriginalType!EType;
+    else
+        alias OriginalType = T;
+}

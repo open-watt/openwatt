@@ -7,21 +7,21 @@ nothrow @nogc:
 
 ref T swap(T)(ref T a, return ref T b)
 {
-	import core.lifetime : move;
+    import urt.lifetime : move, moveEmplace;
 
-	auto t = a.move;
-	a = b.move;
-	b = t.move;
-	return b;
+    T t = a.move;
+    a = b.move;
+    b = t.move;
+    return b;
 }
 
 T swap(T)(ref T a, T b)
 {
-	import core.lifetime : move;
+    import urt.lifetime : move, moveEmplace;
 
-	auto t = a.move;
-	a = b.move;
-	return t.move;
+    auto t = a.move;
+    a = b.move;
+    return t.move;
 }
 
 pure:
