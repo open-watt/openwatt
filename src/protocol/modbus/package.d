@@ -306,7 +306,6 @@ class RequestState : FunctionCommandState
 nothrow @nogc:
 
     MutableString!0 slave;
-    bool finished = false;
 
     this(Session session, const(char)[] slave)
     {
@@ -318,15 +317,13 @@ nothrow @nogc:
     {
         // TODO: how to handle request cancellation? if we bail, then the client will try and call a dead delegate...
 
-        if (finished)
-            return CommandCompletionState.Finished;
-        return CommandCompletionState.InProgress;
+        return state;
     }
 
     void responseHandler(ref const ModbusPDU request, ref ModbusPDU response, MonoTime requestTime, MonoTime responseTime)
     {
         session.writeLine("Response from ", slave[], " in ", (responseTime - requestTime).as!"msecs", "ms: ", toHexString(response.data[1..$], 2, 4, "_ "));
-        finished = true;
+        state = CommandCompletionState.Finished;
     }
 
     void errorHandler(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime requestTime)
@@ -335,9 +332,11 @@ nothrow @nogc:
         if (errorType == ModbusErrorType.Timeout)
         {
             session.writeLine("Timeout waiting for response from ", slave[], " after ", reqDuration.as!"msecs", "ms");
-            finished = true;
+            state = CommandCompletionState.Timeout;
         }
         else if (errorType == ModbusErrorType.Retrying)
             session.writeLine("Timeout (", reqDuration.as!"msecs", "ms); retrying...");
+        else
+            state = CommandCompletionState.Error;
     }
 }
