@@ -154,50 +154,46 @@ struct Duration
         => cast(double)this;
 }
 
-struct Timer(Duration timeout = Duration.zero)
+struct Timer(uint milliseconds = 0)
 {
 nothrow @nogc:
     MonoTime startTime;
 
-    static if (timeout == Duration.zero)
-        alias m_timeout = timeout;
-    else
+    static if (milliseconds == 0)
     {
-        Duration m_timeout;
+        Duration timeout;
 
         void setTimeout(Duration timeout)
         {
-            m_timeout = timeout;
+            this.timeout = timeout;
         }
     }
 
-    void reset()
-    {
-        startTime = getTime();
-    }
-    void reset(MonoTime now)
+    void reset(MonoTime now = getTime())
     {
         startTime = now;
     }
 
-    bool expired() const
-        => getTime() - startTime >= m_timeout;
-    bool expired(MonoTime now) const
-        => now - startTime >= m_timeout;
+    bool expired(MonoTime now = getTime()) const
+    {
+        static if (milliseconds != 0)
+            return now - startTime >= milliseconds.msecs;
+        else
+            return now - startTime >= timeout;
+    }
 
-    Duration elapsed() const
-        => getTime() - startTime;
-    Duration elapsed(MonoTime now) const
+    Duration elapsed(MonoTime now = getTime()) const
         => now - startTime;
 
-    Duration remaining() const
-        => m_timeout - (getTime() - startTime);
-    Duration remaining(MonoTime now) const
-        => m_timeout - (now - startTime);
+    Duration remaining(MonoTime now = getTime()) const
+    {
+        static if (milliseconds != 0)
+            return milliseconds.msecs - (now - startTime);
+        else
+            return timeout - (now - startTime);
+    }
 
-    Duration expiredDuration() const
-        => -remaining();
-    Duration expiredDuration(MonoTime now) const
+    Duration expiredDuration(MonoTime now = getTime()) const
         => -remaining(now);
 }
 
