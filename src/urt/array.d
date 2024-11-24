@@ -6,13 +6,13 @@ import urt.mem;
 nothrow @nogc:
 
 
-bool beginsWith(T, U)(const(T)[] arr, U[] rh)
+bool beginsWith(T, U)(const(T)[] arr, U[] rh) pure
     => rh.length <= arr.length && arr[0 .. rh.length] == rh[];
 
-bool endsWith(T, U)(const(T)[] arr, U[] rh)
+bool endsWith(T, U)(const(T)[] arr, U[] rh) pure
     => rh.length <= arr.length && arr[$ - rh.length .. $] == rh[];
 
-T[] pop(T)(ref T[] arr, ptrdiff_t n)
+T[] pop(T)(ref T[] arr, ptrdiff_t n) pure
 {
     T[] r = arr[0 .. n];
     arr = arr[n .. $];
@@ -22,54 +22,59 @@ T[] pop(T)(ref T[] arr, ptrdiff_t n)
 //Slice<T> take(ptrdiff_t n)
 //Slice<T> drop(ptrdiff_t n)
 
-bool empty(T)(T[] arr) pure nothrow @nogc
+bool empty(T)(const T[] arr) pure
 {
     return arr.length == 0;
 }
 
-ref inout(T) popFront(T)(ref inout(T)[] buffer) pure nothrow @nogc
+bool empty(T, K)(ref const T[K] arr) pure
 {
-	debug assert(buffer.length > 0);
-	buffer = buffer.ptr[1..buffer.length];
-	return buffer.ptr[-1];
+    return arr.length == 0;
 }
 
-ref inout(T) popBack(T)(ref inout(T)[] buffer) pure nothrow @nogc
+ref inout(T) popFront(T)(ref inout(T)[] arr) pure
 {
-	debug assert(buffer.length > 0);
-	buffer = buffer.ptr[0..buffer.length - 1];
-	return buffer.ptr[buffer.length];
+	debug assert(arr.length > 0);
+	arr = arr.ptr[1..arr.length];
+	return arr.ptr[-1];
 }
 
-inout(T)[] takeFront(T)(ref inout(T)[] s, size_t count) pure nothrow @nogc
+ref inout(T) popBack(T)(ref inout(T)[] arr) pure
 {
-	assert(count <= s.length);
-	inout(T)[] t = s.ptr[0 .. count];
-	s = s.ptr[count .. s.length];
+	debug assert(arr.length > 0);
+	arr = arr.ptr[0..arr.length - 1];
+	return arr.ptr[arr.length];
+}
+
+inout(T)[] takeFront(T)(ref inout(T)[] arr, size_t count) pure
+{
+	assert(count <= arr.length);
+	inout(T)[] t = arr.ptr[0 .. count];
+	arr = arr.ptr[count .. arr.length];
 	return t;
 }
 
-ref inout(T)[N] takeFront(size_t N, T)(ref inout(T)[] s) pure nothrow @nogc
+ref inout(T)[N] takeFront(size_t N, T)(ref inout(T)[] arr) pure
 {
-	assert(N <= s.length);
-	inout(T)* t = s.ptr;
-	s = s.ptr[N .. s.length];
+	assert(N <= arr.length);
+	inout(T)* t = arr.ptr;
+	arr = arr.ptr[N .. arr.length];
 	return t[0..N];
 }
 
-inout(T)[] takeBack(T)(ref inout(T)[] s, size_t count) pure nothrow @nogc
+inout(T)[] takeBack(T)(ref inout(T)[] arr, size_t count) pure
 {
-	assert(count <= s.length);
-	inout(T)[] t = s.ptr[s.length - count .. s.length];
-	s = s.ptr[0 .. s.length - count];
+	assert(count <= arr.length);
+	inout(T)[] t = arr.ptr[arr.length - count .. arr.length];
+	arr = arr.ptr[0 .. arr.length - count];
 	return t;
 }
 
-ref inout(T)[N] takeBack(size_t N, T)(ref inout(T)[] s) pure nothrow @nogc
+ref inout(T)[N] takeBack(size_t N, T)(ref inout(T)[] arr) pure
 {
-	assert(N <= s.length);
-	inout(T)* t = s.ptr + s.length - N;
-	s = s.ptr[0 .. s.length - N];
+	assert(N <= arr.length);
+	inout(T)* t = arr.ptr + arr.length - N;
+	arr = arr.ptr[0 .. arr.length - N];
 	return t[0..N];
 }
 
@@ -163,6 +168,13 @@ U[] copyTo(T, U)(T[] arr, U[] dest)
     assert(dest.length >= arr.length);
     dest[0 .. arr.length] = arr[];
     return dest[0 .. arr.length];
+}
+
+T[] duplicate(T)(const T[] src, NoGCAllocator allocator) nothrow @nogc
+{
+    T[] r = cast(T[])allocator.alloc(src.length * T.sizeof);
+    r[] = src[];
+    return r;
 }
 
 
