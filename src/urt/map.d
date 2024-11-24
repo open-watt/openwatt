@@ -75,7 +75,7 @@ nothrow @nogc:
 		clear();
 	}
 
-	size_t size() const => numNodes;
+	size_t length() const => numNodes;
 	bool empty() const => numNodes == 0;
 
 	void clear()
@@ -333,6 +333,16 @@ nothrow @nogc:
 		return Iterator();
 	}
 
+    int opApply(scope int delegate(ref const K k, ref V v) pure nothrow @nogc dg) pure
+    {
+        for (Iterator i = begin(); i != end(); ++i)
+        {
+            int r = dg(i.key, i.value);
+            if (r)
+                return r;
+        }
+        return 0;
+    }
     int opApply(scope int delegate(ref const K k, ref V v) nothrow @nogc dg)
     {
         for (Iterator i = begin(); i != end(); ++i)
@@ -344,6 +354,16 @@ nothrow @nogc:
         return 0;
     }
 
+    int opApply(scope int delegate(ref V v) pure nothrow @nogc dg) pure
+    {
+        for (Iterator i = begin(); i != end(); ++i)
+        {
+            int r = dg(i.value);
+            if (r)
+                return r;
+        }
+        return 0;
+    }
     int opApply(scope int delegate(ref V v) nothrow @nogc dg)
     {
         for (Iterator i = begin(); i != end(); ++i)
