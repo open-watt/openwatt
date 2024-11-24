@@ -5,47 +5,39 @@ import urt.traits;
 
 
 template Nullable(T)
-    if (is(T == class))
-{
-    alias Nullable T;
-}
-
-template Nullable(T)
-    if (is(T == U*, U))
-{
-    alias Nullable T;
-}
-
-template Nullable(T)
-    if (is(T == U[], U))
+    if (is(T == class) || is(T == U[], U) || is(T == U*, U))
 {
     struct Nullable
     {
         enum T NullValue = null;
-        private T _value = NullValue;
+        T value = NullValue;
 
         this(T v)
         {
-            _value = v;
+            value = v;
         }
 
-        T value() const
-            => _value;
-
         bool opCast(T : bool)() const
-            => _value != NullValue;
+            => value !is NullValue;
 
+        bool opEquals(typeof(null)) const
+            => value is null;
         bool opEquals(T v) const
-            => _value == v;
+            => value == v;
 
         void opAssign(U)(U v)
             if (is(U : T))
         {
-            _value = v;
+            value = v;
         }
 
         ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc
-            => formatValue(value, buffer, format, formatArgs);
+        {
+            if (value is null)
+                return formatValue(null, buffer, format, formatArgs);
+            else
+                return formatValue(value, buffer, format, formatArgs);
+        }
     }
 }
 
