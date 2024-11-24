@@ -35,11 +35,11 @@ void main()
 	ApplicationInstance app = getGlobalInstance.createInstance(StringLit!"app");
 
 	// execute startup script
-	string conf;
+	const(char)[] conf;
 	try
 	{
-		import std.file : readText;
-		conf = "conf/startup.conf".readText();
+		import urt.file : load_file;
+		conf = cast(char[])"conf/startup.conf".load_file();
 	}
 	catch (Exception e)
 	{
