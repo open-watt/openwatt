@@ -183,8 +183,11 @@ package:
         status.recvBytes += packet.length;
 
         // check if we ever saw the sender before...
-        if (findMacAddress(packet.src) is null)
-            addAddress(packet.src, this);
+        if (!packet.src.isMulticast)
+        {
+            if (findMacAddress(packet.src) is null)
+                addAddress(packet.src, this);
+        }
 
         foreach (ref subscriber; subscribers[0..numSubscribers])
         {

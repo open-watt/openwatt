@@ -86,7 +86,7 @@ nothrow @nogc:
 
     this(InterfaceModule.Instance m, String name, Stream stream, ModbusProtocol protocol, bool isMaster) nothrow @nogc
     {
-        super(m, name, StringLit!"modbus");
+        super(m, name.move, StringLit!"modbus");
         this.stream = stream;
         this.protocol = protocol;
         this.isBusMaster = isMaster;
@@ -576,12 +576,11 @@ class ModbusInterfaceModule : Plugin
 
         ServerMap* findServerByMac(MACAddress mac)
         {
-            try foreach (ref map; remoteServers)
+            foreach (ref map; remoteServers)
             {
                 if (map.mac == mac)
                     return &map;
             }
-            catch(Exception) {}
             return null;
         }
 
