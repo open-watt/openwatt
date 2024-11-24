@@ -294,7 +294,11 @@ private:
             return;
         }
 
-        size_t fileSize = m_historyFile.get_size();
+        ulong size = m_historyFile.get_size();
+
+        // TODO: maybe we should specify a "MAX_ALLOC" or something...
+        assert(size <= size_t.max, "File too large to read into memory");
+        size_t fileSize = cast(size_t)size;
 
         char[] mem = cast(char[])allocator.alloc(fileSize);
         if (mem == null)
