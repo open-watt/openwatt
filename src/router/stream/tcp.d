@@ -1,10 +1,5 @@
 module router.stream.tcp;
 
-//import core.atomic;
-//import core.sync.mutex;
-//import core.thread;
-//import std.concurrency;
-
 import urt.conv;
 import urt.io;
 import urt.log;
@@ -35,7 +30,7 @@ nothrow @nogc:
         addrInfo.protocol = Protocol.TCP;
         AddressInfoResolver results;
         get_address_info(host, port.tstring, &addrInfo, results);
-        if (!results.next_address(&addrInfo))
+        if (!results.next_address(addrInfo))
         {
             // TODO: handle error case for no remote host...
             assert(0);
@@ -466,7 +461,7 @@ class TCPStreamModule : Plugin
             size_t taken;
             if (!port)
             {
-                portNumber = portSuffix.parseInt(&taken);
+                portNumber = cast(size_t)portSuffix.parseInt(&taken);
                 if (taken == 0)
                     return session.writeLine("Port must be numeric: ", portSuffix);
             }
