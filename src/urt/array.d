@@ -184,11 +184,6 @@ struct Array(T, size_t EmbedCount = 0)
 {
     static assert(EmbedCount == 0, "Not without move semantics!");
 
-    static if (is(T == void))
-        alias ElementType = ubyte;
-    else
-        alias ElementType = T;
-
     // constructors
 
     // TODO: DELETE POSTBLIT!
@@ -198,7 +193,6 @@ struct Array(T, size_t EmbedCount = 0)
 
         ptr = null;
         _length = 0;
-        ec.allocCount = 0;
         this = t[];
     }
 
@@ -238,7 +232,7 @@ struct Array(T, size_t EmbedCount = 0)
     {
         clear();
         if (hasAllocation())
-            defaultAllocator().free(ptr[0 .. _length]);
+            free(ptr);
     }
 
 nothrow @nogc:
@@ -445,12 +439,12 @@ nothrow @nogc:
     void removeSwapLast(const(T)* pItem)            { removeSwapLast(ptr[0 .. _length].indexOfElement(pItem)); }
     void removeFirstSwapLast(U)(ref const U item)   { removeSwapLast(ptr[0 .. _length].findFirst(item)); }
 
-    inout(T)[] getBuffer() inout
+    inout(void)[] getBuffer() inout
     {
         static if (EmbedCount > 0)
-            return hasAllocation() ? ptr[0 .. ec.allocCount] : ec.embed[];
+            return ptr ? ptr[0 .. allocCount()] : embed[];
         else
-            return hasAllocation() ? ptr[0 .. ec.allocCount] : null;
+            return ptr ? ptr[0 .. allocCount()] : null;
     }
 
     bool opCast(T : bool)() const
@@ -496,17 +490,17 @@ nothrow @nogc:
 
     void reserve(size_t count)
     {
-        if (count > EmbedCount && count > allocCount())
+        if (count > allocCount())
         {
             debug assert(count <= uint.max, "Exceed maximum size");
-            T[] newArray = cast(T[])defaultAllocator().alloc(T.sizeof * count, T.alignof);
+            T* newArray = allocate(cast(uint)count);
 
             // TODO: POD should memcpy... (including class)
 
             static if (is(T == class) || is(T == interface))
             {
                 for (uint i = 0; i < _length; ++i)
-                    newArray.ptr[i] = ptr[i];
+                    newArray[i] = ptr[i];
             }
             else
             {
@@ -518,10 +512,9 @@ nothrow @nogc:
             }
 
             if (hasAllocation())
-                defaultAllocator().free(ptr[0 .. _length]);
+                free(ptr);
 
-            ec.allocCount = cast(uint)count;
-            ptr = newArray.ptr;
+            ptr = newArray;
         }
     }
 
@@ -572,26 +565,38 @@ nothrow @nogc:
     }
 
 private:
-    union EC
-    {
-        static if (EmbedCount > 0)
-            T[EmbedCount] embed = void;
-        uint allocCount;
-    }
-
     T* ptr;
     uint _length;
-    EC ec;
+
+    static if (EmbedCount > 0)
+        T[EmbedCount] embed = void;
 
     bool hasAllocation() const
     {
         static if (EmbedCount > 0)
-            return ptr && ptr != ec.embed.ptr;
+            return ptr && ptr != embed.ptr;
         else
-            return ptr != null;
+            return ptr !is null;
     }
     uint allocCount() const
-        => hasAllocation() ? ec.allocCount : EmbedCount;
+        => hasAllocation() ? (cast(uint*)ptr)[-1] : EmbedCount;
+
+    T* allocate(uint count)
+    {
+        enum AllocAlignment = T.alignof < 4 ? 4 : T.alignof;
+        enum AllocPrefixBytes = T.sizeof < 4 ? 4 : T.sizeof;
+
+        void[] mem = defaultAllocator().alloc(AllocPrefixBytes + T.sizeof * count, AllocAlignment);
+        T* array = cast(T*)(mem.ptr + AllocPrefixBytes);
+        (cast(uint*)array)[-1] = count;
+        return array;
+    }
+    void free(T* ptr)
+    {
+        enum AllocPrefixBytes = T.sizeof < 4 ? 4 : T.sizeof;
+
+        defaultAllocator().free((cast(void*)ptr - AllocPrefixBytes)[0 .. AllocPrefixBytes + T.sizeof * allocCount()]);
+    }
 
     pragma(inline, true)
     static uint numToAlloc(uint i)
@@ -601,6 +606,183 @@ private:
     }
 
     auto __debugExpanded() const pure => ptr[0 .. _length];
+}
+
+// SharedArray is a ref-counted array which can be distributed
+struct SharedArray(T)
+{
+    // TODO: DELETE POSTBLIT!
+    this(this)
+    {
+        if (ptr)
+            incRef();
+    }
+
+    this(typeof(null)) {}
+
+    this(ref typeof(this) val)
+    {
+        ptr = val.ptr;
+        _length = val._length;
+        if (ptr)
+            incRef();
+    }
+
+    this(U)(U[] arr)
+        if (is(U : T))
+    {
+        this = arr[];
+    }
+
+    this(U, size_t N)(ref U[N] arr)
+        if (is(U : T))
+    {
+        this = arr[];
+    }
+
+    ~this()
+    {
+        clear();
+    }
+
+nothrow @nogc:
+
+    void opAssign(typeof(null))
+    {
+        clear();
+    }
+
+    void opAssign(ref typeof(this) val)
+    {
+        clear();
+
+        ptr = val.ptr;
+        _length = val._length;
+        if (ptr)
+            incRef();
+    }
+
+    void opAssign(U)(U[] arr)
+        if (is(U : T))
+    {
+        debug assert(arr.length <= uint.max);
+        uint len = cast(uint)arr.length;
+
+        clear();
+
+        _length = len;
+        if (len > 0)
+        {
+            ptr = allocate(len);
+            for (uint i = 0; i < len; ++i)
+                emplace!T(&ptr[i], arr.ptr[i]);
+        }
+        else
+            ptr = null;
+    }
+
+    void opAssign(U, size_t N)(U[N] arr)
+        if (is(U : T))
+    {
+        this = arr[];
+    }
+
+    bool empty() const
+        => _length == 0;
+    size_t length() const
+        => _length;
+
+    ref inout(T) front() inout
+    {
+        debug assert(_length > 0, "Range error");
+        return ptr[0];
+    }
+    ref inout(T) back() inout
+    {
+        debug assert(_length > 0, "Range error");
+        return ptr[_length - 1];
+    }
+
+//    inout(void)[] getBuffer() inout
+//    {
+//        static if (EmbedCount > 0)
+//            return ptr ? ptr[0 .. allocCount()] : embed[];
+//        else
+//            return ptr ? ptr[0 .. allocCount()] : null;
+//    }
+
+    bool opCast(T : bool)() const
+        => _length != 0;
+
+    size_t opDollar() const
+        => _length;
+
+    // full slice: arr[]
+    inout(T)[] opIndex() inout
+        => ptr[0 .. _length];
+
+    // array indexing: arr[i]
+    ref inout(T) opIndex(size_t i) inout
+    {
+        debug assert(i < _length, "Range error");
+        return ptr[i];
+    }
+
+    // array slicing: arr[x .. y]
+    inout(T)[] opIndex(uint[2] i) inout
+        => ptr[i[0] .. i[1]];
+
+    uint[2] opSlice(size_t dim : 0)(size_t x, size_t y)
+    {
+        debug assert(y <= _length, "Range error");
+        return [cast(uint)x, cast(uint)y];
+    }
+
+    void clear()
+    {
+        static if (!is(T == class) && !is(T == interface))
+            for (uint i = 0; i < _length; ++i)
+                ptr[i].destroy!false();
+
+        if (ptr)
+            decRef();
+        ptr = null;
+        _length = 0;
+    }
+
+private:
+    T* ptr;
+    uint _length;
+
+    void incRef()
+    {
+        ++(cast(uint*)ptr)[-1];
+    }
+
+    void decRef()
+    {
+        uint* rc = cast(uint*)ptr - 1;
+        if (*rc == 0)
+            free();
+        else
+            --*rc;
+    }
+
+    T* allocate(uint count)
+    {
+        enum AllocAlignment = T.alignof < uint.alignof ? uint.alignof : T.alignof;
+
+        void[] mem = defaultAllocator().alloc(AllocAlignment + T.sizeof * count, AllocAlignment);
+        T* array = cast(T*)(mem.ptr + AllocPrefixBytes);
+        (cast(uint*)array)[-1] = 0;
+        return array;
+    }
+    void free()
+    {
+        enum AllocAlignment = T.alignof < uint.alignof ? uint.alignof : T.alignof;
+
+        defaultAllocator().free((cast(void*)ptr - AllocAlignment)[0 .. AllocAlignment + T.sizeof * allocCount()]);
+    }
 }
 
 
