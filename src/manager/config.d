@@ -12,6 +12,8 @@ enum CommentDelimiter = '#';
 
 struct ConfItem
 {
+    this(this) @disable;
+
     const(char)[] name;
     const(char)[] value;
     Array!ConfItem subItems;

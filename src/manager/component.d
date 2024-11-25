@@ -38,6 +38,8 @@ nothrow @nogc:
 	String template_;
 	Array!(Element*) elements;
 
+	this(this) @disable;
+
 	import urt.string.format;
 	ptrdiff_t toString(char[] buffer, const(char)[] fmt, const(FormatArg)[] formatArgs) const
 	{

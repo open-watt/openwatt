@@ -29,6 +29,8 @@ nothrow @nogc:
 
 //	Server[] servers;
 
+    this(this) @disable;
+
     void addComponent(Component* component) // TODO: include sampler here...
     {
         foreach (Component* c; components)

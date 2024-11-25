@@ -6,13 +6,13 @@ import urt.mem;
 nothrow @nogc:
 
 
-bool beginsWith(T, U)(const(T)[] arr, U[] rh)
+bool beginsWith(T, U)(const(T)[] arr, U[] rh) pure
     => rh.length <= arr.length && arr[0 .. rh.length] == rh[];
 
-bool endsWith(T, U)(const(T)[] arr, U[] rh)
+bool endsWith(T, U)(const(T)[] arr, U[] rh) pure
     => rh.length <= arr.length && arr[$ - rh.length .. $] == rh[];
 
-T[] pop(T)(ref T[] arr, ptrdiff_t n)
+T[] pop(T)(ref T[] arr, ptrdiff_t n) pure
 {
     T[] r = arr[0 .. n];
     arr = arr[n .. $];
@@ -21,6 +21,62 @@ T[] pop(T)(ref T[] arr, ptrdiff_t n)
 
 //Slice<T> take(ptrdiff_t n)
 //Slice<T> drop(ptrdiff_t n)
+
+bool empty(T)(const T[] arr) pure
+{
+    return arr.length == 0;
+}
+
+bool empty(T, K)(ref const T[K] arr) pure
+{
+    return arr.length == 0;
+}
+
+ref inout(T) popFront(T)(ref inout(T)[] arr) pure
+{
+	debug assert(arr.length > 0);
+	arr = arr.ptr[1..arr.length];
+	return arr.ptr[-1];
+}
+
+ref inout(T) popBack(T)(ref inout(T)[] arr) pure
+{
+	debug assert(arr.length > 0);
+	arr = arr.ptr[0..arr.length - 1];
+	return arr.ptr[arr.length];
+}
+
+inout(T)[] takeFront(T)(ref inout(T)[] arr, size_t count) pure
+{
+	assert(count <= arr.length);
+	inout(T)[] t = arr.ptr[0 .. count];
+	arr = arr.ptr[count .. arr.length];
+	return t;
+}
+
+ref inout(T)[N] takeFront(size_t N, T)(ref inout(T)[] arr) pure
+{
+	assert(N <= arr.length);
+	inout(T)* t = arr.ptr;
+	arr = arr.ptr[N .. arr.length];
+	return t[0..N];
+}
+
+inout(T)[] takeBack(T)(ref inout(T)[] arr, size_t count) pure
+{
+	assert(count <= arr.length);
+	inout(T)[] t = arr.ptr[arr.length - count .. arr.length];
+	arr = arr.ptr[0 .. arr.length - count];
+	return t;
+}
+
+ref inout(T)[N] takeBack(size_t N, T)(ref inout(T)[] arr) pure
+{
+	assert(N <= arr.length);
+	inout(T)* t = arr.ptr + arr.length - N;
+	arr = arr.ptr[0 .. arr.length - N];
+	return t[0..N];
+}
 
 bool exists(T)(const(T)[] arr, auto ref const T el, size_t *pIndex = null)
 {
@@ -114,6 +170,13 @@ U[] copyTo(T, U)(T[] arr, U[] dest)
     return dest[0 .. arr.length];
 }
 
+T[] duplicate(T)(const T[] src, NoGCAllocator allocator) nothrow @nogc
+{
+    T[] r = cast(T[])allocator.alloc(src.length * T.sizeof);
+    r[] = src[];
+    return r;
+}
+
 
 // Array introduces static-sized and/or stack-based ownership. this is useful anywhere that fixed-length arrays are appropriate
 // Array will fail-over to an allocated buffer if the contents exceed the fixed size
@@ -128,7 +191,16 @@ struct Array(T, size_t EmbedCount = 0)
 
     // constructors
 
-    this(this) @disable;
+    // TODO: DELETE POSTBLIT!
+    this(this)
+    {
+        T[] t = this[];
+
+        ptr = null;
+        _length = 0;
+        ec.allocCount = 0;
+        this = t[];
+    }
 
     this(ref typeof(this) val)
     {
@@ -352,8 +424,8 @@ nothrow @nogc:
         }
     }
 
-    void remove(const(T)* pItem)                { remove(ptr[0 .. _length].indexOfElement(pItem)); }
-    void removeFirst(ref const T item)          { remove(ptr[0 .. _length].findFirst(item)); }
+    void remove(const(T)* pItem)                    { remove(ptr[0 .. _length].indexOfElement(pItem)); }
+    void removeFirst(U)(ref const U item)           { remove(ptr[0 .. _length].findFirst(item)); }
 
     void removeSwapLast(size_t i)
     {
@@ -370,8 +442,8 @@ nothrow @nogc:
         }
     }
 
-    void removeSwapLast(const(T)* pItem)        { removeSwapLast(ptr[0 .. _length].indexOfElement(pItem)); }
-    void removeFirstSwapLast(ref const T item)  { removeSwapLast(ptr[0 .. _length].findFirst(item)); }
+    void removeSwapLast(const(T)* pItem)            { removeSwapLast(ptr[0 .. _length].indexOfElement(pItem)); }
+    void removeFirstSwapLast(U)(ref const U item)   { removeSwapLast(ptr[0 .. _length].findFirst(item)); }
 
     inout(T)[] getBuffer() inout
     {
