@@ -84,7 +84,7 @@ nothrow @nogc:
 			enum descOffset = 0;
 
 		const(char)[][descOffset + 32] tailStrings = void;
-		String[descOffset + 33] temp = void;
+		String[descOffset + 33] temp;
 
 		size_t numStrings = descOffset + fields.length + fieldDesc.length;
 		assert(numStrings <= tailStrings.length, "TODO: alloc some scratch mem!");
