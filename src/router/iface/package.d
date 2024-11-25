@@ -290,7 +290,7 @@ class InterfaceModule : Plugin
                     tdLen = max(tdLen, iface.getStatus.sendDropped.formatInt(null));
                 }
 
-                session.writef(" ID    {0, *1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",
+                session.writef(" ID     {0, -*1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",
                                "NAME", nameLen,
                                "RX-BYTE", rxLen, "TX-BYTE", txLen,
                                "RX-PACKET", rpLen, "TX-PACKET", tpLen,
@@ -299,7 +299,7 @@ class InterfaceModule : Plugin
                 size_t i = 0;
                 foreach (iface; interfaces)
                 {
-                    session.writef("{0, 3} {1}{2} {3, *4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
+                    session.writef("{0, 3} {1}{2}  {3, -*4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
                                    i, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ',
                                    iface.name, nameLen,
                                    iface.getStatus.recvBytes, rxLen, iface.getStatus.sendBytes, txLen,
@@ -310,11 +310,11 @@ class InterfaceModule : Plugin
             }
             else
             {
-                session.writef(" ID    {0, *1}  {2, *3}  MAC-ADDRESS\n", "NAME", nameLen, "TYPE", typeLen);
+                session.writef(" ID     {0, -*1}  {2, -*3}  MAC-ADDRESS\n", "NAME", nameLen, "TYPE", typeLen);
                 size_t i = 0;
                 foreach (iface; interfaces)
                 {
-                    session.writef("{0, 3} {6}{7}  {1, *2}  {3, *4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ');
+                    session.writef("{0, 3} {6}{7}  {1, -*2}  {3, -*4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ');
                     ++i;
                 }
             }

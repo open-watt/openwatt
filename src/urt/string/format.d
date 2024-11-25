@@ -926,7 +926,7 @@ unittest
 	const char *pName = "manu";
 	int[3] arr = [ 1, 2, 30 ];
 	r = format(tmp, "{1}, {'?',?7}{'!',!7}, {@6} {3}", "hello ", pName, 10, arr, "-*5", 10, "<{0,@4}>", false);
-	assert(r == "manu, !, <    hello > [1,2,30]");
+	assert(r == "manu, !, <hello     > [1,2,30]");
 
 	r = format(tmp, "{0}", cast(void[])arr);
 	version (LittleEndian)
