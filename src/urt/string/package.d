@@ -266,7 +266,13 @@ char[] toHexString(const(ubyte[]) data, char[] buffer, uint group = 0, uint seco
 	assert(secondaryGroup.isPowerOf2);
 	assert((secondaryGroup == 0 && seps.length > 0) || seps.length > 1, "Secondary grouping requires additional separator");
 
-	if (buffer.length < 2)
+	if (data.length == 0)
+		return buffer[0..0];
+
+	size_t len = data.length*2;
+	if (group)
+		len += (data.length-1) / group;
+	if (len > buffer.length)
 		return null;
 
 	__gshared immutable char[16] hex = "0123456789ABCDEF";
@@ -274,13 +280,13 @@ char[] toHexString(const(ubyte[]) data, char[] buffer, uint group = 0, uint seco
 	size_t secondMask = secondaryGroup - 1;
 
 	size_t offset = 0;
-	for (size_t i = 0; true;)
+	for (size_t i = 0; true; )
 	{
 		buffer[offset++] = hex[data[i] >> 4];
 		buffer[offset++] = hex[data[i] & 0xF];
 
 		bool sep = (i & mask) == mask;
-		if (++i == data.length || offset + 2 + sep > buffer.length)
+		if (++i == data.length)
 			return buffer[0 .. offset];
 		if (sep)
 			buffer[offset++] = ((i & secondMask) == 0 ? seps[1] : seps[0]);
