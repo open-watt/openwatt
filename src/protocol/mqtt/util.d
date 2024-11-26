@@ -1,5 +1,8 @@
 module protocol.mqtt.util;
 
+nothrow @nogc:
+
+
 inout(As)[] take(As = ubyte)(ref inout(ubyte)[] buffer, size_t n)
 {
     inout(ubyte)[] r = buffer[0 .. n*As.sizeof];
@@ -36,7 +39,7 @@ inout(U)[] take(T : U[], U)(ref inout(ubyte)[] buffer)
     return r;
 }
 
-uint takeVarInt(ref const(ubyte)[] buffer)
+uint take_var_int(ref const(ubyte)[] buffer)
 {
     uint r = buffer[0];
     if (r < 128)
@@ -100,7 +103,7 @@ void put(ref ubyte[] buffer, const(char)[] val)
     buffer.put(cast(ubyte[])val);
 }
 
-void putVarInt(ref ubyte[] buffer, uint val)
+void put_var_int(ref ubyte[] buffer, uint val)
 {
     if (val >= (1 << 28))
         return;

@@ -1,167 +1,145 @@
 module protocol.mqtt.broker;
 
+import urt.array;
+import urt.lifetime;
+import urt.log;
+import urt.map;
+import urt.mem.allocator;
 import urt.string;
 import urt.time;
 
+import manager;
+import manager.base;
+
 import protocol.mqtt.client;
 
-import router.stream;
 import router.stream.tcp;
 
+nothrow @nogc:
 
-struct MQTTClientCredentials
+
+class MQTTBroker : BaseObject
 {
-    string username;
-    string password;
-    string[] whitelist;
-    string[] blacklist;
-}
+    __gshared Property[3] Properties = [ Property.create!("port", port)(),
+                                         Property.create!("allow-anonymous", allow_anonymous)(),
+                                         Property.create!("client-timeout", _client_timeout)() ];
+nothrow @nogc:
 
-struct MQTTBrokerOptions
-{
-    enum Flags
+    alias TypeName = StringLit!"mqqt-broker";
+
+    this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        None = 0,
-        AllowAnonymousLogin = 1 << 0,
+        super(collection_type_info!MQTTBroker, name.move, flags);
     }
 
-    ushort port = 1883;
-    Flags flags = Flags.None;
-    MQTTClientCredentials[] clientCredentials;
-    uint clientTimeoutOverride = 0; // maximum time since last contact before client is presumed awol
-}
-
-struct Session
-{
-    struct Subscription
+    // Properties...
+    ushort port() const pure
+        => _port;
+    void port(ushort value)
     {
-        string topic;
-        ubyte options;
-    }
-
-    string identifier;
-    Client* client;
-
-    uint sessionExpiryInterval = 0;
-
-    MonoTime closeTime;
-
-    Subscription[] subs;
-    Subscription*[string] subsByFilter;
-
-    // last will and testament
-    string willTopic;
-    immutable(ubyte)[] willMessage;
-    immutable(ubyte)[] willProps;
-    uint willDelay;
-    ubyte willFlags;
-    bool willSent;
-
-    // publish state
-    ushort packetId = 1;
-
-    // TODO: pending messages...
-    ubyte[] pendingMessages;
-}
-
-class MQTTBroker
-{
-    const MQTTBrokerOptions options;
-
-//    TCPServer server;
-    Stream[] newConnections;
-    Client[] clients;
-    Session[string] sessions;
-
-    // local subs
-    // network subs
-
-    // retained values
-    struct Value
-    {
-        Value[string] children;
-        immutable(ubyte)[] data;
-        immutable(ubyte)[] properties;
-        ubyte flags;
-    }
-    Value root;
-
-    this(ref MQTTBrokerOptions options = MQTTBrokerOptions())
-    {
-        this.options = options;
-//        server = new TCPServer(options.port, &newConnection, cast(void*)this);
-    }
-
-    void start()
-    {
-//        server.start();
-    }
-
-    void stop()
-    {
-//        server.stop();
-    }
-
-    void update()
-    {
-        while (!newConnections.empty)
+        _port = value ? value : 1883;
+        if (_server)
         {
-            clients ~= Client(this, newConnections[0]);
-            newConnections = newConnections[1 .. $];
+            // TODO: this will cause a restart of the server, we need to check this doesn't cascade a reset of the whole broker...
+            _server.port = _port;
+        }
+    }
+
+    bool allow_anonymous() const pure
+        => (_flags & MQTTFlags.AllowAnonymousLogin) != 0;
+    void allow_anonymous(bool value)
+    {
+        _flags = cast(MQTTFlags)((_flags & ~MQTTFlags.AllowAnonymousLogin) | (value ? MQTTFlags.AllowAnonymousLogin : 0));
+    }
+
+    // API...
+
+    override bool validate() const pure
+        => true;
+
+    override CompletionStatus startup()
+    {
+        if (!_server)
+        {
+            _server = get_module!TCPStreamModule.tcp_servers.create(name, ObjectFlags.Dynamic);
+            _server.port = _port ? _port : 1883;
+            _server.setConnectionCallback(&new_connection, null);
         }
 
-        // update clients
-        for (size_t i = 0; i < clients.length; ++i)
+        if (_server.running)
         {
-            if (!clients[i].update())
+            writeInfo("MQTT broker listening on port ", _server.port);
+            return CompletionStatus.Complete;
+        }
+        return CompletionStatus.Continue;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        if (_server)
+        {
+            _server.destroy();
+            _server = null;
+        }
+        return CompletionStatus.Complete;
+    }
+
+    override void update()
+    {
+        _server.update();
+
+        // update clients
+        for (size_t i = 0; i < _clients.length; )
+        {
+            if (!_clients[i].update())
             {
                 // destroy client...
-                clients[i].terminate();
-                for (size_t j = i + 1; j < clients.length; ++j)
-                    clients[j - 1] = clients[j];
-                --clients.length;
+                _clients[i].terminate();
+                _clients.removeSwapLast(i);
             }
+            else
+                ++i;
         }
 
         // update sessions
         MonoTime now = getTime();
-        string[16] itemsToRemove;
-        size_t numItemsToRemove = 0;
-        foreach (ref session; sessions)
+        const(char)[][16] items_to_remove;
+        size_t num_items_to_remove = 0;
+        foreach (ref session; sessions.values)
         {
             if (session.client)
                 continue;
 
-            if (session.sessionExpiryInterval != 0xFFFFFFFF)
+            if (session.session_expiry_interval != 0xFFFFFFFF)
             {
-                if (now - session.closeTime >= session.sessionExpiryInterval.seconds)
+                if (now - session.close_time >= session.session_expiry_interval.seconds)
                 {
                     // session expired
-                    if (numItemsToRemove == 16)
+                    if (num_items_to_remove == 16)
                         break;
-                    itemsToRemove[numItemsToRemove++] = session.identifier;
+                    items_to_remove[num_items_to_remove++] = session.identifier;
                 }
             }
         }
-        foreach (i; 0 .. numItemsToRemove)
-            sessions.remove(itemsToRemove[i]);
+        foreach (i; 0 .. num_items_to_remove)
+            sessions.remove(items_to_remove[i]);
     }
 
     void publish(const(char)[] client, ubyte flags, const(char)[] topic, const(ubyte)[] payload, const(ubyte)[] properties = null)
     {
-        Value* getRecord(Value* val, const(char)[] topic)
+        Value* get_record(Value* val, const(char)[] topic)
         {
             char sep;
             const(char)[] level = topic.split!'/'(sep);
             Value* child = level in val.children;
             if (!child)
-                child = &(val.children[level.idup] = Value());
+                child = val.children.insert(level.makeString(defaultAllocator()), Value());
             if (sep == 0)
                 return child;
-            return getRecord(child, topic);
+            return get_record(child, topic);
         }
 
-        void deleteRecord(Value* val, const(char)[] topic)
+        void delete_record(Value* val, const(char)[] topic) nothrow @nogc
         {
             char sep;
             const(char)[] level = topic.split!'/'(sep);
@@ -169,9 +147,9 @@ class MQTTBroker
             if (sep == 0)
                 child.data = null;
             else if(child)
-                deleteRecord(child, topic);
+                delete_record(child, topic);
             if (child.children.empty)
-                val.children.remove(level.idup); // TODO: chech why this idup? seems unnecessary!
+                val.children.remove(level);
         }
 
         // retain message and/or push to subscribers...
@@ -181,17 +159,20 @@ class MQTTBroker
 
         if (payload.empty)
         {
-            deleteRecord(&root, topic);
+            delete_record(&_root, topic);
             return;
         }
 
         if (retain)
         {
-            Value* value = getRecord(&root, topic);
+            Value* value = get_record(&_root, topic);
             if (value)
             {
-                value.data = payload.idup;
-                value.properties = properties ? properties.idup : null;
+                value.data = payload[];
+                if (properties)
+                    value.properties = properties[];
+                else
+                    value.properties = null;
                 value.flags = flags;
             }
         }
@@ -201,39 +182,106 @@ class MQTTBroker
 
     }
 
-    void subscribe(Client client, const(char)[] topic)
+    void subscribe(ref MQTTClient client, const(char)[] topic)
     {
         // add subscription...
     }
 
 package:
-    void destroySession(ref Session session)
+    void destroy_session(ref MQTTSession session)
     {
-        sendLWT(session);
+        send_lwt(session);
 
         session.client = null;
         session.subs = null;
-        session.subsByFilter.clear();
-        session.willTopic = null;
-        session.willMessage = null;
-        session.willProps = null;
-        session.willDelay = 0;
-        session.willFlags = 0;
-        session.packetId = 1;
+        session.subs_by_filter.clear();
+        session.will_topic = null;
+        session.will_message = null;
+        session.will_props = null;
+        session.will_delay = 0;
+        session.will_flags = 0;
+        session.packet_id = 1;
     }
 
-    void sendLWT(ref Session session)
+    void send_lwt(ref MQTTSession session)
     {
-        if (!session.willTopic || session.willSent)
+        if (!session.will_topic || session.will_sent)
             return;
-        publish(session.identifier, session.willFlags, session.willTopic, session.willMessage, session.willProps);
-        session.willSent = true;
+        publish(session.identifier, session.will_flags, session.will_topic, session.will_message[], session.will_props[]);
+        session.will_sent = true;
     }
+
+    Map!(const(char)[], MQTTSession) sessions;
 
 private:
-    static void newConnection(TCPStream client, void* userData)
+    TCPServer _server;
+    ushort _port = 1883;
+    MQTTFlags _flags;
+    Duration _client_timeout;
+
+    Array!MQTTClient _clients;
+
+    // local subs
+    // network subs
+
+    // retained values
+    struct Value
     {
-        MQTTBroker _this = cast(MQTTBroker)userData;
-        _this.newConnections ~= client;
+        Map!(String, Value) children;
+        Array!ubyte data;
+        Array!ubyte properties;
+        ubyte flags;
     }
+    Value _root;
+
+    void new_connection(TCPStream client, void* user_data)
+    {
+        _clients ~= MQTTClient(this, client);
+
+        writeInfo("MQTT client connected: ", client.remoteName());
+    }
+}
+
+
+private:
+
+enum MQTTFlags
+{
+    None = 0,
+    AllowAnonymousLogin = 1 << 0,
+}
+
+package struct MQTTSession
+{
+    this(this) @disable;
+
+    struct Subscription
+    {
+        String topic;
+        ubyte options;
+    }
+
+    String identifier;
+    MQTTClient* client;
+
+    uint session_expiry_interval = 0;
+
+    MonoTime close_time;
+
+    Array!Subscription subs;
+    Map!(const(char)[], Subscription*) subs_by_filter;
+
+    // last will and testament
+    String will_topic;
+    Array!ubyte will_message;
+    Array!ubyte will_props;
+    uint will_delay;
+    ubyte will_flags;
+    bool will_sent;
+
+    // publish state
+    ushort packet_id = 1;
+
+    // TODO: pending messages...
+    ubyte[] pending_messages;
 }
