@@ -1,13 +1,18 @@
 module protocol.mqtt.client;
 
-import urt.array : empty;
+import urt.array : duplicate, empty;
 import urt.log;
+import urt.mem;
+import urt.string;
 import urt.time;
 
 import protocol.mqtt.broker;
 import protocol.mqtt.util;
 
 import router.stream;
+
+nothrow @nogc:
+
 
 enum MQTTPacketType : byte
 {
@@ -62,6 +67,8 @@ enum MQTTProperties : ubyte
 
 struct Client
 {
+nothrow @nogc:
+
     enum ConnectionState
     {
         WaitingIntroduction = 0,
@@ -72,7 +79,7 @@ struct Client
 
     MQTTBroker broker;
     Stream stream;
-    Session* session;
+    MQTTSession* session;
 
     MonoTime lastContactTime;
     ConnectionState state = ConnectionState.WaitingIntroduction;
@@ -217,7 +224,9 @@ struct Client
             else
             {
                 // if the message is small enough to fit into the stack buffer, well just shuffle the data back to the start of the buffer, otherwise allocate
-                ubyte[] t = (messageLen <= buffer.length && packet.ptr >= buffer.ptr + buffer.sizeof/2) ? buffer[0 .. messageLen] : new ubyte[messageLen];
+                assert(messageLen <= buffer.length && packet.ptr >= buffer.ptr + buffer.sizeof/2, "TODO: implement grow-able buffer!");
+//                ubyte[] t = (messageLen <= buffer.length && packet.ptr >= buffer.ptr + buffer.sizeof/2) ? buffer[0 .. messageLen] : new ubyte[messageLen];
+                ubyte[] t = buffer[0 .. messageLen];
                 t[0 .. packet.length] = packet[];
                 ubyte[] remain = t[packet.length .. $];
                 packet = null;
@@ -310,21 +319,24 @@ struct Client
 
                     // check username and password
                     {
-                        bool authenticated = false;
-                        foreach (ref cred; broker.options.clientCredentials)
-                        {
-                            if (cred.username[] == username[] && cred.password[] == password[])
-                            {
-                                credentials = &cred;
-                                authenticated = true;
-                                break;
-                            }
-                        }
-                        if (!authenticated && !(broker.options.flags & MQTTBrokerOptions.Flags.AllowAnonymousLogin))
-                        {
-                            buffer[3] = 0x04;
-                            goto sendConnAck;
-                        }
+//                        bool authenticated = false;
+//                        foreach (ref cred; broker.options.clientCredentials)
+//                        {
+//                            if (cred.username[] == username[] && cred.password[] == password[])
+//                            {
+//                                credentials = &cred;
+//                                authenticated = true;
+//                                break;
+//                            }
+//                        }
+//                        if (!authenticated && !(broker.options.flags & MQTTBrokerOptions.Flags.AllowAnonymousLogin))
+//                        {
+//                            buffer[3] = 0x04;
+//                            goto sendConnAck;
+//                        }
+                        // HACK: just accept it for now!
+                        buffer[3] = 0x04;
+                        goto sendConnAck;
                     }
 
                     // if client has not supplied an ID, and we should generate one
@@ -363,9 +375,8 @@ struct Client
                         sessionPresent = session !is null;
                         if (!session)
                         {
-                            string identifier = id.idup;
-                            broker.sessions[identifier] = Session(identifier);
-                            session = &broker.sessions[id];
+                            String identifier = id.makeString(defaultAllocator());
+                            session = broker.sessions.insert(identifier[], MQTTSession(identifier.move));
                         }
 
                         // if session already has a live client
@@ -399,9 +410,9 @@ struct Client
                         // record last will and testament
                         if (connFlags & 4)
                         {
-                            session.willTopic = willTopic.idup;
-                            session.willMessage = willMessage.idup;
-                            session.willProps = willProps.idup;
+                            session.willTopic = willTopic.makeString(defaultAllocator());
+                            session.willMessage = willMessage.duplicate(defaultAllocator());
+                            session.willProps = willProps.duplicate(defaultAllocator());
                             session.willFlags = ((connFlags >> 2) & 0x6) | ((connFlags & 0x20) ? 1 : 0);
 
                             // process the will properties...
@@ -775,14 +786,14 @@ struct Client
 //                        bool retainAsPublished = protocolLevel >= 5 && (opts & 8) != 0;
                         ubyte retainHandling = (opts >> 4) & 3;
 
-                        Session.Subscription** sub = topic in session.subsByFilter;
+                        MQTTSession.Subscription** sub = topic in session.subsByFilter;
                         if (!sub)
                         {
-                            session.subs ~= Session.Subscription(topic.idup, opts);
-                            session.subsByFilter[topic] = &session.subs[$-1];
+                            MQTTSession.Subscription* newSub = &session.subs.emplaceBack(topic.makeString(defaultAllocator()), opts);
+                            session.subsByFilter[newSub.topic] = newSub;
                         }
                         else
-                            **sub = Session.Subscription((**sub).topic, opts);
+                            **sub = MQTTSession.Subscription((**sub).topic, opts);
 
                         if (retainHandling == 0 || (retainHandling == 1 && !sub))
                         {
