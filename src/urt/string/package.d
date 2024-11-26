@@ -135,20 +135,28 @@ inout(char)[] takeLine(ref inout(char)[] s) pure nothrow @nogc
 	return t;
 }
 
-inout(char)[] split(char Separator)(ref inout(char)[] s)
+inout(char)[] split(char Separator, bool HandleQuotes = true)(ref inout(char)[] s)
 {
-	int inQuotes = 0;
+	static if (HandleQuotes)
+		int inQuotes = 0;
+	else
+		enum inQuotes = false;
+
 	size_t i = 0;
 	for (; i < s.length; ++i)
 	{
 		if (s[i] == Separator && !inQuotes)
 			break;
-		if (s[i] == '"' && !(inQuotes & 0x6))
-			inQuotes = 1 - inQuotes;
-		else if (s[i] == '\'' && !(inQuotes & 0x5))
-			inQuotes = 2 - inQuotes;
-		else if (s[i] == '`' && !(inQuotes & 0x3))
-			inQuotes = 4 - inQuotes;
+
+		static if (HandleQuotes)
+		{
+			if (s[i] == '"' && !(inQuotes & 0x6))
+				inQuotes = 1 - inQuotes;
+			else if (s[i] == '\'' && !(inQuotes & 0x5))
+				inQuotes = 2 - inQuotes;
+			else if (s[i] == '`' && !(inQuotes & 0x3))
+				inQuotes = 4 - inQuotes;
+		}
 	}
 	inout(char)[] t = s[0 .. i].trimBack;
 	s = i < s.length ? s[i+1 .. $].trimFront : null;
