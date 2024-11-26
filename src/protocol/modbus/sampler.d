@@ -223,8 +223,6 @@ private:
                 if (e.sampleTimeMs == 0)
                     e.flags |= 2;
             }
-//            else version (DebugModbusSampler)
-//                writeDebugf("Got reg {0, 04x}: {1} ", e.register, e.element.id);
 
             // parse value from the response...
             ushort offset = cast(ushort)(e.register - first);
@@ -345,6 +343,9 @@ private:
                         break;
                 }
             }
+
+            version (DebugModbusSampler)
+                writeDebugf("Got reg {0, 04x}: {1} = {2}", e.register, e.element.id, e.element.value);
         }
     }
 
