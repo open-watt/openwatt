@@ -29,4 +29,5 @@ extern(C)
     double cos(double x);
     double exp(double x);
     double log(double x);
+    double acos(double x);
 }

@@ -4,6 +4,8 @@ import urt.array;
 
 import manager.element;
 import manager.sampler;
+import manager.subscriber;
+import manager.value;
 
 import protocol.tesla;
 import protocol.tesla.master;
@@ -77,12 +79,34 @@ nothrow @nogc:
 
     final void addElement(Element* element)
     {
-        elements ~= element;
+        if (!elements[].exists(element))
+        {
+            elements ~= element;
+            if (element.access != Access.Read)
+                element.addSubscriber(this);
+        }
     }
 
     final override void removeElement(Element* element)
     {
-        // TODO: find the element in the list and remove it...
+        if (element.access != Access.Read)
+            element.removeSubscriber(this);
+        elements.removeFirstSwapLast(element);
+    }
+
+    void onChange(Element* e, ref const Value val, Subscriber whoMadeChange)
+    {
+        if (!master) // if not bound, we can't apply any values
+            return;
+
+        if (e.id[] == "targetCurrent")
+        {
+            TeslaTWCMaster.Charger* charger = &master.chargers[chargerIndex];
+            charger.targetCurrent = cast(ushort)val.asFloat();
+
+            import urt.log;
+            writeDebug("Set target current: ", charger.targetCurrent);
+        }
     }
 
     TeslaProtocolModule.Instance tesla_mod;
