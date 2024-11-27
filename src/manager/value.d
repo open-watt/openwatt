@@ -138,13 +138,13 @@ nothrow @nogc:
 		}
 	}
 
-    bool fromString(const(char)[] s, size_t* taken = null)
+    ptrdiff_t fromString(const(char)[] s)
     {
         if (s.length == 0)
         {
             len_ty = Type.Null;
             p = null;
-            return true;
+            return 0;
         }
         bool isQuotes = false;
         if (s[0] == '"' || s[0] == '\"' || s[0] == '`')
@@ -180,7 +180,7 @@ nothrow @nogc:
         length = cast(uint)mem.length;
         p = cast(void*)mem.ptr;
 
-        return true;
+        return s.length;
     }
 
 private:

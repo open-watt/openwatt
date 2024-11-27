@@ -90,7 +90,7 @@ class ModbusProtocolModule : Plugin
             }
             else
             {
-                if (!target.fromString(slave))
+                if (target.fromString(slave) != slave.length)
                 {
                     session.writeLine("Invalid slave identifier or address '", slave, "'");
                     return;
@@ -306,7 +306,7 @@ class ModbusProtocolModule : Plugin
             {
                 if (map)
                     addr = map.mac;
-                else if (!addr.fromString(slave))
+                else if (addr.fromString(slave) != slave.length)
                 {
                     session.writeLine("Invalid slave identifier or address '", slave, "'");
                     return null;

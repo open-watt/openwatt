@@ -270,9 +270,8 @@ template to(T)
         T to(const(char)[] str)
         {
             T r;
-            size_t taken;
-            bool success = r.fromString(str, &taken);
-            assert(success && taken == str.length, "Failed to parse string as " ~ T.stringof);
+            ptrdiff_t taken = r.fromString(str);
+            assert(taken == str.length, "Failed to parse string as " ~ T.stringof);
             return r;
         }
     }

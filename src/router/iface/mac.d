@@ -5,7 +5,7 @@ import urt.string.format : FormatArg;
 nothrow @nogc:
 
 
-enum MACAddress MAC(string addr) = (){ MACAddress a; assert(a.fromString(addr), "Not a mac address"); return a; }();
+enum MACAddress MAC(string addr) = (){ MACAddress a; assert(a.fromString(addr) == a.length, "Not a mac address"); return a; }();
 
 
 struct MACAddress
@@ -85,7 +85,7 @@ nothrow @nogc:
         if (!buffer.ptr)
             return 17;
         if (buffer.length < 17)
-            return 0;
+            return -1;
         buffer[0]  = hexDigits[b[0] >> 4];
         buffer[1]  = hexDigits[b[0] & 0xF];
         buffer[2]  = ':';
@@ -106,30 +106,28 @@ nothrow @nogc:
         return 17;
     }
 
-    bool fromString(const(char)[] s, size_t* taken = null)
+    ptrdiff_t fromString(const(char)[] s)
     {
         import urt.conv;
         import urt.string.ascii;
 
-        if (s.length != 17)
-            return false;
+        if (s.length < 17)
+            return -1;
         for (size_t n = 0; n < 17; ++n)
         {
             if (n % 3 == 2)
             {
                 if (s[n] != ':')
-                    return false;
+                    return -1;
             }
             else if (!isHex(s[n]))
-                return false;
+                return -1;
         }
 
         for (size_t i = 0; i < 6; ++i)
             b[i] = cast(ubyte)parseInt(s[i*3 .. i*3 + 2], null, null, 16);
 
-        if (taken)
-            *taken = 17;
-        return true;
+        return 17;
     }
 
     auto __debugOverview()

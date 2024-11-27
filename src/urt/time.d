@@ -69,21 +69,21 @@ nothrow @nogc:
     import urt.string.format : FormatArg;
     ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const
     {
-        size_t len = timeToString((ticks != 0 ? appTime(this) : Duration()).as!"msecs", buffer.length > 2 ? buffer[2..$] : buffer);
-        if (len)
-        {
-            if (buffer.length > 2)
-                buffer[0 .. 2] = "T+";
-            return len + 2;
-        }
-        return 0;
+        long ms = (ticks != 0 ? appTime(this) : Duration()).as!"msecs";
+        if (!buffer.ptr)
+            return 2 + timeToString(ms, null);
+        if (buffer.length < 2)
+            return -1;
+        buffer[0..2] = "T+";
+        ptrdiff_t len = timeToString(ms, buffer[2..$]);
+        return len < 0 ? len : 2 + len;
     }
 
     auto __debugOverview() const
     {
         import urt.mem.temp;
         char[] b = cast(char[])talloc(64);
-        size_t len = toString(b, null, null);
+        ptrdiff_t len = toString(b, null, null);
         return b[0..len];
     }
 }
@@ -242,37 +242,45 @@ nothrow @nogc:
         if (year <= 0)
         {
             if (buffer.length < 3)
-                return 0;
+                return -1;
             y = -year + 1;
             buffer[0 .. 3] = "BC ";
             offset += 3;
         }
-        offset += year.formatInt(buffer[offset..$]);
-        if (offset + 1 > buffer.length)
-            return offset;
+        ptrdiff_t len = year.formatInt(buffer[offset..$]);
+        if (len < 0 || len == buffer.length)
+            return -1;
+        offset += len;
         buffer[offset++] = '-';
-        offset += month.formatInt(buffer[offset..$]);
-        if (offset + 1 > buffer.length)
-            return offset;
+        len = month.formatInt(buffer[offset..$]);
+        if (len < 0 || len == buffer.length)
+            return -1;
+        offset += len;
         buffer[offset++] = '-';
-        offset += day.formatInt(buffer[offset..$]);
-        if (offset + 1 > buffer.length)
-            return offset;
+        len = day.formatInt(buffer[offset..$]);
+        if (len < 0 || len == buffer.length)
+            return -1;
+        offset += len;
         buffer[offset++] = ' ';
-        offset += hour.formatInt(buffer[offset..$], 10, 2, '0');
-        if (offset + 1 > buffer.length)
-            return offset;
+        len = hour.formatInt(buffer[offset..$], 10, 2, '0');
+        if (len < 0 || len == buffer.length)
+            return -1;
+        offset += len;
         buffer[offset++] = ':';
-        offset += minute.formatInt(buffer[offset..$], 10, 2, '0');
-        if (offset + 1 > buffer.length)
-            return offset;
+        len = minute.formatInt(buffer[offset..$], 10, 2, '0');
+        if (len < 0 || len == buffer.length)
+            return -1;
+        offset += len;
         buffer[offset++] = ':';
-        offset += second.formatInt(buffer[offset..$], 10, 2, '0');
-        if (offset + 1 > buffer.length)
-            return offset;
+        len = second.formatInt(buffer[offset..$], 10, 2, '0');
+        if (len < 0 || len == buffer.length)
+            return -1;
+        offset += len;
         buffer[offset++] = '.';
-        offset += (ns / 1_000_000).formatInt(buffer[offset..$], 10, 3, '0');
-        return offset;
+        len = (ns / 1_000_000).formatInt(buffer[offset..$], 10, 3, '0');
+        if (len < 0)
+            return len;
+        return offset + len;
     }
 }
 
