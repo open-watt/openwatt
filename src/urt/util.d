@@ -180,7 +180,7 @@ struct InPlace(C)
 
 	this() @disable;
 
-	this(DefaultInit)
+	this()(DefaultInit)
 	{
 		value.emplace();
 	}

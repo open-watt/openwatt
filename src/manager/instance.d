@@ -91,6 +91,9 @@ class ApplicationInstance
         foreach (plugin; pluginInstance)
             plugin.update();
 
+        import urt.async : asyncUpdate;
+        asyncUpdate();
+
         // TODO: polling is pretty lame! data connections should be in threads and receive data immediately
         // processing should happen in a processing thread which waits on a semaphore for jobs in a queue (submit from comms threads?)
 //        foreach (server; servers)

@@ -121,6 +121,7 @@
     <DCompile Include="src\router\tesla\twc.d" />
     <DCompile Include="src\urt\algorithm.d" />
     <DCompile Include="src\urt\array.d" />
+    <DCompile Include="src\urt\async.d" />
     <DCompile Include="src\urt\compiler.d" />
     <DCompile Include="src\urt\conv.d" />
     <DCompile Include="src\urt\crc.d" />
@@ -143,6 +144,7 @@
     <DCompile Include="src\urt\math.d" />
     <DCompile Include="src\urt\mem\alloc.d" />
     <DCompile Include="src\urt\mem\allocator.d" />
+    <DCompile Include="src\urt\mem\freelist.d" />
     <DCompile Include="src\urt\mem\package.d" />
     <DCompile Include="src\urt\mem\refman.d" />
     <DCompile Include="src\urt\mem\region.d" />
