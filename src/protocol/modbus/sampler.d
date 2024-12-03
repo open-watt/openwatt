@@ -296,7 +296,36 @@ private:
                     case Type.U64:
                     case Type.S64:
                     case Type.F64:
-                        assert(false, "TODO: our value only has int!");
+                        ulong val;
+                        final switch (endian)
+                        {
+                            case Endian.BE_BE:
+                                val = data[byteOffset..byteOffset+8][0..8].bigEndianToNative!ulong;
+                                break;
+                            case Endian.LE_LE:
+                                val = data[byteOffset..byteOffset+8][0..8].littleEndianToNative!ulong;
+                                break;
+                            case Endian.BE_LE:
+                                val = data[byteOffset..byteOffset+2][0..2].bigEndianToNative!ushort |
+                                    (data[byteOffset+2..byteOffset+4][0..2].bigEndianToNative!ushort << 16) |
+                                    (cast(ulong)data[byteOffset+4..byteOffset+6][0..2].bigEndianToNative!ushort << 32) |
+                                    (cast(ulong)data[byteOffset+6..byteOffset+8][0..2].bigEndianToNative!ushort << 48);
+                                break;
+                            case Endian.LE_BE:
+                                val = (cast(ulong)data[byteOffset..byteOffset+2][0..2].littleEndianToNative!ushort << 48) |
+                                    (cast(ulong)data[byteOffset+2..byteOffset+4][0..2].littleEndianToNative!ushort << 32) |
+                                    (data[byteOffset+4..byteOffset+6][0..2].littleEndianToNative!ushort << 16) |
+                                    data[byteOffset+6..byteOffset+8][0..2].littleEndianToNative!ushort;
+                                break;
+                        }
+                        if (type == Type.F64)
+                            e.element.latest = Value(cast(float) *cast(double*)&val);
+                        else if (type == Type.U64)
+                            e.element.latest = Value(cast(uint) val);
+                        else
+                            e.element.latest = Value(cast(int) cast(long)val);
+//                        assert(false, "TODO: our value only has int!");
+                        break;
 
                     case Type.U128:
                     case Type.S128:
@@ -417,22 +446,22 @@ ubyte encodeType(RecordType rt, ubyte seqLen)
     __gshared immutable RecEnd[RecordType.str] rtMap = [
         RecEnd(Type.U16, Endian.BE_BE, 1),
         RecEnd(Type.S16, Endian.BE_BE, 1),
-        RecEnd(Type.U32, Endian.LE_LE, 2),
+        RecEnd(Type.U32, Endian.BE_LE, 2),
         RecEnd(Type.U32, Endian.BE_BE, 2),
-        RecEnd(Type.S32, Endian.LE_LE, 2),
+        RecEnd(Type.S32, Endian.BE_LE, 2),
         RecEnd(Type.S32, Endian.BE_BE, 2),
-        RecEnd(Type.U64, Endian.LE_LE, 4),
+        RecEnd(Type.U64, Endian.BE_LE, 4),
         RecEnd(Type.U64, Endian.BE_BE, 4),
-        RecEnd(Type.S64, Endian.LE_LE, 4),
+        RecEnd(Type.S64, Endian.BE_LE, 4),
         RecEnd(Type.S64, Endian.BE_BE, 4),
         RecEnd(Type.U8_H, Endian.BE_BE, 1),
         RecEnd(Type.U8_L, Endian.BE_BE, 1),
         RecEnd(Type.S8_H, Endian.BE_BE, 1),
         RecEnd(Type.S8_L, Endian.BE_BE, 1),
         RecEnd(Type.U16, Endian.BE_BE, 1),
-        RecEnd(Type.F32, Endian.LE_LE, 2),
+        RecEnd(Type.F32, Endian.BE_LE, 2),
         RecEnd(Type.F32, Endian.BE_BE, 2),
-        RecEnd(Type.F64, Endian.LE_LE, 4),
+        RecEnd(Type.F64, Endian.BE_LE, 4),
         RecEnd(Type.F64, Endian.BE_BE, 4),
         RecEnd(Type.U16, Endian.BE_BE, 1),
         RecEnd(Type.U32, Endian.BE_BE, 2),
