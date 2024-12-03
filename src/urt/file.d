@@ -237,9 +237,12 @@ void[] load_file(const(char)[] path, NoGCAllocator allocator = defaultAllocator(
 {
     File f;
     Result r = f.open(path, FileOpenMode.ReadExisting);
+    if (!r && r.get_FileResult == FileResult.NotFound)
+        return null;
     assert(r, "TODO: handle error");
     ulong size = f.get_size();
-    void[] buffer = allocator.alloc(size);
+    assert(size <= size_t.max, "File is too large");
+    void[] buffer = allocator.alloc(cast(size_t)size);
     size_t bytesRead;
     r = f.read(buffer[], bytesRead);
     assert(r, "TODO: handle error");
