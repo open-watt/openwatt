@@ -26,8 +26,6 @@ import manager.units;
 //import router.server;
 
 
-alias CreateComponentFunc = Component* delegate(Device* device, ref ConfItem config);
-
 class ApplicationInstance
 {
     String name;
@@ -38,11 +36,9 @@ class ApplicationInstance
     GlobalInstance global;
     Array!(Plugin.Instance) pluginInstance;
 
-    Map!(String, CreateComponentFunc) customComponents;
-
     Console console;
 
-    Map!(const(char)[], Device*) devices;
+    Map!(const(char)[], Device) devices;
 
     // database...
 
@@ -75,9 +71,15 @@ class ApplicationInstance
         return cast(I.Instance)moduleInstance(I.ModuleName);
     }
 
-    void registerComponentType(String type, CreateComponentFunc createFunc)
+    Component findComponent(const(char)[] name) pure nothrow @nogc
     {
-        customComponents.insert(type.move, createFunc);
+        const(char)[] deviceName = name.split!'.';
+        foreach (id, device; devices)
+        {
+            if (id[] == deviceName[])
+                return name.empty ? device : device.findComponent(name);
+        }
+        return null;
     }
 
     void update() nothrow @nogc
@@ -109,19 +111,22 @@ class ApplicationInstance
             // split on dots...
         }
 
+        void printComponent(Component c, int indent)
+        {
+            session.writef("{'', *0}{1}: {2} [{3}]\n", indent, c.id, c.name, c.template_);
+            foreach (e; c.elements)
+                session.writef("{'', *8}  {0}{@5, ?4}: {2}{@7, ?6}\n", e.id, e.name, e.latest, e.unit, e.name.length > 0, " ({1})", e.unit.length > 0, " [{3}]", indent);
+            foreach (c2; c.components)
+                printComponent(c2, indent + 2);
+        }
+
         const(char)[] newLine = "";
         foreach (dev; devices)
         {
             session.writeLine(newLine, dev.id, ": ", dev.name);
             newLine = "\n";
             foreach (c; dev.components)
-            {
-                session.writeLine("  ", c.id, ": ", c.name, " [", c.template_, "]");
-                foreach (e; c.elements)
-                {
-                    session.writef("    {0}{@5, ?4}: {2}{@7, ?6}\n", e.id, e.name, e.latest, e.unit, e.name.length > 0, " ({1})", e.unit.length > 0, " [{3}]");
-                }
-            }
+                printComponent(c, 2);
         }
 
 

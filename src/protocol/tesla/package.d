@@ -108,8 +108,7 @@ class TeslaProtocolModule : Plugin
             }
 
             // create the device
-            Device* device = app.allocator.allocT!Device();
-            device.id = id.makeString(app.allocator);
+            Device device = app.allocator.allocT!Device(id.makeString(app.allocator));
             if (name)
                 device.name = name.value.makeString(app.allocator);
 
@@ -117,15 +116,13 @@ class TeslaProtocolModule : Plugin
             TeslaTWCSampler sampler = app.allocator.allocT!TeslaTWCSampler(this, cast(ushort)(slave_id ? slave_id.value : 0), mac ? mac.value : MACAddress());
             device.samplers ~= sampler;
 
-            Component* c;
+            Component c;
             Element* e;
 
             import urt.mem.string;
 
             // device info
-            c = app.allocator.allocT!Component();
-
-            c.id = "info".addString;
+            c = app.allocator.allocT!Component(String("info".addString));
             c.template_ = "DeviceInfo".addString;
 
             e = app.allocator.allocT!Element();
@@ -147,9 +144,7 @@ class TeslaProtocolModule : Plugin
             device.components ~= c;
 
             // charge control
-            c = app.allocator.allocT!Component();
-
-            c.id = "control".addString;
+            c = app.allocator.allocT!Component(String("control".addString));
             c.template_ = "ChargeControl".addString;
 
             e = app.allocator.allocT!Element();
@@ -173,9 +168,7 @@ class TeslaProtocolModule : Plugin
             device.components ~= c;
 
             // car
-            c = app.allocator.allocT!Component();
-
-            c.id = "car".addString;
+            c = app.allocator.allocT!Component(String("car".addString));
             c.template_ = "Car".addString;
 
             e = app.allocator.allocT!Element();
@@ -186,9 +179,7 @@ class TeslaProtocolModule : Plugin
             device.components ~= c;
 
             // energy meter
-            c = app.allocator.allocT!Component();
-
-            c.id = "meter".addString;
+            c = app.allocator.allocT!Component(String("meter".addString));
             c.template_ = "RealtimeEnergyMeter".addString;
 
             e = app.allocator.allocT!Element();

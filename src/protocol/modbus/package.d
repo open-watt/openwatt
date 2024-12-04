@@ -115,8 +115,7 @@ class ModbusProtocolModule : Plugin
             ModbusProfile* profile = parseModbusProfile(cast(char[])file, app.allocator);
 
             // create the device
-            Device* device = app.allocator.allocT!Device();
-            device.id = id.makeString(app.allocator);
+            Device device = app.allocator.allocT!Device(id.makeString(app.allocator));
             if (name)
                 device.name = name.value.makeString(app.allocator);
 
@@ -124,12 +123,16 @@ class ModbusProtocolModule : Plugin
             ModbusSampler sampler = app.allocator.allocT!ModbusSampler(client, target);
             device.samplers ~= sampler;
 
-            // create a bunch of componwnts from the profile template
-            foreach (ref ct; profile.componentTemplates)
+            Component createComponent(ref ComponentTemplate ct)
             {
-                Component* c = app.allocator.allocT!Component();
-                c.id = ct.id.move;
+                Component c = app.allocator.allocT!Component(ct.id.move);
                 c.template_ = ct.template_.move;
+
+                foreach (ref child; ct.components)
+                {
+                    Component childComponent = createComponent(child);
+                    c.components ~= childComponent;
+                }
 
                 foreach (ref el; ct.elements)
                 {
@@ -202,6 +205,13 @@ class ModbusProtocolModule : Plugin
                     c.elements ~= e;
                 }
 
+                return c;
+            }
+
+            // create a bunch of components from the profile template
+            foreach (ref ct; profile.componentTemplates)
+            {
+                Component c = createComponent(ct);
                 device.components ~= c;
             }
 
@@ -278,6 +288,12 @@ class ModbusProtocolModule : Plugin
 
             // TODO: this should be a global MAC->name table, not a modbus specific table...
             map = app.moduleInstance!ModbusInterfaceModule.findServerByName(slave);
+            if (!map)
+            {
+                MACAddress addr;
+                if (addr.fromString(slave))
+                    map = app.moduleInstance!ModbusInterfaceModule.findServerByMac(addr);
+            }
 
             return *c;
         }

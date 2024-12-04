@@ -1,9 +1,5 @@
 module router.modbus.profile;
 
-//import std.algorithm : map;
-//import std.format;
-//import std.stdio;
-
 import urt.array;
 import urt.conv;
 import urt.io;
@@ -254,6 +250,7 @@ struct ComponentTemplate
     String id;
     String template_;
     Array!ElementTemplate elements;
+    Array!ComponentTemplate components;
 
     this(this) @disable;
 
@@ -393,6 +390,14 @@ ModbusProfile* parseModbusProfile(ConfItem conf, NoGCAllocator allocator = defau
 						else writeln("Invalid frequency value: ", freq);
 					}
 
+                    // TODO: this shouldn't be an assert!
+                    foreach (ref r; registers)
+                    {
+                        if (r.desc.name.icmp(id) == 0)
+                            writeln("Duplicate register: ", id, "  ", );
+//                        assert(r.desc.name.icmp(id) != 0, "Duplicate register!");
+                    }
+
 					registers ~= ModbusRegInfo(register.to!int, type, id, units, displayUnits, frequency, desc, fields[], fieldDesc[]);
 					break;
 
@@ -402,40 +407,50 @@ ModbusProfile* parseModbusProfile(ConfItem conf, NoGCAllocator allocator = defau
 			break;
 
         case "device-template":
+            void parseComponent(ref ComponentTemplate component, ref ConfItem conf)
+            {
+                // component desc...
+
+                ElementTemplate.Type ty = ElementTemplate.Type.Constant;
+
+                foreach (ref cItem; conf.subItems) switch (cItem.name)
+                {
+                    case "id":
+                        component.id = cItem.value.unQuote.makeString(allocator);
+                        break;
+
+                    case "template":
+                        component.template_ = cItem.value.unQuote.makeString(allocator);
+                        break;
+
+                    case "element-map":
+                        ty = ElementTemplate.Type.Map;
+                        goto case;
+                    case "element":
+                        ElementTemplate* e = &component.elements.pushBack();
+                        e.type = ty;
+
+                        const(char)[] tail = cItem.value;
+                        e.id = tail.split!','.unQuote.makeString(allocator);
+                        e.value = tail.split!','.makeString(allocator);
+                        break;
+
+                    case "component":
+                        ComponentTemplate* t = &component.components.pushBack();
+                        parseComponent(*t, cItem);
+                        break;
+
+                    default:
+                        writeln("Invalid token: ", cItem.name);
+                        break;
+                }
+            }
+
             foreach (ref item; rootItem.subItems) switch (item.name)
             {
                 case "component":
-                    // component desc...
-
                     ComponentTemplate* t = &componentTemplates.pushBack();
-                    ElementTemplate.Type ty = ElementTemplate.Type.Constant;
-
-                    foreach (ref cItem; item.subItems) switch (cItem.name)
-                    {
-                        case "id":
-                            t.id = cItem.value.unQuote.makeString(allocator);
-                            break;
-
-                        case "template":
-                            t.template_ = cItem.value.unQuote.makeString(allocator);
-                            break;
-
-                        case "element-map":
-                            ty = ElementTemplate.Type.Map;
-                            goto case;
-                        case "element":
-                            ElementTemplate* e = &t.elements.pushBack();
-                            e.type = ty;
-
-                            const(char)[] tail = cItem.value;
-                            e.id = tail.split!','.unQuote.makeString(allocator);
-                            e.value = tail.split!','.makeString(allocator);
-                            break;
-
-                        default:
-                            writeln("Invalid token: ", cItem.name);
-                            break;
-                    }
+                    parseComponent(*t, item);
                     break;
 
                 default:
