@@ -1,8 +1,8 @@
 module router.stream.udp;
 
-import std.socket;
-
 import urt.io;
+import urt.lifetime;
+import urt.socket;
 import urt.string;
 import urt.string.format;
 
@@ -13,38 +13,36 @@ public import router.stream;
 
 class UDPStream : Stream
 {
-	this(String name, ushort remotePort, string remoteHost = "255.255.255.255", ushort localPort = 0, string localHost = "0.0.0.0", StreamOptions options = StreamOptions.None)
+	this(String name, ushort remotePort, const char[] remoteHost = "255.255.255.255", ushort localPort = 0, const char[] localHost = "0.0.0.0", StreamOptions options = StreamOptions.None)
 	{
-		import urt.lifetime;
+        super(name.move, "udp", options);
 
-		// TODO: if remoteHost is a broadcast address and options doesn't have `AllowBroadcast`, make a warning...
+        // TODO: if remoteHost is a broadcast address and options doesn't have `AllowBroadcast`, make a warning...
 
-		super(name.move, "udp", options);
-		this.localHost = localHost;
-		this.localPort = localPort;
-		this.remoteHost = remoteHost;
-		this.remotePort = remotePort;
+        this.localHost = localHost.makeString(defaultAllocator());
+        this.localPort = localPort;
+        this.remoteHost = remoteHost.makeString(defaultAllocator());
+        this.remotePort = remotePort;
 
-		Address[] addrs = getAddress(localHost, localPort);
-		if (addrs.length == 0)
-		{
-			assert(0);
-		}
-		else if (addrs.length > 1)
-		{
-			writeln("TODO: what do to with additional addresses?");
-		}
-		local = addrs[0];
-		addrs = getAddress(remoteHost, remotePort);
-		if (addrs.length == 0)
-		{
-			assert(0);
-		}
-		else if (addrs.length > 1)
-		{
-			writeln("TODO: what do to with additional addresses?");
-		}
-		remote = addrs[0];
+        AddressInfoResolver resolve;
+        Result r = localHost.get_address_info(tconcat(localPort), null, resolve);
+        assert(r, "What do we even do about fails like this?");
+
+        AddressInfo addr;
+        while (resolve.next_address(addr))
+        {
+            local = addr.address;
+            break; // TODO: what do we even do with multiple addresses?
+        }
+
+        r = remoteHost.get_address_info(tconcat(remotePort), null, resolve);
+        assert(r, "What do we even do about fails like this?");
+
+        while (resolve.next_address(addr))
+        {
+            remote = addr.address;
+            break; // TODO: what do we even do with multiple addresses?
+        }
 	}
 
 	override bool connect()
@@ -71,7 +69,7 @@ class UDPStream : Stream
 		return true;
 	}
 
-	override string remoteName()
+	override const(char)[] remoteName()
 	{
 		return remoteHost;
 	}
@@ -85,87 +83,51 @@ class UDPStream : Stream
 //		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.BROADCAST, (options & StreamOptions.AllowBroadcast) ? 1 : 0);
 	}
 
-	override ptrdiff_t read(void[] buffer) nothrow @nogc
-	{
-		// HACK!!!
-		try {
-			auto d = &read_impl;
-			return (cast(ptrdiff_t delegate(void[]) nothrow @nogc)d)(buffer);
-		}
-		catch (Exception)
-			return -1;
-	}
+    override ptrdiff_t read(void[] buffer) nothrow @nogc
+    {
+        size_t bytes;
+        Result r = socket.recvfrom(buffer, MsgFlags.None, null, &bytes);
+        if (!r)
+        {
+            if (r.get_SocketResult() == SocketResult.WouldBlock)
+                return 0;
+            assert(0);
+        }
+        return bytes;
+    }
 
-	final ptrdiff_t read_impl(void[] buffer)
-	{
-		Address from;
-		long r = socket.receiveFrom(buffer, from);
-		if (r == Socket.ERROR)
-		{
-			if (wouldHaveBlocked())
-				return 0;
+    override ptrdiff_t write(const void[] data) nothrow @nogc
+    {
+        size_t bytes;
+        Result r = socket.sendto(data, MsgFlags.None, &remote, &bytes);
+        if (!r)
+            assert(0);
+        return bytes;
+    }
 
-			// TODO?
-			assert(0);
-		}
-		// if remote is not a broadcast addr, we need to confirm we received from our designated remote
-		// TODO: ...
-		return cast(ptrdiff_t)r;
-	}
+    ptrdiff_t recvfrom(ubyte[] msgBuffer, out InetAddress srcAddr)
+    {
+        size_t bytes;
+        Result r = socket.recvfrom(msgBuffer, MsgFlags.None, &srcAddr, &bytes);
+        if (!r)
+        {
+            // TODO?
+            assert(0);
+        }
+        return bytes;
+    }
 
-	override ptrdiff_t write(const void[] data) nothrow @nogc
-	{
-		// HACK!!!
-		try {
-			auto d = &write_impl;
-			return (cast(ptrdiff_t delegate(const void[]) nothrow @nogc)d)(data);
-		}
-		catch (Exception)
-			return -1;
-	}
-
-	final ptrdiff_t write_impl(const void[] data)
-	{
-		long r = socket.sendTo(data, remote);
-		if (r == Socket.ERROR)
-		{
-			// TODO?
-			assert(0);
-		}
-		return cast(ptrdiff_t)r;
-	}
-
-	ptrdiff_t recvfrom(ubyte[] msgBuffer, out char[] srcAddr, char[] addrBuffer = null)
-	{
-		Address from;
-		long r = socket.receiveFrom(msgBuffer, from);
-		if (r == Socket.ERROR)
-		{
-			// TODO?
-			assert(0);
-		}
-		// TODO: stringify `from`
-		//...
-		return cast(ptrdiff_t)r;
-	}
-
-	ptrdiff_t sendto(const ubyte[] data, const(char)[] destAddr)
-	{
-		// TODO: we shouldn't use getAddress here, string should be ip address only, no hostnames here...
-		Address[] addrs = getAddress(destAddr);
-		if (addrs.length == 0)
-			assert(0);
-		else if (addrs.length > 1)
-			writeln("TODO: what do to with additional addresses?");
-
-		long r = socket.sendTo(data, addrs[0]);
-		if (r == Socket.ERROR)
-		{
-			// TODO?
-			assert(0);
-		}
-		return cast(ptrdiff_t)r;
-	}
+    ptrdiff_t sendto(const ubyte[] data, InetAddress destAddr)
+    {
+        size_t sent;
+        Result r = socket.sendto(data, MsgFlags.None, &destAddr, &sent);
+        if (!r)
+        {
+            // TODO?
+            assert(0);
+        }
+        return sent;
+    }
 
 	override ptrdiff_t pending()
 	{
@@ -198,12 +160,12 @@ class UDPStream : Stream
 
 private:
 	Socket socket;
-	string localHost;
-	string remoteHost;
+	String localHost;
+	String remoteHost;
 	ushort localPort;
 	ushort remotePort;
-	Address local;
-	Address remote;
+	InetAddress local;
+	InetAddress remote;
 }
 
 

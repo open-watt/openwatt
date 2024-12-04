@@ -8,6 +8,9 @@ public import urt.time;
 
 version (Windows)
 {
+    // TODO: this is in core.sys.windows.winsock2; why do I need it here?
+    pragma(lib, "ws2_32");
+
 	import core.sys.windows.windows;
 	import core.sys.windows.winsock2 :
 		_bind = bind, _listen = listen, _connect = connect, _accept = accept,
@@ -750,7 +753,7 @@ Result get_hostname(char* name, size_t len)
 	return Result.Success;
 }
 
-Result get_address_info(const(char)[] nodeName, const(char)[] serviceName, AddressInfo* hints, out AddressInfoResolver result)
+Result get_address_info(const(char)[] nodeName, const(char)[] service, AddressInfo* hints, out AddressInfoResolver result)
 {
 	import urt.mem.temp : tstringz;
 
@@ -769,7 +772,7 @@ Result get_address_info(const(char)[] nodeName, const(char)[] serviceName, Addre
 	}
 
 	addrinfo* res;
-	int err = getaddrinfo(nodeName.tstringz, serviceName.tstringz, hints ? &tmpHints : null, &res);
+	int err = getaddrinfo(nodeName.tstringz, service.tstringz, hints ? &tmpHints : null, &res);
 	if (err != 0)
 		return Result(err);
 
@@ -870,7 +873,7 @@ nothrow @nogc:
 		return this;
 	}
 
-	bool next_address(AddressInfo* addressInfo)
+	bool next_address(out AddressInfo addressInfo)
 	{
 		if (!m_internal[1])
 			return false;
