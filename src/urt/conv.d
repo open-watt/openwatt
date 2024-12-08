@@ -211,10 +211,15 @@ unittest
 
 ptrdiff_t formatFloat(double value, char[] buffer, const(char)[] format = null) // pure
 {
+    // TODO: this function should be oblitereated and implemented natively...
+    //       CRT call can't CTFE, which is a shame
+
     import core.stdc.stdio;
     import urt.string.format : concat;
 
-    char[8] fmt;
+    char[16] fmt = void;
+    assert(format.length <= fmt.sizeof - 3, "Format string buffer overflow");
+
     concat(fmt, "%", format, "g\0");
     int len = snprintf(buffer.ptr, buffer.length, fmt.ptr, value);
     if (len < 0)
@@ -285,6 +290,7 @@ template to(T)
         }
     }
 }
+
 
 private:
 
