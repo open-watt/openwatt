@@ -435,6 +435,9 @@
     <DCompile Include="src\router\iface\zigbee.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
+    <DCompile Include="src\urt\crc.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

@@ -120,6 +120,7 @@
     <DCompile Include="src\urt\array.d" />
     <DCompile Include="src\urt\compiler.d" />
     <DCompile Include="src\urt\conv.d" />
+    <DCompile Include="src\urt\crc.d" />
     <DCompile Include="src\urt\dbg.d" />
     <DCompile Include="src\urt\endian.d" />
     <DCompile Include="src\urt\file.d" />
