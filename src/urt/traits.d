@@ -7,10 +7,12 @@ enum bool isType(alias X) = is(X);
 
 enum bool isBoolean(T) = __traits(isUnsigned, T) && is(T : bool);
 
-enum bool isSomeInt(T) = is(T == byte) || is(T == ubyte) || is(T == short) || is(T == ushort) || is(T == int) || is(T == uint) || is(T == long) || is(T == ulong);
-enum bool isIntegral(T) = is(T == bool) || isSomeInt!T || isSomeChar!T;
-enum bool isSignedInt(T) = is(T == byte) || is(T == short) || is(T == int) || is(T == long);
 enum bool isUnsignedInt(T) = is(T == ubyte) || is(T == ushort) || is(T == uint) || is(T == ulong);
+enum bool isSignedInt(T) = is(T == byte) || is(T == short) || is(T == int) || is(T == long);
+enum bool isSomeInt(T) = isUnsignedInt!T || isSignedInt!T;
+enum bool isUnsignedIntegral(T) = is(T == bool) || isUnsignedInt!T || isSomeChar!T;
+enum bool isSignedIntegral(T) = isSignedInt!T;
+enum bool isIntegral(T) = isUnsignedIntegral!T || isSignedIntegral!T;
 enum bool isSomeFloat(T) = is(T == float) || is(T == double) || is(T == real);
 
 enum bool isEnum(T) = is(T == enum);
