@@ -350,7 +350,5 @@ bool tokenToValue(T)(ref const Token t, out T r) nothrow @nogc
     if (is(T == struct))
 {
     const(char)[] v = tokenValue(t, false);
-    size_t taken;
-    r.fromString(v, &taken);
-    return taken != 0;
+    return r.fromString(v) == v.length;
 }

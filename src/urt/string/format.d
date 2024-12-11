@@ -56,17 +56,13 @@ char[] concat(Args...)(char[] buffer, auto ref Args args)
             static if (is(typeof(s) : char))
             {
                 if (buffer.length < offset + 1)
-                    return buffer[];
-                buffer.ptr[offset] = s;
-                ++offset;
+                    return null;
+                buffer.ptr[offset++] = s;
             }
             else
             {
                 if (buffer.length < offset + s.length)
-                {
-                    buffer.ptr[offset .. buffer.length] = s[0 .. buffer.length - offset];
-                    return buffer[];
-                }
+                    return null;
                 buffer.ptr[offset .. offset + s.length] = s.ptr[0 .. s.length];
                 offset += s.length;
             }
@@ -153,10 +149,12 @@ struct FormatArg
 
 	char[] getString(char[] buffer, const(char)[] format, const(FormatArg)[] args) const nothrow @nogc
 	{
-		size_t len = toString(buffer, format, args);
+		ptrdiff_t len = toString(buffer, format, args);
+		if (len < 0)
+			return null;
 		return buffer.ptr[0 .. len];
 	}
-	size_t getLength(const(char)[] format, const(FormatArg)[] args) const nothrow @nogc
+	ptrdiff_t getLength(const(char)[] format, const(FormatArg)[] args) const nothrow @nogc
 	{
 		return toString(null, format, args);
 	}
@@ -200,17 +198,19 @@ struct DefFormat(T)
 		{
 			if (!buffer.ptr)
 				return 4;
-			size_t len = min(buffer.length, 4);
-			buffer[0 .. len] = "null"[0 .. len];
-			return len;
+			if (buffer.length < 4)
+				return -1;
+			buffer[0 .. 4] = "null";
+			return 4;
 		}
 		else static if (is(T == bool))
 		{
+			size_t len = value ? 4 : 5;
 			if (!buffer.ptr)
-				return value ? 4 : 5;
-			string str = value ? "true" : "false";
-			size_t len = min(buffer.length, str.length);
-			buffer[0 .. len] = str[0 .. len];
+				return len;
+			if (buffer.length < len)
+				return -1;
+			buffer[0 .. len] = value ? "true" : "false";
 			return len;
 		}
 		else static if (is(T == char) || is(T == wchar) || is(T == dchar))
@@ -220,7 +220,7 @@ struct DefFormat(T)
 				if (buffer.ptr)
 				{
 					if (buffer.length < 1)
-						return 0;
+						return -1;
 					buffer[0] = cast(char)value;
 				}
 				return 1;
@@ -230,7 +230,7 @@ struct DefFormat(T)
 				if (buffer.ptr)
 				{
 					if (buffer.length < 2)
-						return 0;
+						return -1;
 					buffer[0] = cast(char)(0xC0 | (value >> 6));
 					buffer[1] = cast(char)(0x80 | (value & 0x3F));
 				}
@@ -241,7 +241,7 @@ struct DefFormat(T)
 				if (buffer.ptr)
 				{
 					if (buffer.length < 3)
-						return 0;
+						return -1;
 					buffer[0] = cast(char)(0xE0 | (value >> 12));
 					buffer[1] = cast(char)(0x80 | ((value >> 6) & 0x3F));
 					buffer[2] = cast(char)(0x80 | (value & 0x3F));
@@ -253,7 +253,7 @@ struct DefFormat(T)
 				if (buffer.ptr)
 				{
 					if (buffer.length < 4)
-						return 0;
+						return -1;
 					buffer[0] = cast(char)(0xF0 | (value >> 18));
 					buffer[1] = cast(char)(0x80 | ((value >> 12) & 0x3F));
 					buffer[2] = cast(char)(0x80 | ((value >> 6) & 0x3F));
@@ -267,24 +267,22 @@ struct DefFormat(T)
 				return 0;
 			}
 		}
-		else static if (is(T == double))
+		else static if (is(T == double) || is(T == float))
 		{
-			import core.stdc.stdio;
+			import urt.conv : formatFloat, formatInt;
 
-			char[8] fmt;
-			char[64] result;
-			concat(fmt, "%", format, "g\0");
-			int len = snprintf(result.ptr, result.length, fmt.ptr, value);
-			if (!buffer.ptr)
-				return len;
-			size_t copy = buffer.length < len ? buffer.length : len;
-			buffer[0 .. copy] = result[0 .. copy];
-			return copy;
-		}
-		else static if (is(T == float))
-		{
-			double t = value;
-			return t.defToString(buffer, format, formatArgs);
+			char[16] tmp = void;
+			if (format.length && format[0] == '*')
+			{
+				bool success;
+				size_t arg = format[1..$].parseIntFast(success);
+				if (!success || !formatArgs[arg].canInt)
+					return -2;
+				size_t width = formatArgs[arg].getInt;
+				size_t len = width.formatInt(tmp);
+				format = tmp[0..len];
+			}
+			return formatFloat(value, buffer, format);
 		}
 		else static if (is(T == ulong) || is(T == long))
 		{
@@ -317,11 +315,11 @@ struct DefFormat(T)
 			if (format.length && format[0].isNumeric)
 			{
 				bool success;
-				padding = format.parseInt(success);
+				padding = format.parseIntFast(success);
 				if (varLen)
 				{
 					if (padding < 0 || !formatArgs[padding].canInt)
-						return -1;
+						return -2;
 					padding = formatArgs[padding].getInt;
 				}
 			}
@@ -344,7 +342,7 @@ struct DefFormat(T)
 
 			size_t len = formatInt(value, buffer, base, cast(uint)padding, leadingZeroes ? '0' : ' ', showSign);
 
-			if (toLower)
+			if (toLower && len > 0)
 			{
 				for (size_t i = 0; i < len; ++i)
 					if (cast(uint)(buffer.ptr[i] - 'A') < 26)
@@ -355,13 +353,11 @@ struct DefFormat(T)
 		}
 		else static if (is(T == ubyte) || is(T == ushort) || is(T == uint))
 		{
-			ulong t = value;
-			return t.defToString(buffer, format, formatArgs);
+			return defToString(ulong(value), buffer, format, formatArgs);
 		}
 		else static if (is(T == byte) || is(T == short) || is(T == int))
 		{
-			long t = value;
-			return t.defToString(buffer, format, formatArgs);
+			return defToString(long(value), buffer, format, formatArgs);
 		}
 		else static if (is(T == const(char)*) || is(T == const(char*)))
 		{
@@ -377,12 +373,12 @@ struct DefFormat(T)
 		}
 		else static if (is(T == const char[]))
 		{
-			bool rightJustify = false;
+			bool leftJustify = false;
 			bool varLen = false;
 			ptrdiff_t width = value.length;
 			if (format.length && format[0] == '-')
 			{
-				rightJustify = true;
+				leftJustify = true;
 				format.popFront;
 			}
 			if (format.length && format[0] == '*')
@@ -390,16 +386,16 @@ struct DefFormat(T)
 				varLen = true;
 				format.popFront;
 			}
-			if ((rightJustify || varLen) && (!format.length || !format[0].isNumeric))
-				return -1;
+			if (varLen && (!format.length || !format[0].isNumeric))
+				return -2;
 			if (format.length && format[0].isNumeric)
 			{
 				bool success;
-				width = format.parseInt(success);
+				width = format.parseIntFast(success);
 				if (varLen)
 				{
 					if (width < 0 || !formatArgs[width].canInt)
-						return -1;
+						return -2;
 					width = formatArgs[width].getInt;
 				}
 				if (width < value.length)
@@ -408,12 +404,14 @@ struct DefFormat(T)
 
 			if (!buffer.ptr)
 				return width;
+			if (buffer.length < width)
+				return -1;
 
 			// TODO: accept padd string in the formatSpec?
 
 			size_t padding = width - value.length;
 			size_t pad = 0, len = 0;
-			if (rightJustify && padding > 0)
+			if (!leftJustify && padding > 0)
 			{
 				pad = buffer.length < padding ? buffer.length : padding;
 				buffer[0 .. pad] = ' ';
@@ -421,7 +419,7 @@ struct DefFormat(T)
 			}
 			len = buffer.length < value.length ? buffer.length : value.length;
 			buffer[0 .. len] = value[0 .. len];
-			if (padding > 0 && !rightJustify)
+			if (padding > 0 && leftJustify)
 			{
 				buffer.takeFront(len);
 				pad = buffer.length < padding ? buffer.length : padding;
@@ -449,19 +447,24 @@ struct DefFormat(T)
             if (format.length && format[0].isNumeric)
             {
                 bool success;
-                grp1 = cast(int)format.parseInt(success);
+                grp1 = cast(int)format.parseIntFast(success);
                 if (success && format.length > 0 && format[0] == ':' &&
                                format.length > 1 && format[1].isNumeric)
                 {
                     format.popFront();
-                    grp2 = cast(int)format.parseInt(success);
+                    grp2 = cast(int)format.parseIntFast(success);
                 }
                 if (!success)
-                    return -1;
+                    return -2;
             }
 
             if (!buffer.ptr)
-                return value.length*2 + (value.length / grp1) - 1;
+            {
+                size_t len = value.length*2;
+                if (grp1)
+                    len += (value.length-1) / grp1;
+                return len;
+            }
 
             char[] hex = toHexString(cast(ubyte[])value, buffer, grp1, grp2);
             return hex.length;
@@ -473,7 +476,7 @@ struct DefFormat(T)
 			if (buffer.ptr)
 			{
 				if (buffer.length < 1)
-					return 0;
+					return -1;
 				buffer[0] = '[';
 			}
 
@@ -484,7 +487,7 @@ struct DefFormat(T)
 					if (buffer.ptr)
 					{
 						if (len == buffer.length)
-							return len;
+							return -1;
 						buffer[len] = ',';
 					}
 					++len;
@@ -494,6 +497,8 @@ struct DefFormat(T)
 				if (buffer.ptr)
 				{
 					size_t argLen = arg.getString(buffer.ptr[len .. buffer.length], format, formatArgs).length;
+					if (argLen < 0)
+						return argLen;
 					len += argLen;
 				}
 				else
@@ -503,13 +508,15 @@ struct DefFormat(T)
 			if (buffer.ptr)
 			{
 				if (len == buffer.length)
-					return 0;
+					return -1;
 				buffer[len] = ']';
 			}
 			return ++len;
 		}
 		else static if (is(T B == enum))
 		{
+            // TODO: optimise short enums with a TABLE!
+
             // TODO: should probably return FQN ???
             string key = null;
             val: switch (value)
@@ -525,25 +532,28 @@ struct DefFormat(T)
                 }
                 default:
                     if (!buffer.ptr)
-                        return T.stringof.length + 2 + defToString!B(cast(B)value, buffer, null, null);
+                        return T.stringof.length + 2 + defToString!B(cast(B)value, null, null, null);
 
-                    if (buffer.length < T.stringof.length + 1)
-                        return 0;
+                    if (buffer.length < T.stringof.length + 2)
+                        return -1;
                     buffer[0 .. T.stringof.length] = T.stringof;
                     buffer[T.stringof.length] = '(';
                     ptrdiff_t len = defToString!B(*cast(B*)&value, buffer[T.stringof.length + 1 .. $], null, null);
-                    if (len <= 0 || buffer.length < T.stringof.length + 2 + len)
-                        return 0;
-                    buffer[T.stringof.length + 1 + len] = ')';
-                    return T.stringof.length + 2 + len;
+                    if (len < 0)
+                        return len;
+                    len = T.stringof.length + 2 + len;
+                    if (buffer.length < len)
+                        return -1;
+                    buffer[len - 1] = ')';
+                    return len;
             }
 
-            if (!buffer.ptr)
-                return T.stringof.length + 1 + key.length;
-
             size_t len = T.stringof.length + 1 + key.length;
+            if (!buffer.ptr)
+                return len;
+
             if (buffer.length < len)
-                return 0;
+                return -1;
             buffer[0 .. T.stringof.length] = T.stringof;
             buffer[T.stringof.length] = '.';
             buffer[T.stringof.length + 1 .. len] = key[];
@@ -555,10 +565,7 @@ struct DefFormat(T)
             if (!buffer.ptr)
                 return t.length;
             if (buffer.length < t.length)
-            {
-                buffer[] = t[0 .. buffer.length];
-                return buffer.length;
-            }
+                return -1;
             buffer[0 .. t.length] = t[];
             return t.length;
         }
@@ -569,23 +576,23 @@ struct DefFormat(T)
         else static if (is(T == struct))
         {
             // general structs
-            size_t len = T.stringof.length + 1;
             if (buffer.ptr)
             {
-                if (buffer.length < T.stringof.length + 1)
-                    return 0;
+                if (buffer.length < T.stringof.length + 2)
+                    return -1;
                 buffer[0 .. T.stringof.length] = T.stringof;
                 buffer[T.stringof.length] = '(';
             }
 
+            size_t len = T.stringof.length + 1;
             static foreach (i; 0 .. value.tupleof.length)
             {{
                 static if (i > 0)
                 {
                     if (buffer.ptr)
                     {
-                        if (len + 1 >= buffer.length)
-                            return len;
+                        if (len + 2 > buffer.length)
+                            return -1;
                         buffer[len .. len + 2] = ", ";
                     }
                     len += 2;
@@ -594,18 +601,20 @@ struct DefFormat(T)
                 FormatArg arg = FormatArg(value.tupleof[i]);
                 if (buffer.ptr)
                 {
-                    size_t argLen = arg.getString(buffer.ptr[len .. buffer.length], null, null).length;
+                    ptrdiff_t argLen = arg.getString(buffer.ptr[len .. buffer.length], null, null).length;
+                    if (argLen < 0)
+                        return argLen;
                     len += argLen;
                 }
                 else
-                    len += arg.getLength(format, null);
+                    len += arg.getLength(null, null);
 
             }}
 
             if (buffer.ptr)
             {
                 if (len == buffer.length)
-                    return 0;
+                    return -1;
                 buffer[len] = ')';
             }
             return ++len;
@@ -614,13 +623,13 @@ struct DefFormat(T)
 			static assert(false, "Not implemented for type: ", T.stringof);
 	}
 
-	static if (is(T : ulong) && !isSomeChar!T)
+	static if (isSomeInt!T || is(T == bool))
 	{
 		ptrdiff_t toInt() const pure nothrow @nogc
 		{
 			static if (T.max > ptrdiff_t.max)
 				debug assert(value <= ptrdiff_t.max);
-			return value;
+			return cast(ptrdiff_t)value;
 		}
 	}
 }
@@ -629,7 +638,12 @@ char[] concatImpl(char[] buffer, const(FormatArg)[] args) nothrow @nogc
 {
 	size_t len = 0;
 	foreach (a; args)
-		len += a.getString(buffer.ptr ? buffer[len..$] : null, null, null).length;
+    {
+        const(char)[] s = a.getString(buffer.ptr ? buffer[len..$] : null, null, null);
+        if (!s)
+            return null;
+        len += s.length;
+    }
 	return buffer.ptr[0..len];
 }
 
@@ -652,7 +666,7 @@ char[] formatImpl(char[] buffer, const(char)[] format, const(FormatArg)[] args) 
 			ptrdiff_t len = parseFormat(format, buffer, args);
 			if (len < 0)
 			{
-				assert(false, "Bad format string!");
+				assert(len == -1, "Bad format string!");
 				return null;
 			}
 			length += len;
@@ -667,7 +681,7 @@ char[] formatImpl(char[] buffer, const(char)[] format, const(FormatArg)[] args) 
 			if (buffer.ptr)
 			{
 				if (buffer.length == 0)
-					break;
+					return null;
 				buffer.popFront = c;
 			}
 			++length;
@@ -681,12 +695,12 @@ ptrdiff_t parseFormat(ref const(char)[] format, ref char[] buffer, const(FormatA
 	if (format.popFront != '{')
 	{
 		assert(false, "Not a format string!");
-		return -1;
+		return -2;
 	}
 
 	format = format.trimFront;
-	if (!format.length)
-		return -1;
+	if (format.length == 0)
+		return -2;
 
 	// check for indirection
 	const(char)[] immediate = null;
@@ -699,7 +713,7 @@ ptrdiff_t parseFormat(ref const(char)[] format, ref char[] buffer, const(FormatA
 		while (format.length && format[0] != '\'')
 			format.popFront;
 		if (!format.length)
-			return -1;
+			return -2;
 		immediate = pFormat[0 .. format.ptr - pFormat];
 		format.popFront;
 	}
@@ -719,30 +733,30 @@ ptrdiff_t parseFormat(ref const(char)[] format, ref char[] buffer, const(FormatA
 
 		// get the arg index
 		bool success;
-		arg = format.parseInt(success);
+		arg = format.parseIntFast(success);
 		if (!success)
 		{
 			assert(false, "Invalid format string: Number expected!");
-			return -1;
+			return -2;
 		}
 		if (arg < 0)
 			arg = args.length + arg;
 		if (varRef)
 		{
 			if (arg < 0 || arg >= args.length || !args[arg].canInt)
-				return -1;
+				return -2;
 			arg = args[arg].getInt;
 		}
 		if (arg < 0 || arg >= args.length)
 		{
 			assert(false, "Invalid arg index!");
-			return -1;
+			return -2;
 		}
 	}
 
 	format = format.trimFront;
-	if (!format.length)
-		return -1;
+	if (format.length == 0)
+		return -2;
 
 	// get the format string (if present)
 	const(char)[] formatSpec;
@@ -753,7 +767,7 @@ ptrdiff_t parseFormat(ref const(char)[] format, ref char[] buffer, const(FormatA
 		while (format.length && format[0] != '}')
 			format.popFront;
 		if (!format.length)
-			return -1;
+			return -2;
 		formatSpec = pFormat[0 .. format.ptr - pFormat];
 		formatSpec = formatSpec.trim;
 	}
@@ -762,7 +776,7 @@ ptrdiff_t parseFormat(ref const(char)[] format, ref char[] buffer, const(FormatA
 	if (format.popFront() != '}')
 	{
 		assert(false, "Invalid format string!");
-		return -1;
+		return -2;
 	}
 
 	// check for universal format strings
@@ -782,17 +796,17 @@ ptrdiff_t parseFormat(ref const(char)[] format, ref char[] buffer, const(FormatA
 //			}
 
 			bool success;
-			ptrdiff_t index = formatSpec.parseInt(success);
+			ptrdiff_t index = formatSpec.parseIntFast(success);
 //			if (varRef)
 //			{
 //				if (arg < 0 || !args[arg].canInt)
-//					return -1;
+//					return -2;
 //				arg = args[arg].getInt;
 //			}
 			if (!success)
 			{
 				assert(false, "Invalid format string: Number expected!");
-				return -1;
+				return -2;
 			}
 
 			if (token == '?' || token == '!')
@@ -800,7 +814,7 @@ ptrdiff_t parseFormat(ref const(char)[] format, ref char[] buffer, const(FormatA
 				if (!args[index].canInt)
 				{
 					assert(false, "Argument can not be interpreted as an integer!");
-					return -1;
+					return -2;
 				}
 				ptrdiff_t condition = args[index].getInt;
 				if ((token == '?' && !condition) || (token == '!' && condition))
@@ -818,7 +832,7 @@ ptrdiff_t parseFormat(ref const(char)[] format, ref char[] buffer, const(FormatA
 		}
 	}
 
-	size_t len;
+	ptrdiff_t len;
 	if (immediate.ptr)
 	{
 		len = immediate.defToString(buffer, formatSpec, args);
@@ -826,7 +840,7 @@ ptrdiff_t parseFormat(ref const(char)[] format, ref char[] buffer, const(FormatA
 	else if (bIndirect)
 	{
 		// TODO: i think this is incorrect... i don't think the indirect format should be supplied formatSpec...
-		//       i think the string should be fetched raw, and then the formatSpec applied to the resolved text?
+		//	   i think the string should be fetched raw, and then the formatSpec applied to the resolved text?
 
 		// interpret the arg as an indirect format string
 		ptrdiff_t bytes = args[arg].getLength(formatSpec, args);
@@ -834,44 +848,48 @@ ptrdiff_t parseFormat(ref const(char)[] format, ref char[] buffer, const(FormatA
 		char[128] indirectFormat;
 		assert(bytes <= indirectFormat.sizeof);
 //		MutableString128 indirectFormat(Reserve, bytes);
-		args[arg].getString(indirectFormat[], formatSpec, args);
-		len = formatImpl(buffer, indirectFormat.ptr[0 .. bytes], args).length;
+		char[] indirect = args[arg].getString(indirectFormat[], formatSpec, args);
+		if (!indirect)
+			return -2;
+		char[] t = formatImpl(buffer, indirectFormat.ptr[0 .. bytes], args);
+		len = t ? t.length : -1;
 	}
 	else
 	{
 		// append the arg
-		len = args[arg].getString(buffer, formatSpec, args).length;
+		char[] t = args[arg].getString(buffer, formatSpec, args);
+		len = t ? t.length : -1;
 	}
 
-	if (buffer.ptr)
+	if (buffer.ptr && len >= 0)
 		buffer = buffer.ptr[len .. buffer.length];
 	return len;
 }
 
-ptrdiff_t parseInt(ref const(char)[] format, out bool success) pure nothrow @nogc
+ptrdiff_t parseIntFast(ref const(char)[] text, out bool success) pure nothrow @nogc
 {
-	if (!format.length)
+	if (!text.length)
 		return 0;
 
 	bool neg = false;
-	if (format[0] == '-')
+	if (text[0] == '-')
 	{
 		neg = true;
 		goto skip;
 	}
-	if (format[0] == '+')
+	if (text[0] == '+')
 	{
 	skip:
-		format.popFront;
-		if (!format.length)
+		text.popFront;
+		if (!text.length)
 			return 0;
 	}
-	if (!isNumeric(format[0]))
+	if (!isNumeric(text[0]))
 		return 0;
 
 	size_t i = 0;
-	while (format.length && isNumeric(format[0]))
-		i = i*10 + (format.popFront - '0');
+	while (text.length && isNumeric(text[0]))
+		i = i*10 + (text.popFront - '0');
 	success = true;
 	return neg ? -i : i;
 }
@@ -908,7 +926,7 @@ unittest
 	const char *pName = "manu";
 	int[3] arr = [ 1, 2, 30 ];
 	r = format(tmp, "{1}, {'?',?7}{'!',!7}, {@6} {3}", "hello ", pName, 10, arr, "-*5", 10, "<{0,@4}>", false);
-	assert(r == "manu, !, <    hello > [1,2,30]");
+	assert(r == "manu, !, <hello     > [1,2,30]");
 
 	r = format(tmp, "{0}", cast(void[])arr);
 	version (LittleEndian)

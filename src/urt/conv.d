@@ -125,7 +125,7 @@ unittest
 }
 
 
-size_t formatInt(long value, char[] buffer, uint base = 10, uint width = 0, char fill = ' ', bool showSign = false) pure
+ptrdiff_t formatInt(long value, char[] buffer, uint base = 10, uint width = 0, char fill = ' ', bool showSign = false) pure
 {
 	import urt.util : isPowerOf2, log2, max;
 
@@ -166,7 +166,7 @@ size_t formatInt(long value, char[] buffer, uint base = 10, uint width = 0, char
 	if (buffer.ptr)
 	{
 		if (buffer.length < len)
-			return 0;
+			return -1;
 
 		size_t offset = 0;
 		if (showSign && fill == '0')
@@ -206,6 +206,27 @@ unittest
 	assert(buffer[0 .. len] == "12345");
 	len = formatInt(-123, buffer, 10, 6);
 	assert(buffer[0 .. len] == "  -123");
+}
+
+
+ptrdiff_t formatFloat(double value, char[] buffer, const(char)[] format = null) // pure
+{
+    // TODO: this function should be oblitereated and implemented natively...
+    //       CRT call can't CTFE, which is a shame
+
+    import core.stdc.stdio;
+    import urt.string.format : concat;
+
+    char[16] fmt = void;
+    assert(format.length <= fmt.sizeof - 3, "Format string buffer overflow");
+
+    concat(fmt, "%", format, "g\0");
+    int len = snprintf(buffer.ptr, buffer.length, fmt.ptr, value);
+    if (len < 0)
+        return -2;
+    if (buffer.ptr && len >= buffer.length)
+        return -1;
+    return len;
 }
 
 
@@ -254,9 +275,8 @@ template to(T)
         T to(const(char)[] str)
         {
             T r;
-            size_t taken;
-            bool success = r.fromString(str, &taken);
-            assert(success && taken == str.length, "Failed to parse string as " ~ T.stringof);
+            ptrdiff_t taken = r.fromString(str);
+            assert(taken == str.length, "Failed to parse string as " ~ T.stringof);
             return r;
         }
     }
@@ -270,6 +290,7 @@ template to(T)
         }
     }
 }
+
 
 private:
 

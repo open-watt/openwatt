@@ -55,7 +55,7 @@ nothrow @nogc:
 
 	ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const pure
 	{
-		char[15] stackBuffer;
+		char[15] stackBuffer = void;
 		char[] tmp = buffer.length < stackBuffer.sizeof ? stackBuffer : buffer;
 		size_t offset = 0;
 		for (int i = 0; i < 4; i++)
@@ -67,7 +67,8 @@ nothrow @nogc:
 
         if (buffer.ptr && tmp.ptr == stackBuffer.ptr)
         {
-            offset = buffer.length;
+            if (buffer.length < offset)
+                return -1;
             buffer[0 .. offset] = tmp[0 .. offset];
         }
 		return offset;
@@ -80,22 +81,22 @@ nothrow @nogc:
 		ulong i = s[offset..$].parseInt(&len);
 		offset += len;
 		if (len == 0 || i > 255 || s.length < offset + 1 || s[offset++] != '.')
-			return 0;
+			return -1;
 		t[0] = cast(ubyte)i;
 		i = s[offset..$].parseInt(&len);
 		offset += len;
 		if (len == 0 || i > 255 || s.length < offset + 1 || s[offset++] != '.')
-			return 0;
+			return -1;
 		t[1] = cast(ubyte)i;
 		i = s[offset..$].parseInt(&len);
 		offset += len;
 		if (len == 0 || i > 255 || s.length < offset + 1 || s[offset++] != '.')
-			return 0;
+			return -1;
 		t[2] = cast(ubyte)i;
 		i = s[offset..$].parseInt(&len);
 		offset += len;
 		if (len == 0 || i > 255)
-			return 0;
+			return -1;
 		t[3] = cast(ubyte)i;
 		b = t;
 		return offset;
@@ -195,7 +196,7 @@ struct IPv6Addr
         if (buffer.ptr)
         {
             if (buffer.length < offset)
-                offset = buffer.length;
+                return -1;
             foreach (i, c; tmp[0 .. offset])
                 buffer[i] = c.toLower;
         }
@@ -238,7 +239,7 @@ nothrow @nogc:
 
 	ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const pure
 	{
-		char[18] stackBuffer;
+		char[18] stackBuffer = void;
 		char[] tmp = buffer.length < stackBuffer.sizeof ? stackBuffer : buffer;
 
 		size_t offset = addr.toString(tmp, null, null);
@@ -247,7 +248,8 @@ nothrow @nogc:
 
         if (buffer.ptr && tmp.ptr == stackBuffer.ptr)
         {
-            offset = buffer.length;
+            if (buffer.length < offset)
+                return -1;
             buffer[0 .. offset] = tmp[0 .. offset];
         }
 		return offset;
@@ -257,12 +259,12 @@ nothrow @nogc:
 	{
 		IPAddr a;
 		size_t taken = a.fromString(s);
-		if (taken == 0 || s.length <= taken + 1 || s[taken++] != '/')
-			return 0;
+		if (taken < 0 || s.length <= taken + 1 || s[taken++] != '/')
+			return -1;
 		size_t t;
 		ulong plen = s[taken..$].parseInt(&t);
 		if (t == 0 || plen > 32)
-			return 0;
+			return -1;
 		addr = a;
 		prefixLen = cast(ubyte)plen;
 		return taken + t;
@@ -295,7 +297,7 @@ nothrow @nogc:
 
 	ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const pure
 	{
-		char[42] stackBuffer;
+		char[42] stackBuffer = void;
 		char[] tmp = buffer.length < stackBuffer.sizeof ? stackBuffer : buffer;
 
 		size_t offset = addr.toString(tmp, null, null);
@@ -304,7 +306,8 @@ nothrow @nogc:
 
         if (buffer.ptr && tmp.ptr == stackBuffer.ptr)
         {
-            offset = buffer.length;
+            if (buffer.length < offset)
+                return -1;
             buffer[0 .. offset] = tmp[0 .. offset];
         }
 		return offset;
@@ -314,12 +317,12 @@ nothrow @nogc:
 	{
 		IPv6Addr a;
 		size_t taken = a.fromString(s);
-		if (taken == 0 || s.length <= taken + 1 || s[taken++] != '/')
-			return 0;
+		if (taken < 0 || s.length <= taken + 1 || s[taken++] != '/')
+			return -1;
 		size_t t;
 		ulong plen = s[taken..$].parseInt(&t);
 		if (t == 0 || plen > 32)
-			return 0;
+			return -1;
 		addr = a;
 		prefixLen = cast(ubyte)plen;
 		return taken + t;
@@ -389,7 +392,7 @@ nothrow @nogc:
 
 	ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const pure
 	{
-		char[47] stackBuffer;
+		char[47] stackBuffer = void;
 		char[] tmp = buffer.length < stackBuffer.sizeof ? stackBuffer : buffer;
 
 		size_t offset = void;
@@ -410,7 +413,8 @@ nothrow @nogc:
 
         if (buffer.ptr && tmp.ptr == stackBuffer.ptr)
         {
-            offset = buffer.length;
+            if (buffer.length < offset)
+                return -1;
             buffer[0 .. offset] = tmp[0 .. offset];
         }
 		return offset;
@@ -432,18 +436,18 @@ nothrow @nogc:
 		if (af == AddressFamily.IPv4)
 		{
 			taken = a4.fromString(s);
-			if (taken == 0)
-				return 0;
+			if (taken < 0)
+				return -1;
 		}
 		else
 		{
 			if (s.length > 0 && s[0] == '[')
 				++taken;
 			size_t t = a6.fromString(s[taken..$]);
-			if (t == 0)
-				return 0;
+			if (t < 0)
+				return -1;
 			if (s[0] == '[' && (s.length < t + 2 || s[t + taken++] != ']'))
-				return 0;
+				return -1;
 			taken += t;
 		}
 
@@ -453,7 +457,7 @@ nothrow @nogc:
 			size_t t;
 			ulong p = s[++taken..$].parseInt(&t);
 			if (t == 0 || p > 0xFFFF)
-				return 0;
+				return -1;
 			taken += t;
 			port = cast(ushort)p;
 		}

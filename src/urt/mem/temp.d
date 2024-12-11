@@ -91,7 +91,7 @@ char[] tstring(T)(auto ref T value)
 {
 	import urt.string.format : toString;
 	char[] r = toString(value, cast(char[])tempMem[allocOffset..$]);
-	if (r.length == 0)
+	if (!r)
 	{
 		allocOffset = 0;
 		r = toString(value, cast(char[])tempMem[0..TempMemSize / 2]);
@@ -104,7 +104,7 @@ char[] tconcat(Args...)(ref Args args)
 {
 	import urt.string.format : concat;
 	char[] r = concat(cast(char[])tempMem[allocOffset..$], args);
-	if (r.length == 0)
+	if (!r)
 	{
 		allocOffset = 0;
 		r = concat(cast(char[])tempMem[0..TempMemSize / 2], args);
@@ -117,7 +117,7 @@ char[] tformat(Args...)(const(char)[] fmt, ref Args args)
 {
 	import urt.string.format : format;
 	char[] r = format(cast(char[])tempMem[allocOffset..$], fmt, args);
-	if (r.length == 0)
+	if (!r)
 	{
 		allocOffset = 0;
 		r = format(cast(char[])tempMem[0..TempMemSize / 2], fmt, args);
