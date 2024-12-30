@@ -17,6 +17,10 @@ import router.iface;
 import router.iface.packet;
 import router.stream;
 
+//version = DebugTeslaInterface;
+
+nothrow @nogc:
+
 
 struct DeviceMap
 {
@@ -157,7 +161,7 @@ nothrow @nogc:
             return false;
         }
 
-        debug {
+        version (DebugTeslaInterface) {
             import urt.io;
             writef("{4} - {0}: TWC packet sent {1}-->{2} [{3}]\n", name, packet.src, packet.dst, packet.data, packet.creationTime);
         }
@@ -245,11 +249,14 @@ class TeslaInterfaceModule : Plugin
             import urt.log;
             writeInfo("Create tesla-twc interface '", name, "' - ", iface.mac);
 
-            // HACK: we'll print packets that we receive...
-            iface.subscribe((ref const Packet p, BaseInterface i, void* u) {
-                import urt.io;
-                writef("{4} - {0}: TWC packet recv {2}<--{1} [{3}]\n", i.name, p.src, p.dst, p.data, p.creationTime);
-            }, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.TeslaTWC));
+            version (DebugTeslaInterface)
+            {
+                // HACK: we'll print packets that we receive...
+                iface.subscribe((ref const Packet p, BaseInterface i, void* u) {
+                    import urt.io;
+                    writef("{4} - {0}: TWC packet recv {2}<--{1} [{3}]\n", i.name, p.src, p.dst, p.data, p.creationTime);
+                }, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.TeslaTWC));
+            }
         }
 
 
