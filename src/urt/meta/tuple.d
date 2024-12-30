@@ -8,7 +8,7 @@ enum isTuple(T) = __traits(compiles, { void f(Specs...)(Tuple!Specs tup) {} f(T.
 
 template tuple(Names...)
 {
-    auto tuple(Args...)(Args args)
+    auto tuple(Args...)(Args args) nothrow @nogc
     {
         static if (Names.length == 0)
             return Tuple!Args(args);
@@ -68,6 +68,8 @@ template Tuple(Specs...)
 
     struct Tuple
     {
+    nothrow @nogc:
+
         alias Types = staticMap!(extractType, fieldSpecs);
 
         private alias _Fields = Specs;
@@ -455,12 +457,16 @@ template Tuple(Specs...)
                 {
                     // Workaround for when .hashOf is not both @safe and nothrow.
                     static if (is(T : shared U, U) && __traits(compiles, (U* a) nothrow @safe => .hashOf(*a))
-							   && !__traits(hasMember, T, "toHash"))
+                               && !__traits(hasMember, T, "toHash"))
                         // BUG: Improperly casts away `shared`!
                         const k = .hashOf(*(() @trusted => cast(U*) &field[i])());
                     else
-                        // BUG: Improperly casts away `shared`!
-                        const k = typeid(T).getHash((() @trusted => cast(const void*) &field[i])());
+                    {
+                        assert(false, "TODO: @NOGC PROBLEM!");
+                      // BUG: Improperly casts away `shared`!
+//                      const k = typeid(T).getHash((() @trusted => cast(const void*) &field[i])());
+                      const k = 0;
+                    }
                 }
                 static if (i == 0)
                     h = k;
