@@ -10,8 +10,8 @@ ref T swap(T)(ref T a, return ref T b)
     import urt.lifetime : move, moveEmplace;
 
     T t = a.move;
-    a = b.move;
-    b = t.move;
+    b.move(a);
+    t.move(b);
     return b;
 }
 
@@ -20,7 +20,7 @@ T swap(T)(ref T a, T b)
     import urt.lifetime : move, moveEmplace;
 
     auto t = a.move;
-    a = b.move;
+    b.move(a);
     return t.move;
 }
 
