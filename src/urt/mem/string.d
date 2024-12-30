@@ -27,31 +27,18 @@ struct CacheString
 
 	string toString() const nothrow @nogc
 	{
-		ushort len = stringHeap[offset];
-		if (len < 128)
-			return cast(string)stringHeap[offset + 1 .. offset + 1 + len];
-		len = (len & 0x7F) | ((stringHeap[offset + 1] << 7) & 0x7F);
+		ushort len = *cast(ushort*)(stringHeap.ptr + offset);
 		return cast(string)stringHeap[offset + 2 .. offset + 2 + len];
 	}
 
 	immutable(char)* ptr() const nothrow @nogc
-	{
-		return cast(immutable(char)*)(stringHeap[offset] < 128 ? &stringHeap[offset + 1] : &stringHeap[offset + 2]);
-	}
+		=> cast(immutable(char)*)(stringHeap.ptr + offset + 2);
 
 	size_t length() const nothrow @nogc
-	{
-		ushort len = stringHeap[offset];
-		if (len < 128)
-			return len;
-		return (len & 0x7F) | ((stringHeap[offset + 1] << 7) & 0x7F);
-	}
+		=> *cast(ushort*)(stringHeap.ptr + offset);
 
-	bool opCast(T)() const pure nothrow @nogc
-		if (is(T == bool))
-	{
-		return offset != 0;
-	}
+	bool opCast(T : bool)() const pure nothrow @nogc
+		=> offset != 0;
 
 	void opAssign(typeof(null)) pure nothrow @nogc
 	{
@@ -95,6 +82,7 @@ void initStringHeap(uint stringHeapSize) nothrow
 	// write the null string to the start
 	stringHeapCursor = 0;
 	stringHeap[stringHeapCursor++] = 0;
+	stringHeap[stringHeapCursor++] = 0;
 	numStrings = 1;
 
 	stringHeapInitialised = true;
@@ -137,14 +125,15 @@ CacheString addString(const(char)[] str, bool dedup = true) nothrow @nogc
 		}
 	}
 
+    if (stringHeapCursor & 1)
+        stringHeap[stringHeapCursor++] = '\0';
+
 	// add the string to the heap...
 	assert(stringHeapCursor + str.length < stringHeap.length, "String heap overflow!");
 
-	char[] heap = cast(char[])stringHeap;
 	ushort offset = stringHeapCursor;
-	size_t bytes = void;
-	str.makeString(heap[stringHeapCursor .. $], &bytes);
-	stringHeapCursor += bytes;
+	str.makeString(stringHeap[stringHeapCursor .. $]);
+	stringHeapCursor += str.length + 2;
 	++numStrings;
 
 	return CacheString(offset);
@@ -157,15 +146,14 @@ void* allocWithStringCache(size_t bytes, String[] cachedStrings, const(char[])[]
 
 	size_t extra = 0;
 	foreach (s; strings)
-		extra += s.length + (s.length < 128 ? 1 : 2);
+		extra += 2 + s.length + (s.length & 1);
 
 	void* ptr = alloc(bytes + extra).ptr;
 	char* buffer = cast(char*)ptr + bytes;
-	for (size_t i = 0; i < strings.length; ++i)
+	foreach (size_t i, str; strings)
 	{
-		size_t len = void;
-		cachedStrings[i] = strings[i].makeString(buffer[0..extra], &len);
-		buffer += len;
+		cachedStrings[i] = str.makeString(buffer[0..extra]);
+		buffer += 2 + str.length + (str.length & 1);
 	}
 
 	return ptr;

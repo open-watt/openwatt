@@ -30,4 +30,7 @@ void crt_bootup()
 
     import urt.dbg : setupAssertHandler;
     setupAssertHandler();
+
+    import urt.string.string : initStringAllocators;
+    initStringAllocators();
 }
