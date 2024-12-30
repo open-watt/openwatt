@@ -77,7 +77,7 @@ String makeString(const(char)[] s, StringAlloc allocator, void* userData = null)
     assert(s.length <= MaxStringLen, "String too long");
     assert(allocator <= StringAlloc.max, "String allocator index must be < 3");
 
-    if (allocator < 4)
+    if (allocator < stringAllocators.length)
     {
         return String(writeString(stringAllocators[allocator].alloc(cast(ushort)s.length, null), s), true);
     }
@@ -102,7 +102,7 @@ String makeString(const(char)[] s, NoGCAllocator a) nothrow @nogc
 
     assert(s.length <= MaxStringLen, "String too long");
 
-    return String(writeString(stringAllocators[3].alloc(cast(ushort)s.length, cast(void*)a), s), true);
+    return String(writeString(stringAllocators[StringAlloc.Explicit].alloc(cast(ushort)s.length, cast(void*)a), s), true);
 }
 
 String makeString(const(char)[] s, char[] buffer) nothrow @nogc
@@ -596,6 +596,7 @@ unittest
 private:
 
 __gshared StringAllocator[4] stringAllocators;
+static assert(stringAllocators.length <= 4, "Only 2 bits reserved to store allocator index");
 
 char* writeString(char* buffer, const(char)[] str) pure nothrow @nogc
 {
