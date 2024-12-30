@@ -8,6 +8,10 @@ import urt.string.tailstring : TailString;
 
 import core.lifetime : move;
 
+public import urt.array : Alloc_T, Alloc, Reserve_T, Reserve, Concat_T, Concat;
+enum Format_T { Value }
+alias Format = Format_T.Value;
+
 
 enum MaxStringLen = 0x7FFF;
 
@@ -144,7 +148,7 @@ nothrow @nogc:
         }
     }
 
-    this(size_t Embed)(MutableString!Embed str) inout pure
+    this(size_t Embed)(MutableString!Embed str) inout //pure TODO: PUT THIS BACK!!
     {
         if (!str.ptr)
             return;
@@ -160,7 +164,7 @@ nothrow @nogc:
         }
 
         // take the buffer
-        ptr = str.ptr;
+        ptr = cast(inout(char*))str.ptr;
         *cast(ushort*)(ptr - 4) = 0; // rc = 0, allocator = 0 (default)
         str.ptr = null;
     }
@@ -332,6 +336,30 @@ nothrow @nogc:
         ptr[0 .. s.length] = s[];
     }
 
+    this(Alloc_T, size_t length, char pad = '\0')
+    {
+        debug assert(length <= MaxStringLen, "String too long");
+        reserve(cast(ushort)length);
+        writeLength(length);
+        ptr[0 .. length] = pad;
+    }
+
+    this(Reserve_T, size_t length)
+    {
+        debug assert(length <= MaxStringLen, "String too long");
+        reserve(cast(ushort)length);
+    }
+
+    this(Things...)(Concat_T, auto ref Things things)
+    {
+        append(forward!things);
+    }
+
+    this(Args...)(Format_T, auto ref Args args)
+    {
+        format(forward!args);
+    }
+
     ~this()
     {
         freeStringBuffer(ptr);
@@ -430,11 +458,11 @@ nothrow @nogc:
         return this;
     }
 
-    ref MutableString!Embed format(Things...)(auto ref Things things)
+    ref MutableString!Embed format(Args...)(auto ref Args args)
     {
         if (ptr)
             writeLength(0);
-        insertFormat(0, forward!things);
+        insertFormat(0, forward!args);
         return this;
     }
 
@@ -520,6 +548,16 @@ nothrow @nogc:
                 writeLength(len);
             }
         }
+    }
+
+    char[] extend(size_t length)
+    {
+        size_t oldLen = this.length;
+        debug assert(oldLen + length <= MaxStringLen, "String too long");
+
+        reserve(cast(ushort)(oldLen + length));
+        writeLength(oldLen + length);
+        return ptr[oldLen .. oldLen + length];
     }
 
     void clear()
