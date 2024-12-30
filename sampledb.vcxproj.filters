@@ -450,6 +450,9 @@
     <DCompile Include="src\protocol\dns\package.d">
       <Filter>src\protocol\dns</Filter>
     </DCompile>
+    <DCompile Include="src\urt\kvp.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

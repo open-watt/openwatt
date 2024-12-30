@@ -1,6 +1,7 @@
 module urt.map;
 
 import urt.lifetime;
+import urt.kvp;
 import urt.mem.allocator;
 import urt.util;
 
@@ -25,33 +26,6 @@ struct Compare(T)
 //		return a.cmp(b);
 //	}
 //}
-
-struct KVP(K, V)
-{
-nothrow @nogc:
-
-	//	this(KVP!(K, V) kvp)
-	//	{
-	//		this.key = kvp.key.move;
-	//		this.value = kvp.value.move;
-	//	}
-	this(ref KVP!(K, V) kvp)
-	{
-		this.key = kvp.key;
-		this.value = kvp.value;
-	}
-
-	this(_K, _V)(auto ref _K key, auto ref _V value)
-	{
-		this.key = forward!key;
-		this.value = forward!value;
-	}
-
-	// TODO: consider, should value be first? it is more likely to have alignment requirements.
-	//       conversely, key is more frequently accessed, so should be in the first cache line...
-	K key;
-	V value;
-}
 
 alias Map(K, V) = AVLTree!(K, V);
 
