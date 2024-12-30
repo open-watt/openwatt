@@ -75,6 +75,8 @@
     <DCompile Include="src\protocol\ezsp\client.d" />
     <DCompile Include="src\protocol\ezsp\commands.d" />
     <DCompile Include="src\protocol\ezsp\package.d" />
+    <DCompile Include="src\protocol\http\client.d" />
+    <DCompile Include="src\protocol\http\package.d" />
     <DCompile Include="src\protocol\modbus\client.d" />
     <DCompile Include="src\protocol\modbus\package.d" />
     <DCompile Include="src\protocol\modbus\sampler.d" />

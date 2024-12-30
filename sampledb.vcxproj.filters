@@ -94,6 +94,9 @@
     <Filter Include="src\urt\range">
       <UniqueIdentifier>{14daa134-d1ed-4584-ac0e-ba1176386c0e}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\http">
+      <UniqueIdentifier>{072e997d-5dcf-4378-947a-4a665e1fd242}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d">
@@ -317,6 +320,12 @@
     </DCompile>
     <DCompile Include="src\router\port\serial.d">
       <Filter>src\router\port</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\http\package.d">
+      <Filter>src\protocol\http</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\http\client.d">
+      <Filter>src\protocol\http</Filter>
     </DCompile>
     <DCompile Include="src\protocol\mqtt\broker.d">
       <Filter>src\protocol\mqtt</Filter>
