@@ -29,13 +29,22 @@ nothrow @nogc:
         addrInfo.sockType = SocketType.Stream;
         addrInfo.protocol = Protocol.TCP;
         AddressInfoResolver results;
-        get_address_info(host, port.tstring, &addrInfo, results);
+        get_address_info(host, port ? port.tstring : null, &addrInfo, results);
         if (!results.next_address(addrInfo))
         {
             // TODO: handle error case for no remote host...
             assert(0);
         }
         remote = addrInfo.address;
+        status.linkStatusChangeTime = getTime();
+        update();
+    }
+
+    this(String name, InetAddress address, StreamOptions options = StreamOptions.None)
+    {
+        super(name.move, "tcp-client", options);
+
+        remote = address;
         status.linkStatusChangeTime = getTime();
         update();
     }
@@ -126,6 +135,9 @@ nothrow @nogc:
 
     override ptrdiff_t write(const void[] data)
     {
+        if (!live && (options & StreamOptions.OnDemand))
+            connect();
+
         if (live)
         {
             size_t bytes;
@@ -284,7 +296,7 @@ nothrow @nogc:
         socket.close();
         socket = Socket.invalid;
         live = false;
-        status.linkStatus = true;
+        status.linkStatus = false;
         status.linkStatusChangeTime = getTime();
         ++status.linkDowns;
 

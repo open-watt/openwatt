@@ -755,7 +755,16 @@ Result get_hostname(char* name, size_t len)
 
 Result get_address_info(const(char)[] nodeName, const(char)[] service, AddressInfo* hints, out AddressInfoResolver result)
 {
+    import urt.array : findFirst;
 	import urt.mem.temp : tstringz;
+
+    size_t colon = nodeName.findFirst(':');
+    if (colon < nodeName.length)
+    {
+        if (!service)
+            service = nodeName[colon + 1..$];
+        nodeName = nodeName[0 .. colon];
+    }
 
 	addrinfo tmpHints;
 	if (hints)
@@ -772,7 +781,7 @@ Result get_address_info(const(char)[] nodeName, const(char)[] service, AddressIn
 	}
 
 	addrinfo* res;
-	int err = getaddrinfo(nodeName.tstringz, service.tstringz, hints ? &tmpHints : null, &res);
+	int err = getaddrinfo(nodeName.tstringz, service ? service.tstringz : null, hints ? &tmpHints : null, &res);
 	if (err != 0)
 		return Result(err);
 
