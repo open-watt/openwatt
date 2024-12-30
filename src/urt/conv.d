@@ -329,14 +329,19 @@ ptrdiff_t formatFloat(double value, char[] buffer, const(char)[] format = null) 
     import urt.string.format : concat;
 
     char[16] fmt = void;
+    char[64] result = void;
     assert(format.length <= fmt.sizeof - 3, "Format string buffer overflow");
 
     concat(fmt, "%", format, "g\0");
-    int len = snprintf(buffer.ptr, buffer.length, fmt.ptr, value);
+    int len = snprintf(result.ptr, result.length, fmt.ptr, value);
     if (len < 0)
         return -2;
-    if (buffer.ptr && len >= buffer.length)
-        return -1;
+    if (buffer.ptr)
+    {
+        if (len > buffer.length)
+            return -1;
+        buffer[0 .. len] = result[0 .. len];
+    }
     return len;
 }
 

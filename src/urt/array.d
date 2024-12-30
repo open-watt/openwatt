@@ -341,8 +341,8 @@ nothrow @nogc:
             _length = len + 1;
             for (uint i = len; i > 0; --i)
             {
-                emplace!T(&ptr[i], ptr[i-1].move);
-                ptr[i-1].destroy!false();
+                moveEmplace!T(ptr[i-1], ptr[i]);
+                destroy!false(ptr[i-1]);
             }
             emplace!T(&ptr[0], forward!item);
             return ptr[0];
@@ -370,6 +370,29 @@ nothrow @nogc:
         }
     }
 
+    ref T emplaceFront(Args...)(auto ref Args args)
+    {
+        uint len = _length;
+        reserve(len + 1);
+        _length = len + 1;
+        for (uint i = len; i > 0; --i)
+        {
+            moveEmplace(ptr[i-1], ptr[i]);
+            destroy!false(ptr[i-1]);
+        }
+        emplace!T(&ptr[0], forward!args);
+        return ptr[0];
+    }
+
+    ref T emplaceBack(Args...)(auto ref Args args)
+    {
+        uint len = _length;
+        reserve(len + 1);
+        _length = len + 1;
+        emplace!T(&ptr[len], forward!args);
+        return ptr[len];
+    }
+
     T popFront()
     {
         debug assert(_length > 0);
@@ -388,10 +411,10 @@ nothrow @nogc:
             T copy = ptr[0].move;
             for (uint i = 1; i < _length; ++i)
             {
-                ptr[i-1].destroy!false();
-                emplace!T(&ptr[i-1], ptr[i].move);
+                destroy!false(ptr[i-1]);
+                moveEmplace(ptr[i], ptr[i-1]);
             }
-            ptr[--_length].destroy!false();
+            destroy!false(ptr[--_length]);
             return copy.move;
         }
     }
@@ -412,7 +435,7 @@ nothrow @nogc:
         {
             uint last = _length-1;
             T copy = ptr[last].move;
-            ptr[last].destroy!false();
+            destroy!false(ptr[last]);
             _length = last;
             return copy.move;
         }
@@ -430,11 +453,11 @@ nothrow @nogc:
         }
         else
         {
-            ptr[i].destroy!false();
+            destroy!false(ptr[i]);
             for (size_t j = i + 1; j < _length; ++j)
             {
                 emplace!T(&ptr[j-1], ptr[j].move);
-                ptr[j].destroy!false();
+                destroy!false(ptr[j]);
             }
             --_length;
         }
@@ -452,9 +475,9 @@ nothrow @nogc:
         }
         else
         {
-            ptr[i].destroy!false();
+            destroy!false(ptr[i]);
             emplace!T(&ptr[i], ptr[--_length].move);
-            ptr[_length].destroy!false();
+            destroy!false(ptr[_length]);
         }
     }
 
@@ -534,8 +557,8 @@ nothrow @nogc:
             {
                 for (uint i = 0; i < _length; ++i)
                 {
-                    emplace!T(&newArray[i], ptr[i].move);
-                    ptr[i].destroy!false();
+                    moveEmplace(ptr[i], newArray[i]);
+                    destroy!false(ptr[i]);
                 }
             }
 
@@ -563,7 +586,7 @@ nothrow @nogc:
             else
             {
                 for (ptrdiff_t i = _length - 1; i >= count; --i)
-                    ptr[i].destroy!false();
+                    destroy!false(ptr[i]);
             }
             _length = cast(uint)count;
         }
@@ -588,7 +611,7 @@ nothrow @nogc:
     {
         static if (!is(T == class) && !is(T == interface))
             for (uint i = 0; i < _length; ++i)
-                ptr[i].destroy!false();
+                destroy!false(ptr[i]);
         _length = 0;
     }
 

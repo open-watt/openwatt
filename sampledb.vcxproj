@@ -168,6 +168,7 @@
     <DCompile Include="src\urt\time.d" />
     <DCompile Include="src\urt\traits.d" />
     <DCompile Include="src\urt\util.d" />
+    <DCompile Include="src\urt\variant.d" />
     <DCompile Include="src\urt\zip.d" />
   </ItemGroup>
   <ItemGroup>

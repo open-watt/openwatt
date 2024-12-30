@@ -90,14 +90,20 @@ char* tstringz(const(char)[] str) nothrow @nogc
 char[] tstring(T)(auto ref T value)
 {
 	import urt.string.format : toString;
-	char[] r = toString(value, cast(char[])tempMem[allocOffset..$]);
-	if (!r)
+	ptrdiff_t r = toString(value, cast(char[])tempMem[allocOffset..$]);
+	if (r < 0)
 	{
 		allocOffset = 0;
 		r = toString(value, cast(char[])tempMem[0..TempMemSize / 2]);
+		if (r < 0)
+		{
+//			assert(false, "Formatted string is too large for the temp buffer!");
+			return null;
+		}
 	}
-	allocOffset += r.length;
-	return r;
+	char[] result = cast(char[])tempMem[allocOffset .. allocOffset + r];
+	allocOffset += r;
+	return result;
 }
 
 char[] tconcat(Args...)(ref Args args)
