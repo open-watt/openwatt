@@ -259,7 +259,7 @@ char[] unEscape(char[] s) pure nothrow @nogc
 }
 
 
-char[] toHexString(const(ubyte[]) data, char[] buffer, uint group = 0, uint secondaryGroup = 0, const(char)[] seps = " -") pure nothrow @nogc
+char[] toHexString(const(void[]) data, char[] buffer, uint group = 0, uint secondaryGroup = 0, const(char)[] seps = " -") pure nothrow @nogc
 {
 	import urt.util : isPowerOf2;
 	assert(group.isPowerOf2);
@@ -275,15 +275,16 @@ char[] toHexString(const(ubyte[]) data, char[] buffer, uint group = 0, uint seco
 	if (len > buffer.length)
 		return null;
 
-	__gshared immutable char[16] hex = "0123456789ABCDEF";
+	auto src = cast(const(ubyte)[])data;
+
 	size_t mask = group - 1;
 	size_t secondMask = secondaryGroup - 1;
 
 	size_t offset = 0;
 	for (size_t i = 0; true; )
 	{
-		buffer[offset++] = hex[data[i] >> 4];
-		buffer[offset++] = hex[data[i] & 0xF];
+		buffer[offset++] = hexDigits[src[i] >> 4];
+		buffer[offset++] = hexDigits[src[i] & 0xF];
 
 		bool sep = (i & mask) == mask;
 		if (++i == data.length)

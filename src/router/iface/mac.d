@@ -82,6 +82,8 @@ nothrow @nogc:
 
     ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const
     {
+        import urt.string.ascii : hexDigits;
+
         if (!buffer.ptr)
             return 17;
         if (buffer.length < 17)
@@ -317,8 +319,3 @@ private:
             prev.next = elements[element].next;
     }
 }
-
-
-private:
-
-__gshared immutable char[16] hexDigits = "0123456789ABCDEF";
