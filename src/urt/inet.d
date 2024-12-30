@@ -16,6 +16,7 @@ enum AddressFamily : byte
 	IPv6,
 }
 
+enum IPAddr IPAddrLit(string addr) = () { IPAddr a; size_t taken = a.fromString(addr); assert(taken == addr.length, "Not an IPV4 address"); return a; }();
 
 struct IPAddr
 {

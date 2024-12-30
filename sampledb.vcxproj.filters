@@ -82,6 +82,9 @@
     <Filter Include="src\protocol\zigbee">
       <UniqueIdentifier>{ba691bb2-9acf-4496-a2e1-134bf2130294}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\dns">
+      <UniqueIdentifier>{6b327823-23d1-49dc-a514-342b020a2613}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d">
@@ -437,6 +440,15 @@
     </DCompile>
     <DCompile Include="src\urt\crc.d">
       <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dns\mdns.d">
+      <Filter>src\protocol\dns</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dns\message.d">
+      <Filter>src\protocol\dns</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dns\package.d">
+      <Filter>src\protocol\dns</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>

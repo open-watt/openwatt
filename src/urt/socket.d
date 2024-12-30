@@ -95,7 +95,7 @@ enum SocketOption : ubyte
 	// IP options
 	FirstIpOption,
 	Multicast = FirstIpOption,
-	MulticastUseLoopback,
+	MulticastLoopback,
 	MulticastTTL,
 
 	// IPv6 options
@@ -389,7 +389,7 @@ Result set_socket_option(Socket socket, SocketOption option, const(void)* optval
 	// check the option appears to be the proper datatype
 	const OptInfo* optInfo = &s_socketOptions[option];
 	assert(optInfo.rtType != OptType.Unsupported, "Socket option is unsupported on this platform!");
-	assert(optlen == s_optTypeSize[optInfo.rtType], "Socket option has incorrect payload size!");
+	assert(optlen == s_optTypeRtSize[optInfo.rtType], "Socket option has incorrect payload size!");
 
 	// special case for non-blocking
 	// this is not strictly a 'socket option', but this rather simplifies our API
@@ -428,8 +428,8 @@ Result set_socket_option(Socket socket, SocketOption option, const(void)* optval
 
 	// platforms don't all agree on option data formats!
 	const(void)* arg = optval;
-	int itmp = 0;
-	linger ling;
+	int itmp = void;
+	linger ling = void;
 	if (optInfo.rtType != optInfo.platformType)
 	{
 		switch (optInfo.rtType)
@@ -476,22 +476,31 @@ Result set_socket_option(Socket socket, SocketOption option, const(void)* optval
 	}
 	
 	// Options expected in network-byte order
-	IPAddr inaddtmp;
-	MulticastGroup mgtmp;
+	in_addr inaddtmp = void;
+	ip_mreq mgtmp = void;
 	switch (optInfo.rtType)
 	{
 		case OptType.INAddress:
 		{
 			const(IPAddr)* addr = cast(const(IPAddr)*)optval;
-			storeBigEndian(&inaddtmp.address(), addr.address);
+			inaddtmp.S_un.S_un_b.s_b1 = addr.b[0];
+			inaddtmp.S_un.S_un_b.s_b2 = addr.b[1];
+			inaddtmp.S_un.S_un_b.s_b3 = addr.b[2];
+			inaddtmp.S_un.S_un_b.s_b4 = addr.b[3];
 			arg = &inaddtmp;
 			break;
 		}
 		case OptType.MulticastGroup:
 		{
 			const(MulticastGroup)* group = cast(const(MulticastGroup)*)optval;
-			storeBigEndian(&mgtmp.address.address(), group.address.address);
-			storeBigEndian(&mgtmp.iface.address(), group.iface.address);
+			mgtmp.imr_multiaddr.S_un.S_un_b.s_b1 = group.address.b[0];
+			mgtmp.imr_multiaddr.S_un.S_un_b.s_b2 = group.address.b[1];
+			mgtmp.imr_multiaddr.S_un.S_un_b.s_b3 = group.address.b[2];
+			mgtmp.imr_multiaddr.S_un.S_un_b.s_b4 = group.address.b[3];
+			mgtmp.imr_interface.S_un.S_un_b.s_b1 = group.iface.b[0];
+			mgtmp.imr_interface.S_un.S_un_b.s_b2 = group.iface.b[1];
+			mgtmp.imr_interface.S_un.S_un_b.s_b3 = group.iface.b[2];
+			mgtmp.imr_interface.S_un.S_un_b.s_b4 = group.iface.b[3];
 			arg = &mgtmp;
 			break;
 		}
@@ -500,7 +509,7 @@ Result set_socket_option(Socket socket, SocketOption option, const(void)* optval
 	}
 
 	// set the option
-	r.systemCode = setsockopt(socket.handle, s_sockOptLevel[level], optInfo.option, cast(const(char)*)arg, s_optTypeSize[optInfo.platformType]);
+	r.systemCode = setsockopt(socket.handle, s_sockOptLevel[level], optInfo.option, cast(const(char)*)arg, s_optTypePlatformSize[optInfo.platformType]);
 
 	return r;
 }
@@ -541,6 +550,15 @@ Result set_socket_option(Socket socket, SocketOption option, IPAddr value)
 	return set_socket_option(socket, option, &value, IPAddr.sizeof);
 }
 
+Result set_socket_option(Socket socket, SocketOption option, ref MulticastGroup value)
+{
+	const OptInfo* optInfo = &s_socketOptions[option];
+	if (optInfo.rtType == OptType.Unsupported)
+		return InternalResult(InternalCode.Unsupported);
+	assert(optInfo.rtType == OptType.MulticastGroup, "Incorrect option value type for call");
+	return set_socket_option(socket, option, &value, MulticastGroup.sizeof);
+}
+
 Result get_socket_option(Socket socket, SocketOption option, void* output, size_t outputlen)
 {
 	Result r = Result.Success;
@@ -548,7 +566,7 @@ Result get_socket_option(Socket socket, SocketOption option, void* output, size_
 	// check the option appears to be the proper datatype
 	const OptInfo* optInfo = &s_socketOptions[option];
 	assert(optInfo.rtType != OptType.Unsupported, "Socket option is unsupported on this platform!");
-	assert(outputlen == s_optTypeSize[optInfo.rtType], "Socket option has incorrect payload size!");
+	assert(outputlen == s_optTypeRtSize[optInfo.rtType], "Socket option has incorrect payload size!");
 
 	assert(option != SocketOption.NonBlocking, "Socket option NonBlocking cannot be get");
 
@@ -582,7 +600,7 @@ Result get_socket_option(Socket socket, SocketOption option, void* output, size_
 		}
 	}
 
-	socklen_t writtenLen = s_optTypeSize[optInfo.platformType];
+	socklen_t writtenLen = s_optTypePlatformSize[optInfo.platformType];
 	// get the option
 	r.systemCode = getsockopt(socket.handle, s_sockOptLevel[level], optInfo.option, cast(char*)arg, &writtenLen);
 
@@ -1163,7 +1181,8 @@ enum OptType : ubyte
 }
 
 
-__gshared immutable ubyte[] s_optTypeSize = [ 0, bool.sizeof, int.sizeof, int.sizeof, int.sizeof, Duration.sizeof, IPAddr.sizeof, MulticastGroup.sizeof, linger.sizeof ];
+__gshared immutable ubyte[] s_optTypeRtSize = [ 0, bool.sizeof, int.sizeof, int.sizeof, int.sizeof, Duration.sizeof, IPAddr.sizeof, MulticastGroup.sizeof, 0 ];
+__gshared immutable ubyte[] s_optTypePlatformSize = [ 0, 0, int.sizeof, int.sizeof, int.sizeof, 0, in_addr.sizeof, ip_mreq.sizeof, linger.sizeof ];
 
 
 struct OptInfo
@@ -1427,4 +1446,10 @@ version (Windows)
 	}
 
 	extern(C) int WSAPoll(LPWSAPOLLFD fdArray, uint fds, int timeout);
+
+    struct ip_mreq
+    {
+        in_addr imr_multiaddr;
+        in_addr imr_interface;
+    }
 }
