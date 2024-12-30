@@ -8,105 +8,216 @@ nothrow @nogc:
 
 
 // on error or not-a-number cases, bytesTaken will contain 0
-long parseInt(const(char)[] str, size_t* bytesTaken = null, ulong* fixedPointDivisor = null, int base = 10) pure
+long parseInt(const(char)[] str, size_t* bytesTaken = null, int base = 10) pure
 {
-	assert(base > 1 && base <= 36, "Invalid base");
-
-	static uint getDigit(char c)
-	{
-		uint zeroBase = c - '0';
-		if (zeroBase < 10)
-			return zeroBase;
-		uint ABase = c - 'A';
-		if (ABase < 26)
-			return ABase + 10;
-		uint aBase = c - 'a';
-		if (aBase < 26)
-			return aBase + 10;
-		return -1;
-	}
-
 	size_t i = 0;
-	long value = 0;
-	ulong divisor = 1;
 	bool neg = false;
-	bool hasPoint = false;
-	bool atLeastOneDigit = false;
 
-	if (str.length == 0)
-		goto done;
-
-	neg = str[0] == '-';
-	if (neg || str[0] == '+')
+	if (str.length > 0)
 	{
-		if (str.length < 2 || getDigit(str[1]) >= base)
-			goto done;
-		i++;
+		char c = str.ptr[0];
+		neg = c == '-';
+		if (neg || c == '+')
+			i++;
 	}
 
-	for (; i < str.length; ++i)
-	{
-		char c = str[i];
-
-		if (c == '.')
-		{
-			if (fixedPointDivisor && !hasPoint)
-			{
-				hasPoint = true;
-				continue;
-			}
-			break;
-		}
-
-		uint digit = getDigit(str[i]);
-		if (digit >= base)
-		{
-			// if we have taken at least 1 digit, then we can consider this the end of the string...
-			if (!atLeastOneDigit)
-			{
-				value = 0;
-				i = 0;
-			}
-			break;
-		}
-		value = value*base + digit;
-		atLeastOneDigit = true;
-		if (hasPoint)
-			divisor *= base;
-	}
-
-	done:
-	if (bytesTaken)
-		*bytesTaken = i;
-	if (fixedPointDivisor)
-		*fixedPointDivisor = divisor;
-	return neg ? -value : value;
+	ulong value = str.ptr[i .. str.length].parseUint(bytesTaken, base);
+	if (bytesTaken && *bytesTaken != 0)
+		*bytesTaken += i;
+	return neg ? -cast(long)value : cast(long)value;
 }
+
+long parseIntWithDecimal(const(char)[] str, out ulong fixedPointDivisor, size_t* bytesTaken = null, int base = 10) pure
+{
+	size_t i = 0;
+	bool neg = false;
+
+	if (str.length > 0)
+	{
+		char c = str.ptr[0];
+		neg = c == '-';
+		if (neg || c == '+')
+			i++;
+	}
+
+	ulong value = str[i .. str.length].parseUintWithDecimal(fixedPointDivisor, bytesTaken, base);
+	if (bytesTaken && *bytesTaken != 0)
+		*bytesTaken += i;
+	return neg ? -cast(long)value : cast(long)value;
+}
+
+ulong parseUint(const(char)[] str, size_t* bytesTaken = null, int base = 10) pure
+{
+    assert(base > 1 && base <= 36, "Invalid base");
+
+    ulong value = 0;
+
+    const(char)* s = str.ptr;
+    const(char)* e = s + str.length;
+
+    if (base <= 10)
+    {
+        for (; s < e; ++s)
+        {
+            uint digit = *s - '0';
+            if (digit > 9)
+                break;
+            value = value*base + digit;
+        }
+    }
+    else
+    {
+        for (; s < e; ++s)
+        {
+            uint digit = getDigit(*s);
+            if (digit >= base)
+                break;
+            value = value*base + digit;
+        }
+    }
+
+    if (bytesTaken)
+        *bytesTaken = s - str.ptr;
+    return value;
+}
+
+ulong parseUintWithDecimal(const(char)[] str, out ulong fixedPointDivisor, size_t* bytesTaken = null, int base = 10) pure
+{
+    assert(base > 1 && base <= 36, "Invalid base");
+
+    ulong value = 0;
+    ulong divisor = 1;
+
+    const(char)* s = str.ptr;
+    const(char)* e = s + str.length;
+
+    // TODO: we could optimise the commoin base <= 10 case...
+
+    for (; s < e; ++s)
+    {
+        char c = *s;
+
+        if (c == '.')
+        {
+            ++s;
+            goto parse_decimal;
+        }
+
+        uint digit = getDigit(c);
+        if (digit >= base)
+            break;
+        value = value*base + digit;
+    }
+    goto done;
+
+parse_decimal:
+    for (; s < e; ++s)
+    {
+        uint digit = getDigit(*s);
+        if (digit >= base)
+        {
+            // if i == 1, then the first char was a '.' and the next was not numeric, so this is not a number!
+            if (s == str.ptr + 1)
+                s = str.ptr;
+            break;
+        }
+        value = value*base + digit;
+        divisor *= base;
+    }
+
+done:
+    fixedPointDivisor = divisor;
+    if (bytesTaken)
+        *bytesTaken = s - str.ptr;
+    return value;
+}
+
 
 unittest
 {
 	size_t taken;
 	ulong divisor;
-	assert(parseInt("123") == 123);
+	assert(parseUint("123") == 123);
 	assert(parseInt("+123.456") == 123);
-	assert(parseInt("-123.456", null, null, 10) == -123);
-	assert(parseInt("123.456", null, &divisor, 10) == 123456 && divisor == 1000);
-	assert(parseInt("123.456.789", &taken, &divisor, 16) == 1193046 && taken == 7 && divisor == 4096);
-	assert(parseInt("11001", null, null, 2) == 25);
-	assert(parseInt("-AbCdE.f", null, &divisor, 16) == -11259375 && divisor == 16);
-	assert(parseInt("123abc", &taken, null, 10) == 123 && taken == 3);
-	assert(parseInt("!!!", &taken, null, 10) == 0 && taken == 0);
-	assert(parseInt("-!!!", &taken, null, 10) == 0 && taken == 0);
-	assert(parseInt("Wow", &taken, null, 36) == 42368 && taken == 3);
+	assert(parseInt("-123.456", null, 10) == -123);
+	assert(parseUintWithDecimal("123.456", divisor, null, 10) == 123456 && divisor == 1000);
+	assert(parseIntWithDecimal("123.456.789", divisor, &taken, 16) == 1193046 && taken == 7 && divisor == 4096);
+	assert(parseInt("11001", null, 2) == 25);
+	assert(parseIntWithDecimal("-AbCdE.f", divisor, null, 16) == -11259375 && divisor == 16);
+	assert(parseInt("123abc", &taken, 10) == 123 && taken == 3);
+	assert(parseInt("!!!", &taken, 10) == 0 && taken == 0);
+	assert(parseInt("-!!!", &taken, 10) == 0 && taken == 0);
+	assert(parseInt("Wow", &taken, 36) == 42368 && taken == 3);
+}
+
+int parseIntFast(ref const(char)[] text, out bool success) pure
+{
+    if (!text.length)
+        return 0;
+
+    const(char)* s = text.ptr;
+    const char* e = s + text.length;
+
+    bool neg = false;
+    if (*s == '-')
+    {
+        neg = true;
+        goto skip;
+    }
+    if (*s == '+')
+    {
+    skip:
+        if (text.length == 1)
+            return 0;
+        ++s;
+    }
+    uint i = *s - '0';
+    if (i > 9)
+        return 0;
+
+    uint max = int.max + neg;
+
+    while (true)
+    {
+        if (++s == e)
+            break;
+        uint c = *s - '0';
+        if (c > 9)
+            break;
+        if (i > int.max / 10) // check for overflow
+            return 0; // should we take the number from the text stream though?
+        i = i*10 + c;
+        if (i > max) // check for overflow
+            return 0; // should we take the number from the text stream though?
+    }
+    text = s[0 .. e - s];
+    success = true;
+    return neg ? -cast(int)i : cast(int)i;
+}
+
+unittest
+{
+    bool success;
+    const(char)[] text = "123";
+    assert(parseIntFast(text, success) == 123 && success == true && text.empty);
+    text = "-2147483648abc";
+    assert(parseIntFast(text, success) == -2147483648 && success == true && text.length == 3);
+    text = "2147483648";
+    assert(parseIntFast(text, success) == 0 && success == false);
+    text = "-2147483649";
+    assert(parseIntFast(text, success) == 0 && success == false);
+    text = "2147483650";
+    assert(parseIntFast(text, success) == 0 && success == false);
 }
 
 
 // on error or not-a-number, result will be nan and bytesTaken will contain 0
 double parseFloat(const(char)[] str, size_t* bytesTaken = null, int base = 10) pure
 {
+	// TODO: E-notation...
 	size_t taken = void;
 	ulong div = void;
-	long value = str.parseInt(&taken, &div, base);
+	long value = str.parseIntWithDecimal(div, &taken, base);
 	if (bytesTaken)
 		*bytesTaken = taken;
 	if (taken == 0)
@@ -241,7 +352,7 @@ template to(T)
         {
             int base = parseBasePrefix(str);
             size_t taken;
-            long r = parseInt(str, &taken, null, base);
+            long r = parseInt(str, &taken, base);
             assert(taken == str.length, "String is not numeric");
             return r;
         }
@@ -294,7 +405,21 @@ template to(T)
 
 private:
 
-int parseBasePrefix(ref const(char)[] str)
+uint getDigit(char c) pure
+{
+    uint zeroBase = c - '0';
+    if (zeroBase < 10)
+        return zeroBase;
+    uint ABase = c - 'A';
+    if (ABase < 26)
+        return ABase + 10;
+    uint aBase = c - 'a';
+    if (aBase < 26)
+        return aBase + 10;
+    return -1;
+}
+
+int parseBasePrefix(ref const(char)[] str) pure
 {
     int base = 10;
     if (str.length >= 2)
