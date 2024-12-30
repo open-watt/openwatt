@@ -17,6 +17,9 @@ import protocol.dns.message;
 nothrow @nogc:
 
 
+enum IPAddr mDNSMulticastAddress = IPAddrLit!"224.0.0.251";
+enum ushort mDNSPort = 5353;
+
 
 class mDNSServer
 {
@@ -34,6 +37,7 @@ nothrow @nogc:
 //        this.interfaces = interfaces.move;
 
 //        hostname = manager.system.hostname.makeString(defaultAllocator());
+        // TODO: gotta get the hostname from the OS...
         hostname = StringLit!"Manu-Win10";
     }
 
@@ -97,11 +101,12 @@ nothrow @nogc:
             if (r)
                 socket.set_socket_option(SocketOption.ReuseAddress, true);
             if (r)
-                r = socket.set_socket_option(SocketOption.Multicast, MulticastGroup(IPAddrLit!"224.0.0.251", IPAddr.any));
+                r = socket.set_socket_option(SocketOption.Multicast, MulticastGroup(mDNSMulticastAddress, IPAddr.any));
+            // TODO: not sure if this should be present or not...
 //            if (r)
 //                r = socket.set_socket_option(SocketOption.MulticastLoopback, false);
             if (r)
-                socket.bind(InetAddress(IPAddr.any, 5353));
+                socket.bind(InetAddress(IPAddr.any, mDNSPort));
             if (!r)
             {
                 socket.close();
@@ -203,7 +208,7 @@ nothrow @nogc:
 
                 ubyte[] msg = buffer[0 .. probe.formDNSMessage(buffer, false)];
 
-                InetAddress addr = InetAddress(IPAddrLit!"224.0.0.251", 5353);
+                InetAddress addr = InetAddress(mDNSMulticastAddress, mDNSPort);
                 size_t bytes;
 
                 r = socket.sendto(msg, MsgFlags.None, &addr, &bytes);

@@ -138,9 +138,8 @@ bool parseDNSMessage(const(ubyte)[] data, out DNSMessage message)
 
         DNSType qtype = msg.takeFront!2.bigEndianToNative!DNSType;
         DNSClass qclass = msg.takeFront!2.bigEndianToNative!DNSClass;
-        ushort highBit = qclass & 0x8000;
-        qclass ^= highBit;
-        bool preferUnicastResponse = highBit != 0;
+        bool preferUnicastResponse = (qclass & 0x8000) != 0;
+        qclass &= 0x7FFF;
 
         message.questions ~= DNSQuestion(qname.move, qtype, qclass, preferUnicastResponse);
     }
@@ -153,9 +152,8 @@ bool parseDNSMessage(const(ubyte)[] data, out DNSMessage message)
 
         DNSType type = msg.takeFront!2.bigEndianToNative!DNSType;
         DNSClass cls = msg.takeFront!2.bigEndianToNative!DNSClass;
-        ushort highBit = cls & 0x8000;
-        cls ^= highBit;
-        bool flushCache = highBit != 0;
+        bool flushCache = (cls & 0x8000) != 0;
+        cls &= 0x7FFF;
 
         uint ttl = msg.takeFront!4.bigEndianToNative!uint;
         ushort rdlen = msg.takeFront!2.bigEndianToNative!ushort;

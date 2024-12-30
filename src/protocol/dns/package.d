@@ -41,6 +41,7 @@ class DNSModule : Plugin
 
         void server_add(Session session, const(char)[] name)//, const(char)[][] _interface)
         {
+            // TODO: we probably want servers to only apply to select interfaces rather than all interfaces...
 //            Array!BaseInterface interfaces;
 //            foreach(i; 0 .. _interface.length)
 //            {
