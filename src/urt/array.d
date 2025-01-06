@@ -439,6 +439,12 @@ nothrow @nogc:
     void removeSwapLast(const(T)* pItem)            { removeSwapLast(ptr[0 .. _length].indexOfElement(pItem)); }
     void removeFirstSwapLast(U)(ref const U item)   { removeSwapLast(ptr[0 .. _length].findFirst(item)); }
 
+    void sort(alias pred = void)()
+    {
+        import urt.algorithm : qsort;
+        qsort!(pred)(ptr[0.._length]);
+    }
+
     inout(void)[] getBuffer() inout
     {
         static if (EmbedCount > 0)

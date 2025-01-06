@@ -214,3 +214,8 @@ template FunctionTypeOf(alias func)
     else
         static assert(0);
 }
+
+// helpers to test certain expressions
+private struct __InoutWorkaroundStruct{}
+@property T rvalueOf(T)(inout __InoutWorkaroundStruct = __InoutWorkaroundStruct.init) pure nothrow @nogc;
+@property ref T lvalueOf(T)(inout __InoutWorkaroundStruct = __InoutWorkaroundStruct.init) pure nothrow @nogc;
