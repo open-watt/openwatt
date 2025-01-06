@@ -3,7 +3,7 @@ module urt.string.string;
 import urt.lifetime : forward;
 import urt.mem;
 import urt.mem.string : CacheString;
-import urt.string : fnv1aHash, fnv1aHash64;
+import urt.hash : fnv1aHash, fnv1aHash64;
 import urt.string.tailstring : TailString;
 
 import core.lifetime : move;

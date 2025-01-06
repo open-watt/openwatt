@@ -1,9 +1,55 @@
 module urt.hash;
 
-nothrow @nogc:
-
 version = SmallSize;
 version = BranchIsFasterThanMod;
+
+nothrow @nogc:
+
+
+alias fnv1aHash = fnv1Hash!(uint, true);
+alias fnv1aHash64 = fnv1Hash!(ulong, true);
+
+T fnv1Hash(T, bool alternate)(const ubyte[] s) pure nothrow @nogc
+    if (is(T == ushort) || is(T == uint) || is(T == ulong))
+{
+    static if (is(T == ushort))
+    {
+        enum T prime = 0x0101; // 16-bit FNV prime
+        T hash = 0x811C; // 16-bit FNV offset basis
+    }
+    else static if (is(T == uint))
+    {
+        enum T prime = 0x01000193; // 32-bit FNV prime
+        T hash = 0x811C9DC5; // 32-bit FNV offset basis
+    }
+    else static if (is(T == ulong))
+    {
+        enum T prime = 0x100000001B3; // 64-bit FNV prime
+        T hash = 0XCBF29CE484222325; // 64-bit FNV offset basis
+    }
+
+    const ubyte* p = s.ptr;
+    for (size_t i = 0; i < s.length; ++i)
+    {
+        static if (alternate)
+        {
+            hash ^= p[i];
+            hash *= prime;
+        }
+        else
+        {
+            hash *= prime;
+            hash ^= p[i];
+        }
+    }
+    return hash;
+}
+
+unittest
+{
+    enum hash = fnv1aHash(cast(ubyte[])"hello world");
+    static assert(hash == 0xD58B3FA7);
+}
 
 
 uint adler32(const void[] data)

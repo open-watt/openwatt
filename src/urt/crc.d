@@ -198,7 +198,7 @@ unittest
 }
 
 
-private: // Helper function to reflect bits (reverse bit order)
+private:
 
 enum CRCParams[] paramTable = [
     CRCParams(16, true,  0x8005, 0xFFFF, 0xFFFF, 0xB4C8), // CRC16_USB
@@ -212,6 +212,7 @@ enum CRCParams[] paramTable = [
     CRCParams(32, true,  0x1EDC6F41, 0xFFFFFFFF, 0xFFFFFFFF, 0xE3069283), // CRC32_CASTAGNOLI
 ];
 
+// helper function to reflect bits (reverse bit order)
 T reflect(T)(T value, ubyte bits)
 {
     T result = 0;
