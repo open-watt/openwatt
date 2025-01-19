@@ -125,7 +125,7 @@ nothrow @nogc:
         }
 
         for (size_t i = 0; i < 6; ++i)
-            b[i] = cast(ubyte)parseInt(s[i*3 .. i*3 + 2], null, null, 16);
+            b[i] = cast(ubyte)parseInt(s[i*3 .. i*3 + 2], null, 16);
 
         return 17;
     }

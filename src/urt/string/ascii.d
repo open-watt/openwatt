@@ -31,7 +31,7 @@ immutable char[128] charDetails = [
 bool isNewline(char c) pure         => c < 128 && (charDetails[c] & 8);
 bool isWhitespace(char c) pure      => c < 128 && (charDetails[c] & 0xC);
 bool isAlpha(char c) pure           => c < 128 && (charDetails[c] & 1);
-bool isNumeric(char c) pure         => c < 128 && (charDetails[c] & 2);
+bool isNumeric(char c) pure         => c - '0' <= 9;
 bool isAlphaNumeric(char c) pure    => c < 128 && (charDetails[c] & 3);
 bool isHex(char c) pure             => c.isAlphaNumeric && (c | 0x20) <= 'f';
 

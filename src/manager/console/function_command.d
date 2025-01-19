@@ -268,7 +268,7 @@ const(char[]) tokenToValue(I)(ref const Token t, out I r, ApplicationInstance ap
         v = v[2 .. $];
     }
     size_t taken;
-    r = cast(I)v.parseInt(&taken, null, base);
+    r = cast(I)v.parseInt(&taken, base);
     return taken == v.length ? null : "Invalid integer value";
 }
 
@@ -353,9 +353,7 @@ const(char[]) tokenToValue(T)(ref const Token t, out T r, ApplicationInstance ap
     if (is(T == struct))
 {
     const(char)[] v = tokenValue(t, false);
-    size_t taken;
-    r.fromString(v, &taken);
-    return taken == v.length ? null : tconcat("Couldn't parse `" ~ T.stringof ~ "` from string: ", t);
+    return r.fromString(v) == v.length ? null : tconcat("Couldn't parse `" ~ T.stringof ~ "` from string: ", t);
 }
 
 public import manager.component;

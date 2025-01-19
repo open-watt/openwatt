@@ -1,5 +1,6 @@
 module urt.string.format;
 
+import urt.conv : parseIntFast;
 import urt.string;
 import urt.traits;
 import urt.util;
@@ -24,9 +25,9 @@ char[] toString(T)(auto ref T value, char[] buffer)
 
 	debug InFormatFunction = true;
 	FormatArg a = FormatArg(value);
-	char[] r = a.getString(buffer, null, null);
+	ptrdiff_t r = a.getString(buffer, null, null);
 	debug InFormatFunction = false;
-	return r;
+	return r < 0 ? null : buffer[0 .. r];
 }
 
 char[] concat(Args...)(char[] buffer, auto ref Args args)
@@ -147,12 +148,9 @@ struct FormatArg
 			toInt = null;
 	}
 
-	char[] getString(char[] buffer, const(char)[] format, const(FormatArg)[] args) const nothrow @nogc
+	ptrdiff_t getString(char[] buffer, const(char)[] format, const(FormatArg)[] args) const nothrow @nogc
 	{
-		ptrdiff_t len = toString(buffer, format, args);
-		if (len < 0)
-			return null;
-		return buffer.ptr[0 .. len];
+		return toString(buffer, format, args);
 	}
 	ptrdiff_t getLength(const(char)[] format, const(FormatArg)[] args) const nothrow @nogc
 	{
@@ -496,7 +494,7 @@ struct DefFormat(T)
 				FormatArg arg = FormatArg(value[i]);
 				if (buffer.ptr)
 				{
-					size_t argLen = arg.getString(buffer.ptr[len .. buffer.length], format, formatArgs).length;
+					ptrdiff_t argLen = arg.getString(buffer.ptr[len .. buffer.length], format, formatArgs);
 					if (argLen < 0)
 						return argLen;
 					len += argLen;
@@ -601,7 +599,7 @@ struct DefFormat(T)
                 FormatArg arg = FormatArg(value.tupleof[i]);
                 if (buffer.ptr)
                 {
-                    ptrdiff_t argLen = arg.getString(buffer.ptr[len .. buffer.length], null, null).length;
+                    ptrdiff_t argLen = arg.getString(buffer.ptr[len .. buffer.length], null, null);
                     if (argLen < 0)
                         return argLen;
                     len += argLen;
@@ -639,10 +637,10 @@ char[] concatImpl(char[] buffer, const(FormatArg)[] args) nothrow @nogc
 	size_t len = 0;
 	foreach (a; args)
     {
-        const(char)[] s = a.getString(buffer.ptr ? buffer[len..$] : null, null, null);
-        if (!s)
+        ptrdiff_t r = a.getString(buffer.ptr ? buffer[len..$] : null, null, null);
+        if (r < 0)
             return null;
-        len += s.length;
+        len += r;
     }
 	return buffer.ptr[0..len];
 }
@@ -780,7 +778,7 @@ ptrdiff_t parseFormat(ref const(char)[] format, ref char[] buffer, const(FormatA
 	}
 
 	// check for universal format strings
-	char[64] indirectFormatSpec;
+	char[64] indirectFormatSpec = void;
 	if (formatSpec.length)
 	{
 		// indrect formatting allows to take the format string from another parameter
@@ -843,13 +841,11 @@ ptrdiff_t parseFormat(ref const(char)[] format, ref char[] buffer, const(FormatA
 		//	   i think the string should be fetched raw, and then the formatSpec applied to the resolved text?
 
 		// interpret the arg as an indirect format string
-		ptrdiff_t bytes = args[arg].getLength(formatSpec, args);
 		// TODO: make growable?
-		char[128] indirectFormat;
-		assert(bytes <= indirectFormat.sizeof);
+		char[128] indirectFormat = void;
 //		MutableString128 indirectFormat(Reserve, bytes);
-		char[] indirect = args[arg].getString(indirectFormat[], formatSpec, args);
-		if (!indirect)
+		ptrdiff_t bytes = args[arg].getString(indirectFormat[], formatSpec, args);
+		if (bytes < 0)
 			return -2;
 		char[] t = formatImpl(buffer, indirectFormat.ptr[0 .. bytes], args);
 		len = t ? t.length : -1;
@@ -857,41 +853,12 @@ ptrdiff_t parseFormat(ref const(char)[] format, ref char[] buffer, const(FormatA
 	else
 	{
 		// append the arg
-		char[] t = args[arg].getString(buffer, formatSpec, args);
-		len = t ? t.length : -1;
+		len = args[arg].getString(buffer, formatSpec, args);
 	}
 
 	if (buffer.ptr && len >= 0)
 		buffer = buffer.ptr[len .. buffer.length];
 	return len;
-}
-
-ptrdiff_t parseIntFast(ref const(char)[] text, out bool success) pure nothrow @nogc
-{
-	if (!text.length)
-		return 0;
-
-	bool neg = false;
-	if (text[0] == '-')
-	{
-		neg = true;
-		goto skip;
-	}
-	if (text[0] == '+')
-	{
-	skip:
-		text.popFront;
-		if (!text.length)
-			return 0;
-	}
-	if (!isNumeric(text[0]))
-		return 0;
-
-	size_t i = 0;
-	while (text.length && isNumeric(text[0]))
-		i = i*10 + (text.popFront - '0');
-	success = true;
-	return neg ? -i : i;
 }
 
 
