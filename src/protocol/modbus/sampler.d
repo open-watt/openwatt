@@ -16,6 +16,8 @@ import router.iface.mac;
 import router.modbus.message;
 import router.modbus.profile;
 
+//version = DebugModbusSampler;
+
 nothrow @nogc:
 
 
@@ -114,7 +116,8 @@ nothrow @nogc:
             ModbusPDU pdu = createMessage_Read(cast(RegisterType)elements[i].regKind, firstReg, count);
             client.sendRequest(server, pdu, &responseHandler, &errorHandler, 0, retryTime);
 
-            debug writeDebugf("Request: {0} [{1}{2,04x}:{3}]", server, elements[i].regKind, firstReg, count);
+            version (DebugModbusSampler)
+                writeDebugf("Request: {0} [{1}{2,04x}:{3}]", server, elements[i].regKind, firstReg, count);
 
             i = j;
         }
@@ -199,7 +202,8 @@ private:
         else if (kind > 2 && responseBytes / 2 != count)
             return;
 
-        debug writeDebugf("Response: {0}, [{1}{2,04x}:{3}] - {4}", server, kind, first, count, responseTime - requestTime);
+        version (DebugModbusSampler)
+            writeDebugf("Response: {0}, [{1}{2,04x}:{3}] - {4}", server, kind, first, count, responseTime - requestTime);
 
         ubyte[] data = response.data[1 .. 1 + responseBytes];
 
@@ -219,8 +223,8 @@ private:
                 if (e.sampleTimeMs == 0)
                     e.flags |= 2;
             }
-//            else
-//                debug writeDebugf("Got reg {0, 04x}: {1} ", e.register, e.element.id);
+//            else version (DebugModbusSampler)
+//                writeDebugf("Got reg {0, 04x}: {1} ", e.register, e.element.id);
 
             // parse value from the response...
             ushort offset = cast(ushort)(e.register - first);
@@ -353,7 +357,8 @@ private:
         ushort first = request.data[0..2].bigEndianToNative!ushort;
         ushort count = request.data[2..4].bigEndianToNative!ushort;
 
-        debug writeDebugf("Timeout: [{0}{1,04x}:{2}] - {3}", kind, first, count, getTime()-requestTime);
+        version (DebugModbusSampler)
+            writeDebugf("Timeout: [{0}{1,04x}:{2}] - {3}", kind, first, count, getTime()-requestTime);
 
         // release all the in-flight flags...
         foreach (ref e; elements)
