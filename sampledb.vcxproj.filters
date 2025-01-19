@@ -85,6 +85,9 @@
     <Filter Include="src\protocol\dns">
       <UniqueIdentifier>{6b327823-23d1-49dc-a514-342b020a2613}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\urt\digest">
+      <UniqueIdentifier>{5ca0e114-4a83-4c9d-869b-a172139eb46a}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d">
@@ -452,6 +455,9 @@
     </DCompile>
     <DCompile Include="src\urt\kvp.d">
       <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\digest\md5.d">
+      <Filter>src\urt\digest</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>
