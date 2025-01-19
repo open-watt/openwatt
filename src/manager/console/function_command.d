@@ -8,10 +8,11 @@ import urt.traits;
 import urt.string;
 import urt.string.format;
 
-public import manager.console; 
-public import manager.console.command; 
-public import manager.console.expression; 
-public import manager.console.session; 
+public import manager.console;
+public import manager.console.command;
+public import manager.console.expression;
+public import manager.console.session;
+public import manager.instance;
 
 
 class FunctionCommandState : CommandState
@@ -38,7 +39,7 @@ nothrow @nogc:
         static const(char)[] functionAdapter(Session session, out FunctionCommandState state, KVP[] parameters, void* instance)
         {
             const(char)[] error;
-            auto args = makeArgTuple!fun(parameters, error);
+            auto args = makeArgTuple!fun(parameters, error, session.m_console.appInstance);
             if (error)
             {
                 session.writeLine(error);
@@ -151,7 +152,7 @@ char[] transformCommandName(const(char)[] name)
     return result;
 }
 
-auto makeArgTuple(alias F)(KVP[] args, out const(char)[] error)
+auto makeArgTuple(alias F)(KVP[] args, out const(char)[] error, ApplicationInstance app)
     if (isSomeFunction!F)
 {
     import urt.meta;
@@ -178,9 +179,10 @@ auto makeArgTuple(alias F)(KVP[] args, out const(char)[] error)
             static foreach (i, P; Params)
             {
                 case Alias!(transformCommandName(ParamNames[i])):
-                    if (!kvp.v.tokenToValue(params[i]))
+                    error = kvp.v.tokenToValue(params[i], app);
+                    if (error)
                     {
-                        error = tconcat("Invalid argument: ", params[i]);
+                        error = tconcat("Error parsing argument '", key, "': ", error);
                         break outer;
                     }
                     gotArg[i] = true;
@@ -226,34 +228,34 @@ const(char)[] tokenValue(ref const Token t, bool acceptString) nothrow @nogc
     return t.token[];
 }
 
-bool tokenToValue(ref const Token t, out bool r) nothrow @nogc
+const(char[]) tokenToValue(ref const Token t, out bool r, ApplicationInstance app) nothrow @nogc
 {
     const(char)[] v = tokenValue(t, false);
     if (!v)
     {
         r = true;
-        return true;
+        return null;
     }
     if (v[] == "true" || v[] == "yes")
     {
         r = true;
-        return true;
+        return null;
     }
     else if (v[] == "false" || v[] == "no")
     {
         r = false;
-        return true;
+        return null;
     }
-    return false;
+    return "Invalid boolean value";
 }
 
-bool tokenToValue(I)(ref const Token t, out I r) nothrow @nogc
+const(char[]) tokenToValue(I)(ref const Token t, out I r, ApplicationInstance app) nothrow @nogc
     if (isSomeInt!I)
 {
     import urt.conv : parseInt;
     const(char)[] v = tokenValue(t, false);
     if (!v)
-        return false;
+        return "No value";
     int base = 10;
     if (v.length > 2 && v[0..2] == "0x")
     {
@@ -267,42 +269,42 @@ bool tokenToValue(I)(ref const Token t, out I r) nothrow @nogc
     }
     size_t taken;
     r = cast(I)v.parseInt(&taken, null, base);
-    return taken > 0;
+    return taken == v.length ? null : "Invalid integer value";
 }
 
-bool tokenToValue(F)(ref const Token t, out F r) nothrow @nogc
+const(char[]) tokenToValue(F)(ref const Token t, out F r, ApplicationInstance app) nothrow @nogc
     if (isSomeFloat!F)
 {
     import urt.conv : parseFloat;
     const(char)[] v = tokenValue(t, false);
     if (!v)
-        return false;
+        return "No value";
     size_t taken;
     r = cast(F)v.parseFloat(&taken);
-    return taken > 0;
+    return taken == v.length ? null : "Invalid float value";
 }
 
-bool tokenToValue(S : const(char)[])(ref const Token t, out S r) nothrow @nogc
+const(char[]) tokenToValue(S : const(char)[])(ref const Token t, out S r, ApplicationInstance app) nothrow @nogc
 {
     const(char)[] v = tokenValue(t, true);
     r = v;
-    return true;
+    return null;
 }
 
-bool tokenToValue(T)(ref const Token t, out T r) nothrow @nogc
+const(char[]) tokenToValue(T)(ref const Token t, out T r, ApplicationInstance app) nothrow @nogc
     if (is(T U == enum))
 {
     // try and parse a key from the string...
     const(char)[] v = tokenValue(t, false);
     if (!v)
-        return false;
+        return "No value";
     switch (v)
     {
         static foreach(E; __traits(allMembers, T))
         {
             case Alias!(toLower(E)):
                 r = __traits(getMember, T, E);
-                return true;
+                return null;
         }
         default:
             break;
@@ -311,10 +313,10 @@ bool tokenToValue(T)(ref const Token t, out T r) nothrow @nogc
     // else parse the base type?
 //    const(char)[] v = tokenValue(t, false);
 
-    return false;
+    return "Invalid value";
 }
 
-bool tokenToValue(T : U[], U)(ref const Token t, out T r) nothrow @nogc
+const(char[]) tokenToValue(T : U[], U)(ref const Token t, out T r, ApplicationInstance app) nothrow @nogc
     if (!is(U : char))
 {
     const(char)[] v = tokenValue(t, false);
@@ -331,24 +333,35 @@ bool tokenToValue(T : U[], U)(ref const Token t, out T r) nothrow @nogc
     int i = 0;
     while (!v.empty)
     {
-        if (!tokenToValue!U(Token(v.split!','), r[i++]))
-            return false;
+        const(char[]) error = tokenToValue(Token(v.split!','), r[i++], app);
+        if (error)
+            return error;
     }
-    return true;
+    return null;
 }
 
-bool tokenToValue(T : Nullable!U, U)(ref const Token t, out T r) nothrow @nogc
+const(char[]) tokenToValue(T : Nullable!U, U)(ref const Token t, out T r, ApplicationInstance app) nothrow @nogc
 {
     U tmp;
-    bool success = tokenToValue(t, tmp);
-    if (success)
+    const(char[]) error = tokenToValue(t, tmp, app);
+    if (!error)
         r = tmp.move;
-    return success;
+    return error;
 }
 
-bool tokenToValue(T)(ref const Token t, out T r) nothrow @nogc
+const(char[]) tokenToValue(T)(ref const Token t, out T r, ApplicationInstance app) nothrow @nogc
     if (is(T == struct))
 {
     const(char)[] v = tokenValue(t, false);
-    return r.fromString(v) == v.length;
+    size_t taken;
+    r.fromString(v, &taken);
+    return taken == v.length ? null : tconcat("Couldn't parse `" ~ T.stringof ~ "` from string: ", t);
+}
+
+public import manager.component;
+const(char[]) tokenToValue(ref const Token t, out Component r, ApplicationInstance app) nothrow @nogc
+{
+    const(char)[] v = tokenValue(t, true);
+    r = app.findComponent(v);
+    return r ? null : tconcat("No component '", v, '\'');
 }
