@@ -6,18 +6,19 @@ import urt.mem;
 nothrow @nogc:
 
 
+enum Alloc_T { Value }
+alias Alloc = Alloc_T.Value;
+enum Concat_T { Value }
+alias Concat = Concat_T.Value;
+enum Reserve_T { Value }
+alias Reserve = Reserve_T.Value;
+
+
 bool beginsWith(T, U)(const(T)[] arr, U[] rh) pure
     => rh.length <= arr.length && arr[0 .. rh.length] == rh[];
 
 bool endsWith(T, U)(const(T)[] arr, U[] rh) pure
     => rh.length <= arr.length && arr[$ - rh.length .. $] == rh[];
-
-T[] pop(T)(ref T[] arr, ptrdiff_t n) pure
-{
-    T[] r = arr[0 .. n];
-    arr = arr[n .. $];
-    return r;
-}
 
 //Slice<T> take(ptrdiff_t n)
 //Slice<T> drop(ptrdiff_t n)
@@ -48,7 +49,7 @@ ref inout(T) popBack(T)(ref inout(T)[] arr) pure
 
 inout(T)[] takeFront(T)(ref inout(T)[] arr, size_t count) pure
 {
-	assert(count <= arr.length);
+	debug assert(count <= arr.length);
 	inout(T)[] t = arr.ptr[0 .. count];
 	arr = arr.ptr[count .. arr.length];
 	return t;
@@ -56,7 +57,7 @@ inout(T)[] takeFront(T)(ref inout(T)[] arr, size_t count) pure
 
 ref inout(T)[N] takeFront(size_t N, T)(ref inout(T)[] arr) pure
 {
-	assert(N <= arr.length);
+	debug assert(N <= arr.length);
 	inout(T)* t = arr.ptr;
 	arr = arr.ptr[N .. arr.length];
 	return t[0..N];
@@ -64,7 +65,7 @@ ref inout(T)[N] takeFront(size_t N, T)(ref inout(T)[] arr) pure
 
 inout(T)[] takeBack(T)(ref inout(T)[] arr, size_t count) pure
 {
-	assert(count <= arr.length);
+	debug assert(count <= arr.length);
 	inout(T)[] t = arr.ptr[arr.length - count .. arr.length];
 	arr = arr.ptr[0 .. arr.length - count];
 	return t;
@@ -72,7 +73,7 @@ inout(T)[] takeBack(T)(ref inout(T)[] arr, size_t count) pure
 
 ref inout(T)[N] takeBack(size_t N, T)(ref inout(T)[] arr) pure
 {
-	assert(N <= arr.length);
+	debug assert(N <= arr.length);
 	inout(T)* t = arr.ptr + arr.length - N;
 	arr = arr.ptr[0 .. arr.length - N];
 	return t[0..N];
@@ -115,8 +116,10 @@ size_t findFirst(T, U)(const(T)[] arr, U[] seq)
 {
     if (seq.length == 0)
         return 0;
+    if (arr.length < seq.length)
+        return arr.length;
     size_t i = 0;
-    for (; i < arr.length - seq.length; ++i)
+    for (; i <= arr.length - seq.length; ++i)
     {
         if (arr[i .. i + seq.length] == seq[])
             return i;
@@ -128,6 +131,8 @@ size_t findFirst(T, U)(const(T)[] arr, U[] seq)
 size_t findLast(T, U)(const(T)[] arr, U[] seq)
 {
     if (seq.length == 0)
+        return arr.length;
+    if (arr.length < seq.length)
         return arr.length;
     ptrdiff_t i = arr.length - seq.length;
     for (; i >= 0; --i)
@@ -224,9 +229,20 @@ struct Array(T, size_t EmbedCount = 0)
         this(arr[]);
     }
 
-//    this(Alloc_T, size_t count);
-//    this(Reserve_T, size_t count);
-//    this(Items...)(Concat_T, auto ref Items items);
+    this(Alloc_T, size_t count)
+    {
+        resize(count);
+    }
+
+    this(Reserve_T, size_t count)
+    {
+        reserve(count);
+    }
+
+    this(Things...)(Concat_T, auto ref Things things)
+    {
+        concat(forward!things);
+    }
 
     ~this()
     {
@@ -356,6 +372,8 @@ nothrow @nogc:
 
     T popFront()
     {
+        debug assert(_length > 0);
+
         // TODO: this should be removed and uses replaced with a queue container
         static if (is(T == class) || is(T == interface))
         {
@@ -380,6 +398,8 @@ nothrow @nogc:
 
     T popBack()
     {
+        debug assert(_length > 0);
+
         static if (is(T == class) || is(T == interface))
         {
             uint last = _length-1;
@@ -400,6 +420,8 @@ nothrow @nogc:
 
     void remove(size_t i)
     {
+        debug assert(i < _length);
+
         static if (is(T == class) || is(T == interface))
         {
             for (size_t j = i + 1; j < _length; ++j)
