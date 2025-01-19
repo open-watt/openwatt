@@ -92,11 +92,6 @@ void md5Finalize(ref MD5Context ctx)
 
     md5Step(ctx.buffer, tmp);
 
-//    // Move the result into digest (convert from little-endian)
-//    ctx.digest[0 .. 4]   = ctx.buffer[0].nativeToLittleEndian;
-//    ctx.digest[4 .. 8]   = ctx.buffer[1].nativeToLittleEndian;
-//    ctx.digest[8 .. 12]  = ctx.buffer[2].nativeToLittleEndian;
-//    ctx.digest[12 .. 16] = ctx.buffer[3].nativeToLittleEndian;
 
     foreach (uint k; 0 .. 4)
         storeLittleEndian(cast(uint*)ctx.digest.ptr + k, ctx.buffer.ptr[k]);
