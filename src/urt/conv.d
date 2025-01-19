@@ -91,7 +91,7 @@ ulong parseUintWithDecimal(const(char)[] str, out ulong fixedPointDivisor, size_
     const(char)* s = str.ptr;
     const(char)* e = s + str.length;
 
-    // TODO: we could optimise the commoin base <= 10 case...
+    // TODO: we could optimise the common base <= 10 case...
 
     for (; s < e; ++s)
     {
