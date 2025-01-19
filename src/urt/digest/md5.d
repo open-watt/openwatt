@@ -92,7 +92,6 @@ void md5Finalize(ref MD5Context ctx)
 
     md5Step(ctx.buffer, tmp);
 
-
     foreach (uint k; 0 .. 4)
         storeLittleEndian(cast(uint*)ctx.digest.ptr + k, ctx.buffer.ptr[k]);
 }
