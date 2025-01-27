@@ -47,7 +47,7 @@ nothrow @nogc:
 
 	size_t toHash() const pure
 	{
-		import urt.string : fnv1aHash, fnv1aHash64;
+		import urt.hash : fnv1aHash, fnv1aHash64;
 		static if (size_t.sizeof > 4)
 			return fnv1aHash64(b[]);
 		else
@@ -139,7 +139,7 @@ struct IPv6Addr
 
 	size_t toHash() const pure
 	{
-		import urt.string : fnv1aHash, fnv1aHash64;
+		import urt.hash : fnv1aHash, fnv1aHash64;
 		static if (size_t.sizeof > 4)
 			return fnv1aHash64(cast(ubyte[])s[]);
 		else

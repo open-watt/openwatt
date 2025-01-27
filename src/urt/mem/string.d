@@ -53,6 +53,8 @@ struct CacheString
 
 	size_t toHash() const nothrow @nogc
 	{
+		import urt.hash;
+
 		static if (size_t.sizeof == 4)
 			return fnv1aHash(cast(ubyte[])toString());
 		else

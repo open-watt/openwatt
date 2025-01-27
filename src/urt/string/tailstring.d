@@ -78,6 +78,8 @@ struct TailString(T)
 
     size_t toHash() const pure nothrow @nogc
     {
+        import urt.hash;
+
         static if (size_t.sizeof == 4)
             return fnv1aHash(cast(ubyte[])toString());
         else
