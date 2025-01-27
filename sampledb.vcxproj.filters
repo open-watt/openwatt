@@ -462,6 +462,12 @@
     <DCompile Include="src\urt\digest\md5.d">
       <Filter>src\urt\digest</Filter>
     </DCompile>
+    <DCompile Include="src\urt\zip.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\hash.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />
