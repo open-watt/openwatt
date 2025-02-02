@@ -1,6 +1,7 @@
 module urt.file;
 
 import urt.mem.allocator;
+import urt.platform;
 import urt.result;
 import urt.string.uni;
 import urt.time;
@@ -22,6 +23,26 @@ version(Windows)
         extern(Windows) DWORD GetFinalPathNameByHandleW(HANDLE hFile, LPWSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags) nothrow @nogc;
         enum FILE_NAME_OPENED = 8;
     }
+}
+else version (Posix)
+{
+    import core.stdc.errno;
+    import core.sys.posix.dirent;
+    import core.sys.posix.fcntl;
+    import core.sys.posix.stdlib;
+    import core.sys.posix.sys.stat;
+    import core.sys.posix.unistd;
+    import urt.mem.temp : tconcat;
+    import urt.string : tstringz;
+
+    enum SEEK_SET = 0;
+    enum SEEK_CUR = 1;
+    enum SEEK_END = 2;
+
+    enum POSIX_FADV_NORMAL = 0;
+    enum POSIX_FADV_RANDOM = 1;
+    enum POSIX_FADV_SEQUENTIAL = 2;
+    extern(C) int posix_fadvise(int fd, off_t offset, off_t len, int advice) nothrow @nogc;
 }
 else
 {
@@ -84,6 +105,8 @@ struct File
 {
     version (Windows)
         void* handle = INVALID_HANDLE_VALUE;
+    else version (Posix)
+        int fd = -1;
     else
         static assert(0, "Not implemented");
 }
@@ -95,6 +118,12 @@ bool file_exists(const(char)[] path)
         DWORD attr = GetFileAttributesW(path.twstringz);
         return attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY);
     }
+    else version (Posix)
+    {
+        import core.sys.posix.sys.stat;
+        stat_t st;
+        return stat(path.tstringz, &st) == 0 && S_ISREG(st.st_mode);
+    }
     else
         static assert(0, "Not implemented");
 }
@@ -105,6 +134,11 @@ Result delete_file(const(char)[] path)
     {
         if (!DeleteFileW(path.twstringz))
             return Win32Result(GetLastError());
+    }
+    else version (Posix)
+    {
+        if (unlink(path.tstringz) == -1)
+            return PosixResult(errno);
     }
     else
         static assert(0, "Not implemented");
@@ -119,18 +153,29 @@ Result rename_file(const(char)[] oldPath, const(char)[] newPath)
         if (!MoveFileW(oldPath.twstringz, newPath.twstringz))
             return Win32Result(GetLastError());
     }
+    else version (Posix)
+    {
+        import core.sys.posix.stdio;
+        if (int result = rename(oldPath.tstringz, newPath.tstringz)!= 0)
+           return PosixResult(result);
+    }
     else
         static assert(0, "Not implemented");
 
     return Result.Success;
 }
 
-Result copy_file(const(char)[] oldPath, const(char)[] newPath, bool overwriteExisting = true)
+Result copy_file(const(char)[] oldPath, const(char)[] newPath, bool overwriteExisting = false)
 {
     version (Windows)
     {
         if (!CopyFileW(oldPath.twstringz, newPath.twstringz, !overwriteExisting))
             return Win32Result(GetLastError());
+    }
+    else version (Posix)
+    {
+        // TODO
+        assert(false);
     }
     else
         static assert(0, "Not implemented");
@@ -157,12 +202,37 @@ Result get_path(ref const File file, ref char[] buffer)
             buffer = buffer[4..pathLen];
         else
             buffer = buffer[0..pathLen];
-        return Result.Success;
+    }
+    else version (Darwin)
+    {
+        import urt.mem : strlen;
+
+        char[PATH_MAX] src = void;
+        int r = fcntl(file.fd, F_GETPATH, src.ptr);
+        if (r == -1)
+            return PosixResult(errno);
+        size_t l = strlen(src.ptr);
+        if (l > buffer.length)
+            return InternalResult(InternalCode.BufferTooSmall);
+        buffer[0..l] = src[0..l];
+        buffer = buffer[0..l];
+    }
+    else version (Posix)
+    {
+        ptrdiff_t r = readlink(tconcat("/proc/self/fd/", file.fd, '\0').ptr, buffer.ptr, buffer.length);
+        if (r == -1)
+            return PosixResult(errno);
+        if (r == buffer.length)
+        {
+            // TODO: if r == buffer.length, truncation MAY have occurred, but also maybe not...
+            //       is there any way to fix this? for now, we'll just assume it did and return an error
+            return InternalResult(InternalCode.BufferTooSmall);
+        }
+        buffer = buffer[0..r];
     }
     else
         static assert(0, "Not implemented");
-
-    return InternalResult(InternalCode.Unsupported);
+    return Result.Success;
 }
 
 Result set_file_times(ref File file, const SystemTime* createTime, const SystemTime* accessTime, const SystemTime* writeTime);
@@ -191,6 +261,11 @@ Result get_file_attributes(const(char)[] path, out FileAttributes outAttributes)
         outAttributes.createTime = SysTime(cast(ulong)attrData.ftCreationTime.dwHighDateTime << 32 | attrData.ftCreationTime.dwLowDateTime);
         outAttributes.accessTime = SysTime(cast(ulong)attrData.ftLastAccessTime.dwHighDateTime << 32 | attrData.ftLastAccessTime.dwLowDateTime);
         outAttributes.writeTime = SysTime(cast(ulong)attrData.ftLastWriteTime.dwHighDateTime << 32 | attrData.ftLastWriteTime.dwLowDateTime);
+    }
+    else version (Posix)
+    {
+        // TODO
+        assert(false);
     }
     else
         static assert(0, "Not implemented");
@@ -230,6 +305,11 @@ Result get_attributes(ref const File file, out FileAttributes outAttributes)
 
         return Result.Success;
 +/
+    }
+    else version (Posix)
+    {
+        // TODO
+        assert(false);
     }
     else
         static assert(0, "Not implemented");
@@ -316,27 +396,105 @@ Result open(ref File file, const(char)[] path, FileOpenMode mode, FileOpenFlags 
 
         if (mode == FileOpenMode.WriteAppend || mode == FileOpenMode.ReadWriteAppend)
             SetFilePointer(file.handle, 0, null, FILE_END);
+    }
+    else version (Posix)
+    {
+        assert(file.fd == -1);
 
-        return Result.Success;
+        int flags;
+        switch (mode)
+        {
+            case FileOpenMode.Write:
+                flags = O_WRONLY | O_CREAT;
+                break;
+            case FileOpenMode.ReadWrite:
+                flags = O_RDWR | O_CREAT;
+                break;
+            case FileOpenMode.ReadExisting:
+                flags = O_RDONLY;
+                break;
+            case FileOpenMode.ReadWriteExisting:
+                flags = O_RDWR;
+                break;
+            case FileOpenMode.WriteTruncate:
+                flags = O_WRONLY | O_CREAT | O_TRUNC;
+                break;
+            case FileOpenMode.ReadWriteTruncate:
+                flags = O_RDWR | O_CREAT | O_TRUNC;
+                break;
+            case FileOpenMode.WriteAppend:
+                flags = O_WRONLY | O_APPEND | O_CREAT;
+                break;
+            case FileOpenMode.ReadWriteAppend:
+                flags = O_RDWR | O_APPEND | O_CREAT;
+                break;
+            default:
+                return InternalResult(InternalCode.InvalidParameter);
+        }
+
+        flags |= O_CLOEXEC;
+
+        version (Darwin) {} else {
+            if (openFlags & FileOpenFlags.NoBuffering)
+                flags |= O_DIRECT;
+        }
+
+        int fd = core.sys.posix.fcntl.open(path.tstringz, flags, 0b110_110_110);
+        if (fd < 0)
+            return PosixResult(errno);
+        file.fd = fd;
+
+        version (Darwin) {
+            if (openFlags & FileOpenFlags.NoBuffering)
+                fcntl(fd, F_NOCACHE, 1);
+        }
+
+        int advice = POSIX_FADV_NORMAL;
+        if (openFlags & FileOpenFlags.RandomAccess)
+            advice = POSIX_FADV_RANDOM;
+        else if (openFlags & FileOpenFlags.Sequential)
+            advice = POSIX_FADV_SEQUENTIAL;
+        if (advice != POSIX_FADV_NORMAL)
+        {
+            // Not checking the error case because the file should continue
+            // to operate correctly even if this fails.
+            posix_fadvise(fd, 0, 0, advice);
+        }
+
+        if (mode == FileOpenMode.WriteAppend || mode == FileOpenMode.ReadWriteAppend)
+            lseek(file.fd, 0, SEEK_END);
     }
     else
         static assert(0, "Not implemented");
+
+    return Result.Success;
 }
 
 bool is_open(ref const File file)
 {
-    return file.handle != INVALID_HANDLE_VALUE;
+    version (Windows)
+        return file.handle != INVALID_HANDLE_VALUE;
+    else version (Posix)
+        return file.fd != -1;
+    else
+        static assert(0, "Not implemented");
 }
 
 void close(ref File file)
 {
     version (Windows)
     {
-        if (file.handle != INVALID_HANDLE_VALUE)
-        {
-            CloseHandle(file.handle);
-            file.handle = INVALID_HANDLE_VALUE;
-        }
+        if (file.handle == INVALID_HANDLE_VALUE)
+            return;
+        CloseHandle(file.handle);
+        file.handle = INVALID_HANDLE_VALUE;
+    }
+    else version (Posix)
+    {
+        if (file.fd == -1)
+            return;
+        core.sys.posix.unistd.close(file.fd);
+        file.fd = -1;
     }
     else
         static assert(0, "Not implemented");
@@ -350,6 +508,13 @@ ulong get_size(ref const File file)
         if (!GetFileSizeEx(cast(void*)file.handle, &fileSize))
             return 0;
         return fileSize.QuadPart;
+    }
+    else version (Posix)
+    {
+        stat_t fs;
+        if (fstat(file.fd, &fs))
+            return 0;
+        return fs.st_size;
     }
     else
         static assert(0, "Not implemented");
@@ -394,11 +559,15 @@ Result set_size(ref File file, ulong size)
             if (!SetEndOfFile(file.handle))
                 return Win32Result(GetLastError());
         }
-
-        return Result.Success;
+    }
+    else version (Posix)
+    {
+        if (ftruncate(file.fd, size))
+            return PosixResult(errno);
     }
     else
         static assert(0, "Not implemented");
+    return Result.Success;
 }
 
 ulong get_pos(ref const File file)
@@ -411,6 +580,8 @@ ulong get_pos(ref const File file)
         SetFilePointerEx(cast(HANDLE)file.handle, liDistanceToMove, &liResult, FILE_CURRENT);
         return liResult.QuadPart;
     }
+    else version (Posix)
+        return lseek(file.fd, 0, SEEK_CUR);
     else
         static assert(0, "Not implemented");
 }
@@ -423,10 +594,16 @@ Result set_pos(ref File file, ulong offset)
         liDistanceToMove.QuadPart = offset;
         if (!SetFilePointerEx(file.handle, liDistanceToMove, null, FILE_BEGIN))
             return Win32Result(GetLastError());
-        return Result.Success;
+    }
+    else version (Posix)
+    {
+        off_t rc = lseek(file.fd, offset, SEEK_SET);
+        if (rc < 0)
+            return PosixResult(errno);
     }
     else
         static assert(0, "Not implemented");
+    return Result.Success;
 }
 
 Result read(ref File file, void[] buffer, out size_t bytesRead)
@@ -438,15 +615,21 @@ Result read(ref File file, void[] buffer, out size_t bytesRead)
         DWORD dwBytesRead;
         if (!ReadFile(file.handle, buffer.ptr, cast(uint)min(buffer.length, uint.max), &dwBytesRead, null))
         {
-            bytesRead = 0;
             DWORD lastError = GetLastError();
             return (lastError == ERROR_BROKEN_PIPE) ? Result.Success : Win32Result(lastError);
         }
         bytesRead = dwBytesRead;
-        return Result.Success;
+    }
+    else version (Posix)
+    {
+        ptrdiff_t n = core.sys.posix.unistd.read(file.fd, buffer.ptr, buffer.length);
+        if (n < 0)
+            return PosixResult(errno);
+        bytesRead = n;
     }
     else
         static assert(0, "Not implemented");
+    return Result.Success;
 }
 
 Result read_at(ref File file, void[] buffer, ulong offset, out size_t bytesRead)
@@ -464,16 +647,20 @@ Result read_at(ref File file, void[] buffer, ulong offset, out size_t bytesRead)
         if (!ReadFile(file.handle, buffer.ptr, cast(DWORD)buffer.length, &dwBytesRead, &o))
         {
             if (GetLastError() != ERROR_HANDLE_EOF)
-            {
-                bytesRead = 0;
                 return Win32Result(GetLastError());
-            }
         }
         bytesRead = dwBytesRead;
-        return Result.Success;
+    }
+    else version (Posix)
+    {
+        ssize_t n = pread(file.fd, buffer.ptr, buffer.length, offset);
+        if (n < 0)
+            return PosixResult(errno);
+        bytesRead = n;
     }
     else
         static assert(0, "Not implemented");
+    return Result.Success;
 }
 
 Result write(ref File file, const(void)[] data, out size_t bytesWritten)
@@ -482,15 +669,19 @@ Result write(ref File file, const(void)[] data, out size_t bytesWritten)
     {
         DWORD dwBytesWritten;
         if (!WriteFile(file.handle, data.ptr, cast(uint)data.length, &dwBytesWritten, null))
-        {
-            bytesWritten = 0;
             return Win32Result(GetLastError());
-        }
         bytesWritten = dwBytesWritten;
-        return Result.Success;
+    }
+    else version (Posix)
+    {
+        ptrdiff_t n = core.sys.posix.unistd.write(file.fd, data.ptr, data.length);
+        if (n < 0)
+            return PosixResult(errno);
+        bytesWritten = n;
     }
     else
         static assert(0, "Not implemented");
+    return Result.Success;
 }
 
 Result write_at(ref File file, const(void)[] data, ulong offset, out size_t bytesWritten)
@@ -506,15 +697,19 @@ Result write_at(ref File file, const(void)[] data, ulong offset, out size_t byte
 
         DWORD dwBytesWritten;
         if (!WriteFile(file.handle, data.ptr, cast(DWORD)data.length, &dwBytesWritten, &o))
-        {
-            bytesWritten = 0;
             return Win32Result(GetLastError());
-        }
         bytesWritten = dwBytesWritten;
-        return Result.Success;
+    }
+    else version (Posix)
+    {
+        ptrdiff_t n = pwrite(file.fd, data.ptr, data.length, offset);
+        if (n < 0)
+            return PosixResult(errno);
+        bytesWritten = n;
     }
     else
         static assert(0, "Not implemented");
+    return Result.Success;
 }
 
 Result flush(ref File file)
@@ -523,10 +718,15 @@ Result flush(ref File file)
     {
         if (!FlushFileBuffers(file.handle))
             return Win32Result(GetLastError());
-        return Result.Success;
+    }
+    else version (Posix)
+    {
+        if (fsync(file.fd))
+            return PosixResult(errno);
     }
     else
         static assert(0, "Not implemented");
+    return Result.Success;
 }
 
 FileResult get_FileResult(Result result)
@@ -543,6 +743,20 @@ FileResult get_FileResult(Result result)
             case ERROR_PATH_NOT_FOUND:  return FileResult.NotFound;
             case ERROR_NO_DATA:         return FileResult.NoData;
             default:                    return FileResult.Failure;
+        }
+    }
+    else version (Posix)
+    {
+        static assert(EAGAIN == EWOULDBLOCK, "Expect EGAIN and EWOULDBLOCK are the same value");
+        switch (result.systemCode)
+        {
+            case 0:         return FileResult.Success;
+            case ENOSPC:    return FileResult.DiskFull;
+            case EACCES:    return FileResult.AccessDenied;
+            case EEXIST:    return FileResult.AlreadyExists;
+            case ENOENT:    return FileResult.NotFound;
+            case EAGAIN:    return FileResult.NoData;
+            default:        return FileResult.Failure;
         }
     }
     else
@@ -566,15 +780,32 @@ Result get_temp_filename(ref char[] buffer, const(char)[] dstDir, const(char)[] 
             return InternalResult(InternalCode.BufferTooSmall);
         }
         buffer = buffer[0 .. resLen];
-        return Result.Success;
+    }
+    else version (Posix)
+    {
+        // Construct a format string which will be the supplied dir with prefix and 8 generated random characters
+        char[] fn = tconcat(dstDir, (dstDir.length && dstDir[$-1] != '/') ? "/" : "", prefix, "XXXXXX\0");
+        File file;
+        file.fd = mkstemp(fn.ptr);
+        if (file.fd == -1)
+            return PosixResult(errno);
+        Result r = get_path(file, buffer);
+        core.sys.posix.unistd.close(file.fd);
+        return r;
     }
     else
         static assert(0, "Not implemented");
+    return Result.Success;
 }
 
 version (Windows)
 {
     Result Win32Result(uint err)
+        => Result(err);
+}
+else version (Posix)
+{
+    Result PosixResult(int err)
         => Result(err);
 }
 

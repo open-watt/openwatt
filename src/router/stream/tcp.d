@@ -86,7 +86,7 @@ nothrow @nogc:
         if (r == Result.Success)
             return true;
         SocketResult sr = r.get_SocketResult;
-        if (sr == SocketResult.Again || sr == SocketResult.WouldBlock)
+        if (sr == SocketResult.WouldBlock)
             return true;
 
         // something happened... we should try and reconnect I guess?
@@ -396,7 +396,7 @@ class TCPServer
             if (r.get_SocketResult == SocketResult.WouldBlock)
                 return;
             // TODO: handle error more good?
-            assert(false);
+            assert(false, tconcat(r.get_SocketResult));
         }
 
         assert(conn);
