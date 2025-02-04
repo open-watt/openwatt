@@ -8,6 +8,16 @@ version = SmallSize;
 nothrow @nogc:
 
 
+int compare(T, U)(auto ref T a, auto ref U b)
+{
+    static if (__traits(compiles, lvalueOf!T.opCmp(lvalueOf!U)))
+        return a.opCmp(b);
+    else static if (__traits(compiles, lvalueOf!U.opCmp(lvalueOf!T)))
+        return -b.opCmp(a);
+    else
+        return a < b ? -1 : a > b ? 1 : 0;
+}
+
 size_t binarySearch(alias pred = void, T, Cmp...)(T[] arr, auto ref Cmp cmpArgs)
 {
     T* p = arr.ptr;
