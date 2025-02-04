@@ -62,10 +62,10 @@ nothrow @nogc:
         components.pushBack(component);
     }
 
-    Component findComponent(const(char)[] name) pure nothrow @nogc
+    inout(Component) findComponent(const(char)[] name) inout pure nothrow @nogc
     {
         const(char)[] id = name.split!'.';
-        foreach (Component c; components)
+        foreach (inout Component c; components)
         {
             if (c.id[] == id[])
                 return name.empty ? c : c.findComponent(name);
@@ -73,12 +73,12 @@ nothrow @nogc:
         return null;
     }
 
-    Element* findElement(const(char)[] name) pure nothrow @nogc
+    inout(Element)* findElement(const(char)[] name) inout pure nothrow @nogc
     {
         const(char)[] id = name.split!'.';
         if (!name.empty)
         {
-            foreach (Component c; components)
+            foreach (inout Component c; components)
             {
                 if (c.id[] == id[])
                     return c.findElement(name);
@@ -86,13 +86,30 @@ nothrow @nogc:
         }
         else
         {
-            foreach (Element* e; elements)
+            foreach (inout(Element)* e; elements)
             {
                 if (e.id[] == id[])
                     return e;
             }
         }
         return null;
+    }
+
+    Component getFirstComponentByTemplate(const char[] templateName)
+    {
+        foreach (Component c; components)
+            if (c.template_[] == templateName[])
+                return c;
+        return null;
+    }
+
+    Array!Component findComponentsByTemplate(const char[] templateName)
+    {
+        Array!Component result;
+        foreach (Component c; components)
+            if (c.template_[] == templateName[])
+                result ~= c;
+        return result;
     }
 
     import urt.string.format;

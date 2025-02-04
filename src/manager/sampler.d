@@ -1,11 +1,12 @@
 module manager.sampler;
 
 import manager.element;
+import manager.subscriber;
 
 nothrow @nogc:
 
 
-class Sampler
+class Sampler : Subscriber
 {
 nothrow @nogc:
 
