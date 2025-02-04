@@ -238,59 +238,101 @@ unittest
 
 ptrdiff_t formatInt(long value, char[] buffer, uint base = 10, uint width = 0, char fill = ' ', bool showSign = false) pure
 {
-	import urt.util : isPowerOf2, log2, max;
+    const bool neg = value < 0;
+    showSign |= neg;
 
-	assert(base >= 2 && base <= 36, "Invalid base");
+    if (buffer.ptr && buffer.length < showSign)
+        return -1;
 
-	const bool neg = value < 0;
-	showSign |= neg;
+    ulong i = neg ? -value : value;
 
-	long i = neg ? -value : value;
+    ptrdiff_t r = formatUint(i, buffer.ptr ? buffer.ptr[width == 0 ? showSign : 0 .. buffer.length] : null, base, width, fill);
+    if (r < 0 || !showSign)
+        return r;
 
-	// HACK: we could special case this one special number...
-	assert(i >= 0, "Value can not be long.min");
+    if (buffer.ptr)
+    {
+        char sgn = neg ? '-' : '+';
 
-	char[64] t = void;
-	uint numLen = 0;
-	// TODO: if this is a hot function, the if's could be hoisted outside the loop.
-	//       there are 8 permutations...
-	//       also, some platforms might prefer a lookup table than `d < 10 ? ... : ...`
-	for (; i != 0; i /= base)
-	{
-		if (buffer.ptr)
-		{
-			int d = cast(int)(i % base);
-			t.ptr[numLen] = cast(char)((d < 10 ? '0' : 'A' - 10) + d);
-		}
-		++numLen;
-	}
-	if (numLen == 0)
-	{
-		if (buffer.length > 0)
-			t.ptr[0] = '0';
-		numLen = 1;
-	}
+        if (width == 0)
+        {
+            buffer.ptr[0] = sgn;
+            return r + showSign;
+        }
+        if (buffer.ptr[0] == '0')
+        {
+            buffer.ptr[0] = sgn;
+            return r;
+        }
+        if (buffer.ptr[0] == fill)
+        {
+            // we don't need to shift it left...
+            size_t sgnOffset = 0;
+            while (buffer.ptr[sgnOffset + 1] == fill)
+                ++sgnOffset;
+            buffer.ptr[sgnOffset] = sgn;
+            return r;
+        }
 
-	uint len = max(numLen + showSign, width);
-	uint padding = width > numLen ? width - numLen - showSign : 0;
+        // we need to shift the number right...
+        // TODO: this is a bad case; maybe we should have reserved space in the first place?
+        if (buffer.length < r + 1)
+            return -1;
+        for (size_t j = r; j > 0; --j)
+            buffer.ptr[j] = buffer.ptr[j - 1];
+        buffer.ptr[0] = sgn;
+        return r + 1;
+    }
 
-	if (buffer.ptr)
-	{
-		if (buffer.length < len)
-			return -1;
+    if (r == width && i < base^^cast(uint)(width - 1))
+        return r;
+    return r + 1;
+}
 
-		size_t offset = 0;
-		if (showSign && fill == '0')
-			buffer.ptr[offset++] = neg ? '-' : '+';
-		while (padding--)
-			buffer.ptr[offset++] = fill;
-		if (showSign && fill != '0')
-			buffer.ptr[offset++] = neg ? '-' : '+';
-		for (uint j = numLen; j > 0; )
-			buffer.ptr[offset++] = t[--j];
-	}
+ptrdiff_t formatUint(ulong value, char[] buffer, uint base = 10, uint width = 0, char fill = ' ') pure
+{
+    import urt.util : max;
 
-	return len;
+    assert(base >= 2 && base <= 36, "Invalid base");
+
+    ulong i = value;
+
+    char[64] t = void;
+    uint numLen = 0;
+    // TODO: if this is a hot function, the if's could be hoisted outside the loop.
+    //       there are 8 permutations...
+    //       also, some platforms might prefer a lookup table than `d < 10 ? ... : ...`
+    for (; i != 0; i /= base)
+    {
+        if (buffer.ptr)
+        {
+            int d = cast(int)(i % base);
+            t.ptr[numLen] = cast(char)((d < 10 ? '0' : 'A' - 10) + d);
+        }
+        ++numLen;
+    }
+    if (numLen == 0)
+    {
+        if (buffer.length > 0)
+            t.ptr[0] = '0';
+        numLen = 1;
+    }
+
+    uint len = max(numLen, width);
+    uint padding = width > numLen ? width - numLen : 0;
+
+    if (buffer.ptr)
+    {
+        if (buffer.length < len)
+            return -1;
+
+        size_t offset = 0;
+        while (padding--)
+            buffer.ptr[offset++] = fill;
+        for (uint j = numLen; j > 0; )
+            buffer.ptr[offset++] = t[--j];
+    }
+    return len;
 }
 
 unittest
@@ -301,6 +343,11 @@ unittest
 	assert(formatInt(14, null, 16) == 1);
 	assert(formatInt(-14, null) == 3);
 	assert(formatInt(-14, null, 16) == 2);
+	assert(formatInt(-14, null, 16, 3, '0') == 3);
+	assert(formatInt(-123, null, 10, 6) == 6);
+	assert(formatInt(-123, null, 10, 3) == 4);
+	assert(formatInt(-123, null, 10, 2) == 4);
+
 	size_t len = formatInt(0, buffer);
 	assert(buffer[0 .. len] == "0");
 	len = formatInt(14, buffer);

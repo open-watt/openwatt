@@ -484,6 +484,8 @@ nothrow @nogc:
 
                 // TODO: parse args?
                 //format
+                if (flags | Flags.Uint64Flag)
+                    return asUlong().formatUint(buffer);
                 return asLong().formatInt(buffer);
 
             case Variant.Type.String:

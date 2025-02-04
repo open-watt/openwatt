@@ -284,21 +284,24 @@ struct DefFormat(T)
 		}
 		else static if (is(T == ulong) || is(T == long))
 		{
-			import urt.conv : formatInt;
+			import urt.conv : formatInt, formatUint;
 
 			// TODO: what formats are interesting for ints?
 
-			bool showSign = false;
 			bool leadingZeroes = false;
 			bool toLower = false;
 			bool varLen = false;
 			ptrdiff_t padding = 0;
 			uint base = 10;
 
-			if (format.length && format[0] == '+')
+			static if (is(T == long))
 			{
-				showSign = true;
-				format.popFront;
+				bool showSign = false;
+				if (format.length && format[0] == '+')
+				{
+					showSign = true;
+					format.popFront;
+				}
 			}
 			if (format.length && format[0] == '0')
 			{
@@ -338,7 +341,10 @@ struct DefFormat(T)
 				format.popFront;
 			}
 
-			size_t len = formatInt(value, buffer, base, cast(uint)padding, leadingZeroes ? '0' : ' ', showSign);
+			static if (is(T == long))
+				size_t len = formatInt(value, buffer, base, cast(uint)padding, leadingZeroes ? '0' : ' ', showSign);
+			else
+				size_t len = formatUint(value, buffer, base, cast(uint)padding, leadingZeroes ? '0' : ' ');
 
 			if (toLower && len > 0)
 			{
