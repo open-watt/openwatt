@@ -215,6 +215,27 @@ template FunctionTypeOf(alias func)
         static assert(0);
 }
 
+// is T a primitive/builtin type?
+enum isPrimitive(T) = isIntegral!T || isSomeFloat!T || (isEnum!T && isPrimitive!(enumType!T) ||
+                      is(T == P*, P) || is(T == S[], S) || (is(T == A[N], A, size_t N) && isPrimitive!A) ||
+                      is(T == R function(Args), R, Args...) || is(T == R delegate(Args), R, Args...));
+
+enum isDefaultConstructible(T) = isPrimitive!T || (is(T == struct) && __traits(compiles, { T t; }));
+
+enum isConstructible(T, Args...) = (isPrimitive!T && (Args.length == 0 || (Args.length == 1 && is(Args[0] : T)))) ||
+                                   (is(T == struct) && __traits(compiles, (Args args) { T x = T(args); })); // this probably fails if the struct can't be assigned to x... TODO: use placement new?
+
+// TODO: we need to know it's not calling an elaborate constructor...
+//enum isTriviallyConstructible(T, Args...) = (isPrimitive!T && (Args.length == 0 || (Args.length == 1 && is(Args[0] : T)))) ||
+//                                            (is(T == struct) && __traits(compiles, (Args args) { auto x = T(args); })); // this probably fails if the struct can't be assigned to x... TODO: use placement new?
+
+//enum isCopyConstructible(T) = isPrimitive!T || (is(T == struct) && __traits(compiles, { T u = lvalueOf!T; }));
+//enum isMoveConstructible(T) = isPrimitive!T || (is(T == struct) && __traits(compiles, { T u = rvalueOf!T; }));
+
+enum isTriviallyDefaultConstructible(T) = isDefaultConstructible!T; // dlang doesn't have elaborate default constructors (YET...)
+//enum isTriviallyCopyConstructible(T) = isPrimitive!T; // TODO: somehow find out if there is no copy constructor
+//enum isTriviallyMoveConstructible(T) = isPrimitive!T || is(T == struct); // TODO: somehow find out if there is no move constructor
+
 // helpers to test certain expressions
 private struct __InoutWorkaroundStruct{}
 @property T rvalueOf(T)(inout __InoutWorkaroundStruct = __InoutWorkaroundStruct.init) pure nothrow @nogc;

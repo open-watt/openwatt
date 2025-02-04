@@ -91,6 +91,9 @@
     <Filter Include="src\urt\format">
       <UniqueIdentifier>{75942b85-0248-49fb-9e5e-61056ac27089}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\urt\range">
+      <UniqueIdentifier>{14daa134-d1ed-4584-ac0e-ba1176386c0e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d">
@@ -184,9 +187,6 @@
       <Filter>src\router\stream</Filter>
     </DCompile>
     <DCompile Include="src\urt\io.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\range.d">
       <Filter>src\urt</Filter>
     </DCompile>
     <DCompile Include="src\urt\traits.d">
@@ -476,6 +476,12 @@
     </DCompile>
     <DCompile Include="src\urt\variant.d">
       <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\range\package.d">
+      <Filter>src\urt\range</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\range\primitives.d">
+      <Filter>src\urt\range</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>
