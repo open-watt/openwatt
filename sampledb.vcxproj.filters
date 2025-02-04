@@ -540,6 +540,9 @@
     <DCompile Include="src\protocol\package.d">
       <Filter>src\protocol</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\http\sampler.d">
+      <Filter>src\protocol\http</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />
