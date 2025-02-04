@@ -500,9 +500,10 @@ nothrow @nogc:
 
             case Variant.Type.Map:
             case Variant.Type.Array:
+                import urt.format.json;
+
                 // should we just format this like JSON or something?
-                // TODO:...
-                assert(false);
+                return writeJson(this, buffer);
 
             case Variant.Type.User:
                 if (flags & Flags.InlineFlag)

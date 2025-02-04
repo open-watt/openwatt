@@ -88,6 +88,9 @@
     <Filter Include="src\urt\digest">
       <UniqueIdentifier>{5ca0e114-4a83-4c9d-869b-a172139eb46a}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\urt\format">
+      <UniqueIdentifier>{75942b85-0248-49fb-9e5e-61056ac27089}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d">
@@ -467,6 +470,9 @@
     </DCompile>
     <DCompile Include="src\urt\hash.d">
       <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\format\json.d">
+      <Filter>src\urt\format</Filter>
     </DCompile>
     <DCompile Include="src\urt\variant.d">
       <Filter>src\urt</Filter>
