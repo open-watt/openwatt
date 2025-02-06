@@ -223,7 +223,7 @@ private:
 
 bool append(char[] buffer, ref ptrdiff_t offset, char c)
 {
-    if (offset == buffer.length)
+    if (offset >= buffer.length)
         return false;
     buffer[offset++] = c;
     return true;

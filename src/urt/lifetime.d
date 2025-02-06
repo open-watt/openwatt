@@ -249,7 +249,7 @@ private enum bool hasContextPointers(T) = {
 } ();
 
 
-private void moveEmplaceImpl(T)(scope ref T target, return scope ref T source)
+private void moveEmplaceImpl(T)(scope ref T target, return scope ref T source) @nogc
 {
     // TODO: this assert pulls in half of phobos. we need to work out an alternative assert strategy.
 //    static if (!is(T == class) && hasAliasing!T) if (!__ctfe)
@@ -320,7 +320,7 @@ private void moveEmplaceImpl(T)(scope ref T target, return scope ref T source)
     }
 }
 
-void moveEmplace(T)(ref T source, ref T target) @system
+void moveEmplace(T)(ref T source, ref T target) @system @nogc
 {
     moveEmplaceImpl(target, source);
 }

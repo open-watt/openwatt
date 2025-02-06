@@ -306,21 +306,13 @@ nothrow @nogc:
         return ptr[_length - 1];
     }
 
-    static if (is(T == class) || is(T == interface))
+    ref T pushFront()
     {
-        ref T pushFront()
-            => pushFront(null);
-        ref T pushBack()
-            => pushBack(null);
+        static if (is(T == class) || is(T == interface))
+            return pushFront(null);
+        else
+            return pushFront(T.init);
     }
-    else
-    {
-        ref T pushFront()
-            => pushFront(T.init);
-        ref T pushBack()
-            => pushBack(T.init);
-    }
-
     ref T pushFront(U)(auto ref U item)
         if (is(U : T))
     {
@@ -349,6 +341,13 @@ nothrow @nogc:
         }
     }
 
+    ref T pushBack()
+    {
+        static if (is(T == class) || is(T == interface))
+            return pushBack(null);
+        else
+            return pushBack(T.init);
+    }
     ref T pushBack(U)(auto ref U item)
         if (is(U : T))
     {

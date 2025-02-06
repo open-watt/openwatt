@@ -15,18 +15,6 @@ alias VariantKVP = KVP!(const(char)[], Variant);
 struct Variant
 {
 nothrow @nogc:
-    enum Type : ushort
-    {
-        Null        = 0,
-        False       = 1,
-        True        = 2,
-        Number      = 3,
-        String      = 4,
-        Array       = 5,
-        Map         = 6,
-        User        = 7
-    }
-
     this(this) @disable;
     this(ref Variant rh)
     {
@@ -67,15 +55,25 @@ nothrow @nogc:
         flags = b ? Flags.True : Flags.False;
     }
 
-    this(byte i)    { this(cast(int)i); }
-    this(ubyte i)   { this(cast(uint)i); }
-    this(short i)   { this(cast(int)i); }
-    this(ushort i)  { this(cast(uint)i); }
+    this(I)(I i)
+        if (is(I == byte) || is(I == short))
+    {
+        flags = Flags.NumberInt;
+        value.l = i;
+        if (i >= 0)
+            flags |= Flags.UintFlag | Flags.Uint64Flag;
+    }
+    this(I)(I i)
+        if (is(I == ubyte) || is(I == ushort))
+    {
+        flags = cast(Flags)(Flags.NumberUint | Flags.IntFlag);
+        value.ul = i;
+    }
 
     this(int i)
     {
         flags = Flags.NumberInt;
-        *cast(long*)&value.ul = i;
+        value.l = i;
         if (i >= 0)
             flags |= Flags.UintFlag | Flags.Uint64Flag;
     }
@@ -91,14 +89,13 @@ nothrow @nogc:
     this(long i)
     {
         flags = Flags.NumberInt64;
-        *cast(long*)&value.ul = i;
+        value.l = i;
         if (i >= 0)
         {
-            flags |= Flags.Uint64Flag; 
             if (i <= int.max)
-                flags |= Flags.IntFlag | Flags.UintFlag;
+                flags |= Flags.IntFlag | Flags.UintFlag | Flags.Uint64Flag;
             else if (i <= uint.max)
-                flags |= Flags.UintFlag;
+                flags |= Flags.UintFlag | Flags.Uint64Flag;
         }
         else if (i >= int.min)
             flags |= Flags.IntFlag;
@@ -116,6 +113,11 @@ nothrow @nogc:
             flags |= Flags.Int64Flag;
     }
 
+    this(float f)
+    {
+        flags = Flags.NumberFloat;
+        value.d = f;
+    }
     this(double d)
     {
         flags = Flags.NumberDouble;
@@ -143,7 +145,7 @@ nothrow @nogc:
         nodeArray = a[];
     }
     this(T)(T[] a)
-        if (!is(T == Variant) && !is(T == VariantKVP))
+        if (!is(T == Variant) && !is(T == VariantKVP) && !is(T : dchar))
     {
         flags = Flags.Array;
         nodeArray.reserve(a.length);
@@ -194,7 +196,7 @@ nothrow @nogc:
         }
         else static if (EmbedUserType!T)
         {
-            flags |= Flags.InlineFlag;
+            flags |= Flags.Embedded;
             alloc = UserTypeShortId!T;
             emplace(cast(T*)embed.ptr, forward!thing);
         }
@@ -210,8 +212,41 @@ nothrow @nogc:
         destroy!false();
     }
 
-    Type type() const pure
-        => cast(Type)(flags & Flags.TypeMask);
+    // TODO: since this is a catch-all, the error messages will be a bit shit
+    //       maybe we can find a way to constrain it to valid inputs?
+    void opAssign(T)(auto ref T value)
+    {
+        destroy!false();
+        emplace(&this, forward!value);
+    }
+
+    // TODO: do we want Variant to support +=, ~=, etc...?
+    //       or maybe rather, we SHOULDN'T allow variant to support [$]/length()/etc...
+
+    // support indexing for arrays and maps...
+    alias opDollar = length;
+
+    ref inout(Variant) opIndex(size_t i) inout pure
+    {
+        assert(isArray());
+        assert(i < count);
+        return value.n[i];
+    }
+
+    ref const(Variant) opIndex(const(char)[] member) const pure
+    {
+        const(Variant)* m = getMember(member);
+        assert(m !is null);
+        return *m;
+    }
+    ref Variant opIndex(const(char)[] member)
+    {
+        Variant* m = getMember(member);
+        if (m)
+            return *m;
+        nodeArray.emplaceBack(member);
+        return nodeArray.pushBack();
+    }
 
     bool isNull() const pure
         => flags == Flags.Null;
@@ -220,9 +255,9 @@ nothrow @nogc:
     bool isTrue() const pure
         => flags == Flags.True;
     bool isBool() const pure
-        => (flags & Flags.BoolFlag) != 0;
+        => (flags & Flags.IsBool) != 0;
     bool isNumber() const pure
-        => (flags & Flags.NumberFlag) != 0;
+        => (flags & Flags.IsNumber) != 0;
     bool isInt() const pure
         => (flags & Flags.IntFlag) != 0;
     bool isUint() const pure
@@ -231,10 +266,12 @@ nothrow @nogc:
         => (flags & Flags.Int64Flag) != 0;
     bool isUlong() const pure
         => (flags & Flags.Uint64Flag) != 0;
+    bool isFloat() const pure
+        => (flags & Flags.FloatFlag) != 0;
     bool isDouble() const pure
         => (flags & Flags.DoubleFlag) != 0;
     bool isString() const pure
-        => (flags & Flags.StringFlag) != 0;
+        => (flags & Flags.IsString) != 0;
     bool isArray() const pure
         => flags == Flags.Array;
     bool isObject() const pure
@@ -260,39 +297,18 @@ nothrow @nogc:
     int asInt() const pure @property
     {
         assert(isInt());
-        return cast(int)cast(long)value.ul;
+        return cast(int)value.l;
     }
-    void asInt(int v) @property
-    {
-        destroy!false();
-        *cast(long*)&value.ul = v;
-        count = 0;
-        flags = Flags.NumberInt;
-        if (v >= 0)
-            flags |= Flags.UintFlag | Flags.Uint64Flag;
-    }
-
     uint asUint() const pure @property
     {
         assert(isUint());
         return cast(uint)value.ul;
     }
-    void asUint(uint v) @property
-    {
-        destroy!false();
-        value.ul = v;
-        count = 0;
-        flags = Flags.NumberUint;
-        if (v <= int.max)
-            flags |= Flags.IntFlag;
-    }
-
     long asLong() const pure @property
     {
         assert(isLong());
-        return cast(long)value.ul;
+        return value.l;
     }
-
     ulong asUlong() const pure @property
     {
         assert(isUlong());
@@ -312,22 +328,11 @@ nothrow @nogc:
             return cast(double)value.ul;
         return cast(double)cast(long)value.ul;
     }
-    void asDouble(double v) @property
-    {
-        destroy!false();
-        value.d = v;
-        count = 0;
-        flags = Flags.NumberDouble;
-    }
-
-    float asFloat() const pure @property
-        => cast(float)asDouble();
-    alias asFloat = asDouble;
 
     const(char)[] asString() const pure
     {
         assert(isString());
-        if (flags & Flags.InlineFlag)
+        if (flags & Flags.Embedded)
             return embed[0 .. embed[$-1]];
         return value.s[0 .. count];
     }
@@ -337,16 +342,13 @@ nothrow @nogc:
         assert(isArray());
         return nodeArray;
     }
-    ref Array!Variant asArray()
+
+    ref Array!Variant asArray() pure
     {
-        if (isObject)
-            destroy!false();
-        if (!isArray())
-        {
+        if (flags == Flags.Null)
             flags = Flags.Array;
-            value.n = null;
-            count = 0;
-        }
+        else
+            assert(isArray());
         return nodeArray;
     }
 
@@ -376,22 +378,18 @@ nothrow @nogc:
 
     size_t length() const pure
     {
-        assert(isArray());
-        return count;
+        if (flags == Flags.Null)
+            return 0;
+        else if (isString())
+            return (flags & Flags.Embedded) ? embed[$-1] : count;
+        else if (isArray())
+            return count;
+        else
+            assert(false);
     }
 
-    size_t opDollar() const pure
-    {
-        assert(isArray());
-        return count;
-    }
-
-    ref inout(Variant) opIndex(size_t i) inout pure
-    {
-        assert(isArray());
-        assert(i < count);
-        return value.n[i];
-    }
+    bool empty() const pure
+        => isObject() ? count == 0 : length() == 0;
 
     inout(Variant)* getMember(const(char)[] member) inout pure
     {
@@ -402,21 +400,6 @@ nothrow @nogc:
                 return value.n + i + 1;
         }
         return null;
-    }
-
-    ref const(Variant) opIndex(const(char)[] member) const pure
-    {
-        const(Variant)* m = getMember(member);
-        assert(m !is null);
-        return *m;
-    }
-    ref Variant opIndex(const(char)[] member)
-    {
-        Variant* m = getMember(member);
-        if (m)
-            return *m;
-        nodeArray.emplaceBack(member);
-        return nodeArray.pushBack();
     }
 
     // TODO: this seems to interfere with UFCS a lot...
@@ -508,34 +491,43 @@ nothrow @nogc:
                 return writeJson(this, buffer);
 
             case Variant.Type.User:
-                if (flags & Flags.InlineFlag)
+                if (flags & Flags.Embedded)
                     return findTypeDetails(alloc).stringify(embed.ptr, buffer);
                 else
-                    return findTypeDetails(count).stringify(value.p, buffer);
+                    return findTypeDetails(count).stringify(ptr, buffer);
         }
     }
 
 package:
     union Value
     {
+        long l;
         ulong ul;
         double d;
+//        int i;   // maybe implement these if the platform has no native 64bit int support
+//        uint u;
+//        float f; // if there is no hardware double support, then we should use this...
+
         const(char)* s;
         Variant* n;
-        void* p;
     }
 
     union {
-        struct {
-            Value value;
+        struct { // 12 bytes on 32bit, 16 bytes on 64bit
+            void* ptr;
             uint count;
             ushort alloc;
             Flags flags;
         }
-        struct {
-            char[14] embed;
-        }
+
+        enum EmbedSize = size_t.sizeof == 4 ? 10 : 14;
+        char[EmbedSize] embed; // a buffer for locally embedded data
+
+        Value value;
     }
+
+    Type type() const pure
+        => cast(Type)(flags & Flags.TypeMask);
 
     ref inout(Array!Variant) nodeArray() @property inout pure
         => *cast(inout(Array!Variant)*)&value;
@@ -548,52 +540,69 @@ package:
 
     void destroy(bool reset = true)()
     {
-        Type t = type();
-        if ((t == Type.Map || t == Type.Array) && value.n)
+        if (flags & Flags.NeedDestruction)
         {
-            nodeArray.destroy!false();
-            static if (reset)
+            Type t = type();
+            if ((t == Type.Map || t == Type.Array) && value.n)
+                nodeArray.destroy!false();
+            else if (t == Type.User)
             {
-                value.n = null;
-                count = 0;
-                flags = Flags.Null;
+                if (flags & Flags.Embedded)
+                    findTypeDetails(alloc).destroy(embed.ptr);
+                else
+                    findTypeDetails(count).destroy(ptr);
             }
         }
-        else if (t == Type.User)
+        static if (reset)
         {
-            if (flags & Flags.InlineFlag)
-                findTypeDetails(alloc).destroy(embed.ptr);
-            else
-                findTypeDetails(count).destroy(value.p);
+            value.ul = 0;
+            count = 0;
+            alloc = 0;
+            flags = Flags.Null;
         }
+    }
+
+    enum Type : ushort
+    {
+        Null        = 0,
+        False       = 1,
+        True        = 2,
+        Number      = 3,
+        String      = 4,
+        Array       = 5,
+        Map         = 6,
+        User        = 7
     }
 
     enum Flags : ushort
     {
         Null            = cast(Flags)Type.Null,
-        True            = cast(Flags)Type.True | Flags.BoolFlag,
-        False           = cast(Flags)Type.False | Flags.BoolFlag,
-        NumberInt       = cast(Flags)Type.Number | Flags.NumberFlag | Flags.IntFlag | Flags.Int64Flag,
-        NumberUint      = cast(Flags)Type.Number | Flags.NumberFlag | Flags.UintFlag | Flags.Uint64Flag | Flags.Int64Flag,
-        NumberInt64     = cast(Flags)Type.Number | Flags.NumberFlag | Flags.Int64Flag,
-        NumberUint64    = cast(Flags)Type.Number | Flags.NumberFlag | Flags.Uint64Flag,
-        NumberDouble    = cast(Flags)Type.Number | Flags.NumberFlag | Flags.DoubleFlag,
-        String          = cast(Flags)Type.String | Flags.StringFlag,
-        ShortString     = cast(Flags)Type.String | Flags.StringFlag | Flags.InlineFlag,
+        False           = cast(Flags)Type.False  | Flags.IsBool,
+        True            = cast(Flags)Type.True   | Flags.IsBool,
+        NumberInt       = cast(Flags)Type.Number | Flags.IsNumber | Flags.IntFlag  | Flags.Int64Flag,
+        NumberUint      = cast(Flags)Type.Number | Flags.IsNumber | Flags.UintFlag | Flags.Uint64Flag | Flags.Int64Flag,
+        NumberInt64     = cast(Flags)Type.Number | Flags.IsNumber | Flags.Int64Flag,
+        NumberUint64    = cast(Flags)Type.Number | Flags.IsNumber | Flags.Uint64Flag,
+        NumberFloat     = cast(Flags)Type.Number | Flags.IsNumber | Flags.FloatFlag | Flags.DoubleFlag,
+        NumberDouble    = cast(Flags)Type.Number | Flags.IsNumber | Flags.DoubleFlag,
+        String          = cast(Flags)Type.String | Flags.IsString,
+        ShortString     = cast(Flags)Type.String | Flags.IsString | Flags.Embedded,
         Array           = cast(Flags)Type.Array,
         Map             = cast(Flags)Type.Map,
         User            = cast(Flags)Type.User,
 
-        BoolFlag        = 1 << (TypeBits + 0),
-        NumberFlag      = 1 << (TypeBits + 1),
-        IntFlag         = 1 << (TypeBits + 2),
-        UintFlag        = 1 << (TypeBits + 3),
-        Int64Flag       = 1 << (TypeBits + 4),
-        Uint64Flag      = 1 << (TypeBits + 5),
-        DoubleFlag      = 1 << (TypeBits + 6),
-        StringFlag      = 1 << (TypeBits + 7),
-        InlineFlag      = 1 << (TypeBits + 8),
-//        CopyFlag        = 1 << (TypeBits + 9), // maybe we want to know if a thing is a copy, or a reference to an external one?
+        IsBool          = 1 << (TypeBits + 0),
+        IsNumber        = 1 << (TypeBits + 1),
+        IsString        = 1 << (TypeBits + 2),
+        IntFlag         = 1 << (TypeBits + 3),
+        UintFlag        = 1 << (TypeBits + 4),
+        Int64Flag       = 1 << (TypeBits + 5),
+        Uint64Flag      = 1 << (TypeBits + 6),
+        FloatFlag       = 1 << (TypeBits + 7),
+        DoubleFlag      = 1 << (TypeBits + 8),
+        Embedded        = 1 << (TypeBits + 9),
+        NeedDestruction = 1 << (TypeBits + 10),
+//        CopyFlag        = 1 << (TypeBits + 11), // maybe we want to know if a thing is a copy, or a reference to an external one?
 
         TypeMask        = (1 << TypeBits) - 1,
         TypeBits        = 3
@@ -638,13 +647,6 @@ enum uint UserTypeShortId(T) = cast(ushort)UserTypeId!T ^ (UserTypeId!T >> 16);
 enum bool EmbedUserType(T) = is(T == struct) && T.sizeof <= Variant.embed.sizeof - 2 && T.alignof <= Variant.alignof;
 enum bool UserTypeReturnByRef(T) = is(T == struct);
 
-bool append(char[] buffer, ref ptrdiff_t offset, char c)
-{
-    if (offset == buffer.length)
-        return false;
-    buffer[offset++] = c;
-    return true;
-}
 ptrdiff_t newline(char[] buffer, ref ptrdiff_t offset, int level)
 {
     if (offset + level >= buffer.length)
