@@ -246,7 +246,7 @@ ptrdiff_t formatInt(long value, char[] buffer, uint base = 10, uint width = 0, c
 
     ulong i = neg ? -value : value;
 
-    ptrdiff_t r = formatUint(i, buffer.ptr ? buffer.ptr[width == 0 ? showSign : 0 .. buffer.length] : null, base, width, fill);
+    ptrdiff_t r = formatUint(i, buffer.ptr ? buffer.ptr[(width == 0 ? showSign : 0) .. buffer.length] : null, base, width, fill);
     if (r < 0 || !showSign)
         return r;
 
@@ -257,10 +257,12 @@ ptrdiff_t formatInt(long value, char[] buffer, uint base = 10, uint width = 0, c
         if (width == 0)
         {
             buffer.ptr[0] = sgn;
-            return r + showSign;
+            return r + 1;
         }
         if (buffer.ptr[0] == '0')
         {
+            // this handles cases where the number was padded with leading zeroes
+            // it should format as: "-000123" instead of "   -123"
             buffer.ptr[0] = sgn;
             return r;
         }
@@ -284,6 +286,7 @@ ptrdiff_t formatInt(long value, char[] buffer, uint base = 10, uint width = 0, c
         return r + 1;
     }
 
+    // determine if the formatted number would have padding, because the sign character will consume padding bytes
     if (r == width && i < base^^cast(uint)(width - 1))
         return r;
     return r + 1;
@@ -296,26 +299,28 @@ ptrdiff_t formatUint(ulong value, char[] buffer, uint base = 10, uint width = 0,
     assert(base >= 2 && base <= 36, "Invalid base");
 
     ulong i = value;
-
-    char[64] t = void;
     uint numLen = 0;
-    // TODO: if this is a hot function, the if's could be hoisted outside the loop.
-    //       there are 8 permutations...
-    //       also, some platforms might prefer a lookup table than `d < 10 ? ... : ...`
-    for (; i != 0; i /= base)
-    {
-        if (buffer.ptr)
-        {
-            int d = cast(int)(i % base);
-            t.ptr[numLen] = cast(char)((d < 10 ? '0' : 'A' - 10) + d);
-        }
-        ++numLen;
-    }
-    if (numLen == 0)
+    char[64] t = void;
+    if (i == 0)
     {
         if (buffer.length > 0)
             t.ptr[0] = '0';
         numLen = 1;
+    }
+    else
+    {
+        // TODO: if this is a hot function, the if's could be hoisted outside the loop.
+        //       there are 8 permutations...
+        //       also, some platforms might prefer a lookup table than `d < 10 ? ... : ...`
+        for (; i != 0; i /= base)
+        {
+            if (buffer.ptr)
+            {
+                int d = cast(int)(i % base);
+                t.ptr[numLen] = cast(char)((d < 10 ? '0' : 'A' - 10) + d);
+            }
+            ++numLen;
+        }
     }
 
     uint len = max(numLen, width);

@@ -92,10 +92,11 @@ nothrow @nogc:
         value.l = i;
         if (i >= 0)
         {
+            flags |= Flags.Uint64Flag;
             if (i <= int.max)
-                flags |= Flags.IntFlag | Flags.UintFlag | Flags.Uint64Flag;
+                flags |= Flags.IntFlag | Flags.UintFlag;
             else if (i <= uint.max)
-                flags |= Flags.UintFlag | Flags.Uint64Flag;
+                flags |= Flags.UintFlag;
         }
         else if (i >= int.min)
             flags |= Flags.IntFlag;
@@ -467,7 +468,7 @@ nothrow @nogc:
 
                 // TODO: parse args?
                 //format
-                if (flags | Flags.Uint64Flag)
+                if (flags & Flags.Uint64Flag)
                     return asUlong().formatUint(buffer);
                 return asLong().formatInt(buffer);
 
@@ -541,24 +542,28 @@ package:
     void destroy(bool reset = true)()
     {
         if (flags & Flags.NeedDestruction)
-        {
-            Type t = type();
-            if ((t == Type.Map || t == Type.Array) && value.n)
-                nodeArray.destroy!false();
-            else if (t == Type.User)
-            {
-                if (flags & Flags.Embedded)
-                    findTypeDetails(alloc).destroy(embed.ptr);
-                else
-                    findTypeDetails(count).destroy(ptr);
-            }
-        }
+            doDestroy();
+
         static if (reset)
         {
             value.ul = 0;
             count = 0;
             alloc = 0;
             flags = Flags.Null;
+        }
+    }
+
+    private void doDestroy()
+    {
+        Type t = type();
+        if ((t == Type.Map || t == Type.Array) && value.n)
+            nodeArray.destroy!false();
+        else if (t == Type.User)
+        {
+            if (flags & Flags.Embedded)
+                findTypeDetails(alloc).destroy(embed.ptr);
+            else
+                findTypeDetails(count).destroy(ptr);
         }
     }
 
