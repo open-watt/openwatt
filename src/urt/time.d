@@ -417,9 +417,9 @@ ptrdiff_t timeToString(long ms, char[] buffer) pure
     if (!buffer.ptr)
         return hr.formatInt(null, 10, 2, '0') + 10;
 
-    size_t len = hr.formatInt(buffer, 10, 2, '0');
-    if (len == 0 || buffer.length < len + 10)
-        return 0;
+    ptrdiff_t len = hr.formatInt(buffer, 10, 2, '0');
+    if (len < 0 || buffer.length < len + 10)
+        return -1;
 
     ubyte min = cast(ubyte)(ms / 60_000 % 60);
     ubyte sec = cast(ubyte)(ms / 1000 % 60);

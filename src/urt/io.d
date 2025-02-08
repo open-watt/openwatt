@@ -63,7 +63,7 @@ unittest
     writelnf("Hello, World! {0}", "wow!");
 
     writeln();
-    writeln(10, " why count ", 20, '?');
+    writeln(10u, " why count ", 20, '?');
 
     write("Hello there ");
     write("mister ", "robot ");

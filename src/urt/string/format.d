@@ -19,7 +19,7 @@ alias StringifyFunc = ptrdiff_t delegate(char[] buffer, const(char)[] format, co
 alias IntifyFunc = ptrdiff_t delegate() nothrow @nogc;
 
 
-char[] toString(T)(auto ref T value, char[] buffer)
+ptrdiff_t toString(T)(auto ref T value, char[] buffer)
 {
 	import urt.string.format : FormatArg;
 
@@ -27,7 +27,7 @@ char[] toString(T)(auto ref T value, char[] buffer)
 	FormatArg a = FormatArg(value);
 	ptrdiff_t r = a.getString(buffer, null, null);
 	debug InFormatFunction = false;
-	return r < 0 ? null : buffer[0 .. r];
+	return r;
 }
 
 char[] concat(Args...)(char[] buffer, auto ref Args args)
@@ -140,10 +140,10 @@ struct FormatArg
 			static assert(false);
 		}
 		else
-			toString = &value.defFormat.toString;
+			toString = &defFormat(value).toString;
 
-		static if (is(typeof(&value.defFormat.toInt)))
-			toInt = &value.defFormat.toInt;
+		static if (is(typeof(&defFormat(value).toInt)))
+			toInt = &defFormat(value).toInt;
 		else
 			toInt = null;
 	}
@@ -284,21 +284,24 @@ struct DefFormat(T)
 		}
 		else static if (is(T == ulong) || is(T == long))
 		{
-			import urt.conv : formatInt;
+			import urt.conv : formatInt, formatUint;
 
 			// TODO: what formats are interesting for ints?
 
-			bool showSign = false;
 			bool leadingZeroes = false;
 			bool toLower = false;
 			bool varLen = false;
 			ptrdiff_t padding = 0;
 			uint base = 10;
 
-			if (format.length && format[0] == '+')
+			static if (is(T == long))
 			{
-				showSign = true;
-				format.popFront;
+				bool showSign = false;
+				if (format.length && format[0] == '+')
+				{
+					showSign = true;
+					format.popFront;
+				}
 			}
 			if (format.length && format[0] == '0')
 			{
@@ -338,7 +341,10 @@ struct DefFormat(T)
 				format.popFront;
 			}
 
-			size_t len = formatInt(value, buffer, base, cast(uint)padding, leadingZeroes ? '0' : ' ', showSign);
+			static if (is(T == long))
+				size_t len = formatInt(value, buffer, base, cast(uint)padding, leadingZeroes ? '0' : ' ', showSign);
+			else
+				size_t len = formatUint(value, buffer, base, cast(uint)padding, leadingZeroes ? '0' : ' ');
 
 			if (toLower && len > 0)
 			{
@@ -559,13 +565,18 @@ struct DefFormat(T)
         }
         else static if (is(T == class))
         {
-            const(char)[] t = value.toString();
-            if (!buffer.ptr)
+            try
+            {
+                const(char)[] t = (cast()value).toString();
+                if (!buffer.ptr)
+                    return t.length;
+                if (buffer.length < t.length)
+                    return -1;
+                buffer[0 .. t.length] = t[];
                 return t.length;
-            if (buffer.length < t.length)
+            }
+            catch (Exception)
                 return -1;
-            buffer[0 .. t.length] = t[];
-            return t.length;
         }
 		else static if (is(T == const))
 		{
