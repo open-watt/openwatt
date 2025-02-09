@@ -189,7 +189,7 @@ ptrdiff_t url_encode_length(const char[] data) pure
     size_t len = 0;
     foreach (c; data)
     {
-        if (c.isURL)
+        if (c.isURL || c == ' ')
             ++len;
         else
             len += 3;
@@ -206,11 +206,11 @@ ptrdiff_t url_encode(const char[] data, char[] result) pure
     for (size_t i = 0; i < data.length; ++i)
     {
         char c = data[i];
-        if (c.isURL)
+        if (c.isURL || c == ' ')
         {
             if (j == result.length)
                 return -1;
-            result[j++] = c;
+            result[j++] = c == ' ' ? '+' : c;
         }
         else
         {
@@ -250,7 +250,9 @@ ptrdiff_t url_decode(const char[] data, char[] result) pure
             return -1;
 
         char c = data[i];
-        if (c == '%')
+        if (c == '+')
+            c = ' ';
+        else if (c == '%')
         {
             if (i + 2 >= data.length)
                 return -1;
@@ -280,13 +282,13 @@ ptrdiff_t url_decode(const char[] data, char[] result) pure
 unittest
 {
     char[13] data = "Hello, World!";
-    char[19] encoded = void;
+    char[17] encoded = void;
     char[13] decoded = void;
 
-    assert(url_encode_length(data) == 19);
+    assert(url_encode_length(data) == 17);
     size_t len = url_encode(data, encoded);
-    assert(len == 19);
-    assert(encoded == "Hello%2C%20World%21");
+    assert(len == 17);
+    assert(encoded == "Hello%2C+World%21");
     assert(url_decode_length(encoded) == 13);
     len = url_decode(encoded, decoded);
     assert(len == 13);
