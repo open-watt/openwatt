@@ -268,8 +268,13 @@ const(char[]) tokenToValue(I)(ref const Token t, out I r, ApplicationInstance ap
         v = v[2 .. $];
     }
     size_t taken;
-    r = cast(I)v.parseInt(&taken, base);
-    return taken == v.length ? null : "Invalid integer value";
+    long i = v.parseInt(&taken, base);
+    if (taken != v.length)
+        return "Invalid integer value";
+    if ((long.max > I.max && i > I.max) || (long.min < I.min && i < I.min))
+        return "Integer value out of range";
+    r = cast(I)i;
+    return null;
 }
 
 const(char[]) tokenToValue(F)(ref const Token t, out F r, ApplicationInstance app) nothrow @nogc
