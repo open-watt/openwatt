@@ -5,31 +5,23 @@ import urt.kvp;
 import urt.mem.allocator;
 import urt.util;
 
-//#include "ep/cpp/platform.h"
-//#include "ep/cpp/keyvaluepair.h"
-//#include "ep/cpp/range.h"
-//#include "ep/cpp/delegate.h"
-
 nothrow @nogc:
 
-struct Compare(T)
+
+template DefCmp(T)
 {
-	static ptrdiff_t opCall(ref const T a, ref const T b)
-	{
-		return a < b ? -1 : (a > b ? 1 : 0);
-	}
+    import urt.algorithm : compare;
+
+//    alias DefCmp(U) = compare!(T, U); // TODO: this should work...
+
+    ptrdiff_t DefCmp(U)(ref const T a, ref const U b)
+        => compare(a, b);
 }
-//struct Compare(T : const(char)[])
-//{
-//	ptrdiff_t opCall(String a, String b)
-//	{
-//		return a.cmp(b);
-//	}
-//}
+
 
 alias Map(K, V) = AVLTree!(K, V);
 
-struct AVLTree(K, V, Pred = Compare!K, Allocator = Mallocator)
+struct AVLTree(K, V, alias Pred = DefCmp!K, Allocator = Mallocator)
 {
 nothrow @nogc:
 	alias KeyType = K;
@@ -242,18 +234,18 @@ nothrow @nogc:
   }
 +/
 
-	void remove(ref const K key)
+	void remove(_K)(ref const _K key)
 	{
 		pRoot = deleteNode(pRoot, key);
 	}
 
-	inout(V)* get(ref const K key) inout
+	inout(V)* get(_K)(ref const _K key) inout
 	{
 		inout(Node)* n = find(pRoot, key);
 		return n ? &n.kvp.value : null;
 	}
 
-	ref inout(V) opIndex(ref const K key) inout
+	ref inout(V) opIndex(_K)(ref const _K key) inout
 	{
 		inout(V)* pV = get(key);
 		assert(pV, "Element not found");
@@ -266,12 +258,12 @@ nothrow @nogc:
 		replace(key, forward!value);
 	}
 
-	inout(V)* opBinaryRight(string op : "in")(ref const K key) inout
+	inout(V)* opBinaryRight(string op : "in", _K)(ref const _K key) inout
 	{
 		return get(key);
 	}
 
-	bool exists(ref const K key) const
+	bool exists(_K)(ref const _K key) const
 	{
 		return get(key) != null;
 	}
@@ -355,12 +347,12 @@ private:
 	size_t numNodes = 0;
 	Node* pRoot = null;
 
-	static int height(const(Node)* n)
+	static int height(const(Node)* n) pure
 	{
 		return n ? n.height : 0;
 	}
 
-	static int maxHeight(const(Node)* n)
+	static int maxHeight(const(Node)* n) pure
 	{
 		if (!n)
 			return 0;
@@ -376,12 +368,12 @@ private:
 		return 0;
 	}
 
-	static int getBalance(Node* n)
+	static int getBalance(Node* n) pure
 	{
 		return n ? height(n.left) - height(n.right) : 0;
 	}
 
-	static Node* rightRotate(Node* y)
+	static Node* rightRotate(Node* y) pure
 	{
 		Node* x = y.left;
 		Node* T2 = x.right;
@@ -398,7 +390,7 @@ private:
 		return x;
 	}
 
-	static Node* leftRotate(Node* x)
+	static Node* leftRotate(Node* x) pure
 	{
 		Node* y = x.right;
 		Node* T2 = y.left;
@@ -415,14 +407,14 @@ private:
 		return y;
 	}
 
-	static inout(Node)* find(inout(Node)* n, ref const K key)
+	static inout(Node)* find(_K)(inout(Node)* n, ref const _K key)
 	{
 		if (!n)
 			return null;
-		ptrdiff_t c = Pred(key, n.kvp.key);
-		if (c < 0)
-			return find(n.left, key);
+		ptrdiff_t c = Pred(n.kvp.key, key);
 		if (c > 0)
+			return find(n.left, key);
+		if (c < 0)
 			return find(n.right, key);
 		return n;
 	}
@@ -522,67 +514,75 @@ private:
 		return current;
 	}
 
-	Node* deleteNode(Node* _pRoot, ref const K key)
+	Node* deleteNode(_K)(Node* _pRoot, ref const _K key)
 	{
 		// STEP 1: PERFORM STANDARD BST DELETE
 
 		if (_pRoot == null)
 			return _pRoot;
 
-		ptrdiff_t c = Pred(key, _pRoot.kvp.key);
+		ptrdiff_t c = Pred(_pRoot.kvp.key, key);
 
 		// If the key to be deleted is smaller than the _pRoot's key,
 		// then it lies in left subtree
-		if (c < 0)
+		if (c > 0)
 			_pRoot.left = deleteNode(_pRoot.left, key);
 
 		// If the key to be deleted is greater than the _pRoot's key,
 		// then it lies in right subtree
-		else if (c > 0)
+		else if (c < 0)
 			_pRoot.right = deleteNode(_pRoot.right, key);
 
 		// if key is same as _pRoot's key, then this is the Node
 		// to be deleted
 		else
+			doDelete(_pRoot);
+
+		return rebalance(_pRoot);
+	}
+
+	void doDelete(Node* _pRoot)
+	{
+		// Node with only one child or no child
+		if ((_pRoot.left == null) || (_pRoot.right == null))
 		{
-			// Node with only one child or no child
-			if ((_pRoot.left == null) || (_pRoot.right == null))
+			Node* temp = _pRoot.left ? _pRoot.left : _pRoot.right;
+
+			// No child case
+			if (temp == null)
 			{
-				Node* temp = _pRoot.left ? _pRoot.left : _pRoot.right;
-
-				// No child case
-				if (temp == null)
-				{
-					temp = _pRoot;
-					_pRoot = null;
-				}
-				else // One child case
-				{
-					// TODO: FIX THIS!!
-					// this is copying the child node into the parent node because there is no parent pointer
-					// DO: add parent pointer, then fix up the parent's child pointer to the child, and do away with this pointless copy!
-					*_pRoot = (*temp).move; // Copy the contents of the non-empty child
-				}
-
-				temp.destroy();
-				Allocator.instance.freeT(temp);
-
-				--numNodes;
+				temp = _pRoot;
+				_pRoot = null;
 			}
-			else
+			else // One child case
 			{
-				// Node with two children: get the inorder successor (smallest
-				// in the right subtree)
-				Node* temp = minValueNode(_pRoot.right);
-
-				// Copy the inorder successor's data to this Node
-				_pRoot.kvp.key = temp.kvp.key;
-
-				// Delete the inorder successor
-				_pRoot.right = deleteNode(_pRoot.right, temp.kvp.key);
+				// TODO: FIX THIS!!
+				// this is copying the child node into the parent node because there is no parent pointer
+				// DO: add parent pointer, then fix up the parent's child pointer to the child, and do away with this pointless copy!
+				*_pRoot = (*temp).move; // Copy the contents of the non-empty child
 			}
+
+			temp.destroy();
+			Allocator.instance.freeT(temp);
+
+			--numNodes;
 		}
+		else
+		{
+			// Node with two children: get the inorder successor (smallest
+			// in the right subtree)
+			Node* temp = minValueNode(_pRoot.right);
 
+			// Copy the inorder successor's data to this Node
+			_pRoot.kvp.key = temp.kvp.key;
+
+			// Delete the inorder successor
+			_pRoot.right = deleteNode(_pRoot.right, temp.kvp.key);
+		}
+	}
+
+	Node* rebalance(Node* _pRoot)
+	{
 		// If the tree had only one Node then return
 		if (_pRoot == null)
 			return _pRoot;
@@ -798,7 +798,7 @@ nothrow @nogc:
 		emplace(&this, rh.move);
 		return this;
 	}
-};
+}
 
 /+
 template<typename K, typename V, typename PredFunctor, typename Allocator>
