@@ -155,7 +155,8 @@
     <DCompile Include="src\urt\package.d" />
     <DCompile Include="src\urt\platform.d" />
     <DCompile Include="src\urt\processor.d" />
-    <DCompile Include="src\urt\range.d" />
+    <DCompile Include="src\urt\range\package.d" />
+    <DCompile Include="src\urt\range\primitives.d" />
     <DCompile Include="src\urt\result.d" />
     <DCompile Include="src\urt\serial.d" />
     <DCompile Include="src\urt\socket.d" />
