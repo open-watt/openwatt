@@ -5,6 +5,7 @@ import urt.log;
 import urt.mem.string;
 import urt.string;
 import urt.string.format;
+import urt.system;
 
 import manager;
 import manager.component;
@@ -48,6 +49,9 @@ void main()
 	}
 	ConsoleSession s = new ConsoleSession(app.console);
 	s.setInput(conf);
+
+    // stop the computer from sleeping while this application is running...
+    setSystemIdleParams(IdleParams.SystemRequired);
 
 	/+
 -	35000 - 33  Device infio

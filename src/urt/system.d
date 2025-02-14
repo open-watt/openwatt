@@ -3,8 +3,30 @@ module urt.system;
 nothrow @nogc:
 
 
+enum IdleParams : ubyte
+{
+    SystemRequired = 1,     // stop the system from going to sleep
+    DisplayRequired = 2,    // keep the display turned on
+}
+
 extern(C) void abort();
 extern(C) void exit(int status);
+
+void setSystemIdleParams(IdleParams params)
+{
+    version (Windows)
+    {
+        import core.sys.windows.winbase;
+
+        enum EXECUTION_STATE ES_SYSTEM_REQUIRED = 0x00000001;
+        enum EXECUTION_STATE ES_DISPLAY_REQUIRED = 0x00000002;
+        enum EXECUTION_STATE ES_CONTINUOUS = 0x80000000;
+
+        SetThreadExecutionState(ES_CONTINUOUS | (params.SystemRequired ? ES_SYSTEM_REQUIRED : 0) | (params.DisplayRequired ? ES_DISPLAY_REQUIRED : 0));
+    }
+    else
+        static assert(0, "Not implemented");
+}
 
 
 version (Windows)
