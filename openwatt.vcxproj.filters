@@ -91,6 +91,9 @@
     <Filter Include="third_party\urt">
       <UniqueIdentifier>{116edccd-0839-4b40-bea5-164a59529949}</UniqueIdentifier>
     </Filter>
+    <Filter Include="third_party\urt\crypto">
+      <UniqueIdentifier>{aeb0c73e-df99-45b6-843e-64ff84d35cbe}</UniqueIdentifier>
+    </Filter>
     <Filter Include="third_party\urt\digest">
       <UniqueIdentifier>{c019eeb4-22e9-470a-8284-4be630b35495}</UniqueIdentifier>
     </Filter>
@@ -470,6 +473,9 @@
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\digest\sha.d">
       <Filter>third_party\urt\digest</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\chacha.d">
+      <Filter>third_party\urt\crypto</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\algorithm.d">
       <Filter>third_party\urt</Filter>
