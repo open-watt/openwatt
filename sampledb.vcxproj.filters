@@ -112,6 +112,9 @@
     <Filter Include="conf\rest_profiles">
       <UniqueIdentifier>{adb46336-8e98-41fa-9701-bcda31f4d3ec}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\urt\si">
+      <UniqueIdentifier>{932a57f7-c6b2-4f7e-b017-282999bbbe48}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d">
@@ -533,6 +536,15 @@
     </DCompile>
     <DCompile Include="src\apps\energy\package.d">
       <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\si\package.d">
+      <Filter>src\urt\si</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\si\quantity.d">
+      <Filter>src\urt\si</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\si\unit.d">
+      <Filter>src\urt\si</Filter>
     </DCompile>
     <DCompile Include="src\urt\system.d">
       <Filter>src\urt</Filter>

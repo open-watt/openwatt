@@ -134,11 +134,17 @@ ptrdiff_t writeJson(ref const Variant val, char[] buffer, bool dense = false, ui
         case Variant.Type.Number:
             import urt.conv;
 
+            if (val.isQuantity())
+                assert(false, "TODO: implement quantity formatting for JSON");
+
             if (val.isDouble())
                 return val.asDouble().formatFloat(buffer);
 
             // TODO: parse args?
             //format
+
+            if (val.isUlong())
+                return val.asUlong().formatUint(buffer);
             return val.asLong().formatInt(buffer);
 
         case Variant.Type.User:
