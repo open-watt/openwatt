@@ -154,7 +154,9 @@ struct Duration
         => cast(double)this;
 }
 
-struct Timer(uint milliseconds = 0)
+alias Timer = FixedTimer!();
+
+struct FixedTimer(uint milliseconds = 0)
 {
 nothrow @nogc:
     MonoTime startTime;

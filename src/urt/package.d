@@ -29,4 +29,7 @@ void crt_bootup()
 
     import urt.string.string : initStringAllocators;
     initStringAllocators();
+
+    import urt.fibre : initFibre;
+    initFibre();
 }
