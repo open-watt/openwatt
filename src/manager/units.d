@@ -193,8 +193,8 @@ immutable UnitDef[string] absoluteUnitMap = [
 	"pct":		UnitDef(0.01),				// percent
 	"percent":	UnitDef(0.01),				// percent
 	"‰":		UnitDef(0.001),				// permille
-	"pm":		UnitDef(0.01),				// permille
-	"pml":		UnitDef(0.01),				// permille
+	"pm":		UnitDef(0.001),				// permille
+	"pml":		UnitDef(0.001),				// permille
 	"permille":	UnitDef(0.001),				// permille
 	"ppm":		UnitDef(0.000001),			// parts per million
 	"in":		UnitDef(0.0254),			// inch

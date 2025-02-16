@@ -78,6 +78,9 @@ nothrow @nogc:
 
 	Type type() const
 		=> cast(Type)(len_ty >> 28);
+
+	bool isString() const => type == Type.String;
+
 	size_t length() const
 		=> len_ty & 0x0FFFFFFF;
 
@@ -188,7 +191,7 @@ private:
 	union
 	{
 		void* p = null;
-		uint i;
+		int i;
 		float f;
 	}
 

@@ -72,6 +72,14 @@ class ApplicationInstance
         return cast(I.Instance)moduleInstance(I.ModuleName);
     }
 
+    Device findDevice(const(char)[] deviceId) pure nothrow @nogc
+    {
+        foreach (id, device; devices)
+            if (id[] == deviceId[])
+                return device;
+        return null;
+    }
+
     Component findComponent(const(char)[] name) pure nothrow @nogc
     {
         const(char)[] deviceName = name.split!'.';

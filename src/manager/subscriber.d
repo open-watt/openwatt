@@ -3,9 +3,11 @@ module manager.subscriber;
 import manager.element;
 import manager.value;
 
+nothrow @nogc:
+
+
 interface Subscriber
 {
-	void onChange(Element* e, Value val, Subscriber whoMadeChange);
-
-
+nothrow @nogc:
+	void onChange(Element* e, ref const Value val, Subscriber whoMadeChange);
 }

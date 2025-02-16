@@ -356,10 +356,18 @@ const(char[]) tokenToValue(T)(ref const Token t, out T r, ApplicationInstance ap
     return r.fromString(v) == v.length ? null : tconcat("Couldn't parse `" ~ T.stringof ~ "` from string: ", t);
 }
 
-public import manager.component;
+public import manager.component : Component;
 const(char[]) tokenToValue(ref const Token t, out Component r, ApplicationInstance app) nothrow @nogc
 {
     const(char)[] v = tokenValue(t, true);
     r = app.findComponent(v);
     return r ? null : tconcat("No component '", v, '\'');
+}
+
+public import manager.device : Device;
+const(char[]) tokenToValue(ref const Token t, out Device r, ApplicationInstance app) nothrow @nogc
+{
+    const(char)[] v = tokenValue(t, true);
+    r = app.findDevice(v);
+    return r ? null : tconcat("No device '", v, '\'');
 }

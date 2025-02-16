@@ -39,6 +39,29 @@ nothrow @nogc:
 
     this(this) @disable;
 
+    void addSubscriber(Subscriber s)
+    {
+        if (subscribers[].findFirst(s) == subscribers.length)
+            subscribers ~= s;
+    }
+
+    void removeSubscriber(Subscriber s)
+    {
+        subscribers.removeFirstSwapLast(s);
+    }
+
+    float normalisedValue() const
+    {
+        if (unit)
+        {
+            UnitDef conv = getUnitConv(unit);
+            float val = value.asFloat();
+            return conv.normalise(val);
+        }
+        else
+            return value.asFloat();
+    }
+
     ref const(Value) value() const
     {
         return latest;
@@ -53,7 +76,7 @@ nothrow @nogc:
             if (latest.getInt() != v)
             {
                 latest = Value(v);
-                // TODO: signal subscribers...
+                signal(latest, null); // TODO: who made the change? so we can break cycles...
             }
         }
         else static if (is(T == float))
@@ -61,7 +84,7 @@ nothrow @nogc:
             if (latest.getFloat() != v)
             {
                 latest = Value(v);
-                // TODO: signal subscribers...
+                signal(latest, null); // TODO: who made the change? so we can break cycles...
             }
         }
         else static if (is(T : const(char)[]))
@@ -69,7 +92,7 @@ nothrow @nogc:
             if (latest.getString() != v[])
             {
                 latest = Value(v);
-                // TODO: signal subscribers...
+                signal(latest, null); // TODO: who made the change? so we can break cycles...
             }
         }
         else static if (is(T E == enum) && isSomeInt!E)
@@ -80,5 +103,11 @@ nothrow @nogc:
             value(cast(float)v);
         else
             static assert(false, "Not implemented");
+    }
+
+    void signal(ref const Value v, Subscriber who)
+    {
+        foreach (s; subscribers)
+            s.onChange(&this, v, who);
     }
 }

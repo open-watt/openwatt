@@ -105,3 +105,4 @@ nothrow @nogc:
 	Array!(Element*) sampleElements;
 	MonoTime lastPoll;
 }
+
