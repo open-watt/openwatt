@@ -37,7 +37,7 @@ enum StreamOptions
 
 struct StreamStatus
 {
-    MonoTime linkStatusChangeTime;
+    SysTime linkStatusChangeTime;
     bool linkStatus;
     int linkDowns;
     ulong sendBytes;

@@ -1,6 +1,7 @@
 module router.iface.zigbee;
 
 import urt.lifetime;
+import urt.meta.nullable;
 import urt.string;
 
 import manager.plugin;
@@ -18,17 +19,20 @@ class ZigbeeInterface : BaseInterface
 {
 nothrow @nogc:
 
+    alias TypeName = StringLit!"zigbee";
+
+    ubyte[8] eui;
 
     this(InterfaceModule.Instance m, String name) nothrow @nogc
     {
-        super(m, name.move, StringLit!"zigbee");
+        super(m, name.move, TypeName);
     }
 
     override void update()
     {
     }
 
-    override bool forward(ref const Packet packet) nothrow @nogc
+    protected override bool transmit(ref const Packet packet) nothrow @nogc
     {
         // can only handle zigbee packets
         if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.Zigbee || packet.data.length < 3)
@@ -59,11 +63,9 @@ class ZigbeeInterfaceModule : Plugin
             app.console.registerCommand!add("/interface/zigbee", this);
         }
 
-        import urt.meta.nullable;
-
         // /interface/zigbee/add command
         // TODO: protocol enum!
-        void add(Session session, const(char)[] name, const(char)[] ezsp_client)
+        void add(Session session, const(char)[] name, const(char)[] ezsp_client, Nullable!(const(char)[]) pcap)
         {
             // TODO: EZSP might not be the only hardware interface...
             assert(ezsp_client, "'ezsp_client' must be specified");
@@ -76,16 +78,13 @@ class ZigbeeInterfaceModule : Plugin
             }
 
             auto mod_if = app.moduleInstance!InterfaceModule;
-
-            if (name.empty)
-                name = mod_if.generateInterfaceName("zigbee");
-            String n = name.makeString(app.allocator);
+            String n = mod_if.addInterfaceName(session, name, ZigbeeInterface.TypeName);
+            if (!n)
+                return;
 
             ZigbeeInterface iface = app.allocator.allocT!ZigbeeInterface(mod_if, n.move);
-            mod_if.addInterface(iface);
 
-            import urt.log;
-            writeInfo("Create zigbee interface '", name, "' - ", iface.mac);
+            mod_if.addInterface(session, iface, pcap ? pcap.value : null);
         }
 
     }

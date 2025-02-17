@@ -375,8 +375,6 @@ class TeslaWallConnector
 
 	void poll()
 	{
-		MonoTime now = getTime();
-
 		ubyte[1024] buffer = void;
 		ptrdiff_t bytes = stream.read(buffer);
 		if (bytes == Socket.ERROR)

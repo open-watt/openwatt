@@ -507,6 +507,9 @@
     <DCompile Include="src\urt\system.d">
       <Filter>src\urt</Filter>
     </DCompile>
+    <DCompile Include="src\manager\pcap.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

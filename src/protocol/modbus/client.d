@@ -21,10 +21,10 @@ enum ModbusErrorType
     Failed,
 }
 
-alias ModbusRequestHandler = void delegate(ref const MACAddress client, ushort sequenceNumber, ref const ModbusPDU request, MonoTime requestTime) nothrow @nogc;
-alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref ModbusPDU response, MonoTime requestTime, MonoTime responseTime) nothrow @nogc;
-alias ModbusErrorHandler = void delegate(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime requestTime) nothrow @nogc;
-alias ModbusSnoopHandler = void delegate(ref const MACAddress server, ref const ModbusPDU request, ref ModbusPDU response, MonoTime requestTime, MonoTime responseTime) nothrow @nogc;
+alias ModbusRequestHandler = void delegate(ref const MACAddress client, ushort sequenceNumber, ref const ModbusPDU request, SysTime requestTime) nothrow @nogc;
+alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref ModbusPDU response, SysTime requestTime, SysTime responseTime) nothrow @nogc;
+alias ModbusErrorHandler = void delegate(ModbusErrorType errorType, ref const ModbusPDU request, SysTime requestTime) nothrow @nogc;
+alias ModbusSnoopHandler = void delegate(ref const MACAddress server, ref const ModbusPDU request, ref ModbusPDU response, SysTime requestTime, SysTime responseTime) nothrow @nogc;
 
 class ModbusClient
 {
@@ -79,40 +79,15 @@ nothrow @nogc:
             return;
         }
 
-        MonoTime now = getTime();
+        SysTime now = getSysTime();
         PendingRequest* r = &pending.pushBack(PendingRequest(now, now, request, ++sequenceNumber, numRetries, timeout, server, responseHandler, errorHandler));
 
-        import router.iface.modbus;
-        ServerMap* map = m.app.moduleInstance!ModbusInterfaceModule().findServerByMac(server);
-        if (!map)
-            return;
-
-        // send the packet
-        ubyte[4 + ModbusMessageDataMaxLength] buffer = void;
-        buffer[0] = map.universalAddress;
-        buffer[1] = ModbusFrameType.Request;
-        buffer[2..4] = nativeToBigEndian(sequenceNumber);
-        buffer[4] = request.functionCode;
-        buffer[5 .. 5 + request.data.length] = request.data[];
-
-        iface.send(server, buffer[0 .. 5 + request.data.length], EtherType.ENMS, ENMS_SubType.Modbus);
+        sendPacket(server, sequenceNumber, request, ModbusFrameType.Request);
     }
 
     void sendResponse(ref const MACAddress client, ushort sequenceNumber, ref const ModbusPDU response) nothrow @nogc
     {
-        import router.iface.modbus;
-        ServerMap* map = m.app.moduleInstance!ModbusInterfaceModule().findServerByMac(client);
-        if (!map)
-            return;
-
-        ubyte[4 + ModbusMessageDataMaxLength] message = void;
-        message[0] = map.universalAddress;
-        message[1] = ModbusFrameType.Response;
-        message[2..4] = sequenceNumber.nativeToBigEndian;
-        message[4] = response.functionCode;
-        message[5 .. 5 + response.data.length] = response.data[];
-
-        iface.send(client, message[0 .. 3 + response.data.length], EtherType.ENMS, ENMS_SubType.Modbus);
+        sendPacket(client, sequenceNumber, response, ModbusFrameType.Response);
     }
 
     void update()
@@ -124,7 +99,7 @@ nothrow @nogc:
         {
             PendingRequest* req = &pending[i];
 
-            MonoTime now = getTime();
+            SysTime now = getSysTime();
 
             if (req.retryTime + msecs(req.timeout) < now)
             {
@@ -150,8 +125,8 @@ nothrow @nogc:
 private:
     struct PendingRequest
     {
-        MonoTime requestTime;
-        MonoTime retryTime;
+        SysTime requestTime;
+        SysTime retryTime;
         ModbusPDU request;
         ushort sequenceNumber;
         ubyte numRetries;
@@ -164,16 +139,16 @@ private:
     ushort sequenceNumber = 0;
     Array!PendingRequest pending;
 
-    void incomingPacket(ref const Packet p, BaseInterface iface, void* userData) nothrow @nogc
+    void incomingPacket(ref const Packet p, BaseInterface iface, PacketDirection dir, void* userData) nothrow @nogc
     {
         // we can't even identify what request a message belongs to if it's been truncated
         auto message = cast(const(ubyte)[])p.data;
         if (message.length < 5)
             return;
 
-        ubyte address = *cast(ubyte*)&p.data[0];
-        ModbusFrameType type = *cast(ModbusFrameType*)&p.data[1];
-        ushort seq = message[2..4].bigEndianToNative!ushort;
+        ushort seq = message[0..2].bigEndianToNative!ushort;
+        ModbusFrameType type = cast(ModbusFrameType)message[2];
+        ubyte address = message[3];
 
         if (type == ModbusFrameType.Request && (p.dst == iface.mac || p.dst.isBroadcast))
         {
@@ -217,12 +192,29 @@ private:
             }
             else
             {
-                if (type != ModbusFrameType.Response || pending[0].requestTime == MonoTime())
+                if (type != ModbusFrameType.Response || pending[0].requestTime == SysTime())
                     return;
 
                 ModbusPDU response = ModbusPDU(cast(FunctionCode)message[4], message[5 .. $]);
                 snoopHandler(p.src, pending[0].request, response, pending[0].requestTime, p.creationTime);
             }
         }
+    }
+
+    void sendPacket(ref const MACAddress server, ushort sequenceNumber, ref const ModbusPDU message, ModbusFrameType type) nothrow @nogc
+    {
+        import router.iface.modbus;
+        ServerMap* map = m.app.moduleInstance!ModbusInterfaceModule().findServerByMac(server);
+        if (!map)
+            return;
+
+        ubyte[4 + ModbusMessageDataMaxLength] buffer = void;
+        buffer[0..2] = sequenceNumber.nativeToBigEndian;
+        buffer[2] = type;
+        buffer[3] = map.universalAddress;
+        buffer[4] = message.functionCode;
+        buffer[5 .. 5 + message.data.length] = message.data[];
+
+        iface.send(server, buffer[0 .. 5 + message.data.length], EtherType.ENMS, ENMS_SubType.Modbus);
     }
 }

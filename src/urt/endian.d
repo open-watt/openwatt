@@ -158,13 +158,13 @@ alias bigEndianToNative(T) = endianToNative!(T, false);
 alias littleEndianToNative(T) = endianToNative!(T, true);
 
 
-pragma(inline, true) ubyte[1] nativeToEndian(bool little, T)(T u8)
+pragma(inline, true) ubyte[1] nativeToEndian(bool little, T)(const T u8)
     if (is(T == ubyte) || is(T == byte) || is(T == bool))
 {
     return (cast(ubyte*)&u8)[0..1];
 }
 
-ubyte[2] nativeToEndian(bool little, T)(T u16)
+ubyte[2] nativeToEndian(bool little, T)(const T u16)
     if (is(T == ushort) || is(T == short) || is(T == wchar))
 {
     static if (SupportUnalignedLoadStore && IsLittleEndian == little)
@@ -189,7 +189,7 @@ ubyte[2] nativeToEndian(bool little, T)(T u16)
     }
 }
 
-ubyte[4] nativeToEndian(bool little, T)(T u32)
+ubyte[4] nativeToEndian(bool little, T)(const T u32)
     if (is(T == uint) || is(T == int) || is(T == dchar) || is(T == float))
 {
     static if (SupportUnalignedLoadStore && IsLittleEndian == little)
@@ -218,7 +218,7 @@ ubyte[4] nativeToEndian(bool little, T)(T u32)
     }
 }
 
-ubyte[8] nativeToEndian(bool little, T)(T u64)
+ubyte[8] nativeToEndian(bool little, T)(const T u64)
     if (is(T == ulong) || is(T == long) || is(T == double))
 {
     static if (SupportUnalignedLoadStore && IsLittleEndian == little)
@@ -247,13 +247,13 @@ ubyte[8] nativeToEndian(bool little, T)(T u64)
     }
 }
 
-ubyte[T.sizeof] nativeToEndian(bool little, T)(T data)
+ubyte[T.sizeof] nativeToEndian(bool little, T)(const T data)
     if (isEnum!T)
 {
     return nativeToEndian!little(cast(enumType!T)data);
 }
 
-ubyte[T.sizeof] nativeToEndian(bool little, T)(auto ref T data)
+ubyte[T.sizeof] nativeToEndian(bool little, T)(auto ref const T data)
     if (is(T == U[N], U, size_t N))
 {
     static assert(is(T == U[N], U, size_t N) && !is(U == class) && !is(U == interface) && !is(U == V*, V), T.stringof ~ " is not POD");
@@ -271,7 +271,7 @@ ubyte[T.sizeof] nativeToEndian(bool little, T)(auto ref T data)
     return buffer;
 }
 
-ubyte[T.sizeof] nativeToEndian(bool little, T)(auto ref T data)
+ubyte[T.sizeof] nativeToEndian(bool little, T)(auto ref const T data)
     if (is(T == struct))
 {
     // assert that T is POD
@@ -290,24 +290,24 @@ ubyte[T.sizeof] nativeToEndian(bool little, T)(auto ref T data)
     return buffer;
 }
 
-ubyte[T.sizeof] nativeToEndian(bool little, T)(auto ref T data)
+ubyte[T.sizeof] nativeToEndian(bool little, T)(auto ref const T data)
     if (is(T == U[], U) || is(T == U*, U) || is(T == class) || is(T == interface))
 {
     static assert(false, "Invalid call for " ~ T.stringof);
 }
 
-ubyte[T.sizeof] nativeToBigEndian(T)(auto ref T data)
+ubyte[T.sizeof] nativeToBigEndian(T)(auto ref const T data)
     => nativeToEndian!false(data);
-ubyte[T.sizeof] nativeToLittleEndian(T)(auto ref T data)
+ubyte[T.sizeof] nativeToLittleEndian(T)(auto ref const T data)
     => nativeToEndian!true(data);
 
 
-void storeBigEndian(T)(T* target, T val)
+void storeBigEndian(T)(T* target, const T val)
     if (isSomeInt!T || is(T == float))
 {
     (cast(ubyte*)target)[0..T.sizeof] = nativeToBigEndian(val);
 }
-void storeLittleEndian(T)(T* target, T val)
+void storeLittleEndian(T)(T* target, const T val)
     if (isSomeInt!T || is(T == float))
 {
     (cast(ubyte*)target)[0..T.sizeof] = nativeToLittleEndian(val);

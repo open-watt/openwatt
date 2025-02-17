@@ -6,6 +6,7 @@ import urt.crc;
 import urt.endian;
 import urt.map;
 import urt.mem;
+import urt.meta.nullable;
 import urt.string;
 import urt.string.format;
 import urt.time;
@@ -60,7 +61,7 @@ struct ModbusRequest
             defaultAllocator().free((cast(void*)bufferedPacket)[0 .. Packet.sizeof + bufferedPacket.length]);
     }
 
-    MonoTime requestTime;
+    SysTime requestTime;
     MACAddress requestFrom;
     ushort sequenceNumber;
     ubyte localServerAddress;
@@ -72,6 +73,8 @@ class ModbusInterface : BaseInterface
 {
 nothrow @nogc:
 
+    alias TypeName = StringLit!"modbus";
+
     Stream stream;
 
     ModbusProtocol protocol;
@@ -80,7 +83,7 @@ nothrow @nogc:
     ushort requestTimeout = 500; // default 500ms? longer?
     ushort queueTimeout = 500;   // same as request timeout?
     ushort gapTime = 35;         // what's a reasonable RTU gap time?
-    MonoTime lastReceiveEvent;
+    SysTime lastReceiveEvent;
 
     // if we are the bus master
     Array!ModbusRequest pendingRequests;
@@ -95,7 +98,7 @@ nothrow @nogc:
 
     this(InterfaceModule.Instance m, String name, Stream stream, ModbusProtocol protocol, bool isMaster) nothrow @nogc
     {
-        super(m, name.move, StringLit!"modbus");
+        super(m, name.move, TypeName);
         this.stream = stream;
         this.protocol = protocol;
         this.isBusMaster = isMaster;
@@ -119,7 +122,7 @@ nothrow @nogc:
                 tcpStream.enableKeepAlive(true, seconds(10), seconds(1), 10);
         }
 
-        status.linkStatusChangeTime = getTime();
+        status.linkStatusChangeTime = getSysTime();
         status.linkStatus = stream.connected;
 
         // TODO: warn the user if they configure an interface to use modbus tcp over a serial line
@@ -130,7 +133,7 @@ nothrow @nogc:
 
     override void update()
     {
-        MonoTime now = getTime();
+        SysTime now = getSysTime();
 
         // check for timeouts
         for (size_t i = 0; i < pendingRequests.length; )
@@ -254,7 +257,7 @@ nothrow @nogc:
         while (true);
     }
 
-    override bool forward(ref const Packet packet) nothrow @nogc
+    protected override bool transmit(ref const Packet packet) nothrow @nogc
     {
         // can only handle modbus packets
         if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.Modbus || packet.data.length < 5)
@@ -265,8 +268,9 @@ nothrow @nogc:
 
         auto modbus = mod_iface.app.moduleInstance!ModbusInterfaceModule();
 
-        ubyte packetAddress = *cast(ubyte*)&packet.data[0];
-        ModbusFrameType packetType = *cast(ModbusFrameType*)&packet.data[1];
+        ushort sequenceNumber = (cast(ubyte[])packet.data)[0..2].bigEndianToNative!ushort;
+        ModbusFrameType packetType = *cast(ModbusFrameType*)&packet.data[2];
+        ubyte packetAddress = *cast(ubyte*)&packet.data[3];
 
         ushort length = 0;
         ubyte address = 0;
@@ -298,16 +302,13 @@ nothrow @nogc:
 
             // we can transmit immediately if simultaneous requests are accepted
             // or if there are no messages currently queued, and we satisfied the message gap time
-            MonoTime now = getTime();
+            SysTime now = getSysTime();
             bool transmitImmediately = supportSimultaneousRequests || (pendingRequests.empty ? (now - lastReceiveEvent >= gapTime.msecs) : (&packet == pendingRequests[0].bufferedPacket));
 
             // we need to queue the request so we can return the response to the sender...
             // but check that it's not a re-send attempt of the head queued packet
             if (pendingRequests.empty || &packet != pendingRequests[0].bufferedPacket)
-            {
-                ushort sequenceNumber = (cast(ubyte[])packet.data)[2..4].bigEndianToNative!ushort;
                 pendingRequests ~= ModbusRequest(now, packet.src, sequenceNumber, address, transmitImmediately, packet.clone());
-            }
 
             if (!transmitImmediately)
                 return true;
@@ -346,7 +347,7 @@ nothrow @nogc:
         }
 
         // frame it up and send...
-        const(ubyte)[] data = cast(ubyte[])packet.data[4 .. $]; // skip sequence number
+        const(ubyte)[] pdu = cast(ubyte[])packet.data[4 .. $]; // PDU data
         ubyte[520] buffer = void;
 
         final switch (protocol)
@@ -355,9 +356,9 @@ nothrow @nogc:
                 assert(false, "Modbus protocol not specified");
             case ModbusProtocol.RTU:
                 // frame the packet
-                length = cast(ushort)(1 + data.length);
+                length = cast(ushort)(1 + pdu.length);
                 buffer[0] = address;
-                buffer[1 .. length] = data[];
+                buffer[1 .. length] = pdu[];
                 buffer[length .. length + 2][0 .. 2] = buffer[0 .. length].modbusCRC().nativeToLittleEndian;
                 length += 2;
                 break;
@@ -366,14 +367,14 @@ nothrow @nogc:
             case ModbusProtocol.ASCII:
                 // calculate the LRC
                 ubyte lrc = address;
-                foreach (b; cast(ubyte[])data[])
+                foreach (b; cast(ubyte[])pdu[])
                     lrc += cast(ubyte)b;
                 lrc = cast(ubyte)-lrc;
 
                 // format the packet
                 buffer[0] = ':';
                 formatInt(address, cast(char[])buffer[1..3], 16, 2, '0');
-                length = cast(ushort)(3 + toHexString(data[], cast(char[])buffer[3..$]).length);
+                length = cast(ushort)(3 + toHexString(pdu[], cast(char[])buffer[3..$]).length);
                 formatInt(lrc, cast(char[])buffer[length .. length + 2], 16, 2, '0');
                 (cast(char[])buffer)[length + 2 .. length + 4] = "\r\n";
                 length += 4;
@@ -393,16 +394,28 @@ nothrow @nogc:
         }
 
         ++status.sendPackets;
-        status.sendBytes += data.length;
-        // TODO: or should we record `length`? payload bytes, or full protocol bytes?
+        status.sendBytes += length;
         return true;
+    }
+
+    override ushort pcapType() const
+        => 147; // DLT_USER
+
+    override void pcapWrite(ref const Packet packet, PacketDirection dir, scope void delegate(const void[] packetData) nothrow @nogc sink) const
+    {
+        // write the address and pdu
+        sink(packet.data[3..$]);
+
+        // calculate and write the crc
+        ushort crc = packet.data[3 .. $].modbusCRC();
+        sink(crc.nativeToLittleEndian());
     }
 
 private:
     ubyte[260] tail;
     ushort tailBytes;
 
-    final void incomingPacket(const(void)[] message, MonoTime recvTime, ref ModbusFrameInfo frameInfo)
+    final void incomingPacket(const(void)[] message, SysTime recvTime, ref ModbusFrameInfo frameInfo)
     {
         // TODO: some debug logging of the incoming packet stream?
         version (DebugModbusMessageFlow) {
@@ -465,8 +478,8 @@ private:
         }
 
         ubyte[255] buffer = void;
-        buffer[0] = address;
-        buffer[1] = type;
+        buffer[3] = address;
+        buffer[2] = type;
         buffer[4 .. 4 + message.length] = cast(ubyte[])message[];
 
         Packet p = Packet(buffer[0 .. 4 + message.length]);
@@ -491,7 +504,7 @@ private:
                 {
                     p.src = frameMac;
                     p.dst = pendingRequests[0].requestFrom;
-                    buffer[2..4] = nativeToBigEndian(pendingRequests[0].sequenceNumber);
+                    buffer[0..2] = nativeToBigEndian(pendingRequests[0].sequenceNumber);
                     dispatch(p);
                 }
                 else
@@ -528,7 +541,7 @@ private:
                     p.src = frameMac;
                     p.dst = req.requestFrom;
 
-                    buffer[2..4] = nativeToBigEndian(seq);
+                    buffer[0..2] = nativeToBigEndian(seq);
 
                     dispatch(p);
                     dispatched = true;
@@ -554,7 +567,7 @@ private:
                 if (frameMac == mac)
                 {
                     debug assert(type != ModbusFrameType.Response, "This seems like a request, but the FrameInfo disagrees!");
-                    buffer[1] = type = ModbusFrameType.Request;
+                    buffer[2] = type = ModbusFrameType.Request;
                 }
                 else if (type == ModbusFrameType.Unknown)
                 {
@@ -575,7 +588,7 @@ private:
                     ++sequenceNumber;
                 seq = sequenceNumber;
             }
-            buffer[2..4] = nativeToBigEndian(seq);
+            buffer[0..2] = nativeToBigEndian(seq);
 
             dispatch(p);
 
@@ -680,11 +693,9 @@ class ModbusInterfaceModule : Plugin
             return universalAddress in remoteServers;
         }
 
-        import urt.meta.nullable;
-
         // /interface/modbus/add command
         // TODO: protocol enum!
-        void add(Session session, const(char)[] name, const(char)[] stream, const(char)[] protocol, Nullable!bool master)
+        void add(Session session, const(char)[] name, const(char)[] stream, const(char)[] protocol, Nullable!bool master, Nullable!(const(char)[]) pcap)
         {
             // is it an error to not specify a stream?
             assert(stream, "'stream' must be specified");
@@ -721,16 +732,13 @@ class ModbusInterfaceModule : Plugin
             }
 
             auto mod_if = app.moduleInstance!InterfaceModule;
-
-            if (name.empty)
-                name = mod_if.generateInterfaceName("modbus");
-            String n = name.makeString(defaultAllocator());
+            String n = mod_if.addInterfaceName(session, name, ModbusInterface.TypeName);
+            if (!n)
+                return;
 
             ModbusInterface iface = defaultAllocator.allocT!ModbusInterface(mod_if, n.move, s, p, master ? master.value : false);
-            mod_if.addInterface(iface);
 
-            import urt.log;
-            writeInfo("Create modbus interface '", name, "' - ", iface.mac);
+            mod_if.addInterface(session, iface, pcap ? pcap.value : null);
 
             version (DebugModbusMessageFlow)
                 iface.subscribe(&printPacket, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
@@ -797,12 +805,14 @@ private:
 
 struct ModbusFrameInfo
 {
-    ubyte address;
     bool hasSequenceNumber;
+    bool hasCRC;
     ushort sequenceNumber;
+    ushort crc;
+    ModbusFrameType frameType = ModbusFrameType.Unknown;
+    ubyte address;
     FunctionCode functionCode;
     ExceptionCode exceptionCode = ExceptionCode.None;
-    ModbusFrameType frameType = ModbusFrameType.Unknown;
 }
 
 __gshared immutable ushort[25] functionLens = [
@@ -846,6 +856,7 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
     if (fnData == 0) // @unlikely
         return 0;
     frameInfo.functionCode = fc;
+    frameInfo.hasCRC = true;
 
     // exceptions are always 3 bytes
     ubyte reqLength = void;
@@ -885,7 +896,7 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
 
         // realistically, this is almost always a result of stream corruption...
         // and the implementation is quite a lot of code!
-        const(ubyte)[] message = crawlForRTU(data, null);
+        const(ubyte)[] message = crawlForRTU(data, &frameInfo.crc);
         if (message != null)
             return cast(int)message.length;
         return 0;
@@ -918,11 +929,13 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
             if ((crc2 >> 16) == (data[smallerLength] | cast(ushort)data[smallerLength + 1] << 8))
             {
                 frameInfo.frameType = smallerType;
+                frameInfo.crc = crc2 >> 16;
                 return smallerLength;
             }
             if ((crc2 & 0xFFFF) == (data[length] | cast(ushort)data[length + 1] << 8))
             {
                 frameInfo.frameType = type;
+                frameInfo.crc = crc2 & 0xFFFF;
                 return length;
             }
             return 0;
@@ -942,7 +955,10 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
     ushort crc = data[0 .. reqLength].modbusCRC();
 
     if (crc == (data[reqLength] | cast(ushort)data[reqLength + 1] << 8))
+    {
+        frameInfo.crc = crc;
         return reqLength;
+    }
 
     return failResult;
 }

@@ -324,7 +324,7 @@ nothrow @nogc:
         iface.send(c.mac, message[], EtherType.ENMS, ENMS_SubType.TeslaTWC);
     }
 
-    void incomingPacket(ref const Packet p, BaseInterface iface, void* userData) nothrow @nogc
+    void incomingPacket(ref const Packet p, BaseInterface iface, PacketDirection dir, void* userData) nothrow @nogc
     {
         TWCMessage msg;
         if (parseTWCMessage(cast(ubyte[])p.data, msg))

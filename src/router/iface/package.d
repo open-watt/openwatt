@@ -21,8 +21,15 @@ enum BufferOverflowBehaviour : byte
     Fail        // cause the call to fail
 }
 
+enum PacketDirection : ubyte
+{
+    Incoming = 1,
+    Outgoing = 2
+}
+
 struct PacketFilter
 {
+nothrow @nogc:
     alias FilterCallback = bool delegate(ref const Packet p) nothrow @nogc;
 
     MACAddress src;
@@ -31,8 +38,9 @@ struct PacketFilter
     ushort enmsSubType;
     ushort vlan;
     FilterCallback customFilter;
+    PacketDirection direction = PacketDirection.Incoming;
 
-    bool match(ref const Packet p) nothrow @nogc
+    bool match(ref const Packet p)
     {
         if (etherType && p.etherType != etherType)
             return false;
@@ -52,16 +60,16 @@ struct PacketFilter
 
 struct InterfaceSubscriber
 {
-    alias IncomingPacketHandler = void delegate(ref const Packet p, BaseInterface i, void* u) nothrow @nogc;
+    alias PacketHandler = void delegate(ref const Packet p, BaseInterface i, PacketDirection dir, void* u) nothrow @nogc;
 
     PacketFilter filter;
-    IncomingPacketHandler recvPacket;
+    PacketHandler recvPacket;
     void* userData;
 }
 
 struct InterfaceStatus
 {
-    MonoTime linkStatusChangeTime;
+    SysTime linkStatusChangeTime;
     bool linkStatus;
     int linkDowns;
 
@@ -105,7 +113,7 @@ nothrow @nogc:
 
     BaseInterface master;
 
-    this(InterfaceModule.Instance m, String name, const(char)[] type) nothrow @nogc
+    this(InterfaceModule.Instance m, String name, const(char)[] type)
     {
         import urt.lifetime;
 
@@ -124,12 +132,12 @@ nothrow @nogc:
     ref const(InterfaceStatus) getStatus() const
         => status;
 
-    void subscribe(InterfaceSubscriber.IncomingPacketHandler packetHandler, ref const PacketFilter filter, void* userData = null) nothrow @nogc
+    void subscribe(InterfaceSubscriber.PacketHandler packetHandler, ref const PacketFilter filter, void* userData = null)
     {
         subscribers[numSubscribers++] = InterfaceSubscriber(filter, packetHandler, userData);
     }
 
-    bool send(MACAddress dest, const(void)[] message, EtherType type, ENMS_SubType subType = ENMS_SubType.Unspecified) nothrow @nogc
+    bool send(MACAddress dest, const(void)[] message, EtherType type, ENMS_SubType subType = ENMS_SubType.Unspecified)
     {
         Packet p = Packet(message);
         p.src = mac;
@@ -137,24 +145,33 @@ nothrow @nogc:
         p.vlan = 0; // TODO: if this is a vlan interface?
         p.etherType = type;
         p.etherSubType = subType;
-        p.creationTime = getTime();
+        p.creationTime = getSysTime();
         return forward(p);
     }
 
-    abstract bool forward(ref const Packet packet) nothrow @nogc;
+    final bool forward(ref const Packet packet)
+    {
+        foreach (ref subscriber; subscribers[0..numSubscribers])
+        {
+            if ((subscriber.filter.direction & PacketDirection.Outgoing) && subscriber.filter.match(packet))
+                subscriber.recvPacket(packet, this, PacketDirection.Outgoing, subscriber.userData);
+        }
 
-    final void addAddress(MACAddress mac, BaseInterface iface) nothrow @nogc
+        return transmit(packet);
+    }
+
+    final void addAddress(MACAddress mac, BaseInterface iface)
     {
         assert(mac !in macTable, "MAC address already in use!");
         macTable[mac] = iface;
     }
 
-    final void removeAddress(MACAddress mac) nothrow @nogc
+    final void removeAddress(MACAddress mac)
     {
         macTable.remove(mac);
     }
 
-    final BaseInterface findMacAddress(MACAddress mac) nothrow @nogc
+    final BaseInterface findMacAddress(MACAddress mac)
     {
         BaseInterface* i = mac in macTable;
         if (i)
@@ -162,10 +179,50 @@ nothrow @nogc:
         return null;
     }
 
+    ushort pcapType() const
+        => 1; // LINKTYPE_ETHERNET
+
+    void pcapWrite(ref const Packet packet, PacketDirection dir, scope void delegate(const void[] packetData) nothrow @nogc sink) const
+    {
+        import urt.endian;
+
+        bool isEnms = packet.etherType == EtherType.ENMS;
+
+        // write ethernet header...
+        struct Header
+        {
+            MACAddress dst;
+            MACAddress src;
+            ubyte[2] type;
+            ubyte[2] subType;
+        }
+        Header h;
+        h.dst = packet.dst;
+        h.src = packet.src;
+        h.type = nativeToBigEndian(packet.etherType);
+        if (isEnms)
+            h.subType = nativeToBigEndian(packet.etherSubType);
+        sink((cast(ubyte*)&h)[0 .. (isEnms ? Header.sizeof : Header.subType.offsetof)]);
+
+        // write packet data
+        sink(packet.data);
+
+        if (isEnms && packet.etherSubType == ENMS_SubType.Modbus)
+        {
+            // wireshark wants RTU packets for its decoder, so we need to append the crc...
+            import urt.crc;
+            ushort crc = packet.data[3..$].calculateCRC!(Algorithm.CRC16_MODBUS)();
+            sink(crc.nativeToLittleEndian());
+        }
+    }
+
+    int opCmp(const BaseInterface rh) const
+        => name[] < rh.name[] ? -1 : name[] > rh.name[] ? 1 : 0;
+
 package:
     Packet[] sendQueue;
 
-    MACAddress generateMacAddress() pure nothrow @nogc
+    MACAddress generateMacAddress() pure
     {
         enum ushort MAGIC = 0x1337;
 
@@ -176,7 +233,7 @@ package:
         return addr;
     }
 
-    void dispatch(ref const Packet packet) nothrow @nogc
+    void dispatch(ref const Packet packet)
     {
         // update the stats
         ++status.recvPackets;
@@ -191,10 +248,13 @@ package:
 
         foreach (ref subscriber; subscribers[0..numSubscribers])
         {
-            if (subscriber.filter.match(packet))
-                subscriber.recvPacket(packet, this, subscriber.userData);
+            if ((subscriber.filter.direction & PacketDirection.Incoming) && subscriber.filter.match(packet))
+                subscriber.recvPacket(packet, this, PacketDirection.Incoming, subscriber.userData);
         }
     }
+
+protected:
+    abstract bool transmit(ref const Packet packet);
 }
 
 
@@ -233,10 +293,39 @@ class InterfaceModule : Plugin
             return null;
         }
 
-        final void addInterface(BaseInterface iface)
+        final String addInterfaceName(Session session, const(char)[] name, const(char)[] defaultName)
         {
-            assert(iface.name !in interfaces, "Interface already exists");
-            interfaces[iface.name] = iface;
+            if (name.empty)
+                name = generateInterfaceName(defaultName);
+            else if (name in interfaces)
+            {
+                session.writeLine("Interface '", name, " already exists");
+                return String();
+            }
+
+            return name.makeString(app.allocator);
+        }
+
+        final bool addInterface(Session session, BaseInterface iface, const(char)[] pcap)
+        {
+            interfaces[iface.name[]] = iface;
+
+            if (!pcap.empty)
+            {
+                import manager.pcap;
+
+                auto mod_pcap = app.moduleInstance!PcapModule;
+                PcapInterface* cap = mod_pcap.findInterface(pcap);
+                if (!cap)
+                    session.writeLine("Failed to attach pcap interface '", pcap, "' to interface '", iface.name, "'; doesn't exist");
+                else
+                    cap.subscribeInterface(iface);
+            }
+
+            import urt.log;
+            writeInfo("Create ", iface.type, " interface '", iface.name, "' - ", iface.mac);
+
+            return true;
         }
 
         final void removeInterface(BaseInterface iface)

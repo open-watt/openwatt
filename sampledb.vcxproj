@@ -62,6 +62,7 @@
     <DCompile Include="src\manager\instance.d" />
     <DCompile Include="src\manager\log.d" />
     <DCompile Include="src\manager\package.d" />
+    <DCompile Include="src\manager\pcap.d" />
     <DCompile Include="src\manager\plugin.d" />
     <DCompile Include="src\manager\sampler.d" />
     <DCompile Include="src\manager\subscriber.d" />

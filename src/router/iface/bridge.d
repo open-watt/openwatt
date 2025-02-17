@@ -3,6 +3,7 @@ module router.iface.bridge;
 import urt.array;
 import urt.log;
 import urt.mem;
+import urt.meta.nullable;
 import urt.string;
 import urt.time;
 
@@ -17,14 +18,16 @@ class BridgeInterface : BaseInterface
 {
 nothrow @nogc:
 
+    alias TypeName = StringLit!"bridge";
+
     this(InterfaceModule.Instance m, String name)
     {
-        super(m, name, StringLit!"bridge");
+        super(m, name, TypeName);
 
         macTable = MACTable(16, 256, 60);
 
         status.linkStatus = true;
-        status.linkStatusChangeTime = getTime();
+        status.linkStatusChangeTime = getSysTime();
     }
 
     bool addMember(BaseInterface iface)
@@ -100,7 +103,7 @@ nothrow @nogc:
         macTable.update();
     }
 
-    override bool forward(ref const Packet packet)
+    protected override bool transmit(ref const Packet packet)
     {
         send(packet);
 
@@ -114,7 +117,7 @@ protected:
     Array!BaseInterface members;
     MACTable macTable;
 
-    void incomingPacket(ref const Packet packet, BaseInterface srcInterface, void* userData)
+    void incomingPacket(ref const Packet packet, BaseInterface srcInterface, PacketDirection dir, void* userData)
     {
         ubyte srcPort = cast(ubyte)cast(size_t)userData;
 
@@ -197,19 +200,16 @@ class BridgeInterfaceModule : Plugin
 
         // /interface/modbus/add command
         // TODO: protocol enum!
-        void add(Session session, const(char)[] name)
+        void add(Session session, const(char)[] name, Nullable!(const(char)[]) pcap)
         {
             auto mod_if = app.moduleInstance!InterfaceModule;
-
-            if (name.empty)
-                name = mod_if.generateInterfaceName("bridge");
-            String n = name.makeString(defaultAllocator());
+            String n = mod_if.addInterfaceName(session, name, BridgeInterface.TypeName);
+            if (!n)
+                return;
 
             BridgeInterface iface = defaultAllocator.allocT!BridgeInterface(mod_if, n.move);
-            mod_if.addInterface(iface);
 
-            import urt.log;
-            writeInfo("Create bridge interface '", name, "' - ", iface.mac);
+            mod_if.addInterface(session, iface, pcap ? pcap.value : null);
 
 //            // HACK: we'll print packets that we receive...
 //            iface.subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {
