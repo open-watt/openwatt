@@ -103,6 +103,15 @@
     <Filter Include="src\apps\energy">
       <UniqueIdentifier>{64b88f6a-915f-4210-b838-b7905c8455ad}</UniqueIdentifier>
     </Filter>
+    <Filter Include="conf">
+      <UniqueIdentifier>{7f37cbda-422d-4bb4-a2b2-d913b4cf3ba9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="conf\modbus_profiles">
+      <UniqueIdentifier>{44799e0d-95be-4f50-83d3-bb8473558560}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="conf\rest_profiles">
+      <UniqueIdentifier>{adb46336-8e98-41fa-9701-bcda31f4d3ec}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d">
@@ -535,5 +544,35 @@
   <ItemGroup>
     <None Include=".gitignore" />
     <None Include=".editorconfig" />
+    <None Include="conf\startup.conf">
+      <Filter>conf</Filter>
+    </None>
+    <None Include="conf\modbus_profiles\eastron_sdm120.conf">
+      <Filter>conf\modbus_profiles</Filter>
+    </None>
+    <None Include="conf\modbus_profiles\eastron_sdm630.conf">
+      <Filter>conf\modbus_profiles</Filter>
+    </None>
+    <None Include="conf\modbus_profiles\gm1000.conf">
+      <Filter>conf\modbus_profiles</Filter>
+    </None>
+    <None Include="conf\modbus_profiles\goodwe_ems.conf">
+      <Filter>conf\modbus_profiles</Filter>
+    </None>
+    <None Include="conf\modbus_profiles\pace_bms.conf">
+      <Filter>conf\modbus_profiles</Filter>
+    </None>
+    <None Include="conf\modbus_profiles\se_meter.conf">
+      <Filter>conf\modbus_profiles</Filter>
+    </None>
+    <None Include="conf\modbus_profiles\smartevse.conf">
+      <Filter>conf\modbus_profiles</Filter>
+    </None>
+    <None Include="conf\modbus_profiles\tac1100.conf">
+      <Filter>conf\modbus_profiles</Filter>
+    </None>
+    <None Include="conf\rest_profiles\smartevse.conf">
+      <Filter>conf\rest_profiles</Filter>
+    </None>
   </ItemGroup>
 </Project>
