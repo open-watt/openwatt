@@ -1,5 +1,19 @@
 module manager.value;
 
+import urt.mem.allocator;
+
+version (_64Bit)
+	version = LocalLong;
+
+nothrow @nogc:
+
+
+// use this allocator for all value related memory allocation (except strings, which use normal string allocation techniques)
+NoGCAllocator valueAllocator()
+{
+	return defaultAllocator();
+}
+
 
 struct Value
 {
@@ -12,9 +26,18 @@ nothrow @nogc:
 		Bool,
 		Integer,
 		Float,
-		String,
-		Time,
+
+		PackedEnum,
+		PackedBitfield,
+
+		AllocatedTypes,
+
+		Long,
+		Double,
 		Duration,
+
+		String = AllocatedTypes,
+		Time,
 		Binary,
 		Custom,
 
@@ -24,6 +47,11 @@ nothrow @nogc:
 
 		// special stuff
 		// MAC address, IP4, IP6, netmask, 
+	}
+
+	this(ref typeof(this) rhs)
+	{
+		// copy the memory...
 	}
 
 	this(typeof(null))
@@ -88,7 +116,7 @@ nothrow @nogc:
 		=> i != 0;
 	int getInt() const
 		=> cast(int)i;
-	double getFloat() const
+	float getFloat() const
 		=> f;
 	const(char)[] getString() const
 		=> (cast(const(char)*)p)[0..length];
@@ -96,8 +124,32 @@ nothrow @nogc:
 		=> (cast(bool*)p)[0..length];
 	int[] getIntArray() const
 		=> (cast(int*)p)[0..length];
-	double[] getFloatArray() const
-		=> (cast(double*)p)[0..length];
+	float[] getFloatArray() const
+		=> (cast(float*)p)[0..length];
+
+    float asFloat() const
+    {
+        switch (type)
+        {
+            case Type.Float:
+                return f;
+            case Type.Integer:
+                return cast(float)i;
+            case Type.String:
+            {
+                import urt.conv : parseFloat;
+
+                const(char)[] s = getString();
+                size_t len;
+                double v = parseFloat(s, &len);
+                if (len == s.length)
+                    return v;
+                return 0;
+            }
+            default:
+                return 0;
+        }
+    }
 
 	// should probably use this instead of those above...
 	T get(T)() const

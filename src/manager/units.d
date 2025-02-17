@@ -1,37 +1,65 @@
 module manager.units;
 
-import std.math	: PI, pow;
-import std.conv;
+import urt.conv;
+import urt.math : PI;
+
+nothrow @nogc:
+
+
+enum UnitCategory : ubyte
+{
+    None,
+    Length,
+    Area,
+    Volume,
+    Mass,
+    Force,
+    Duration,
+    Frequency,
+    Angle,
+    Temperature,
+    LuminousFlux,
+    Voltage,
+    Charge,  // Coulombs (Amp-sec), Ah
+    Current, // Ampere
+    Energy,  // Joule (Watt-sec) / Wh
+    Power,   // Watt
+    ApparentPower,
+    ReactivePower,
+    Resistance,
+    Capacitance,
+}
 
 
 struct UnitDef
 {
+nothrow @nogc:
 	double scale = 1;
 	double offset = 0;
 
-	double normalise(double value) const { return value * scale + offset; }
-	double denormalise(double value) const { return (value - offset) / scale; }
+	double normalise(double value) const pure { return value * scale + offset; }
+	double denormalise(double value) const pure { return (value - offset) / scale; }
 }
 
-double normalise(string unit)(double value)
+double normalise(const(char)[] unit)(double value)
 {
 	enum UnitDef unit = unit.parseUnitDef;
 	return value * unit.scale + unit.offset;
 }
-double denormalise(string unit)(double value)
+double denormalise(const(char)[] unit)(double value)
 {
 	enum UnitDef unit = unit.parseUnitDef;
 	enum UnitDef inv = UnitDef(1.0/unit.scale, -unit.offset/unit.scale);
 	return value * inv.scale + inv.offset;
 }
 
-double convertUnit(string from, string to)(double value)
+double convertUnit(const(char)[] from, const(char)[] to)(double value)
 {
 	enum UnitDef conv = unitConversion(from, to);
 	return value * conv.scale + conv.offset;
 }
 
-UnitDef unitConversion(string from, string to)
+UnitDef unitConversion(const(char)[] from, const(char)[] to)
 {
 	UnitDef fromNorm = from.parseUnitDef;
 	UnitDef toNorm = to.parseUnitDef;
@@ -43,37 +71,54 @@ UnitDef unitConversion(UnitDef from, UnitDef to)
 	return UnitDef(from.scale/to.scale, (from.offset - to.offset)/to.scale);
 }
 
-UnitDef getUnitConv(string unit)
+UnitDef getUnitConv(const(char)[] unit)
 {
-	static UnitDef[string] cache;
+	import urt.map;
+	import urt.mem.string;
+
+	static Map!(const(char)[], UnitDef) cache;
 	if (!unit)
 		return UnitDef();
 	UnitDef* cached = unit in cache;
 	if (cached)
 		return *cached;
-	return cache[unit] = unit.parseUnitDef;
+
+	// use the string cache with de-duplication...
+	CacheString cs = addString(unit);
+	return *cache.insert(cs[], unit.parseUnitDef);
 }
 
-UnitDef getUnitConv(string from, string to)
+UnitDef getUnitConv(const(char)[] from, const(char)[] to)
 {
 	return unitConversion(from.getUnitConv, to.getUnitConv);
 }
 
-UnitDef parseUnitDef(string unitDef)
+UnitDef parseUnitDef(const(char)[] unitDef)
 {
 	double multiple = 1;
 	double offset = 0;
-	string unit = null;
+	const(char)[] unit = null;
 
 	// parse number with optional decimal
 	size_t i = 0;
 	int hasDot = 0;
+	int neg = 0;
+	if (unitDef.length > 0 && unitDef[0] == '-')
+	{
+		neg = 1;
+		i++;
+	}
 	while (i < unitDef.length && (unitDef[i] >= '0' && unitDef[i] <= '9' || unitDef[i] == '.' && !hasDot++))
 		i++;
-	if (i > 0)
+	if (i > neg)
 	{
 		multiple = unitDef[0 .. i].to!double;
 		unitDef = unitDef[i .. $];
+	}
+	else if (neg)
+	{
+		multiple = -1;
+		unitDef = unitDef[neg .. $];
 	}
 
 	// parse unit name, scanning in reverse for '+' after which will be an optional offset
@@ -94,7 +139,7 @@ UnitDef parseUnitDef(string unitDef)
 
 	// now let's try and disect the unit name
 	// first, we can chop off any per- suffixes
-	string per;
+	const(char)[] per;
 	i = unitDef.length;
 	while (i > 0 && unitDef[i - 1] != '/')
 		i--;
@@ -126,7 +171,7 @@ UnitDef parseUnitDef(string unitDef)
 		multiple *= conv.scale;
 		offset += conv.offset;
 
-		conv = unit in siUnitMap;
+		conv = unit[1..$] in siUnitMap;
 		if (conv)
 			return UnitDef(conv.scale * multiple, conv.offset + offset);
 	}
