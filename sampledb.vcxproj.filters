@@ -216,6 +216,9 @@
     <DCompile Include="src\urt\mem\temp.d">
       <Filter>src\urt\mem</Filter>
     </DCompile>
+    <DCompile Include="src\urt\mem\freelist.d">
+      <Filter>src\urt\mem</Filter>
+    </DCompile>
     <DCompile Include="src\urt\string\format.d">
       <Filter>src\urt\string</Filter>
     </DCompile>
@@ -451,6 +454,12 @@
       <Filter>src\urt</Filter>
     </DCompile>
     <DCompile Include="src\urt\fibre.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\async.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
+    <DCompile Include="src\urt\system.d">
       <Filter>src\urt</Filter>
     </DCompile>
     <DCompile Include="src\protocol\dns\mdns.d">
