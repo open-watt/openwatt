@@ -1,6 +1,6 @@
 module manager.console.command;
 
-import manager.instance;
+import manager;
 import manager.console;
 import manager.console.builtin_commands;
 import manager.console.session;
@@ -60,7 +60,7 @@ nothrow @nogc:
         this.name = name.move;
     }
 
-    final ApplicationInstance appInstance() pure nothrow @nogc => m_console.appInstance;
+    final ApplicationInstance app() pure nothrow @nogc => m_console.appInstance;
 
     abstract CommandState execute(Session session, const(char)[] cmdLine);
 

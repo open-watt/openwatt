@@ -13,7 +13,6 @@ import manager.console.session;
 import manager.config;
 import manager.device;
 import manager.element;
-import manager.instance;
 import manager.units;
 
 import protocol.mqtt.broker;
@@ -32,7 +31,7 @@ void main()
 	// TODO: prime the string cache with common strings, like unit names and common variable names
 	//       the idea is to make dedup lookups much faster...
 
-	ApplicationInstance app = getGlobalInstance.createInstance(StringLit!"app");
+	ApplicationInstance app = getAppInstance();
 
 	// execute startup script
 	const(char)[] conf;
@@ -100,7 +99,7 @@ void main()
 	int i = 0;
 	while (true)
 	{
-		getGlobalInstance.update();
+		getAppInstance.update();
 
 		// Process program logic
 		// ...

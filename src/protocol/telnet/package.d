@@ -14,48 +14,43 @@ import router.iface;
 import router.stream.tcp;
 
 
-class TelnetModule : Plugin
+class TelnetModule : Module
 {
-    mixin RegisterModule!"protocol.telnet";
+    mixin DeclareModule!"protocol.telnet";
+nothrow @nogc:
 
-    class Instance : Plugin.Instance
+    Map!(const(char)[], TelnetServer) servers;
+
+    override void init()
     {
-        mixin DeclareInstance;
-    nothrow @nogc:
+        app.console.registerCommand!add_server("/protocol/telnet/server", this, "add");
 
-        Map!(const(char)[], TelnetServer) servers;
+        // create telnet server
+    }
 
-        override void init()
-        {
-            app.console.registerCommand!add_server("/protocol/telnet/server", this, "add");
+    override void update()
+    {
+        foreach (server; servers)
+            server.update();
 
-            // create telnet server
-        }
+//        for (auto i = servers.begin; i != servers.end; ++i)
+//            (*i).update();
+    }
 
-        override void update()
-        {
-            foreach (server; servers)
-                server.update();
+    void add_server(Session session, const(char)[] name, ushort port)
+    {
+        auto mod_if = app.moduleInstance!InterfaceModule;
 
-//            for (auto i = servers.begin; i != servers.end; ++i)
-//                (*i).update();
-        }
+//        BaseInterface i = mod_if.findInterface(_interface);
+//        if(i is null)
+//        {
+//            session.writeLine("Interface '", _interface, "' not found");
+//            return;
+//        }
 
-        void add_server(Session session, const(char)[] name, ushort port)
-        {
-            auto mod_if = app.moduleInstance!InterfaceModule;
+        String n = name.makeString(defaultAllocator());
 
-//            BaseInterface i = mod_if.findInterface(_interface);
-//            if(i is null)
-//            {
-//                session.writeLine("Interface '", _interface, "' not found");
-//                return;
-//            }
-
-            String n = name.makeString(defaultAllocator());
-
-            TelnetServer server = defaultAllocator().allocT!TelnetServer(defaultAllocator(), n.move, &app.console, null, port);
-            servers[server.name[]] = server;
-        }
+        TelnetServer server = defaultAllocator().allocT!TelnetServer(defaultAllocator(), n.move, &app.console, null, port);
+        servers[server.name[]] = server;
     }
 }

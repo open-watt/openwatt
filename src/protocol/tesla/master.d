@@ -116,7 +116,7 @@ nothrow @nogc:
         }
     }
 
-    TeslaProtocolModule.Instance m;
+    TeslaProtocolModule m;
 
     String name;
     BaseInterface iface;
@@ -132,7 +132,7 @@ nothrow @nogc:
     Array!Charger chargers;
 
 
-    this(TeslaProtocolModule.Instance m, String name, BaseInterface iface)
+    this(TeslaProtocolModule m, String name, BaseInterface iface)
     {
         this.name = name.move;
         this.iface = iface;

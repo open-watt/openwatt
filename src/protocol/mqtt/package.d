@@ -8,25 +8,20 @@ import manager.plugin;
 import protocol.mqtt.broker;
 
 
-class MQTTModule : Plugin
+class MQTTModule : Module
 {
-	mixin RegisterModule!"mqtt";
+	mixin DeclareModule!"protocol.mqtt";
 
-	class Instance : Plugin.Instance
+	MQTTBroker broker;
+
+	override void init()
 	{
-		mixin DeclareInstance;
+	}
 
-		MQTTBroker broker;
-
-		override void init()
-		{
-		}
-
-		override void update()
-		{
-//			if (broker)
-//				broker.update();
-		}
+	override void update()
+	{
+//		if (broker)
+//			broker.update();
 	}
 }
 

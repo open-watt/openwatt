@@ -2,7 +2,7 @@ module router.port.serial;
 
 import urt.string;
 
-import manager.instance;
+import manager;
 
 import router.port;
 

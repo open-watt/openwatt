@@ -23,7 +23,7 @@ nothrow @nogc:
 
     ubyte[8] eui;
 
-    this(InterfaceModule.Instance m, String name) nothrow @nogc
+    this(InterfaceModule m, String name) nothrow @nogc
     {
         super(m, name.move, TypeName);
     }
@@ -49,44 +49,38 @@ private:
 }
 
 
-class ZigbeeInterfaceModule : Plugin
+class ZigbeeInterfaceModule : Module
 {
-    mixin RegisterModule!"interface.zigbee";
+    mixin DeclareModule!"interface.zigbee";
+nothrow @nogc:
 
-    class Instance : Plugin.Instance
+    override void init()
     {
-        mixin DeclareInstance;
-    nothrow @nogc:
+        app.console.registerCommand!add("/interface/zigbee", this);
+    }
 
-        override void init()
+    // /interface/zigbee/add command
+    // TODO: protocol enum!
+    void add(Session session, const(char)[] name, const(char)[] ezsp_client, Nullable!(const(char)[]) pcap)
+    {
+        // TODO: EZSP might not be the only hardware interface...
+        assert(ezsp_client, "'ezsp_client' must be specified");
+
+        EZSPClient c = app.moduleInstance!EZSPProtocolModule.getClient(ezsp_client);
+        if (!c)
         {
-            app.console.registerCommand!add("/interface/zigbee", this);
+            session.writeLine("EZSP client does not exist: ", ezsp_client);
+            return;
         }
 
-        // /interface/zigbee/add command
-        // TODO: protocol enum!
-        void add(Session session, const(char)[] name, const(char)[] ezsp_client, Nullable!(const(char)[]) pcap)
-        {
-            // TODO: EZSP might not be the only hardware interface...
-            assert(ezsp_client, "'ezsp_client' must be specified");
+        auto mod_if = app.moduleInstance!InterfaceModule;
+        String n = mod_if.addInterfaceName(session, name, ZigbeeInterface.TypeName);
+        if (!n)
+            return;
 
-            EZSPClient c = app.moduleInstance!EZSPProtocolModule.getClient(ezsp_client);
-            if (!c)
-            {
-                session.writeLine("EZSP client does not exist: ", ezsp_client);
-                return;
-            }
+        ZigbeeInterface iface = app.allocator.allocT!ZigbeeInterface(mod_if, n.move);
 
-            auto mod_if = app.moduleInstance!InterfaceModule;
-            String n = mod_if.addInterfaceName(session, name, ZigbeeInterface.TypeName);
-            if (!n)
-                return;
-
-            ZigbeeInterface iface = app.allocator.allocT!ZigbeeInterface(mod_if, n.move);
-
-            mod_if.addInterface(session, iface, pcap ? pcap.value : null);
-        }
-
+        mod_if.addInterface(session, iface, pcap ? pcap.value : null);
     }
 }
 

@@ -8,11 +8,11 @@ import urt.traits;
 import urt.string;
 import urt.string.format;
 
+public import manager;
 public import manager.console;
 public import manager.console.command;
 public import manager.console.expression;
 public import manager.console.session;
-public import manager.instance;
 
 
 class FunctionCommandState : CommandState

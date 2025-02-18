@@ -47,7 +47,7 @@ nothrow @nogc:
 
     CANInterfaceProtocol protocol;
 
-    this(InterfaceModule.Instance m, String name, Stream stream, CANInterfaceProtocol protocol) nothrow @nogc
+    this(InterfaceModule m, String name, Stream stream, CANInterfaceProtocol protocol) nothrow @nogc
     {
         super(m, name.move, TypeName);
         this.stream = stream;
@@ -287,54 +287,49 @@ private:
 }
 
 
-class CANInterfaceModule : Plugin
+class CANInterfaceModule : Module
 {
-    mixin RegisterModule!"interface.can";
+    mixin DeclareModule!"interface.can";
+nothrow @nogc:
 
-    class Instance : Plugin.Instance
+    override void init()
     {
-        mixin DeclareInstance;
-    nothrow @nogc:
+        app.console.registerCommand!add("/interface/can", this);
+    }
 
-        override void init()
+    // /interface/can/add command
+    // TODO: protocol enum!
+    void add(Session session, const(char)[] name, const(char)[] stream, const(char)[] protocol, Nullable!(const(char)[]) pcap)
+    {
+        // is it an error to not specify a stream?
+        assert(stream, "'stream' must be specified");
+
+        Stream s = app.moduleInstance!StreamModule.getStream(stream);
+        if (!s)
         {
-            app.console.registerCommand!add("/interface/can", this);
+            session.writeLine("Stream does not exist: ", stream);
+            return;
         }
 
-        // /interface/can/add command
-        // TODO: protocol enum!
-        void add(Session session, const(char)[] name, const(char)[] stream, const(char)[] protocol, Nullable!(const(char)[]) pcap)
+        CANInterfaceProtocol p = CANInterfaceProtocol.Unknown;
+        switch (protocol)
         {
-            // is it an error to not specify a stream?
-            assert(stream, "'stream' must be specified");
-
-            Stream s = app.moduleInstance!StreamModule.getStream(stream);
-            if (!s)
-            {
-                session.writeLine("Stream does not exist: ", stream);
+            case "ebyte":
+                p = CANInterfaceProtocol.EBYTE;
+                break;
+            default:
+                session.writeLine("Invalid CAN protocol '", protocol, "', expect 'ebyte|??'.");
                 return;
-            }
-
-            CANInterfaceProtocol p = CANInterfaceProtocol.Unknown;
-            switch (protocol)
-            {
-                case "ebyte":
-                    p = CANInterfaceProtocol.EBYTE;
-                    break;
-                default:
-                    session.writeLine("Invalid CAN protocol '", protocol, "', expect 'ebyte|??'.");
-                    return;
-            }
-
-            auto mod_if = app.moduleInstance!InterfaceModule;
-            String n = mod_if.addInterfaceName(session, name, CANInterface.TypeName);
-            if (!n)
-                return;
-
-            CANInterface iface = defaultAllocator.allocT!CANInterface(mod_if, n.move, s, p);
-
-            mod_if.addInterface(session, iface, pcap ? pcap.value : null);
         }
+
+        auto mod_if = app.moduleInstance!InterfaceModule;
+        String n = mod_if.addInterfaceName(session, name, CANInterface.TypeName);
+        if (!n)
+            return;
+
+        CANInterface iface = defaultAllocator.allocT!CANInterface(mod_if, n.move, s, p);
+
+        mod_if.addInterface(session, iface, pcap ? pcap.value : null);
     }
 }
 

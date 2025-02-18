@@ -12,11 +12,13 @@ import urt.time;
 import manager.console;
 import manager.plugin;
 
+// package modules...
+public static import router.stream.bridge;
+public static import router.stream.serial;
+public static import router.stream.tcp;
+public static import router.stream.udp;
 
-//public import router.stream.bridge;
-//public import router.stream.serial;
-//public import router.stream.tcp;
-//public import router.stream.udp;
+nothrow @nogc:
 
 
 enum StreamOptions
@@ -106,68 +108,63 @@ protected:
     void[] sendBuffer;
 }
 
-class StreamModule : Plugin
+class StreamModule : Module
 {
-    mixin RegisterModule!"stream";
+    mixin DeclareModule!"stream";
+nothrow @nogc:
 
-    class Instance : Plugin.Instance
+    Map!(const(char)[], Stream) streams;
+
+    override void init()
     {
-        mixin DeclareInstance;
-    nothrow @nogc:
+    }
 
-        Map!(const(char)[], Stream) streams;
+    Stream getStream(const(char)[] name)
+    {
+        Stream* s = name in streams;
+        return s ? *s : null;
+    }
 
-        override void init()
+    override void preUpdate()
+    {
+        // TODO: polling is super lame! data connections should be in threads and receive data immediately
+        // blocking read's in threads, or a select() loop...
+
+        foreach (stream; streams)
+            stream.update();
+    }
+
+    const(char)[] generateStreamName(const(char)[] prefix)
+    {
+        if (prefix !in streams)
+            return prefix;
+        for (size_t i = 0; i < ushort.max; i++)
         {
+            const(char)[] name = tconcat(prefix, i);
+            if (name !in streams)
+                return name;
         }
+        return null;
+    }
 
-        Stream getStream(const(char)[] name)
-        {
-            Stream* s = name in streams;
-            return s ? *s : null;
-        }
+    final void addStream(Stream stream)
+    {
+        assert(stream.name[] !in streams, "Stream already exists");
+        streams[stream.name[]] = stream;
+    }
 
-        override void preUpdate()
-        {
-            // TODO: polling is super lame! data connections should be in threads and receive data immediately
-            // blocking read's in threads, or a select() loop...
+    final void removeStream(Stream stream)
+    {
+        assert(stream.name[] in streams, "Stream not found");
+        streams.remove(stream.name[]);
+    }
 
-            foreach (stream; streams)
-                stream.update();
-        }
-
-        const(char)[] generateStreamName(const(char)[] prefix)
-        {
-            if (prefix !in streams)
-                return prefix;
-            for (size_t i = 0; i < ushort.max; i++)
-            {
-                const(char)[] name = tconcat(prefix, i);
-                if (name !in streams)
-                    return name;
-            }
-            return null;
-        }
-
-        final void addStream(Stream stream)
-        {
-            assert(stream.name[] !in streams, "Stream already exists");
-            streams[stream.name[]] = stream;
-        }
-
-        final void removeStream(Stream stream)
-        {
-            assert(stream.name[] in streams, "Stream not found");
-            streams.remove(stream.name[]);
-        }
-
-        final Stream findStream(const(char)[] name)
-        {
-            foreach (s; streams)
-                if (s.name[] == name[])
-                    return s;
-            return null;
-        }
+    final Stream findStream(const(char)[] name)
+    {
+        foreach (s; streams)
+            if (s.name[] == name[])
+                return s;
+        return null;
     }
 }
 

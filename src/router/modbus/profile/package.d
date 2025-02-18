@@ -12,7 +12,6 @@ import urt.string.format;
 import manager.component;
 import manager.config;
 import manager.device;
-import manager.instance;
 
 import router.modbus.message : RegisterType;
 
