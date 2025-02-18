@@ -498,6 +498,9 @@
     <DCompile Include="src\urt\range\primitives.d">
       <Filter>src\urt\range</Filter>
     </DCompile>
+    <DCompile Include="src\urt\system.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />
