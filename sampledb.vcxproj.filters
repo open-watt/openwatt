@@ -450,6 +450,9 @@
     <DCompile Include="src\urt\crc.d">
       <Filter>src\urt</Filter>
     </DCompile>
+    <DCompile Include="src\urt\rand.d">
+      <Filter>src\urt</Filter>
+    </DCompile>
     <DCompile Include="src\urt\encoding.d">
       <Filter>src\urt</Filter>
     </DCompile>
