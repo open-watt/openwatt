@@ -68,7 +68,7 @@ T calculateCRC(T = uint)(const void[] data, ref const CRCParams params, ref cons
 }
 
 // compute a CRC with hard-coded parameters
-T calculateCRC(Algorithm algo, T = CRCType!algo)(const void[] data) pure
+T calculateCRC(Algorithm algo, T = CRCType!algo)(const void[] data, T initial = cast(T)paramTable[algo].initial^paramTable[algo].finalXor) pure
     if (isUnsignedInt!T)
 {
     enum CRCParams params = paramTable[algo];
@@ -78,7 +78,10 @@ T calculateCRC(Algorithm algo, T = CRCType!algo)(const void[] data) pure
 
     const ubyte[] bytes = cast(ubyte[])data;
 
-    T crc = cast(T)params.initial;
+    static if (params.finalXor)
+        T crc = initial ^ params.finalXor;
+    else
+        T crc = initial;
 
     foreach (b; bytes)
     {
@@ -195,6 +198,14 @@ unittest
     assert(calculateCRC!(Algorithm.CRC16_DNP)(checkData[]) == paramTable[Algorithm.CRC16_DNP].check);
     assert(calculateCRC!(Algorithm.CRC32_ISO_HDLC)(checkData[]) == paramTable[Algorithm.CRC32_ISO_HDLC].check);
     assert(calculateCRC!(Algorithm.CRC32_CASTAGNOLI)(checkData[]) == paramTable[Algorithm.CRC32_CASTAGNOLI].check);
+
+    // check that rolling CRC works...
+    ushort crc = calculateCRC!(Algorithm.CRC16_MODBUS)(checkData[0 .. 5]);
+    assert(calculateCRC!(Algorithm.CRC16_MODBUS)(checkData[5 .. 9], crc) == paramTable[Algorithm.CRC16_MODBUS].check);
+           crc = calculateCRC!(Algorithm.CRC16_ISO_HDLC)(checkData[0 .. 5]);
+    assert(calculateCRC!(Algorithm.CRC16_ISO_HDLC)(checkData[5 .. 9], crc) == paramTable[Algorithm.CRC16_ISO_HDLC].check);
+    uint crc32 = calculateCRC!(Algorithm.CRC32_ISO_HDLC)(checkData[0 .. 5]);
+    assert(calculateCRC!(Algorithm.CRC32_ISO_HDLC)(checkData[5 .. 9], crc32) == paramTable[Algorithm.CRC32_ISO_HDLC].check);
 }
 
 
