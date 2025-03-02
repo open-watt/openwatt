@@ -98,6 +98,7 @@
     <DCompile Include="src\router\goodwe\aa55.d" />
     <DCompile Include="src\router\goodwe\package.d" />
     <DCompile Include="src\router\iface\bridge.d" />
+    <DCompile Include="src\router\iface\can.d" />
     <DCompile Include="src\router\iface\mac.d" />
     <DCompile Include="src\router\iface\modbus.d" />
     <DCompile Include="src\router\iface\package.d" />
