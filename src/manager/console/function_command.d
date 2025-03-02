@@ -7,12 +7,13 @@ import urt.meta.tuple;
 import urt.traits;
 import urt.string;
 import urt.string.format;
+import urt.variant;
 
 public import manager;
 public import manager.console;
 public import manager.console.command;
-public import manager.console.expression;
 public import manager.console.session;
+public import manager.expression : NamedArgument;
 
 
 class FunctionCommandState : CommandState
@@ -28,7 +29,7 @@ class FunctionCommand : Command
 {
 nothrow @nogc:
 
-    alias GenericCall = const(char)[] function(Session, out FunctionCommandState state, KVP[], void*) nothrow @nogc;
+    alias GenericCall = const(char)[] function(Session, out FunctionCommandState, const Variant[], const NamedArgument[], void*) nothrow @nogc;
 
     static FunctionCommand create(alias fun, Instance)(ref Console console, Instance i, const(char)[] commandName = null)
     {
@@ -36,10 +37,10 @@ nothrow @nogc:
 
         enum FunctionName = transformCommandName(__traits(identifier, fun));
 
-        static const(char)[] functionAdapter(Session session, out FunctionCommandState state, KVP[] parameters, void* instance)
+        static const(char)[] functionAdapter(Session session, out FunctionCommandState state, const Variant[] arguments, const NamedArgument[] parameters, void* instance)
         {
             const(char)[] error;
-            auto args = makeArgTuple!fun(parameters, error, session.m_console.appInstance);
+            auto args = makeArgTuple!fun(arguments, parameters, error, session.m_console.appInstance);
             if (error)
             {
                 session.writeLine(error);
@@ -94,34 +95,10 @@ nothrow @nogc:
         this.fn = fn;
     }
 
-    override FunctionCommandState execute(Session session, const(char)[] cmdLine)
+    override FunctionCommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
     {
-        import urt.mem.scratchpad;
-        import urt.mem.region;
-
-        void[] scratch = allocScratchpad();
-        scope(exit) freeScratchpad(scratch);
-
-        // TODO: move this to its own function...
-        Region* region = scratch.makeRegion;
-        KVP[] params = region.allocArray!KVP(40);
-        assert(params !is null);
-        size_t numParams = 0;
-
-        while (!cmdLine.empty)
-        {
-            KVP kvp = cmdLine.takeKVP;
-            if (kvp.k.type == Token.Type.Error)
-            {
-                session.writeLine("Error: ", kvp.k.token);
-                return null;
-            }
-            if (!kvp.k.type == Token.Type.None)
-                params[numParams++] = kvp;
-        }
-
         FunctionCommandState state;
-        const(char)[] result = fn(session, state, params[0 .. numParams], instance);
+        const(char)[] result = fn(session, state, args, namedArgs, instance);
         if (state)
             state.command = this;
 
@@ -139,7 +116,6 @@ private:
 
 private:
 
-
 char[] transformCommandName(const(char)[] name)
 {
     name = name.length > 0 && name[0] == '_' ? name[1 .. $] : name;
@@ -152,7 +128,7 @@ char[] transformCommandName(const(char)[] name)
     return result;
 }
 
-auto makeArgTuple(alias F)(KVP[] args, out const(char)[] error, ApplicationInstance app)
+auto makeArgTuple(alias F)(const Variant[] args, const NamedArgument[] parameters, out const(char)[] error, ApplicationInstance app)
     if (isSomeFunction!F)
 {
     import urt.meta;
@@ -164,32 +140,24 @@ auto makeArgTuple(alias F)(KVP[] args, out const(char)[] error, ApplicationInsta
     error = null;
     bool[Params.length] gotArg;
 
-    outer: foreach (ref kvp; args)
+    outer: foreach (ref param; parameters)
     {
-        // validate argument name...
-        if (kvp.k.type != Token.Type.Identifier)
-        {
-            error = tconcat("Invalid parameter type");
-            break;
-        }
-
-        const(char)[] key = kvp.k.token[];
-        arg: switch (key)
+        param_switch: switch (param.name)
         {
             static foreach (i, P; Params)
             {
                 case Alias!(transformCommandName(ParamNames[i])):
-                    error = kvp.v.tokenToValue(params[i], app);
+                    error = convertVariant(param.value, params[i], app);
                     if (error)
                     {
-                        error = tconcat("Error parsing argument '", key, "': ", error);
+                        error = tconcat("Argument '", param.name, "' error: ", error);
                         break outer;
                     }
                     gotArg[i] = true;
-                    break arg;
+                    break param_switch;
             }
             default:
-                error = tconcat("Unknown parameter '", key, "'");
+                error = tconcat("Unknown parameter '", param.name, "'");
                 break outer;
         }
     }
@@ -197,7 +165,12 @@ auto makeArgTuple(alias F)(KVP[] args, out const(char)[] error, ApplicationInsta
     static foreach (i, P; Params)
     {
         {
-            static if (!is(P : Nullable!U, U))
+            static if (transformCommandName(ParamNames[i]) == "args")
+            {
+                static assert(is(P == Variant[]), "`args` parameter must be of type Variant[]");
+                params[i] = args;
+            }
+            else static if (!is(P : Nullable!U, U))
             {
                 if (!gotArg[i])
                 {
@@ -212,167 +185,237 @@ done:
     return params;
 }
 
-const(char)[] tokenValue(ref const Token t, bool acceptString) nothrow @nogc
+const(char[]) convertVariant(ref const Variant v, out bool r, ApplicationInstance app) nothrow @nogc
 {
-    if (t.type == Token.Type.Command)
+    if (v.isBool)
+        r = v.asBool;
+    else if (v.isNumber)
     {
-        assert(false, "TODO: [command] expressions need to be evaluated... but what if the user calls a command with latency?");
-    }
-    else if (t.type == Token.Type.String)
-    {
-        if (acceptString)
-            return t.token[].unQuote;
+        // TODO: confirm; do we even want this implicit conversion?
+        if (v.isDouble)
+            r = v.asDouble != 0.0;
+        else if (v.isLong)
+            r = v.asLong != 0;
         else
-            return null;
+            r = v.asUlong != 0;
     }
-    return t.token[];
+    else if (v.isString)
+    {
+        const(char)[] s = v.asString;
+        if (s == "true" || s == "yes")
+            r = true;
+        else if (s == "false" || s == "no")
+            r = false;
+        else
+            return "Invalid boolean value";
+    }
+    else
+        return "Invalid boolean value";
+    return null;
 }
 
-const(char[]) tokenToValue(ref const Token t, out bool r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstance app) nothrow @nogc
+    if (isSomeInt!T)
 {
-    const(char)[] v = tokenValue(t, false);
-    if (!v)
+    if (v.isNumber)
     {
-        r = true;
-        return null;
+        if (v.isDouble)
+        {
+            double d = v.asDouble;
+            r = cast(T)d;
+            if (r != d)
+                return "Not an integer value";
+        }
+        else if (v.isLong)
+        {
+            long l = v.asLong;
+            if (l > T.max || l < T.min)
+                return "Integer value out of range";
+            r = cast(T)l;
+        }
+        else
+        {
+            long u = v.asUlong;
+            if (u > T.max)
+                return "Integer value out of range";
+            r = cast(T)u;
+        }
     }
-    if (v[] == "true" || v[] == "yes")
+    else if (v.isString)
     {
-        r = true;
-        return null;
-    }
-    else if (v[] == "false" || v[] == "no")
-    {
-        r = false;
-        return null;
-    }
-    return "Invalid boolean value";
-}
+        import urt.conv : parseInt, parseUint;
 
-const(char[]) tokenToValue(I)(ref const Token t, out I r, ApplicationInstance app) nothrow @nogc
-    if (isSomeInt!I)
-{
-    import urt.conv : parseInt;
-    const(char)[] v = tokenValue(t, false);
-    if (!v)
-        return "No value";
-    int base = 10;
-    if (v.length > 2 && v[0..2] == "0x")
-    {
-        base = 16;
-        v = v[2 .. $];
+        const(char)[] s = v.asString;
+        int base = 10;
+        if (s.length > 2 && s[0..2] == "0x")
+        {
+            base = 16;
+            s = s[2 .. $];
+        }
+        if (s.length > 2 && s[0..2] == "0b")
+        {
+            base = 2;
+            s = s[2 .. $];
+        }
+        size_t taken;
+        long i = base != 10 ? cast(long)s.parseUint(&taken, base) : s.parseInt(&taken);
+        if (taken != s.length)
+            return "Invalid integer value";
+        if ((long.max > T.max && i > T.max) || (long.min < T.min && i < T.min))
+            return "Integer value out of range";
+        r = cast(T)i;
     }
-    if (v.length > 2 && v[0..2] == "0b")
-    {
-        base = 2;
-        v = v[2 .. $];
-    }
-    size_t taken;
-    long i = v.parseInt(&taken, base);
-    if (taken != v.length)
+    else
         return "Invalid integer value";
-    if ((long.max > I.max && i > I.max) || (long.min < I.min && i < I.min))
-        return "Integer value out of range";
-    r = cast(I)i;
     return null;
 }
 
-const(char[]) tokenToValue(F)(ref const Token t, out F r, ApplicationInstance app) nothrow @nogc
-    if (isSomeFloat!F)
+const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstance app) nothrow @nogc
+    if (isSomeFloat!T)
 {
-    import urt.conv : parseFloat;
-    const(char)[] v = tokenValue(t, false);
-    if (!v)
-        return "No value";
-    size_t taken;
-    r = cast(F)v.parseFloat(&taken);
-    return taken == v.length ? null : "Invalid float value";
-}
+    if (v.isNumber)
+    {
+        if (v.isDouble)
+            r = cast(T)v.asDouble;
+        else if (v.isLong)
+            r = cast(T)v.asLong;
+        else
+            r = cast(T)v.asUlong;
+    }
+    else if (v.isString)
+    {
+        import urt.conv : parseFloat;
 
-const(char[]) tokenToValue(S : const(char)[])(ref const Token t, out S r, ApplicationInstance app) nothrow @nogc
-{
-    const(char)[] v = tokenValue(t, true);
-    r = v;
+        const(char)[] s = v.asString;
+        size_t taken;
+        r = cast(T)s.parseFloat(&taken);
+        if (taken != s.length)
+            return "Invalid float value";
+    }
+    else
+        return "Invalid float value";
     return null;
 }
 
-const(char[]) tokenToValue(T)(ref const Token t, out T r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstance app) nothrow @nogc
+    if (is(const(char)[] : T))
+{
+    if (v.isString)
+        r = v.asString;
+    else
+    {
+        // TODO: expand this and catch possible error cases...
+        r = v.tstring();
+    }
+    return null;
+}
+
+const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstance app) nothrow @nogc
     if (is(T U == enum))
 {
-    // try and parse a key from the string...
-    const(char)[] v = tokenValue(t, false);
-    if (!v)
-        return "No value";
-    switch (v)
+    // TODO: variant may be an enum...
+//    if (v.isUser!T)
+//        r = v.asUser!T;
+//    else if (v.isString)
+    if (v.isString)
     {
-        static foreach(E; __traits(allMembers, T))
+        // try and parse a key from the string...
+        const(char)[] s = v.asString;
+        if (!s)
+            return "No value";
+        switch (s)
         {
-            case Alias!(toLower(E)):
-                r = __traits(getMember, T, E);
-                return null;
+            static foreach(E; __traits(allMembers, T))
+            {
+                case Alias!(toLower(E)):
+                    r = __traits(getMember, T, E);
+                    return null;
+            }
+            default:
+                break;
         }
-        default:
-            break;
     }
 
     // else parse the base type?
-//    const(char)[] v = tokenValue(t, false);
+    // TODO: could be a non-key... do we want to allow this?
 
     return "Invalid value";
 }
 
-const(char[]) tokenToValue(T : U[], U)(ref const Token t, out T r, ApplicationInstance app) nothrow @nogc
-    if (!is(U : char))
+const(char[]) convertVariant(U)(ref const Variant v, out U[] r, ApplicationInstance app) nothrow @nogc
+    if (!is(U : dchar))
 {
-    const(char)[] v = tokenValue(t, false);
+    const(Variant)[] arr;
+    if (v.isArray)
+        arr = v.asArray()[];
+    else if (v.isString)
+        assert(false, "TODO: split on ',' and re-tokenise all the elements...");
+    else
+        return "Invalid array";
 
-    // TODO: this is tricky, because we need to split on ',' but also need to re-tokenise all the elements...
-    //       trouble is; what if the whole token is a string? did it even detect the token type correctly in the first place?
-
-    const(char)[] tmp = v;
-    int numArgs = 0;
-    while (tmp.split!',')
-        ++numArgs;
-
-    r = tempAllocator().allocArray!U(numArgs);
-    int i = 0;
-    while (!v.empty)
+    r = tempAllocator().allocArray!U(arr.length);
+    foreach (i, ref e; arr)
     {
-        const(char[]) error = tokenToValue(Token(v.split!','), r[i++], app);
+        const(char[]) error = convertVariant(e, r[i], app);
         if (error)
             return error;
     }
     return null;
 }
 
-const(char[]) tokenToValue(T : Nullable!U, U)(ref const Token t, out T r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(U, size_t N)(ref const Variant v, out U[N] r, ApplicationInstance app) nothrow @nogc
+    if (!is(U : dchar))
+{
+    U[] tmp;
+    const(char)[] err = convertVariant!(U[])(v, tmp, app);
+    if (err)
+        return err;
+    if (tmp.length != N)
+        return "Array length mismatch";
+    r = tmp[0..N];
+    return null;
+}
+
+const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstance app) nothrow @nogc
+    if (is(T == struct))
+{
+    if (v.isUser!T)
+        r = v.asUser!T;
+    else if (v.isString)
+    {
+        const(char)[] s = v.asString;
+        return r.fromString(s) == s.length ? null : tconcat("Couldn't parse `" ~ T.stringof ~ "` from string: ", v);
+    }
+    else
+        return "Invalid value";
+    return null;
+}
+
+const(char[]) convertVariant(T : Nullable!U, U)(ref const Variant v, out T r, ApplicationInstance app) nothrow @nogc
 {
     U tmp;
-    const(char[]) error = tokenToValue(t, tmp, app);
+    const(char[]) error = convertVariant(v, tmp, app);
     if (!error)
         r = tmp.move;
     return error;
 }
 
-const(char[]) tokenToValue(T)(ref const Token t, out T r, ApplicationInstance app) nothrow @nogc
-    if (is(T == struct))
-{
-    const(char)[] v = tokenValue(t, false);
-    return r.fromString(v) == v.length ? null : tconcat("Couldn't parse `" ~ T.stringof ~ "` from string: ", t);
-}
-
 public import manager.component : Component;
-const(char[]) tokenToValue(ref const Token t, out Component r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(ref const Variant v, out Component r, ApplicationInstance app) nothrow @nogc
 {
-    const(char)[] v = tokenValue(t, true);
-    r = app.findComponent(v);
-    return r ? null : tconcat("No component '", v, '\'');
+    if (!v.isString)
+        return "Invalid component value";
+    const(char)[] s = v.asString;
+    r = app.findComponent(s);
+    return r ? null : tconcat("No component '", s, '\'');
 }
 
 public import manager.device : Device;
-const(char[]) tokenToValue(ref const Token t, out Device r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(ref const Variant v, out Device r, ApplicationInstance app) nothrow @nogc
 {
-    const(char)[] v = tokenValue(t, true);
-    r = app.findDevice(v);
-    return r ? null : tconcat("No device '", v, '\'');
+    if (!v.isString)
+        return "Invalid device value";
+    const(char)[] s = v.asString;
+    r = app.findDevice(s);
+    return r ? null : tconcat("No device '", s, '\'');
 }

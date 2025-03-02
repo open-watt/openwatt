@@ -50,13 +50,26 @@ wchar* twstringz(const(char)[] str) nothrow @nogc
     return buffer.ptr;
 }
 
-int icmp(const(char)[] a, const(char)[] b) pure nothrow @nogc
+ptrdiff_t cmp(const(char)[] a, const(char)[] b) pure nothrow @nogc
 {
     if (a.length != b.length)
-        return cast(int)(a.length - b.length);
+        return a.length - b.length;
     for (size_t i = 0; i < a.length; ++i)
     {
-        int diff = toLower(a[i]) - toLower(b[i]);
+        ptrdiff_t diff = a[i] - b[i];
+        if (diff)
+            return diff;
+    }
+    return 0;
+}
+
+ptrdiff_t icmp(const(char)[] a, const(char)[] b) pure nothrow @nogc
+{
+    if (a.length != b.length)
+        return a.length - b.length;
+    for (size_t i = 0; i < a.length; ++i)
+    {
+        ptrdiff_t diff = toLower(a[i]) - toLower(b[i]);
         if (diff)
             return diff;
     }

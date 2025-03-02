@@ -9,9 +9,9 @@ import urt.util;
 
 import manager.console.builtin_commands;
 import manager.console.command;
-import manager.console.expression;
 import manager.console.function_command;
 import manager.console.session;
+import manager.expression;
 
 nothrow @nogc:
 
@@ -137,13 +137,26 @@ nothrow @nogc:
 
         Scope s = session.curScope;
 
-        cmdLine = cmdLine.trimCmdLine;
-        if (cmdLine.empty)
-            return null;
+        // TODO: reorg this code to stash context and run script...
+        try
+        {
+            Array!ScriptCommand cmds = parseCommands(cmdLine);
+            if (cmds.empty)
+                return null;
 
-        if (cmdLine.frontIs('/'))
-            s = getRoot();
-        return s.execute(session, cmdLine);
+            if(cmds[0].command.frontIs('/'))
+                s = getRoot();
+
+            Context ctx = Context(session, s, cmds.move);
+            // TODO: return context to caller...
+
+            return ctx.execute(session, s);
+        }
+        catch (Exception e)
+        {
+            // something went wrong
+            return null;
+        }
     }
 
 
