@@ -5,6 +5,8 @@ import urt.result;
 import urt.string.uni;
 import urt.time;
 
+public import urt.result;
+
 alias SystemTime = void;
 
 version(Windows)

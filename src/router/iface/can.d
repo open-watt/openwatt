@@ -3,6 +3,7 @@ module router.iface.can;
 import urt.endian;
 import urt.log;
 import urt.mem;
+import urt.meta.nullable;
 import urt.string;
 import urt.time;
 
@@ -38,7 +39,9 @@ nothrow @nogc:
 
 class CANInterface : BaseInterface
 {
-    nothrow @nogc:
+nothrow @nogc:
+
+    alias TypeName = StringLit!"can";
 
     Stream stream;
 
@@ -46,17 +49,17 @@ class CANInterface : BaseInterface
 
     this(InterfaceModule.Instance m, String name, Stream stream, CANInterfaceProtocol protocol) nothrow @nogc
     {
-        super(m, name.move, StringLit!"can");
+        super(m, name.move, TypeName);
         this.stream = stream;
         this.protocol = protocol;
 
-        status.linkStatusChangeTime = getTime();
+        status.linkStatusChangeTime = getSysTime();
         status.linkStatus = stream.connected;
     }
 
     override void update()
     {
-        MonoTime now = getTime();
+        SysTime now = getSysTime();
 
         // check the link status
         bool isConnected = stream.connected();
@@ -164,7 +167,7 @@ class CANInterface : BaseInterface
         while (true);
     }
 
-    override bool forward(ref const Packet packet) nothrow @nogc
+    protected override bool transmit(ref const Packet packet) nothrow @nogc
     {
         // can only handle can packets
         if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.CAN)
@@ -230,11 +233,38 @@ class CANInterface : BaseInterface
         return true;
     }
 
+    override ushort pcapType() const
+        => 227; // CAN_SOCKETCAN
+
+    override void pcapWrite(ref const Packet packet, PacketDirection dir, scope void delegate(const void[] packetData) nothrow @nogc sink) const
+    {
+        // write socket_can struct...
+        struct socket_can
+        {
+            ubyte[4] id;
+            ubyte len;
+            ubyte __pad;
+            ubyte __res0;
+            ubyte len8_dlc; // optional DLC for 8 byte payload length (9 .. 15) (????)
+            ubyte[8] data;
+        }
+        static assert(socket_can.sizeof == 16);
+
+        socket_can f;
+        f.id = (cast(const ubyte[])packet.data)[0..4];
+        f.len = cast(ubyte)(packet.data.length - 4);
+        f.data[0 .. f.len] = cast(const ubyte[])packet.data[4 .. $];
+
+        // TODO: what's the go with the error bit (bit 29 of ID)???
+
+        sink((cast(ubyte*)&f)[0 .. socket_can.sizeof]);
+    }
+
 private:
     ubyte[13] tail; // EBYTE proto has 13byte frames
     ushort tailBytes;
 
-    final void incomingPacket(ref const CANFrame frame, MonoTime recvTime)
+    final void incomingPacket(ref const CANFrame frame, SysTime recvTime)
     {
         version (DebugCANInterface)
             writeDebug("CAN packet received from interface '", name, "': id=", frame.id, " (", frame.data.length , ")[ ", cast(void[])frame.data[], " - ", frame.data.binToAscii(), " ]");
@@ -271,11 +301,9 @@ class CANInterfaceModule : Plugin
             app.console.registerCommand!add("/interface/can", this);
         }
 
-        import urt.meta.nullable;
-
         // /interface/can/add command
         // TODO: protocol enum!
-        void add(Session session, const(char)[] name, const(char)[] stream, const(char)[] protocol)
+        void add(Session session, const(char)[] name, const(char)[] stream, const(char)[] protocol, Nullable!(const(char)[]) pcap)
         {
             // is it an error to not specify a stream?
             assert(stream, "'stream' must be specified");
@@ -299,15 +327,13 @@ class CANInterfaceModule : Plugin
             }
 
             auto mod_if = app.moduleInstance!InterfaceModule;
-
-            if (name.empty)
-                name = mod_if.generateInterfaceName("can");
-            String n = name.makeString(defaultAllocator());
+            String n = mod_if.addInterfaceName(session, name, CANInterface.TypeName);
+            if (!n)
+                return;
 
             CANInterface iface = defaultAllocator.allocT!CANInterface(mod_if, n.move, s, p);
-            mod_if.addInterface(iface);
 
-            writeInfo("Create CAN interface '", name, "' - ", iface.mac);
+            mod_if.addInterface(session, iface, pcap ? pcap.value : null);
         }
     }
 }

@@ -69,16 +69,35 @@ T nextPowerOf2(T)(T x)
 	return cast(T)(x + 1);
 }
 
+T alignDown(size_t alignment, T)(T value)
+    if (isSomeInt!T || is(T == U*, U))
+{
+    return cast(T)(cast(size_t)value & ~(alignment - 1));
+}
+
 T alignDown(T)(T value, size_t alignment)
 	if (isSomeInt!T || is(T == U*, U))
 {
 	return cast(T)(cast(size_t)value & ~(alignment - 1));
 }
 
+T alignUp(size_t alignment, T)(T value)
+    if (isSomeInt!T || is(T == U*, U))
+{
+    return cast(T)((cast(size_t)value + (alignment - 1)) & ~(alignment - 1));
+}
+
 T alignUp(T)(T value, size_t alignment)
 	if (isSomeInt!T || is(T == U*, U))
 {
 	return cast(T)((cast(size_t)value + (alignment - 1)) & ~(alignment - 1));
+}
+
+bool isAligned(size_t alignment, T)(T value)
+    if (isSomeInt!T || is(T == U*, U))
+{
+    static assert(T.sizeof > size_t.sizeof, "TODO");
+    return (cast(size_t)value & (alignment - 1)) == 0;
 }
 
 bool isAligned(T)(T value, size_t alignment)

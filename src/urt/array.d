@@ -575,6 +575,9 @@ nothrow @nogc:
 
     void resize(size_t count)
     {
+        if (count == _length)
+            return;
+
         if (count < _length)
         {
             static if (is(T == class) || is(T == interface))

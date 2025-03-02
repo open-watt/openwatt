@@ -336,13 +336,13 @@ nothrow @nogc:
         return state;
     }
 
-    void responseHandler(ref const ModbusPDU request, ref ModbusPDU response, MonoTime requestTime, MonoTime responseTime)
+    void responseHandler(ref const ModbusPDU request, ref ModbusPDU response, SysTime requestTime, SysTime responseTime)
     {
         session.writeLine("Response from ", slave[], " in ", (responseTime - requestTime).as!"msecs", "ms: ", toHexString(response.data[1..$], 2, 4, "_ "));
         state = CommandCompletionState.Finished;
     }
 
-    void errorHandler(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime requestTime)
+    void errorHandler(ModbusErrorType errorType, ref const ModbusPDU request, SysTime requestTime)
     {
         Duration reqDuration = getTime() - requestTime;
         if (errorType == ModbusErrorType.Timeout)

@@ -29,7 +29,7 @@ nothrow @nogc:
     }
 
 private:
-    void incomingPacket(ref const Packet p, BaseInterface iface, void* userData) nothrow @nogc
+    void incomingPacket(ref const Packet p, BaseInterface iface, PacketDirection dir, void* userData) nothrow @nogc
     {
     }
 }

@@ -59,7 +59,7 @@ nothrow @nogc:
         return r;
     }
 
-    MonoTime creationTime; // time received, or time of call to send
+    SysTime creationTime; // time received, or time of call to send
     MACAddress src;
     MACAddress dst;
     uint vlan;

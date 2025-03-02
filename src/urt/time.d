@@ -38,10 +38,10 @@ nothrow @nogc:
             return MonoTime(ticks - bootFileTime);
     }
 
-    bool opEquals(MonoTime b) const pure
+    bool opEquals(Time!clock b) const pure
         => ticks == b.ticks;
 
-    int opCmp(MonoTime b) const pure
+    int opCmp(Time!clock b) const pure
         => ticks < b.ticks ? -1 : ticks > b.ticks ? 1 : 0;
 
     Duration opBinary(string op, Clock c)(Time!c rhs) const pure if (op == "-")
@@ -365,6 +365,14 @@ Duration appTime(MonoTime t)
     => t - startTime;
 Duration appTime(SysTime t)
     => cast(MonoTime)t - startTime;
+
+ulong unixTimeNs(SysTime t)
+{
+    version (Windows)
+        return (t.ticks - 116444736000000000UL) * 100UL;
+    else
+        static assert(false, "TODO");
+}
 
 Duration abs(Duration d) pure
     => Duration(d.ticks < 0 ? -d.ticks : d.ticks);

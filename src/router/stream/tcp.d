@@ -36,7 +36,7 @@ nothrow @nogc:
             assert(0);
         }
         remote = addrInfo.address;
-        status.linkStatusChangeTime = getTime();
+        status.linkStatusChangeTime = getSysTime();
         update();
     }
 
@@ -45,13 +45,13 @@ nothrow @nogc:
         super(name.move, "tcp-client", options);
 
         remote = address;
-        status.linkStatusChangeTime = getTime();
+        status.linkStatusChangeTime = getSysTime();
         update();
     }
 
     override bool connect()
     {
-        lastRetry = MonoTime();
+        lastRetry = SysTime();
         update();
         return true;
     }
@@ -200,7 +200,7 @@ nothrow @nogc:
             return;
         }
 
-        MonoTime now = getTime();
+        SysTime now = getSysTime();
 
         // if the socket is invalid, we'll attempt to initiate a connection...
         if (socket == Socket.invalid)
@@ -297,7 +297,7 @@ nothrow @nogc:
         socket = Socket.invalid;
         live = false;
         status.linkStatus = false;
-        status.linkStatusChangeTime = getTime();
+        status.linkStatusChangeTime = getSysTime();
         ++status.linkDowns;
 
         writeWarning("TCP stream '", name, "' link down.");
@@ -308,7 +308,7 @@ nothrow @nogc:
 //private:
     InetAddress remote;
     Socket socket;
-    MonoTime lastRetry;
+    SysTime lastRetry;
 //    TCPServer reverseConnectServer;
 
     bool keepEnable = false;

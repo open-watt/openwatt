@@ -3,6 +3,7 @@ module router.iface.tesla;
 import urt.log;
 import urt.map;
 import urt.mem;
+import urt.meta.nullable;
 import urt.string;
 import urt.string.format;
 import urt.time;
@@ -34,17 +35,19 @@ class TeslaInterface : BaseInterface
 {
 nothrow @nogc:
 
+    alias TypeName = StringLit!"tesla-twc";
+
     Stream stream;
 
     this(InterfaceModule.Instance m, String name, Stream stream) nothrow @nogc
     {
-        super(m, name, StringLit!"tesla-twc");
+        super(m, name, TypeName);
         this.stream = stream;
     }
 
     override void update()
     {
-        MonoTime now = getTime();
+        SysTime now = getSysTime();
 
         // check the link status
         bool isConnected = stream.connected();
@@ -115,7 +118,7 @@ nothrow @nogc:
         }
     }
 
-    override bool forward(ref const Packet packet) nothrow @nogc
+    protected override bool transmit(ref const Packet packet) nothrow @nogc
     {
         if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.TeslaTWC)
         {
@@ -174,7 +177,7 @@ nothrow @nogc:
 
 private:
 
-    final void incomingPacket(const(ubyte)[] msg, MonoTime recvTime)
+    final void incomingPacket(const(ubyte)[] msg, SysTime recvTime)
     {
         // we need to extract the sender/receiver addresses...
         TWCMessage message;
@@ -230,7 +233,7 @@ class TeslaInterfaceModule : Plugin
             app.console.registerCommand!add("/interface/tesla-twc", this);
         }
 
-        void add(Session session, const(char)[] name, const(char)[] stream)
+        void add(Session session, const(char)[] name, const(char)[] stream, Nullable!(const(char)[]) pcap)
         {
             Stream s = app.moduleInstance!StreamModule.getStream(stream);
             if (!s)
@@ -239,15 +242,14 @@ class TeslaInterfaceModule : Plugin
                 return;
             }
 
-            if (name.empty)
-                name = app.moduleInstance!InterfaceModule.generateInterfaceName("tesla-twc");
-            String n = name.makeString(defaultAllocator());
+            auto mod_if = app.moduleInstance!InterfaceModule;
+            String n = mod_if.addInterfaceName(session, name, TeslaInterface.TypeName);
+            if (!n)
+                return;
 
-            TeslaInterface iface = defaultAllocator.allocT!TeslaInterface(app.moduleInstance!InterfaceModule, n.move, s);
-            app.moduleInstance!InterfaceModule().addInterface(iface);
+            TeslaInterface iface = defaultAllocator.allocT!TeslaInterface(mod_if, n.move, s);
 
-            import urt.log;
-            writeInfo("Create tesla-twc interface '", name, "' - ", iface.mac);
+            mod_if.addInterface(session, iface, pcap ? pcap.value : null);
 
             version (DebugTeslaInterface)
             {
