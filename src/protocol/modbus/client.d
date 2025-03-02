@@ -11,6 +11,7 @@ import urt.time;
 import protocol.modbus;
 
 import router.iface;
+import router.iface.modbus : ModbusFrameType; // TODO: move this?
 import router.modbus.message;
 
 enum ModbusErrorType
@@ -20,6 +21,7 @@ enum ModbusErrorType
     Failed,
 }
 
+alias ModbusRequestHandler = void delegate(ref const MACAddress client, ushort sequenceNumber, ref const ModbusPDU request, MonoTime requestTime) nothrow @nogc;
 alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref ModbusPDU response, MonoTime requestTime, MonoTime responseTime) nothrow @nogc;
 alias ModbusErrorHandler = void delegate(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime requestTime) nothrow @nogc;
 alias ModbusSnoopHandler = void delegate(ref const MACAddress server, ref const ModbusPDU request, ref ModbusPDU response, MonoTime requestTime, MonoTime responseTime) nothrow @nogc;
@@ -32,8 +34,11 @@ nothrow @nogc:
 
     String name;
     BaseInterface iface;
-    bool snooping;
+
+    ModbusRequestHandler requestHandler;
     ModbusSnoopHandler snoopHandler;
+
+    bool snooping;
 
     this(ModbusProtocolModule.Instance m, String name, BaseInterface _interface, bool snooping = false) nothrow @nogc
     {
@@ -53,6 +58,16 @@ nothrow @nogc:
         // TODO: unsubscribe!
     }
 
+    void setRequestHandler(ModbusRequestHandler handler) pure nothrow @nogc
+    {
+        requestHandler = handler;
+    }
+
+    void setSnoopHandler(ModbusSnoopHandler snoopHandler)
+    {
+        this.snoopHandler = snoopHandler;
+    }
+
     bool isSnooping() const
         => snooping;
 
@@ -67,17 +82,37 @@ nothrow @nogc:
         MonoTime now = getTime();
         PendingRequest* r = &pending.pushBack(PendingRequest(now, now, request, ++sequenceNumber, numRetries, timeout, server, responseHandler, errorHandler));
 
+        import router.iface.modbus;
+        ServerMap* map = m.app.moduleInstance!ModbusInterfaceModule().findServerByMac(server);
+        if (!map)
+            return;
+
         // send the packet
-        ubyte[255] buffer = void;
-        buffer[0 .. 2] = nativeToBigEndian(sequenceNumber);
-        buffer[2] = request.functionCode;
-        buffer[3 .. 3 + request.data.length] = request.data[];
-        iface.send(server, buffer[0 .. 3 + request.data.length], EtherType.ENMS, ENMS_SubType.Modbus);
+        ubyte[4 + ModbusMessageDataMaxLength] buffer = void;
+        buffer[0] = map.universalAddress;
+        buffer[1] = ModbusFrameType.Request;
+        buffer[2..4] = nativeToBigEndian(sequenceNumber);
+        buffer[4] = request.functionCode;
+        buffer[5 .. 5 + request.data.length] = request.data[];
+
+        iface.send(server, buffer[0 .. 5 + request.data.length], EtherType.ENMS, ENMS_SubType.Modbus);
     }
 
-    void setSnoopHandler(ModbusSnoopHandler snoopHandler)
+    void sendResponse(ref const MACAddress client, ushort sequenceNumber, ref const ModbusPDU response) nothrow @nogc
     {
-        this.snoopHandler = snoopHandler;
+        import router.iface.modbus;
+        ServerMap* map = m.app.moduleInstance!ModbusInterfaceModule().findServerByMac(client);
+        if (!map)
+            return;
+
+        ubyte[4 + ModbusMessageDataMaxLength] message = void;
+        message[0] = map.universalAddress;
+        message[1] = ModbusFrameType.Response;
+        message[2..4] = sequenceNumber.nativeToBigEndian;
+        message[4] = response.functionCode;
+        message[5 .. 5 + response.data.length] = response.data[];
+
+        iface.send(client, message[0 .. 3 + response.data.length], EtherType.ENMS, ENMS_SubType.Modbus);
     }
 
     void update()
@@ -133,11 +168,24 @@ private:
     {
         // we can't even identify what request a message belongs to if it's been truncated
         auto message = cast(const(ubyte)[])p.data;
-        if (message.length < 3)
+        if (message.length < 5)
             return;
-        ushort seq = message[0..2].bigEndianToNative!ushort;
 
-        if (!snooping)
+        ubyte address = *cast(ubyte*)&p.data[0];
+        ModbusFrameType type = *cast(ModbusFrameType*)&p.data[1];
+        ushort seq = message[2..4].bigEndianToNative!ushort;
+
+        if (type == ModbusFrameType.Request && (p.dst == iface.mac || p.dst.isBroadcast))
+        {
+            // check that we're accepting requests...
+            if (!requestHandler)
+                return;
+
+            // it's a request for us...
+            ModbusPDU request = ModbusPDU(cast(FunctionCode)message[4], message[5 .. $]);
+            requestHandler(p.src, seq, request, p.creationTime);
+        }
+        else if (!snooping)
         {
             foreach (i, ref PendingRequest req; pending)
             {
@@ -147,7 +195,7 @@ private:
                     continue;
 
                 // this appears to be the message we're waiting for!
-                ModbusPDU response = ModbusPDU(cast(FunctionCode)message[2], message[3 .. $]);
+                ModbusPDU response = ModbusPDU(cast(FunctionCode)message[4], message[5 .. $]);
                 req.responseHandler(req.request, response, req.requestTime, p.creationTime);
 
                 pending.remove(i);
@@ -156,18 +204,23 @@ private:
         }
         else if (snoopHandler)
         {
+            // if the sequence number changes, it must be a new transaction
             if (pending[0].sequenceNumber != seq)
             {
-                // if the sequence number changed, it must be the start of a transaction
+                if (type != ModbusFrameType.Request)
+                    return;
+
                 pending[0].requestTime = p.creationTime;
-                pending[0].request = ModbusPDU(cast(FunctionCode)message[2], message[3 .. $]);
+                pending[0].request = ModbusPDU(cast(FunctionCode)message[4], message[5 .. $]);
                 pending[0].sequenceNumber = seq;
                 pending[0].server = p.dst;
             }
             else
             {
-                // if the sequence number was the same, then it must be a response
-                ModbusPDU response = ModbusPDU(cast(FunctionCode)message[2], message[3 .. $]);
+                if (type != ModbusFrameType.Response || pending[0].requestTime == MonoTime())
+                    return;
+
+                ModbusPDU response = ModbusPDU(cast(FunctionCode)message[4], message[5 .. $]);
                 snoopHandler(p.src, pending[0].request, response, pending[0].requestTime, p.creationTime);
             }
         }
