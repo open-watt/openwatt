@@ -1,5 +1,8 @@
 module urt.system;
 
+import urt.platform;
+import urt.processor;
+
 nothrow @nogc:
 
 
@@ -11,6 +14,31 @@ enum IdleParams : ubyte
 
 extern(C) void abort();
 extern(C) void exit(int status);
+
+struct SystemInfo
+{
+    string osName;
+    string processor;
+    ulong totalMemory;
+    ulong availableMemory;
+}
+
+SystemInfo getSysInfo()
+{
+    SystemInfo r;
+    r.osName = Platform;
+    r.processor = ProcessorFamily;
+    version (Windows)
+    {
+        MEMORYSTATUSEX mem;
+        if (GlobalMemoryStatusEx(&mem))
+        {
+            r.totalMemory = mem.ullTotalPhys;
+            r.availableMemory = mem.ullAvailPhys;
+        }
+    }
+    return r;
+}
 
 void setSystemIdleParams(IdleParams params)
 {
@@ -31,6 +59,21 @@ void setSystemIdleParams(IdleParams params)
 
 version (Windows)
 {
+    struct MEMORYSTATUSEX
+    {
+        uint dwLength = MEMORYSTATUSEX.sizeof;
+        uint dwMemoryLoad;
+        ulong ullTotalPhys;
+        ulong ullAvailPhys;
+        ulong ullTotalPageFile;
+        ulong ullAvailPageFile;
+        ulong ullTotalVirtual;
+        ulong ullAvailVirtual;
+        ulong ullAvailExtendedVirtual;
+    }
+
+    extern(C) int GlobalMemoryStatusEx(MEMORYSTATUSEX* lpBuffer);
+
     version (X86_64)
     {
         alias _EXCEPTION_REGISTRATION_RECORD = void;
