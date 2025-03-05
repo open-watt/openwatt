@@ -126,6 +126,11 @@ class TeslaProtocolModule : Plugin
             c.template_ = "DeviceInfo".addString;
 
             e = app.allocator.allocT!Element();
+            e.id = "deviceType".addString;
+            e.latest = Value("evse");
+            c.elements ~= e;
+
+            e = app.allocator.allocT!Element();
             e.id = "deviceName".addString;
             e.latest = Value("Tesla Wall Charger Gen2");
             c.elements ~= e;
@@ -138,6 +143,12 @@ class TeslaProtocolModule : Plugin
             e = app.allocator.allocT!Element();
             e.id = "lifetimeEnergy".addString;
             e.unit = "kWh".addString;
+            c.elements ~= e;
+            sampler.addElement(e);
+
+            // HACK: remove this, move to car component...
+            e = app.allocator.allocT!Element();
+            e.id = "vin".addString;
             c.elements ~= e;
             sampler.addElement(e);
 
@@ -167,20 +178,25 @@ class TeslaProtocolModule : Plugin
 
             device.components ~= c;
 
-            // car
-            c = app.allocator.allocT!Component(String("car".addString));
-            c.template_ = "Car".addString;
-
-            e = app.allocator.allocT!Element();
-            e.id = "vin".addString;
-            c.elements ~= e;
-            sampler.addElement(e);
-
-            device.components ~= c;
+//            // car
+//            c = app.allocator.allocT!Component(String("car".addString));
+//            c.template_ = "Car".addString;
+//
+//            e = app.allocator.allocT!Element();
+//            e.id = "vin".addString;
+//            c.elements ~= e;
+//            sampler.addElement(e);
+//
+//            device.components ~= c;
 
             // energy meter
-            c = app.allocator.allocT!Component(String("meter".addString));
+            c = app.allocator.allocT!Component(String("realtime".addString));
             c.template_ = "RealtimeEnergyMeter".addString;
+
+            e = app.allocator.allocT!Element();
+            e.id = "type".addString;
+            e.value = "three-phase".addString;
+            c.elements ~= e;
 
             e = app.allocator.allocT!Element();
             e.id = "voltage1".addString;
@@ -207,26 +223,43 @@ class TeslaProtocolModule : Plugin
             sampler.addElement(e);
 
             e = app.allocator.allocT!Element();
-            e.id = "activePower1".addString;
+            e.id = "power1".addString;
             e.unit = "W".addString;
             c.elements ~= e;
             sampler.addElement(e);
 
             e = app.allocator.allocT!Element();
-            e.id = "activePower2".addString;
+            e.id = "power2".addString;
             e.unit = "W".addString;
             c.elements ~= e;
             sampler.addElement(e);
 
             e = app.allocator.allocT!Element();
-            e.id = "activePower3".addString;
+            e.id = "power3".addString;
             e.unit = "W".addString;
             c.elements ~= e;
             sampler.addElement(e);
 
             e = app.allocator.allocT!Element();
-            e.id = "totalPower".addString;
+            e.id = "power".addString;
             e.unit = "W".addString;
+            c.elements ~= e;
+            sampler.addElement(e);
+
+            device.components ~= c;
+
+            // cumulative energy meter
+            c = app.allocator.allocT!Component(String("cumulative".addString));
+            c.template_ = "CumulativeEnergyMeter".addString;
+
+            e = app.allocator.allocT!Element();
+            e.id = "type".addString;
+            e.value = "three-phase".addString;
+            c.elements ~= e;
+
+            e = app.allocator.allocT!Element();
+            e.id = "totalImportActiveEnergy".addString;
+            e.unit = "kWh".addString;
             c.elements ~= e;
             sampler.addElement(e);
 
