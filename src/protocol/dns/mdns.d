@@ -14,6 +14,8 @@ static import manager.system;
 
 import protocol.dns.message;
 
+//version = DebugDNSMessageFlow;
+
 nothrow @nogc:
 
 
@@ -168,13 +170,14 @@ nothrow @nogc:
 
             // TODO: we got a normal message
             // handle requests, collect responses...
-            writeDebug("mDNS: received message from ", sender, ": ID=", message.id);
-
-            foreach (q; message.questions)
-                writeDebugf("mDNS:   question {0}, type={1,04x}, class={2,04x}", q.name, q.type, q.class_);
-
-            foreach (a; message.answers)
-                writeDebugf("mDNS:   answer {0}, type={1,04x}, class={2,04x}, ttl={3} - {4}", a.name, a.type, a.class_, a.ttl, cast(void[])a.data[]);
+            version (DebugDNSMessageFlow)
+            {
+                writeDebug("mDNS: received message from ", sender, ": ID=", message.id);
+                foreach (q; message.questions)
+                    writeDebugf("mDNS:   question {0}, type={1,04x}, class={2,04x}", q.name, q.type, q.class_);
+                foreach (a; message.answers)
+                    writeDebugf("mDNS:   answer {0}, type={1,04x}, class={2,04x}, ttl={3} - {4}", a.name, a.type, a.class_, a.ttl, cast(void[])a.data[]);
+            }
         }
 
         // perform name negotiation
