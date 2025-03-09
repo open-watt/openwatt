@@ -255,70 +255,65 @@ struct PcapServer
 }
 
 
-class PcapModule : Plugin
+class PcapModule : Module
 {
-    mixin RegisterModule!"manager.pcap";
+    mixin DeclareModule!"manager.pcap";
+nothrow @nogc:
 
-    class Instance : Plugin.Instance
+    Array!(PcapInterface*) interfaces;
+
+    PcapInterface* findInterface(const(char)[] name)
     {
-        mixin DeclareInstance;
-    nothrow @nogc:
+        foreach (PcapInterface* pcap; interfaces)
+            if (pcap.name == name)
+                return pcap;
+        return null;
+    }
 
-        Array!(PcapInterface*) interfaces;
+    override void init()
+    {
+        app.console.registerCommand!add("/tools/pcap", this);
+    }
 
-        PcapInterface* findInterface(const(char)[] name)
+    override void postUpdate()
+    {
+        foreach (PcapInterface* pcap; interfaces)
+            pcap.update();
+    }
+
+    import urt.meta.nullable;
+
+    // /tools/pcap/add command
+    void add(Session session, const(char)[] name, const(char)[] file)
+    {
+        if (name.empty)
         {
-            foreach (PcapInterface* pcap; interfaces)
-                if (pcap.name == name)
-                    return pcap;
-            return null;
+            session.writeLine("PCAP interface must have a name");
+            return;
         }
-
-        override void init()
+        foreach (PcapInterface* pcap; interfaces)
         {
-            app.console.registerCommand!add("/tools/pcap", this);
-        }
-
-        override void postUpdate()
-        {
-            foreach (PcapInterface* pcap; interfaces)
-                pcap.update();
-        }
-
-        import urt.meta.nullable;
-
-        // /tools/pcap/add command
-        void add(Session session, const(char)[] name, const(char)[] file)
-        {
-            if (name.empty)
+            if (pcap.name == name)
             {
-                session.writeLine("PCAP interface must have a name");
+                session.writeLine("PCAP interface '", name, "' already exists");
                 return;
             }
-            foreach (PcapInterface* pcap; interfaces)
-            {
-                if (pcap.name == name)
-                {
-                    session.writeLine("PCAP interface '", name, "' already exists");
-                    return;
-                }
-            }
-            String n = name.makeString(app.allocator);
-
-            PcapInterface* pcap = app.allocator.allocT!PcapInterface();
-            pcap.name = n.move;
-
-            if (!pcap.openFile(file))
-            {
-                writeInfo("Couldn't open PCAP file '", file, "'");
-                app.allocator.freeT(pcap);
-                return;
-            }
-
-            interfaces ~= pcap;
-
-            writeInfo("Create PCAP interface '", name, "' to file: ", file);
         }
+        String n = name.makeString(app.allocator);
+
+        PcapInterface* pcap = app.allocator.allocT!PcapInterface();
+        pcap.name = n.move;
+
+        if (!pcap.openFile(file))
+        {
+            writeInfo("Couldn't open PCAP file '", file, "'");
+            app.allocator.freeT(pcap);
+            return;
+        }
+
+        interfaces ~= pcap;
+
+        writeInfo("Create PCAP interface '", name, "' to file: ", file);
     }
 }
 

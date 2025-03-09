@@ -12,7 +12,6 @@ import urt.string.format;
 import urt.time;
 
 import manager.console;
-import manager.instance;
 import manager.plugin;
 
 import router.iface;
@@ -96,7 +95,7 @@ nothrow @nogc:
     Map!(ubyte, ubyte) localToUni;
     Map!(ubyte, ubyte) uniToLocal;
 
-    this(InterfaceModule.Instance m, String name, Stream stream, ModbusProtocol protocol, bool isMaster) nothrow @nogc
+    this(InterfaceModule m, String name, Stream stream, ModbusProtocol protocol, bool isMaster) nothrow @nogc
     {
         super(m, name.move, TypeName);
         this.stream = stream;
@@ -598,205 +597,200 @@ private:
 }
 
 
-class ModbusInterfaceModule : Plugin
+class ModbusInterfaceModule : Module
 {
-    mixin RegisterModule!"interface.modbus";
+    mixin DeclareModule!"interface.modbus";
+nothrow @nogc:
 
-    class Instance : Plugin.Instance
+    Map!(ubyte, ServerMap) remoteServers;
+
+    override void init()
     {
-        mixin DeclareInstance;
-    nothrow @nogc:
+        app.console.registerCommand!add("/interface/modbus", this);
+        app.console.registerCommand!remote_server_add("/interface/modbus/remote-server", this, "add");
+    }
 
-        Map!(ubyte, ServerMap) remoteServers;
-
-        override void init()
+    ServerMap* findServerByName(const(char)[] name)
+    {
+        foreach (ref map; remoteServers)
         {
-            app.console.registerCommand!add("/interface/modbus", this);
-            app.console.registerCommand!remote_server_add("/interface/modbus/remote-server", this, "add");
+            if (map.name[] == name)
+                return &map;
         }
+        return null;
+    }
 
-        ServerMap* findServerByName(const(char)[] name)
+    ServerMap* findServerByMac(MACAddress mac)
+    {
+        foreach (ref map; remoteServers)
         {
-            foreach (ref map; remoteServers)
+            if (map.mac == mac)
+                return &map;
+        }
+        return null;
+    }
+
+    ServerMap* findServerByLocalAddress(ubyte localAddress, BaseInterface iface)
+    {
+        foreach (ref map; remoteServers)
+        {
+            if (map.localAddress == localAddress && map.iface is iface)
+                return &map;
+        }
+        return null;
+    }
+
+    ServerMap* findServerByUniversalAddress(ubyte universalAddress)
+    {
+        return universalAddress in remoteServers;
+    }
+
+    ServerMap* addRemoteServer(const(char)[] name, ModbusInterface iface, ubyte address, const(char)[] profile, ubyte universalAddress = 0)
+    {
+        if (!name)
+            name = tconcat(iface.name[], '.', address);
+
+        ServerMap map;
+        map.name = name.makeString(defaultAllocator());
+        map.mac = iface.generateMacAddress();
+        map.mac.b[5] = address;
+
+        if (!universalAddress)
+        {
+            const ubyte initialAddress = universalAddress = map.mac.b[4] ^ address;
+            while (true)
             {
-                if (map.name[] == name)
-                    return &map;
+                if (universalAddress == 0 || universalAddress == 0xFF)
+                    universalAddress += 2;
+                if (universalAddress !in remoteServers)
+                    break;
+                ++universalAddress;
+                assert(universalAddress != initialAddress, "No available universal addresses!");
             }
-            return null;
+        }
+        else
+            assert(universalAddress !in remoteServers, "Universal address already in use.");
+
+        iface.localToUni[address] = universalAddress;
+        iface.uniToLocal[universalAddress] = address;
+
+        map.localAddress = address;
+        map.universalAddress = universalAddress;
+        map.iface = iface;
+        map.profile = profile.makeString(defaultAllocator());
+
+        remoteServers[universalAddress] = map;
+        iface.addAddress(map.mac, iface);
+
+        import urt.log;
+        writeInfof("Create modbus server '{0}' - mac: {1}  uid: {2}  at-interface: {3}({4})", map.name, map.mac, map.universalAddress, iface.name, map.localAddress);
+
+        return universalAddress in remoteServers;
+    }
+
+    // /interface/modbus/add command
+    // TODO: protocol enum!
+    void add(Session session, const(char)[] name, const(char)[] stream, const(char)[] protocol, Nullable!bool master, Nullable!(const(char)[]) pcap)
+    {
+        // is it an error to not specify a stream?
+        assert(stream, "'stream' must be specified");
+
+        Stream s = app.moduleInstance!StreamModule.getStream(stream);
+        if (!s)
+        {
+            session.writeLine("Stream does not exist: ", stream);
+            return;
         }
 
-        ServerMap* findServerByMac(MACAddress mac)
+        ModbusProtocol p = ModbusProtocol.Unknown;
+        switch (protocol)
         {
-            foreach (ref map; remoteServers)
-            {
-                if (map.mac == mac)
-                    return &map;
-            }
-            return null;
+            case "rtu":
+                p = ModbusProtocol.RTU;
+                break;
+            case "tcp":
+                p = ModbusProtocol.TCP;
+                break;
+            case "ascii":
+                p = ModbusProtocol.ASCII;
+                break;
+            default:
+                session.writeLine("Invalid modbus protocol '", protocol, "', expect 'rtu|tcp|ascii'.");
+                return;
         }
-
-        ServerMap* findServerByLocalAddress(ubyte localAddress, BaseInterface iface)
+        if (p == ModbusProtocol.Unknown)
         {
-            foreach (ref map; remoteServers)
-            {
-                if (map.localAddress == localAddress && map.iface is iface)
-                    return &map;
-            }
-            return null;
-        }
-
-        ServerMap* findServerByUniversalAddress(ubyte universalAddress)
-        {
-            return universalAddress in remoteServers;
-        }
-
-        ServerMap* addRemoteServer(const(char)[] name, ModbusInterface iface, ubyte address, const(char)[] profile, ubyte universalAddress = 0)
-        {
-            if (!name)
-                name = tconcat(iface.name[], '.', address);
-
-            ServerMap map;
-            map.name = name.makeString(defaultAllocator());
-            map.mac = iface.generateMacAddress();
-            map.mac.b[5] = address;
-
-            if (!universalAddress)
-            {
-                const ubyte initialAddress = universalAddress = map.mac.b[4] ^ address;
-                while (true)
-                {
-                    if (universalAddress == 0 || universalAddress == 0xFF)
-                        universalAddress += 2;
-                    if (universalAddress !in remoteServers)
-                        break;
-                    ++universalAddress;
-                    assert(universalAddress != initialAddress, "No available universal addresses!");
-                }
-            }
+            if (s && s.type == "tcp-client") // TODO: UDP here too... but what is the type called?
+                p = ModbusProtocol.TCP;
             else
-                assert(universalAddress !in remoteServers, "Universal address already in use.");
-
-            iface.localToUni[address] = universalAddress;
-            iface.uniToLocal[universalAddress] = address;
-
-            map.localAddress = address;
-            map.universalAddress = universalAddress;
-            map.iface = iface;
-            map.profile = profile.makeString(defaultAllocator());
-
-            remoteServers[universalAddress] = map;
-            iface.addAddress(map.mac, iface);
-
-            import urt.log;
-            writeInfof("Create modbus server '{0}' - mac: {1}  uid: {2}  at-interface: {3}({4})", map.name, map.mac, map.universalAddress, iface.name, map.localAddress);
-
-            return universalAddress in remoteServers;
+                p = ModbusProtocol.RTU;
         }
 
-        // /interface/modbus/add command
-        // TODO: protocol enum!
-        void add(Session session, const(char)[] name, const(char)[] stream, const(char)[] protocol, Nullable!bool master, Nullable!(const(char)[]) pcap)
-        {
-            // is it an error to not specify a stream?
-            assert(stream, "'stream' must be specified");
+        auto mod_if = app.moduleInstance!InterfaceModule;
+        String n = mod_if.addInterfaceName(session, name, ModbusInterface.TypeName);
+        if (!n)
+            return;
 
-            Stream s = app.moduleInstance!StreamModule.getStream(stream);
-            if (!s)
-            {
-                session.writeLine("Stream does not exist: ", stream);
-                return;
-            }
+        ModbusInterface iface = defaultAllocator.allocT!ModbusInterface(mod_if, n.move, s, p, master ? master.value : false);
 
-            ModbusProtocol p = ModbusProtocol.Unknown;
-            switch (protocol)
-            {
-                case "rtu":
-                    p = ModbusProtocol.RTU;
-                    break;
-                case "tcp":
-                    p = ModbusProtocol.TCP;
-                    break;
-                case "ascii":
-                    p = ModbusProtocol.ASCII;
-                    break;
-                default:
-                    session.writeLine("Invalid modbus protocol '", protocol, "', expect 'rtu|tcp|ascii'.");
-                    return;
-            }
-            if (p == ModbusProtocol.Unknown)
-            {
-                if (s && s.type == "tcp-client") // TODO: UDP here too... but what is the type called?
-                    p = ModbusProtocol.TCP;
-                else
-                    p = ModbusProtocol.RTU;
-            }
-
-            auto mod_if = app.moduleInstance!InterfaceModule;
-            String n = mod_if.addInterfaceName(session, name, ModbusInterface.TypeName);
-            if (!n)
-                return;
-
-            ModbusInterface iface = defaultAllocator.allocT!ModbusInterface(mod_if, n.move, s, p, master ? master.value : false);
-
-            mod_if.addInterface(session, iface, pcap ? pcap.value : null);
-
-            version (DebugModbusMessageFlow)
-                iface.subscribe(&printPacket, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
-        }
+        mod_if.addInterface(session, iface, pcap ? pcap.value : null);
 
         version (DebugModbusMessageFlow)
-        {
-            void printPacket(ref const Packet p, BaseInterface i, void*)
-            {
-                import urt.io;
+            iface.subscribe(&printPacket, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
+    }
 
-                auto modbus = app.moduleInstance!ModbusInterfaceModule;
-                ServerMap* src = modbus.findServerByMac(p.src);
-                ServerMap* dst = modbus.findServerByMac(p.dst);
-                const(char)[] srcName = src ? src.name[] : tconcat(p.src);
-                const(char)[] dstName = dst ? dst.name[] : tconcat(p.dst);
-                writef("{0}: Modbus packet received: ( {1} -> {2} )  [{3}]\n", i.name, srcName, dstName, p.data);
+    version (DebugModbusMessageFlow)
+    {
+        void printPacket(ref const Packet p, BaseInterface i, void*)
+        {
+            import urt.io;
+
+            auto modbus = app.moduleInstance!ModbusInterfaceModule;
+            ServerMap* src = modbus.findServerByMac(p.src);
+            ServerMap* dst = modbus.findServerByMac(p.dst);
+            const(char)[] srcName = src ? src.name[] : tconcat(p.src);
+            const(char)[] dstName = dst ? dst.name[] : tconcat(p.dst);
+            writef("{0}: Modbus packet received: ( {1} -> {2} )  [{3}]\n", i.name, srcName, dstName, p.data);
+        }
+    }
+
+    void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, const(char)[] profile, Nullable!ubyte universal_address)
+    {
+        if (!_interface)
+        {
+            session.writeLine("Interface must be specified.");
+            return;
+        }
+        if (!address)
+        {
+            session.writeLine("Local address must be specified.");
+            return;
+        }
+
+        BaseInterface iface = app.moduleInstance!InterfaceModule.findInterface(_interface);
+        if (!iface)
+        {
+            session.writeLine("Interface '", _interface, "' not found.");
+            return;
+        }
+        ModbusInterface modbusInterface = cast(ModbusInterface)iface;
+        if (!modbusInterface)
+        {
+            session.writeLine("Interface '", _interface, "' is not a modbus interface.");
+            return;
+        }
+
+        if (universal_address)
+        {
+            ServerMap* t = universal_address.value in remoteServers;
+            if (t)
+            {
+                session.writeLine("Universal address '", universal_address.value, "' already in use by '", t.name, "'.");
+                return;
             }
         }
 
-        void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, const(char)[] profile, Nullable!ubyte universal_address)
-        {
-            if (!_interface)
-            {
-                session.writeLine("Interface must be specified.");
-                return;
-            }
-            if (!address)
-            {
-                session.writeLine("Local address must be specified.");
-                return;
-            }
-
-            BaseInterface iface = app.moduleInstance!InterfaceModule.findInterface(_interface);
-            if (!iface)
-            {
-                session.writeLine("Interface '", _interface, "' not found.");
-                return;
-            }
-            ModbusInterface modbusInterface = cast(ModbusInterface)iface;
-            if (!modbusInterface)
-            {
-                session.writeLine("Interface '", _interface, "' is not a modbus interface.");
-                return;
-            }
-
-            if (universal_address)
-            {
-                ServerMap* t = universal_address.value in remoteServers;
-                if (t)
-                {
-                    session.writeLine("Universal address '", universal_address.value, "' already in use by '", t.name, "'.");
-                    return;
-                }
-            }
-
-            addRemoteServer(name, modbusInterface, address, profile, universal_address ? universal_address.value : 0);
-        }
+        addRemoteServer(name, modbusInterface, address, profile, universal_address ? universal_address.value : 0);
     }
 }
 

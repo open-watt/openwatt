@@ -4,91 +4,225 @@ import urt.array;
 import urt.lifetime : move;
 import urt.map;
 import urt.mem.allocator;
+import urt.mem.string;
 import urt.string;
 
-public import manager.instance;
+import manager.console;
 import manager.plugin;
+import manager.system;
+
+public static import manager.pcap;
+
+nothrow @nogc:
 
 
-__gshared GlobalInstance globalInstance;
+__gshared ApplicationInstance appInstance;
 
-
-GlobalInstance getGlobalInstance() nothrow @nogc
+ApplicationInstance getAppInstance()
 {
-	if (!globalInstance)
-		globalInstance = defaultAllocator().allocT!GlobalInstance();
-	return globalInstance;
+    if (!appInstance)
+        appInstance = defaultAllocator().allocT!ApplicationInstance();
+    return appInstance;
 }
 
-class GlobalInstance
+
+class ApplicationInstance
 {
-	Map!(String, ApplicationInstance) instances;
-	Array!Plugin modules;
+nothrow @nogc:
 
-	import router.modbus.profile;
+    String name;
 
-	void registerPlugin(Plugin plugin)
-	{
-		import urt.string.format;
+    NoGCAllocator allocator;
+    NoGCAllocator tempAllocator;
 
-		foreach (p; modules)
-			assert(p.moduleName[] != plugin.moduleName, tconcat("Module '", plugin.moduleName, "' already registered"));
+    Array!Module modules;
 
-		plugin.moduleId = modules.length;
-		modules ~= plugin;
+    Console console;
 
-		plugin.init();
+    Map!(const(char)[], Device) devices;
 
-		foreach (app; instances)
-		{
-			Plugin.Instance pluginInstance = plugin.createInstance(app);
-			app.pluginInstance ~= pluginInstance;
-		}
-	}
+    // database...
 
-	Plugin getModule(const(char)[] name) nothrow @nogc
-	{
-		foreach (plugin; modules)
-			if (plugin.moduleName[] == name[])
-				return plugin;
-		return null;
-	}
+    this()
+    {
+        import urt.mem;
 
-	Module getModule(Module)() nothrow @nogc
-	{
-		return cast(Module)getModule(Module.ModuleName);
-	}
+        allocator = defaultAllocator;
+        tempAllocator = tempAllocator;
+
+        console = Console(this, String("console".addString), Mallocator.instance);
+
+        console.setPrompt(StringLit!"enermon > ");
+
+        console.registerCommand!log_level("/system", this);
+        console.registerCommand!set_hostname("/system", this);
+
+        console.registerCommand!device_print("/device", this, "print");
+
+        registerModules(this);
+    }
+
+    void registerModule(Module mod)
+    {
+        import urt.string.format;
+
+        foreach (m; modules)
+            assert(m.moduleName[] != mod.moduleName, tconcat("Module '", mod.moduleName, "' already registered!"));
+
+        mod.moduleId = modules.length;
+        modules ~= mod;
+
+        try
+            mod.init();
+        catch(Exception e)
+            assert(false);
+    }
+
+    Module moduleInstance(const(char)[] name) pure
+    {
+        foreach (i; 0 .. modules.length)
+            if (modules[i].moduleName[] == name[])
+                return modules[i];
+        return null;
+    }
+
+    Mod moduleInstance(Mod)() pure
+        if (is(Mod : Module))
+    {
+        return cast(Mod)moduleInstance(Mod.ModuleName);
+    }
+
+    Device findDevice(const(char)[] deviceId) pure
+    {
+        foreach (id, device; devices)
+            if (id[] == deviceId[])
+                return device;
+        return null;
+    }
+
+    Component findComponent(const(char)[] name) pure
+    {
+        const(char)[] deviceName = name.split!'.';
+        foreach (id, device; devices)
+        {
+            if (id[] == deviceName[])
+                return name.empty ? device : device.findComponent(name);
+        }
+        return null;
+    }
+
+    void update()
+    {
+        foreach (m; modules)
+            m.preUpdate();
+
+        foreach (m; modules)
+            m.update();
+
+        import urt.async : asyncUpdate;
+        asyncUpdate();
+
+        // TODO: polling is pretty lame! data connections should be in threads and receive data immediately
+        // processing should happen in a processing thread which waits on a semaphore for jobs in a queue (submit from comms threads?)
+//        foreach (server; servers)
+//            server.poll();
+        foreach (device; devices)
+            device.update();
+
+        foreach (m; modules)
+            m.postUpdate();
+    }
 
 
-	ApplicationInstance createInstance(String name) nothrow @nogc
-	{
-		ApplicationInstance app = defaultAllocator().allocT!ApplicationInstance();
-		app.name = name.move;
-		app.global = getGlobalInstance();
+    // /device/print command
+    import urt.meta.nullable;
+    void device_print(Session session, Nullable!(const(char)[]) _scope)
+    {
+        if (_scope)
+        {
+            // split on dots...
+        }
 
-		instances[name] = app;
+        void printComponent(Component c, int indent)
+        {
+            session.writef("{'', *0}{1}: {2} [{3}]\n", indent, c.id, c.name, c.template_);
+            foreach (e; c.elements)
+                session.writef("{'', *8}  {0}{@5, ?4}: {2}{@7, ?6}\n", e.id, e.name, e.latest, e.unit, e.name.length > 0, " ({1})", e.unit.length > 0, " [{3}]", indent);
+            foreach (c2; c.components)
+                printComponent(c2, indent + 2);
+        }
 
-		app.pluginInstance.resize(modules.length);
-		foreach (i; 0 .. modules.length)
-		{
-			Plugin.Instance pluginInstance = modules[i].createInstance(app);
-			app.pluginInstance[i] = pluginInstance;
-		}
+        const(char)[] newLine = "";
+        foreach (dev; devices)
+        {
+            session.writeLine(newLine, dev.id, ": ", dev.name);
+            newLine = "\n";
+            foreach (c; dev.components)
+                printComponent(c, 2);
+        }
 
-		return app;
-	}
 
-	void update()
-	{
-		foreach (plugin; modules)
-			plugin.preUpdate();
+/+
+        import urt.util;
 
-		foreach(app; instances)
-		{
-			app.update();
-		}
+        size_t nameLen = 4;
+        size_t typeLen = 4;
+        foreach (i, iface; interfaces)
+        {
+            nameLen = max(nameLen, iface.name.length);
+            typeLen = max(typeLen, iface.type.length);
 
-		foreach (plugin; modules)
-			plugin.postUpdate();
-	}
+            // TODO: MTU stuff?
+        }
+
+        session.writeLine("Flags: R - RUNNING; S - SLAVE");
+        if (stats)
+        {
+            size_t rxLen = 7;
+            size_t txLen = 7;
+            size_t rpLen = 9;
+            size_t tpLen = 9;
+            size_t rdLen = 7;
+            size_t tdLen = 7;
+
+            foreach (i, iface; interfaces)
+            {
+                rxLen = max(rxLen, iface.getStatus.recvBytes.formatInt(null));
+                txLen = max(txLen, iface.getStatus.sendBytes.formatInt(null));
+                rpLen = max(rpLen, iface.getStatus.recvPackets.formatInt(null));
+                tpLen = max(tpLen, iface.getStatus.sendPackets.formatInt(null));
+                rdLen = max(rdLen, iface.getStatus.recvDropped.formatInt(null));
+                tdLen = max(tdLen, iface.getStatus.sendDropped.formatInt(null));
+            }
+
+            session.writef(" ID    {0, *1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",
+                           "NAME", nameLen,
+                           "RX-BYTE", rxLen, "TX-BYTE", txLen,
+                           "RX-PACKET", rpLen, "TX-PACKET", tpLen,
+                           "RX-DROP", rdLen, "TX-DROP", tdLen);
+
+            size_t i = 0;
+            foreach (iface; interfaces)
+            {
+                session.writef("{0, 3} {1}{2} {3, *4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
+                               i, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ',
+                               iface.name, nameLen,
+                               iface.getStatus.recvBytes, rxLen, iface.getStatus.sendBytes, txLen,
+                               iface.getStatus.recvPackets, rpLen, iface.getStatus.sendPackets, tpLen,
+                               iface.getStatus.recvDropped, rdLen, iface.getStatus.sendDropped, tdLen);
+                ++i;
+            }
+        }
+        else
+        {
+            session.writef(" ID    {0, *1}  {2, *3}  MAC-ADDRESS\n", "NAME", nameLen, "TYPE", typeLen);
+            size_t i = 0;
+            foreach (iface; interfaces)
+            {
+                session.writef("{0, 3} {6}{7}  {1, *2}  {3, *4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ');
+                ++i;
+            }
+        }
++/
+    }
 }

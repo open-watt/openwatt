@@ -146,48 +146,39 @@ private:
 }
 
 
-class BridgeStreamModule : Plugin
+class BridgeStreamModule : Module
 {
-    mixin RegisterModule!"stream.bridge";
+    mixin DeclareModule!"stream.bridge";
+nothrow @nogc:
 
     override void init()
     {
+        app.console.registerCommand!add("/stream/bridge", this);
     }
 
-    class Instance : Plugin.Instance
+
+    // TODO: source should be an array, and let the external code separate and validate the array args...
+    void add(Session session, const(char)[] name, const(char)[][] source)
     {
-        mixin DeclareInstance;
-    nothrow @nogc:
+        auto mod_stream = app.moduleInstance!StreamModule;
 
-        override void init()
+        if (name.empty)
+            name = mod_stream.generateStreamName("bridge");
+
+        // parse source streams...
+        // TODO: we need move semantics for embed buffers!
+//        Array!(Stream, 8) sourceStreams;
+        Array!Stream sourceStreams;
+        foreach (s; source)
         {
-            app.console.registerCommand!add("/stream/bridge", this);
+            Stream* stream = s in mod_stream.streams;
+            if (stream)
+                sourceStreams ~= *stream;
         }
 
+        String n = name.makeString(defaultAllocator());
 
-        // TODO: source should be an array, and let the external code separate and validate the array args...
-        void add(Session session, const(char)[] name, const(char)[][] source)
-        {
-            auto mod_stream = app.moduleInstance!StreamModule;
-
-            if (name.empty)
-                name = mod_stream.generateStreamName("bridge");
-
-            // parse source streams...
-            // TODO: we need move semantics for embed buffers!
-//            Array!(Stream, 8) sourceStreams;
-            Array!Stream sourceStreams;
-            foreach (s; source)
-            {
-                Stream* stream = s in mod_stream.streams;
-                if (stream)
-                    sourceStreams ~= *stream;
-            }
-
-            String n = name.makeString(defaultAllocator());
-
-            BridgeStream stream = app.allocator.allocT!BridgeStream(n.move, StreamOptions.NonBlocking | StreamOptions.KeepAlive, sourceStreams[]);
-            mod_stream.addStream(stream);
-        }
+        BridgeStream stream = app.allocator.allocT!BridgeStream(n.move, StreamOptions.NonBlocking | StreamOptions.KeepAlive, sourceStreams[]);
+        mod_stream.addStream(stream);
     }
 }

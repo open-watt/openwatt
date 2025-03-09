@@ -30,7 +30,7 @@ class ModbusClient
 {
 nothrow @nogc:
 
-    ModbusProtocolModule.Instance m;
+    ModbusProtocolModule m;
 
     String name;
     BaseInterface iface;
@@ -40,7 +40,7 @@ nothrow @nogc:
 
     bool snooping;
 
-    this(ModbusProtocolModule.Instance m, String name, BaseInterface _interface, bool snooping = false) nothrow @nogc
+    this(ModbusProtocolModule m, String name, BaseInterface _interface, bool snooping = false) nothrow @nogc
     {
         this.m = m;
         this.name = name.move;

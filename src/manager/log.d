@@ -18,28 +18,23 @@ enum Category
 	Debug
 }
 
-class LogModule : Plugin
+class LogModule : Module
 {
-	mixin RegisterModule!"log";
+    mixin DeclareModule!"log";
+nothrow @nogc
 
-	class Instance : Plugin.Instance
-	{
-		mixin DeclareInstance;
-	nothrow @nogc
+    override void init()
+    {
+        Command[5] commands = [
+            app.allocator.allocT!LogCommand(app.console, "info", Category.Info, this),
+            app.allocator.allocT!LogCommand(app.console, "warn", Category.Warning, this),
+            app.allocator.allocT!LogCommand(app.console, "error", Category.Error, this),
+            app.allocator.allocT!LogCommand(app.console, "alert", Category.Alert, this),
+            app.allocator.allocT!LogCommand(app.console, "debug", Category.Debug, this)
+        ];
 
-		override void init()
-		{
-			Command[5] commands = [
-				app.allocator.allocT!LogCommand(app.console, "info", Category.Info, this),
-				app.allocator.allocT!LogCommand(app.console, "warn", Category.Warning, this),
-				app.allocator.allocT!LogCommand(app.console, "error", Category.Error, this),
-				app.allocator.allocT!LogCommand(app.console, "alert", Category.Alert, this),
-				app.allocator.allocT!LogCommand(app.console, "debug", Category.Debug, this)
-			];
-
-			app.console.registerCommands("/log", commands);
-		}
-	}
+        app.console.registerCommands("/log", commands);
+    }
 }
 
 
@@ -49,10 +44,10 @@ class LogCommand : Command
 {
 nothrow @nogc:
 
-	LogModule.Instance instance;
+	LogModule instance;
 	Category category;
 
-	this(ref Console console, const(char)[] name, Category category, LogModule.Instance instance)
+	this(ref Console console, const(char)[] name, Category category, LogModule instance)
 	{
 		import urt.mem.string;
 

@@ -2,7 +2,7 @@ module router.port;
 
 import urt.string;
 
-import manager.instance;
+import manager;
 
 class Port
 {

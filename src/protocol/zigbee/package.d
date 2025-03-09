@@ -23,93 +23,88 @@ import router.iface;
 nothrow @nogc:
 
 
-class ZigbeeProtocolModule : Plugin
+class ZigbeeProtocolModule : Module
 {
-    mixin RegisterModule!"protocol.zigbee";
+    mixin DeclareModule!"protocol.zigbee";
+nothrow @nogc:
 
-    class Instance : Plugin.Instance
+    Map!(const(char)[], ZigbeeClient) clients;
+    Map!(const(char)[], ZigbeeCoordinator) coordinators;
+
+    override void init()
     {
-        mixin DeclareInstance;
-    nothrow @nogc:
+        app.console.registerCommand!client_add("/protocol/zigbee/client", this, "add");
+        app.console.registerCommand!coordinator_add("/protocol/zigbee/coordinator", this, "add");
 
-        Map!(const(char)[], ZigbeeClient) clients;
-        Map!(const(char)[], ZigbeeCoordinator) coordinators;
+        app.console.registerCommand!scan("/protocol/zigbee", this);
+    }
 
-        override void init()
+    override void update()
+    {
+        foreach(name, coordinator; coordinators)
+            coordinator.update();
+
+        foreach(name, client; clients)
+            client.update();
+    }
+
+    void client_add(Session session, const(char)[] name, const(char)[] _interface)
+    {
+        BaseInterface i = app.moduleInstance!InterfaceModule.findInterface(_interface);
+        if(i is null)
         {
-            app.console.registerCommand!client_add("/protocol/zigbee/client", this, "add");
-            app.console.registerCommand!coordinator_add("/protocol/zigbee/coordinator", this, "add");
-
-            app.console.registerCommand!scan("/protocol/zigbee", this);
+            session.writeLine("Interface '", _interface, "' not found");
+            return;
         }
 
-        override void update()
-        {
-            foreach(name, coordinator; coordinators)
-                coordinator.update();
+        NoGCAllocator a = app.allocator;
 
-            foreach(name, client; clients)
-                client.update();
+        // TODO: generate name if not supplied
+        String n = name.makeString(a);
+
+        ZigbeeClient client = a.allocT!ZigbeeClient(n.move, i);
+        clients.insert(client.name[], client);
+
+//        writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);
+    }
+
+    void coordinator_add(Session session, const(char)[] name, const(char)[] _interface)
+    {
+        BaseInterface i = app.moduleInstance!InterfaceModule.findInterface(_interface);
+        if(i is null)
+        {
+            session.writeLine("Interface '", _interface, "' not found");
+            return;
         }
 
-        void client_add(Session session, const(char)[] name, const(char)[] _interface)
+        NoGCAllocator a = app.allocator;
+
+        // TODO: generate name if not supplied
+        String n = name.makeString(a);
+
+        ZigbeeCoordinator coordinator = a.allocT!ZigbeeCoordinator(n.move, i);
+        coordinators.insert(coordinator.name[], coordinator);
+
+//        writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);
+    }
+
+
+    // some useful tools zigbee...
+    import protocol.ezsp.commands;
+
+    RequestState scan(Session session, const(char)[] ezsp_client, Nullable!bool energy_scan)
+    {
+        EZSPClient c = app.moduleInstance!EZSPProtocolModule.getClient(ezsp_client);
+        if (!c)
         {
-			BaseInterface i = app.moduleInstance!InterfaceModule.findInterface(_interface);
-			if(i is null)
-			{
-				session.writeLine("Interface '", _interface, "' not found");
-				return;
-			}
-
-            NoGCAllocator a = app.allocator;
-
-            // TODO: generate name if not supplied
-            String n = name.makeString(a);
-
-            ZigbeeClient client = a.allocT!ZigbeeClient(n.move, i);
-            clients.insert(client.name[], client);
-
-//            writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);
+            session.writeLine("EZSP client does not exist: ", ezsp_client);
+            return null;
         }
 
-        void coordinator_add(Session session, const(char)[] name, const(char)[] _interface)
-        {
-			BaseInterface i = app.moduleInstance!InterfaceModule.findInterface(_interface);
-			if(i is null)
-			{
-				session.writeLine("Interface '", _interface, "' not found");
-				return;
-			}
-
-            NoGCAllocator a = app.allocator;
-
-            // TODO: generate name if not supplied
-            String n = name.makeString(a);
-
-            ZigbeeCoordinator coordinator = a.allocT!ZigbeeCoordinator(n.move, i);
-            coordinators.insert(coordinator.name[], coordinator);
-
-//            writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);
-        }
-
-
-        // some useful tools zigbee...
-        import protocol.ezsp.commands;
-
-        RequestState scan(Session session, const(char)[] ezsp_client, Nullable!bool energy_scan)
-        {
-            EZSPClient c = app.moduleInstance!EZSPProtocolModule.getClient(ezsp_client);
-            if (!c)
-            {
-                session.writeLine("EZSP client does not exist: ", ezsp_client);
-                return null;
-            }
-
-            RequestState state = app.allocator.allocT!RequestState(session, c);
-            c.setMessageHandler(&state.messageHandler);
-            c.sendCommand!EZSP_StartScan(&state.startScan, energy_scan ? EzspNetworkScanType.ENERGY_SCAN : EzspNetworkScanType.ACTIVE_SCAN, 0x07FFF800, 3);
-            return state;
-        }
+        RequestState state = app.allocator.allocT!RequestState(session, c);
+        c.setMessageHandler(&state.messageHandler);
+        c.sendCommand!EZSP_StartScan(&state.startScan, energy_scan ? EzspNetworkScanType.ENERGY_SCAN : EzspNetworkScanType.ACTIVE_SCAN, 0x07FFF800, 3);
+        return state;
     }
 }
 

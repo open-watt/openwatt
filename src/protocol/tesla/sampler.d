@@ -19,7 +19,7 @@ class TeslaTWCSampler : Sampler
 {
 nothrow @nogc:
 
-    this(TeslaProtocolModule.Instance tesla_mod, ushort chargerId, MACAddress mac)
+    this(TeslaProtocolModule tesla_mod, ushort chargerId, MACAddress mac)
     {
         this.tesla_mod = tesla_mod;
         this.chargerId = chargerId;
@@ -110,17 +110,11 @@ nothrow @nogc:
         }
     }
 
-    TeslaProtocolModule.Instance tesla_mod;
+    TeslaProtocolModule tesla_mod;
     TeslaTWCMaster master;
     ubyte chargerIndex;
     ushort chargerId;
     MACAddress mac;
 
     Array!(Element*) elements;
-
-//    struct SampleElement
-//    {
-//        Element* element;
-//        //...
-//    }
 }

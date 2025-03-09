@@ -17,31 +17,27 @@ import protocol.dns.mdns;
 nothrow @nogc:
 
 
-class DNSModule : Plugin
+class DNSModule : Module
 {
-    mixin RegisterModule!"protocol.dns";
+    mixin DeclareModule!"protocol.dns";
+nothrow @nogc:
 
-    class Instance : Plugin.Instance
+    Map!(const(char)[], mDNSServer) servers;
+
+    override void init()
     {
-        mixin DeclareInstance;
-        nothrow @nogc:
+        app.console.registerCommand!server_add("/protocol/mdns/server", this, "add");
+    }
 
-        Map!(const(char)[], mDNSServer) servers;
+    override void update()
+    {
+        foreach(name, server; servers)
+            server.update();
+    }
 
-        override void init()
-        {
-            app.console.registerCommand!server_add("/protocol/mdns/server", this, "add");
-        }
-
-        override void update()
-        {
-            foreach(name, server; servers)
-                server.update();
-        }
-
-        void server_add(Session session, const(char)[] name)//, const(char)[][] _interface)
-        {
-            // TODO: we probably want servers to only apply to select interfaces rather than all interfaces...
+    void server_add(Session session, const(char)[] name)//, const(char)[][] _interface)
+    {
+        // TODO: we probably want servers to only apply to select interfaces rather than all interfaces...
 //            Array!BaseInterface interfaces;
 //            foreach(i; 0 .. _interface.length)
 //            {
@@ -54,13 +50,12 @@ class DNSModule : Plugin
 //                interfaces ~= iface;
 //            }
 
-            NoGCAllocator a = app.allocator;
+        NoGCAllocator a = app.allocator;
 
-            String n = name.makeString(a);
-            mDNSServer server = a.allocT!mDNSServer(n.move);//, interfaces.move);
-            servers.insert(server.name[], server);
+        String n = name.makeString(a);
+        mDNSServer server = a.allocT!mDNSServer(n.move);//, interfaces.move);
+        servers.insert(server.name[], server);
 
-            writeInfof("Create mDNS server '{0}'", name);
-        }
+        writeInfof("Create mDNS server '{0}'", name);
     }
 }

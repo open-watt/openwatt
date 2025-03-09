@@ -169,16 +169,7 @@ private:
 }
 
 
-class UDPStreamModule : Plugin
+class UDPStreamModule : Module
 {
-	mixin RegisterModule!"stream.udp";
-
-	override void init()
-	{
-	}
-
-	class Instance : Plugin.Instance
-	{
-		mixin DeclareInstance;
-	}
+    mixin DeclareModule!"stream.udp";
 }

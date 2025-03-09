@@ -386,47 +386,38 @@ else
 }
 
 
-class SerialStreamModule : Plugin
+class SerialStreamModule : Module
 {
-    mixin RegisterModule!"stream.serial";
+    mixin DeclareModule!"stream.serial";
+nothrow @nogc:
 
     override void init()
     {
+        app.console.registerCommand!add("/stream/serial", this);
     }
 
-    class Instance : Plugin.Instance
+    void add(Session session, const(char)[] name, const(char)[] device, int baud, Nullable!int data_bits, Nullable!float stop_bits, Nullable!Parity parity, Nullable!FlowControl flow_control)
     {
-        mixin DeclareInstance;
-    nothrow @nogc:
+        auto mod_stream = app.moduleInstance!StreamModule;
 
-        override void init()
-        {
-            app.console.registerCommand!add("/stream/serial", this);
-        }
+        if (name.empty)
+            mod_stream.generateStreamName("serial-stream");
 
-        void add(Session session, const(char)[] name, const(char)[] device, int baud, Nullable!int data_bits, Nullable!float stop_bits, Nullable!Parity parity, Nullable!FlowControl flow_control)
-        {
-            auto mod_stream = app.moduleInstance!StreamModule;
+        // TODO: assert data bits == 7,8, stop bits == 1,1.5,2, verify other enums...
 
-            if (name.empty)
-                mod_stream.generateStreamName("serial-stream");
+        SerialParams params;
+        params.baudRate = baud;
+        params.dataBits = data_bits ? cast(ubyte)data_bits.value : 8;
+        params.stopBits = stop_bits ? cast(StopBits)(stop_bits.value*2 - 2) : StopBits.One;
+        params.parity = parity ? parity.value : Parity.None;
+        params.flowControl = flow_control ? flow_control.value : FlowControl.None;
 
-            // TODO: assert data bits == 7,8, stop bits == 1,1.5,2, verify other enums...
+        String n = name.makeString(app.allocator);
+        String dev = device.makeString(app.allocator);
 
-            SerialParams params;
-            params.baudRate = baud;
-            params.dataBits = data_bits ? cast(ubyte)data_bits.value : 8;
-            params.stopBits = stop_bits ? cast(StopBits)(stop_bits.value*2 - 2) : StopBits.One;
-            params.parity = parity ? parity.value : Parity.None;
-            params.flowControl = flow_control ? flow_control.value : FlowControl.None;
+        SerialStream stream = app.allocator.allocT!SerialStream(n.move, dev.move, params, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+        mod_stream.addStream(stream);
 
-            String n = name.makeString(app.allocator);
-            String dev = device.makeString(app.allocator);
-
-            SerialStream stream = app.allocator.allocT!SerialStream(n.move, dev.move, params, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
-            mod_stream.addStream(stream);
-
-            writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);
-        }
+        writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);
     }
 }

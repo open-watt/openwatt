@@ -183,9 +183,6 @@
     <DCompile Include="src\router\goodwe\aa55.d">
       <Filter>src\router\goodwe</Filter>
     </DCompile>
-    <DCompile Include="src\manager\instance.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
     <DCompile Include="src\manager\plugin.d">
       <Filter>src\manager</Filter>
     </DCompile>
@@ -539,6 +536,9 @@
     </DCompile>
     <DCompile Include="src\manager\pcap.d">
       <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\package.d">
+      <Filter>src\protocol</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>

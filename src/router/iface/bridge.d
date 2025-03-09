@@ -8,7 +8,6 @@ import urt.string;
 import urt.time;
 
 import manager.console;
-import manager.instance;
 import manager.plugin;
 
 import router.iface;
@@ -20,7 +19,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"bridge";
 
-    this(InterfaceModule.Instance m, String name)
+    this(InterfaceModule m, String name)
     {
         super(m, name, TypeName);
 
@@ -183,82 +182,77 @@ protected:
 }
 
 
-class BridgeInterfaceModule : Plugin
+class BridgeInterfaceModule : Module
 {
-    mixin RegisterModule!"interface.bridge";
+    mixin DeclareModule!"interface.bridge";
+nothrow @nogc:
 
-    class Instance : Plugin.Instance
+    override void init()
     {
-        mixin DeclareInstance;
-    nothrow @nogc:
+        app.console.registerCommand!add("/interface/bridge", this);
+        app.console.registerCommand!port_add("/interface/bridge/port", this, "add");
+    }
 
-        override void init()
+    // /interface/modbus/add command
+    // TODO: protocol enum!
+    void add(Session session, const(char)[] name, Nullable!(const(char)[]) pcap)
+    {
+        auto mod_if = app.moduleInstance!InterfaceModule;
+        String n = mod_if.addInterfaceName(session, name, BridgeInterface.TypeName);
+        if (!n)
+            return;
+
+        BridgeInterface iface = defaultAllocator.allocT!BridgeInterface(mod_if, n.move);
+
+        mod_if.addInterface(session, iface, pcap ? pcap.value : null);
+
+//        // HACK: we'll print packets that we receive...
+//        iface.subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {
+//            import urt.io;
+//            writef("{0}: packet received: ({1} -> {2} )  [{3}]\n", i.name, p.src, p.dst, p.data);
+//        }, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
+    }
+
+    void port_add(Session session, const(char)[] bridge, const(char)[] _interface)
+    {
+        auto mod_if = app.moduleInstance!InterfaceModule;
+
+        BaseInterface b = mod_if.findInterface(bridge);
+        if (b is null)
         {
-            app.console.registerCommand!add("/interface/bridge", this);
-            app.console.registerCommand!port_add("/interface/bridge/port", this, "add");
+            session.writeLine("Bridge interface '", bridge, "' not found.");
+            return;
+        }
+        BridgeInterface bi = cast(BridgeInterface)b;
+        if (!bi)
+        {
+            session.writeLine("Interface '", bridge, "' is not a bridge.");
+            return;
         }
 
-        // /interface/modbus/add command
-        // TODO: protocol enum!
-        void add(Session session, const(char)[] name, Nullable!(const(char)[]) pcap)
+        BaseInterface i = mod_if.findInterface(_interface);
+        if (i is null)
         {
-            auto mod_if = app.moduleInstance!InterfaceModule;
-            String n = mod_if.addInterfaceName(session, name, BridgeInterface.TypeName);
-            if (!n)
-                return;
-
-            BridgeInterface iface = defaultAllocator.allocT!BridgeInterface(mod_if, n.move);
-
-            mod_if.addInterface(session, iface, pcap ? pcap.value : null);
-
-//            // HACK: we'll print packets that we receive...
-//            iface.subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {
-//                import urt.io;
-//                writef("{0}: packet received: ({1} -> {2} )  [{3}]\n", i.name, p.src, p.dst, p.data);
-//            }, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
+            session.writeLine("Interface '", _interface, "' not found.");
+            return;
+        }
+        if (bi is i)
+        {
+            session.writeLine("Can't add a bridge to itself.");
+            return;
+        }
+        if (i.master)
+        {
+            session.writeLine("Interface '", _interface, "' is already a slave to '", i.master.name, "'.");
+            return;
         }
 
-        void port_add(Session session, const(char)[] bridge, const(char)[] _interface)
+        if (!bi.addMember(i))
         {
-            auto mod_if = app.moduleInstance!InterfaceModule;
-
-            BaseInterface b = mod_if.findInterface(bridge);
-            if (b is null)
-            {
-                session.writeLine("Bridge interface '", bridge, "' not found.");
-                return;
-            }
-            BridgeInterface bi = cast(BridgeInterface)b;
-            if (!bi)
-            {
-                session.writeLine("Interface '", bridge, "' is not a bridge.");
-                return;
-            }
-
-            BaseInterface i = mod_if.findInterface(_interface);
-            if (i is null)
-            {
-                session.writeLine("Interface '", _interface, "' not found.");
-                return;
-            }
-            if (bi is i)
-            {
-                session.writeLine("Can't add a bridge to itself.");
-                return;
-            }
-            if (i.master)
-            {
-                session.writeLine("Interface '", _interface, "' is already a slave to '", i.master.name, "'.");
-                return;
-            }
-
-            if (!bi.addMember(i))
-            {
-                session.writeLine("Failed to add interface '", _interface, "' to bridge '", bridge, "'.");
-                return;
-            }
-
-            writeInfo("Bridge port add - bridge: ", bridge, "  interface: ", _interface);
+            session.writeLine("Failed to add interface '", _interface, "' to bridge '", bridge, "'.");
+            return;
         }
+
+        writeInfo("Bridge port add - bridge: ", bridge, "  interface: ", _interface);
     }
 }

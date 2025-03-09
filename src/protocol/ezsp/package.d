@@ -18,60 +18,55 @@ import router.stream;
 nothrow @nogc:
 
 
-class EZSPProtocolModule : Plugin
+class EZSPProtocolModule : Module
 {
-    mixin RegisterModule!"protocol.ezsp";
+    mixin DeclareModule!"protocol.ezsp";
+nothrow @nogc:
 
-    class Instance : Plugin.Instance
+    Map!(const(char)[], EZSPClient) clients;
+
+    override void init()
     {
-        mixin DeclareInstance;
-    nothrow @nogc:
+        app.console.registerCommand!client_add("/protocol/ezsp/client", this, "add");
+    }
 
-        Map!(const(char)[], EZSPClient) clients;
+    EZSPClient getClient(const(char)[] client)
+    {
+        if (auto c = client in clients)
+            return *c;
+        return null;
+    }
 
-        override void init()
+    override void update()
+    {
+        foreach(name, client; clients)
+            client.update();
+    }
+
+    void client_add(Session session, const(char)[] name, const(char)[] stream)
+    {
+        auto mod_stream = app.moduleInstance!StreamModule;
+
+        // is it an error to not specify a stream?
+        assert(stream, "'stream' must be specified");
+
+        Stream s = mod_stream.getStream(stream);
+        if (!s)
         {
-            app.console.registerCommand!client_add("/protocol/ezsp/client", this, "add");
+            session.writeLine("Stream does not exist: ", stream);
+            return;
         }
 
-        EZSPClient getClient(const(char)[] client)
-        {
-            if (auto c = client in clients)
-                return *c;
-            return null;
-        }
+        if (name.empty)
+            mod_stream.generateStreamName("ezsp");
 
-        override void update()
-        {
-            foreach(name, client; clients)
-                client.update();
-        }
+        NoGCAllocator a = app.allocator;
 
-        void client_add(Session session, const(char)[] name, const(char)[] stream)
-        {
-            auto mod_stream = app.moduleInstance!StreamModule;
+        String n = name.makeString(a);
+        EZSPClient client = a.allocT!EZSPClient(n.move, s);
+        clients.insert(client.name[], client);
 
-            // is it an error to not specify a stream?
-            assert(stream, "'stream' must be specified");
-
-            Stream s = mod_stream.getStream(stream);
-            if (!s)
-            {
-                session.writeLine("Stream does not exist: ", stream);
-                return;
-            }
-
-            if (name.empty)
-                mod_stream.generateStreamName("ezsp");
-
-            NoGCAllocator a = app.allocator;
-
-            String n = name.makeString(a);
-            EZSPClient client = a.allocT!EZSPClient(n.move, s);
-            clients.insert(client.name[], client);
-
-//            writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);
-        }
+//        writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);
     }
 }
 

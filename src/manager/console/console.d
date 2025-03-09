@@ -12,7 +12,6 @@ import manager.console.command;
 import manager.console.expression;
 import manager.console.function_command;
 import manager.console.session;
-import manager.instance;
 
 nothrow @nogc:
 

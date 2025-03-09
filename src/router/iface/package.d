@@ -13,6 +13,16 @@ import manager.plugin;
 
 public import router.iface.packet;
 
+// package modules...
+public static import router.iface.bridge;
+public static import router.iface.can;
+public static import router.iface.modbus;
+public static import router.iface.tesla;
+public static import router.iface.zigbee;
+
+nothrow @nogc:
+
+
 
 enum BufferOverflowBehaviour : byte
 {
@@ -94,7 +104,7 @@ class BaseInterface
 {
 nothrow @nogc:
 
-    InterfaceModule.Instance mod_iface;
+    InterfaceModule mod_iface;
 
     String name;
     CacheString type;
@@ -113,7 +123,7 @@ nothrow @nogc:
 
     BaseInterface master;
 
-    this(InterfaceModule.Instance m, String name, const(char)[] type)
+    this(InterfaceModule m, String name, const(char)[] type)
     {
         import urt.lifetime;
 
@@ -261,154 +271,149 @@ protected:
 }
 
 
-class InterfaceModule : Plugin
+class InterfaceModule : Module
 {
-    mixin RegisterModule!"interface";
+    mixin DeclareModule!"interface";
+nothrow @nogc:
 
-    class Instance : Plugin.Instance
+    Map!(const(char)[], BaseInterface) interfaces;
+
+    override void init()
     {
-        mixin DeclareInstance;
-    nothrow @nogc:
+        app.console.registerCommand!print("/interface", this);
+    }
 
-        Map!(const(char)[], BaseInterface) interfaces;
+    override void update()
+    {
+        foreach (i; interfaces)
+            i.update();
+    }
 
-        override void init()
+    const(char)[] generateInterfaceName(const(char)[] prefix)
+    {
+        if (prefix !in interfaces)
+            return prefix;
+        for (size_t i = 0; i < ushort.max; i++)
         {
-            app.console.registerCommand!print("/interface", this);
+            const(char)[] name = tconcat(prefix, i);
+            if (name !in interfaces)
+                return name;
+        }
+        return null;
+    }
+
+    final String addInterfaceName(Session session, const(char)[] name, const(char)[] defaultName)
+    {
+        if (name.empty)
+            name = generateInterfaceName(defaultName);
+        else if (name in interfaces)
+        {
+            session.writeLine("Interface '", name, " already exists");
+            return String();
         }
 
-        override void update()
+        return name.makeString(app.allocator);
+    }
+
+    final bool addInterface(Session session, BaseInterface iface, const(char)[] pcap)
+    {
+        interfaces[iface.name[]] = iface;
+
+        if (!pcap.empty)
         {
-            foreach (i; interfaces)
-                i.update();
+            import manager.pcap;
+
+            auto mod_pcap = app.moduleInstance!PcapModule;
+            PcapInterface* cap = mod_pcap.findInterface(pcap);
+            if (!cap)
+                session.writeLine("Failed to attach pcap interface '", pcap, "' to '", iface.name, "'; doesn't exist");
+            else
+                cap.subscribeInterface(iface);
         }
 
-        const(char)[] generateInterfaceName(const(char)[] prefix)
+        import urt.log;
+        writeInfo("Create ", iface.type, " interface '", iface.name, "' - ", iface.mac);
+
+        return true;
+    }
+
+    final void removeInterface(BaseInterface iface)
+    {
+        assert(iface.name in interfaces, "Interface not found");
+        interfaces.remove(iface.name);
+    }
+
+    final BaseInterface findInterface(const(char)[] name)
+    {
+        foreach (i; interfaces)
+            if (i.name[] == name[])
+                return i;
+        return null;
+    }
+
+    import urt.meta.nullable;
+
+    // /interface/print command
+    void print(Session session, Nullable!bool stats)
+    {
+        import urt.util;
+
+        size_t nameLen = 4;
+        size_t typeLen = 4;
+        foreach (i, iface; interfaces)
         {
-            if (prefix !in interfaces)
-                return prefix;
-            for (size_t i = 0; i < ushort.max; i++)
-            {
-                const(char)[] name = tconcat(prefix, i);
-                if (name !in interfaces)
-                    return name;
-            }
-            return null;
+            nameLen = max(nameLen, iface.name.length);
+            typeLen = max(typeLen, iface.type.length);
+
+            // TODO: MTU stuff?
         }
 
-        final String addInterfaceName(Session session, const(char)[] name, const(char)[] defaultName)
+        session.writeLine("Flags: R - RUNNING; S - SLAVE");
+        if (stats)
         {
-            if (name.empty)
-                name = generateInterfaceName(defaultName);
-            else if (name in interfaces)
-            {
-                session.writeLine("Interface '", name, " already exists");
-                return String();
-            }
+            size_t rxLen = 7;
+            size_t txLen = 7;
+            size_t rpLen = 9;
+            size_t tpLen = 9;
+            size_t rdLen = 7;
+            size_t tdLen = 7;
 
-            return name.makeString(app.allocator);
-        }
-
-        final bool addInterface(Session session, BaseInterface iface, const(char)[] pcap)
-        {
-            interfaces[iface.name[]] = iface;
-
-            if (!pcap.empty)
-            {
-                import manager.pcap;
-
-                auto mod_pcap = app.moduleInstance!PcapModule;
-                PcapInterface* cap = mod_pcap.findInterface(pcap);
-                if (!cap)
-                    session.writeLine("Failed to attach pcap interface '", pcap, "' to interface '", iface.name, "'; doesn't exist");
-                else
-                    cap.subscribeInterface(iface);
-            }
-
-            import urt.log;
-            writeInfo("Create ", iface.type, " interface '", iface.name, "' - ", iface.mac);
-
-            return true;
-        }
-
-        final void removeInterface(BaseInterface iface)
-        {
-            assert(iface.name in interfaces, "Interface not found");
-            interfaces.remove(iface.name);
-        }
-
-        final BaseInterface findInterface(const(char)[] name)
-        {
-            foreach (i; interfaces)
-                if (i.name[] == name[])
-                    return i;
-            return null;
-        }
-
-        import urt.meta.nullable;
-
-        // /interface/print command
-        void print(Session session, Nullable!bool stats)
-        {
-            import urt.util;
-
-            size_t nameLen = 4;
-            size_t typeLen = 4;
             foreach (i, iface; interfaces)
             {
-                nameLen = max(nameLen, iface.name.length);
-                typeLen = max(typeLen, iface.type.length);
-
-                // TODO: MTU stuff?
+                rxLen = max(rxLen, iface.getStatus.recvBytes.formatInt(null));
+                txLen = max(txLen, iface.getStatus.sendBytes.formatInt(null));
+                rpLen = max(rpLen, iface.getStatus.recvPackets.formatInt(null));
+                tpLen = max(tpLen, iface.getStatus.sendPackets.formatInt(null));
+                rdLen = max(rdLen, iface.getStatus.recvDropped.formatInt(null));
+                tdLen = max(tdLen, iface.getStatus.sendDropped.formatInt(null));
             }
 
-            session.writeLine("Flags: R - RUNNING; S - SLAVE");
-            if (stats)
+            session.writef(" ID     {0, -*1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",
+                            "NAME", nameLen,
+                            "RX-BYTE", rxLen, "TX-BYTE", txLen,
+                            "RX-PACKET", rpLen, "TX-PACKET", tpLen,
+                            "RX-DROP", rdLen, "TX-DROP", tdLen);
+
+            size_t i = 0;
+            foreach (iface; interfaces)
             {
-                size_t rxLen = 7;
-                size_t txLen = 7;
-                size_t rpLen = 9;
-                size_t tpLen = 9;
-                size_t rdLen = 7;
-                size_t tdLen = 7;
-
-                foreach (i, iface; interfaces)
-                {
-                    rxLen = max(rxLen, iface.getStatus.recvBytes.formatInt(null));
-                    txLen = max(txLen, iface.getStatus.sendBytes.formatInt(null));
-                    rpLen = max(rpLen, iface.getStatus.recvPackets.formatInt(null));
-                    tpLen = max(tpLen, iface.getStatus.sendPackets.formatInt(null));
-                    rdLen = max(rdLen, iface.getStatus.recvDropped.formatInt(null));
-                    tdLen = max(tdLen, iface.getStatus.sendDropped.formatInt(null));
-                }
-
-                session.writef(" ID     {0, -*1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",
-                               "NAME", nameLen,
-                               "RX-BYTE", rxLen, "TX-BYTE", txLen,
-                               "RX-PACKET", rpLen, "TX-PACKET", tpLen,
-                               "RX-DROP", rdLen, "TX-DROP", tdLen);
-
-                size_t i = 0;
-                foreach (iface; interfaces)
-                {
-                    session.writef("{0, 3} {1}{2}  {3, -*4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
-                                   i, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ',
-                                   iface.name, nameLen,
-                                   iface.getStatus.recvBytes, rxLen, iface.getStatus.sendBytes, txLen,
-                                   iface.getStatus.recvPackets, rpLen, iface.getStatus.sendPackets, tpLen,
-                                   iface.getStatus.recvDropped, rdLen, iface.getStatus.sendDropped, tdLen);
-                    ++i;
-                }
+                session.writef("{0, 3} {1}{2}  {3, -*4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
+                                i, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ',
+                                iface.name, nameLen,
+                                iface.getStatus.recvBytes, rxLen, iface.getStatus.sendBytes, txLen,
+                                iface.getStatus.recvPackets, rpLen, iface.getStatus.sendPackets, tpLen,
+                                iface.getStatus.recvDropped, rdLen, iface.getStatus.sendDropped, tdLen);
+                ++i;
             }
-            else
+        }
+        else
+        {
+            session.writef(" ID     {0, -*1}  {2, -*3}  MAC-ADDRESS\n", "NAME", nameLen, "TYPE", typeLen);
+            size_t i = 0;
+            foreach (iface; interfaces)
             {
-                session.writef(" ID     {0, -*1}  {2, -*3}  MAC-ADDRESS\n", "NAME", nameLen, "TYPE", typeLen);
-                size_t i = 0;
-                foreach (iface; interfaces)
-                {
-                    session.writef("{0, 3} {6}{7}  {1, -*2}  {3, -*4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ');
-                    ++i;
-                }
+                session.writef("{0, 3} {6}{7}  {1, -*2}  {3, -*4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ');
+                ++i;
             }
         }
     }
