@@ -4,6 +4,8 @@ import urt.array;
 import urt.kvp;
 import urt.lifetime;
 import urt.map;
+import urt.si.quantity;
+import urt.si.unit : ScaledUnit;
 import urt.traits;
 
 nothrow @nogc:
@@ -123,6 +125,13 @@ nothrow @nogc:
     {
         flags = Flags.NumberDouble;
         value.d = d;
+    }
+
+    this(U, ScaledUnit _U)(Quantity!(U, _U) q)
+    {
+        this(q.value);
+        flags |= Flags.IsQuantity;
+        count = q.unit.pack;
     }
 
     this(const(char)[] s) // TODO: (S)(S s)
@@ -271,6 +280,8 @@ nothrow @nogc:
         => (flags & Flags.FloatFlag) != 0;
     bool isDouble() const pure
         => (flags & Flags.DoubleFlag) != 0;
+    bool isQuantity() const pure
+        => (flags & Flags.IsQuantity) != 0;
     bool isString() const pure
         => (flags & Flags.IsString) != 0;
     bool isArray() const pure
@@ -328,6 +339,30 @@ nothrow @nogc:
         if ((flags & Flags.Uint64Flag) != 0)
             return cast(double)value.ul;
         return cast(double)cast(long)value.ul;
+    }
+
+    Quantity!T asQuantity(T = double)() const pure @property
+    {
+        assert(isNumber());
+
+        Quantity!double r;
+        static if (is(T == double))
+            r.value = asDouble();
+//        else static if (is(T == float))
+//            r.value = asFloat();
+        else static if (is(T == int))
+            r.value = asInt();
+        else static if (is(T == uint))
+            r.value = asUint();
+        else static if (is(T == long))
+            r.value = asLong();
+        else static if (is(T == ulong))
+            r.value = asUlong();
+        else
+            assert(false, "Unsupported quantity type!");
+        if (isQuantity())
+            r.unit.pack = count;
+        return r;
     }
 
     const(char)[] asString() const pure
@@ -463,11 +498,15 @@ nothrow @nogc:
             case Variant.Type.Number:
                 import urt.conv;
 
+                if (isQuantity())
+                    assert(false, "TODO: implement quantity formatting for JSON");
+
                 if (isDouble())
                     return asDouble().formatFloat(buffer);
 
                 // TODO: parse args?
                 //format
+
                 if (flags & Flags.Uint64Flag)
                     return asUlong().formatUint(buffer);
                 return asLong().formatInt(buffer);
@@ -605,9 +644,10 @@ package:
         Uint64Flag      = 1 << (TypeBits + 6),
         FloatFlag       = 1 << (TypeBits + 7),
         DoubleFlag      = 1 << (TypeBits + 8),
-        Embedded        = 1 << (TypeBits + 9),
-        NeedDestruction = 1 << (TypeBits + 10),
-//        CopyFlag        = 1 << (TypeBits + 11), // maybe we want to know if a thing is a copy, or a reference to an external one?
+        IsQuantity      = 1 << (TypeBits + 9),
+        Embedded        = 1 << (TypeBits + 10),
+        NeedDestruction = 1 << (TypeBits + 11),
+//        CopyFlag        = 1 << (TypeBits + 12), // maybe we want to know if a thing is a copy, or a reference to an external one?
 
         TypeMask        = (1 << TypeBits) - 1,
         TypeBits        = 3
@@ -617,6 +657,7 @@ package:
 unittest
 {
     import urt.inet;
+    import urt.si.quantity : Metres;
 
     // fabricate some variants
     Variant v;
@@ -624,13 +665,15 @@ unittest
     v.asArray ~= Variant(101.1);
     v.asArray ~= Variant(VariantKVP("wow", Variant(true)), VariantKVP("bogus", Variant(false)));
     v.asArray ~= Variant(IPAddrLit!"127.0.0.1");
+    v.asArray ~= Variant(Metres(10));
 
-    assert(v.length == 4);
+    assert(v.length == 5);
     assert(v[0].asInt == 42);
     assert(v[1].asDouble == 101.1);
     assert(v[2]["wow"].isTrue);
     assert(v[2]["bogus"].asBool == false);
     assert(v[3].asUser!IPAddr == IPAddrLit!"127.0.0.1");
+    assert(v[4].asQuantity == Metres(10));
 }
 
 
@@ -645,7 +688,8 @@ enum ValidUserType(T) = (is(T == struct) || is(T == class)) &&
                         !is(T == Variant) &&
                         !is(T == VariantKVP) &&
                         !is(T == Array!U, U) &&
-                        !is(T : const(char)[]);
+                        !is(T : const(char)[]) &&
+                        !is(T == Quantity!(T, U), T, alias U);
 
 enum uint UserTypeId(T) = fnv1aHash(cast(const(ubyte)[])T.stringof); // maybe this isn't a good enough hash?
 enum uint UserTypeShortId(T) = cast(ushort)UserTypeId!T ^ (UserTypeId!T >> 16);

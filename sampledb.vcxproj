@@ -170,6 +170,9 @@
     <DCompile Include="src\urt\rand.d" />
     <DCompile Include="src\urt\result.d" />
     <DCompile Include="src\urt\serial.d" />
+    <DCompile Include="src\urt\si\package.d" />
+    <DCompile Include="src\urt\si\quantity.d" />
+    <DCompile Include="src\urt\si\unit.d" />
     <DCompile Include="src\urt\socket.d" />
     <DCompile Include="src\urt\string\ansi.d" />
     <DCompile Include="src\urt\string\ascii.d" />
