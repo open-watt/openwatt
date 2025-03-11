@@ -31,6 +31,7 @@ SystemInfo getSysInfo()
     version (Windows)
     {
         MEMORYSTATUSEX mem;
+        mem.dwLength = MEMORYSTATUSEX.sizeof;
         if (GlobalMemoryStatusEx(&mem))
         {
             r.totalMemory = mem.ullTotalPhys;
@@ -59,35 +60,22 @@ void setSystemIdleParams(IdleParams params)
 
 version (Windows)
 {
-    struct MEMORYSTATUSEX
-    {
-        uint dwLength = MEMORYSTATUSEX.sizeof;
-        uint dwMemoryLoad;
-        ulong ullTotalPhys;
-        ulong ullAvailPhys;
-        ulong ullTotalPageFile;
-        ulong ullAvailPageFile;
-        ulong ullTotalVirtual;
-        ulong ullAvailVirtual;
-        ulong ullAvailExtendedVirtual;
-    }
+    import core.sys.windows.winbase : GlobalMemoryStatusEx, MEMORYSTATUSEX;
 
-    extern(C) int GlobalMemoryStatusEx(MEMORYSTATUSEX* lpBuffer);
+    alias _EXCEPTION_REGISTRATION_RECORD = void;
+    struct NT_TIB
+    {
+        _EXCEPTION_REGISTRATION_RECORD* ExceptionList;
+        void* StackBase;
+        void* StackLimit;
+        void* SubSystemTib;
+        void* FiberData;
+        void* ArbitraryUserPointer;
+        NT_TIB* Self;
+    }
 
     version (X86_64)
     {
-        alias _EXCEPTION_REGISTRATION_RECORD = void;
-        struct NT_TIB
-        {
-            _EXCEPTION_REGISTRATION_RECORD* ExceptionList;
-            void* StackBase;
-            void* StackLimit;
-            void* SubSystemTib;
-            void* FiberData;
-            void* ArbitraryUserPointer;
-            NT_TIB* Self;
-        }
-
         extern(C) ubyte __readgsbyte(uint Offset) nothrow @nogc
         {
             asm nothrow @nogc {
@@ -96,7 +84,6 @@ version (Windows)
                 ret;
             }
         }
-
         extern(C) ushort __readgsword(uint Offset) nothrow @nogc
         {
             asm nothrow @nogc {
@@ -105,7 +92,6 @@ version (Windows)
                 ret;
             }
         }
-
         extern(C) uint __readgsdword(uint Offset) nothrow @nogc
         {
             asm nothrow @nogc {
@@ -114,7 +100,6 @@ version (Windows)
                 ret;
             }
         }
-
         extern(C) ulong __readgsqword(uint Offset) nothrow @nogc
         {
             asm nothrow @nogc {
@@ -132,7 +117,6 @@ version (Windows)
                 ret;
             }
         }
-
         extern(C) void __writegsword(uint Offset, ushort Value) nothrow @nogc
         {
             asm nothrow @nogc {
@@ -141,7 +125,6 @@ version (Windows)
                 ret;
             }
         }
-
         extern(C) void __writegsdword(uint Offset, uint Value) nothrow @nogc
         {
             asm nothrow @nogc {
@@ -150,7 +133,6 @@ version (Windows)
                 ret;
             }
         }
-
         extern(C) void __writegsqword(uint Offset, ulong Value) nothrow @nogc
         {
             asm nothrow @nogc {
@@ -160,8 +142,67 @@ version (Windows)
             }
         }
     }
-    else
+    else version (X86)
     {
-        static assert(0, "TODO");
+        extern(C) ubyte __readfsbyte(uint Offset) nothrow @nogc
+        {
+            asm nothrow @nogc {
+                naked;
+                mov EAX, [ESP + 4];
+                mov AL, FS:[EAX];
+                ret;
+            }
+        }
+        extern(C) ushort __readfsword(uint Offset) nothrow @nogc
+        {
+            asm nothrow @nogc {
+                naked;
+                mov EAX, [ESP + 4];
+                mov AX, FS:[EAX];
+                ret;
+            }
+        }
+        extern(C) uint __readfsdword(uint Offset) nothrow @nogc
+        {
+            asm nothrow @nogc {
+                naked;
+                mov EAX, [ESP + 4];
+                mov EAX, FS:[EAX];
+                ret;
+            }
+        }
+
+        extern(C) void __writefsbyte(uint Offset, ubyte Data) nothrow @nogc
+        {
+            asm nothrow @nogc {
+                naked;
+                mov EAX, [ESP + 4];
+                mov EDX, [ESP + 8];
+                mov FS:[EAX], DL;
+                ret;
+            }
+        }
+        extern(C) void __writefsword(uint Offset, ushort Data) nothrow @nogc
+        {
+            asm nothrow @nogc {
+                naked;
+                mov EAX, [ESP + 4];
+                mov EDX, [ESP + 8];
+                mov FS:[EAX], DX;
+                ret;
+            }
+        }
+        extern(C) void __writefsdword(uint Offset, uint Data) nothrow @nogc
+        {
+            asm nothrow @nogc {
+                naked;
+                mov EAX, [ESP + 4];
+                mov EDX, [ESP + 8];
+                mov FS:[EAX], EDX;
+                ret;
+            }
+        }
     }
+    else
+        static assert(0, "TODO");
 }

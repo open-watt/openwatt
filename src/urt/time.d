@@ -5,7 +5,8 @@ import urt.traits : isSomeFloat;
 version (Windows)
 {
     import core.sys.windows.windows;
-    extern (C) void GetSystemTimePreciseAsFileTime(FILETIME* lpSystemTimeAsFileTime) nothrow @nogc;
+
+    extern (Windows) void GetSystemTimePreciseAsFileTime(FILETIME* lpSystemTimeAsFileTime) nothrow @nogc;
 }
 
 nothrow @nogc:
