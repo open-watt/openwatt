@@ -114,26 +114,28 @@ ptrdiff_t formatValue(T)(auto ref T value, char[] buffer, const(char)[] format, 
 
 struct FormatArg
 {
+	enum IsAggregate(T) = is(T == struct) || is(T == class);
+
 	private this(T)(ref T value) pure nothrow @nogc
 	{
-		static if (is(typeof(&value.toString) : StringifyFunc))
+		static if (IsAggregate!T && is(typeof(&value.toString) : StringifyFunc))
 			toString = &value.toString;
-		else static if (__traits(compiles, value.toString(buffer, "format", cast(FormatArg[])null) == 0))
+		else static if (IsAggregate!T && __traits(compiles, value.toString(buffer, "format", cast(FormatArg[])null) == 0))
 		{
 			// wrap in a delegate that adjusts for format + args...
 			static assert(false);
 		}
-		else static if (__traits(compiles, value.toString(buffer, "format") == 0))
+		else static if (IsAggregate!T && __traits(compiles, value.toString(buffer, "format") == 0))
 		{
 			// wrap in a delegate that adjusts for format...
 			static assert(false);
 		}
-		else static if (__traits(compiles, value.toString(buffer) == 0))
+		else static if (IsAggregate!T && __traits(compiles, value.toString(buffer) == 0))
 		{
 			// wrap in a delegate...
 			static assert(false);
 		}
-		else static if (__traits(compiles, value.toString((const(char)[]){}) == 0))
+		else static if (IsAggregate!T && __traits(compiles, value.toString((const(char)[]){}) == 0))
 		{
 			// version with a sink function...
 			// wrap in a delegate that adjusts for format + args...

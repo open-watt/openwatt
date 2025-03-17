@@ -112,7 +112,7 @@ nothrow @nogc:
         if (pack == 0 || e == 0)
             return Unit();
         if (pack < 0x40 && (pack & 3) == 0)
-            return Unit(pack | (e < 0 ? 3-e : e-1));
+            return Unit(pack ^ (e < 0 ? 3-e : e-1));
         if (e == -1)
         {
             enum Signs = 0b000100_000100_000100_000100;
@@ -327,6 +327,7 @@ unittest
     assert(Cycle / Second == Hertz);
     assert(Metre^^2 * Metre == Metre^^3);
     assert((Metre^^-1)^^-1 == Metre);
+    assert((Metre^^-1)^^2 == Metre^^-2);
 
     Unit farad = Kilogram^^-1 * Metre^^-2 * Second^^4 * Ampere^^2;
     assert(farad.pack == ((UnitType.Mass << 3)     | (4 << 0)  |

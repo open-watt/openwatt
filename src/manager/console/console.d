@@ -98,10 +98,10 @@ nothrow @nogc:
     }
 
     /// Get the console's identifier
-    const(char)[] identifier() { return m_identifier; }
+    const(char)[] identifier() { return m_identifier[]; }
 
     /// Get the console's prompt string
-    const(char)[] getPrompt() nothrow @nogc { return m_prompt; }
+    const(char)[] getPrompt() nothrow @nogc { return m_prompt[]; }
 
     /// Set the prompt that text-based sessions will show when accepting commands.
     String setPrompt(String prompt)

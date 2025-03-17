@@ -2,9 +2,15 @@ module urt.processor;
 
 
 version (X86_64)
+{
+    version = Intel;
     enum string ProcessorFamily = "x86_64";
+}
 else version (X86)
+{
+    version = Intel;
     enum string ProcessorFamily = "x86";
+}
 else version (ARM64)
     enum string ProcessorFamily = "ARM64";
 else version (ARM)
