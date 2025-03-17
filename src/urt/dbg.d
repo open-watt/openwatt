@@ -33,6 +33,17 @@ version (Intel)
         }
     }
 }
+else version (ARM)
+{
+    pragma(inline, true)
+    extern(C) void breakpoint() pure nothrow @nogc
+    {
+        debug asm pure nothrow @nogc
+        {
+            "bkpt #0";
+        }
+    }
+}
 else
     static assert(0, "TODO: Unsupported architecture");
 

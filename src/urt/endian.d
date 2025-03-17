@@ -10,10 +10,8 @@ else version (AArch64)
     enum SupportUnalignedLoadStore = true;
 else version (ARM)
 {
-    // TODO: this depends on ARM version, and only works for integers!
-    // need to check target-info details...
-    static assert(false);
-    enum SupportUnalignedLoadStore = false;
+    import urt.processor;
+    enum SupportUnalignedLoadStore = !ProcFeatures.strict_align;
 }
 else
 {
