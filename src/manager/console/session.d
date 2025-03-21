@@ -13,6 +13,31 @@ import urt.util;
 import urt.file;
 import urt.result;
 
+
+enum ClientFeatures : ushort
+{
+    None = 0,
+
+    CRLF = 1 << 1,          // Client recognises CR-LF for newline
+    LineMode = 1 << 2,      // Client uses line-mode
+    Escape = 1 << 3,        // Client can parse control sequences
+    Cursor = 1 << 4,        // Client supports cursor movement
+    Format = 1 << 5,        // Client supports screen formatting
+    TextAttrs = 1 << 6,     // Client supports text attributes
+    Gfx = 1 << 7,           // Client supports graphics
+    BasicColour = 1 << 8,   // Client supports color
+    FullColour = 1 << 9,    // Client supports full color
+    Resize = 1 << 10,       // Client supports terminal resizing
+    Mouse = 1 << 11,        // Client supports mouse events
+    UTF8 = 1 << 12,         // Client supports UTF-8
+
+    NVT = CRLF,
+    VT100 = Escape | Cursor | Format | TextAttrs | Gfx,
+    ANSI = Escape | Cursor | Format | TextAttrs | BasicColour | UTF8,
+    XTERM = ANSI | Gfx | FullColour | Mouse | Resize | UTF8,
+    Windows = CRLF | Cursor | Format | TextAttrs | BasicColour | Resize | UTF8,
+}
+
 class Session
 {
 nothrow @nogc:
@@ -131,6 +156,8 @@ nothrow @nogc:
     ptrdiff_t appendInput(const(char)[] text)
     {
         assert(m_console != null, "Session was closed!");
+
+        // TODO: well, actually, the current command should receive this input, and ^C should cancel the command
         assert(!m_currentCommand);
 
         assert(m_buffer.length + text.length <= MaxStringLen, "Exceeds max string length");
@@ -143,179 +170,9 @@ nothrow @nogc:
         {
             size_t take = 1;
 
-            if (t[i] == '\x03')
-            {
-                i += 1;
-                goto close_session;
-            }
-            else if (t[i] == '\r' || t[i] == '\n')
-            {
-                return i;
-            }
-            else if (t[i] == '\b' || t[i] == '\x7f')
-            {
-            erase_char:
-                if (m_position > 0)
-                    m_buffer.erase(--m_position, 1);
-            }
-            else if (t[i] == '\t')
-            {
-                if (m_suggestionPending)
-                {
-                    Array!(MutableString!0) suggestions = m_console.suggest(m_buffer, curScope);
-                    if (!suggestions.empty)
-                        showSuggestions(cast(String[])suggestions[]); // HACK: this is a brutal cast!!
-                }
-                else
-                {
-                    const(char)[] completeFrom = m_buffer[0 .. m_position];
-                    MutableString!0 completed = m_console.complete(completeFrom, curScope);
-                    if (completed[] != completeFrom[])
-                    {
-                        uint oldPos = m_position;
-                        m_position = cast(uint)completed.length;
-                        completed ~= m_buffer[oldPos .. $];
-                        m_buffer = completed.move;
-                    }
-                    else
-                    {
-                        m_suggestionPending = true;
-
-                        // advance i since we skip the bottom part of the loop
-                        i += take;
-                        continue;
-                    }
-                }
-            }
-            else if (t[i] == '\xff')
-            {
-                // NVT commands...
-                if (i >= len - 1)
-                    goto early_return;
-
-                take = 2;
-                char cmd = t[i + 1];
-
-                switch (cmd)
-                {
-                    case '\xf1': // NOP (No Operation)
-                        break;
-                    case '\xf2': // DM (Data Mark)
-                        // Used to mark the position in the data stream where a Telnet break or interruption occurred.
-                        break;
-                    case '\xf3': // BRK (Break)
-                        // Signals that the sender has initiated a break (interrupt) signal.
-                        // should probable terminate latent commands...?
-                        break;
-                    case '\xf4': // IP (Interrupt Process)
-                        // Used to interrupt the process running on the remote system.
-                        // should probable terminate latent commands...?
-                        break;
-                    case '\xf5': // AO (Abort Output)
-                        // Commands the remote system to stop sending output but allows the process to continue running.
-                        break;
-                    case '\xf6': // AYT (Are You There)
-                        // Used to check if the remote server is still connected and responding.
-                        break;
-                    case '\xf7': // EC (Erase Character)
-                        // Sent to instruct the remote system to erase the last character sent.
-                        goto erase_char;
-                    case '\xf8': // EL (Erase Line)
-                        // Instructs the remote system to erase the entire current line of input.
-                        m_buffer.clear();
-                        m_position = 0;
-                        break;
-                    case '\xf9': // GA (Go Ahead)
-                        // A command used to indicate that the sender is finished, and the receiver may start sending data. This is primarily used in "line-at-a-time" mode.
-                        break;
-                    case '\xfa':
-                        size_t subNvt = i + 2;
-                        while (subNvt < len - 1 && t[subNvt] != '\xff' && t[subNvt + 1] != '\xf0')
-                            ++subNvt;
-                        if (subNvt >= len - 1)
-                        {
-                            // this subnegotiation wasn't closed. we must have an incomplete stream...
-                            goto early_return;
-                        }
-
-                        take = subNvt + 2 - i;
-                        const(char)[] sub = t[i + 2 .. subNvt];
-
-                        if (sub.length > 0)
-                        {
-                            switch (sub[0])
-                            {
-                                case '\x1f': // WINDOW SIZE
-                                    if (sub.length == 5)
-                                    {
-                                        m_width = cast(uint)sub[1] << 8 | (cast(uint)sub[2]);
-                                        m_height = cast(uint)sub[3] << 8 | (cast(uint)sub[4]);
-                                    }
-                                    break;
-                                case '\x2a': // CHARSET
-                                    assert(false, "test this path");
-                                    break;
-                                default:
-                                    writeWarningf("Unsupported NVT subnegotiation: \\\\x{0, 02x}", cast(ubyte)sub[0]);
-                                    break;
-                            }
-                        }
-                        break;
-                    case '\xfb': // WILL
-                    case '\xfc': // WON'T
-                    case '\xfd': // DO
-                    case '\xfe': // DON'T
-                        if (i >= len - 2)
-                            goto early_return;
-
-                        // ECHO              = 1 (0x01)
-                        // SUPPRESS GO-AHEAD = 3 (0x03)
-                        // STATUS            = 5 (0x05)
-                        // TIMING MARK       = 6 (0x06)
-                        // TERMINAL TYPE     = 24 (0x18)
-                        // WINDOW SIZE       = 31 (0x1f)
-                        // CHARSET           = 42 (0x2a)
-
-                        take = 3;
-                        ubyte opt = t[i + 2];
-
-                        final switch (cmd)
-                        {
-                            case '\xfb': // WILL
-                                // This command is sent to indicate that the sender wishes to enable an option. It is typically followed by a byte that specifies which option the sender wants to enable.
-                                if (opt == 0x2a)
-                                {
-                                    assert(false, "this was never tested! not clear if we should transmit the space or not?");
-                                    // client has agreed to negotiate character set; we'll request UTF8...
-                                    write("\xff\xfa\x2a\x01 UTF-8\xff\xf0");
-                                }
-                                debug writeDebugf("Telnet: WILL {0}", cast(ubyte)opt);
-                                break;
-                            case '\xfc': // WON'T
-                                // Sent to indicate that the sender refuses to enable an option.
-                                debug writeDebugf("Telnet: WON'T {0}", cast(ubyte)opt);
-                                break;
-                            case '\xfd': // DO
-                                // This command is sent to indicate that the sender requests the receiver to enable an option.
-                                debug writeDebugf("Telnet: DO {0}", cast(ubyte)opt);
-                                break;
-                            case '\xfe': // DON'T
-                                // Sent to indicate that the sender requests the receiver to disable an option.
-                                debug writeDebugf("Telnet: DON'T {0}", cast(ubyte)opt);
-                                break;
-                        }
-                        break;
-                    case '\xff': // QUIT
-                        // This command indicates that the sender wants to close the Telnet connection.
-                        i += 2;
-                        goto close_session;
-                    default:
-                        // surprise NVT command?
-                        writeWarningf("Unknown NVT command: \\\\x{0, 02x}", cast(ubyte)cmd);
-                        break;
-                }
-            }
-            else if (size_t ansiLen = parseANSICode(t[i .. len]))
+            if (t[i] == '\x7f')
+                goto erase_char;
+            if (size_t ansiLen = parseANSICode(t[i .. len]))
             {
                 const(char)[] seq = t[i .. i + ansiLen];
                 take = ansiLen;
@@ -401,6 +258,58 @@ nothrow @nogc:
                     m_position = cast(uint)m_buffer.length;
                 }
             }
+            else if (t[i] < '\x20')
+            {
+                if (t[i] == '\x03')
+                {
+                    i += 1;
+                    goto close_session;
+                }
+                else if (t[i] == '\r')
+                {
+                    return i;
+                }
+                else if (t[i] == '\b')
+                {
+                erase_char:
+                    if (m_position > 0)
+                        m_buffer.erase(--m_position, 1);
+                }
+                else if (t[i] == '\t')
+                {
+                    if (m_suggestionPending)
+                    {
+                        Array!(MutableString!0) suggestions = m_console.suggest(m_buffer, curScope);
+                        if (!suggestions.empty)
+                            showSuggestions(cast(String[])suggestions[]); // HACK: this is a brutal cast!!
+                    }
+                    else
+                    {
+                        const(char)[] completeFrom = m_buffer[0 .. m_position];
+                        MutableString!0 completed = m_console.complete(completeFrom, curScope);
+                        if (completed[] != completeFrom[])
+                        {
+                            uint oldPos = m_position;
+                            m_position = cast(uint)completed.length;
+                            completed ~= m_buffer[oldPos .. $];
+                            m_buffer = completed.move;
+                        }
+                        else
+                        {
+                            m_suggestionPending = true;
+
+                            // advance i since we skip the bottom part of the loop
+                            i += take;
+                            continue;
+                        }
+                    }
+                }
+                else if (t[i] == '\a')
+                {
+                    i += 1;
+                    doBell();
+                }
+            }
             else
             {
                 m_buffer.insert(m_position, t[i .. i + take]);
@@ -433,13 +342,13 @@ nothrow @nogc:
 
 
     /// \returns The width of the terminal in characters.
-    final uint width() => m_width;
+    final ushort width() => m_width;
 
     /// \returns The height of the terminal in characters.
-    final uint height() => m_height;
+    final ushort height() => m_height;
 
     /// Set the size of the console. Some session types may not support this feature.
-    void setConsoleSize(uint width, uint height)
+    void setConsoleSize(ushort width, ushort height)
     {
         m_width = width;
         m_height = height;
@@ -481,7 +390,7 @@ protected:
         {
             if (lineOffset + max + 3 > m_width)
             {
-                text ~= "\r\n";
+                text ~= (features & ClientFeatures.CRLF) ? "\r\n" : "\n";
                 lineOffset = 0;
             }
             text.appendFormat("   {0, *1}", s[], max);
@@ -508,11 +417,12 @@ protected:
             }
             else if (taken < input.length)
             {
-                assert(input[taken] == '\r' || input[taken] == '\n', "Should only be here when user presses enter?");
+                assert(input[taken] == '\r', "Should only be here when user presses enter?");
 
-                // consume following '\n'??
-                if (input[taken] == '\r' && taken + 1 < input.length && (input[taken + 1] == '\n' || input[taken + 1] == '\0'))
-                    ++taken;
+//                // TODO: what about not-telnet?
+//                //       consume following '\n'?? do enter keypresses expect a '\n'? maybe ClientFeatures.CRLF?
+//                if (taken + 1 < input.length && (input[taken + 1] == '\n'))
+//                    ++taken;
 
                 MutableString!0 cmdInput = takeInput();
                 const(char)[] command = cmdInput.trimCmdLine;
@@ -540,6 +450,11 @@ protected:
         => m_console.m_allocator;
     final NoGCAllocator tempAllocator() pure
         => m_console.m_tempAllocator;
+
+    void doBell()
+    {
+        // TODO: anything to handle BEEP?
+    }
 
     final bool execute(const(char)[] command)
     {
@@ -611,12 +526,10 @@ protected:
     }
 
 
-    CommandState m_currentCommand = null;
-
-    Map!(String, String) localVariables;
-
-    uint m_width = 80;
-    uint m_height = 24;
+    ClientFeatures features;
+    ushort m_width = 80;
+    ushort m_height = 24;
+    char escapeChar;
 
     bool m_showPrompt = true;
     bool m_suggestionPending = false;
@@ -624,6 +537,10 @@ protected:
     const(char)[] m_prompt;
     MutableString!0 m_buffer;
     uint m_position = 0;
+
+    CommandState m_currentCommand = null;
+
+    Map!(String, String) localVariables;
 
 //    list<String> m_history;
 //    list<String>::iterator m_historyCursor;
@@ -701,4 +618,95 @@ nothrow @nogc:
         else
             writeln(text);
     }
+}
+
+class SerialSession : Session
+{
+    import router.stream;
+nothrow @nogc:
+
+    this(ref Console console, Stream stream, ClientFeatures features = ClientFeatures.ANSI, ushort width = 80, ushort height = 24)
+    {
+        super(console);
+        features |= features;
+        m_stream = stream;
+        m_width = width;
+        m_height = height;
+    }
+
+    override void update()
+    {
+        enum DefaultBufferLen = 512;
+        char[DefaultBufferLen] recvbuf = void;
+
+        Array!(char, 0) input; // TODO: add a generous stack buffer
+
+        ptrdiff_t read;
+        do
+        {
+            read = m_stream.read(recvbuf[]);
+            if (read < 0)
+            {
+                closeSession();
+                return;
+            }
+            else if (read == 0)
+                break;
+
+            // TODO: process the stream for CRLF, or for null, or for any other things we gotta handle?
+            input.reserve(input.length + read);
+            for (size_t i = 0; i < read; ++i)
+            {
+                char c = cast(char)recvbuf[i];
+                if (c == '\r')
+                {
+                    if (features & ClientFeatures.CRLF)
+                    {
+                        if (i == read - 1)
+                        {
+                            // TODO: buffer this byte for later... it might have been a split transmission
+                            //       if it's the end of transmission, we'll ignore it
+                            //       otherwise if it's alone, it's probably intentional and we should pass it through...
+                            assert(false);
+                        }
+                        if (recvbuf[i + 1] == '\n')
+                        {
+                            c = '\n';
+                            ++i;
+                        }
+                        else
+                        {
+                            // I think '\r' alone is from an enter keypress...?
+                            assert(false);
+                        }
+                    }
+                }
+                else if (c == '\0')
+                {
+                    // TODO: do we ignore null, or treat it as a newline?
+//                    c = '\n';
+                    continue;
+                }
+
+                input ~= c;
+            }
+        }
+        while (read == recvbuf.length);
+
+        if (!input.empty)
+            receiveInput(input[]);
+
+        super.update();
+    }
+
+    override void writeOutput(const(char)[] text, bool newline)
+    {
+        import urt.io;
+        m_stream.write(text);
+        if (newline)
+            m_stream.write((features & ClientFeatures.CRLF) ? "\r\n" : "\n");
+    }
+
+private:
+    Stream m_stream;
 }
