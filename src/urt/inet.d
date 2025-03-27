@@ -4,6 +4,7 @@ import urt.conv;
 import urt.endian;
 import urt.meta.nullable;
 import urt.string.format;
+import urt.util : clz;
 
 nothrow @nogc:
 
@@ -17,7 +18,8 @@ enum AddressFamily : byte
 	IPv6,
 }
 
-enum IPAddr IPAddrLit(string addr) = () { IPAddr a; size_t taken = a.fromString(addr); assert(taken == addr.length, "Not an IPV4 address"); return a; }();
+enum IPAddr IPAddrLit(string addr) = () { IPAddr a; size_t taken = a.fromString(addr); assert(taken == addr.length, "Not an IPv4 address"); return a; }();
+//enum IPv6Addr IPv6AddrLit(string addr) = () { IPv6Addr a; size_t taken = a.fromString(addr); assert(taken == addr.length, "Not an IPv6 address"); return a; }();
 
 struct IPAddr
 {
@@ -299,11 +301,21 @@ nothrow @nogc:
     enum privateA  = IPSubnet(IPAddr(10, 0, 0, 0), 8);
     enum privateB  = IPSubnet(IPAddr(172, 16, 0, 0), 12);
     enum privateC  = IPSubnet(IPAddr(192, 168, 0, 0), 16);
-
-	IPAddr addr;
-	ubyte prefixLen;
     // TODO: ya know, this is gonna align to 4-bytes anyway...
     //       we could store the actual mask in the native endian, and then clz to recover the prefix len in one opcode
+
+    IPAddr addr;
+    IPAddr mask;
+
+    ubyte prefixLen() @property const pure
+        => clz(~loadBigEndian(&mask.address));
+    void prefixLen(ubyte len) @property pure
+    {
+        if (len == 0)
+            mask.address = 0;
+        else
+            storeBigEndian(&mask.address, 0xFFFFFFFF << (32 - len));
+    }
 
 	this(IPAddr addr, ubyte prefixLen)
 	{
@@ -312,10 +324,15 @@ nothrow @nogc:
 	}
 
     IPAddr netMask() const pure
-        => IPAddr(nativeToBigEndian!uint(0xFFFFFFFF << (32 - prefixLen)));
+        => mask;
 
     bool contains(IPAddr ip) const pure
         => (ip & netMask()) == addr;
+
+    IPAddr getNetwork(IPAddr ip) const pure
+        => ip & mask;
+    IPAddr getLocal(IPAddr ip) const pure
+        => ip & ~mask;
 
 	size_t toHash() const pure
 		=> addr.toHash() ^ prefixLen;
