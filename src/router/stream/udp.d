@@ -71,7 +71,7 @@ class UDPStream : Stream
 
 	override const(char)[] remoteName()
 	{
-		return remoteHost;
+		return remoteHost[];
 	}
 
 	override void setOpts(StreamOptions options) nothrow @nogc

@@ -562,7 +562,6 @@ private:
 				*_pRoot = (*temp).move; // Copy the contents of the non-empty child
 			}
 
-			temp.destroy();
 			Allocator.instance.freeT(temp);
 
 			--numNodes;
