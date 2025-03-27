@@ -859,7 +859,7 @@ ptrdiff_t parseFormat(ref const(char)[] format, ref char[] buffer, const(FormatA
 		if (bytes < 0)
 			return -2;
 		char[] t = formatImpl(buffer, indirectFormat.ptr[0 .. bytes], args);
-		len = t ? t.length : -1;
+		len = t.length;
 	}
 	else
 	{
