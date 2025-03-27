@@ -363,6 +363,7 @@
     <LinkIncremental>true</LinkIncremental>
     <IntDir>build\$(Platform)\$(Configuration)\</IntDir>
     <OutDir>bin\$(Platform)\$(Configuration)\</OutDir>
+    <TargetName>$(ProjectName)_test</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
@@ -378,6 +379,7 @@
     <LinkIncremental>true</LinkIncremental>
     <IntDir>build\$(Platform)\$(Configuration)\</IntDir>
     <OutDir>bin\$(Platform)\$(Configuration)\</OutDir>
+    <TargetName>$(ProjectName)_test</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
@@ -393,6 +395,7 @@
     <LinkIncremental>true</LinkIncremental>
     <IntDir>build\$(Platform)\$(Configuration)\</IntDir>
     <OutDir>bin\$(Platform)\$(Configuration)\</OutDir>
+    <TargetName>$(ProjectName)_test</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">
     <LinkIncremental>false</LinkIncremental>
@@ -408,6 +411,7 @@
     <LinkIncremental>true</LinkIncremental>
     <IntDir>build\$(Platform)\$(Configuration)\</IntDir>
     <OutDir>bin\$(Platform)\$(Configuration)\</OutDir>
+    <TargetName>$(ProjectName)_test</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">
     <LinkIncremental>false</LinkIncremental>

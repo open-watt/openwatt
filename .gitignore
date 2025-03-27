@@ -1,41 +1,29 @@
 # Local cruft
-*.log
 *.ll
 *.s
 *.bc
 *.ast
-src/parser/
-src/parser/
-lib/bdwgc-gc7_4_4/
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
-*.obj
 *.bin
 
-# Precompiled Headers
-*.gch
-*.pch
+*.log
+*.pcap
+*.pcapng
+
+# Compiled Object files
+*.o
+*.obj
 
 # Compiled Dynamic libraries
 *.so
 *.dylib
 *.dll
 
-# Fortran module files
-*.mod
-
 # Compiled Static libraries
-*.lai
-*.la
 *.a
 *.lib
 
 # Executables
 *.exe
-*.out
 *.app
 
 # Visual Studio junk
@@ -48,5 +36,5 @@ lib/bdwgc-gc7_4_4/
 
 # folders
 .vs
-Debug
-x64
+build
+bin
