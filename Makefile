@@ -1,11 +1,15 @@
 SRCDIR := src
-OBJDIR := obj/linux
+OBJDIR := build/linux
 TARGETDIR := bin/linux
 TARGETNAME := enms
-TARGET := $(TARGETDIR)/$(TARGETNAME)
+TARGET = $(TARGETDIR)/$(TARGETNAME)
 
 config ?= debug
 D_COMPILER ?= dmd
+
+ifeq ($(config),unittest)
+	TARGETNAME := $(TARGETNAME)_test
+endif
 
 DFLAGS := $(DFLAGS) -preview=bitfields -preview=rvaluerefparam -preview=nosharedaccess -preview=in
 
