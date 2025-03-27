@@ -1,6 +1,7 @@
 module urt.inet;
 
 import urt.conv;
+import urt.endian;
 import urt.meta.nullable;
 import urt.string.format;
 
@@ -22,28 +23,59 @@ struct IPAddr
 {
 nothrow @nogc:
 
-	enum any = IPAddr(0, 0, 0, 0);
-	enum loopback = IPAddr(127, 0, 0, 1);
-	enum broadcast = IPAddr(255, 255, 255, 255);
-	enum none = IPAddr(255, 255, 255, 255);
+    enum any       = IPAddr(0, 0, 0, 0);
+    enum loopback  = IPAddr(127, 0, 0, 1);
+    enum broadcast = IPAddr(255, 255, 255, 255);
+    enum none      = IPAddr(255, 255, 255, 255);
 
-	ref uint address() const @property => *cast(uint*)b.ptr;
-	void address(uint v) @property { *cast(uint*)b.ptr = v; }
-	ubyte[4] b;
+    union {
+        uint address;
+        ubyte[4] b;
+    }
 
 	this(ubyte[4] b...) pure
 	{
 		this.b = b;
 	}
 
+    bool isMulticast() const pure
+        => (b[0] & 0xF0) == 224;
+    bool isLoopback() const pure
+        => b[0] == 127;
+    bool isLinkLocal() const pure
+        => (b[0] == 169 && b[1] == 254);
+    bool isPrivate() const pure
+        => (b[0] == 192 && b[1] == 168) || b[0] == 10 || (b[0] == 172 && (b[1] & 0xF) == 16);
+
 	bool opCast(T : bool)() const pure
-		=> (b[0] | b[1] | b[2] | b[3]) != 0;
+		=> address != 0;
 
 	bool opEquals(ref const IPAddr rhs) const pure
-		=> b == rhs.b;
+		=> address == rhs.address;
 
 	bool opEquals(const(ubyte)[4] bytes) const pure
 		=> b == bytes;
+
+    IPAddr opUnary(string op : "~")() const pure
+    {
+        IPAddr r;
+        r.address = ~address;
+        return r;
+    }
+
+    IPAddr opBinary(string op)(const IPAddr rhs) const pure
+        if (op == "&" || op == "|" || op == "^")
+    {
+        IPAddr r;
+        r.address = mixin("address" ~ op ~ "rhs.address");
+        return r;
+    }
+
+    void opOpAssign(string op)(const IPAddr rhs) pure
+        if (op == "&" || op == "|" || op == "^")
+    {
+        address = mixin("address" ~ op ~ "rhs.address");
+    }
 
 	size_t toHash() const pure
 	{
@@ -116,17 +148,28 @@ nothrow @nogc:
 
 struct IPv6Addr
 {
-	nothrow @nogc:
+nothrow @nogc:
 
-	// well-known mac addresses
-	enum linkLocal_allNodes		= IPv6Addr(0xFF02, 0, 0, 0, 0, 0, 0, 1);
+    enum any                = IPv6Addr(0, 0, 0, 0, 0, 0, 0, 0);
+    enum loopback           = IPv6Addr(0, 0, 0, 0, 0, 0, 0, 1);
+    enum linkLocal_allNodes = IPv6Addr(0xFF02, 0, 0, 0, 0, 0, 0, 1);
+    enum linkLocal_routers  = IPv6Addr(0xFF02, 0, 0, 0, 0, 0, 0, 2);
 
-	align(2) ushort[8] s;
+	ushort[8] s;
 
 	this(ushort[8] s...) pure
 	{
 		this.s = s;
 	}
+
+    bool isGlobal() const pure
+        => (s[0] & 0xE000) == 0x2000;
+    bool isLinkLocal() const pure
+        => (s[0] & 0xFFC0) == 0xFE80;
+    bool isMulticast() const pure
+        => (s[0] & 0xFF00) == 0xFF00;
+    bool isUniqueLocal() const pure
+        => (s[0] & 0xFE00) == 0xFC00;
 
 	bool opCast(T : bool)() const pure
 		=> (s[0] | s[1] | s[2] | s[3] | s[4] | s[5] | s[6] | s[7]) != 0;
@@ -136,6 +179,30 @@ struct IPv6Addr
 
 	bool opEquals(const(ushort)[8] words) const pure
 		=> s == words;
+
+    IPv6Addr opUnary(string op : "~")() const pure
+    {
+        IPv6Addr r;
+        foreach (i; 0..8)
+            r.s[i] = cast(ushort)~s[i];
+        return r;
+    }
+
+    IPv6Addr opBinary(string op)(const IPv6Addr rhs) pure
+        if (op == "&" || op == "|" || op == "^")
+    {
+        IPv6Addr t;
+        foreach (i, v; s)
+            t.s[i] = mixin("v " ~ op ~ " rhs.s[i]");
+        return t;
+    }
+
+    void opOpAssign(string op)(const IPv6Addr rhs) pure
+        if (op == "&" || op == "|" || op == "^")
+    {
+        foreach (i, v; s)
+            this = mixin("this " ~ op ~ " rhs");
+    }
 
 	size_t toHash() const pure
 	{
@@ -226,14 +293,29 @@ struct IPSubnet
 {
 nothrow @nogc:
 
+    enum multicast = IPSubnet(IPAddr(224, 0, 0, 0), 4);
+    enum loopback  = IPSubnet(IPAddr(127, 0, 0, 0), 8);
+    enum linkLocal = IPSubnet(IPAddr(169, 254, 0, 0), 16);
+    enum privateA  = IPSubnet(IPAddr(10, 0, 0, 0), 8);
+    enum privateB  = IPSubnet(IPAddr(172, 16, 0, 0), 12);
+    enum privateC  = IPSubnet(IPAddr(192, 168, 0, 0), 16);
+
 	IPAddr addr;
 	ubyte prefixLen;
+    // TODO: ya know, this is gonna align to 4-bytes anyway...
+    //       we could store the actual mask in the native endian, and then clz to recover the prefix len in one opcode
 
 	this(IPAddr addr, ubyte prefixLen)
 	{
 		this.addr = addr;
 		this.prefixLen = prefixLen;
 	}
+
+    IPAddr netMask() const pure
+        => IPAddr(nativeToBigEndian!uint(0xFFFFFFFF << (32 - prefixLen)));
+
+    bool contains(IPAddr ip) const pure
+        => (ip & netMask()) == addr;
 
 	size_t toHash() const pure
 		=> addr.toHash() ^ prefixLen;
@@ -284,6 +366,11 @@ struct IPv6Subnet
 {
 nothrow @nogc:
 
+    enum global      = IPv6Subnet(IPv6Addr(0x2000, 0, 0, 0, 0, 0, 0, 0), 3);
+    enum linkLocal   = IPv6Subnet(IPv6Addr(0xFE80, 0, 0, 0, 0, 0, 0, 0), 10);
+    enum multicast   = IPv6Subnet(IPv6Addr(0xFF00, 0, 0, 0, 0, 0, 0, 0), 8);
+    enum uniqueLocal = IPv6Subnet(IPv6Addr(0xFC00, 0, 0, 0, 0, 0, 0, 0), 7);
+
 	IPv6Addr addr;
 	ubyte prefixLen;
 
@@ -292,6 +379,32 @@ nothrow @nogc:
 		this.addr = addr;
 		this.prefixLen = prefixLen;
 	}
+
+    IPv6Addr netMask() const pure
+    {
+        IPv6Addr r;
+        int i, j = prefixLen / 16;
+        while (i < j) r.s[i++] = 0xFFFF;
+        r.s[i++] = cast(ushort)(0xFFFF << (16 - (prefixLen % 16)));
+        while (i < 8) r.s[i++] = 0;
+        return r;
+    }
+
+    bool contains(IPv6Addr ip) const pure
+    {
+        uint n = prefixLen / 16;
+        uint i = 0;
+        for (; i < n; ++i)
+            if (ip.s[i] != addr.s[i])
+                return false;
+        if (prefixLen % 16)
+        {
+            uint s = 16 - (prefixLen % 16);
+            if (ip.s[i] >> s != addr.s[i] >> s)
+                return false;
+        }
+        return true;
+    }
 
 	size_t toHash() const pure
 		=> addr.toHash() ^ prefixLen;
@@ -494,12 +607,18 @@ unittest
 {
 	char[64] tmp;
 
+    assert(~IPAddr(255, 255, 248, 0) == IPAddr(0, 0, 7, 255));
+    assert((IPAddr(255, 255, 248, 0) ^ IPAddr(255, 0, 255, 255)) == IPAddr(0, 255, 7, 255));
+    assert(IPSubnet(IPAddr(), 21).netMask() == IPAddr(0xFF, 0xFF, 0xF8, 0));
+
 	assert(tmp[0 .. IPAddr(192, 168, 0, 1).toString(tmp, null, null)] == "192.168.0.1");
 	assert(tmp[0 .. IPAddr(0, 0, 0, 0).toString(tmp, null, null)] == "0.0.0.0");
 
 	IPAddr addr;
 	assert(addr.fromString("192.168.0.1/24") == 11 && addr == IPAddr(192, 168, 0, 1));
 	assert(addr.fromString("0.0.0.0:21") == 7 && addr == IPAddr(0, 0, 0, 0));
+    addr |= IPAddr(1, 2, 3, 4);
+    assert(addr == IPAddr(1, 2, 3, 4));
 
 	assert(tmp[0 .. IPSubnet(IPAddr(192, 168, 0, 0), 24).toString(tmp, null, null)] == "192.168.0.0/24");
 	assert(tmp[0 .. IPSubnet(IPAddr(0, 0, 0, 0), 0).toString(tmp, null, null)] == "0.0.0.0/0");
@@ -507,6 +626,10 @@ unittest
 	IPSubnet subnet;
 	assert(subnet.fromString("192.168.0.0/24") == 14 && subnet == IPSubnet(IPAddr(192, 168, 0, 0), 24));
 	assert(subnet.fromString("0.0.0.0/0") == 9 && subnet == IPSubnet(IPAddr(0, 0, 0, 0), 0));
+
+    assert(~IPv6Addr(0xFFFF, 0xFFFF, 0xFFFF, 0xFFFF, 0xFFF0, 0, 0, 0) == IPv6Addr(0, 0, 0, 0, 0xF, 0xFFFF, 0xFFFF, 0xFFFF));
+    assert((IPv6Addr(0xFFFF, 0, 1, 2, 3, 4, 5, 6) ^ IPv6Addr(0xFF00, 0, 3, 0, 0, 0, 0, 2)) == IPv6Addr(0xFF, 0, 2, 2, 3, 4, 5, 4));
+    assert(IPv6Subnet(IPv6Addr(), 21).netMask() == IPv6Addr(0xFFFF, 0xF800, 0, 0, 0, 0, 0, 0));
 
 	assert(tmp[0 .. IPv6Addr(0x2001, 0xdb8, 0, 1, 0, 0, 0, 1).toString(tmp, null, null)] == "2001:db8:0:1::1");
 	assert(tmp[0 .. IPv6Addr(0x2001, 0xdb8, 0, 0, 1, 0, 0, 1).toString(tmp, null, null)] == "2001:db8::1:0:0:1");
