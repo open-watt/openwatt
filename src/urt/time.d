@@ -8,6 +8,10 @@ version (Windows)
 
     extern (Windows) void GetSystemTimePreciseAsFileTime(FILETIME* lpSystemTimeAsFileTime) nothrow @nogc;
 }
+else version (Posix)
+{
+    import core.sys.posix.time;
+}
 
 nothrow @nogc:
 
@@ -34,9 +38,9 @@ nothrow @nogc:
         if (is(T == Time!c, Clock c) && c != clock)
     {
         static if (clock == Clock.Monotonic && c == Clock.SystemTime)
-            return SysTime(ticks + bootFileTime);
+            return SysTime(ticks + ticksSinceBoot);
         else
-            return MonoTime(ticks - bootFileTime);
+            return MonoTime(ticks - ticksSinceBoot);
     }
 
     bool opEquals(Time!clock b) const pure
@@ -52,9 +56,9 @@ nothrow @nogc:
         static if (clock != c)
         {
             static if (clock == Clock.Monotonic)
-                t1 += bootFileTime;
+                t1 += ticksSinceBoot;
             else
-                t2 += bootFileTime;
+                t2 += ticksSinceBoot;
         }
         return Duration(t1 - t2);
     }
@@ -322,6 +326,12 @@ MonoTime getTime()
         QueryPerformanceCounter(&now);
         return MonoTime(now.QuadPart);
     }
+    else version (Posix)
+    {
+        timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        return MonoTime(ts.tv_sec * 1_000_000_000 + ts.tv_nsec);
+    }
     else
     {
         static assert(false, "TODO");
@@ -336,6 +346,12 @@ SysTime getSysTime()
         GetSystemTimePreciseAsFileTime(&ft);
         return SysTime(*cast(ulong*)&ft);
     }
+    else version (Posix)
+    {
+        timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        return SysTime(ts.tv_sec * 1_000_000_000 + ts.tv_nsec);
+    }
     else
     {
         static assert(false, "TODO");
@@ -347,6 +363,12 @@ DateTime getDateTime()
 {
     version (Windows)
         return fileTimeToDateTime(getSysTime());
+    else version (Posix)
+    {
+        timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        return realtimeToDateTime(ts);
+    }
     else
         static assert(false, "TODO");
 }
@@ -355,6 +377,13 @@ DateTime getDateTime(SysTime time)
 {
     version (Windows)
         return fileTimeToDateTime(time);
+    else version (Posix)
+    {
+        timespec ts;
+        ts.tv_sec = time.ticks / 1_000_000_000;
+        ts.tv_nsec = time.ticks % 1_000_000_000;
+        return realtimeToDateTime(ts);
+    }
     else
         static assert(false, "TODO");
 }
@@ -371,6 +400,8 @@ ulong unixTimeNs(SysTime t)
 {
     version (Windows)
         return (t.ticks - 116444736000000000UL) * 100UL;
+    else version (Posix)
+        return t.ticks;
     else
         static assert(false, "TODO");
 }
@@ -381,13 +412,20 @@ Duration abs(Duration d) pure
 
 private:
 
-immutable uint ticksPerSecond;
-immutable uint nsecMultiplier;
 immutable MonoTime startTime;
 
 version (Windows)
-    immutable ulong bootFileTime;
-
+{
+    immutable uint ticksPerSecond;
+    immutable uint nsecMultiplier;
+    immutable ulong ticksSinceBoot;
+}
+else version (Posix)
+{
+    enum uint ticksPerSecond = 1_000_000_000;
+    enum uint nsecMultiplier = 1;
+    immutable ulong ticksSinceBoot;
+}
 
 package(urt) void initClock()
 {
@@ -413,7 +451,22 @@ package(urt) void initClock()
             GetSystemTimePreciseAsFileTime(cast(FILETIME*)&ftime);
             bootTime = min(bootTime, ftime - qpc.QuadPart);
         }
-        cast()bootFileTime = bootTime;
+        cast()ticksSinceBoot = bootTime;
+    }
+    else version (Posix)
+    {
+        import urt.util : min;
+
+        // this doesn't really give time since boot, since MONOTIME is not guaranteed to be zero at system startup...
+        timespec mt, rt;
+        ulong bootTime = ulong.max;
+        foreach (i; 0 .. 100)
+        {
+            clock_gettime(CLOCK_MONOTONIC, &mt);
+            clock_gettime(CLOCK_REALTIME, &rt);
+            bootTime = min(bootTime, rt.tv_sec*1_000_000_000 + rt.tv_nsec - mt.tv_sec*1_000_000_000 - mt.tv_nsec);
+        }
+        cast()ticksSinceBoot = bootTime;
     }
     else
         static assert(false, "TODO");
@@ -482,6 +535,26 @@ version (Windows)
         dt.ns = (ftime.ticks % 10_000_000) * 100;
 
         debug assert(stime.wMilliseconds == dt.msec);
+
+        return dt;
+    }
+}
+else version (Posix)
+{
+    DateTime realtimeToDateTime(timespec ts)
+    {
+        tm t;
+        gmtime_r(&ts.tv_sec, &t);
+
+        DateTime dt;
+        dt.year = cast(short)(t.tm_year + 1900);
+        dt.month = cast(ubyte)(t.tm_mon + 1);
+        dt.wday = cast(ubyte)t.tm_wday;
+        dt.day = cast(ubyte)t.tm_mday;
+        dt.hour = cast(ubyte)t.tm_hour;
+        dt.minute = cast(ubyte)t.tm_min;
+        dt.second = cast(ubyte)t.tm_sec;
+        dt.ns = cast(uint)ts.tv_nsec;
 
         return dt;
     }

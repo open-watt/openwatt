@@ -298,27 +298,31 @@ version(Windows)
 }
 else version(Posix)
 {
-    import core.sys.posix.termios;
+
+//    import urt.internal.os;
+    import core.sys.linux.termios;
     import core.sys.posix.unistd;
     import core.sys.posix.fcntl;
-    import core.stdc.stdint : ptrdiff_t;
+    import core.sys.posix.sys.types;
     import std.string : toStringz;
 
     class SerialStream : Stream
     {
-        this(string device, in SerialParams serialParams, StreamOptions options = StreamOptions.None)
+    nothrow @nogc:
+        this(String name, String device, in SerialParams serialParams, StreamOptions options = StreamOptions.None)
         {
+            super(name.move, "serial", options);
             this.device = device;
             this.params = serialParams;
-            this.options = options;
         }
 
         override bool connect()
         {
-            fd = core.sys.posix.fcntl.open(device.toStringz(), O_RDWR | O_NOCTTY | O_NDELAY);
+            fd = core.sys.posix.fcntl.open(device.tstringz, O_RDWR | O_NOCTTY | O_NDELAY);
             if (fd == -1)
             {
-                writeln("Failed to open device %s.\n", params.device);
+                writeln("Failed to open device %s.\n", this.device);
+                return false;
             }
 
             termios tty;
@@ -357,25 +361,82 @@ else version(Posix)
 
         override void disconnect()
         {
-            close(fd);
+            core.sys.posix.unistd.close(fd);
             fd = -1;
         }
 
-        override ptrdiff_t read(ubyte[] buffer)
+        override bool connected()
         {
-            ssize_t bytesRead = read(fd, buffer.ptr, buffer.length);
+            if (fd == -1)
+                live = false;
+            if (!live)
+                return false;
+            // TODO
+            assert(false);
+//            DWORD errors;
+//            COMSTAT status;
+//            if (ClearCommError(hCom, &errors, &status))
+//            {
+//                if (errors == 0)
+//                    return true;
+//                else
+//                {
+//                    assert(false, "TODO: test this case");
+//                    return false; // close the port?
+//                }
+//            }
+//
+//            disconnect();
+            return false;
+        }
+
+        override const(char)[] remoteName()
+        {
+            return device[];
+        }
+
+        override void setOpts(StreamOptions options)
+        {
+            this.options = options;
+        }
+
+
+        override ptrdiff_t read(void[] buffer)
+        {
+            ssize_t bytesRead = core.sys.posix.unistd.read(fd, buffer.ptr, buffer.length);
             return bytesRead;
         }
 
-        override ptrdiff_t write(const ubyte[] data)
+        override ptrdiff_t write(const void[] data)
         {
-            ssize_t bytesWritten = write(fd, buffer.ptr, buffer.length);
+            ssize_t bytesWritten = core.sys.posix.unistd.write(fd, data.ptr, data.length);
             return bytesWritten;
+        }
+
+        override ptrdiff_t pending()
+        {
+            // TODO:?
+            assert(0);
+        }
+
+        override ptrdiff_t flush()
+        {
+            // TODO: just read until can't read anymore?
+            assert(0);
+        }
+
+        override void update()
+        {
+            // this should implement keep-alive nonsense and all that...
+            // what if the port comes and goes? we need to re-scan for the device if it's plugged/unplugged, etc.
+
+            if (!live)
+                connect();
         }
 
     private:
         int fd = -1;
-        string device;
+        String device;
         SerialParams params;
         StreamOptions options;
     }

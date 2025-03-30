@@ -52,6 +52,7 @@ version (Windows)
 }
 else version (Posix)
 {
+	import core.stdc.errno;
     Result InternalResult(InternalCode code)
     {
         switch (code)
@@ -59,16 +60,16 @@ else version (Posix)
             case InternalCode.Success:
                 return Result();
             case InternalCode.BufferTooSmall:
-                return Result(ERANGE + kPOSIXErrorBase);
+                return Result(ERANGE);
             case InternalCode.InvalidParameter:
-                return Result(EINVAL + kPOSIXErrorBase);
+                return Result(EINVAL);
             default:
-                return Result(ENOTSUP + kPOSIXErrorBase); // InternalCode.Unsupported
+                return Result(ENOTSUP); // InternalCode.Unsupported
         }
     }
 
     Result PosixResult(int err)
-        => Result(err + kPOSIXErrorBase);
+        => Result(err);
     Result ErrnoResult()
-        => Result(errno + kPOSIXErrorBase);
+        => Result(errno);
 }

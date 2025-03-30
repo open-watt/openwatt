@@ -41,6 +41,7 @@ void[] allocAligned(size_t size, size_t alignment) nothrow @nogc
 	}
 	else version (Posix)
 	{
+		import core.sys.posix.stdlib;
 		void* mem;
 		return posix_memalign(&mem, alignment, size) ? null : mem[0 .. size];
 	}
@@ -129,9 +130,9 @@ size_t memsize(void* ptr) nothrow @nogc
 		return _msize(mem) - (cast(size_t)ptr - cast(size_t)mem);
 	}
 	else version (Posix)
-		return malloc_usable_size(p);
+		return malloc_usable_size(ptr);
 	else version (Darwin)
-		return malloc_size(p);
+		return malloc_size(ptr);
 	else
 		assert(false, "Unsupported platform");
 }
@@ -151,4 +152,9 @@ version (Windows)
 {
 	extern(C) void* _expand(void* memblock, size_t size) nothrow @nogc;
 	extern(C) size_t _msize(void* _Block);
+}
+
+version (Posix)
+{
+	extern(C) size_t malloc_usable_size(void *__ptr);
 }
