@@ -1454,7 +1454,7 @@ version (Windows)
 		POLLNVAL = 0x0004
 	}
 
-	extern(C) int WSAPoll(LPWSAPOLLFD fdArray, uint fds, int timeout);
+	extern(Windows) int WSAPoll(LPWSAPOLLFD fdArray, uint fds, int timeout);
 
     struct ip_mreq
     {

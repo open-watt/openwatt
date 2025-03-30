@@ -15,11 +15,13 @@ version(Windows)
     import core.sys.windows.windows;
     import core.sys.windows.windef : MAX_PATH;
     import core.sys.windows.winnt;
-
     import urt.string : twstringz;
 
-    enum FILE_NAME_OPENED = 0x8;
-    extern(C) { nothrow @nogc: int GetFinalPathNameByHandleW(void *hFile, wchar *lpszFilePath, uint cchFilePath, uint dwFlags); }
+    // TODO: remove this when LDC/GDC are up to date...
+    version (DigitalMars) {} else {
+        extern(Windows) DWORD GetFinalPathNameByHandleW(HANDLE hFile, LPWSTR lpszFilePath, DWORD cchFilePath, DWORD dwFlags) nothrow @nogc;
+        enum FILE_NAME_OPENED = 8;
+    }
 }
 else
 {
@@ -557,7 +559,7 @@ Result get_temp_filename(ref char[] buffer, const(char)[] dstDir, const(char)[] 
         if (!GetTempFileNameW(dstDir.twstringz, prefix.twstringz, 0, tmp.ptr))
             return Win32Result(GetLastError());
         size_t resLen = wcslen(tmp.ptr);
-        resLen = tmp[0..resLen].uniConvert(buffer);
+        resLen = tmp[((dstDir.length == 0 && tmp[0] == '\\') ? 1 : 0)..resLen].uniConvert(buffer);
         if (resLen == 0)
         {
             DeleteFileW(tmp.ptr);

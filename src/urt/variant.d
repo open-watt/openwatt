@@ -24,14 +24,13 @@ nothrow @nogc:
         {
             Array!Variant arr = rh.nodeArray;
             takeNodeArray(arr);
+            flags = rh.flags;
         }
         else
         {
-            value.ul = rh.value.ul;
-            count = rh.count;
-            alloc = rh.alloc; // there might be some string bytes in here...
+            assert((rh.flags & Flags.NeedDestruction) == 0);
+            __pack = rh.__pack;
         }
-        flags = rh.flags;
     }
 
     version (EnableMoveSemantics) {
@@ -212,6 +211,7 @@ nothrow @nogc:
         }
         else
         {
+//            flags |= Flags.NeedDestruction; // if T has a destructor...
             count = UserTypeId!T;
             assert(false, "TODO: alloc for the object...");
         }
@@ -549,28 +549,37 @@ package:
 //        float f; // if there is no hardware double support, then we should use this...
 
         const(char)* s;
-        Variant* n;
+
+        struct {
+            // HACK: on 32bit, `n` must be placed immediately before `count`
+            static if (size_t.sizeof == 4)
+                uint __placeholder;
+            Variant* n;
+        }
     }
 
     union {
-        struct { // 12 bytes on 32bit, 16 bytes on 64bit
-            void* ptr;
+        ulong[2] __pack; // for efficient copying...
+
+        struct {
+            union {
+                Value value;
+                void* ptr;
+            }
             uint count;
             ushort alloc;
             Flags flags;
         }
 
-        enum EmbedSize = size_t.sizeof == 4 ? 10 : 14;
+        enum EmbedSize = 14;
         char[EmbedSize] embed; // a buffer for locally embedded data
-
-        Value value;
     }
 
     Type type() const pure
         => cast(Type)(flags & Flags.TypeMask);
 
     ref inout(Array!Variant) nodeArray() @property inout pure
-        => *cast(inout(Array!Variant)*)&value;
+        => *cast(inout(Array!Variant)*)&value.n;
     void takeNodeArray(ref Array!Variant arr)
     {
         value.n = arr[].ptr;
@@ -584,12 +593,7 @@ package:
             doDestroy();
 
         static if (reset)
-        {
-            value.ul = 0;
-            count = 0;
-            alloc = 0;
-            flags = Flags.Null;
-        }
+            __pack[] = 0;
     }
 
     private void doDestroy()
@@ -631,8 +635,8 @@ package:
         NumberDouble    = cast(Flags)Type.Number | Flags.IsNumber | Flags.DoubleFlag,
         String          = cast(Flags)Type.String | Flags.IsString,
         ShortString     = cast(Flags)Type.String | Flags.IsString | Flags.Embedded,
-        Array           = cast(Flags)Type.Array,
-        Map             = cast(Flags)Type.Map,
+        Array           = cast(Flags)Type.Array | Flags.NeedDestruction,
+        Map             = cast(Flags)Type.Map | Flags.NeedDestruction,
         User            = cast(Flags)Type.User,
 
         IsBool          = 1 << (TypeBits + 0),

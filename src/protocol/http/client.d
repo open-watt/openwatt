@@ -122,7 +122,7 @@ nothrow @nogc:
     // response info
     HTTPVersion httpVersion;    // HTTP version (e.g., "HTTP/1.1", "HTTP/2")
     ushort statusCode;          // Status code (e.g., 200, 404, 500)
-    ulong contentLength;        // Length of the body, if applicable
+    size_t contentLength;        // Length of the body, if applicable
     Array!ubyte content;        // Response body (if any)
     Array!HTTPParam headers;    // Array of additional headers (or string[string] for key-value)
 
@@ -310,7 +310,7 @@ nothrow @nogc:
                         if (val)
                         {
                             bool success;
-                            long contentLen = val.parseIntFast(success);
+                            size_t contentLen = val.parseIntFast(success);
                             if (!success)
                                 goto error_out; // bad content length
                             response.contentLength = contentLen;
@@ -333,7 +333,7 @@ nothrow @nogc:
                                 break parse_outer;
                             }
                             size_t taken;
-                            response.pendingChunkLen = msg[0 .. newline].parseInt(&taken, 16);
+                            response.pendingChunkLen = cast(size_t)msg[0 .. newline].parseInt(&taken, 16);
                             if (taken != newline)
                                 goto error_out; // bad chunk length format!
                             msg = msg[newline + 2 .. $];

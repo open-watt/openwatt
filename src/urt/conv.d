@@ -227,11 +227,17 @@ double parseFloat(const(char)[] str, size_t* bytesTaken = null, int base = 10) p
 
 unittest
 {
+    static bool fcmp(double a, double b) pure
+    {
+        import urt.math;
+        return fabs(a - b) < 10e-23;
+    }
+
 	size_t taken;
-	assert(parseFloat("123.456") == 123.456);
-	assert(parseFloat("+123.456") == 123.456);
-	assert(parseFloat("-123.456.789") == -123.456);
-	assert(parseFloat("1101.11", &taken, 2) == 13.75 && taken == 7);
+	assert(fcmp(parseFloat("123.456"), 123.456));
+	assert(fcmp(parseFloat("+123.456"), 123.456));
+	assert(fcmp(parseFloat("-123.456.789"), -123.456));
+	assert(fcmp(parseFloat("1101.11", &taken, 2), 13.75) && taken == 7);
 	assert(parseFloat("xyz", &taken) is double.nan && taken == 0);
 }
 
