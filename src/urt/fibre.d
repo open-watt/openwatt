@@ -529,6 +529,71 @@ else
             }
         }
     }
+    else version (ARM)
+    {
+        // State: r4-r11, sp, lr
+        enum SaveStateLen = 10;
+
+        void co_init_stack(void* base, void* top, coentry_t entry)
+        {
+            size_t stack_top = cast(size_t)top;
+            stack_top &= ~size_t(15);
+
+            void** p = cast(void**)base;
+            p[8] = cast(void*)stack_top;    // starting sp
+            p[9] = entry;                   // starting lr
+        }
+
+        pragma(inline, false)
+        extern(C) void co_swap(cothread_t newCtx, cothread_t oldCtx) @naked
+        {
+            // just for thumb-1, thumb-2 can to the 32bit thing below.. somehow... apparently...?
+            static if (ProcFeatures.thumb && !ProcFeatures.thumb2)
+            {
+                static assert(false, "TODO: this needs to be tested somehow... thumb instructions are offset by 1 byte.");
+                asm nothrow @nogc
+                {
+                    `
+                    stmia r1!, {r4-r7}
+                    mov r2, r8
+                    mov r3, r9
+                    mov r4, r10
+                    mov r5, r11
+                    mov r6, sp
+                    mov r7, lr
+                    stmia r1!, {r2-r7}
+                    add r1, r0, #16
+                    ldmia r1!, {r2-r6}
+                    mov r8, r2
+                    mov r9, r3
+                    mov r10, r4
+                    mov r11, r5
+                    mov sp, r6
+                    ldmia r0!, {r4-r7}
+                    ldmia r1!, {pc}
+                    `
+    //                bx lr ; TODO: why is this even here? the prior instruction loads `pc`... maybe it's a hint to the branch predictor?
+                    : // no outputs
+                    : // "r"(newCtx), "r"(oldCtx) // function is @naked, so the ABI takes care of this
+                    : "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "sp", "lr", "memory";
+                }
+            }
+            else
+            {
+                asm nothrow @nogc
+                {
+                    `
+                    stmia r1!, {r4-r11,sp,lr}
+                    ldmia r0!, {r4-r11,sp,pc}
+                    bx lr ; TODO: why is this even here? the prior instruction loads 'pc'... maybe it's a hint to the branch predictor?
+                    `
+                    : // no outputs
+                    : // "r"(newCtx), "r"(oldCtx) // function is @naked, so the ABI takes care of this
+                    : "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "sp", "lr", "memory";
+                }
+            }
+        }
+    }
     else
         static assert(false, "TODO: implement for other architectures!");
 }
