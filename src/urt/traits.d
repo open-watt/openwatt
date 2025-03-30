@@ -7,13 +7,13 @@ enum bool isType(alias X) = is(X);
 
 enum bool isBoolean(T) = __traits(isUnsigned, T) && is(T : bool);
 
-enum bool isUnsignedInt(T) = is(T == ubyte) || is(T == ushort) || is(T == uint) || is(T == ulong);
-enum bool isSignedInt(T) = is(T == byte) || is(T == short) || is(T == int) || is(T == long);
+enum bool isUnsignedInt(T) = is(Unqual!T == ubyte) || is(Unqual!T == ushort) || is(Unqual!T == uint) || is(Unqual!T == ulong);
+enum bool isSignedInt(T) = is(Unqual!T == byte) || is(Unqual!T == short) || is(Unqual!T == int) || is(Unqual!T == long);
 enum bool isSomeInt(T) = isUnsignedInt!T || isSignedInt!T;
-enum bool isUnsignedIntegral(T) = is(T == bool) || isUnsignedInt!T || isSomeChar!T;
+enum bool isUnsignedIntegral(T) = is(Unqual!T == bool) || isUnsignedInt!T || isSomeChar!T;
 enum bool isSignedIntegral(T) = isSignedInt!T;
 enum bool isIntegral(T) = isUnsignedIntegral!T || isSignedIntegral!T;
-enum bool isSomeFloat(T) = is(T == float) || is(T == double) || is(T == real);
+enum bool isSomeFloat(T) = is(Unqual!T == float) || is(Unqual!T == double) || is(Unqual!T == real);
 
 enum bool isEnum(T) = is(T == enum);
 template enumType(T)
@@ -79,7 +79,9 @@ template Unqual(T : const U, U)
 
 template Unsigned(T)
 {
-    static if (is(T == long))
+    static if (isUnsigned!T)
+        alias Unsigned = T;
+    else static if (is(T == long))
         alias Unsigned = ulong;
     else static if (is(T == int))
         alias Unsigned = uint;
@@ -87,9 +89,7 @@ template Unsigned(T)
         alias Unsigned = ushort;
     else static if (is(T == byte))
         alias Unsigned = ubyte;
-    else static if (is(T == cent))
-        alias Unsigned = ucent;
-    else static if (is(T == ulong) || is(T == ushort) || is(T == ubyte) || is(T == ucent) || is(T == bool) || is(T == char) || is(T == wchar) || is(T == dchar))
+    else static if (is(T == ulong) || is(T == ushort) || is(T == ubyte) || is(T == bool) || is(T == char) || is(T == wchar) || is(T == dchar))
         alias Unsigned = T;
     else static if (is(T == U*, U))
         alias Unsigned = Unsigned!U*;
@@ -113,7 +113,9 @@ template Unsigned(T)
 
 template Signed(T)
 {
-    static if (is(T == ulong))
+    static if (isSigned!T)
+        alias Unsigned = T;
+    else static if (is(T == ulong))
         alias Signed = long;
     else static if (is(T == uint))
         alias Signed = int;
