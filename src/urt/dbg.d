@@ -33,6 +33,17 @@ version (Intel)
         }
     }
 }
+else version (AArch64)
+{
+    pragma(inline, true)
+    extern(C) void breakpoint() pure nothrow @nogc
+    {
+        debug asm pure nothrow @nogc
+        {
+            "brk #0";
+        }
+    }
+}
 else version (ARM)
 {
     pragma(inline, true)
