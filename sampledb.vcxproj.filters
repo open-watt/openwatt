@@ -552,6 +552,9 @@
     <DCompile Include="src\protocol\package.d">
       <Filter>src\protocol</Filter>
     </DCompile>
+    <DCompile Include="src\manager\expression.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

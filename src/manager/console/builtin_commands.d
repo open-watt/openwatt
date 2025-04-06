@@ -4,10 +4,11 @@ import urt.array;
 import urt.mem;
 import urt.string;
 import urt.string.format : tconcat;
+import urt.variant;
 
 import manager.console;
 import manager.console.command;
-import manager.console.expression;
+import manager.expression : NamedArgument;
 
 nothrow @nogc:
 
@@ -39,49 +40,46 @@ nothrow @nogc:
         return null;
     }
 
-    override CommandState execute(Session session, const(char)[] cmdLine)
+    override CommandState execute(Session session, const(Variant)[] args, const NamedArgument[] namedArgs)
     {
-        cmdLine = cmdLine.trimCmdLine;
-        if (cmdLine.frontIs('/'))
-            cmdLine = cmdLine[1..$].trimCmdLine;
+        // a lone `/` should only be possible for a root-scope command
+        if (args.length > 0 && args[0].isString && args[0].asString == "/")
+            args = args[1..$];
 
         // move to scope...
-        if (cmdLine.length == 0)
+        if (args.length == 0)
         {
             session.curScope = this;
             return null;
         }
 
+        if (!args[0].isString)
+            assert(false, "TODO: the argument to a command must be an identifier? or are there other cases?");
+        const(char)[] cmd = args[0].asString;
+
+        // skip the path separator...
+        if (cmd.frontIs('/'))
+            cmd = cmd[1..$];
+
         // check for '..'
-        if (cmdLine.frontIs(".."))
+        if (cmd.frontIs(".."))
         {
-            if (cmdLine.length == 2 || (cmdLine.length > 2 && isWhitespace(cmdLine[2]) || cmdLine[2] == '/' || cmdLine[2] == '#'))
+            if (parent is null)
             {
-                if (parent is null)
-                {
-                    session.writeOutput("Error: '..' used at top level", true);
-                    return null;
-                }
-                return parent.execute(session, cmdLine[2..$]);
+                session.writeOutput("Error: '..' used at top level", true);
+                return null;
             }
+            return parent.execute(session, args[1..$], namedArgs);
         }
 
-        // take next identifier and see if it's a child...
-        const(char)[] identifier = cmdLine.takeIdentifier;
-
-        if (identifier.empty)
+        // see if the identifier is a child...
+        foreach (Command c; commands)
         {
-            session.writeOutput("Error: expected identifier", true);
-            return null;
+            if (c.name[] == cmd[])
+                return c.execute(session, args[1..$], namedArgs);
         }
 
-        foreach (Command cmd; commands)
-        {
-            if (cmd.name[] == identifier[])
-                return cmd.execute(session, cmdLine);
-        }
-
-        session.writeOutput(tconcat("Error: no command `", identifier[], "`"), true);
+        session.writeOutput(tconcat("Error: no command `", cmd[], "`"), true);
         return null;
     }
 

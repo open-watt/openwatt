@@ -66,12 +66,12 @@
     <DCompile Include="src\manager\console\builtin_commands.d" />
     <DCompile Include="src\manager\console\command.d" />
     <DCompile Include="src\manager\console\console.d" />
-    <DCompile Include="src\manager\console\expression.d" />
     <DCompile Include="src\manager\console\function_command.d" />
     <DCompile Include="src\manager\console\package.d" />
     <DCompile Include="src\manager\console\session.d" />
     <DCompile Include="src\manager\device.d" />
     <DCompile Include="src\manager\element.d" />
+    <DCompile Include="src\manager\expression.d" />
     <DCompile Include="src\manager\log.d" />
     <DCompile Include="src\manager\package.d" />
     <DCompile Include="src\manager\pcap.d" />

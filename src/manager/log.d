@@ -3,6 +3,7 @@ module manager.log;
 import urt.array;
 import urt.log;
 import urt.string;
+import urt.variant;
 
 import manager.console;
 import manager.console.command;
@@ -56,65 +57,35 @@ nothrow @nogc:
 		this.category = category;
 	}
 
-	override CommandState execute(Session session, const(char)[] cmdLine)
-	{
-		import manager.console.expression;
+    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
+    {
+        if (args.length == 0 || args.length > 1)
+        {
+            session.writeLine("/log command expected string argument");
+            return null;
+        }
 
-		while (1)
-		{
-			cmdLine = cmdLine.trimCmdLine;
-
-			if (cmdLine.empty)
-				break;
-
-			KVP t = cmdLine.takeKVP;
-			if (t.k.type == Token.Type.Error)
-			{
-				session.writeLine(t.k.token);
-				return null;
-			}
-
-			if (t.v.type != Token.Type.None)
-			{
-				// it's a kvp arg...
-			}
-			else
-			{
-				if (t.k.type != Token.Type.String)
-				{
-					session.writeLine("Invalid argument: /log command expected string argument");
-					return null;
-				}
-
-				const(char)[] text = t.k.token.unQuote;
-
-				final switch (category)
-				{
-					case Category.Info:
-						writeInfo(text);
-						break;
-					case Category.Warning:
-						writeWarning(text);
-						break;
-					case Category.Error:
-						writeError(text);
-						break;
-					case Category.Alert:
-						// TODO: implement ALERT type...
-						writeError(text);
-						break;
-					case Category.Debug:
-						writeDebug(text);
-						break;
-				}
-				return null;
-			}
-		}
-
-		// no args... complain with help
-		session.writeLine("/log command expected string argument");
-		return null;
-	}
+        final switch (category)
+        {
+            case Category.Info:
+                writeInfo(args[0]);
+                break;
+            case Category.Warning:
+                writeWarning(args[0]);
+                break;
+            case Category.Error:
+                writeError(args[0]);
+                break;
+            case Category.Alert:
+                // TODO: implement ALERT type...
+                writeError(args[0]);
+                break;
+            case Category.Debug:
+                writeDebug(args[0]);
+                break;
+        }
+        return null;
+    }
 
 	version (ExcludeAutocomplete) {} else
 	{

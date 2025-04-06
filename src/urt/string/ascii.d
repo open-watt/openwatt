@@ -31,10 +31,11 @@ __gshared immutable ubyte[128] charDetails = [
 __gshared immutable char[16] hexDigits = "0123456789ABCDEF";
 
 
+bool isSpace(char c) pure           => c < 128 && (charDetails[c] & 4);
 bool isNewline(char c) pure         => c < 128 && (charDetails[c] & 8);
 bool isWhitespace(char c) pure      => c < 128 && (charDetails[c] & 0xC);
 bool isAlpha(char c) pure           => c < 128 && (charDetails[c] & 1);
-bool isNumeric(char c) pure         => c - '0' <= 9;
+bool isNumeric(char c) pure         => cast(uint)(c - '0') <= 9;
 bool isAlphaNumeric(char c) pure    => c < 128 && (charDetails[c] & 3);
 bool isHex(char c) pure             => c < 128 && (charDetails[c] & 0x80);
 bool isControlChar(char c) pure     => c < 128 && (charDetails[c] & 0x10);

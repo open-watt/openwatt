@@ -4,11 +4,13 @@ import manager;
 import manager.console;
 import manager.console.builtin_commands;
 import manager.console.session;
+import manager.expression : NamedArgument;
 
 import urt.array;
 import urt.mem;
 import urt.meta.nullable;
 import urt.string;
+import urt.variant;
 
 
 //version = ExcludeAutocomplete;
@@ -52,6 +54,12 @@ class Command
 {
 nothrow @nogc:
 
+    struct Argument
+    {
+        const(char)[] name;
+        Variant value;
+    }
+
     const String name;
 
     this(ref Console console, String name) nothrow @nogc
@@ -62,7 +70,7 @@ nothrow @nogc:
 
     final ApplicationInstance app() pure nothrow @nogc => m_console.appInstance;
 
-    abstract CommandState execute(Session session, const(char)[] cmdLine);
+    abstract CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs);
 
     MutableString!0 complete(const(char)[] cmdLine)
     {
