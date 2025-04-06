@@ -594,6 +594,60 @@ else
             }
         }
     }
+    else version (AArch64)
+    {
+        // State: x19-x30 (x29=fp, x30=lr), sp, [padd], v8-v15 (128bits each)
+        enum SaveStateLen = 12 + 1 + 1 + 8*2;
+
+        void co_init_stack(void* base, void* top, coentry_t entry)
+        {
+            size_t stack_top = cast(size_t)top;
+            stack_top &= ~size_t(15);
+
+            void** p = cast(void**)base;
+            p[0]  = cast(void*)stack_top;   // x16 (stack pointer)
+            p[1]  = entry;                  // x30 (link register)
+            p[12] = cast(void*)stack_top;   // x29 (frame pointer)
+        }
+
+        pragma(inline, false)
+        extern(C) void co_swap(cothread_t newCtx, cothread_t oldCtx) @naked
+        {
+            asm nothrow @nogc
+            {
+                `
+                mov x16,sp
+                stp x16,x30,[x1]
+                ldp x16,x30,[x0]
+                mov sp,x16
+                stp x19,x20,[x1, 16]
+                stp x21,x22,[x1, 32]
+                stp x23,x24,[x1, 48]
+                stp x25,x26,[x1, 64]
+                stp x27,x28,[x1, 80]
+                str x29,    [x1, 96]
+                stp q8, q9, [x1,112]
+                stp q10,q11,[x1,144]
+                stp q12,q13,[x1,176]
+                stp q14,q15,[x1,208]
+                ldp x19,x20,[x0, 16]
+                ldp x21,x22,[x0, 32]
+                ldp x23,x24,[x0, 48]
+                ldp x25,x26,[x0, 64]
+                ldp x27,x28,[x0, 80]
+                ldr x29,    [x0, 96]
+                ldp q8, q9, [x0,112]
+                ldp q10,q11,[x0,144]
+                ldp q12,q13,[x0,176]
+                ldp q14,q15,[x0,208]
+                br x30
+                `
+                : // no outputs
+                : // "r"(newCtx), "r"(oldCtx) // function is @naked, so the ABI takes care of this
+                : "x16", "x19", "x20", "x21", "x22", "x23", "x24", "x25", "x26", "x27", "x28", "x29", "x30", "v8", "v9", "v10", "v11", "v12", "v13", "v14", "v15", "sp", "memory";
+            }
+        }
+    }
     else
         static assert(false, "TODO: implement for other architectures!");
 }
