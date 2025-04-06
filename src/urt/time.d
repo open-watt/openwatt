@@ -380,8 +380,8 @@ DateTime getDateTime(SysTime time)
     else version (Posix)
     {
         timespec ts;
-        ts.tv_sec = time.ticks / 1_000_000_000;
-        ts.tv_nsec = time.ticks % 1_000_000_000;
+        ts.tv_sec = cast(time_t)(time.ticks / 1_000_000_000);
+        ts.tv_nsec = cast(uint)(time.ticks % 1_000_000_000);
         return realtimeToDateTime(ts);
     }
     else

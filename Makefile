@@ -1,57 +1,71 @@
-SRCDIR := src
-OBJDIR := obj/linux
-TARGETDIR := bin/linux
-TARGETNAME := enms
-TARGET := $(TARGETDIR)/$(TARGETNAME)
-
-config ?= debug
+PLATFORM ?= x86_64
+CONFIG ?= debug
 D_COMPILER ?= dmd
+DC ?= dmd
+
+SRCDIR := src
+OBJDIR := obj/$(PLATFORM)_$(CONFIG)
+TARGETDIR := bin/$(PLATFORM)_$(CONFIG)
+TARGETNAME := enms
+DEPFILE = $(OBJDIR)/$(TARGETNAME).d
 
 DFLAGS := $(DFLAGS) -preview=bitfields -preview=rvaluerefparam -preview=nosharedaccess -preview=in
 
-SOURCES := $(shell find $(SRCDIR) -type f -name '*.d')
-DEPFILE := $(OBJDIR)/$(TARGETNAME).d
+SOURCES := $(shell find "$(SRCDIR)" -type f -name '*.d')
 
-ifeq ($(config),arm32)
-		D_COMPILER = ldc2
-		DFLAGS := $(DFLAGS) -mtriple=arm-unknown-linux-eabihf -march=thumb -mcpu=cortex-a7 -I $(SRCDIR)
-#		DFLAGS := $(DFLAGS) -mtriple=thumb-unknown-linux-eabihf -march=thumb -mcpu=cortex-a7 -I $(SRCDIR)
-#		ifeq ($(config),debug)
-			DFLAGS := $(DFLAGS) -g -d-debug
-#		else
-#			ifeq ($(config),unittest)
-#				DFLAGS := $(DFLAGS) -g -d-debug -unittest
-#			else
-#				DFLAGS := $(DFLAGS) -O3 -release -enable-inlining
-#			endif
-#		endif
-		COMPILE_CMD = $(D_COMPILER) $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -deps=$(DEPFILE) $(SOURCES)
+ifeq ($(OS),windows)
+    TARGET = $(TARGETDIR)/$(TARGETNAME).exe
 else
-	ifeq ($(D_COMPILER),dmd)
-		DFLAGS := $(DFLAGS) -I=$(SRCDIR)
-		ifeq ($(config),debug)
-			DFLAGS := $(DFLAGS) -g -debug
-		else
-			ifeq ($(config),unittest)
-				DFLAGS := $(DFLAGS) -g -debug -unittest
-			else
-				DFLAGS := $(DFLAGS) -O -release -inline
-			endif
-		endif
-		COMPILE_CMD = $(D_COMPILER) $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -makedeps $(SOURCES) > $(DEPFILE)
-	else ifeq ($(D_COMPILER),ldc2)
-		DFLAGS := $(DFLAGS) -I $(SRCDIR)
-		ifeq ($(config),debug)
-			DFLAGS := $(DFLAGS) -g -d-debug
-		else
-			ifeq ($(config),unittest)
-				DFLAGS := $(DFLAGS) -g -d-debug -unittest
-			else
-				DFLAGS := $(DFLAGS) -O3 -release -enable-inlining
-			endif
-		endif
-		COMPILE_CMD = $(D_COMPILER) $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -deps=$(DEPFILE) $(SOURCES)
-	endif
+    TARGET = $(TARGETDIR)/$(TARGETNAME)
+endif
+
+ifeq ($(D_COMPILER),ldc)
+    DFLAGS := $(DFLAGS) -I $(SRCDIR)
+
+    ifeq ($(PLATFORM),x86_64)
+#        DFLAGS := $(DFLAGS) -mtriple=x86_64-linux-gnu
+    else ifeq ($(PLATFORM),x86)
+        DFLAGS := $(DFLAGS) -mtriple=i686-linux-gnu
+    else ifeq ($(PLATFORM),arm64)
+        DFLAGS := $(DFLAGS) -mtriple=aarch64-linux-gnu
+    else ifeq ($(PLATFORM),arm32)
+        DFLAGS := $(DFLAGS) -mtriple=arm-linux-eabihf -mcpu=cortex-a7
+    else
+        $(error "Unsupported platform: $(PLATFORM)")
+    endif
+
+    ifeq ($(CONFIG),release)
+        DFLAGS := $(DFLAGS) -release -O3 -enable-inlining
+    else
+        DFLAGS := $(DFLAGS) -g -d-debug
+    endif
+
+    COMPILE_CMD = "$(DC)" $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -deps=$(DEPFILE) $(SOURCES)
+else ifeq ($(D_COMPILER),dmd)
+    DFLAGS := $(DFLAGS) -I=$(SRCDIR)
+
+    ifeq ($(PLATFORM),x86_64)
+#        DFLAGS := $(DFLAGS) -m64
+    else ifeq ($(PLATFORM),x86)
+        DFLAGS := $(DFLAGS) -m32
+    else
+        $(error "Unsupported platform: $(PLATFORM)")
+    endif
+
+    ifeq ($(CONFIG),release)
+        DFLAGS := $(DFLAGS) -release -O -inline
+    else
+        DFLAGS := $(DFLAGS) -g -debug
+    endif
+
+    COMPILE_CMD = "$(DC)" $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -makedeps $(SOURCES) > $(DEPFILE)
+else
+    $(error "Unknown D compiler: $(D_COMPILER)")
+endif
+
+ifeq ($(CONFIG),unittest)
+    DFLAGS := $(DFLAGS) -unittest
+    TARGETNAME := $(TARGETNAME)_test
 endif
 
 -include $(DEPFILE)

@@ -1,0 +1,54 @@
+name: CI Matrix
+
+on:
+  push:
+    branches: [ "master", "release" ]
+  pull_request:
+    branches: [ "master", "release" ]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ${{ matrix.os }}-latest  # GitHub-hosted runners
+    strategy:
+      matrix:
+        os: [windows, ubuntu]
+        compiler: [dmd, ldc]
+        platform: [x86, x86_64, arm, arm64]
+        config: [unittest]
+        exclude:
+          - compiler: ldc   # TODO: remove this exclusion when the next LDC is released...
+          # No point cross-compiling on Windows; linux is so much faster!
+          - os: windows
+            platform: arm
+          - os: windows
+            platform: arm64
+          # DMD never plans to support ARM32
+          - compiler: dmd
+            platform: arm
+          # TODO: DMD ARM64 support is WIP; remove when it releases...
+          - compiler: dmd
+            platform: arm64
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup D Compiler
+        uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ${{ matrix.compiler }}
+          version: latest
+
+      # 32-bit linux needs libs to link and run tests...
+      - name: Install 32-bit Toolchains (Linux)
+        if: ${{ matrix.os == 'ubuntu' && matrix.platform == 'x86' }}
+        run: sudo apt-get update && sudo apt-get install -y gcc-multilib
+
+      - name: Build
+        run: make PLATFORM=${{ matrix.platform }} CONFIG=${{ matrix.config }} OS=${{ matrix.os }} D_COMPILER=${{ matrix.compiler }}
+
+      - name: Test
+        if: ${{ success() && (matrix.platform == 'x86_64' || matrix.platform == 'x86') }}
+        run: ./bin/${{ matrix.platform }}_${{ matrix.config }}/enms_test
