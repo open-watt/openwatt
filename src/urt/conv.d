@@ -132,6 +132,16 @@ done:
     return value;
 }
 
+ulong parseUintWithBase(const(char)[] str, size_t* bytesTaken = null) pure
+{
+    const(char)* p = str.ptr;
+    int base = parseBasePrefix(str);
+    ulong i = parseUint(str, bytesTaken, base);
+    if (bytesTaken && *bytesTaken != 0)
+        *bytesTaken += str.ptr - p;
+    return i;
+}
+
 
 unittest
 {
@@ -148,6 +158,7 @@ unittest
 	assert(parseInt("!!!", &taken, 10) == 0 && taken == 0);
 	assert(parseInt("-!!!", &taken, 10) == 0 && taken == 0);
 	assert(parseInt("Wow", &taken, 36) == 42368 && taken == 3);
+	assert(parseUintWithBase("0x100", &taken) == 0x100 && taken == 5);
 }
 
 int parseIntFast(ref const(char)[] text, out bool success) pure
