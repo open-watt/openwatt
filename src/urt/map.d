@@ -23,7 +23,7 @@ alias Map(K, V) = AVLTree!(K, V);
 
 struct AVLTree(K, V, alias Pred = DefCmp!K, Allocator = Mallocator)
 {
-nothrow @nogc:
+@nogc:
 	alias KeyType = K;
 	alias ValueType = V; // TODO: . ElementType
 	alias KeyValuePair = KVP!(K, V);
@@ -36,15 +36,15 @@ nothrow @nogc:
 //			insert(kvp.key, kvp.value);
 //	}
 
-	~this()
+	~this() nothrow
 	{
 		clear();
 	}
 
-	size_t length() const => numNodes;
-	bool empty() const => numNodes == 0;
+	size_t length() const nothrow => numNodes;
+	bool empty() const nothrow => numNodes == 0;
 
-	void clear()
+	void clear() nothrow
 	{
 		destroy(pRoot);
 		pRoot = null;
@@ -289,17 +289,17 @@ nothrow @nogc:
 	}
 +/
 
-	Iterator begin()
+	Iterator begin() nothrow
 	{
 		return Iterator(pRoot);
 	}
 
-	static Iterator end()
+	static Iterator end() nothrow
 	{
 		return Iterator();
 	}
 
-    int opApply(scope int delegate(ref const K k, ref V v) pure nothrow @nogc dg) pure
+    int opApply(scope int delegate(ref const K k, ref V v) pure nothrow @nogc dg) pure nothrow
     {
         for (Iterator i = begin(); i != end(); ++i)
         {
@@ -309,7 +309,27 @@ nothrow @nogc:
         }
         return 0;
     }
-    int opApply(scope int delegate(ref const K k, ref V v) nothrow @nogc dg)
+    int opApply(scope int delegate(ref const K k, ref V v) nothrow @nogc dg) nothrow
+    {
+        for (Iterator i = begin(); i != end(); ++i)
+        {
+            int r = dg(i.key, i.value);
+            if (r)
+                return r;
+        }
+        return 0;
+    }
+    int opApply(scope int delegate(ref const K k, ref V v) pure @nogc dg) pure
+    {
+        for (Iterator i = begin(); i != end(); ++i)
+        {
+            int r = dg(i.key, i.value);
+            if (r)
+                return r;
+        }
+        return 0;
+    }
+    int opApply(scope int delegate(ref const K k, ref V v) @nogc dg)
     {
         for (Iterator i = begin(); i != end(); ++i)
         {
@@ -320,7 +340,7 @@ nothrow @nogc:
         return 0;
     }
 
-    int opApply(scope int delegate(ref V v) pure nothrow @nogc dg) pure
+    int opApply(scope int delegate(ref V v) pure nothrow @nogc dg) pure nothrow
     {
         for (Iterator i = begin(); i != end(); ++i)
         {
@@ -330,7 +350,27 @@ nothrow @nogc:
         }
         return 0;
     }
-    int opApply(scope int delegate(ref V v) nothrow @nogc dg)
+    int opApply(scope int delegate(ref V v) nothrow @nogc dg) nothrow
+    {
+        for (Iterator i = begin(); i != end(); ++i)
+        {
+            int r = dg(i.value);
+            if (r)
+                return r;
+        }
+        return 0;
+    }
+    int opApply(scope int delegate(ref V v) pure @nogc dg) pure
+    {
+        for (Iterator i = begin(); i != end(); ++i)
+        {
+            int r = dg(i.value);
+            if (r)
+                return r;
+        }
+        return 0;
+    }
+    int opApply(scope int delegate(ref V v) @nogc dg)
     {
         for (Iterator i = begin(); i != end(); ++i)
         {
@@ -342,6 +382,7 @@ nothrow @nogc:
     }
 
 private:
+nothrow:
 	alias Node = AVLTreeNode!(K, V);
 
 	size_t numNodes = 0;
@@ -409,7 +450,7 @@ private:
 
 	static inout(Node)* find(_K)(inout(Node)* n, ref const _K key)
 	{
-		if (!n)
+		if (n is null)
 			return null;
 		ptrdiff_t c = Pred(n.kvp.key, key);
 		if (c > 0)
@@ -421,13 +462,12 @@ private:
 
 	void destroy(Node* n)
 	{
-		if (!n)
+		if (n is null)
 			return;
 
 		destroy(n.left);
 		destroy(n.right);
 
-		n.destroy();
 		Allocator.instance.freeT(n);
 
 		--numNodes;
@@ -436,7 +476,7 @@ private:
 	Node* insert(Node* n, Node* newnode)
 	{
 		// 1.  Perform the normal BST rotation
-		if (n == null)
+		if (n is null)
 		{
 			++numNodes;
 			return newnode;
@@ -453,7 +493,6 @@ private:
 			newnode.right = n.right;
 			newnode.height = n.height;
 
-			n.destroy();
 			Allocator.instance.freeT(n);
 
 			return newnode;
@@ -508,7 +547,7 @@ private:
 		Node* current = n;
 
 		// loop down to find the leftmost leaf
-		while (current.left != null)
+		while (current.left !is null)
 			current = current.left;
 
 		return current;
@@ -518,7 +557,7 @@ private:
 	{
 		// STEP 1: PERFORM STANDARD BST DELETE
 
-		if (_pRoot == null)
+		if (_pRoot is null)
 			return _pRoot;
 
 		ptrdiff_t c = Pred(_pRoot.kvp.key, key);
@@ -536,20 +575,20 @@ private:
 		// if key is same as _pRoot's key, then this is the Node
 		// to be deleted
 		else
-			doDelete(_pRoot);
+			_pRoot = doDelete(_pRoot);
 
 		return rebalance(_pRoot);
 	}
 
-	void doDelete(Node* _pRoot)
+	Node* doDelete(Node* _pRoot)
 	{
 		// Node with only one child or no child
-		if ((_pRoot.left == null) || (_pRoot.right == null))
+		if ((_pRoot.left is null) || (_pRoot.right is null))
 		{
 			Node* temp = _pRoot.left ? _pRoot.left : _pRoot.right;
 
 			// No child case
-			if (temp == null)
+			if (temp is null)
 			{
 				temp = _pRoot;
 				_pRoot = null;
@@ -578,13 +617,15 @@ private:
 			// Delete the inorder successor
 			_pRoot.right = deleteNode(_pRoot.right, temp.kvp.key);
 		}
+
+		return _pRoot;
 	}
 
 	Node* rebalance(Node* _pRoot)
 	{
 		// If the tree had only one Node then return
-		if (_pRoot == null)
-			return _pRoot;
+		if (_pRoot is null)
+			return null;
 
 		// STEP 2: UPDATE HEIGHT OF THE CURRENT NODE
 		_pRoot.height = max(height(_pRoot.left), height(_pRoot.right)) + 1;
@@ -840,3 +881,44 @@ ptrdiff_t epStringify(Slice<char> buffer, String epUnusedParam(format), const AV
 //// Range retrieval
 //template <typename K, typename V, typename P, typename A>
 //TreeRange<AVLTree<K, V, P, A>> range(const AVLTree<K, V, P, A> &input) { return TreeRange<AVLTree<K, V, P, A>>(input); }
+
+
+
+unittest
+{
+    alias TestAVLTree = AVLTree!(int, int);
+    alias TestAVLTreeCIP = AVLTree!(int, const int*);
+
+    static assert(is(TestAVLTree.KeyType == int), "IndexType failed!");
+
+    static assert(is(TestAVLTree.ValueType == int), "ElementType failed!");
+    static assert(is(TestAVLTreeCIP.ValueType == const int*), "ElementType failed!");
+
+//    static_assert(ep::HasFront<TestAVLTree>::value == false, "ep::HasFront failed!");
+//    static_assert(ep::HasBack<TestAVLTree>::value == false, "ep::HasBack failed!");
+//    static_assert(ep::RandomAccessible<TestAVLTree>::value == true, "ep::RandomAccessible failed!");
+//
+//    static_assert(ep::HasSize<TestAVLTree>::value == true, "ep::HasSize failed!");
+//    static_assert(ep::IsContainer<TestAVLTree>::value == true, "ep::IsContainer failed!");
+//
+//    static_assert(ep::Growable<TestAVLTree>::value == true, "ep::Growable failed!");
+//    static_assert(ep::Shrinkable<TestAVLTree>::value == true, "ep::Shrinkable failed!");
+//    static_assert(ep::IsMutable< TestAVLTree>::value == true, "ep::IsMutable failed!");
+//
+//    static_assert(ep::IsKeyed<TestAVLTree>::value == true, "ep::IsKeyed failed!");
+//
+//
+//    DEFINE_MAP_TEST_CONTAINER_KEYED(ep::AVLTree, ep::SharedString)
+//        using MyTypes = typename ::testing::Types<testTraits::Types>;
+//    INSTANTIATE_TYPED_TEST_CASE_P(AVLTree, Traits_HasSizeTest, MyTypes);
+//    INSTANTIATE_TYPED_TEST_CASE_P(AVLTree, Traits_IsGrowable, MyTypes);
+//    INSTANTIATE_TYPED_TEST_CASE_P(AVLTree, Traits_IsShrinkable, MyTypes);
+//    INSTANTIATE_TYPED_TEST_CASE_P(AVLTree, Traits_IsGrowable_RandomAccessible, MyTypes);
+//    INSTANTIATE_TYPED_TEST_CASE_P(AVLTree, Traits_IsShrinkable_RandomAccessible, MyTypes);
+//    INSTANTIATE_TYPED_TEST_CASE_P(AVLTree, Maps_Coverage, MyTypes);
+//    INSTANTIATE_TYPED_TEST_CASE_P(AVLTree, Maps_InsertAndRemoveTest, MyTypes);
+//    // TODO: Enable this once find() and remove are implemented
+//    //INSTANTIATE_TYPED_TEST_CASE_P(AVLTree, Maps_Iterators, MyTypes);
+
+
+}
