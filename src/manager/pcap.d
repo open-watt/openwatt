@@ -272,7 +272,7 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!add("/tools/pcap", this);
+        g_app.console.registerCommand!add("/tools/pcap", this);
     }
 
     override void postUpdate()
@@ -299,15 +299,15 @@ nothrow @nogc:
                 return;
             }
         }
-        String n = name.makeString(app.allocator);
+        String n = name.makeString(g_app.allocator);
 
-        PcapInterface* pcap = app.allocator.allocT!PcapInterface();
+        PcapInterface* pcap = g_app.allocator.allocT!PcapInterface();
         pcap.name = n.move;
 
         if (!pcap.openFile(file))
         {
             writeInfo("Couldn't open PCAP file '", file, "'");
-            app.allocator.freeT(pcap);
+            g_app.allocator.freeT(pcap);
             return;
         }
 

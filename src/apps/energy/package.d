@@ -10,6 +10,7 @@ import apps.energy.circuit;
 import apps.energy.manager;
 import apps.energy.meter;
 
+import manager;
 import manager.component;
 import manager.device;
 import manager.console.command;
@@ -41,10 +42,10 @@ nothrow @nogc:
 
         manager = defaultAllocator.allocT!EnergyManager();
 
-        app.console.registerCommand!circuit_add("/apps/energy/circuit", this, "add");
-        app.console.registerCommand!circuit_print("/apps/energy/circuit", this, "print");
+        g_app.console.registerCommand!circuit_add("/apps/energy/circuit", this, "add");
+        g_app.console.registerCommand!circuit_print("/apps/energy/circuit", this, "print");
 
-        app.console.registerCommand!appliance_add("/apps/energy/appliance", this, "add");
+        g_app.console.registerCommand!appliance_add("/apps/energy/appliance", this, "add");
     }
 
     void registerApplianceType(ApplianceType)()
@@ -68,7 +69,7 @@ nothrow @nogc:
         Component m;
         if (meter)
         {
-            m = app.findComponent(meter.value);
+            m = g_app.findComponent(meter.value);
             if (!m)
             {
                 session.writeLine("Meter '", meter.value, "' not found");
@@ -87,7 +88,7 @@ nothrow @nogc:
             }
         }
 
-        manager.addCircuit(name.makeString(app.allocator), p, max_current ? max_current.value : 0, m);
+        manager.addCircuit(name.makeString(g_app.allocator), p, max_current ? max_current.value : 0, m);
     }
 
     void appliance_add(Session session, const(char)[] id, Nullable!(Device) device, Nullable!(const(char)[]) _type, Nullable!(const(char)[]) name, Nullable!(const(char)[]) circuit, Nullable!(int) priority, Nullable!Component meter, Nullable!(const(char)[]) vin, Nullable!Component _info, Nullable!Component control, Nullable!(Component[]) mppt, Nullable!Component backup, Nullable!Component battery)
@@ -111,14 +112,14 @@ nothrow @nogc:
             }
         }
 
-        Appliance appliance = createAppliance(type, id.makeString(app.allocator), manager);
+        Appliance appliance = createAppliance(type, id.makeString(g_app.allocator), manager);
         if (!appliance)
         {
             session.writeLine("Couldn't create appliance of type '", type, "'");
             return;
         }
 
-        appliance.name = name ? name.value.makeString(app.allocator) : String();
+        appliance.name = name ? name.value.makeString(g_app.allocator) : String();
         appliance.info = info;
         appliance.init(device ? device.value : null);
 
@@ -160,7 +161,7 @@ nothrow @nogc:
                 if (control)
                     a.control = control.value;
                 if (vin)
-                    a.vin = vin.value.makeString(app.allocator);
+                    a.vin = vin.value.makeString(g_app.allocator);
                 break;
 
             case "ac":

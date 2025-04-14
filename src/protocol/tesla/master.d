@@ -15,6 +15,8 @@ import router.iface;
 import router.iface.packet;
 import router.iface.tesla;
 
+import manager;
+
 //version = DebugTWCMaster;
 
 nothrow @nogc:
@@ -143,7 +145,7 @@ nothrow @nogc:
 
         iface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.TeslaTWC));
 
-        m.app.moduleInstance!TeslaInterfaceModule.addServer(name[], iface, id);
+        getModule!TeslaInterfaceModule.addServer(name[], iface, id);
     }
 
     ~this()

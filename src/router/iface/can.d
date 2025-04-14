@@ -294,7 +294,7 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!add("/interface/can", this);
+        g_app.console.registerCommand!add("/interface/can", this);
     }
 
     // /interface/can/add command
@@ -304,7 +304,7 @@ nothrow @nogc:
         // is it an error to not specify a stream?
         assert(stream, "'stream' must be specified");
 
-        Stream s = app.moduleInstance!StreamModule.getStream(stream);
+        Stream s = getModule!StreamModule.getStream(stream);
         if (!s)
         {
             session.writeLine("Stream does not exist: ", stream);
@@ -322,7 +322,7 @@ nothrow @nogc:
                 return;
         }
 
-        auto mod_if = app.moduleInstance!InterfaceModule;
+        auto mod_if = getModule!InterfaceModule;
         String n = mod_if.addInterfaceName(session, name, CANInterface.TypeName);
         if (!n)
             return;

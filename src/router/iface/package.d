@@ -280,7 +280,7 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!print("/interface", this);
+        g_app.console.registerCommand!print("/interface", this);
     }
 
     override void update()
@@ -312,7 +312,7 @@ nothrow @nogc:
             return String();
         }
 
-        return name.makeString(app.allocator);
+        return name.makeString(g_app.allocator);
     }
 
     final bool addInterface(Session session, BaseInterface iface, const(char)[] pcap)
@@ -323,7 +323,7 @@ nothrow @nogc:
         {
             import manager.pcap;
 
-            auto mod_pcap = app.moduleInstance!PcapModule;
+            auto mod_pcap = getModule!PcapModule;
             PcapInterface* cap = mod_pcap.findInterface(pcap);
             if (!cap)
                 session.writeLine("Failed to attach pcap interface '", pcap, "' to '", iface.name, "'; doesn't exist");

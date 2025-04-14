@@ -38,7 +38,7 @@ class GoodWePlugin : Plugin
 
 		override void init()
 		{
-			modbus = app.moduleInstance!ModbusPlugin;
+			modbus = getModule!ModbusPlugin;
 
 			// register modbus component
 			app.registerComponentType("goodwe-component", &createGoodWeComponent);

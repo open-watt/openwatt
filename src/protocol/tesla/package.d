@@ -7,6 +7,7 @@ import urt.string;
 import urt.string.format;
 import urt.time;
 
+import manager;
 import manager.console.command;
 import manager.console.function_command : FunctionCommandState;
 import manager.console.session;
@@ -29,9 +30,9 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!twc_add("/protocol/tesla/twc", this, "add");
-        app.console.registerCommand!twc_set("/protocol/tesla/twc", this, "set");
-        app.console.registerCommand!device_add("/protocol/tesla/twc/device", this, "add");
+        g_app.console.registerCommand!twc_add("/protocol/tesla/twc", this, "add");
+        g_app.console.registerCommand!twc_set("/protocol/tesla/twc", this, "set");
+        g_app.console.registerCommand!device_add("/protocol/tesla/twc/device", this, "add");
     }
 
     override void update()
@@ -42,7 +43,7 @@ nothrow @nogc:
 
     void twc_add(Session session, const(char)[] name, const(char)[] _interface, ushort id, float max_current)
     {
-        auto mod_if = app.moduleInstance!InterfaceModule;
+        auto mod_if = getModule!InterfaceModule;
 
         BaseInterface i = mod_if.findInterface(_interface);
         if(i is null)
@@ -75,7 +76,7 @@ nothrow @nogc:
 
     void twc_set(Session session, const(char)[] name, float target_current)
     {
-        auto mod_if = app.moduleInstance!TeslaInterfaceModule;
+        auto mod_if = getModule!TeslaInterfaceModule;
 
         foreach (_, m; twcMasters)
         {
@@ -91,7 +92,7 @@ nothrow @nogc:
         import manager.element;
         import manager.value;
 
-        if (id in app.devices)
+        if (id in g_app.devices)
         {
             session.writeLine("Device '", id, "' already exists");
             return;
@@ -104,12 +105,12 @@ nothrow @nogc:
         }
 
         // create the device
-        Device device = app.allocator.allocT!Device(id.makeString(app.allocator));
+        Device device = g_app.allocator.allocT!Device(id.makeString(g_app.allocator));
         if (name)
-            device.name = name.value.makeString(app.allocator);
+            device.name = name.value.makeString(g_app.allocator);
 
         // create a sampler for this modbus server...
-        TeslaTWCSampler sampler = app.allocator.allocT!TeslaTWCSampler(this, cast(ushort)(slave_id ? slave_id.value : 0), mac ? mac.value : MACAddress());
+        TeslaTWCSampler sampler = g_app.allocator.allocT!TeslaTWCSampler(this, cast(ushort)(slave_id ? slave_id.value : 0), mac ? mac.value : MACAddress());
         device.samplers ~= sampler;
 
         Component c;
@@ -118,32 +119,32 @@ nothrow @nogc:
         import urt.mem.string;
 
         // device info
-        c = app.allocator.allocT!Component(String("info".addString));
+        c = g_app.allocator.allocT!Component(String("info".addString));
         c.template_ = "DeviceInfo".addString;
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "deviceType".addString;
         e.latest = Value("evse");
         c.elements ~= e;
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "deviceName".addString;
         e.latest = Value("Tesla Wall Charger Gen2");
         c.elements ~= e;
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "serialNumber".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "lifetimeEnergy".addString;
         e.unit = "kWh".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
         // HACK: remove this, move to car component...
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "vin".addString;
         c.elements ~= e;
         sampler.addElement(e);
@@ -151,22 +152,22 @@ nothrow @nogc:
         device.components ~= c;
 
         // charge control
-        c = app.allocator.allocT!Component(String("control".addString));
+        c = g_app.allocator.allocT!Component(String("control".addString));
         c.template_ = "ChargeControl".addString;
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "state".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "targetCurrent".addString;
         e.unit = "10mA".addString;
         e.access = Access.ReadWrite;
         c.elements ~= e;
         sampler.addElement(e);
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "maxCurrent".addString;
         e.unit = "10mA".addString;
         c.elements ~= e;
@@ -175,10 +176,10 @@ nothrow @nogc:
         device.components ~= c;
 
 //        // car
-//        c = app.allocator.allocT!Component(String("car".addString));
+//        c = g_app.allocator.allocT!Component(String("car".addString));
 //        c.template_ = "Car".addString;
 //
-//        e = app.allocator.allocT!Element();
+//        e = g_app.allocator.allocT!Element();
 //        e.id = "vin".addString;
 //        c.elements ~= e;
 //        sampler.addElement(e);
@@ -186,57 +187,57 @@ nothrow @nogc:
 //        device.components ~= c;
 
         // energy meter
-        c = app.allocator.allocT!Component(String("realtime".addString));
+        c = g_app.allocator.allocT!Component(String("realtime".addString));
         c.template_ = "RealtimeEnergyMeter".addString;
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "type".addString;
         e.value = "three-phase".addString;
         c.elements ~= e;
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "voltage1".addString;
         e.unit = "V".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "voltage2".addString;
         e.unit = "V".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "voltage3".addString;
         e.unit = "V".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "current".addString;
         e.unit = "10mA".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "power1".addString;
         e.unit = "W".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "power2".addString;
         e.unit = "W".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "power3".addString;
         e.unit = "W".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "power".addString;
         e.unit = "W".addString;
         c.elements ~= e;
@@ -245,15 +246,15 @@ nothrow @nogc:
         device.components ~= c;
 
         // cumulative energy meter
-        c = app.allocator.allocT!Component(String("cumulative".addString));
+        c = g_app.allocator.allocT!Component(String("cumulative".addString));
         c.template_ = "CumulativeEnergyMeter".addString;
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "type".addString;
         e.value = "three-phase".addString;
         c.elements ~= e;
 
-        e = app.allocator.allocT!Element();
+        e = g_app.allocator.allocT!Element();
         e.id = "totalImportActiveEnergy".addString;
         e.unit = "kWh".addString;
         c.elements ~= e;
@@ -261,6 +262,6 @@ nothrow @nogc:
 
         device.components ~= c;
 
-        app.devices.insert(device.id, device);
+        g_app.devices.insert(device.id, device);
     }
 }

@@ -4,6 +4,7 @@ import urt.lifetime;
 import urt.meta.nullable;
 import urt.string;
 
+import manager;
 import manager.plugin;
 import manager.console.session;
 
@@ -56,7 +57,7 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!add("/interface/zigbee", this);
+        g_app.console.registerCommand!add("/interface/zigbee", this);
     }
 
     // /interface/zigbee/add command
@@ -66,19 +67,19 @@ nothrow @nogc:
         // TODO: EZSP might not be the only hardware interface...
         assert(ezsp_client, "'ezsp_client' must be specified");
 
-        EZSPClient c = app.moduleInstance!EZSPProtocolModule.getClient(ezsp_client);
+        EZSPClient c = getModule!EZSPProtocolModule.getClient(ezsp_client);
         if (!c)
         {
             session.writeLine("EZSP client does not exist: ", ezsp_client);
             return;
         }
 
-        auto mod_if = app.moduleInstance!InterfaceModule;
+        auto mod_if = getModule!InterfaceModule;
         String n = mod_if.addInterfaceName(session, name, ZigbeeInterface.TypeName);
         if (!n)
             return;
 
-        ZigbeeInterface iface = app.allocator.allocT!ZigbeeInterface(mod_if, n.move);
+        ZigbeeInterface iface = g_app.allocator.allocT!ZigbeeInterface(mod_if, n.move);
 
         mod_if.addInterface(session, iface, pcap ? pcap.value : null);
     }

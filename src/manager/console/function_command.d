@@ -128,7 +128,7 @@ char[] transformCommandName(const(char)[] name)
     return result;
 }
 
-auto makeArgTuple(alias F)(const Variant[] args, const NamedArgument[] parameters, out const(char)[] error, ApplicationInstance app)
+auto makeArgTuple(alias F)(const Variant[] args, const NamedArgument[] parameters, out const(char)[] error, Application app)
     if (isSomeFunction!F)
 {
     import urt.meta;
@@ -185,7 +185,7 @@ done:
     return params;
 }
 
-const(char[]) convertVariant(ref const Variant v, out bool r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(ref const Variant v, out bool r, Application app) nothrow @nogc
 {
     if (v.isBool)
         r = v.asBool;
@@ -214,7 +214,7 @@ const(char[]) convertVariant(ref const Variant v, out bool r, ApplicationInstanc
     return null;
 }
 
-const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(T)(ref const Variant v, out T r, Application app) nothrow @nogc
     if (isSomeInt!T)
 {
     if (v.isNumber)
@@ -270,7 +270,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstanc
     return null;
 }
 
-const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(T)(ref const Variant v, out T r, Application app) nothrow @nogc
     if (isSomeFloat!T)
 {
     if (v.isNumber)
@@ -297,7 +297,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstanc
     return null;
 }
 
-const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(T)(ref const Variant v, out T r, Application app) nothrow @nogc
     if (is(const(char)[] : T))
 {
     if (v.isString)
@@ -310,7 +310,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstanc
     return null;
 }
 
-const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(T)(ref const Variant v, out T r, Application app) nothrow @nogc
     if (is(T U == enum))
 {
     // TODO: variant may be an enum...
@@ -342,8 +342,8 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstanc
     return "Invalid value";
 }
 
-const(char[]) convertVariant(U)(ref const Variant v, out U[] r, ApplicationInstance app) nothrow @nogc
-    if (!is(U : dchar))
+const(char[]) convertVariant(U)(ref const Variant v, out U[] r, Application app) nothrow @nogc
+    if (!isSomeChar!U)
 {
     const(Variant)[] arr;
     if (v.isArray)
@@ -363,7 +363,7 @@ const(char[]) convertVariant(U)(ref const Variant v, out U[] r, ApplicationInsta
     return null;
 }
 
-const(char[]) convertVariant(U, size_t N)(ref const Variant v, out U[N] r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(U, size_t N)(ref const Variant v, out U[N] r, Application app) nothrow @nogc
     if (!is(U : dchar))
 {
     U[] tmp;
@@ -376,7 +376,7 @@ const(char[]) convertVariant(U, size_t N)(ref const Variant v, out U[N] r, Appli
     return null;
 }
 
-const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(T)(ref const Variant v, out T r, Application app) nothrow @nogc
     if (is(T == struct))
 {
     if (v.isUser!T)
@@ -391,7 +391,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r, ApplicationInstanc
     return null;
 }
 
-const(char[]) convertVariant(T : Nullable!U, U)(ref const Variant v, out T r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(T : Nullable!U, U)(ref const Variant v, out T r, Application app) nothrow @nogc
 {
     U tmp;
     const(char[]) error = convertVariant(v, tmp, app);
@@ -401,7 +401,7 @@ const(char[]) convertVariant(T : Nullable!U, U)(ref const Variant v, out T r, Ap
 }
 
 public import manager.component : Component;
-const(char[]) convertVariant(ref const Variant v, out Component r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(ref const Variant v, out Component r, Application app) nothrow @nogc
 {
     if (!v.isString)
         return "Invalid component value";
@@ -411,7 +411,7 @@ const(char[]) convertVariant(ref const Variant v, out Component r, ApplicationIn
 }
 
 public import manager.device : Device;
-const(char[]) convertVariant(ref const Variant v, out Device r, ApplicationInstance app) nothrow @nogc
+const(char[]) convertVariant(ref const Variant v, out Device r, Application app) nothrow @nogc
 {
     if (!v.isString)
         return "Invalid device value";

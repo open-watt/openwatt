@@ -14,6 +14,11 @@ import router.iface;
 import router.iface.modbus : ModbusFrameType; // TODO: move this?
 import router.modbus.message;
 
+import manager;
+
+nothrow @nogc:
+
+
 enum ModbusErrorType
 {
     Retrying,
@@ -204,7 +209,7 @@ private:
     void sendPacket(ref const MACAddress server, ushort sequenceNumber, ref const ModbusPDU message, ModbusFrameType type) nothrow @nogc
     {
         import router.iface.modbus;
-        ServerMap* map = m.app.moduleInstance!ModbusInterfaceModule().findServerByMac(server);
+        ServerMap* map = getModule!ModbusInterfaceModule().findServerByMac(server);
         if (!map)
             return;
 

@@ -12,7 +12,6 @@ class Module
 {
 nothrow @nogc:
 
-    ApplicationInstance app;
     String moduleName;
     size_t moduleId = -1;
 
@@ -33,10 +32,9 @@ nothrow @nogc:
     }
 
 protected:
-    this(ApplicationInstance app, String name)
+    this(Application app, String name)
     {
         import urt.lifetime : move;
-        this.app = app;
         this.moduleName = name.move;
     }
 }
@@ -44,11 +42,11 @@ protected:
 // helper template to register a plugin
 mixin template DeclareModule(string name)
 {
-    import manager : ApplicationInstance;
+    import manager : Application;
 
     enum string ModuleName = name;
 
-    this(ApplicationInstance app) nothrow @nogc
+    this(Application app) nothrow @nogc
     {
         super(app, StringLit!ModuleName);
     }
@@ -58,7 +56,7 @@ mixin template DeclareModule(string name)
 //
 // HACK: MANUALLY REGISTER ALL THE MODULES
 //
-void registerModules(ApplicationInstance app)
+void registerModules(Application app)
 {
     import manager.log;
     registerModule!(manager.log)(app);
@@ -97,7 +95,7 @@ void registerModules(ApplicationInstance app)
 
 private:
 
-void registerModule(alias mod)(ApplicationInstance app)
+void registerModule(alias mod)(Application app)
 {
     alias AllModules = Modules!mod;
     static if (AllModules.length == 0)

@@ -6,12 +6,12 @@ import manager;
 
 class Port
 {
-	ApplicationInstance instance;
+	Application instance;
 
 	String name;
 	String type;
 
-	this(ApplicationInstance instance, String name, String type)
+	this(Application instance, String name, String type)
 	{
 		import urt.lifetime;
 

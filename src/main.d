@@ -31,7 +31,7 @@ void main()
 	// TODO: prime the string cache with common strings, like unit names and common variable names
 	//       the idea is to make dedup lookups much faster...
 
-	ApplicationInstance app = getAppInstance();
+	Application app = createApplication();
 
 	// execute startup script
 	const(char)[] conf;
@@ -45,7 +45,7 @@ void main()
 		// TODO: warn user that can't load profile...
 		assert(false);
 	}
-	ConsoleSession s = new ConsoleSession(app.console);
+	ConsoleSession s = new ConsoleSession(g_app.console);
 	s.setInput(conf);
 
     // stop the computer from sleeping while this application is running...
@@ -99,7 +99,7 @@ void main()
 	int i = 0;
 	while (true)
 	{
-		getAppInstance.update();
+		g_app.update();
 
 		// Process program logic
 		// ...
@@ -108,4 +108,6 @@ void main()
 		import core.time : std_dur = dur;
 		Thread.sleep(std_dur!"msecs"(1));
 	}
+
+    shutdownApplication();
 }

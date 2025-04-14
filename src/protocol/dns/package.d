@@ -6,6 +6,7 @@ import urt.map;
 import urt.mem.allocator;
 import urt.string;
 
+import manager;
 import manager.console.command;
 import manager.console.function_command : FunctionCommandState;
 import manager.console.session;
@@ -26,7 +27,7 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!server_add("/protocol/mdns/server", this, "add");
+        g_app.console.registerCommand!server_add("/protocol/mdns/server", this, "add");
     }
 
     override void update()
@@ -41,7 +42,7 @@ nothrow @nogc:
 //            Array!BaseInterface interfaces;
 //            foreach(i; 0 .. _interface.length)
 //            {
-//                BaseInterface iface = app.moduleInstance!InterfaceModule.findInterface(_interface[i]);
+//                BaseInterface iface = getModule!InterfaceModule.findInterface(_interface[i]);
 //                if (!iface)
 //                {
 //                    session.writeLine("Interface does not exist: ", _interface[i]);
@@ -50,7 +51,7 @@ nothrow @nogc:
 //                interfaces ~= iface;
 //            }
 
-        NoGCAllocator a = app.allocator;
+        NoGCAllocator a = g_app.allocator;
 
         String n = name.makeString(a);
         mDNSServer server = a.allocT!mDNSServer(n.move);//, interfaces.move);
