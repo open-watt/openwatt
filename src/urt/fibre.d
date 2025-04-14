@@ -1,11 +1,22 @@
 module urt.fibre;
 
 import urt.mem;
-import urt.system;
 import urt.time;
+import urt.util : isAligned, max;
 
 version (Windows)
     version = UseWindowsFibreAPI;
+
+debug
+{
+    enum DefaultStackSize = 64*1024;
+    enum GuardBand = 1024;
+}
+else
+{
+    enum DefaultStackSize = 16*1024;
+    enum GuardBand = 0;
+}
 
 @nogc:
 
@@ -14,81 +25,169 @@ extern(C++) class AwakenEvent
 {
 extern(D):
 nothrow @nogc:
+    bool abort;
     abstract bool ready() { return true; }
     void update() {}
 }
 
-
 alias FibreEntryFunc = void function(void*) @nogc;
 alias FibreEntryDelegate = void delegate() @nogc;
-alias YieldHandler = void function(ref Fibre yielding, AwakenEvent awakenEvent) nothrow @nogc;
+alias ResumeHandler = void delegate() nothrow @nogc;
+alias YieldHandler = ResumeHandler function(ref Fibre yielding, AwakenEvent awakenEvent) nothrow @nogc;
 
 struct Fibre
 {
-nothrow @nogc:
+@nogc:
 
     this() @disable;
+    this(ref typeof(this)) @disable;    // disable copy
+    this(typeof(this)) @disable;        // disable move
 
-    this(FibreEntryDelegate fibreEntry, YieldHandler yieldHandler, size_t stackSize = 16*1024)
-    {
-        this(cast(FibreEntryFunc)fibreEntry.funcptr, yieldHandler, fibreEntry.ptr, stackSize);
-        isDelegate = true;
-    }
-
-    this(FibreEntryFunc fibreEntry, YieldHandler yieldHandler, void* userData = null, size_t stackSize = 16*1024)
+    this(size_t stackSize) nothrow
     {
         if (!mainFibre)
             mainFibre = co_active();
 
-        this.fibreEntry = fibreEntry;
-        this.yieldHandler = yieldHandler;
-        this.userData = userData;
+        // TODO: i think it's a bug that this stuff isn't initialised!
+        isDelegate = false;
+        abortRequested = false;
+        finished = true; // init in a state ready to be recycled...
+        aborted = false;
 
         static void fibreFunc()
         {
             auto thisFibre = cast(Fibre*)co_data();
-            try {
-                if (thisFibre.isDelegate)
-                {
-                    FibreEntryDelegate dg;
-                    dg.ptr = thisFibre.userData;
-                    dg.funcptr = cast(void function() @nogc)thisFibre.fibreEntry;
-                    dg();
+            while (true)
+            {
+                try {
+                    if (thisFibre.isDelegate)
+                    {
+                        FibreEntryDelegate dg;
+                        dg.ptr = thisFibre.userData;
+                        dg.funcptr = cast(void function() @nogc)thisFibre.fibreEntry;
+                        dg();
+                    }
+                    else
+                        thisFibre.fibreEntry(thisFibre.userData);
                 }
-                else
-                    thisFibre.fibreEntry(thisFibre.userData);
-            }
-            catch (Exception e) {
-                // catch the exception... and?
-                assert(false, "Unhandled exception!");
-            }
-            catch (Throwable e)
-                abort();
+                catch (Exception e)
+                {
+                    // catch the exception... and?
+                    assert(false, "Unhandled exception!");
+                }
+                catch (AbortException e)
+                {
+                    thisFibre.aborted = true;
+                }
+                catch (Throwable e)
+                {
+                    import urt.system : abort;
+                    abort();
+                }
 
-            thisFibre.finished = true;
+                thisFibre.finished = true;
 
-            // fibre is finished; we'll just yield immediately anytime it is awakened...
-            // or should we do something more aggressive, like assert that it's done?
-            while(true)
-                yield();
+                // fibre is finished; we'll just yield immediately anytime it is awakened...
+                while (thisFibre.finished)
+                    co_switch(mainFibre);
+
+                // fibre was recycled...
+            }
         }
 
         fibre = co_create(stackSize, &fibreFunc, &this);
     }
 
-    ~this()
+    this(FibreEntryDelegate fibreEntry, YieldHandler yieldHandler, size_t stackSize = DefaultStackSize) nothrow
+    {
+        this(cast(FibreEntryFunc)fibreEntry.funcptr, yieldHandler, fibreEntry.ptr, stackSize);
+
+        isDelegate = true;
+    }
+
+    this(FibreEntryFunc fibreEntry, YieldHandler yieldHandler, void* userData = null, size_t stackSize = DefaultStackSize) nothrow
+    {
+        this(stackSize);
+
+        this.fibreEntry = fibreEntry;
+        this.yieldHandler = yieldHandler;
+        this.userData = userData;
+
+        finished = false;
+    }
+
+    ~this() nothrow
     {
         assert(co_active() != fibre, "Can't delete the current fibre!");
+
+        if (!finished)
+        {
+            abort();
+            assert(finished && aborted, "Fibre did not abort!");
+        }
+
         co_delete(fibre);
     }
 
-    void resume()
+    void resume() nothrow
     {
         co_switch(fibre);
     }
 
-    bool isFinished()
+    void abort() nothrow
+    {
+        assert(co_active() == mainFibre, "Can't abort when active; use urt.fibre.abort() instead.");
+
+        // request abort and switch to the fibre
+        abortRequested = true;
+        co_switch(fibre);
+    }
+
+    void recycle(FibreEntryDelegate fibreEntry) pure nothrow
+    {
+        assert(isFinished(), "Can't recycle a fibre that hasn't finished yet!");
+
+        this.fibreEntry = cast(FibreEntryFunc)fibreEntry.funcptr;
+        userData = fibreEntry.ptr;
+        isDelegate = true;
+        abortRequested = false;
+        finished = false;
+        aborted = false;
+    }
+
+    void recycle(FibreEntryFunc fibreEntry, void* userData = null) pure nothrow
+    {
+        assert(isFinished(), "Can't recycle a fibre that hasn't finished yet!");
+
+        this.fibreEntry = fibreEntry;
+        this.userData = userData;
+        isDelegate = false;
+        abortRequested = false;
+        finished = false;
+        aborted = false;
+    }
+
+    void reset() pure nothrow
+    {
+        assert(isFinished(), "Can't restart a fibre that hasn't finished yet!");
+
+        abortRequested = false;
+        finished = false;
+        aborted = false;
+    }
+
+    bool isFinished() const pure nothrow
         => finished;
+
+    bool wasAborted() const pure nothrow
+        => aborted;
+
+    size_t stackSize() const pure nothrow
+    {
+        assert(fibre, "Fibre not created!");
+        auto fdata = cast(co_fibre_data*)fibre - 1;
+        return fdata.stack_size;
+    }
 
     void* userData;
 
@@ -97,31 +196,31 @@ private:
     YieldHandler yieldHandler;
 
     cothread_t fibre;
-    bool finished;
     bool isDelegate;
+    bool abortRequested;
+    bool finished;
+    bool aborted;
 }
 
-
-nothrow:
-
-ref Fibre getFibre()
-{
-    return *cast(Fibre*)co_data();
-}
-
-bool isInFibre()
-{
-    return co_active() != mainFibre;
-}
 
 void yield(AwakenEvent ev = null)
 {
     debug assert(isInFibre(), "Can't yield the main thread!");
 
     Fibre* thisFibre = &getFibre();
-    thisFibre.yieldHandler(*thisFibre, ev);
+    assert(!thisFibre.wasAborted(), "Can't yield during fibre abort!");
+
+    ResumeHandler resume = null;
+    if (thisFibre.yieldHandler)
+        resume = thisFibre.yieldHandler(*thisFibre, ev);
 
     co_switch(mainFibre);
+
+    if (resume)
+        resume();
+
+    if (thisFibre.abortRequested)
+        abort("Abort requested");
 }
 
 void sleep(Duration dur)
@@ -135,13 +234,13 @@ void sleep(Duration dur)
 
         Timer timer;
 
+        this() @disable;
         this(Duration dur)
         {
-            timer.setTimeout(dur);
-            timer.reset();
+            timer = Timer(dur);
         }
 
-        final override bool ready()
+        final override bool ready() const
             => timer.expired();
     }
 
@@ -152,10 +251,41 @@ void sleep(Duration dur)
     yield(ev);
 }
 
+noreturn abort(string message)
+{
+    debug assert(isInFibre(), "Can't abort the main thread!");
+
+    if (!abortException)
+        abortException = defaultAllocator().allocT!AbortException(message);
+    else
+        abortException.msg = message;
+    throw abortException;
+}
+
+ref Fibre getFibre() nothrow
+{
+    return *cast(Fibre*)co_data();
+}
+
+bool isInFibre() nothrow
+{
+    return co_active() != mainFibre;
+}
+
 
 private:
 
+class AbortException : Throwable
+{
+    this(string msg) nothrow @nogc
+    {
+        super(msg);
+    }
+}
+
 void* mainFibre = null;
+
+__gshared AbortException abortException;
 
 
 unittest
@@ -171,9 +301,10 @@ unittest
         yield();
     }
 
-    static void yield(ref Fibre yielding, AwakenEvent awakenEvent) nothrow @nogc
+    static ResumeHandler yield(ref Fibre yielding, AwakenEvent awakenEvent) nothrow @nogc
     {
         x += 10;
+        return null;
     }
 
     auto f = Fibre(&entry, &yield);
@@ -187,6 +318,7 @@ unittest
 
 // internal implementations inspired by libco
 //-------------------------------------------
+nothrow:
 
 alias cothread_t = void*;
 alias coentry_t = void function() @nogc;
@@ -220,6 +352,7 @@ version (UseWindowsFibreAPI)
     {
         void* fiber;
         void* user_data;
+        uint stack_size;
         coentry_t coentry;
     }
     co_fibre_data thread_fiber_data;
@@ -257,6 +390,7 @@ version (UseWindowsFibreAPI)
         auto fdata = defaultAllocator().allocT!co_fibre_data();
         fdata.user_data = data;
         fdata.coentry = entry;
+        fdata.stack_size = cast(uint)stack_size;
         fdata.fiber = CreateFiber(stack_size, &co_thunk, fdata);
         return fdata;
     }
@@ -320,9 +454,16 @@ else
     {
         assert(stack_size <= uint.max, "Stack size too large");
 
-        void[] memory = defaultAllocator().alloc(stack_size, co_fibre_data.alignof);
+        void[] memory = defaultAllocator().alloc(stack_size + co_fibre_data.sizeof + GuardBand, max(co_fibre_data.alignof, 16));
         if(!memory)
             return null;
+
+        static if (GuardBand > 0)
+        {
+            (cast(uint[])memory[0 .. GuardBand/2])[] = 0x0DF0ADBA;
+            (cast(uint[])memory[$-GuardBand/2 .. $])[] = 0x0DF0ADBA;
+            memory = memory[GuardBand/2 .. $-GuardBand/2];
+        }
 
         cothread_t co = co_derive(memory, entry, data);
         co_fibre_data* fdata = cast(co_fibre_data*)co - 1;
@@ -334,7 +475,12 @@ else
     {
         co_fibre_data* fdata = cast(co_fibre_data*)handle - 1;
         if (fdata.flags & 1)
-            defaultAllocator().free((cast(void*)fdata)[0 .. co_fibre_data.sizeof + fdata.stack_size]);
+        {
+            void[] memory = (cast(void*)fdata)[0 .. co_fibre_data.sizeof + fdata.stack_size];
+            static if (GuardBand > 0)
+                memory = (memory.ptr - GuardBand/2)[0 .. memory.length + GuardBand];
+            defaultAllocator().free(memory);
+        }
     }
 
     void co_switch(cothread_t handle)
@@ -359,21 +505,20 @@ else
     {
         void crash()
         {
-            assert(false, "Error: returned from fibre!");  // called only if cothread_t entrypoint returns
+            assert(false, "Error: returned from fibre!"); // called only if cothread_t entrypoint returns
         }
 
         void co_init_stack(void* base, void* top, coentry_t entry)
         {
-            size_t stack_top = cast(size_t)top;
-            stack_top -= 32;                    // TODO: lib_co; why subtract 32 bytes here???
-            stack_top &= ~size_t(15);
+            assert(isAligned!16(base) && isAligned!16(top), "Stack must be aligned to 16 bytes");
 
-            void** sp = cast(void**)stack_top;  // seek to top of stack
-            *--sp = &crash;                     // crash if entrypoint returns
-            *--sp = entry;                      // entry function at return address
+            void** sp = cast(void**)top;    // seek to top of stack
+            *--sp = &crash;                 // crash if entrypoint returns
+            *--sp = entry;                  // entry function at return address
 
             void** p = cast(void**)base;
-            p[0] = sp;                          // starting (e/r)sp
+            p[0] = sp;                      // starting (e/r)sp
+            p[1] = null;
         }
 
         version (X86_64)
@@ -536,12 +681,11 @@ else
 
         void co_init_stack(void* base, void* top, coentry_t entry)
         {
-            size_t stack_top = cast(size_t)top;
-            stack_top &= ~size_t(15);
+            assert(isAligned!16(base) && isAligned!16(top), "Stack must be aligned to 16 bytes");
 
             void** p = cast(void**)base;
-            p[8] = cast(void*)stack_top;    // starting sp
-            p[9] = entry;                   // starting lr
+            p[8] = cast(void*)top;  // starting sp
+            p[9] = entry;           // starting lr
         }
 
         pragma(inline, false)
@@ -585,7 +729,6 @@ else
                     `
                     stmia r1!, {r4-r11,sp,lr}
                     ldmia r0!, {r4-r11,sp,pc}
-                    bx lr ; TODO: why is this even here? the prior instruction loads 'pc'... maybe it's a hint to the branch predictor?
                     `
                     : // no outputs
                     : // "r"(newCtx), "r"(oldCtx) // function is @naked, so the ABI takes care of this
@@ -601,13 +744,12 @@ else
 
         void co_init_stack(void* base, void* top, coentry_t entry)
         {
-            size_t stack_top = cast(size_t)top;
-            stack_top &= ~size_t(15);
+            assert(isAligned!16(base) && isAligned!16(top), "Stack must be aligned to 16 bytes");
 
             void** p = cast(void**)base;
-            p[0]  = cast(void*)stack_top;   // x16 (stack pointer)
-            p[1]  = entry;                  // x30 (link register)
-            p[12] = cast(void*)stack_top;   // x29 (frame pointer)
+            p[0]  = cast(void*)top; // x16 (stack pointer)
+            p[1]  = entry;          // x30 (link register)
+            p[12] = cast(void*)top; // x29 (frame pointer)
         }
 
         pragma(inline, false)
