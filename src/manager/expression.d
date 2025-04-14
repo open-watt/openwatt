@@ -20,6 +20,7 @@ enum Type : ubyte
     Str = 0,
     Num,
     Var,
+    Arr,
 
     // lists
     CmdList,
@@ -132,8 +133,7 @@ nothrow @nogc:
     {
         ty = Type.Str;
         flags = 0; // TODO: we might need to scan for variable references...
-        // TODO: swap for placement new...
-        emplace(&str, forward!s);
+        new(str) typeof(str)(forward!s);
     }
 
     ~this()
@@ -141,6 +141,8 @@ nothrow @nogc:
         // strings with pointer and zero length are actually a `String` and that needs to be destroyed
         if (isString())
             str.destroy!false();
+        else if (ty == Type.Arr)
+            arr.destroy!false();
         else if (ty == Type.CmdList)
             cmds.destroy!false();
         else if (ty >= Type.Neg)
@@ -167,8 +169,7 @@ nothrow @nogc:
         this.destroy!false();
         ty = Type.Str;
         flags = 0; // TODO: we might need to scan for variable references...
-        // TODO: swap for placement new...
-        emplace(str, forward!s);
+        new(str) typeof(str)(forward!s);
         s.length = 0;
     }
 
@@ -251,6 +252,12 @@ nothrow @nogc:
                 return Variant(getStr());
             case Type.Var:
                 assert(false, "TODO: lookup variable...");
+            case Type.Arr:
+                Variant r;
+                ref Array!Variant va = r.asArray();
+                foreach (e; arr)
+                    va ~= e.evaluate();
+                return r.move;
             case Type.CmdList:
                 assert(false, "TODO: how do we shuttle this value into commands? in a variant? some other way?");
             case Type.Neg:
@@ -311,6 +318,7 @@ nothrow @nogc:
         }
 
         MutableString!0 str;
+        Array!(Expression*) arr;
         Array!ScriptCommand cmds;
     }
 }
@@ -661,7 +669,7 @@ Expression* parsePrimaryExp(ref const(char)[] text)
         else
             text.expect('}');
         Expression* cmds = allocExpression(Type.CmdList);
-        moveEmplace(cmds.cmds, commands.move);
+        commands.moveEmplace(cmds.cmds);
         if (eval)
             cmds.flags |= Flags.CommandEval;
         return cmds;
@@ -811,9 +819,12 @@ Expression* parsePrimaryExp(ref const(char)[] text)
             writeDebug(",");
     }
 
-    // if arr.length > 0, then we have an array, and we should return that...
-    //TODO...
-    assert(arr.length == 0);
+    if (arr.length > 0)
+    {
+        arr ~= r;
+        r = allocExpression(Type.Arr);
+        arr.moveEmplace(r.arr);
+    }
 
     return r;
 }
