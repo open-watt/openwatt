@@ -27,14 +27,14 @@ nothrow @nogc
     override void init()
     {
         Command[5] commands = [
-            app.allocator.allocT!LogCommand(app.console, "info", Category.Info, this),
-            app.allocator.allocT!LogCommand(app.console, "warn", Category.Warning, this),
-            app.allocator.allocT!LogCommand(app.console, "error", Category.Error, this),
-            app.allocator.allocT!LogCommand(app.console, "alert", Category.Alert, this),
-            app.allocator.allocT!LogCommand(app.console, "debug", Category.Debug, this)
+            g_app.allocator.allocT!LogCommand(g_app.console, "info", Category.Info, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "warn", Category.Warning, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "error", Category.Error, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "alert", Category.Alert, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "debug", Category.Debug, this)
         ];
 
-        app.console.registerCommands("/log", commands);
+        g_app.console.registerCommands("/log", commands);
     }
 }
 

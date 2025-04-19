@@ -16,17 +16,29 @@ public static import manager.pcap;
 nothrow @nogc:
 
 
-__gshared ApplicationInstance appInstance;
+__gshared Application g_app = null;
 
-ApplicationInstance getAppInstance()
+Application createApplication()
 {
-    if (!appInstance)
-        appInstance = defaultAllocator().allocT!ApplicationInstance();
-    return appInstance;
+    return defaultAllocator().allocT!Application();
+}
+
+void shutdownApplication()
+{
+    defaultAllocator().freeT(g_app);
+}
+
+Mod getModule(Mod)()
+    if (is(Mod : Module))
+{
+    __gshared Mod moduleInstance = null;
+    if (!moduleInstance)
+        moduleInstance = cast(Mod)g_app.moduleInstance(Mod.ModuleName);
+    return moduleInstance;
 }
 
 
-class ApplicationInstance
+class Application
 {
 nothrow @nogc:
 
@@ -50,6 +62,9 @@ nothrow @nogc:
         allocator = defaultAllocator;
         tempAllocator = tempAllocator;
 
+        assert(!g_app, "Application already created!");
+        g_app = this;
+
         console = Console(this, String("console".addString), Mallocator.instance);
 
         console.setPrompt(StringLit!"enermon > ");
@@ -62,6 +77,11 @@ nothrow @nogc:
         registerModules(this);
     }
 
+    ~this()
+    {
+        g_app = null;
+    }
+
     void registerModule(Module mod)
     {
         import urt.string.format;
@@ -72,10 +92,7 @@ nothrow @nogc:
         mod.moduleId = modules.length;
         modules ~= mod;
 
-        try
-            mod.init();
-        catch(Exception e)
-            assert(false);
+        mod.init();
     }
 
     Module moduleInstance(const(char)[] name) pure

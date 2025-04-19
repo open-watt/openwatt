@@ -5,6 +5,7 @@ import urt.map;
 import urt.mem.allocator;
 import urt.string;
 
+import manager;
 import manager.console.session;
 import manager.plugin;
 
@@ -23,7 +24,7 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!add_server("/protocol/telnet/server", this, "add");
+        g_app.console.registerCommand!add_server("/protocol/telnet/server", this, "add");
 
         // create telnet server
     }
@@ -39,7 +40,7 @@ nothrow @nogc:
 
     void add_server(Session session, const(char)[] name, ushort port)
     {
-        auto mod_if = app.moduleInstance!InterfaceModule;
+        auto mod_if = getModule!InterfaceModule;
 
 //        BaseInterface i = mod_if.findInterface(_interface);
 //        if(i is null)
@@ -50,7 +51,7 @@ nothrow @nogc:
 
         String n = name.makeString(defaultAllocator());
 
-        TelnetServer server = defaultAllocator().allocT!TelnetServer(defaultAllocator(), n.move, &app.console, null, port);
+        TelnetServer server = defaultAllocator().allocT!TelnetServer(defaultAllocator(), n.move, &g_app.console, null, port);
         servers[server.name[]] = server;
     }
 }

@@ -55,14 +55,11 @@ nothrow @nogc:
             if (!mb.isBusMaster)
                 macTable.insert(mb.masterMac, port, vlan);
 
-            auto mod = mod_iface.app.moduleInstance!ModbusInterfaceModule;
-            if (mod)
+            auto mod_mb = getModule!ModbusInterfaceModule;
+            foreach (addr, ref map; mod_mb.remoteServers)
             {
-                foreach (addr, ref map; mod.remoteServers)
-                {
-                    if (map.iface is iface)
-                        macTable.insert(map.mac, port, vlan);
-                }
+                if (map.iface is iface)
+                    macTable.insert(map.mac, port, vlan);
             }
         }
 
@@ -189,15 +186,15 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!add("/interface/bridge", this);
-        app.console.registerCommand!port_add("/interface/bridge/port", this, "add");
+        g_app.console.registerCommand!add("/interface/bridge", this);
+        g_app.console.registerCommand!port_add("/interface/bridge/port", this, "add");
     }
 
     // /interface/modbus/add command
     // TODO: protocol enum!
     void add(Session session, const(char)[] name, Nullable!(const(char)[]) pcap)
     {
-        auto mod_if = app.moduleInstance!InterfaceModule;
+        auto mod_if = getModule!InterfaceModule;
         String n = mod_if.addInterfaceName(session, name, BridgeInterface.TypeName);
         if (!n)
             return;
@@ -215,7 +212,7 @@ nothrow @nogc:
 
     void port_add(Session session, const(char)[] bridge, const(char)[] _interface)
     {
-        auto mod_if = app.moduleInstance!InterfaceModule;
+        auto mod_if = getModule!InterfaceModule;
 
         BaseInterface b = mod_if.findInterface(bridge);
         if (b is null)

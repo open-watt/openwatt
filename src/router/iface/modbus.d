@@ -11,6 +11,7 @@ import urt.string;
 import urt.string.format;
 import urt.time;
 
+import manager;
 import manager.console;
 import manager.plugin;
 
@@ -265,7 +266,7 @@ nothrow @nogc:
             return false;
         }
 
-        auto modbus = mod_iface.app.moduleInstance!ModbusInterfaceModule();
+        auto mod_mb = getModule!ModbusInterfaceModule();
 
         ushort sequenceNumber = (cast(ubyte[])packet.data)[0..2].bigEndianToNative!ushort;
         ModbusFrameType packetType = *cast(ModbusFrameType*)&packet.data[2];
@@ -280,7 +281,7 @@ nothrow @nogc:
 
             if (!packet.dst.isBroadcast)
             {
-                ServerMap* map = modbus.findServerByMac(packet.dst);
+                ServerMap* map = mod_mb.findServerByMac(packet.dst);
                 if (!map)
                 {
                     ++status.sendDropped;
@@ -326,7 +327,7 @@ nothrow @nogc:
             address = packetAddress;
 
             // the packet is a response to the master; just frame it and send it...
-            ServerMap* map = modbus.findServerByUniversalAddress(packetAddress);
+            ServerMap* map = mod_mb.findServerByUniversalAddress(packetAddress);
             if (!map)
             {
                 ++status.sendDropped;
@@ -442,7 +443,7 @@ private:
             frameMac = MACAddress.broadcast;
         else
         {
-            auto modbus = mod_iface.app.moduleInstance!ModbusInterfaceModule();
+            auto mod_mb = getModule!ModbusInterfaceModule();
 
             // we probably need to find a way to cache these lookups.
             // doing this every packet feels kinda bad...
@@ -451,9 +452,9 @@ private:
             //    ...so the address must be their local bus address
             // if we are not the bus master, then it could be a request from a master to a local or remote slave, or a response from a local slave
             //    ...the response is local, so it can only be a universal address if it's a request!
-            ServerMap* map = modbus.findServerByLocalAddress(frameInfo.address, this);
+            ServerMap* map = mod_mb.findServerByLocalAddress(frameInfo.address, this);
             if (!map && type == ModbusFrameType.Request)
-                map = modbus.findServerByUniversalAddress(frameInfo.address);
+                map = mod_mb.findServerByUniversalAddress(frameInfo.address);
             if (!map)
             {
                 // apparently this is the first time we've seen this guy...
@@ -470,7 +471,7 @@ private:
                     return;
                 }
 
-                map = modbus.addRemoteServer(null, this, frameInfo.address, null);
+                map = mod_mb.addRemoteServer(null, this, frameInfo.address, null);
             }
             address = map.universalAddress;
             frameMac = map.mac;
@@ -606,8 +607,8 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!add("/interface/modbus", this);
-        app.console.registerCommand!remote_server_add("/interface/modbus/remote-server", this, "add");
+        g_app.console.registerCommand!add("/interface/modbus", this);
+        g_app.console.registerCommand!remote_server_add("/interface/modbus/remote-server", this, "add");
     }
 
     ServerMap* findServerByName(const(char)[] name)
@@ -695,7 +696,7 @@ nothrow @nogc:
         // is it an error to not specify a stream?
         assert(stream, "'stream' must be specified");
 
-        Stream s = app.moduleInstance!StreamModule.getStream(stream);
+        Stream s = getModule!StreamModule.getStream(stream);
         if (!s)
         {
             session.writeLine("Stream does not exist: ", stream);
@@ -726,7 +727,7 @@ nothrow @nogc:
                 p = ModbusProtocol.RTU;
         }
 
-        auto mod_if = app.moduleInstance!InterfaceModule;
+        auto mod_if = getModule!InterfaceModule;
         String n = mod_if.addInterfaceName(session, name, ModbusInterface.TypeName);
         if (!n)
             return;
@@ -745,7 +746,7 @@ nothrow @nogc:
         {
             import urt.io;
 
-            auto modbus = app.moduleInstance!ModbusInterfaceModule;
+            auto modbus = getModule!ModbusInterfaceModule;
             ServerMap* src = modbus.findServerByMac(p.src);
             ServerMap* dst = modbus.findServerByMac(p.dst);
             const(char)[] srcName = src ? src.name[] : tconcat(p.src);
@@ -767,7 +768,7 @@ nothrow @nogc:
             return;
         }
 
-        BaseInterface iface = app.moduleInstance!InterfaceModule.findInterface(_interface);
+        BaseInterface iface = getModule!InterfaceModule.findInterface(_interface);
         if (!iface)
         {
             session.writeLine("Interface '", _interface, "' not found.");

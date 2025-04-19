@@ -6,6 +6,7 @@ import urt.meta.nullable;
 import urt.string;
 import urt.time;
 
+import manager;
 import manager.console.command;
 import manager.console.function_command : FunctionCommandState;
 import manager.console.session;
@@ -29,10 +30,10 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!client_add("/protocol/modbus/client", this, "add");
-        app.console.registerCommand!device_add("/protocol/modbus/device", this, "add");
-        app.console.registerCommand!request_read("/protocol/modbus/client/request", this, "read");
-        app.console.registerCommand!request_read_device_id("/protocol/modbus/client/request", this, "read-device-id");
+        g_app.console.registerCommand!client_add("/protocol/modbus/client", this, "add");
+        g_app.console.registerCommand!device_add("/protocol/modbus/device", this, "add");
+        g_app.console.registerCommand!request_read("/protocol/modbus/client/request", this, "read");
+        g_app.console.registerCommand!request_read_device_id("/protocol/modbus/client/request", this, "read-device-id");
     }
 
     override void update()
@@ -43,7 +44,7 @@ nothrow @nogc:
 
     void client_add(Session session, const(char)[] name, const(char)[] _interface, Nullable!bool snoop)
     {
-        auto mod_if = app.moduleInstance!InterfaceModule;
+        auto mod_if = getModule!InterfaceModule;
 
         BaseInterface i = mod_if.findInterface(_interface);
         if(i is null)
@@ -53,15 +54,15 @@ nothrow @nogc:
         }
 
         // TODO: generate name if not supplied
-        String n = name.makeString(app.allocator);
+        String n = name.makeString(g_app.allocator);
 
-        ModbusClient client = app.allocator.allocT!ModbusClient(this, n.move, i, snoop ? snoop.value : false);
+        ModbusClient client = g_app.allocator.allocT!ModbusClient(this, n.move, i, snoop ? snoop.value : false);
         clients[client.name[]] = client;
     }
 
     void device_add(Session session, const(char)[] id, const(char)[] _client, const(char)[] slave, Nullable!(const(char)[]) name, Nullable!(const(char)[]) _profile)
     {
-        if (id in app.devices)
+        if (id in g_app.devices)
         {
             session.writeLine("Device '", id, "' already exists");
             return;
@@ -107,21 +108,21 @@ nothrow @nogc:
         import urt.file;
         import urt.string.format;
 
-        void[] file = load_file(tconcat("conf/modbus_profiles/", profileName, ".conf"), app.allocator);
-        ModbusProfile* profile = parseModbusProfile(cast(char[])file, app.allocator);
+        void[] file = load_file(tconcat("conf/modbus_profiles/", profileName, ".conf"), g_app.allocator);
+        ModbusProfile* profile = parseModbusProfile(cast(char[])file, g_app.allocator);
 
         // create the device
-        Device device = app.allocator.allocT!Device(id.makeString(app.allocator));
+        Device device = g_app.allocator.allocT!Device(id.makeString(g_app.allocator));
         if (name)
-            device.name = name.value.makeString(app.allocator);
+            device.name = name.value.makeString(g_app.allocator);
 
         // create a sampler for this modbus server...
-        ModbusSampler sampler = app.allocator.allocT!ModbusSampler(client, target);
+        ModbusSampler sampler = g_app.allocator.allocT!ModbusSampler(client, target);
         device.samplers ~= sampler;
 
         Component createComponent(ref ComponentTemplate ct)
         {
-            Component c = app.allocator.allocT!Component(ct.id.move);
+            Component c = g_app.allocator.allocT!Component(ct.id.move);
             c.template_ = ct.template_.move;
 
             foreach (ref child; ct.components)
@@ -132,7 +133,7 @@ nothrow @nogc:
 
             foreach (ref el; ct.elements)
             {
-                Element* e = app.allocator.allocT!Element();
+                Element* e = g_app.allocator.allocT!Element();
                 e.id = el.id.move;
 
                 if (el.value.length > 0)
@@ -151,7 +152,7 @@ nothrow @nogc:
                             if (!pReg)
                             {
                                 session.writeLine("Invalid register specified for element-map '", e.id, "': ", mapReg);
-                                app.allocator.freeT(e);
+                                g_app.allocator.freeT(e);
                                 continue;
                             }
 
@@ -184,7 +185,7 @@ nothrow @nogc:
                                 Value.Type.Float,
                             ];
 
-                            e.unit = (*pReg).units.makeString(app.allocator);
+                            e.unit = (*pReg).units.makeString(g_app.allocator);
                             e.type = (*pReg).type < RecordType.str ? typeMap[(*pReg).type] : Value.Type.String;
                             e.arrayLen = 0; // TODO: handle arrays?
                             e.access = cast(manager.element.Access)(*pReg).access; // HACK: delete the rh type!
@@ -211,11 +212,11 @@ nothrow @nogc:
             device.components ~= c;
         }
 
-        app.devices.insert(device.id, device);
+        g_app.devices.insert(device.id, device);
 
         // clean up...
-        app.allocator.freeT(profile);
-        app.allocator.free(file);
+        g_app.allocator.freeT(profile);
+        g_app.allocator.free(file);
     }
 
     RequestState request_read(Session session, const(char)[] client, const(char)[] slave, const(char)[] reg_type, ushort first, ushort count = 1)
@@ -250,7 +251,7 @@ nothrow @nogc:
                 return null;
         }
 
-        RequestState state = app.allocator.allocT!RequestState(session, slave);
+        RequestState state = g_app.allocator.allocT!RequestState(session, slave);
 
         ModbusPDU msg = createMessage_Read(ty, first, count);
         c.sendRequest(addr, msg, &state.responseHandler, &state.errorHandler);
@@ -265,7 +266,7 @@ nothrow @nogc:
         if (!c)
             return null;
 
-        RequestState state = app.allocator.allocT!RequestState(session, slave);
+        RequestState state = g_app.allocator.allocT!RequestState(session, slave);
 
         ModbusPDU msg = createMessage_GetDeviceInformation();
         c.sendRequest(addr, msg, &state.responseHandler, &state.errorHandler);
@@ -283,12 +284,12 @@ nothrow @nogc:
         }
 
         // TODO: this should be a global MAC->name table, not a modbus specific table...
-        map = app.moduleInstance!ModbusInterfaceModule.findServerByName(slave);
+        map = getModule!ModbusInterfaceModule.findServerByName(slave);
         if (!map)
         {
             MACAddress addr;
             if (addr.fromString(slave))
-                map = app.moduleInstance!ModbusInterfaceModule.findServerByMac(addr);
+                map = getModule!ModbusInterfaceModule.findServerByMac(addr);
         }
 
         return *c;

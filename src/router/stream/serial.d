@@ -7,6 +7,7 @@ import urt.meta.nullable;
 import urt.string;
 import urt.string.format;
 
+import manager;
 import manager.console.session;
 import manager.plugin;
 
@@ -454,12 +455,12 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!add("/stream/serial", this);
+        g_app.console.registerCommand!add("/stream/serial", this);
     }
 
     void add(Session session, const(char)[] name, const(char)[] device, int baud, Nullable!int data_bits, Nullable!float stop_bits, Nullable!Parity parity, Nullable!FlowControl flow_control)
     {
-        auto mod_stream = app.moduleInstance!StreamModule;
+        auto mod_stream = getModule!StreamModule;
 
         if (name.empty)
             mod_stream.generateStreamName("serial-stream");
@@ -473,10 +474,10 @@ nothrow @nogc:
         params.parity = parity ? parity.value : Parity.None;
         params.flowControl = flow_control ? flow_control.value : FlowControl.None;
 
-        String n = name.makeString(app.allocator);
-        String dev = device.makeString(app.allocator);
+        String n = name.makeString(g_app.allocator);
+        String dev = device.makeString(g_app.allocator);
 
-        SerialStream stream = app.allocator.allocT!SerialStream(n.move, dev.move, params, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+        SerialStream stream = g_app.allocator.allocT!SerialStream(n.move, dev.move, params, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
         mod_stream.addStream(stream);
 
         writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);

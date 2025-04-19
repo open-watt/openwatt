@@ -8,6 +8,7 @@ import urt.meta.nullable;
 import urt.string;
 import urt.time;
 
+import manager;
 import manager.console.command;
 import manager.console.function_command : FunctionCommandState;
 import manager.console.session;
@@ -33,10 +34,10 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!client_add("/protocol/zigbee/client", this, "add");
-        app.console.registerCommand!coordinator_add("/protocol/zigbee/coordinator", this, "add");
+        g_app.console.registerCommand!client_add("/protocol/zigbee/client", this, "add");
+        g_app.console.registerCommand!coordinator_add("/protocol/zigbee/coordinator", this, "add");
 
-        app.console.registerCommand!scan("/protocol/zigbee", this);
+        g_app.console.registerCommand!scan("/protocol/zigbee", this);
     }
 
     override void update()
@@ -50,14 +51,14 @@ nothrow @nogc:
 
     void client_add(Session session, const(char)[] name, const(char)[] _interface)
     {
-        BaseInterface i = app.moduleInstance!InterfaceModule.findInterface(_interface);
+        BaseInterface i = getModule!InterfaceModule.findInterface(_interface);
         if(i is null)
         {
             session.writeLine("Interface '", _interface, "' not found");
             return;
         }
 
-        NoGCAllocator a = app.allocator;
+        NoGCAllocator a = g_app.allocator;
 
         // TODO: generate name if not supplied
         String n = name.makeString(a);
@@ -70,14 +71,14 @@ nothrow @nogc:
 
     void coordinator_add(Session session, const(char)[] name, const(char)[] _interface)
     {
-        BaseInterface i = app.moduleInstance!InterfaceModule.findInterface(_interface);
+        BaseInterface i = getModule!InterfaceModule.findInterface(_interface);
         if(i is null)
         {
             session.writeLine("Interface '", _interface, "' not found");
             return;
         }
 
-        NoGCAllocator a = app.allocator;
+        NoGCAllocator a = g_app.allocator;
 
         // TODO: generate name if not supplied
         String n = name.makeString(a);
@@ -94,14 +95,14 @@ nothrow @nogc:
 
     RequestState scan(Session session, const(char)[] ezsp_client, Nullable!bool energy_scan)
     {
-        EZSPClient c = app.moduleInstance!EZSPProtocolModule.getClient(ezsp_client);
+        EZSPClient c = getModule!EZSPProtocolModule.getClient(ezsp_client);
         if (!c)
         {
             session.writeLine("EZSP client does not exist: ", ezsp_client);
             return null;
         }
 
-        RequestState state = app.allocator.allocT!RequestState(session, c);
+        RequestState state = g_app.allocator.allocT!RequestState(session, c);
         c.setMessageHandler(&state.messageHandler);
         c.sendCommand!EZSP_StartScan(&state.startScan, energy_scan ? EzspNetworkScanType.ENERGY_SCAN : EzspNetworkScanType.ACTIVE_SCAN, 0x07FFF800, 3);
         return state;

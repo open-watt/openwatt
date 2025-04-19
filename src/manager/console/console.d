@@ -33,7 +33,7 @@ struct Console
 {
 nothrow @nogc:
 
-    ApplicationInstance appInstance;
+    Application appInstance;
 
     Scope root;
 //    Command[] commands;
@@ -41,7 +41,7 @@ nothrow @nogc:
     this() @disable;
     this(this) @disable;
 
-    this(ApplicationInstance appInstance, String identifier, NoGCAllocator allocator, NoGCAllocator tempAllocator = null)
+    this(Application appInstance, String identifier, NoGCAllocator allocator, NoGCAllocator tempAllocator = null)
     {
         this.appInstance = appInstance;
         m_allocator = allocator;

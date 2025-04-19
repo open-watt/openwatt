@@ -6,6 +6,7 @@ import urt.map;
 import urt.mem.allocator;
 import urt.string;
 
+import manager;
 import manager.console.command;
 import manager.console.function_command : FunctionCommandState;
 import manager.console.session;
@@ -27,7 +28,7 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!client_add("/protocol/ezsp/client", this, "add");
+        g_app.console.registerCommand!client_add("/protocol/ezsp/client", this, "add");
     }
 
     EZSPClient getClient(const(char)[] client)
@@ -45,7 +46,7 @@ nothrow @nogc:
 
     void client_add(Session session, const(char)[] name, const(char)[] stream)
     {
-        auto mod_stream = app.moduleInstance!StreamModule;
+        auto mod_stream = getModule!StreamModule;
 
         // is it an error to not specify a stream?
         assert(stream, "'stream' must be specified");
@@ -60,7 +61,7 @@ nothrow @nogc:
         if (name.empty)
             mod_stream.generateStreamName("ezsp");
 
-        NoGCAllocator a = app.allocator;
+        NoGCAllocator a = g_app.allocator;
 
         String n = name.makeString(a);
         EZSPClient client = a.allocT!EZSPClient(n.move, s);

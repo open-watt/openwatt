@@ -9,7 +9,7 @@ import router.port;
 
 class SerialPort : Port
 {
-	this(ApplicationInstance instance, String name)
+	this(Application instance, String name)
 	{
 		super(instance, name, StringLit!"serial");
 	}

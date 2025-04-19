@@ -70,14 +70,14 @@ nothrow @nogc:
                     return null; // invalid port string!
             }
 
-            stream = app.allocator.allocT!TCPStream(name, server, port, StreamOptions.OnDemand);
-            app.moduleInstance!StreamModule.addStream(stream);
+            stream = g_app.allocator.allocT!TCPStream(name, server, port, StreamOptions.OnDemand);
+            getModule!StreamModule.addStream(stream);
         }
         else if (protocol.icmp("https") == 0)
         {
             assert(false, "TODO: need TLS stream");
-//                stream = app.allocator.allocT!SSLStream(name, server, ushort(0));
-//                app.moduleInstance!StreamModule.addStream(stream);
+//                stream = g_app.allocator.allocT!SSLStream(name, server, ushort(0));
+//                getModule!StreamModule.addStream(stream);
         }
         if (!stream)
         {
@@ -85,7 +85,7 @@ nothrow @nogc:
             return null;
         }
 
-        HTTPClient http = app.allocator.allocT!HTTPClient(name.move, stream, server.makeString(app.allocator));
+        HTTPClient http = g_app.allocator.allocT!HTTPClient(name.move, stream, server.makeString(g_app.allocator));
         clients.insert(http.name[], http);
         return http;
     }
@@ -94,13 +94,13 @@ nothrow @nogc:
     {
         char[47] tmp = void;
         address.toString(tmp, null, null);
-        String host = tmp.makeString(app.allocator);
+        String host = tmp.makeString(g_app.allocator);
 
         // TODO: guess http/https from the port maybe?
-        Stream stream = app.allocator.allocT!TCPStream(name, address, StreamOptions.OnDemand);
-        app.moduleInstance!StreamModule.addStream(stream);
+        Stream stream = g_app.allocator.allocT!TCPStream(name, address, StreamOptions.OnDemand);
+        getModule!StreamModule.addStream(stream);
 
-        HTTPClient http = app.allocator.allocT!HTTPClient(name.move, stream, host.move);
+        HTTPClient http = g_app.allocator.allocT!HTTPClient(name.move, stream, host.move);
         clients.insert(http.name[], http);
         return http;
     }
@@ -111,7 +111,7 @@ nothrow @nogc:
 
         assert(false, "TODO: get host from stream");
 
-        HTTPClient http = app.allocator.allocT!HTTPClient(name.move, stream, host.move);
+        HTTPClient http = g_app.allocator.allocT!HTTPClient(name.move, stream, host.move);
         clients.insert(http.name[], http);
         return http;
     }

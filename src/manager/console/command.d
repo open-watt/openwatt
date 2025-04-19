@@ -68,7 +68,7 @@ nothrow @nogc:
         this.name = name.move;
     }
 
-    final ApplicationInstance app() pure nothrow @nogc => m_console.appInstance;
+    final Application app() pure nothrow @nogc => m_console.appInstance;
 
     abstract CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs);
 

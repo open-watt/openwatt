@@ -153,14 +153,14 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!add("/stream/bridge", this);
+        g_app.console.registerCommand!add("/stream/bridge", this);
     }
 
 
     // TODO: source should be an array, and let the external code separate and validate the array args...
     void add(Session session, const(char)[] name, const(char)[][] source)
     {
-        auto mod_stream = app.moduleInstance!StreamModule;
+        auto mod_stream = getModule!StreamModule;
 
         if (name.empty)
             name = mod_stream.generateStreamName("bridge");
@@ -178,7 +178,7 @@ nothrow @nogc:
 
         String n = name.makeString(defaultAllocator());
 
-        BridgeStream stream = app.allocator.allocT!BridgeStream(n.move, StreamOptions.NonBlocking | StreamOptions.KeepAlive, sourceStreams[]);
+        BridgeStream stream = g_app.allocator.allocT!BridgeStream(n.move, StreamOptions.NonBlocking | StreamOptions.KeepAlive, sourceStreams[]);
         mod_stream.addStream(stream);
     }
 }

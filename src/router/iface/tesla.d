@@ -189,11 +189,11 @@ private:
         p.etherType = EtherType.ENMS;
         p.etherSubType = ENMS_SubType.TeslaTWC;
 
-        auto tesla = mod_iface.app.moduleInstance!TeslaInterfaceModule();
+        auto mod_tesla = getModule!TeslaInterfaceModule();
 
-        DeviceMap* map = tesla.findServerByAddress(message.sender);
+        DeviceMap* map = mod_tesla.findServerByAddress(message.sender);
         if (!map)
-            map = tesla.addDevice(null, this, message.sender);
+            map = mod_tesla.addDevice(null, this, message.sender);
         p.src = map.mac;
 
         if (!message.receiver)
@@ -201,7 +201,7 @@ private:
         else
         {
             // find receiver... do we have a global device registry?
-            map = tesla.findServerByAddress(message.receiver);
+            map = mod_tesla.findServerByAddress(message.receiver);
             if (!map)
             {
                 // we haven't seen the other guy, so we can't assign a dst address
@@ -225,19 +225,19 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!add("/interface/tesla-twc", this);
+        g_app.console.registerCommand!add("/interface/tesla-twc", this);
     }
 
     void add(Session session, const(char)[] name, const(char)[] stream, Nullable!(const(char)[]) pcap)
     {
-        Stream s = app.moduleInstance!StreamModule.getStream(stream);
+        Stream s = getModule!StreamModule.getStream(stream);
         if (!s)
         {
             session.writeLine("Stream does not exist: ", stream);
             return;
         }
 
-        auto mod_if = app.moduleInstance!InterfaceModule;
+        auto mod_if = getModule!InterfaceModule;
         String n = mod_if.addInterfaceName(session, name, TeslaInterface.TypeName);
         if (!n)
             return;

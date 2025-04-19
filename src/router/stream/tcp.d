@@ -441,12 +441,12 @@ nothrow @nogc:
 
     override void init()
     {
-        app.console.registerCommand!add("/stream/tcp-client", this);
+        g_app.console.registerCommand!add("/stream/tcp-client", this);
     }
 
     void add(Session session, const(char)[] name, const(char)[] address, Nullable!int port)
     {
-        auto mod_stream = app.moduleInstance!StreamModule;
+        auto mod_stream = getModule!StreamModule;
 
         if (name.empty)
             mod_stream.generateStreamName("tcp-stream");
@@ -472,10 +472,10 @@ nothrow @nogc:
         if (portNumber - 1 > ushort.max - 1)
             return session.writeLine("Invalid port number (1-65535): ", portNumber);
 
-        String n = name.makeString(app.allocator);
-        String a = address.makeString(app.allocator);
+        String n = name.makeString(g_app.allocator);
+        String a = address.makeString(g_app.allocator);
 
-        TCPStream stream = app.allocator.allocT!TCPStream(n.move, a.move, cast(ushort)portNumber, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+        TCPStream stream = g_app.allocator.allocT!TCPStream(n.move, a.move, cast(ushort)portNumber, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
         mod_stream.addStream(stream);
 
         writeInfof("Create TCP stream '{0}' - server: [{1}]:{2}", name, address, portNumber);
