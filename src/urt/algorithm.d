@@ -14,6 +14,36 @@ auto compare(T, U)(auto ref T a, auto ref U b)
         return a.opCmp(b);
     else static if (__traits(compiles, lvalueOf!U.opCmp(lvalueOf!T)))
         return -b.opCmp(a);
+    else static if (is(T : A[], A))
+    {
+        import urt.traits : isPrimitive;
+
+        auto ai = a.ptr;
+        auto bi = b.ptr;
+        size_t len = a.length < b.length ? a.length : b.length;
+        static if (isPrimitive!A)
+        {
+            // compare strings
+            foreach (i; 0 .. len)
+            {
+                if (ai[i] != bi[i])
+                    return ai[i] < bi[i] ? -1 : 1;
+            }
+        }
+        else
+        {
+            // compare arrays
+            foreach (i; 0 .. len)
+            {
+                auto cmp = compare(ai[i], bi[i]);
+                if (cmp != 0)
+                    return cmp;
+            }
+        }
+        if (a.length == b.length)
+            return 0;
+        return a.length < b.length ? -1 : 1;
+    }
     else
         return a < b ? -1 : (a > b ? 1 : 0);
 }

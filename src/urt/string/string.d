@@ -229,6 +229,14 @@ nothrow @nogc:
         return len == rhs.length && (ptr == rhs.ptr || ptr[0 .. len] == rhs[]);
     }
 
+    int opCmp(const(char)[] rhs) const pure
+    {
+        import urt.algorithm : compare;
+        if (!ptr)
+            return rhs.length == 0 ? 0 : -1;
+        return compare(ptr[0 .. length()], rhs);
+    }
+
     size_t toHash() const pure
     {
         if (!ptr)
