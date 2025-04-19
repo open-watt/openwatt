@@ -27,7 +27,7 @@ alias SysTime = Time!(Clock.SystemTime);
 
 struct Time(Clock clock)
 {
-nothrow @nogc:
+pure nothrow @nogc:
 
     ulong ticks;
 
@@ -43,13 +43,13 @@ nothrow @nogc:
             return MonoTime(ticks - ticksSinceBoot);
     }
 
-    bool opEquals(Time!clock b) const pure
+    bool opEquals(Time!clock b) const
         => ticks == b.ticks;
 
-    int opCmp(Time!clock b) const pure
+    int opCmp(Time!clock b) const
         => ticks < b.ticks ? -1 : ticks > b.ticks ? 1 : 0;
 
-    Duration opBinary(string op, Clock c)(Time!c rhs) const pure if (op == "-")
+    Duration opBinary(string op, Clock c)(Time!c rhs) const if (op == "-")
     {
         ulong t1 = ticks;
         ulong t2 = rhs.ticks;
@@ -63,10 +63,10 @@ nothrow @nogc:
         return Duration(t1 - t2);
     }
 
-    Time opBinary(string op)(Duration rhs) const pure if (op == "+" || op == "-")
+    Time opBinary(string op)(Duration rhs) const if (op == "+" || op == "-")
         => Time(mixin("ticks " ~ op ~ " rhs.ticks"));
 
-    void opOpAssign(string op)(Duration rhs) pure if (op == "+" || op == "-")
+    void opOpAssign(string op)(Duration rhs) if (op == "+" || op == "-")
     {
         mixin("ticks " ~ op ~ "= rhs.ticks;");
     }
@@ -86,16 +86,21 @@ nothrow @nogc:
 
     auto __debugOverview() const
     {
-        import urt.mem.temp;
-        char[] b = cast(char[])talloc(64);
-        ptrdiff_t len = toString(b, null, null);
-        return b[0..len];
+        debug
+        {
+            import urt.mem.temp;
+            char[] b = cast(char[])talloc(64);
+            ptrdiff_t len = toString(b, null, null);
+            return b[0..len];
+        }
+        else
+            return appTime(this).as!"msecs";
     }
 }
 
 struct Duration
 {
-    pure nothrow @nogc:
+pure nothrow @nogc:
 
     long ticks;
 
@@ -170,18 +175,24 @@ nothrow @nogc:
     {
         Duration timeout;
 
-        void setTimeout(Duration timeout)
+        this(Duration timeout)
+        {
+            setTimeout(timeout);
+            reset();
+        }
+
+        void setTimeout(Duration timeout) pure
         {
             this.timeout = timeout;
         }
     }
 
-    void reset(MonoTime now = getTime())
+    void reset(MonoTime now = getTime()) pure
     {
         startTime = now;
     }
 
-    bool expired(MonoTime now = getTime()) const
+    bool expired(MonoTime now = getTime()) const pure
     {
         static if (milliseconds != 0)
             return now - startTime >= milliseconds.msecs;
@@ -189,10 +200,10 @@ nothrow @nogc:
             return now - startTime >= timeout;
     }
 
-    Duration elapsed(MonoTime now = getTime()) const
+    Duration elapsed(MonoTime now = getTime()) const pure
         => now - startTime;
 
-    Duration remaining(MonoTime now = getTime()) const
+    Duration remaining(MonoTime now = getTime()) const pure
     {
         static if (milliseconds != 0)
             return milliseconds.msecs - (now - startTime);
@@ -200,13 +211,13 @@ nothrow @nogc:
             return timeout - (now - startTime);
     }
 
-    Duration expiredDuration(MonoTime now = getTime()) const
+    Duration expiredDuration(MonoTime now = getTime()) const pure
         => -remaining(now);
 }
 
 struct DateTime
 {
-nothrow @nogc:
+pure nothrow @nogc:
 
     short year;
     ubyte month;
@@ -220,9 +231,9 @@ nothrow @nogc:
     ushort msec() const => ns / 1_000_000;
     uint usec() const => ns / 1_000;
 
-    bool leapYear() => year % 4 == 0 && (year % 100 != 0 || year % 400 == 0); // && year >= -44; <- this is the year leap years were invented...
+    bool leapYear() const => year % 4 == 0 && (year % 100 != 0 || year % 400 == 0); // && year >= -44; <- this is the year leap years were invented...
 
-    Duration opBinary(string op)(DateTime rhs) const pure if (op == "-")
+    Duration opBinary(string op)(DateTime rhs) const if (op == "-")
     {
         // complicated...
         assert(false);
@@ -234,7 +245,7 @@ nothrow @nogc:
         assert(false);
     }
 
-    void opOpAssign(string op)(Duration rhs) pure if (op == "+" || op == "-")
+    void opOpAssign(string op)(Duration rhs) if (op == "+" || op == "-")
     {
         this = mixin("this " ~ op ~ " rhs;");
     }
@@ -291,7 +302,7 @@ nothrow @nogc:
     }
 }
 
-Duration dur(string base)(long value)
+Duration dur(string base)(long value) pure
 {
     static if (base == "nsecs")
         return Duration(value / nsecMultiplier);
@@ -391,12 +402,12 @@ DateTime getDateTime(SysTime time)
 Duration getAppTime()
     => getTime() - startTime;
 
-Duration appTime(MonoTime t)
+Duration appTime(MonoTime t) pure
     => t - startTime;
-Duration appTime(SysTime t)
+Duration appTime(SysTime t) pure
     => cast(MonoTime)t - startTime;
 
-ulong unixTimeNs(SysTime t)
+ulong unixTimeNs(SysTime t) pure
 {
     version (Windows)
         return (t.ticks - 116444736000000000UL) * 100UL;
