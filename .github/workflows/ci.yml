@@ -19,8 +19,6 @@ jobs:
         platform: [x86, x86_64, arm, arm64]
         config: [unittest]
         exclude:
-          - platform: arm
-          - platform: arm64
           # No point cross-compiling on Windows; linux is so much faster!
           - os: windows
             platform: arm
