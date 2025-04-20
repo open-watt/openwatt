@@ -1,3 +1,4 @@
+OS ?= ubuntu
 PLATFORM ?= x86_64
 CONFIG ?= debug
 D_COMPILER ?= dmd
@@ -25,10 +26,14 @@ ifeq ($(D_COMPILER),ldc)
     ifeq ($(PLATFORM),x86_64)
 #        DFLAGS := $(DFLAGS) -mtriple=x86_64-linux-gnu
     else ifeq ($(PLATFORM),x86)
-        DFLAGS := $(DFLAGS) -mtriple=i686-linux-gnu
+        ifeq ($(OS),windows)
+            DFLAGS := $(DFLAGS) -mtriple=i686-windows-msvc
+        else
+            DFLAGS := $(DFLAGS) -mtriple=i686-linux-gnu
+        endif
     else ifeq ($(PLATFORM),arm64)
         DFLAGS := $(DFLAGS) -mtriple=aarch64-linux-gnu
-    else ifeq ($(PLATFORM),arm32)
+    else ifeq ($(PLATFORM),arm)
         DFLAGS := $(DFLAGS) -mtriple=arm-linux-eabihf -mcpu=cortex-a7
     else
         $(error "Unsupported platform: $(PLATFORM)")
