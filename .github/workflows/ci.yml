@@ -17,7 +17,6 @@ jobs:
         os: [windows, ubuntu]
         compiler: [dmd, ldc]
         platform: [x86, x86_64, arm, arm64, riscv64]
-        config: [unittest]
         exclude:
           # No point cross-compiling on Windows; linux is so much faster!
           - os: windows
@@ -41,7 +40,6 @@ jobs:
         uses: dlang-community/setup-dlang@v2
         with:
           compiler: ${{ matrix.compiler == 'ldc' && 'ldc-beta' || matrix.compiler }}
-          version: latest
 
       # 32-bit linux needs libs to link and run tests...
       - name: Install 32-bit Toolchains (Linux)
@@ -51,9 +49,19 @@ jobs:
         if: ${{ matrix.os == 'ubuntu' && matrix.platform == 'arm' }}
         run: sudo dpkg --add-architecture armhf && sudo apt-get update && sudo apt-get install -y libstdc++6:armhf
 
-      - name: Build
-        run: make PLATFORM=${{ matrix.platform == 'ubuntu-arm' && 'ubuntu' || matrix.platform }} CONFIG=${{ matrix.config }} OS=${{ matrix.os }} D_COMPILER=${{ matrix.compiler }}
+      - name: Build release
+        if: ${{ github.ref == 'refs/heads/release' }}
+        run: make PLATFORM=${{ matrix.platform }} CONFIG=release OS=${{ matrix.os }} D_COMPILER=${{ matrix.compiler }}
+      - name: Build unittest
+        run: make PLATFORM=${{ matrix.platform }} CONFIG=unittest OS=${{ matrix.os }} D_COMPILER=${{ matrix.compiler }}
 
       - name: Test
         if: ${{ success() && (matrix.platform == 'x86_64' || matrix.platform == 'x86' || matrix.platform == 'arm64') }}
-        run: ./bin/${{ matrix.platform }}_${{ matrix.config }}/enms_test
+        run: ./bin/${{ matrix.platform }}_unittest/enms_test
+
+      - name: Upload release binary
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release' && matrix.compiler == 'ldc' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: enum_${{ matrix.os }}_${{ matrix.platform }}
+          path: ./bin/${{ matrix.platform }}_release/${{ matrix.os == 'windows' && 'enms.exe' || 'enms' }}
