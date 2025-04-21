@@ -6,6 +6,7 @@ import urt.encoding;
 import urt.kvp;
 import urt.lifetime;
 import urt.log;
+import urt.meta;
 import urt.string;
 import urt.mem.allocator;
 import urt.time;
@@ -72,6 +73,7 @@ struct HTTPMessage
     ushort statusCode;              // Status code (e.g., 200, 404, 500) // TODO: Collapse with flags
     String reason;                  // Reason
     String url;                     // URL or path (e.g., "/index.html" or full "https://example.com")
+    String requestTarget;
 
     String username;                // Username
     String password;                // Password
@@ -84,7 +86,7 @@ struct HTTPMessage
     int delegate(ref const HTTPMessage) nothrow @nogc responseHandler;
     MonoTime requestTime;
 
-    bool isRequest() => statusCode == 0;
+    bool isRequest() => requestTarget.empty;
 
     const(char)[] host()
     {
@@ -134,6 +136,7 @@ nothrow @nogc:
     size_t pendingChunkLen;
     Flags flags;
 
+    this() @disable;
     this(this) @disable;
 
     this(int delegate(ref const HTTPMessage) nothrow @nogc messageHandler)
@@ -165,8 +168,9 @@ nothrow @nogc:
                     }
                     else
                     {
-                        // TODO readRequestLine
-                        return -1;
+                        int result = readRequestLine(msg, message);
+                        if (result != 0)
+                            return -1;
                     }
 
                     messageInUse = true;
@@ -395,6 +399,88 @@ private:
         return 0;
     }
 
+    int readRequestLine(ref const(char)[] msg, ref HTTPMessage message)
+    {
+        HTTPMethod method = msg.split!(' ', false).enumFromString!HTTPMethod;
+        if (byte(method) == -1)
+            return -1;
+
+        if (int result = readRequestTarget(msg, message))
+            return result;
+
+        if (!readHttpVersion(msg, message))
+            return -1;
+
+        if (msg.takeLine.length != 0)
+            return -1;
+
+        flags = Flags.ReadingHeaders;
+        return 0;
+    }
+
+    int readRequestTarget(ref const(char)[] msg, ref HTTPMessage message)
+    {
+        const(char)[] requestTarget = msg.split!(' ', false);
+
+        // authority-form
+        if (message.method == HTTPMethod.CONNECT)
+        {
+            // CONNECT www.example.com:80 HTTP/1.1
+            message.requestTarget = StringLit!"/";
+            return 0;
+        }
+
+        // asterisk-form
+        if (message.method == HTTPMethod.OPTIONS)
+        {
+            // OPTIONS * HTTP/1.1
+            message.requestTarget = StringLit!"/";
+            return 0;
+        }
+
+        const(char)[] query = requestTarget;
+        requestTarget = query.split!('?', false);
+
+        int result = readQueryParams(query, message);
+        if (result != 0)
+            return result;
+
+        // absolute-form
+        string schemeStr = "://";
+        const size_t scheme = requestTarget.findFirst(schemeStr);
+        if (scheme != requestTarget.length)
+        {
+            const(char)[] subStr = requestTarget[scheme + schemeStr.length..$];
+            const size_t slash = subStr[0..$].findFirst('/');
+            if (slash == subStr.length)
+            {
+                message.requestTarget = StringLit!"/";
+                return 0;
+            }
+
+            message.requestTarget = subStr[slash..$].makeString(defaultAllocator);
+            return 0;
+        }
+
+        // origin-form
+        message.requestTarget = requestTarget.makeString(defaultAllocator);
+
+        return 0;
+    }
+
+    int readQueryParams(ref const(char)[] msg, ref HTTPMessage message)
+    {
+        while (msg.length > 0)
+        {
+            const(char)[] kvp = msg.split!('&', false);
+            const(char)[] key = kvp.split!('=', false);
+            message.headers ~= HTTPParam(key.makeString(defaultAllocator), kvp.makeString(defaultAllocator));
+        }
+
+        return 0;
+    }
+
+
     int handleEncoding()
     {
         switch (message.header("Content-Encoding"))
@@ -481,6 +567,26 @@ private:
     }
 }
 
-package:
+void httpStatusLine(HTTPVersion httpVersion, ushort statusCode, const(char)[] reason, ref MutableString!0 str)
+{
+    str.append("HTTP/", httpVersion >> 4, '.', httpVersion & 0xF, ' ', statusCode, ' ', reason, "\r\n");
+}
 
-__gshared immutable string[] methodString = [ "GET", "HEAD", "OPTIONS", "POST", "PUT", "PATCH", "DELETE", "TRACE", "CONNECT" ];
+void httpFieldLines(scope const HTTPParam[] params, ref MutableString!0 str)
+{
+    foreach (ref const kvp; params)
+        str.append( kvp.key, ':', kvp.value, "\r\n");
+}
+
+void httpDate(ref const DateTime date, ref MutableString!0 str)
+{
+    const(char)[] day = EnumKeys!Day[date.wday];
+    const(char)[] month = EnumKeys!Month[date.month];
+
+    // IMF-fixdate
+    // Sun, 06 Nov 1994 08:49:37 GMT
+
+    //                  week day day   month year hours  mins   secs
+    str.appendFormat("Date: {0}, {1,02} {2}, {3}, {4,02}:{5,02}:{6,02} GMT \r\n",
+                     day[0..3], date.day, month[0..3], date.year, date.hour, date.minute, date.second);
+}

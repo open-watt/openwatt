@@ -15,6 +15,32 @@ else version (Posix)
 
 nothrow @nogc:
 
+enum Day : ubyte
+{
+    Sunday,
+    Monday,
+    Tuesday,
+    Wednesday,
+    Thursday,
+    Friday,
+    Saturday,
+}
+
+enum Month : ubyte
+{
+    January = 1,
+    February,
+    March,
+    April,
+    May,
+    June,
+    July,
+    August,
+    September,
+    October,
+    November,
+    December,
+}
 
 enum Clock
 {
@@ -220,8 +246,8 @@ struct DateTime
 pure nothrow @nogc:
 
     short year;
-    ubyte month;
-    ubyte wday;
+    Month month;
+    Day wday;
     ubyte day;
     ubyte hour;
     ubyte minute;
@@ -537,8 +563,8 @@ version (Windows)
 
         DateTime dt;
         dt.year = stime.wYear;
-        dt.month = cast(ubyte)stime.wMonth;
-        dt.wday = cast(ubyte)stime.wDayOfWeek;
+        dt.month = cast(Month)stime.wMonth;
+        dt.wday = cast(Day)stime.wDayOfWeek;
         dt.day = cast(ubyte)stime.wDay;
         dt.hour = cast(ubyte)stime.wHour;
         dt.minute = cast(ubyte)stime.wMinute;
@@ -559,8 +585,8 @@ else version (Posix)
 
         DateTime dt;
         dt.year = cast(short)(t.tm_year + 1900);
-        dt.month = cast(ubyte)(t.tm_mon + 1);
-        dt.wday = cast(ubyte)t.tm_wday;
+        dt.month = cast(Month)(t.tm_mon + 1);
+        dt.wday = cast(Day)t.tm_wday;
         dt.day = cast(ubyte)t.tm_mday;
         dt.hour = cast(ubyte)t.tm_hour;
         dt.minute = cast(ubyte)t.tm_min;
