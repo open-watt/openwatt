@@ -93,6 +93,9 @@ unittest
 {
     SystemInfo info = getSysInfo();
     assert(info.uptime > Duration.zero);
+
+    import urt.io;
+    writelnf("System info: {0} - {1}, mem: {2}kb ({3}kb)", info.osName, info.processor, info.totalMemory / (1024), info.availableMemory / (1024));
 }
 
 

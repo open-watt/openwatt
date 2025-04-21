@@ -35,6 +35,9 @@ ifeq ($(D_COMPILER),ldc)
         DFLAGS := $(DFLAGS) -mtriple=aarch64-linux-gnu
     else ifeq ($(PLATFORM),arm)
         DFLAGS := $(DFLAGS) -mtriple=arm-linux-eabihf -mcpu=cortex-a7
+    else ifeq ($(PLATFORM),riscv64)
+        # we are building the Sipeed M1s device... which is BL808 as I understand
+        DFLAGS := $(DFLAGS) -mtriple=riscv64-unknown-elf -mcpu=c906 -mattr=+m,+a,+f,+c,+v
     else
         $(error "Unsupported platform: $(PLATFORM)")
     endif
