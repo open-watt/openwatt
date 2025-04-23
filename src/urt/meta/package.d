@@ -71,3 +71,20 @@ template isSame(A, B)
 {
     enum isSame = is(A == B);
 }
+
+
+template EnumKeys(E)
+{
+    static assert(is(E == enum), "EnumKeys only works with enums!");
+    __gshared immutable string[EnumStrings.length] EnumKeys = [ EnumStrings ];
+    private alias EnumStrings = __traits(allMembers, E);
+}
+
+E enumFromString(E)(const(char)[] key)
+    if (is(E == enum))
+{
+    foreach (i, k; EnumKeys!E)
+        if (key[] == k[])
+            return cast(E)i;
+    return cast(E)-1;
+}
