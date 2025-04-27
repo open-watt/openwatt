@@ -264,7 +264,7 @@ nothrow @nogc:
         => length();
 
 private:
-    auto __debugOverview() const pure => ptr[0 .. length];
+    auto __debugOverview() const pure { debug return ptr[0 .. length].debugExcapeString(); else return ptr[0 .. length]; }
     auto __debugExpanded() const pure => ptr[0 .. length];
     auto __debugStringView() const pure => ptr[0 .. length];
 
@@ -726,7 +726,7 @@ private:
         defaultAllocator().free(buffer[0 .. 4 + *cast(ushort*)buffer]);
     }
 
-    auto __debugOverview() const pure => ptr[0 .. length];
+    auto __debugOverview() const pure { debug return ptr[0 .. length].debugExcapeString(); else return ptr[0 .. length]; }
     auto __debugExpanded() const pure => ptr[0 .. length];
     auto __debugStringView() const pure => ptr[0 .. length];
 }
@@ -921,4 +921,29 @@ package(urt) void initStringAllocators()
         str -= size_t.sizeof*2;
         a.free(str[0 .. size_t.sizeof*2 + len]);
     };
+}
+
+debug
+{
+    char[] debugExcapeString(const char[] s) pure nothrow
+    {
+        char[] t = new char[s.length*2];
+        int d;
+        foreach (i; 0 .. s.length)
+        {
+            switch (s.ptr[i])
+            {
+                case '\0':  t[d++] = '\\', t[d++] = '0';    break;
+                case '\a':  t[d++] = '\\', t[d++] = 'a';    break;
+                case '\b':  t[d++] = '\\', t[d++] = 'b';    break;
+                case '\f':  t[d++] = '\\', t[d++] = 'f';    break;
+                case '\n':  t[d++] = '\\', t[d++] = 'n';    break;
+                case '\r':  t[d++] = '\\', t[d++] = 'r';    break;
+                case '\t':  t[d++] = '\\', t[d++] = 't';    break;
+                case '\v':  t[d++] = '\\', t[d++] = 'v';    break;
+                default:    t[d++] = s.ptr[i];              break;
+            }
+        }
+        return t[0..d];
+    }
 }
