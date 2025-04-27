@@ -329,6 +329,7 @@
     <DCompile Include="third_party\urt\src\urt\async.d" />
     <DCompile Include="third_party\urt\src\urt\atomic.d" />
     <DCompile Include="third_party\urt\src\urt\attribute.d" />
+    <DCompile Include="third_party\urt\src\urt\bigint.d" />
     <DCompile Include="third_party\urt\src\urt\compiler.d" />
     <DCompile Include="third_party\urt\src\urt\conv.d" />
     <DCompile Include="third_party\urt\src\urt\crc.d" />
