@@ -8,7 +8,7 @@ version = DebugTempAlloc;
 enum size_t TempMemSize = 4096;
 
 
-void[] talloc(size_t size) nothrow @nogc
+void[] talloc(size_t size) pure nothrow @nogc
 {
 	debug version (DebugTempAlloc)
 	{
@@ -22,13 +22,15 @@ void[] talloc(size_t size) nothrow @nogc
 		return null;
 	}
 
-	if (allocOffset + size > TempMemSize)
-		allocOffset = 0;
-
-	void[] mem = tempMem[allocOffset .. allocOffset + size];
-	allocOffset += size;
-
-	return mem;
+    static void[] tallocImpl(size_t size) nothrow @nogc
+    {
+        if (allocOffset + size > TempMemSize)
+            allocOffset = 0;
+        void[] mem = tempMem[allocOffset .. allocOffset + size];
+        allocOffset += size;
+        return mem;
+    }
+    return (cast(void[] function(size_t) pure nothrow @nogc)&tallocImpl)(size);
 }
 
 void[] tallocAligned(size_t size, size_t alignment) nothrow @nogc

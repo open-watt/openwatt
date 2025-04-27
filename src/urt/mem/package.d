@@ -9,7 +9,7 @@ public import urt.mem.allocator;
 extern(C)
 {
 nothrow @nogc:
-    void* alloca(size_t size);
+    void* alloca(size_t size) pure;
 
     void* memcpy(void* dest, const void* src, size_t n);
     void* memmove(void* dest, const void* src, size_t n);
