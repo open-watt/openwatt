@@ -213,7 +213,7 @@ struct Array(T, size_t EmbedCount = 0)
 
     this(typeof(null)) {}
 
-    this(U)(U[] arr)
+    this(U)(scope U[] arr...)
         if (is(U : T))
     {
         debug assert(arr.length <= uint.max);
@@ -288,7 +288,7 @@ nothrow @nogc:
     }
 
     // manipulation
-    ref Array!(T, Count) concat(Things...)(auto ref Things things);
+    ref Array!(T, EmbedCount) concat(Things...)(auto ref Things things);
 
     bool empty() const
         => _length == 0;
