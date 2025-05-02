@@ -16,6 +16,27 @@ enum IdleParams : ubyte
 extern(C) void abort();
 extern(C) void exit(int status);
 
+void sleep(Duration duration)
+{
+//    enum Duration spinThreshold = 10.msecs;
+//    if (duration < spinThreshold)
+//    {
+//        // spin lock...
+//    }
+
+    version (Windows)
+    {
+        import core.sys.windows.winbase : Sleep;
+        Sleep(cast(uint)duration.as!"msecs");
+    }
+    else
+    {
+        // TODO: use nanosleep; usleep is deprecated!
+
+        usleep(cast(uint)duration.as!"usecs");
+    }
+}
+
 struct SystemInfo
 {
     string osName;
@@ -247,4 +268,8 @@ version (Windows)
     }
     else
         static assert(0, "TODO");
+}
+else
+{
+    extern(C) int usleep(uint usec) nothrow @nogc;
 }

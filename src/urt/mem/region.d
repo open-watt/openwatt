@@ -32,20 +32,20 @@ struct Region
     T* alloc(T, Args...)(auto ref Args args) @nogc
         if (is(T == struct))
     {
-        import core.lifetime : emplace, forward;
+        import urt.lifetime : emplace, forward;
         return (cast(T*)alloc(T.sizeof, T.alignof).ptr).emplace(forward!args);
     }
 
     C alloc(C, Args...)(auto ref Args args) @nogc
         if (is(C == class))
     {
-        import core.lifetime : emplace, forward;
+        import urt.lifetime : emplace, forward;
         return (cast(C)alloc(__traits(classInstanceSize, C), __traits(classInstanceAlignment, C)).ptr).emplace(forward!Args(args));
     }
 
     T[] allocArray(T)(size_t count) @nogc
     {
-        import core.lifetime : emplace;
+        import urt.lifetime : emplace;
         T* r = cast(T*)alloc(T.sizeof * count, T.alignof).ptr;
         if (!r)
             return null;
