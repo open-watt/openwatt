@@ -98,7 +98,7 @@ nothrow @nogc:
 
 	ref Value opAssign(T)(auto ref T val)
 	{
-		import core.lifetime;
+		import urt.lifetime;
 		this.destroy();
 		emplace(&this, forward!val);
 		return this;

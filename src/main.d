@@ -6,6 +6,7 @@ import urt.mem.string;
 import urt.string;
 import urt.string.format;
 import urt.system;
+import urt.time;
 
 import manager;
 import manager.component;
@@ -104,9 +105,7 @@ void main()
 		// Process program logic
 		// ...
 
-		import core.thread;
-		import core.time : std_dur = dur;
-		Thread.sleep(std_dur!"msecs"(1));
+        sleep(msecs(1));
 	}
 
     shutdownApplication();

@@ -1,6 +1,5 @@
 module urt.mem;
 
-public import core.lifetime : copyEmplace;
 public import core.stdc.stddef : wchar_t;
 
 public import urt.lifetime : emplace, moveEmplace, forward, move;
