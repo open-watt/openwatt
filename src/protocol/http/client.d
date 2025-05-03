@@ -6,6 +6,7 @@ import urt.encoding;
 import urt.kvp;
 import urt.lifetime;
 import urt.mem.allocator;
+import urt.meta;
 import urt.string;
 import urt.string.format : tconcat;
 import urt.time;
@@ -127,7 +128,7 @@ private:
         }
 
         MutableString!0 message;
-        message.concat(methodString[request.method], ' ', request.url, get, " HTTP/", request.httpVersion >> 4, '.', request.httpVersion & 0xF,
+        message.concat(EnumKeys!HTTPMethod[request.method], ' ', request.url, get, " HTTP/", request.httpVersion >> 4, '.', request.httpVersion & 0xF,
                        "\r\nHost: ", host,
                        "\r\nUser-Agent: ENMS\r\nAccept-Encoding: gzip, deflate\r\n");
         if (request.httpVersion == HTTPVersion.V1_1)
@@ -165,7 +166,7 @@ private:
 
         version (DebugHTTPMessageFlow) {
             import urt.log;
-            writeDebug("HTTP: request to ", host, " - ", methodString[request.method], " ", request.url, " (", request.content.length, " bytes)");
+            writeDebug("HTTP: request to ", host, " - ", EnumKeys!HTTPMethod[request.method], " ", request.url, " (", request.content.length, " bytes)");
         }
     }
 

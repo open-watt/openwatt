@@ -70,6 +70,7 @@ enum SocketResult
 	Interrupted,
 	InvalidSocket,
 	NoMemory,
+    InvalidArgument,
 }
 
 enum SocketType : byte
@@ -945,6 +946,8 @@ SocketResult get_SocketResult(Result result)
 			return SocketResult.Interrupted;
 		if (result.systemCode == WSAENOTSOCK)
 			return SocketResult.InvalidSocket;
+		if (result.systemCode == WSAEINVAL)
+            return SocketResult.InvalidArgument;
 	}
 	else version (Posix)
 	{
@@ -966,6 +969,8 @@ SocketResult get_SocketResult(Result result)
 			return SocketResult.Interrupted;
 		if (checkResult(result, ENOMEM))
 			return SocketResult.NoMemory;
+		if (result.systemCode == EINVAL)
+            return SocketResult.InvalidArgument;
 	}
 	return SocketResult.Failure;
 }
