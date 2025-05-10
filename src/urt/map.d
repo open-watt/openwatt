@@ -23,7 +23,7 @@ alias Map(K, V) = AVLTree!(K, V);
 
 struct AVLTree(K, V, alias Pred = DefCmp!K, Allocator = Mallocator)
 {
-nothrow @nogc:
+@nogc:
 	alias KeyType = K;
 	alias ValueType = V; // TODO: . ElementType
 	alias KeyValuePair = KVP!(K, V);
@@ -36,15 +36,15 @@ nothrow @nogc:
 //			insert(kvp.key, kvp.value);
 //	}
 
-	~this()
+	~this() nothrow
 	{
 		clear();
 	}
 
-	size_t length() const => numNodes;
-	bool empty() const => numNodes == 0;
+	size_t length() const nothrow => numNodes;
+	bool empty() const nothrow => numNodes == 0;
 
-	void clear()
+	void clear() nothrow
 	{
 		destroy(pRoot);
 		pRoot = null;
@@ -289,17 +289,17 @@ nothrow @nogc:
 	}
 +/
 
-	Iterator begin()
+	Iterator begin() nothrow
 	{
 		return Iterator(pRoot);
 	}
 
-	static Iterator end()
+	static Iterator end() nothrow
 	{
 		return Iterator();
 	}
 
-    int opApply(scope int delegate(ref const K k, ref V v) pure nothrow @nogc dg) pure
+    int opApply(scope int delegate(ref const K k, ref V v) pure nothrow @nogc dg) pure nothrow
     {
         for (Iterator i = begin(); i != end(); ++i)
         {
@@ -309,7 +309,27 @@ nothrow @nogc:
         }
         return 0;
     }
-    int opApply(scope int delegate(ref const K k, ref V v) nothrow @nogc dg)
+    int opApply(scope int delegate(ref const K k, ref V v) nothrow @nogc dg) nothrow
+    {
+        for (Iterator i = begin(); i != end(); ++i)
+        {
+            int r = dg(i.key, i.value);
+            if (r)
+                return r;
+        }
+        return 0;
+    }
+    int opApply(scope int delegate(ref const K k, ref V v) pure @nogc dg) pure
+    {
+        for (Iterator i = begin(); i != end(); ++i)
+        {
+            int r = dg(i.key, i.value);
+            if (r)
+                return r;
+        }
+        return 0;
+    }
+    int opApply(scope int delegate(ref const K k, ref V v) @nogc dg)
     {
         for (Iterator i = begin(); i != end(); ++i)
         {
@@ -320,7 +340,7 @@ nothrow @nogc:
         return 0;
     }
 
-    int opApply(scope int delegate(ref V v) pure nothrow @nogc dg) pure
+    int opApply(scope int delegate(ref V v) pure nothrow @nogc dg) pure nothrow
     {
         for (Iterator i = begin(); i != end(); ++i)
         {
@@ -330,7 +350,27 @@ nothrow @nogc:
         }
         return 0;
     }
-    int opApply(scope int delegate(ref V v) nothrow @nogc dg)
+    int opApply(scope int delegate(ref V v) nothrow @nogc dg) nothrow
+    {
+        for (Iterator i = begin(); i != end(); ++i)
+        {
+            int r = dg(i.value);
+            if (r)
+                return r;
+        }
+        return 0;
+    }
+    int opApply(scope int delegate(ref V v) pure @nogc dg) pure
+    {
+        for (Iterator i = begin(); i != end(); ++i)
+        {
+            int r = dg(i.value);
+            if (r)
+                return r;
+        }
+        return 0;
+    }
+    int opApply(scope int delegate(ref V v) @nogc dg)
     {
         for (Iterator i = begin(); i != end(); ++i)
         {
@@ -342,6 +382,7 @@ nothrow @nogc:
     }
 
 private:
+nothrow:
 	alias Node = AVLTreeNode!(K, V);
 
 	size_t numNodes = 0;
@@ -409,7 +450,7 @@ private:
 
 	static inout(Node)* find(_K)(inout(Node)* n, ref const _K key)
 	{
-		if (!n)
+		if (n is null)
 			return null;
 		ptrdiff_t c = Pred(n.kvp.key, key);
 		if (c > 0)
@@ -421,13 +462,12 @@ private:
 
 	void destroy(Node* n)
 	{
-		if (!n)
+		if (n is null)
 			return;
 
 		destroy(n.left);
 		destroy(n.right);
 
-		n.destroy();
 		Allocator.instance.freeT(n);
 
 		--numNodes;
@@ -436,7 +476,7 @@ private:
 	Node* insert(Node* n, Node* newnode)
 	{
 		// 1.  Perform the normal BST rotation
-		if (n == null)
+		if (n is null)
 		{
 			++numNodes;
 			return newnode;
@@ -453,7 +493,6 @@ private:
 			newnode.right = n.right;
 			newnode.height = n.height;
 
-			n.destroy();
 			Allocator.instance.freeT(n);
 
 			return newnode;
@@ -503,22 +542,11 @@ private:
 		return n;
 	}
 
-	static Node* minValueNode(Node* n)
-	{
-		Node* current = n;
-
-		// loop down to find the leftmost leaf
-		while (current.left != null)
-			current = current.left;
-
-		return current;
-	}
-
 	Node* deleteNode(_K)(Node* _pRoot, ref const _K key)
 	{
 		// STEP 1: PERFORM STANDARD BST DELETE
 
-		if (_pRoot == null)
+		if (_pRoot is null)
 			return _pRoot;
 
 		ptrdiff_t c = Pred(_pRoot.kvp.key, key);
@@ -536,20 +564,20 @@ private:
 		// if key is same as _pRoot's key, then this is the Node
 		// to be deleted
 		else
-			doDelete(_pRoot);
+			_pRoot = doDelete(_pRoot);
 
 		return rebalance(_pRoot);
 	}
 
-	void doDelete(Node* _pRoot)
+	Node* doDelete(Node* _pRoot)
 	{
 		// Node with only one child or no child
-		if ((_pRoot.left == null) || (_pRoot.right == null))
+		if ((_pRoot.left is null) || (_pRoot.right is null))
 		{
 			Node* temp = _pRoot.left ? _pRoot.left : _pRoot.right;
 
 			// No child case
-			if (temp == null)
+			if (temp is null)
 			{
 				temp = _pRoot;
 				_pRoot = null;
@@ -568,23 +596,29 @@ private:
 		}
 		else
 		{
-			// Node with two children: get the inorder successor (smallest
-			// in the right subtree)
-			Node* temp = minValueNode(_pRoot.right);
+            // Node with two children: we replace 'this' node with the next one in sequence...
 
-			// Copy the inorder successor's data to this Node
-			_pRoot.kvp.key = temp.kvp.key;
+            // get the in-order successor: the 'next' item is the far left node on the right hand side)
+            Node* next = _pRoot.right;
+            while (next.left !is null) // find the leftmost leaf
+                next = next.left;
 
-			// Delete the inorder successor
-			_pRoot.right = deleteNode(_pRoot.right, temp.kvp.key);
+			// Copy the in-order successor's data to this Node
+			_pRoot.kvp.key = next.kvp.key; // we can't move the key, because deleteNode still needs to be able to find it
+			_pRoot.kvp.value = next.kvp.value.move;
+
+			// Delete the node we just shifted
+			_pRoot.right = deleteNode(_pRoot.right, next.kvp.key);
 		}
+
+		return _pRoot;
 	}
 
 	Node* rebalance(Node* _pRoot)
 	{
 		// If the tree had only one Node then return
-		if (_pRoot == null)
-			return _pRoot;
+		if (_pRoot is null)
+			return null;
 
 		// STEP 2: UPDATE HEIGHT OF THE CURRENT NODE
 		_pRoot.height = max(height(_pRoot.left), height(_pRoot.right)) + 1;
@@ -840,3 +874,245 @@ ptrdiff_t epStringify(Slice<char> buffer, String epUnusedParam(format), const AV
 //// Range retrieval
 //template <typename K, typename V, typename P, typename A>
 //TreeRange<AVLTree<K, V, P, A>> range(const AVLTree<K, V, P, A> &input) { return TreeRange<AVLTree<K, V, P, A>>(input); }
+
+
+
+unittest
+{
+    alias TestAVLTree = AVLTree!(int, int);
+    alias TestAVLTreeCIP = AVLTree!(int, const(int)*);
+
+    static assert(is(TestAVLTree.KeyType == int), "IndexType failed!");
+
+    static assert(is(TestAVLTree.ValueType == int), "ElementType failed!");
+    static assert(is(TestAVLTreeCIP.ValueType == const(int)*), "ElementType failed!");
+
+    // Basic insertion and retrieval
+    {
+        TestAVLTree map;
+        assert(map.empty());
+        assert(map.length == 0);
+
+        map.insert(1, 10);
+        assert(!map.empty());
+        assert(map.length == 1);
+        assert(map.get(1) !is null && *map.get(1) == 10);
+        assert(map[1] == 10);
+        assert(1 in map);
+        assert(map.exists(1));
+
+        map.insert(2, 20);
+        assert(map.length == 2);
+        assert(map.get(2) !is null && *map.get(2) == 20);
+        assert(map[2] == 20);
+        assert(2 in map);
+
+        // Test inserting duplicate key (should be ignored)
+        auto pVal = map.insert(1, 11);
+        assert(pVal is null); // Insert should fail if key exists
+        assert(map.length == 2);
+        assert(map[1] == 10); // Value should remain unchanged
+
+        // Test non-existent key
+        assert(map.get(3) is null);
+        assert(3 !in map);
+        assert(!map.exists(3));
+    }
+
+    // Replace and opIndexAssign
+    {
+        TestAVLTree map;
+        map.replace(5, 50);
+        assert(map.length == 1);
+        assert(map[5] == 50);
+
+        map.replace(5, 55); // Replace existing key
+        assert(map.length == 1);
+        assert(map[5] == 55);
+
+        map[6] = 60; // opIndexAssign for new key
+        assert(map.length == 2);
+        assert(map[6] == 60);
+
+        map[6] = 66; // opIndexAssign for existing key
+        assert(map.length == 2);
+        assert(map[6] == 66);
+    }
+
+    // Removal
+    {
+        TestAVLTree map;
+        map.insert(10, 100);
+        map.insert(5, 50);
+        map.insert(15, 150);
+        map.insert(3, 30);
+        map.insert(7, 70);
+        map.insert(12, 120);
+        map.insert(17, 170);
+        assert(map.length == 7);
+
+        map.remove(5); // Remove node with two children
+        assert(map.length == 6);
+        assert(map.get(5) is null);
+        assert(map.exists(3));
+        assert(map.exists(7));
+
+        map.remove(3); // Remove leaf node
+        assert(map.length == 5);
+        assert(map.get(3) is null);
+
+        map.remove(17); // Remove leaf node
+        assert(map.length == 4);
+        assert(map.get(17) is null);
+
+        map.remove(10); // Remove root node
+        assert(map.length == 3);
+        assert(map.get(10) is null);
+        assert(map.exists(7));
+        assert(map.exists(15));
+        assert(map.exists(12));
+
+        map.remove(15);
+        assert(map.length == 2);
+        assert(map.get(15) is null);
+
+        map.remove(7);
+        assert(map.length == 1);
+        assert(map.get(7) is null);
+
+        map.remove(12);
+        assert(map.length == 0);
+        assert(map.empty());
+        assert(map.get(12) is null);
+
+        // Remove non-existent key
+        map.remove(100);
+        assert(map.length == 0);
+        assert(map.empty());
+    }
+
+    // Clear
+    {
+        TestAVLTree map;
+        map.insert(1, 1);
+        map.insert(2, 2);
+        assert(map.length == 2);
+        map.clear();
+        assert(map.length == 0);
+        assert(map.empty());
+        assert(map.get(1) is null);
+        assert(map.get(2) is null);
+    }
+
+    // Iteration (opApply)
+    {
+        TestAVLTree map;
+        map.insert(3, 30);
+        map.insert(1, 10);
+        map.insert(2, 20);
+        map.insert(4, 40);
+
+        int sumKeys = 0;
+        int sumValues = 0;
+        int count = 0;
+
+        // Iterate key-value pairs
+        foreach (k, v; map)
+        {
+            sumKeys += k;
+            sumValues += v;
+            count++;
+        }
+
+        assert(count == 4);
+        assert(sumKeys == 1 + 2 + 3 + 4);
+        assert(sumValues == 10 + 20 + 30 + 40);
+
+        sumValues = 0;
+        count = 0;
+        // Iterate values only
+        foreach (v; map)
+        {
+            sumValues += v;
+            count++;
+        }
+        assert(count == 4);
+        assert(sumValues == 10 + 20 + 30 + 40);
+
+        // Test stopping iteration
+        count = 0;
+        foreach (k, v; map)
+        {
+            count++;
+            if (k == 2)
+                break; // Stop when key is 2
+        }
+        assert(count == 2); // Should stop after 1 and 2
+    }
+
+    // Iteration (Iterator struct)
+    {
+        TestAVLTree map;
+        map.insert(3, 30);
+        map.insert(1, 10);
+        map.insert(2, 20);
+        map.insert(4, 40);
+
+        foreach (kvp; map) // Uses Iterator internally
+        {
+            // Note: D's foreach over structs with opApply might not directly use the Iterator struct
+            // but opApply tests cover the iteration logic.
+            // This loop tests if the basic range primitives work.
+            // A direct Iterator test:
+        }
+
+        auto it = map.begin();
+        assert(it.key == 1 && it.value == 10);
+        ++it;
+        assert(it.key == 2 && it.value == 20);
+        ++it;
+        assert(it.key == 3 && it.value == 30);
+        ++it;
+        assert(it.key == 4 && it.value == 40);
+        ++it;
+        assert(it == map.end());
+
+        // Test empty map iteration
+        TestAVLTree emptyMap;
+        auto emptyIt = emptyMap.begin();
+        assert(emptyIt == emptyMap.end());
+        int emptyCount = 0;
+        foreach(kvp; emptyMap) { emptyCount++; }
+        assert(emptyCount == 0);
+    }
+
+    // Test with string keys
+    {
+        alias StringMap = AVLTree!(const(char)[], int);
+        StringMap map;
+
+        map.insert("banana", 1);
+        map.insert("apple", 2);
+        map.insert("cherry", 3);
+
+        assert(map.length == 3);
+        assert(map["apple"] == 2);
+        assert(map["banana"] == 1);
+        assert(map["cherry"] == 3);
+        assert("banana" in map);
+        assert("grape" !in map);
+
+        map.remove("banana");
+        assert(map.length == 2);
+        assert("banana" !in map);
+        assert(map["apple"] == 2);
+        assert(map["cherry"] == 3);
+
+        int count = 0;
+        foreach (k, v; map)
+        {
+            count++;
+        }
+        assert(count == 2);
+    }
+}

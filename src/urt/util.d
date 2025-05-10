@@ -346,7 +346,7 @@ enum Default = DefaultInit.init;
 struct InPlace(C)
 	if (is(C == class))
 {
-	import core.lifetime;
+	import urt.lifetime;
 
 	alias value this;
 	inout(C) value() inout pure nothrow @nogc => cast(inout(C))instance.ptr;

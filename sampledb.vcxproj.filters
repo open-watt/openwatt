@@ -555,6 +555,12 @@
     <DCompile Include="src\manager\expression.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\http\message.d">
+      <Filter>src\protocol\http</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\http\server.d">
+      <Filter>src\protocol\http</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

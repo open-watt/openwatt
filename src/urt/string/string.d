@@ -1,12 +1,10 @@
 module urt.string.string;
 
-import urt.lifetime : forward;
+import urt.lifetime : forward, move;
 import urt.mem;
 import urt.mem.string : CacheString;
 import urt.hash : fnv1aHash, fnv1aHash64;
 import urt.string.tailstring : TailString;
-
-import core.lifetime : move;
 
 public import urt.array : Alloc_T, Alloc, Reserve_T, Reserve, Concat_T, Concat;
 enum Format_T { Value }
@@ -300,6 +298,115 @@ private:
             *cast(ushort*)(ptr - 2) |= 0x8000;
     }
 }
+
+unittest
+{
+    // Test StringLit
+    enum hello = StringLit!"Hello";
+    assert(hello.length == 5);
+    assert(hello == "Hello");
+    assert(hello.toString == "Hello");
+    assert(hello.opDollar() == 5);
+
+    // Test empty StringLit
+    enum emptyLit = StringLit!"";
+    assert(emptyLit.length == 0);
+    assert(emptyLit == "");
+    assert(!emptyLit); // opCast!bool
+
+    // Test makeString (default allocator)
+    String s1 = makeString("World");
+    assert(s1.length == 5);
+    assert(s1 == "World");
+
+    // Test makeString (temp allocator)
+    // Note: Temp strings are volatile, use with care in real code
+    String s2 = makeString("Temporary", StringAlloc.TempString);
+    assert(s2.length == 9);
+    assert(s2 == "Temporary");
+
+    // Test empty string creation
+    String emptyStr = makeString("");
+    assert(emptyStr.ptr is null);
+    assert(emptyStr.length == 0);
+    assert(emptyStr == "");
+    assert(!emptyStr);
+
+    String nullStr = String(null);
+    assert(nullStr.ptr is null);
+    assert(nullStr.length == 0);
+    assert(nullStr == "");
+    assert(!nullStr);
+
+    // Test assignment and reference counting (basic check)
+    String s3 = s1; // s3 references the same data as s1
+    assert(s3.ptr == s1.ptr);
+    assert(s3 == "World");
+    s1 = null; // s1 releases its reference
+    assert(s3 == "World"); // s3 should still be valid
+    assert(s3.length == 5);
+
+    // Test equality
+    String s4 = makeString("World");
+    assert(s3 == s4); // Different allocations, same content
+    assert(s3 != "world"); // Case sensitive
+    assert(s3 != "Worl");
+    assert(s3 != "Worlds");
+
+    // Test opIndex and opSlice
+    String s5 = StringLit!"Testing";
+    assert(s5[0] == 'T');
+    assert(s5[6] == 'g');
+    assert(s5[1 .. 4] == "est");
+    assert(s5[] == "Testing");
+    assert(s5[1 .. $] == "esting");
+    assert(s5[0 .. $-1] == "Testin");
+
+    // Test hashing (basic check - ensure it runs)
+    size_t hash1 = s3.toHash();
+    size_t hash2 = s4.toHash();
+    size_t hashEmpty = emptyStr.toHash();
+    assert(hash1 == hash2);
+    assert(hashEmpty == 0);
+    assert(StringLit!"abc".toHash() != StringLit!"abd".toHash());
+
+    // Test conversion from MutableString
+    MutableString!0 mut = "Mutable";
+    String s6 = move(mut); // Takes ownership
+    assert(s6 == "Mutable");
+    assert(mut.ptr is null); // Original mutable string should be empty
+
+    // Test copy construction
+    String s7 = s6;
+    assert(s7 == "Mutable");
+    assert(s6.ptr == s7.ptr); // Should share the buffer initially
+    s6 = null; // Release s6's reference
+    assert(s7 == "Mutable"); // s7 should still be valid
+
+    // Test assignment from null
+    s7 = null;
+    assert(s7.ptr is null);
+    assert(s7.length == 0);
+
+    // Test opCmp
+    assert(StringLit!"abc".opCmp("abc") == 0);
+    assert(StringLit!"abc".opCmp("abd") < 0);
+    assert(StringLit!"abd".opCmp("abc") > 0);
+    assert(StringLit!"ab".opCmp("abc") < 0);
+    assert(StringLit!"abc".opCmp("ab") > 0);
+    assert(String(null).opCmp("") == 0);
+    assert(String(null).opCmp("a") < 0);
+    assert(StringLit!"a".opCmp("") > 0);
+
+
+    // Test assignment from CacheString/TailString (conceptual - requires setup)
+    // import urt.mem.string : addString;
+    // auto cs = "Cached".addString();
+    // String s8;
+    // s8 = cs;
+    // assert(s8 == "Cached");
+}
+
 
 struct MutableString(size_t Embed = 0)
 {
@@ -626,16 +733,151 @@ private:
 
 unittest
 {
+    // Initial tests from previous version
     MutableString!0 s;
-    s.reserve(4567);
-    s = "Hello, world!\n";
+    s.reserve(10); // Reserve some initial space
+    assert(s.allocated >= 10);
+    s = "Hello";
+    assert(s == "Hello");
+    assert(s.length == 5);
+
+    s.append(", world!\n");
+    assert(s == "Hello, world!\n");
+    assert(s.length == 14);
+
+    MutableString!0 s_long;
+    s_long.reserve(4567);
+    s_long = "Start";
     foreach (i; 0 .. 100)
     {
-        assert(s.length == i*13 + 14);
-        s.append("Hello world!\n");
+        s_long.append(" Loop ");
+        assert(s_long.length == 5 + (i + 1) * 6);
     }
-    s.clear();
-    s = "wow!";
+    s_long.clear();
+    assert(s_long.length == 0);
+    assert(s_long == "");
+    s_long = "wow!";
+    assert(s_long == "wow!");
+
+    // New tests for missing methods
+    MutableString!0 m;
+
+    // opAssign(char)
+    m = 'X';
+    assert(m == "X");
+    assert(m.length == 1);
+
+    // opAssign(const(char)[]) - already tested implicitly
+
+    // opOpAssign("~", ...) / append
+    m ~= '!';
+    assert(m == "X!");
+    m ~= " More";
+    assert(m == "X! More");
+    m.append(" Text");
+    assert(m == "X! More Text");
+
+    // appendFormat
+    m.clear();
+    m.appendFormat("Value: {0}", 123);
+    assert(m == "Value: 123");
+    m.appendFormat(", String: {0}", "abc");
+    assert(m == "Value: 123, String: abc");
+
+    // concat
+    m.concat("New", ' ', "String");
+    assert(m == "New String");
+    assert(m.length == 10);
+
+    // format
+    m.format("Formatted: {0} {1}", "test", 456);
+    assert(m == "Formatted: test 456");
+
+    // insert
+    m = "String";
+    m.insert(0, "My ");   // Beginning
+    assert(m == "My String");
+    m.insert(3, "Super "); // Middle
+    assert(m == "My Super String");
+    m.insert(m.length, "!"); // End (same as append)
+    assert(m == "My Super String!");
+
+    // insertFormat
+    m = "Data";
+    m.insertFormat(0, "[{0}] ", 1);
+    assert(m == "[1] Data");
+    m.insertFormat(4, "\\{{0}\\}", "fmt");
+    assert(m == "[1] {fmt}Data");
+    m.insertFormat(m.length, " End");
+    assert(m == "[1] {fmt}Data End");
+
+    // erase
+    m = "RemoveStuff";
+    m.erase(0, 6); // Remove "Remove"
+    assert(m == "Stuff");
+    m = "RemoveStuff";
+    m.erase(6, 5); // Remove "Stuff"
+    assert(m == "Remove");
+    m = "RemoveStuff";
+    m.erase(3, 4); // Remove "oveS"
+    assert(m == "Remtuff");
+    m.erase(0, m.length); // Erase all
+    assert(m == "");
+
+    // reserve - already tested implicitly
+
+    // extend
+    m = "Init";
+    char[] extended = m.extend(3);
+    assert(m.length == 7);
+    assert(extended.length == 3);
+    extended[] = "ial";
+    assert(m == "Initial");
+
+    // clear - already tested
+
+    // opIndex, opSlice
+    m = "Access";
+    assert(m[0] == 'A');
+    assert(m[5] == 's');
+    m[1] = 'k'; // Modify via ref opIndex
+    assert(m == "Akcess");
+    assert(m[1..4] == "kce");
+    assert(m[] == "Akcess");
+    assert(m[1 .. $] == "kcess");
+    assert(m[0 .. $ - 1] == "Akces");
+
+    // opDollar
+    assert(m.opDollar() == m.length);
+
+    // Constructor variations
+    auto m_alloc = MutableString!0(Alloc, 5, 'Z');
+    assert(m_alloc == "ZZZZZ");
+
+    auto m_reserve = MutableString!0(Reserve, 20);
+    assert(m_reserve.length == 0);
+    assert(m_reserve.allocated >= 20);
+
+    auto m_concat = MutableString!0(Concat, "One", "Two", "Three");
+    assert(m_concat == "OneTwoThree");
+
+    auto m_format = MutableString!0(Format, "Num: {0}", 99);
+    assert(m_format == "Num: 99");
+
+    // Copy construction / assignment
+    MutableString!0 m_copy_src = "Copy Me";
+    MutableString!0 m_copy_dst = m_copy_src; // Uses copy constructor (or postblit hack)
+    assert(m_copy_dst == "Copy Me");
+    m_copy_src[0] = 'X'; // Modify original
+    assert(m_copy_src == "Xopy Me");
+    assert(m_copy_dst == "Copy Me"); // Destination should be independent
+
+    MutableString!0 m_assign_dst;
+    m_assign_dst = m_copy_src; // Assignment operator
+    assert(m_assign_dst == "Xopy Me");
+    m_copy_src[1] = 'Y';
+    assert(m_copy_src == "XYpy Me");
+    assert(m_assign_dst == "Xopy Me"); // Assignment should also copy
 }
 
 

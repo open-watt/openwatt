@@ -3,16 +3,24 @@ module protocol.http;
 import urt.array;
 import urt.conv;
 import urt.inet;
+import urt.kvp;
 import urt.lifetime;
 import urt.map;
+import urt.mem.allocator;
 import urt.string;
+import urt.string.format : tstring;
+import urt.time;
 
 import manager.console;
 import manager.plugin;
 
 import protocol.http.client;
+import protocol.http.server;
+import protocol.http.message;
 
 import router.stream.tcp;
+
+version = DebugHTTPMessageFlow;
 
 nothrow @nogc:
 
@@ -23,9 +31,11 @@ class HTTPModule : Module
 nothrow @nogc:
 
     Map!(const(char)[], HTTPClient) clients;
+    Map!(const(char)[], HTTPServer) servers;
 
     override void init()
     {
+        g_app.console.registerCommand!add_server("/protocol/http/server", this, "add");
     }
 
     HTTPClient createClient(String name, const(char)[] server)
@@ -116,11 +126,42 @@ nothrow @nogc:
         return http;
     }
 
+    HTTPServer createServer(const(char)[] name, ushort port, HTTPServer.RequestHandler handler)
+    {
+        HTTPServer server = defaultAllocator().allocT!HTTPServer(name.makeString(defaultAllocator()), null, port, handler);
+        servers[server.name[]] = server;
+
+        return server;
+    }
+
     override void update()
     {
+        foreach (server; servers)
+            server.update();
+
         foreach (client; clients)
-        {
             client.update();
-        }
+    }
+
+    void add_server(Session session, const(char)[] name, ushort port)
+    {
+        createServer(name, port, (request, stream) {
+            MutableString!0 response;
+
+            const string messageBody = "Ermon Webserver";
+
+            httpStatusLine(request.httpVersion, request.statusCode == 0 ? 200 : request.statusCode, "", response);
+            httpDate(getDateTime(), response);
+
+            httpFieldLines([ HTTPParam(StringLit!"Content-Type", StringLit!"text/plain"),
+                             HTTPParam(StringLit!"Content-Length", makeString(tstring(messageBody.length), defaultAllocator())) ], response);
+
+            response ~= "\r\n";
+            response ~= messageBody;
+            stream.write(response);
+
+            return 0; });
+
+        session.writeLine("HTTP Server ", name, ":", port);
     }
 }

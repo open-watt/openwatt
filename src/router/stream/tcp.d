@@ -361,9 +361,32 @@ class TCPServer
         assert(!isRunning, "Already started");
 
         Result r = create_socket(AddressFamily.IPv4, SocketType.Stream, Protocol.TCP, serverSocket);
+        if (r.failed)
+        {
+            writeError("Error staring TCP server '", name , "':port ", port, " failed to create socket. Error ", r.systemCode, ".");
+            return;
+        }
+
         r = serverSocket.set_socket_option(SocketOption.NonBlocking, true);
+        if (r.failed)
+        {
+            writeError("Error staring TCP server '", name , "':port ", port, " set_socket_option failed.  Error ", r.systemCode, ".");
+            return;
+        }
+
         r = serverSocket.bind(InetAddress(IPAddr.any, port));
+        if (r.failed)
+        {
+            writeError("Error staring TCP server '", name , "':port ", port, " failed to bind socket.", r.systemCode, ".");
+            return;
+        }
+
         r = serverSocket.listen();
+        if (r.failed)
+        {
+            writeError("Error staring TCP server '", name , "':port ", port, " call to listen failed.", r.systemCode, ".");
+            return;
+        }
 
         isRunning = true;
 
