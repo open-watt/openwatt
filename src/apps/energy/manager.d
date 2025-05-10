@@ -75,8 +75,10 @@ nothrow @nogc:
 
     void update()
     {
-        if (main)
-            main.update();
+        if (!main)
+            return;
+
+        main.update();
 
         Array!Appliance wantPower;
         float excessSolar = main.meterData.active[0] < 0 ? -main.meterData.active[0] : 0;
