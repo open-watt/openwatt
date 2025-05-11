@@ -1,5 +1,10 @@
 module urt.processor;
 
+version (LittleEndian)
+    enum LittleEndian = true;
+else
+    enum LittleEndian = false;
+
 version (X86_64)
 {
     version = Intel;
@@ -65,6 +70,22 @@ else version (Xtensa)
     enum string ProcessorFamily = "Xtensa";
 else
     static assert(0, "Unsupported processor");
+
+version (X86)
+    enum SupportUnalignedLoadStore = true;
+else version (X86_64)
+    enum SupportUnalignedLoadStore = true;
+else version (AArch64)
+    enum SupportUnalignedLoadStore = true;
+else version (ARM)
+{
+    enum SupportUnalignedLoadStore = !ProcFeatures.strict_align;
+}
+else
+{
+    // TODO: I think MIPS R6 can do native unalogned loads/stores
+    enum SupportUnalignedLoadStore = false;
+}
 
 // Different arch may define this differently...
 // question is; is it worth a branch to avoid a redundant store?

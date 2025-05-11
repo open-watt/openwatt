@@ -1,108 +1,89 @@
 module urt.endian;
 
+import urt.processor;
 import urt.traits;
+import urt.util : byteReverse;
 
-version (X86)
-    enum SupportUnalignedLoadStore = true;
-else version (X86_64)
-    enum SupportUnalignedLoadStore = true;
-else version (AArch64)
-    enum SupportUnalignedLoadStore = true;
-else version (ARM)
-{
-    import urt.processor;
-    enum SupportUnalignedLoadStore = !ProcFeatures.strict_align;
-}
-else
-{
-    // TODO: I think MIPS R6 can do native unalogned loads/stores
-
-    enum SupportUnalignedLoadStore = false;
-}
-
-// TODO: ARM has REV, REV16, REV32, REV64
-//       MIPS has wsbh, dsbh, dshd
-//       POWERPC has lwbrx/stbrx lhbrx/sthbrx
-//       x86 has XCHG and BSWAP
-//       RISC-V has grev if the B (Bitmanip extension) is present
-//       GCC/LLVM have __builtin_bswap32/__builtin_bswap16 intrinsics...
-
-version (LittleEndian)
-    enum IsLittleEndian = true;
-else
-    enum IsLittleEndian = false;
+pure nothrow @nogc:
 
 
-nothrow @nogc:
-
-
+// load from byte arrays
 pragma(inline, true) T endianToNative(T, bool little)(ref const ubyte[1] bytes)
-    if (is(T == ubyte) || is(T == byte) || is(T == bool) || is(T == char))
+    if (T.sizeof == 1 && isIntegral!T)
 {
-    return (cast(T*)bytes.ptr)[0];
+    return cast(T)bytes[0];
 }
 
-T endianToNative(T, bool little)(ref const ubyte[2] bytes)
-    if (is(T == ushort) || is(T == short) || is(T == wchar))
+ushort endianToNative(T, bool little)(ref const ubyte[2] bytes)
+    if (T.sizeof == 2 && isIntegral!T)
 {
-    static if (SupportUnalignedLoadStore && IsLittleEndian == little)
-        return *cast(T*)bytes.ptr;
-    else static if (little)
-        return bytes[0] | bytes[1] << 8;
-    else
-        return bytes[0] << 8 | bytes[1];
-}
-
-T endianToNative(T, bool little)(ref const ubyte[4] bytes)
-    if (is(T == uint) || is(T == int) || is(T == dchar) || is(T == float))
-{
-    static if (SupportUnalignedLoadStore && IsLittleEndian == little)
-        return *cast(T*)bytes.ptr;
-    else static if (little)
+    if (__ctfe || !SupportUnalignedLoadStore)
     {
-        uint i = bytes[0] | bytes[1] << 8 | bytes[2] << 16 | bytes[3] << 24;
-        static if (is(T == float))
-            return *cast(float*)&i;
+        // ctfe can't do the memory reinterpreting
+        static if (little)
+            return cast(T)(bytes[0] | bytes[1] << 8);
         else
-            return i;
+            return cast(T)(bytes[0] << 8 | bytes[1]);
     }
-    else
+    static if (SupportUnalignedLoadStore)
     {
-        uint i = bytes[0] << 24 | bytes[1] << 16 | bytes[2] << 8 | bytes[3];
-        static if (is(T == float))
-            return *cast(float*)&i;
+        pragma(inline, true);
+        static if (LittleEndian == little)
+            return *cast(ushort*)bytes.ptr;
         else
-            return i;
+            return byteReverse(*cast(ushort*)bytes.ptr);
     }
 }
 
-T endianToNative(T, bool little)(ref const ubyte[8] bytes)
-    if (is(T == ulong) || is(T == long) || is(T == double))
+uint endianToNative(T, bool little)(ref const ubyte[4] bytes)
+    if (T.sizeof == 4 && isIntegral!T)
 {
-    static if (SupportUnalignedLoadStore && IsLittleEndian == little)
-        return *cast(T*)bytes.ptr;
-    else static if (little)
+    if (__ctfe || !SupportUnalignedLoadStore)
     {
-        ulong i = bytes[0] | bytes[1] << 8 | bytes[2] << 16 | cast(ulong)bytes[3] << 24 | cast(ulong)bytes[4] << 32 | cast(ulong)bytes[5] << 40 | cast(ulong)bytes[6] << 48 | cast(ulong)bytes[7] << 56;
-        static if (is(T == double))
-            return *cast(double*)&i;
+        // ctfe can't do the memory reinterpreting
+        static if (little)
+            return cast(T)(bytes[0] | bytes[1] << 8 | bytes[2] << 16 | bytes[3] << 24);
         else
-            return i;
+            return cast(T)(bytes[0] << 24 | bytes[1] << 16 | bytes[2] << 8 | bytes[3]);
     }
-    else
+    static if (SupportUnalignedLoadStore)
     {
-        ulong i = cast(ulong)bytes[0] << 56 | cast(ulong)bytes[1] << 48 | cast(ulong)bytes[2] << 40 | cast(ulong)bytes[3] << 32 | cast(ulong)bytes[4] << 24 | bytes[5] << 16 | bytes[6] << 8 | bytes[7];
-        static if (is(T == double))
-            return *cast(double*)&i;
+        pragma(inline, true);
+        static if (LittleEndian == little)
+            return *cast(uint*)bytes.ptr;
         else
-            return i;
+            return byteReverse(*cast(uint*)bytes.ptr);
     }
 }
 
-auto endianToNative(T, bool little)(ref const ubyte[T.sizeof] bytes)
-    if (isEnum!T)
+ulong endianToNative(T, bool little)(ref const ubyte[8] bytes)
+    if (T.sizeof == 8 && isIntegral!T)
 {
-    return cast(T)endianToNative!(enumType!T, little)(bytes);
+    if (__ctfe || !SupportUnalignedLoadStore)
+    {
+        // ctfe can't do the memory reinterpreting
+        static if (little)
+            return cast(T)(bytes[0] | bytes[1] << 8 | bytes[2] << 16 | bytes[3] << 24 | cast(ulong)bytes[4] << 32 | cast(ulong)bytes[5] << 40 | cast(ulong)bytes[6] << 48 | cast(ulong)bytes[7] << 56);
+        else
+            return cast(T)(cast(ulong)bytes[0] << 56 | cast(ulong)bytes[1] << 48 | cast(ulong)bytes[2] << 40 | cast(ulong)bytes[3] << 32 | bytes[4] << 24 | bytes[5] << 16 | bytes[6] << 8 | bytes[7]);
+    }
+    static if (SupportUnalignedLoadStore)
+    {
+        pragma(inline, true);
+        static if (LittleEndian == little)
+            return *cast(ulong*)bytes.ptr;
+        else
+            return byteReverse(*cast(ulong*)bytes.ptr);
+    }
+}
+
+pragma(inline, true) T endianToNative(T, bool little)(ref const ubyte[T.sizeof] bytes)
+    if (!isIntegral!T && !is(T == struct) && !is(T == U[N], U, size_t N))
+{
+    import urt.meta : intForWidth;
+    alias U = intForWidth!(T.sizeof*8);
+    U u = endianToNative!(U, little)(bytes);
+    return *cast(T*)&u;
 }
 
 T endianToNative(T, bool little)(ref const ubyte[T.sizeof] bytes)
@@ -112,17 +93,15 @@ T endianToNative(T, bool little)(ref const ubyte[T.sizeof] bytes)
     {
         static assert(!is(U == class) && !is(U == interface) && !is(U == V*, V), T.stringof ~ " is not POD");
 
-        T r;
-
         static if (U.sizeof == 1)
-            r = (cast(U[])bytes)[0..N];
+            r = *cast(T*)&bytes;
         else
         {
+            T r;
             for (size_t i = 0, j = 0; i < N; ++i, j += T.sizeof)
                 r[i] = endianToNative!(U, little)(bytes.ptr[j .. j + T.sizeof][0 .. T.sizeof]);
+            return r;
         }
-
-        return r;
     }
 }
 
@@ -156,99 +135,79 @@ alias bigEndianToNative(T) = endianToNative!(T, false);
 alias littleEndianToNative(T) = endianToNative!(T, true);
 
 
-pragma(inline, true) ubyte[1] nativeToEndian(bool little, T)(const T u8)
-    if (is(T == ubyte) || is(T == byte) || is(T == bool))
+// store to byte arrays
+pragma(inline, true) ubyte[1] nativeToEndian(bool little)(ubyte u)
 {
-    return (cast(ubyte*)&u8)[0..1];
+    return [ u ];
 }
 
-ubyte[2] nativeToEndian(bool little, T)(const T u16)
-    if (is(T == ushort) || is(T == short) || is(T == wchar))
+ubyte[2] nativeToEndian(bool little)(ushort u)
 {
-    static if (SupportUnalignedLoadStore && IsLittleEndian == little)
+    if (__ctfe || !SupportUnalignedLoadStore)
     {
-        ubyte[2] res = void;
-        *cast(T*)res.ptr = u16; // this should perform an unaligned store to the destination via NRVO
-        return res;
-    }
-    else
-    {
-        ushort i = u16;
+        // ctfe can't do the memory reinterpreting
         static if (little)
-        {
-            ubyte[2] res = [ i & 0xFF, i >> 8 ];
-            return res;
-        }
+            return [ u & 0xFF, u >> 8 ];
         else
-        {
-            ubyte[2] res = [ i >> 8, i & 0xFF ];
-            return res;
-        }
+            return [ u >> 8, u & 0xFF ];
+    }
+    static if (SupportUnalignedLoadStore)
+    {
+        static if (LittleEndian != little)
+            u = byteReverse(u);
+        else
+            pragma(inline, true);
+        return *cast(ubyte[2]*)&u;
     }
 }
 
-ubyte[4] nativeToEndian(bool little, T)(const T u32)
-    if (is(T == uint) || is(T == int) || is(T == dchar) || is(T == float))
+ubyte[4] nativeToEndian(bool little)(uint u)
 {
-    static if (SupportUnalignedLoadStore && IsLittleEndian == little)
+    if (__ctfe || !SupportUnalignedLoadStore)
     {
-        ubyte[4] res = void;
-        *cast(T*)res.ptr = u32; // this should perform an unaligned store to the destination via NRVO
-        return res;
-    }
-    else
-    {
-        uint i;
-        static if (is(T == float))
-            i = *cast(uint*)&u32;
-        else
-            i = u32;
+        // ctfe can't do the memory reinterpreting
         static if (little)
-        {
-            ubyte[4] res = [ i & 0xFF, (i >> 8) & 0xFF, (i >> 16) & 0xFF, i >> 24 ];
-            return res;
-        }
+            return [ u & 0xFF, (u >> 8) & 0xFF, (u >> 16) & 0xFF, u >> 24 ];
         else
-        {
-            ubyte[4] res = [ i >> 24, (i >> 16) & 0xFF, (i >> 8) & 0xFF, i & 0xFF ];
-            return res;
-        }
+            return [ u >> 24, (u >> 16) & 0xFF, (u >> 8) & 0xFF, u & 0xFF ];
+    }
+    static if (SupportUnalignedLoadStore)
+    {
+        static if (LittleEndian != little)
+            u = byteReverse(u);
+        else
+            pragma(inline, true);
+        return *cast(ubyte[4]*)&u;
     }
 }
 
-ubyte[8] nativeToEndian(bool little, T)(const T u64)
-    if (is(T == ulong) || is(T == long) || is(T == double))
+ubyte[8] nativeToEndian(bool little)(ulong u)
 {
-    static if (SupportUnalignedLoadStore && IsLittleEndian == little)
+    if (__ctfe || !SupportUnalignedLoadStore)
     {
-        ubyte[8] res = void;
-        *cast(T*)res.ptr = u64; // this should perform an unaligned store to the destination via NRVO
-        return res;
-    }
-    else
-    {
-        ulong i;
-        static if (is(T == double))
-            i = *cast(ulong*)&u64;
-        else
-            i = u64;
+        // ctfe can't do the memory reinterpreting
         static if (little)
-        {
-            ubyte[8] res = [ i & 0xFF, (i >> 8) & 0xFF, (i >> 16) & 0xFF, (i >> 24) & 0xFF, (i >> 32) & 0xFF, (i >> 40) & 0xFF, (i >> 48) & 0xFF, i >> 56 ];
-            return res;
-        }
+            return [ u & 0xFF, (u >> 8) & 0xFF, (u >> 16) & 0xFF, (u >> 24) & 0xFF, (u >> 32) & 0xFF, (u >> 40) & 0xFF, (u >> 48) & 0xFF, u >> 56 ];
         else
-        {
-            ubyte[8] res = [ i >> 56, (i >> 48) & 0xFF, (i >> 40) & 0xFF, (i >> 32) & 0xFF, (i >> 24) & 0xFF, (i >> 16) & 0xFF, (i >> 8) & 0xFF, i & 0xFF ];
-            return res;
-        }
+            return [ u >> 56, (u >> 48) & 0xFF, (u >> 40) & 0xFF, (u >> 32) & 0xFF, (u >> 24) & 0xFF, (u >> 16) & 0xFF, (u >> 8) & 0xFF, u & 0xFF ];
+    }
+    static if (SupportUnalignedLoadStore)
+    {
+        static if (LittleEndian != little)
+            u = byteReverse(u);
+        else
+            pragma(inline, true);
+        return *cast(ubyte[8]*)&u;
     }
 }
 
-ubyte[T.sizeof] nativeToEndian(bool little, T)(const T data)
-    if (isEnum!T)
+pragma(inline, true) auto nativeToEndian(bool little, T)(T val)
+    if (!isIntegral!T && !is(T == struct) && !is(T == U[N], U, size_t N))
 {
-    return nativeToEndian!little(cast(enumType!T)data);
+    import urt.meta : intForWidth;
+    alias U = intForWidth!(T.sizeof*8);
+    U r = nativeToEndian!little(*cast(U*)&val);
+    return *cast(T*)&r;
 }
 
 ubyte[T.sizeof] nativeToEndian(bool little, T)(auto ref const T data)
@@ -256,17 +215,15 @@ ubyte[T.sizeof] nativeToEndian(bool little, T)(auto ref const T data)
 {
     static assert(is(T == U[N], U, size_t N) && !is(U == class) && !is(U == interface) && !is(U == V*, V), T.stringof ~ " is not POD");
 
-    ubyte[T.sizeof] buffer;
-
-    static if (T.sizeof == 1)
-        buffer[0 .. N] = cast(ubyte[])data[];
+    static if (U.sizeof == 1)
+        return *cast(ubyte[T.sizeof])&data;
     else
     {
+        ubyte[T.sizeof] buffer = void;
         for (size_t i = 0; i < N*T.sizeof; i += T.sizeof)
            buffer.ptr[i .. i + T.sizeof][0 .. T.sizeof] = nativeToEndian!little(data[i]);
+        return buffer;
     }
-
-    return buffer;
 }
 
 ubyte[T.sizeof] nativeToEndian(bool little, T)(auto ref const T data)
@@ -274,7 +231,7 @@ ubyte[T.sizeof] nativeToEndian(bool little, T)(auto ref const T data)
 {
     // assert that T is POD
 
-    ubyte[T.sizeof] buffer;
+    ubyte[T.sizeof] buffer = void;
 
     size_t offset = 0;
     alias members = data.tupleof;
@@ -300,25 +257,38 @@ ubyte[T.sizeof] nativeToLittleEndian(T)(auto ref const T data)
     => nativeToEndian!true(data);
 
 
+// load/store from/to memory
 void storeBigEndian(T)(T* target, const T val)
     if (isSomeInt!T || is(T == float))
 {
-    (cast(ubyte*)target)[0..T.sizeof] = nativeToBigEndian(val);
+    version (BigEndian)
+        *target = val;
+    else
+        *target = byteReverse(val);
 }
 void storeLittleEndian(T)(T* target, const T val)
     if (isSomeInt!T || is(T == float))
 {
-    (cast(ubyte*)target)[0..T.sizeof] = nativeToLittleEndian(val);
+    version (LittleEndian)
+        *target = val;
+    else
+        *target = byteReverse(val);
 }
 T loadBigEndian(T)(const(T)* src)
     if (isSomeInt!T || is(T == float))
 {
-    return bigEndianToNative!T((cast(ubyte*)src)[0..T.sizeof]);
+    version (BigEndian)
+        return *src;
+    else
+        return byteReverse(*src);
 }
 T loadLittleEndian(T)(const(T)* src)
     if (isSomeInt!T || is(T == float))
 {
-    return littleEndianToNative!T((cast(ubyte*)src)[0..T.sizeof]);
+    version (LittleEndian)
+        return *src;
+    else
+        return byteReverse(*src);
 }
 
 
@@ -326,21 +296,21 @@ unittest
 {
     ubyte[8] test = [0x12, 0x34, 0x56, 0x78, 0x9A, 0xBC, 0xDE, 0xF0];
 
-    assert(endianToNative!(ubyte,   IsLittleEndian)(test[0..1]) == 0x12);
-    assert(endianToNative!(ushort,  IsLittleEndian)(test[0..2]) == 0x3412);
-    assert(endianToNative!(uint,    IsLittleEndian)(test[0..4]) == 0x78563412);
-    assert(endianToNative!(ulong,   IsLittleEndian)(test) == 0xF0DEBC9A78563412);
-    assert(endianToNative!(ubyte,  !IsLittleEndian)(test[0..1]) == 0x12);
-    assert(endianToNative!(ushort, !IsLittleEndian)(test[0..2]) == 0x1234);
-    assert(endianToNative!(uint,   !IsLittleEndian)(test[0..4]) == 0x12345678);
-    assert(endianToNative!(ulong,  !IsLittleEndian)(test) == 0x123456789ABCDEF0);
+    assert(endianToNative!(ubyte,   LittleEndian)(test[0..1]) == 0x12);
+    assert(endianToNative!(ushort,  LittleEndian)(test[0..2]) == 0x3412);
+    assert(endianToNative!(uint,    LittleEndian)(test[0..4]) == 0x78563412);
+    assert(endianToNative!(ulong,   LittleEndian)(test) == 0xF0DEBC9A78563412);
+    assert(endianToNative!(ubyte,  !LittleEndian)(test[0..1]) == 0x12);
+    assert(endianToNative!(ushort, !LittleEndian)(test[0..2]) == 0x1234);
+    assert(endianToNative!(uint,   !LittleEndian)(test[0..4]) == 0x12345678);
+    assert(endianToNative!(ulong,  !LittleEndian)(test) == 0x123456789ABCDEF0);
 
-    assert(nativeToEndian!( IsLittleEndian,  ubyte)(0x12) == test[0..1]);
-    assert(nativeToEndian!( IsLittleEndian, ushort)(0x3412) == test[0..2]);
-    assert(nativeToEndian!( IsLittleEndian,   uint)(0x78563412) == test[0..4]);
-    assert(nativeToEndian!( IsLittleEndian,  ulong)(0xF0DEBC9A78563412) == test);
-    assert(nativeToEndian!(!IsLittleEndian,  ubyte)(0x12) == test[0..1]);
-    assert(nativeToEndian!(!IsLittleEndian, ushort)(0x1234) == test[0..2]);
-    assert(nativeToEndian!(!IsLittleEndian,   uint)(0x12345678) == test[0..4]);
-    assert(nativeToEndian!(!IsLittleEndian,  ulong)(0x123456789ABCDEF0) == test);
+    assert(nativeToEndian!( LittleEndian)(0x12) == test[0..1]);
+    assert(nativeToEndian!( LittleEndian)(0x3412) == test[0..2]);
+    assert(nativeToEndian!( LittleEndian)(0x78563412) == test[0..4]);
+    assert(nativeToEndian!( LittleEndian)(0xF0DEBC9A78563412) == test);
+    assert(nativeToEndian!(!LittleEndian)(0x12) == test[0..1]);
+    assert(nativeToEndian!(!LittleEndian)(0x1234) == test[0..2]);
+    assert(nativeToEndian!(!LittleEndian)(0x12345678) == test[0..4]);
+    assert(nativeToEndian!(!LittleEndian)(0x123456789ABCDEF0) == test);
 }
