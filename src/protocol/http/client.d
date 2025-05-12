@@ -39,7 +39,7 @@ nothrow @nogc:
         this.parser = HTTPParser(&dispatchMessage);
     }
 
-    HTTPMessage* request(HTTPMethod method, const(char)[] resource, int delegate(ref const HTTPMessage) nothrow @nogc responseHandler, const void[] content = null, HTTPParam[] params = null, HTTPParam[] additionalHeaders = null, String username = null, String password = null)
+    HTTPMessage* request(HTTPMethod method, const(char)[] resource, HTTPMessageHandler responseHandler, const void[] content = null, HTTPParam[] params = null, HTTPParam[] additionalHeaders = null, String username = null, String password = null)
     {
         HTTPMessage* request = defaultAllocator().allocT!HTTPMessage();
         request.httpVersion = serverVersion;
@@ -51,7 +51,7 @@ nothrow @nogc:
         request.headers = additionalHeaders.move;
         request.queryParams = params.move;
         request.responseHandler = responseHandler;
-        request.requestTime = getTime();
+        request.requestTime = getSysTime();
 
         if (requests.length == 0) // OR CONCURRENT REQUESTS...
             sendRequest(*request);

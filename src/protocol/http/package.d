@@ -5,6 +5,7 @@ import urt.conv;
 import urt.inet;
 import urt.kvp;
 import urt.lifetime;
+import urt.log;
 import urt.map;
 import urt.mem.allocator;
 import urt.string;
@@ -36,6 +37,8 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.registerCommand!add_server("/protocol/http/server", this, "add");
+        g_app.console.registerCommand!add_client("/protocol/http/client", this, "add");
+        g_app.console.registerCommand!request("/protocol/http", this);
     }
 
     HTTPClient createClient(String name, const(char)[] server)
@@ -148,7 +151,7 @@ nothrow @nogc:
         createServer(name, port, (request, stream) {
             MutableString!0 response;
 
-            const string messageBody = "Ermon Webserver";
+            const string messageBody = "enermon Webserver";
 
             httpStatusLine(request.httpVersion, request.statusCode == 0 ? 200 : request.statusCode, "", response);
             httpDate(getDateTime(), response);
@@ -160,8 +163,74 @@ nothrow @nogc:
             response ~= messageBody;
             stream.write(response);
 
-            return 0; });
+            return 0;
+        });
 
-        session.writeLine("HTTP Server ", name, ":", port);
+        writeInfof("Create HTTP server '{0}' on port {1}", name, port);
+    }
+
+    void add_client(Session session, const(char)[] name, const(char)[] host)
+    {
+        if (!createClient(name.makeString(defaultAllocator), host))
+        {
+            // TODO: so bad!
+        }
+
+        writeInfof("Create HTTP client '{0}' to host {1}", name, host);
+    }
+
+    static class HTTPRequestState : FunctionCommandState
+    {
+    nothrow @nogc:
+        HTTPClient client;
+
+        this(Session session)
+        {
+            super(session);
+        }
+
+        ~this()
+        {
+            if (client)
+            {
+                // TODO: destroy the client...
+                assert(false);
+            }
+        }
+
+        override CommandCompletionState update()
+        {
+            // TODO: how to handle request cancellation? if we bail, then the client will try and call a dead delegate...
+
+            return state;
+        }
+
+        int responseHandler(ref const HTTPMessage response)
+        {
+            if (response.statusCode == 0)
+            {
+                session.writef("HTTP request failed!");
+                state = CommandCompletionState.Error;
+                return -1;
+            }
+
+            session.writef("HTTP response: {0}\n{1}", response.statusCode, cast(const char[])response.content[]);
+            state = CommandCompletionState.Finished;
+            return 0;
+        }
+    }
+
+    HTTPRequestState request(Session session, const(char)[] client, const(char)[] uri = "/", HTTPMethod method = HTTPMethod.GET)
+    {
+        HTTPClient* c = client in clients;
+        if (!c)
+        {
+            session.writef("No HTTP client: '{0}'", client);
+            return null;
+        }
+
+        HTTPRequestState state = g_app.allocator.allocT!HTTPRequestState(session);
+        c.request(method, uri, &state.responseHandler);
+        return state;
     }
 }

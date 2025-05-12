@@ -21,9 +21,11 @@ nothrow @nogc:
 class HTTPServer
 {
 nothrow @nogc:
-    const String name;
 
     alias RequestHandler = int delegate(ref const HTTPMessage, Stream stream) nothrow @nogc;
+
+    const String name;
+
     this(String name, BaseInterface , ushort port, RequestHandler requestHandler)
     {
         server = defaultAllocator().allocT!TCPServer(name.toString().makeString(defaultAllocator), port, &acceptConnection, null);
