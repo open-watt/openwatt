@@ -1,5 +1,7 @@
 module urt.compiler;
 
+public import urt.attribute;
+
 version (DigitalMars)
     enum IS_DMD = true;
 else
@@ -8,8 +10,6 @@ else
 version (LDC)
 {
     version = LDC_OR_GDC;
-
-    public import ldc.attributes;
 
     enum IS_LDC = true;
 }
