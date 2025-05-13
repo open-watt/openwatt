@@ -8,6 +8,7 @@ import urt.lifetime;
 import urt.log;
 import urt.meta;
 import urt.string;
+import urt.mem : memmove;
 import urt.mem.allocator;
 import urt.time;
 import urt.zip;
@@ -21,6 +22,8 @@ version = DebugHTTPMessageFlow;
 nothrow @nogc:
 
 alias HTTPParam = KVP!(String, String);
+
+alias HTTPMessageHandler = int delegate(ref const HTTPMessage) nothrow @nogc;
 
 enum HTTPMethod : ubyte
 {
@@ -62,7 +65,7 @@ enum HTTPFlags : ubyte
 
 struct HTTPMessage
 {
-    nothrow @nogc:
+nothrow @nogc:
 
     this(this) @disable;
 
@@ -83,10 +86,11 @@ struct HTTPMessage
     Array!HTTPParam headers;        // Array of additional headers
     Array!HTTPParam queryParams;    // Query parameters
 
-    int delegate(ref const HTTPMessage) nothrow @nogc responseHandler;
-    MonoTime requestTime;
+    HTTPMessageHandler responseHandler;
+    SysTime requestTime;
 
-    bool isRequest() => requestTarget.empty;
+    bool isRequest() const pure
+        => statusCode == 0;
 
     const(char)[] host()
     {
@@ -119,101 +123,67 @@ struct HTTPMessage
 struct HTTPParser
 {
 nothrow @nogc:
+    enum ParseState : ubyte
+    {
+        Pending,
+        ReadingHeaders,
+        ReadingBody,
+        ReadingTailHeaders,
+    }
+
     enum Flags : ubyte
     {
         None = 0,
         Chunked = 1,
-        ReadingHeaders = 2,
-        ReadingTailHeaders = 4
     }
 
     HTTPMessage message;
-    bool messageInUse;
+    ParseState state;
 
-    int delegate(ref const HTTPMessage) nothrow @nogc messageHandler;
+    HTTPMessageHandler messageHandler;
 
-    Array!char tail;
+    Array!ubyte tail;
     size_t pendingChunkLen;
     Flags flags;
 
     this() @disable;
     this(this) @disable;
 
-    this(int delegate(ref const HTTPMessage) nothrow @nogc messageHandler)
+    this(HTTPMessageHandler messageHandler)
     {
         this.messageHandler = messageHandler;
     }
 
     int update(Stream stream)
     {
+        ubyte[1024] buffer = void;
+        buffer[0 .. tail.length] = tail[];
+        size_t readOffset = tail.length;
+        tail.clear();
+
         while (true)
         {
-            ubyte[1024] buffer = void;
-            const ptrdiff_t bytes = stream.read(buffer);
+            ptrdiff_t bytes = stream.read(buffer[readOffset .. $]);
             if (bytes == 0)
                 break;
 
+            bytes += readOffset;
+            readOffset = 0;
+
             const(char)[] msg = cast(const(char)[])buffer[0 .. bytes];
 
-            parse_outer: while (!msg.empty)
+            final switch (state)
             {
-                // Assuming response
-                if (!messageInUse)
-                {
-                    if (isResponse(msg))
-                    {
-                        int result = readStatusLine(msg, message);
-                        if (result != 0)
-                            return -1;
-                    }
-                    else
-                    {
-                        int result = readRequestLine(msg, message);
-                        if (result != 0)
-                            return -1;
-                    }
+                case ParseState.Pending:
+                    int r = isResponse(msg) ? readStatusLine(msg, message) : readRequestLine(msg, message);
+                    // TODO: what if there is insufficient text to read the first line? we should stash the tail and wait for more data...
+                    if (r != 0)
+                        return -1;
+                    state = ParseState.ReadingHeaders;
+                    goto case ParseState.ReadingHeaders;
 
-                    messageInUse = true;
-                }
-                else
-                {
-                    if (tail.length)
-                    {
-                        tail ~= buffer[0 .. bytes];
-                        msg = tail[];
-
-                        assert(pendingChunkLen == 0, "How did this happen?");
-                    }
-
-                    if (!(flags & (Flags.ReadingHeaders | Flags.ReadingTailHeaders)))
-                    {
-                        if (pendingChunkLen)
-                        {
-                            if (pendingChunkLen > msg.length)
-                            {
-                                pendingChunkLen -= msg.length;
-                                message.content ~= cast(ubyte[])msg;
-                                msg = msg[$ .. $];
-                                continue;
-                            }
-
-                            message.content ~= cast(ubyte[])msg[0 .. pendingChunkLen];
-                            msg = msg[pendingChunkLen .. $];
-                            pendingChunkLen = 0;
-
-                            if (flags & Flags.Chunked)
-                            {
-                                if (message.content[$-2] != '\r' || message.content[$-1] != '\n')
-                                    return -1;
-                                message.content.resize(message.content.length - 2);
-                            }
-                        }
-                    }
-                }
-
-            read_headers:
-                if (flags & (Flags.ReadingHeaders | Flags.ReadingTailHeaders))
-                {
+                case ParseState.ReadingHeaders:
+                case ParseState.ReadingTailHeaders:
                     int r = readHeaders(msg, message);
                     if (r < 0)
                         return -1;
@@ -221,46 +191,79 @@ nothrow @nogc:
                     {
                         // incomplete data stream while reading headers
                         // store off the current header line and wait for more data...
-                        tail = msg;
-                        break parse_outer;
+                        memmove(buffer.ptr, msg.ptr, msg.length);
+                        readOffset = msg.length;
+                        break;
                     }
-                    flags &= ~Flags.ReadingHeaders;
+
+                    if (state == ParseState.ReadingTailHeaders || message.method == HTTPMethod.HEAD)
+                        goto message_done;
 
                     if (message.header("Transfer-Encoding") == "chunked")
-                        flags |= Flags.Chunked;
-                }
-
-                if ((flags & Flags.ReadingTailHeaders) || message.method == HTTPMethod.HEAD)
-                    goto message_done;
-
-                // now the body...
-                if (!(flags & Flags.Chunked))
-                {
-                    String val = message.header("Content-Length");
-                    if (val)
                     {
-                        bool success;
-                        size_t contentLen = val.parseIntFast(success);
-                        if (!success)
-                            return -1; // bad content length
-                        message.contentLength = contentLen;
-                        if (message.content.length < contentLen)
-                            pendingChunkLen = contentLen - message.content.length;
+                        flags |= Flags.Chunked;
                     }
-                }
+                    else
+                    {
+                        String val = message.header("Content-Length");
+                        if (val)
+                        {
+                            bool success;
+                            size_t contentLen = val.parseIntFast(success);
+                            if (!success)
+                                return -1; // bad content length
+                            message.contentLength = contentLen;
+                            if (message.content.length < contentLen)
+                                pendingChunkLen = contentLen - message.content.length;
+                        }
 
-                do
-                {
+                        // TODO: what if there is no Content-Length??
+                        //       do we just read bytes until the remote closes the stream?
+                        // TODO: what if Content-Length is 0???
+                        //       go straight to message_done?
+                    }
+
+                    state = ParseState.ReadingBody;
+                    goto case ParseState.ReadingBody;
+
+                case ParseState.ReadingBody:
+                    if (pendingChunkLen)
+                    {
+                        if (pendingChunkLen > msg.length)
+                        {
+                            pendingChunkLen -= msg.length;
+                            message.content ~= cast(ubyte[])msg;
+                            msg = null;
+                            break;
+                        }
+
+                        message.content ~= cast(ubyte[])msg[0 .. pendingChunkLen];
+                        msg = msg[pendingChunkLen .. $];
+                        pendingChunkLen = 0;
+
+                        if (flags & Flags.Chunked)
+                        {
+                            // trim the newline from the end of the chunk
+                            if (message.content.length < 2 || message.content[$-2] != '\r' || message.content[$-1] != '\n')
+                                return -1;
+                            message.content.resize(message.content.length - 2);
+                        }
+                    }
+
                     if (flags & Flags.Chunked)
                     {
+                        // get the length for the next chunk...
                         size_t newline = msg.findFirst("\r\n");
+                        // TODO: there should be some upper-limit to the length of the line that it will wait on...
+                        //       it should just be an integer chunk length, so probably doesn't need to be too big!
                         if (newline == msg.length)
                         {
                             // the buffer ended in the middle of the chunk-length line
                             // we'll have to stash this bit of text and wait for more data...
-                            tail = msg;
+                            memmove(buffer.ptr, msg.ptr, msg.length);
+                            readOffset = msg.length;
                             assert(false, "TODO: test this case somehow!");
-                            break parse_outer;
+                            break;
                         }
                         size_t taken;
                         pendingChunkLen = cast(size_t)msg[0 .. newline].parseInt(&taken, 16);
@@ -272,67 +275,51 @@ nothrow @nogc:
                         if (pendingChunkLen == 0)
                         {
                             // jump back to read more headers...
-                            flags |= Flags.ReadingTailHeaders;
-                            goto read_headers;
+                            state = ParseState.ReadingTailHeaders;
+                            goto case ParseState.ReadingTailHeaders;
                         }
                         message.contentLength += pendingChunkLen;
                         pendingChunkLen += 2; // expect `\r\n` to terminate the chunk
+
+                        goto case ParseState.ReadingBody;
                     }
 
-                    if (pendingChunkLen > msg.length)
-                    {
-                        // expect more data...
-                        message.content = cast(ubyte[])msg[];
-                        pendingChunkLen -= msg.length;
-                        msg = msg[$..$];
+                message_done:
+                    int result = handleEncoding();
+                    if (result != 0)
+                        return -1;
 
-                        tail.clear();
-                        continue parse_outer;
-                    }
-                    else if (pendingChunkLen > 0)
-                    {
-                        message.content = cast(ubyte[])msg[0 .. pendingChunkLen];
-                        msg = msg[pendingChunkLen .. $];
-                        pendingChunkLen = 0;
+                    if (message.isRequest)
+                        message.requestTime = getSysTime();
 
-                        if (flags & Flags.Chunked)
-                        {
-                            if (message.content[$-2] != '\r' || message.content[$-1] != '\n')
-                                return -1;
-                            message.content.resize(message.content.length - 2);
-                        }
-                    }
+                    // message complete
+                    if (messageHandler(message) < 0)
+                        return -1;
 
-                    // a chunked message will return to the top for the next chunk, a non-chunked message is done now
-                }
-                while (flags & Flags.Chunked);
+                    if (!stream.connected())
+                        msg = null;
 
-            message_done:
+                    message = HTTPMessage();
+                    state = ParseState.Pending;
 
-                int result = handleEncoding();
-                if (result != 0)
-                    return -1;
-
-                 // message complete
-                if (messageHandler(message) < 0)
-                    return -1;
-
-                if (!stream.connected())
-                    msg = null;
-
-                message = HTTPMessage();
-                messageInUse = false;
+                    if (!msg.empty)
+                        goto case ParseState.Pending;
+                    break;
             }
 
             if (bytes < buffer.length)
                 break;
         }
 
+        // stash the tail for later...
+        if (readOffset > 0)
+            tail = buffer[0 .. readOffset];
+
         return 0;
     }
 
 private:
-    bool readHttpVersion(ref const(char)[] msg, ref HTTPMessage message)
+    static bool readHttpVersion(ref const(char)[] msg, ref HTTPMessage message)
     {
         string http = "HTTP/";
         if (msg[0..http.length] != http)
@@ -362,20 +349,19 @@ private:
         return true;
     }
 
-    bool isResponse(const char[] msg)
+    static bool isResponse(const char[] msg)
     {
         string http = "HTTP/";
         return msg[0..http.length] == http;
     }
 
-    int readStatusLine(ref const(char)[] msg, ref HTTPMessage message)
+    static int readStatusLine(ref const(char)[] msg, ref HTTPMessage message)
     {
         if(!readHttpVersion(msg, message))
            return -1;
 
         if (msg.empty || msg[0] != ' ')
             return -1;
-
         msg = msg[1..$];
 
         bool success;
@@ -394,12 +380,11 @@ private:
         msg = msg[newline + 1 .. $];
 
         message.statusCode = cast(ushort)status;
-        flags = Flags.ReadingHeaders;
 
         return 0;
     }
 
-    int readRequestLine(ref const(char)[] msg, ref HTTPMessage message)
+    static int readRequestLine(ref const(char)[] msg, ref HTTPMessage message)
     {
         HTTPMethod method = msg.split!(' ', false).enumFromString!HTTPMethod;
         if (byte(method) == -1)
@@ -414,11 +399,10 @@ private:
         if (msg.takeLine.length != 0)
             return -1;
 
-        flags = Flags.ReadingHeaders;
         return 0;
     }
 
-    int readRequestTarget(ref const(char)[] msg, ref HTTPMessage message)
+    static int readRequestTarget(ref const(char)[] msg, ref HTTPMessage message)
     {
         const(char)[] requestTarget = msg.split!(' ', false);
 
@@ -468,18 +452,16 @@ private:
         return 0;
     }
 
-    int readQueryParams(ref const(char)[] msg, ref HTTPMessage message)
+    static int readQueryParams(ref const(char)[] msg, ref HTTPMessage message)
     {
         while (msg.length > 0)
         {
             const(char)[] kvp = msg.split!('&', false);
             const(char)[] key = kvp.split!('=', false);
-            message.headers ~= HTTPParam(key.makeString(defaultAllocator), kvp.makeString(defaultAllocator));
+            message.queryParams ~= HTTPParam(key.makeString(defaultAllocator), kvp.makeString(defaultAllocator));
         }
-
         return 0;
     }
-
 
     int handleEncoding()
     {
@@ -526,7 +508,7 @@ private:
         return 0;
     }
 
-    int readHeaders(ref const(char)[] msg, ref HTTPMessage message)
+    static int readHeaders(ref const(char)[] msg, ref HTTPMessage message)
     {
         // parse headers...
         while (true)
@@ -586,7 +568,7 @@ void httpDate(ref const DateTime date, ref MutableString!0 str)
     // IMF-fixdate
     // Sun, 06 Nov 1994 08:49:37 GMT
 
-    //                  week day day   month year hours  mins   secs
+    //                      wday  day  month year hours  mins   secs
     str.appendFormat("Date: {0}, {1,02} {2}, {3}, {4,02}:{5,02}:{6,02} GMT \r\n",
                      day[0..3], date.day, month[0..3], date.year, date.hour, date.minute, date.second);
 }
