@@ -5,36 +5,60 @@ import urt.string.format : FormatArg;
 nothrow @nogc:
 
 
-enum MACAddress MAC(string addr) = (){ MACAddress a; assert(a.fromString(addr) == a.length, "Not a mac address"); return a; }();
+enum MACAddress MACLit(string addr) = (){ MACAddress a; assert(a.fromString(addr) == a.length, "Not a mac address"); return a; }();
+enum EUI64 EUILit(string addr) = (){ EUI64 a; assert(a.fromString(addr) == a.length, "Not an eui64 address"); return a; }();
 
+alias MACAddress = EUI!48;
+alias EUI64 = EUI!64;
 
-struct MACAddress
+struct EUI(int width)
 {
-nothrow @nogc:
+    static assert(width == 48 || width == 64, "Invalid EUI width");
+    enum Bytes = width / 8;
 
-    // well-known mac addresses
-    enum broadcast      = MACAddress(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
-    enum lldp_multicast = MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E);
+    static if (width == 48)
+    {
+        // well-known mac addresses
+        enum broadcast      = MACAddress(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
+        enum lldp_multicast = MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E);
 
-    align(2) ubyte[6] b;
+        align(2) ubyte[6] b;
 
-    this(ubyte[6] b...) pure
+        version (BigEndian)
+            ulong ul() @property const pure => *cast(ulong*)b.ptr >> 16;
+        else
+            ulong ul() @property const pure => (*cast(ulong*)b.ptr << 16) >> 16;
+    }
+    else
+    {
+        enum broadcast = EUI64(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
+
+        union {
+            ulong ul;
+            ubyte[8] b;
+        }
+    }
+
+    this(ubyte[Bytes] b...) pure
     {
         this.b = b;
     }
 
+    EUI64 makeEui64()() const pure if (width == 48)
+        => EUI64(b[0] | 2, b[1], b[2], 0xFF, 0xFE, b[3], b[4], b[5]);
+
     bool opCast(T : bool)() const pure
-        => (b[0] | b[1] | b[2] | b[3] | b[4] | b[5]) != 0;
+        => ul != 0;
 
-    bool opEquals(ref const MACAddress rhs) const pure
-        => b == rhs.b;
+    bool opEquals(ref const EUI!width rhs) const pure
+        => ul == rhs.ul;
 
-    bool opEquals(const(ubyte)[6] bytes) const pure
+    bool opEquals(const(ubyte)[Bytes] bytes) const pure
         => b == bytes;
 
-    int opCmp(ref const MACAddress rhs) const pure
+    int opCmp(ref const EUI!width rhs) const pure
     {
-        for (size_t i = 0; i < 6; ++i)
+        for (size_t i = 0; i < Bytes; ++i)
         {
             int c = rhs.b[i] - b[i];
             if (c != 0)
@@ -44,10 +68,13 @@ nothrow @nogc:
     }
 
     bool isBroadcast() const pure
-        => b == broadcast.b;
+        => ul == broadcast.ul;
 
     bool isMulticast() const pure
         => (b[0] & 0x01) != 0;
+
+    bool isLocal() const pure
+        => (b[0] & 0x02) != 0;
 
     size_t toHash() const pure
     {
@@ -63,10 +90,12 @@ nothrow @nogc:
             hash = 0xBAADF00DDEADB33F ^ (cast(ulong)s[0] << 0) ^ (cast(ulong)s[0] << 37);
             hash ^= (cast(ulong)s[1] << 14) ^ (cast(ulong)s[1] << 51);
             hash ^= (cast(ulong)s[2] << 28) ^ (cast(ulong)s[2] << 7);
+            static if (Bytes == 8)
+                hash ^= (cast(ulong)s[3] << 21) ^ (cast(ulong)s[3] << 44);
 
-            // additional mixing
+            // bonus rotation
             hash ^= (hash >> 13);
-            hash ^= (hash >> 29);
+            hash ^= (hash << 51);
 //            hash ^= 0xA5A5A5A5A5A5A5A5;
         }
         else
@@ -75,18 +104,21 @@ nothrow @nogc:
             hash ^= (cast(uint)s[1] << 16);
             hash = (hash << 5) | (hash >> 27);  // 5-bit rotate left
             hash ^= s[2];
+            static if (Bytes == 8)
+                hash ^= (cast(uint)s[3] << 16);
 //            hash ^= 0xA5A5A5A5;
         }
         return hash;
     }
 
+    enum StringLen = Bytes == 6 ? 17 : 23;
     ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const
     {
         import urt.string.ascii : hexDigits;
 
         if (!buffer.ptr)
-            return 17;
-        if (buffer.length < 17)
+            return StringLen;
+        if (buffer.length < StringLen)
             return -1;
         buffer[0]  = hexDigits[b[0] >> 4];
         buffer[1]  = hexDigits[b[0] & 0xF];
@@ -105,7 +137,16 @@ nothrow @nogc:
         buffer[14] = ':';
         buffer[15] = hexDigits[b[5] >> 4];
         buffer[16] = hexDigits[b[5] & 0xF];
-        return 17;
+        static if (Bytes == 8)
+        {
+            buffer[17] = ':';
+            buffer[18] = hexDigits[b[6] >> 4];
+            buffer[19] = hexDigits[b[6] & 0xF];
+            buffer[20] = ':';
+            buffer[21] = hexDigits[b[7] >> 4];
+            buffer[22] = hexDigits[b[7] & 0xF];
+        }
+        return StringLen;
     }
 
     ptrdiff_t fromString(const(char)[] s)
@@ -113,9 +154,9 @@ nothrow @nogc:
         import urt.conv;
         import urt.string.ascii;
 
-        if (s.length < 17)
+        if (s.length < StringLen)
             return -1;
-        for (size_t n = 0; n < 17; ++n)
+        for (size_t n = 0; n < StringLen; ++n)
         {
             if (n % 3 == 2)
             {
@@ -126,16 +167,16 @@ nothrow @nogc:
                 return -1;
         }
 
-        for (size_t i = 0; i < 6; ++i)
+        for (size_t i = 0; i < Bytes; ++i)
             b[i] = cast(ubyte)parseInt(s[i*3 .. i*3 + 2], null, 16);
 
-        return 17;
+        return StringLen;
     }
 
     auto __debugOverview()
     {
         debug {
-            char[] buffer = new char[17];
+            char[] buffer = new char[StringLen];
             ptrdiff_t len = toString(buffer, null, null);
             return buffer[0 .. len];
         }
