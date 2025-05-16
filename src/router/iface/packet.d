@@ -48,7 +48,7 @@ nothrow @nogc:
     ref T init(T)(const(void)[] payload)
     {
         static assert(T.sizeof <= embed.length);
-        assert(payload.length > ushort.max, "Payload too large");
+        assert(payload.length <= ushort.max, "Payload too large");
         type = T.Type;
         ptr = payload.ptr;
         length = cast(ushort)payload.length;

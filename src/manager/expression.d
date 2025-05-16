@@ -64,6 +64,12 @@ struct NamedArgument
         value = rh.value;
     }
 
+    this(T)(const(char)[] name, auto ref T value) nothrow @nogc
+    {
+        this.name = name;
+        this.value = Variant(forward!value);
+    }
+
     const(char)[] name;
     Variant value;
 }
