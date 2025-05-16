@@ -17,12 +17,11 @@ import manager.console;
 import manager.plugin;
 
 import protocol.http.client;
+import protocol.http.message;
 import protocol.http.server;
 import protocol.http.message;
 
 import router.stream.tcp;
-
-version = DebugHTTPMessageFlow;
 
 nothrow @nogc:
 
@@ -32,53 +31,20 @@ class HTTPModule : Module
     mixin DeclareModule!"http";
 nothrow @nogc:
 
+    Collection!HTTPServer servers;
     Collection!HTTPClient clients;
-    Map!(const(char)[], HTTPServer) servers;
 
     override void init()
     {
         g_app.console.registerCollection("/protocol/http/client", clients);
-        g_app.console.registerCommand!add_server("/protocol/http/server", this, "add");
+        g_app.console.registerCollection("/protocol/http/server", servers);
         g_app.console.registerCommand!request("/protocol/http", this);
-    }
-
-    HTTPServer createServer(const(char)[] name, ushort port, HTTPServer.RequestHandler handler)
-    {
-        HTTPServer server = defaultAllocator().allocT!HTTPServer(name.makeString(defaultAllocator()), null, port, handler);
-        servers[server.name[]] = server;
-
-        return server;
     }
 
     override void update()
     {
-        foreach (server; servers.values)
-            server.update();
-
+        servers.updateAll();
         clients.updateAll();
-    }
-
-    void add_server(Session session, const(char)[] name, ushort port)
-    {
-        createServer(name, port, (request, stream) {
-            MutableString!0 response;
-
-            const string messageBody = "enermon Webserver";
-
-            httpStatusLine(request.httpVersion, request.statusCode == 0 ? 200 : request.statusCode, "", response);
-            httpDate(getDateTime(), response);
-
-            httpFieldLines([ HTTPParam(StringLit!"Content-Type", StringLit!"text/plain"),
-                             HTTPParam(StringLit!"Content-Length", makeString(tstring(messageBody.length), defaultAllocator())) ], response);
-
-            response ~= "\r\n";
-            response ~= messageBody;
-            stream.write(response);
-
-            return 0;
-        });
-
-        writeInfof("Create HTTP server '{0}' on port {1}", name, port);
     }
 
     static class HTTPRequestState : FunctionCommandState
@@ -107,16 +73,16 @@ nothrow @nogc:
             return state;
         }
 
-        int responseHandler(ref const HTTPMessage response)
+        int response_handler(ref const HTTPMessage response)
         {
-            if (response.statusCode == 0)
+            if (response.status_code == 0)
             {
                 session.writef("HTTP request failed!");
                 state = CommandCompletionState.Error;
                 return -1;
             }
 
-            session.writef("HTTP response: {0}\n{1}", response.statusCode, cast(const char[])response.content[]);
+            session.writef("HTTP response: {0}\n{1}", response.status_code, cast(const char[])response.content[]);
             state = CommandCompletionState.Finished;
             return 0;
         }
@@ -132,7 +98,7 @@ nothrow @nogc:
         }
 
         HTTPRequestState state = g_app.allocator.allocT!HTTPRequestState(session);
-        c.request(method, uri, &state.responseHandler);
+        c.request(method, uri, &state.response_handler);
         return state;
     }
 }

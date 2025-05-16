@@ -497,6 +497,12 @@ nothrow @nogc:
         }
 
         // TODO: should the stream we just created to into the stream pool...?
+        else
+        {
+            // TODO: if nobody is accepting connections; I guess we should just terminate them as they come?
+            conn.shutdown(SocketShutdownMode.read_write);
+            conn.close();
+        }
     }
 
 private:
