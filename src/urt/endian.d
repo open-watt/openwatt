@@ -2,7 +2,9 @@ module urt.endian;
 
 import urt.processor;
 import urt.traits;
-import urt.util : byteReverse;
+
+public import urt.processor : LittleEndian;
+public import urt.util : byteReverse;
 
 pure nothrow @nogc:
 

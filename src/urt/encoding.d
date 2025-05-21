@@ -2,6 +2,11 @@ module urt.encoding;
 
 nothrow @nogc:
 
+
+enum Hex(const char[] s) = (){ ubyte[s.length / 2] r; ptrdiff_t len = hex_decode(s, r); assert(len == r.sizeof, "Not a hex string!"); return r; }();
+enum Base64(const char[] s) = (){ ubyte[base64_decode_length(s)] r; ptrdiff_t len = base64_decode(s, r); assert(len == r.sizeof, "Not a base64 string!"); return r; }();
+
+
 ptrdiff_t base64_encode_length(size_t sourceLength) pure
     => (sourceLength + 2) / 3 * 4;
 
@@ -124,6 +129,8 @@ unittest
     len = base64_decode(encoded, decoded);
     assert(len == 10);
     assert(data[0..10] == decoded[0..10]);
+
+//    static assert(Base64!"012345" == [0x01, 0x23, 0x45]);
 }
 
 
@@ -179,6 +186,8 @@ unittest
     len = hex_decode(encoded, decoded);
     assert(len == 12);
     assert(data == decoded);
+
+    static assert(Hex!"012345" == [0x01, 0x23, 0x45]);
 }
 
 
