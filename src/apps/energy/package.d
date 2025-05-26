@@ -64,19 +64,8 @@ nothrow @nogc:
         manager.update();
     }
 
-    void circuit_add(Session session, const(char)[] name, Nullable!(const(char)[]) parent, Nullable!(const(char)[]) meter, Nullable!(uint) max_current)
+    void circuit_add(Session session, const(char)[] name, Nullable!(const(char)[]) parent, Nullable!Component meter, Nullable!(uint) max_current)
     {
-        Component m;
-        if (meter)
-        {
-            m = g_app.findComponent(meter.value);
-            if (!m)
-            {
-                session.writeLine("Meter '", meter.value, "' not found");
-                return;
-            }
-        }
-
         Circuit* p;
         if (parent)
         {
@@ -88,7 +77,7 @@ nothrow @nogc:
             }
         }
 
-        manager.addCircuit(name.makeString(g_app.allocator), p, max_current ? max_current.value : 0, m);
+        manager.addCircuit(name.makeString(g_app.allocator), p, max_current ? max_current.value : 0, meter ? meter.value : null);
     }
 
     void appliance_add(Session session, const(char)[] id, Nullable!(Device) device, Nullable!(const(char)[]) _type, Nullable!(const(char)[]) name, Nullable!(const(char)[]) circuit, Nullable!(int) priority, Nullable!Component meter, Nullable!(const(char)[]) vin, Nullable!Component _info, Nullable!Component control, Nullable!(Component[]) mppt, Nullable!Component backup, Nullable!Component battery)

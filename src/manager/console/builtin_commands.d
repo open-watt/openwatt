@@ -141,7 +141,7 @@ nothrow @nogc:
         }
     }
 
-    override Array!(MutableString!0) suggest(const(char)[] cmdLine)
+    override Array!String suggest(const(char)[] cmdLine)
     {
         version (ExcludeAutocomplete)
             return null;
@@ -166,16 +166,16 @@ nothrow @nogc:
                         return cmd.suggest(cmdLine[j..$]);
                     }
                 }
-                return Array!(MutableString!0)();
+                return Array!String();
             }
 
-            Array!(MutableString!0) r;
+            Array!String r;
 //            if (this !is m_console.root)
 //                r ~= MutableString!0("..");
             foreach (Command cmd; commands)
             {
                 if (cmd.name.startsWith(cmdLine))
-                    r ~= MutableString!0(cmd.name);
+                    r ~= cmd.name.makeString(defaultAllocator);
             }
             return r;
         }

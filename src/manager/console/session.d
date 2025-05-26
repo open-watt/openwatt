@@ -279,9 +279,9 @@ nothrow @nogc:
                 {
                     if (m_suggestionPending)
                     {
-                        Array!(MutableString!0) suggestions = m_console.suggest(m_buffer, curScope);
+                        Array!String suggestions = m_console.suggest(m_buffer, curScope);
                         if (!suggestions.empty)
-                            showSuggestions(cast(String[])suggestions[]); // HACK: this is a brutal cast!!
+                            showSuggestions(suggestions[]);
                     }
                     else
                     {

@@ -79,7 +79,7 @@ nothrow @nogc:
         else
         {
             MutableString!0 result = cmdLine;
-            Array!(MutableString!0) tokens = suggest(cmdLine);
+            Array!String tokens = suggest(cmdLine);
             if (tokens.empty)
                 return result;
             size_t lastToken = cmdLine.length;
@@ -90,8 +90,8 @@ nothrow @nogc:
         }
     }
 
-    Array!(MutableString!0) suggest(const(char)[] cmdLine)
-        => Array!(MutableString!0)();
+    Array!String suggest(const(char)[] cmdLine)
+        => Array!String();
 
     const(char)[] help(const(char)[] args) const
     {

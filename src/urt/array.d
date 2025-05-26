@@ -440,6 +440,26 @@ nothrow @nogc:
         }
     }
 
+    Array!T takeFront(size_t count)
+    {
+        assert(false, "TODO");
+    }
+
+    Array!(T, N) takeFront(size_t N)()
+    {
+        assert(false, "TODO");
+    }
+
+    Array!T takeBack(size_t count)
+    {
+        assert(false, "TODO");
+    }
+
+    Array!(T, N) takeBack(size_t N)()
+    {
+        assert(false, "TODO");
+    }
+
     void remove(size_t i)
     {
         debug assert(i < _length);
