@@ -3,12 +3,12 @@ module protocol.modbus.sampler;
 import urt.array;
 import urt.endian;
 import urt.log;
+import urt.si;
 import urt.time;
 import urt.util : align_up;
 
 import manager.element;
 import manager.sampler;
-import manager.value;
 
 import protocol.modbus.client;
 
@@ -143,6 +143,15 @@ nothrow @nogc:
             default: assert(false);
         }
 
+        float scale;
+        ptrdiff_t taken = e.unit.parseUnit(regInfo.units[], e.scale);
+        if (taken != regInfo.units.length)
+        {
+            // TODO: not sure what to do about these awkward units...
+            // I guess we need a way to scale them into valuid units while sampling...?
+            writeWarning("Failed to parse unit for ", element.id, ": ", regInfo.units);
+        }
+
         // we need to re-sort the regs after adding any new ones...
         needsSort = true;
     }
@@ -163,14 +172,16 @@ private:
 
     struct SampleElement
     {
-        Element* element;
+        SysTime lastUpdate;
         ushort register;
         ubyte regKind;
         ubyte seqLen;
         ubyte type;
         ubyte flags; // 1 - in-flight, 2 - constant-sampled, 4 - ...
         ushort sampleTimeMs;
-        SysTime lastUpdate;
+        Element* element;
+        ScaledUnit unit;
+        float scale;
     }
 
     void responseHandler(ref const ModbusPDU request, ref ModbusPDU response, SysTime requestTime, SysTime responseTime)
@@ -249,7 +260,7 @@ private:
                         goto case;
                     case Type.U8_H:
                     case Type.S8_H:
-                        e.element.latest = Value((type & 1) ? cast(byte)data[byteOffset] : data[byteOffset]);
+                        e.element.latest = Quantity!float(((type & 1) ? cast(byte)data[byteOffset] : data[byteOffset]) * e.scale, e.unit);
                         break;
 
                     case Type.YM_DH_MS:
@@ -263,7 +274,7 @@ private:
                             val = data[byteOffset..byteOffset+2][0..2].bigEndianToNative!ushort;
                         else
                             val = data[byteOffset..byteOffset+2][0..2].littleEndianToNative!ushort;
-                        e.element.latest = Value(type == Type.U16 ? val : cast(short)val);
+                        e.element.latest = Quantity!float((type == Type.U16 ? val : cast(short)val) * e.scale, e.unit);
                         break;
 
                     case Type.U32:
@@ -288,11 +299,11 @@ private:
                                 break;
                         }
                         if (type == Type.F32)
-                            e.element.latest = Value(*cast(float*)&val);
+                            e.element.latest = Quantity!float(*cast(float*)&val * e.scale, e.unit);
                         else if (type == Type.U32)
-                            e.element.latest = Value(val);
+                            e.element.latest = Quantity!double(double(val) * e.scale, e.unit);
                         else
-                            e.element.latest = Value(cast(int)val);
+                            e.element.latest = Quantity!double(double(cast(int)val) * e.scale, e.unit);
                         break;
 
                     case Type.U64:
@@ -321,12 +332,11 @@ private:
                                 break;
                         }
                         if (type == Type.F64)
-                            e.element.latest = Value(cast(float) *cast(double*)&val);
+                            e.element.latest = Quantity!double(*cast(double*)&val * e.scale, e.unit);
                         else if (type == Type.U64)
-                            e.element.latest = Value(cast(uint) val);
+                            e.element.latest = Quantity!double(double(val) * e.scale, e.unit);
                         else
-                            e.element.latest = Value(cast(int) cast(long)val);
-//                        assert(false, "TODO: our value only has int!");
+                            e.element.latest = Quantity!double(double(cast(long)val) * e.scale, e.unit);
                         break;
 
                     case Type.U128:
@@ -337,9 +347,7 @@ private:
                         size_t len = 0;
                         while (len < arrayLen*2 && data[len] != '\0')
                             ++len;
-                        const(char)[] string = cast(char[])data[0..len];
-                        // TODO: NEED TO ALLOCATE STRINGS!!!
-                        e.element.latest = Value(string);
+                        e.element.latest = cast(char[])data[0..len];
                         break;
                 }
             }
@@ -438,7 +446,7 @@ enum Access : ubyte
 
 ubyte encodeType(const(char)[] s)
 {
-    assert(false);
+    assert(false, "TODO: take directly from string, delete RecordType");
 }
 
 ubyte encodeType(RecordType rt, ubyte seqLen)

@@ -1,5 +1,6 @@
 module apps.energy.meter;
 
+import urt.si;
 import urt.util : log2;
 
 import apps.energy.circuit : CircuitType;
@@ -72,15 +73,19 @@ enum NumFields = MeterField.max + 1;
 enum CumulativeFields = MeterField.TotalActive;
 
 
+alias MeterVolts = Quantity!(float, ScaledUnit(Volt));
+alias MeterAmps = Quantity!(float, ScaledUnit(Ampere));
+alias MeterWatts = Quantity!(float, ScaledUnit(Watt));
+
 struct MeterData
 {
     CircuitType type;
     FieldFlags fields;
 
-    float[4] voltage = 0;               // Avg, L1-N, L2-N, L3-N
-    float[4] crossPhaseVoltage = 0;     // Avg, L1-L2, L2-L3, L3-L1
-    float[4] current = 0;               // Sum, L1, L2, L3
-    float[4] active = 0;                // Sum, L1, L2, L3
+    MeterVolts[4] voltage;              // Avg, L1-N, L2-N, L3-N
+    MeterVolts[4] crossPhaseVoltage;    // Avg, L1-L2, L2-L3, L3-L1
+    MeterAmps[4] current;               // Sum, L1, L2, L3
+    MeterWatts[4] active;               // Sum, L1, L2, L3
 
     float[4] reactive = 0;              // Sum, L1, L2, L3
     float[4] apparent = 0;              // Sum, L1, L2, L3
@@ -110,7 +115,7 @@ static CircuitType getMeterType(Component meter)
     {
         Element* e = meter.findElement("type");
         // TODO: this should compare to-lower!! (case-insensitive)
-        switch(e && e.value.isString ? e.value.getString : "")
+        switch(e && e.value.isString ? e.value.asString : "")
         {
             case "dc":              return CircuitType.DC;
             case "single-phase":    return CircuitType.SinglePhase;
@@ -198,11 +203,15 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
     if (!meter)
         return r;
 
+//    alias Setter = float function(float, bool) nothrow @nogc pure;
+//
+//    Setter x = (float v, bool set) { if (set) { r.voltage = MeterVolts(v); } return (cast(Quantity!(float, ScaledUnit(Volt)))r.voltage).value; };
+
     float*[NumFields] f = [
-        r.voltage.ptr,
-        r.crossPhaseVoltage.ptr,
-        r.current.ptr,
-        r.active.ptr,
+        cast(float*)r.voltage.ptr,
+        cast(float*)r.crossPhaseVoltage.ptr,
+        cast(float*)r.current.ptr,
+        cast(float*)r.active.ptr,
         r.reactive.ptr,
         r.apparent.ptr,
         r.pf.ptr,
@@ -326,24 +335,28 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         {
             r.pf = 1;
             foreach (i; 0..4)
-                r.apparent[i] = fabs(r.active[i]);
+                r.apparent[i] = fabs(r.active[i].value);
         }
         else
         {
             import urt.math : sqrt;
             foreach (i; 0..4)
             {
-                r.apparent[i] = fabs(r.active[i]) / r.pf[i];
-                r.reactive[i] = -cast(float)sqrt(r.apparent[i]^^2 - r.active[i]^^2); // assume negative var?
+                r.apparent[i] = fabs(r.active[i].value) / r.pf[i];
+                r.reactive[i] = -cast(float)sqrt(r.apparent[i]^^2 - r.active[i].value^^2); // assume negative var?
             }
         }
     }
 
     if (needCalculateSystemPF)
-        r.pf[0] = r.active[0] / r.apparent[0];
+        r.pf[0] = r.active[0].value / r.apparent[0];
 
 //    if ((fields & Cumulative) && !
     // accumulate total since last update?
+
+    import urt.dbg;
+    if (r.voltage[0] > Volts(400))
+        breakpoint();
 
     return r;
 }

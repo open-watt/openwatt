@@ -2,6 +2,7 @@ module apps.energy.appliance;
 
 import urt.array;
 import urt.lifetime;
+import urt.si.quantity;
 import urt.string;
 import urt.util;
 
@@ -47,7 +48,7 @@ nothrow @nogc:
     MeterData meterData;
 
     bool enabled;
-    float targetPower = 0;
+    Watts targetPower = Watts(0);
 
     // HACK: distribute power according to priority...
     int priority;
@@ -74,8 +75,8 @@ nothrow @nogc:
     }
 
     // get the power currently being consumed by the appliance
-    float currentConsumption() const
-        => meterData.active[0] > 0 ? meterData.active[0] : 0;
+    Watts currentConsumption() const
+        => meterData.active[0] > Watts(0) ? cast(Watts)meterData.active[0] : Watts(0);
 
     // returns true if the appliance can be controlled
     bool canControl() const
@@ -92,13 +93,13 @@ nothrow @nogc:
     }
 
     // specifies power that the appliance wants to consume
-    float wantsPower() const
-        => 0;
+    Watts wantsPower() const
+        => Watts(0);
 
     // offset power to the appliance, returns the amount accepted
-    float offerPower(float watts)
+    Watts offerPower(Watts watts)
     {
-        float min, max;
+        Watts min, max;
         if (minPowerLimit(min) && watts < min)
             targetPower = min;
         else if (maxPowerLimit(max) && watts > max)
@@ -109,11 +110,11 @@ nothrow @nogc:
     }
 
     // specifies the minimum power that the appliance can accept
-    bool minPowerLimit(out float watts) const
+    bool minPowerLimit(out Watts limit) const
         => false;
 
     // specifies the maximum power that the appliance can accept
-    bool maxPowerLimit(out float watts) const
+    bool maxPowerLimit(out Watts limit) const
         => false;
 
     void update()
@@ -133,7 +134,7 @@ nothrow @nogc:
 
     Component dummyMeter; // this can be used to control the charge/discharge functionality
 
-    float ratedPower = 0;
+    Watts ratedPower = Watts(0);
 
     this(String id, EnergyManager* manager)
     {
@@ -153,7 +154,7 @@ nothrow @nogc:
         return ControlCapability.Reverse;
     }
 
-    final override float wantsPower() const
+    final override Watts wantsPower() const
     {
         // if SOC < 100%, then we want to charge the battery
 
@@ -163,7 +164,7 @@ nothrow @nogc:
 
 //        return 0;
         // HACK:
-        return ratedPower ? ratedPower : 5000; // we should work out how much the battery actually wants!
+        return ratedPower ? ratedPower : Watts(5000); // we should work out how much the battery actually wants!
     }
 
     final override void update()
@@ -173,7 +174,7 @@ nothrow @nogc:
             if (Element* rp = info.findElement("ratedPower"))
             {
                 if (rp)
-                    ratedPower = rp.value.getFloat();
+                    ratedPower = rp.value.asQuantity;
             }
         }
 
@@ -224,22 +225,22 @@ nothrow @nogc:
         return ControlCapability.None;
     }
 
-    final override float wantsPower() const
+    final override Watts wantsPower() const
     {
-        float wants = 0;
+        Watts wants = 0;
         if (connectedCar)
             maxPowerLimit(wants);
         return wants;
     }
 
-    final override bool minPowerLimit(out float watts) const
+    final override bool minPowerLimit(out Watts watts) const
     {
-        watts = meterData.voltage[0] ? meterData.voltage[0] * 6 : 230 * 6;
+        watts = meterData.voltage[0] ? cast(Volts)meterData.voltage[0] * Amps(6) : Volts(230) * Amps(6);
         return true;
     }
-    final override bool maxPowerLimit(out float watts) const
+    final override bool maxPowerLimit(out Watts watts) const
     {
-        watts = meterData.voltage[0] ? meterData.voltage[0] * 32 : 240 * 32;
+        watts = meterData.voltage[0] ? cast(Volts)meterData.voltage[0] * Amps(32) : Volts(240) * Amps(32);
         return true;
     }
 
@@ -255,7 +256,7 @@ nothrow @nogc:
                 connectedCar.evse = null;
             connectedCar = null;
 
-            const(char)[] vin = e.value.getString();
+            const(char)[] vin = e.value.asString();
             if (vin.length > 0)
             {
                 // find a car with this VIN among our appliances...
@@ -275,14 +276,14 @@ nothrow @nogc:
             }
         }
 
-        float targetCurrent = targetPower;
+        Watts target = targetPower;
         if (connectedCar)
         {
-            if (connectedCar.targetPower > 0)
-                targetPower = max(targetPower, connectedCar.targetPower);
+            if (connectedCar.targetPower > Watts(0))
+                target = max(targetPower, connectedCar.targetPower);
         }
-        targetCurrent /= meterData.voltage[0] ? meterData.voltage[0] : 230;
-        if (targetCurrent > 0)
+        Amps targetCurrent = target / (meterData.voltage[0] ? cast(Volts)meterData.voltage[0] : Volts(230));
+        if (targetCurrent > Amps(0))
         {
             // set the
 
@@ -290,7 +291,7 @@ nothrow @nogc:
             {
                 Element* e = control.findElement("targetCurrent");
                 if (e)
-                    e.value = cast(int)(targetCurrent * 100); // HACK: respect UNITS!
+                    e.value = targetCurrent;
             }
 
         }
@@ -324,31 +325,31 @@ nothrow @nogc:
         return ControlCapability.None;
     }
 
-    final override float currentConsumption() const
+    final override Watts currentConsumption() const
     {
         if (evse)
             return evse.currentConsumption();
-        return 0;
+        return Watts(0);
     }
 
-    final override float wantsPower() const
+    final override Watts wantsPower() const
     {
         // if it actually wants to charge...
 
-        float wants = 0;
+        Watts wants = Watts(0);
         if (evse)
             maxPowerLimit(wants);
         return wants;
     }
 
-    final override bool minPowerLimit(out float watts) const
+    final override bool minPowerLimit(out Watts watts) const
     {
-        watts = meterData.voltage[0] ? meterData.voltage[0] * 6 : 230 * 6;
+        watts = meterData.voltage[0] ? cast(Volts)meterData.voltage[0] * Amps(6) : Volts(230) * Amps(6);
         return true;
     }
-    final override bool maxPowerLimit(out float watts) const
+    final override bool maxPowerLimit(out Watts watts) const
     {
-        watts = meterData.voltage[0] ? meterData.voltage[0] * 32 : 240 * 32;
+        watts = meterData.voltage[0] ? cast(Volts)meterData.voltage[0] * Amps(32) : Volts(240) * Amps(32);
         return true;
     }
 
@@ -396,14 +397,14 @@ nothrow @nogc:
         super(id.move, Type, manager);
     }
 
-    final override float wantsPower() const
+    final override Watts wantsPower() const
     {
         // we need to check the thermostat to see if temp < target
         //...
 
         // in the meantime, we probably just offer power any time we have unused excess...
 
-        return 0;
+        return Watts(0);
     }
 
     final override void update()

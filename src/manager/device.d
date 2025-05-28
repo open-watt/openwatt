@@ -9,7 +9,6 @@ import urt.time;
 import manager.component;
 import manager.element;
 import manager.sampler;
-import manager.value;
 
 import router.modbus.message;
 import router.modbus.profile;

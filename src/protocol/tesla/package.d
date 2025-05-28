@@ -90,7 +90,6 @@ nothrow @nogc:
         import manager.component;
         import manager.device;
         import manager.element;
-        import manager.value;
 
         if (id in g_app.devices)
         {
@@ -124,12 +123,12 @@ nothrow @nogc:
 
         e = g_app.allocator.allocT!Element();
         e.id = "deviceType".addString;
-        e.latest = Value("evse");
+        e.latest = "evse";
         c.elements ~= e;
 
         e = g_app.allocator.allocT!Element();
         e.id = "deviceName".addString;
-        e.latest = Value("Tesla Wall Charger Gen2");
+        e.latest = "Tesla Wall Charger Gen2";
         c.elements ~= e;
 
         e = g_app.allocator.allocT!Element();
@@ -139,7 +138,6 @@ nothrow @nogc:
 
         e = g_app.allocator.allocT!Element();
         e.id = "lifetimeEnergy".addString;
-        e.unit = "kWh".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
@@ -162,14 +160,12 @@ nothrow @nogc:
 
         e = g_app.allocator.allocT!Element();
         e.id = "targetCurrent".addString;
-        e.unit = "10mA".addString;
         e.access = Access.ReadWrite;
         c.elements ~= e;
         sampler.addElement(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "maxCurrent".addString;
-        e.unit = "10mA".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
@@ -197,49 +193,41 @@ nothrow @nogc:
 
         e = g_app.allocator.allocT!Element();
         e.id = "voltage1".addString;
-        e.unit = "V".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "voltage2".addString;
-        e.unit = "V".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "voltage3".addString;
-        e.unit = "V".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "current".addString;
-        e.unit = "10mA".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "power1".addString;
-        e.unit = "W".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "power2".addString;
-        e.unit = "W".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "power3".addString;
-        e.unit = "W".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "power".addString;
-        e.unit = "W".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
@@ -256,7 +244,6 @@ nothrow @nogc:
 
         e = g_app.allocator.allocT!Element();
         e.id = "totalImportActiveEnergy".addString;
-        e.unit = "kWh".addString;
         c.elements ~= e;
         sampler.addElement(e);
 
