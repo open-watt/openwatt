@@ -145,6 +145,7 @@
     <DCompile Include="src\urt\crc.d" />
     <DCompile Include="src\urt\dbg.d" />
     <DCompile Include="src\urt\digest\md5.d" />
+    <DCompile Include="src\urt\digest\sha.d" />
     <DCompile Include="src\urt\encoding.d" />
     <DCompile Include="src\urt\endian.d" />
     <DCompile Include="src\urt\fibre.d" />

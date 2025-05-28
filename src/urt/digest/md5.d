@@ -10,26 +10,16 @@ struct MD5Context
     ulong size;         // size of input in bytes
     uint[4] buffer;     // current accumulation of hash
     ubyte[64] input;    // input to be used in the next step
-    ubyte[16] digest;   // result of algorithm
+
+    enum uint[4] initState = [ 0x67452301, 0xefcdab89, 0x98badcfe, 0x10325476 ];
 }
 
-// initialize a context
 void md5Init(ref MD5Context ctx)
 {
     ctx.size = 0;
-
-    ctx.buffer[0] = cast(uint)A;
-    ctx.buffer[1] = cast(uint)B;
-    ctx.buffer[2] = cast(uint)C;
-    ctx.buffer[3] = cast(uint)D;
+    ctx.buffer = MD5Context.initState;
 }
 
-import urt.log;
-
-// Add some amount of input to the context
-//
-// If the input fills out a block of 512 bits, apply the algorithm (md5Step)
-// and save the result in the buffer. Also updates the overall size.
 void md5Update(ref MD5Context ctx, const void[] input)
 {
     size_t offset = ctx.size % 64;
@@ -64,9 +54,7 @@ void md5Update(ref MD5Context ctx, const void[] input)
     }
 }
 
-// Pad the current input to get to 448 bytes, append the size in bits to the very end,
-// and save the result of the final iteration into digest.
-void md5Finalize(ref MD5Context ctx)
+ubyte[16] md5Finalise(ref MD5Context ctx)
 {
     uint[16] tmp = void;
     uint offset = ctx.size % 64;
@@ -92,32 +80,31 @@ void md5Finalize(ref MD5Context ctx)
 
     md5Step(ctx.buffer, tmp);
 
+    uint[4] digest = void;
     foreach (uint k; 0 .. 4)
-        storeLittleEndian(cast(uint*)ctx.digest.ptr + k, ctx.buffer.ptr[k]);
+        storeLittleEndian(digest.ptr + k, ctx.buffer.ptr[k]);
+    return cast(ubyte[16])digest;
 }
 
 unittest
 {
+    import urt.encoding;
+
     MD5Context ctx;
     md5Init(ctx);
-    md5Finalize(ctx);
-    assert(ctx.digest == [0xd4,0x1d,0x8c,0xd9,0x8f,0x00,0xb2,0x04,0xe9,0x80,0x09,0x98,0xec,0xf8,0x42,0x7e]);
+    auto digest = md5Finalise(ctx);
+    assert(digest == Hex!"d41d8cd98f00b204e9800998ecf8427e");
 
     md5Init(ctx);
     md5Update(ctx, "Hello, World!");
-    md5Finalize(ctx);
-    assert(ctx.digest == [0x65,0xa8,0xe2,0x7d,0x88,0x79,0x28,0x38,0x31,0xb6,0x64,0xbd,0x8b,0x7f,0x0a,0xd4]);
+    digest = md5Finalise(ctx);
+    assert(digest == Hex!"65a8e27d8879283831b664bd8b7f0ad4");
 }
+
 
 private:
 
-// constants defined by the MD5 algorithm
-enum uint A = 0x67452301;
-enum uint B = 0xefcdab89;
-enum uint C = 0x98badcfe;
-enum uint D = 0x10325476;
-
-__gshared immutable uint[] S = [
+__gshared immutable ubyte[] S = [
     7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22,
     5,  9, 14, 20, 5,  9, 14, 20, 5,  9, 14, 20, 5,  9, 14, 20,
     4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23,
@@ -161,7 +148,7 @@ void md5Step(ref uint[4] buffer, ref const uint[16] input)
 
     foreach (uint i; 0 .. 64)
     {
-        switch(i / 16)
+        final switch(i / 16)
         {
             case 0:
                 E = ((BB & CC) | (~BB & DD));   // F(BB, CC, DD); uint F(uint X, uint Y, uint Z) => ((X & Y) | (~X & Z));
@@ -175,7 +162,7 @@ void md5Step(ref uint[4] buffer, ref const uint[16] input)
                 E = (BB ^ CC ^ DD);             // H(BB, CC, DD); uint H(uint X, uint Y, uint Z) => (X ^ Y ^ Z);
                 j = ((i*3) + 5) % 16;
                 break;
-            default:
+            case 3:
                 E = (CC ^ (BB | ~DD));          // I(BB, CC, DD); uint I(uint X, uint Y, uint Z) => (Y ^ (X | ~Z));
                 j = (i*7) % 16;
                 break;

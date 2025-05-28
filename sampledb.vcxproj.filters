@@ -564,6 +564,9 @@
     <DCompile Include="src\urt\attribute.d">
       <Filter>src\urt</Filter>
     </DCompile>
+    <DCompile Include="src\urt\digest\sha.d">
+      <Filter>src\urt\digest</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />
