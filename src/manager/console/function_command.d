@@ -1,5 +1,6 @@
 module manager.console.function_command;
 
+import urt.array;
 import urt.mem;
 import urt.meta;
 import urt.meta.nullable;
@@ -14,6 +15,22 @@ public import manager.console;
 public import manager.console.command;
 public import manager.console.session;
 public import manager.expression : NamedArgument;
+
+
+// uses GC
+char[] transformCommandName(const(char)[] name)
+{
+    name = name.length > 0 && name[0] == '_' ? name[1 .. $] : name;
+    char[] result = name.dup;
+    foreach (i, c; result)
+    {
+        if (c == '_')
+            result[i] = '-';
+    }
+    return result;
+}
+
+nothrow @nogc:
 
 
 class FunctionCommandState : CommandState
@@ -84,7 +101,26 @@ nothrow @nogc:
             }
         }
 
-        return console.m_allocator.allocT!FunctionCommand(console, commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName, cast(void*)i, &functionAdapter);
+        FunctionCommand fnCmd = console.m_allocator.allocT!FunctionCommand(console, commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName, cast(void*)i, &functionAdapter);
+
+        alias ParamNames = ParameterIdentifierTuple!fun[1 .. $];
+        alias Params = staticMap!(Unqual, Parameters!fun[1 .. $]);
+
+        static foreach (j; 0 .. ParamNames.length)
+        {
+            static if (ParamNames[j] != "args")
+            {{
+                fnCmd.args ~= FunctionArgument(StringLit!(ParamNames[j].transformCommandName()));
+                static if (is(Params[j] == Nullable!T, T))
+                    alias ArgTy = T;
+                else
+                    alias ArgTy = Params[j];
+                static if (is(typeof(&suggestCompletion!ArgTy)))
+                    fnCmd.args[$-1].suggest = &suggestCompletion!ArgTy;
+            }}
+        }
+
+        return fnCmd;
     }
 
 
@@ -99,33 +135,115 @@ nothrow @nogc:
     {
         FunctionCommandState state;
         const(char)[] result = fn(session, state, args, namedArgs, instance);
-        if (state)
-            state.command = this;
 
         // TODO: when a function returns a token, it might be fed into the calling context?
         assert(!(state && result), "Shouldn't return a latent state AND a result...");
 
-        return state;
+        if (state)
+        {
+            state.command = this;
+            return state;
+        }
+
+        if (result)
+            session.writeLine(result);
+        return null;
+    }
+
+    override MutableString!0 complete(const(char)[] cmdLine)
+    {
+        version (ExcludeAutocomplete)
+            return null;
+        else
+        {
+            MutableString!0 result = cmdLine;
+            Array!String tokens;
+
+            size_t lastToken = cmdLine.length;
+            while (lastToken > 0 && !isSeparator(cmdLine[lastToken - 1]))
+                --lastToken;
+            const(char)[] lastTok = cmdLine[lastToken .. $];
+
+            size_t equals = lastTok.findFirst('=');
+            if (equals == lastTok.length)
+            {
+                tokens = suggestArgs(lastTok);
+                result ~= getCompletionSuffix(lastTok, tokens);
+                if (result.length > 0 && result.length > cmdLine.length)
+                {
+                    if (result[$-1] == ' ')
+                    {
+                        result.popBack();
+                        tokens = suggestValues(result[0 .. $-1], null);
+                        result ~= getCompletionSuffix(null, tokens);
+                    }
+                }
+                return result;
+            }
+
+            tokens = suggestValues(lastTok[0 .. equals], lastTok[equals + 1 .. $]);
+            result ~= getCompletionSuffix(lastTok[equals + 1 .. $], tokens);
+            return result;
+        }
+    }
+
+    override Array!String suggest(const(char)[] cmdLine)
+    {
+        // get incomplete argument
+        ptrdiff_t lastToken = cmdLine.length;
+        while (lastToken > 0)
+        {
+            if (cmdLine[lastToken - 1].isWhitespace)
+                break;
+            --lastToken;
+        }
+        const(char)[] lastTok = cmdLine[lastToken .. $];
+
+        // if the partial argument alrady contains an '='
+        size_t equals = lastTok.findFirst('=');
+        if (equals == lastTok.length)
+            return suggestArgs(lastTok);
+        return suggestValues(lastTok[0 .. equals], lastTok[equals + 1 .. $]);
     }
 
 private:
     void* instance;
     GenericCall fn;
+    Array!FunctionArgument args;
+
+    Array!String suggestArgs(const(char)[] argPrefix)
+    {
+        Array!String suggestions;
+        foreach (ref arg; args)
+        {
+            if (arg.name.startsWith(argPrefix))
+                suggestions ~= String(MutableString!0(Concat, arg.name, '=')); // TODO: MOVE construct!
+        }
+        return suggestions;
+    }
+
+    Array!String suggestValues(const(char)[] argument, const(char)[] value)
+    {
+        foreach (ref arg; args)
+        {
+            if (arg.name[] == argument[])
+            {
+                if (arg.suggest)
+                    return arg.suggest(value);
+                break;
+            }
+        }
+        return Array!String();
+    }
 }
 
 
 private:
 
-char[] transformCommandName(const(char)[] name)
+struct FunctionArgument
 {
-    name = name.length > 0 && name[0] == '_' ? name[1 .. $] : name;
-    char[] result = name.dup;
-    foreach (i, c; result)
-    {
-        if (c == '_')
-            result[i] = '-';
-    }
-    return result;
+    String name;
+    Array!String function(const(char)[]) nothrow @nogc suggest;
 }
 
 auto makeArgTuple(alias F)(const Variant[] args, const NamedArgument[] parameters, out const(char)[] error, Application app)
@@ -184,6 +302,10 @@ auto makeArgTuple(alias F)(const Variant[] args, const NamedArgument[] parameter
 done:
     return params;
 }
+
+
+// argument conversion functions...
+// TODO: THESE NEED ADL STYLE LOOKUP!
 
 const(char[]) convertVariant(ref const Variant v, out bool r, Application app) nothrow @nogc
 {
@@ -418,4 +540,93 @@ const(char[]) convertVariant(ref const Variant v, out Device r, Application app)
     const(char)[] s = v.asString;
     r = app.findDevice(s);
     return r ? null : tconcat("No device '", s, '\'');
+}
+
+
+// argument completions...
+// TODO: THESE NEED ADL STYLE LOOKUP!
+
+Array!String suggestCompletion(E)(const(char)[] argumentText)
+    if (is(E == enum))
+{
+    Array!String completions;
+    static foreach(M; __traits(allMembers, E))
+    {{
+        enum Member = Alias!(M.toLower);
+        if (Member.startsWith(argumentText))
+            completions ~= StringLit!Member;
+    }}
+    return completions;
+}
+
+Array!String suggestCompletion(T : Component)(const(char)[] argumentText)
+{
+    Array!String devices;
+    size_t dot = argumentText.findFirst('.');
+    if (dot == argumentText.length)
+    {
+        devices = suggestCompletion!Device(argumentText);
+        if (devices.length == 1)
+        {
+            dot = devices[0].length;
+            argumentText = devices[0];
+        }
+        else
+            return devices;
+    }
+    Device* dev = argumentText[0 .. dot] in g_app.devices;
+    if (!dev)
+        return Array!String();
+    Component cmp = *dev;
+    auto prefix = MutableString!0(Concat, cmp.id, '.');
+    if (devices.length == 1)
+        argumentText = prefix[];
+
+    find_inner: while (true)
+    {
+        argumentText = argumentText[dot + 1 .. $];
+        dot = argumentText.findFirst('.');
+        if (dot == argumentText.length)
+            break;
+
+        foreach (c; cmp.components)
+        {
+            if (c.id == argumentText[0 .. dot])
+            {
+                prefix.append(c.id, '.');
+                cmp = c;
+                continue find_inner;
+            }
+        }
+        return Array!String();
+    }
+
+    Array!String completions;
+    size_t cid;
+    foreach (i, c; cmp.components)
+    {
+        if (c.id.startsWith(argumentText))
+        {
+            cid = i;
+            completions ~= String(MutableString!0(Concat, prefix, c.id)); // TODO: MOVE construct!
+        }
+    }
+    if (completions.length == 1)
+    {
+        cmp = cmp.components[cid];
+        foreach (i, c; cmp.components)
+            completions ~= String(MutableString!0(Concat, completions[0], '.', c.id)); // TODO: MOVE construct!
+    }
+    return completions;
+}
+
+Array!String suggestCompletion(T : Device)(const(char)[] argumentText)
+{
+    Array!String completions;
+    foreach (name, device; g_app.devices)
+    {
+        if (name.startsWith(argumentText))
+            completions ~= name.makeString(defaultAllocator);
+    }
+    return completions;
 }

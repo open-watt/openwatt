@@ -553,6 +553,48 @@ nothrow @nogc:
         return ptr[x .. y];
     }
 
+    char popFront()
+    {
+        char c = this[0];
+        erase(0, 1);
+        return c;
+    }
+
+    char popBack()
+    {
+        char c = this[$-1];
+        erase(-1, 1);
+        return c;
+    }
+
+    MutableString!E takeFront(size_t E = Embed)(size_t count)
+    {
+        auto r = MutableString!E(this[0 .. count]);
+        erase(0, count);
+        return r;
+    }
+
+    MutableString!N takeFront(size_t N)()
+    {
+        auto r = MutableString!N(this[0 .. N]);
+        erase(0, N);
+        return r;
+    }
+
+    MutableString!E takeBack(size_t E = Embed)(size_t count)
+    {
+        auto r = MutableString!E(this[$-count .. $]);
+        erase(-count, count);
+        return r;
+    }
+
+    MutableString!N takeBack(size_t N)()
+    {
+        auto r = MutableString!N(this[$-N .. $]);
+        erase(-N, N);
+        return r;
+    }
+
     ref MutableString!Embed append(Things...)(auto ref Things things)
     {
         insert(length(), forward!things);
@@ -640,11 +682,16 @@ nothrow @nogc:
     ref MutableString!Embed erase(ptrdiff_t offset, size_t count)
     {
         size_t len = length();
+        debug assert(count <= len, "Out of bounds");
+
         if (offset < 0)
             offset = len + offset;
-        size_t eraseEnd = offset + count;
-        debug assert(eraseEnd <= len, "Out of bounds");
-        memmove(ptr + offset, ptr + eraseEnd, len - eraseEnd);
+        if (offset != len - count)
+        {
+            debug assert(size_t(offset) <= len - count, "Out of bounds");
+            size_t eraseEnd = offset + count;
+            memmove(ptr + offset, ptr + eraseEnd, len - eraseEnd);
+        }
         writeLength(len - count);
         return this;
     }

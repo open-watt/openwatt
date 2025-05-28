@@ -184,7 +184,7 @@ nothrow @nogc:
     /// \param cmdLine
     ///  A command line string to analyse for auto-complete suggestions.
     /// \returns A filtered list of possible completion terms.
-    Array!(MutableString!0) suggest(const(char)[] cmdLine, Scope curScope)
+    Array!String suggest(const(char)[] cmdLine, Scope curScope)
     {
         version (ExcludeAutocomplete)
             return null;
@@ -359,7 +359,7 @@ bool isSeparator(char c)
     return c == ' ' || c == '\t';
 }
 
-MutableString!0 getCompletionSuffix(const(char)[] tokenStart, ref const Array!(MutableString!0) tokens)
+MutableString!0 getCompletionSuffix(const(char)[] tokenStart, ref const Array!String tokens)
 {
     MutableString!0 result;
     if (tokens.length == 0)

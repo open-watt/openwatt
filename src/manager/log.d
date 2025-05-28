@@ -96,9 +96,9 @@ nothrow @nogc:
 		}
 
 
-		override Array!(MutableString!0) suggest(const(char)[] cmdLine) const
+		override Array!String suggest(const(char)[] cmdLine) const
 		{
-			return Array!(MutableString!0)();
+			return Array!String();
 		}
 	}
 
