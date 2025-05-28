@@ -1,5 +1,6 @@
 module protocol.modbus;
 
+import urt.endian;
 import urt.map;
 import urt.mem;
 import urt.meta.nullable;
@@ -32,7 +33,9 @@ nothrow @nogc:
     {
         g_app.console.registerCommand!client_add("/protocol/modbus/client", this, "add");
         g_app.console.registerCommand!device_add("/protocol/modbus/device", this, "add");
+        g_app.console.registerCommand!request_raw("/protocol/modbus/client/request", this, "raw");
         g_app.console.registerCommand!request_read("/protocol/modbus/client/request", this, "read");
+        g_app.console.registerCommand!request_write("/protocol/modbus/client/request", this, "write");
         g_app.console.registerCommand!request_read_device_id("/protocol/modbus/client/request", this, "read-device-id");
     }
 
@@ -219,44 +222,60 @@ nothrow @nogc:
         g_app.allocator.free(file);
     }
 
-    RequestState request_read(Session session, const(char)[] client, const(char)[] slave, const(char)[] reg_type, ushort first, ushort count = 1)
+    RequestState sendRequest(Session session, const(char)[] client, const(char)[] slave, ref ModbusPDU msg)
     {
         MACAddress addr;
         ModbusClient c = lookupClientAndMAC(session, client, slave, addr);
         if (!c)
             return null;
 
-        RegisterType ty;
-        uint reg = 0;
-        switch(reg_type)
-        {
-            case "0":
-            case "coil":
-                ty = RegisterType.Coil;
-                break;
-            case "1":
-            case "discrete":
-                ty = RegisterType.DiscreteInput;
-                break;
-            case "3":
-            case "input":
-                ty = RegisterType.InputRegister;
-                break;
-            case "4":
-            case "holding":
-                ty = RegisterType.HoldingRegister;
-                break;
-            default:
-                session.writeLine("Invalid register type '", reg_type, "'");
-                return null;
-        }
-
         RequestState state = g_app.allocator.allocT!RequestState(session, slave);
-
-        ModbusPDU msg = createMessage_Read(ty, first, count);
         c.sendRequest(addr, msg, &state.responseHandler, &state.errorHandler);
 
         return state;
+    }
+
+    RequestState request_raw(Session session, const(char)[] client, const(char)[] slave, ubyte[] message)
+    {
+        if (message.length == 0)
+        {
+            session.writeLine("Message must contain at least one byte (function code).");
+            return null;
+        }
+        ModbusPDU msg = ModbusPDU(cast(FunctionCode)message[0], message[1..$]);
+        return sendRequest(session, client, slave, msg);
+    }
+
+    RequestState request_read(Session session, const(char)[] client, const(char)[] slave, const(char)[] reg_type, ushort register, Nullable!ushort count, Nullable!(const(char)[]) data_type)
+    {
+        RegisterType ty = parseRegisterType(reg_type);
+        if (ty == RegisterType.Invalid)
+        {
+            session.writeLine("Invalid register type '", reg_type, "'");
+            return null;
+        }
+
+        ModbusPDU msg = createMessage_Read(ty, register, count ? count.value : 1);
+        return sendRequest(session, client, slave, msg);
+    }
+
+    RequestState request_write(Session session, const(char)[] client, const(char)[] slave, const(char)[] reg_type, ushort register, Nullable!ushort value, Nullable!(ushort[]) values)
+    {
+        if (!value && !values)
+        {
+            session.writeLine("No `value` or `values` specified for write request");
+            return null;
+        }
+
+        RegisterType ty = parseRegisterType(reg_type);
+        if (ty == RegisterType.Invalid)
+        {
+            session.writeLine("Invalid register type '", reg_type, "'");
+            return null;
+        }
+
+        ModbusPDU msg = createMessage_Write(ty, register, values ? values.value : (&value.value)[0..1]);
+        return sendRequest(session, client, slave, msg);
     }
 
     RequestState request_read_device_id(Session session, const(char)[] client, const(char)[] slave)
@@ -311,6 +330,27 @@ nothrow @nogc:
         }
         return c;
     }
+
+    RegisterType parseRegisterType(const(char)[] type)
+    {
+        switch(type)
+        {
+            case "0":
+            case "coil":
+                return RegisterType.Coil;
+            case "1":
+            case "discrete":
+                return RegisterType.DiscreteInput;
+            case "3":
+            case "input":
+                return RegisterType.InputRegister;
+            case "4":
+            case "holding":
+                return RegisterType.HoldingRegister;
+            default:
+                return RegisterType.Invalid;
+        }
+    }
 }
 
 
@@ -318,12 +358,12 @@ class RequestState : FunctionCommandState
 {
 nothrow @nogc:
 
-    MutableString!0 slave;
+    String slave;
 
     this(Session session, const(char)[] slave)
     {
         super(session);
-        this.slave = MutableString!0(slave);
+        this.slave = slave.makeString(defaultAllocator);
     }
 
     override CommandCompletionState update()
@@ -335,7 +375,80 @@ nothrow @nogc:
 
     void responseHandler(ref const ModbusPDU request, ref ModbusPDU response, SysTime requestTime, SysTime responseTime)
     {
-        session.writeLine("Response from ", slave[], " in ", (responseTime - requestTime).as!"msecs", "ms: ", toHexString(response.data[1..$], 2, 4, "_ "));
+        if (response.functionCode & 0x80)
+        {
+            import urt.meta : EnumKeys;
+            session.writeLine("Exception response from ", slave[], ", code: ", EnumKeys!ExceptionCode[response.data[0]]);
+        }
+        else
+        {
+            session.writeLine("Response from ", slave[], " in ", (responseTime - requestTime).as!"msecs", "ms: ", toHexString(response.data));
+            switch (response.functionCode)
+            {
+                case FunctionCode.ReadCoils:
+                case FunctionCode.ReadDiscreteInputs:
+                case FunctionCode.ReadInputRegisters:
+                case FunctionCode.ReadHoldingRegisters:
+                    ubyte byteCount = response.data[0];
+                    ushort first = request.data[0..2].bigEndianToNative!ushort;
+                    ushort count = request.data[2..4].bigEndianToNative!ushort;
+                    switch (response.functionCode)
+                    {
+                        case FunctionCode.ReadCoils:
+                        case FunctionCode.ReadDiscreteInputs:
+                            if (byteCount * 8 < count)
+                            {
+                                session.writeLine("Invalid byte count in response...");
+                                break;
+                            }
+                            for (ushort i = 0; i < count; i++)
+                            {
+                                bool value = (response.data[1 + i / 8] & (1 << (i % 8))) != 0;
+                                session.writeLine("  ", first + i, ": ", value ? "ON" : "OFF");
+                            }
+                            break;
+                        case FunctionCode.ReadInputRegisters:
+                        case FunctionCode.ReadHoldingRegisters:
+                            if (byteCount != count * 2)
+                            {
+                                session.writeLine("Invalid byte count in response...");
+                                break;
+                            }
+                            if (count == 2)
+                            {
+                                uint value = response.data[1 .. 5].bigEndianToNative!uint;
+                                session.writef("  {0}: {1, 04x}_{2, 04x} (i: {3}, f: {4})\n", first, value >> 16, value & 0xFFFF, int(value), *cast(float*)&value);
+                            }
+                            else
+                            {
+                                for (ushort i = 0; i < count; i++)
+                                {
+                                    uint offset = 1 + i*2;
+                                    ushort value = response.data[offset .. offset + 2][0..2].bigEndianToNative!ushort;
+                                    session.writef("  {0}: {1, 04x} ({2})\n", first + i, value, value);
+                                }
+                            }
+                            break;
+                        default:
+                            assert(0); // unreachable
+                    }
+                    break;
+                case FunctionCode.WriteSingleCoil:
+                case FunctionCode.WriteSingleRegister:
+                    ushort reg = request.data[0..2].bigEndianToNative!ushort;
+                    ushort value = request.data[2..4].bigEndianToNative!ushort;
+                    session.writef("  {0}: {1, 04x} ({2})\n", reg, value, value);
+                    break;
+                case FunctionCode.WriteMultipleCoils:
+                case FunctionCode.WriteMultipleRegisters:
+                    assert(false, "TODO: pretty-print the output?");
+//                    session.writeLine("Starting register: ", toHexString(response.data[0..2], 2, 4, "_ "));
+//                    session.writeLine("Number of registers written: ", toHexString(response.data[2..4], 2, 4, "_ "));
+                    break;
+                default:
+                    break;
+            }
+        }
         state = CommandCompletionState.Finished;
     }
 

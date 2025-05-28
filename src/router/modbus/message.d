@@ -7,6 +7,7 @@ enum ModbusMessageDataMaxLength = 252;
 
 enum RegisterType : ubyte
 {
+	Invalid = cast(ubyte)-1,
 	Coil = 0,
 	DiscreteInput = 1,
 	InputRegister = 3,
@@ -80,6 +81,7 @@ enum ExceptionCode : ubyte
 	SlaveDeviceBusy = 0x06, // The slave is engaged in processing a long–duration command. The master should retry later
 	NegativeAcknowledge = 0x07, // The slave cannot perform the program function received in the query
 	MemoryParityError = 0x08, // The slave detected a parity error in memory. The master can retry the request, but service may be required on the slave device
+	_Undefined = 0x09,
 	GatewayPathUnavailable = 0x0A, // Specialized for Modbus gateways. Indicates a misconfigured gateway
 	GatewayTargetDeviceFailedToRespond = 0x0B, // Specialized for Modbus gateways. Sent when slave fails to respond
 }
