@@ -1,6 +1,8 @@
 module urt.si.quantity;
 
+import urt.meta : TypeForOp;
 import urt.si.unit;
+import urt.traits;
 
 nothrow @nogc:
 
@@ -9,6 +11,12 @@ alias VarQuantity = Quantity!(double);
 alias Scalar = Quantity!(double, ScaledUnit());
 alias Metres = Quantity!(double, ScaledUnit(Metre));
 alias Seconds = Quantity!(double, ScaledUnit(Second));
+alias Volts = Quantity!(double, ScaledUnit(Volt));
+alias Amps = Quantity!(double, ScaledUnit(Ampere));
+alias AmpHours = Quantity!(double, AmpereHour);
+alias Watts = Quantity!(double, ScaledUnit(Watt));
+alias Kilowatts = Quantity!(double, Kilowatt);
+alias WattHours = Quantity!(double, WattHour);
 
 
 struct Quantity(T, ScaledUnit _unit = ScaledUnit(uint.max))
@@ -20,7 +28,7 @@ nothrow @nogc:
     enum Dynamic = _unit.pack == uint.max;
     enum IsCompatible(ScaledUnit U) = _unit.unit == U.unit;
 
-    T value;
+    T value = 0;
 
     static if (Dynamic)
         ScaledUnit unit;
@@ -31,11 +39,20 @@ nothrow @nogc:
         if (is(U : T))
         => unit.unit == compatibleWith.unit.unit;
 
-    this(T value) pure
+    static if (Dynamic)
     {
-        static if (Dynamic)
-            this.unit = ScaledUnit();
-        this.value = value;
+        this(T value, ScaledUnit unit = ScaledUnit()) pure
+        {
+            this.unit = unit;
+            this.value = value;
+        }
+    }
+    else
+    {
+        this(T value) pure
+        {
+            this.value = value;
+        }
     }
 
     this(U, ScaledUnit _U)(Quantity!(U, _U) b) pure
@@ -49,25 +66,26 @@ nothrow @nogc:
         else
         {
             static if (b.Dynamic)
-                assert(isCompatible(b), "Incompatible unit!");
+                assert(isCompatible(b), "Incompatible units!");
             else
-                static assert(IsCompatible!_U, "Incompatible unit: ", unit, " and ", b.unit);
+                static assert(IsCompatible!_U, "Incompatible units: ", unit.toString, " and ", b.unit.toString);
             value = adjustScale(b);
         }
     }
-
+    
     void opAssign()(T value) pure
     {
         static if (Dynamic)
             unit = Scalar;
         else
-            static assert(unit == Unit(), "Incompatible unit: ", unit, " and Scalar");
+            static assert(unit == Unit(), "Incompatible units: ", unit.toString, " and Scalar");
         this.value = value;
     }
 
     void opAssign(U, ScaledUnit _U)(Quantity!(U, _U) b) pure
-        if (is(U : T))
     {
+        static assert(__traits(compiles, value = b.value), "cannot implicitly convert ScaledUnit of type `", U, "` to `", T, "`");
+
         static if (Dynamic)
         {
             unit = b.unit;
@@ -76,36 +94,44 @@ nothrow @nogc:
         else
         {
             static if (b.Dynamic)
-                assert(isCompatible(b), "Incompatible unit!");
+                assert(isCompatible(b), "Incompatible units!");
             else
-                static assert(IsCompatible!_U, "Incompatible unit: ", unit, " and ", b.unit);
+                static assert(IsCompatible!_U, "Incompatible units: ", unit.toString, " and ", b.unit.toString);
             value = adjustScale(b);
         }
     }
 
+    auto opUnary(string op)() const pure
+        if (op == "+" || op == "-")
+    {
+        alias RT = Quantity!(TypeForOp!(op, T), _unit);
+        static if (Dynamic)
+            return RT(mixin(op ~ "value"), unit);
+        else
+            return RT(mixin(op ~ "value"));
+    }
+
     auto opBinary(string op, U)(U value) const pure
         if ((op == "+" || op == "-") && is(U : T))
-    {
-        static if (Dynamic)
-            assert(unit == Scalar);
-        else
-            static assert(unit == Unit(), "Incompatible unit: ", unit, " and Scalar");
-        return mixin("this.value " ~ op ~ " value");
-    }
+        => opBinary!op(Quantity!(U, ScaledUnit())(value));
 
     auto opBinary(string op, U, ScaledUnit _U)(Quantity!(U, _U) b) const pure
         if ((op == "+" || op == "-") && is(U : T))
     {
+        // TODO: what unit should be result take?
+        //       for float T, I reckon maybe the MAX exponent?
+        //       for int types... we need to do some special shit to manage overflows!
+        // HACK: for now, we just scale to the left-hand size... :/
         static if (!Dynamic && !b.Dynamic && unit == Unit() && b.unit == Unit())
             return mixin("value " ~ op ~ " b.value");
         else
         {
             static if (Dynamic || b.Dynamic)
-                assert(isCompatible(b), "Incompatible unit!");
+                assert(isCompatible(b), "Incompatible units!");
             else
-                static assert(IsCompatible!_U, "Incompatible unit: ", unit, " and ", b.unit);
+                static assert(IsCompatible!_U, "Incompatible units: ", unit.toString, " and ", b.unit.toString);
 
-            This r;
+            Quantity!(TypeForOp!(op, T, U), _unit) r;
             r.value = mixin("value " ~ op ~ " adjustScale(b)");
             static if (Dynamic)
                 r.unit = unit;
@@ -120,7 +146,7 @@ nothrow @nogc:
             return mixin("this.value " ~ op ~ " value");
         else
         {
-            This r;
+            Quantity!(TypeForOp!(op, T, U), unit) r;
             r.value = mixin("this.value " ~ op ~ " value");
             static if (Dynamic)
                 r.unit = unit;
@@ -135,31 +161,61 @@ nothrow @nogc:
             return mixin("value " ~ op ~ " b.value");
         else
         {
+            // TODO: if the unit product is invalid, then we need to decide a target scaling factor...
             static if (Dynamic || b.Dynamic)
-            {
-                Quantity!T r;
-                r.unit = mixin("unit " ~ op ~ " b.unit");
-            }
+                const u = mixin("unit " ~ op ~ " b.unit");
             else
-                Quantity!(T, mixin("unit " ~ op ~ " b.unit")) r;
+                enum u = mixin("unit " ~ op ~ " b.unit");
 
-            // TODO: if the unit product is invalid, then we apply the scaling factor...
-            //       ... but which side should we scale to? probably the left I guess...
+            alias RT = TypeForOp!(op, T, U);
+            RT v = mixin("value " ~ op ~ " b.value");
 
-            r.value = mixin("value " ~ op ~ " b.value");
-            return r;
+            static if (Dynamic || b.Dynamic)
+                return Quantity!RT(v, u);
+            else
+                return Quantity!(RT, u)(v);
         }
     }
 
-    void opOpAssign(string op, U)(U value) pure
-        if (is(U : T))
+    void opOpAssign(string op)(T value) pure
     {
+        // TODO: in D; ubyte += int is allowed, so we should cast the result to T
         this = opBinary!op(value);
     }
 
     void opOpAssign(string op, U, ScaledUnit _U)(Quantity!(U, _U) b) pure
     {
+        // TODO: in D; ubyte += int is allowed, so we should cast the result to T
         this = opBinary!op(b);
+    }
+
+    bool opCast(T : bool)() const pure
+        => value != 0;
+
+    // not clear if this should return the raw value, or the normalised value...?
+//    T opCast(T)() const pure
+//        if (isSomeFloat!T || isSomeInt!T)
+//    {
+//        assert(unit.pack == 0, "Non-scalar unit can't cast to scalar");
+//        assert(false, "TODO: should we be applying the scale to this result?");
+//        return cast(T)value;
+//    }
+
+    T opCast(T)() const pure
+        if (is(T == Quantity!(U, _U), U, ScaledUnit _U))
+    {
+        static if (is(T == Quantity!(U, _U), U, ScaledUnit _U))
+        {
+            T r;
+            static if (Dynamic || T.Dynamic)
+                assert(isCompatible(r), "Incompatible units!");
+            else
+                static assert(IsCompatible!_U, "Incompatible units: ", r.unit.toString, " and ", unit.toString);
+            r.value = cast(U)r.adjustScale(this);
+            static if (T.Dynamic)
+                r.unit = unit;
+            return r;
+        }
     }
 
     bool opEquals(U)(U value) const pure
@@ -185,14 +241,14 @@ nothrow @nogc:
 
         // can't compare mismatch unit types... i think?
         static if (Dynamic || rh.Dynamic)
-            assert(isCompatible(rh), "Incompatible unit!");
+            assert(isCompatible(rh), "Incompatible units!");
         else
-            static assert(IsCompatible!_U, "Incompatible unit: ", unit, " and ", rh.unit);
+            static assert(IsCompatible!_U, "Incompatible units: ", unit.toString, " and ", rh.unit.toString);
 
         // TODO: meeting in the middle is only better if the signs are opposite
         //       otherwise we should just scale to the left...
         static if (Dynamic && rh.Dynamic)
-        {
+        {{
             // if the scale values are both dynamic, it should be more precise if we meet in the middle...
             auto lScale = unit.scale();
             auto lTrans = unit.offset();
@@ -200,7 +256,7 @@ nothrow @nogc:
             auto rTrans = rh.unit.offset();
             lhs = lhs*lScale + lTrans;
             rhs = rhs*rScale + rTrans;
-        }
+        }}
         else
             rhs = adjustScale(rh);
 
@@ -220,6 +276,80 @@ nothrow @nogc:
             else
                 return cmp < -epsilon ? -1 : cmp > epsilon ? 1 : 0;
         }
+    }
+
+    auto normalise() const pure
+    {
+        static if (Dynamic)
+        {
+            Quantity!T r;
+            r.unit = ScaledUnit(unit.unit);
+        }
+        else
+            Quantity!(T, ScaledUnit(unit.unit)) r;
+        r.value = r.adjustScale(this);
+        return r;
+    }
+
+    ptrdiff_t toString(char[] buffer) const
+    {
+        import urt.conv : formatFloat;
+
+        double v = value;
+        ScaledUnit u = unit;
+
+        if (u.pack)
+        {
+            // round upward to the nearest ^3
+            if (u.siScale)
+            {
+                int x = u.exp;
+                if (u.unit.pack == 0)
+                {
+                    if (x == -3)
+                    {
+                        v *= 0.1;
+                        u = ScaledUnit(Unit(), x + 1);
+                    }
+                    else if (x != -2)
+                    {
+                        v *= u.scale();
+                        u = ScaledUnit();
+                    }
+                }
+                else
+                {
+                    x = (x + 33) % 3;
+                    if (x != 0)
+                    {
+                        u = ScaledUnit(u.unit, u.exp + (3 - x));
+                        if (x == 1)
+                            v *= 0.01;
+                        else
+                            v *= 0.1;
+                    }
+                }
+            }
+        }
+
+        ptrdiff_t l = formatFloat(v, buffer);
+        if (l < 0)
+            return l;
+
+        if (u.pack)
+        {
+            ptrdiff_t l2 = u.toString(buffer[l .. $]);
+            if (l2 < 0)
+                return l2;
+            l += l2;
+        }
+
+        return l;
+    }
+
+    ptrdiff_t fromString(const(char)[] s)
+    {
+        return -1;
     }
 
 private:

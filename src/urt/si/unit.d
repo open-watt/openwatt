@@ -1,5 +1,8 @@
 module urt.si.unit;
 
+import urt.array;
+import urt.string;
+
 nothrow @nogc:
 
 
@@ -39,6 +42,9 @@ enum Candela = Unit(UnitType.Luma);
 enum Radian = Unit(UnitType.Angle);
 
 // non-si units
+enum Minute = ScaledUnit(Second, ScaleFactor.Minute);
+enum Hour = ScaledUnit(Second, ScaleFactor.Hour);
+enum Day = ScaledUnit(Second, ScaleFactor.Day);
 enum Inch = ScaledUnit(Metre, ScaleFactor.Inch);
 enum Foot = ScaledUnit(Metre, ScaleFactor.Foot);
 enum Mile = ScaledUnit(Metre, ScaleFactor.Mile);
@@ -61,6 +67,7 @@ enum Litre = ScaledUnit(CubicMetre, -3);
 enum Gram = ScaledUnit(Kilogram, -3);
 enum Milligram = ScaledUnit(Kilogram, -6);
 enum Hertz = Cycle / Second;
+//enum Kilohertz = TODO: ONOES! Our system can't encode kilohertz! This is disaster!!
 enum Newton = Kilogram * Metre / Second^^2;
 enum Pascal = Newton / Metre^^2;
 enum PSI = ScaledUnit(Pascal, ScaleFactor.PSI);
@@ -96,7 +103,18 @@ enum UnitType : ubyte
 
 struct Unit
 {
-nothrow @nogc:
+nothrow:
+    // debug/ctfe helper
+    string toString() pure
+    {
+        char[32] t;
+        ptrdiff_t l = toString(t);
+        if (l < 0)
+            return "Invalid unit"; // OR JUST COULDN'T STRINGIFY!
+        return t[0..l].idup;
+    }
+
+@nogc:
 
     uint pack;
 
@@ -225,82 +243,39 @@ nothrow @nogc:
         this = this.opBinary!op(rh);
     }
 
-    ptrdiff_t toString(char[] buffer) const
+    ptrdiff_t toString(char[] buffer) const pure
     {
-        immutable string[24] si = [
-//                "da", "h", "k", "10k", "100k", "M", "10M", "100M", "G", "10G", "100G", "T", "10T", "100T", "P", "10P", "100P", "E", "10E", "100E", "Z", "10Z", "100Z", "Y"
-                "10", "100", "k", "10k", "100k", "M", "10M", "100M", "G", "10G", "100G", "T", "10T", "100T", "P", "10P", "100P", "E", "10E", "100E", "Z", "10Z", "100Z", "Y"
-            ];
-        immutable string[24] si_inv = [
-//                "d", "c", "m", "100μ", "10μ", "μ", "100n", "10n", "n", "100p", "10p", "p", "100f", "10f", "f", "100a", "10a", "a", "100z", "10z", "z", "100y", "10y", "y"
-                "100m", "10m", "m", "100μ", "10μ", "μ", "100n", "10n", "n", "100p", "10p", "p", "100f", "10f", "f", "100a", "10a", "a", "100z", "10z", "z", "100y", "10y", "y"
-            ];
+        assert(false, "TODO");
+    }
 
-        ptrdiff_t len = 0;
+    ptrdiff_t fromString(const(char)[] s) pure
+    {
+        if (s.length == 0)
+        {
+            pack = 0;
+            return 0;
+        }
 
-        // ⁰¹⁻²³⁴⁵⁶⁷⁸⁹·°
+        Unit r;
+        size_t len = s.length;
+        bool invert;
+        char sep;
+        while (const(char)[] unit = s.split!('/', '*')(sep))
+        {
+            int p = unit.takePower();
+            if (p == 0)
+                return -1; // invalid power
 
-//        if (q(0).exponent == 0)
-//        {
-//            // if we have a scaling factor... what do we write?
-////            if (sf) ...
-//            len = 0;
-//            return len;
-//        }
-//
-//        auto name = this in unitNames;
-//        if (name)
-//        {
-//            len = name.length;
-//            buffer[0 .. len] = *name;
-//            return len;
-//        }
-//
-//        int f = sf();
-//        name = unit() in unitNames;
-//
-//        if ((name || q(1).exponent == 0) && f <= 24)
-//        {
-//            if (f > 0)
-//            {
-//                ref immutable string[24] prefix = inv ? si_inv : si;
-//
-//                uint scale = f - 1;
-//                if (q(0).measure == UnitType.Mass)
-//                    scale += 3;
-//
-//                len = prefix[scale].length;
-//                buffer[0 .. len] = prefix[scale][];
-//            }
-//
-//            if (name)
-//            {
-//                buffer[len .. len + name.length] = *name;
-//                len += name.length;
-//            }
-//            else
-//            {
-//                immutable string[UnitType.max + 1] unit_name = [ "g", "m", "s", "A", "K", "cd", "cy" ];
-//
-//                string uname = unit_name[q(0).measure];
-//                buffer[len .. len + uname.length] = uname[];
-//                len += uname.length;
-//            }
-//
-//            if (q(0).measure != 1)
-//            {
-//                buffer[len++] = '^';
-//                len += q(0).exponent.toString(buffer[len .. $]);
-//            }
-//
-//        }
-//        else
-//        {
-//            // multiple terms, or an odd scale factor...
-//            // TODO...
-//            assert(false);
-//        }
-
+            if (const Unit* u = unit in unitMap)
+                r *= (*u) ^^ (invert ? -p : p);
+            else
+            {
+                assert(false, "TODO?");
+            }
+            if (sep == '/')
+                invert = true;
+        }
+        this = r;
         return len;
     }
 
@@ -381,7 +356,18 @@ enum ExtendedScaleFactor : ubyte
 
 struct ScaledUnit
 {
-nothrow @nogc:
+nothrow:
+    // debug/ctfe helper
+    string toString() pure
+    {
+        char[32] t;
+        ptrdiff_t l = toString(t);
+        if (l < 0)
+            return "Invalid unit"; // OR JUST COULDN'T STRINGIFY!
+        return t[0..l].idup;
+    }
+
+@nogc:
 
     uint pack;
 
@@ -574,6 +560,244 @@ nothrow @nogc:
     bool opEquals(Unit rh) const pure
         => (pack & 0xFF000000) ? false : unit == rh;
 
+    ptrdiff_t parseUnit(const(char)[] s, out float preScale) pure
+    {
+        preScale = 1;
+
+        if (s.length == 0)
+        {
+            pack = 0;
+            return 0;
+        }
+
+        size_t len = s.length;
+        if (s[0] == '-')
+        {
+            if (s.length == 1)
+                return -1;
+            preScale = -1;
+            s = s[1 .. $];
+        }
+
+        ScaledUnit r;
+        bool invert;
+        char sep;
+        while (const(char)[] term = s.split!('/', '*')(sep))
+        {
+            int p = term.takePower();
+            if (p == 0)
+                return -1; // invalid exponent
+
+            if (const ScaledUnit* su = term in noScaleUnitMap)
+                r *= (*su) ^^ (invert ? -p : p);
+            else
+            {
+                size_t offset = 0;
+
+                // parse the exponent
+                int e = 0;
+                if (term[0].isNumeric)
+                {
+                    if (term[0] == '0')
+                    {
+                        if (term.length < 2 || term[1] != '.')
+                            return -1;
+                        e = 1;
+                        offset = 2;
+                        while (offset < term.length)
+                        {
+                            if (term[offset] == '1')
+                                break;
+                            if (term[offset] != '0')
+                                return -1;
+                            ++e;
+                            ++offset;
+                        }
+                        ++offset;
+                        e = -e;
+                    }
+                    else if (term[0] == '1')
+                    {
+                        offset = 1;
+                        while (offset < term.length)
+                        {
+                            if (term[offset] != '0')
+                                break;
+                            ++e;
+                            ++offset;
+                        }
+                    }
+                    else
+                        return -1;
+                }
+
+                if (offset == term.length)
+                    r *= ScaledUnit(Unit(), e);
+                else
+                {
+                    // try and parse SI prefix...
+                    switch (term[offset])
+                    {
+                        case 'Y':   e += 24;   ++offset;    break;
+                        case 'Z':   e += 21;   ++offset;    break;
+                        case 'E':   e += 18;   ++offset;    break;
+                        case 'P':   e += 15;   ++offset;    break;
+                        case 'T':   e += 12;   ++offset;    break;
+                        case 'G':   e += 9;    ++offset;    break;
+                        case 'M':   e += 6;    ++offset;    break;
+                        case 'k':   e += 3;    ++offset;    break;
+                        case 'h':   e += 2;    ++offset;    break;
+                        case 'c':   e -= 2;    ++offset;    break;
+                        case 'u':   e -= 6;    ++offset;    break;
+                        case 'n':   e -= 9;    ++offset;    break;
+                        case 'p':   e -= 12;   ++offset;    break;
+                        case 'f':   e -= 15;   ++offset;    break;
+                        case 'a':   e -= 18;   ++offset;    break;
+                        case 'z':   e -= 21;   ++offset;    break;
+                        case 'y':   e -= 24;   ++offset;    break;
+                        case 'm':
+                            // can confuse with metres... so gotta check...
+                            if (offset + 1 < term.length)
+                                e -= 3, ++offset;
+                            break;
+                        case 'd':
+                            if (offset + 1 < term.length && term[offset + 1] == 'a')
+                            {
+                                e += 1, offset += 2;
+                                break;
+                            }
+                            e -= 1, ++offset;
+                            break;
+                        default:
+                            if (offset + "µ".length < term.length && term[offset .. offset + "µ".length] == "µ")
+                                e -= 6, offset += "µ".length;
+                            break;
+                    }
+                    if (offset == term.length)
+                        return -1;
+
+                    term = term[offset .. $];
+                    if (const Unit* u = term in unitMap)
+                    {
+                        if (term == "kg")
+                        {
+                            // we alrady parsed the 'k'
+                            return -1;
+                        }
+                        r *= ScaledUnit((*u) ^^ (invert ? -p : p), e);
+                    }
+                    else if (const ScaledUnit* su = term in scaledUnitMap)
+                        r *= ScaledUnit(su.unit, su.exp + e) ^^ (invert ? -p : p);
+                    else if (const ScaledUnit* su = term in noScaleUnitMap)
+                    {
+                        r *= (*su) ^^ (invert ? -p : p);
+                        preScale *= 10^^e;
+                    }
+                    else
+                        return -1; // string was not taken?
+                }
+            }
+
+            if (sep == '/')
+                invert = true;
+        }
+        this = r;
+        return len;
+    }
+
+    ptrdiff_t toString(char[] buffer) const pure
+    {
+        if (!unit.pack)
+        {
+            if (siScale && exp == -2)
+            {
+                if (buffer.length == 0)
+                    return -1;
+                buffer[0] = '%';
+                return 1;
+            }
+            else
+                assert(false, "TODO!");
+        }
+
+        size_t len = 0;
+        if (siScale)
+        {
+            int x = exp;
+            if (x != 0)
+            {
+                // for scale factors between SI units, we'll normalise to the next higher unit...
+                int y = (x + 33) % 3;
+                if (y != 0)
+                {
+                    if (y == 1)
+                    {
+                        if (buffer.length < 2)
+                            return -1;
+                        --x;
+                        buffer[0..2] = "10";
+                        len += 2;
+                    }
+                    else
+                    {
+                        if (buffer.length < 3)
+                            return -1;
+                        x -= 2;
+                        buffer[0..3] = "100";
+                        len += 3;
+                    }
+                }
+                assert(x >= -30, "TODO: handle this very small case");
+
+                if (x != 0)
+                {
+                    if (buffer.length <= len)
+                        return -1;
+                    buffer[len++] = "qryzafpnum kMGTPEZYRQ"[x/3 + 10];
+                }
+            }
+
+            if (const string* name = unit in unitNames)
+            {
+                if (buffer.length < len + name.length)
+                    return -1;
+                buffer[len .. len + name.length] = *name;
+                len += name.length;
+            }
+            else
+            {
+                // synth a unit name...
+                assert(false, "TODO");
+            }
+        }
+        else
+        {
+            if (const string* name = this in scaledUnitNames)
+            {
+                if (buffer.length < len + name.length)
+                    return -1;
+                buffer[len .. len + name.length] = *name;
+                len += name.length;
+            }
+            else
+            {
+                // what now?
+                assert(false, "TODO");
+            }
+        }
+        return len;
+    }
+
+    ptrdiff_t fromString(const(char)[] s) pure
+    {
+        float scale;
+        ptrdiff_t r = parseUnit(s, scale);
+        if (scale != 1)
+            return -1;
+        return r;
+    }
+
+
     size_t toHash() const pure
         => pack;
 
@@ -688,39 +912,41 @@ immutable double[4] tempOffsets = [
     (-273.15*9)/5 + 32      // K -> F
 ];
 
-immutable string[ScaledUnit] unitNames = [
-
-    // ⁰¹⁻²³⁴⁵⁶⁷⁸⁹·°
-
-    // base units
-    ScaledUnit()            : "",
-    ScaledUnit(Metre)       : "m",
-    ScaledUnit(Kilogram)    : "kg",
-    ScaledUnit(Second)      : "s",
-    ScaledUnit(Ampere)      : "A",
-    ScaledUnit(Kelvin)      : "°K",
-    ScaledUnit(Candela)     : "cd",
-    ScaledUnit(Radian)      : "rad",
+immutable string[Unit] unitNames = [
+    Metre       : "m",
+    Metre^^2    : "m²",
+    Metre^^3    : "m³",
+    Kilogram    : "kg",
+    Second      : "s",
+    Ampere      : "A",
+    Kelvin      : "K",
+    Candela     : "cd",
+    Radian      : "rad",
 
     // derived units
-    ScaledUnit(SquareMetre) : "m²",
-    ScaledUnit(CubicMetre)  : "m³",
-    ScaledUnit(Newton)      : "N",
-    ScaledUnit(Pascal)      : "Pa",
-    ScaledUnit(Joule)       : "J",
-    ScaledUnit(Watt)        : "W",
-    ScaledUnit(Coulomb)     : "C",
-    ScaledUnit(Volt)        : "V",
-    ScaledUnit(Ohm)         : "Ω",
-    ScaledUnit(Farad)       : "F",
-    ScaledUnit(Siemens)     : "S",
-    ScaledUnit(Weber)       : "Wb",
-    ScaledUnit(Tesla)       : "T",
-    ScaledUnit(Henry)       : "H",
-    ScaledUnit(Lumen)       : "lm",
-    ScaledUnit(Lux)         : "lx",
+    Newton      : "N",
+    Pascal      : "Pa",
+    Joule       : "J",
+    Watt        : "W",
+    Coulomb     : "C",
+    Volt        : "V",
+    Ohm         : "Ω",
+    Farad       : "F",
+    Siemens     : "S",
+    Weber       : "Wb",
+    Tesla       : "T",
+    Henry       : "H",
+    Lumen       : "lm",
+    Lux         : "lx",
+];
 
-    // scaled units
+immutable string[ScaledUnit] scaledUnitNames = [
+    Minute      : "min",
+//    Minute      : "mins",
+    Hour        : "hr",
+//    Hour        : "hrs",
+    Day         : "day",
+
     Inch        : "in",
     Foot        : "ft",
     Mile        : "mi",
@@ -745,3 +971,136 @@ immutable string[ScaledUnit] unitNames = [
     AmpereHour  : "Ah",
     WattHour    : "Wh",
 ];
+
+immutable Unit[string] unitMap = [
+    // base units
+    "m"     : Metre,
+    "kg"    : Kilogram,
+    "s"     : Second,
+    "A"     : Ampere,
+    "°K"    : Kelvin,
+    "cd"    : Candela,
+    "rad"   : Radian,
+
+    // derived units
+    "N"     : Newton,
+    "Pa"    : Pascal,
+    "J"     : Joule,
+    "W"     : Watt,
+    "C"     : Coulomb,
+    "V"     : Volt,
+    "Ω"     : Ohm,
+    "F"     : Farad,
+    "S"     : Siemens,
+    "Wb"    : Weber,
+    "T"     : Tesla,
+    "H"     : Henry,
+    "lm"    : Lumen,
+    "lx"    : Lux,
+
+    // questionable... :/
+    "VA"    : Watt,
+    "var"   : Watt,
+];
+
+immutable ScaledUnit[string] noScaleUnitMap = [
+    "min"   : Minute,
+    "mins"  : Minute,
+    "hr"    : Hour,
+    "hrs"   : Hour,
+    "day"   : Day,
+    "days"  : Day,
+    "'"     : Inch,
+    "in"    : Inch,
+    "\""    : Foot,
+    "ft"    : Foot,
+    "mi"    : Mile,
+    "oz"    : Ounce,
+    // TODO: us/uk floz/gallon?
+    "lb"    : Pound,
+    "°"     : Degree,
+    "deg"   : Degree,
+    "°C"    : Celsius,
+    "°F"    : Fahrenheit,
+    "Ah"    : AmpereHour,
+    "Wh"    : WattHour,
+    "cy"    : Cycle,
+    "Hz"    : Hertz,
+    "psi"   : PSI,
+
+    // questionable... :/
+    "VAh"   : WattHour,
+    "varh"  : WattHour,
+];
+
+immutable ScaledUnit[string] scaledUnitMap = [
+    "%"     : Percent,
+    "‰"     : Permille,
+    "l"     : Litre,
+    "g"     : Gram,
+];
+
+int takePower(ref const(char)[] s) pure
+{
+    size_t e = s.findFirst('^');
+    if (e < s.length)
+    {
+        const(char)[] p = s[e+1..$];
+        s = s[0..e];
+        if (s.length == 0 || p.length == 0)
+            return 0;
+        if (p[0] == '-')
+        {
+            if (p.length != 2 || uint(p[2] - '0') > 4)
+                return 0;
+            return -(p[2] - '0');
+        }
+        if (p.length != 1 || uint(p[1] - '0') > 4)
+            return 0;
+        return p[2] - '0';
+    }
+    else if (s.length > 2)
+    {
+        if (s[$-2..$] == "¹")
+        {
+            if (s.length > 5 && s[$-5..$-2] == "⁻")
+            {
+                s = s[0..$-5];
+                return -1;
+            }
+            s = s[0..$-2];
+            return 1;
+        }
+        if (s[$-2..$] == "²")
+        {
+            if (s.length > 5 && s[$-5..$-2] == "⁻")
+            {
+                s = s[0..$-5];
+                return -2;
+            }
+            s = s[0..$-2];
+            return 2;
+        }
+        if (s[$-2..$] == "³")
+        {
+            if (s.length > 5 && s[$-5..$-2] == "⁻")
+            {
+                s = s[0..$-5];
+                return -3;
+            }
+            s = s[0..$-2];
+            return 3;
+        }
+    }
+    else if (s.length > 3 && s[$-3..$] == "⁴")
+    {
+        if (s.length > 6 && s[$-6..$-3] == "⁻")
+        {
+            s = s[0..$-6];
+            return -4;
+        }
+        s = s[0..$-3];
+        return 4;
+    }
+    return 1;
+}

@@ -6,25 +6,28 @@ alias Alias(T) = T;
 
 alias AliasSeq(TList...) = TList;
 
-template intForWidth(size_t width, bool signed = false)
+template intForWidth(size_t bits, bool signed = false)
 {
-    static if (width <= 8 && !signed)
+    static if (bits <= 8 && !signed)
         alias intForWidth = ubyte;
-    else static if (width <= 8 && signed)
+    else static if (bits <= 8 && signed)
         alias intForWidth = byte;
-    else static if (width <= 16 && !signed)
+    else static if (bits <= 16 && !signed)
         alias intForWidth = ushort;
-    else static if (width <= 16 && signed)
+    else static if (bits <= 16 && signed)
         alias intForWidth = short;
-    else static if (width <= 32 && !signed)
+    else static if (bits <= 32 && !signed)
         alias intForWidth = uint;
-    else static if (width <= 32 && signed)
+    else static if (bits <= 32 && signed)
         alias intForWidth = int;
-    else static if (width <= 64 && !signed)
+    else static if (bits <= 64 && !signed)
         alias intForWidth = ulong;
-    else static if (width <= 64 && signed)
+    else static if (bits <= 64 && signed)
         alias intForWidth = long;
 }
+
+alias TypeForOp(string op, U) = typeof(mixin(op ~ "U()"));
+alias TypeForOp(string op, A, B) = typeof(mixin("A()" ~ op ~ "B()"));
 
 template staticMap(alias fun, args...)
 {
