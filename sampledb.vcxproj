@@ -154,6 +154,7 @@
     <DCompile Include="src\urt\format\json.d" />
     <DCompile Include="src\urt\inet.d" />
     <DCompile Include="src\urt\intrinsic\package.d" />
+    <DCompile Include="src\urt\intrinsic\x86.d" />
     <DCompile Include="src\urt\io.d" />
     <DCompile Include="src\urt\kvp.d" />
     <DCompile Include="src\urt\lifetime.d" />
