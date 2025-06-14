@@ -51,7 +51,10 @@ nothrow @nogc:
     MACAddress src;
     MACAddress dst;
     ushort etherType;
-    ushort owSubType;
+    union {
+        ushort owSubType; // if etherType == EtherType.OW
+        ushort etherType2;
+    }
     ushort vlan;
 
     bool match(ref const Packet p)
@@ -62,10 +65,23 @@ nothrow @nogc:
                 return false;
             if (type == PacketType.Ethernet)
             {
-                if (etherType && p.eth.ether_type != etherType)
-                    return false;
-                if (owSubType && p.eth.ow_sub_type != owSubType)
-                    return false;
+                if (etherType)
+                {
+                    if (p.eth.ether_type != etherType)
+                    {
+                        if (!etherType2 || etherType == EtherType.OW)
+                            return false;
+                        if (p.eth.ether_type != etherType2)
+                            return false;
+                    }
+                    else if (etherType == EtherType.OW)
+                    {
+                        if (owSubType && p.eth.ow_sub_type != owSubType)
+                            return false;
+                    }
+                }
+                else
+                    debug assert(etherType2 == 0, "etherType must be set if etherType 2 is set!");
                 if (src && p.eth.src != src)
                     return false;
                 if (dst && p.eth.dst != dst)
@@ -199,6 +215,7 @@ nothrow @nogc:
         return null;
     }
 
+    // alias the base functions into this scope to merge the overload sets
     alias subscribe = typeof(super).subscribe;
     alias unsubscribe = typeof(super).unsubscribe;
 

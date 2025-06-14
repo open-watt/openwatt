@@ -70,6 +70,9 @@
     <Filter Include="src\protocol\http">
       <UniqueIdentifier>{072e997d-5dcf-4378-947a-4a665e1fd242}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\ppp">
+      <UniqueIdentifier>{508dd041-891d-4aa4-9154-de16fc507aa5}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\apps">
       <UniqueIdentifier>{8643bbe8-bb9e-448c-88a7-e8beae4c45e8}</UniqueIdentifier>
     </Filter>
@@ -368,6 +371,15 @@
     </DCompile>
     <DCompile Include="src\protocol\http\server.d">
       <Filter>src\protocol\http</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ppp\client.d">
+      <Filter>src\protocol\ppp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ppp\package.d">
+      <Filter>src\protocol\ppp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ppp\server.d">
+      <Filter>src\protocol\ppp</Filter>
     </DCompile>
     <DCompile Include="src\manager\console\argument.d">
       <Filter>src\manager\console</Filter>
