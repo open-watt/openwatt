@@ -285,9 +285,6 @@
     <DCompile Include="src\manager\console\builtin_commands.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
-    <DCompile Include="src\manager\console\expression.d">
-      <Filter>src\manager\console</Filter>
-    </DCompile>
     <DCompile Include="src\urt\mem\region.d">
       <Filter>src\urt\mem</Filter>
     </DCompile>
@@ -604,5 +601,6 @@
     <None Include="conf\rest_profiles\smartevse.conf">
       <Filter>conf\rest_profiles</Filter>
     </None>
+    <None Include="Makefile" />
   </ItemGroup>
 </Project>
