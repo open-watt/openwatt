@@ -1,6 +1,7 @@
 #pragma attribute(push, nothrow, nogc)
 
-#if defined(linux)
+#if defined(__linux)
+# define _DEFAULT_SOURCE
 # include <sys/socket.h>
 # include <sys/un.h>
 # include <netinet/in.h>

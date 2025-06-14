@@ -39,7 +39,7 @@ jobs:
       - name: Setup D Compiler
         uses: dlang-community/setup-dlang@v2
         with:
-          compiler: ${{ matrix.compiler == 'ldc' && 'ldc-beta' || matrix.compiler }}
+          compiler: ${{ matrix.compiler }}
 
       # 32-bit linux needs libs to link and run tests...
       - name: Install 32-bit Toolchains (Linux)
