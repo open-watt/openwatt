@@ -214,6 +214,7 @@
     <None Include="conf\modbus_profiles\tac1100.conf" />
     <None Include="conf\rest_profiles\smartevse.conf" />
     <None Include="conf\startup.conf" />
+    <None Include="Makefile" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E12D037A-40C8-4F1B-B8B3-DE527A1E9D41}</ProjectGuid>
