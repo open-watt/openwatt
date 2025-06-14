@@ -19,9 +19,9 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"bridge";
 
-    this(InterfaceModule m, String name)
+    this(String name)
     {
-        super(m, name, TypeName);
+        super(name.move, TypeName);
 
         macTable = MACTable(16, 256, 60);
 
@@ -199,7 +199,7 @@ nothrow @nogc:
         if (!n)
             return;
 
-        BridgeInterface iface = defaultAllocator.allocT!BridgeInterface(mod_if, n.move);
+        BridgeInterface iface = defaultAllocator.allocT!BridgeInterface(n.move);
 
         mod_if.addInterface(session, iface, pcap ? pcap.value : null);
 
@@ -210,46 +210,25 @@ nothrow @nogc:
 //        }, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
     }
 
-    void port_add(Session session, const(char)[] bridge, const(char)[] _interface)
+    void port_add(Session session, BridgeInterface bridge, BaseInterface _interface)
     {
-        auto mod_if = getModule!InterfaceModule;
-
-        BaseInterface b = mod_if.findInterface(bridge);
-        if (b is null)
-        {
-            session.writeLine("Bridge interface '", bridge, "' not found.");
-            return;
-        }
-        BridgeInterface bi = cast(BridgeInterface)b;
-        if (!bi)
-        {
-            session.writeLine("Interface '", bridge, "' is not a bridge.");
-            return;
-        }
-
-        BaseInterface i = mod_if.findInterface(_interface);
-        if (i is null)
-        {
-            session.writeLine("Interface '", _interface, "' not found.");
-            return;
-        }
-        if (bi is i)
+        if (bridge is _interface)
         {
             session.writeLine("Can't add a bridge to itself.");
             return;
         }
-        if (i.master)
+        if (_interface.master)
         {
-            session.writeLine("Interface '", _interface, "' is already a slave to '", i.master.name, "'.");
+            session.writeLine("Interface '", _interface.name[], "' is already a slave to '", _interface.master.name[], "'.");
             return;
         }
 
-        if (!bi.addMember(i))
+        if (!bridge.addMember(_interface))
         {
-            session.writeLine("Failed to add interface '", _interface, "' to bridge '", bridge, "'.");
+            session.writeLine("Failed to add interface '", _interface.name[], "' to bridge '", bridge.name[], "'.");
             return;
         }
 
-        writeInfo("Bridge port add - bridge: ", bridge, "  interface: ", _interface);
+        writeInfo("Bridge port add - bridge: ", bridge.name[], "  interface: ", _interface.name[]);
     }
 }

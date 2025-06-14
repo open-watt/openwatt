@@ -14,6 +14,8 @@ import protocol.telnet.server;
 import router.iface;
 import router.stream.tcp;
 
+nothrow @nogc:
+
 
 class TelnetModule : Module
 {

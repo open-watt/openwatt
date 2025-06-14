@@ -74,13 +74,15 @@ version(Windows)
     {
     nothrow @nogc:
 
+        alias TypeName = StringLit!"serial";
+
         this(String name, String device, in SerialParams serialParams, StreamOptions options = StreamOptions.None)
         {
             assert(serialParams.dataBits >= 5 || serialParams.dataBits <= 8);
 
             // TODO: The use of 5 data bits with 2 stop bits is an invalid combination, as is 6, 7, or 8 data bits with 1.5 stop bits.
 
-            super(name.move, "serial", options);
+            super(name.move, TypeName, options);
             this.device = device.move;
             this.params = serialParams;
 
@@ -314,9 +316,12 @@ else version(Posix)
     class SerialStream : Stream
     {
     nothrow @nogc:
+
+        alias TypeName = StringLit!"serial";
+
         this(String name, String device, in SerialParams serialParams, StreamOptions options = StreamOptions.None)
         {
-            super(name.move, "serial", options);
+            super(name.move, TypeName, options);
             this.device = device;
             this.params = serialParams;
         }

@@ -44,27 +44,15 @@ nothrow @nogc:
             client.update();
     }
 
-    void client_add(Session session, const(char)[] name, const(char)[] stream)
+    void client_add(Session session, const(char)[] name, Stream stream)
     {
-        auto mod_stream = getModule!StreamModule;
-
-        // is it an error to not specify a stream?
-        assert(stream, "'stream' must be specified");
-
-        Stream s = mod_stream.getStream(stream);
-        if (!s)
-        {
-            session.writeLine("Stream does not exist: ", stream);
-            return;
-        }
-
         if (name.empty)
-            mod_stream.generateStreamName("ezsp");
+            getModule!StreamModule.generateStreamName("ezsp");
 
         NoGCAllocator a = g_app.allocator;
 
         String n = name.makeString(a);
-        EZSPClient client = a.allocT!EZSPClient(n.move, s);
+        EZSPClient client = a.allocT!EZSPClient(n.move, stream);
         clients.insert(client.name[], client);
 
 //        writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);

@@ -126,6 +126,13 @@ nothrow @nogc:
     {
     }
 
+    ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc
+    {
+        if (buffer.length < "stream:".length + name.length)
+            return -1; // Not enough space
+        return buffer.concat("stream:", name[]).length;
+    }
+
 protected:
     bool live;
     StreamOptions options;

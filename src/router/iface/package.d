@@ -104,8 +104,6 @@ class BaseInterface
 {
 nothrow @nogc:
 
-    InterfaceModule mod_iface;
-
     String name;
     CacheString type;
 
@@ -123,11 +121,10 @@ nothrow @nogc:
 
     BaseInterface master;
 
-    this(InterfaceModule m, String name, const(char)[] type)
+    this(String name, const(char)[] type)
     {
         import urt.lifetime;
 
-        this.mod_iface = m;
         this.name = name.move;
         this.type = type.addString();
 
@@ -229,6 +226,13 @@ nothrow @nogc:
     int opCmp(const BaseInterface rh) const
         => name[] < rh.name[] ? -1 : name[] > rh.name[] ? 1 : 0;
 
+    ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc
+    {
+        if (buffer.length < "interface:".length + name.length)
+            return -1; // Not enough space
+        return buffer.concat("interface:", name[]).length;
+    }
+
 package:
     Packet[] sendQueue;
 
@@ -302,10 +306,10 @@ nothrow @nogc:
         return null;
     }
 
-    final String addInterfaceName(Session session, const(char)[] name, const(char)[] defaultName)
+    final String addInterfaceName(Session session, const(char)[] name, const(char)[] defaultNamePrefix)
     {
         if (name.empty)
-            name = generateInterfaceName(defaultName);
+            name = generateInterfaceName(defaultNamePrefix);
         else if (name in interfaces)
         {
             session.writeLine("Interface '", name, " already exists");

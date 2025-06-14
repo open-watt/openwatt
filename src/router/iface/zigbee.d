@@ -24,9 +24,9 @@ nothrow @nogc:
 
     ubyte[8] eui;
 
-    this(InterfaceModule m, String name) nothrow @nogc
+    this(String name) nothrow @nogc
     {
-        super(m, name.move, TypeName);
+        super(name.move, TypeName);
     }
 
     override void update()
@@ -79,7 +79,7 @@ nothrow @nogc:
         if (!n)
             return;
 
-        ZigbeeInterface iface = g_app.allocator.allocT!ZigbeeInterface(mod_if, n.move);
+        ZigbeeInterface iface = g_app.allocator.allocT!ZigbeeInterface(n.move);
 
         mod_if.addInterface(session, iface, pcap ? pcap.value : null);
     }
