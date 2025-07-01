@@ -74,6 +74,8 @@ nothrow @nogc:
             buffer[0 .. read] = m_inputBuffer[];
             m_inputBuffer.clear();
         }
+        if (logging)
+            writeToLog(true, buffer[0 .. read]);
         return read;
     }
 
@@ -87,6 +89,8 @@ nothrow @nogc:
                 written += m_streams[i].write(data[written .. 0]);
             }
         }
+        if (logging)
+            writeToLog(false, data);
         return 0;
     }
 

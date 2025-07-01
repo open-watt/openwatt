@@ -254,6 +254,8 @@ version(Windows)
                 live = false;
                 return -1;
             }
+            if (logging)
+                writeToLog(true, buffer[0 .. bytesRead]);
             return bytesRead;
         }
 
@@ -267,6 +269,8 @@ version(Windows)
                 live = false;
                 return -1;
             }
+            if (logging)
+                writeToLog(false, data[0 .. bytesWritten]);
             return bytesWritten;
         }
 
@@ -405,12 +409,16 @@ else version(Posix)
         override ptrdiff_t read(void[] buffer)
         {
             ssize_t bytesRead = core.sys.posix.unistd.read(fd, buffer.ptr, buffer.length);
+            if (logging)
+                writeToLog(true, buffer[0 .. bytesRead]);
             return bytesRead;
         }
 
         override ptrdiff_t write(const void[] data)
         {
             ssize_t bytesWritten = core.sys.posix.unistd.write(fd, data.ptr, data.length);
+            if (logging)
+                writeToLog(false, data[0 .. bytesWritten]);
             return bytesWritten;
         }
 

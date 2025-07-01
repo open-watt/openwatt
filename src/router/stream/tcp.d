@@ -129,6 +129,8 @@ nothrow @nogc:
                 closeLink();
             return 0;
         }
+        if (logging)
+            writeToLog(true, buffer[0 .. bytes]);
         status.recvBytes += bytes;
         return bytes;
     }
@@ -151,7 +153,11 @@ nothrow @nogc:
                 closeLink();
             }
             else
+            {
+                if (logging)
+                    writeToLog(false, data[0 .. bytes]);
                 return bytes;
+            }
         }
 
         if (options & StreamOptions.BufferData)
