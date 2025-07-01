@@ -25,7 +25,7 @@ nothrow @nogc:
 
         macTable = MACTable(16, 256, 60);
 
-        status.linkStatus = true;
+        status.linkStatus = Status.Link.Up;
         status.linkStatusChangeTime = getSysTime();
     }
 

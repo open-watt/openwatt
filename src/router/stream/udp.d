@@ -47,6 +47,8 @@ nothrow @nogc:
             remote = addr.address;
             break; // TODO: what do we even do with multiple addresses?
         }
+
+        status.linkStatus = Status.Link.Up;
 	}
 
 	override bool connect()
@@ -89,6 +91,7 @@ nothrow @nogc:
 
     override ptrdiff_t read(void[] buffer) nothrow @nogc
     {
+        // TODO: if a packet doesn't fill buffer, we should loop...
         size_t bytes;
         Result r = socket.recvfrom(buffer, MsgFlags.None, null, &bytes);
         if (!r)
@@ -104,6 +107,7 @@ nothrow @nogc:
 
     override ptrdiff_t write(const void[] data) nothrow @nogc
     {
+        // TODO: fragment on MTU...?
         size_t bytes;
         Result r = socket.sendto(data, MsgFlags.None, &remote, &bytes);
         if (!r)

@@ -199,7 +199,7 @@ version(Windows)
                 return false;
             }
 
-            live = true;
+            status.linkStatus = Status.Link.Up;
 
             return true;
         }
@@ -209,14 +209,14 @@ version(Windows)
             if (hCom != INVALID_HANDLE_VALUE)
                 CloseHandle(hCom);
             hCom = INVALID_HANDLE_VALUE;
-            live = false;
+            status.linkStatus = Status.Link.Down;
         }
 
         override bool connected()
         {
             if (hCom == INVALID_HANDLE_VALUE)
-                live = false;
-            if (!live)
+                status.linkStatus = Status.Link.Down;
+            if (status.linkStatus != Status.Link.Up)
                 return false;
 
             DWORD errors;
@@ -253,7 +253,7 @@ version(Windows)
             {
                 CloseHandle(hCom);
                 hCom = INVALID_HANDLE_VALUE;
-                live = false;
+                status.linkStatus = Status.Link.Down;
                 return -1;
             }
             if (logging)
@@ -268,7 +268,7 @@ version(Windows)
             {
                 CloseHandle(hCom);
                 hCom = INVALID_HANDLE_VALUE;
-                live = false;
+                status.linkStatus = Status.Link.Down;
                 return -1;
             }
             if (logging)
@@ -290,10 +290,31 @@ version(Windows)
 
         override void update()
         {
+            if (hCom == INVALID_HANDLE_VALUE)
+                return;
+
+            if (status.linkStatus == Status.Link.Up)
+            {
+                DWORD errors;
+                COMSTAT stat;
+                if (ClearCommError(hCom, &errors, &stat))
+                {
+                    if (errors == 0)
+                        status.linkStatus = Status.Link.Up;
+                    else
+                    {
+                        assert(false, "TODO: test this case");
+                        status.linkStatus = Status.Link.Down; // close the port?
+                    }
+                }
+                else
+                    disconnect();
+            }
+
             // this should implement keep-alive nonsense and all that...
             // what if the port comes and goes? we need to re-scan for the device if it's plugged/unplugged, etc.
 
-            if (!live)
+            if (status.linkStatus != Status.Link.Up)
                 connect();
         }
 
@@ -378,8 +399,8 @@ else version(Posix)
         override bool connected()
         {
             if (fd == -1)
-                live = false;
-            if (!live)
+                status.linkStatus = Status.Link.Down;
+            if (status.linkStatus != Status.Link.Up)
                 return false;
             // TODO
             assert(false);
@@ -444,7 +465,7 @@ else version(Posix)
             // this should implement keep-alive nonsense and all that...
             // what if the port comes and goes? we need to re-scan for the device if it's plugged/unplugged, etc.
 
-            if (!live)
+            if (status.linkStatus != Status.Link.Up)
                 connect();
         }
 
@@ -490,7 +511,7 @@ nothrow @nogc:
         String n = name.makeString(g_app.allocator);
         String dev = device.makeString(g_app.allocator);
 
-        SerialStream stream = g_app.allocator.allocT!SerialStream(n.move, dev.move, params, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+        SerialStream stream = g_app.allocator.allocT!SerialStream(n.move, dev.move, params, cast(StreamOptions)(StreamOptions.NonBlocking | StreamOptions.KeepAlive));
         mod_stream.addStream(stream);
 
         writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);

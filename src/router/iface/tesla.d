@@ -49,15 +49,15 @@ nothrow @nogc:
         SysTime now = getSysTime();
 
         // check the link status
-        bool isConnected = stream.connected();
-        if (isConnected != status.linkStatus)
+        Status.Link streamStatus = stream.status.linkStatus;
+        if (streamStatus != status.linkStatus)
         {
-            status.linkStatus = isConnected;
+            status.linkStatus = streamStatus;
             status.linkStatusChangeTime = now;
-            if (!isConnected)
+            if (streamStatus != Status.Link.Up)
                 ++status.linkDowns;
         }
-        if (!isConnected)
+        if (streamStatus != Status.Link.Up)
             return;
 
         // check for data

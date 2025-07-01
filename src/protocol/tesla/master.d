@@ -122,7 +122,7 @@ nothrow @nogc:
 
     String name;
     BaseInterface iface;
-    bool lastLinkStatus = false;
+    Status.Link lastLinkStatus = Status.Link.Down;
 
     MonoTime lastAction;
 
@@ -187,8 +187,8 @@ nothrow @nogc:
 
     void update()
     {
-        bool linkStatus = iface.getStatus.linkStatus;
-        if (linkStatus != lastLinkStatus && linkStatus)
+        Status.Link linkStatus = iface.status.linkStatus;
+        if (linkStatus != lastLinkStatus && linkStatus == Status.Link.Up)
         {
             // if the link returned after being offline for a bit, we'll issue a full restart
             roundRobinIndex = -10;
@@ -197,7 +197,7 @@ nothrow @nogc:
             lastAction = MonoTime();
         }
         lastLinkStatus = linkStatus;
-        if (!linkStatus)
+        if (linkStatus != Status.Link.Up)
             return;
 
         MonoTime now = getTime();

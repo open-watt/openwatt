@@ -26,14 +26,18 @@ nothrow @nogc:
         this.m_streams = streams;
         this.m_remoteName.reserve(60);
 
-        m_remoteName = "bridge[";
+        m_remoteName = "bridge";
+        m_remoteName ~= '[';
         foreach (i, s; streams)
         {
             if (i > 0)
-                m_remoteName ~= "|";
+                m_remoteName ~= '|';
             m_remoteName ~= s.remoteName();
         }
-        m_remoteName ~= "]";
+        m_remoteName ~= ']';
+
+        // a guess a bridge is up if any of its members are up? or just always; ya know.
+        status.linkStatus = Status.Link.Up;
     }
 
     override bool connect()
@@ -88,7 +92,7 @@ nothrow @nogc:
             ptrdiff_t written = 0;
             while (written < data.length)
             {
-                written += m_streams[i].write(data[written .. 0]);
+                written += m_streams[i].write(data[written .. $]);
             }
         }
         if (logging)
@@ -173,7 +177,7 @@ nothrow @nogc:
 
         String n = name.makeString(defaultAllocator());
 
-        BridgeStream stream = g_app.allocator.allocT!BridgeStream(n.move, StreamOptions.NonBlocking | StreamOptions.KeepAlive, source);
+        BridgeStream stream = g_app.allocator.allocT!BridgeStream(n.move, cast(StreamOptions)(StreamOptions.NonBlocking | StreamOptions.KeepAlive), source);
         mod_stream.addStream(stream);
     }
 }
