@@ -38,7 +38,7 @@ nothrow @nogc:
         // can only handle zigbee packets
         if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.Zigbee || packet.data.length < 3)
         {
-            ++status.sendDropped;
+            ++_status.sendDropped;
             return false;
         }
 

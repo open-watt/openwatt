@@ -90,21 +90,16 @@ struct InterfaceSubscriber
 
 class BaseInterface : BaseObject
 {
+    __gshared Property[6] Properties = [ Property.create!("mtu", mtu)(),
+                                         Property.create!("actual-mtu", actual_mtu)(),
+                                         Property.create!("l2mtu", l2mtu)(),
+                                         Property.create!("max-l2mtu", max_l2mtu)(),
+                                         Property.create!("running", running)(),
+                                         Property.create!("pcap", pcap)() ];
 nothrow @nogc:
 
     MACAddress mac;
     Map!(MACAddress, BaseInterface) macTable;
-
-    InterfaceSubscriber[4] subscribers;
-    ubyte numSubscribers;
-
-
-    Status status;
-
-    BufferOverflowBehaviour sendBehaviour;
-    BufferOverflowBehaviour recvBehaviour;
-
-    BaseInterface master;
 
     this(String name, const(char)[] type)
     {
@@ -114,20 +109,76 @@ nothrow @nogc:
         addAddress(mac, this);
     }
 
-    bool up() const
-        => status.linkStatus == Status.Link.Up;
+    // Properties...
+    final ushort mtu() const pure
+        => _mtu;
+    final void mtu(ushort value) pure
+    {
+        _mtu = value;
+    }
+    ushort actual_mtu() const pure
+        => _mtu == 0 ? _l2mtu : _mtu;
+
+    // TODO: the L2MTU properties should be available only to actual L2 interfaces...
+    final ushort l2mtu() const pure
+        => _l2mtu;
+    void l2mtu(ushort value) pure
+    {
+        _l2mtu = value;
+    }
+    final ushort max_l2mtu() const pure
+        => _max_l2mtu;
+
+    final bool running() const pure
+        => _status.linkStatus == Status.Link.Up;
+
+    final const(char)[] pcap() const pure
+    {
+        assert(false, "TODO: we need to store the pcap thing!");
+    }
+    final const(char)[] pcap(const(char)[] value)
+    {
+        // TODO: unsubscribe from old pcap interface, if any...
+        import manager.pcap;
+        PcapInterface* cap = getModule!PcapModule.findInterface(value);
+        if (!cap)
+            return tconcat("Failed to attach pcap interface '", value, "' to '", name, "'; doesn't exist");
+        else
+            cap.subscribeInterface(this);
+        return null;
+    }
+
+
+    // API...
+
+    ref const(Status) status() const pure
+        => _status;
+
+    final void resetCounters() pure
+    {
+        _status.linkDowns = 0;
+        _status.sendBytes = 0;
+        _status.recvBytes = 0;
+        _status.sendPackets = 0;
+        _status.recvPackets = 0;
+        _status.sendDropped = 0;
+        _status.recvDropped = 0;
+    }
+
+    override const(char)[] statusMessage() const pure
+        => running ? "Running" : super.statusMessage();
 
     override bool enable(bool enable = true)
     {
         bool wasEnabled = !_disabled;
         if (enable != wasEnabled)
         {
-            status.linkStatusChangeTime = getSysTime();
+            _status.linkStatusChangeTime = getSysTime();
             _disabled = !enable;
             if (_disabled)
             {
-                status.linkStatus = Status.Link.Down;
-                ++status.linkDowns;
+                _status.linkStatus = Status.Link.Down;
+                ++_status.linkDowns;
             }
         }
         return wasEnabled;
@@ -140,6 +191,9 @@ nothrow @nogc:
 
     bool send(MACAddress dest, const(void)[] message, EtherType type, ENMS_SubType subType = ENMS_SubType.Unspecified)
     {
+        if (!running)
+            return false;
+
         Packet p = Packet(message);
         p.src = mac;
         p.dst = dest;
@@ -152,6 +206,9 @@ nothrow @nogc:
 
     final bool forward(ref const Packet packet)
     {
+        if (!running)
+            return false;
+
         foreach (ref subscriber; subscribers[0..numSubscribers])
         {
             if ((subscriber.filter.direction & PacketDirection.Outgoing) && subscriber.filter.match(packet))
@@ -227,7 +284,21 @@ nothrow @nogc:
         return buffer.concat("interface:", name[]).length;
     }
 
+protected:
+    Status _status;
+    ushort _mtu;        // 0 = auto
+    ushort _l2mtu;
+    ushort _max_l2mtu;  // 0 = unspecified/unknown
+
+    BufferOverflowBehaviour sendBehaviour;
+    BufferOverflowBehaviour recvBehaviour;
+
+    abstract bool transmit(ref const Packet packet);
+
+    // TODO: this package section should be refactored out of existence!
 package:
+    BaseInterface master;
+
     Packet[] sendQueue;
 
     MACAddress generateMacAddress() pure
@@ -247,8 +318,8 @@ package:
     void dispatch(ref const Packet packet)
     {
         // update the stats
-        ++status.recvPackets;
-        status.recvBytes += packet.length;
+        ++_status.recvPackets;
+        _status.recvBytes += packet.length;
 
         // check if we ever saw the sender before...
         if (!packet.src.isMulticast)
@@ -264,8 +335,9 @@ package:
         }
     }
 
-protected:
-    abstract bool transmit(ref const Packet packet);
+private:
+    InterfaceSubscriber[4] subscribers;
+    ubyte numSubscribers;
 }
 
 

@@ -199,7 +199,7 @@ version(Windows)
                 return false;
             }
 
-            status.linkStatus = Status.Link.Up;
+            _status.linkStatus = Status.Link.Up;
 
             return true;
         }
@@ -209,7 +209,7 @@ version(Windows)
             if (hCom != INVALID_HANDLE_VALUE)
                 CloseHandle(hCom);
             hCom = INVALID_HANDLE_VALUE;
-            status.linkStatus = Status.Link.Down;
+            _status.linkStatus = Status.Link.Down;
         }
 
         override const(char)[] remoteName()
@@ -229,7 +229,7 @@ version(Windows)
             {
                 CloseHandle(hCom);
                 hCom = INVALID_HANDLE_VALUE;
-                status.linkStatus = Status.Link.Down;
+                _status.linkStatus = Status.Link.Down;
                 return -1;
             }
             if (logging)
@@ -244,7 +244,7 @@ version(Windows)
             {
                 CloseHandle(hCom);
                 hCom = INVALID_HANDLE_VALUE;
-                status.linkStatus = Status.Link.Down;
+                _status.linkStatus = Status.Link.Down;
                 return -1;
             }
             if (logging)
@@ -278,7 +278,7 @@ version(Windows)
                     if (errors != 0)
                     {
                         assert(false, "TODO: test this case");
-                        status.linkStatus = Status.Link.Down; // close the port?
+                        _status.linkStatus = Status.Link.Down; // close the port?
                     }
                 }
                 else

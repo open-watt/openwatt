@@ -45,9 +45,8 @@ enum StreamOptions : ubyte
 
 abstract class Stream : BaseObject
 {
+    __gshared Property[1] Properties = [ Property.create!("running", running)() ];
 nothrow @nogc:
-
-    Status status;
 
     this(String name, const(char)[] type, StreamOptions options)
     {
@@ -64,22 +63,44 @@ nothrow @nogc:
         setLogFile(null);
     }
 
-    bool up() const
-        => status.linkStatus == Status.Link.Up;
+    // Properties...
+
+    final bool running() const pure
+        => _status.linkStatus == Status.Link.Up;
+
+
+    // API...
+
+    ref const(Status) status() const pure
+        => _status;
+
+    final void resetCounters() pure
+    {
+        _status.linkDowns = 0;
+        _status.sendBytes = 0;
+        _status.recvBytes = 0;
+        _status.sendPackets = 0;
+        _status.recvPackets = 0;
+        _status.sendDropped = 0;
+        _status.recvDropped = 0;
+    }
+
+    override const(char)[] statusMessage() const pure
+        => running ? "Running" : super.statusMessage();
 
     override bool enable(bool enable = true)
     {
         bool wasEnabled = !_disabled;
         if (enable != wasEnabled)
         {
-            status.linkStatusChangeTime = getSysTime();
+            _status.linkStatusChangeTime = getSysTime();
             _disabled = !enable;
             if (_disabled)
             {
                 disconnect();
-                debug assert(status.linkStatus == Status.Link.Down);
-//                status.linkStatus = Status.Link.Down;
-                ++status.linkDowns; // TODO: shoul this be moved to wherever the down is assigned?
+                debug assert(_status.linkStatus == Status.Link.Down);
+//                _status.linkStatus = Status.Link.Down;
+                ++_status.linkDowns; // TODO: shoul this be moved to wherever the down is assigned?
             }
         }
         return wasEnabled;
@@ -136,6 +157,7 @@ nothrow @nogc:
     }
 
 protected:
+    Status _status;
     StreamOptions options;
     version (SupportLogging)
     {

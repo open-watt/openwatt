@@ -104,6 +104,14 @@ nothrow @nogc:
         this.isBusMaster = isMaster;
         this.supportSimultaneousRequests = protocol == ModbusProtocol.TCP;
 
+        // this is the proper value for modbus, irrespective of the L2 MTU
+        // modbus jumbo's are theoretically possible if all hops support it... (fragmentation is not possible)
+        _mtu = 253; // function + 252 byte payload (address is considered framing (?))
+
+        // this would be 253 for the RS485 bus, or larger if another carrier...?
+        _max_l2mtu = _mtu;
+        _l2mtu = _max_l2mtu;
+
         localToUni.insert(ubyte(0), ubyte(0));
         uniToLocal.insert(ubyte(0), ubyte(0));
 
@@ -122,8 +130,8 @@ nothrow @nogc:
                 tcpStream.enableKeepAlive(true, seconds(10), seconds(1), 10);
         }
 
-        status.linkStatusChangeTime = getSysTime();
-        status.linkStatus = stream.status.linkStatus;
+        _status.linkStatusChangeTime = getSysTime();
+        _status.linkStatus = stream.status.linkStatus;
 
         // TODO: warn the user if they configure an interface to use modbus tcp over a serial line
         //       user needs to be warned that data corruption may occur!
@@ -144,7 +152,7 @@ nothrow @nogc:
             {
                 pendingRequests.remove(i);
                 if (!req.inFlight)
-                    ++status.sendDropped;
+                    ++_status.sendDropped;
             }
             else
                 ++i;
@@ -170,10 +178,10 @@ nothrow @nogc:
         Status.Link streamStatus = stream.status.linkStatus;
         if (streamStatus != status.linkStatus)
         {
-            status.linkStatus = streamStatus;
-            status.linkStatusChangeTime = now;
+            _status.linkStatus = streamStatus;
+            _status.linkStatusChangeTime = now;
             if (streamStatus != Status.Link.Up)
-                ++status.linkDowns;
+                ++_status.linkDowns;
         }
         if (streamStatus != Status.Link.Up)
             return;
@@ -261,7 +269,7 @@ nothrow @nogc:
         // can only handle modbus packets
         if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.Modbus || packet.data.length < 5)
         {
-            ++status.sendDropped;
+            ++_status.sendDropped;
             return false;
         }
 
@@ -283,7 +291,7 @@ nothrow @nogc:
                 ServerMap* map = mod_mb.findServerByMac(packet.dst);
                 if (!map)
                 {
-                    ++status.sendDropped;
+                    ++_status.sendDropped;
                     return false; // we don't know who this server is!
                 }
                 if (map.iface !is this)
@@ -291,7 +299,7 @@ nothrow @nogc:
                     // this server belongs to a different interface, but this interface received it...
                     // this probably happened because a bridge didn't know where to direct the packet.
                     // we have 2 options; just forward it, or drop it... since we know it should be directed somewhere else...?
-                    ++status.sendDropped;
+                    ++_status.sendDropped;
                     return false; // this server belongs to a different interface...
                 }
                 debug assert(packetAddress == map.universalAddress, "Packet address does not match dest address?!");
@@ -319,7 +327,7 @@ nothrow @nogc:
             // if we're not a bus master, we can only send response packets destined for the master
             if (packet.dst != masterMac)
             {
-                ++status.sendDropped;
+                ++_status.sendDropped;
                 return false;
             }
 
@@ -329,7 +337,7 @@ nothrow @nogc:
             ServerMap* map = mod_mb.findServerByUniversalAddress(packetAddress);
             if (!map)
             {
-                ++status.sendDropped;
+                ++_status.sendDropped;
                 return false; // how did we even get a response if we don't know who the server is?
             }
 
@@ -388,12 +396,12 @@ nothrow @nogc:
             // if the stream disconnected, maybe we should buffer the message incase it reconnects promptly?
 
             // just drop it for now...
-            ++status.sendDropped;
+            ++_status.sendDropped;
             return false;
         }
 
-        ++status.sendPackets;
-        status.sendBytes += length;
+        ++_status.sendPackets;
+        _status.sendBytes += length;
         return true;
     }
 
@@ -466,7 +474,7 @@ private:
                     // if we are the bus-master, it should have been impossible to receive a packet from an unknown guy
                     // it's possibly a false packet from a corrupt bitstream, or there's another master on the bus!
                     // we'll drop this packet to be safe...
-                    ++status.recvDropped;
+                    ++_status.recvDropped;
                     return;
                 }
 
@@ -494,7 +502,7 @@ private:
                 // if there are no pending requests, then we probably received a late reply to something we timed out...
                 if (pendingRequests.empty)
                 {
-                    ++status.recvDropped;
+                    ++_status.recvDropped;
                     return;
                 }
 
@@ -516,7 +524,7 @@ private:
                     //  3. dismiss ALL pending requests, because we may be out of cadence so drop everything to start over?
 
                     // we'll do 2 for now...
-                    ++status.recvDropped;
+                    ++_status.recvDropped;
                 }
 
                 pendingRequests.remove(0);
@@ -555,7 +563,7 @@ private:
                     // we received a packet with no pending request...
                     // maybe it was a late response to a message that we already dismissed as timeout?
                     // ...or something else?
-                    ++status.recvDropped;
+                    ++_status.recvDropped;
                 }
             }
         }
@@ -572,7 +580,7 @@ private:
                 {
                     // we can't dispatch this message if we don't know if its a request or a response...
                     // we'll need to discard messages until we get one that we know, and then we can predict future messages from there
-                    ++status.recvDropped;
+                    ++_status.recvDropped;
                     return;
                 }
             }
