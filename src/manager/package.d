@@ -7,7 +7,9 @@ import urt.mem.allocator;
 import urt.mem.string;
 import urt.string;
 
+import manager.component;
 import manager.console;
+import manager.device;
 import manager.plugin;
 import manager.system;
 
