@@ -1,6 +1,7 @@
 module router.stream;
 
 import urt.conv;
+import urt.file;
 import urt.lifetime;
 import urt.map;
 import urt.mem.string;
@@ -17,6 +18,8 @@ public static import router.stream.bridge;
 public static import router.stream.serial;
 public static import router.stream.tcp;
 public static import router.stream.udp;
+
+version = SupportLogging;
 
 nothrow @nogc:
 
@@ -68,6 +71,8 @@ nothrow @nogc:
     {
         // TODO: should we check if it's already disconnected before calling this?
         disconnect();
+
+        setLogFile(null);
     }
 
     // Method to initiate a connection
@@ -95,6 +100,27 @@ nothrow @nogc:
     // Flush the receive buffer (return number of bytes destroyed)
     abstract ptrdiff_t flush();
 
+    void setLogFile(const(char)[] baseFilename)
+    {
+        version (SupportLogging)
+        {
+            if (log[0].is_open())
+                log[0].close();
+            if (log[1].is_open())
+                log[1].close();
+            logging = false;
+            if (baseFilename)
+            {
+                // TODO: should we not append, and instead bump a number on the end of the filename and write a new one?
+                //       probably want to separate the logs for each session...?
+                //       and should we disable buffering? kinda slow, but if we crash, we want to know what crashed it, right?
+                log[0].open(tconcat(baseFilename, ".tx"), FileOpenMode.WriteAppend, FileOpenFlags.Sequential /+| FileOpenFlags.NoBuffering+/);
+                log[1].open(tconcat(baseFilename, ".rx"), FileOpenMode.WriteAppend, FileOpenFlags.Sequential /+| FileOpenFlags.NoBuffering+/);
+                logging = log[0].is_open() || log[1].is_open();
+            }
+        }
+    }
+
     // Update the stream
     void update()
     {
@@ -103,9 +129,29 @@ nothrow @nogc:
 protected:
     bool live;
     StreamOptions options;
+    version (SupportLogging)
+    {
+        bool logging;
+        File[2] log;
+    }
+    else
+        enum logging = false;
 
     uint bufferLen = 0;
     void[] sendBuffer;
+
+    final void writeToLog(bool rx, const void[] buffer)
+    {
+        version (SupportLogging)
+        {
+            if (!logging || !log[rx].is_open)
+                return;
+            size_t written;
+            log[rx].write(buffer, written);
+            // TODO: do we want to assert the write was successful? maybe disk full? should probably not crash the app...
+//            assert(written == buffer.length, "Failed to write to log file...?");
+        }
+    }
 }
 
 class StreamModule : Module

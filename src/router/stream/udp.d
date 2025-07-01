@@ -93,6 +93,8 @@ class UDPStream : Stream
                 return 0;
             assert(0);
         }
+        if (logging)
+            writeToLog(true, buffer[0 .. bytes]);
         return bytes;
     }
 
@@ -102,6 +104,8 @@ class UDPStream : Stream
         Result r = socket.sendto(data, MsgFlags.None, &remote, &bytes);
         if (!r)
             assert(0);
+        if (logging)
+            writeToLog(true, data[0 .. bytes]);
         return bytes;
     }
 
