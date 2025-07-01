@@ -54,7 +54,7 @@ nothrow @nogc:
         this.protocol = protocol;
 
         status.linkStatusChangeTime = getSysTime();
-        status.linkStatus = stream.connected;
+        status.linkStatus = stream.status.linkStatus;
     }
 
     override void update()
@@ -62,15 +62,15 @@ nothrow @nogc:
         SysTime now = getSysTime();
 
         // check the link status
-        bool isConnected = stream.connected();
-        if (isConnected != status.linkStatus)
+        Status.Link streamStatus = stream.status.linkStatus;
+        if (streamStatus != status.linkStatus)
         {
-            status.linkStatus = isConnected;
+            status.linkStatus = streamStatus;
             status.linkStatusChangeTime = now;
-            if (!isConnected)
+            if (streamStatus != Status.Link.Up)
                 ++status.linkDowns;
         }
-        if (!isConnected)
+        if (streamStatus != Status.Link.Up)
             return;
 
         enum LargestProtocolFrame = 13; // EBYTE proto has 13byte frames

@@ -76,7 +76,7 @@ nothrow @nogc:
 
     override bool connected()
     {
-        if (!live)
+        if (status.linkStatus != Status.Link.Up)
             return false;
 
         // poll to see if the socket is actually alive...
@@ -119,7 +119,7 @@ nothrow @nogc:
 
     override ptrdiff_t read(void[] buffer)
     {
-        if (!live)
+        if (status.linkStatus != Status.Link.Up)
             return 0;
 
         size_t bytes = 0;
@@ -139,10 +139,10 @@ nothrow @nogc:
 
     override ptrdiff_t write(const void[] data)
     {
-        if (!live && (options & StreamOptions.OnDemand))
+        if (status.linkStatus != Status.Link.Up && (options & StreamOptions.OnDemand))
             connect();
 
-        if (live)
+        if (status.linkStatus == Status.Link.Up)
         {
             size_t bytes;
             Result r = socket.send(data, MsgFlags.None, &bytes);
@@ -173,7 +173,7 @@ nothrow @nogc:
 
     override ptrdiff_t pending()
     {
-        if (!live)
+        if (status.linkStatus != Status.Link.Up)
             return 0;
 
         size_t bytes;
@@ -196,8 +196,25 @@ nothrow @nogc:
 
     override void update()
     {
-        // if it's live we have nothing to do
-        if (live)
+        if (status.linkStatus == Status.Link.Up)
+        {
+            // poll to see if the socket is actually alive...
+
+            // TODO: does this actually work?! and do we really even want this?
+            ubyte[1] buffer;
+            size_t bytesReceived;
+            Result r = recv(socket, null, MsgFlags.Peek, &bytesReceived);
+            if (r == Result.Success || r.get_SocketResult == SocketResult.WouldBlock)
+                status.linkStatus = Status.Link.Up;
+            else
+            {
+                // something happened... we should try and reconnect I guess?
+                closeLink();
+
+                status.linkStatus = Status.Link.Down;
+            }
+        }
+        if (status.linkStatus == Status.Link.Up)
             return;
 
         // a reverse-connect socket will be handled by a companion TCPServer
@@ -229,7 +246,7 @@ nothrow @nogc:
             r = socket.connect(remote);
             if (r.succeeded)
             {
-                live = true;
+                status.linkStatus = Status.Link.Up;
                 return;
             }
             else
@@ -291,8 +308,7 @@ nothrow @nogc:
             if (keepEnable)
                 set_keepalive(socket, keepEnable, keepIdle, keepInterval, keepCount);
 
-            live = true;
-            status.linkStatus = true;
+            status.linkStatus = Status.Link.Up;
             status.linkStatusChangeTime = now;
 
             writeInfo("TCP stream '", name, "' link established.");
@@ -303,8 +319,7 @@ nothrow @nogc:
     {
         socket.close();
         socket = Socket.invalid;
-        live = false;
-        status.linkStatus = false;
+        status.linkStatus = Status.Link.Down;
         status.linkStatusChangeTime = getSysTime();
         ++status.linkDowns;
 
@@ -330,8 +345,7 @@ nothrow @nogc:
         socket.get_peer_name(remote);
 
         this.socket = socket;
-        live = true;
-//        live.atomicStore(true);
+        status.linkStatus = Status.Link.Up;
     }
 }
 
@@ -506,7 +520,7 @@ nothrow @nogc:
         String n = name.makeString(g_app.allocator);
         String a = address.makeString(g_app.allocator);
 
-        TCPStream stream = g_app.allocator.allocT!TCPStream(n.move, a.move, cast(ushort)portNumber, StreamOptions.NonBlocking | StreamOptions.KeepAlive);
+        TCPStream stream = g_app.allocator.allocT!TCPStream(n.move, a.move, cast(ushort)portNumber, cast(StreamOptions)(StreamOptions.NonBlocking | StreamOptions.KeepAlive));
         mod_stream.addStream(stream);
 
         writeInfof("Create TCP stream '{0}' - server: [{1}]:{2}", name, address, portNumber);

@@ -12,6 +12,7 @@ import manager.console;
 import manager.plugin;
 
 public import router.iface.packet;
+public import router.status;
 
 // package modules...
 public static import router.iface.bridge;
@@ -77,20 +78,6 @@ struct InterfaceSubscriber
     void* userData;
 }
 
-struct InterfaceStatus
-{
-    SysTime linkStatusChangeTime;
-    bool linkStatus;
-    int linkDowns;
-
-    ulong sendBytes;
-    ulong recvBytes;
-    uint sendPackets;
-    uint recvPackets;
-    uint sendDropped;
-    uint recvDropped;
-}
-
 // MAC: 02:xx:xx:ra:nd:yy
 //      02:13:37:xx:xx:yy
 //      02:AC:1D:xx:xx:yy
@@ -114,7 +101,7 @@ nothrow @nogc:
     ubyte numSubscribers;
 
 
-    InterfaceStatus status;
+    Status status;
 
     BufferOverflowBehaviour sendBehaviour;
     BufferOverflowBehaviour recvBehaviour;
@@ -136,7 +123,7 @@ nothrow @nogc:
     {
     }
 
-    ref const(InterfaceStatus) getStatus() const
+    ref const(Status) getStatus() const
         => status;
 
     void subscribe(InterfaceSubscriber.PacketHandler packetHandler, ref const PacketFilter filter, void* userData = null)
@@ -384,12 +371,12 @@ nothrow @nogc:
 
             foreach (i, iface; interfaces)
             {
-                rxLen = max(rxLen, iface.getStatus.recvBytes.formatInt(null));
-                txLen = max(txLen, iface.getStatus.sendBytes.formatInt(null));
-                rpLen = max(rpLen, iface.getStatus.recvPackets.formatInt(null));
-                tpLen = max(tpLen, iface.getStatus.sendPackets.formatInt(null));
-                rdLen = max(rdLen, iface.getStatus.recvDropped.formatInt(null));
-                tdLen = max(tdLen, iface.getStatus.sendDropped.formatInt(null));
+                rxLen = max(rxLen, iface.status.recvBytes.formatInt(null));
+                txLen = max(txLen, iface.status.sendBytes.formatInt(null));
+                rpLen = max(rpLen, iface.status.recvPackets.formatInt(null));
+                tpLen = max(tpLen, iface.status.sendPackets.formatInt(null));
+                rdLen = max(rdLen, iface.status.recvDropped.formatInt(null));
+                tdLen = max(tdLen, iface.status.sendDropped.formatInt(null));
             }
 
             session.writef(" ID     {0, -*1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",
@@ -402,11 +389,11 @@ nothrow @nogc:
             foreach (iface; interfaces)
             {
                 session.writef("{0, 3} {1}{2}  {3, -*4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
-                                i, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ',
+                                i, iface.status.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ',
                                 iface.name, nameLen,
-                                iface.getStatus.recvBytes, rxLen, iface.getStatus.sendBytes, txLen,
-                                iface.getStatus.recvPackets, rpLen, iface.getStatus.sendPackets, tpLen,
-                                iface.getStatus.recvDropped, rdLen, iface.getStatus.sendDropped, tdLen);
+                                iface.status.recvBytes, rxLen, iface.status.sendBytes, txLen,
+                                iface.status.recvPackets, rpLen, iface.status.sendPackets, tpLen,
+                                iface.status.recvDropped, rdLen, iface.status.sendDropped, tdLen);
                 ++i;
             }
         }
@@ -416,7 +403,7 @@ nothrow @nogc:
             size_t i = 0;
             foreach (iface; interfaces)
             {
-                session.writef("{0, 3} {6}{7}  {1, -*2}  {3, -*4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ');
+                session.writef("{0, 3} {6}{7}  {1, -*2}  {3, -*4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.status.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ');
                 ++i;
             }
         }

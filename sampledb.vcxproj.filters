@@ -570,6 +570,9 @@
     <DCompile Include="src\manager\console\argument.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
+    <DCompile Include="src\router\status.d">
+      <Filter>src\router</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

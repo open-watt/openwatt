@@ -130,7 +130,7 @@
     <DCompile Include="src\router\modbus\profile\package.d" />
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d" />
     <DCompile Include="src\router\port\package.d" />
-    <DCompile Include="src\router\port\serial.d" />
+    <DCompile Include="src\router\status.d" />
     <DCompile Include="src\router\stream\bridge.d" />
     <DCompile Include="src\router\stream\package.d" />
     <DCompile Include="src\router\stream\serial.d" />

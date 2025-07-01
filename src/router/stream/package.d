@@ -13,6 +13,8 @@ import urt.time;
 import manager.console;
 import manager.plugin;
 
+public import router.status;
+
 // package modules...
 public static import router.stream.bridge;
 public static import router.stream.serial;
@@ -24,7 +26,7 @@ version = SupportLogging;
 nothrow @nogc:
 
 
-enum StreamOptions
+enum StreamOptions : ubyte
 {
     None = 0,
 
@@ -40,17 +42,6 @@ enum StreamOptions
     KeepAlive =      1 << 2, // Attempt reconnection on connection drops
 }
 
-struct StreamStatus
-{
-    SysTime linkStatusChangeTime;
-    bool linkStatus;
-    int linkDowns;
-    ulong sendBytes;
-    ulong recvBytes;
-    ulong sendDropped;
-    ulong recvDropped;
-}
-
 abstract class Stream
 {
 nothrow @nogc:
@@ -58,7 +49,7 @@ nothrow @nogc:
     String name;
     CacheString type;
 
-    StreamStatus status;
+    Status status;
 
     this(String name, const(char)[] type, StreamOptions options)
     {
@@ -134,7 +125,6 @@ nothrow @nogc:
     }
 
 protected:
-    bool live;
     StreamOptions options;
     version (SupportLogging)
     {
