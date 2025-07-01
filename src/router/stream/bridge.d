@@ -26,7 +26,7 @@ nothrow @nogc:
         this.m_streams = streams;
         this.m_remoteName.reserve(60);
 
-        m_remoteName = "bridge";
+        m_remoteName = TypeName[];
         m_remoteName ~= '[';
         foreach (i, s; streams)
         {
@@ -49,12 +49,6 @@ nothrow @nogc:
     override void disconnect()
     {
         // TODO: Should this disconnect subordinate streams?
-    }
-
-    override bool connected()
-    {
-        // what here?
-        return true;
     }
 
     override const(char)[] remoteName()

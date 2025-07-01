@@ -212,30 +212,6 @@ version(Windows)
             status.linkStatus = Status.Link.Down;
         }
 
-        override bool connected()
-        {
-            if (hCom == INVALID_HANDLE_VALUE)
-                status.linkStatus = Status.Link.Down;
-            if (status.linkStatus != Status.Link.Up)
-                return false;
-
-            DWORD errors;
-            COMSTAT status;
-            if (ClearCommError(hCom, &errors, &status))
-            {
-                if (errors == 0)
-                    return true;
-                else
-                {
-                    assert(false, "TODO: test this case");
-                    return false; // close the port?
-                }
-            }
-
-            disconnect();
-            return false;
-        }
-
         override const(char)[] remoteName()
         {
             return device[];
@@ -299,9 +275,7 @@ version(Windows)
                 COMSTAT stat;
                 if (ClearCommError(hCom, &errors, &stat))
                 {
-                    if (errors == 0)
-                        status.linkStatus = Status.Link.Up;
-                    else
+                    if (errors != 0)
                     {
                         assert(false, "TODO: test this case");
                         status.linkStatus = Status.Link.Down; // close the port?
@@ -396,31 +370,6 @@ else version(Posix)
             fd = -1;
         }
 
-        override bool connected()
-        {
-            if (fd == -1)
-                status.linkStatus = Status.Link.Down;
-            if (status.linkStatus != Status.Link.Up)
-                return false;
-            // TODO
-            assert(false);
-//            DWORD errors;
-//            COMSTAT status;
-//            if (ClearCommError(hCom, &errors, &status))
-//            {
-//                if (errors == 0)
-//                    return true;
-//                else
-//                {
-//                    assert(false, "TODO: test this case");
-//                    return false; // close the port?
-//                }
-//            }
-//
-//            disconnect();
-            return false;
-        }
-
         override const(char)[] remoteName()
         {
             return device[];
@@ -462,6 +411,15 @@ else version(Posix)
 
         override void update()
         {
+            if (fd == -1)
+                return;
+
+            if (status.linkStatus == Status.Link.Up)
+            {
+                // TODO
+                assert(false, "TODO: test to see if the port is live...");
+            }
+
             // this should implement keep-alive nonsense and all that...
             // what if the port comes and goes? we need to re-scan for the device if it's plugged/unplugged, etc.
 

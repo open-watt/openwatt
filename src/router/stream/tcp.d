@@ -74,29 +74,6 @@ nothrow @nogc:
         }
     }
 
-    override bool connected()
-    {
-        if (status.linkStatus != Status.Link.Up)
-            return false;
-
-        // poll to see if the socket is actually alive...
-
-        // TODO: does this actually work?! and do we really even want this?
-        ubyte[1] buffer;
-        size_t bytesReceived;
-        Result r = recv(socket, null, MsgFlags.Peek, &bytesReceived);
-        if (r == Result.Success)
-            return true;
-        SocketResult sr = r.get_SocketResult;
-        if (sr == SocketResult.WouldBlock)
-            return true;
-
-        // something happened... we should try and reconnect I guess?
-        closeLink();
-
-        return false;
-    }
-
     override const(char)[] remoteName()
     {
         return tstring(remote);

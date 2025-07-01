@@ -70,11 +70,6 @@ nothrow @nogc:
 //		}
 	}
 
-	override bool connected() nothrow @nogc
-	{
-		return true;
-	}
-
 	override const(char)[] remoteName()
 	{
 		return remoteHost[];
