@@ -92,7 +92,7 @@ package:
     final void vlan_incoming(ref Packet packet)
     {
         assert((packet.vlan & 0xFFF) == _vlan, "received packet for wrong vlan!");
-        packet.vlan &= 0xF000; // should we chear the p-bits too?
+        packet.vlan &= 0xF000; // should we clear the p-bits too?
         dispatch(packet);
     }
 

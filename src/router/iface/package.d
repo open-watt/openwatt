@@ -22,6 +22,7 @@ public import router.status;
 // package modules...
 public static import router.iface.bridge;
 public static import router.iface.can;
+public static import router.iface.ethernet;
 public static import router.iface.modbus;
 public static import router.iface.tesla;
 public static import router.iface.vlan;
@@ -441,6 +442,11 @@ nothrow @nogc:
 
         g_app.console.registerCollection("/interface/vlan", vlan_interfaces);
         g_app.console.registerCommand!print("/interface", this);
+    }
+
+    override void update()
+    {
+        vlan_interfaces.update_all();
     }
 
     final String addInterfaceName(Session session, const(char)[] name, const(char)[] defaultNamePrefix)

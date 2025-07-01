@@ -50,15 +50,24 @@ enum OW_SubType : ushort
 struct Packet
 {
 nothrow @nogc:
-    ref T init(T)(const(void)[] payload)
+    ref T init(T)(const(void)[] payload, SysTime create_time = getSysTime())
     {
         static assert(T.sizeof <= embed.length);
         assert(payload.length <= ushort.max, "Payload too large");
-        creationTime = getSysTime();
+        creationTime = create_time;
         type = T.Type;
-        ptr = payload.ptr;
-        length = cast(ushort)payload.length;
+        vlan = 0;
+        _flags = 0;
+        _offset = 0;
+        _length = cast(ushort)payload.length;
+        _ptr = payload.ptr;
         return *cast(T*)embed.ptr;
+    }
+    ref T init(T)(void[] payload, SysTime create_time = getSysTime())
+    {
+        ref T r = init!T(cast(const)payload, create_time);
+        _flags |= 0x01; // mutable
+        return r;
     }
 
     ref inout(T) hdr(T)() inout
@@ -69,21 +78,35 @@ nothrow @nogc:
     }
 
     const(void)[] data() const @property
-        => ptr[0 .. length];
+        => _ptr[_offset .. _length];
+
+    void* alloc_prefix(size_t bytes)
+    {
+        // check we have mutable header bytes
+        if (!(_flags & 0x01) || _offset < bytes)
+            return null;
+        _offset -= cast(ubyte)bytes;
+        return cast(void*)_ptr + _offset;
+    }
 
     void data(const(void[]) payload) @property
     {
         assert(payload.length <= ushort.max, "Payload too large");
-        ptr = payload.ptr;
-        length = cast(ushort)payload.length;
+        _ptr = payload.ptr;
+        _offset = 0;
+        _length = cast(ushort)payload.length;
     }
+
+    uint length() const
+        => _length - _offset;
 
     Packet* clone(NoGCAllocator allocator = defaultAllocator()) const
     {
         Packet* r = cast(Packet*)allocator.alloc(Packet.sizeof + length);
         *r = this;
-        r.ptr = &r[1];
-        cast(void[])r.ptr[0 .. length] = data[];
+        r._flags |= 0x01; // mutable
+        r._ptr = &r[1];
+        cast(void[])r._ptr[0 .. _length] = _ptr[0 .. _length];
         return r;
     }
 
@@ -94,11 +117,12 @@ nothrow @nogc:
     }
     PacketType type;
     ushort vlan;
-    ushort svlan;
 
 package:
-    ushort length;
-    const(void)* ptr;
+    ubyte _flags; // tag type, mutable alloc, etc...
+    ubyte _offset;
+    ushort _length;
+    const(void)* _ptr;
 }
 
 struct Ethernet
