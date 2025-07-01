@@ -13,9 +13,13 @@ public import router.stream;
 
 class UDPStream : Stream
 {
+nothrow @nogc:
+
+    alias TypeName = StringLit!"udp";
+
 	this(String name, ushort remotePort, const char[] remoteHost = "255.255.255.255", ushort localPort = 0, const char[] localHost = "0.0.0.0", StreamOptions options = StreamOptions.None)
 	{
-        super(name.move, "udp", options);
+        super(name.move, TypeName, options);
 
         // TODO: if remoteHost is a broadcast address and options doesn't have `AllowBroadcast`, make a warning...
 

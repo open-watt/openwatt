@@ -15,11 +15,13 @@ class BridgeStream : Stream
 {
 nothrow @nogc:
 
+    alias TypeName = StringLit!"bridge";
+
     this(String name, StreamOptions options, Stream[] streams...) nothrow @nogc
     {
         import urt.lifetime;
 
-        super(name.move, "bridge", options);
+        super(name.move, TypeName, options);
 
         this.m_streams = streams;
         this.m_remoteName.reserve(60);
@@ -162,27 +164,16 @@ nothrow @nogc:
 
 
     // TODO: source should be an array, and let the external code separate and validate the array args...
-    void add(Session session, const(char)[] name, const(char)[][] source)
+    void add(Session session, const(char)[] name, Stream[] source)
     {
         auto mod_stream = getModule!StreamModule;
 
         if (name.empty)
             name = mod_stream.generateStreamName("bridge");
 
-        // parse source streams...
-        // TODO: we need move semantics for embed buffers!
-//        Array!(Stream, 8) sourceStreams;
-        Array!Stream sourceStreams;
-        foreach (s; source)
-        {
-            Stream* stream = s in mod_stream.streams;
-            if (stream)
-                sourceStreams ~= *stream;
-        }
-
         String n = name.makeString(defaultAllocator());
 
-        BridgeStream stream = g_app.allocator.allocT!BridgeStream(n.move, StreamOptions.NonBlocking | StreamOptions.KeepAlive, sourceStreams[]);
+        BridgeStream stream = g_app.allocator.allocT!BridgeStream(n.move, StreamOptions.NonBlocking | StreamOptions.KeepAlive, source);
         mod_stream.addStream(stream);
     }
 }

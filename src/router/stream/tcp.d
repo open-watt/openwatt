@@ -20,9 +20,11 @@ class TCPStream : Stream
 {
 nothrow @nogc:
 
+    alias TypeName = StringLit!"tcp-client";
+
     this(String name, const(char)[] host, ushort port, StreamOptions options = StreamOptions.None)
     {
-        super(name.move, "tcp-client", options);
+        super(name.move, TypeName, options);
 
         AddressInfo addrInfo;
         addrInfo.family = AddressFamily.IPv4;
@@ -42,7 +44,7 @@ nothrow @nogc:
 
     this(String name, InetAddress address, StreamOptions options = StreamOptions.None)
     {
-        super(name.move, "tcp-client", options);
+        super(name.move, TypeName, options);
 
         remote = address;
         status.linkStatusChangeTime = getSysTime();

@@ -45,21 +45,12 @@ nothrow @nogc:
             client.update();
     }
 
-    void client_add(Session session, const(char)[] name, const(char)[] _interface, Nullable!bool snoop)
+    void client_add(Session session, const(char)[] name, BaseInterface _interface, Nullable!bool snoop)
     {
-        auto mod_if = getModule!InterfaceModule;
-
-        BaseInterface i = mod_if.findInterface(_interface);
-        if(i is null)
-        {
-            session.writeLine("Interface '", _interface, "' not found");
-            return;
-        }
-
         // TODO: generate name if not supplied
         String n = name.makeString(g_app.allocator);
 
-        ModbusClient client = g_app.allocator.allocT!ModbusClient(this, n.move, i, snoop ? snoop.value : false);
+        ModbusClient client = g_app.allocator.allocT!ModbusClient(this, n.move, _interface, snoop ? snoop.value : false);
         clients[client.name[]] = client;
     }
 

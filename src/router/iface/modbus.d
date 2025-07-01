@@ -96,9 +96,9 @@ nothrow @nogc:
     Map!(ubyte, ubyte) localToUni;
     Map!(ubyte, ubyte) uniToLocal;
 
-    this(InterfaceModule m, String name, Stream stream, ModbusProtocol protocol, bool isMaster) nothrow @nogc
+    this(String name, Stream stream, ModbusProtocol protocol, bool isMaster) nothrow @nogc
     {
-        super(m, name.move, TypeName);
+        super(name.move, TypeName);
         this.stream = stream;
         this.protocol = protocol;
         this.isBusMaster = isMaster;
@@ -184,7 +184,7 @@ nothrow @nogc:
         ptrdiff_t readOffset = tailBytes;
         ptrdiff_t length = tailBytes;
         tailBytes = 0;
-        read_loop: do
+        read_loop: while (true)
         {
             assert(length < 260);
 
@@ -254,7 +254,6 @@ nothrow @nogc:
             // we've eaten the whole buffer...
             length = 0;
         }
-        while (true);
     }
 
     protected override bool transmit(ref const Packet packet) nothrow @nogc
@@ -691,18 +690,8 @@ nothrow @nogc:
 
     // /interface/modbus/add command
     // TODO: protocol enum!
-    void add(Session session, const(char)[] name, const(char)[] stream, const(char)[] protocol, Nullable!bool master, Nullable!(const(char)[]) pcap)
+    void add(Session session, const(char)[] name, Stream stream, const(char)[] protocol, Nullable!bool master, Nullable!(const(char)[]) pcap)
     {
-        // is it an error to not specify a stream?
-        assert(stream, "'stream' must be specified");
-
-        Stream s = getModule!StreamModule.getStream(stream);
-        if (!s)
-        {
-            session.writeLine("Stream does not exist: ", stream);
-            return;
-        }
-
         ModbusProtocol p = ModbusProtocol.Unknown;
         switch (protocol)
         {
@@ -721,7 +710,7 @@ nothrow @nogc:
         }
         if (p == ModbusProtocol.Unknown)
         {
-            if (s && s.type == "tcp-client") // TODO: UDP here too... but what is the type called?
+            if (stream.type == "tcp-client") // TODO: UDP here too... but what is the type called?
                 p = ModbusProtocol.TCP;
             else
                 p = ModbusProtocol.RTU;
@@ -732,7 +721,7 @@ nothrow @nogc:
         if (!n)
             return;
 
-        ModbusInterface iface = defaultAllocator.allocT!ModbusInterface(mod_if, n.move, s, p, master ? master.value : false);
+        ModbusInterface iface = defaultAllocator.allocT!ModbusInterface(n.move, stream, p, master ? master.value : false);
 
         mod_if.addInterface(session, iface, pcap ? pcap.value : null);
 

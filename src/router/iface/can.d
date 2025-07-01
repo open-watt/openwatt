@@ -47,9 +47,9 @@ nothrow @nogc:
 
     CANInterfaceProtocol protocol;
 
-    this(InterfaceModule m, String name, Stream stream, CANInterfaceProtocol protocol) nothrow @nogc
+    this(String name, Stream stream, CANInterfaceProtocol protocol) nothrow @nogc
     {
-        super(m, name.move, TypeName);
+        super(name.move, TypeName);
         this.stream = stream;
         this.protocol = protocol;
 
@@ -299,18 +299,8 @@ nothrow @nogc:
 
     // /interface/can/add command
     // TODO: protocol enum!
-    void add(Session session, const(char)[] name, const(char)[] stream, const(char)[] protocol, Nullable!(const(char)[]) pcap)
+    void add(Session session, const(char)[] name, Stream stream, const(char)[] protocol, Nullable!(const(char)[]) pcap)
     {
-        // is it an error to not specify a stream?
-        assert(stream, "'stream' must be specified");
-
-        Stream s = getModule!StreamModule.getStream(stream);
-        if (!s)
-        {
-            session.writeLine("Stream does not exist: ", stream);
-            return;
-        }
-
         CANInterfaceProtocol p = CANInterfaceProtocol.Unknown;
         switch (protocol)
         {
@@ -327,7 +317,7 @@ nothrow @nogc:
         if (!n)
             return;
 
-        CANInterface iface = defaultAllocator.allocT!CANInterface(mod_if, n.move, s, p);
+        CANInterface iface = defaultAllocator.allocT!CANInterface(n.move, stream, p);
 
         mod_if.addInterface(session, iface, pcap ? pcap.value : null);
     }

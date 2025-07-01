@@ -38,9 +38,9 @@ nothrow @nogc:
 
     Stream stream;
 
-    this(InterfaceModule m, String name, Stream stream) nothrow @nogc
+    this(String name, Stream stream) nothrow @nogc
     {
-        super(m, name, TypeName);
+        super(name, TypeName);
         this.stream = stream;
     }
 
@@ -228,21 +228,14 @@ nothrow @nogc:
         g_app.console.registerCommand!add("/interface/tesla-twc", this);
     }
 
-    void add(Session session, const(char)[] name, const(char)[] stream, Nullable!(const(char)[]) pcap)
+    void add(Session session, const(char)[] name, Stream stream, Nullable!(const(char)[]) pcap)
     {
-        Stream s = getModule!StreamModule.getStream(stream);
-        if (!s)
-        {
-            session.writeLine("Stream does not exist: ", stream);
-            return;
-        }
-
         auto mod_if = getModule!InterfaceModule;
         String n = mod_if.addInterfaceName(session, name, TeslaInterface.TypeName);
         if (!n)
             return;
 
-        TeslaInterface iface = defaultAllocator.allocT!TeslaInterface(mod_if, n.move, s);
+        TeslaInterface iface = defaultAllocator.allocT!TeslaInterface(n.move, stream);
 
         mod_if.addInterface(session, iface, pcap ? pcap.value : null);
 
