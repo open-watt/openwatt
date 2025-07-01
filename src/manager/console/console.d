@@ -7,6 +7,7 @@ import urt.string;
 import urt.string.format;
 import urt.util;
 
+import manager.collection;
 import manager.console.builtin_commands;
 import manager.console.command;
 import manager.console.function_command;
@@ -224,6 +225,14 @@ nothrow @nogc:
 //        static assert(is(Fun : R function(Session, A) nothrow @nogc, R, A...), typeof(method).stringof ~ " must be nothrow @nogc!");
 
         return registerCommand(_scope, FunctionCommand.create!method(this, instance, commandName));
+    }
+
+    void registerCollection(const(char)[] _scope, ref BaseCollection collection)
+    {
+        import manager.console.collection_commands;
+
+        Scope s = createScope(_scope);
+        s.addCollectionCommands(collection);
     }
 
 
