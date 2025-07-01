@@ -124,6 +124,15 @@
     <Filter Include="third_party\urt\range">
       <UniqueIdentifier>{fda610db-eacb-4a07-80cb-fffc185f2c9a}</UniqueIdentifier>
     </Filter>
+    <Filter Include="third_party\npcap-sdk-1.15">
+      <UniqueIdentifier>{4f3f0359-c743-426b-8fb4-fd5688b46048}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\npcap-sdk-1.15\Include">
+      <UniqueIdentifier>{b5679a3b-9b6f-4986-83aa-cfba3339dac9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\npcap-sdk-1.15\Include\pcap">
+      <UniqueIdentifier>{daf01d7a-6123-44e3-93b8-e1fda0fd67fe}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\router\modbus\profile\solaredge_meter.d">
@@ -335,6 +344,9 @@
     </DCompile>
     <DCompile Include="src\protocol\zigbee\zcl.d">
       <Filter>src\protocol\zigbee</Filter>
+    </DCompile>
+    <DCompile Include="src\router\iface\ethernet.d">
+      <Filter>src\router\iface</Filter>
     </DCompile>
     <DCompile Include="src\router\iface\zigbee.d">
       <Filter>src\router\iface</Filter>
@@ -638,5 +650,70 @@
       <Filter>conf\rest_profiles</Filter>
     </None>
     <None Include="Makefile" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\npcap-bpf.h">
+      <Filter>third_party\npcap-sdk-1.15\Include</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\npcap-defs.h">
+      <Filter>third_party\npcap-sdk-1.15\Include</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\Packet32.h">
+      <Filter>third_party\npcap-sdk-1.15\Include</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap.h">
+      <Filter>third_party\npcap-sdk-1.15\Include</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap-bpf.h">
+      <Filter>third_party\npcap-sdk-1.15\Include</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap-namedb.h">
+      <Filter>third_party\npcap-sdk-1.15\Include</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\bluetooth.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\bpf.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\can_socketcan.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\compiler-tests.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\dlt.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\funcattrs.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\ipnet.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\namedb.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\nflog.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\pcap.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\pcap-inttypes.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\sll.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\socket.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\usb.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\vlan.h">
+      <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

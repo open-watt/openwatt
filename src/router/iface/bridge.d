@@ -230,51 +230,58 @@ protected:
 
         ubyte src_port = cast(ubyte)child_id;
         ref const BridgePort port = _members[src_port];
+        ushort src_vlan = 0;
 
         // check for link-local frames (bridges must not forward link-local frames)
         if (packet.eth.dst.is_link_local && packet.type == PacketType.Ethernet)
         {
             // STP/LACP/EAPOL/LLDP... should we support these?
-            // TODO...
-            return;
+            debug assert(false, "TODO?");
+            goto drop_packet;
         }
 
-        ushort src_vlan = 0;
         if (_vlan_filtering)
         {
             // check and strip vlan tag...
             if (packet.type == PacketType.Ethernet && packet.eth.ether_type == EtherType.VLAN)
             {
                 if (packet.data.length < 4)
-                    return;
+                    goto drop_packet;
 
-                auto data = cast(const(ubyte)*)packet.data.ptr;
-                src_vlan = data[0..2].bigEndianToNative!ushort;
+                // strip the vlan tag
+                auto tag = cast(const(ushort)*)packet.data.ptr;
+                src_vlan = loadBigEndian(tag++);
+                packet.eth.ether_type = loadBigEndian(tag);
+                packet._offset += 4;
+
                 if ((src_vlan & 0x0FFF) == 0)
+                {
+                    // vlan 0 adopts PVID
                     src_vlan = (src_vlan & 0xF000) | port.pvid;
+                }
                 else if (port.ingress_filtering)
                 {
                     // TODO: check if port is a member of tag_vlan...
                     assert(false, "TODO");
                 }
 
-                packet.eth.ether_type = data[2..4].bigEndianToNative!ushort;
                 if (packet.eth.ether_type == EtherType.OW)
                 {
-                    if (packet.data.length < 6)
-                        return;
-                    packet.eth.ow_sub_type = data[4..6].bigEndianToNative!ushort;
-                    packet.data = packet.data[6..$];
+                    if (packet.data.length < 2)
+                        goto drop_packet;
+                    packet.eth.ow_sub_type = loadBigEndian(++tag);
+                    packet._offset += 2;
                 }
-                else
-                    packet.data = packet.data[4..$];
             }
             else
+            {
+                // untagged packets adopt PVID
                 src_vlan = port.pvid;
+            }
 
-            // port is configured to drop untagged frames...
+            // port was configured to drop untagged frames (PVID = 0)
             if (src_vlan == 0)
-                return;
+                goto drop_packet;
             packet.vlan = src_vlan;
         }
 
@@ -315,12 +322,20 @@ protected:
         else
         {
             // check if the dest mac matches any of our vlan interfaces...
+            // TODO: this loop is horrible; we should make this better!
+            //       maybe keep a list of vlan interfaces where the MAC was overridden (not equal to bridge MAC)?
             foreach (vlan; _vlans)
             {
-                if (packet.vlan == vlan.key)
+                if (packet.eth.dst == vlan.value.mac)
                 {
-                    vlan.value.vlan_incoming(packet);
-                    return;
+                    if (packet.vlan == vlan.key)
+                    {
+                        vlan.value.vlan_incoming(packet);
+                        return;
+                    }
+                    // destined for a vlan, but wrong tag!
+                    debug assert(false, "TODO: try and repro this case; or see if we ever catch one in the wild...");
+                    goto drop_packet;
                 }
             }
 
@@ -338,6 +353,10 @@ protected:
                     writeDebug(name, ": broadcast: ", packet.eth.src, " -> * [", packet.data, "]");
             }
         }
+        return;
+
+    drop_packet:
+        ++_status.recvDropped;
     }
 
     void send(ref Packet packet, int src_port = -1) nothrow @nogc
