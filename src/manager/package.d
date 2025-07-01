@@ -113,20 +113,16 @@ nothrow @nogc:
 
     Device findDevice(const(char)[] deviceId) pure
     {
-        foreach (id, device; devices)
-            if (id[] == deviceId[])
-                return device;
+        if (Device* d = deviceId[] in devices)
+            return *d;
         return null;
     }
 
     Component findComponent(const(char)[] name) pure
     {
         const(char)[] deviceName = name.split!'.';
-        foreach (id, device; devices)
-        {
-            if (id[] == deviceName[])
-                return name.empty ? device : device.findComponent(name);
-        }
+        if (Device* d = deviceName[] in devices)
+            return name.empty ? *d : (*d).findComponent(name);
         return null;
     }
 
@@ -145,7 +141,7 @@ nothrow @nogc:
         // processing should happen in a processing thread which waits on a semaphore for jobs in a queue (submit from comms threads?)
 //        foreach (server; servers)
 //            server.poll();
-        foreach (device; devices)
+        foreach (device; devices.values)
             device.update();
 
         foreach (m; modules)
@@ -172,7 +168,7 @@ nothrow @nogc:
         }
 
         const(char)[] newLine = "";
-        foreach (dev; devices)
+        foreach (dev; devices.values)
         {
             session.writeLine(newLine, dev.id, ": ", dev.name);
             newLine = "\n";

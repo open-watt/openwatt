@@ -37,7 +37,7 @@ nothrow @nogc:
 
     override void update()
     {
-        foreach(_, m; twcMasters)
+        foreach(m; twcMasters.values)
             m.update();
     }
 
@@ -53,7 +53,7 @@ nothrow @nogc:
         }
 
         TeslaTWCMaster master;
-        foreach (_, m; twcMasters)
+        foreach (m; twcMasters.values)
         {
             if (m.iface is i)
             {
@@ -78,7 +78,7 @@ nothrow @nogc:
     {
         auto mod_if = getModule!TeslaInterfaceModule;
 
-        foreach (_, m; twcMasters)
+        foreach (m; twcMasters.values)
         {
             if (m.setTargetCurrent(name, cast(ushort)(target_current * 100)) >= 0)
                 return;

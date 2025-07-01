@@ -173,7 +173,7 @@ nothrow @nogc:
         // TODO: polling is super lame! data connections should be in threads and receive data immediately
         // blocking read's in threads, or a select() loop...
 
-        foreach (stream; streams)
+        foreach (stream; streams.values)
             stream.update();
     }
 
@@ -204,7 +204,7 @@ nothrow @nogc:
 
     final Stream findStream(const(char)[] name)
     {
-        foreach (s; streams)
+        foreach (s; streams.values)
             if (s.name[] == name[])
                 return s;
         return null;

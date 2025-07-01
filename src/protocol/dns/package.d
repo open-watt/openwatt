@@ -32,7 +32,7 @@ nothrow @nogc:
 
     override void update()
     {
-        foreach(name, server; servers)
+        foreach(server; servers.values)
             server.update();
     }
 

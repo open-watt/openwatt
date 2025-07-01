@@ -259,7 +259,7 @@ nothrow @nogc:
             if (vin.length > 0)
             {
                 // find a car with this VIN among our appliances...
-                foreach (a; manager.appliances)
+                foreach (a; manager.appliances.values)
                 {
                     if (a.type != "car")
                         continue;

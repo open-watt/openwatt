@@ -276,7 +276,7 @@ nothrow @nogc:
 
     override void update()
     {
-        foreach (i; interfaces)
+        foreach (i; interfaces.values)
             i.update();
     }
 
@@ -336,7 +336,7 @@ nothrow @nogc:
 
     final BaseInterface findInterface(const(char)[] name)
     {
-        foreach (i; interfaces)
+        foreach (i; interfaces.values)
             if (i.name[] == name[])
                 return i;
         return null;
@@ -351,7 +351,7 @@ nothrow @nogc:
 
         size_t nameLen = 4;
         size_t typeLen = 4;
-        foreach (i, iface; interfaces)
+        foreach (iface; interfaces.values)
         {
             nameLen = max(nameLen, iface.name.length);
             typeLen = max(typeLen, iface.type.length);
@@ -369,7 +369,7 @@ nothrow @nogc:
             size_t rdLen = 7;
             size_t tdLen = 7;
 
-            foreach (i, iface; interfaces)
+            foreach (iface; interfaces.values)
             {
                 rxLen = max(rxLen, iface.status.recvBytes.formatInt(null));
                 txLen = max(txLen, iface.status.sendBytes.formatInt(null));
@@ -386,7 +386,7 @@ nothrow @nogc:
                             "RX-DROP", rdLen, "TX-DROP", tdLen);
 
             size_t i = 0;
-            foreach (iface; interfaces)
+            foreach (iface; interfaces.values)
             {
                 session.writef("{0, 3} {1}{2}  {3, -*4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
                                 i, iface.status.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ',
@@ -401,7 +401,7 @@ nothrow @nogc:
         {
             session.writef(" ID     {0, -*1}  {2, -*3}  MAC-ADDRESS\n", "NAME", nameLen, "TYPE", typeLen);
             size_t i = 0;
-            foreach (iface; interfaces)
+            foreach (iface; interfaces.values)
             {
                 session.writef("{0, 3} {6}{7}  {1, -*2}  {3, -*4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.status.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ');
                 ++i;

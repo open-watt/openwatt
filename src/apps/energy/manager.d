@@ -82,7 +82,7 @@ nothrow @nogc:
 
         Array!Appliance wantPower;
         float excessSolar = main.meterData.active[0] < 0 ? -main.meterData.active[0] : 0;
-        foreach (a; appliances)
+        foreach (a; appliances.values)
         {
             if (a.canControl)
             {
@@ -134,7 +134,7 @@ nothrow @nogc:
         }
 
         // update the appliances, this might commit the state changes from above
-        foreach (a; appliances)
+        foreach (a; appliances.values)
             a.update();
     }
 }

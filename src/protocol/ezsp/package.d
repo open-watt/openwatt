@@ -40,7 +40,7 @@ nothrow @nogc:
 
     override void update()
     {
-        foreach(name, client; clients)
+        foreach(client; clients.values)
             client.update();
     }
 

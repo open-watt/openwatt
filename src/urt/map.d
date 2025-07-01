@@ -41,8 +41,10 @@ struct AVLTree(K, V, alias Pred = DefCmp!K, Allocator = Mallocator)
 		clear();
 	}
 
-	size_t length() const nothrow => numNodes;
-	bool empty() const nothrow => numNodes == 0;
+    size_t length() const nothrow
+        => numNodes;
+    bool empty() const nothrow
+        => numNodes == 0;
 
 	void clear() nothrow
 	{
@@ -258,15 +260,11 @@ struct AVLTree(K, V, alias Pred = DefCmp!K, Allocator = Mallocator)
 		replace(key, forward!value);
 	}
 
-	inout(V)* opBinaryRight(string op : "in", _K)(ref const _K key) inout
-	{
-		return get(key);
-	}
+    inout(V)* opBinaryRight(string op : "in", _K)(ref const _K key) inout
+        => get(key);
 
-	bool exists(_K)(ref const _K key) const
-	{
-		return get(key) != null;
-	}
+    bool exists(_K)(ref const _K key) const
+        => get(key) != null;
 /+
 	AVLTree<K, V>& operator =(const AVLTree<K, V> &rh)
 	{
@@ -289,97 +287,18 @@ struct AVLTree(K, V, alias Pred = DefCmp!K, Allocator = Mallocator)
 	}
 +/
 
-	Iterator begin() nothrow
-	{
-		return Iterator(pRoot);
-	}
+    // TODO: why don't the const overloads work properly?
+    auto keys() const nothrow
+        => Range!(IterateBy.Keys, true)(pRoot);
+    auto values() nothrow
+        => Range!(IterateBy.Values)(pRoot);
+//    auto values() const nothrow
+//        => Range!(IterateBy.Values, true)(pRoot);
 
-	static Iterator end() nothrow
-	{
-		return Iterator();
-	}
-
-    int opApply(scope int delegate(ref const K k, ref V v) pure nothrow @nogc dg) pure nothrow
-    {
-        for (Iterator i = begin(); i != end(); ++i)
-        {
-            int r = dg(i.key, i.value);
-            if (r)
-                return r;
-        }
-        return 0;
-    }
-    int opApply(scope int delegate(ref const K k, ref V v) nothrow @nogc dg) nothrow
-    {
-        for (Iterator i = begin(); i != end(); ++i)
-        {
-            int r = dg(i.key, i.value);
-            if (r)
-                return r;
-        }
-        return 0;
-    }
-    int opApply(scope int delegate(ref const K k, ref V v) pure @nogc dg) pure
-    {
-        for (Iterator i = begin(); i != end(); ++i)
-        {
-            int r = dg(i.key, i.value);
-            if (r)
-                return r;
-        }
-        return 0;
-    }
-    int opApply(scope int delegate(ref const K k, ref V v) @nogc dg)
-    {
-        for (Iterator i = begin(); i != end(); ++i)
-        {
-            int r = dg(i.key, i.value);
-            if (r)
-                return r;
-        }
-        return 0;
-    }
-
-    int opApply(scope int delegate(ref V v) pure nothrow @nogc dg) pure nothrow
-    {
-        for (Iterator i = begin(); i != end(); ++i)
-        {
-            int r = dg(i.value);
-            if (r)
-                return r;
-        }
-        return 0;
-    }
-    int opApply(scope int delegate(ref V v) nothrow @nogc dg) nothrow
-    {
-        for (Iterator i = begin(); i != end(); ++i)
-        {
-            int r = dg(i.value);
-            if (r)
-                return r;
-        }
-        return 0;
-    }
-    int opApply(scope int delegate(ref V v) pure @nogc dg) pure
-    {
-        for (Iterator i = begin(); i != end(); ++i)
-        {
-            int r = dg(i.value);
-            if (r)
-                return r;
-        }
-        return 0;
-    }
-    int opApply(scope int delegate(ref V v) @nogc dg)
-    {
-        for (Iterator i = begin(); i != end(); ++i)
-        {
-            int r = dg(i.value);
-            if (r)
-                return r;
-        }
-        return 0;
-    }
+    auto opIndex() nothrow
+        => Range!(IterateBy.KVP)(pRoot);
+//    auto opIndex() const nothrow
+//        => Range!(IterateBy.KVP, true)(pRoot);
 
 private:
 nothrow:
@@ -667,130 +586,107 @@ nothrow:
 //	}
 
 public:
-	struct Iterator
-	{
-	nothrow @nogc:
-		this(Node* pRoot)
-		{
-			this.pRoot = pRoot;
+    enum IterateBy
+    {
+        Keys,
+        Values,
+        KVP
+    }
+    struct Range(IterateBy type, bool const_ = false)
+    {
+    nothrow @nogc:
+        import urt.array;
 
-			Node* pLeftMost = pRoot;
-			while (pLeftMost && pLeftMost.left)
-			{
-				stack = stack | (1 << depth);
-				depth = depth + 1;
-				pLeftMost = pLeftMost.left;
-			}
-		}
+        static if (const_)
+            alias PN = const(Node)*;
+        else
+            alias PN = Node*;
 
-		ref Iterator opUnary(string op : "++")()
-		{
-			iterateNext(pRoot, null, 0);
-			return this;
-		}
+        PN n;
+        Array!(PN) stack;
 
-        ref inout(V) opUnary(string op : "*")() inout
-            => value();
+        this(PN root)
+        {
+            if (root)
+            {
+                stack.reserve(root.height - 1);
+                n = getLeft(root);
+            }
+        }
 
-		bool opEqual(Iterator rhs) => pRoot == rhs.pRoot && data == rhs.data;
+        bool empty() const pure
+            => n is null;
 
-		ref const(K) key() const
-		{
-			auto node = getNode(stack, depth);
-			return node.kvp.key;
-		}
+        static if (type == IterateBy.Keys)
+        {
+            ref const(K) front() const pure
+                => n.kvp.key;
+        }
+        else
+        {
+            static if (const_)
+            {
+                ref auto front() const
+                {
+                    static if (type == IterateBy.Values)
+                        return n.kvp.value;
+                    else
+                    {
+                        struct KV
+                        {
+                            const PN n;
+                            ref const(K) key() @property const pure
+                                => n.kvp.key;
+                            ref const(V) value() @property const pure
+                                => n.kvp.value;
+                        }
+                        return KV(n);
+                    }
+                }
+            }
+            else
+            {
+                ref auto front()
+                {
+                    static if (type == IterateBy.Values)
+                        return n.kvp.value;
+                    else
+                    {
+                        struct KV
+                        {
+                            PN n;
+                            ref const(K) key() @property const pure
+                                => n.kvp.key;
+//                            ref const(V) value() @property const pure
+//                                => n.kvp.value;
+                            ref V value() @property pure
+                                => n.kvp.value;
+                        }
+                        return KV(n);
+                    }
+                }
+            }
+        }
 
-		ref inout(V) value() inout
-		{
-			auto node = getNode(stack, depth);
-			return node.kvp.value;
-		}
+        void popFront()
+        {
+            if (n.right)
+                n = getLeft(n.right);
+            else
+                n = !stack.empty ? stack.popBack() : null;
+        }
 
-//		KVPRef<const K, const V> operator*() const
-//		{
-//			return KVPRef<const K, const V>(key(), value());
-//		}
-//		KVPRef<const K, V> operator*()
-//		{
-//			return KVPRef<const K, V>(key(), value());
-//		}
-//		const V* operator.() const
-//		{
-//			return &value();
-//		}
-//		V* operator.()
-//		{
-//			return &value();
-//		}
-
-		inout(Node)* getNode(ulong s, ulong d) inout
-		{
-			inout(Node)* pNode = pRoot;
-			for (ulong i = 0; i < d; ++i)
-			{
-				if (s & (1 << i))
-					pNode = pNode.left;
-				else
-					pNode = pNode.right;
-			}
-			return pNode;
-		}
-
-	private:
-		bool iterateNext(Node* pNode, Node* pParent, ulong d)
-		{
-			if (d < depth)
-			{
-				Node* pNext = (stack & (1 << d)) ? pNode.left : pNode.right;
-				if (!iterateNext(pNext, pNode, d + 1))
-					return false;
-			}
-			else
-			{
-				if (pNode.right) // Left Most
-				{
-					depth = depth + 1;
-					const(Node)* pLeftMost = pNode.right;
-					while (pLeftMost.left)
-					{
-						stack = stack | (1 << depth);
-						depth = depth + 1;
-						pLeftMost = pLeftMost.left;
-					}
-					return false;
-				}
-			}
-
-			if (depth == 0)
-			{
-				pRoot = null;
-				data = 0;
-				return false;
-			}
-
-			depth = depth - 1;
-			stack = stack & ~(1 << depth);
-			if (pParent.right == pNode)
-				return true;
-
-			return false;
-		}
-
-		ubyte depth() const => data & 0xFF;
-		void depth(uint v)
-		{
-			data = (data & ~0xFF) | (v & 0xFF);
-		}
-
-		ulong stack() const => data >> 8;
-		void stack(ulong v)
-		{
-			data = (data & 0xFF) | (v << 8);
-		}
-
-		ulong data;
-		Node* pRoot;
-	}
+    private:
+        PN getLeft(PN node)
+        {
+            while (node.left)
+            {
+                stack ~= node;
+                node = node.left;
+            }
+            return node;
+        }
+    }
 }
 
 struct AVLTreeNode(K, V)
@@ -1017,10 +913,10 @@ unittest
         int count = 0;
 
         // Iterate key-value pairs
-        foreach (k, v; map)
+        foreach (kv; map)
         {
-            sumKeys += k;
-            sumValues += v;
+            sumKeys += kv.key;
+            sumValues += kv.value;
             count++;
         }
 
@@ -1031,7 +927,7 @@ unittest
         sumValues = 0;
         count = 0;
         // Iterate values only
-        foreach (v; map)
+        foreach (v; map.values)
         {
             sumValues += v;
             count++;
@@ -1041,7 +937,7 @@ unittest
 
         // Test stopping iteration
         count = 0;
-        foreach (k, v; map)
+        foreach (k; map.keys)
         {
             count++;
             if (k == 2)
@@ -1066,24 +962,9 @@ unittest
             // A direct Iterator test:
         }
 
-        auto it = map.begin();
-        assert(it.key == 1 && it.value == 10);
-        ++it;
-        assert(it.key == 2 && it.value == 20);
-        ++it;
-        assert(it.key == 3 && it.value == 30);
-        ++it;
-        assert(it.key == 4 && it.value == 40);
-        ++it;
-        assert(it == map.end());
-
         // Test empty map iteration
         TestAVLTree emptyMap;
-        auto emptyIt = emptyMap.begin();
-        assert(emptyIt == emptyMap.end());
-        int emptyCount = 0;
-        foreach(kvp; emptyMap) { emptyCount++; }
-        assert(emptyCount == 0);
+        assert(emptyMap[].empty);
     }
 
     // Test with string keys
@@ -1109,7 +990,7 @@ unittest
         assert(map["cherry"] == 3);
 
         int count = 0;
-        foreach (k, v; map)
+        foreach (kv; map)
         {
             count++;
         }
