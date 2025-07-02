@@ -131,6 +131,20 @@ nothrow @nogc:
         subscribers[numSubscribers++] = InterfaceSubscriber(filter, packetHandler, userData);
     }
 
+    void unsubscribe(InterfaceSubscriber.PacketHandler packetHandler)
+    {
+        foreach (i, ref sub; subscribers[0..numSubscribers])
+        {
+            if (sub.recvPacket is packetHandler)
+            {
+                // remove this subscriber
+                if (i < --numSubscribers)
+                    sub = subscribers[numSubscribers];
+                return;
+            }
+        }
+    }
+
     bool send(MACAddress dest, const(void)[] message, EtherType type, ENMS_SubType subType = ENMS_SubType.Unspecified)
     {
         Packet p = Packet(message);

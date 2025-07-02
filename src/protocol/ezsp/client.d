@@ -9,6 +9,8 @@ import urt.string;
 import urt.time;
 import urt.traits;
 
+import manager.base;
+
 import router.stream;
 
 import protocol.ezsp;
@@ -25,31 +27,54 @@ nothrow @nogc:
 //
 
 
-class EZSPClient
+class EZSPClient : BaseObject
 {
+    __gshared Property[2] Properties = [ Property.create!("stream", stream)(),
+                                         Property.create!("running", running)() ];
 nothrow @nogc:
 
-    String name;
+    enum TypeName = StringLit!"ezsp";
 
-    this(String name, Stream stream)
+    this(String name)
     {
-        this.ash = ASH(stream);
-        this.name = name.move;
+        super(collectionTypeInfo!EZSPClient, name.move);
+    }
 
+    // Properties...
+
+    final inout(Stream) stream() inout pure
+        => ash.stream;
+    final void stream(Stream stream)
+    {
+        // reset and rebuild ASH
+        this.ash = ASH(stream);
         ash.setPacketCallback(&incomingPacket);
     }
 
-    final bool isConnected()
-    {
-        return knownVersion && ash.isConnected();
-    }
+    final bool running() const pure
+        => knownVersion && ash.isConnected();
 
-    final void reset()
+
+    // API...
+
+    final override bool validate() const pure
+        => ash.stream !is null;
+
+    final override const(char)[] statusMessage() const pure
+        => running ? "Running" : super.statusMessage();
+
+    final override bool enable(bool enable)
     {
-        ash.reset();
-        knownVersion = 0;
-        requestedVersion = 0;
-        sequenceNumber = 0;
+        bool old = enabled;
+        enabled = enable;
+        if (!enable)
+        {
+            ash.reset();
+            knownVersion = 0;
+            requestedVersion = 0;
+            sequenceNumber = 0;
+        }
+        return old;
     }
 
     final void setMessageHandler(void delegate(ubyte sequence, ushort command, const(ubyte)[] message) nothrow @nogc callback)
@@ -97,6 +122,9 @@ nothrow @nogc:
 
         final bool sendCommand(Callback)(Callback responseHandler, RequestParams args, void* userData = null)
         {
+            if (!running)
+                return false;
+
             alias Args = Parameters!Callback;
             static assert (is(Args == ResponseParams) || is(Args == AliasSeq!(void*, ResponseParams)), "Callback must be a function with arguments matching " ~ EZSP_Command.stringof ~ ".Response, and optionally a `void* userData` argument in the first position.");
             enum HasUserData = Args.length > 0 && is(Args[0] == void*);
@@ -121,6 +149,9 @@ nothrow @nogc:
 
     final int sendMessage(ushort cmd, const(ubyte)[] data)
     {
+        if (!running)
+            return -1;
+
         ubyte[256] buffer = void;
         ubyte i = 0;
 
@@ -153,8 +184,11 @@ nothrow @nogc:
         return sequenceNumber++;
     }
 
-    final void update()
+    final override void update()
     {
+        if (!enabled || !validate())
+            return;
+
         ash.update();
 
         if (!knownVersion)
@@ -172,7 +206,7 @@ nothrow @nogc:
                     lastEvent = getTime();
                 }
                 else if (getTime() - lastEvent > 10.seconds)
-                    reset();
+                    restart();
             }
             return;
         }
@@ -200,6 +234,8 @@ private:
     enum PreferredVersion = 13;
 
     MonoTime lastEvent;
+
+    bool enabled = true;
 
     ubyte requestedVersion;
     ubyte knownVersion;

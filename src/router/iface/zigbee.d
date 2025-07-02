@@ -67,7 +67,7 @@ nothrow @nogc:
         // TODO: EZSP might not be the only hardware interface...
         assert(ezsp_client, "'ezsp_client' must be specified");
 
-        EZSPClient c = getModule!EZSPProtocolModule.getClient(ezsp_client);
+        EZSPClient c = getModule!EZSPProtocolModule.clients.get(ezsp_client);
         if (!c)
         {
             session.writeLine("EZSP client does not exist: ", ezsp_client);

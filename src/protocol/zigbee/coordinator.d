@@ -3,32 +3,56 @@ module protocol.zigbee.coordinator;
 import urt.lifetime;
 import urt.string;
 
+import manager.base;
+
 import router.iface;
 import router.iface.packet;
 
 nothrow @nogc:
 
 
-class ZigbeeCoordinator
+class ZigbeeCoordinator : BaseObject
 {
+    __gshared Property[1] Properties = [ Property.create!("interface", iface)() ];
 nothrow @nogc:
 
-    String name;
-    BaseInterface iface;
+    alias TypeName = StringLit!"zigbee-coordinator";
 
-    this(String name, BaseInterface _interface) nothrow @nogc
+    this(String name) nothrow @nogc
     {
-        this.name = name.move;
-        this.iface = _interface;
-
-        _interface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
+        super(collectionTypeInfo!ZigbeeCoordinator, name.move);
     }
 
-    void update()
+    // Properties...
+
+    inout(BaseInterface) iface() inout
+        => _interface;
+    void iface(BaseInterface value)
     {
+        if (_interface)
+            _interface.unsubscribe(&incomingPacket);
+        _interface = value;
+        if (_interface)
+            _interface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Zigbee));
+    }
+
+
+    // API...
+
+    final override bool validate() const pure
+    {
+        return _interface !is null;
+    }
+
+    final override bool enable(bool enable)
+    {
+        // TODO: this needs to enable/disable the coordinator...
+        return true;
     }
 
 private:
+    BaseInterface _interface;
+
     void incomingPacket(ref const Packet p, BaseInterface iface, PacketDirection dir, void* userData) nothrow @nogc
     {
     }
