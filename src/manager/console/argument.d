@@ -294,7 +294,7 @@ const(char[]) convertVariant(S)(ref const Variant v, out S r) nothrow @nogc
     if (!v.isString)
         return "Invalid stream value";
     const(char)[] s = v.asString;
-    if (Stream stream = getModule!StreamModule.getStream(s))
+    if (Stream stream = getModule!StreamModule.streams.get(s))
     {
         r = cast(S)stream;
         static if (!is(Unqual!S == Stream))

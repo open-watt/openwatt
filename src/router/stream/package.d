@@ -11,6 +11,7 @@ import urt.string.format;
 import urt.time;
 
 import manager.base;
+import manager.collection;
 import manager.console;
 import manager.plugin;
 
@@ -48,6 +49,16 @@ abstract class Stream : BaseObject
 //    __gshared Property[1] Properties = [ Property.create!("running", running)() ];
 nothrow @nogc:
 
+    this(const CollectionTypeInfo* typeInfo, String name, StreamOptions options)
+    {
+        super(typeInfo, name.move);
+
+        assert(!getModule!StreamModule.streams.exists(this.name), "HOW DID THIS HAPPEN?");
+        getModule!StreamModule.streams.add(this);
+
+        this.options = options;
+    }
+
     this(String name, const(char)[] type, StreamOptions options)
     {
         super(name.move, type);
@@ -62,6 +73,15 @@ nothrow @nogc:
 
         setLogFile(null);
     }
+
+    static const(char)[] validateName(const(char)[] name)
+    {
+        import urt.mem.temp;
+        if (getModule!StreamModule.streams.exists(name))
+            return tconcat("Stream with name '", name[], "' already exists");
+        return null;
+    }
+
 
     // Properties...
 
@@ -189,16 +209,10 @@ class StreamModule : Module
     mixin DeclareModule!"stream";
 nothrow @nogc:
 
-    Map!(const(char)[], Stream) streams;
+    Collection!Stream streams;
 
     override void init()
     {
-    }
-
-    Stream getStream(const(char)[] name)
-    {
-        Stream* s = name in streams;
-        return s ? *s : null;
     }
 
     override void preUpdate()
@@ -206,41 +220,7 @@ nothrow @nogc:
         // TODO: polling is super lame! data connections should be in threads and receive data immediately
         // blocking read's in threads, or a select() loop...
 
-        foreach (stream; streams.values)
-            stream.update();
-    }
-
-    const(char)[] generateStreamName(const(char)[] prefix)
-    {
-        if (prefix !in streams)
-            return prefix;
-        for (size_t i = 0; i < ushort.max; i++)
-        {
-            const(char)[] name = tconcat(prefix, i);
-            if (name !in streams)
-                return name;
-        }
-        return null;
-    }
-
-    final void addStream(Stream stream)
-    {
-        assert(stream.name[] !in streams, "Stream already exists");
-        streams[stream.name[]] = stream;
-    }
-
-    final void removeStream(Stream stream)
-    {
-        assert(stream.name[] in streams, "Stream not found");
-        streams.remove(stream.name[]);
-    }
-
-    final Stream findStream(const(char)[] name)
-    {
-        foreach (s; streams.values)
-            if (s.name[] == name[])
-                return s;
-        return null;
+        streams.updateAll();
     }
 }
 

@@ -10,6 +10,7 @@ import urt.string;
 import urt.string.format;
 import urt.time;
 
+import manager.collection;
 import manager.console;
 import manager.plugin;
 
@@ -18,9 +19,17 @@ public import router.stream;
 
 class TCPStream : Stream
 {
+    __gshared Property[2] Properties = [ Property.create!("remote", remote)(),
+                                         Property.create!("port", port)() ];
 nothrow @nogc:
 
     alias TypeName = StringLit!"tcp-client";
+
+    this(String name)
+    {
+        writeDebug("TCP stream, name: ", name[]);
+        super(collectionTypeInfo!TCPStream, name.move, cast(StreamOptions)(StreamOptions.NonBlocking | StreamOptions.KeepAlive));
+    }
 
     this(String name, const(char)[] host, ushort port, StreamOptions options = StreamOptions.None)
     {
@@ -37,7 +46,7 @@ nothrow @nogc:
             // TODO: handle error case for no remote host...
             assert(0);
         }
-        remote = addrInfo.address;
+        _remote = addrInfo.address;
         _status.linkStatusChangeTime = getSysTime();
         update();
     }
@@ -46,13 +55,203 @@ nothrow @nogc:
     {
         super(name.move, TypeName, options);
 
-        remote = address;
+        _remote = address;
         _status.linkStatusChangeTime = getSysTime();
         update();
     }
 
-    override bool running() const pure
-        => status.linkStatus == Status.Link.Up;
+    ~this()
+    {
+        close_socket();
+    }
+
+
+    // Properties...
+    ref const(String) remote() const pure
+        => _host;
+    void remote(InetAddress value)
+    {
+        // apply explicit port if assigned
+        if (_port != 0)
+        {
+            if (value.family == AddressFamily.IPv4)
+                value._a.ipv4.port = _port;
+            else if (value.family == AddressFamily.IPv6)
+                value._a.ipv6.port = _port;
+        }
+
+        _host = null;
+        if (value == _remote)
+            return;
+        _remote = value;
+
+        restart();
+    }
+    const(char)[] remote(String value)
+    {
+        if (value.empty)
+            return "remote cannot be empty";
+        if (value == _host)
+            return null;
+
+        _host = value.move;
+        _remote = InetAddress();
+
+        restart();
+        return null;
+    }
+
+    ushort port() const pure
+        => _port;
+    void port(WellKnownPort value)
+        => port(cast(ushort)value);
+    void port(ushort value)
+    {
+        if (_port == value)
+            return;
+
+        _port = value;
+        if ((_remote.family == AddressFamily.IPv4 && _remote._a.ipv4.port == value) ||
+            (_remote.family == AddressFamily.IPv6 && _remote._a.ipv6.port == value))
+            return;
+
+        restart();
+    }
+
+
+    // API...
+
+    final override bool validate() const pure
+        => ((_remote != InetAddress()) ^^ !_host.empty) &&
+            ((_remote.family == AddressFamily.IPv4 && _remote._a.ipv4.port != 0) ||
+             (_remote.family == AddressFamily.IPv6 && _remote._a.ipv6.port != 0));
+
+    final override CompletionStatus startup()
+    {
+        // a reverse-connect socket will be handled by a companion TCPServer
+        // TODO...
+        if (options & StreamOptions.ReverseConnect)
+        {
+            assert(false);
+            return CompletionStatus.Continue;
+        }
+
+        if (_remote == InetAddress())
+        {
+            assert(_host, "No remote set for TCP stream!");
+
+            AddressInfo addrInfo;
+            addrInfo.family = AddressFamily.IPv4;
+            addrInfo.sockType = SocketType.Stream;
+            addrInfo.protocol = Protocol.TCP;
+            AddressInfoResolver results;
+            get_address_info(_host, _port ? _port.tstring : null, &addrInfo, results);
+            if (!results.next_address(addrInfo))
+                return CompletionStatus.Continue;
+
+            // apply explicit port if assigned
+            if (_port != 0)
+            {
+                if (addrInfo.address.family == AddressFamily.IPv4)
+                    addrInfo.address._a.ipv4.port = _port;
+                else if (addrInfo.address.family == AddressFamily.IPv6)
+                    addrInfo.address._a.ipv6.port = _port;
+            }
+
+            _remote = addrInfo.address;
+        }
+
+        // if the socket is invalid, we'll attempt to initiate a connection...
+        if (_socket == Socket.invalid)
+        {
+            // we don't want to spam connection attempts...
+            SysTime now = getSysTime();
+            if (now < lastRetry + seconds(5))
+                return CompletionStatus.Continue;
+            lastRetry = now;
+
+            Result r = create_socket(AddressFamily.IPv4, SocketType.Stream, Protocol.TCP, _socket);
+            if (!r)
+            {
+                debug writeWarning("create_socket() failed with error: ", r.get_SocketResult());
+                restart();
+                return CompletionStatus.Error;
+            }
+
+            set_socket_option(_socket, SocketOption.NonBlocking, true);
+            r = _socket.connect(_remote);
+            if (!r.succeeded && r.get_SocketResult != SocketResult.WouldBlock)
+            {
+                debug writeWarning("_socket.connect() failed with error: ", r.get_SocketResult());
+                restart();
+                return CompletionStatus.Error;
+            }
+        }
+
+        // the socket is valid, but not live (waiting for connect() to complete)
+        // we'll poll it to see if it connected...
+        PollFd fd;
+        fd.socket = _socket;
+        fd.requestEvents = PollEvents.Write;
+        uint numEvents;
+        Result r = poll(fd, Duration.zero, numEvents);
+        if (r.failed)
+        {
+            debug writeWarning("poll() failed with error: ", r.get_SocketResult);
+            restart();
+            return CompletionStatus.Error;
+        }
+
+        // no events returned, still waiting...
+        if (numEvents == 0)
+            return CompletionStatus.Continue;
+
+        // check error conditions
+        if (fd.returnEvents & (PollEvents.Error | PollEvents.HangUp | PollEvents.Invalid))
+        {
+            debug writeDebug("TCP stream connection failed: '", name, "' to ", remote);
+            restart();
+            return CompletionStatus.Error;
+        }
+
+        // this should be the only case left, we've successfully connected!
+        // let's just assert that the socket is writable to be sure...
+        assert(fd.returnEvents & PollEvents.Write);
+
+        if (keepEnable)
+            set_keepalive(_socket, keepEnable, keepIdle, keepInterval, keepCount);
+
+        writeInfo("TCP stream '", name, "' link established.");
+        return CompletionStatus.Complete;
+    }
+
+    final override CompletionStatus shutdown()
+    {
+        if (_host)
+            _remote = InetAddress();
+
+        close_socket();
+
+        if (_flags & ObjectFlags.Temporary)
+            destroy();
+
+        return CompletionStatus.Complete;
+    }
+
+    final override void update()
+    {
+        // poll to see if the socket is actually alive...
+
+        // TODO: does this actually work?! and do we really even want this?
+        ubyte[1] buffer;
+        size_t bytesReceived;
+        Result r = recv(_socket, null, MsgFlags.Peek, &bytesReceived);
+        if (r != Result.Success && r.get_SocketResult != SocketResult.WouldBlock)
+        {
+            // something happened... we should try and reconnect I guess?
+            restart();
+        }
+    }
 
     override bool connect()
     {
@@ -69,12 +268,7 @@ nothrow @nogc:
 //            reverseConnectServer = null;
 //        }
 
-        if (socket)
-        {
-//            if (socket.isAlive)
-            socket.shutdown(SocketShutdownMode.ReadWrite);
-            closeLink();
-        }
+        close_socket();
     }
 
     override const(char)[] remoteName()
@@ -93,8 +287,8 @@ nothrow @nogc:
         this.keepIdle = keepIdle;
         this.keepInterval = keepInterval;
         this.keepCount = keepCount;
-        if (socket)
-            set_keepalive(socket, enable, keepIdle, keepInterval, keepCount);
+        if (_socket)
+            set_keepalive(_socket, enable, keepIdle, keepInterval, keepCount);
     }
 
     override ptrdiff_t read(void[] buffer)
@@ -103,12 +297,12 @@ nothrow @nogc:
             return 0;
 
         size_t bytes = 0;
-        Result r = socket.recv(buffer, MsgFlags.None, &bytes);
+        Result r = _socket.recv(buffer, MsgFlags.None, &bytes);
         if (r != Result.Success)
         {
             SocketResult sr = r.get_SocketResult;
             if (sr != SocketResult.WouldBlock)
-                closeLink();
+                restart();
             return 0;
         }
         if (logging)
@@ -125,14 +319,13 @@ nothrow @nogc:
         if (running)
         {
             size_t bytes;
-            Result r = socket.send(data, MsgFlags.None, &bytes);
+            Result r = _socket.send(data, MsgFlags.None, &bytes);
             if (r != Result.Success)
             {
                 SocketResult sr = r.get_SocketResult;
                 if (sr == SocketResult.WouldBlock)
                     return 0;
-
-                closeLink();
+                restart();
             }
             else
             {
@@ -157,13 +350,13 @@ nothrow @nogc:
             return 0;
 
         size_t bytes;
-        Result r = socket.recv(null, MsgFlags.Peek, &bytes);
+        Result r = _socket.recv(null, MsgFlags.Peek, &bytes);
         assert(false, "TODO: not implemented...");
         if (r != Result.Success)
         {
 //            SocketResult sr = r.get_SocketResult;
-            socket.close();
-            socket = null;
+            _socket.close();
+            _socket = null;
         }
         return bytes;
     }
@@ -174,143 +367,11 @@ nothrow @nogc:
         assert(0);
     }
 
-    override void update()
-    {
-        if (status.linkStatus == Status.Link.Up)
-        {
-            // poll to see if the socket is actually alive...
-
-            // TODO: does this actually work?! and do we really even want this?
-            ubyte[1] buffer;
-            size_t bytesReceived;
-            Result r = recv(socket, null, MsgFlags.Peek, &bytesReceived);
-            if (r == Result.Success || r.get_SocketResult == SocketResult.WouldBlock)
-                _status.linkStatus = Status.Link.Up;
-            else
-            {
-                // something happened... we should try and reconnect I guess?
-                closeLink();
-
-                _status.linkStatus = Status.Link.Down;
-            }
-        }
-        if (_status.linkStatus == Status.Link.Up)
-            return;
-
-        // a reverse-connect socket will be handled by a companion TCPServer
-        // TODO...
-        if (options & StreamOptions.ReverseConnect)
-        {
-            assert(false);
-            return;
-        }
-
-        SysTime now = getSysTime();
-
-        // if the socket is invalid, we'll attempt to initiate a connection...
-        if (socket == Socket.invalid)
-        {
-            // we don't want to spam connection attempts...
-            if (now < lastRetry + seconds(5))
-                return;
-            lastRetry = now;
-
-            Result r = create_socket(AddressFamily.IPv4, SocketType.Stream, Protocol.TCP, socket);
-            if (!r)
-            {
-                socket = Socket.invalid;
-                debug writeWarning("create_socket() failed with error: ", r.get_SocketResult());
-            }
-
-            set_socket_option(socket, SocketOption.NonBlocking, true);
-            r = socket.connect(remote);
-            if (r.succeeded)
-            {
-                _status.linkStatus = Status.Link.Up;
-                return;
-            }
-            else
-            {
-                version (Windows)
-                {
-                    if (r.get_SocketResult == SocketResult.WouldBlock)
-                        return;
-                }
-                else version (Posix)
-                {
-                    if (r.get_SocketResult == SocketResult.InProgress)
-                        return;
-                }
-                else
-                    static assert(0, "Unsupported platform?");
-
-                // something went wrong with the call to connect; we'll destroy the socket and try again later
-                socket.close();
-                socket = Socket.invalid;
-
-                debug writeWarning("socket.connect() failed with error: ", r.get_SocketResult());
-            }
-        }
-        else
-        {
-            // the socket is valid, but not live (waiting for connect() to complete)
-            // we'll poll it to see if it connected...
-
-            PollFd fd;
-            fd.socket = socket;
-            fd.requestEvents = PollEvents.Write;
-            uint numEvents;
-            Result r = poll(fd, Duration.zero, numEvents);
-            if (r.failed)
-            {
-                debug writeWarning("poll() failed with error: ", r.get_SocketResult);
-                // TODO: destroy socket and start over?
-                return;
-            }
-
-            // no events returned, still waiting...
-            if (numEvents == 0)
-                return;
-
-            // check error conditions
-            if (fd.returnEvents & (PollEvents.Error | PollEvents.HangUp | PollEvents.Invalid))
-            {
-                socket.close();
-                socket = Socket.invalid;
-                debug writeDebug("TCP stream connection failed: '", name, "' to ", remote);
-                return;
-            }
-
-            // this should be the only case left, we've successfully connected!
-            // let's just assert that the socket is writable to be sure...
-            assert(fd.returnEvents & PollEvents.Write);
-
-            if (keepEnable)
-                set_keepalive(socket, keepEnable, keepIdle, keepInterval, keepCount);
-
-            _status.linkStatus = Status.Link.Up;
-            _status.linkStatusChangeTime = now;
-
-            writeInfo("TCP stream '", name, "' link established.");
-        }
-    }
-
-    void closeLink()
-    {
-        socket.close();
-        socket = Socket.invalid;
-        _status.linkStatus = Status.Link.Down;
-        _status.linkStatusChangeTime = getSysTime();
-        ++_status.linkDowns;
-
-        writeWarning("TCP stream '", name, "' link down.");
-    }
-
-
-    // TODO: this is a bug! uncomment this bad boy!!
-//private:
-    InetAddress remote;
-    Socket socket;
+private:
+    InetAddress _remote;
+    String _host;
+    ushort _port;
+    Socket _socket;
     SysTime lastRetry;
 //    TCPServer reverseConnectServer;
 
@@ -319,13 +380,27 @@ nothrow @nogc:
     Duration keepIdle;
     Duration keepInterval;
 
+    void close_socket()
+    {
+        if (_socket == Socket.invalid)
+            return;
+        if (_state == State.Stopping)
+            _socket.shutdown(SocketShutdownMode.ReadWrite);
+        _socket.close();
+        _socket = Socket.invalid;
+    }
+
+    // TODO: this is a bug! remove the public!!
+public:
     this(String name, Socket socket, ushort port)
     {
-        super(name.move, "tcp-client", StreamOptions.None);
-        socket.get_peer_name(remote);
+        this(name.move);
 
-        this.socket = socket;
-        _status.linkStatus = Status.Link.Up;
+        _state = State.Running;
+        _flags |= ObjectFlags.Dynamic | ObjectFlags.Temporary;
+
+        this._socket = socket;
+        socket.get_peer_name(_remote);
     }
 }
 
@@ -365,28 +440,28 @@ class TCPServer
         Result r = create_socket(AddressFamily.IPv4, SocketType.Stream, Protocol.TCP, serverSocket);
         if (r.failed)
         {
-            writeError("Error staring TCP server '", name , "':port ", port, " failed to create socket. Error ", r.systemCode, ".");
+            writeError("Error staring TCP server '", name , "': failed to create _socket. Error ", r.systemCode);
             return;
         }
 
         r = serverSocket.set_socket_option(SocketOption.NonBlocking, true);
         if (r.failed)
         {
-            writeError("Error staring TCP server '", name , "':port ", port, " set_socket_option failed.  Error ", r.systemCode, ".");
+            writeError("Error staring TCP server '", name , "': set_socket_option failed.  Error ", r.systemCode);
             return;
         }
 
         r = serverSocket.bind(InetAddress(IPAddr.any, port));
         if (r.failed)
         {
-            writeError("Error staring TCP server '", name , "':port ", port, " failed to bind socket.", r.systemCode, ".");
+            writeError("Error staring TCP server '", name , "': failed to bind port ", port, ". Error ", r.systemCode);
             return;
         }
 
         r = serverSocket.listen();
         if (r.failed)
         {
-            writeError("Error staring TCP server '", name , "':port ", port, " call to listen failed.", r.systemCode, ".");
+            writeError("Error staring TCP server '", name , "': listen failed. Error ", r.systemCode);
             return;
         }
 
@@ -413,6 +488,9 @@ class TCPServer
     // TODO: remove this, we should use threads instead of polling!
     void update()
     {
+        if (!isRunning)
+            return;
+
         Socket conn;
         InetAddress remoteAddr;
         Result r = serverSocket.accept(conn, &remoteAddr);
@@ -429,11 +507,14 @@ class TCPServer
         if (options & ServerOptions.JustOne)
             stop();
 
+        // prevent duplicate stream names...
+        String newName = getModule!StreamModule.streams.generateName(name).makeString(defaultAllocator());
+
 //        if (rawConnectionCallback)
 //            rawConnectionCallback(conn, userData);
 //        else if (connectionCallback)
         if (connectionCallback)
-            connectionCallback(defaultAllocator().allocT!TCPStream(name, conn, port), userData);
+            connectionCallback(defaultAllocator().allocT!TCPStream(newName.move, conn, port), userData);
     }
 
 private:
@@ -464,45 +545,10 @@ class TCPStreamModule : Module
     mixin DeclareModule!"stream.tcp";
 nothrow @nogc:
 
+    Collection!TCPStream tcpStreams;
+
     override void init()
     {
-        g_app.console.registerCommand!add("/stream/tcp-client", this);
-    }
-
-    void add(Session session, const(char)[] name, const(char)[] address, Nullable!int port)
-    {
-        auto mod_stream = getModule!StreamModule;
-
-        if (name.empty)
-            mod_stream.generateStreamName("tcp-stream");
-
-        const(char)[] portSuffix = address;
-        address = portSuffix.split!':';
-        size_t portNumber = 0;
-
-        if (port)
-        {
-            if (portSuffix)
-                return session.writeLine("Port specified twice");
-            portNumber = port.value;
-        }
-
-        size_t taken;
-        if (!port)
-        {
-            portNumber = cast(size_t)portSuffix.parseInt(&taken);
-            if (taken == 0)
-                return session.writeLine("Port must be numeric: ", portSuffix);
-        }
-        if (portNumber - 1 > ushort.max - 1)
-            return session.writeLine("Invalid port number (1-65535): ", portNumber);
-
-        String n = name.makeString(g_app.allocator);
-        String a = address.makeString(g_app.allocator);
-
-        TCPStream stream = g_app.allocator.allocT!TCPStream(n.move, a.move, cast(ushort)portNumber, cast(StreamOptions)(StreamOptions.NonBlocking | StreamOptions.KeepAlive));
-        mod_stream.addStream(stream);
-
-        writeInfof("Create TCP stream '{0}' - server: [{1}]:{2}", name, address, portNumber);
+        g_app.console.registerCollection("/stream/tcp-client", tcpStreams);
     }
 }

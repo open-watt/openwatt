@@ -405,7 +405,7 @@ nothrow @nogc:
         static if (EmbedUserType!T)
             return *cast(inout(T)*)embed.ptr;
         else
-            return *cast(inout(T)*)value.p;
+            return *cast(inout(T)*)ptr;
     }
     inout(T) asUser(T)() inout pure
         if (ValidUserType!T && !UserTypeReturnByRef!T)
@@ -413,7 +413,7 @@ nothrow @nogc:
         if (!isUser!T)
             assert(false, "Variant is not a " ~ T.stringof);
         static if (is(T == class))
-            return cast(inout(T))value.p;
+            return cast(inout(T))ptr;
         else static if (EmbedUserType!T)
             static assert(false, "TODO: memcpy to a stack local and return that...");
         else

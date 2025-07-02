@@ -487,6 +487,7 @@ nothrow @nogc:
 
     void removeSwapLast(size_t i)
     {
+        assert(i < _length, "Range error");
         static if (is(T == class) || is(T == interface))
         {
             ptr[i] = ptr[--_length];

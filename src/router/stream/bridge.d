@@ -170,11 +170,11 @@ nothrow @nogc:
         auto mod_stream = getModule!StreamModule;
 
         if (name.empty)
-            name = mod_stream.generateStreamName("bridge");
+            name = mod_stream.streams.generateName("bridge");
 
         String n = name.makeString(defaultAllocator());
 
         BridgeStream stream = g_app.allocator.allocT!BridgeStream(n.move, cast(StreamOptions)(StreamOptions.NonBlocking | StreamOptions.KeepAlive), source);
-        mod_stream.addStream(stream);
+        mod_stream.streams.add(stream);
     }
 }
