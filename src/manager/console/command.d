@@ -54,12 +54,6 @@ class Command
 {
 nothrow @nogc:
 
-    struct Argument
-    {
-        const(char)[] name;
-        Variant value;
-    }
-
     const String name;
 
     this(ref Console console, String name) nothrow @nogc
@@ -69,6 +63,7 @@ nothrow @nogc:
     }
 
     final Application app() pure nothrow @nogc => m_console.appInstance;
+    final ref Console console() pure nothrow @nogc => *m_console;
 
     abstract CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs);
 

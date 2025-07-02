@@ -12,7 +12,7 @@ import urt.variant;
 import manager;
 
 // these are used by the conversion functions...
-//import manager.base : BaseObject;
+import manager.base : BaseObject;
 import manager.component : Component;
 import manager.device : Device;
 import router.iface;
@@ -149,7 +149,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
     return null;
 }
 
-const(char[]) convertVariant(T)(ref const Variant v, out String r) nothrow @nogc
+const(char[]) convertVariant(ref const Variant v, out String r) nothrow @nogc
 {
     if (v.isString)
         r = v.asString.makeString(defaultAllocator);
@@ -237,8 +237,9 @@ const(char[]) convertVariant(T : Nullable!U, U)(ref const Variant v, out T r) no
 }
 
 const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
-    if (is(T == struct)) // TODO: remove this, use below!
 //    if (ValidUserType!T && !is(T : const(BaseObject)))
+    // TODO: DELETE THIS LINE, USE THE ONE ABOVE WHEN STREAM AND INTERFACE ARE MIGRATED TO COLLECTIONS...
+    if (ValidUserType!T && !is(T : const BaseObject) && !is(T : const Stream) && !is(T : const BaseInterface))
 {
     if (v.isUser!T)
         r = v.asUser!T;

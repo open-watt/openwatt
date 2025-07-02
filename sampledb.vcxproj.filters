@@ -573,6 +573,15 @@
     <DCompile Include="src\router\status.d">
       <Filter>src\router</Filter>
     </DCompile>
+    <DCompile Include="src\manager\base.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\collection_commands.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\collection.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />

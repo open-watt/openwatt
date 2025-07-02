@@ -11,6 +11,14 @@ import urt.traits;
 nothrow @nogc:
 
 
+enum ValidUserType(T) = (is(T == struct) || is(T == class)) &&
+                        !is(T == Variant) &&
+                        !is(T == VariantKVP) &&
+                        !is(T == Array!U, U) &&
+                        !is(T : const(char)[]) &&
+                        !is(T == Quantity!(T, U), T, alias U);
+
+
 alias VariantKVP = KVP!(const(char)[], Variant);
 
 
@@ -687,13 +695,6 @@ import urt.hash : fnv1aHash;
 
 static assert(Variant.sizeof == 16);
 static assert(Variant.Type.max <= Variant.Flags.TypeMask);
-
-enum ValidUserType(T) = (is(T == struct) || is(T == class)) &&
-                        !is(T == Variant) &&
-                        !is(T == VariantKVP) &&
-                        !is(T == Array!U, U) &&
-                        !is(T : const(char)[]) &&
-                        !is(T == Quantity!(T, U), T, alias U);
 
 enum uint UserTypeId(T) = fnv1aHash(cast(const(ubyte)[])T.stringof); // maybe this isn't a good enough hash?
 enum uint UserTypeShortId(T) = cast(ushort)UserTypeId!T ^ (UserTypeId!T >> 16);

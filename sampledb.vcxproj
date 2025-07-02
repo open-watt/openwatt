@@ -61,10 +61,13 @@
     <DCompile Include="src\db\stream.d" />
     <DCompile Include="src\devices\goodwe\scanner.d" />
     <DCompile Include="src\main.d" />
+    <DCompile Include="src\manager\base.d" />
+    <DCompile Include="src\manager\collection.d" />
     <DCompile Include="src\manager\component.d" />
     <DCompile Include="src\manager\config.d" />
     <DCompile Include="src\manager\console\argument.d" />
     <DCompile Include="src\manager\console\builtin_commands.d" />
+    <DCompile Include="src\manager\console\collection_commands.d" />
     <DCompile Include="src\manager\console\command.d" />
     <DCompile Include="src\manager\console\console.d" />
     <DCompile Include="src\manager\console\function_command.d" />
