@@ -108,7 +108,7 @@ nothrow @nogc:
     {
         lastUpdate = getTime();
 
-        foreach (ref InterfacePacketBuffer ib; packetBuffers)
+        foreach (ref InterfacePacketBuffer ib; packetBuffers.values)
         {
             if (ib.packetBuffer.empty)
                 continue;

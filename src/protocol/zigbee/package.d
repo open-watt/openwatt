@@ -42,10 +42,10 @@ nothrow @nogc:
 
     override void update()
     {
-        foreach(name, coordinator; coordinators)
+        foreach(coordinator; coordinators.values)
             coordinator.update();
 
-        foreach(name, client; clients)
+        foreach(client; clients.values)
             client.update();
     }
 

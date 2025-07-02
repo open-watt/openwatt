@@ -139,10 +139,10 @@ nothrow @nogc:
 
     override void update()
     {
-        foreach (server; servers)
+        foreach (server; servers.values)
             server.update();
 
-        foreach (client; clients)
+        foreach (client; clients.values)
             client.update();
     }
 

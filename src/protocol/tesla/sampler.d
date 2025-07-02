@@ -30,7 +30,7 @@ nothrow @nogc:
     {
         if (!master)
         {
-            outer: foreach (twc; tesla_mod.twcMasters)
+            outer: foreach (twc; tesla_mod.twcMasters.values)
             {
                 foreach (i, ref c; twc.chargers)
                 {

@@ -56,7 +56,7 @@ nothrow @nogc:
                 macTable.insert(mb.masterMac, port, vlan);
 
             auto mod_mb = getModule!ModbusInterfaceModule;
-            foreach (addr, ref map; mod_mb.remoteServers)
+            foreach (ref map; mod_mb.remoteServers.values)
             {
                 if (map.iface is iface)
                     macTable.insert(map.mac, port, vlan);

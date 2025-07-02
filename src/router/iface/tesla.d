@@ -252,7 +252,7 @@ nothrow @nogc:
 
     DeviceMap* findServerByName(const(char)[] name)
     {
-        foreach (ref map; devices)
+        foreach (ref map; devices.values)
         {
             if (map.name[] == name[])
                 return &map;
@@ -262,7 +262,7 @@ nothrow @nogc:
 
     DeviceMap* findServerByMac(MACAddress mac)
     {
-        foreach (ref map; devices)
+        foreach (ref map; devices.values)
         {
             if (map.mac == mac)
                 return &map;

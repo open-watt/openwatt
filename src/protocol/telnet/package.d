@@ -33,7 +33,7 @@ nothrow @nogc:
 
     override void update()
     {
-        foreach (server; servers)
+        foreach (server; servers.values)
             server.update();
 
 //        for (auto i = servers.begin; i != servers.end; ++i)

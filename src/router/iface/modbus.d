@@ -612,7 +612,7 @@ nothrow @nogc:
 
     ServerMap* findServerByName(const(char)[] name)
     {
-        foreach (ref map; remoteServers)
+        foreach (ref map; remoteServers.values)
         {
             if (map.name[] == name)
                 return &map;
@@ -622,7 +622,7 @@ nothrow @nogc:
 
     ServerMap* findServerByMac(MACAddress mac)
     {
-        foreach (ref map; remoteServers)
+        foreach (ref map; remoteServers.values)
         {
             if (map.mac == mac)
                 return &map;
@@ -632,7 +632,7 @@ nothrow @nogc:
 
     ServerMap* findServerByLocalAddress(ubyte localAddress, BaseInterface iface)
     {
-        foreach (ref map; remoteServers)
+        foreach (ref map; remoteServers.values)
         {
             if (map.localAddress == localAddress && map.iface is iface)
                 return &map;
