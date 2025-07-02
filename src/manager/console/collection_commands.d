@@ -76,10 +76,6 @@ nothrow @nogc:
         BaseObject item = collection.create(name);
         collection.add(item);
 
-        // TODO: maybe something better? perhaps a virtual on the object which lets it supply a creation message?
-        //       how do we know what properties are relevant for the create logs?
-        writeInfo("Create ", item.type, " object: '", item.name, "'");
-
         // set all the properties
         foreach (ref arg; namedArgs)
         {
@@ -87,10 +83,14 @@ nothrow @nogc:
                 continue;
             if (item.set(arg.name, arg.value))
             {
-                // TODO: report error; and destroy object, or just report that the one property couldn't be set???
-                assert(false);
+                // TODO: should we destroy the object? ...or just report that the one property couldn't be set???
+                session.writeLine("Failed to set property '", arg.name, "' for object '", item.name, "': ", arg.value);
             }
         }
+
+        // TODO: maybe something better? perhaps a virtual on the object which lets it supply a creation message?
+        //       how do we know what properties are relevant for the create logs?
+        writeInfo("Create ", item.type, " object '", item.name, "'");
 
         return null;
     }

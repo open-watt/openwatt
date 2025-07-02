@@ -10,6 +10,7 @@ import urt.string;
 import urt.string.format;
 import urt.time;
 
+import manager.collection;
 import manager.console;
 import manager.plugin;
 
@@ -18,9 +19,16 @@ public import router.stream;
 
 class TCPStream : Stream
 {
+    __gshared Property[2] Properties = [ Property.create!("remote", remote)(),
+                                         Property.create!("port", port)() ];
 nothrow @nogc:
 
     alias TypeName = StringLit!"tcp-client";
+
+    this(String name)
+    {
+        super(collectionTypeInfo!TCPStream, name.move, cast(StreamOptions)(StreamOptions.NonBlocking | StreamOptions.KeepAlive));
+    }
 
     this(String name, const(char)[] host, ushort port, StreamOptions options = StreamOptions.None)
     {
@@ -37,7 +45,7 @@ nothrow @nogc:
             // TODO: handle error case for no remote host...
             assert(0);
         }
-        remote = addrInfo.address;
+        _remote = addrInfo.address;
         _status.linkStatusChangeTime = getSysTime();
         update();
     }
@@ -46,10 +54,137 @@ nothrow @nogc:
     {
         super(name.move, TypeName, options);
 
-        remote = address;
+        _remote = address;
         _status.linkStatusChangeTime = getSysTime();
         update();
     }
+
+
+    // Properties...
+    ref const(String) remote() const pure
+        => _host;
+    const(char)[] remote(InetAddress value)
+    {
+        // apply explicit port if assigned
+        if (_port != 0)
+        {
+            if (value.family == AddressFamily.IPv4)
+                value._a.ipv4.port = _port;
+            else if (value.family == AddressFamily.IPv6)
+                value._a.ipv6.port = _port;
+        }
+
+        if (value == _remote)
+            return null;
+
+        _remote = value;
+        _host = null;
+
+        if (socket)
+            closeLink();
+        return null;
+    }
+    const(char)[] remote(String value)
+    {
+        if (value == _host && (value || _remote == InetAddress()))
+            return null;
+
+        if (!value)
+        {
+            _host = null;
+            _remote = InetAddress(); // reset remote address
+            if (socket)
+                closeLink();
+            return null;
+        }
+
+        AddressInfo addrInfo;
+        addrInfo.family = AddressFamily.IPv4;
+        addrInfo.sockType = SocketType.Stream;
+        addrInfo.protocol = Protocol.TCP;
+        AddressInfoResolver results;
+        get_address_info(value, port ? port.tstring : null, &addrInfo, results);
+        if (!results.next_address(addrInfo))
+        {
+            _host = value.move;
+            _remote = InetAddress(); // reset remote address
+            // TODO: we couldn't resolve the address, but that's not necessarily an invalid input...
+            //       or do we return as in error here?
+            return null;
+        }
+
+        // apply explicit port if assigned
+        if (_port != 0)
+        {
+            if (addrInfo.address.family == AddressFamily.IPv4)
+                addrInfo.address._a.ipv4.port = _port;
+            else if (addrInfo.address.family == AddressFamily.IPv6)
+                addrInfo.address._a.ipv6.port = _port;
+        }
+
+        _host = value.move;
+
+        if (addrInfo.address == _remote)
+            return null;
+
+        _remote = addrInfo.address;
+
+        if (socket)
+            closeLink();
+        return null;
+    }
+
+    ushort port() const pure
+        => _port;
+    void port(WellKnownPort value)
+        => port(cast(ushort)value);
+    void port(ushort value)
+    {
+        if (_port == value)
+            return;
+
+        _port = value;
+        if ((_remote.family == AddressFamily.IPv4 && _remote._a.ipv4.port == value) ||
+            (_remote.family == AddressFamily.IPv6 && _remote._a.ipv6.port == value))
+            return;
+
+        // apply the explicit port
+        if (_remote.family == AddressFamily.IPv4)
+            _remote._a.ipv4.port = value;
+        else if (_remote.family == AddressFamily.IPv6)
+            _remote._a.ipv6.port = value;
+
+        // port changed; reset the stream
+        if (socket)
+            closeLink();
+    }
+
+
+    // API...
+
+    final override bool validate() const pure
+        => _remote != InetAddress() &&
+            ((_remote.family == AddressFamily.IPv4 && _remote._a.ipv4.port != 0) ||
+             (_remote.family == AddressFamily.IPv6 && _remote._a.ipv6.port != 0));
+
+    final override bool enable(bool enable)
+    {
+        bool old = _enabled;
+        if (_enabled != enable)
+        {
+            _enabled = enable;
+            if (!enable)
+            {
+                if (socket)
+                {
+                    socket.shutdown(SocketShutdownMode.ReadWrite);
+                    closeLink();
+                }
+            }
+        }
+        return old;
+    }
+
 
     override bool connect()
     {
@@ -173,6 +308,9 @@ nothrow @nogc:
 
     override void update()
     {
+        if (!_enabled || !validate())
+            return;
+
         if (status.linkStatus == Status.Link.Up)
         {
             // poll to see if the socket is actually alive...
@@ -187,8 +325,6 @@ nothrow @nogc:
             {
                 // something happened... we should try and reconnect I guess?
                 closeLink();
-
-                _status.linkStatus = Status.Link.Down;
             }
         }
         if (_status.linkStatus == Status.Link.Up)
@@ -220,7 +356,7 @@ nothrow @nogc:
             }
 
             set_socket_option(socket, SocketOption.NonBlocking, true);
-            r = socket.connect(remote);
+            r = socket.connect(_remote);
             if (r.succeeded)
             {
                 _status.linkStatus = Status.Link.Up;
@@ -306,7 +442,10 @@ nothrow @nogc:
 
     // TODO: this is a bug! uncomment this bad boy!!
 //private:
-    InetAddress remote;
+    InetAddress _remote;
+    String _host;
+    ushort _port;
+    bool _enabled;
     Socket socket;
     SysTime lastRetry;
 //    TCPServer reverseConnectServer;
@@ -319,7 +458,7 @@ nothrow @nogc:
     this(String name, Socket socket, ushort port)
     {
         super(name.move, "tcp-client", StreamOptions.None);
-        socket.get_peer_name(remote);
+        socket.get_peer_name(_remote);
 
         this.socket = socket;
         _status.linkStatus = Status.Link.Up;
@@ -461,45 +600,10 @@ class TCPStreamModule : Module
     mixin DeclareModule!"stream.tcp";
 nothrow @nogc:
 
+    Collection!TCPStream tcpStreams;
+
     override void init()
     {
-        g_app.console.registerCommand!add("/stream/tcp-client", this);
-    }
-
-    void add(Session session, const(char)[] name, const(char)[] address, Nullable!int port)
-    {
-        auto mod_stream = getModule!StreamModule;
-
-        if (name.empty)
-            mod_stream.generateStreamName("tcp-stream");
-
-        const(char)[] portSuffix = address;
-        address = portSuffix.split!':';
-        size_t portNumber = 0;
-
-        if (port)
-        {
-            if (portSuffix)
-                return session.writeLine("Port specified twice");
-            portNumber = port.value;
-        }
-
-        size_t taken;
-        if (!port)
-        {
-            portNumber = cast(size_t)portSuffix.parseInt(&taken);
-            if (taken == 0)
-                return session.writeLine("Port must be numeric: ", portSuffix);
-        }
-        if (portNumber - 1 > ushort.max - 1)
-            return session.writeLine("Invalid port number (1-65535): ", portNumber);
-
-        String n = name.makeString(g_app.allocator);
-        String a = address.makeString(g_app.allocator);
-
-        TCPStream stream = g_app.allocator.allocT!TCPStream(n.move, a.move, cast(ushort)portNumber, cast(StreamOptions)(StreamOptions.NonBlocking | StreamOptions.KeepAlive));
-        mod_stream.addStream(stream);
-
-        writeInfof("Create TCP stream '{0}' - server: [{1}]:{2}", name, address, portNumber);
+        g_app.console.registerCollection("/stream/tcp-client", tcpStreams);
     }
 }

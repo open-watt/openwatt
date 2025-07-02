@@ -8,6 +8,9 @@ import urt.mem.string;
 import urt.mem.temp;
 import urt.variant;
 import urt.string;
+import urt.traits : Parameters, ReturnType;
+
+import manager.console.argument;
 
 public import manager.collection : collectionTypeInfo, CollectionTypeInfo;
 
@@ -36,55 +39,26 @@ struct Property
 
     static Property create(string name, alias member)()
     {
-        import manager.console.argument;
-
-        enum Member = __traits(identifier, member);
-
         alias Type = __traits(parent, member);
         static assert(is(Type : BaseObject), "Type must be a subclass of BaseObject");
 
         Property prop;
         prop.name = StringLit!name;
 
-        static foreach (i; 0 .. __traits(getOverloads, Type, Member).length)
-        {{
-            alias Fun = typeof(&__traits(getOverloads, Type, Member)[i]);
-            static if (is(Fun == R function(Args) nothrow @nogc, R, Args...))
-            {
-                static if (Args.length == 0)
-                {
-                    prop.get = (BaseObject item) {
-                        Type instance = cast(Type)item;
-                        auto r = __traits(getOverloads, instance, Member)[i]();
-                        assert(false, "TODO: convert to Variant...");
-                        return Variant(/+...+/);
-                    };
-                }
-                else static if (Args.length == 1)
-                {
-                    prop.set = (ref const Variant value, BaseObject item) {
-                        Type instance = cast(Type)item;
-                        Args[0] arg;
-                        if (const(char)[] error = convertVariant(value, arg))
-                            return error;
-                        static if (is(R == void))
-                        {
-                            __traits(getOverloads, instance, Member)[i](arg);
-                            return null;
-                        }
-                        else
-                            return __traits(getOverloads, instance, Member)[i](arg);
-                    };
+        // synthesise getter
+        alias Getters = FilterOverloads!(IsGetter, member);
+        static if (Getters.length > 0)
+            prop.get = &SynthGetter!Getters;
 
-                    static if (is(typeof(suggestCompletion!(Args[0]))))
-                        prop.suggest = &suggestCompletion!(Args[0]);
-                }
-                else
-                {
-                    static assert(false, "it's something else! - ", Fun.stringof);
-                }
-            }
-        }}
+        // synthesise setter
+        alias Setters = FilterOverloads!(IsSetter, member);
+        static if (Setters.length > 0)
+            prop.set = &SynthSetter!Setters;
+
+        // synthesise setter
+        alias Suggests = FilterOverloads!(HasSuggest, member);
+        static if (Suggests.length > 0)
+            prop.suggest = &SynthSuggest!Suggests;
 
         return prop;
     }
@@ -305,4 +279,110 @@ auto allPropertiesImpl(Type, size_t allocCount)()
     static foreach (i; 0 .. PropCount)
         result[result.length - allocCount - PropCount + i] = &Type.Properties[i];
     return result;
+}
+
+template FilterOverloads(alias Filter, alias Symbol)
+{
+    import urt.meta : AliasSeq;
+    alias Parent = __traits(parent, Symbol);
+    enum string Identifier = __traits(identifier, Symbol);
+
+    alias FilterOverloads = AliasSeq!();
+    static foreach (Overload; __traits(getOverloads, Parent, Identifier))
+        static if (Filter!Overload)
+            FilterOverloads = AliasSeq!(FilterOverloads, Overload);
+}
+
+template IsGetter(alias Func)
+{
+    static if (is(typeof(&Func) == R function(Args) nothrow @nogc, R, Args...))
+        enum IsGetter = Args.length == 0 && !is(R == void);
+    else
+        enum IsGetter = false;
+}
+
+template IsSetter(alias Func)
+{
+    static if (is(typeof(&Func) == R function(Args) nothrow @nogc, R, Args...))
+        enum IsSetter = Args.length == 1;
+    else
+        enum IsSetter = false;
+}
+
+template HasSuggest(alias Func)
+{
+    static if (is(typeof(&Func) == R function(Args) nothrow @nogc, R, Args...) && IsSetter!Func)
+        enum HasSuggest = is(typeof(suggestCompletion!(Args[0])));
+    else
+        enum HasSuggest = false;
+}
+
+
+Variant SynthGetter(Getters...)(BaseObject item) nothrow @nogc
+{
+    static assert(Getters.length == 1, "Only one getter overload is allowed for a property");
+    alias Getter = Getters[0];
+
+    alias Type = __traits(parent, Getter);
+    Type instance = cast(Type)item;
+
+    auto r = __traits(child, instance, Getter)();
+    assert(false, "TODO: convert to Variant...");
+    return Variant(/+...+/);
+}
+
+const(char)[] SynthSetter(Setters...)(ref const Variant value, BaseObject item) nothrow @nogc
+{
+    alias Type = __traits(parent, Setters[0]);
+    Type instance = cast(Type)item;
+
+    const(char)[] error;
+    static foreach (Setter; Setters)
+    {{
+        alias PropType = Parameters!Setter[0];
+        PropType arg;
+        error = convertVariant(value, arg);
+        if (!error)
+        {
+            static if (is(ReturnType!Setter : const(char)[]))
+                return __traits(child, instance, Setter)(arg);
+            else
+            {
+                __traits(child, instance, Setter)(arg);
+                return null;
+            }
+        }
+    }}
+    if (Setters.length == 1)
+        return error;
+    return tconcat("Couldn't set property '" ~ __traits(identifier, Setters[0]) ~ "' with value: ", value);
+}
+
+template SynthSuggest(Setters...)
+{
+    // synth suggest function only if there's more than one.
+    static if (Setters.length == 1)
+    {
+        alias PropType = Parameters!(Setters[0])[0];
+        alias SynthSuggest = suggestCompletion!PropType;
+    }
+    else
+    {
+        Array!String SynthSuggest(const(char)[] arg) nothrow @nogc
+        {
+            Array!String tokens;
+            static foreach (Setter; Setters)
+            {{
+                alias PropType = Parameters!Setter[0];
+                static if (is(typeof(suggestCompletion!PropType)))
+                    tokens ~= suggestCompletion!PropType(arg);
+
+                // TODO: also support types with a suggest member function...
+            }}
+
+            // TODO: sort and de-duplicate the tokens...
+
+            return tokens;
+        }
+    }
 }
