@@ -731,7 +731,7 @@ nothrow @nogc:
 
         ModbusInterface iface = defaultAllocator.allocT!ModbusInterface(n.move, stream, p, master ? master.value : false);
 
-        mod_if.addInterface(session, iface, pcap ? pcap.value : null);
+        mod_if.interfaces.add(iface);
 
         version (DebugModbusMessageFlow)
             iface.subscribe(&printPacket, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
@@ -765,7 +765,7 @@ nothrow @nogc:
             return;
         }
 
-        BaseInterface iface = getModule!InterfaceModule.findInterface(_interface);
+        BaseInterface iface = getModule!InterfaceModule.interfaces.get(_interface);
         if (!iface)
         {
             session.writeLine("Interface '", _interface, "' not found.");

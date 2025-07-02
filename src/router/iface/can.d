@@ -7,6 +7,7 @@ import urt.meta.nullable;
 import urt.string;
 import urt.time;
 
+import manager.collection;
 import manager.console;
 import manager.plugin;
 
@@ -39,19 +40,16 @@ nothrow @nogc:
 
 class CANInterface : BaseInterface
 {
+    __gshared Property[5] Properties = [ Property.create!("stream", stream)(),
+                                         Property.create!("protocol", protocol)() ];
+
 nothrow @nogc:
 
     alias TypeName = StringLit!"can";
 
-    Stream stream;
-
-    CANInterfaceProtocol protocol;
-
-    this(String name, Stream stream, CANInterfaceProtocol protocol) nothrow @nogc
+    this(String name)
     {
-        super(name.move, TypeName);
-        this.stream = stream;
-        this.protocol = protocol;
+        super(collectionTypeInfo!CANInterface, name.move);
 
         // this is the proper value for canbus, irrespective of the L2 MTU
         // can jumbo's are theoretically possible if all hops support it... (fragmentation is not possible (?))
@@ -60,10 +58,47 @@ nothrow @nogc:
         // this would be 8 or 64 for physical canbus, or larger if another carrier...?
         _max_l2mtu = _mtu;
         _l2mtu = _max_l2mtu;
-
-        _status.linkStatusChangeTime = getSysTime();
-        _status.linkStatus = stream.status.linkStatus;
     }
+
+
+    // Properties...
+
+    inout(Stream) stream() inout pure
+        => _stream;
+    void stream(Stream value)
+    {
+        // unhook from existing stream?
+
+        _stream = value;
+
+        if (!_stream)
+        {
+            if (_status.linkStatus != Status.Link.Down)
+            {
+                _status.linkStatusChangeTime = getSysTime();
+                _status.linkStatus = Status.Link.Down;
+            }
+        }
+        else if (_status.linkStatus != _stream.status.linkStatus)
+        {
+            _status.linkStatusChangeTime = getSysTime();
+            _status.linkStatus = _stream.status.linkStatus;
+        }
+    }
+
+    CANInterfaceProtocol protocol() const pure
+        => _protocol;
+    const(char)[] protocol(CANInterfaceProtocol value)
+    {
+        import urt.mem.temp;
+        if (value != CANInterfaceProtocol.EBYTE)
+            return tconcat("Invalid CAN protocol '", protocol, "': expect 'ebyte|??'.");
+        _protocol = value;
+        return null;
+    }
+
+
+    // API...
 
     override void update()
     {
@@ -78,7 +113,7 @@ nothrow @nogc:
             if (streamStatus != Status.Link.Up)
                 ++_status.linkDowns;
         }
-        if (streamStatus != Status.Link.Up)
+        if (!running)
             return;
 
         enum LargestProtocolFrame = 13; // EBYTE proto has 13byte frames
@@ -177,6 +212,9 @@ nothrow @nogc:
 
     protected override bool transmit(ref const Packet packet) nothrow @nogc
     {
+        if (!running)
+            return false;
+
         // can only handle can packets
         if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.CAN)
         {
@@ -269,6 +307,8 @@ nothrow @nogc:
     }
 
 private:
+    Stream _stream;
+    CANInterfaceProtocol _protocol;
     ubyte[13] tail; // EBYTE proto has 13byte frames
     ushort tailBytes;
 
@@ -300,34 +340,11 @@ class CANInterfaceModule : Module
     mixin DeclareModule!"interface.can";
 nothrow @nogc:
 
+    Collection!CANInterface canInterfaces;
+
     override void init()
     {
-        g_app.console.registerCommand!add("/interface/can", this);
-    }
-
-    // /interface/can/add command
-    // TODO: protocol enum!
-    void add(Session session, const(char)[] name, Stream stream, const(char)[] protocol, Nullable!(const(char)[]) pcap)
-    {
-        CANInterfaceProtocol p = CANInterfaceProtocol.Unknown;
-        switch (protocol)
-        {
-            case "ebyte":
-                p = CANInterfaceProtocol.EBYTE;
-                break;
-            default:
-                session.writeLine("Invalid CAN protocol '", protocol, "', expect 'ebyte|??'.");
-                return;
-        }
-
-        auto mod_if = getModule!InterfaceModule;
-        String n = mod_if.addInterfaceName(session, name, CANInterface.TypeName);
-        if (!n)
-            return;
-
-        CANInterface iface = defaultAllocator.allocT!CANInterface(n.move, stream, p);
-
-        mod_if.addInterface(session, iface, pcap ? pcap.value : null);
+        g_app.console.registerCollection("/interface/can", canInterfaces);
     }
 }
 

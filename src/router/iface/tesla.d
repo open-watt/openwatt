@@ -237,7 +237,7 @@ nothrow @nogc:
 
         TeslaInterface iface = defaultAllocator.allocT!TeslaInterface(n.move, stream);
 
-        mod_if.addInterface(session, iface, pcap ? pcap.value : null);
+        mod_if.interfaces.add(iface);
 
         version (DebugTeslaInterface)
         {

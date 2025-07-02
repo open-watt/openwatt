@@ -201,7 +201,7 @@ nothrow @nogc:
 
         BridgeInterface iface = defaultAllocator.allocT!BridgeInterface(n.move);
 
-        mod_if.addInterface(session, iface, pcap ? pcap.value : null);
+        mod_if.interfaces.add(iface);
 
 //        // HACK: we'll print packets that we receive...
 //        iface.subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {

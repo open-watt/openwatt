@@ -10,6 +10,7 @@ import urt.string.format;
 import urt.time;
 
 import manager.base;
+import manager.collection;
 import manager.console;
 import manager.plugin;
 
@@ -101,6 +102,17 @@ nothrow @nogc:
     MACAddress mac;
     Map!(MACAddress, BaseInterface) macTable;
 
+    this(const CollectionTypeInfo* typeInfo, String name)
+    {
+        super(typeInfo, name.move);
+
+        assert(!getModule!InterfaceModule.interfaces.exists(this.name), "HOW DID THIS HAPPEN?");
+        getModule!InterfaceModule.interfaces.add(this);
+
+        mac = generateMacAddress();
+        addAddress(mac, this);
+    }
+
     this(String name, const(char)[] type)
     {
         super(name.move, type);
@@ -108,6 +120,15 @@ nothrow @nogc:
         mac = generateMacAddress();
         addAddress(mac, this);
     }
+
+    static const(char)[] validateName(const(char)[] name)
+    {
+        import urt.mem.temp;
+        if (getModule!InterfaceModule.interfaces.exists(name))
+            return tconcat("Interface with name '", name[], "' already exists");
+        return null;
+    }
+
 
     // Properties...
     final ushort mtu() const pure
@@ -360,7 +381,7 @@ class InterfaceModule : Module
     mixin DeclareModule!"interface";
 nothrow @nogc:
 
-    Map!(const(char)[], BaseInterface) interfaces;
+    Collection!BaseInterface interfaces;
 
     override void init()
     {
@@ -373,66 +394,17 @@ nothrow @nogc:
             i.update();
     }
 
-    const(char)[] generateInterfaceName(const(char)[] prefix)
-    {
-        if (prefix !in interfaces)
-            return prefix;
-        for (size_t i = 0; i < ushort.max; i++)
-        {
-            const(char)[] name = tconcat(prefix, i);
-            if (name !in interfaces)
-                return name;
-        }
-        return null;
-    }
-
-    final String addInterfaceName(Session session, const(char)[] name, const(char)[] defaultNamePrefix)
+     final String addInterfaceName(Session session, const(char)[] name, const(char)[] defaultNamePrefix)
     {
         if (name.empty)
-            name = generateInterfaceName(defaultNamePrefix);
-        else if (name in interfaces)
+            name = interfaces.generateName(defaultNamePrefix);
+        else if (interfaces.exists(name))
         {
             session.writeLine("Interface '", name, " already exists");
             return String();
         }
 
         return name.makeString(g_app.allocator);
-    }
-
-    final bool addInterface(Session session, BaseInterface iface, const(char)[] pcap)
-    {
-        interfaces[iface.name[]] = iface;
-
-        if (!pcap.empty)
-        {
-            import manager.pcap;
-
-            auto mod_pcap = getModule!PcapModule;
-            PcapInterface* cap = mod_pcap.findInterface(pcap);
-            if (!cap)
-                session.writeLine("Failed to attach pcap interface '", pcap, "' to '", iface.name, "'; doesn't exist");
-            else
-                cap.subscribeInterface(iface);
-        }
-
-        import urt.log;
-        writeInfo("Create ", iface.type, " interface '", iface.name, "' - ", iface.mac);
-
-        return true;
-    }
-
-    final void removeInterface(BaseInterface iface)
-    {
-        assert(iface.name in interfaces, "Interface not found");
-        interfaces.remove(iface.name);
-    }
-
-    final BaseInterface findInterface(const(char)[] name)
-    {
-        foreach (i; interfaces.values)
-            if (i.name[] == name[])
-                return i;
-        return null;
     }
 
     import urt.meta.nullable;

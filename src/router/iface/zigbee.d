@@ -81,7 +81,7 @@ nothrow @nogc:
 
         ZigbeeInterface iface = g_app.allocator.allocT!ZigbeeInterface(n.move);
 
-        mod_if.addInterface(session, iface, pcap ? pcap.value : null);
+        mod_if.interfaces.add(iface);
     }
 }
 
