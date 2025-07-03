@@ -45,7 +45,7 @@ nothrow @nogc:
     {
         auto mod_if = getModule!InterfaceModule;
 
-        BaseInterface i = mod_if.findInterface(_interface);
+        BaseInterface i = mod_if.interfaces.get(_interface);
         if(i is null)
         {
             session.writeLine("Interface '", _interface, "' not found");

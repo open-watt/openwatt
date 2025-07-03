@@ -278,7 +278,7 @@ const(char[]) convertVariant(I)(ref const Variant v, out I r) nothrow @nogc
     if (!v.isString)
         return "Invalid interface value";
     const(char)[] s = v.asString;
-    if (BaseInterface i = getModule!InterfaceModule.findInterface(s))
+    if (BaseInterface i = getModule!InterfaceModule.interfaces.get(s))
     {
         r = cast(I)i;
         static if (!is(Unqual!I == BaseInterface))
