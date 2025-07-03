@@ -2,12 +2,14 @@ module router.iface;
 
 import urt.conv;
 import urt.map;
+import urt.lifetime;
 import urt.mem.ring;
 import urt.mem.string;
 import urt.string;
 import urt.string.format;
 import urt.time;
 
+import manager.base;
 import manager.console;
 import manager.plugin;
 
@@ -22,7 +24,6 @@ public static import router.iface.tesla;
 public static import router.iface.zigbee;
 
 nothrow @nogc:
-
 
 
 enum BufferOverflowBehaviour : byte
@@ -87,12 +88,9 @@ struct InterfaceSubscriber
 //      02:FE:ED:xx:xx:yy
 //      02:B0:0B:xx:xx:yy
 
-class BaseInterface
+class BaseInterface : BaseObject
 {
 nothrow @nogc:
-
-    String name;
-    CacheString type;
 
     MACAddress mac;
     Map!(MACAddress, BaseInterface) macTable;
@@ -110,21 +108,30 @@ nothrow @nogc:
 
     this(String name, const(char)[] type)
     {
-        import urt.lifetime;
-
-        this.name = name.move;
-        this.type = type.addString();
+        super(name.move, type);
 
         mac = generateMacAddress();
         addAddress(mac, this);
     }
 
-    void update()
-    {
-    }
+    bool up() const
+        => status.linkStatus == Status.Link.Up;
 
-    ref const(Status) getStatus() const
-        => status;
+    override bool enable(bool enable = true)
+    {
+        bool wasEnabled = !_disabled;
+        if (enable != wasEnabled)
+        {
+            status.linkStatusChangeTime = getSysTime();
+            _disabled = !enable;
+            if (_disabled)
+            {
+                status.linkStatus = Status.Link.Down;
+                ++status.linkDowns;
+            }
+        }
+        return wasEnabled;
+    }
 
     void subscribe(InterfaceSubscriber.PacketHandler packetHandler, ref const PacketFilter filter, void* userData = null)
     {

@@ -10,6 +10,7 @@ import urt.string;
 import urt.string.format;
 import urt.time;
 
+import manager.base;
 import manager.console;
 import manager.plugin;
 
@@ -42,19 +43,16 @@ enum StreamOptions : ubyte
     KeepAlive =      1 << 2, // Attempt reconnection on connection drops
 }
 
-abstract class Stream
+abstract class Stream : BaseObject
 {
 nothrow @nogc:
-
-    String name;
-    CacheString type;
 
     Status status;
 
     this(String name, const(char)[] type, StreamOptions options)
     {
-        this.name = name.move;
-        this.type = type.addString();
+        super(name.move, type);
+
         this.options = options;
     }
 
@@ -66,14 +64,32 @@ nothrow @nogc:
         setLogFile(null);
     }
 
+    bool up() const
+        => status.linkStatus == Status.Link.Up;
+
+    override bool enable(bool enable = true)
+    {
+        bool wasEnabled = !_disabled;
+        if (enable != wasEnabled)
+        {
+            status.linkStatusChangeTime = getSysTime();
+            _disabled = !enable;
+            if (_disabled)
+            {
+                disconnect();
+                debug assert(status.linkStatus == Status.Link.Down);
+//                status.linkStatus = Status.Link.Down;
+                ++status.linkDowns; // TODO: shoul this be moved to wherever the down is assigned?
+            }
+        }
+        return wasEnabled;
+    }
+
     // Method to initiate a connection
     abstract bool connect();
 
     // Method to disconnect the stream
     abstract void disconnect();
-
-    // Check if the stream is connected
-    abstract bool connected();
 
     abstract const(char)[] remoteName();
 
@@ -110,11 +126,6 @@ nothrow @nogc:
                 logging = log[0].is_open() || log[1].is_open();
             }
         }
-    }
-
-    // Update the stream
-    void update()
-    {
     }
 
     ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc

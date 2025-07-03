@@ -93,7 +93,7 @@ nothrow @nogc:
     }
 
     bool connected()
-        => stream.connected();
+        => stream.up;
 
 
 private:

@@ -23,7 +23,6 @@ nothrow @nogc:
     }
 
     SysTime linkStatusChangeTime;
-    bool enabled;
     Connection connected = Connection.Unknown;
     Link linkStatus = Link.Down;
     int linkDowns;

@@ -147,7 +147,7 @@ struct Client
 
 	bool update()
 	{
-		if (!stream.connected())
+		if (!stream.up)
 			return false;
 
 		if (state == ConnectionState.Active)

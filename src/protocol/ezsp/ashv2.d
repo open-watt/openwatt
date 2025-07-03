@@ -93,10 +93,10 @@ nothrow @nogc:
     {
         MonoTime now = getTime();
 
-        if (!stream.connected)
+        if (!stream.up)
             reset();
 
-        if (connecting && !connected && now - lastEvent > T_RSTACK_MAX.msecs && stream.connected)
+        if (connecting && !connected && now - lastEvent > T_RSTACK_MAX.msecs && stream.up)
         {
             writeDebug("ASHv2: connecting...");
             ashRst();
