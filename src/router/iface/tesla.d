@@ -52,10 +52,10 @@ nothrow @nogc:
         Status.Link streamStatus = stream.status.linkStatus;
         if (streamStatus != status.linkStatus)
         {
-            status.linkStatus = streamStatus;
-            status.linkStatusChangeTime = now;
+            _status.linkStatus = streamStatus;
+            _status.linkStatusChangeTime = now;
             if (streamStatus != Status.Link.Up)
-                ++status.linkDowns;
+                ++_status.linkDowns;
         }
         if (streamStatus != Status.Link.Up)
             return;
@@ -121,7 +121,7 @@ nothrow @nogc:
     {
         if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.TeslaTWC)
         {
-            ++status.sendDropped;
+            ++_status.sendDropped;
             return false;
         }
 
@@ -159,7 +159,7 @@ nothrow @nogc:
         if (written != offset)
         {
             debug writeDebug("Failed to write to stream '", stream.name, "'");
-            ++status.sendDropped;
+            ++_status.sendDropped;
             return false;
         }
 
@@ -168,8 +168,8 @@ nothrow @nogc:
             writef("{4} - {0}: TWC packet sent {1}-->{2} [{3}]\n", name, packet.src, packet.dst, packet.data, packet.creationTime);
         }
 
-        ++status.sendPackets;
-        status.sendBytes += packet.data.length;
+        ++_status.sendPackets;
+        _status.sendBytes += packet.data.length;
         // TODO: but should we record the ACTUAL protocol packet?
         return true;
     }

@@ -48,7 +48,7 @@ nothrow @nogc:
             break; // TODO: what do we even do with multiple addresses?
         }
 
-        status.linkStatus = Status.Link.Up;
+        _status.linkStatus = Status.Link.Up;
 	}
 
 	override bool connect()

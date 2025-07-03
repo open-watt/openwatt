@@ -296,7 +296,7 @@ nothrow @nogc:
                     if (messageHandler(message) < 0)
                         return -1;
 
-                    if (!stream.up)
+                    if (!stream.running)
                         msg = null;
 
                     message = HTTPMessage();

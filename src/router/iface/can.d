@@ -53,8 +53,16 @@ nothrow @nogc:
         this.stream = stream;
         this.protocol = protocol;
 
-        status.linkStatusChangeTime = getSysTime();
-        status.linkStatus = stream.status.linkStatus;
+        // this is the proper value for canbus, irrespective of the L2 MTU
+        // can jumbo's are theoretically possible if all hops support it... (fragmentation is not possible (?))
+        _mtu = 8; // or 64 for FD-CAN...
+
+        // this would be 8 or 64 for physical canbus, or larger if another carrier...?
+        _max_l2mtu = _mtu;
+        _l2mtu = _max_l2mtu;
+
+        _status.linkStatusChangeTime = getSysTime();
+        _status.linkStatus = stream.status.linkStatus;
     }
 
     override void update()
@@ -65,10 +73,10 @@ nothrow @nogc:
         Status.Link streamStatus = stream.status.linkStatus;
         if (streamStatus != status.linkStatus)
         {
-            status.linkStatus = streamStatus;
-            status.linkStatusChangeTime = now;
+            _status.linkStatus = streamStatus;
+            _status.linkStatusChangeTime = now;
             if (streamStatus != Status.Link.Up)
-                ++status.linkDowns;
+                ++_status.linkDowns;
         }
         if (streamStatus != Status.Link.Up)
             return;
@@ -172,7 +180,7 @@ nothrow @nogc:
         // can only handle can packets
         if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.CAN)
         {
-            ++status.sendDropped;
+            ++_status.sendDropped;
             return false;
         }
 
@@ -223,12 +231,12 @@ nothrow @nogc:
             // if the stream disconnected, maybe we should buffer the message incase it reconnects promptly?
 
             // just drop it for now...
-            ++status.sendDropped;
+            ++_status.sendDropped;
             return false;
         }
 
-        ++status.sendPackets;
-        status.sendBytes += length;
+        ++_status.sendPackets;
+        _status.sendBytes += length;
         // TODO: or should we record `length`? payload bytes, or full protocol bytes?
         return true;
     }

@@ -25,8 +25,8 @@ nothrow @nogc:
 
         macTable = MACTable(16, 256, 60);
 
-        status.linkStatus = Status.Link.Up;
-        status.linkStatusChangeTime = getSysTime();
+        _status.linkStatus = Status.Link.Up;
+        _status.linkStatusChangeTime = getSysTime();
     }
 
     bool addMember(BaseInterface iface)
@@ -103,8 +103,8 @@ nothrow @nogc:
     {
         send(packet);
 
-        ++status.sendPackets;
-        status.sendBytes += packet.data.length;
+        ++_status.sendPackets;
+        _status.sendBytes += packet.data.length;
 
         return true;
     }

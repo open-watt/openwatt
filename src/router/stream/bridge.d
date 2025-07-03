@@ -37,7 +37,7 @@ nothrow @nogc:
         m_remoteName ~= ']';
 
         // a guess a bridge is up if any of its members are up? or just always; ya know.
-        status.linkStatus = Status.Link.Up;
+        _status.linkStatus = Status.Link.Up;
     }
 
     override bool connect()

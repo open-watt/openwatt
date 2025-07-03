@@ -38,7 +38,7 @@ nothrow @nogc:
             assert(0);
         }
         remote = addrInfo.address;
-        status.linkStatusChangeTime = getSysTime();
+        _status.linkStatusChangeTime = getSysTime();
         update();
     }
 
@@ -47,7 +47,7 @@ nothrow @nogc:
         super(name.move, TypeName, options);
 
         remote = address;
-        status.linkStatusChangeTime = getSysTime();
+        _status.linkStatusChangeTime = getSysTime();
         update();
     }
 
@@ -96,7 +96,7 @@ nothrow @nogc:
 
     override ptrdiff_t read(void[] buffer)
     {
-        if (status.linkStatus != Status.Link.Up)
+        if (!running)
             return 0;
 
         size_t bytes = 0;
@@ -110,16 +110,16 @@ nothrow @nogc:
         }
         if (logging)
             writeToLog(true, buffer[0 .. bytes]);
-        status.recvBytes += bytes;
+        _status.recvBytes += bytes;
         return bytes;
     }
 
     override ptrdiff_t write(const void[] data)
     {
-        if (status.linkStatus != Status.Link.Up && (options & StreamOptions.OnDemand))
+        if (!running && (options & StreamOptions.OnDemand))
             connect();
 
-        if (status.linkStatus == Status.Link.Up)
+        if (running)
         {
             size_t bytes;
             Result r = socket.send(data, MsgFlags.None, &bytes);
@@ -150,7 +150,7 @@ nothrow @nogc:
 
     override ptrdiff_t pending()
     {
-        if (status.linkStatus != Status.Link.Up)
+        if (!running)
             return 0;
 
         size_t bytes;
@@ -182,16 +182,16 @@ nothrow @nogc:
             size_t bytesReceived;
             Result r = recv(socket, null, MsgFlags.Peek, &bytesReceived);
             if (r == Result.Success || r.get_SocketResult == SocketResult.WouldBlock)
-                status.linkStatus = Status.Link.Up;
+                _status.linkStatus = Status.Link.Up;
             else
             {
                 // something happened... we should try and reconnect I guess?
                 closeLink();
 
-                status.linkStatus = Status.Link.Down;
+                _status.linkStatus = Status.Link.Down;
             }
         }
-        if (status.linkStatus == Status.Link.Up)
+        if (_status.linkStatus == Status.Link.Up)
             return;
 
         // a reverse-connect socket will be handled by a companion TCPServer
@@ -223,7 +223,7 @@ nothrow @nogc:
             r = socket.connect(remote);
             if (r.succeeded)
             {
-                status.linkStatus = Status.Link.Up;
+                _status.linkStatus = Status.Link.Up;
                 return;
             }
             else
@@ -285,8 +285,8 @@ nothrow @nogc:
             if (keepEnable)
                 set_keepalive(socket, keepEnable, keepIdle, keepInterval, keepCount);
 
-            status.linkStatus = Status.Link.Up;
-            status.linkStatusChangeTime = now;
+            _status.linkStatus = Status.Link.Up;
+            _status.linkStatusChangeTime = now;
 
             writeInfo("TCP stream '", name, "' link established.");
         }
@@ -296,9 +296,9 @@ nothrow @nogc:
     {
         socket.close();
         socket = Socket.invalid;
-        status.linkStatus = Status.Link.Down;
-        status.linkStatusChangeTime = getSysTime();
-        ++status.linkDowns;
+        _status.linkStatus = Status.Link.Down;
+        _status.linkStatusChangeTime = getSysTime();
+        ++_status.linkDowns;
 
         writeWarning("TCP stream '", name, "' link down.");
     }
@@ -322,7 +322,7 @@ nothrow @nogc:
         socket.get_peer_name(remote);
 
         this.socket = socket;
-        status.linkStatus = Status.Link.Up;
+        _status.linkStatus = Status.Link.Up;
     }
 }
 
