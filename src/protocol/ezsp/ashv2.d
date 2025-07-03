@@ -65,7 +65,7 @@ nothrow @nogc:
         this.stream = stream;
     }
 
-    bool isConnected()
+    bool isConnected() const pure
         => connected;
 
     void setPacketCallback(void delegate(const(ubyte)[]) nothrow @nogc callback)

@@ -7,6 +7,7 @@ import urt.mem.allocator;
 import urt.string;
 
 import manager;
+import manager.collection;
 import manager.console.command;
 import manager.console.function_command : FunctionCommandState;
 import manager.console.session;
@@ -24,38 +25,16 @@ class EZSPProtocolModule : Module
     mixin DeclareModule!"protocol.ezsp";
 nothrow @nogc:
 
-    Map!(const(char)[], EZSPClient) clients;
+    Collection!EZSPClient clients;
 
     override void init()
     {
-        g_app.console.registerCommand!client_add("/protocol/ezsp/client", this, "add");
-    }
-
-    EZSPClient getClient(const(char)[] client)
-    {
-        if (auto c = client in clients)
-            return *c;
-        return null;
+        g_app.console.registerCollection("/protocol/ezsp/client", clients);
     }
 
     override void update()
     {
-        foreach(client; clients.values)
-            client.update();
-    }
-
-    void client_add(Session session, const(char)[] name, Stream stream)
-    {
-        if (name.empty)
-            getModule!StreamModule.generateStreamName("ezsp");
-
-        NoGCAllocator a = g_app.allocator;
-
-        String n = name.makeString(a);
-        EZSPClient client = a.allocT!EZSPClient(n.move, stream);
-        clients.insert(client.name[], client);
-
-//        writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);
+        clients.updateAll();
     }
 }
 
