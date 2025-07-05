@@ -185,26 +185,6 @@ nothrow @nogc:
     override const(char)[] statusMessage() const
         => running ? "Running" : super.statusMessage();
 
-    override void update()
-    {
-        assert(_status.linkStatus == Status.Link.Up, "Interface is not online, it shouldn't be in Running state!");
-    }
-
-    override void setOnline()
-    {
-        _status.linkStatus = Status.Link.Up;
-        _status.linkStatusChangeTime = getSysTime();
-        super.setOnline();
-    }
-
-    override void setOffline()
-    {
-        super.setOffline();
-        _status.linkStatus = Status.Link.Down;
-        _status.linkStatusChangeTime = getSysTime();
-        ++_status.linkDowns;
-    }
-
     void subscribe(InterfaceSubscriber.PacketHandler packetHandler, ref const PacketFilter filter, void* userData = null)
     {
         subscribers[numSubscribers++] = InterfaceSubscriber(filter, packetHandler, userData);
@@ -327,6 +307,26 @@ protected:
 
     BufferOverflowBehaviour sendBehaviour;
     BufferOverflowBehaviour recvBehaviour;
+
+    override void update()
+    {
+        assert(_status.linkStatus == Status.Link.Up, "Interface is not online, it shouldn't be in Running state!");
+    }
+
+    override void setOnline()
+    {
+        _status.linkStatus = Status.Link.Up;
+        _status.linkStatusChangeTime = getSysTime();
+        super.setOnline();
+    }
+
+    override void setOffline()
+    {
+        super.setOffline();
+        _status.linkStatus = Status.Link.Down;
+        _status.linkStatusChangeTime = getSysTime();
+        ++_status.linkDowns;
+    }
 
     abstract bool transmit(ref const Packet packet);
 
