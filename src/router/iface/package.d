@@ -95,7 +95,6 @@ class BaseInterface : BaseObject
                                          Property.create!("actual-mtu", actual_mtu)(),
                                          Property.create!("l2mtu", l2mtu)(),
                                          Property.create!("max-l2mtu", max_l2mtu)(),
-                                         Property.create!("running", running)(),
                                          Property.create!("pcap", pcap)() ];
 nothrow @nogc:
 
@@ -150,9 +149,6 @@ nothrow @nogc:
     final ushort max_l2mtu() const pure
         => _max_l2mtu;
 
-    final bool running() const pure
-        => _status.linkStatus == Status.Link.Up;
-
     final const(char)[] pcap() const pure
     {
         assert(false, "TODO: we need to store the pcap thing!");
@@ -186,23 +182,27 @@ nothrow @nogc:
         _status.recvDropped = 0;
     }
 
-    override const(char)[] statusMessage() const pure
+    override const(char)[] statusMessage() const
         => running ? "Running" : super.statusMessage();
 
-    override bool enable(bool enable = true)
+    override void update()
     {
-        bool wasEnabled = !_disabled;
-        if (enable != wasEnabled)
-        {
-            _status.linkStatusChangeTime = getSysTime();
-            _disabled = !enable;
-            if (_disabled)
-            {
-                _status.linkStatus = Status.Link.Down;
-                ++_status.linkDowns;
-            }
-        }
-        return wasEnabled;
+        assert(_status.linkStatus == Status.Link.Up, "Interface is not online, it shouldn't be in Running state!");
+    }
+
+    override void setOnline()
+    {
+        _status.linkStatus = Status.Link.Up;
+        _status.linkStatusChangeTime = getSysTime();
+        super.setOnline();
+    }
+
+    override void setOffline()
+    {
+        super.setOffline();
+        _status.linkStatus = Status.Link.Down;
+        _status.linkStatusChangeTime = getSysTime();
+        ++_status.linkDowns;
     }
 
     void subscribe(InterfaceSubscriber.PacketHandler packetHandler, ref const PacketFilter filter, void* userData = null)
@@ -390,8 +390,8 @@ nothrow @nogc:
 
     override void update()
     {
-        foreach (i; interfaces.values)
-            i.update();
+        // TODO: is it appropriate to update all interfaces here, or should we update the collections independently?
+        interfaces.updateAll();
     }
 
      final String addInterfaceName(Session session, const(char)[] name, const(char)[] defaultNamePrefix)

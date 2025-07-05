@@ -44,6 +44,9 @@ nothrow @nogc:
         this.stream = stream;
     }
 
+    override bool running() const pure
+        => status.linkStatus == Status.Link.Up;
+
     override void update()
     {
         SysTime now = getSysTime();

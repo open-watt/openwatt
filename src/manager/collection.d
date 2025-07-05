@@ -1,5 +1,6 @@
 module manager.collection;
 
+import urt.array;
 import urt.lifetime;
 import urt.map;
 import urt.string;
@@ -72,8 +73,18 @@ nothrow @nogc:
 
     void updateAll()
     {
+        Array!BaseObject doomed;
         foreach (item; pool.values)
-            item.update();
+        {
+            if (item.do_update())
+                doomed ~= item;
+        }
+        foreach (item; doomed)
+        {
+            import urt.mem;
+            remove(item);
+            defaultAllocator.freeT(item);
+        }
     }
 
     void add(BaseObject item)

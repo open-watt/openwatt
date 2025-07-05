@@ -40,6 +40,9 @@ nothrow @nogc:
         _status.linkStatus = Status.Link.Up;
     }
 
+    override bool running() const pure
+        => status.linkStatus == Status.Link.Up;
+
     override bool connect()
     {
         // should we connect subordinate streams?

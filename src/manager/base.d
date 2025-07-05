@@ -13,12 +13,18 @@ public import manager.collection : collectionTypeInfo, CollectionTypeInfo;
 
 nothrow @nogc:
 
+enum CompletionStatus
+{
+    Continue,
+    Complete,
+    Error = -1,
+}
 
 enum StateSignal
 {
-    Destroyed,
     Online,
-    Offline
+    Offline,
+    Destroyed
 }
 
 alias StateSignalHandler = void delegate(BaseObject object, StateSignal signal) nothrow @nogc;
@@ -96,16 +102,19 @@ struct Property
 
 class BaseObject
 {
-    __gshared Property[5] Properties = [ Property.create!("type", type)(),
+    __gshared Property[6] Properties = [ Property.create!("type", type)(),
                                          Property.create!("name", name)(),
                                          Property.create!("disabled", disabled)(),
                                          Property.create!("comment", comment)(),
+                                         Property.create!("running", running)(),
                                          Property.create!("status", statusMessage)() ];
 nothrow @nogc:
 
     // TODO: delete this constructor!!!
     this(String name, const(char)[] type)
     {
+        assert(name !is null, "`name` must not be empty");
+
         _typeInfo = null;
         _type = type.addString();
         _name = name.move;
@@ -128,7 +137,11 @@ nothrow @nogc:
         => _name;
     final const(char)[] name(ref String value)
     {
-        // TODO: check if name is already in use...
+        if (value.empty)
+            return "`name` must not be empty";
+
+        assert(false, "TODO: check name is not already in use...");
+
         _name = value.move;
         return null;
     }
@@ -141,45 +154,64 @@ nothrow @nogc:
     }
 
     final bool disabled() const pure
-        => _disabled;
+        => _state & _Disabled;
     final void disabled(bool value)
     {
-        enable(!value);
+        _state |= _Disabled;
+        _state &= ~_Start;
+        if (_state & _Valid)
+            _state |= _Stop;
     }
+
+    // TODO: PUT FINAL BACK WHEN EVERYTHING PORTED!
+    /+final+/ bool running() const pure
+        => _state == State.Running;
 
     // give a helpful status string, e.g. "Ready", "Disabled", "Error: <message>"
     const(char)[] statusMessage() const pure
-        => disabled ? "Disabled" : validate() ? "Invalid" : "Ready";
-
-
-    // Implement for derived types
-
-    // per-tick updates
-    void update()
     {
-    }
-
-    // validate configuration is in an operable state, update status if it's not
-    bool validate() const pure
-        => true;
-
-    // enable/disable methods; returns prior state before the call
-    abstract bool enable(bool enable = true);
-
-    final bool disable()
-        => enable(false);
-
-    final bool restart()
-    {
-        bool wasEnabled = !_disabled;
-        if (wasEnabled)
-            enable(false);
-        enable(true);
-        return wasEnabled;
+        switch (_state)
+        {
+            case State.Disabled:
+            case State.Stopping:
+                return "Disabled";
+            case State.Destroying:
+            case State.Destroyed:
+                return "Destroyed";
+            case State.InitFailed:
+                return "Failed";
+            case State.Validate:
+                return "Invalid";
+            case State.Starting:
+                return "Starting";
+            case State.Restarting:
+                return "Restarting";
+            case State.Running:
+                return "Running";
+            default:
+                assert(false, "Invalid state!");
+        }
     }
 
 
     // Object API...
+
+    final void restart()
+    {
+        if (_state & _Valid)
+        {
+            _state &= ~_Start;
+            _state |= _Stop;
+        }
+    }
+
+    final void destroy()
+    {
+        _state |= _Disabled | _Destroyed;
+        _state &= ~_Start;
+        if (_state & _Valid)
+            _state |= _Stop;
+    }
 
     // return a list of properties that can be set on this object
     final const(Property*)[] properties() const
@@ -252,9 +284,93 @@ nothrow @nogc:
     }
 
 protected:
+    enum ubyte _Disabled   = 1 << 0;
+    enum ubyte _Destroyed  = 1 << 1;
+    enum ubyte _Start      = 1 << 2;
+    enum ubyte _Stop       = 1 << 3;
+    enum ubyte _Valid      = 1 << 4;
+
+    enum State : ubyte
+    {
+        InitFailed  = 0,
+        Disabled    = _Disabled,
+        Destroyed   = _Disabled | _Destroyed,
+        Validate    = _Start,
+        Running     = _Valid,
+        Starting    = _Start | _Valid,
+        Restarting  = _Stop | _Valid,
+        Stopping    = _Disabled | _Stop | _Valid,
+        Destroying  = _Disabled | _Destroyed | _Stop | _Valid,
+    }
+
     const CollectionTypeInfo* _typeInfo;
     size_t propsSet;
-    bool _disabled; // TODO: this unaligns the whole thing... maybe steal the top bit of propsSet?
+    State _state = State.Validate;
+
+    final void setState(State newState)
+    {
+        assert(_state != State.Destroyed, "Cannot change state of a destroyed object!");
+
+        if (newState == _state)
+            return;
+
+        State old = _state;
+        _state = newState;
+
+        switch (newState)
+        {
+            case State.Disabled:
+            case State.Destroyed:
+            case State.InitFailed:
+                break;
+
+            case State.Running:
+                setOnline();
+                goto case;
+            case State.Validate:
+            case State.Starting:
+                do_update();
+                break;
+
+            case State.Restarting:
+            case State.Destroying:
+            case State.Stopping:
+                if (old == State.Running)
+                    setOffline();
+                do_update();
+                break;
+
+            default:
+                assert(false, "Invalid state!");
+        }
+    }
+
+    // validate configuration is in an operable state
+    bool validate() const
+        => true;
+
+    CompletionStatus validating()
+        => validate() ? CompletionStatus.Complete : CompletionStatus.Error;
+
+    CompletionStatus startup()
+        => CompletionStatus.Complete;
+
+    CompletionStatus shutdown()
+        => CompletionStatus.Complete;
+
+    void update()
+    {
+    }
+
+    void setOnline()
+    {
+        signalStateChange(StateSignal.Online);
+    }
+
+    void setOffline()
+    {
+        signalStateChange(StateSignal.Offline);
+    }
 
     // sends a signal to all clients
     final void signalStateChange(StateSignal signal)
@@ -268,6 +384,56 @@ private:
     String _name;
     String _comment;
     Array!StateSignalHandler subscribers;
+
+    package bool do_update()
+    {
+        switch (_state)
+        {
+            case State.Destroyed:
+                return true;
+
+            case State.Disabled:
+                // do nothing...
+                break;
+
+            case State.InitFailed:
+                // implement backoff timer?
+                setState(State.Validate);
+                break;
+
+            case State.Validate:
+                CompletionStatus s = validating();
+                debug assert(s != CompletionStatus.Continue, "validating() should return Success or Failure");
+                if (s == CompletionStatus.Complete)
+                    setState(State.Starting);
+                break;
+
+            case State.Starting:
+                CompletionStatus s = startup();
+                if (s == CompletionStatus.Complete)
+                    setState(State.Running);
+                else if (s == CompletionStatus.Error)
+                    setState(State.InitFailed); // TODO: there is no shutdown moment between starting -> init-failed...?!
+                break;
+
+            case State.Restarting:
+            case State.Stopping:
+            case State.Destroying:
+                CompletionStatus s = shutdown();
+                debug assert(s != CompletionStatus.Error, "shutdown() should not fail; just clear/reset the state!");
+                if (s == CompletionStatus.Complete)
+                    setState(cast(State)(_state & ~(_Stop | _Valid)));
+                break;
+
+            case State.Running:
+                update();
+                break;
+
+            default:
+                assert(false, "Invalid state!");
+        }
+        return _state == State.Destroyed;
+    }
 }
 
 
@@ -284,9 +450,19 @@ nothrow @nogc:
         _object.subscribe(&destroy_handler);
     }
 
-    ~this() pure
+    ~this()
     {
         release();
+    }
+
+    void opAssign(Type object)
+    {
+        if (object && _object is object)
+            return;
+        release(); // release the old object
+        _object = object; // assign the new one
+        if (_object !is null)
+            _object.subscribe(&destroy_handler);
     }
 
     inout(Type) get() inout pure
@@ -303,10 +479,13 @@ nothrow @nogc:
             size_t t = _ptr ^ 1;
             return *cast(String*)&t;
         }
-        return _object.name;
+        return _object ? _object.name : String();
     }
 
-    void release() pure
+    bool detached() const pure
+        => _ptr & 1;
+
+    void release()
     {
         // if we hold a string, we must destroy it...
         if (_ptr & 1)
@@ -329,7 +508,7 @@ private:
         size_t _ptr;
     }
 
-    void destroy_handler(BaseObject object, StateSignal signal) pure
+    void destroy_handler(BaseObject object, StateSignal signal)
     {
         assert(object is _object, "Object reference mismatch!");
         if (signal != StateSignal.Destroyed)

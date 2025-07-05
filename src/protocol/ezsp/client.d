@@ -46,36 +46,20 @@ nothrow @nogc:
         => ash.stream;
     final void stream(Stream stream)
     {
-        // reset and rebuild ASH
-        this.ash = ASH(stream);
-        ash.setPacketCallback(&incomingPacket);
+        if (ash.stream !is stream)
+        {
+            // rebuild ASH and reset
+            ash = ASH(stream);
+            ash.setPacketCallback(&incomingPacket);
+            restart();
+        }
     }
-
-    final bool running() const pure
-        => knownVersion && ash.isConnected();
 
 
     // API...
 
-    final override bool validate() const pure
-        => ash.stream !is null;
-
-    final override const(char)[] statusMessage() const pure
+    final override const(char)[] statusMessage() const
         => running ? "Running" : super.statusMessage();
-
-    final override bool enable(bool enable)
-    {
-        bool old = enabled;
-        enabled = enable;
-        if (!enable)
-        {
-            ash.reset();
-            knownVersion = 0;
-            requestedVersion = 0;
-            sequenceNumber = 0;
-        }
-        return old;
-    }
 
     final void setMessageHandler(void delegate(ubyte sequence, ushort command, const(ubyte)[] message) nothrow @nogc callback)
     {
@@ -182,6 +166,43 @@ nothrow @nogc:
             return -1;
         }
         return sequenceNumber++;
+    }
+
+    final override bool validate() const pure
+        => ash.stream !is null;
+
+    override CompletionStatus startup()
+    {
+        ash.update();
+
+        if (knownVersion)
+            return CompletionStatus.Complete;
+
+        if (ash.isConnected())
+        {
+            if (requestedVersion == 0)
+            {
+                writeDebug("EZSP: connecting...");
+
+                requestedVersion = PreferredVersion;
+                immutable ubyte[4] versionMsg = [ sequenceNumber++, 0x00, 0x00, requestedVersion ];
+                ash.send(versionMsg);
+
+                lastEvent = getTime();
+            }
+            else if (getTime() - lastEvent > 10.seconds)
+                return CompletionStatus.Error;
+        }
+        return CompletionStatus.Continue;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        ash.reset();
+        knownVersion = 0;
+        requestedVersion = 0;
+        sequenceNumber = 0;
+        return CompletionStatus.Complete;
     }
 
     final override void update()

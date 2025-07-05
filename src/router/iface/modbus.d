@@ -139,6 +139,9 @@ nothrow @nogc:
         // TODO: assert that recvBufferLen and sendBufferLen are both larger than a single PDU (254 bytes)!
     }
 
+    override bool running() const pure
+        => status.linkStatus == Status.Link.Up;
+
     override void update()
     {
         SysTime now = getSysTime();

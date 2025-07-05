@@ -79,8 +79,6 @@ private:
 
         int update()
         {
-            stream.update();
-
             int result = parser.update(stream);
             if (result != 0)
             {

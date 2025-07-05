@@ -51,6 +51,9 @@ nothrow @nogc:
         update();
     }
 
+    override bool running() const pure
+        => status.linkStatus == Status.Link.Up;
+
     override bool connect()
     {
         lastRetry = SysTime();
