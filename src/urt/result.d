@@ -52,7 +52,7 @@ version (Windows)
 }
 else version (Posix)
 {
-	import core.stdc.errno;
+    import core.stdc.errno;
     Result InternalResult(InternalCode code)
     {
         switch (code)

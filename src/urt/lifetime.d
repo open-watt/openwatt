@@ -447,7 +447,7 @@ if (!Init.length ||
 
 /+
 T _d_newclassT(T)() @trusted
-	if (is(T == class))
+    if (is(T == class))
 {
     import core.internal.traits : hasIndirections;
     import core.exception : onOutOfMemoryError;

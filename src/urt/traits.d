@@ -205,7 +205,7 @@ template FunctionTypeOf(alias func)
     else static if (is(func T) || is(typeof(func) T))
     {
         static if (is(T == function))
-            alias FunctionTypeOf = T;	// HIT: function
+            alias FunctionTypeOf = T;    // HIT: function
         else static if (is(T Fptr : Fptr*) && is(Fptr == function))
             alias FunctionTypeOf = Fptr; // HIT: function pointer
         else static if (is(T Fdlg == delegate))

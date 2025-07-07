@@ -6,86 +6,86 @@ enum EndTime = ulong.max;
 
 enum StreamType : ubyte
 {
-	Auto,
-	Accumulator,	// stream of time values between increments
-	DenseDelta,	 // regularly cadenced accumulating data
-	SparseDelta,	// irregularly cadenced accumulating data
-	DenseSample,	// regularly cadenced absolute/noisy data
-	SparseSample	// irregularly cadenced absolute/noisy data
+    Auto,
+    Accumulator,    // stream of time values between increments
+    DenseDelta,     // regularly cadenced accumulating data
+    SparseDelta,    // irregularly cadenced accumulating data
+    DenseSample,    // regularly cadenced absolute/noisy data
+    SparseSample    // irregularly cadenced absolute/noisy data
 }
 
 
 enum DataType : ubyte
 {
-	Integer,
-	Float,
-	String,
-	Custom
+    Integer,
+    Float,
+    String,
+    Custom
 }
 
 
 enum Flags : ubyte
 {
-	AutoType,
-	AutoResolution,
+    AutoType,
+    AutoResolution,
 }
 
 enum InsertHint : uint
 {
-	None = 0,
-	Sorted = 1 << 0
+    None = 0,
+    Sorted = 1 << 0
 }
 
 struct BlockTreeNode
 {
-	ulong startTime, endTime, halfTime;
-	BlockMeta* block;
-	BlockTreeNode* left, right;
+    ulong startTime, endTime, halfTime;
+    BlockMeta* block;
+    BlockTreeNode* left, right;
 }
 
 struct BlockMeta
 {
-	ulong startTime, endTime;
-	void[] blockData;
+    ulong startTime, endTime;
+    void[] blockData;
 
-	int numSamples;
+    int numSamples;
 
-	// statistics
-	int numOoOInserts = 0;
-	int numLargesamples = 0;
+    // statistics
+    int numOoOInserts = 0;
+    int numLargesamples = 0;
 
-	BlockMeta* prevBlock, nextBlock;
-	BlockTreeNode* treeNode;
+    BlockMeta* prevBlock, nextBlock;
+    BlockTreeNode* treeNode;
 }
 
 struct Sample(TimeT = ulong, RecordT = uint)
 {
-	TimeT time;
-	RecordT record;
+    TimeT time;
+    RecordT record;
 }
 
 class Stream
 {
-	string name;
+    string name;
 
-	ulong timeResolution; // 100th's of seconds
-	// TODO: stream start time
+    ulong timeResolution; // 100th's of seconds
+    // TODO: stream start time
 
-	StreamType streamType;
-	DataType dataType;
-	ushort customDataSize;
-	Flags flags;
+    StreamType streamType;
+    DataType dataType;
+    ushort customDataSize;
+    Flags flags;
 
-	// TODO: block sizes, elements-per-block, etc...
+    // TODO: block sizes, elements-per-block, etc...
 
-	BlockTreeNode* root;
+    BlockTreeNode* root;
 
-	void Insert(TimeT = ulong, RecordT = uint)(Sample!(TimeT, RecordT)[] samples, uint hints = InsertHint.None)
-	{
-	}
+    void Insert(TimeT = ulong, RecordT = uint)(Sample!(TimeT, RecordT)[] samples, uint hints = InsertHint.None)
+    {
+    }
 
-	void Insert(RecordT = uint)(RecordT[] samples, uint hints = InsertHint.None)
-	{
-	}
+    void Insert(RecordT = uint)(RecordT[] samples, uint hints = InsertHint.None)
+    {
+    }
 
 }
