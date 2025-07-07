@@ -85,7 +85,7 @@ nothrow @nogc:
         {
             lastAction = now;
 
-            if (!socket && !create_socket(AddressFamily.IPv4, SocketType.Datagram, Protocol.UDP, socket))
+            if (!socket && !create_socket(AddressFamily.IPv4, SocketType.datagram, Protocol.udp, socket))
             {
                 if (!alreadyComplained)
                 {
@@ -97,14 +97,14 @@ nothrow @nogc:
             if (!socket)
                 return;
 
-            Result r = socket.set_socket_option(SocketOption.NonBlocking, true);
+            Result r = socket.set_socket_option(SocketOption.non_blocking, true);
             if (r)
-                socket.set_socket_option(SocketOption.ReuseAddress, true);
+                socket.set_socket_option(SocketOption.reuse_address, true);
             if (r)
-                r = socket.set_socket_option(SocketOption.Multicast, MulticastGroup(mDNSMulticastAddress, IPAddr.any));
+                r = socket.set_socket_option(SocketOption.multicast, MulticastGroup(mDNSMulticastAddress, IPAddr.any));
             // TODO: not sure if this should be present or not...
 //            if (r)
-//                r = socket.set_socket_option(SocketOption.MulticastLoopback, false);
+//                r = socket.set_socket_option(SocketOption.multicast_loopback, false);
             if (r)
                 socket.bind(InetAddress(IPAddr.any, mDNSPort));
             if (!r)
@@ -115,7 +115,7 @@ nothrow @nogc:
                 if (!alreadyComplained)
                 {
                     alreadyComplained = true;
-                    writeError("Failed to bind socket for mDNS multicast: ", r.get_SocketResult());
+                    writeError("Failed to bind socket for mDNS multicast: ", r.socket_result());
                 }
                 return;
             }
@@ -134,11 +134,11 @@ nothrow @nogc:
         ubyte[1500] buffer = void;
         InetAddress sender;
         size_t recv;
-        Result r = socket.recvfrom(buffer, MsgFlags.None, &sender, &recv);
-        if (!r && r.get_SocketResult != SocketResult.WouldBlock)
+        Result r = socket.recvfrom(buffer, MsgFlags.none, &sender, &recv);
+        if (!r && r.socket_result != SocketResult.would_block)
         {
             // TODO: what is this case? should we reset the connection?
-            writeError("mDNS: recvfrom failed: ", r.get_SocketResult());
+            writeError("mDNS: recvfrom failed: ", r.socket_result());
             return;
         }
 
@@ -211,11 +211,11 @@ nothrow @nogc:
                 InetAddress addr = InetAddress(mDNSMulticastAddress, mDNSPort);
                 size_t bytes;
 
-                r = socket.sendto(msg, MsgFlags.None, &addr, &bytes);
+                r = socket.sendto(msg, MsgFlags.none, &addr, &bytes);
                 if (!r)
                 {
                     // TODO: what is this case? should we reset the connection?
-                    writeError("mDNS: sendto failed: ", r.get_SocketResult());
+                    writeError("mDNS: sendto failed: ", r.socket_result());
                     return;
                 }
 

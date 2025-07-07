@@ -91,10 +91,10 @@ nothrow @nogc:
     {
         // TODO: if a packet doesn't fill buffer, we should loop...
         size_t bytes;
-        Result r = socket.recvfrom(buffer, MsgFlags.None, null, &bytes);
+        Result r = socket.recvfrom(buffer, MsgFlags.none, null, &bytes);
         if (!r)
         {
-            if (r.get_SocketResult() == SocketResult.WouldBlock)
+            if (r.socket_result() == SocketResult.would_block)
                 return 0;
             assert(0);
         }
@@ -107,7 +107,7 @@ nothrow @nogc:
     {
         // TODO: fragment on MTU...?
         size_t bytes;
-        Result r = socket.sendto(data, MsgFlags.None, &remote, &bytes);
+        Result r = socket.sendto(data, MsgFlags.none, &remote, &bytes);
         if (!r)
             assert(0);
         if (logging)
@@ -118,7 +118,7 @@ nothrow @nogc:
     ptrdiff_t recvfrom(ubyte[] msgBuffer, out InetAddress srcAddr)
     {
         size_t bytes;
-        Result r = socket.recvfrom(msgBuffer, MsgFlags.None, &srcAddr, &bytes);
+        Result r = socket.recvfrom(msgBuffer, MsgFlags.none, &srcAddr, &bytes);
         if (!r)
         {
             // TODO?
@@ -130,7 +130,7 @@ nothrow @nogc:
     ptrdiff_t sendto(const ubyte[] data, InetAddress destAddr)
     {
         size_t sent;
-        Result r = socket.sendto(data, MsgFlags.None, &destAddr, &sent);
+        Result r = socket.sendto(data, MsgFlags.none, &destAddr, &sent);
         if (!r)
         {
             // TODO?

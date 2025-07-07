@@ -172,7 +172,7 @@ nothrow @nogc:
 
             if (t[i] == '\x7f')
                 goto erase_char;
-            if (size_t ansiLen = parseANSICode(t[i .. len]))
+            if (size_t ansiLen = parse_ansi_code(t[i .. len]))
             {
                 const(char)[] seq = t[i .. i + ansiLen];
                 take = ansiLen;

@@ -78,7 +78,7 @@ nothrow @nogc:
                 server = server[0 .. colon];
 
                 size_t taken;
-                long i = portStr.parseInt(&taken);
+                long i = portStr.parse_int(&taken);
                 if (i > ushort.max || taken != portStr.length)
                     return null; // invalid port string!
             }

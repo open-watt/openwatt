@@ -284,7 +284,7 @@ nothrow @nogc:
         {
             // wireshark wants RTU packets for its decoder, so we need to append the crc...
             import urt.crc;
-            ushort crc = packet.data[3..$].calculateCRC!(Algorithm.CRC16_MODBUS)();
+            ushort crc = packet.data[3..$].calculate_crc!(Algorithm.CRC16_MODBUS)();
             sink(crc.nativeToLittleEndian());
         }
     }
@@ -339,7 +339,7 @@ package:
     MACAddress generateMacAddress() pure
     {
         import urt.crc;
-        alias crcFun = calculateCRC!(Algorithm.CRC32_ISO_HDLC);
+        alias crcFun = calculate_crc!(Algorithm.CRC32_ISO_HDLC);
 
         enum ushort MAGIC = 0x1337;
 
@@ -436,12 +436,12 @@ nothrow @nogc:
 
             foreach (iface; interfaces.values)
             {
-                rxLen = max(rxLen, iface.status.recvBytes.formatInt(null));
-                txLen = max(txLen, iface.status.sendBytes.formatInt(null));
-                rpLen = max(rpLen, iface.status.recvPackets.formatInt(null));
-                tpLen = max(tpLen, iface.status.sendPackets.formatInt(null));
-                rdLen = max(rdLen, iface.status.recvDropped.formatInt(null));
-                tdLen = max(tdLen, iface.status.sendDropped.formatInt(null));
+                rxLen = max(rxLen, iface.status.recvBytes.format_int(null));
+                txLen = max(txLen, iface.status.sendBytes.format_int(null));
+                rpLen = max(rpLen, iface.status.recvPackets.format_int(null));
+                tpLen = max(tpLen, iface.status.sendPackets.format_int(null));
+                rdLen = max(rdLen, iface.status.recvDropped.format_int(null));
+                tdLen = max(tdLen, iface.status.sendDropped.format_int(null));
             }
 
             session.writef(" ID     {0, -*1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",

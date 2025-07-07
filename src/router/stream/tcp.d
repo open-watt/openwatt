@@ -37,8 +37,8 @@ nothrow @nogc:
 
         AddressInfo addrInfo;
         addrInfo.family = AddressFamily.IPv4;
-        addrInfo.sockType = SocketType.Stream;
-        addrInfo.protocol = Protocol.TCP;
+        addrInfo.sock_type = SocketType.stream;
+        addrInfo.protocol = Protocol.tcp;
         AddressInfoResolver results;
         get_address_info(host, port ? port.tstring : null, &addrInfo, results);
         if (!results.next_address(addrInfo))
@@ -142,8 +142,8 @@ nothrow @nogc:
 
             AddressInfo addrInfo;
             addrInfo.family = AddressFamily.IPv4;
-            addrInfo.sockType = SocketType.Stream;
-            addrInfo.protocol = Protocol.TCP;
+            addrInfo.sock_type = SocketType.stream;
+            addrInfo.protocol = Protocol.tcp;
             AddressInfoResolver results;
             get_address_info(_host, _port ? _port.tstring : null, &addrInfo, results);
             if (!results.next_address(addrInfo))
@@ -170,19 +170,19 @@ nothrow @nogc:
                 return CompletionStatus.Continue;
             lastRetry = now;
 
-            Result r = create_socket(AddressFamily.IPv4, SocketType.Stream, Protocol.TCP, _socket);
+            Result r = create_socket(AddressFamily.IPv4, SocketType.stream, Protocol.tcp, _socket);
             if (!r)
             {
-                debug writeWarning("create_socket() failed with error: ", r.get_SocketResult());
+                debug writeWarning("create_socket() failed with error: ", r.socket_result());
                 restart();
                 return CompletionStatus.Error;
             }
 
-            set_socket_option(_socket, SocketOption.NonBlocking, true);
+            set_socket_option(_socket, SocketOption.non_blocking, true);
             r = _socket.connect(_remote);
-            if (!r.succeeded && r.get_SocketResult != SocketResult.WouldBlock)
+            if (!r.succeeded && r.socket_result != SocketResult.would_block)
             {
-                debug writeWarning("_socket.connect() failed with error: ", r.get_SocketResult());
+                debug writeWarning("_socket.connect() failed with error: ", r.socket_result());
                 restart();
                 return CompletionStatus.Error;
             }
@@ -192,12 +192,12 @@ nothrow @nogc:
         // we'll poll it to see if it connected...
         PollFd fd;
         fd.socket = _socket;
-        fd.requestEvents = PollEvents.Write;
+        fd.request_events = PollEvents.write;
         uint numEvents;
         Result r = poll(fd, Duration.zero, numEvents);
         if (r.failed)
         {
-            debug writeWarning("poll() failed with error: ", r.get_SocketResult);
+            debug writeWarning("poll() failed with error: ", r.socket_result);
             restart();
             return CompletionStatus.Error;
         }
@@ -207,7 +207,7 @@ nothrow @nogc:
             return CompletionStatus.Continue;
 
         // check error conditions
-        if (fd.returnEvents & (PollEvents.Error | PollEvents.HangUp | PollEvents.Invalid))
+        if (fd.return_events & (PollEvents.error | PollEvents.hangup | PollEvents.invalid))
         {
             debug writeDebug("TCP stream connection failed: '", name, "' to ", remote);
             restart();
@@ -216,7 +216,7 @@ nothrow @nogc:
 
         // this should be the only case left, we've successfully connected!
         // let's just assert that the socket is writable to be sure...
-        assert(fd.returnEvents & PollEvents.Write);
+        assert(fd.return_events & PollEvents.write);
 
         if (keepEnable)
             set_keepalive(_socket, keepEnable, keepIdle, keepInterval, keepCount);
@@ -245,8 +245,8 @@ nothrow @nogc:
         // TODO: does this actually work?! and do we really even want this?
         ubyte[1] buffer;
         size_t bytesReceived;
-        Result r = recv(_socket, null, MsgFlags.Peek, &bytesReceived);
-        if (r != Result.Success && r.get_SocketResult != SocketResult.WouldBlock)
+        Result r = recv(_socket, null, MsgFlags.peek, &bytesReceived);
+        if (r != Result.success && r.socket_result != SocketResult.would_block)
         {
             // something happened... we should try and reconnect I guess?
             restart();
@@ -297,11 +297,11 @@ nothrow @nogc:
             return 0;
 
         size_t bytes = 0;
-        Result r = _socket.recv(buffer, MsgFlags.None, &bytes);
-        if (r != Result.Success)
+        Result r = _socket.recv(buffer, MsgFlags.none, &bytes);
+        if (r != Result.success)
         {
-            SocketResult sr = r.get_SocketResult;
-            if (sr != SocketResult.WouldBlock)
+            SocketResult sr = r.socket_result;
+            if (sr != SocketResult.would_block)
                 restart();
             return 0;
         }
@@ -319,11 +319,11 @@ nothrow @nogc:
         if (running)
         {
             size_t bytes;
-            Result r = _socket.send(data, MsgFlags.None, &bytes);
-            if (r != Result.Success)
+            Result r = _socket.send(data, MsgFlags.none, &bytes);
+            if (r != Result.success)
             {
-                SocketResult sr = r.get_SocketResult;
-                if (sr == SocketResult.WouldBlock)
+                SocketResult sr = r.socket_result;
+                if (sr == SocketResult.would_block)
                     return 0;
                 restart();
             }
@@ -350,11 +350,11 @@ nothrow @nogc:
             return 0;
 
         size_t bytes;
-        Result r = _socket.recv(null, MsgFlags.Peek, &bytes);
+        Result r = _socket.recv(null, MsgFlags.peek, &bytes);
         assert(false, "TODO: not implemented...");
-        if (r != Result.Success)
+        if (r != Result.success)
         {
-//            SocketResult sr = r.get_SocketResult;
+//            SocketResult sr = r.socket_result;
             _socket.close();
             _socket = null;
         }
@@ -385,7 +385,7 @@ private:
         if (_socket == Socket.invalid)
             return;
         if (_state == State.Stopping)
-            _socket.shutdown(SocketShutdownMode.ReadWrite);
+            _socket.shutdown(SocketShutdownMode.read_write);
         _socket.close();
         _socket = Socket.invalid;
     }
@@ -437,14 +437,14 @@ class TCPServer
         // TODO: should we just accept multiple calls to start() and ignore if already running?
         assert(!isRunning, "Already started");
 
-        Result r = create_socket(AddressFamily.IPv4, SocketType.Stream, Protocol.TCP, serverSocket);
+        Result r = create_socket(AddressFamily.IPv4, SocketType.stream, Protocol.tcp, serverSocket);
         if (r.failed)
         {
             writeError("Error staring TCP server '", name , "': failed to create _socket. Error ", r.systemCode);
             return;
         }
 
-        r = serverSocket.set_socket_option(SocketOption.NonBlocking, true);
+        r = serverSocket.set_socket_option(SocketOption.non_blocking, true);
         if (r.failed)
         {
             writeError("Error staring TCP server '", name , "': set_socket_option failed.  Error ", r.systemCode);
@@ -496,10 +496,10 @@ class TCPServer
         Result r = serverSocket.accept(conn, &remoteAddr);
         if (r.failed)
         {
-            if (r.get_SocketResult == SocketResult.WouldBlock)
+            if (r.socket_result == SocketResult.would_block)
                 return;
             // TODO: handle error more good?
-            assert(false, tconcat(r.get_SocketResult));
+            assert(false, tconcat(r.socket_result));
         }
 
         assert(conn);
