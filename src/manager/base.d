@@ -14,12 +14,15 @@ public import manager.collection : collectionTypeInfo, CollectionTypeInfo;
 nothrow @nogc:
 
 
-enum ClientStateSignal
+enum StateSignal
 {
     Destroyed,
     Online,
     Offline
 }
+
+alias StateSignalHandler = void delegate(BaseObject object, StateSignal signal) nothrow @nogc;
+
 
 struct Property
 {
@@ -237,10 +240,15 @@ nothrow @nogc:
         return MutableString!0();
     }
 
-    final void registerClient(BaseObject client)
+    final void subscribe(StateSignalHandler handler)
     {
-        assert(!clients[].exists(client), "Client already registered");
-        clients ~= client;
+        assert(!subscribers[].exists(handler), "Already registered");
+        subscribers ~= handler;
+    }
+
+    final void unsubscribe(StateSignalHandler handler) pure
+    {
+        subscribers.removeFirstSwapLast(handler);
     }
 
 protected:
@@ -249,26 +257,87 @@ protected:
     bool _disabled; // TODO: this unaligns the whole thing... maybe steal the top bit of propsSet?
 
     // sends a signal to all clients
-    void signalStateChange(ClientStateSignal signal)
+    final void signalStateChange(StateSignal signal)
     {
-        foreach (c; clients)
-            c.clientSignal(this, signal);
-    }
-
-    // receive signal from a subscriber
-    void clientSignal(BaseObject client, ClientStateSignal signal)
-    {
-        debug assert(clients[].exists(client), "Client not registered!");
-
-        if (signal == ClientStateSignal.Destroyed)
-            clients.removeFirstSwapLast(client);
+        foreach (handler; subscribers)
+            handler(this, signal);
     }
 
 private:
     const CacheString _type; // TODO: DELETE THIS MEMBER!!!
     String _name;
     String _comment;
-    Array!BaseObject clients;
+    Array!StateSignalHandler subscribers;
+}
+
+
+struct ObjectRef(Type)
+{
+nothrow @nogc:
+    static assert (is(Type : BaseObject), "Type must be a subclass of BaseObject");
+
+    alias get this;
+
+    this(Type object)
+    {
+        _object = object;
+        _object.subscribe(&destroy_handler);
+    }
+
+    ~this() pure
+    {
+        release();
+    }
+
+    inout(Type) get() inout pure
+    {
+        if (_ptr & 1)
+            return null; // object has been destroyed, so return null
+        return _object;
+    }
+
+    String name() const pure
+    {
+        if (_ptr & 1)
+        {
+            size_t t = _ptr ^ 1;
+            return *cast(String*)&t;
+        }
+        return _object.name;
+    }
+
+    void release() pure
+    {
+        // if we hold a string, we must destroy it...
+        if (_ptr & 1)
+        {
+            _ptr ^= 1;
+            _name = null;
+        }
+        else if (_object !is null)
+        {
+            _object.unsubscribe(&destroy_handler);
+            _object = null;
+        }
+    }
+
+private:
+    union
+    {
+        Type _object;
+        String _name;
+        size_t _ptr;
+    }
+
+    void destroy_handler(BaseObject object, StateSignal signal) pure
+    {
+        assert(object is _object, "Object reference mismatch!");
+        if (signal != StateSignal.Destroyed)
+            return;
+        _name = _object.name;
+        assert((_ptr & 1) == 0, "Objects and strings should not have the 1-bit of their pointers set!?");
+        _ptr |= 1;
+    }
 }
 
 
