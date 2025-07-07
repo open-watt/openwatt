@@ -10,19 +10,19 @@ import protocol.mqtt.broker;
 
 class MQTTModule : Module
 {
-	mixin DeclareModule!"protocol.mqtt";
+    mixin DeclareModule!"protocol.mqtt";
 
-	MQTTBroker broker;
+    MQTTBroker broker;
 
-	override void init()
-	{
-	}
+    override void init()
+    {
+    }
 
-	override void update()
-	{
-//		if (broker)
-//			broker.update();
-	}
+    override void update()
+    {
+//        if (broker)
+//            broker.update();
+    }
 }
 
 

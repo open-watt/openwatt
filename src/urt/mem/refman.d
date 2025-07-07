@@ -8,28 +8,28 @@ ushort allocOffset = 0;
 
 struct ShortRef(T)
 {
-	static assert(is(T == void*) || is(T == void[]), "ShortRef can only be used with T* or T[]");
+    static assert(is(T == void*) || is(T == void[]), "ShortRef can only be used with T* or T[]");
 
-	T getRef()
-	{
-		static if (is(T == void*))
-			return cast(T)ptrs[_ref];
-		else static if (is(T == void[]))
-			return *cast(T*)&ptrs[_ref];
-	}
-	alias getRef this;
+    T getRef()
+    {
+        static if (is(T == void*))
+            return cast(T)ptrs[_ref];
+        else static if (is(T == void[]))
+            return *cast(T*)&ptrs[_ref];
+    }
+    alias getRef this;
 
 private:
-	ushort _ref;
+    ushort _ref;
 }
 
 
 ShortRef!(void*) getRef(void* ptr)
 {
-	return ShortRef!(void*)();
+    return ShortRef!(void*)();
 }
 
 ShortRef!(void[]) getRef(void[] array)
 {
-	return ShortRef!(void[])();
+    return ShortRef!(void[])();
 }

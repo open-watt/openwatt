@@ -24,40 +24,40 @@ alias Map(K, V) = AVLTree!(K, V);
 struct AVLTree(K, V, alias Pred = DefCmp!K, Allocator = Mallocator)
 {
 @nogc:
-	alias KeyType = K;
-	alias ValueType = V; // TODO: . ElementType
-	alias KeyValuePair = KVP!(K, V);
+    alias KeyType = K;
+    alias ValueType = V; // TODO: . ElementType
+    alias KeyValuePair = KVP!(K, V);
 
-	// TODO: copy ctor, move ctor, etc...
+    // TODO: copy ctor, move ctor, etc...
 
-//	this(KeyValuePair[] arr)
-//	{
-//		foreach (ref kvp; arr)
-//			insert(kvp.key, kvp.value);
-//	}
+//    this(KeyValuePair[] arr)
+//    {
+//        foreach (ref kvp; arr)
+//            insert(kvp.key, kvp.value);
+//    }
 
-	~this() nothrow
-	{
-		clear();
-	}
+    ~this() nothrow
+    {
+        clear();
+    }
 
     size_t length() const nothrow
         => numNodes;
     bool empty() const nothrow
         => numNodes == 0;
 
-	void clear() nothrow
-	{
-		destroy(pRoot);
-		pRoot = null;
-	}
+    void clear() nothrow
+    {
+        destroy(pRoot);
+        pRoot = null;
+    }
 
-	V* insert(_K, _V)(auto ref _K key, auto ref _V val)
-	{
-		if (get(key))
-			return null;
-		return &replace(forward!key, forward!val);
-	}
+    V* insert(_K, _V)(auto ref _K key, auto ref _V val)
+    {
+        if (get(key))
+            return null;
+        return &replace(forward!key, forward!val);
+    }
 
 /+
   V& insert(K &&key, V &&val)
@@ -163,15 +163,15 @@ struct AVLTree(K, V, alias Pred = DefCmp!K, Allocator = Mallocator)
   }
 +/
 
-	ref V replace(_K, _V)(auto ref _K key, auto ref _V val)
-	{
-		Node* node = cast(Node*)Allocator.instance.alloc(Node.sizeof);
-		emplace(&node.kvp, forward!key, forward!val);
-		node.left = node.right = null;
-		node.height = 1;
-		pRoot = insert(pRoot, node);
-		return node.kvp.value;
-	}
+    ref V replace(_K, _V)(auto ref _K key, auto ref _V val)
+    {
+        Node* node = cast(Node*)Allocator.instance.alloc(Node.sizeof);
+        emplace(&node.kvp, forward!key, forward!val);
+        node.left = node.right = null;
+        node.height = 1;
+        pRoot = insert(pRoot, node);
+        return node.kvp.value;
+    }
 /+
   V& replace(K &&key, V &&val)
   {
@@ -236,29 +236,29 @@ struct AVLTree(K, V, alias Pred = DefCmp!K, Allocator = Mallocator)
   }
 +/
 
-	void remove(_K)(ref const _K key)
-	{
-		pRoot = deleteNode(pRoot, key);
-	}
+    void remove(_K)(ref const _K key)
+    {
+        pRoot = deleteNode(pRoot, key);
+    }
 
-	inout(V)* get(_K)(ref const _K key) inout
-	{
-		inout(Node)* n = find(pRoot, key);
-		return n ? &n.kvp.value : null;
-	}
+    inout(V)* get(_K)(ref const _K key) inout
+    {
+        inout(Node)* n = find(pRoot, key);
+        return n ? &n.kvp.value : null;
+    }
 
-	ref inout(V) opIndex(_K)(ref const _K key) inout
-	{
-		inout(V)* pV = get(key);
-		assert(pV, "Element not found");
-		return *pV;
-	}
+    ref inout(V) opIndex(_K)(ref const _K key) inout
+    {
+        inout(V)* pV = get(key);
+        assert(pV, "Element not found");
+        return *pV;
+    }
 
-	// TODO: should an assignment expression return anything? I think not...
-	void opIndexAssign(_V)(auto ref _V value, ref const K key)
-	{
-		replace(key, forward!value);
-	}
+    // TODO: should an assignment expression return anything? I think not...
+    void opIndexAssign(_V)(auto ref _V value, ref const K key)
+    {
+        replace(key, forward!value);
+    }
 
     inout(V)* opBinaryRight(string op : "in", _K)(ref const _K key) inout
         => get(key);
@@ -266,25 +266,25 @@ struct AVLTree(K, V, alias Pred = DefCmp!K, Allocator = Mallocator)
     bool exists(_K)(ref const _K key) const
         => get(key) != null;
 /+
-	AVLTree<K, V>& operator =(const AVLTree<K, V> &rh)
-	{
-		if (this != &rh)
-		{
-			this.~AVLTree();
-			epConstruct(this) AVLTree<K, V>(rh);
-		}
-		return *this;
-	}
+    AVLTree<K, V>& operator =(const AVLTree<K, V> &rh)
+    {
+        if (this != &rh)
+        {
+            this.~AVLTree();
+            epConstruct(this) AVLTree<K, V>(rh);
+        }
+        return *this;
+    }
 
-	AVLTree<K, V>& operator =(AVLTree<K, V> &&rval)
-	{
-		if (this != &rval)
-		{
-			this.~AVLTree();
-			epConstruct(this) AVLTree<K, V>(std::move(rval));
-		}
-		return *this;
-	}
+    AVLTree<K, V>& operator =(AVLTree<K, V> &&rval)
+    {
+        if (this != &rval)
+        {
+            this.~AVLTree();
+            epConstruct(this) AVLTree<K, V>(std::move(rval));
+        }
+        return *this;
+    }
 +/
 
     // TODO: why don't the const overloads work properly?
@@ -302,219 +302,219 @@ struct AVLTree(K, V, alias Pred = DefCmp!K, Allocator = Mallocator)
 
 private:
 nothrow:
-	alias Node = AVLTreeNode!(K, V);
+    alias Node = AVLTreeNode!(K, V);
 
-	size_t numNodes = 0;
-	Node* pRoot = null;
+    size_t numNodes = 0;
+    Node* pRoot = null;
 
-	static int height(const(Node)* n) pure
-	{
-		return n ? n.height : 0;
-	}
+    static int height(const(Node)* n) pure
+    {
+        return n ? n.height : 0;
+    }
 
-	static int maxHeight(const(Node)* n) pure
-	{
-		if (!n)
-			return 0;
-		if (n.left)
-		{
-			if (n.right)
-				return max(n.left.height, n.right.height);
-			else
-				return n.left.height;
-		}
-		if (n.right)
-			return n.right.height;
-		return 0;
-	}
+    static int maxHeight(const(Node)* n) pure
+    {
+        if (!n)
+            return 0;
+        if (n.left)
+        {
+            if (n.right)
+                return max(n.left.height, n.right.height);
+            else
+                return n.left.height;
+        }
+        if (n.right)
+            return n.right.height;
+        return 0;
+    }
 
-	static int getBalance(Node* n) pure
-	{
-		return n ? height(n.left) - height(n.right) : 0;
-	}
+    static int getBalance(Node* n) pure
+    {
+        return n ? height(n.left) - height(n.right) : 0;
+    }
 
-	static Node* rightRotate(Node* y) pure
-	{
-		Node* x = y.left;
-		Node* T2 = x.right;
+    static Node* rightRotate(Node* y) pure
+    {
+        Node* x = y.left;
+        Node* T2 = x.right;
 
-		// Perform rotation
-		x.right = y;
-		y.left = T2;
+        // Perform rotation
+        x.right = y;
+        y.left = T2;
 
-		// Update heights
-		y.height = maxHeight(y) + 1;
-		x.height = maxHeight(x) + 1;
+        // Update heights
+        y.height = maxHeight(y) + 1;
+        x.height = maxHeight(x) + 1;
 
-		// Return new root
-		return x;
-	}
+        // Return new root
+        return x;
+    }
 
-	static Node* leftRotate(Node* x) pure
-	{
-		Node* y = x.right;
-		Node* T2 = y.left;
+    static Node* leftRotate(Node* x) pure
+    {
+        Node* y = x.right;
+        Node* T2 = y.left;
 
-		// Perform rotation
-		y.left = x;
-		x.right = T2;
+        // Perform rotation
+        y.left = x;
+        x.right = T2;
 
-		//  Update heights
-		x.height = maxHeight(x) + 1;
-		y.height = maxHeight(y) + 1;
+        //  Update heights
+        x.height = maxHeight(x) + 1;
+        y.height = maxHeight(y) + 1;
 
-		// Return new root
-		return y;
-	}
+        // Return new root
+        return y;
+    }
 
-	static inout(Node)* find(_K)(inout(Node)* n, ref const _K key)
-	{
-		if (n is null)
-			return null;
-		ptrdiff_t c = Pred(n.kvp.key, key);
-		if (c > 0)
-			return find(n.left, key);
-		if (c < 0)
-			return find(n.right, key);
-		return n;
-	}
+    static inout(Node)* find(_K)(inout(Node)* n, ref const _K key)
+    {
+        if (n is null)
+            return null;
+        ptrdiff_t c = Pred(n.kvp.key, key);
+        if (c > 0)
+            return find(n.left, key);
+        if (c < 0)
+            return find(n.right, key);
+        return n;
+    }
 
-	void destroy(Node* n)
-	{
-		if (n is null)
-			return;
+    void destroy(Node* n)
+    {
+        if (n is null)
+            return;
 
-		destroy(n.left);
-		destroy(n.right);
+        destroy(n.left);
+        destroy(n.right);
 
-		Allocator.instance.freeT(n);
+        Allocator.instance.freeT(n);
 
-		--numNodes;
-	}
+        --numNodes;
+    }
 
-	Node* insert(Node* n, Node* newnode)
-	{
-		// 1.  Perform the normal BST rotation
-		if (n is null)
-		{
-			++numNodes;
-			return newnode;
-		}
+    Node* insert(Node* n, Node* newnode)
+    {
+        // 1.  Perform the normal BST rotation
+        if (n is null)
+        {
+            ++numNodes;
+            return newnode;
+        }
 
-		ptrdiff_t c = Pred(newnode.kvp.key, n.kvp.key);
-		if (c < 0)
-			n.left = insert(n.left, newnode);
-		else if (c > 0)
-			n.right = insert(n.right, newnode);
-		else
-		{
-			newnode.left = n.left;
-			newnode.right = n.right;
-			newnode.height = n.height;
+        ptrdiff_t c = Pred(newnode.kvp.key, n.kvp.key);
+        if (c < 0)
+            n.left = insert(n.left, newnode);
+        else if (c > 0)
+            n.right = insert(n.right, newnode);
+        else
+        {
+            newnode.left = n.left;
+            newnode.right = n.right;
+            newnode.height = n.height;
 
-			Allocator.instance.freeT(n);
+            Allocator.instance.freeT(n);
 
-			return newnode;
-		}
+            return newnode;
+        }
 
-		// 2. Update height of this ancestor Node
-		n.height = maxHeight(n) + 1;
+        // 2. Update height of this ancestor Node
+        n.height = maxHeight(n) + 1;
 
-		// 3. get the balance factor of this ancestor Node to check whether
-		//    this Node became unbalanced
-		int balance = getBalance(n);
+        // 3. get the balance factor of this ancestor Node to check whether
+        //    this Node became unbalanced
+        int balance = getBalance(n);
 
-		// If this Node becomes unbalanced, then there are 4 cases
+        // If this Node becomes unbalanced, then there are 4 cases
 
-		if (balance > 1)
-		{
-			ptrdiff_t lc = Pred(newnode.kvp.key, n.left.kvp.key);
-			// Left Left Case
-			if (lc < 0)
-				return rightRotate(n);
+        if (balance > 1)
+        {
+            ptrdiff_t lc = Pred(newnode.kvp.key, n.left.kvp.key);
+            // Left Left Case
+            if (lc < 0)
+                return rightRotate(n);
 
-			// Left Right Case
-			if (lc > 0)
-			{
-				n.left = leftRotate(n.left);
-				return rightRotate(n);
-			}
-		}
+            // Left Right Case
+            if (lc > 0)
+            {
+                n.left = leftRotate(n.left);
+                return rightRotate(n);
+            }
+        }
 
-		if (balance < -1)
-		{
-			ptrdiff_t rc = Pred(newnode.kvp.key, n.right.kvp.key);
+        if (balance < -1)
+        {
+            ptrdiff_t rc = Pred(newnode.kvp.key, n.right.kvp.key);
 
-			// Right Right Case
-			if (rc > 0)
-				return leftRotate(n);
+            // Right Right Case
+            if (rc > 0)
+                return leftRotate(n);
 
-			// Right Left Case
-			if (rc < 0)
-			{
-				n.right = rightRotate(n.right);
-				return leftRotate(n);
-			}
-		}
+            // Right Left Case
+            if (rc < 0)
+            {
+                n.right = rightRotate(n.right);
+                return leftRotate(n);
+            }
+        }
 
-		// return the (unchanged) Node pointer
-		return n;
-	}
+        // return the (unchanged) Node pointer
+        return n;
+    }
 
-	Node* deleteNode(_K)(Node* _pRoot, ref const _K key)
-	{
-		// STEP 1: PERFORM STANDARD BST DELETE
+    Node* deleteNode(_K)(Node* _pRoot, ref const _K key)
+    {
+        // STEP 1: PERFORM STANDARD BST DELETE
 
-		if (_pRoot is null)
-			return _pRoot;
+        if (_pRoot is null)
+            return _pRoot;
 
-		ptrdiff_t c = Pred(_pRoot.kvp.key, key);
+        ptrdiff_t c = Pred(_pRoot.kvp.key, key);
 
-		// If the key to be deleted is smaller than the _pRoot's key,
-		// then it lies in left subtree
-		if (c > 0)
-			_pRoot.left = deleteNode(_pRoot.left, key);
+        // If the key to be deleted is smaller than the _pRoot's key,
+        // then it lies in left subtree
+        if (c > 0)
+            _pRoot.left = deleteNode(_pRoot.left, key);
 
-		// If the key to be deleted is greater than the _pRoot's key,
-		// then it lies in right subtree
-		else if (c < 0)
-			_pRoot.right = deleteNode(_pRoot.right, key);
+        // If the key to be deleted is greater than the _pRoot's key,
+        // then it lies in right subtree
+        else if (c < 0)
+            _pRoot.right = deleteNode(_pRoot.right, key);
 
-		// if key is same as _pRoot's key, then this is the Node
-		// to be deleted
-		else
-			_pRoot = doDelete(_pRoot);
+        // if key is same as _pRoot's key, then this is the Node
+        // to be deleted
+        else
+            _pRoot = doDelete(_pRoot);
 
-		return rebalance(_pRoot);
-	}
+        return rebalance(_pRoot);
+    }
 
-	Node* doDelete(Node* _pRoot)
-	{
-		// Node with only one child or no child
-		if ((_pRoot.left is null) || (_pRoot.right is null))
-		{
-			Node* temp = _pRoot.left ? _pRoot.left : _pRoot.right;
+    Node* doDelete(Node* _pRoot)
+    {
+        // Node with only one child or no child
+        if ((_pRoot.left is null) || (_pRoot.right is null))
+        {
+            Node* temp = _pRoot.left ? _pRoot.left : _pRoot.right;
 
-			// No child case
-			if (temp is null)
-			{
-				temp = _pRoot;
-				_pRoot = null;
-			}
-			else // One child case
-			{
-				// TODO: FIX THIS!!
-				// this is copying the child node into the parent node because there is no parent pointer
-				// DO: add parent pointer, then fix up the parent's child pointer to the child, and do away with this pointless copy!
-				*_pRoot = (*temp).move; // Copy the contents of the non-empty child
-			}
+            // No child case
+            if (temp is null)
+            {
+                temp = _pRoot;
+                _pRoot = null;
+            }
+            else // One child case
+            {
+                // TODO: FIX THIS!!
+                // this is copying the child node into the parent node because there is no parent pointer
+                // DO: add parent pointer, then fix up the parent's child pointer to the child, and do away with this pointless copy!
+                *_pRoot = (*temp).move; // Copy the contents of the non-empty child
+            }
 
-			Allocator.instance.freeT(temp);
+            Allocator.instance.freeT(temp);
 
-			--numNodes;
-		}
-		else
-		{
+            --numNodes;
+        }
+        else
+        {
             // Node with two children: we replace 'this' node with the next one in sequence...
 
             // get the in-order successor: the 'next' item is the far left node on the right hand side)
@@ -522,68 +522,68 @@ nothrow:
             while (next.left !is null) // find the leftmost leaf
                 next = next.left;
 
-			// Copy the in-order successor's data to this Node
-			_pRoot.kvp.key = next.kvp.key; // we can't move the key, because deleteNode still needs to be able to find it
-			_pRoot.kvp.value = next.kvp.value.move;
+            // Copy the in-order successor's data to this Node
+            _pRoot.kvp.key = next.kvp.key; // we can't move the key, because deleteNode still needs to be able to find it
+            _pRoot.kvp.value = next.kvp.value.move;
 
-			// Delete the node we just shifted
-			_pRoot.right = deleteNode(_pRoot.right, next.kvp.key);
-		}
+            // Delete the node we just shifted
+            _pRoot.right = deleteNode(_pRoot.right, next.kvp.key);
+        }
 
-		return _pRoot;
-	}
+        return _pRoot;
+    }
 
-	Node* rebalance(Node* _pRoot)
-	{
-		// If the tree had only one Node then return
-		if (_pRoot is null)
-			return null;
+    Node* rebalance(Node* _pRoot)
+    {
+        // If the tree had only one Node then return
+        if (_pRoot is null)
+            return null;
 
-		// STEP 2: UPDATE HEIGHT OF THE CURRENT NODE
-		_pRoot.height = max(height(_pRoot.left), height(_pRoot.right)) + 1;
+        // STEP 2: UPDATE HEIGHT OF THE CURRENT NODE
+        _pRoot.height = max(height(_pRoot.left), height(_pRoot.right)) + 1;
 
-		// STEP 3: GET THE BALANCE FACTOR OF THIS NODE (to check whether
-		//  this Node became unbalanced)
-		int balance = getBalance(_pRoot);
+        // STEP 3: GET THE BALANCE FACTOR OF THIS NODE (to check whether
+        //  this Node became unbalanced)
+        int balance = getBalance(_pRoot);
 
-		// If this Node becomes unbalanced, then there are 4 cases
+        // If this Node becomes unbalanced, then there are 4 cases
 
-		// Left Left Case
-		if (balance > 1 && getBalance(_pRoot.left) >= 0)
-			return rightRotate(_pRoot);
+        // Left Left Case
+        if (balance > 1 && getBalance(_pRoot.left) >= 0)
+            return rightRotate(_pRoot);
 
-		// Left Right Case
-		if (balance > 1 && getBalance(_pRoot.left) < 0)
-		{
-			_pRoot.left = leftRotate(_pRoot.left);
-			return rightRotate(_pRoot);
-		}
+        // Left Right Case
+        if (balance > 1 && getBalance(_pRoot.left) < 0)
+        {
+            _pRoot.left = leftRotate(_pRoot.left);
+            return rightRotate(_pRoot);
+        }
 
-		// Right Right Case
-		if (balance < -1 && getBalance(_pRoot.right) <= 0)
-			return leftRotate(_pRoot);
+        // Right Right Case
+        if (balance < -1 && getBalance(_pRoot.right) <= 0)
+            return leftRotate(_pRoot);
 
-		// Right Left Case
-		if (balance < -1 && getBalance(_pRoot.right) > 0)
-		{
-			_pRoot.right = rightRotate(_pRoot.right);
-			return leftRotate(_pRoot);
-		}
+        // Right Left Case
+        if (balance < -1 && getBalance(_pRoot.right) > 0)
+        {
+            _pRoot.right = rightRotate(_pRoot.right);
+            return leftRotate(_pRoot);
+        }
 
-		return _pRoot;
-	}
+        return _pRoot;
+    }
 
-//	static Node* clone(Node* pOld)
-//	{
-//		if (!pOld)
-//			return null;
+//    static Node* clone(Node* pOld)
+//    {
+//        if (!pOld)
+//            return null;
 //
-//		Node* pNew = Allocator.instance.allocT!Node(pOld.kvp);
-//		pNew.height = pOld.height;
-//		pNew.left = clone(pOld.left);
-//		pNew.right = clone(pOld.right);
-//		return pNew;
-//	}
+//        Node* pNew = Allocator.instance.allocT!Node(pOld.kvp);
+//        pNew.height = pOld.height;
+//        pNew.left = clone(pOld.left);
+//        pNew.right = clone(pOld.right);
+//        return pNew;
+//    }
 
 public:
     enum IterateBy
@@ -693,77 +693,77 @@ struct AVLTreeNode(K, V)
 {
 nothrow @nogc:
 
-	AVLTreeNode* left, right;
-	KVP!(K, V) kvp;
-	int height;
+    AVLTreeNode* left, right;
+    KVP!(K, V) kvp;
+    int height;
 
-	this() @disable;
+    this() @disable;
 
-	//  this(AVLTreeNode rh)
-	//  {
-	//	left = rh.left;
-	//	right = rh.right;
-	//	kvp = rh.kvp.move;
-	//	height = rh.height;
-	//  }
-	this(ref AVLTreeNode rh)
-	{
-		left = rh.left;
-		right = rh.right;
-		kvp = rh.kvp;
-		height = rh.height;
-	}
+//    this(AVLTreeNode rh)
+//    {
+//        left = rh.left;
+//        right = rh.right;
+//        kvp = rh.kvp.move;
+//        height = rh.height;
+//    }
+    this(ref AVLTreeNode rh)
+    {
+        left = rh.left;
+        right = rh.right;
+        kvp = rh.kvp;
+        height = rh.height;
+    }
 
-	ref AVLTreeNode opAssign(ref AVLTreeNode rh)
-	{
-		this.destroy();
-		emplace(&this, rh);
-		return this;
-	}
+    ref AVLTreeNode opAssign(ref AVLTreeNode rh)
+    {
+        this.destroy();
+        emplace(&this, rh);
+        return this;
+    }
 
-	ref AVLTreeNode opAssign(AVLTreeNode rh)
-	{
-		this.destroy();
-		emplace(&this, rh.move);
-		return this;
-	}
+    ref AVLTreeNode opAssign(AVLTreeNode rh)
+    {
+        this.destroy();
+        emplace(&this, rh.move);
+        return this;
+    }
 }
 
 /+
 template<typename K, typename V, typename PredFunctor, typename Allocator>
 ptrdiff_t epStringify(Slice<char> buffer, String epUnusedParam(format), const AVLTree<K, V, PredFunctor, Allocator> &tree, const VarArg* epUnusedParam(pArgs))
 {
-	size_t offset = 0;
-	if (buffer)
-		offset += String("{ ").copyTo(buffer);
-	else
-		offset += String("{ ").length;
+    size_t offset = 0;
+    if (buffer)
+        offset += String("{ ").copyTo(buffer);
+    else
+        offset += String("{ ").length;
 
-	bool bFirst = true;
-	for (auto &&kvp : tree)
-	{
-		if (!bFirst)
-		{
-			if (buffer)
-				offset += String(", ").copyTo(buffer.drop(offset));
-			else
-				offset += String(", ").length;
-		}
-		else
-			bFirst = false;
+    bool bFirst = true;
+    for (auto &&kvp : tree)
+    {
+        if (!bFirst)
+        {
+            if (buffer)
+                offset += String(", ").copyTo(buffer.drop(offset));
+            else
+                offset += String(", ").length;
+        }
+        else
+            bFirst = false;
 
-		if (buffer)
-			offset += epStringify(buffer.drop(offset), null, kvp, null);
-		else
-			offset += epStringify(null, null, kvp, null);
-	}
+        if (buffer)
+            offset += epStringify(buffer.drop(offset), null, kvp, null);
+        else
+            offset += epStringify(null, null, kvp, null);
+    }
 
-	if (buffer)
-		offset += String(" }").copyTo(buffer.drop(offset));
-	else
-		offset += String(" }").length;
+    if (buffer)
+        offset += String(" }").copyTo(buffer.drop(offset));
+    else
+        offset += String(" }").length;
 
-	return offset;
+    return offset;
 }
 +/
 

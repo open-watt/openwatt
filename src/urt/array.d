@@ -35,48 +35,48 @@ bool empty(T, K)(ref const T[K] arr) pure
 
 ref inout(T) popFront(T)(ref inout(T)[] arr) pure
 {
-	debug assert(arr.length > 0);
-	arr = arr.ptr[1..arr.length];
-	return arr.ptr[-1];
+    debug assert(arr.length > 0);
+    arr = arr.ptr[1..arr.length];
+    return arr.ptr[-1];
 }
 
 ref inout(T) popBack(T)(ref inout(T)[] arr) pure
 {
-	debug assert(arr.length > 0);
-	arr = arr.ptr[0..arr.length - 1];
-	return arr.ptr[arr.length];
+    debug assert(arr.length > 0);
+    arr = arr.ptr[0..arr.length - 1];
+    return arr.ptr[arr.length];
 }
 
 inout(T)[] takeFront(T)(ref inout(T)[] arr, size_t count) pure
 {
-	debug assert(count <= arr.length);
-	inout(T)[] t = arr.ptr[0 .. count];
-	arr = arr.ptr[count .. arr.length];
-	return t;
+    debug assert(count <= arr.length);
+    inout(T)[] t = arr.ptr[0 .. count];
+    arr = arr.ptr[count .. arr.length];
+    return t;
 }
 
 ref inout(T)[N] takeFront(size_t N, T)(ref inout(T)[] arr) pure
 {
-	debug assert(N <= arr.length);
-	inout(T)* t = arr.ptr;
-	arr = arr.ptr[N .. arr.length];
-	return t[0..N];
+    debug assert(N <= arr.length);
+    inout(T)* t = arr.ptr;
+    arr = arr.ptr[N .. arr.length];
+    return t[0..N];
 }
 
 inout(T)[] takeBack(T)(ref inout(T)[] arr, size_t count) pure
 {
-	debug assert(count <= arr.length);
-	inout(T)[] t = arr.ptr[arr.length - count .. arr.length];
-	arr = arr.ptr[0 .. arr.length - count];
-	return t;
+    debug assert(count <= arr.length);
+    inout(T)[] t = arr.ptr[arr.length - count .. arr.length];
+    arr = arr.ptr[0 .. arr.length - count];
+    return t;
 }
 
 ref inout(T)[N] takeBack(size_t N, T)(ref inout(T)[] arr) pure
 {
-	debug assert(N <= arr.length);
-	inout(T)* t = arr.ptr + arr.length - N;
-	arr = arr.ptr[0 .. arr.length - N];
-	return t[0..N];
+    debug assert(N <= arr.length);
+    inout(T)* t = arr.ptr + arr.length - N;
+    arr = arr.ptr[0 .. arr.length - N];
+    return t[0..N];
 }
 
 bool exists(T)(const(T)[] arr, auto ref const T el, size_t *pIndex = null)

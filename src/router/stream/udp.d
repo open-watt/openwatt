@@ -17,8 +17,8 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"udp";
 
-	this(String name, ushort remotePort, const char[] remoteHost = "255.255.255.255", ushort localPort = 0, const char[] localHost = "0.0.0.0", StreamOptions options = StreamOptions.None)
-	{
+    this(String name, ushort remotePort, const char[] remoteHost = "255.255.255.255", ushort localPort = 0, const char[] localHost = "0.0.0.0", StreamOptions options = StreamOptions.None)
+    {
         super(name.move, TypeName, options);
 
         // TODO: if remoteHost is a broadcast address and options doesn't have `AllowBroadcast`, make a warning...
@@ -49,40 +49,40 @@ nothrow @nogc:
         }
 
         _status.linkStatus = Status.Link.Up;
-	}
+    }
 
-	override bool connect()
-	{
-//		socket = new UdpSocket();
-//		socket.bind(local);
-//		socket.blocking = !(options & StreamOptions.NonBlocking);
-//		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.BROADCAST, (options & StreamOptions.AllowBroadcast) ? 1 : 0);
-		return true;
-	}
+    override bool connect()
+    {
+//        socket = new UdpSocket();
+//        socket.bind(local);
+//        socket.blocking = !(options & StreamOptions.NonBlocking);
+//        socket.setOption(SocketOptionLevel.SOCKET, SocketOption.BROADCAST, (options & StreamOptions.AllowBroadcast) ? 1 : 0);
+        return true;
+    }
 
-	override void disconnect()
-	{
-//		if (socket !is null)
-//		{
-//			socket.shutdown(SocketShutdown.BOTH);
-//			socket.close();
-//			socket = null;
-//		}
-	}
+    override void disconnect()
+    {
+//        if (socket !is null)
+//        {
+//            socket.shutdown(SocketShutdown.BOTH);
+//            socket.close();
+//            socket = null;
+//        }
+    }
 
-	override const(char)[] remoteName()
-	{
-		return remoteHost[];
-	}
+    override const(char)[] remoteName()
+    {
+        return remoteHost[];
+    }
 
-	override void setOpts(StreamOptions options) nothrow @nogc
-	{
-		this.options = options;
-		assert(false);
-//		if (socket)
-//			socket.blocking = !(options & StreamOptions.NonBlocking);
-//		socket.setOption(SocketOptionLevel.SOCKET, SocketOption.BROADCAST, (options & StreamOptions.AllowBroadcast) ? 1 : 0);
-	}
+    override void setOpts(StreamOptions options) nothrow @nogc
+    {
+        this.options = options;
+        assert(false);
+//        if (socket)
+//            socket.blocking = !(options & StreamOptions.NonBlocking);
+//        socket.setOption(SocketOptionLevel.SOCKET, SocketOption.BROADCAST, (options & StreamOptions.AllowBroadcast) ? 1 : 0);
+    }
 
     override ptrdiff_t read(void[] buffer) nothrow @nogc
     {
@@ -136,43 +136,43 @@ nothrow @nogc:
         return sent;
     }
 
-	override ptrdiff_t pending()
-	{
-//		if (!connected())
-//		{
-//			if (options & StreamOptions.KeepAlive)
-//			{
-//				connect();
-//				return 0;
-//			}
-//			else
-//				return -1;
-//		}
+    override ptrdiff_t pending()
+    {
+//        if (!connected())
+//        {
+//            if (options & StreamOptions.KeepAlive)
+//            {
+//                connect();
+//                return 0;
+//            }
+//            else
+//                return -1;
+//        }
 //
-//		long r = socket.receive(null, SocketFlags.PEEK);
-//		if (r == 0 || r == Socket.ERROR)
-//		{
-//			socket.close();
-//			socket = null;
-//		}
-//		return cast(size_t) r;
-		return 0;
-	}
+//        long r = socket.receive(null, SocketFlags.PEEK);
+//        if (r == 0 || r == Socket.ERROR)
+//        {
+//            socket.close();
+//            socket = null;
+//        }
+//        return cast(size_t) r;
+        return 0;
+    }
 
-	override ptrdiff_t flush()
-	{
-		// TODO: read until can't read no more?
-		assert(0);
-	}
+    override ptrdiff_t flush()
+    {
+        // TODO: read until can't read no more?
+        assert(0);
+    }
 
 private:
-	Socket socket;
-	String localHost;
-	String remoteHost;
-	ushort localPort;
-	ushort remotePort;
-	InetAddress local;
-	InetAddress remote;
+    Socket socket;
+    String localHost;
+    String remoteHost;
+    ushort localPort;
+    ushort remotePort;
+    InetAddress local;
+    InetAddress remote;
 }
 
 

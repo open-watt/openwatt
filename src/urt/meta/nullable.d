@@ -271,10 +271,10 @@ template Nullable(T)
             isValue = false;
         }
         void opAssign(T v)
-		{
+        {
             value = v;
             isValue = true;
-		}
+        }
 
         ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc
         {

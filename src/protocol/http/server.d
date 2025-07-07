@@ -65,8 +65,8 @@ package:
     }
 
 private:
-	struct Session
-	{
+    struct Session
+    {
     nothrow @nogc:
 
         this(Stream stream, RequestHandler requestHandler)
@@ -104,5 +104,5 @@ private:
         Stream stream;
         HTTPParser parser;
         RequestHandler requestHandler;
-	}
+    }
 }
