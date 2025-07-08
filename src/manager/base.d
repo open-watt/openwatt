@@ -13,6 +13,20 @@ public import manager.collection : collectionTypeInfo, CollectionTypeInfo;
 
 nothrow @nogc:
 
+
+enum ObjectFlags : ubyte
+{
+    None        = 0,
+    Dynamic     = 1 << 0, // D
+    Temporary   = 1 << 1, // T
+    Disabled    = 1 << 2, // X
+    Invalid     = 1 << 3, // I
+    Running     = 1 << 4, // R
+    Slave       = 1 << 5, // S
+    LinkPresent = 1 << 6, // L
+    Hardware    = 1 << 7, // H
+}
+
 enum CompletionStatus
 {
     Continue,
@@ -102,11 +116,12 @@ struct Property
 
 class BaseObject
 {
-    __gshared Property[6] Properties = [ Property.create!("type", type)(),
+    __gshared Property[7] Properties = [ Property.create!("type", type)(),
                                          Property.create!("name", name)(),
                                          Property.create!("disabled", disabled)(),
                                          Property.create!("comment", comment)(),
                                          Property.create!("running", running)(),
+                                         Property.create!("flags", running)(),
                                          Property.create!("status", statusMessage)() ];
 nothrow @nogc:
 
@@ -166,6 +181,14 @@ nothrow @nogc:
     // TODO: PUT FINAL BACK WHEN EVERYTHING PORTED!
     /+final+/ bool running() const pure
         => _state == State.Running;
+
+    ObjectFlags flags() const
+    {
+        return cast(ObjectFlags)(_flags |
+                                 ((_state & _Valid) || validate() ? ObjectFlags.None : ObjectFlags.Invalid) |
+                                 ((_state & _Disabled) ? ObjectFlags.Disabled :
+                                 _state == State.Running ? ObjectFlags.Running : ObjectFlags.None));
+    }
 
     // give a helpful status string, e.g. "Ready", "Disabled", "Error: <message>"
     const(char)[] statusMessage() const pure
@@ -306,6 +329,7 @@ protected:
     const CollectionTypeInfo* _typeInfo;
     size_t propsSet;
     State _state = State.Validate;
+    ObjectFlags _flags;
 
     final void setState(State newState)
     {
