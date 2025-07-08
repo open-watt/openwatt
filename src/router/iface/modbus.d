@@ -12,6 +12,8 @@ import urt.string.format;
 import urt.time;
 
 import manager;
+import manager.base;
+import manager.collection;
 import manager.console;
 import manager.plugin;
 
@@ -71,30 +73,35 @@ struct ModbusRequest
 
 class ModbusInterface : BaseInterface
 {
+    __gshared Property[3] Properties = [ Property.create!("protocol", protocol)(),
+                                         Property.create!("master", master)(),
+                                         Property.create!("stream", stream)() ];
 nothrow @nogc:
 
     alias TypeName = StringLit!"modbus";
 
-    Stream stream;
+    this(String name)
+    {
+        super(collectionTypeInfo!ModbusInterface, name.move);
 
-    ModbusProtocol protocol;
-    bool isBusMaster;
-    bool supportSimultaneousRequests = false;
-    ushort requestTimeout = 500; // default 500ms? longer?
-    ushort queueTimeout = 500;   // same as request timeout?
-    ushort gapTime = 35;         // what's a reasonable RTU gap time?
-    SysTime lastReceiveEvent;
+        // this is the proper value for modbus, irrespective of the L2 MTU
+        // modbus jumbo's are theoretically possible if all hops support it... (fragmentation is not possible)
+        _mtu = 253; // function + 252 byte payload (address is considered framing (?))
 
-    // if we are the bus master
-    Array!ModbusRequest pendingRequests;
+        // this would be 253 for the RS485 bus, or larger if another carrier...?
+        _max_l2mtu = _mtu;
+        _l2mtu = _max_l2mtu;
 
-    // if we are not the bus master
-    MACAddress masterMac;
-    ushort sequenceNumber;
-    ModbusFrameType expectMessageType = ModbusFrameType.Unknown;
+        // master defaults to false, so we'll generate a mac for the remote bus master...
+        masterMac = generateMacAddress();
+        masterMac.b[5] = 0xFF;
+        addAddress(masterMac, this);
 
-    Map!(ubyte, ubyte) localToUni;
-    Map!(ubyte, ubyte) uniToLocal;
+        // TODO: warn the user if they configure an interface to use modbus tcp over a serial line
+        //       user should be warned that data corruption may occur!
+
+        // TODO: assert that recvBufferLen and sendBufferLen are both larger than a single PDU (254 bytes)!
+    }
 
     this(String name, Stream stream, ModbusProtocol protocol, bool isMaster) nothrow @nogc
     {
@@ -139,11 +146,125 @@ nothrow @nogc:
         // TODO: assert that recvBufferLen and sendBufferLen are both larger than a single PDU (254 bytes)!
     }
 
-    override bool running() const pure
-        => status.linkStatus == Status.Link.Up;
+
+    // Properties...
+
+    ModbusProtocol protocol() const pure
+        => _protocol;
+    const(char)[] protocol(ModbusProtocol value)
+    {
+        if (value == ModbusProtocol.Unknown)
+            return "Error: Invalid modbus protocol 'unknown'";
+        _protocol = value;
+        supportSimultaneousRequests = value == ModbusProtocol.TCP;
+        return null;
+    }
+
+    bool master() const pure
+        => isBusMaster;
+    void master(bool value)
+    {
+        if (isBusMaster == value)
+            return;
+
+        isBusMaster = value;
+        if (value)
+        {
+            removeAddress(masterMac);
+            masterMac = MACAddress();
+            if (_protocol == ModbusProtocol.Unknown)
+                restart();
+        }
+        else
+        {
+            masterMac = generateMacAddress();
+            masterMac.b[5] = 0xFF;
+            addAddress(masterMac, this);
+        }
+    }
+
+    inout(Stream) stream() inout pure
+        => _stream;
+    void stream(Stream value)
+    {
+        if (value && _stream is value)
+            return;
+        _stream = value;
+
+        if (_stream)
+        {
+            // if we're not the master, we can't write to the bus unless we are responding...
+            // and if the stream is TCP, we'll never know if the remote has dropped the connection
+            // we'll enable keep-alive in tcp streams to to detect this...
+            import router.stream.tcp : TCPStream;
+            auto tcpStream = cast(TCPStream)_stream;
+            if (tcpStream)
+                tcpStream.enableKeepAlive(true, seconds(10), seconds(1), 10);
+        }
+
+        // flush messages and the address mapping tables
+        restart();
+    }
+
+
+    // API...
+
+    override bool validate() const
+        => _stream !is null && (!master || _protocol != ModbusProtocol.Unknown);
+
+    override CompletionStatus validating()
+    {
+        if (_stream.detached)
+        {
+            if (Stream* s = getModule!StreamModule.streams.get(_stream.name))
+                _stream = *s;
+        }
+        return validate() ? CompletionStatus.Complete : CompletionStatus.Continue;
+    }
+
+    override CompletionStatus startup()
+    {
+        if (!_stream)
+            return CompletionStatus.Error;
+        if (!_stream.running)
+            return CompletionStatus.Continue;
+
+        if (!isBusMaster && _protocol == ModbusProtocol.Unknown)
+        {
+            // listen for a frame and detect the protocol...
+            assert(false, "TODO");
+        }
+        if (_protocol != ModbusProtocol.Unknown)
+        {
+            localToUni.insert(ubyte(0), ubyte(0));
+            uniToLocal.insert(ubyte(0), ubyte(0));
+            return CompletionStatus.Complete;
+        }
+        return CompletionStatus.Continue;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        sequenceNumber = 0;
+        expectMessageType = ModbusFrameType.Unknown;
+        lastReceiveEvent = SysTime();
+
+        _status.sendDropped += pendingRequests.length;
+        pendingRequests.clear();
+
+        localToUni.clear();
+        uniToLocal.clear();
+
+        return CompletionStatus.Complete;
+    }
 
     override void update()
     {
+        if (!_stream || !_stream.running)
+            return restart();
+
+        super.update();
+
         SysTime now = getSysTime();
 
         // check for timeouts
@@ -176,18 +297,6 @@ nothrow @nogc:
                 pendingRequests.remove(0);
             }
         }
-
-        // check the link status
-        Status.Link streamStatus = stream.status.linkStatus;
-        if (streamStatus != status.linkStatus)
-        {
-            _status.linkStatus = streamStatus;
-            _status.linkStatusChangeTime = now;
-            if (streamStatus != Status.Link.Up)
-                ++_status.linkDowns;
-        }
-        if (streamStatus != Status.Link.Up)
-            return;
 
         // check for data
         ubyte[1024] buffer = void;
@@ -269,6 +378,9 @@ nothrow @nogc:
 
     protected override bool transmit(ref const Packet packet) nothrow @nogc
     {
+        if (!running)
+            return false;
+
         // can only handle modbus packets
         if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.Modbus || packet.data.length < 5)
         {
@@ -422,11 +534,34 @@ nothrow @nogc:
     }
 
 private:
+    ObjectRef!Stream _stream;
+
+    ModbusProtocol _protocol;
+    bool isBusMaster;
+    bool supportSimultaneousRequests = false;
+    ushort requestTimeout = 500; // default 500ms? longer?
+    ushort queueTimeout = 500;   // same as request timeout?
+    ushort gapTime = 35;         // what's a reasonable RTU gap time?
+    SysTime lastReceiveEvent;
+
+    // if we are the bus master
+    Array!ModbusRequest pendingRequests;
+
+    // if we are not the bus master
+    package MACAddress masterMac; // TODO: `package` because bridge interface backdoors this... rethink?
+    ushort sequenceNumber;
+    ModbusFrameType expectMessageType = ModbusFrameType.Unknown;
+
+    Map!(ubyte, ubyte) localToUni;
+    Map!(ubyte, ubyte) uniToLocal;
+
     ubyte[260] tail;
     ushort tailBytes;
 
     final void incomingPacket(const(void)[] message, SysTime recvTime, ref ModbusFrameInfo frameInfo)
     {
+        debug assert(running, "Shouldn't receive packets while not running...?");
+
         // TODO: some debug logging of the incoming packet stream?
         version (DebugModbusMessageFlow) {
             import urt.log;
@@ -613,11 +748,12 @@ class ModbusInterfaceModule : Module
     mixin DeclareModule!"interface.modbus";
 nothrow @nogc:
 
+    Collection!ModbusInterface modbusInterfaces;
     Map!(ubyte, ServerMap) remoteServers;
 
     override void init()
     {
-        g_app.console.registerCommand!add("/interface/modbus", this);
+        g_app.console.registerCollection("/interface/modbus", modbusInterfaces);
         g_app.console.registerCommand!remote_server_add("/interface/modbus/remote-server", this, "add");
     }
 
@@ -697,62 +833,6 @@ nothrow @nogc:
         writeInfof("Create modbus server '{0}' - mac: {1}  uid: {2}  at-interface: {3}({4})", map.name, map.mac, map.universalAddress, iface.name, map.localAddress);
 
         return universalAddress in remoteServers;
-    }
-
-    // /interface/modbus/add command
-    // TODO: protocol enum!
-    void add(Session session, const(char)[] name, Stream stream, const(char)[] protocol, Nullable!bool master, Nullable!(const(char)[]) pcap)
-    {
-        ModbusProtocol p = ModbusProtocol.Unknown;
-        switch (protocol)
-        {
-            case "rtu":
-                p = ModbusProtocol.RTU;
-                break;
-            case "tcp":
-                p = ModbusProtocol.TCP;
-                break;
-            case "ascii":
-                p = ModbusProtocol.ASCII;
-                break;
-            default:
-                session.writeLine("Invalid modbus protocol '", protocol, "', expect 'rtu|tcp|ascii'.");
-                return;
-        }
-        if (p == ModbusProtocol.Unknown)
-        {
-            if (stream.type == "tcp-client") // TODO: UDP here too... but what is the type called?
-                p = ModbusProtocol.TCP;
-            else
-                p = ModbusProtocol.RTU;
-        }
-
-        auto mod_if = getModule!InterfaceModule;
-        String n = mod_if.addInterfaceName(session, name, ModbusInterface.TypeName);
-        if (!n)
-            return;
-
-        ModbusInterface iface = defaultAllocator.allocT!ModbusInterface(n.move, stream, p, master ? master.value : false);
-
-        mod_if.interfaces.add(iface);
-
-        version (DebugModbusMessageFlow)
-            iface.subscribe(&printPacket, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
-    }
-
-    version (DebugModbusMessageFlow)
-    {
-        void printPacket(ref const Packet p, BaseInterface i, void*)
-        {
-            import urt.io;
-
-            auto modbus = getModule!ModbusInterfaceModule;
-            ServerMap* src = modbus.findServerByMac(p.src);
-            ServerMap* dst = modbus.findServerByMac(p.dst);
-            const(char)[] srcName = src ? src.name[] : tconcat(p.src);
-            const(char)[] dstName = dst ? dst.name[] : tconcat(p.dst);
-            writef("{0}: Modbus packet received: ( {1} -> {2} )  [{3}]\n", i.name, srcName, dstName, p.data);
-        }
     }
 
     void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, const(char)[] profile, Nullable!ubyte universal_address)
