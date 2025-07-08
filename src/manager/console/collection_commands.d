@@ -72,25 +72,26 @@ nothrow @nogc:
             }
         }
 
-        // rebuild the delegate to create an instance...
+        // create an instance
         BaseObject item = collection.create(name);
-        collection.add(item);
 
-        // TODO: maybe something better? perhaps a virtual on the object which lets it supply a creation message?
-        //       how do we know what properties are relevant for the create logs?
-        writeInfo("Create ", item.type, " object: '", item.name, "'");
-
-        // set all the properties
+        // set all the properties...
         foreach (ref arg; namedArgs)
         {
             if (arg.name[] == "name")
                 continue;
             if (item.set(arg.name, arg.value))
             {
-                // TODO: report error; and destroy object, or just report that the one property couldn't be set???
-                assert(false);
+                defaultAllocator.freeT(item);
+                session.writeLine("Invalid value for property '", arg.name, "': ", arg.value);
+                return null;
             }
         }
+        collection.add(item);
+
+        // TODO: maybe something better? perhaps a virtual on the object which lets it supply a creation message?
+        //       how do we know what properties are relevant for the create logs?
+        writeInfo("Create ", item.type, ": '", item.name, "'");
 
         return null;
     }

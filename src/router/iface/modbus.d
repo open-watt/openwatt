@@ -216,8 +216,8 @@ nothrow @nogc:
     {
         if (_stream.detached)
         {
-            if (Stream* s = getModule!StreamModule.streams.get(_stream.name))
-                _stream = *s;
+            if (Stream s = getModule!StreamModule.streams.get(_stream.name))
+                _stream = s;
         }
         return validate() ? CompletionStatus.Complete : CompletionStatus.Continue;
     }

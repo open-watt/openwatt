@@ -461,7 +461,7 @@ nothrow @nogc:
         auto mod_stream = getModule!StreamModule;
 
         if (name.empty)
-            mod_stream.generateStreamName("serial-stream");
+            mod_stream.streams.generateName("serial-stream");
 
         // TODO: assert data bits == 7,8, stop bits == 1,1.5,2, verify other enums...
 
@@ -476,7 +476,7 @@ nothrow @nogc:
         String dev = device.makeString(g_app.allocator);
 
         SerialStream stream = g_app.allocator.allocT!SerialStream(n.move, dev.move, params, cast(StreamOptions)(StreamOptions.NonBlocking | StreamOptions.KeepAlive));
-        mod_stream.addStream(stream);
+        mod_stream.streams.add(stream);
 
         writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);
     }

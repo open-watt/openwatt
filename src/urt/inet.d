@@ -18,6 +18,22 @@ enum AddressFamily : byte
     IPv6,
 }
 
+enum WellKnownPort : ushort
+{
+    Auto    = 0,
+    FTP     = 21,
+    SSH     = 22,
+    Telnet  = 23,
+    DNS     = 53,
+    DHCP    = 67,
+    HTTP    = 80,
+    NTP     = 123,
+    SNMP    = 161,
+    HTTPS   = 443,
+    MQTT    = 1883,
+    MDNS    = 5353,
+}
+
 enum IPAddr IPAddrLit(string addr) = () { IPAddr a; size_t taken = a.fromString(addr); assert(taken == addr.length, "Not an IPv4 address"); return a; }();
 //enum IPv6Addr IPv6AddrLit(string addr) = () { IPv6Addr a; size_t taken = a.fromString(addr); assert(taken == addr.length, "Not an IPv6 address"); return a; }();
 

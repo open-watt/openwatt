@@ -1,10 +1,10 @@
 module protocol.telnet.session;
 
 import urt.array;
-import urt.socket;
 import urt.string;
 import urt.string.ansi;
 
+import manager.base;
 import manager.console;
 import manager.console.session;
 
@@ -73,6 +73,12 @@ nothrow @nogc:
     override void update()
     {
         super.update();
+
+        if (!m_stream)
+        {
+            closeSession();
+            return;
+        }
 
         enum DefaultBufferLen = 512;
         ubyte[DefaultBufferLen] recvbuf = void;
@@ -399,21 +405,12 @@ nothrow @nogc:
 
     override void closeSession()
     {
-        NoGCAllocator conAllocator;
-        if (isAttached())
-            conAllocator = allocator;
-
         super.closeSession();
 
-        if (!isAttached())
+        if (!isAttached() && m_stream)
         {
-            assert(conAllocator || !m_stream, "Why didn't the stream get freed before the console was lost?");
-
-            if (conAllocator)
-            {
-                conAllocator.freeT(m_stream);
-                m_stream = null;
-            }
+            m_stream.destroy();
+            m_stream.release();
         }
     }
 
@@ -559,7 +556,7 @@ nothrow @nogc:
     }
 
 private:
-    Stream m_stream;
+    ObjectRef!Stream m_stream;
     Array!ubyte m_tail;
 
     ulong serverState;

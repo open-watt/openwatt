@@ -23,11 +23,11 @@ nothrow @nogc:
 
     this(NoGCAllocator allocator, String name, Console* console, BaseInterface iface, ushort port)
     {
-        this.name = name.move;
+        this.name = name;
         m_allocator = allocator;
         m_console = console;
 
-        m_server = m_allocator.allocT!TCPServer(name, port, &acceptConnection, null);
+        m_server = m_allocator.allocT!TCPServer(name.move, port, &acceptConnection, null);
     }
 
     ~this()

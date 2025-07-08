@@ -84,7 +84,7 @@ nothrow @nogc:
             }
 
             stream = g_app.allocator.allocT!TCPStream(name, server, port, StreamOptions.OnDemand);
-            getModule!StreamModule.addStream(stream);
+            getModule!StreamModule.streams.add(stream);
         }
         else if (protocol.icmp("https") == 0)
         {
@@ -111,7 +111,7 @@ nothrow @nogc:
 
         // TODO: guess http/https from the port maybe?
         Stream stream = g_app.allocator.allocT!TCPStream(name, address, StreamOptions.OnDemand);
-        getModule!StreamModule.addStream(stream);
+        getModule!StreamModule.streams.add(stream);
 
         HTTPClient http = g_app.allocator.allocT!HTTPClient(name.move, stream, host.move);
         clients.insert(http.name[], http);

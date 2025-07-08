@@ -10,6 +10,8 @@ import urt.string;
 import urt.string.format : tconcat;
 import urt.time;
 
+import manager.base;
+
 import protocol.http;
 import protocol.http.message;
 
@@ -17,6 +19,7 @@ import router.stream.tcp;
 import router.iface;
 
 nothrow @nogc:
+
 
 class HTTPServer
 {
@@ -50,7 +53,8 @@ nothrow @nogc:
                 defaultAllocator().freeT(sessions[i]);
                 sessions.remove(i);
             }
-            ++i;
+            else
+                ++i;
         }
     }
 
@@ -79,10 +83,12 @@ private:
 
         int update()
         {
+            if (!stream)
+                return -1;
             int result = parser.update(stream);
             if (result != 0)
             {
-                stream.disconnect();
+                stream.destroy();
                 return result;
             }
 
@@ -99,7 +105,7 @@ private:
             return 0;
         }
 
-        Stream stream;
+        ObjectRef!Stream stream;
         HTTPParser parser;
         RequestHandler requestHandler;
     }

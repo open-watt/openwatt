@@ -59,7 +59,6 @@ enum SocketResult
 {
     Success,
     Failure,
-    InProgress,
     WouldBlock,
     NoBuffer,
     NetworkDown,
@@ -69,7 +68,6 @@ enum SocketResult
     ConnectionClosed,
     Interrupted,
     InvalidSocket,
-    NoMemory,
     InvalidArgument,
 }
 
@@ -930,9 +928,9 @@ SocketResult get_SocketResult(Result result)
         return SocketResult.ConnectionClosed;
     version (Windows)
     {
-        if (result.systemCode == WSAEINPROGRESS)
-            return SocketResult.InProgress;
         if (result.systemCode == WSAEWOULDBLOCK)
+            return SocketResult.WouldBlock;
+        if (result.systemCode == WSAEINPROGRESS)
             return SocketResult.WouldBlock;
         if (result.systemCode == WSAENOBUFS)
             return SocketResult.NoBuffer;
@@ -951,24 +949,23 @@ SocketResult get_SocketResult(Result result)
     }
     else version (Posix)
     {
-        static assert(EAGAIN == EWOULDBLOCK, "Expected EGAIN and EWOULDBLOCK to be the same value.");
-        auto checkResult = (Result result, int err) => result == PosixResult(err) || cast(int)result.systemCode == err;
-        if (checkResult(result, EINPROGRESS))
-            return SocketResult.InProgress;
-        if (checkResult(result, EWOULDBLOCK))
+        static if (EAGAIN != EWOULDBLOCK)
+            if (result.systemCode == EAGAIN)
+                return SocketResult.WouldBlock;
+        if (result.systemCode == EWOULDBLOCK)
             return SocketResult.WouldBlock;
-        if (checkResult(result, ENOMEM))
+        if (result.systemCode == EINPROGRESS)
+            return SocketResult.WouldBlock;
+        if (result.systemCode == ENOMEM)
             return SocketResult.NoBuffer;
-        if (checkResult(result, ENETDOWN))
+        if (result.systemCode == ENETDOWN)
             return SocketResult.NetworkDown;
-        if (checkResult(result, ECONNREFUSED))
+        if (result.systemCode == ECONNREFUSED)
             return SocketResult.ConnectionRefused;
-        if (checkResult(result, ECONNRESET))
+        if (result.systemCode == ECONNRESET)
             return SocketResult.ConnectionReset;
-        if (checkResult(result, EINTR))
+        if (result.systemCode == EINTR)
             return SocketResult.Interrupted;
-        if (checkResult(result, ENOMEM))
-            return SocketResult.NoMemory;
         if (result.systemCode == EINVAL)
             return SocketResult.InvalidArgument;
     }
