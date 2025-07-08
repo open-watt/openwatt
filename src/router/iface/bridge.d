@@ -29,6 +29,9 @@ nothrow @nogc:
         _status.linkStatusChangeTime = getSysTime();
     }
 
+    override bool running() const pure
+        => status.linkStatus == Status.Link.Up;
+
     bool addMember(BaseInterface iface)
     {
         assert(iface !is this, "Cannot add a bridge to itself!");
@@ -52,7 +55,7 @@ nothrow @nogc:
         {
             ushort vlan = 0;
 
-            if (!mb.isBusMaster)
+            if (!mb.master)
                 macTable.insert(mb.masterMac, port, vlan);
 
             auto mod_mb = getModule!ModbusInterfaceModule;

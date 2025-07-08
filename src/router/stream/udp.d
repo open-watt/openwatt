@@ -51,6 +51,9 @@ nothrow @nogc:
         _status.linkStatus = Status.Link.Up;
     }
 
+    override bool running() const pure
+        => status.linkStatus == Status.Link.Up;
+
     override bool connect()
     {
 //        socket = new UdpSocket();

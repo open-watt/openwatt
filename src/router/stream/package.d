@@ -45,7 +45,7 @@ enum StreamOptions : ubyte
 
 abstract class Stream : BaseObject
 {
-    __gshared Property[1] Properties = [ Property.create!("running", running)() ];
+//    __gshared Property[1] Properties = [ Property.create!("running", running)() ];
 nothrow @nogc:
 
     this(String name, const(char)[] type, StreamOptions options)
@@ -65,9 +65,6 @@ nothrow @nogc:
 
     // Properties...
 
-    final bool running() const pure
-        => _status.linkStatus == Status.Link.Up;
-
 
     // API...
 
@@ -85,31 +82,34 @@ nothrow @nogc:
         _status.recvDropped = 0;
     }
 
-    override const(char)[] statusMessage() const pure
+    override const(char)[] statusMessage() const
         => running ? "Running" : super.statusMessage();
 
-    override bool enable(bool enable = true)
+    // TODO: remove public when everyting ported to collections...
+    override void update()
     {
-        bool wasEnabled = !_disabled;
-        if (enable != wasEnabled)
-        {
-            _status.linkStatusChangeTime = getSysTime();
-            _disabled = !enable;
-            if (_disabled)
-            {
-                disconnect();
-                debug assert(_status.linkStatus == Status.Link.Down);
-//                _status.linkStatus = Status.Link.Down;
-                ++_status.linkDowns; // TODO: shoul this be moved to wherever the down is assigned?
-            }
-        }
-        return wasEnabled;
+        assert(_status.linkStatus == Status.Link.Up, "Stream is not online, it shouldn't be in Running state!");
     }
 
-    // Method to initiate a connection
+    override void setOnline()
+    {
+        super.setOnline();
+        _status.linkStatus = Status.Link.Up;
+        _status.linkStatusChangeTime = getSysTime();
+    }
+
+    override void setOffline()
+    {
+        super.setOffline();
+        _status.linkStatus = Status.Link.Down;
+        _status.linkStatusChangeTime = getSysTime();
+        ++_status.linkDowns;
+    }
+
+    // Initiate an on-demand connection
     abstract bool connect();
 
-    // Method to disconnect the stream
+    // Disconnect the stream
     abstract void disconnect();
 
     abstract const(char)[] remoteName();

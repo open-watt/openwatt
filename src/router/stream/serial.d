@@ -89,6 +89,9 @@ version(Windows)
             connect();
         }
 
+        override bool running() const pure
+            => status.linkStatus == Status.Link.Up;
+
         override bool connect()
         {
             hCom = CreateFile(device.twstringz, GENERIC_READ | GENERIC_WRITE, 0, null, OPEN_EXISTING, 0, null);
@@ -320,6 +323,9 @@ else version(Posix)
             this.device = device;
             this.params = serialParams;
         }
+
+        override bool running() const pure
+            => status.linkStatus == Status.Link.Up;
 
         override bool connect()
         {

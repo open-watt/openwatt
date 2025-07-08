@@ -44,12 +44,6 @@ nothrow @nogc:
         return _interface !is null;
     }
 
-    final override bool enable(bool enable)
-    {
-        // TODO: this needs to enable/disable the client...
-        return true;
-    }
-
 private:
     BaseInterface _interface;
 
