@@ -211,6 +211,12 @@ nothrow @nogc:
         update();
     }
 
+    ~this()
+    {
+        if (elements)
+            defaultAllocator().freeArray(elements);
+    }
+
     bool insert(MACAddress mac, ubyte port, ushort vlan)
     {
         assert(port < 256 && vlan < 4096);

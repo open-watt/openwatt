@@ -40,16 +40,16 @@ nothrow @nogc:
 
 class CANInterface : BaseInterface
 {
-    __gshared Property[5] Properties = [ Property.create!("stream", stream)(),
+    __gshared Property[2] Properties = [ Property.create!("stream", stream)(),
                                          Property.create!("protocol", protocol)() ];
 
 nothrow @nogc:
 
     alias TypeName = StringLit!"can";
 
-    this(String name)
+    this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        super(collectionTypeInfo!CANInterface, name.move);
+        super(collectionTypeInfo!CANInterface, name.move, flags);
 
         // this is the proper value for canbus, irrespective of the L2 MTU
         // can jumbo's are theoretically possible if all hops support it... (fragmentation is not possible (?))
@@ -65,14 +65,17 @@ nothrow @nogc:
 
     inout(Stream) stream() inout pure
         => _stream;
-    void stream(Stream value)
+    const(char)[] stream(Stream value)
     {
-        if (value && _stream is value)
-            return;
+        if (!value)
+            return "stream cannot be null";
+        if (_stream is value)
+            return null;
         _stream = value;
 
         if (!_stream || !_stream.running)
             restart();
+        return null;
     }
 
     CANInterfaceProtocol protocol() const pure
@@ -99,7 +102,7 @@ nothrow @nogc:
             if (Stream s = getModule!StreamModule.streams.get(_stream.name))
                 _stream = s;
         }
-        return validate() ? CompletionStatus.Complete : CompletionStatus.Continue;
+        return super.validating();
     }
 
     override CompletionStatus startup()
@@ -215,9 +218,6 @@ nothrow @nogc:
 
     protected override bool transmit(ref const Packet packet) nothrow @nogc
     {
-        if (!running)
-            return false;
-
         // can only handle can packets
         if (packet.etherType != EtherType.OW || packet.etherSubType != OW_SubType.CAN)
         {

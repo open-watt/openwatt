@@ -3,9 +3,11 @@ module manager.collection;
 import urt.array;
 import urt.lifetime;
 import urt.map;
+import urt.mem.allocator;
 import urt.string;
 
 public import manager.base;
+public import manager.expression : NamedArgument;
 
 nothrow @nogc:
 
@@ -25,8 +27,8 @@ const(CollectionTypeInfo)* collectionTypeInfo(Type)() nothrow @nogc
                                                                         else
                                                                             return null;
                                                                    }(),
-                                                                   (ref BaseCollection c, const(char)[] n)
-                                                                       => defaultAllocator.allocT!Type((n ? n : c.generateName(Type.TypeName)).makeString(defaultAllocator()))
+                                                                   (ref BaseCollection c, const(char)[] n, ObjectFlags flags)
+                                                                       => defaultAllocator.allocT!Type((n ? n : c.generateName(Type.TypeName)).makeString(defaultAllocator()), flags)
                                                                    );
         return &ti;
     }
@@ -35,7 +37,7 @@ const(CollectionTypeInfo)* collectionTypeInfo(Type)() nothrow @nogc
 struct CollectionTypeInfo
 {
     alias ValidateName = const(char)[] function(const(char)[] name) nothrow @nogc;
-    alias CreateFun = BaseObject function(ref BaseCollection collection, const(char)[] name) nothrow @nogc;
+    alias CreateFun = BaseObject function(ref BaseCollection collection, const(char)[] name, ObjectFlags flags = ObjectFlags.None) nothrow @nogc;
 
     String type;
     const(Property*)[] properties;
@@ -54,10 +56,34 @@ nothrow @nogc:
         this.typeInfo = typeinfo;
     }
 
-    BaseObject create(const(char)[] name)
+    BaseObject create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] namedArgs = null)
     {
         assert(typeInfo, "Can't create into a base collection!");
-        return typeInfo.create(this, name);
+
+        if (exists(name))
+            return null;
+        if (typeInfo.validateName && typeInfo.validateName(name) != null)
+            return null;
+
+        BaseObject item = alloc(name, flags);
+
+        foreach (ref arg; namedArgs)
+        {
+            if (item.set(arg.name, arg.value))
+            {
+                defaultAllocator.freeT(item);
+                return null;
+            }
+        }
+
+        add(item);
+        return item;
+    }
+
+    BaseObject alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.None)
+    {
+        assert(typeInfo, "Can't create into a base collection!");
+        return typeInfo.create(this, name, flags);
     }
 
     auto keys() const
@@ -134,8 +160,11 @@ nothrow @nogc:
     BaseCollection _base = BaseCollection(collectionTypeInfo!Type);
     alias _base this;
 
-    Type create(const(char)[] name)
-        => cast(Type)_base.create(name);
+    Type create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] namedArgs = null)
+        => cast(Type)_base.create(name, flags, namedArgs);
+
+    Type alloc(const(char)[] name)
+        => cast(Type)_base.alloc(name);
 
     void add(Type item)
     {

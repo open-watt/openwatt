@@ -6,108 +6,49 @@ import urt.mem;
 import urt.string;
 import urt.string.format;
 
+import manager.base;
+import manager.collection;
 import manager.console;
 import manager.plugin;
 
 public import router.stream;
 
-class BridgeStream : Stream
-{
 nothrow @nogc:
 
-    alias TypeName = StringLit!"bridge";
 
-    this(String name, StreamOptions options, Stream[] streams...) nothrow @nogc
+class BridgeStream : Stream
+{
+    __gshared Property[1] Properties = [ Property.create!("streams", streams)() ];
+nothrow @nogc:
+
+    alias TypeName = StringLit!"bridge-stream";
+
+    this(String name, ObjectFlags flags = ObjectFlags.None, StreamOptions options = StreamOptions.None)
     {
-        import urt.lifetime;
+        super(collectionTypeInfo!BridgeStream, name.move, flags, options);
+    }
 
-        super(name.move, TypeName, options);
+    // Properties
 
-        this.m_streams = streams;
-        this.m_remoteName.reserve(60);
+    ref const(Array!(ObjectRef!Stream)) streams() const
+        => m_streams;
+    void streams(Stream[] value...)
+    {
+        m_streams.clear();
+        m_streams.reserve(value.length);
+        foreach (s; value)
+            m_streams.emplaceBack(s);
 
-        m_remoteName = TypeName[];
+        m_remoteName.reserve(60);
+        m_remoteName = TypeName[]; // reset remote name
         m_remoteName ~= '[';
-        foreach (i, s; streams)
+        foreach (i, s; value)
         {
             if (i > 0)
                 m_remoteName ~= '|';
             m_remoteName ~= s.remoteName();
         }
         m_remoteName ~= ']';
-
-        // a guess a bridge is up if any of its members are up? or just always; ya know.
-        _status.linkStatus = Status.Link.Up;
-    }
-
-    override bool running() const pure
-        => status.linkStatus == Status.Link.Up;
-
-    override bool connect()
-    {
-        // should we connect subordinate streams?
-        return true;
-    }
-
-    override void disconnect()
-    {
-        // TODO: Should this disconnect subordinate streams?
-    }
-
-    override const(char)[] remoteName()
-        => m_remoteName;
-
-    override void setOpts(StreamOptions options)
-    {
-        this.options = options;
-    }
-
-    override ptrdiff_t read(void[] buffer)
-    {
-        size_t read;
-        if (buffer.length < m_inputBuffer.length)
-        {
-            read = buffer.length;
-            buffer[] = m_inputBuffer[0 .. read];
-            m_inputBuffer = m_inputBuffer[read .. $];
-        }
-        else
-        {
-            read = m_inputBuffer.length;
-            buffer[0 .. read] = m_inputBuffer[];
-            m_inputBuffer.clear();
-        }
-        if (logging)
-            writeToLog(true, buffer[0 .. read]);
-        return read;
-    }
-
-    override ptrdiff_t write(const void[] data)
-    {
-        foreach (i; 0 .. m_streams.length)
-        {
-            ptrdiff_t written = 0;
-            while (written < data.length)
-            {
-                written += m_streams[i].write(data[written .. $]);
-            }
-        }
-        if (logging)
-            writeToLog(false, data);
-        return 0;
-    }
-
-    override ptrdiff_t pending()
-        =>m_inputBuffer.length;
-
-    override ptrdiff_t flush()
-    {
-        // what this even?
-        assert(0);
-        foreach (stream; m_streams)
-            stream.flush();
-        m_inputBuffer.clear();
-        return 0;
     }
 
     override void update()
@@ -118,6 +59,9 @@ nothrow @nogc:
         // read all streams, echo to other streams, accumulate input buffer
         foreach (i; 0 .. m_streams.length)
         {
+            if (!m_streams[i] || !m_streams[i].running)
+                continue;
+
             ubyte[1024] buf;
             size_t bytes;
             do
@@ -146,8 +90,60 @@ nothrow @nogc:
         }
     }
 
+    override const(char)[] remoteName()
+        => m_remoteName;
+
+    override ptrdiff_t read(void[] buffer)
+    {
+        size_t read;
+        if (buffer.length < m_inputBuffer.length)
+        {
+            read = buffer.length;
+            buffer[] = m_inputBuffer[0 .. read];
+            m_inputBuffer = m_inputBuffer[read .. $];
+        }
+        else
+        {
+            read = m_inputBuffer.length;
+            buffer[0 .. read] = m_inputBuffer[];
+            m_inputBuffer.clear();
+        }
+        if (logging)
+            writeToLog(true, buffer[0 .. read]);
+        return read;
+    }
+
+    override ptrdiff_t write(const void[] data)
+    {
+        foreach (i; 0 .. m_streams.length)
+        {
+            ptrdiff_t written = 0;
+            while (written < data.length)
+            {
+                if (m_streams[i] && m_streams[i].running)
+                    written += m_streams[i].write(data[written .. $]);
+            }
+        }
+        if (logging)
+            writeToLog(false, data);
+        return 0;
+    }
+
+    override ptrdiff_t pending()
+        =>m_inputBuffer.length;
+
+    override ptrdiff_t flush()
+    {
+        // what this even?
+        assert(0);
+        foreach (stream; m_streams)
+            stream.flush();
+        m_inputBuffer.clear();
+        return 0;
+    }
+
 private:
-    Array!Stream m_streams;
+    Array!(ObjectRef!Stream) m_streams;
     Array!ubyte m_inputBuffer;
     MutableString!0 m_remoteName;
 }
@@ -158,23 +154,10 @@ class BridgeStreamModule : Module
     mixin DeclareModule!"stream.bridge";
 nothrow @nogc:
 
+    Collection!BridgeStream bridges;
+
     override void init()
     {
-        g_app.console.registerCommand!add("/stream/bridge", this);
-    }
-
-
-    // TODO: source should be an array, and let the external code separate and validate the array args...
-    void add(Session session, const(char)[] name, Stream[] source)
-    {
-        auto mod_stream = getModule!StreamModule;
-
-        if (name.empty)
-            name = mod_stream.streams.generateName("bridge");
-
-        String n = name.makeString(defaultAllocator());
-
-        BridgeStream stream = g_app.allocator.allocT!BridgeStream(n.move, cast(StreamOptions)(StreamOptions.NonBlocking | StreamOptions.KeepAlive), source);
-        mod_stream.streams.add(stream);
+        g_app.console.registerCollection("/stream/bridge", bridges);
     }
 }

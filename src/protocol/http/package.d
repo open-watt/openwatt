@@ -12,6 +12,7 @@ import urt.string;
 import urt.string.format : tstring;
 import urt.time;
 
+import manager.collection;
 import manager.console;
 import manager.plugin;
 
@@ -31,102 +32,14 @@ class HTTPModule : Module
     mixin DeclareModule!"http";
 nothrow @nogc:
 
-    Map!(const(char)[], HTTPClient) clients;
+    Collection!HTTPClient clients;
     Map!(const(char)[], HTTPServer) servers;
 
     override void init()
     {
+        g_app.console.registerCollection("/protocol/http/client", clients);
         g_app.console.registerCommand!add_server("/protocol/http/server", this, "add");
-        g_app.console.registerCommand!add_client("/protocol/http/client", this, "add");
         g_app.console.registerCommand!request("/protocol/http", this);
-    }
-
-    HTTPClient createClient(String name, const(char)[] server)
-    {
-        const(char)[] protocol = "http";
-
-        size_t prefix = server.findFirst(":");
-        if (prefix != server.length)
-        {
-            protocol = server[0 .. prefix];
-            server = server[prefix + 1 .. $];
-        }
-        if (server.startsWith("//"))
-            server = server[2 .. $];
-
-        const(char)[] resource;
-        size_t resOffset = server.findFirst("/");
-        if (resOffset != server.length)
-        {
-            resource = server[resOffset .. $];
-            server = server[0 .. resOffset];
-        }
-
-        // TODO: I don't think we need a resource when connecting?
-        //       maybe we should keep it and make all requests relative to this resource?
-
-        Stream stream = null;
-        if (protocol.icmp("http") == 0)
-        {
-            ushort port = 80;
-
-            // see if server has a port...
-            size_t colon = server.findFirst(":");
-            if (colon != server.length)
-            {
-                const(char)[] portStr = server[colon + 1 .. $];
-                server = server[0 .. colon];
-
-                size_t taken;
-                long i = portStr.parse_int(&taken);
-                if (i > ushort.max || taken != portStr.length)
-                    return null; // invalid port string!
-            }
-
-            stream = g_app.allocator.allocT!TCPStream(name, server, port, StreamOptions.OnDemand);
-            getModule!StreamModule.streams.add(stream);
-        }
-        else if (protocol.icmp("https") == 0)
-        {
-            assert(false, "TODO: need TLS stream");
-//                stream = g_app.allocator.allocT!SSLStream(name, server, ushort(0));
-//                getModule!StreamModule.addStream(stream);
-        }
-        if (!stream)
-        {
-            assert(false, "error strategy... just write log output?");
-            return null;
-        }
-
-        HTTPClient http = g_app.allocator.allocT!HTTPClient(name.move, stream, server.makeString(g_app.allocator));
-        clients.insert(http.name[], http);
-        return http;
-    }
-
-    HTTPClient createClient(String name, InetAddress address)
-    {
-        char[47] tmp = void;
-        address.toString(tmp, null, null);
-        String host = tmp.makeString(g_app.allocator);
-
-        // TODO: guess http/https from the port maybe?
-        Stream stream = g_app.allocator.allocT!TCPStream(name, address, StreamOptions.OnDemand);
-        getModule!StreamModule.streams.add(stream);
-
-        HTTPClient http = g_app.allocator.allocT!HTTPClient(name.move, stream, host.move);
-        clients.insert(http.name[], http);
-        return http;
-    }
-
-    HTTPClient createClient(String name, Stream stream)
-    {
-        String host;
-
-        assert(false, "TODO: get host from stream");
-
-        HTTPClient http = g_app.allocator.allocT!HTTPClient(name.move, stream, host.move);
-        clients.insert(http.name[], http);
-        return http;
     }
 
     HTTPServer createServer(const(char)[] name, ushort port, HTTPServer.RequestHandler handler)
@@ -142,8 +55,7 @@ nothrow @nogc:
         foreach (server; servers.values)
             server.update();
 
-        foreach (client; clients.values)
-            client.update();
+        clients.updateAll();
     }
 
     void add_server(Session session, const(char)[] name, ushort port)
@@ -167,16 +79,6 @@ nothrow @nogc:
         });
 
         writeInfof("Create HTTP server '{0}' on port {1}", name, port);
-    }
-
-    void add_client(Session session, const(char)[] name, const(char)[] host)
-    {
-        if (!createClient(name.makeString(defaultAllocator), host))
-        {
-            // TODO: so bad!
-        }
-
-        writeInfof("Create HTTP client '{0}' to host {1}", name, host);
     }
 
     static class HTTPRequestState : FunctionCommandState
@@ -222,7 +124,7 @@ nothrow @nogc:
 
     HTTPRequestState request(Session session, const(char)[] client, const(char)[] uri = "/", HTTPMethod method = HTTPMethod.GET)
     {
-        HTTPClient* c = client in clients;
+        HTTPClient c = clients.get(client);
         if (!c)
         {
             session.writef("No HTTP client: '{0}'", client);

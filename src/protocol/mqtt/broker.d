@@ -243,8 +243,6 @@ private:
     {
         MQTTBroker _this = cast(MQTTBroker)userData;
 
-        client.setOpts(StreamOptions.NonBlocking);
-
         _this.mutex.lock();
         _this.newConnections ~= client;
         _this.mutex.unlock();

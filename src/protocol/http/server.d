@@ -10,6 +10,7 @@ import urt.string;
 import urt.string.format : tconcat;
 import urt.time;
 
+import manager;
 import manager.base;
 
 import protocol.http;
@@ -31,20 +32,23 @@ nothrow @nogc:
 
     this(String name, BaseInterface , ushort port, RequestHandler requestHandler)
     {
-        server = defaultAllocator().allocT!TCPServer(name.toString().makeString(defaultAllocator), port, &acceptConnection, null);
+        const(char)[] server_name = getModule!TCPStreamModule.tcp_servers.generateName(name);
+
+        server = getModule!TCPStreamModule.tcp_servers.create(server_name.makeString(defaultAllocator), ObjectFlags.Dynamic);
+        server.port = port;
+        server.setConnectionCallback(&acceptConnection, null);
+
         this.name = name.move;
         this.requestHandler = requestHandler;
     }
 
     ~this()
     {
-        defaultAllocator().freeT(server);
+        server.destroy();
     }
 
     void update()
     {
-        server.update();
-
         for (size_t i = 0; i < sessions.length; )
         {
             int result = sessions[i].update();
@@ -65,7 +69,7 @@ package:
 
     void acceptConnection(TCPStream stream, void* )
     {
-        sessions.emplaceBack(defaultAllocator().allocT!Session(stream, requestHandler));
+        sessions ~= defaultAllocator().allocT!Session(stream, requestHandler);
     }
 
 private:
@@ -76,7 +80,6 @@ private:
         this(Stream stream, RequestHandler requestHandler)
         {
             this.stream = stream;
-            stream.setOpts(StreamOptions.NonBlocking);
             parser = HTTPParser(&requestCallback);
             this.requestHandler = requestHandler;
         }

@@ -5,8 +5,9 @@ import urt.meta.nullable;
 import urt.string;
 
 import manager;
-import manager.plugin;
+import manager.collection;
 import manager.console.session;
+import manager.plugin;
 
 import protocol.ezsp;
 import protocol.ezsp.client;
@@ -24,9 +25,9 @@ nothrow @nogc:
 
     ubyte[8] eui;
 
-    this(String name) nothrow @nogc
+    this(String name, ObjectFlags flags = ObjectFlags.None) nothrow @nogc
     {
-        super(name.move, TypeName);
+        super(collectionTypeInfo!ZigbeeInterface, name.move, flags);
     }
 
     override void update()
@@ -55,33 +56,11 @@ class ZigbeeInterfaceModule : Module
     mixin DeclareModule!"interface.zigbee";
 nothrow @nogc:
 
+    Collection!ZigbeeInterface zigbee_interfaces;
+
     override void init()
     {
-        g_app.console.registerCommand!add("/interface/zigbee", this);
-    }
-
-    // /interface/zigbee/add command
-    // TODO: protocol enum!
-    void add(Session session, const(char)[] name, const(char)[] ezsp_client, Nullable!(const(char)[]) pcap)
-    {
-        // TODO: EZSP might not be the only hardware interface...
-        assert(ezsp_client, "'ezsp_client' must be specified");
-
-        EZSPClient c = getModule!EZSPProtocolModule.clients.get(ezsp_client);
-        if (!c)
-        {
-            session.writeLine("EZSP client does not exist: ", ezsp_client);
-            return;
-        }
-
-        auto mod_if = getModule!InterfaceModule;
-        String n = mod_if.addInterfaceName(session, name, ZigbeeInterface.TypeName);
-        if (!n)
-            return;
-
-        ZigbeeInterface iface = g_app.allocator.allocT!ZigbeeInterface(n.move);
-
-        mod_if.interfaces.add(iface);
+        g_app.console.registerCollection("/interface/zigbee", zigbee_interfaces);
     }
 }
 

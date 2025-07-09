@@ -3,6 +3,7 @@ module protocol.http.client;
 import urt.array;
 import urt.conv;
 import urt.encoding;
+import urt.inet;
 import urt.kvp;
 import urt.lifetime;
 import urt.mem.allocator;
@@ -11,56 +12,179 @@ import urt.string;
 import urt.string.format : tconcat;
 import urt.time;
 
+import manager;
+import manager.base;
+
 import protocol.http;
 import protocol.http.message;
 
+import router.stream;
 import router.stream.tcp;
 
 nothrow @nogc:
 
-class HTTPClient
+class HTTPClient : BaseObject
 {
+    __gshared Property[3] Properties = [ Property.create!("remote", remote)(),
+                                         Property.create!("stream", stream)() ];
 nothrow @nogc:
 
-    String name;
-    String host;
-    Stream stream;
-    HTTPVersion serverVersion = HTTPVersion.V1_1;
+    alias TypeName = StringLit!"http-client";
 
-    HTTPParser parser;
-    Array!(HTTPMessage*) requests;
-
-    this(String name, Stream stream, String host)
+    this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        this.name = name.move;
-        this.stream = stream;
-        this.host = host.move;
-
-        this.parser = HTTPParser(&dispatchMessage);
+        super(collectionTypeInfo!HTTPClient, name.move, flags);
+        parser = HTTPParser(&dispatchMessage);
     }
 
-    HTTPMessage* request(HTTPMethod method, const(char)[] resource, HTTPMessageHandler responseHandler, const void[] content = null, HTTPParam[] params = null, HTTPParam[] additionalHeaders = null, String username = null, String password = null)
+    // Properties...
+    ref const(String) remote() const pure
+        => _host;
+    void remote(InetAddress value)
     {
-        HTTPMessage* request = defaultAllocator().allocT!HTTPMessage();
-        request.httpVersion = serverVersion;
-        request.method = method;
-        request.url = resource.makeString(defaultAllocator);
-        request.username = username.move;
-        request.password = password.move;
-        request.content = cast(ubyte[])content;
-        request.headers = additionalHeaders.move;
-        request.queryParams = params.move;
-        request.responseHandler = responseHandler;
-        request.requestTime = getSysTime();
+        _host = null;
+        if (value == _remote)
+            return;
+        _remote = value;
 
-        if (requests.length == 0) // OR CONCURRENT REQUESTS...
-            sendRequest(*request);
+        restart();
+    }
+    const(char)[] remote(String value)
+    {
+        if (value.empty)
+            return "remote cannot be empty";
+        if (value == _host)
+            return null;
 
-        requests ~= request;
-        return request;
+        _host = value.move;
+        _remote = InetAddress();
+
+        restart();
+        return null;
     }
 
-    void update()
+    inout(Stream) stream() inout pure
+        => _stream;
+    const(char)[] stream(Stream value)
+    {
+        if (!value)
+            return "stream cannot be null";
+        if (_stream is value)
+            return null;
+        _stream = value;
+
+        restart();
+        return null;
+    }
+
+    // API...
+
+    override bool validate() const pure
+        => (!_host.empty || _remote != InetAddress()) != !!_stream; // TODO: validate URL??
+
+    override CompletionStatus validating()
+    {
+        if (_stream.detached)
+        {
+            if (Stream s = getModule!StreamModule.streams.get(_stream.name))
+                _stream = s;
+        }
+        return super.validating();
+    }
+
+    override CompletionStatus startup()
+    {
+        if (!_stream)
+        {
+            if (!_host && _remote == InetAddress())
+                return CompletionStatus.Error;
+
+            const(char)[] stream_name = getModule!StreamModule.streams.generateName(name);
+            if (_host)
+            {
+                const(char)[] host = _host[];
+                const(char)[] protocol = "http";
+
+                size_t prefix = host.findFirst(":");
+                if (prefix != host.length)
+                {
+                    protocol = host[0 .. prefix];
+                    host = host[prefix + 1 .. $];
+                }
+                if (host.startsWith("//"))
+                    host = host[2 .. $];
+
+                const(char)[] resource;
+                size_t resOffset = host.findFirst("/");
+                if (resOffset != host.length)
+                {
+                    resource = host[resOffset .. $];
+                    host = host[0 .. resOffset];
+                }
+
+                // TODO: I don't think we need a resource when connecting?
+                //       maybe we should keep it and make all requests relative to this resource?
+
+                if (protocol.icmp("http") == 0)
+                {
+                    ushort port = 80;
+
+                    // see if host has a port...
+                    size_t colon = host.findFirst(":");
+                    if (colon != host.length)
+                    {
+                        const(char)[] portStr = host[colon + 1 .. $];
+                        host = host[0 .. colon];
+
+                        size_t taken;
+                        long i = portStr.parse_int(&taken);
+                        if (i > ushort.max || taken != portStr.length)
+                            return CompletionStatus.Error; // invalid port string!
+                    }
+
+                    TCPStream tcp_stream = getModule!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.Dynamic);
+                    tcp_stream.remote = host.makeString(defaultAllocator);
+                    tcp_stream.port = port;
+                    _stream = tcp_stream;
+                }
+                else if (protocol.icmp("https") == 0)
+                {
+                    assert(false, "TODO: need TLS stream");
+//                    stream = g_app.allocator.allocT!SSLStream(name, host, ushort(0));
+//                    getModule!StreamModule.addStream(stream);
+                }
+            }
+            else
+            {
+                TCPStream tcp_stream = getModule!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.Dynamic);
+                tcp_stream.remote = _remote;
+                _stream = tcp_stream;
+            }
+
+            // we should have created a stream...
+            if (!_stream)
+            {
+                assert(false, "error strategy... just write log output?");
+                return CompletionStatus.Error;
+            }
+        }
+
+        if (_stream.running)
+            return CompletionStatus.Complete;
+        return CompletionStatus.Continue;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        if (_host || _remote != InetAddress())
+        {
+            _stream.destroy();
+            _stream = null;
+        }
+        return CompletionStatus.Complete;
+    }
+
+    override void update()
     {
         if (requests.empty)
             return;
@@ -88,15 +212,44 @@ nothrow @nogc:
                 ++i;
         }
 
-       if (sendNext && requests.length > 0)
-           sendRequest(*requests[0]);
+        if (sendNext && requests.length > 0)
+            sendRequest(*requests[0]);
     }
 
-    bool connected()
-        => stream.running;
+    HTTPMessage* request(HTTPMethod method, const(char)[] resource, HTTPMessageHandler responseHandler, const void[] content = null, HTTPParam[] params = null, HTTPParam[] additionalHeaders = null, String username = null, String password = null)
+    {
+        if (!running)
+            return null;
 
+        HTTPMessage* request = defaultAllocator().allocT!HTTPMessage();
+        request.httpVersion = serverVersion;
+        request.method = method;
+        request.url = resource.makeString(defaultAllocator);
+        request.username = username.move;
+        request.password = password.move;
+        request.content = cast(ubyte[])content;
+        request.headers = additionalHeaders.move;
+        request.queryParams = params.move;
+        request.responseHandler = responseHandler;
+        request.requestTime = getSysTime();
+
+        if (requests.length == 0) // OR CONCURRENT REQUESTS...
+            sendRequest(*request);
+
+        requests ~= request;
+        return request;
+    }
 
 private:
+    ObjectRef!Stream _stream;
+    String _host;
+    InetAddress _remote;
+
+    HTTPVersion serverVersion = HTTPVersion.V1_1;
+
+    HTTPParser parser;
+    Array!(HTTPMessage*) requests;
+
     void sendRequest(ref HTTPMessage request)
     {
         bool includeBody = true;
@@ -129,7 +282,7 @@ private:
 
         MutableString!0 message;
         message.concat(EnumKeys!HTTPMethod[request.method], ' ', request.url, get, " HTTP/", request.httpVersion >> 4, '.', request.httpVersion & 0xF,
-                       "\r\nHost: ", host,
+                       "\r\nHost: ", _host,
                        "\r\nUser-Agent: OpenWatt\r\nAccept-Encoding: gzip, deflate\r\n");
         if (request.httpVersion == HTTPVersion.V1_1)
             message.append("Connection: keep-alive\r\n");

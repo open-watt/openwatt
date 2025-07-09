@@ -7,6 +7,7 @@ import urt.meta.nullable;
 import urt.string;
 import urt.time;
 
+import manager.collection;
 import manager.console;
 import manager.plugin;
 
@@ -19,18 +20,12 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"bridge";
 
-    this(String name)
+    this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        super(name.move, TypeName);
+        super(collectionTypeInfo!BridgeInterface, name.move, flags);
 
         macTable = MACTable(16, 256, 60);
-
-        _status.linkStatus = Status.Link.Up;
-        _status.linkStatusChangeTime = getSysTime();
     }
-
-    override bool running() const pure
-        => status.linkStatus == Status.Link.Up;
 
     bool addMember(BaseInterface iface)
     {
@@ -118,6 +113,8 @@ protected:
 
     void incomingPacket(ref const Packet packet, BaseInterface srcInterface, PacketDirection dir, void* userData)
     {
+        debug assert(running, "Shouldn't receive packets while not running...?");
+
         ubyte srcPort = cast(ubyte)cast(size_t)userData;
 
         // TODO: should we check and strip a vlan tag?
@@ -153,6 +150,9 @@ protected:
 
     void send(ref const Packet packet, int srcPort = -1) nothrow @nogc
     {
+        if (!running)
+            return;
+
         if (!packet.dst.isMulticast)
         {
             ubyte dstPort;
@@ -166,7 +166,8 @@ protected:
                     return;
 
                 // forward the message
-                members[dstPort].forward(packet);
+                if (members[dstPort].running)
+                    members[dstPort].forward(packet);
                 return;
             }
         }
@@ -175,7 +176,7 @@ protected:
         // we just broadcast it, and maybe we'll catch the dst mac when the remote replies...
         foreach (i, member; members)
         {
-            if (i != srcPort)
+            if (i != srcPort && member.running)
                 member.forward(packet);
         }
     }
@@ -187,30 +188,12 @@ class BridgeInterfaceModule : Module
     mixin DeclareModule!"interface.bridge";
 nothrow @nogc:
 
+    Collection!BridgeInterface bridges;
+
     override void init()
     {
-        g_app.console.registerCommand!add("/interface/bridge", this);
+        g_app.console.registerCollection("/interface/bridge", bridges);
         g_app.console.registerCommand!port_add("/interface/bridge/port", this, "add");
-    }
-
-    // /interface/modbus/add command
-    // TODO: protocol enum!
-    void add(Session session, const(char)[] name, Nullable!(const(char)[]) pcap)
-    {
-        auto mod_if = getModule!InterfaceModule;
-        String n = mod_if.addInterfaceName(session, name, BridgeInterface.TypeName);
-        if (!n)
-            return;
-
-        BridgeInterface iface = defaultAllocator.allocT!BridgeInterface(n.move);
-
-        mod_if.interfaces.add(iface);
-
-//        // HACK: we'll print packets that we receive...
-//        iface.subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {
-//            import urt.io;
-//            writef("{0}: packet received: ({1} -> {2} )  [{3}]\n", i.name, p.src, p.dst, p.data);
-//        }, PacketFilter(etherType: EtherType.OW, owSubType: OW_SubType.Modbus));
     }
 
     void port_add(Session session, BridgeInterface bridge, BaseInterface _interface)

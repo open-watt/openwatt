@@ -29,15 +29,14 @@ nothrow @nogc:
 
 class EZSPClient : BaseObject
 {
-    __gshared Property[2] Properties = [ Property.create!("stream", stream)(),
-                                         Property.create!("running", running)() ];
+    __gshared Property[1] Properties = [ Property.create!("stream", stream)() ];
 nothrow @nogc:
 
     enum TypeName = StringLit!"ezsp";
 
-    this(String name)
+    this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        super(collectionTypeInfo!EZSPClient, name.move);
+        super(collectionTypeInfo!EZSPClient, name.move, flags);
     }
 
     // Properties...
@@ -57,9 +56,6 @@ nothrow @nogc:
 
 
     // API...
-
-    final override const(char)[] statusMessage() const
-        => running ? "Running" : super.statusMessage();
 
     final void setMessageHandler(void delegate(ubyte sequence, ushort command, const(ubyte)[] message) nothrow @nogc callback)
     {

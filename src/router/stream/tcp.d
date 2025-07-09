@@ -10,6 +10,7 @@ import urt.string;
 import urt.string.format;
 import urt.time;
 
+import manager.base;
 import manager.collection;
 import manager.console;
 import manager.plugin;
@@ -19,52 +20,17 @@ public import router.stream;
 
 class TCPStream : Stream
 {
-    __gshared Property[2] Properties = [ Property.create!("remote", remote)(),
-                                         Property.create!("port", port)() ];
+    __gshared Property[3] Properties = [ Property.create!("remote", remote)(),
+                                         Property.create!("port", port)(),
+                                         Property.create!("keepalive", keepalive)() ];
 nothrow @nogc:
 
     alias TypeName = StringLit!"tcp-client";
 
-    this(String name)
+    this(String name, ObjectFlags flags = ObjectFlags.None, StreamOptions options = StreamOptions.None)
     {
-        writeDebug("TCP stream, name: ", name[]);
-        super(collectionTypeInfo!TCPStream, name.move, cast(StreamOptions)(StreamOptions.NonBlocking | StreamOptions.KeepAlive));
+        super(collectionTypeInfo!TCPStream, name.move, flags, options);
     }
-
-    this(String name, const(char)[] host, ushort port, StreamOptions options = StreamOptions.None)
-    {
-        super(name.move, TypeName, options);
-
-        AddressInfo addrInfo;
-        addrInfo.family = AddressFamily.IPv4;
-        addrInfo.sock_type = SocketType.stream;
-        addrInfo.protocol = Protocol.tcp;
-        AddressInfoResolver results;
-        get_address_info(host, port ? port.tstring : null, &addrInfo, results);
-        if (!results.next_address(addrInfo))
-        {
-            // TODO: handle error case for no remote host...
-            assert(0);
-        }
-        _remote = addrInfo.address;
-        _status.linkStatusChangeTime = getSysTime();
-        update();
-    }
-
-    this(String name, InetAddress address, StreamOptions options = StreamOptions.None)
-    {
-        super(name.move, TypeName, options);
-
-        _remote = address;
-        _status.linkStatusChangeTime = getSysTime();
-        update();
-    }
-
-    ~this()
-    {
-        close_socket();
-    }
-
 
     // Properties...
     ref const(String) remote() const pure
@@ -73,12 +39,7 @@ nothrow @nogc:
     {
         // apply explicit port if assigned
         if (_port != 0)
-        {
-            if (value.family == AddressFamily.IPv4)
-                value._a.ipv4.port = _port;
-            else if (value.family == AddressFamily.IPv6)
-                value._a.ipv6.port = _port;
-        }
+            update_port(value, _port);
 
         _host = null;
         if (value == _remote)
@@ -114,17 +75,37 @@ nothrow @nogc:
         if ((_remote.family == AddressFamily.IPv4 && _remote._a.ipv4.port == value) ||
             (_remote.family == AddressFamily.IPv6 && _remote._a.ipv6.port == value))
             return;
+        update_port(_remote, _port);
 
         restart();
+    }
+
+    bool keepalive() const pure
+        => keepEnable;
+    void keepalive(bool value)
+    {
+        if (keepEnable == value)
+            return;
+        enableKeepAlive(value);
     }
 
 
     // API...
 
     final override bool validate() const pure
-        => ((_remote != InetAddress()) ^^ !_host.empty) &&
-            ((_remote.family == AddressFamily.IPv4 && _remote._a.ipv4.port != 0) ||
-             (_remote.family == AddressFamily.IPv6 && _remote._a.ipv6.port != 0));
+    {
+        if (_remote != InetAddress())
+        {
+            if (!_host.empty)
+                return false;
+            if ((_remote.family == AddressFamily.IPv4 && _remote._a.ipv4.port != 0) ||
+                (_remote.family == AddressFamily.IPv6 && _remote._a.ipv6.port != 0))
+                return true;
+        }
+        else if (_host.empty)
+            return false;
+        return true;
+    }
 
     final override CompletionStatus startup()
     {
@@ -148,17 +129,11 @@ nothrow @nogc:
             get_address_info(_host, _port ? _port.tstring : null, &addrInfo, results);
             if (!results.next_address(addrInfo))
                 return CompletionStatus.Continue;
+            _remote = addrInfo.address;
 
             // apply explicit port if assigned
             if (_port != 0)
-            {
-                if (addrInfo.address.family == AddressFamily.IPv4)
-                    addrInfo.address._a.ipv4.port = _port;
-                else if (addrInfo.address.family == AddressFamily.IPv6)
-                    addrInfo.address._a.ipv6.port = _port;
-            }
-
-            _remote = addrInfo.address;
+                update_port(_remote, _port);
         }
 
         // if the socket is invalid, we'll attempt to initiate a connection...
@@ -173,8 +148,7 @@ nothrow @nogc:
             Result r = create_socket(AddressFamily.IPv4, SocketType.stream, Protocol.tcp, _socket);
             if (!r)
             {
-                debug writeWarning("create_socket() failed with error: ", r.socket_result());
-                restart();
+                debug writeError(type, " '", name, "' - create_socket() failed with error: ", r.socket_result);
                 return CompletionStatus.Error;
             }
 
@@ -182,8 +156,7 @@ nothrow @nogc:
             r = _socket.connect(_remote);
             if (!r.succeeded && r.socket_result != SocketResult.would_block)
             {
-                debug writeWarning("_socket.connect() failed with error: ", r.socket_result());
-                restart();
+                debug writeWarning(type, " '", name, "' - connect() failed with error: ", r.socket_result);
                 return CompletionStatus.Error;
             }
         }
@@ -197,8 +170,7 @@ nothrow @nogc:
         Result r = poll(fd, Duration.zero, numEvents);
         if (r.failed)
         {
-            debug writeWarning("poll() failed with error: ", r.socket_result);
-            restart();
+            debug writeError(type, " '", name, "' - poll() failed with error: ", r.socket_result);
             return CompletionStatus.Error;
         }
 
@@ -209,8 +181,7 @@ nothrow @nogc:
         // check error conditions
         if (fd.return_events & (PollEvents.error | PollEvents.hangup | PollEvents.invalid))
         {
-            debug writeDebug("TCP stream connection failed: '", name, "' to ", remote);
-            restart();
+            debug writeError(type, " '", name, "' - connection failed to ", _remote);
             return CompletionStatus.Error;
         }
 
@@ -221,7 +192,6 @@ nothrow @nogc:
         if (keepEnable)
             set_keepalive(_socket, keepEnable, keepIdle, keepInterval, keepCount);
 
-        writeInfo("TCP stream '", name, "' link established.");
         return CompletionStatus.Complete;
     }
 
@@ -276,11 +246,6 @@ nothrow @nogc:
         return tstring(remote);
     }
 
-    override void setOpts(StreamOptions options)
-    {
-        this.options = options;
-    }
-
     void enableKeepAlive(bool enable, Duration keepIdle = seconds(10), Duration keepInterval = seconds(1), int keepCount = 10)
     {
         this.keepEnable = enable;
@@ -313,26 +278,23 @@ nothrow @nogc:
 
     override ptrdiff_t write(const void[] data)
     {
-        if (!running && (options & StreamOptions.OnDemand))
-            connect();
+        if (!running)
+            return 0;
 
-        if (running)
-        {
-            size_t bytes;
+        size_t bytes;
             Result r = _socket.send(data, MsgFlags.none, &bytes);
             if (r != Result.success)
-            {
+        {
                 SocketResult sr = r.socket_result;
                 if (sr == SocketResult.would_block)
-                    return 0;
-                restart();
-            }
-            else
-            {
-                if (logging)
-                    writeToLog(false, data[0 .. bytes]);
-                return bytes;
-            }
+                return 0;
+            restart();
+        }
+        else
+        {
+            if (logging)
+                writeToLog(false, data[0 .. bytes]);
+            return bytes;
         }
 
         if (options & StreamOptions.BufferData)
@@ -390,6 +352,21 @@ private:
         _socket = Socket.invalid;
     }
 
+    bool update_port(ref InetAddress addr, ushort port)
+    {
+        if (addr.family == AddressFamily.IPv4)
+        {
+            addr._a.ipv4.port = port;
+            return true;
+        }
+        else if (addr.family == AddressFamily.IPv6)
+        {
+            addr._a.ipv6.port = port;
+            return true;
+        }
+        return false;
+    }
+
     // TODO: this is a bug! remove the public!!
 public:
     this(String name, Socket socket, ushort port)
@@ -410,124 +387,130 @@ enum ServerOptions
     JustOne = 1 << 0, // Only accept one connection then terminate the server
 }
 
-class TCPServer
+class TCPServer : BaseObject
 {
-    nothrow @nogc:
+    __gshared Property[1] Properties = [ Property.create!("port", port)() ];
+
+nothrow @nogc:
+
+    alias TypeName = StringLit!"tcp-server";
 
     alias NewConnection = void delegate(TCPStream client, void* userData) nothrow @nogc;
 
-    this(String name, ushort port, NewConnection callback, void* userData, ServerOptions options = ServerOptions.None) nothrow @nogc
+    this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        this.name = name.move;
-        this.port = port;
-        this.options = options;
-        this.connectionCallback = callback;
-        this.userData = userData;
-
-        start();
+        super(collectionTypeInfo!TCPServer, name.move, flags);
     }
 
-    ~this()
+    // Properties
+    ushort port() const pure
+        => _port;
+    void port(ushort value)
     {
-        stop();
+        if (_port == value)
+            return;
+        _port = value;
+        restart();
     }
 
-    void start() nothrow @nogc
-    {
-        // TODO: should we just accept multiple calls to start() and ignore if already running?
-        assert(!isRunning, "Already started");
+    // API...
 
-        Result r = create_socket(AddressFamily.IPv4, SocketType.stream, Protocol.tcp, serverSocket);
+    void setConnectionCallback(NewConnection callback, void* userData)
+    {
+        _connectionCallback = callback;
+        _userData = userData;
+    }
+
+    final override bool validate() const pure
+        => _port != 0;
+
+    final override CompletionStatus startup()
+    {
+        assert(!_serverSocket);
+
+        Result r = create_socket(AddressFamily.IPv4, SocketType.stream, Protocol.tcp, _serverSocket);
         if (r.failed)
         {
-            writeError("Error staring TCP server '", name , "': failed to create _socket. Error ", r.systemCode);
-            return;
+            debug writeError(type, " '", name, "' - failed to create socket. Error ", r.systemCode);
+            return CompletionStatus.Error;
         }
 
-        r = serverSocket.set_socket_option(SocketOption.non_blocking, true);
+        r = _serverSocket.set_socket_option(SocketOption.non_blocking, true);
         if (r.failed)
         {
-            writeError("Error staring TCP server '", name , "': set_socket_option failed.  Error ", r.systemCode);
-            return;
+            debug writeError(type, " '", name, "' - set_socket_option failed.  Error ", r.systemCode);
+            return CompletionStatus.Error;
         }
 
-        r = serverSocket.bind(InetAddress(IPAddr.any, port));
+        r = _serverSocket.bind(InetAddress(IPAddr.any, _port));
         if (r.failed)
         {
-            writeError("Error staring TCP server '", name , "': failed to bind port ", port, ". Error ", r.systemCode);
-            return;
+            debug writeWarning(type, " '", name, "' - failed to bind port ", _port, ". Error ", r.systemCode);
+            return CompletionStatus.Error;
         }
 
-        r = serverSocket.listen();
+        r = _serverSocket.listen();
         if (r.failed)
         {
-            writeError("Error staring TCP server '", name , "': listen failed. Error ", r.systemCode);
-            return;
+            debug writeError(type, " '", name, "' - listen failed. Error ", r.systemCode);
+            return CompletionStatus.Error;
         }
 
-        isRunning = true;
-
-        writeInfo("TCP server '", name , "' listening on port ", port);
+        debug writeInfo(type, " '", name, "' - listening on port ", _port);
+        return CompletionStatus.Complete;
     }
 
-    void stop()
+    final override CompletionStatus shutdown()
     {
-        assert(isRunning, "Not started");
-
-        isRunning = false;
-
-        serverSocket.close();
-        serverSocket = null;
+        if (_serverSocket)
+        {
+            _serverSocket.close();
+            _serverSocket = null;
+        }
+        return CompletionStatus.Complete;
     }
 
-    bool running()
+    final override void update()
     {
-        return isRunning;
-    }
-
-    // TODO: remove this, we should use threads instead of polling!
-    void update()
-    {
-        if (!isRunning)
-            return;
-
         Socket conn;
         InetAddress remoteAddr;
-        Result r = serverSocket.accept(conn, &remoteAddr);
+        Result r = _serverSocket.accept(conn, &remoteAddr);
         if (r.failed)
         {
-            if (r.socket_result == SocketResult.would_block)
-                return;
-            // TODO: handle error more good?
-            assert(false, tconcat(r.socket_result));
+            if (r.socket_result != SocketResult.would_block)
+            {
+                // do we want to know what went wrong??
+                restart();
+            }
+            return;
         }
-
         assert(conn);
 
-        if (options & ServerOptions.JustOne)
-            stop();
+        // if this was a temporary server. maybe we destroy it now?
+//        if (options & ServerOptions.JustOne)
+//            stop();
 
         // prevent duplicate stream names...
         String newName = getModule!StreamModule.streams.generateName(name).makeString(defaultAllocator());
 
-//        if (rawConnectionCallback)
-//            rawConnectionCallback(conn, userData);
-//        else if (connectionCallback)
-        if (connectionCallback)
-            connectionCallback(defaultAllocator().allocT!TCPStream(newName.move, conn, port), userData);
+//        if (_rawConnectionCallback)
+//            _rawConnectionCallback(conn, userData);
+//        else if (_connectionCallback)
+        if (_connectionCallback)
+            _connectionCallback(defaultAllocator().allocT!TCPStream(newName.move, conn, _port), _userData);
+
+        // TODO: should the stream we just created to into the stream pool...?
     }
 
 private:
     alias NewRawConnection = void function(Socket client, void* userData) nothrow @nogc;
 
-    String name;
-    ServerOptions options;
-    ushort port;
-    bool isRunning;
-    NewConnection connectionCallback;
-//    NewRawConnection rawConnectionCallback;
-    void* userData;
-    Socket serverSocket;
+//    ServerOptions _options;
+    ushort _port;
+    NewConnection _connectionCallback;
+//    NewRawConnection _rawConnectionCallback;
+    void* _userData;
+    Socket _serverSocket;
 
 //    this(ushort port, NewRawConnection callback, void* userData, ServerOptions options = ServerOptions.None)
 //    {
@@ -545,10 +528,17 @@ class TCPStreamModule : Module
     mixin DeclareModule!"stream.tcp";
 nothrow @nogc:
 
-    Collection!TCPStream tcpStreams;
+    Collection!TCPStream tcp_streams;
+    Collection!TCPServer tcp_servers;
 
     override void init()
     {
-        g_app.console.registerCollection("/stream/tcp-client", tcpStreams);
+        g_app.console.registerCollection("/stream/tcp-client", tcp_streams);
+        g_app.console.registerCollection("/stream/tcp-server", tcp_servers);
+    }
+
+    override void update()
+    {
+        tcp_servers.updateAll();
     }
 }

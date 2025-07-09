@@ -50,8 +50,6 @@ nothrow @nogc:
         super(console);
         this.m_stream = clientStream;
 
-        clientStream.setOpts(StreamOptions.NonBlocking);
-
         will(TelnetOptions.ECHO);
         dont(TelnetOptions.ECHO, true);
         will(TelnetOptions.SUPPRESS_GO_AHEAD);
