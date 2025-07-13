@@ -84,15 +84,15 @@ import urt.util : InPlace, Default;
 
 struct AsyncCall
 {
-nothrow @nogc:
+@nogc:
     Fibre fibre;
     AsyncCall* next;
     void delegate() userEntry;
 
     this() @disable;
-    this(int)
+    this(int) nothrow
     {
-        fibre = Fibre(&entry, &doYield, userData: &this);
+        fibre = Fibre(&entry, &doYield, cast(void*)&this);
     }
 
     static void entry(void* p)
@@ -121,7 +121,7 @@ AsyncCall* freeCalls;
 
 FreeList!AsyncWait waitingPool;
 
-void doYield(ref Fibre yielding, AwakenEvent awakenEvent)
+ResumeHandler doYield(ref Fibre yielding, AwakenEvent awakenEvent)
 {
     if (awakenEvent is finishToken)
     {
@@ -137,4 +137,5 @@ void doYield(ref Fibre yielding, AwakenEvent awakenEvent)
         wait.next = waiting;
         waiting = wait;
     }
+    return null;
 }

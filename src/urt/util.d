@@ -98,14 +98,13 @@ T alignUp(T)(T value, size_t alignment)
 bool isAligned(size_t alignment, T)(T value)
     if (isSomeInt!T || is(T == U*, U))
 {
-    static assert(T.sizeof > size_t.sizeof, "TODO");
+    static assert(IsPowerOf2!alignment, "Alignment must be a power of two!");
     return (cast(size_t)value & (alignment - 1)) == 0;
 }
 
 bool isAligned(T)(T value, size_t alignment)
     if (isSomeInt!T || is(T == U*, U))
 {
-    static assert(T.sizeof > size_t.sizeof, "TODO");
     return (cast(size_t)value & (alignment - 1)) == 0;
 }
 
