@@ -34,20 +34,8 @@
     <Filter Include="src\router\tesla">
       <UniqueIdentifier>{9e30a0ce-3be3-4c81-822d-c1b59d0af556}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\urt">
-      <UniqueIdentifier>{304f8331-b3de-4bb9-81b7-b8514ee0958c}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="src\urt\mem">
-      <UniqueIdentifier>{fcaa78bd-2cef-4deb-bc67-416b480d0710}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="src\urt\string">
-      <UniqueIdentifier>{154e5d1e-c3fd-402b-b106-1067742ac9bc}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\manager\console">
       <UniqueIdentifier>{5b7f73d6-de14-482f-86a8-89a77e2af436}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="src\urt\intrinsic">
-      <UniqueIdentifier>{4df84de2-6358-4722-b319-08d25bd2f6ac}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\router\iface">
       <UniqueIdentifier>{0e965bb7-e2d4-44f9-a982-88df797db1fb}</UniqueIdentifier>
@@ -63,9 +51,6 @@
     </Filter>
     <Filter Include="src\protocol\mqtt">
       <UniqueIdentifier>{ff7e033e-b5f6-472c-8460-916db93b4dbe}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="src\urt\meta">
-      <UniqueIdentifier>{de3ea41c-cef1-43ef-8c98-70f80a0b9ba8}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\protocol\tesla">
       <UniqueIdentifier>{54587164-3374-4538-ad23-3865c5baffef}</UniqueIdentifier>
@@ -85,15 +70,6 @@
     <Filter Include="src\protocol\dns">
       <UniqueIdentifier>{6b327823-23d1-49dc-a514-342b020a2613}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\urt\digest">
-      <UniqueIdentifier>{5ca0e114-4a83-4c9d-869b-a172139eb46a}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="src\urt\format">
-      <UniqueIdentifier>{75942b85-0248-49fb-9e5e-61056ac27089}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="src\urt\range">
-      <UniqueIdentifier>{14daa134-d1ed-4584-ac0e-ba1176386c0e}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\protocol\http">
       <UniqueIdentifier>{072e997d-5dcf-4378-947a-4a665e1fd242}</UniqueIdentifier>
     </Filter>
@@ -112,8 +88,38 @@
     <Filter Include="conf\rest_profiles">
       <UniqueIdentifier>{adb46336-8e98-41fa-9701-bcda31f4d3ec}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\urt\si">
-      <UniqueIdentifier>{932a57f7-c6b2-4f7e-b017-282999bbbe48}</UniqueIdentifier>
+    <Filter Include="third_party">
+      <UniqueIdentifier>{bfd0dc75-e884-4b56-bee1-3f94570b47b0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt">
+      <UniqueIdentifier>{116edccd-0839-4b40-bea5-164a59529949}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\digest">
+      <UniqueIdentifier>{c019eeb4-22e9-470a-8284-4be630b35495}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\format">
+      <UniqueIdentifier>{0576e295-8b70-4b93-8071-a6fc436aef18}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\internal">
+      <UniqueIdentifier>{89a11fa8-2d0a-4b9a-9d7c-52b0c5df40b8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\intrinsic">
+      <UniqueIdentifier>{40268c2d-d19f-45e8-83bb-6036d91e335e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\mem">
+      <UniqueIdentifier>{744f1601-c161-4ba0-a646-e2a9c869655f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\meta">
+      <UniqueIdentifier>{8691deb8-7d43-4182-934a-52eaa14924d4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\string">
+      <UniqueIdentifier>{eb6617e4-792c-4476-90b3-977eba93f55f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\si">
+      <UniqueIdentifier>{af470b6a-000a-4e83-9502-2ea2ca5f3159}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\range">
+      <UniqueIdentifier>{fda610db-eacb-4a07-80cb-fffc185f2c9a}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -201,51 +207,6 @@
     <DCompile Include="src\router\stream\bridge.d">
       <Filter>src\router\stream</Filter>
     </DCompile>
-    <DCompile Include="src\urt\io.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\traits.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\mem\alloc.d">
-      <Filter>src\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\mem\allocator.d">
-      <Filter>src\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\mem\package.d">
-      <Filter>src\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\mem\refman.d">
-      <Filter>src\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\mem\ring.d">
-      <Filter>src\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\mem\scratchpad.d">
-      <Filter>src\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\mem\string.d">
-      <Filter>src\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\mem\temp.d">
-      <Filter>src\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\mem\freelist.d">
-      <Filter>src\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\string\format.d">
-      <Filter>src\urt\string</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\string\package.d">
-      <Filter>src\urt\string</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\string\string.d">
-      <Filter>src\urt\string</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\string\tailstring.d">
-      <Filter>src\urt\string</Filter>
-    </DCompile>
     <DCompile Include="src\manager\subscriber.d">
       <Filter>src\manager</Filter>
     </DCompile>
@@ -258,62 +219,8 @@
     <DCompile Include="src\manager\console\package.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
-    <DCompile Include="src\urt\list.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\platform.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\processor.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\compiler.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\intrinsic\package.d">
-      <Filter>src\urt\intrinsic</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\intrinsic\x86.d">
-      <Filter>src\urt\intrinsic</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\package.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\util.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
     <DCompile Include="src\manager\console\builtin_commands.d">
       <Filter>src\manager\console</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\mem\region.d">
-      <Filter>src\urt\mem</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\string\ansi.d">
-      <Filter>src\urt\string</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\endian.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\dbg.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\algorithm.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\string\ascii.d">
-      <Filter>src\urt\string</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\string\uni.d">
-      <Filter>src\urt\string</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\conv.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\log.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\time.d">
-      <Filter>src\urt</Filter>
     </DCompile>
     <DCompile Include="src\router\iface\bridge.d">
       <Filter>src\router\iface</Filter>
@@ -328,9 +235,6 @@
       <Filter>src\protocol\modbus</Filter>
     </DCompile>
     <DCompile Include="src\router\port\package.d">
-      <Filter>src\router\port</Filter>
-    </DCompile>
-    <DCompile Include="src\router\port\serial.d">
       <Filter>src\router\port</Filter>
     </DCompile>
     <DCompile Include="src\protocol\http\package.d">
@@ -351,23 +255,14 @@
     <DCompile Include="src\protocol\mqtt\util.d">
       <Filter>src\protocol\mqtt</Filter>
     </DCompile>
-    <DCompile Include="src\urt\meta\nullable.d">
-      <Filter>src\urt\meta</Filter>
-    </DCompile>
     <DCompile Include="src\router\iface\packet.d">
       <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\meta\package.d">
-      <Filter>src\urt\meta</Filter>
     </DCompile>
     <DCompile Include="src\router\iface\tesla.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
     <DCompile Include="src\protocol\tesla\twc.d">
       <Filter>src\protocol\tesla</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\meta\tuple.d">
-      <Filter>src\urt\meta</Filter>
     </DCompile>
     <DCompile Include="src\manager\console\function_command.d">
       <Filter>src\manager\console</Filter>
@@ -384,27 +279,6 @@
     <DCompile Include="src\manager\system.d">
       <Filter>src\manager</Filter>
     </DCompile>
-    <DCompile Include="src\urt\map.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\lifetime.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\socket.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\inet.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\math.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\file.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\result.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
     <DCompile Include="src\router\iface\mac.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
@@ -419,12 +293,6 @@
     </DCompile>
     <DCompile Include="src\protocol\telnet\package.d">
       <Filter>src\protocol\telnet</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\array.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\serial.d">
-      <Filter>src\urt</Filter>
     </DCompile>
     <DCompile Include="src\manager\console\console.d">
       <Filter>src\manager\console</Filter>
@@ -468,24 +336,6 @@
     <DCompile Include="src\router\iface\can.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
-    <DCompile Include="src\urt\crc.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\rand.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\encoding.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\fibre.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\async.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\system.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
     <DCompile Include="src\protocol\dns\mdns.d">
       <Filter>src\protocol\dns</Filter>
     </DCompile>
@@ -494,30 +344,6 @@
     </DCompile>
     <DCompile Include="src\protocol\dns\package.d">
       <Filter>src\protocol\dns</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\kvp.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\digest\md5.d">
-      <Filter>src\urt\digest</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\zip.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\hash.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\format\json.d">
-      <Filter>src\urt\format</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\variant.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\range\package.d">
-      <Filter>src\urt\range</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\range\primitives.d">
-      <Filter>src\urt\range</Filter>
     </DCompile>
     <DCompile Include="src\apps\energy\appliance.d">
       <Filter>src\apps\energy</Filter>
@@ -533,15 +359,6 @@
     </DCompile>
     <DCompile Include="src\apps\energy\package.d">
       <Filter>src\apps\energy</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\si\package.d">
-      <Filter>src\urt\si</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\si\quantity.d">
-      <Filter>src\urt\si</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\si\unit.d">
-      <Filter>src\urt\si</Filter>
     </DCompile>
     <DCompile Include="src\urt\system.d">
       <Filter>src\urt</Filter>
@@ -561,12 +378,6 @@
     <DCompile Include="src\protocol\http\server.d">
       <Filter>src\protocol\http</Filter>
     </DCompile>
-    <DCompile Include="src\urt\attribute.d">
-      <Filter>src\urt</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\digest\sha.d">
-      <Filter>src\urt\digest</Filter>
-    </DCompile>
     <DCompile Include="src\manager\console\argument.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
@@ -581,6 +392,198 @@
     </DCompile>
     <DCompile Include="src\manager\collection.d">
       <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\ansi.d">
+      <Filter>third_party\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\ascii.d">
+      <Filter>third_party\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\format.d">
+      <Filter>third_party\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\package.d">
+      <Filter>third_party\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\string.d">
+      <Filter>third_party\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\tailstring.d">
+      <Filter>third_party\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\uni.d">
+      <Filter>third_party\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\si\package.d">
+      <Filter>third_party\urt\si</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\si\quantity.d">
+      <Filter>third_party\urt\si</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\si\unit.d">
+      <Filter>third_party\urt\si</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\range\package.d">
+      <Filter>third_party\urt\range</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\range\primitives.d">
+      <Filter>third_party\urt\range</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\meta\nullable.d">
+      <Filter>third_party\urt\meta</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\meta\package.d">
+      <Filter>third_party\urt\meta</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\meta\tuple.d">
+      <Filter>third_party\urt\meta</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\alloc.d">
+      <Filter>third_party\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\allocator.d">
+      <Filter>third_party\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\freelist.d">
+      <Filter>third_party\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\package.d">
+      <Filter>third_party\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\refman.d">
+      <Filter>third_party\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\region.d">
+      <Filter>third_party\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\ring.d">
+      <Filter>third_party\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\scratchpad.d">
+      <Filter>third_party\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\string.d">
+      <Filter>third_party\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\temp.d">
+      <Filter>third_party\urt\mem</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\intrinsic\package.d">
+      <Filter>third_party\urt\intrinsic</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\intrinsic\x86.d">
+      <Filter>third_party\urt\intrinsic</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\format\json.d">
+      <Filter>third_party\urt\format</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\digest\md5.d">
+      <Filter>third_party\urt\digest</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\digest\sha.d">
+      <Filter>third_party\urt\digest</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\algorithm.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\array.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\async.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\attribute.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\compiler.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\conv.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crc.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\dbg.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\encoding.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\endian.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\fibre.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\file.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\hash.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\inet.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\io.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\kvp.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\lifetime.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\list.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\log.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\map.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\math.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\package.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\platform.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\processor.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\rand.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\result.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\serial.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\socket.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\system.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\time.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\traits.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\util.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\variant.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\zip.d">
+      <Filter>third_party\urt</Filter>
     </DCompile>
   </ItemGroup>
   <ItemGroup>
@@ -617,5 +620,10 @@
       <Filter>conf\rest_profiles</Filter>
     </None>
     <None Include="Makefile" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="third_party\urt\src\urt\internal\os.c">
+      <Filter>third_party\urt\internal</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

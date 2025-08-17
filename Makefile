@@ -4,6 +4,7 @@ CONFIG ?= debug
 D_COMPILER ?= dmd
 DC ?= dmd
 
+RTSRCDIR := third_party/urt/src
 SRCDIR := src
 OBJDIR := obj/$(PLATFORM)_$(CONFIG)
 TARGETDIR := bin/$(PLATFORM)_$(CONFIG)
@@ -13,6 +14,7 @@ DEPFILE = $(OBJDIR)/$(TARGETNAME).d
 DFLAGS := $(DFLAGS) -preview=bitfields -preview=rvaluerefparam -preview=nosharedaccess -preview=in
 
 SOURCES := $(shell find "$(SRCDIR)" -type f -name '*.d')
+SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)" -type f -name '*.d')
 
 ifeq ($(OS),windows)
     TARGET = $(TARGETDIR)/$(TARGETNAME).exe
@@ -21,7 +23,7 @@ else
 endif
 
 ifeq ($(D_COMPILER),ldc)
-    DFLAGS := $(DFLAGS) -I $(SRCDIR)
+    DFLAGS := $(DFLAGS) -I $(RTSRCDIR) -I $(SRCDIR)
 
     ifeq ($(PLATFORM),x86_64)
 #        DFLAGS := $(DFLAGS) -mtriple=x86_64-linux-gnu
@@ -50,7 +52,7 @@ ifeq ($(D_COMPILER),ldc)
 
     COMPILE_CMD = "$(DC)" $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -deps=$(DEPFILE) $(SOURCES)
 else ifeq ($(D_COMPILER),dmd)
-    DFLAGS := $(DFLAGS) -I=$(SRCDIR)
+    DFLAGS := $(DFLAGS) -I=$(RTSRCDIR) -I=$(SRCDIR)
 
     ifeq ($(PLATFORM),x86_64)
 #        DFLAGS := $(DFLAGS) -m64
