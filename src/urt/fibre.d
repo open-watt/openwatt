@@ -56,6 +56,8 @@ struct Fibre
 
         static void fibreFunc()
         {
+            import urt.system : abort;
+
             auto thisFibre = cast(Fibre*)co_data();
             while (true)
             {
@@ -70,18 +72,18 @@ struct Fibre
                     else
                         thisFibre.fibreEntry(thisFibre.userData);
                 }
-                catch (Exception e)
-                {
-                    // catch the exception... and?
-                    assert(false, "Unhandled exception!");
-                }
                 catch (AbortException e)
                 {
+                    thisFibre.abortRequested = false;
                     thisFibre.aborted = true;
+                }
+                catch (Exception e)
+                {
+                    assert(false, "Unhandled exception!");
+                    abort();
                 }
                 catch (Throwable e)
                 {
-                    import urt.system : abort;
                     abort();
                 }
 
@@ -185,7 +187,7 @@ struct Fibre
     size_t stackSize() const pure nothrow
     {
         assert(fibre, "Fibre not created!");
-        auto fdata = cast(co_fibre_data*)fibre - 1;
+        auto fdata = co_get_fibre_data(fibre);
         return fdata.stack_size;
     }
 
@@ -253,6 +255,12 @@ void sleep(Duration dur)
 
 noreturn abort(string message)
 {
+    version (Windows)
+    {
+        version (UseWindowsFibreAPI) {} else
+            assert(false, "TODO: Windows raw fibres don't support exceptions (yet - needs more work!)");
+    }
+
     debug assert(isInFibre(), "Can't abort the main thread!");
 
     if (!abortException)
@@ -275,7 +283,7 @@ bool isInFibre() nothrow
 
 private:
 
-class AbortException : Throwable
+class AbortException : Exception
 {
     this(string msg) nothrow @nogc
     {
@@ -285,7 +293,7 @@ class AbortException : Throwable
 
 void* mainFibre = null;
 
-__gshared AbortException abortException;
+AbortException abortException;
 
 
 unittest
@@ -313,6 +321,15 @@ unittest
     x = 2;
     f.resume();
     assert(x == 13);
+    f.resume();
+    assert(f.isFinished);
+
+    f.reset();
+    f.resume();
+    assert(x == 11);
+    f.abort();
+    assert(f.isFinished);
+    assert(f.wasAborted);
 }
 
 
@@ -357,6 +374,9 @@ version (UseWindowsFibreAPI)
     }
     co_fibre_data thread_fiber_data;
 
+    private inout(co_fibre_data)* co_get_fibre_data(inout cothread_t fibre) pure
+        => cast(co_fibre_data*)fibre;
+
     cothread_t co_active()
     {
         if(!thread_fiber_data.fiber)
@@ -365,9 +385,7 @@ version (UseWindowsFibreAPI)
     }
 
     void* co_data()
-    {
-        return (cast(co_fibre_data*)GetFiberData()).user_data;
-    }
+        => (cast(co_fibre_data*)GetFiberData()).user_data;
 
     cothread_t co_derive(void[] memory, coentry_t entry, void* data)
     {
@@ -417,6 +435,9 @@ else
         uint flags;
     }
 
+    private inout(co_fibre_data)* co_get_fibre_data(inout cothread_t fibre) pure
+        => cast(co_fibre_data*)fibre - 1;
+
     align(16) size_t[SaveStateLen] co_active_buffer;
     cothread_t co_active_handle = null;
 
@@ -428,9 +449,7 @@ else
     }
 
     void* co_data()
-    {
-        return (cast(co_fibre_data*)co_active_handle - 1).user_data;
-    }
+        => (cast(co_fibre_data*)co_active_handle - 1).user_data;
 
     cothread_t co_derive(void[] memory, coentry_t entry, void* data)
     {
@@ -453,6 +472,47 @@ else
     cothread_t co_create(size_t stack_size, coentry_t entry, void* data)
     {
         assert(stack_size <= uint.max, "Stack size too large");
+
+        // TODO: (chatgpt suggestions...)
+
+        // On Windows
+        //  reserve = VirtualAlloc(NULL, reserve_size, MEM_RESERVE, PAGE_READWRITE)
+        //  commit_top = VirtualAlloc(reserve_top - commit_size, commit_size, MEM_COMMIT, PAGE_READWRITE)
+        //  mark the page below commit_top with PAGE_GUARD via VirtualProtect
+        //
+        //  write:
+        //    TEB->NtTib.StackBase = reserve_top;
+        //    TEB->NtTib.StackLimit = commit_top - commit_size; (or wherever the current low committed limit ends up after guard)
+        //    TEB->DeallocationStack = reserve_base;
+        //
+        //  (x86) TEB->NtTib.ExceptionList = (EXCEPTION_REGISTRATION_RECORD*)-1;
+        //  set RSP to StackBase - red_zone - shadow_space (x64), maintain 16-byte alignment
+        //  touch a few pages downward to arm the guard
+
+        // On Linux:
+        //  mmap(size + page) + mprotect(lowest page, PROT_NONE) instead of guard band
+        //
+        //  Alignment + call discipline:
+        //    On x86-64 SysV: maintain 16-byte RSP alignment at call sites.
+        //    Enter the fiber by doing a call into a normal C/C++ function (or an asm thunk with CFI), not a jmp. A call pushes a return address and gives the unwinder a sane CFA.
+        //    Provide any ABI-required call scratch (no shadow space on SysV x86-64; AArch64 also needs 16-byte SP alignment).
+        //
+        //  CFI / unwind info at the top frame:
+        //    If your first frame is compiled C/C++, you’re good: GCC/Clang emit DWARF CFI the unwinder can use.
+        //    If your first frame is hand-written asm, add .cfi_startproc, .cfi_def_cfa %rsp, 8 (after the call), and proper .cfi_offset/.cfi_def_cfa_offset as you adjust RSP.
+        //
+        //  Red zone awareness (x86-64 SysV):
+        //    The 128-byte red zone exists below RSP. Don’t place your fiber’s SP so close to the guard that normal red-zone use immediately hits the guard. Leave ≥128 B slack above the guard.
+        //
+        //  Signals (optional but practical).
+        //    If your fibers have small stacks, install a signal alt-stack (sigaltstack) so signal handlers don’t blow the fiber stack.
+        //    If you intend to throw across a signal frame (rare), ensure handlers are compiled with unwind tables.
+        //
+        //  Stack overflow behavior.
+        //    Linux won’t auto-grow your ad-hoc stack. The guard page gives you a deterministic SIGSEGV instead of silent corruption. Consider pre-touching a page or two to establish mapping.
+
+        // Bare metal:
+        //  this code should be fine, check the guard-band from time to time...?
 
         void[] memory = defaultAllocator().alloc(stack_size + co_fibre_data.sizeof + GuardBand, max(co_fibre_data.alignof, 16));
         if(!memory)

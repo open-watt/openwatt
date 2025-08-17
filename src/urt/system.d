@@ -13,8 +13,8 @@ enum IdleParams : ubyte
     DisplayRequired = 2,    // keep the display turned on
 }
 
-extern(C) void abort();
-extern(C) void exit(int status);
+extern(C) noreturn abort();
+extern(C) noreturn exit(int status);
 
 void sleep(Duration duration)
 {
