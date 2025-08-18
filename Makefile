@@ -1,8 +1,7 @@
 OS ?= ubuntu
 PLATFORM ?= x86_64
 CONFIG ?= debug
-D_COMPILER ?= dmd
-DC ?= dmd
+COMPILER ?= dmd
 
 RTSRCDIR := third_party/urt/src
 SRCDIR := src
@@ -22,7 +21,8 @@ else
     TARGET = $(TARGETDIR)/$(TARGETNAME)
 endif
 
-ifeq ($(D_COMPILER),ldc)
+ifeq ($(COMPILER),ldc)
+    DC ?= ldc2
     DFLAGS := $(DFLAGS) -I $(RTSRCDIR) -I $(SRCDIR)
 
     ifeq ($(PLATFORM),x86_64)
@@ -51,7 +51,8 @@ ifeq ($(D_COMPILER),ldc)
     endif
 
     COMPILE_CMD = "$(DC)" $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -deps=$(DEPFILE) $(SOURCES)
-else ifeq ($(D_COMPILER),dmd)
+else ifeq ($(COMPILER),dmd)
+    DC ?= dmd
     DFLAGS := $(DFLAGS) -I=$(RTSRCDIR) -I=$(SRCDIR)
 
     ifeq ($(PLATFORM),x86_64)
@@ -70,7 +71,7 @@ else ifeq ($(D_COMPILER),dmd)
 
     COMPILE_CMD = "$(DC)" $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -makedeps $(SOURCES) > $(DEPFILE)
 else
-    $(error "Unknown D compiler: $(D_COMPILER)")
+    $(error "Unknown D compiler: $(COMPILER)")
 endif
 
 ifeq ($(CONFIG),unittest)
