@@ -61,7 +61,7 @@ nothrow @nogc:
         SystemInfo sysInfo = getSysInfo();
         buffer.writeOption(2, sysInfo.processor); // shb_hardware
         buffer.writeOption(3, sysInfo.osName); // shb_os
-        buffer.writeOption(4, "ENMS"); // shb_userappl
+        buffer.writeOption(4, "OpenWatt"); // shb_userappl
         buffer.writeOption(0, null);
 
         buffer.writeBlockLen();

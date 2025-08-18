@@ -130,7 +130,7 @@ private:
         MutableString!0 message;
         message.concat(EnumKeys!HTTPMethod[request.method], ' ', request.url, get, " HTTP/", request.httpVersion >> 4, '.', request.httpVersion & 0xF,
                        "\r\nHost: ", host,
-                       "\r\nUser-Agent: ENMS\r\nAccept-Encoding: gzip, deflate\r\n");
+                       "\r\nUser-Agent: OpenWatt\r\nAccept-Encoding: gzip, deflate\r\n");
         if (request.httpVersion == HTTPVersion.V1_1)
             message.append("Connection: keep-alive\r\n");
 

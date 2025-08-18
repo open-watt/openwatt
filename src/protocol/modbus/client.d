@@ -55,7 +55,7 @@ nothrow @nogc:
         if (snooping)
             pending.pushBack(); // temp storage for the requests
 
-        _interface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
+        _interface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.OW, owSubType: OW_SubType.Modbus));
     }
 
     ~this()
@@ -113,7 +113,7 @@ nothrow @nogc:
                     req.numRetries--;
                     req.retryTime = now;
                     void[] msg = (cast(void*)&req.request)[0 .. 1 + req.request.data.length];
-                    iface.send(req.server, msg, EtherType.ENMS, ENMS_SubType.Modbus);
+                    iface.send(req.server, msg, EtherType.OW, OW_SubType.Modbus);
                     req.errorHandler(ModbusErrorType.Retrying, req.request, req.retryTime);
                 }
                 else
@@ -220,6 +220,6 @@ private:
         buffer[4] = message.functionCode;
         buffer[5 .. 5 + message.data.length] = message.data[];
 
-        iface.send(server, buffer[0 .. 5 + message.data.length], EtherType.ENMS, ENMS_SubType.Modbus);
+        iface.send(server, buffer[0 .. 5 + message.data.length], EtherType.OW, OW_SubType.Modbus);
     }
 }

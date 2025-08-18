@@ -60,11 +60,11 @@ jobs:
 
       - name: Test
         if: ${{ success() && (matrix.platform == 'x86_64' || matrix.platform == 'x86' || matrix.platform == 'arm64') }}
-        run: ./bin/${{ matrix.platform }}_unittest/enms_test
+        run: ./bin/${{ matrix.platform }}_unittest/openwatt_test
 
       - name: Upload release binary
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release' && matrix.compiler == 'ldc' }}
         uses: actions/upload-artifact@v4
         with:
           name: enum_${{ matrix.os }}_${{ matrix.platform }}
-          path: ./bin/${{ matrix.platform }}_release/${{ matrix.os == 'windows' && 'enms.exe' || 'enms' }}
+          path: ./bin/${{ matrix.platform }}_release/${{ matrix.os == 'windows' && 'openwatt.exe' || 'openwatt' }}

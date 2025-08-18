@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.7.34024.191
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "sampledb", "sampledb.vcxproj", "{E12D037A-40C8-4F1B-B8B3-DE527A1E9D41}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "openwatt", "openwatt.vcxproj", "{E12D037A-40C8-4F1B-B8B3-DE527A1E9D41}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

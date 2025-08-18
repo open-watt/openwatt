@@ -14,13 +14,13 @@ enum EtherType : ushort
     VLAN = 0x8100,  // IEEE 802.1Q VLAN tag
     IP6  = 0x86DD,  // Internet Protocol version 6 (IPv6)
     QinQ = 0x88A8,  // Service VLAN tag identifier (S-Tag) on Q-in-Q tunnel
-    ENMS = 0x88B5,  // OUR PROGRAM: this is the official experimental ethertype for development use
+    OW   = 0x88B5,  // OpenWatt: this is the official experimental ethertype for development use
     MTik = 0x88BF,  // MikroTik RoMON
     LLDP = 0x88CC,  // Link Layer Discovery Protocol (LLDP)
     HPGP = 0x88E1,  // HomePlug Green PHY (HPGP)
 }
 
-enum ENMS_SubType : ushort
+enum OW_SubType : ushort
 {
     Unspecified         = 0x0000,
     AgentDiscover       = 0x0001,   // probably need some way to find peers on the network?

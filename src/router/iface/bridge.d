@@ -210,7 +210,7 @@ nothrow @nogc:
 //        iface.subscribe((ref const Packet p, BaseInterface i) nothrow @nogc {
 //            import urt.io;
 //            writef("{0}: packet received: ({1} -> {2} )  [{3}]\n", i.name, p.src, p.dst, p.data);
-//        }, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.Modbus));
+//        }, PacketFilter(etherType: EtherType.OW, owSubType: OW_SubType.Modbus));
     }
 
     void port_add(Session session, BridgeInterface bridge, BaseInterface _interface)

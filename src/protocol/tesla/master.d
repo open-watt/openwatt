@@ -143,7 +143,7 @@ nothrow @nogc:
         this.id = 0x7770 + idCounter++;
         this.sig = iface.mac.b[3];
 
-        iface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.TeslaTWC));
+        iface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.OW, owSubType: OW_SubType.TeslaTWC));
 
         getModule!TeslaInterfaceModule.addServer(name[], iface, id);
     }
@@ -213,7 +213,7 @@ nothrow @nogc:
             message[0..2] = ushort(roundRobinIndex++ < -5 ? 0xFCE1 : 0xFBE2).nativeToBigEndian;
             message[2..4] = id.nativeToBigEndian;
             message[4] = sig;
-            iface.send(MACAddress.broadcast, message[], EtherType.ENMS, ENMS_SubType.TeslaTWC);
+            iface.send(MACAddress.broadcast, message[], EtherType.OW, OW_SubType.TeslaTWC);
             return;
         }
 
@@ -323,7 +323,7 @@ nothrow @nogc:
         }
 
         // send request
-        iface.send(c.mac, message[], EtherType.ENMS, ENMS_SubType.TeslaTWC);
+        iface.send(c.mac, message[], EtherType.OW, OW_SubType.TeslaTWC);
     }
 
     void incomingPacket(ref const Packet p, BaseInterface iface, PacketDirection dir, void* userData) nothrow @nogc

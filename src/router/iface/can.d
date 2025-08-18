@@ -219,7 +219,7 @@ nothrow @nogc:
             return false;
 
         // can only handle can packets
-        if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.CAN)
+        if (packet.etherType != EtherType.OW || packet.etherSubType != OW_SubType.CAN)
         {
             ++_status.sendDropped;
             return false;
@@ -328,8 +328,8 @@ private:
 
         Packet p = Packet(packet[0 .. 4 + frame.data.length]);
         p.creationTime = recvTime;
-        p.etherType = EtherType.ENMS;
-        p.etherSubType = ENMS_SubType.CAN;
+        p.etherType = EtherType.OW;
+        p.etherSubType = OW_SubType.CAN;
 
         // all CAN messages are broadcasts...
         p.dst = MACAddress.broadcast;

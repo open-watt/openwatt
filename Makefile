@@ -8,7 +8,7 @@ RTSRCDIR := third_party/urt/src
 SRCDIR := src
 OBJDIR := obj/$(PLATFORM)_$(CONFIG)
 TARGETDIR := bin/$(PLATFORM)_$(CONFIG)
-TARGETNAME := enms
+TARGETNAME := openwatt
 DEPFILE = $(OBJDIR)/$(TARGETNAME).d
 
 DFLAGS := $(DFLAGS) -preview=bitfields -preview=rvaluerefparam -preview=nosharedaccess -preview=in

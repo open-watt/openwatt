@@ -382,7 +382,7 @@ nothrow @nogc:
             return false;
 
         // can only handle modbus packets
-        if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.Modbus || packet.data.length < 5)
+        if (packet.etherType != EtherType.OW || packet.etherSubType != OW_SubType.Modbus || packet.data.length < 5)
         {
             ++_status.sendDropped;
             return false;
@@ -629,8 +629,8 @@ private:
 
         Packet p = Packet(buffer[0 .. 4 + message.length]);
         p.creationTime = recvTime;
-        p.etherType = EtherType.ENMS;
-        p.etherSubType = ENMS_SubType.Modbus;
+        p.etherType = EtherType.OW;
+        p.etherSubType = OW_SubType.Modbus;
 
         if (isBusMaster)
         {
