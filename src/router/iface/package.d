@@ -48,7 +48,7 @@ nothrow @nogc:
     MACAddress src;
     MACAddress dst;
     ushort etherType;
-    ushort enmsSubType;
+    ushort owSubType;
     ushort vlan;
     FilterCallback customFilter;
     PacketDirection direction = PacketDirection.Incoming;
@@ -57,7 +57,7 @@ nothrow @nogc:
     {
         if (etherType && p.etherType != etherType)
             return false;
-        if (enmsSubType && p.etherSubType != enmsSubType)
+        if (owSubType && p.etherSubType != owSubType)
             return false;
         if (vlan && p.vlan != vlan)
             return false;
@@ -204,7 +204,7 @@ nothrow @nogc:
         }
     }
 
-    bool send(MACAddress dest, const(void)[] message, EtherType type, ENMS_SubType subType = ENMS_SubType.Unspecified)
+    bool send(MACAddress dest, const(void)[] message, EtherType type, OW_SubType subType = OW_SubType.Unspecified)
     {
         if (!running)
             return false;
@@ -259,7 +259,7 @@ nothrow @nogc:
     {
         import urt.endian;
 
-        bool isEnms = packet.etherType == EtherType.ENMS;
+        bool isOW = packet.etherType == EtherType.OW;
 
         // write ethernet header...
         struct Header
@@ -273,14 +273,14 @@ nothrow @nogc:
         h.dst = packet.dst;
         h.src = packet.src;
         h.type = nativeToBigEndian(packet.etherType);
-        if (isEnms)
+        if (isOW)
             h.subType = nativeToBigEndian(packet.etherSubType);
-        sink((cast(ubyte*)&h)[0 .. (isEnms ? Header.sizeof : Header.subType.offsetof)]);
+        sink((cast(ubyte*)&h)[0 .. (isOW ? Header.sizeof : Header.subType.offsetof)]);
 
         // write packet data
         sink(packet.data);
 
-        if (isEnms && packet.etherSubType == ENMS_SubType.Modbus)
+        if (isOW && packet.etherSubType == OW_SubType.Modbus)
         {
             // wireshark wants RTU packets for its decoder, so we need to append the crc...
             import urt.crc;

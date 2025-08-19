@@ -122,7 +122,7 @@ nothrow @nogc:
 
     protected override bool transmit(ref const Packet packet) nothrow @nogc
     {
-        if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.TeslaTWC)
+        if (packet.etherType != EtherType.OW || packet.etherSubType != OW_SubType.TeslaTWC)
         {
             ++_status.sendDropped;
             return false;
@@ -189,8 +189,8 @@ private:
 
         Packet p = Packet(msg);
         p.creationTime = recvTime;
-        p.etherType = EtherType.ENMS;
-        p.etherSubType = ENMS_SubType.TeslaTWC;
+        p.etherType = EtherType.OW;
+        p.etherSubType = OW_SubType.TeslaTWC;
 
         auto mod_tesla = getModule!TeslaInterfaceModule();
 
@@ -248,7 +248,7 @@ nothrow @nogc:
             iface.subscribe((ref const Packet p, BaseInterface i, void* u) {
                 import urt.io;
                 writef("{4} - {0}: TWC packet recv {2}<--{1} [{3}]\n", i.name, p.src, p.dst, p.data, p.creationTime);
-            }, PacketFilter(etherType: EtherType.ENMS, enmsSubType: ENMS_SubType.TeslaTWC));
+            }, PacketFilter(etherType: EtherType.OW, owSubType: OW_SubType.TeslaTWC));
         }
     }
 

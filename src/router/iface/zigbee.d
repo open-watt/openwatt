@@ -36,7 +36,7 @@ nothrow @nogc:
     protected override bool transmit(ref const Packet packet) nothrow @nogc
     {
         // can only handle zigbee packets
-        if (packet.etherType != EtherType.ENMS || packet.etherSubType != ENMS_SubType.Zigbee || packet.data.length < 3)
+        if (packet.etherType != EtherType.OW || packet.etherSubType != OW_SubType.Zigbee || packet.data.length < 3)
         {
             ++_status.sendDropped;
             return false;

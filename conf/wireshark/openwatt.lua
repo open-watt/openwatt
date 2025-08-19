@@ -1,9 +1,9 @@
 -- Define the main protocol
-local enms = Proto("ENMS", "ENMS Ethernet Protocol")
+local openwatt = Proto("OpenWatt", "OpenWatt Ethernet Protocol")
 
 -- Define fields
-local f_subtype = ProtoField.uint16("enms.subtype", "Sub-Type", base.HEX, { [0x0010] = "MBoE", [0x0020] = "CANoE", [0x0030] = "ZBoE", [0x0040] = "TWCoE" })
-local f_payload = ProtoField.bytes("enms.payload", "Payload Data")
+local f_subtype = ProtoField.uint16("openwatt.subtype", "Sub-Type", base.HEX, { [0x0010] = "MBoE", [0x0020] = "CANoE", [0x0030] = "ZBoE", [0x0040] = "TWCoE" })
+local f_payload = ProtoField.bytes("openwatt.payload", "Payload Data")
 
 -- MBoE (Modbus over Ethernet) fields
 local f_mboe_address = ProtoField.uint8("mboe.address", "Address", base.DEC)
@@ -18,13 +18,13 @@ local f_twcoe_cmd = ProtoField.uint16("twcoe.command", "Command Code", base.HEX)
 local f_twcoe_sender = ProtoField.uint16("twcoe.sender", "Sender ID", base.HEX)
 local f_twcoe_payload = ProtoField.bytes("twcoe.payload", "TWC Payload Data")
 
-enms.fields = { f_subtype, f_payload, f_mboe_address, f_mboe_direction, f_mboe_sequence, f_canoe_frame, f_twcoe_cmd, f_twcoe_sender, f_twcoe_payload }
+openwatt.fields = { f_subtype, f_payload, f_mboe_address, f_mboe_direction, f_mboe_sequence, f_canoe_frame, f_twcoe_cmd, f_twcoe_sender, f_twcoe_payload }
 
 -- Function to dissect MBoE (Modbus over Ethernet)
 local function dissect_mboe(buffer, pinfo, tree)
     if buffer:len() < 5 then return end  -- ensure at least header + one PDU byte
 
-    local mboe_subtree = tree:add(enms, buffer(), "MBoE - Modbus over Ethernet")
+    local mboe_subtree = tree:add(openwatt, buffer(), "MBoE - Modbus over Ethernet")
 
     -- Show fields in the packet details
     mboe_subtree:add(f_mboe_sequence,  buffer:range(0,2))
@@ -48,7 +48,7 @@ end
 --local function dissect_canoe(buffer, pinfo, tree)
 --    if buffer:len() < 16 then return end  -- Typical minimum CAN frame size
 --
---    local canoe_subtree = tree:add(enms, buffer(), "CANoE - CAN over Ethernet")
+--    local canoe_subtree = tree:add(openwatt, buffer(), "CANoE - CAN over Ethernet")
 --    canoe_subtree:add(f_canoe_frame, buffer())
 --
 --    -- Retrieve the CAN dissector correctly
@@ -66,7 +66,7 @@ end
 local function dissect_twcoe(buffer, pinfo, tree)
     if buffer:len() < 4 then return end
 
-    local twcoe_subtree = tree:add(enms, buffer(), "TWCoE - Tesla-TWC over Ethernet")
+    local twcoe_subtree = tree:add(openwatt, buffer(), "TWCoE - Tesla-TWC over Ethernet")
     twcoe_subtree:add(f_twcoe_cmd, buffer(0,2))
     twcoe_subtree:add(f_twcoe_sender, buffer(2,2))
 
@@ -88,12 +88,12 @@ local function dissect_twcoe(buffer, pinfo, tree)
 end
 
 -- Main dissector function
-function enms.dissector(buffer, pinfo, tree)
+function openwatt.dissector(buffer, pinfo, tree)
     if buffer:len() < 2 then return end
 
-    pinfo.cols.protocol = "ENMS"
+    pinfo.cols.protocol = "openwatt"
 
-    local subtree = tree:add(enms, buffer(), "ENMS Protocol")
+    local subtree = tree:add(openwatt, buffer(), "openwatt Protocol")
     local subtype = buffer(0,2):uint()
     subtree:add(f_subtype, buffer(0,2))
 
@@ -120,4 +120,4 @@ function enms.dissector(buffer, pinfo, tree)
 end
 
 -- Register the dissector for Ethertype 0x88B5
-DissectorTable.get("ethertype"):add(0x88B5, enms)
+DissectorTable.get("ethertype"):add(0x88B5, openwatt)

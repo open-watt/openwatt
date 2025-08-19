@@ -9,7 +9,7 @@ import manager.console.session;
 nothrow @nogc:
 
 
-String hostname = StringLit!("enms"); // TODO: we need to make this thing...
+String hostname = StringLit!("OpenWatt"); // TODO: we need to make this thing...
 
 
 void log_level(Session session, Level level)

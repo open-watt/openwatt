@@ -1,3 +1,3 @@
 [submodule "third_party/urt"]
 	path = third_party/urt
-	url = git@github.com:TurkeyMan/urt.git
+	url = git@github.com:open-watt/urt.git
