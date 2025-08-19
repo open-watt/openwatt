@@ -54,9 +54,9 @@ jobs:
 
       - name: Build release
         if: ${{ github.ref == 'refs/heads/release' }}
-        run: make PLATFORM=${{ matrix.platform }} CONFIG=release OS=${{ matrix.os }} D_COMPILER=${{ matrix.compiler }}
+        run: make PLATFORM=${{ matrix.platform }} CONFIG=release OS=${{ matrix.os }} COMPILER=${{ matrix.compiler }}
       - name: Build unittest
-        run: make PLATFORM=${{ matrix.platform }} CONFIG=unittest OS=${{ matrix.os }} D_COMPILER=${{ matrix.compiler }}
+        run: make PLATFORM=${{ matrix.platform }} CONFIG=unittest OS=${{ matrix.os }} COMPILER=${{ matrix.compiler }}
 
       - name: Test
         if: ${{ success() && (matrix.platform == 'x86_64' || matrix.platform == 'x86' || matrix.platform == 'arm64') }}
