@@ -82,7 +82,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
     }
     else if (v.isString)
     {
-        import urt.conv : parseInt, parseUint;
+        import urt.conv : parse_int, parse_uint;
 
         const(char)[] s = v.asString;
         int base = 10;
@@ -97,7 +97,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
             s = s[2 .. $];
         }
         size_t taken;
-        long i = base != 10 ? cast(long)s.parseUint(&taken, base) : s.parseInt(&taken);
+        long i = base != 10 ? cast(long)s.parse_uint(&taken, base) : s.parse_int(&taken);
         if (taken != s.length)
             return "Invalid integer value";
         if ((long.max > T.max && i > T.max) || (long.min < T.min && i < T.min))
@@ -123,11 +123,11 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
     }
     else if (v.isString)
     {
-        import urt.conv : parseFloat;
+        import urt.conv : parse_float;
 
         const(char)[] s = v.asString;
         size_t taken;
-        r = cast(T)s.parseFloat(&taken);
+        r = cast(T)s.parse_float(&taken);
         if (taken != s.length)
             return "Invalid float value";
     }

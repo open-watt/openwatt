@@ -137,11 +137,11 @@ nothrow @nogc:
                 return cast(float)i;
             case Type.String:
             {
-                import urt.conv : parseFloat;
+                import urt.conv : parse_float;
 
                 const(char)[] s = getString();
                 size_t len;
-                double v = parseFloat(s, &len);
+                double v = parse_float(s, &len);
                 if (len == s.length)
                     return v;
                 return 0;

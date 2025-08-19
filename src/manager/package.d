@@ -202,12 +202,12 @@ nothrow @nogc:
 
             foreach (i, iface; interfaces)
             {
-                rxLen = max(rxLen, iface.getStatus.recvBytes.formatInt(null));
-                txLen = max(txLen, iface.getStatus.sendBytes.formatInt(null));
-                rpLen = max(rpLen, iface.getStatus.recvPackets.formatInt(null));
-                tpLen = max(tpLen, iface.getStatus.sendPackets.formatInt(null));
-                rdLen = max(rdLen, iface.getStatus.recvDropped.formatInt(null));
-                tdLen = max(tdLen, iface.getStatus.sendDropped.formatInt(null));
+                rxLen = max(rxLen, iface.getStatus.recvBytes.format_int(null));
+                txLen = max(txLen, iface.getStatus.sendBytes.format_int(null));
+                rpLen = max(rpLen, iface.getStatus.recvPackets.format_int(null));
+                tpLen = max(tpLen, iface.getStatus.sendPackets.format_int(null));
+                rdLen = max(rdLen, iface.getStatus.recvDropped.format_int(null));
+                tdLen = max(tdLen, iface.getStatus.sendDropped.format_int(null));
             }
 
             session.writef(" ID    {0, *1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",

@@ -24,8 +24,8 @@ import router.stream;
 
 //version = DebugModbusMessageFlow;
 
-alias modbusCRC = calculateCRC!(Algorithm.CRC16_MODBUS);
-alias modbusCRC_2 = calculateCRC_2!(Algorithm.CRC16_MODBUS);
+alias modbusCRC = calculate_crc!(Algorithm.CRC16_MODBUS);
+alias modbusCRC_2 = calculate_crc_2!(Algorithm.CRC16_MODBUS);
 
 nothrow @nogc:
 
@@ -495,9 +495,9 @@ nothrow @nogc:
 
                 // format the packet
                 buffer[0] = ':';
-                formatInt(address, cast(char[])buffer[1..3], 16, 2, '0');
+                format_int(address, cast(char[])buffer[1..3], 16, 2, '0');
                 length = cast(ushort)(3 + toHexString(pdu[], cast(char[])buffer[3..$]).length);
-                formatInt(lrc, cast(char[])buffer[length .. length + 2], 16, 2, '0');
+                format_int(lrc, cast(char[])buffer[length .. length + 2], 16, 2, '0');
                 (cast(char[])buffer)[length + 2 .. length + 4] = "\r\n";
                 length += 4;
         }

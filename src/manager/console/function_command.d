@@ -105,7 +105,7 @@ nothrow @nogc:
         FunctionCommand fnCmd = console.m_allocator.allocT!FunctionCommand(console, commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName, cast(void*)i, &functionAdapter);
 
         alias ParamNames = ParameterIdentifierTuple!fun[1 .. $];
-        alias Params = staticMap!(Unqual, Parameters!fun[1 .. $]);
+        alias Params = STATIC_MAP!(Unqual, Parameters!fun[1 .. $]);
 
         static foreach (j; 0 .. ParamNames.length)
         {
@@ -252,7 +252,7 @@ auto makeArgTuple(alias F)(const Variant[] args, const NamedArgument[] parameter
 {
     import urt.meta;
 
-    alias Params = staticMap!(Unqual, Parameters!F[1 .. $]);
+    alias Params = STATIC_MAP!(Unqual, Parameters!F[1 .. $]);
     alias ParamNames = ParameterIdentifierTuple!F[1 .. $];
 
     Tuple!Params params;

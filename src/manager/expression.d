@@ -195,7 +195,7 @@ nothrow @nogc:
             case Type.Num: return f;
             case Type.Str:
                 size_t taken;
-                double d = getStr().parseFloat(&taken);
+                double d = getStr().parse_float(&taken);
                 if (taken != s.length)
                     return 0;
                 return d;
@@ -236,7 +236,7 @@ nothrow @nogc:
             if (v.isString)
             {
                 size_t taken;
-                double d = v.asString.parseFloat(&taken);
+                double d = v.asString.parse_float(&taken);
                 if (taken != v.asString.length)
                     return 0;
                 return d;
@@ -782,7 +782,7 @@ Expression* parsePrimaryExp(ref const(char)[] text)
         if (numeric && numDots <= 1)
         {
             size_t taken = 0;
-            double f = text.parseFloat(&taken);
+            double f = text.parse_float(&taken);
             if (taken == 0)
                 syntaxError("Expected number");
             else

@@ -50,7 +50,7 @@ void main()
     s.setInput(conf);
 
     // stop the computer from sleeping while this application is running...
-    setSystemIdleParams(IdleParams.SystemRequired);
+    set_system_idle_params(IdleParams.SystemRequired);
 
     /+
 -    35000 - 33  Device infio

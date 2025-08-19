@@ -191,7 +191,7 @@ nothrow @nogc:
     // /apps/energy/print command
     void circuit_print(Session session)
     {
-        import urt.conv : formatFloat;
+        import urt.conv : format_float;
         import urt.util;
 
         import manager.element;
@@ -233,12 +233,12 @@ nothrow @nogc:
             circuit.data = &c.meterData;
 
             nameLen = max(nameLen, circuit.indent + c.id.length);
-            powerLen = max(powerLen, c.meterData.active[0].formatFloat(null) + 1);
-            importLen = max(importLen, c.meterData.totalImportActive[0].formatFloat(null) + 3);
-            exportLen = max(exportLen, c.meterData.totalExportActive[0].formatFloat(null) + 3);
-            apparentLen = max(apparentLen, c.meterData.apparent[0].formatFloat(null) + 2);
-            reactiveLen = max(reactiveLen, c.meterData.reactive[0].formatFloat(null) + 3);
-            currentLen = max(currentLen, c.meterData.current[0].formatFloat(null) + 1);
+            powerLen = max(powerLen, c.meterData.active[0].format_float(null) + 1);
+            importLen = max(importLen, c.meterData.totalImportActive[0].format_float(null) + 3);
+            exportLen = max(exportLen, c.meterData.totalExportActive[0].format_float(null) + 3);
+            apparentLen = max(apparentLen, c.meterData.apparent[0].format_float(null) + 2);
+            reactiveLen = max(reactiveLen, c.meterData.reactive[0].format_float(null) + 3);
+            currentLen = max(currentLen, c.meterData.current[0].format_float(null) + 1);
 
             Line* unknown;
             bool hasLeftover = c.meter && (c.appliances.length != 0 || c.subCircuits.length != 0);
@@ -259,12 +259,12 @@ nothrow @nogc:
                 line.data = &a.meterData;
 
                 nameLen = max(nameLen, line.indent + a.id.length);
-                powerLen = max(powerLen, a.meterData.active[0].formatFloat(null) + 1);
-                importLen = max(importLen, a.meterData.totalImportActive[0].formatFloat(null) + 3);
-                exportLen = max(exportLen, a.meterData.totalExportActive[0].formatFloat(null) + 3);
-                apparentLen = max(apparentLen, a.meterData.apparent[0].formatFloat(null) + 2);
-                reactiveLen = max(reactiveLen, a.meterData.reactive[0].formatFloat(null) + 3);
-                currentLen = max(currentLen, a.meterData.current[0].formatFloat(null) + 1);
+                powerLen = max(powerLen, a.meterData.active[0].format_float(null) + 1);
+                importLen = max(importLen, a.meterData.totalImportActive[0].format_float(null) + 3);
+                exportLen = max(exportLen, a.meterData.totalExportActive[0].format_float(null) + 3);
+                apparentLen = max(apparentLen, a.meterData.apparent[0].format_float(null) + 2);
+                reactiveLen = max(reactiveLen, a.meterData.reactive[0].format_float(null) + 3);
+                currentLen = max(currentLen, a.meterData.current[0].format_float(null) + 1);
             }
 
             foreach (sub; c.subCircuits)

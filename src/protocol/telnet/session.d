@@ -651,7 +651,7 @@ private:
         Result result = open(m_historyFile, ".telnet_history", FileOpenMode.ReadWrite);
         if (result.failed)
         {
-            writeError("Error opening telnet history :", result.get_FileResult);
+            writeError("Error opening telnet history :", result.file_result);
             return;
         }
 

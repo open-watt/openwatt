@@ -168,7 +168,7 @@ struct EUI(int width)
         }
 
         for (size_t i = 0; i < Bytes; ++i)
-            b[i] = cast(ubyte)parseInt(s[i*3 .. i*3 + 2], null, 16);
+            b[i] = cast(ubyte)parse_int(s[i*3 .. i*3 + 2], null, 16);
 
         return StringLen;
     }

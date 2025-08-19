@@ -209,7 +209,7 @@ nothrow @nogc:
                         if (val)
                         {
                             bool success;
-                            size_t contentLen = val.parseIntFast(success);
+                            size_t contentLen = val.parse_int_fast(success);
                             if (!success)
                                 return -1; // bad content length
                             message.contentLength = contentLen;
@@ -266,7 +266,7 @@ nothrow @nogc:
                             break;
                         }
                         size_t taken;
-                        pendingChunkLen = cast(size_t)msg[0 .. newline].parseInt(&taken, 16);
+                        pendingChunkLen = cast(size_t)msg[0 .. newline].parse_int(&taken, 16);
                         if (taken != newline)
                             return -1; // bad chunk length format!
                         msg = msg[newline + 2 .. $];
@@ -328,13 +328,13 @@ private:
         msg = msg[http.length..$];
 
         bool success;
-        int major = msg.parseIntFast(success);
+        int major = msg.parse_int_fast(success);
         if (!success || msg.empty || msg[0] != '.')
             return false;
 
         msg = msg[1..$];
 
-        int minor = msg.parseIntFast(success);
+        int minor = msg.parse_int_fast(success);
         if (!success || msg.empty)
             return false;
 
@@ -365,7 +365,7 @@ private:
         msg = msg[1..$];
 
         bool success;
-        const int status = msg.parseIntFast(success);
+        const int status = msg.parse_int_fast(success);
         if (!success || msg.empty || msg[0] != ' ')
             return -1;
 
@@ -386,7 +386,7 @@ private:
 
     static int readRequestLine(ref const(char)[] msg, ref HTTPMessage message)
     {
-        HTTPMethod method = msg.split!(' ', false).enumFromString!HTTPMethod;
+        HTTPMethod method = msg.split!(' ', false).enum_from_string!HTTPMethod;
         if (byte(method) == -1)
             return -1;
 
@@ -476,10 +476,10 @@ private:
                 Array!ubyte uncompressed;
                 size_t uncompressedLen;
 
-                if (gzip_uncompressed_length(message.content[], uncompressedLen) != error_code.OK)
+                if (!gzip_uncompressed_length(message.content[], uncompressedLen))
                     return -1;
                 uncompressed.resize(uncompressedLen);
-                if (gzip_uncompress(message.content[], uncompressed[], uncompressedLen) != error_code.OK)
+                if (!gzip_uncompress(message.content[], uncompressed[], uncompressedLen))
                     return -1;
                 if (uncompressedLen != uncompressed.length)
                     return -1; // something went wrong!
