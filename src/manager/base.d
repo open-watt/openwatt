@@ -2,17 +2,23 @@ module manager.base;
 
 import urt.array;
 import urt.lifetime;
+import urt.log;
 import urt.map;
 import urt.meta;
 import urt.mem.string;
 import urt.mem.temp;
 import urt.variant;
 import urt.string;
+import urt.time;
 import urt.traits : Parameters, ReturnType;
+import urt.util : min;
 
 import manager.console.argument;
 
 public import manager.collection : collectionTypeInfo, CollectionTypeInfo;
+
+//version = DebugStateFlow;
+enum DebugType = null;
 
 nothrow @nogc:
 
@@ -95,7 +101,7 @@ class BaseObject
                                          Property.create!("disabled", disabled)(),
                                          Property.create!("comment", comment)(),
                                          Property.create!("running", running)(),
-                                         Property.create!("flags", running)(),
+                                         Property.create!("flags", flags)(),
                                          Property.create!("status", statusMessage)() ];
 nothrow @nogc:
 
@@ -109,11 +115,21 @@ nothrow @nogc:
         _name = name.move;
     }
 
-    this(const CollectionTypeInfo* typeInfo, String name)
+    this(const CollectionTypeInfo* typeInfo, String name, ObjectFlags flags = ObjectFlags.None)
     {
+        assert((flags & ~(ObjectFlags.Dynamic | ObjectFlags.Temporary | ObjectFlags.Disabled)) == 0,
+               "`flags` may only contain Dynamic, Temporary, or Disabled flags");
+
         _typeInfo = typeInfo;
         _type = typeInfo.type[].addString();
         _name = name.move;
+        _flags = flags;
+
+        if (_flags & ObjectFlags.Disabled)
+        {
+            _flags ^= ObjectFlags.Disabled;
+            _state = State.Disabled;
+        }
     }
 
 
@@ -176,6 +192,7 @@ nothrow @nogc:
             case State.Destroyed:
                 return "Destroyed";
             case State.InitFailed:
+            case State.Failure:
                 return "Failed";
             case State.Validate:
                 return "Invalid";
@@ -204,10 +221,14 @@ nothrow @nogc:
 
     final void destroy()
     {
+        writeInfo(_type[], " '", _name, "' destroyed...");
+
         _state |= _Disabled | _Destroyed;
         _state &= ~_Start;
         if (_state & _Valid)
             _state |= _Stop;
+
+        signalStateChange(StateSignal.Destroyed);
     }
 
     // return a list of properties that can be set on this object
@@ -286,16 +307,18 @@ protected:
     enum ubyte _Start      = 1 << 2;
     enum ubyte _Stop       = 1 << 3;
     enum ubyte _Valid      = 1 << 4;
+    enum ubyte _Fail       = 1 << 5;
 
     enum State : ubyte
     {
-        InitFailed  = 0,
+        Validate    = 0,
+        InitFailed  = _Fail,
         Disabled    = _Disabled,
         Destroyed   = _Disabled | _Destroyed,
-        Validate    = _Start,
         Running     = _Valid,
         Starting    = _Start | _Valid,
         Restarting  = _Stop | _Valid,
+        Failure     = _Fail | _Stop | _Valid,
         Stopping    = _Disabled | _Stop | _Valid,
         Destroying  = _Disabled | _Destroyed | _Stop | _Valid,
     }
@@ -315,26 +338,42 @@ protected:
         State old = _state;
         _state = newState;
 
+        debug version (DebugStateFlow)
+            if (!DebugType || _type[] == DebugType)
+                writeDebug(_type[], " '", _name, "' state change: ", old, " -> ", newState);
+
         switch (newState)
         {
+            case State.InitFailed:
+                debug version (DebugStateFlow)
+                    if (!DebugType || _type[] == DebugType)
+                        writeDebug(_type[], " '", _name, "' init fail - try again in ", backoff_ms, "ms");
+                goto case;
             case State.Disabled:
             case State.Destroyed:
-            case State.InitFailed:
                 break;
 
             case State.Running:
+                backoff_ms = 0;
                 setOnline();
-                goto case;
+                goto do_update;
+
             case State.Validate:
+                goto do_update;
+
             case State.Starting:
-                do_update();
-                break;
+                last_init_attempt = getTime();
+                goto do_update;
 
             case State.Restarting:
             case State.Destroying:
             case State.Stopping:
+            case State.Failure:
                 if (old == State.Running)
                     setOffline();
+                goto do_update;
+
+            do_update:
                 do_update();
                 break;
 
@@ -362,11 +401,13 @@ protected:
 
     void setOnline()
     {
+        writeInfo(_type[], " '", _name, "' online...");
         signalStateChange(StateSignal.Online);
     }
 
     void setOffline()
     {
+        writeInfo(_type[], " '", _name, "' offline...");
         signalStateChange(StateSignal.Offline);
     }
 
@@ -382,6 +423,9 @@ private:
     String _name;
     String _comment;
     Array!StateSignalHandler subscribers;
+    MonoTime last_init_attempt;
+    ushort backoff_ms = 0;
+
 
     package bool do_update()
     {
@@ -395,8 +439,11 @@ private:
                 break;
 
             case State.InitFailed:
-                // implement backoff timer?
-                setState(State.Validate);
+                if (getTime() - last_init_attempt >= backoff_ms.msecs)
+                {
+                    backoff_ms = cast(ushort)(backoff_ms == 0 ? 100 : min(backoff_ms * 2, 60_000));
+                    setState(State.Validate);
+                }
                 break;
 
             case State.Validate:
@@ -411,12 +458,13 @@ private:
                 if (s == CompletionStatus.Complete)
                     setState(State.Running);
                 else if (s == CompletionStatus.Error)
-                    setState(State.InitFailed); // TODO: there is no shutdown moment between starting -> init-failed...?!
+                    setState(State.Failure);
                 break;
 
             case State.Restarting:
             case State.Stopping:
             case State.Destroying:
+            case State.Failure:
                 CompletionStatus s = shutdown();
                 debug assert(s != CompletionStatus.Error, "shutdown() should not fail; just clear/reset the state!");
                 if (s == CompletionStatus.Complete)

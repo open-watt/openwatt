@@ -5,6 +5,8 @@ import urt.lifetime;
 import urt.mem.allocator;
 import urt.string;
 
+import manager;
+import manager.base;
 import manager.console;
 
 import protocol.telnet.session;
@@ -23,16 +25,20 @@ nothrow @nogc:
 
     this(NoGCAllocator allocator, String name, Console* console, BaseInterface iface, ushort port)
     {
-        this.name = name;
+        this.name = name.move;
         m_allocator = allocator;
         m_console = console;
 
-        m_server = m_allocator.allocT!TCPServer(name.move, port, &acceptConnection, null);
+        const(char)[] server_name = getModule!TCPStreamModule.tcp_servers.generateName(this.name);
+
+        m_server = getModule!TCPStreamModule.tcp_servers.create(server_name.makeString(defaultAllocator), ObjectFlags.Dynamic);
+        m_server.port = port;
+        m_server.setConnectionCallback(&acceptConnection, null);
     }
 
     ~this()
     {
-        m_allocator.freeT(m_server);
+        m_server.destroy();
 
         foreach (TelnetSession s; m_sessions)
             m_allocator.freeT(s);
@@ -58,8 +64,6 @@ nothrow @nogc:
     /// Update the telnet server. Should be called once per frame (or periodically) from a main thread.
     void update()
     {
-        m_server.update();
-
         for (size_t i; i < m_sessions.length; )
         {
             TelnetSession s = m_sessions[i];

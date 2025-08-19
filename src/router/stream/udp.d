@@ -54,37 +54,9 @@ nothrow @nogc:
     override bool running() const pure
         => status.linkStatus == Status.Link.Up;
 
-    override bool connect()
-    {
-//        socket = new UdpSocket();
-//        socket.bind(local);
-//        socket.blocking = !(options & StreamOptions.NonBlocking);
-//        socket.setOption(SocketOptionLevel.SOCKET, SocketOption.BROADCAST, (options & StreamOptions.AllowBroadcast) ? 1 : 0);
-        return true;
-    }
-
-    override void disconnect()
-    {
-//        if (socket !is null)
-//        {
-//            socket.shutdown(SocketShutdown.BOTH);
-//            socket.close();
-//            socket = null;
-//        }
-    }
-
     override const(char)[] remoteName()
     {
         return remoteHost[];
-    }
-
-    override void setOpts(StreamOptions options) nothrow @nogc
-    {
-        this.options = options;
-        assert(false);
-//        if (socket)
-//            socket.blocking = !(options & StreamOptions.NonBlocking);
-//        socket.setOption(SocketOptionLevel.SOCKET, SocketOption.BROADCAST, (options & StreamOptions.AllowBroadcast) ? 1 : 0);
     }
 
     override ptrdiff_t read(void[] buffer) nothrow @nogc

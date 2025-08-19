@@ -73,7 +73,7 @@ nothrow @nogc:
         }
 
         // create an instance
-        BaseObject item = collection.create(name);
+        BaseObject item = collection.alloc(name);
 
         // set all the properties...
         foreach (ref arg; namedArgs)
@@ -116,6 +116,7 @@ private:
 class CollectionRemoveCommand : Command
 {
 nothrow @nogc:
+
     this(ref Console console, ref BaseCollection collection)
     {
         super(console, StringLit!"remove");
@@ -155,6 +156,7 @@ private:
 class CollectionGetCommand : Command
 {
 nothrow @nogc:
+
     this(ref Console console, ref BaseCollection collection)
     {
         super(console, StringLit!"get");
@@ -216,6 +218,7 @@ private:
 class CollectionSetCommand : Command
 {
 nothrow @nogc:
+
     this(ref Console console, ref BaseCollection collection)
     {
         super(console, StringLit!"set");
@@ -274,6 +277,7 @@ private:
 class CollectionResetCommand : Command
 {
 nothrow @nogc:
+
     this(ref Console console, ref BaseCollection collection)
     {
         super(console, StringLit!"reset");
@@ -345,7 +349,8 @@ private:
 
 class CollectionPrintCommand : Command
 {
-    nothrow @nogc:
+nothrow @nogc:
+
     this(ref Console console, ref BaseCollection collection)
     {
         super(console, StringLit!"print");

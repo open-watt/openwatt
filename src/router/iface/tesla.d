@@ -8,6 +8,8 @@ import urt.string;
 import urt.string.format;
 import urt.time;
 
+import manager.base;
+import manager.collection;
 import manager.console;
 import manager.plugin;
 
@@ -32,40 +34,56 @@ struct DeviceMap
 
 class TeslaInterface : BaseInterface
 {
+    __gshared Property[1] Properties = [ Property.create!("stream", stream)() ];
 nothrow @nogc:
 
     alias TypeName = StringLit!"tesla-twc";
 
-    Stream stream;
-
-    this(String name, Stream stream) nothrow @nogc
+    this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        super(name, TypeName);
-        this.stream = stream;
+        super(collectionTypeInfo!TeslaInterface, name.move, flags);
     }
 
-    override bool running() const pure
-        => status.linkStatus == Status.Link.Up;
+    // Properties...
+
+    inout(Stream) stream() inout pure
+        => _stream;
+    const(char)[] stream(Stream value)
+    {
+        if (!value)
+            return "stream cannot be null";
+        if (_stream is value)
+            return null;
+        _stream = value;
+
+        restart();
+        return null;
+    }
+
+    // API...
+
+    override bool validate() const
+        => _stream !is null;
+
+    override CompletionStatus startup()
+    {
+        if (!_stream)
+            return CompletionStatus.Error;
+        if (_stream.running)
+            return CompletionStatus.Complete;
+        return CompletionStatus.Continue;
+    }
 
     override void update()
     {
-        SysTime now = getSysTime();
+        if (!_stream || !_stream.running)
+            return restart();
 
-        // check the link status
-        Status.Link streamStatus = stream.status.linkStatus;
-        if (streamStatus != status.linkStatus)
-        {
-            _status.linkStatus = streamStatus;
-            _status.linkStatusChangeTime = now;
-            if (streamStatus != Status.Link.Up)
-                ++_status.linkDowns;
-        }
-        if (streamStatus != Status.Link.Up)
-            return;
+        SysTime now = getSysTime();
 
         // check for data
         ubyte[1024] buffer = void;
-        ptrdiff_t bytes = stream.read(buffer);
+        ptrdiff_t bytes = _stream.read(buffer);
         if (bytes < 0)
         {
             assert(false, "what causes read to fail?");
@@ -95,7 +113,7 @@ nothrow @nogc:
                     buffer[i - offset] = buffer[i];
                 bytes = bytes - offset;
                 offset = 0;
-                bytes += stream.read(buffer[bytes .. $]);
+                bytes += _stream.read(buffer[bytes .. $]);
                 continue;
             }
 
@@ -158,10 +176,10 @@ nothrow @nogc:
         // It works without this byte, but I always receive it from a real device!
         t[offset++] = 0xFD;
 
-        size_t written = stream.write(t[0..offset]);
+        size_t written = _stream.write(t[0..offset]);
         if (written != offset)
         {
-            debug writeDebug("Failed to write to stream '", stream.name, "'");
+            debug writeDebug("Failed to write to stream '", _stream.name, "'");
             ++_status.sendDropped;
             return false;
         }
@@ -178,9 +196,12 @@ nothrow @nogc:
     }
 
 private:
+    ObjectRef!Stream _stream;
 
     final void incomingPacket(const(ubyte)[] msg, SysTime recvTime)
     {
+        debug assert(running, "Shouldn't receive packets while not running...?");
+
         // we need to extract the sender/receiver addresses...
         TWCMessage message;
         bool r = msg.parseTWCMessage(message);
@@ -224,34 +245,13 @@ class TeslaInterfaceModule : Module
     mixin DeclareModule!"interface.tesla-twc";
 nothrow @nogc:
 
+    Collection!TeslaInterface twc_interfaces;
     Map!(ushort, DeviceMap) devices;
 
     override void init()
     {
-        g_app.console.registerCommand!add("/interface/tesla-twc", this);
+        g_app.console.registerCollection("/interface/tesla-twc", twc_interfaces);
     }
-
-    void add(Session session, const(char)[] name, Stream stream, Nullable!(const(char)[]) pcap)
-    {
-        auto mod_if = getModule!InterfaceModule;
-        String n = mod_if.addInterfaceName(session, name, TeslaInterface.TypeName);
-        if (!n)
-            return;
-
-        TeslaInterface iface = defaultAllocator.allocT!TeslaInterface(n.move, stream);
-
-        mod_if.interfaces.add(iface);
-
-        version (DebugTeslaInterface)
-        {
-            // HACK: we'll print packets that we receive...
-            iface.subscribe((ref const Packet p, BaseInterface i, void* u) {
-                import urt.io;
-                writef("{4} - {0}: TWC packet recv {2}<--{1} [{3}]\n", i.name, p.src, p.dst, p.data, p.creationTime);
-            }, PacketFilter(etherType: EtherType.OW, owSubType: OW_SubType.TeslaTWC));
-        }
-    }
-
 
     DeviceMap* findServerByName(const(char)[] name)
     {

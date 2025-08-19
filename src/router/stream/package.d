@@ -32,16 +32,9 @@ enum StreamOptions : ubyte
 {
     None = 0,
 
-    // Should non-blocking be a thing like this? I think it's up to the stream to work out how it wants to operate...
-    NonBlocking =    1 << 0, // Non-blocking IO
-
-    ReverseConnect = 1 << 1, // For TCP connections where remote will initiate connection
-    OnDemand =       1 << 2, // Only connect on demand
-    BufferData =     1 << 3, // Buffer read/write data when stream is not ready
-    AllowBroadcast = 1 << 4, // Allow broadcast messages
-
-    // TODO: DELETE THIS ONE, it should be default behaviour!
-    KeepAlive =      1 << 2, // Attempt reconnection on connection drops
+    ReverseConnect = 1 << 0, // For TCP connections where remote will initiate connection
+    BufferData =     1 << 1, // Buffer read/write data when stream is not ready
+    AllowBroadcast = 1 << 2, // Allow broadcast messages
 }
 
 abstract class Stream : BaseObject
@@ -49,9 +42,9 @@ abstract class Stream : BaseObject
 //    __gshared Property[1] Properties = [ Property.create!("running", running)() ];
 nothrow @nogc:
 
-    this(const CollectionTypeInfo* typeInfo, String name, StreamOptions options)
+    this(const CollectionTypeInfo* typeInfo, String name, ObjectFlags flags = ObjectFlags.None, StreamOptions options = StreamOptions.None)
     {
-        super(typeInfo, name.move);
+        super(typeInfo, name.move, flags);
 
         assert(!getModule!StreamModule.streams.exists(this.name), "HOW DID THIS HAPPEN?");
         getModule!StreamModule.streams.add(this);
@@ -127,14 +120,15 @@ nothrow @nogc:
     }
 
     // Initiate an on-demand connection
-    abstract bool connect();
+    bool connect()
+        => true;
 
     // Disconnect the stream
-    abstract void disconnect();
+    void disconnect()
+    {
+    }
 
     abstract const(char)[] remoteName();
-
-    abstract void setOpts(StreamOptions options);
 
     // Read data from the stream
     abstract ptrdiff_t read(void[] buffer);

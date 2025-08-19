@@ -18,9 +18,9 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"zigbee-client";
 
-    this(String name) nothrow @nogc
+    this(String name, ObjectFlags flags = ObjectFlags.None) nothrow @nogc
     {
-        super(collectionTypeInfo!ZigbeeClient, name.move);
+        super(collectionTypeInfo!ZigbeeClient, name.move, flags);
     }
 
     // Properties...

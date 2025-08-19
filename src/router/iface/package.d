@@ -101,20 +101,12 @@ nothrow @nogc:
     MACAddress mac;
     Map!(MACAddress, BaseInterface) macTable;
 
-    this(const CollectionTypeInfo* typeInfo, String name)
+    this(const CollectionTypeInfo* typeInfo, String name, ObjectFlags flags = ObjectFlags.None)
     {
-        super(typeInfo, name.move);
+        super(typeInfo, name.move, flags);
 
         assert(!getModule!InterfaceModule.interfaces.exists(this.name), "HOW DID THIS HAPPEN?");
         getModule!InterfaceModule.interfaces.add(this);
-
-        mac = generateMacAddress();
-        addAddress(mac, this);
-    }
-
-    this(String name, const(char)[] type)
-    {
-        super(name.move, type);
 
         mac = generateMacAddress();
         addAddress(mac, this);

@@ -80,9 +80,9 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"modbus";
 
-    this(String name)
+    this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        super(collectionTypeInfo!ModbusInterface, name.move);
+        super(collectionTypeInfo!ModbusInterface, name.move, flags);
 
         // this is the proper value for modbus, irrespective of the L2 MTU
         // modbus jumbo's are theoretically possible if all hops support it... (fragmentation is not possible)
@@ -102,50 +102,6 @@ nothrow @nogc:
 
         // TODO: assert that recvBufferLen and sendBufferLen are both larger than a single PDU (254 bytes)!
     }
-
-    this(String name, Stream stream, ModbusProtocol protocol, bool isMaster) nothrow @nogc
-    {
-        super(name.move, TypeName);
-        this.stream = stream;
-        this.protocol = protocol;
-        this.isBusMaster = isMaster;
-        this.supportSimultaneousRequests = protocol == ModbusProtocol.TCP;
-
-        // this is the proper value for modbus, irrespective of the L2 MTU
-        // modbus jumbo's are theoretically possible if all hops support it... (fragmentation is not possible)
-        _mtu = 253; // function + 252 byte payload (address is considered framing (?))
-
-        // this would be 253 for the RS485 bus, or larger if another carrier...?
-        _max_l2mtu = _mtu;
-        _l2mtu = _max_l2mtu;
-
-        localToUni.insert(ubyte(0), ubyte(0));
-        uniToLocal.insert(ubyte(0), ubyte(0));
-
-        if (!isMaster)
-        {
-            masterMac = generateMacAddress();
-            masterMac.b[5] = 0xFF;
-            addAddress(masterMac, this);
-
-            // if we're not the master, we can't write to the bus unless we are responding...
-            // and if the stream is TCP, we'll never know if the remote has dropped the connection
-            // we'll enable keep-alive in tcp streams to to detect this...
-            import router.stream.tcp : TCPStream;
-            auto tcpStream = cast(TCPStream)stream;
-            if (tcpStream)
-                tcpStream.enableKeepAlive(true, seconds(10), seconds(1), 10);
-        }
-
-        _status.linkStatusChangeTime = getSysTime();
-        _status.linkStatus = stream.status.linkStatus;
-
-        // TODO: warn the user if they configure an interface to use modbus tcp over a serial line
-        //       user needs to be warned that data corruption may occur!
-
-        // TODO: assert that recvBufferLen and sendBufferLen are both larger than a single PDU (254 bytes)!
-    }
-
 
     // Properties...
 
@@ -185,10 +141,12 @@ nothrow @nogc:
 
     inout(Stream) stream() inout pure
         => _stream;
-    void stream(Stream value)
+    const(char)[] stream(Stream value)
     {
-        if (value && _stream is value)
-            return;
+        if (!value)
+            return "stream cannot be null";
+        if (_stream is value)
+            return null;
         _stream = value;
 
         if (_stream)
@@ -204,6 +162,7 @@ nothrow @nogc:
 
         // flush messages and the address mapping tables
         restart();
+        return null;
     }
 
 
@@ -219,7 +178,7 @@ nothrow @nogc:
             if (Stream s = getModule!StreamModule.streams.get(_stream.name))
                 _stream = s;
         }
-        return validate() ? CompletionStatus.Complete : CompletionStatus.Continue;
+        return super.validating();
     }
 
     override CompletionStatus startup()
@@ -378,9 +337,6 @@ nothrow @nogc:
 
     protected override bool transmit(ref const Packet packet) nothrow @nogc
     {
-        if (!running)
-            return false;
-
         // can only handle modbus packets
         if (packet.etherType != EtherType.OW || packet.etherSubType != OW_SubType.Modbus || packet.data.length < 5)
         {
@@ -748,12 +704,12 @@ class ModbusInterfaceModule : Module
     mixin DeclareModule!"interface.modbus";
 nothrow @nogc:
 
-    Collection!ModbusInterface modbusInterfaces;
+    Collection!ModbusInterface modbus_interfaces;
     Map!(ubyte, ServerMap) remoteServers;
 
     override void init()
     {
-        g_app.console.registerCollection("/interface/modbus", modbusInterfaces);
+        g_app.console.registerCollection("/interface/modbus", modbus_interfaces);
         g_app.console.registerCommand!remote_server_add("/interface/modbus/remote-server", this, "add");
     }
 

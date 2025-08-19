@@ -8,10 +8,31 @@ import urt.string;
 import urt.string.format;
 
 import manager;
+import manager.collection;
 import manager.console.session;
 import manager.plugin;
 
 public import router.stream;
+
+version (Windows)
+{
+    import core.sys.windows.windows;
+    import std.conv : to;
+    import std.string : toStringz;
+}
+else version(Posix)
+{
+//    import urt.internal.os;
+    import core.sys.linux.termios;
+    import core.sys.posix.unistd;
+    import core.sys.posix.fcntl;
+    import core.sys.posix.sys.types;
+    import std.string : toStringz;
+}
+else
+    static assert(false, "Unsupported platform!");
+
+nothrow @nogc:
 
 
 enum StopBits : ubyte
@@ -55,58 +76,112 @@ struct SerialParams
     FlowControl flowControl = FlowControl.None;
 }
 
-version(Windows)
+class SerialStream : Stream
 {
-    import core.sys.windows.windows;
-    import std.conv : to;
-    import std.string : toStringz;
+    __gshared Property[6] Properties = [ Property.create!("device", device)(),
+                                         Property.create!("baud-rate", baud_rate)(),
+                                         Property.create!("data-bits", data_bits)(),
+                                         Property.create!("parity", parity)(),
+                                         Property.create!("stop-bits", stop_bits)(),
+                                         Property.create!("flow-control", flow_control)() ];
+nothrow @nogc:
 
-    enum RTSControl : ubyte
+    alias TypeName = StringLit!"serial";
+
+    this(String name, ObjectFlags flags = ObjectFlags.None, StreamOptions options = StreamOptions.None)
     {
-        Disable, Enable, Handshake, Toggle
+        super(collectionTypeInfo!SerialStream, name.move, flags, options);
     }
-    enum DTRControl : ubyte
+
+    // Properties...
+
+    String device() const pure
+        => _device;
+    const(char)[] device(String value)
     {
-        Disable, Enable, Handshake
+        if (!value)
+            return "device cannot be empty";
+        if (_device == value)
+            return null;
+        _device = value.move;
+        restart();
+        return null;
     }
 
-    class SerialStream : Stream
+    uint baud_rate() const pure
+        => params.baudRate;
+    const(char)[] baud_rate(uint value)
     {
-    nothrow @nogc:
+        if (value != 0)
+            return "baud rate must be greater than 0";
+        if (params.baudRate == value)
+            return null;
+        params.baudRate = value;
+        restart();
+        return null;
+    }
 
-        alias TypeName = StringLit!"serial";
+    uint data_bits() const pure
+        => params.dataBits;
+    const(char)[] data_bits(uint value)
+    {
+        if (value < 5 || value > 9)
+            return "data bits must be between 5 and 9";
+        if (params.dataBits == cast(ubyte)value)
+            return null;
+        params.dataBits = cast(ubyte)value;
+        restart();
+        return null;
+    }
 
-        this(String name, String device, in SerialParams serialParams, StreamOptions options = StreamOptions.None)
-        {
-            assert(serialParams.dataBits >= 5 || serialParams.dataBits <= 8);
+    Parity parity() const pure
+        => params.parity;
+    void parity(Parity value)
+    {
+        if (params.parity == value)
+            return;
+        params.parity = value;
+        restart();
+    }
 
-            // TODO: The use of 5 data bits with 2 stop bits is an invalid combination, as is 6, 7, or 8 data bits with 1.5 stop bits.
+    StopBits stop_bits() const pure
+        => params.stopBits;
+    void stop_bits(StopBits value)
+    {
+        if (params.stopBits == value)
+            return;
+        params.stopBits = value;
+        restart();
+    }
 
-            super(name.move, TypeName, options);
-            this.device = device.move;
-            this.params = serialParams;
+    FlowControl flow_control() const pure
+        => params.flowControl;
+    void flow_control(FlowControl value)
+    {
+        if (params.flowControl == value)
+            return;
+        params.flowControl = value;
+        restart();
+    }
 
-            connect();
-        }
+    // API...
 
-        override bool running() const pure
-            => status.linkStatus == Status.Link.Up;
+    final override bool validate() const
+        => !_device.empty;
 
-        override bool connect()
+    override CompletionStatus startup()
+    {
+        version(Windows)
         {
             hCom = CreateFile(device.twstringz, GENERIC_READ | GENERIC_WRITE, 0, null, OPEN_EXISTING, 0, null);
             if (hCom == INVALID_HANDLE_VALUE)
-                return false;
+                return CompletionStatus.Error;
 
             DCB dcb;
             ZeroMemory(&dcb, DCB.sizeof);
             dcb.DCBlength = DCB.sizeof;
             if (!GetCommState(hCom, &dcb))
-            {
-                CloseHandle(hCom);
-                hCom = INVALID_HANDLE_VALUE;
-                return false;
-            }
+                return CompletionStatus.Error;
 
             dcb._bf = 1;
 
@@ -122,11 +197,11 @@ version(Windows)
 
             switch (params.parity)
             {
-                case Parity.None:    dcb.Parity = NOPARITY;        break;
-                case Parity.Even:    dcb.Parity = EVENPARITY;    break;
-                case Parity.Odd:    dcb.Parity = ODDPARITY;        break;
-                case Parity.Mark:    dcb.Parity = MARKPARITY;    break;
-                case Parity.Space:    dcb.Parity = SPACEPARITY;    break;
+                case Parity.None:   dcb.Parity = NOPARITY;      break;
+                case Parity.Even:   dcb.Parity = EVENPARITY;    break;
+                case Parity.Odd:    dcb.Parity = ODDPARITY;     break;
+                case Parity.Mark:   dcb.Parity = MARKPARITY;    break;
+                case Parity.Space:  dcb.Parity = SPACEPARITY;   break;
                 default: assert(false);
             }
             if (params.parity != Parity.None)
@@ -183,11 +258,7 @@ version(Windows)
             }
 
             if (!SetCommState(hCom, &dcb))
-            {
-                CloseHandle(hCom);
-                hCom = INVALID_HANDLE_VALUE;
-                return false;
-            }
+                return CompletionStatus.Error;
 
             COMMTIMEOUTS timeouts = {};
             timeouts.ReadIntervalTimeout = -1;
@@ -196,144 +267,15 @@ version(Windows)
             timeouts.WriteTotalTimeoutConstant = 0;
             timeouts.WriteTotalTimeoutMultiplier = 0;
             if (!SetCommTimeouts(hCom, &timeouts))
-            {
-                CloseHandle(hCom);
-                hCom = INVALID_HANDLE_VALUE;
-                return false;
-            }
-
-            _status.linkStatus = Status.Link.Up;
-
-            return true;
+                return CompletionStatus.Error;
         }
-
-        override void disconnect()
-        {
-            if (hCom != INVALID_HANDLE_VALUE)
-                CloseHandle(hCom);
-            hCom = INVALID_HANDLE_VALUE;
-            _status.linkStatus = Status.Link.Down;
-        }
-
-        override const(char)[] remoteName()
-        {
-            return device[];
-        }
-
-        override void setOpts(StreamOptions options)
-        {
-            this.options = options;
-        }
-
-        override ptrdiff_t read(void[] buffer)
-        {
-            DWORD bytesRead;
-            if (!ReadFile(hCom, buffer.ptr, cast(DWORD)buffer.length, &bytesRead, null))
-            {
-                CloseHandle(hCom);
-                hCom = INVALID_HANDLE_VALUE;
-                _status.linkStatus = Status.Link.Down;
-                return -1;
-            }
-            if (logging)
-                writeToLog(true, buffer[0 .. bytesRead]);
-            return bytesRead;
-        }
-
-        override ptrdiff_t write(const void[] data)
-        {
-            DWORD bytesWritten;
-            if (!WriteFile(hCom, data.ptr, cast(DWORD)data.length, &bytesWritten, null))
-            {
-                CloseHandle(hCom);
-                hCom = INVALID_HANDLE_VALUE;
-                _status.linkStatus = Status.Link.Down;
-                return -1;
-            }
-            if (logging)
-                writeToLog(false, data[0 .. bytesWritten]);
-            return bytesWritten;
-        }
-
-        override ptrdiff_t pending()
-        {
-            // TODO:?
-            assert(0);
-        }
-
-        override ptrdiff_t flush()
-        {
-            // TODO: just read until can't read anymore?
-            assert(0);
-        }
-
-        override void update()
-        {
-            if (hCom == INVALID_HANDLE_VALUE)
-                return;
-
-            if (status.linkStatus == Status.Link.Up)
-            {
-                DWORD errors;
-                COMSTAT stat;
-                if (ClearCommError(hCom, &errors, &stat))
-                {
-                    if (errors != 0)
-                    {
-                        assert(false, "TODO: test this case");
-                        _status.linkStatus = Status.Link.Down; // close the port?
-                    }
-                }
-                else
-                    disconnect();
-            }
-
-            // this should implement keep-alive nonsense and all that...
-            // what if the port comes and goes? we need to re-scan for the device if it's plugged/unplugged, etc.
-
-            if (status.linkStatus != Status.Link.Up)
-                connect();
-        }
-
-    private:
-        String device;
-        SerialParams params;
-        HANDLE hCom = INVALID_HANDLE_VALUE;
-    }
-}
-else version(Posix)
-{
-
-//    import urt.internal.os;
-    import core.sys.linux.termios;
-    import core.sys.posix.unistd;
-    import core.sys.posix.fcntl;
-    import core.sys.posix.sys.types;
-    import std.string : toStringz;
-
-    class SerialStream : Stream
-    {
-    nothrow @nogc:
-
-        alias TypeName = StringLit!"serial";
-
-        this(String name, String device, in SerialParams serialParams, StreamOptions options = StreamOptions.None)
-        {
-            super(name.move, TypeName, options);
-            this.device = device;
-            this.params = serialParams;
-        }
-
-        override bool running() const pure
-            => status.linkStatus == Status.Link.Up;
-
-        override bool connect()
+        else version(Posix)
         {
             fd = core.sys.posix.fcntl.open(device.tstringz, O_RDWR | O_NOCTTY | O_NDELAY);
             if (fd == -1)
             {
                 writeln("Failed to open device %s.\n", this.device);
-                return false;
+                return CompletionStatus.Error;
             }
 
             termios tty;
@@ -365,84 +307,128 @@ else version(Posix)
 
             if (tcsetattr(fd, TCSANOW, &tty) != 0)
             {
-                // Handle error
+                // Handle error ???
+                return CompletionStatus.Error;
             }
-            return true;
         }
+        return CompletionStatus.Complete;
+    }
 
-        override void disconnect()
+    override CompletionStatus shutdown()
+    {
+        version (Windows)
         {
-            core.sys.posix.unistd.close(fd);
-            fd = -1;
+            if (hCom != INVALID_HANDLE_VALUE)
+                CloseHandle(hCom);
+            hCom = INVALID_HANDLE_VALUE;
         }
-
-        override const(char)[] remoteName()
+        else version (Posix)
         {
-            return device[];
+            if (fd != -1)
+            {
+                core.sys.posix.unistd.close(fd);
+                fd = -1;
+            }
         }
+        return CompletionStatus.Complete;
+    }
 
-        override void setOpts(StreamOptions options)
+
+    override void update()
+    {
+        version(Windows)
         {
-            this.options = options;
+            DWORD errors;
+            COMSTAT stat;
+            if (ClearCommError(hCom, &errors, &stat))
+            {
+                if (errors != 0)
+                {
+                    assert(false, "TODO: test this case");
+                    restart();
+                }
+            }
+            else
+                restart();
         }
+        else
+        {
+            // TODO
+            assert(false, "TODO: test to see if the port is live...");
+        }
+    }
 
-
-        override ptrdiff_t read(void[] buffer)
+    override ptrdiff_t read(void[] buffer)
+    {
+        version(Windows)
+        {
+            DWORD bytesRead;
+            if (!ReadFile(hCom, buffer.ptr, cast(DWORD)buffer.length, &bytesRead, null))
+            {
+                restart();
+                return -1;
+            }
+            if (logging)
+                writeToLog(true, buffer[0 .. bytesRead]);
+            return bytesRead;
+        }
+        else version(Posix)
         {
             ssize_t bytesRead = core.sys.posix.unistd.read(fd, buffer.ptr, buffer.length);
             if (logging)
                 writeToLog(true, buffer[0 .. bytesRead]);
             return bytesRead;
         }
+    }
 
-        override ptrdiff_t write(const void[] data)
+    override ptrdiff_t write(const void[] data)
+    {
+        version(Windows)
+        {
+            DWORD bytesWritten;
+            if (!WriteFile(hCom, data.ptr, cast(DWORD)data.length, &bytesWritten, null))
+            {
+                restart();
+                return -1;
+            }
+            if (logging)
+                writeToLog(false, data[0 .. bytesWritten]);
+            return bytesWritten;
+        }
+        else version(Posix)
         {
             ssize_t bytesWritten = core.sys.posix.unistd.write(fd, data.ptr, data.length);
             if (logging)
                 writeToLog(false, data[0 .. bytesWritten]);
             return bytesWritten;
         }
-
-        override ptrdiff_t pending()
-        {
-            // TODO:?
-            assert(0);
-        }
-
-        override ptrdiff_t flush()
-        {
-            // TODO: just read until can't read anymore?
-            assert(0);
-        }
-
-        override void update()
-        {
-            if (fd == -1)
-                return;
-
-            if (status.linkStatus == Status.Link.Up)
-            {
-                // TODO
-                assert(false, "TODO: test to see if the port is live...");
-            }
-
-            // this should implement keep-alive nonsense and all that...
-            // what if the port comes and goes? we need to re-scan for the device if it's plugged/unplugged, etc.
-
-            if (status.linkStatus != Status.Link.Up)
-                connect();
-        }
-
-    private:
-        int fd = -1;
-        String device;
-        SerialParams params;
-        StreamOptions options;
     }
-}
-else
-{
-    static assert(false, "No serial implementation!");
+
+    override const(char)[] remoteName()
+    {
+        return _device[];
+    }
+
+    override ptrdiff_t pending()
+    {
+        // TODO:?
+        assert(0);
+    }
+
+    override ptrdiff_t flush()
+    {
+        // TODO: just read until can't read anymore?
+        assert(0);
+    }
+
+private:
+    version (Windows)
+        HANDLE hCom = INVALID_HANDLE_VALUE;
+    else version (Posix)
+        int fd = -1;
+
+    String _device;
+    SerialParams params;
 }
 
 
@@ -451,33 +437,25 @@ class SerialStreamModule : Module
     mixin DeclareModule!"stream.serial";
 nothrow @nogc:
 
+    Collection!SerialStream serial_streams;
+
     override void init()
     {
-        g_app.console.registerCommand!add("/stream/serial", this);
+        g_app.console.registerCollection("/stream/serial", serial_streams);
     }
+}
 
-    void add(Session session, const(char)[] name, const(char)[] device, int baud, Nullable!int data_bits, Nullable!float stop_bits, Nullable!Parity parity, Nullable!FlowControl flow_control)
+
+private:
+
+version(Windows)
+{
+    enum RTSControl : ubyte
     {
-        auto mod_stream = getModule!StreamModule;
-
-        if (name.empty)
-            mod_stream.streams.generateName("serial-stream");
-
-        // TODO: assert data bits == 7,8, stop bits == 1,1.5,2, verify other enums...
-
-        SerialParams params;
-        params.baudRate = baud;
-        params.dataBits = data_bits ? cast(ubyte)data_bits.value : 8;
-        params.stopBits = stop_bits ? cast(StopBits)(stop_bits.value*2 - 2) : StopBits.One;
-        params.parity = parity ? parity.value : Parity.None;
-        params.flowControl = flow_control ? flow_control.value : FlowControl.None;
-
-        String n = name.makeString(g_app.allocator);
-        String dev = device.makeString(g_app.allocator);
-
-        SerialStream stream = g_app.allocator.allocT!SerialStream(n.move, dev.move, params, cast(StreamOptions)(StreamOptions.NonBlocking | StreamOptions.KeepAlive));
-        mod_stream.streams.add(stream);
-
-        writeInfof("Create Serial stream '{0}' - device: {1}@{2}", name, device, params.baudRate);
+        Disable, Enable, Handshake, Toggle
+    }
+    enum DTRControl : ubyte
+    {
+        Disable, Enable, Handshake
     }
 }
