@@ -54,7 +54,7 @@ const(char[]) convertVariant(ref const Variant v, out bool r) nothrow @nogc
 }
 
 const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
-    if (isSomeInt!T)
+    if (is_some_int!T)
 {
     if (v.isNumber)
     {
@@ -110,7 +110,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
 }
 
 const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
-    if (isSomeFloat!T)
+    if (is_some_float!T)
 {
     if (v.isNumber)
     {
@@ -178,7 +178,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
         {
             static foreach(E; __traits(allMembers, T))
             {
-                case Alias!(toLower(E)):
+                case Alias!(to_lower(E)):
                     r = __traits(getMember, T, E);
                     return null;
             }
@@ -194,7 +194,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
 }
 
 const(char[]) convertVariant(U)(ref const Variant v, out U[] r) nothrow @nogc
-    if (!isSomeChar!U)
+    if (!is_some_char!U)
 {
     const(Variant)[] arr;
     if (v.isArray)
@@ -320,7 +320,7 @@ Array!String suggestCompletion(E)(const(char)[] argumentText)
     Array!String completions;
     static foreach(M; __traits(allMembers, E))
     {{
-        enum Member = Alias!(M.toLower);
+        enum Member = Alias!(M.to_lower);
         if (Member.startsWith(argumentText))
             completions ~= StringLit!Member;
     }}

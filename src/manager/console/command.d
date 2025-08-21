@@ -119,11 +119,11 @@ bool isValidIdentifier(const(char)[] s) pure
 {
     if (s.length == 0)
         return false;
-    if (!isAlpha(s[0]) && s[0] != '_')
+    if (!is_alpha(s[0]) && s[0] != '_')
         return false;
     foreach (char c; s[1..$])
     {
-        if (!isAlphaNumeric(c) && c != '_')
+        if (!is_alpha_numeric(c) && c != '_')
             return false;
     }
     // TODO: should keywords be filtered?
@@ -134,12 +134,12 @@ inout(char)[] takeIdentifier(ref inout(char)[] s) pure
 {
     if (s.length == 0)
         return s[0..0];
-    if (!isAlpha(s[0]) && s[0] != '-' && s[0] != '_')
+    if (!is_alpha(s[0]) && s[0] != '-' && s[0] != '_')
         return s[0..0];
     size_t i = 1;
     for (; i < s.length; ++i)
     {
-        if (!isAlphaNumeric(s[i]) && s[i] != '-' && s[i] != '_')
+        if (!is_alpha_numeric(s[i]) && s[i] != '-' && s[i] != '_')
             break;
     }
     inout(char)[] r = s[0 .. i];
@@ -153,7 +153,7 @@ inout(char)[] trimCmdLine(inout(char)[] s) pure
     {
         if (s[0] == '#')
             return s[$ .. $];
-        if (isWhitespace(s[0]))
+        if (is_whitespace(s[0]))
             s = s[1 .. $];
         else
             break;

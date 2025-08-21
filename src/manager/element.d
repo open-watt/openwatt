@@ -95,11 +95,11 @@ nothrow @nogc:
                 signal(latest, null); // TODO: who made the change? so we can break cycles...
             }
         }
-        else static if (is(T E == enum) && isSomeInt!E)
+        else static if (is(T E == enum) && is_some_int!E)
             value(cast(int)v);
-        else static if (isSomeInt!T)
+        else static if (is_some_int!T)
             value(cast(int)v);
-        else static if (isSomeFloat!T)
+        else static if (is_some_float!T)
             value(cast(float)v);
         else
             static assert(false, "Not implemented");

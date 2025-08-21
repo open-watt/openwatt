@@ -522,7 +522,7 @@ private:
             if (newline == 0)
                 break; // empty line marks end of header fields
 
-            if (line[0].isWhitespace)
+            if (line[0].is_whitespace)
             {
                 assert(false, "TODO: just check this path is correct...");
 
@@ -562,8 +562,8 @@ void httpFieldLines(scope const HTTPParam[] params, ref MutableString!0 str)
 
 void httpDate(ref const DateTime date, ref MutableString!0 str)
 {
-    const(char)[] day = EnumKeys!Day[date.wday];
-    const(char)[] month = EnumKeys!Month[date.month];
+    const(char)[] day = enum_keys!Day[date.wday];
+    const(char)[] month = enum_keys!Month[date.month];
 
     // IMF-fixdate
     // Sun, 06 Nov 1994 08:49:37 GMT

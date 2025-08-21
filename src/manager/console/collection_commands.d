@@ -528,7 +528,7 @@ Array!String suggest(const(char)[] cmdLine, ref BaseCollection collection, Sugge
     ptrdiff_t lastToken = cmdLine.length;
     while (lastToken > 0)
     {
-        if (cmdLine[lastToken - 1].isWhitespace)
+        if (cmdLine[lastToken - 1].is_whitespace)
             break;
         --lastToken;
     }
@@ -555,7 +555,7 @@ Array!String suggest(const(char)[] cmdLine, ref BaseCollection collection, Sugge
         const(char)[] name;
         for (size_t i = 1; ; ++i)
         {
-            if (cmdLine[i].isWhitespace)
+            if (cmdLine[i].is_whitespace)
             {
                 name = cmdLine[0 .. i];
                 break;

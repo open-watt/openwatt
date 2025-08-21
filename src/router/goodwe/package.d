@@ -1,9 +1,5 @@
 module router.goodwe;
 
-import std.conv;
-import std.stdio;
-import std.uni : toLower;
-
 import manager;
 import manager.config;
 import manager.component;

@@ -8,7 +8,7 @@ import urt.map;
 import urt.string;
 import urt.system;
 import urt.time;
-import urt.util : alignUp, swap;
+import urt.util : align_up, swap;
 
 import manager.plugin;
 import manager.console;
@@ -374,5 +374,5 @@ void writeBlockLen(ref Array!ubyte buffer, size_t startOffset = 0)
 
 void alignBlock(ref Array!ubyte buffer)
 {
-    buffer.resize(buffer.length.alignUp!4);
+    buffer.resize(buffer.length.align_up!4);
 }

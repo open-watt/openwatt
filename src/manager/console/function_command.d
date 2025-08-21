@@ -104,7 +104,7 @@ nothrow @nogc:
 
         FunctionCommand fnCmd = console.m_allocator.allocT!FunctionCommand(console, commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName, cast(void*)i, &functionAdapter);
 
-        alias ParamNames = ParameterIdentifierTuple!fun[1 .. $];
+        alias ParamNames = parameter_identifier_tuple!fun[1 .. $];
         alias Params = STATIC_MAP!(Unqual, Parameters!fun[1 .. $]);
 
         static foreach (j; 0 .. ParamNames.length)
@@ -194,7 +194,7 @@ nothrow @nogc:
         ptrdiff_t lastToken = cmdLine.length;
         while (lastToken > 0)
         {
-            if (cmdLine[lastToken - 1].isWhitespace)
+            if (cmdLine[lastToken - 1].is_whitespace)
                 break;
             --lastToken;
         }
@@ -248,12 +248,12 @@ struct FunctionArgument
 }
 
 auto makeArgTuple(alias F)(const Variant[] args, const NamedArgument[] parameters, out const(char)[] error, Application app)
-    if (isSomeFunction!F)
+    if (is_some_function!F)
 {
     import urt.meta;
 
     alias Params = STATIC_MAP!(Unqual, Parameters!F[1 .. $]);
-    alias ParamNames = ParameterIdentifierTuple!F[1 .. $];
+    alias ParamNames = parameter_identifier_tuple!F[1 .. $];
 
     Tuple!Params params;
     error = null;
