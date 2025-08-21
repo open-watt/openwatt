@@ -8,7 +8,7 @@
             "args": [
                 "/p:Configuration=Debug",
                 "/p:Platform=x64",
-                "sampledb.sln"
+                "openwatt.sln"
             ],
             "group": "build",
             "presentation": {
@@ -23,7 +23,7 @@
             "args": [
                 "/p:Configuration=\"Debug LLVM\"",
                 "/p:Platform=x64",
-                "sampledb.sln"
+                "openwatt.sln"
             ],
             "group": "build",
             "presentation": {
@@ -38,7 +38,7 @@
             "args": [
                 "/p:Configuration=Debug",
                 "/p:Platform=Win32",
-                "sampledb.sln"
+                "openwatt.sln"
             ],
             "group": "build",
             "presentation": {
@@ -53,7 +53,7 @@
             "args": [
                 "/p:Configuration=\"Debug LLVM\"",
                 "/p:Platform=Win32",
-                "sampledb.sln"
+                "openwatt.sln"
             ],
             "group": "build",
             "presentation": {
@@ -102,7 +102,7 @@
             "args": [
                 "/p:Configuration=Release",
                 "/p:Platform=x64",
-                "sampledb.sln"
+                "openwatt.sln"
             ],
             "group": "build",
             "presentation": {
@@ -117,7 +117,7 @@
             "args": [
                 "/p:Configuration=\"Release LLVM\"",
                 "/p:Platform=x64",
-                "sampledb.sln"
+                "openwatt.sln"
             ],
             "group": "build",
             "presentation": {
@@ -132,7 +132,7 @@
             "args": [
                 "/p:Configuration=Release",
                 "/p:Platform=Win32",
-                "sampledb.sln"
+                "openwatt.sln"
             ],
             "group": "build",
             "presentation": {
@@ -147,7 +147,7 @@
             "args": [
                 "/p:Configuration=\"Release LLVM\"",
                 "/p:Platform=Win32",
-                "sampledb.sln"
+                "openwatt.sln"
             ],
             "group": "build",
             "presentation": {
@@ -162,7 +162,7 @@
             "args": [
                 "/p:Configuration=UnitTest",
                 "/p:Platform=x64",
-                "sampledb.sln"
+                "openwatt.sln"
             ],
             "group": {
                 "kind": "build",
@@ -180,7 +180,7 @@
             "args": [
                 "/p:Configuration=\"UnitTest LLVM\"",
                 "/p:Platform=x64",
-                "sampledb.sln"
+                "openwatt.sln"
             ],
             "group": "build",
             "presentation": {
@@ -195,7 +195,7 @@
             "args": [
                 "/p:Configuration=UnitTest",
                 "/p:Platform=Win32",
-                "sampledb.sln"
+                "openwatt.sln"
             ],
             "group": "build",
             "presentation": {
@@ -210,7 +210,7 @@
             "args": [
                 "/p:Configuration=\"UnitTest LLVM\"",
                 "/p:Platform=Win32",
-                "sampledb.sln"
+                "openwatt.sln"
             ],
             "group": "build",
             "presentation": {
@@ -262,7 +262,7 @@
             "args": [
                 "/t:Clean",
                 "/p:Platform=Win32",
-                "sampledb.sln"
+                "openwatt.sln"
             ],
             "options": {
                 "profile": "VSPowerShell"
@@ -280,7 +280,7 @@
             "args": [
                 "/t:Clean",
                 "/p:Platform=x64",
-                "sampledb.sln"
+                "openwatt.sln"
             ],
             "options": {
                 "profile": "VSPowerShell"
