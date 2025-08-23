@@ -7,6 +7,7 @@ public static import protocol.http;
 public static import protocol.modbus;
 public static import protocol.mqtt;
 public static import protocol.snmp;
+public static import protocol.spinel;
 public static import protocol.telnet;
 public static import protocol.tesla;
 public static import protocol.zigbee;

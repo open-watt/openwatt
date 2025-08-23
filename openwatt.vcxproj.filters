@@ -58,6 +58,9 @@
     <Filter Include="src\protocol\snmp">
       <UniqueIdentifier>{f9e366d8-35ce-4a70-9f0e-3ab303fb1bdb}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\spinel">
+      <UniqueIdentifier>{fcdd9e88-513a-4859-a5da-665d1bee0704}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\protocol\telnet">
       <UniqueIdentifier>{f9218558-feb4-40d3-b5bb-db924d553f6a}</UniqueIdentifier>
     </Filter>
@@ -320,6 +323,12 @@
     </DCompile>
     <DCompile Include="src\protocol\ezsp\client.d">
       <Filter>src\protocol\ezsp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\spinel\package.d">
+      <Filter>src\protocol\spinel</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\spinel\client.d">
+      <Filter>src\protocol\spinel</Filter>
     </DCompile>
     <DCompile Include="src\protocol\zigbee\package.d">
       <Filter>src\protocol\zigbee</Filter>
