@@ -343,7 +343,7 @@ void skipWhitespace(ref const(char)[] text) nothrow
 {
     while (text.length > 0)
     {
-        if (text[0].isSpace)
+        if (text[0].is_space)
             text = text[1..$];
         else
         {
@@ -359,7 +359,7 @@ void skipWhitespaceAndNewlines(ref const(char)[] text) nothrow
 {
     while (text.length > 0)
     {
-        if (text[0].isWhitespace)
+        if (text[0].is_whitespace)
             text = text[1..$];
         else if (text[0] == '#')
         {
@@ -419,7 +419,7 @@ Array!ScriptCommand parseCommands(ref const(char)[] text)
         skipWhitespace(text);
         if (text.length > 0)
         {
-            if (text[0] == ';' ||  text[0].isNewline)
+            if (text[0] == ';' ||  text[0].is_newline)
             {
                 if (text[0] == '\r' && text.length == 1 || text[1] != '\n')
                     assert(false); // TODO: not actually a newline; need to continue looking for semicolon or newlines...
@@ -447,7 +447,7 @@ ScriptCommand parseCommand(ref const(char)[] text)
     while (text.length > 0)
     {
         skipWhitespace(text);
-        if (text.length == 0 || text[0].isNewline || text[0] == ';' || text[0] == '}' || text[0] == ']')
+        if (text.length == 0 || text[0].is_newline || text[0] == ';' || text[0] == '}' || text[0] == ']')
             break;
 
         ScriptCommand.Argument a = parseArgument(text);
@@ -735,9 +735,9 @@ Expression* parsePrimaryExp(ref const(char)[] text)
                 syntaxError("Invalid variable name");
         }
 
-        identifier = text[0].isAlpha || text[0] == '_' || text[0] == '/';
+        identifier = text[0].is_alpha || text[0] == '_' || text[0] == '/';
         if (!identifier)
-            numeric = text[0].isNumeric || (!isVar && (text[0] == '-' || text[0] == '+') && text.length > 1 && text[1].isNumeric);
+            numeric = text[0].is_numeric || (!isVar && (text[0] == '-' || text[0] == '+') && text.length > 1 && text[1].is_numeric);
 
         string stringDelimiters = "/$=,;\"\\{}[]()?'`";
         size_t len = identifier | numeric; // skip the first char; first char has some special cases
@@ -753,13 +753,13 @@ Expression* parsePrimaryExp(ref const(char)[] text)
                     break scan_string;
             }
 
-            if (identifier && !c.isAlphaNumeric && c != '_' && c != '-')
+            if (identifier && !c.is_alpha_numeric && c != '_' && c != '-')
             {
                 if (isVar)
                     break;
                 identifier = false;
             }
-            else if (numeric && !c.isNumeric)
+            else if (numeric && !c.is_numeric)
             {
                 if (isVar)
                     break;
@@ -775,7 +775,7 @@ Expression* parsePrimaryExp(ref const(char)[] text)
         if (len < text.length)
         {
             // string should have terminated on a valid delimiter
-            if (!text[len].isWhitespace && text[len] != '=' && text[len] != '/' && text[len] != ';' && text[len] != ',' && text[len] != ')' && text[len] != '}' && text[len] != ']')
+            if (!text[len].is_whitespace && text[len] != '=' && text[len] != '/' && text[len] != ';' && text[len] != ',' && text[len] != ')' && text[len] != '}' && text[len] != ']')
                 syntaxError("Invalid token");
         }
 

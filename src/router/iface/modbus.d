@@ -24,8 +24,8 @@ import router.stream;
 
 //version = DebugModbusMessageFlow;
 
-alias modbusCRC = calculate_crc!(Algorithm.CRC16_MODBUS);
-alias modbusCRC_2 = calculate_crc_2!(Algorithm.CRC16_MODBUS);
+alias modbusCRC = calculate_crc!(Algorithm.crc16_modbus);
+alias modbusCRC_2 = calculate_crc_2!(Algorithm.crc16_modbus);
 
 nothrow @nogc:
 
@@ -1032,7 +1032,7 @@ size_t parseASCII(const(ubyte)[] data, out const(void)[] message, out ModbusFram
 
 inout(ubyte)[] crawlForRTU(inout(ubyte)[] data, ushort* rcrc = null)
 {
-    alias modbus_crc_table = CRCTable!(Algorithm.CRC16_MODBUS);
+    alias modbus_crc_table = crc_table!(Algorithm.crc16_modbus);
 
 //    if (data.length < 4)
 //        return null;

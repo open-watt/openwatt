@@ -276,7 +276,7 @@ nothrow @nogc:
         {
             // wireshark wants RTU packets for its decoder, so we need to append the crc...
             import urt.crc;
-            ushort crc = packet.data[3..$].calculate_crc!(Algorithm.CRC16_MODBUS)();
+            ushort crc = packet.data[3..$].calculate_crc!(Algorithm.crc16_modbus)();
             sink(crc.nativeToLittleEndian());
         }
     }
@@ -331,7 +331,7 @@ package:
     MACAddress generateMacAddress() pure
     {
         import urt.crc;
-        alias crcFun = calculate_crc!(Algorithm.CRC32_ISO_HDLC);
+        alias crcFun = calculate_crc!(Algorithm.crc32_iso_hdlc);
 
         enum ushort MAGIC = 0x1337;
 

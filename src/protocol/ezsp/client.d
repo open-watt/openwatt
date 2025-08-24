@@ -79,7 +79,7 @@ nothrow @nogc:
 
             handler.responseShim = &responseShim!(HasUserData, ResponseParams);
             handler.userData = HasUserData ? userData : null;
-            static if (isDelegate!Callback)
+            static if (is_delegate!Callback)
             {
                 handler.cbFnPtr = responseHandler.funcptr;
                 handler.cbInstance = responseHandler.ptr;
@@ -120,7 +120,7 @@ nothrow @nogc:
 
             writeInfof("EZSP: sending request - " ~ EZSP_Command.stringof ~ "(x{0, 04x})", EZSP_Command.Command);
 
-            static if (isDelegate!Callback)
+            static if (is_delegate!Callback)
                 return sendCommandImpl(EZSP_Command.Command, buffer[0..offset], &responseShim!(HasUserData, ResponseParams), responseHandler.funcptr, responseHandler.ptr, HasUserData ? userData : null);
             else
                 return sendCommandImpl(EZSP_Command.Command, buffer[0..offset], &responseShim!(HasUserData, ResponseParams), responseHandler, null, HasUserData ? userData : null);

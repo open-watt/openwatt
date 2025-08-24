@@ -363,7 +363,7 @@ version (DebugCANInterface)
         char[] t = cast(char[])talloc(bin.length);
         t[] = cast(char[])bin[];
         foreach (ref c; t)
-            c = isControlChar(c) ? '.' : c;
+            c = is_control_char(c) ? '.' : c;
         return t;
     }
 }

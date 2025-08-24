@@ -92,13 +92,13 @@ nothrow @nogc:
             size_t i = 0;
             if (cmdLine.frontIs('/'))
                 ++i;
-            while (i < cmdLine.length && isWhitespace(cmdLine[i]))
+            while (i < cmdLine.length && is_whitespace(cmdLine[i]))
                 ++i;
             if (i < cmdLine.length && cmdLine[i] == '/')
                 return MutableString!0(cmdLine);
 
             size_t j = i;
-            while (j < cmdLine.length && !isWhitespace(cmdLine[j]) && cmdLine[j] != '/')
+            while (j < cmdLine.length && !is_whitespace(cmdLine[j]) && cmdLine[j] != '/')
                 ++j;
 
             if (j < cmdLine.length)
@@ -148,7 +148,7 @@ nothrow @nogc:
         else
         {
             size_t i = 0;
-            while (i < cmdLine.length && !isWhitespace(cmdLine[i]) && cmdLine[i] != '/')
+            while (i < cmdLine.length && !is_whitespace(cmdLine[i]) && cmdLine[i] != '/')
                 ++i;
 
             if (i < cmdLine.length)
@@ -161,7 +161,7 @@ nothrow @nogc:
                         size_t j = i;
                         if (cast(Scope)cmd && j < cmdLine.length && cmdLine[j] == '/')
                             ++j;
-                        while (j < cmdLine.length && isWhitespace(cmdLine[j]))
+                        while (j < cmdLine.length && is_whitespace(cmdLine[j]))
                             ++j;
                         return cmd.suggest(cmdLine[j..$]);
                     }

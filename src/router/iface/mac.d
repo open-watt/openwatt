@@ -114,37 +114,37 @@ struct EUI(int width)
     enum StringLen = Bytes == 6 ? 17 : 23;
     ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const
     {
-        import urt.string.ascii : hexDigits;
+        import urt.string.ascii : hex_digits;
 
         if (!buffer.ptr)
             return StringLen;
         if (buffer.length < StringLen)
             return -1;
-        buffer[0]  = hexDigits[b[0] >> 4];
-        buffer[1]  = hexDigits[b[0] & 0xF];
+        buffer[0]  = hex_digits[b[0] >> 4];
+        buffer[1]  = hex_digits[b[0] & 0xF];
         buffer[2]  = ':';
-        buffer[3]  = hexDigits[b[1] >> 4];
-        buffer[4]  = hexDigits[b[1] & 0xF];
+        buffer[3]  = hex_digits[b[1] >> 4];
+        buffer[4]  = hex_digits[b[1] & 0xF];
         buffer[5]  = ':';
-        buffer[6]  = hexDigits[b[2] >> 4];
-        buffer[7]  = hexDigits[b[2] & 0xF];
+        buffer[6]  = hex_digits[b[2] >> 4];
+        buffer[7]  = hex_digits[b[2] & 0xF];
         buffer[8]  = ':';
-        buffer[9]  = hexDigits[b[3] >> 4];
-        buffer[10] = hexDigits[b[3] & 0xF];
+        buffer[9]  = hex_digits[b[3] >> 4];
+        buffer[10] = hex_digits[b[3] & 0xF];
         buffer[11] = ':';
-        buffer[12] = hexDigits[b[4] >> 4];
-        buffer[13] = hexDigits[b[4] & 0xF];
+        buffer[12] = hex_digits[b[4] >> 4];
+        buffer[13] = hex_digits[b[4] & 0xF];
         buffer[14] = ':';
-        buffer[15] = hexDigits[b[5] >> 4];
-        buffer[16] = hexDigits[b[5] & 0xF];
+        buffer[15] = hex_digits[b[5] >> 4];
+        buffer[16] = hex_digits[b[5] & 0xF];
         static if (Bytes == 8)
         {
             buffer[17] = ':';
-            buffer[18] = hexDigits[b[6] >> 4];
-            buffer[19] = hexDigits[b[6] & 0xF];
+            buffer[18] = hex_digits[b[6] >> 4];
+            buffer[19] = hex_digits[b[6] & 0xF];
             buffer[20] = ':';
-            buffer[21] = hexDigits[b[7] >> 4];
-            buffer[22] = hexDigits[b[7] & 0xF];
+            buffer[21] = hex_digits[b[7] >> 4];
+            buffer[22] = hex_digits[b[7] & 0xF];
         }
         return StringLen;
     }
@@ -163,7 +163,7 @@ struct EUI(int width)
                 if (s[n] != ':')
                     return -1;
             }
-            else if (!isHex(s[n]))
+            else if (!is_hex(s[n]))
                 return -1;
         }
 
@@ -195,8 +195,8 @@ nothrow @nogc:
 
     this(ushort minElements, ushort maxElements, ubyte ttl)
     {
-        import urt.util : isPowerOf2;
-        assert(maxElements < 2^^12 && minElements <= maxElements && minElements.isPowerOf2 && maxElements.isPowerOf2);
+        import urt.util : is_power_of_2;
+        assert(maxElements < 2^^12 && minElements <= maxElements && minElements.is_power_of_2 && maxElements.is_power_of_2);
 
         this.maxElements = maxElements;
         this.ttl = ttl;

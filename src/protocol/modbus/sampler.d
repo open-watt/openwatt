@@ -4,7 +4,7 @@ import urt.array;
 import urt.endian;
 import urt.log;
 import urt.time;
-import urt.util : alignUp;
+import urt.util : align_up;
 
 import manager.element;
 import manager.sampler;
@@ -197,7 +197,7 @@ private:
 
         // I don't think it's valid for a response length to not match the request?
         // if this happens, it must be a response to a different request
-        if (kind < 2 && responseBytes * 8 != count.alignUp(8))
+        if (kind < 2 && responseBytes * 8 != count.align_up(8))
             return;
         else if (kind > 2 && responseBytes / 2 != count)
             return;
