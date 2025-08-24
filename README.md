@@ -9,6 +9,14 @@ OpenWatt is a comprehensive energy management and home/industrial automation pla
 - **Automation and Management:** A powerful logic layer that allows you to create custom rules and automation to optimize your energy usage and manage your devices.
 - **Extensible and Modular:** Designed to be extensible, allowing you to add support for new devices and protocols.
 
+## Documentation
+
+For a detailed overview of the project structure, terminology, and module layout, please see our [System Overview](docs/OVERVIEW.md).
+
+A quick reference for the project's feature set is available in the [Feature Set](docs/FEATURES.md) document.
+
+For details on the command-line interface and startup configuration, see the [CLI Documentation](docs/CLI.md).
+
 ## Getting Started
 
 ### Prerequisites
