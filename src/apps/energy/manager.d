@@ -4,6 +4,7 @@ import urt.algorithm;
 import urt.array;
 import urt.map;
 import urt.mem;
+import urt.si.quantity;
 import urt.string;
 import urt.util;
 
@@ -68,9 +69,9 @@ nothrow @nogc:
         return appliance;
     }
 
-    float getMainsVoltage(int phase = 0) pure
+    Volts getMainsVoltage(int phase = 0) pure
     {
-        return main.meterData.voltage[phase];
+        return cast(Volts)main.meterData.voltage[phase];
     }
 
     void update()
@@ -81,15 +82,15 @@ nothrow @nogc:
         main.update();
 
         Array!Appliance wantPower;
-        float excessSolar = main.meterData.active[0] < 0 ? -main.meterData.active[0] : 0;
+        Watts excessSolar = main.meterData.active[0] < Watts(0) ? cast(Watts)-main.meterData.active[0] : Watts(0);
         foreach (a; appliances.values)
         {
             if (a.canControl)
             {
-                float power = a.currentConsumption;
-                if (power > 0)
+                Watts power = a.currentConsumption;
+                if (power > Watts(0))
                     excessSolar += power;
-                if (a.wantsPower || power > 0)
+                if (a.wantsPower || power > Watts(0))
                     wantPower ~= a;
             }
         }
@@ -97,24 +98,24 @@ nothrow @nogc:
         wantPower.sort!((Appliance x, Appliance y) => compare(x.priority, y.priority));
 
         // HACK: TO CHARGE MY CAR FOR THE AIRPORT!
-//        excessSolar += 4000;
+//        excessSolar += Watts(4000);
 
         // excessSolar is the total excess solar we are able to distribute
         // some may already be consumed by implicit loads; like a solar battery
         foreach (a; wantPower)
         {
-            if (excessSolar <= 0)
+            if (excessSolar <= Watts(0))
                 break;
 
-            float wants = a.wantsPower();
-            float consumption = a.currentConsumption;
+            Watts wants = a.wantsPower();
+            Watts consumption = a.currentConsumption;
 
             ControlCapability controlCap = a.hasControl();
             if (controlCap & ControlCapability.Linear)
             {
                 // there is a problem where the implicit inverter loses to a downward spiral where chargers creep upwards
                 // HACK: fix it with a scaling factor...
-                float minimum;
+                Watts minimum;
                 if (!a.minPowerLimit(minimum) || excessSolar >= minimum)
                     a.offerPower(min(wants, excessSolar * 0.9));
 

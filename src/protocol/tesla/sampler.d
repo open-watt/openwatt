@@ -1,11 +1,12 @@
 module protocol.tesla.sampler;
 
 import urt.array;
+import urt.si.quantity;
+import urt.variant;
 
 import manager.element;
 import manager.sampler;
 import manager.subscriber;
-import manager.value;
 
 import protocol.tesla;
 import protocol.tesla.master;
@@ -56,22 +57,25 @@ nothrow @nogc:
             {
                 case "targetCurrent":
                     // TODO: user can write to targetCurrent...
-                    e.value(charger.targetCurrent);
+                    e.value(CentiAmps(charger.targetCurrent));
                     break;
-                case "state":           e.value(charger.chargerState);                               break;
-                case "maxCurrent":      e.value(charger.maxCurrent);                                 break;
-                case "current":         e.value((charger.flags & 2) ? charger.current : 0);          break;
-                case "voltage1":        e.value((charger.flags & 2) ? charger.voltage1 : 0);         break;
-                case "voltage2":        e.value((charger.flags & 2) ? charger.voltage2 : 0);         break;
-                case "voltage3":        e.value((charger.flags & 2) ? charger.voltage3 : 0);         break;
-                case "power":           e.value((charger.flags & 2) ? charger.totalPower : 0);       break;
-                case "power1":          e.value((charger.flags & 2) ? charger.power1 : 0);           break;
-                case "power2":          e.value((charger.flags & 2) ? charger.power2 : 0);           break;
-                case "power3":          e.value((charger.flags & 2) ? charger.power3 : 0);           break;
+                case "state":           e.value(charger.chargerState);                                  break;
+                case "maxCurrent":      e.value(CentiAmps(charger.maxCurrent));                         break;
+                case "current":         e.value(CentiAmps((charger.flags & 2) ? charger.current : 0));  break;
+                case "voltage1":        e.value(Volts((charger.flags & 2) ? charger.voltage1 : 0));     break;
+                case "voltage2":        e.value(Volts((charger.flags & 2) ? charger.voltage2 : 0));     break;
+                case "voltage3":        e.value(Volts((charger.flags & 2) ? charger.voltage3 : 0));     break;
+                case "power":           e.value(Watts((charger.flags & 2) ? charger.totalPower : 0));   break;
+                case "power1":          e.value(Watts((charger.flags & 2) ? charger.power1 : 0));       break;
+                case "power2":          e.value(Watts((charger.flags & 2) ? charger.power2 : 0));       break;
+                case "power3":          e.value(Watts((charger.flags & 2) ? charger.power3 : 0));       break;
                 case "totalImportActiveEnergy":
-                case "lifetimeEnergy":  e.value((charger.flags & 2) ? charger.lifetimeEnergy : 0);   break;
-                case "serialNumber":    e.value((charger.flags & 4) ? charger.serialNumber : "");    break;
-                case "vin":             e.value((charger.flags & 0xF0) == 0xF0 ? charger.vin : "");  break;
+                case "lifetimeEnergy":
+                    // TODO: could that multiply realistically overflow?
+                    e.value(WattHours((charger.flags & 2) ? ulong(charger.lifetimeEnergy) * 1000 : 0));
+                    break;
+                case "serialNumber":    e.value((charger.flags & 4) ? charger.serialNumber : "");       break;
+                case "vin":             e.value((charger.flags & 0xF0) == 0xF0 ? charger.vin : "");     break;
                 default:
                     assert(false, "Invalid element for Tesla TWC");
             }
@@ -95,7 +99,7 @@ nothrow @nogc:
         elements.removeFirstSwapLast(element);
     }
 
-    void onChange(Element* e, ref const Value val, Subscriber whoMadeChange)
+    void onChange(Element* e, ref const Variant val, Subscriber whoMadeChange)
     {
         if (!master) // if not bound, we can't apply any values
             return;
@@ -103,7 +107,7 @@ nothrow @nogc:
         if (e.id[] == "targetCurrent")
         {
             TeslaTWCMaster.Charger* charger = &master.chargers[chargerIndex];
-            charger.targetCurrent = cast(ushort)val.asFloat();
+            charger.targetCurrent = (cast(CentiAmps)val.asQuantity()).value;
 
             import urt.log;
             writeDebug("Set target current: ", charger.targetCurrent);

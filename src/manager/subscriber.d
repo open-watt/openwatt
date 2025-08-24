@@ -1,7 +1,8 @@
 module manager.subscriber;
 
+import urt.variant;
+
 import manager.element;
-import manager.value;
 
 nothrow @nogc:
 
@@ -9,5 +10,5 @@ nothrow @nogc:
 interface Subscriber
 {
 nothrow @nogc:
-    void onChange(Element* e, ref const Value val, Subscriber whoMadeChange);
+    void onChange(Element* e, ref const Variant val, Subscriber whoMadeChange);
 }

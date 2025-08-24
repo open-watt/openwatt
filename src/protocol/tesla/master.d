@@ -22,11 +22,15 @@ import manager;
 nothrow @nogc:
 
 
+import urt.si;
+alias CentiAmps = Quantity!(ushort, ScaledUnit(Ampere, -2));
+
+
 class TeslaTWCMaster
 {
 nothrow @nogc:
 
-    enum ChargerState
+    enum ChargerState : ubyte
     {
         Unknown,
         Idle,

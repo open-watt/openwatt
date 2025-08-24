@@ -8,8 +8,6 @@ import urt.string;
 
 import manager.device;
 import manager.element;
-import manager.units;
-import manager.value;
 
 import router.modbus.profile;
 

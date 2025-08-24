@@ -97,7 +97,6 @@ nothrow @nogc:
         import manager.component;
         import manager.device;
         import manager.element;
-        import manager.value;
         import router.modbus.profile;
         import urt.file;
         import urt.string.format;
@@ -150,39 +149,54 @@ nothrow @nogc:
                                 continue;
                             }
 
-                            // HACK HACK HACK: this is all one huge gross HACK!
-                            __gshared immutable Value.Type[RecordType.str] typeMap = [
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Float,
-                                Value.Type.Float,
-                                Value.Type.Float,
-                                Value.Type.Float,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Integer,
-                                Value.Type.Float,
-                            ];
+                            // HACK: rework this whole function, it's all old and rubbish
+                            import urt.si;
+                            ScaledUnit unit;
+                            float scale;
+                            ptrdiff_t taken = unit.parseUnit((*pReg).units[], scale);
+                            if (taken != (*pReg).units.length)
+                            {
+                                assert(false, "Unit was not parsed correctly...?");
+                            }
 
-                            e.unit = (*pReg).units.makeString(g_app.allocator);
-                            e.type = (*pReg).type < RecordType.str ? typeMap[(*pReg).type] : Value.Type.String;
-                            e.arrayLen = 0; // TODO: handle arrays?
                             e.access = cast(manager.element.Access)(*pReg).access; // HACK: delete the rh type!
+
+                            // init the value with the proper type and unit if specified...
+                            switch ((*pReg).type)
+                            {
+                                case RecordType.uint16:
+                                case RecordType.int16:
+                                case RecordType.uint32le:
+                                case RecordType.uint32:
+                                case RecordType.int32le:
+                                case RecordType.int32:
+                                case RecordType.uint64le:
+                                case RecordType.uint64:
+                                case RecordType.int64le:
+                                case RecordType.int64:
+                                case RecordType.uint8H:
+                                case RecordType.uint8L:
+                                case RecordType.int8H:
+                                case RecordType.int8L:
+                                case RecordType.bf16:
+                                case RecordType.bf32:
+                                case RecordType.bf64:
+                                case RecordType.enum16:
+                                case RecordType.enum32:
+                                    e.value = Quantity!uint(0, unit);
+                                    break;
+                                case RecordType.exp10:
+                                case RecordType.float32le:
+                                case RecordType.float32:
+                                case RecordType.float64le:
+                                case RecordType.float64:
+                                case RecordType.enum32_float:
+                                    e.value = Quantity!float(0.0, unit);
+                                    break;
+                                default:
+                                    e.value = "";
+                                    break;
+                            }
 
                             // TODO: if values are bitfields or enums, we should record the keys...
 
