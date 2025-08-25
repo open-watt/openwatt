@@ -474,6 +474,9 @@
     <DCompile Include="third_party\urt\src\urt\intrinsic\x86.d">
       <Filter>third_party\urt\intrinsic</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\os.c">
+      <Filter>third_party\urt\internal</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\format\json.d">
       <Filter>third_party\urt\format</Filter>
     </DCompile>
@@ -620,10 +623,5 @@
       <Filter>conf\rest_profiles</Filter>
     </None>
     <None Include="Makefile" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="third_party\urt\src\urt\internal\os.c">
-      <Filter>third_party\urt\internal</Filter>
-    </ClCompile>
   </ItemGroup>
 </Project>
