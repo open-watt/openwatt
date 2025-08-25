@@ -218,6 +218,7 @@
     <None Include="conf\rest_profiles\smartevse.conf" />
     <None Include="conf\startup.conf" />
     <None Include="Makefile" />
+    <None Include="vcpkg.json" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E12D037A-40C8-4F1B-B8B3-DE527A1E9D41}</ProjectGuid>
@@ -426,6 +427,9 @@
     <LinkIncremental>false</LinkIncremental>
     <IntDir>build\$(Platform)\$(Configuration)\</IntDir>
     <OutDir>bin\$(Platform)\$(Configuration)\</OutDir>
+  </PropertyGroup>
+  <PropertyGroup Label="Vcpkg">
+    <VcpkgEnableManifest>true</VcpkgEnableManifest>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>

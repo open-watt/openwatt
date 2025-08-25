@@ -623,5 +623,6 @@
       <Filter>conf\rest_profiles</Filter>
     </None>
     <None Include="Makefile" />
+    <None Include="vcpkg.json" />
   </ItemGroup>
 </Project>
