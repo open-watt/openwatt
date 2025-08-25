@@ -338,7 +338,7 @@ nothrow @nogc:
     protected override bool transmit(ref const Packet packet) nothrow @nogc
     {
         // can only handle modbus packets
-        if (packet.etherType != EtherType.OW || packet.etherSubType != OW_SubType.Modbus || packet.data.length < 5)
+        if (packet.eth.ether_type != EtherType.OW || packet.eth.ow_sub_type != OW_SubType.Modbus || packet.data.length < 5)
         {
             ++_status.sendDropped;
             return false;
@@ -357,9 +357,9 @@ nothrow @nogc:
         {
             assert(packetType == ModbusFrameType.Request);
 
-            if (!packet.dst.isBroadcast)
+            if (!packet.eth.dst.isBroadcast)
             {
-                ServerMap* map = mod_mb.findServerByMac(packet.dst);
+                ServerMap* map = mod_mb.findServerByMac(packet.eth.dst);
                 if (!map)
                 {
                     ++_status.sendDropped;
@@ -386,7 +386,7 @@ nothrow @nogc:
             // we need to queue the request so we can return the response to the sender...
             // but check that it's not a re-send attempt of the head queued packet
             if (pendingRequests.empty || &packet != pendingRequests[0].bufferedPacket)
-                pendingRequests ~= ModbusRequest(now, packet.src, sequenceNumber, address, transmitImmediately, packet.clone());
+                pendingRequests ~= ModbusRequest(now, packet.eth.src, sequenceNumber, address, transmitImmediately, packet.clone());
 
             if (!transmitImmediately)
                 return true;
@@ -396,7 +396,7 @@ nothrow @nogc:
             assert(packetType == ModbusFrameType.Response);
 
             // if we're not a bus master, we can only send response packets destined for the master
-            if (packet.dst != masterMac)
+            if (packet.eth.dst != masterMac)
             {
                 ++_status.sendDropped;
                 return false;
@@ -583,10 +583,12 @@ private:
         buffer[2] = type;
         buffer[4 .. 4 + message.length] = cast(ubyte[])message[];
 
-        Packet p = Packet(buffer[0 .. 4 + message.length]);
+        Packet p;
+        p.init!Ethernet(buffer[0 .. 4 + message.length]);
         p.creationTime = recvTime;
-        p.etherType = EtherType.OW;
-        p.etherSubType = OW_SubType.Modbus;
+        p.vlan = _pvid;
+        p.eth.ether_type = EtherType.OW;
+        p.eth.ow_sub_type = OW_SubType.Modbus;
 
         if (isBusMaster)
         {
@@ -603,8 +605,8 @@ private:
                 // expect incoming messages are a response to the front message
                 if (pendingRequests[0].localServerAddress == frameInfo.address)
                 {
-                    p.src = frameMac;
-                    p.dst = pendingRequests[0].requestFrom;
+                    p.eth.src = frameMac;
+                    p.eth.dst = pendingRequests[0].requestFrom;
                     buffer[0..2] = nativeToBigEndian(pendingRequests[0].sequenceNumber);
                     dispatch(p);
                 }
@@ -639,8 +641,8 @@ private:
                     if (req.localServerAddress != frameInfo.address || req.sequenceNumber != seq)
                         continue;
 
-                    p.src = frameMac;
-                    p.dst = req.requestFrom;
+                    p.eth.src = frameMac;
+                    p.eth.dst = req.requestFrom;
 
                     buffer[0..2] = nativeToBigEndian(seq);
 
@@ -679,8 +681,8 @@ private:
                 }
             }
 
-            p.src = type == ModbusFrameType.Request ? masterMac : frameMac;
-            p.dst = type == ModbusFrameType.Request ? frameMac : masterMac;
+            p.eth.src = type == ModbusFrameType.Request ? masterMac : frameMac;
+            p.eth.dst = type == ModbusFrameType.Request ? frameMac : masterMac;
 
             ushort seq = frameInfo.sequenceNumber;
             if (!frameInfo.hasSequenceNumber)

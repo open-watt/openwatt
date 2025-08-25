@@ -350,14 +350,14 @@ nothrow @nogc:
                 //... ???
             }
 
-            if (p.dst.isBroadcast)
+            if (p.eth.dst.isBroadcast)
             {
                 switch (msg.type)
                 {
                     case TWCMessageType.SlaveLinkReady:
                         if (slave.linkready)
                             break;
-                        slave.mac = p.src;
+                        slave.mac = p.eth.src;
                         slave.linkready = true;
                         slave.sigByte = msg.linkready.signature;
                         slave.deviceMaxCurrent = msg.linkready.amps;
@@ -422,7 +422,7 @@ nothrow @nogc:
                         break;
                 }
             }
-            else if (p.dst == iface.mac && msg.type == TWCMessageType.SlaveHeartbeat)
+            else if (p.eth.dst == iface.mac && msg.type == TWCMessageType.SlaveHeartbeat)
             {
                 // record heartbeat response state...
                 slave.state = msg.heartbeat.state;

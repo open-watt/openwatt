@@ -227,9 +227,9 @@ private:
         uint flags = (dir == PacketDirection.Incoming) ? 1 : 2; // 01 = inbound, 10 = outbound
 
         // 2-4 Reception type (000 = not specified, 001 = unicast, 010 = multicast, 011 = broadcast, 100 = promiscuous)
-        if (p.dst.isBroadcast)
+        if (p.eth.dst.isBroadcast)
             flags |= 3 << 2;
-        else if (p.dst.isMulticast)
+        else if (p.eth.dst.isMulticast)
             flags |= 2 << 2;
         else
             flags |= 1 << 2;

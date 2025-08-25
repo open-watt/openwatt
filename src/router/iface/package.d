@@ -50,20 +50,23 @@ nothrow @nogc:
     ushort etherType;
     ushort owSubType;
     ushort vlan;
+    ushort svlan;
     FilterCallback customFilter;
     PacketDirection direction = PacketDirection.Incoming;
 
     bool match(ref const Packet p)
     {
-        if (etherType && p.etherType != etherType)
+        if (etherType && p.eth.ether_type != etherType)
             return false;
-        if (owSubType && p.etherSubType != owSubType)
+        if (owSubType && p.eth.ow_sub_type != owSubType)
             return false;
         if (vlan && p.vlan != vlan)
             return false;
-        if (src && p.src != src)
+        if (src && p.eth.src != src)
             return false;
-        if (dst && p.dst != dst)
+        if (dst && p.eth.dst != dst)
+            return false;
+        if (svlan && p.svlan != svlan)
             return false;
         if (customFilter)
             return customFilter(p);
@@ -91,7 +94,8 @@ struct InterfaceSubscriber
 
 class BaseInterface : BaseObject
 {
-    __gshared Property[6] Properties = [ Property.create!("mtu", mtu)(),
+    __gshared Property[6] Properties = [ Property.create!("pvid", pvid)(),
+                                         Property.create!("mtu", mtu)(),
                                          Property.create!("actual-mtu", actual_mtu)(),
                                          Property.create!("l2mtu", l2mtu)(),
                                          Property.create!("max-l2mtu", max_l2mtu)(),
@@ -122,6 +126,17 @@ nothrow @nogc:
 
 
     // Properties...
+
+    final ushort pvid() const pure
+        => _pvid;
+    final const(char)[] pvid(ushort value) pure
+    {
+        if (value > 4094)
+            return "PVID must be in range 0-4094";
+        _pvid = value;
+        return null;
+    }
+
     final ushort mtu() const pure
         => _mtu;
     final void mtu(ushort value) pure
@@ -201,12 +216,12 @@ nothrow @nogc:
         if (!running)
             return false;
 
-        Packet p = Packet(message);
-        p.src = mac;
-        p.dst = dest;
-        p.vlan = 0; // TODO: if this is a vlan interface?
-        p.etherType = type;
-        p.etherSubType = subType;
+        Packet p;
+        p.init!Ethernet(message);
+        p.eth.src = mac;
+        p.eth.dst = dest;
+        p.eth.ether_type = type;
+        p.eth.ow_sub_type = subType;
         p.creationTime = getSysTime();
         return forward(p);
     }
@@ -251,7 +266,7 @@ nothrow @nogc:
     {
         import urt.endian;
 
-        bool isOW = packet.etherType == EtherType.OW;
+        bool isOW = packet.eth.ether_type == EtherType.OW;
 
         // write ethernet header...
         struct Header
@@ -262,17 +277,17 @@ nothrow @nogc:
             ubyte[2] subType;
         }
         Header h;
-        h.dst = packet.dst;
-        h.src = packet.src;
-        h.type = nativeToBigEndian(packet.etherType);
+        h.dst = packet.eth.dst;
+        h.src = packet.eth.src;
+        h.type = nativeToBigEndian(packet.eth.ether_type);
         if (isOW)
-            h.subType = nativeToBigEndian(packet.etherSubType);
+            h.subType = nativeToBigEndian(packet.eth.ow_sub_type);
         sink((cast(ubyte*)&h)[0 .. (isOW ? Header.sizeof : Header.subType.offsetof)]);
 
         // write packet data
         sink(packet.data);
 
-        if (isOW && packet.etherSubType == OW_SubType.Modbus)
+        if (isOW && packet.eth.ow_sub_type == OW_SubType.Modbus)
         {
             // wireshark wants RTU packets for its decoder, so we need to append the crc...
             import urt.crc;
@@ -293,6 +308,7 @@ nothrow @nogc:
 
 protected:
     Status _status;
+    ushort _pvid;
     ushort _mtu;        // 0 = auto
     ushort _l2mtu;
     ushort _max_l2mtu;  // 0 = unspecified/unknown
@@ -349,10 +365,10 @@ package:
         _status.recvBytes += packet.length;
 
         // check if we ever saw the sender before...
-        if (!packet.src.isMulticast)
+        if (!packet.eth.src.isMulticast)
         {
-            if (findMacAddress(packet.src) is null)
-                addAddress(packet.src, this);
+            if (findMacAddress(packet.eth.src) is null)
+                addAddress(packet.eth.src, this);
         }
 
         foreach (ref subscriber; subscribers[0..numSubscribers])

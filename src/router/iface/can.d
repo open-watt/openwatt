@@ -216,10 +216,10 @@ nothrow @nogc:
         }
     }
 
-    protected override bool transmit(ref const Packet packet) nothrow @nogc
+    protected override bool transmit(ref const Packet packet)
     {
         // can only handle can packets
-        if (packet.etherType != EtherType.OW || packet.etherSubType != OW_SubType.CAN)
+        if (packet.eth.ether_type != EtherType.OW || packet.eth.ow_sub_type != OW_SubType.CAN)
         {
             ++_status.sendDropped;
             return false;
@@ -326,14 +326,16 @@ private:
         packet[0 .. 4] = nativeToBigEndian(frame.id | ((frame.control & 0xC0) << 24));
         packet[4 .. 4 + frame.data.length] = frame.data[];
 
-        Packet p = Packet(packet[0 .. 4 + frame.data.length]);
+        Packet p;
+        p.init!Ethernet(packet[0 .. 4 + frame.data.length]);
         p.creationTime = recvTime;
-        p.etherType = EtherType.OW;
-        p.etherSubType = OW_SubType.CAN;
+        p.vlan = _pvid;
+        p.eth.ether_type = EtherType.OW;
+        p.eth.ow_sub_type = OW_SubType.CAN;
 
         // all CAN messages are broadcasts...
-        p.dst = MACAddress.broadcast;
-        p.src = mac; // TODO: feels a bit odd, since it didn't come from us; but we don't want switches sending it back to us...
+        p.eth.dst = MACAddress.broadcast;
+        p.eth.src = mac; // TODO: feels a bit odd, since it didn't come from us; but we don't want switches sending it back to us...
 
         dispatch(p);
     }
