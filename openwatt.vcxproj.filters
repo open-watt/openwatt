@@ -153,9 +153,6 @@
     <DCompile Include="src\manager\element.d">
       <Filter>src\manager</Filter>
     </DCompile>
-    <DCompile Include="src\manager\units.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
     <DCompile Include="src\manager\component.d">
       <Filter>src\manager</Filter>
     </DCompile>
@@ -167,9 +164,6 @@
     </DCompile>
     <DCompile Include="src\router\modbus\profile\goodwe_inverter.d">
       <Filter>src\router\modbus\profile</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\value.d">
-      <Filter>src\manager</Filter>
     </DCompile>
     <DCompile Include="src\manager\config.d">
       <Filter>src\manager</Filter>
@@ -359,9 +353,6 @@
     </DCompile>
     <DCompile Include="src\apps\energy\package.d">
       <Filter>src\apps\energy</Filter>
-    </DCompile>
-    <DCompile Include="src\urt\system.d">
-      <Filter>src\urt</Filter>
     </DCompile>
     <DCompile Include="src\manager\pcap.d">
       <Filter>src\manager</Filter>
