@@ -120,10 +120,10 @@ protected:
         // TODO: should we check and strip a vlan tag?
         ushort srcVlan = 0;
 
-        if (!packet.src.isMulticast)
-            macTable.insert(packet.src, srcPort, srcVlan);
+        if (!packet.eth.src.isMulticast)
+            macTable.insert(packet.eth.src, srcPort, srcVlan);
 
-        if (packet.dst == mac)
+        if (packet.eth.dst == mac)
         {
             // we're the destination!
             // we don't need to forward it, just deliver it to the upper layer...
@@ -137,13 +137,13 @@ protected:
             {
                 ubyte dstPort;
                 ushort dstVlan;
-                if (macTable.get(packet.dst, dstPort, dstVlan))
+                if (macTable.get(packet.eth.dst, dstPort, dstVlan))
                 {
                     if (dstPort != srcPort)
-                        writeDebug(name, ": forward: ", srcInterface.name, "(", packet.src, ") -> ", members[dstPort].name, "(", packet.dst, ") [", packet.data, "]");
+                        writeDebug(name, ": forward: ", srcInterface.name, "(", packet.eth.src, ") -> ", members[dstPort].name, "(", packet.eth.dst, ") [", packet.data, "]");
                 }
                 else
-                    writeDebug(name, ": broadcast: ", srcInterface.name, "(", packet.src, ") -> * [", packet.data, "]");
+                    writeDebug(name, ": broadcast: ", srcInterface.name, "(", packet.eth.src, ") -> * [", packet.data, "]");
             }
         }
     }
@@ -153,11 +153,11 @@ protected:
         if (!running)
             return;
 
-        if (!packet.dst.isMulticast)
+        if (!packet.eth.dst.isMulticast)
         {
             ubyte dstPort;
             ushort dstVlan;
-            if (macTable.get(packet.dst, dstPort, dstVlan))
+            if (macTable.get(packet.eth.dst, dstPort, dstVlan))
             {
                 // TODO: what should we do about the vlan thing?
 

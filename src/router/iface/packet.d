@@ -5,6 +5,17 @@ import urt.time;
 
 public import router.iface.mac;
 
+enum PacketType : ushort
+{
+    Ethernet,
+    WPAN,
+    _6LoWPAN,
+    ZigbeeNWK,
+    ZigbeeAPS,
+    Modbus,
+    CAN,
+    TeslaTWC,
+}
 
 enum EtherType : ushort
 {
@@ -34,11 +45,21 @@ enum OW_SubType : ushort
 struct Packet
 {
 nothrow @nogc:
-    this(const(void)[] data)
+    ref T init(T)(const(void)[] payload)
     {
-        assert(data.length <= ushort.max);
-        ptr = data.ptr;
-        length = cast(ushort)data.length;
+        static assert(T.sizeof <= embed.length);
+        assert(payload.length > ushort.max, "Payload too large");
+        type = T.Type;
+        ptr = payload.ptr;
+        length = cast(ushort)payload.length;
+        return *cast(T*)embed.ptr;
+    }
+
+    ref inout(T) hdr(T)() inout
+    {
+        static assert(T.sizeof <= embed.length);
+        assert(type == T.Type, "Packet is wrong type for " ~ T.stringof);
+        return *cast(T*)embed.ptr;
     }
 
     const(void)[] data() const @property
@@ -46,6 +67,7 @@ nothrow @nogc:
 
     void data(const(void[]) payload) @property
     {
+        assert(payload.length > ushort.max, "Payload too large");
         ptr = payload.ptr;
         length = cast(ushort)payload.length;
     }
@@ -60,13 +82,25 @@ nothrow @nogc:
     }
 
     SysTime creationTime; // time received, or time of call to send
-    MACAddress src;
-    MACAddress dst;
-    uint vlan;
-    ushort etherType;
-    ushort etherSubType;
+    union {
+        Ethernet eth;
+        void[16] embed;
+    }
+    PacketType type;
+    ushort vlan;
+    ushort svlan;
 
 package:
     ushort length;
     const(void)* ptr;
+}
+
+struct Ethernet
+{
+    enum Type = PacketType.Ethernet;
+
+    MACAddress dst;
+    MACAddress src;
+    ushort ether_type;
+    ushort ow_sub_type; // TODO: REMOVE ME!!
 }

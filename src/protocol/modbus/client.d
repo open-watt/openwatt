@@ -155,7 +155,7 @@ private:
         ModbusFrameType type = cast(ModbusFrameType)message[2];
         ubyte address = message[3];
 
-        if (type == ModbusFrameType.Request && (p.dst == iface.mac || p.dst.isBroadcast))
+        if (type == ModbusFrameType.Request && (p.eth.dst == iface.mac || p.eth.dst.isBroadcast))
         {
             // check that we're accepting requests...
             if (!requestHandler)
@@ -163,13 +163,13 @@ private:
 
             // it's a request for us...
             ModbusPDU request = ModbusPDU(cast(FunctionCode)message[4], message[5 .. $]);
-            requestHandler(p.src, seq, request, p.creationTime);
+            requestHandler(p.eth.src, seq, request, p.creationTime);
         }
         else if (!snooping)
         {
             foreach (i, ref PendingRequest req; pending)
             {
-                if (p.src != req.server)
+                if (p.eth.src != req.server)
                     continue;
                 if (seq != req.sequenceNumber)
                     continue;
@@ -193,7 +193,7 @@ private:
                 pending[0].requestTime = p.creationTime;
                 pending[0].request = ModbusPDU(cast(FunctionCode)message[4], message[5 .. $]);
                 pending[0].sequenceNumber = seq;
-                pending[0].server = p.dst;
+                pending[0].server = p.eth.dst;
             }
             else
             {
@@ -201,7 +201,7 @@ private:
                     return;
 
                 ModbusPDU response = ModbusPDU(cast(FunctionCode)message[4], message[5 .. $]);
-                snoopHandler(p.src, pending[0].request, response, pending[0].requestTime, p.creationTime);
+                snoopHandler(p.eth.src, pending[0].request, response, pending[0].requestTime, p.creationTime);
             }
         }
     }

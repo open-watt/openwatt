@@ -140,7 +140,7 @@ nothrow @nogc:
 
     protected override bool transmit(ref const Packet packet) nothrow @nogc
     {
-        if (packet.etherType != EtherType.OW || packet.etherSubType != OW_SubType.TeslaTWC)
+        if (packet.eth.ether_type != EtherType.OW || packet.eth.ow_sub_type != OW_SubType.TeslaTWC)
         {
             ++_status.sendDropped;
             return false;
@@ -208,20 +208,22 @@ private:
         if (!r)
             return;
 
-        Packet p = Packet(msg);
+        Packet p;
+        p.init!Ethernet(msg);
         p.creationTime = recvTime;
-        p.etherType = EtherType.OW;
-        p.etherSubType = OW_SubType.TeslaTWC;
+        p.vlan = _pvid;
+        p.eth.ether_type = EtherType.OW;
+        p.eth.ow_sub_type = OW_SubType.TeslaTWC;
 
         auto mod_tesla = getModule!TeslaInterfaceModule();
 
         DeviceMap* map = mod_tesla.findServerByAddress(message.sender);
         if (!map)
             map = mod_tesla.addDevice(null, this, message.sender);
-        p.src = map.mac;
+        p.eth.src = map.mac;
 
         if (!message.receiver)
-            p.dst = MACAddress.broadcast;
+            p.eth.dst = MACAddress.broadcast;
         else
         {
             // find receiver... do we have a global device registry?
@@ -231,10 +233,10 @@ private:
                 // we haven't seen the other guy, so we can't assign a dst address
                 return;
             }
-            p.dst = map.mac;
+            p.eth.dst = map.mac;
         }
 
-        if (p.dst)
+        if (p.eth.dst)
             dispatch(p);
     }
 }
