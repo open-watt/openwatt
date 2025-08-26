@@ -144,6 +144,7 @@
     <DCompile Include="third_party\urt\src\urt\compiler.d" />
     <DCompile Include="third_party\urt\src\urt\conv.d" />
     <DCompile Include="third_party\urt\src\urt\crc.d" />
+    <DCompile Include="third_party\urt\src\urt\crypto\chacha.d" />
     <DCompile Include="third_party\urt\src\urt\dbg.d" />
     <DCompile Include="third_party\urt\src\urt\digest\md5.d" />
     <DCompile Include="third_party\urt\src\urt\digest\sha.d" />
