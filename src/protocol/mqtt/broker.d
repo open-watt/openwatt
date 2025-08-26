@@ -1,24 +1,45 @@
 module protocol.mqtt.broker;
 
+import urt.array;
+import urt.lifetime;
+import urt.log;
+import urt.map;
+import urt.mem.allocator;
 import urt.string;
 import urt.time;
 
+import manager;
+import manager.base;
+
 import protocol.mqtt.client;
 
-import router.stream;
 import router.stream.tcp;
+
+nothrow @nogc:
 
 
 struct MQTTClientCredentials
 {
-    string username;
-    string password;
-    string[] whitelist;
-    string[] blacklist;
+    this(this) @disable;
+
+    String username;
+    String password;
+    Array!String whitelist;
+    Array!String blacklist;
 }
 
 struct MQTTBrokerOptions
 {
+nothrow @nogc:
+    this(this) @disable;
+    this(ref MQTTBrokerOptions rh)
+    {
+        this.port = rh.port;
+        this.flags = rh.flags;
+        this.clientCredentials = rh.clientCredentials;
+        this.clientTimeoutOverride = rh.clientTimeoutOverride;
+    }
+
     enum Flags
     {
         None = 0,
@@ -27,32 +48,34 @@ struct MQTTBrokerOptions
 
     ushort port = 1883;
     Flags flags = Flags.None;
-    MQTTClientCredentials[] clientCredentials;
+    Array!MQTTClientCredentials clientCredentials;
     uint clientTimeoutOverride = 0; // maximum time since last contact before client is presumed awol
 }
 
-struct Session
+struct MQTTSession
 {
+    this(this) @disable;
+
     struct Subscription
     {
-        string topic;
+        String topic;
         ubyte options;
     }
 
-    string identifier;
+    String identifier;
     Client* client;
 
     uint sessionExpiryInterval = 0;
 
     MonoTime closeTime;
 
-    Subscription[] subs;
-    Subscription*[string] subsByFilter;
+    Array!Subscription subs;
+    Map!(const(char)[], Subscription*) subsByFilter;
 
     // last will and testament
-    string willTopic;
-    immutable(ubyte)[] willMessage;
-    immutable(ubyte)[] willProps;
+    String willTopic;
+    Array!ubyte willMessage;
+    Array!ubyte willProps;
     uint willDelay;
     ubyte willFlags;
     bool willSent;
@@ -64,70 +87,94 @@ struct Session
     ubyte[] pendingMessages;
 }
 
-class MQTTBroker
+class MQTTBroker : BaseObject
 {
-    const MQTTBrokerOptions options;
+    __gshared Property[3] Properties = [ Property.create!("port", port)(),
+                                         Property.create!("allow-anonymous", allow_anonymous)(),
+                                         Property.create!("client-timeout", _client_timeout)() ];
+nothrow @nogc:
 
-//    TCPServer server;
-    Stream[] newConnections;
-    Client[] clients;
-    Session[string] sessions;
+    alias TypeName = StringLit!"mqqt-broker";
 
-    // local subs
-    // network subs
-
-    // retained values
-    struct Value
+    this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        Value[string] children;
-        immutable(ubyte)[] data;
-        immutable(ubyte)[] properties;
-        ubyte flags;
-    }
-    Value root;
-
-    this(ref MQTTBrokerOptions options = MQTTBrokerOptions())
-    {
-        this.options = options;
-//        server = new TCPServer(options.port, &newConnection, cast(void*)this);
+        super(collectionTypeInfo!MQTTBroker, name.move, flags);
     }
 
-    void start()
+    // Properties...
+    ushort port() const pure
+        => _port;
+    void port(ushort value)
     {
-//        server.start();
-    }
-
-    void stop()
-    {
-//        server.stop();
-    }
-
-    void update()
-    {
-        while (!newConnections.empty)
+        _port = value ? value : 1883;
+        if (_server)
         {
-            clients ~= Client(this, newConnections[0]);
-            newConnections = newConnections[1 .. $];
+            // TODO: this will cause a restart of the server, we need to check this doesn't cascade a reset of the whole broker...
+            _server.port = _port;
+        }
+    }
+
+    bool allow_anonymous() const pure
+        => (_flags & MQTTBrokerOptions.Flags.AllowAnonymousLogin) != 0;
+    void allow_anonymous(bool value)
+    {
+        _flags = cast(MQTTBrokerOptions.Flags)((_flags & ~MQTTBrokerOptions.Flags.AllowAnonymousLogin) | (value ? MQTTBrokerOptions.Flags.AllowAnonymousLogin : 0));
+    }
+
+    // API...
+
+    override bool validate() const pure
+        => true;
+
+    override CompletionStatus startup()
+    {
+        if (!_server)
+        {
+            _server = getModule!TCPStreamModule.tcp_servers.create(name, ObjectFlags.Dynamic);
+            _server.port = _port ? _port : 1883;
+            _server.setConnectionCallback(&newConnection, null);
         }
 
-        // update clients
-        for (size_t i = 0; i < clients.length; ++i)
+        if (_server.running)
         {
-            if (!clients[i].update())
+            writeInfo("MQTT broker listening on port ", _server.port);
+            return CompletionStatus.Complete;
+        }
+        return CompletionStatus.Continue;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        if (_server)
+        {
+            _server.destroy();
+            _server = null;
+        }
+        return CompletionStatus.Complete;
+    }
+
+    override void update()
+    {
+        _server.update();
+
+        // update clients
+        for (size_t i = 0; i < _clients.length; )
+        {
+            if (!_clients[i].update())
             {
                 // destroy client...
-                clients[i].terminate();
-                for (size_t j = i + 1; j < clients.length; ++j)
-                    clients[j - 1] = clients[j];
-                --clients.length;
+                _clients[i].terminate();
+                _clients.removeSwapLast(i);
             }
+            else
+                ++i;
         }
 
         // update sessions
         MonoTime now = getTime();
-        string[16] itemsToRemove;
+        const(char)[][16] itemsToRemove;
         size_t numItemsToRemove = 0;
-        foreach (ref session; sessions)
+        foreach (ref session; sessions.values)
         {
             if (session.client)
                 continue;
@@ -155,13 +202,13 @@ class MQTTBroker
             const(char)[] level = topic.split!'/'(sep);
             Value* child = level in val.children;
             if (!child)
-                child = &(val.children[level.idup] = Value());
+                child = val.children.insert(level.makeString(defaultAllocator()), Value());
             if (sep == 0)
                 return child;
             return getRecord(child, topic);
         }
 
-        void deleteRecord(Value* val, const(char)[] topic)
+        void deleteRecord(Value* val, const(char)[] topic) nothrow @nogc
         {
             char sep;
             const(char)[] level = topic.split!'/'(sep);
@@ -171,7 +218,7 @@ class MQTTBroker
             else if(child)
                 deleteRecord(child, topic);
             if (child.children.empty)
-                val.children.remove(level.idup); // TODO: chech why this idup? seems unnecessary!
+                val.children.remove(level);
         }
 
         // retain message and/or push to subscribers...
@@ -190,8 +237,11 @@ class MQTTBroker
             Value* value = getRecord(&root, topic);
             if (value)
             {
-                value.data = payload.idup;
-                value.properties = properties ? properties.idup : null;
+                value.data = payload[];
+                if (properties)
+                    value.properties = properties[];
+                else
+                    value.properties = null;
                 value.flags = flags;
             }
         }
@@ -207,7 +257,7 @@ class MQTTBroker
     }
 
 package:
-    void destroySession(ref Session session)
+    void destroySession(ref MQTTSession session)
     {
         sendLWT(session);
 
@@ -222,18 +272,43 @@ package:
         session.packetId = 1;
     }
 
-    void sendLWT(ref Session session)
+    void sendLWT(ref MQTTSession session)
     {
         if (!session.willTopic || session.willSent)
             return;
-        publish(session.identifier, session.willFlags, session.willTopic, session.willMessage, session.willProps);
+        publish(session.identifier, session.willFlags, session.willTopic, session.willMessage[], session.willProps[]);
         session.willSent = true;
     }
 
+    Map!(const(char)[], MQTTSession) sessions;
+
 private:
-    static void newConnection(TCPStream client, void* userData)
+    TCPServer _server;
+    ushort _port = 1883;
+    MQTTBrokerOptions.Flags _flags;
+    Duration _client_timeout;
+
+//    const MQTTBrokerOptions options; // TODO: reinstate options!
+
+    Array!Client _clients;
+
+    // local subs
+    // network subs
+
+    // retained values
+    struct Value
     {
-        MQTTBroker _this = cast(MQTTBroker)userData;
-        _this.newConnections ~= client;
+        Map!(String, Value) children;
+        Array!ubyte data;
+        Array!ubyte properties;
+        ubyte flags;
+    }
+    Value root;
+
+    void newConnection(TCPStream client, void* userData)
+    {
+        _clients ~= Client(this, client);
+
+        writeInfo("MQTT client connected: ", client.remoteName());
     }
 }
