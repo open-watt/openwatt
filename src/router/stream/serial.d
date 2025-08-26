@@ -17,8 +17,6 @@ public import router.stream;
 version (Windows)
 {
     import core.sys.windows.windows;
-    import std.conv : to;
-    import std.string : toStringz;
 }
 else version(Posix)
 {
@@ -27,7 +25,6 @@ else version(Posix)
     import core.sys.posix.unistd;
     import core.sys.posix.fcntl;
     import core.sys.posix.sys.types;
-    import std.string : toStringz;
 }
 else
     static assert(false, "Unsupported platform!");

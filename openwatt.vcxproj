@@ -137,7 +137,6 @@
     <DCompile Include="src\router\stream\serial.d" />
     <DCompile Include="src\router\stream\tcp.d" />
     <DCompile Include="src\router\stream\udp.d" />
-    <DCompile Include="src\router\tesla\twc.d" />
     <DCompile Include="third_party\urt\src\urt\algorithm.d" />
     <DCompile Include="third_party\urt\src\urt\array.d" />
     <DCompile Include="third_party\urt\src\urt\async.d" />
