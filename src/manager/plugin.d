@@ -73,8 +73,10 @@ void registerModules(Application app)
     registerModule!(router.iface)(app);
     registerModule!(router.iface.bridge)(app);
     registerModule!(router.iface.can)(app);
+    registerModule!(router.iface.ethernet)(app);
     registerModule!(router.iface.modbus)(app);
     registerModule!(router.iface.tesla)(app);
+    registerModule!(router.iface.wpan)(app);
     registerModule!(router.iface.zigbee)(app);
 
     import protocol;

@@ -117,11 +117,13 @@
     <DCompile Include="src\router\goodwe\package.d" />
     <DCompile Include="src\router\iface\bridge.d" />
     <DCompile Include="src\router\iface\can.d" />
+    <DCompile Include="src\router\iface\ethernet.d" />
     <DCompile Include="src\router\iface\mac.d" />
     <DCompile Include="src\router\iface\modbus.d" />
     <DCompile Include="src\router\iface\package.d" />
     <DCompile Include="src\router\iface\packet.d" />
     <DCompile Include="src\router\iface\tesla.d" />
+    <DCompile Include="src\router\iface\wpan.d" />
     <DCompile Include="src\router\iface\zigbee.d" />
     <DCompile Include="src\router\modbus\coding.d" />
     <DCompile Include="src\router\modbus\message.d" />

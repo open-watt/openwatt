@@ -28,6 +28,7 @@ enum OW_SubType : ushort
     CAN                 = 0x0020,   // CAN bus
     Zigbee              = 0x0030,   // zigbee
     TeslaTWC            = 0x0040,   // tesla-twc
+    WPAN                = 0x0050,   // 802.15.4 MAC layer (WPAN)
 }
 
 

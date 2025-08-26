@@ -20,8 +20,10 @@ public import router.status;
 // package modules...
 public static import router.iface.bridge;
 public static import router.iface.can;
+public static import router.iface.ethernet;
 public static import router.iface.modbus;
 public static import router.iface.tesla;
+public static import router.iface.wpan;
 public static import router.iface.zigbee;
 
 nothrow @nogc:
