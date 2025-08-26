@@ -43,7 +43,6 @@ struct ModbusMessageData
                 {
                     result ~= tformat("{0}Values: {1}", result ? "\n  " : "", rw.values[]);
 
-//                    import std.algorithm, std.range;
 //                    result ~= format("\n  hex: %s", rw.values[].map!(i => format("%04x ", i)).fold!((x, y) => x ~ y));
 //                    uint[] leInts, beInts;
 //                    float[] leFloats, beFloats;

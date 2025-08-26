@@ -1,7 +1,6 @@
 module protocol.mqtt.client;
 
-import std.range : empty;
-
+import urt.array : empty;
 import urt.log;
 import urt.time;
 

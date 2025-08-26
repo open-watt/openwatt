@@ -1,9 +1,5 @@
 module protocol.mqtt.broker;
 
-import core.sync.mutex;
-
-import std.range : empty;
-
 import urt.string;
 import urt.time;
 
@@ -76,7 +72,6 @@ class MQTTBroker
     Stream[] newConnections;
     Client[] clients;
     Session[string] sessions;
-    Mutex mutex;
 
     // local subs
     // network subs
@@ -94,7 +89,6 @@ class MQTTBroker
     this(ref MQTTBrokerOptions options = MQTTBrokerOptions())
     {
         this.options = options;
-        mutex = new Mutex;
 //        server = new TCPServer(options.port, &newConnection, cast(void*)this);
     }
 
@@ -110,13 +104,11 @@ class MQTTBroker
 
     void update()
     {
-        mutex.lock();
         while (!newConnections.empty)
         {
             clients ~= Client(this, newConnections[0]);
             newConnections = newConnections[1 .. $];
         }
-        mutex.unlock();
 
         // update clients
         for (size_t i = 0; i < clients.length; ++i)
@@ -242,9 +234,6 @@ private:
     static void newConnection(TCPStream client, void* userData)
     {
         MQTTBroker _this = cast(MQTTBroker)userData;
-
-        _this.mutex.lock();
         _this.newConnections ~= client;
-        _this.mutex.unlock();
     }
 }

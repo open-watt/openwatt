@@ -1,7 +1,5 @@
 module router.goodwe.aa55;
 
-import std.socket;
-
 import router.stream.udp;
 
 import urt.log;
@@ -282,7 +280,6 @@ class GoodWeResponse : Response
 {
     override KVP[string] values()
     {
-        import std.string : stripRight;
         import manager.units;
         import router.modbus.coding;
 

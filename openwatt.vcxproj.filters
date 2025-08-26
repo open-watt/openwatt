@@ -31,9 +31,6 @@
     <Filter Include="src\router\goodwe">
       <UniqueIdentifier>{a67ded80-224a-4703-a3a0-d4df1bb6a2a6}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\router\tesla">
-      <UniqueIdentifier>{9e30a0ce-3be3-4c81-822d-c1b59d0af556}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\manager\console">
       <UniqueIdentifier>{5b7f73d6-de14-482f-86a8-89a77e2af436}</UniqueIdentifier>
     </Filter>
@@ -194,9 +191,6 @@
     </DCompile>
     <DCompile Include="src\router\goodwe\package.d">
       <Filter>src\router\goodwe</Filter>
-    </DCompile>
-    <DCompile Include="src\router\tesla\twc.d">
-      <Filter>src\router\tesla</Filter>
     </DCompile>
     <DCompile Include="src\router\stream\bridge.d">
       <Filter>src\router\stream</Filter>
