@@ -75,7 +75,6 @@ void registerModules(Application app)
     registerModule!(router.iface.can)(app);
     registerModule!(router.iface.modbus)(app);
     registerModule!(router.iface.tesla)(app);
-    registerModule!(router.iface.zigbee)(app);
 
     import protocol;
     registerModule!(protocol.dns)(app);
