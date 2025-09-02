@@ -10,6 +10,7 @@ import urt.traits;
 import urt.variant;
 
 import manager;
+import manager.collection;
 
 // these are used by the conversion functions...
 import manager.base : BaseObject;
@@ -196,22 +197,32 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
 const(char[]) convertVariant(U)(ref const Variant v, out U[] r) nothrow @nogc
     if (!is_some_char!U)
 {
-    const(Variant)[] arr;
-    if (v.isArray)
-        arr = v.asArray()[];
-    else if (v.isString)
-        assert(false, "TODO: split on ',' and re-tokenise all the elements...");
-    else
-        return "Invalid array";
-
-    r = tempAllocator().allocArray!U(arr.length);
-    foreach (i, ref e; arr)
+    static if (is(U == const V, V))
     {
-        const(char[]) error = convertVariant(e, r[i]);
-        if (error)
-            return error;
+        V[] tmp;
+        const(char[]) err = v.convertVariant(tmp);
+        r = tmp;
+        return err;
     }
-    return null;
+    else
+    {
+        const(Variant)[] arr;
+        if (v.isArray)
+            arr = v.asArray()[];
+        else if (v.isString)
+            assert(false, "TODO: split on ',' and re-tokenise all the elements...");
+        else
+            return "Invalid array";
+
+        r = tempAllocator().allocArray!U(arr.length);
+        foreach (i, ref e; arr)
+        {
+            const(char[]) error = convertVariant(e, r[i]);
+            if (error)
+                return error;
+        }
+        return null;
+    }
 }
 
 const(char[]) convertVariant(U, size_t N)(ref const Variant v, out U[N] r) nothrow @nogc
@@ -237,19 +248,54 @@ const(char[]) convertVariant(T : Nullable!U, U)(ref const Variant v, out T r) no
 }
 
 const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
-//    if (ValidUserType!T && !is(T : const(BaseObject)))
-    // TODO: DELETE THIS LINE, USE THE ONE ABOVE WHEN STREAM AND INTERFACE ARE MIGRATED TO COLLECTIONS...
-    if (ValidUserType!T && !is(T : const BaseObject) && !is(T : const Stream) && !is(T : const BaseInterface))
+    if (ValidUserType!(Unqual!T) && !is(T : const BaseObject))
 {
-    if (v.isUser!T)
-        r = v.asUser!T;
+    alias Type = Unqual!T;
+
+    if (v.isUser!Type)
+    {
+        static if (is(T == class) && !is(T == const Type))
+        {
+            assert(false, "TODO: can we get a mutable reference to this class from a const Variant?");
+//            r = v.asUser!T;
+        }
+        else
+            r = v.asUser!T;
+    }
     else if (v.isString)
     {
-        const(char)[] s = v.asString;
-        return r.fromString(s) == s.length ? null : tconcat("Couldn't parse `" ~ T.stringof ~ "` from string: ", v);
+        static if (__traits(compiles, { r.fromString(s); }))
+        {
+            const(char)[] s = v.asString;
+            return r.fromString(s) == s.length ? null : tconcat("Couldn't parse `" ~ Type.stringof ~ "` from string: ", v);
+        }
+        else
+            return Type.stringof ~ " must implement fromString";
     }
     else
         return "Invalid value";
+    return null;
+}
+
+const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
+    if (ValidUserType!(Unqual!T) && is(T : const BaseObject) && !is(T : const BaseInterface) && !is(T : const Stream))
+{
+    const(char)[] n;
+    if (v.isUser!T)
+        n = v.asUser!T.name;
+    else if (v.isString)
+        n = v.asString;
+    else
+        return "Invalid value";
+
+    alias Type = Unqual!T;
+    Collection!Type* collection = collectionFor!Type();
+    assert(collection !is null, "No collection for " ~ Type.stringof);
+
+    T* item = collection.exists(n);
+    if (item is null)
+        return tconcat("Item does not exist: ", n);
+    r = *item;
     return null;
 }
 
@@ -275,33 +321,41 @@ const(char[]) convertVariant(I)(ref const Variant v, out I r) nothrow @nogc
     if (is(I : const BaseInterface))
 {
     // TODO: parse as mac address...?
-    if (!v.isString)
+    const(char)[] n;
+    if (v.isUser!BaseInterface)
+        n = v.asUser!BaseInterface.name;
+    else if (v.isString)
+        n = v.asString;
+    else
         return "Invalid interface value";
-    const(char)[] s = v.asString;
-    if (BaseInterface i = getModule!InterfaceModule.interfaces.get(s))
+    if (BaseInterface i = getModule!InterfaceModule.interfaces.get(n))
     {
         r = cast(I)i;
         static if (!is(Unqual!I == BaseInterface))
             if (!r)
                 return tconcat("Requires ", I.TypeName, " interface, but ", i.name[], " is ", i.type[]);
     }
-    return r ? null : tconcat("Interface does not exist: ", s);
+    return r ? null : tconcat("Interface does not exist: ", n);
 }
 
 const(char[]) convertVariant(S)(ref const Variant v, out S r) nothrow @nogc
     if (is(S : const Stream))
 {
-    if (!v.isString)
+    const(char)[] n;
+    if (v.isUser!Stream)
+        n = v.asUser!Stream.name;
+    else if (v.isString)
+        n = v.asString;
+    else
         return "Invalid stream value";
-    const(char)[] s = v.asString;
-    if (Stream stream = getModule!StreamModule.streams.get(s))
+    if (Stream stream = getModule!StreamModule.streams.get(n))
     {
         r = cast(S)stream;
         static if (!is(Unqual!S == Stream))
             if (!r)
-                return tconcat("Requires ", S.TypeName, " stream, but ", s, " is ", stream.type[]);
+                return tconcat("Requires ", S.TypeName, " stream, but ", n, " is ", stream.type[]);
     }
-    return r ? null : tconcat("Stream does not exist: ", s);
+    return r ? null : tconcat("Stream does not exist: ", n);
 }
 
 
