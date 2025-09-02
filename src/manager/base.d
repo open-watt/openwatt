@@ -665,10 +665,10 @@ const(char)[] SynthSetter(Setters...)(ref const Variant value, BaseObject item) 
         if (!error)
         {
             static if (is(ReturnType!Setter : const(char)[]))
-                return __traits(child, instance, Setter)(arg);
+                return __traits(child, instance, Setter)(arg.move);
             else
             {
-                __traits(child, instance, Setter)(arg);
+                __traits(child, instance, Setter)(arg.move);
                 return null;
             }
         }
