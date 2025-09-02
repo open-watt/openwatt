@@ -7,6 +7,7 @@ public import router.iface.mac;
 
 enum PacketType : ushort
 {
+    Unknown,
     Ethernet,
     WPAN,
     _6LoWPAN,
@@ -37,7 +38,9 @@ enum OW_SubType : ushort
     AgentDiscover       = 0x0001,   // probably need some way to find peers on the network?
     Modbus              = 0x0010,   // modbus
     CAN                 = 0x0020,   // CAN bus
-    Zigbee              = 0x0030,   // zigbee
+    MAC_802_15_4        = 0x0030,   // 802.15.4 MAC encapsulation
+    ZigbeeNWK           = 0x0031,   // zigbee NWK frame
+    ZigbeeAPS           = 0x0032,   // zigbee APS frame
     TeslaTWC            = 0x0040,   // tesla-twc
 }
 
@@ -48,7 +51,8 @@ nothrow @nogc:
     ref T init(T)(const(void)[] payload)
     {
         static assert(T.sizeof <= embed.length);
-        assert(payload.length > ushort.max, "Payload too large");
+        assert(payload.length <= ushort.max, "Payload too large");
+        creationTime = getSysTime();
         type = T.Type;
         ptr = payload.ptr;
         length = cast(ushort)payload.length;
@@ -59,7 +63,7 @@ nothrow @nogc:
     {
         static assert(T.sizeof <= embed.length);
         assert(type == T.Type, "Packet is wrong type for " ~ T.stringof);
-        return *cast(T*)embed.ptr;
+        return *cast(inout(T)*)embed.ptr;
     }
 
     const(void)[] data() const @property
@@ -67,7 +71,7 @@ nothrow @nogc:
 
     void data(const(void[]) payload) @property
     {
-        assert(payload.length > ushort.max, "Payload too large");
+        assert(payload.length <= ushort.max, "Payload too large");
         ptr = payload.ptr;
         length = cast(ushort)payload.length;
     }
@@ -84,7 +88,7 @@ nothrow @nogc:
     SysTime creationTime; // time received, or time of call to send
     union {
         Ethernet eth;
-        void[16] embed;
+        void[24] embed;
     }
     PacketType type;
     ushort vlan;

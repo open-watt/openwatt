@@ -33,7 +33,7 @@ nothrow @nogc:
             _interface.unsubscribe(&incomingPacket);
         _interface = value;
         if (_interface)
-            _interface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.OW, owSubType: OW_SubType.Zigbee));
+            _interface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.OW, owSubType: OW_SubType.ZigbeeAPS));
     }
 
 
