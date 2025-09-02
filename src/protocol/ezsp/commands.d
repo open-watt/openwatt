@@ -595,7 +595,9 @@ enum EmberCounterType : ubyte {
     PTA_HI_PRI_DENIED = 37, // The number of high priority packet traffic arbitration requests denied.
     PTA_LO_PRI_TX_ABORTED = 38, // The number of aborted low priority packet traffic arbitration transmissions.
     PTA_HI_PRI_TX_ABORTED = 39, // The number of aborted high priority packet traffic arbitration transmissions.
-    TYPE_COUNT = 40, // A placeholder giving the number of Ember counter types.
+    ADDRESS_CONFLICT_SENT = 40,
+//    CSL_RX_SCHEDULE_FAILED = 41,
+    TYPE_COUNT = 41, // A placeholder giving the number of Ember counter types.
 }
 
 // The type of method used for joining.
@@ -1126,10 +1128,7 @@ struct EmberChildData {
     ubyte phy; // The phy of the child
     ubyte power; // The power of the child
     ubyte timeout; // The timeout of the child
-    EmberEUI64 gpdIeeeAddress; // The GPD's EUI64.
-    uint sourceId; // The GPD's source ID.
-    ubyte applicationId; // The GPD Application ID.
-    ubyte endpoint; // The GPD endpoint
+    uint remainingTimeout; // The remaining timeout of the child in seconds
 }
 
 // A 128-bit
@@ -2550,8 +2549,7 @@ struct EZSP_ProxyBroadcast {
         EmberApsFrame apsFrame; // The APS frame for the message.
         ubyte radius; // The message will be delivered to all nodes within radius hops of the sender. A radius of zero is converted to EMBER_MAX_HOPS.
         ubyte messageTag; // A value chosen by the Host. This value is used in the ezspMessageSentHandler response to refer to this message.
-        ubyte messageLength; // The length of the messageContents parameter in bytes.
-        ubyte[] messageContents; // The broadcast message.
+        const(ubyte)[] messageContents; // The broadcast message.
     }
     struct Response {
         EmberStatus status; // An EmberStatus value indicating success or the reason for failure.
@@ -2567,8 +2565,7 @@ struct EZSP_SendMulticast {
         ubyte hops; // The message will be delivered to all nodes within this number of hops of the sender. A value of zero is converted to EMBER_MAX_HOPS.
         ubyte nonmemberRadius; // The number of hops that the message will be forwarded by devices that are not members of the group. A value of 7 or greater is treated as infinite.
         ubyte messageTag; // A value chosen by the Host. This value is used in the ezspMessageSentHandler response to refer to this message.
-        ubyte messageLength; // The length of the messageContents parameter in bytes.
-        ubyte[] messageContents; // The multicast message.
+        const(ubyte)[] messageContents; // The multicast message.
     }
     struct Response {
         EmberStatus status; // An EmberStatus value. For any result other than EMBER_SUCCESS, the message will not be sent. EMBER_SUCCESS - The message has been submitted for transmission. EMBER_INVALID_BINDING_INDEX - The bindingTableIndex refers to a non-multicast binding. EMBER_NETWORK_DOWN - The node is not part of a network. EMBER_MESSAGE_TOO_LONG - The message is too large to fit in a MAC layer frame. EMBER_NO_BUFFERS - The free packet buffer pool is empty. EMBER_NETWORK_BUSY - Insufficient resources available in Network or MAC layers to send message.
@@ -2586,8 +2583,7 @@ struct EZSP_SendMulticastWithAlias {
         ushort alias_; // The alias source address
         ubyte nwkSequence; // the alias sequence number
         ubyte messageTag; // A value chosen by the Host. This value is used in the ezspMessageSentHandler response to refer to this message.
-        ubyte messageLength; // The length of the messageContents parameter in bytes.
-        ubyte[] messageContents; // The multicast message.
+        const(ubyte)[] messageContents; // The multicast message.
     }
     struct Response {
         EmberStatus status; // An EmberStatus value. For any result other than EMBER_SUCCESS, the message will not be sent. EMBER_SUCCESS - The message has been submitted for transmission. EMBER_INVALID_BINDING_INDEX - The bindingTableIndex refers to a non-multicast binding. EMBER_NETWORK_DOWN - The node is not part of a network. EMBER_MESSAGE_TOO_LONG - The message is too large to fit in a MAC layer frame. EMBER_NO_BUFFERS - The free packet buffer pool is empty. EMBER_NETWORK_BUSY - Insufficient resources available in Network or MAC layers to send message.

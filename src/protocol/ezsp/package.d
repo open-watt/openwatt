@@ -39,7 +39,7 @@ nothrow @nogc:
 }
 
 
-size_t ezspSerialise(T)(ref T data, ubyte[] buffer)
+size_t ezsp_serialise(T)(ref T data, ubyte[] buffer)
 {
     static assert(!is(T == class) && !is(T == interface) && !is(T == U*, U), T.stringof ~ " is not POD");
 
@@ -70,7 +70,7 @@ size_t ezspSerialise(T)(ref T data, ubyte[] buffer)
             }
             else
             {
-                size_t len = ezspSerialise(members[i], buffer[bytes..$]);
+                size_t len = ezsp_serialise(members[i], buffer[bytes..$]);
                 if (len == 0)
                     return 0;
                 bytes += len;
@@ -107,7 +107,7 @@ size_t ezspSerialise(T)(ref T data, ubyte[] buffer)
     }
 }
 
-size_t ezspDeserialise(T)(const(ubyte)[] data, out T t)
+size_t ezsp_deserialise(T)(const(ubyte)[] data, out T t)
 {
     static assert(!is(T == class) && !is(T == interface) && !is(T == U*, U), T.stringof ~ " is not POD");
 
@@ -139,7 +139,7 @@ size_t ezspDeserialise(T)(const(ubyte)[] data, out T t)
             }
             else
             {
-                size_t took = data.ptr[offset..data.length].ezspDeserialise(tup[i]);
+                size_t took = data.ptr[offset..data.length].ezsp_deserialise(tup[i]);
                 if (took == 0)
                     return 0;
                 offset += took;
@@ -153,6 +153,15 @@ size_t ezspDeserialise(T)(const(ubyte)[] data, out T t)
             return 0;
         t = data.ptr[0 .. N];
         return N;
+    }
+    else static if (is(T == U[N], U, size_t N))
+    {
+        if (data.length < T.sizeof)
+            return 0;
+        const(ubyte)* p = data.ptr;
+        for (size_t i = 0; i < N; i++, p += U.sizeof)
+            t[i] = p[0..U.sizeof].littleEndianToNative!U;
+        return T.sizeof;
     }
     else static if (is(T : const(ubyte)[]))
     {

@@ -11,7 +11,7 @@ import router.stream;
 
 //version = DebugASHMessageFlow;
 
-alias ezspCRC = calculate_crc!(Algorithm.crc16_ezsp);
+alias ezsp_crc = calculate_crc!(Algorithm.crc16_ezsp);
 
 nothrow @nogc:
 
@@ -191,7 +191,7 @@ nothrow @nogc:
                 ubyte[] frame = rxBuffer[frameStart .. frameEnd];
 
                 // check the crc
-                const ushort crc = frame.ezspCRC();
+                const ushort crc = frame.ezsp_crc();
                 if (rxBuffer[frameEnd .. frameEnd + 2][0..2].bigEndianToNative!ushort != crc)
                 {
                     // corrupt frame!
@@ -510,7 +510,7 @@ private:
             writeDebugf("ASHv2: --> {0} [x{1, 02x}]", nak ? "NAK" : "ACK", control);
 
         ubyte[4] ackMsg = [ control, 0, 0, ASH_FLAG_BYTE ];
-        ackMsg[1..3] = ackMsg[0..1].ezspCRC().nativeToBigEndian;
+        ackMsg[1..3] = ackMsg[0..1].ezsp_crc().nativeToBigEndian;
         if (stream.write(ackMsg) != 4)
         {
             ++txErrors;
@@ -537,7 +537,7 @@ private:
         randomise(msg, frame[1..$]);
 
         // add the crc
-        ushort crc = frame[0 .. 1 + msg.length].ezspCRC();
+        ushort crc = frame[0 .. 1 + msg.length].ezsp_crc();
         frame[1 + msg.length .. 3 + msg.length][0..2] = crc.nativeToBigEndian;
 
         // byte-stuffing
