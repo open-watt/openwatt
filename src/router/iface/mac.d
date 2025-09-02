@@ -11,10 +11,12 @@ enum EUI64 EUILit(string addr) = (){ EUI64 a; assert(a.fromString(addr) == a.len
 alias MACAddress = EUI!48;
 alias EUI64 = EUI!64;
 
+
 struct EUI(int width)
 {
     static assert(width == 48 || width == 64, "Invalid EUI width");
     enum Bytes = width / 8;
+nothrow @nogc:
 
     static if (width == 48)
     {
@@ -53,7 +55,7 @@ struct EUI(int width)
     bool opEquals(ref const EUI!width rhs) const pure
         => ul == rhs.ul;
 
-    bool opEquals(const(ubyte)[Bytes] bytes) const pure
+    bool opEquals(ref const(ubyte)[Bytes] bytes) const pure
         => b == bytes;
 
     int opCmp(ref const EUI!width rhs) const pure
