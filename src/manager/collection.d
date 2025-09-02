@@ -163,8 +163,8 @@ nothrow @nogc:
     Type create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] namedArgs = null)
         => cast(Type)_base.create(name, flags, namedArgs);
 
-    Type alloc(const(char)[] name)
-        => cast(Type)_base.alloc(name);
+    Type alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.None)
+        => cast(Type)_base.alloc(name, flags);
 
     void add(Type item)
     {
