@@ -321,13 +321,19 @@
     <DCompile Include="src\protocol\ezsp\client.d">
       <Filter>src\protocol\ezsp</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\zigbee\package.d">
+    <DCompile Include="src\protocol\zigbee\aps.d">
       <Filter>src\protocol\zigbee</Filter>
     </DCompile>
     <DCompile Include="src\protocol\zigbee\client.d">
       <Filter>src\protocol\zigbee</Filter>
     </DCompile>
     <DCompile Include="src\protocol\zigbee\coordinator.d">
+      <Filter>src\protocol\zigbee</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\zigbee\package.d">
+      <Filter>src\protocol\zigbee</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\zigbee\zcl.d">
       <Filter>src\protocol\zigbee</Filter>
     </DCompile>
     <DCompile Include="src\router\iface\zigbee.d">
