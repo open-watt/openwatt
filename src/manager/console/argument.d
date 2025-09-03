@@ -25,6 +25,14 @@ nothrow @nogc:
 // argument conversion functions...
 // TODO: THESE NEED ADL STYLE LOOKUP!
 
+const(char[]) convertVariant(ref const Variant v, out typeof(null) r) nothrow @nogc
+{
+    if (!v.isNull)
+        return "Not null";
+    r = null;
+    return null;
+}
+
 const(char[]) convertVariant(ref const Variant v, out bool r) nothrow @nogc
 {
     if (v.isBool)

@@ -14,6 +14,8 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
+import router.iface.vlan;
+
 public import router.iface.packet;
 public import router.status;
 
@@ -22,6 +24,7 @@ public static import router.iface.bridge;
 public static import router.iface.can;
 public static import router.iface.modbus;
 public static import router.iface.tesla;
+public static import router.iface.vlan;
 public static import router.iface.zigbee;
 
 nothrow @nogc:
@@ -43,17 +46,13 @@ enum PacketDirection : ubyte
 struct PacketFilter
 {
 nothrow @nogc:
-    alias FilterCallback = bool delegate(ref const Packet p) nothrow @nogc;
-
     PacketType type = PacketType.Ethernet;
+    PacketDirection direction = PacketDirection.Incoming;
     MACAddress src;
     MACAddress dst;
     ushort etherType;
     ushort owSubType;
     ushort vlan;
-    ushort svlan;
-    FilterCallback customFilter;
-    PacketDirection direction = PacketDirection.Incoming;
 
     bool match(ref const Packet p)
     {
@@ -75,10 +74,6 @@ nothrow @nogc:
         }
         if (vlan && p.vlan != vlan)
             return false;
-        if (svlan && p.svlan != svlan)
-            return false;
-        if (customFilter)
-            return customFilter(p);
         return true;
     }
 }
@@ -103,8 +98,7 @@ struct InterfaceSubscriber
 
 class BaseInterface : BaseObject
 {
-    __gshared Property[6] Properties = [ Property.create!("pvid", pvid)(),
-                                         Property.create!("mtu", mtu)(),
+    __gshared Property[5] Properties = [ Property.create!("mtu", mtu)(),
                                          Property.create!("actual-mtu", actual_mtu)(),
                                          Property.create!("l2mtu", l2mtu)(),
                                          Property.create!("max-l2mtu", max_l2mtu)(),
@@ -140,16 +134,6 @@ nothrow @nogc:
 
 
     // Properties...
-
-    final ushort pvid() const pure
-        => _pvid;
-    final const(char)[] pvid(ushort value) pure
-    {
-        if (value > 4094)
-            return "PVID must be in range 0-4094";
-        _pvid = value;
-        return null;
-    }
 
     final ushort mtu() const pure
         => _mtu;
@@ -206,6 +190,15 @@ nothrow @nogc:
     override const(char)[] status_message() const
         => running ? "Running" : super.status_message();
 
+    BaseInterface set_master(BaseInterface master, byte slave_id) pure
+    {
+        if (_master)
+            return _master;
+        _master = master;
+        _slave_id = slave_id;
+        return null;
+    }
+
     alias subscribe = typeof(super).subscribe;
     alias unsubscribe = typeof(super).unsubscribe;
 
@@ -242,7 +235,7 @@ nothrow @nogc:
         return forward(p);
     }
 
-    final bool forward(ref const Packet packet)
+    final bool forward(ref Packet packet)
     {
         if (!running)
             return false;
@@ -349,11 +342,23 @@ protected:
         ++_status.linkDowns;
     }
 
-    abstract bool transmit(ref const Packet packet);
+    abstract bool transmit(ref Packet packet);
+
+    void slave_incoming(ref Packet packet, byte child_id)
+    {
+        assert(false, "Override this method to implement a _master interface");
+    }
+
+    bool bind_vlan(BaseInterface vlan_interface, bool remove)
+    {
+        // Override this method for interfaces supporting vlan's, and return true to indicate that vlan sub-interfaces are accepted
+        return false;
+    }
 
     // TODO: this package section should be refactored out of existence!
 package:
-    BaseInterface master;
+    BaseInterface _master;
+    byte _slave_id;
 
     Packet[] sendQueue;
 
@@ -371,7 +376,7 @@ package:
         return addr;
     }
 
-    void dispatch(ref const Packet packet)
+    void dispatch(ref Packet packet)
     {
         // update the stats
         ++_status.recvPackets;
@@ -384,10 +389,15 @@ package:
                 addAddress(packet.eth.src, this);
         }
 
-        foreach (ref subscriber; subscribers[0..numSubscribers])
+        if (_master)
+            _master.slave_incoming(packet, _slave_id);
+        else
         {
-            if ((subscriber.filter.direction & PacketDirection.Incoming) && subscriber.filter.match(packet))
-                subscriber.recvPacket(packet, this, PacketDirection.Incoming, subscriber.userData);
+            foreach (ref subscriber; subscribers[0..numSubscribers])
+            {
+                if ((subscriber.filter.direction & PacketDirection.Incoming) && subscriber.filter.match(packet))
+                    subscriber.recvPacket(packet, this, PacketDirection.Incoming, subscriber.userData);
+            }
         }
     }
 
@@ -403,6 +413,7 @@ class InterfaceModule : Module
 nothrow @nogc:
 
     Collection!BaseInterface interfaces;
+    Collection!VLANInterface vlan_interfaces;
 
     override void init()
     {
@@ -411,6 +422,7 @@ nothrow @nogc:
         assert(c is null, "Collection has been registered before!");
         c = &interfaces;
 
+        g_app.console.registerCollection("/interface/vlan", vlan_interfaces);
         g_app.console.registerCommand!print("/interface", this);
     }
 
@@ -474,7 +486,7 @@ nothrow @nogc:
             foreach (iface; interfaces.values)
             {
                 session.writef("{0, 3} {1}{2}  {3, -*4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
-                                i, iface.status.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ',
+                                i, iface.status.linkStatus ? 'R' : ' ', iface._master ? 'S' : ' ',
                                 iface.name, nameLen,
                                 iface.status.recvBytes, rxLen, iface.status.sendBytes, txLen,
                                 iface.status.recvPackets, rpLen, iface.status.sendPackets, tpLen,
@@ -488,7 +500,7 @@ nothrow @nogc:
             size_t i = 0;
             foreach (iface; interfaces.values)
             {
-                session.writef("{0, 3} {6}{7}  {1, -*2}  {3, -*4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.status.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ');
+                session.writef("{0, 3} {6}{7}  {1, -*2}  {3, -*4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.status.linkStatus ? 'R' : ' ', iface._master ? 'S' : ' ');
                 ++i;
             }
         }

@@ -122,6 +122,7 @@
     <DCompile Include="src\router\iface\package.d" />
     <DCompile Include="src\router\iface\packet.d" />
     <DCompile Include="src\router\iface\tesla.d" />
+    <DCompile Include="src\router\iface\vlan.d" />
     <DCompile Include="src\router\iface\zigbee.d" />
     <DCompile Include="src\router\modbus\coding.d" />
     <DCompile Include="src\router\modbus\message.d" />
