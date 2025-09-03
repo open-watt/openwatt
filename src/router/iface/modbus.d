@@ -715,6 +715,11 @@ nothrow @nogc:
         g_app.console.registerCommand!remote_server_add("/interface/modbus/remote-server", this, "add");
     }
 
+    override void update()
+    {
+        modbus_interfaces.updateAll();
+    }
+
     ServerMap* findServerByName(const(char)[] name)
     {
         foreach (ref map; remoteServers.values)

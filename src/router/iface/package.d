@@ -413,13 +413,7 @@ nothrow @nogc:
         g_app.console.registerCommand!print("/interface", this);
     }
 
-    override void update()
-    {
-        // TODO: is it appropriate to update all interfaces here, or should we update the collections independently?
-        interfaces.updateAll();
-    }
-
-     final String addInterfaceName(Session session, const(char)[] name, const(char)[] defaultNamePrefix)
+    final String addInterfaceName(Session session, const(char)[] name, const(char)[] defaultNamePrefix)
     {
         if (name.empty)
             name = interfaces.generateName(defaultNamePrefix);

@@ -82,8 +82,8 @@ nothrow @nogc:
                 continue;
             if (item.set(arg.name, arg.value))
             {
-                defaultAllocator.freeT(item);
                 session.writeLine("Invalid value for property '", arg.name, "': ", arg.value);
+                defaultAllocator.freeT(item);
                 return null;
             }
         }

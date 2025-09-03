@@ -196,6 +196,11 @@ nothrow @nogc:
         g_app.console.registerCommand!port_add("/interface/bridge/port", this, "add");
     }
 
+    override void update()
+    {
+        bridges.updateAll();
+    }
+
     void port_add(Session session, BridgeInterface bridge, BaseInterface _interface)
     {
         if (bridge is _interface)

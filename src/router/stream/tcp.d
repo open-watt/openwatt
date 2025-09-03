@@ -537,6 +537,11 @@ nothrow @nogc:
         g_app.console.registerCollection("/stream/tcp-server", tcp_servers);
     }
 
+    override void preUpdate()
+    {
+        tcp_streams.updateAll();
+    }
+
     override void update()
     {
         tcp_servers.updateAll();

@@ -204,18 +204,6 @@ class StreamModule : Module
 nothrow @nogc:
 
     Collection!Stream streams;
-
-    override void init()
-    {
-    }
-
-    override void preUpdate()
-    {
-        // TODO: polling is super lame! data connections should be in threads and receive data immediately
-        // blocking read's in threads, or a select() loop...
-
-        streams.updateAll();
-    }
 }
 
 
