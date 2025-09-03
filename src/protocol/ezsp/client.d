@@ -51,7 +51,8 @@ template EZSPResult(T)
 
 class EZSPClient : BaseObject
 {
-    __gshared Property[1] Properties = [ Property.create!("stream", stream)() ];
+    __gshared Property[2] Properties = [ Property.create!("stream", stream)(),
+                                         Property.create!("stack-type", stack_type)() ];
 @nogc:
 
     enum TypeName = StringLit!"ezsp";
@@ -78,17 +79,20 @@ class EZSPClient : BaseObject
         {
             // rebuild ASH and reset
             ash = ASH(stream);
-            ash.setEventCallback(&eventCallback);
-            ash.setPacketCallback(&incomingPacket);
+            ash.setEventCallback(&event_callback);
+            ash.setPacketCallback(&incoming_packet);
             restart();
         }
     }
 
+    final StackType stack_type() const pure nothrow
+        => _stack_type;
+
     // API...
 
-    final void reboot() nothrow
+    final void reboot_ncp() nothrow
     {
-        sendCommand!EZSP_ResetNode(null);
+        send_command!EZSP_ResetNode(null);
         restart();
     }
 
@@ -110,9 +114,9 @@ class EZSPClient : BaseObject
         auto ev = InPlace!YieldEZSP(Default);
         r.e = ev;
 
-        static void response(void* userData, typeof(R.Response.tupleof) results)
+        static void response(void* user_data, typeof(R.Response.tupleof) results)
         {
-            Result* r = cast(Result*)userData;
+            Result* r = cast(Result*)user_data;
             r.e.finished = true;
             enum numResults = R.Response.tupleof.length;
             static if (numResults > 1)
@@ -124,7 +128,7 @@ class EZSPClient : BaseObject
                 r.result = results[0];
         }
 
-        bool success = sendCommand!R(&response, forward!args, cast(void*)&r);
+        bool success = send_command!R(&response, forward!args, cast(void*)&r);
         assert(success, "EZSP: failed to send command!");
 
         yield(ev);
@@ -134,55 +138,62 @@ class EZSPClient : BaseObject
     }
 
 nothrow:
-    final void setMessageHandler(void delegate(ubyte, ushort, const(ubyte)[]) nothrow @nogc callback) pure nothrow
+    final void set_message_handler(void delegate(ubyte, ushort, const(ubyte)[]) nothrow @nogc callback) pure nothrow
     {
-        messageHandler = callback;
+        _message_handler = callback;
     }
 
-    template setCallbackHandler(EZSP_Command)
+    template set_callback_handler(EZSP_Command)
         if (IsEZSPRequest!EZSP_Command)
     {
         alias ResponseParams = typeof(EZSP_Command.Response.tupleof);
 
-        final void setCallbackHandler(Callback)(Callback responseHandler, void* userData = null) nothrow
+        final void set_callback_handler(Callback)(Callback responseHandler, void* user_data = null) nothrow
         {
-            alias Args = Parameters!Callback;
-            static assert (is(Args == ResponseParams) || is(Args == AliasSeq!(void*, ResponseParams)), "Callback must be a function with arguments matching " ~ EZSP_Command.stringof ~ ".Response, and optionally a `void* userData` argument in the first position.");
-            enum HasUserData = Args.length > 0 && is(Args[0] == void*);
-
-            version(DebugMessageFlow)
+            static if (is(Callback == typeof(null)))
             {
-                import urt.string.format;
-                if ((EZSP_Command.Command in commandNames) is null)
-                    commandNames.insert(EZSP_Command.Command, CommandData(EZSP_Command.stringof[5 .. $],
-                                                                          (const(ubyte)[] data){ EZSP_Command.Request r; data.ezspDeserialise(r); return tconcat(r); },
-                                                                          (const(ubyte)[] data){ EZSP_Command.Response r; data.ezspDeserialise(r); return tconcat(r); }));
-            }
-
-            auto handler = &commandHandlers.replace(EZSP_Command.Command, CommandHandler());
-
-            handler.responseShim = &responseShim!(HasUserData, ResponseParams);
-            handler.userData = HasUserData ? userData : null;
-            static if (is_delegate!Callback)
-            {
-                handler.cbFnPtr = responseHandler.funcptr;
-                handler.cbInstance = responseHandler.ptr;
+                _command_handlers.replace(EZSP_Command.Command, CommandHandler());
             }
             else
             {
-                handler.cbFnPtr = responseHandler;
-                handler.cbInstance = null;
+                alias Args = Parameters!Callback;
+                static assert (is(Args == ResponseParams) || is(Args == AliasSeq!(void*, ResponseParams)), "Callback must be a function with arguments matching " ~ EZSP_Command.stringof ~ ".Response, and optionally a `void* user_data` argument in the first position.");
+                enum HasUserData = Args.length > 0 && is(Args[0] == void*);
+
+                version(DebugMessageFlow)
+                {
+                    import urt.string.format;
+                    if ((EZSP_Command.Command in commandNames) is null)
+                        commandNames.insert(EZSP_Command.Command, CommandData(EZSP_Command.stringof[5 .. $],
+                                                                              (const(ubyte)[] data){ EZSP_Command.Request r; data.ezsp_deserialise(r); return tconcat(r); },
+                                                                              (const(ubyte)[] data){ EZSP_Command.Response r; data.ezsp_deserialise(r); return tconcat(r); }));
+                }
+
+                auto handler = &_command_handlers.replace(EZSP_Command.Command, CommandHandler());
+
+                handler.response_shim = &response_shim!(HasUserData, ResponseParams);
+                handler.user_data = HasUserData ? user_data : null;
+                static if (is_delegate!Callback)
+                {
+                    handler.cb_funcptr = responseHandler.funcptr;
+                    handler.cb_instance = responseHandler.ptr;
+                }
+                else
+                {
+                    handler.cb_funcptr = responseHandler;
+                    handler.cb_instance = null;
+                }
             }
         }
     }
 
-    template sendCommand(EZSP_Command)
+    template send_command(EZSP_Command)
         if (IsEZSPRequest!EZSP_Command)
     {
         alias RequestParams = typeof(EZSP_Command.Request.tupleof);
         alias ResponseParams = typeof(EZSP_Command.Response.tupleof);
 
-        final bool sendCommand(Callback)(Callback responseHandler, auto ref RequestParams args, void* userData = null)
+        final bool send_command(Callback)(Callback responseHandler, auto ref RequestParams args, void* user_data = null)
         {
             if (!running)
                 return false;
@@ -190,7 +201,7 @@ nothrow:
             static if (!is(Callback == typeof(null)))
             {
                 alias Args = Parameters!Callback;
-                static assert (is(Args == ResponseParams) || is(Args == AliasSeq!(void*, ResponseParams)), "Callback must be a function with arguments matching " ~ EZSP_Command.stringof ~ ".Response, and optionally a `void* userData` argument in the first position.");
+                static assert (is(Args == ResponseParams) || is(Args == AliasSeq!(void*, ResponseParams)), "Callback must be a function with arguments matching " ~ EZSP_Command.stringof ~ ".Response, and optionally a `void* user_data` argument in the first position.");
                 enum HasUserData = Args.length > 0 && is(Args[0] == void*);
             }
 
@@ -199,25 +210,25 @@ nothrow:
                 import urt.string.format;
                 if ((EZSP_Command.Command in commandNames) is null)
                     commandNames.insert(EZSP_Command.Command, CommandData(EZSP_Command.stringof[5 .. $],
-                                                                          (const(ubyte)[] data){ EZSP_Command.Request r; data.ezspDeserialise(r); return tconcat(r); },
-                                                                          (const(ubyte)[] data){ EZSP_Command.Response r; data.ezspDeserialise(r); return tconcat(r); }));
+                                                                          (const(ubyte)[] data){ EZSP_Command.Request r; data.ezsp_deserialise(r); return tconcat(r); },
+                                                                          (const(ubyte)[] data){ EZSP_Command.Response r; data.ezsp_deserialise(r); return tconcat(r); }));
             }
 
             ubyte[EZSP_Command.Request.sizeof] buffer = void;
             EZSP_Command.Request tr = void;
             tr.tupleof[] = args[];
-            size_t offset = tr.ezspSerialise(buffer[]);
+            size_t offset = tr.ezsp_serialise(buffer[]);
 
             static if (is(Callback == typeof(null)))
-                return sendCommandImpl(EZSP_Command.Command, buffer[0..offset], null, null, null, null);
+                return send_command_impl(EZSP_Command.Command, buffer[0..offset], null, null, null, null);
             else static if (is_delegate!Callback)
-                return sendCommandImpl(EZSP_Command.Command, buffer[0..offset], &responseShim!(HasUserData, ResponseParams), responseHandler.funcptr, responseHandler.ptr, HasUserData ? userData : null);
+                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), responseHandler.funcptr, responseHandler.ptr, HasUserData ? user_data : null);
             else
-                return sendCommandImpl(EZSP_Command.Command, buffer[0..offset], &responseShim!(HasUserData, ResponseParams), responseHandler, null, HasUserData ? userData : null);
+                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), responseHandler, null, HasUserData ? user_data : null);
         }
     }
 
-    final int sendMessage(ushort cmd, const(ubyte)[] data)
+    final int send_message(ushort cmd, const(ubyte)[] data)
     {
         if (!running)
             return -1;
@@ -225,14 +236,14 @@ nothrow:
         ubyte[256] buffer = void;
         ubyte i = 0;
 
-        buffer[i++] = sequenceNumber;
+        buffer[i++] = _sequence_number;
 
         // the EZSP frame control byte (0x00)
         buffer[i++] = 0x00;
-        if (knownVersion >= 8)
+        if (_known_version >= 8)
             buffer[i++] = 0x01;
 
-        if (cmd != 0 && knownVersion < 8)
+        if (cmd != 0 && _known_version < 8)
         {
             // For all EZSPv6 or EZSPv7 frames except 'version' frame, force an extended header 0xff 0x00
             buffer[i++] = 0xFF;
@@ -240,7 +251,7 @@ nothrow:
         }
 
         buffer[i++] = cast(ubyte)cmd;
-        if (knownVersion >= 8)
+        if (_known_version >= 8)
             buffer[i++] = cmd >> 8;
 
         buffer[i .. i + data.length] = data[];
@@ -249,7 +260,7 @@ nothrow:
         version(DebugMessageFlow)
         {
             CommandData* cmdName = cmd in commandNames;
-            writeDebugf("EZSP: --> [{0}] - {1}(x{2, 04x}) - {3,?5}{4,!5}", sequenceNumber, cmdName ? cmdName.name : "UNKNOWN", cmd, cmdName ? cmdName.reqFmt(buffer[5..i]) : null, cast(void[])buffer[0..i], cmdName !is null);
+            writeDebugf("EZSP: --> [{0}] - {1}(x{2, 04x}) - {3,?5}{4,!5}", _sequence_number, cmdName ? cmdName.name : "UNKNOWN", cmd, cmdName ? cmdName.reqFmt(buffer[5..i]) : null, cast(void[])buffer[0..i], cmdName !is null);
         }
 
         if (!ash.send(buffer[0..i]))
@@ -261,7 +272,7 @@ nothrow:
             return -1;
         }
 
-        return sequenceNumber++;
+        return _sequence_number++;
     }
 
     final override bool validate() const pure
@@ -271,22 +282,22 @@ nothrow:
     {
         ash.update();
 
-        if (knownVersion)
+        if (_known_version)
             return CompletionStatus.Complete;
 
         if (ash.isConnected())
         {
-            if (requestedVersion == 0)
+            if (_requested_version == 0)
             {
                 writeDebug("EZSP: connecting...");
 
-                requestedVersion = PreferredVersion;
-                immutable ubyte[4] versionMsg = [ sequenceNumber++, 0x00, 0x00, requestedVersion ];
-                ash.send(versionMsg);
+                _requested_version = PREFERRED_VERSION;
+                immutable ubyte[4] version_msg = [ _sequence_number++, 0x00, 0x00, _requested_version ];
+                ash.send(version_msg);
 
-                lastEvent = getTime();
+                _last_event = getTime();
             }
-            else if (getTime() - lastEvent > 10.seconds)
+            else if (getTime() - _last_event > 10.seconds)
                 return CompletionStatus.Error;
         }
         return CompletionStatus.Continue;
@@ -295,9 +306,9 @@ nothrow:
     override CompletionStatus shutdown()
     {
         ash.reset();
-        knownVersion = 0;
-        requestedVersion = 0;
-        sequenceNumber = 0;
+        _known_version = 0;
+        _requested_version = 0;
+        _sequence_number = 0;
         return CompletionStatus.Complete;
     }
 
@@ -307,70 +318,50 @@ nothrow:
             return;
 
         ash.update();
-
-        if (!knownVersion)
-        {
-            if (ash.isConnected())
-            {
-                if (requestedVersion == 0)
-                {
-                    writeDebug("EZSP: connecting...");
-
-                    requestedVersion = PreferredVersion;
-                    immutable ubyte[4] versionMsg = [ sequenceNumber++, 0x00, 0x00, requestedVersion ];
-                    ash.send(versionMsg);
-
-                    lastEvent = getTime();
-                }
-                else if (getTime() - lastEvent > 10.seconds)
-                    restart();
-            }
-            return;
-        }
     }
 
 private:
 
     static class YieldEZSP : AwakenEvent
     {
-        nothrow @nogc:
+    nothrow @nogc:
         bool finished;
         override bool ready() { return finished; }
     }
 
     struct ActiveRequests
     {
-        void function(const(ubyte)[], void*, void*, void*) nothrow @nogc responseShim;
-        void* cbFnPtr;
-        void* cbInstance;
-        void* userData;
-        ubyte sequenceNumber;
+        void function(const(ubyte)[], void*, void*, void*) nothrow @nogc response_shim;
+        void* cb_funcptr;
+        void* cb_instance;
+        void* user_data;
+        ubyte sequence_number;
     }
 
     struct CommandHandler
     {
-        void function(const(ubyte)[], void*, void*, void*) nothrow @nogc responseShim;
-        void* cbFnPtr;
-        void* cbInstance;
-        void* userData;
+        void function(const(ubyte)[], void*, void*, void*) nothrow @nogc response_shim;
+        void* cb_funcptr;
+        void* cb_instance;
+        void* user_data;
     }
 
-    enum PreferredVersion = 13;
+    enum PREFERRED_VERSION = 13;
 
-    MonoTime lastEvent;
+    MonoTime _last_event;
 
-    ubyte requestedVersion;
-    ubyte knownVersion;
-    StackType stackType;
-    String stackVersion;
+    ubyte _requested_version;
+    ubyte _known_version;
+    StackType _stack_type;
+    String _stack_version;
 
-    ubyte sequenceNumber;
+    ubyte _sequence_number;
 
     ASH ash;
 
-    void delegate(ubyte, ushort, const(ubyte)[]) nothrow @nogc messageHandler;
-    Map!(ushort, CommandHandler) commandHandlers;
-    ActiveRequests[16] activeRequests;
+    void delegate(ubyte, ushort, const(ubyte)[]) nothrow @nogc _message_handler;
+    Map!(ushort, CommandHandler) _command_handlers;
+    ActiveRequests[16] _active_requests;
 
     version(DebugMessageFlow)
     {
@@ -383,29 +374,30 @@ private:
         Map!(ushort, CommandData) commandNames;
     }
 
-    void eventCallback(ASH.Event event)
+    void event_callback(ASH.Event event)
     {
         if (event == ASH.Event.Reset)
         {
-            knownVersion = 0;
-            requestedVersion = 0;
-            sequenceNumber = 0;
-            stackType = StackType.Unknown;
-            stackVersion = null;
-            activeRequests[] = ActiveRequests();
+            _known_version = 0;
+            _requested_version = 0;
+            _sequence_number = 0;
+            _stack_type = StackType.Unknown;
+            _stack_version = null;
+            _active_requests[] = ActiveRequests();
+            restart();
         }
         else
             assert(false, "Unhandled ASH event");
     }
 
-    void incomingPacket(const(ubyte)[] msg)
+    void incoming_packet(const(ubyte)[] msg)
     {
 //        writeWarningf("ASHv2: [!!!] empty frame received! [x{0,02x}]", control);
 
         ubyte seq;
         ushort control;
         ushort cmd;
-        if (knownVersion >= 8)
+        if (_known_version >= 8)
         {
             if (msg.length < 5)
             {
@@ -453,31 +445,31 @@ private:
 
         bool overflow = (control & 0x1) != 0;
         bool truncated = (control & 0x2) != 0;
-        bool callbackPending = (control & 0x4) != 0;
-        ubyte callbackType = (control >> 3) & 0x3;
-        ubyte networkIndex = (control >> 5) & 0x3;
-        ubyte frameFormatVersion = (control >> 8) & 0x3;
-        bool paddingEnabled = (control & 0x4000) != 0;
-        bool securityEnabled = (control & 0x8000) != 0;
+        bool callback_pending = (control & 0x4) != 0;
+        ubyte callback_type = (control >> 3) & 0x3;
+        ubyte network_index = (control >> 5) & 0x3;
+        ubyte frame_format_version = (control >> 8) & 0x3;
+        bool padding_enabled = (control & 0x4000) != 0;
+        bool security_enabled = (control & 0x8000) != 0;
 
-        lastEvent = getTime();
+        _last_event = getTime();
 
-        dispatchCommand(seq, cmd, msg);
+        dispatch_command(seq, cmd, msg);
     }
 
-    void dispatchCommand(ubyte seq, ushort command, const(ubyte)[] msg)
+    void dispatch_command(ubyte seq, ushort command, const(ubyte)[] msg)
     {
         switch (command)
         {
             case 0x0000: // version
                 EZSP_Version.Response r;
-                msg.ezspDeserialise(r);
+                msg.ezsp_deserialise(r);
 
-                if (r.protocolVersion != requestedVersion)
+                if (r.protocolVersion != _requested_version)
                 {
                     // we'll negotiate down to the version it supports
-                    requestedVersion = r.protocolVersion;
-                    immutable ubyte[4] versionMsg = [ sequenceNumber++, 0x00, 0x00, requestedVersion ];
+                    _requested_version = r.protocolVersion;
+                    immutable ubyte[4] versionMsg = [ _sequence_number++, 0x00, 0x00, _requested_version ];
                     ash.send(versionMsg);
                     break;
                 }
@@ -485,13 +477,13 @@ private:
                 import urt.string.format : tformat;
                 import urt.mem.allocator : defaultAllocator;
 
-                stackType = cast(StackType)r.stackType;
-                stackVersion = tformat("{0}.{1}.{2}.{3}", r.stackVersion >> 12, (r.stackVersion >> 8) & 0xF, (r.stackVersion >> 4) & 0xF, r.stackVersion & 0xF).makeString(defaultAllocator());
+                _stack_type = cast(StackType)r.stackType;
+                _stack_version = tformat("{0}.{1}.{2}.{3}", r.stackVersion >> 12, (r.stackVersion >> 8) & 0xF, (r.stackVersion >> 4) & 0xF, r.stackVersion & 0xF).makeString(defaultAllocator());
 
-                knownVersion = requestedVersion;
-                requestedVersion = 0;
+                _known_version = _requested_version;
+                _requested_version = 0;
 
-                writeInfof("EZSP: connected: {0} V{1} - protocol version {2}", r.stackType == 1 ? "ROUTER" : r.stackType == 2 ? "COORDINATOR" : "UNKNOWN", stackVersion, knownVersion);
+                writeInfof("EZSP: connected: {0} V{1} - protocol version {2}", r.stackType == 1 ? "ROUTER" : r.stackType == 2 ? "COORDINATOR" : "UNKNOWN", _stack_version, _known_version);
                 break;
 
             case 0x0058: // invalidCommand
@@ -507,17 +499,17 @@ private:
                 }
 
                 int slot = seq & 0xF;
-                if (activeRequests[slot].responseShim != null)
+                if (_active_requests[slot].response_shim != null)
                 {
-                    activeRequests[slot].responseShim(msg, activeRequests[slot].cbFnPtr, activeRequests[slot].cbInstance, activeRequests[slot].userData);
-                    activeRequests[slot].responseShim = null;
+                    _active_requests[slot].response_shim(msg, _active_requests[slot].cb_funcptr, _active_requests[slot].cb_instance, _active_requests[slot].user_data);
+                    _active_requests[slot].response_shim = null;
                 }
                 else
                 {
-                    if (auto cmdHandler = command in commandHandlers)
-                        cmdHandler.responseShim(msg, cmdHandler.cbFnPtr, cmdHandler.cbInstance, cmdHandler.userData);
-                    else if (messageHandler)
-                        messageHandler(seq, command, msg);
+                    if (auto cmdHandler = command in _command_handlers)
+                        cmdHandler.response_shim(msg, cmdHandler.cb_funcptr, cmdHandler.cb_instance, cmdHandler.user_data);
+                    else if (_message_handler)
+                        _message_handler(seq, command, msg);
                     else
                     {
                         // TODO: unhandled message?
@@ -527,37 +519,37 @@ private:
         }
     }
 
-    bool sendCommandImpl(ushort cmd, ubyte[] data, void function(const(ubyte)[], void*, void*, void*) nothrow @nogc responseHandler, void* cb, void* inst, void* userData)
+    bool send_command_impl(ushort cmd, ubyte[] data, void function(const(ubyte)[], void*, void*, void*) nothrow @nogc response_handler, void* cb, void* inst, void* user_data)
     {
-        int seq = sendMessage(cmd, data);
+        int seq = send_message(cmd, data);
         if (seq < 0)
             return false;
 
-        if (activeRequests[seq & 0xF].responseShim != null)
+        if (_active_requests[seq & 0xF].response_shim != null)
         {
-            // the request is already in flight!
+            // TODO: we seem to have overflowed the active requests; we should probably timeout old requests?
             assert(false, "TODO: how to handle this case?");
             return false;
         }
 
-        activeRequests[seq & 0xF].responseShim = responseHandler;
-        activeRequests[seq & 0xF].cbFnPtr = cb;
-        activeRequests[seq & 0xF].cbInstance = inst;
-        activeRequests[seq & 0xF].userData = userData;
-        activeRequests[seq & 0xF].sequenceNumber = seq & 0xFF;
+        _active_requests[seq & 0xF].response_shim = response_handler;
+        _active_requests[seq & 0xF].cb_funcptr = cb;
+        _active_requests[seq & 0xF].cb_instance = inst;
+        _active_requests[seq & 0xF].user_data = user_data;
+        _active_requests[seq & 0xF].sequence_number = seq & 0xFF;
 
         return true;
     }
 }
 
-void responseShim(bool withUserdata, Args...)(const(ubyte)[] response, void* cb, void* inst, void* userData)
+void response_shim(bool withUserdata, Args...)(const(ubyte)[] response, void* cb, void* inst, void* user_data)
 {
     import urt.meta.tuple;
 
     Tuple!Args args;
     static if (Args.length > 0)
     {
-        size_t taken = response.ezspDeserialise(args);
+        size_t taken = response.ezsp_deserialise(args);
         if (taken == 0 || taken > response.length)
         {
             writeWarning("EZSP: error deserialising response");
@@ -573,14 +565,14 @@ void responseShim(bool withUserdata, Args...)(const(ubyte)[] response, void* cb,
         callback.ptr = inst;
         callback.funcptr = cast(void function())cb;
         static if (withUserdata)
-            (cast(void delegate(void*, Args) nothrow @nogc)callback)(userData, args.expand);
+            (cast(void delegate(void*, Args) nothrow @nogc)callback)(user_data, args.expand);
         else
             (cast(void delegate(Args) nothrow @nogc)callback)(args.expand);
     }
     else
     {
         static if (withUserdata)
-            (cast(void function(void*, Args) nothrow @nogc)cb)(userData, args.expand);
+            (cast(void function(void*, Args) nothrow @nogc)cb)(user_data, args.expand);
         else
             (cast(void function(Args) nothrow @nogc)cb)(args.expand);
     }

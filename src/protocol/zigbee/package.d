@@ -61,8 +61,8 @@ nothrow @nogc:
         }
 
         RequestState state = g_app.allocator.allocT!RequestState(session, c);
-        c.setMessageHandler(&state.messageHandler);
-        c.sendCommand!EZSP_StartScan(&state.startScan, energy_scan ? EzspNetworkScanType.ENERGY_SCAN : EzspNetworkScanType.ACTIVE_SCAN, 0x07FFF800, 3);
+        c.set_message_handler(&state.messageHandler);
+        c.send_command!EZSP_StartScan(&state.startScan, energy_scan ? EzspNetworkScanType.ENERGY_SCAN : EzspNetworkScanType.ACTIVE_SCAN, 0x07FFF800, 3);
         return state;
     }
 }
@@ -116,19 +116,19 @@ nothrow @nogc:
         {
             case EZSP_EnergyScanResultHandler.Command:
                 EZSP_EnergyScanResultHandler.Response r;
-                if (message.ezspDeserialise(r) == 0)
+                if (message.ezsp_deserialise(r) == 0)
                     return;
                 session.writef("Energy scan: channel {0} = {1}dBm\n", r.channel, r.maxRssiValue);
                 break;
             case EZSP_NetworkFoundHandler.Command:
                 EZSP_NetworkFoundHandler.Response r;
-                if (message.ezspDeserialise(r) == 0)
+                if (message.ezsp_deserialise(r) == 0)
                     return;
                 session.writef("Network found: channel={0} PAN-ID={1,04x} ({2, 0}) {'ALLOW-JOIN', ?3} - lqi: {4}({5}dBm)\n", r.networkFound.channel, r.networkFound.panId, cast(void[])r.networkFound.extendedPanId[], r.networkFound.allowingJoin, r.lastHopLqi, r.lastHopRssi);
                 break;
             case EZSP_ScanCompleteHandler.Command:
                 EZSP_ScanCompleteHandler.Response r;
-                if (message.ezspDeserialise(r) == 0)
+                if (message.ezsp_deserialise(r) == 0)
                     return;
                 if (r.status == EmberStatus.SUCCESS)
                     session.writeLine("Zigbee scan complete");
