@@ -49,6 +49,9 @@
     <Filter Include="src\protocol\mqtt">
       <UniqueIdentifier>{ff7e033e-b5f6-472c-8460-916db93b4dbe}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\ocpp">
+      <UniqueIdentifier>{066d5124-e9c9-42aa-880e-7edf3267f32f}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\protocol\tesla">
       <UniqueIdentifier>{54587164-3374-4538-ad23-3865c5baffef}</UniqueIdentifier>
     </Filter>
@@ -257,6 +260,9 @@
     </DCompile>
     <DCompile Include="src\protocol\mqtt\util.d">
       <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ocpp\package.d">
+      <Filter>src\protocol\ocpp</Filter>
     </DCompile>
     <DCompile Include="src\router\iface\packet.d">
       <Filter>src\router\iface</Filter>
