@@ -45,6 +45,7 @@ struct PacketFilter
 nothrow @nogc:
     alias FilterCallback = bool delegate(ref const Packet p) nothrow @nogc;
 
+    PacketType type = PacketType.Ethernet;
     MACAddress src;
     MACAddress dst;
     ushort etherType;
@@ -56,15 +57,23 @@ nothrow @nogc:
 
     bool match(ref const Packet p)
     {
-        if (etherType && p.eth.ether_type != etherType)
-            return false;
-        if (owSubType && p.eth.ow_sub_type != owSubType)
-            return false;
+        if (type != PacketType.Unknown)
+        {
+            if (type != p.type)
+                return false;
+            if (type == PacketType.Ethernet)
+            {
+                if (etherType && p.eth.ether_type != etherType)
+                    return false;
+                if (owSubType && p.eth.ow_sub_type != owSubType)
+                    return false;
+                if (src && p.eth.src != src)
+                    return false;
+                if (dst && p.eth.dst != dst)
+                    return false;
+            }
+        }
         if (vlan && p.vlan != vlan)
-            return false;
-        if (src && p.eth.src != src)
-            return false;
-        if (dst && p.eth.dst != dst)
             return false;
         if (svlan && p.svlan != svlan)
             return false;
@@ -114,6 +123,11 @@ nothrow @nogc:
 
         mac = generateMacAddress();
         addAddress(mac, this);
+    }
+
+    ~this()
+    {
+        getModule!InterfaceModule.interfaces.remove(this);
     }
 
     static const(char)[] validateName(const(char)[] name)
@@ -192,6 +206,9 @@ nothrow @nogc:
     override const(char)[] statusMessage() const
         => running ? "Running" : super.statusMessage();
 
+    alias subscribe = typeof(super).subscribe;
+    alias unsubscribe = typeof(super).unsubscribe;
+
     void subscribe(InterfaceSubscriber.PacketHandler packetHandler, ref const PacketFilter filter, void* userData = null)
     {
         subscribers[numSubscribers++] = InterfaceSubscriber(filter, packetHandler, userData);
@@ -217,12 +234,12 @@ nothrow @nogc:
             return false;
 
         Packet p;
-        p.init!Ethernet(message);
-        p.eth.src = mac;
-        p.eth.dst = dest;
-        p.eth.ether_type = type;
-        p.eth.ow_sub_type = subType;
+        ref eth = p.init!Ethernet(message);
         p.creationTime = getSysTime();
+        eth.src = mac;
+        eth.dst = dest;
+        eth.ether_type = type;
+        eth.ow_sub_type = subType;
         return forward(p);
     }
 
