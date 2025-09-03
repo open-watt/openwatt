@@ -34,6 +34,12 @@ const(CollectionTypeInfo)* collectionTypeInfo(Type)() nothrow @nogc
     }
 }
 
+ref Collection!Type* collectionFor(Type)() nothrow @nogc
+{
+    __gshared Collection!Type* collection;
+    return collection;
+}
+
 struct CollectionTypeInfo
 {
     alias ValidateName = const(char)[] function(const(char)[] name) nothrow @nogc;
@@ -56,7 +62,7 @@ nothrow @nogc:
         this.typeInfo = typeinfo;
     }
 
-    BaseObject create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] namedArgs = null)
+    BaseObject create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] namedArgs...)
     {
         assert(typeInfo, "Can't create into a base collection!");
 
@@ -160,10 +166,10 @@ nothrow @nogc:
     BaseCollection _base = BaseCollection(collectionTypeInfo!Type);
     alias _base this;
 
-    Type create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] namedArgs = null)
+    Type create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] namedArgs...)
         => cast(Type)_base.create(name, flags, namedArgs);
 
-    Type alloc(const(char)[] name)
+    Type alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.None)
         => cast(Type)_base.alloc(name);
 
     void add(Type item)

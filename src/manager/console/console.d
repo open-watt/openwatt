@@ -227,14 +227,23 @@ nothrow @nogc:
         return registerCommand(_scope, FunctionCommand.create!method(this, instance, commandName));
     }
 
-    void registerCollection(const(char)[] _scope, ref BaseCollection collection)
+    void registerCollection(Type)(const(char)[] _scope, ref Collection!Type collection)
+    {
+        pragma(inline, true);
+
+        ref Collection!Type* c = collectionFor!Type();
+        assert(c is null, "Collection has been registered before!");
+        c = &collection;
+
+        registerCollectionImpl(_scope, collection);
+    }
+    private void registerCollectionImpl(const(char)[] _scope, ref BaseCollection collection)
     {
         import manager.console.collection_commands;
 
         Scope s = createScope(_scope);
         s.addCollectionCommands(collection);
     }
-
 
     void unregisterCommand(const(char)[] _scope, const(char)[] command)
     {
