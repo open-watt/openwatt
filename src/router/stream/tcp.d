@@ -282,12 +282,12 @@ nothrow @nogc:
             return 0;
 
         size_t bytes;
-            Result r = _socket.send(data, MsgFlags.none, &bytes);
-            if (r != Result.success)
+        Result r = _socket.send(data, MsgFlags.none, &bytes);
+        if (r != Result.success)
         {
-                SocketResult sr = r.socket_result;
-                if (sr == SocketResult.would_block)
-                return 0;
+            SocketResult sr = r.socket_result;
+            if (sr == SocketResult.would_block)
+            return 0;
             restart();
         }
         else
@@ -313,12 +313,12 @@ nothrow @nogc:
 
         size_t bytes;
         Result r = _socket.recv(null, MsgFlags.peek, &bytes);
-        assert(false, "TODO: not implemented...");
         if (r != Result.success)
         {
-//            SocketResult sr = r.socket_result;
-            _socket.close();
-            _socket = null;
+            SocketResult sr = r.socket_result;
+            if (sr != SocketResult.would_block)
+                restart();
+            return 0;
         }
         return bytes;
     }

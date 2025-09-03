@@ -5,6 +5,7 @@ import urt.conv;
 import urt.encoding;
 import urt.kvp;
 import urt.lifetime;
+import urt.log;
 import urt.mem.allocator;
 import urt.string;
 import urt.string.format : tconcat, tstring;
@@ -90,6 +91,8 @@ nothrow @nogc:
 
         _server.setConnectionCallback(&accept_connection, null);
 
+        writeInfo(type, ": '", name, "' listening on port ", _port, "...");
+
         return CompletionStatus.Complete;
     }
 
@@ -165,7 +168,7 @@ private:
         {
             foreach (ref h; server._handlers)
             {
-                if (request.method == h.method && request.request_target.startsWith(h.uri_prefix))
+                if (request.method == h.method && request.request_target.startsWith(h.uri_prefix[]))
                     return h.request_handler(request, stream);
             }
 
