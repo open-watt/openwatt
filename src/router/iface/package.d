@@ -235,7 +235,6 @@ nothrow @nogc:
 
         Packet p;
         ref eth = p.init!Ethernet(message);
-        p.creationTime = getSysTime();
         eth.src = mac;
         eth.dst = dest;
         eth.ether_type = type;
@@ -312,9 +311,6 @@ nothrow @nogc:
             sink(crc.nativeToLittleEndian());
         }
     }
-
-    int opCmp(const BaseInterface rh) const
-        => name[] < rh.name[] ? -1 : name[] > rh.name[] ? 1 : 0;
 
     ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc
     {

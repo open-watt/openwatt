@@ -301,6 +301,18 @@ nothrow @nogc:
         subscribers.removeFirstSwapLast(handler);
     }
 
+    int opCmp(const BaseObject rhs) const pure
+    {
+        import urt.algorithm : compare;
+        auto r = compare(_type[], rhs._type[]);
+        if (r != 0)
+            return r;
+        return compare(_name, rhs._name);
+    }
+
+    bool opEquals(const BaseObject rhs) const pure
+        => _name == rhs._name && type[] == rhs.type[];
+
 protected:
     enum ubyte _Disabled   = 1 << 0;
     enum ubyte _Destroyed  = 1 << 1;
@@ -665,10 +677,10 @@ const(char)[] SynthSetter(Setters...)(ref const Variant value, BaseObject item) 
         if (!error)
         {
             static if (is(ReturnType!Setter : const(char)[]))
-                return __traits(child, instance, Setter)(arg);
+                return __traits(child, instance, Setter)(arg.move);
             else
             {
-                __traits(child, instance, Setter)(arg);
+                __traits(child, instance, Setter)(arg.move);
                 return null;
             }
         }

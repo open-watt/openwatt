@@ -16,6 +16,8 @@ import router.iface;
 import router.iface.mac;
 import router.iface.packet;
 
+nothrow @nogc:
+
 
 class ZigbeeInterface : BaseInterface
 {

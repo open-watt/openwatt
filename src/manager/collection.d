@@ -28,10 +28,16 @@ const(CollectionTypeInfo)* collectionTypeInfo(Type)() nothrow @nogc
                                                                             return null;
                                                                    }(),
                                                                    (ref BaseCollection c, const(char)[] n, ObjectFlags flags)
-                                                                       => defaultAllocator.allocT!Type((n ? n : c.generateName(Type.TypeName)).makeString(defaultAllocator()), flags)
+                                                                       => defaultAllocator.allocT!Type((n ? n : c.generateName(Type.TypeName)).makeString(defaultAllocator), flags)
                                                                    );
         return &ti;
     }
+}
+
+ref Collection!Type* collectionFor(Type)() nothrow @nogc
+{
+    __gshared Collection!Type* collection;
+    return collection;
 }
 
 struct CollectionTypeInfo
@@ -56,7 +62,7 @@ nothrow @nogc:
         this.typeInfo = typeinfo;
     }
 
-    BaseObject create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] namedArgs = null)
+    BaseObject create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] namedArgs...)
     {
         assert(typeInfo, "Can't create into a base collection!");
 
@@ -160,7 +166,7 @@ nothrow @nogc:
     BaseCollection _base = BaseCollection(collectionTypeInfo!Type);
     alias _base this;
 
-    Type create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] namedArgs = null)
+    Type create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] namedArgs...)
         => cast(Type)_base.create(name, flags, namedArgs);
 
     Type alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.None)
