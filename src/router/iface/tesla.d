@@ -255,6 +255,11 @@ nothrow @nogc:
         g_app.console.registerCollection("/interface/tesla-twc", twc_interfaces);
     }
 
+    override void update()
+    {
+        twc_interfaces.updateAll();
+    }
+
     DeviceMap* findServerByName(const(char)[] name)
     {
         foreach (ref map; devices.values)

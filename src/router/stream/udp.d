@@ -154,4 +154,16 @@ private:
 class UDPStreamModule : Module
 {
     mixin DeclareModule!"stream.udp";
+
+//    Collection!UDPStream udp_streams;
+//
+//    override void init()
+//    {
+//        g_app.console.registerCollection("/stream/udp-client", udp_streams);
+//    }
+//
+//    override void preUpdate()
+//    {
+//        udp_streams.updateAll();
+//    }
 }

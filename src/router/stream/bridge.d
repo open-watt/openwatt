@@ -160,4 +160,9 @@ nothrow @nogc:
     {
         g_app.console.registerCollection("/stream/bridge", bridges);
     }
+
+    override void preUpdate()
+    {
+        bridges.updateAll();
+    }
 }

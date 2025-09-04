@@ -440,6 +440,11 @@ nothrow @nogc:
     {
         g_app.console.registerCollection("/stream/serial", serial_streams);
     }
+
+    override void preUpdate()
+    {
+        serial_streams.updateAll();
+    }
 }
 
 

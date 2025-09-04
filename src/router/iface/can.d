@@ -353,6 +353,11 @@ nothrow @nogc:
     {
         g_app.console.registerCollection("/interface/can", canInterfaces);
     }
+
+    override void update()
+    {
+        canInterfaces.updateAll();
+    }
 }
 
 
