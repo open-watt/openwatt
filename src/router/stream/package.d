@@ -56,6 +56,8 @@ nothrow @nogc:
     {
         super(name.move, type);
 
+        getModule!StreamModule.streams.add(this);
+
         this.options = options;
     }
 
@@ -65,6 +67,8 @@ nothrow @nogc:
         disconnect();
 
         setLogFile(null);
+
+        getModule!StreamModule.streams.remove(this);
     }
 
     static const(char)[] validateName(const(char)[] name)

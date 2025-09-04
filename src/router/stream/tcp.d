@@ -81,10 +81,10 @@ nothrow @nogc:
     }
 
     bool keepalive() const pure
-        => keepEnable;
+        => _keep_enable;
     void keepalive(bool value)
     {
-        if (keepEnable == value)
+        if (_keep_enable == value)
             return;
         enableKeepAlive(value);
     }
@@ -141,9 +141,9 @@ nothrow @nogc:
         {
             // we don't want to spam connection attempts...
             SysTime now = getSysTime();
-            if (now < lastRetry + seconds(5))
+            if (now < _last_retry + seconds(5))
                 return CompletionStatus.Continue;
-            lastRetry = now;
+            _last_retry = now;
 
             Result r = create_socket(AddressFamily.IPv4, SocketType.stream, Protocol.tcp, _socket);
             if (!r)
@@ -189,8 +189,8 @@ nothrow @nogc:
         // let's just assert that the socket is writable to be sure...
         assert(fd.return_events & PollEvents.write);
 
-        if (keepEnable)
-            set_keepalive(_socket, keepEnable, keepIdle, keepInterval, keepCount);
+        if (_keep_enable)
+            set_keepalive(_socket, _keep_enable, _keep_idle, _keep_interval, _keep_count);
 
         return CompletionStatus.Complete;
     }
@@ -225,7 +225,7 @@ nothrow @nogc:
 
     override bool connect()
     {
-        lastRetry = SysTime();
+        _last_retry = SysTime();
         update();
         return true;
     }
@@ -246,14 +246,14 @@ nothrow @nogc:
         return tstring(remote);
     }
 
-    void enableKeepAlive(bool enable, Duration keepIdle = seconds(10), Duration keepInterval = seconds(1), int keepCount = 10)
+    void enableKeepAlive(bool enable, Duration keep_idle = seconds(10), Duration keep_interval = seconds(1), int keep_count = 10)
     {
-        this.keepEnable = enable;
-        this.keepIdle = keepIdle;
-        this.keepInterval = keepInterval;
-        this.keepCount = keepCount;
+        _keep_enable = enable;
+        _keep_idle = keep_idle;
+        _keep_interval = keep_interval;
+        _keep_count = keep_count;
         if (_socket)
-            set_keepalive(_socket, enable, keepIdle, keepInterval, keepCount);
+            set_keepalive(_socket, enable, keep_idle, keep_interval, keep_count);
     }
 
     override ptrdiff_t read(void[] buffer)
@@ -330,17 +330,17 @@ nothrow @nogc:
     }
 
 private:
-    InetAddress _remote;
-    String _host;
-    ushort _port;
     Socket _socket;
-    SysTime lastRetry;
+    InetAddress _remote;
+    ushort _port;
+    SysTime _last_retry;
+    String _host;
 //    TCPServer reverseConnectServer;
 
-    bool keepEnable = false;
-    int keepCount = 10;
-    Duration keepIdle;
-    Duration keepInterval;
+    bool _keep_enable = false;
+    int _keep_count = 10;
+    Duration _keep_idle;
+    Duration _keep_interval;
 
     void close_socket()
     {
@@ -365,19 +365,6 @@ private:
             return true;
         }
         return false;
-    }
-
-    // TODO: this is a bug! remove the public!!
-public:
-    this(String name, Socket socket, ushort port)
-    {
-        this(name.move);
-
-        _state = State.Running;
-        _flags |= ObjectFlags.Dynamic | ObjectFlags.Temporary;
-
-        this._socket = socket;
-        socket.get_peer_name(_remote);
     }
 }
 
@@ -497,7 +484,17 @@ nothrow @nogc:
 //            _rawConnectionCallback(conn, userData);
 //        else if (_connectionCallback)
         if (_connectionCallback)
-            _connectionCallback(defaultAllocator().allocT!TCPStream(newName.move, conn, _port), _userData);
+        {
+            TCPStream stream = getModule!TCPStreamModule.tcp_streams.alloc(newName.move, cast(ObjectFlags)(ObjectFlags.Dynamic | ObjectFlags.Temporary));
+
+            // assign the socket to the stream and bypass the startup process
+            stream._socket = conn;
+            conn.get_peer_name(stream._remote);
+            stream._state = State.Running;
+            getModule!TCPStreamModule.tcp_streams.add(stream);
+
+            _connectionCallback(stream, _userData);
+        }
 
         // TODO: should the stream we just created to into the stream pool...?
     }

@@ -109,7 +109,7 @@ nothrow @nogc:
         => params.baudRate;
     const(char)[] baud_rate(uint value)
     {
-        if (value != 0)
+        if (value == 0)
             return "baud rate must be greater than 0";
         if (params.baudRate == value)
             return null;
