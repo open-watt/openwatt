@@ -362,9 +362,22 @@ const(char[]) convertVariant(S)(ref const Variant v, out S r) nothrow @nogc
 // argument completions...
 // TODO: THESE NEED ADL STYLE LOOKUP!
 
+Array!String suggestCompletion(T : typeof(null))(const(char)[] argumentText)
+{
+    if (StringLit!"null".startsWith(argumentText))
+        return Array!String(Concat, StringLit!"null");
+    return Array!String();
+}
+
 Array!String suggestCompletion(T : bool)(const(char)[] argumentText)
 {
-    Array!String completions = [ "true", "false", "yes", "no", "1", "0" ];
+    __gshared const String[4] vals = [ StringLit!"true", StringLit!"false", StringLit!"yes", StringLit!"no" ];
+    Array!String completions;
+    foreach (ref s; vals)
+    {
+        if (s.startsWith(argumentText))
+            completions ~= s;
+    }
     return completions;
 }
 
@@ -381,7 +394,8 @@ Array!String suggestCompletion(E)(const(char)[] argumentText)
     return completions;
 }
 
-Array!String suggestCompletion(T : Component)(const(char)[] argumentText)
+Array!String suggestCompletion(T : const Component)(const(char)[] argumentText)
+    if(!is(T == typeof(null)))
 {
     Array!String devices;
     size_t dot = argumentText.findFirst('.');
@@ -442,10 +456,11 @@ Array!String suggestCompletion(T : Component)(const(char)[] argumentText)
     return completions;
 }
 
-Array!String suggestCompletion(T : Device)(const(char)[] argumentText)
+Array!String suggestCompletion(T : const Device)(const(char)[] argumentText)
+    if(!is(T == typeof(null)))
 {
     Array!String completions;
-    foreach (name, device; g_app.devices)
+    foreach (name; g_app.devices.keys)
     {
         if (name.startsWith(argumentText))
             completions ~= name.makeString(defaultAllocator);
@@ -454,30 +469,42 @@ Array!String suggestCompletion(T : Device)(const(char)[] argumentText)
 }
 
 Array!String suggestCompletion(I)(const(char)[] argumentText)
-    if (is(I : const BaseInterface))
+    if (!is(I == typeof(null)) && is(const I == const BaseInterface))
 {
     Array!String completions;
-    foreach (i; getModule!InterfaceModule.interfaces.values)
+    foreach (ref name; getModule!InterfaceModule.interfaces.keys)
     {
-        static if (is(typeof(I.TypeName)))
-        {
-            if (i.type[] != I.TypeName)
-                continue;
-        }
-        if (i.name.startsWith(argumentText))
-            completions ~= i.name;
+        if (name.startsWith(argumentText))
+            completions ~= name;
     }
     return completions;
 }
 
 Array!String suggestCompletion(S)(const(char)[] argumentText)
-    if (is(S : const Stream))
+    if (!is(S == typeof(null)) && is(const S == const Stream))
 {
     Array!String completions;
-    foreach (s; getModule!StreamModule.streams.keys)
+    foreach (ref name; getModule!StreamModule.streams.keys)
     {
-        if (s.startsWith(argumentText))
-            completions ~= s;
+        if (name.startsWith(argumentText))
+            completions ~= name;
+    }
+    return completions;
+}
+
+Array!String suggestCompletion(T)(const(char)[] argumentText)
+    if (!is(T == typeof(null)) && is(T : const BaseObject) && !is(const T == const BaseInterface) && !is(const T == const Stream))
+{
+    alias Type = Unqual!T;
+    const collection = collectionFor!Type();
+    if (collection is null)
+        return Array!String();
+
+    Array!String completions;
+    foreach (ref name; collection.keys)
+    {
+        if (name.startsWith(argumentText))
+            completions ~= name;
     }
     return completions;
 }
