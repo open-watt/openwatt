@@ -1,5 +1,8 @@
 module protocol.mqtt.util;
 
+nothrow @nogc:
+
+
 inout(As)[] take(As = ubyte)(ref inout(ubyte)[] buffer, size_t n)
 {
     inout(ubyte)[] r = buffer[0 .. n*As.sizeof];
