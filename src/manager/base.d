@@ -84,7 +84,7 @@ struct Property
         static if (Setters.length > 0)
             prop.set = &SynthSetter!Setters;
 
-        // synthesise setter
+        // synthesise suggest
         alias Suggests = FilterOverloads!(HasSuggest, member);
         static if (Suggests.length > 0)
             prop.suggest = &SynthSuggest!Suggests;
