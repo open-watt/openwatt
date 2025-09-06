@@ -85,7 +85,7 @@ nothrow @nogc:
 
 struct InterfaceSubscriber
 {
-    alias PacketHandler = void delegate(ref const Packet p, BaseInterface i, PacketDirection dir, void* u) nothrow @nogc;
+    alias PacketHandler = void delegate(ref Packet p, BaseInterface i, PacketDirection dir, void* u) nothrow @nogc;
 
     PacketFilter filter;
     PacketHandler recvPacket;
@@ -103,8 +103,7 @@ struct InterfaceSubscriber
 
 class BaseInterface : BaseObject
 {
-    __gshared Property[6] Properties = [ Property.create!("pvid", pvid)(),
-                                         Property.create!("mtu", mtu)(),
+    __gshared Property[5] Properties = [ Property.create!("mtu", mtu)(),
                                          Property.create!("actual-mtu", actual_mtu)(),
                                          Property.create!("l2mtu", l2mtu)(),
                                          Property.create!("max-l2mtu", max_l2mtu)(),
@@ -140,16 +139,6 @@ nothrow @nogc:
 
 
     // Properties...
-
-    final ushort pvid() const pure
-        => _pvid;
-    final const(char)[] pvid(ushort value) pure
-    {
-        if (value > 4094)
-            return "PVID must be in range 0-4094";
-        _pvid = value;
-        return null;
-    }
 
     final ushort mtu() const pure
         => _mtu;
@@ -242,7 +231,7 @@ nothrow @nogc:
         return forward(p);
     }
 
-    final bool forward(ref const Packet packet)
+    final bool forward(ref Packet packet)
     {
         if (!running)
             return false;
@@ -349,7 +338,7 @@ protected:
         ++_status.linkDowns;
     }
 
-    abstract bool transmit(ref const Packet packet);
+    abstract bool transmit(ref Packet packet);
 
     // TODO: this package section should be refactored out of existence!
 package:
@@ -371,7 +360,7 @@ package:
         return addr;
     }
 
-    void dispatch(ref const Packet packet)
+    void dispatch(ref Packet packet)
     {
         // update the stats
         ++_status.recvPackets;

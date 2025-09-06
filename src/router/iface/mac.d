@@ -21,15 +21,27 @@ nothrow @nogc:
     static if (width == 48)
     {
         // well-known mac addresses
-        enum broadcast      = MACAddress(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
-        enum lldp_multicast = MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E);
+        enum broadcast          = MACAddress(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF);
+        enum stp_multicast      = MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, 0x00);
+        enum pause_multicast    = MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, 0x01);
+        enum lacp_multicast     = MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, 0x02);
+        enum eapol_multicast    = MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, 0x03);
+        enum lldp_multicast     = MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, 0x0E);
 
         align(2) ubyte[6] b;
 
         version (BigEndian)
+        {
             ulong ul() @property const pure => *cast(ulong*)b.ptr >> 16;
+            bool is_link_local() const pure
+                => *cast(uint*)b.ptr == 0x0180C200 && ((*cast(ushort*)(b.ptr + 4) & 0xFFF0) == 0x0000);
+        }
         else
+        {
             ulong ul() @property const pure => (*cast(ulong*)b.ptr << 16) >> 16;
+            bool is_link_local() const pure
+                => *cast(uint*)b.ptr == 0x00C28001 && ((*cast(ushort*)(b.ptr + 4) & 0xF0FF) == 0x0000);
+        }
     }
     else
     {
@@ -193,105 +205,106 @@ struct MACTable
 {
     import urt.mem;
     import urt.time;
+    import urt.util : min;
 nothrow @nogc:
 
-    this(ushort minElements, ushort maxElements, ubyte ttl)
+    this(ushort min_elements, ushort max_elements, ubyte ttl)
     {
         import urt.util : is_power_of_2;
-        assert(maxElements < 2^^12 && minElements <= maxElements && minElements.is_power_of_2 && maxElements.is_power_of_2);
+        assert(max_elements < ushort.max && min_elements <= max_elements);
 
-        this.maxElements = maxElements;
-        this.ttl = ttl;
-        freeListHead = 0;
+        _max_elements = max_elements;
+        _ttl = ttl;
+        _free_list_head = 0;
 
-        elements = defaultAllocator().allocArray!Entry(minElements);
+        _elements = defaultAllocator().allocArray!Entry(min_elements);
         size_t i = 0;
-        for (; i < minElements - 1; ++i)
-            elements[i].next = cast(short)(i + 1);
-        elements[i].next = -1;
+        for (; i < min_elements - 1; ++i)
+            _elements[i].next = cast(ushort)(i + 1);
+        _elements[i].next = 0xFFFF;
 
         update();
     }
 
     ~this()
     {
-        if (elements)
-            defaultAllocator().freeArray(elements);
+        if (_elements)
+            defaultAllocator().freeArray(_elements);
     }
 
-    bool insert(MACAddress mac, ubyte port, ushort vlan)
+    bool insert(MACAddress mac, ushort vlan, byte port)
     {
-        assert(port < 256 && vlan < 4096);
-
-        ubyte h = hash(mac);
-        short element = table[h];
-        if (element >= 0)
+        const k = Entry.Key(mac, vlan).k;
+        ubyte h = hash(k);
+        ushort element = _table[h];
+        if (element != 0xFFFF)
         {
             while (1)
             {
-                if (elements[element].mac == mac)
+                if (_elements[element].key.k == k)
                 {
-                    elements[element].detail = (curTime << 24) | (elements[element].detail & 0xFFFFF);
+                    _elements[element].time = _cur_time;
                     return false;
                 }
-                element = elements[element].next;
-                if (element < 0)
+                element = _elements[element].next;
+                if (element == 0xFFFF)
                     break;
             }
         }
 
         // make sure there is enough space (NOTE: should we just delete this?)
-        if (freeListHead < 0)
+        if (_free_list_head == 0xFFFF)
         {
-            size_t numElements = elements.length;
-            if (numElements >= maxElements)
+            size_t numElements = _elements.length;
+            if (numElements >= _max_elements)
                 return false;
 
             // expand the allocation
-            void[] mem = cast(void[])elements;
-            mem = defaultAllocator().realloc(mem, mem.length * 2);
-            elements = cast(Entry[])mem;
-            freeListHead = cast(short)numElements;
-            for (; numElements < elements.length - 1; ++numElements)
-                elements[numElements].next = cast(short)(numElements + 1);
-            elements[numElements].next = -1;
+            void[] mem = cast(void[])_elements;
+            mem = defaultAllocator().realloc(mem, min(mem.length * 2, _max_elements * Entry.sizeof));
+            _elements = cast(Entry[])mem;
+            _free_list_head = cast(ushort)numElements;
+            for (; numElements < _elements.length - 1; ++numElements)
+                _elements[numElements].next = cast(ushort)(numElements + 1);
+            _elements[numElements].next = 0xFFFF;
         }
 
         // insert the new address
-        element = freeListHead;
-        freeListHead = elements[element].next;
-        elements[element].mac = mac;
-        elements[element].next = table[h];
-        elements[element].detail = (curTime << 24) | (vlan << 8) | port;
-        table[h] = element;
+        element = _free_list_head;
+        _free_list_head = _elements[element].next;
+        _elements[element].key.k = k;
+        _elements[element].next = _table[h];
+        _elements[element].time = _cur_time;
+        _elements[element].port = port;
+        _table[h] = element;
 
         return true;
     }
 
-    bool get(MACAddress mac, out ubyte port, out ushort vlan) pure
+    bool get(MACAddress mac, ushort vlan, out byte port) pure
     {
-        ubyte slot = hash(mac);
-        short first = table[slot];
+        const k = Entry.Key(mac, vlan).k;
+        ubyte slot = hash(k);
+        ushort first = _table[slot];
         if (first < 0)
             return false;
-        short element = first;
+        ushort element = first;
         while (1)
         {
-            if (elements[element].mac == mac)
+            if (_elements[element].key.k == k)
             {
-                port = elements[element].detail & 0xFF;
-                vlan = (elements[element].detail >> 8) & 0xFFF; // TODO: shift left then right?
+                port = _elements[element].port;
                 if (element != first)
                 {
                     // shift it to the front of the bucket...? 
-                    removeWithinSlot(slot, element);
-                    elements[element].next = table[slot];
-                    table[slot] = element;
+                    remove_within_slot(slot, element);
+                    _elements[element].next = _table[slot];
+                    _table[slot] = element;
                 }
                 return true;
             }
-            element = elements[element].next;
-            if (element < 0)
+            element = _elements[element].next;
+            if (element == 0xFFFF)
                 return false;
         }
     }
@@ -300,71 +313,83 @@ nothrow @nogc:
     {
         // update once per second...
         ubyte newTime = (getTime() - MonoTime()).as!"seconds" & 0xFF;
-        if (newTime == curTime)
+        if (newTime == _cur_time)
             return;
 
-        curTime = newTime;
+        _cur_time = newTime;
 
         // we'll just scan one hash map slot each update cycle
         // get through them all every ~4 minutes
-        short element = table[scanSlot];
-        while (element >= 0)
+        ushort element = _table[_scan_slot];
+        while (element != 0xFFFF)
         {
-            uint elementTime = elements[element].detail >> 24;
-            int age = elementTime <= curTime ? curTime - elementTime : (0x100 - elementTime) + curTime;
+            ubyte elementTime = _elements[element].time;
+            int age = elementTime <= _cur_time ? _cur_time - elementTime : (0x100 - elementTime) + _cur_time;
 
-            if (age > ttl)
+            if (age > _ttl)
             {
-                removeFromSlot(scanSlot, element);
-                ushort next = elements[element].next;
-                elements[element].next = freeListHead;
-                freeListHead = element;
+                remove_from_slot(_scan_slot, element);
+                ushort next = _elements[element].next;
+                _elements[element].next = _free_list_head;
+                _free_list_head = element;
                 element = next;
             }
             else
-                element = elements[element].next;
+                element = _elements[element].next;
         }
-        if (++scanSlot >= table.length)
-            scanSlot = 0;
+        if (++_scan_slot >= _table.length)
+            _scan_slot = 0;
     }
 
 private:
     struct Entry
     {
-        MACAddress mac;
-        short next;
-        uint detail; // 8:4:12:8 = time:reserved:vlan:port
+        union Key
+        {
+            struct {
+                MACAddress mac;
+                ushort vlan;
+            }
+            ulong k;
+        }
+        Key key;
+        byte port;
+        ubyte time;
+        ushort next;
+        // TODO: let's not waste this 4 bytes padding! that ulong is holding space...
     }
 
-    Entry[] elements;
-    short freeListHead = -1;
-    ubyte curTime; // in minutes? 10s? what?
-    ubyte ttl;
-    short[256] table = -1;
-    ushort maxElements;
-    ubyte scanSlot = 0;
+    Entry[] _elements;
+    ushort _free_list_head = 0xFFFF;
+    ubyte _cur_time; // in minutes? 10s? what?
+    ubyte _ttl;
+    ushort[256] _table = 0xFFFF;
+    ushort _max_elements;
+    ubyte _scan_slot = 0;
 
-    ubyte hash(MACAddress mac) const pure
+    ubyte hash(ulong x) const pure
     {
-        ushort* s = cast(ushort*)mac.b.ptr;
-        ushort hash = s[0] ^ s[1] ^ (0xF1 * (mac.b[4] >> 8)) ^ (0x25 * (mac.b[5] & 0xFF));
-        return cast(ubyte)(hash ^ (hash >> 8));
+        x ^= x >> 32;
+        x ^= x >> 20;
+        x ^= x >> 12;
+        x ^= x >> 7;
+        return cast(ubyte)(x ^ (x >> 8));
     }
 
-    void removeFromSlot(ubyte slot, ushort element) pure
+    void remove_from_slot(ubyte slot, ushort element) pure
     {
-        if (table[slot] == element)
-            table[slot] = elements[element].next;
-        else if (table[slot] >= 0)
-            removeWithinSlot(slot, element);
+        if (_table[slot] == element)
+            _table[slot] = _elements[element].next;
+        else if (_table[slot] != 0xFFFF)
+            remove_within_slot(slot, element);
     }
 
-    void removeWithinSlot(ubyte slot, ushort element) pure
+    void remove_within_slot(ubyte slot, ushort element) pure
     {
-        Entry* prev = &elements[table[slot]];
-        while (prev.next >= 0 && prev.next != element)
-            prev = &elements[prev.next];
-        if (prev.next >= 0)
-            prev.next = elements[element].next;
+        Entry* prev = &_elements[_table[slot]];
+        while (prev.next != 0xFFFF && prev.next != element)
+            prev = &_elements[prev.next];
+        if (prev.next != 0xFFFF)
+            prev.next = _elements[element].next;
     }
 }
