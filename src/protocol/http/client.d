@@ -21,11 +21,13 @@ import protocol.http.message;
 import router.stream;
 import router.stream.tcp;
 
+//version = DebugHTTPMessageFlow;
+
 nothrow @nogc:
 
 class HTTPClient : BaseObject
 {
-    __gshared Property[3] Properties = [ Property.create!("remote", remote)(),
+    __gshared Property[2] Properties = [ Property.create!("remote", remote)(),
                                          Property.create!("stream", stream)() ];
 nothrow @nogc:
 
@@ -34,7 +36,7 @@ nothrow @nogc:
     this(String name, ObjectFlags flags = ObjectFlags.None)
     {
         super(collectionTypeInfo!HTTPClient, name.move, flags);
-        parser = HTTPParser(&dispatchMessage);
+        parser = HTTPParser(&dispatch_message);
     }
 
     // Properties...
@@ -115,11 +117,11 @@ nothrow @nogc:
                     host = host[2 .. $];
 
                 const(char)[] resource;
-                size_t resOffset = host.findFirst("/");
-                if (resOffset != host.length)
+                size_t res_offset = host.findFirst("/");
+                if (res_offset != host.length)
                 {
-                    resource = host[resOffset .. $];
-                    host = host[0 .. resOffset];
+                    resource = host[res_offset .. $];
+                    host = host[0 .. res_offset];
                 }
 
                 // TODO: I don't think we need a resource when connecting?
@@ -202,7 +204,7 @@ nothrow @nogc:
         for (size_t i = 0; i < requests.length; )
         {
             HTTPMessage* r = requests[i];
-            if (now - r.requestTime > 5.seconds)
+            if (now - r.request_time > 5.seconds)
             {
                 requests.remove(i);
                 defaultAllocator().freeT(r);
@@ -213,28 +215,28 @@ nothrow @nogc:
         }
 
         if (sendNext && requests.length > 0)
-            sendRequest(*requests[0]);
+            send_request(*requests[0]);
     }
 
-    HTTPMessage* request(HTTPMethod method, const(char)[] resource, HTTPMessageHandler responseHandler, const void[] content = null, HTTPParam[] params = null, HTTPParam[] additionalHeaders = null, String username = null, String password = null)
+    HTTPMessage* request(HTTPMethod method, const(char)[] resource, HTTPMessageHandler response_handler, const void[] content = null, HTTPParam[] params = null, HTTPParam[] additional_headers = null, String username = null, String password = null)
     {
         if (!running)
             return null;
 
         HTTPMessage* request = defaultAllocator().allocT!HTTPMessage();
-        request.httpVersion = serverVersion;
+        request.http_version = server_version;
         request.method = method;
         request.url = resource.makeString(defaultAllocator);
         request.username = username.move;
         request.password = password.move;
         request.content = cast(ubyte[])content;
-        request.headers = additionalHeaders.move;
-        request.queryParams = params.move;
-        request.responseHandler = responseHandler;
-        request.requestTime = getSysTime();
+        request.headers = additional_headers.move;
+        request.query_params = params.move;
+        request.response_handler = response_handler;
+        request.request_time = getSysTime();
 
         if (requests.length == 0) // OR CONCURRENT REQUESTS...
-            sendRequest(*request);
+            send_request(*request);
 
         requests ~= request;
         return request;
@@ -245,22 +247,22 @@ private:
     String _host;
     InetAddress _remote;
 
-    HTTPVersion serverVersion = HTTPVersion.V1_1;
+    HTTPVersion server_version = HTTPVersion.V1_1;
 
     HTTPParser parser;
     Array!(HTTPMessage*) requests;
 
-    void sendRequest(ref HTTPMessage request)
+    void send_request(ref HTTPMessage request)
     {
-        bool includeBody = true;
+        bool include_body = true;
         if (request.method == HTTPMethod.HEAD || request.method == HTTPMethod.TRACE || request.method == HTTPMethod.CONNECT)
-            includeBody = false;
-        if (includeBody && request.content.length == 0 && !(request.flags & HTTPFlags.ForceBody))
-            includeBody = false;
+            include_body = false;
+        if (include_body && request.content.length == 0 && !(request.flags & HTTPFlags.ForceBody))
+            include_body = false;
 
         // build the query string
         MutableString!0 get;
-        foreach (ref q; request.queryParams)
+        foreach (ref q; request.query_params)
         {
             bool first = get.empty;
 
@@ -281,10 +283,10 @@ private:
         }
 
         MutableString!0 message;
-        message.concat(enum_keys!HTTPMethod[request.method], ' ', request.url, get, " HTTP/", request.httpVersion >> 4, '.', request.httpVersion & 0xF,
+        message.concat(enum_keys!HTTPMethod[request.method], ' ', request.url, get, " HTTP/", request.http_version >> 4, '.', request.http_version & 0xF,
                        "\r\nHost: ", _host,
                        "\r\nUser-Agent: OpenWatt\r\nAccept-Encoding: gzip, deflate\r\n");
-        if (request.httpVersion == HTTPVersion.V1_1)
+        if (request.http_version == HTTPVersion.V1_1)
             message.append("Connection: keep-alive\r\n");
 
         if (request.username || request.password)
@@ -298,7 +300,7 @@ private:
             auth.base64_encode(message.extend(base64_encode_length(auth.length)));
         }
 
-        if (includeBody)
+        if (include_body)
         {
             message.append("Content-Length: ", request.content.length, "\r\n");
             // TODO: how do we determine the content type?
@@ -308,7 +310,7 @@ private:
             message.append(h.key, ": ", h.value, "\r\n");
         message ~= "\r\n";
 
-        if (includeBody)
+        if (include_body)
             message ~= cast(char[])request.content[];
 
         ptrdiff_t r = stream.write(message);
@@ -323,7 +325,7 @@ private:
         }
     }
 
-    int dispatchMessage(ref const HTTPMessage response)
+    int dispatch_message(ref const HTTPMessage response)
     {
         version (DebugHTTPMessageFlow) {
             import urt.log;
@@ -334,17 +336,17 @@ private:
             return -1;
 
         // if we should close the connection
-        if (requests[0].httpVersion == HTTPVersion.V1_0 || requests[0].header("Connection") == "close")
+        if (requests[0].http_version == HTTPVersion.V1_0 || requests[0].header("Connection") == "close")
             stream.disconnect();
 
-        if (requests[0].responseHandler)
-            requests[0].responseHandler(response);
+        if (requests[0].response_handler)
+            requests[0].response_handler(response);
 
         defaultAllocator().freeT(requests[0]);
         requests.popFront();
 
         if (requests.length > 0)
-            sendRequest(*requests[0]);
+            send_request(*requests[0]);
 
         return 0;
     }
