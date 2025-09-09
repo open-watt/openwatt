@@ -62,6 +62,9 @@ void registerModules(Application app)
     registerModule!(manager.log)(app);
     registerModule!(manager.pcap)(app);
 
+    import router.port;
+    registerModule!(router.port)(app);
+
     import router.stream;
     registerModule!(router.stream)(app);
     registerModule!(router.stream.bridge)(app);
