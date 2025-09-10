@@ -20,23 +20,23 @@ nothrow @nogc:
 
 __gshared Application g_app = null;
 
-Application createApplication()
+Application create_application()
 {
     return defaultAllocator().allocT!Application();
 }
 
-void shutdownApplication()
+void shutdown_application()
 {
     defaultAllocator().freeT(g_app);
 }
 
-Mod getModule(Mod)()
+Mod get_module(Mod)()
     if (is(Mod : Module))
 {
-    __gshared Mod moduleInstance = null;
-    if (!moduleInstance)
-        moduleInstance = cast(Mod)g_app.moduleInstance(Mod.ModuleName);
-    return moduleInstance;
+    __gshared Mod g_module_instance = null;
+    if (!g_module_instance)
+        g_module_instance = cast(Mod)g_app.module_instance(Mod.ModuleName);
+    return g_module_instance;
 }
 
 
@@ -47,7 +47,7 @@ nothrow @nogc:
     String name;
 
     NoGCAllocator allocator;
-    NoGCAllocator tempAllocator;
+    NoGCAllocator temp_allocator;
 
     Array!Module modules;
 
@@ -62,7 +62,7 @@ nothrow @nogc:
         import urt.mem;
 
         allocator = defaultAllocator;
-        tempAllocator = tempAllocator;
+        temp_allocator = temp_allocator;
 
         assert(!g_app, "Application already created!");
         g_app = this;
@@ -76,7 +76,7 @@ nothrow @nogc:
 
         console.registerCommand!device_print("/device", this, "print");
 
-        registerModules(this);
+        register_modules(this);
     }
 
     ~this()
@@ -84,52 +84,52 @@ nothrow @nogc:
         g_app = null;
     }
 
-    void registerModule(Module mod)
+    void register_module(Module mod)
     {
         import urt.string.format;
 
         foreach (m; modules)
-            assert(m.moduleName[] != mod.moduleName, tconcat("Module '", mod.moduleName, "' already registered!"));
+            assert(m.module_name[] != mod.module_name, tconcat("Module '", mod.module_name, "' already registered!"));
 
-        mod.moduleId = modules.length;
+        mod.module_id = modules.length;
         modules ~= mod;
 
         mod.init();
     }
 
-    Module moduleInstance(const(char)[] name) pure
+    Module module_instance(const(char)[] name) pure
     {
         foreach (i; 0 .. modules.length)
-            if (modules[i].moduleName[] == name[])
+            if (modules[i].module_name[] == name[])
                 return modules[i];
         return null;
     }
 
-    Mod moduleInstance(Mod)() pure
+    Mod module_instance(Mod)() pure
         if (is(Mod : Module))
     {
-        return cast(Mod)moduleInstance(Mod.ModuleName);
+        return cast(Mod)module_instance(Mod.ModuleName);
     }
 
-    Device findDevice(const(char)[] deviceId) pure
+    Device find_device(const(char)[] device_id) pure
     {
-        if (Device* d = deviceId[] in devices)
+        if (Device* d = device_id[] in devices)
             return *d;
         return null;
     }
 
-    Component findComponent(const(char)[] name) pure
+    Component find_component(const(char)[] name) pure
     {
-        const(char)[] deviceName = name.split!'.';
-        if (Device* d = deviceName[] in devices)
-            return name.empty ? *d : (*d).findComponent(name);
+        const(char)[] device_name = name.split!'.';
+        if (Device* d = device_name[] in devices)
+            return name.empty ? *d : (*d).find_component(name);
         return null;
     }
 
     void update()
     {
         foreach (m; modules)
-            m.preUpdate();
+            m.pre_update();
 
         foreach (m; modules)
             m.update();
@@ -145,7 +145,7 @@ nothrow @nogc:
             device.update();
 
         foreach (m; modules)
-            m.postUpdate();
+            m.post_update();
     }
 
 

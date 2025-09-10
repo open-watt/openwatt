@@ -118,8 +118,8 @@ nothrow @nogc:
     {
         super(typeInfo, name.move, flags);
 
-        assert(!getModule!InterfaceModule.interfaces.exists(this.name), "HOW DID THIS HAPPEN?");
-        getModule!InterfaceModule.interfaces.add(this);
+        assert(!get_module!InterfaceModule.interfaces.exists(this.name), "HOW DID THIS HAPPEN?");
+        get_module!InterfaceModule.interfaces.add(this);
 
         mac = generateMacAddress();
         addAddress(mac, this);
@@ -127,13 +127,13 @@ nothrow @nogc:
 
     ~this()
     {
-        getModule!InterfaceModule.interfaces.remove(this);
+        get_module!InterfaceModule.interfaces.remove(this);
     }
 
-    static const(char)[] validateName(const(char)[] name)
+    static const(char)[] validate_name(const(char)[] name)
     {
         import urt.mem.temp;
-        if (getModule!InterfaceModule.interfaces.exists(name))
+        if (get_module!InterfaceModule.interfaces.exists(name))
             return tconcat("Interface with name '", name[], "' already exists");
         return null;
     }
@@ -178,7 +178,7 @@ nothrow @nogc:
     {
         // TODO: unsubscribe from old pcap interface, if any...
         import manager.pcap;
-        PcapInterface* cap = getModule!PcapModule.findInterface(value);
+        PcapInterface* cap = get_module!PcapModule.findInterface(value);
         if (!cap)
             return tconcat("Failed to attach pcap interface '", value, "' to '", name, "'; doesn't exist");
         else
@@ -203,8 +203,8 @@ nothrow @nogc:
         _status.recvDropped = 0;
     }
 
-    override const(char)[] statusMessage() const
-        => running ? "Running" : super.statusMessage();
+    override const(char)[] status_message() const
+        => running ? "Running" : super.status_message();
 
     alias subscribe = typeof(super).subscribe;
     alias unsubscribe = typeof(super).unsubscribe;
@@ -334,16 +334,16 @@ protected:
         assert(_status.linkStatus == Status.Link.Up, "Interface is not online, it shouldn't be in Running state!");
     }
 
-    override void setOnline()
+    override void set_online()
     {
         _status.linkStatus = Status.Link.Up;
         _status.linkStatusChangeTime = getSysTime();
-        super.setOnline();
+        super.set_online();
     }
 
-    override void setOffline()
+    override void set_offline()
     {
-        super.setOffline();
+        super.set_offline();
         _status.linkStatus = Status.Link.Down;
         _status.linkStatusChangeTime = getSysTime();
         ++_status.linkDowns;
@@ -412,7 +412,7 @@ nothrow @nogc:
     final String addInterfaceName(Session session, const(char)[] name, const(char)[] defaultNamePrefix)
     {
         if (name.empty)
-            name = interfaces.generateName(defaultNamePrefix);
+            name = interfaces.generate_name(defaultNamePrefix);
         else if (interfaces.exists(name))
         {
             session.writeLine("Interface '", name, " already exists");

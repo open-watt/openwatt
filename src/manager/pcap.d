@@ -275,7 +275,7 @@ nothrow @nogc:
         g_app.console.registerCommand!add("/tools/pcap", this);
     }
 
-    override void postUpdate()
+    override void post_update()
     {
         foreach (PcapInterface* pcap; interfaces)
             pcap.update();

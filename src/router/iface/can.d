@@ -49,7 +49,7 @@ nothrow @nogc:
 
     this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        super(collectionTypeInfo!CANInterface, name.move, flags);
+        super(collection_type_info!CANInterface, name.move, flags);
 
         // this is the proper value for canbus, irrespective of the L2 MTU
         // can jumbo's are theoretically possible if all hops support it... (fragmentation is not possible (?))
@@ -99,7 +99,7 @@ nothrow @nogc:
     {
         if (_stream.detached)
         {
-            if (Stream s = getModule!StreamModule.streams.get(_stream.name))
+            if (Stream s = get_module!StreamModule.streams.get(_stream.name))
                 _stream = s;
         }
         return super.validating();
@@ -356,7 +356,7 @@ nothrow @nogc:
 
     override void update()
     {
-        canInterfaces.updateAll();
+        canInterfaces.update_all();
     }
 }
 

@@ -12,7 +12,7 @@ public import manager.expression : NamedArgument;
 nothrow @nogc:
 
 
-const(CollectionTypeInfo)* collectionTypeInfo(Type)() nothrow @nogc
+const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
 {
     static if (!is(typeof(Type.TypeName)))
         return null; // Type.TypeName must be defined
@@ -22,19 +22,19 @@ const(CollectionTypeInfo)* collectionTypeInfo(Type)() nothrow @nogc
         __gshared const CollectionTypeInfo ti = CollectionTypeInfo(Type.TypeName,
                                                                    allProperties!Type(),
                                                                    (){
-                                                                        static if (is(typeof(Type.validateName) == function))
-                                                                            return &Type.validateName;
+                                                                        static if (is(typeof(Type.validate_name) == function))
+                                                                            return &Type.validate_name;
                                                                         else
                                                                             return null;
                                                                    }(),
                                                                    (ref BaseCollection c, const(char)[] n, ObjectFlags flags)
-                                                                       => defaultAllocator.allocT!Type((n ? n : c.generateName(Type.TypeName)).makeString(defaultAllocator), flags)
+                                                                       => defaultAllocator.allocT!Type((n ? n : c.generate_name(Type.TypeName)).makeString(defaultAllocator), flags)
                                                                    );
         return &ti;
     }
 }
 
-ref Collection!Type* collectionFor(Type)() nothrow @nogc
+ref Collection!Type* collection_for(Type)() nothrow @nogc
 {
     __gshared Collection!Type* collection;
     return collection;
@@ -47,33 +47,33 @@ struct CollectionTypeInfo
 
     String type;
     const(Property*)[] properties;
-    ValidateName validateName;
+    ValidateName validate_name;
     CreateFun create;
 }
 
 struct BaseCollection
 {
 nothrow @nogc:
-    const CollectionTypeInfo* typeInfo;
+    const CollectionTypeInfo* type_info;
     Map!(String, BaseObject) pool;
 
-    this(const CollectionTypeInfo* typeinfo)
+    this(const CollectionTypeInfo* type_info)
     {
-        this.typeInfo = typeinfo;
+        this.type_info = type_info;
     }
 
-    BaseObject create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] namedArgs...)
+    BaseObject create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] named_args...)
     {
-        assert(typeInfo, "Can't create into a base collection!");
+        assert(type_info, "Can't create into a base collection!");
 
         if (exists(name))
             return null;
-        if (typeInfo.validateName && typeInfo.validateName(name) != null)
+        if (type_info.validate_name && type_info.validate_name(name) != null)
             return null;
 
         BaseObject item = alloc(name, flags);
 
-        foreach (ref arg; namedArgs)
+        foreach (ref arg; named_args)
         {
             if (item.set(arg.name, arg.value))
             {
@@ -88,8 +88,8 @@ nothrow @nogc:
 
     BaseObject alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.None)
     {
-        assert(typeInfo, "Can't create into a base collection!");
-        return typeInfo.create(this, name, flags);
+        assert(type_info, "Can't create into a base collection!");
+        return type_info.create(this, name, flags);
     }
 
     auto keys() const
@@ -103,7 +103,7 @@ nothrow @nogc:
 //    auto opIndex() const
 //        => pool[];
 
-    void updateAll()
+    void update_all()
     {
         Array!BaseObject doomed;
         foreach (item; pool.values)
@@ -140,7 +140,7 @@ nothrow @nogc:
         return item ? *item : null;
     }
 
-    const(char)[] generateName(const(char)[] prefix)
+    const(char)[] generate_name(const(char)[] prefix)
     {
         import urt.mem.temp : tconcat;
 
@@ -163,11 +163,11 @@ struct Collection(Type)
 nothrow @nogc:
     static assert(is(Type : BaseObject), "Type must be a subclass of BaseObject");
 
-    BaseCollection _base = BaseCollection(collectionTypeInfo!Type);
+    BaseCollection _base = BaseCollection(collection_type_info!Type);
     alias _base this;
 
-    Type create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] namedArgs...)
-        => cast(Type)_base.create(name, flags, namedArgs);
+    Type create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] named_args...)
+        => cast(Type)_base.create(name, flags, named_args);
 
     Type alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.None)
         => cast(Type)_base.alloc(name, flags);

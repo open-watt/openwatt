@@ -25,7 +25,7 @@ nothrow @nogc:
 
     this(String name, ObjectFlags flags = ObjectFlags.None, StreamOptions options = StreamOptions.None)
     {
-        super(collectionTypeInfo!BridgeStream, name.move, flags, options);
+        super(collection_type_info!BridgeStream, name.move, flags, options);
     }
 
     // Properties
@@ -161,8 +161,8 @@ nothrow @nogc:
         g_app.console.registerCollection("/stream/bridge", bridges);
     }
 
-    override void preUpdate()
+    override void pre_update()
     {
-        bridges.updateAll();
+        bridges.update_all();
     }
 }

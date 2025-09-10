@@ -31,7 +31,7 @@ void main()
     // TODO: prime the string cache with common strings, like unit names and common variable names
     //       the idea is to make dedup lookups much faster...
 
-    Application app = createApplication();
+    Application app = create_application();
 
     // execute startup script
     const(char)[] conf;
@@ -107,5 +107,5 @@ void main()
         sleep(msecs(1));
     }
 
-    shutdownApplication();
+    shutdown_application();
 }

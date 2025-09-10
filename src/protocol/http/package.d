@@ -43,8 +43,8 @@ nothrow @nogc:
 
     override void update()
     {
-        servers.updateAll();
-        clients.updateAll();
+        servers.update_all();
+        clients.update_all();
     }
 
     static class HTTPRequestState : FunctionCommandState

@@ -17,7 +17,7 @@ nothrow @nogc:
 
 void addCollectionCommands(Scope s, ref BaseCollection collection)
 {
-    if (collection.typeInfo)
+    if (collection.type_info)
     {
         s.addCommand(defaultAllocator.allocT!CollectionAddCommand(s.console, collection));
         s.addCommand(defaultAllocator.allocT!CollectionRemoveCommand(s.console, collection));
@@ -60,9 +60,9 @@ nothrow @nogc:
                     session.writeLine("Item with name '", name, "' already exists");
                     return null;
                 }
-                if (collection.typeInfo.validateName)
+                if (collection.type_info.validate_name)
                 {
-                    if (const(char)[] error = collection.typeInfo.validateName(name))
+                    if (const(char)[] error = collection.type_info.validate_name(name))
                     {
                         session.writeLine(error);
                         return null;
@@ -345,7 +345,7 @@ private:
 
 // TODO: enable/disbale commands, which act on multiple items...
 
-// TODO: export command which calls and returns item.exportConfig(), but also works on full collections...
+// TODO: export command which calls and returns item.export_config(), but also works on full collections...
 
 class CollectionPrintCommand : Command
 {
@@ -464,7 +464,7 @@ MutableString!0 complete(const(char)[] cmdLine, ref BaseCollection collection, S
     Array!(const(Property)*) itemProps;
     if (item)
         itemProps = item.properties();
-    const(Property*)[] props = item ? itemProps[] : collection.typeInfo.properties;
+    const(Property*)[] props = item ? itemProps[] : collection.type_info.properties;
 
     size_t equals = lastTok.findFirst('=');
     if (equals == lastTok.length)
@@ -570,7 +570,7 @@ Array!String suggest(const(char)[] cmdLine, ref BaseCollection collection, Sugge
     Array!(const(Property)*) itemProps;
     if (item)
         itemProps = item.properties();
-    const(Property*)[] props = item ? itemProps[] : collection.typeInfo.properties;
+    const(Property*)[] props = item ? itemProps[] : collection.type_info.properties;
 
     // if the partial argument alrady contains an '='
     size_t equals = lastTok.findFirst('=');

@@ -63,7 +63,7 @@ nothrow @nogc:
     void init(Device device) // TODO: rest of cmdline args...
     {
         if (device)
-            config = device.getFirstComponentByTemplate("Configuration");
+            config = device.get_first_component_by_template("Configuration");
     }
 
     T as(T)() pure
@@ -171,7 +171,7 @@ nothrow @nogc:
     {
         if (info)
         {
-            if (Element* rp = info.findElement("ratedPower"))
+            if (Element* rp = info.find_element("ratedPower"))
             {
                 if (rp)
                     ratedPower = rp.value.asQuantity;
@@ -215,7 +215,7 @@ nothrow @nogc:
 
     final override ControlCapability hasControl() const
     {
-        if (control && control.findElement("targetCurrent"))
+        if (control && control.find_element("targetCurrent"))
             return ControlCapability.Linear;
         // on/off control?
 
@@ -250,7 +250,7 @@ nothrow @nogc:
             return;
 
         // check the charger for a connected VIN
-        if (Element* e = info.findElement("vin"))
+        if (Element* e = info.find_element("vin"))
         {
             if (connectedCar)
                 connectedCar.evse = null;
@@ -289,7 +289,7 @@ nothrow @nogc:
 
             if (control)
             {
-                Element* e = control.findElement("targetCurrent");
+                Element* e = control.find_element("targetCurrent");
                 if (e)
                     e.value = targetCurrent;
             }

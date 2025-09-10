@@ -113,7 +113,7 @@ static CircuitType getMeterType(Component meter)
 
     if (meter.template_[] == "RealtimeEnergyMeter" || meter.template_[] == "CumulativeEnergyMeter")
     {
-        Element* e = meter.findElement("type");
+        Element* e = meter.find_element("type");
         // TODO: this should compare to-lower!! (case-insensitive)
         switch(e && e.value.isString ? e.value.asString : "")
         {
@@ -255,7 +255,7 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         // frequency is a global value
         if (i == MeterField.Frequency)
         {
-            if (Element* e = c.findElement(fieldNames[i]))
+            if (Element* e = c.find_element(fieldNames[i]))
                 r.freq = e.normalisedValue();
             r.fields |= FieldFlags.Frequency;
             continue;
@@ -264,7 +264,7 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         ubyte valuesPresent = 0;
         for (size_t j = 0; j < 4; ++j)
         {
-            if (Element* e = c.findElement(j == 0 ? fieldNames[i] : tconcat(fieldNames[i], j)))
+            if (Element* e = c.find_element(j == 0 ? fieldNames[i] : tconcat(fieldNames[i], j)))
             {
                 f[i][j] = e.normalisedValue();
                 valuesPresent |= 1 << j;

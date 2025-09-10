@@ -34,7 +34,7 @@ nothrow @nogc:
 
     override void update()
     {
-        clients.updateAll();
+        clients.update_all();
     }
 }
 

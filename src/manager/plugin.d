@@ -12,14 +12,14 @@ class Module
 {
 nothrow @nogc:
 
-    String moduleName;
-    size_t moduleId = -1;
+    String module_name;
+    size_t module_id = -1;
 
     void init()
     {
     }
 
-    void preUpdate()
+    void pre_update()
     {
     }
 
@@ -27,7 +27,7 @@ nothrow @nogc:
     {
     }
 
-    void postUpdate()
+    void post_update()
     {
     }
 
@@ -35,7 +35,7 @@ protected:
     this(Application app, String name)
     {
         import urt.lifetime : move;
-        this.moduleName = name.move;
+        this.module_name = name.move;
     }
 }
 
@@ -56,52 +56,52 @@ mixin template DeclareModule(string name)
 //
 // HACK: MANUALLY REGISTER ALL THE MODULES
 //
-void registerModules(Application app)
+void register_modules(Application app)
 {
     import manager.log;
-    registerModule!(manager.log)(app);
-    registerModule!(manager.pcap)(app);
+    register_module!(manager.log)(app);
+    register_module!(manager.pcap)(app);
 
     import router.stream;
-    registerModule!(router.stream)(app);
-    registerModule!(router.stream.bridge)(app);
-    registerModule!(router.stream.serial)(app);
-    registerModule!(router.stream.tcp)(app);
-    registerModule!(router.stream.udp)(app);
+    register_module!(router.stream)(app);
+    register_module!(router.stream.bridge)(app);
+    register_module!(router.stream.serial)(app);
+    register_module!(router.stream.tcp)(app);
+    register_module!(router.stream.udp)(app);
 
     import router.iface;
-    registerModule!(router.iface)(app);
-    registerModule!(router.iface.bridge)(app);
-    registerModule!(router.iface.can)(app);
-    registerModule!(router.iface.modbus)(app);
-    registerModule!(router.iface.tesla)(app);
-    registerModule!(router.iface.zigbee)(app);
+    register_module!(router.iface)(app);
+    register_module!(router.iface.bridge)(app);
+    register_module!(router.iface.can)(app);
+    register_module!(router.iface.modbus)(app);
+    register_module!(router.iface.tesla)(app);
+    register_module!(router.iface.zigbee)(app);
 
     import protocol;
-    registerModule!(protocol.dns)(app);
-    registerModule!(protocol.ezsp)(app);
-    registerModule!(protocol.http)(app);
-    registerModule!(protocol.modbus)(app);
-    registerModule!(protocol.mqtt)(app);
-//    registerModule!(protocol.snmp)(app);
-    registerModule!(protocol.telnet)(app);
-    registerModule!(protocol.tesla)(app);
-    registerModule!(protocol.zigbee)(app);
+    register_module!(protocol.dns)(app);
+    register_module!(protocol.ezsp)(app);
+    register_module!(protocol.http)(app);
+    register_module!(protocol.modbus)(app);
+    register_module!(protocol.mqtt)(app);
+//    register_module!(protocol.snmp)(app);
+    register_module!(protocol.telnet)(app);
+    register_module!(protocol.tesla)(app);
+    register_module!(protocol.zigbee)(app);
 
     import apps.energy;
-    registerModule!(apps.energy)(app);
+    register_module!(apps.energy)(app);
 }
 
 
 private:
 
-void registerModule(alias mod)(Application app)
+void register_module(alias mod)(Application app)
 {
     alias AllModules = Modules!mod;
     static if (AllModules.length == 0)
         pragma(msg, "Warning: No `Module`s declared in ", mod.stringof);
     else static foreach (m; AllModules)
-        app.registerModule(app.allocator.allocT!m(app));
+        app.register_module(app.allocator.allocT!m(app));
 }
 
 import urt.meta : AliasSeq;

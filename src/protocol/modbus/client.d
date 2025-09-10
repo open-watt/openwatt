@@ -209,7 +209,7 @@ private:
     void sendPacket(ref const MACAddress server, ushort sequenceNumber, ref const ModbusPDU message, ModbusFrameType type) nothrow @nogc
     {
         import router.iface.modbus;
-        ServerMap* map = getModule!ModbusInterfaceModule().findServerByMac(server);
+        ServerMap* map = get_module!ModbusInterfaceModule().findServerByMac(server);
         if (!map)
             return;
 

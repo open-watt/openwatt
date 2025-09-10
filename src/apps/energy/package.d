@@ -88,11 +88,11 @@ nothrow @nogc:
         if (device)
         {
             if (!info)
-                info = device.value.getFirstComponentByTemplate("DeviceInfo");
+                info = device.value.get_first_component_by_template("DeviceInfo");
         }
         if (!type && info)
         {
-            if (Element* infoEl = info.findElement("deviceType"))
+            if (Element* infoEl = info.find_element("deviceType"))
                 type = infoEl.value.asString();
             if (!type)
             {
@@ -139,7 +139,7 @@ nothrow @nogc:
                 if (control)
                     a.control = control.value;
                 else if (device)
-                    a.control = device.value.findComponent("control");
+                    a.control = device.value.find_component("control");
                 break;
 
             case "car":
@@ -302,7 +302,7 @@ nothrow @nogc:
                         if (mppt.template_[] == "Battery")
                         {
                             name = "battery";
-                            if (Element* socEl = mppt.findElement("soc"))
+                            if (Element* socEl = mppt.find_element("soc"))
                             {
                                 soc = socEl.value.asFloat();
                                 hasSoc = true;

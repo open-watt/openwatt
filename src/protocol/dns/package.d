@@ -42,7 +42,7 @@ nothrow @nogc:
 //            Array!BaseInterface interfaces;
 //            foreach(i; 0 .. _interface.length)
 //            {
-//                BaseInterface iface = getModule!InterfaceModule.findInterface(_interface[i]);
+//                BaseInterface iface = get_module!InterfaceModule.findInterface(_interface[i]);
 //                if (!iface)
 //                {
 //                    session.writeLine("Interface does not exist: ", _interface[i]);

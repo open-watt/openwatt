@@ -202,7 +202,7 @@ nothrow @nogc:
 
                             // record samper data...
                             sampler.addElement(e, **pReg);
-                            device.sampleElements ~= e; // TODO: remove this?
+                            device.sample_elements ~= e; // TODO: remove this?
                             break;
                     }
                 }
@@ -308,12 +308,12 @@ nothrow @nogc:
         }
 
         // TODO: this should be a global MAC->name table, not a modbus specific table...
-        map = getModule!ModbusInterfaceModule.findServerByName(slave);
+        map = get_module!ModbusInterfaceModule.findServerByName(slave);
         if (!map)
         {
             MACAddress addr;
             if (addr.fromString(slave))
-                map = getModule!ModbusInterfaceModule.findServerByMac(addr);
+                map = get_module!ModbusInterfaceModule.findServerByMac(addr);
         }
 
         return *c;

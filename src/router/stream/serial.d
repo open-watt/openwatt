@@ -87,7 +87,7 @@ nothrow @nogc:
 
     this(String name, ObjectFlags flags = ObjectFlags.None, StreamOptions options = StreamOptions.None)
     {
-        super(collectionTypeInfo!SerialStream, name.move, flags, options);
+        super(collection_type_info!SerialStream, name.move, flags, options);
     }
 
     // Properties...
@@ -441,9 +441,9 @@ nothrow @nogc:
         g_app.console.registerCollection("/stream/serial", serial_streams);
     }
 
-    override void preUpdate()
+    override void pre_update()
     {
-        serial_streams.updateAll();
+        serial_streams.update_all();
     }
 }
 

@@ -29,7 +29,7 @@ nothrow @nogc:
 
     this(String name, ObjectFlags flags = ObjectFlags.None) nothrow @nogc
     {
-        super(collectionTypeInfo!ZigbeeInterface, name.move, flags);
+        super(collection_type_info!ZigbeeInterface, name.move, flags);
     }
 
     override void update()

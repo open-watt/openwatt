@@ -43,7 +43,7 @@ nothrow @nogc:
 
     void twc_add(Session session, const(char)[] name, const(char)[] _interface, ushort id, float max_current)
     {
-        auto mod_if = getModule!InterfaceModule;
+        auto mod_if = get_module!InterfaceModule;
 
         BaseInterface i = mod_if.interfaces.get(_interface);
         if(i is null)
@@ -76,7 +76,7 @@ nothrow @nogc:
 
     void twc_set(Session session, const(char)[] name, float target_current)
     {
-        auto mod_if = getModule!TeslaInterfaceModule;
+        auto mod_if = get_module!TeslaInterfaceModule;
 
         foreach (m; twcMasters.values)
         {
