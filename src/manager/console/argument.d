@@ -5,6 +5,8 @@ import urt.mem;
 import urt.mem.temp;
 import urt.meta;
 import urt.meta.nullable;
+import urt.si.quantity;
+import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.traits;
 import urt.variant;
@@ -135,6 +137,36 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
     else
         return "Invalid float value";
     return null;
+}
+
+const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
+    if (is(T == Quantity!(U, _U), U, ScaledUnit _U))
+{
+    static if (is(T == Quantity!(U, _U), U, ScaledUnit _U))
+    {
+        if (v.isQuantity)
+        {
+            VarQuantity q = v.asQuantity;
+            if (!q.isCompatible(r))
+                return "Incompatible units";
+            r = cast(T)q;
+        }
+        else if (v.isNumber)
+        {
+            // TODO: should we actually accept raw numbers? it could be awkward for scripts not to, but for cli, maybe?
+            r = T(v.as!U);
+        }
+        else if (v.isString)
+        {
+            const(char)[] s = v.asString;
+            ptrdiff_t taken = r.fromString(s);
+            if (taken != s.length)
+                return tconcat("Couldn't parse \"", s, "\" as quantity");
+        }
+        else
+            return "Invalid quantity value";
+        return null;
+    }
 }
 
 const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
