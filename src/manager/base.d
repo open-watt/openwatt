@@ -16,7 +16,7 @@ import urt.util : min;
 
 import manager.console.argument;
 
-public import manager.collection : collection_type_info, CollectionTypeInfo;
+public import manager.collection : collection_type_info, collection_for,CollectionTypeInfo;
 
 //version = DebugStateFlow;
 enum DebugType = null;
@@ -515,9 +515,10 @@ nothrow @nogc:
 
     void opAssign(Type object)
     {
-        if (object && _object is object)
+        if (_object is object)
             return;
-        release(); // release the old object
+        if (_object !is null)
+            release(); // release the old object
         _object = object; // assign the new one
         if (_object !is null)
             _object.subscribe(&destroy_handler);
@@ -542,6 +543,18 @@ nothrow @nogc:
 
     bool detached() const pure
         => _ptr & 1;
+
+    bool try_reattach()
+    {
+        if (!detached)
+            return true;
+        if (Type obj = collection_for!Type.get(name))
+        {
+            this = obj;
+            return true;
+        }
+        return false;
+    }
 
     void release()
     {
@@ -572,7 +585,7 @@ private:
         if (signal != StateSignal.Destroyed)
             return;
         _name = _object.name;
-        assert((_ptr & 1) == 0, "Objects and strings should not have the 1-bit of their pointers set!?");
+        assert((_ptr & 1) == 0, "Objects and strings should never have the 1-bit of their pointers set!?");
         _ptr |= 1;
     }
 }

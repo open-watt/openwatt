@@ -59,8 +59,11 @@ nothrow @nogc:
         // read all streams, echo to other streams, accumulate input buffer
         foreach (i; 0 .. m_streams.length)
         {
-            if (!m_streams[i] || !m_streams[i].running)
-                continue;
+            if (!m_streams[i])
+            {
+                if (!m_streams[i].try_reattach() || !m_streams[i].running)
+                    continue;
+            }
 
             ubyte[1024] buf;
             size_t bytes;

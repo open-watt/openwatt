@@ -97,11 +97,7 @@ nothrow @nogc:
 
     override CompletionStatus validating()
     {
-        if (_stream.detached)
-        {
-            if (Stream s = get_module!StreamModule.streams.get(_stream.name))
-                _stream = s;
-        }
+        _stream.try_reattach();
         return super.validating();
     }
 
