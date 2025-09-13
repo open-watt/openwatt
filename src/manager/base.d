@@ -8,6 +8,7 @@ import urt.meta;
 import urt.mem.string;
 import urt.mem.temp;
 import urt.variant;
+import urt.result;
 import urt.string;
 import urt.time;
 import urt.traits : Parameters, ReturnType;
@@ -56,7 +57,7 @@ alias StateSignalHandler = void delegate(BaseObject object, StateSignal signal) 
 struct Property
 {
     alias GetFun = Variant function(BaseObject i) nothrow @nogc;
-    alias SetFun = const(char)[] function(ref const Variant value, BaseObject i) nothrow @nogc;
+    alias SetFun = StringResult function(ref const Variant value, BaseObject i) nothrow @nogc;
     alias ResetFun = void function(BaseObject i) nothrow @nogc;
     alias SuggestFun = Array!String function(const(char)[] arg) nothrow @nogc;
 
@@ -252,18 +253,18 @@ nothrow @nogc:
         return Variant();
     }
 
-    final const(char)[] set(scope const(char)[] property, ref const Variant value)
+    final StringResult set(scope const(char)[] property, ref const Variant value)
     {
         foreach (i, p; properties())
         {
             if (p.name[] == property)
             {
                 if (!p.set)
-                    return tconcat("Property '", property, "' is read-only");
+                    return StringResult(tconcat("Property '", property, "' is read-only"));
                 return p.set(value, this);
             }
         }
-        return tconcat("No property '", property, "' for ", name[]);
+        return StringResult(tconcat("No property '", property, "' for ", name[]));
     }
 
     final void reset(scope const(char)[] property)
@@ -662,7 +663,7 @@ Variant SynthGetter(Getters...)(BaseObject item) nothrow @nogc
     return Variant(/+...+/);
 }
 
-const(char)[] SynthSetter(Setters...)(ref const Variant value, BaseObject item) nothrow @nogc
+StringResult SynthSetter(Setters...)(ref const Variant value, BaseObject item) nothrow @nogc
 {
     alias Type = __traits(parent, Setters[0]);
     Type instance = cast(Type)item;
@@ -675,18 +676,20 @@ const(char)[] SynthSetter(Setters...)(ref const Variant value, BaseObject item) 
         error = convertVariant(value, arg);
         if (!error)
         {
-            static if (is(ReturnType!Setter : const(char)[]))
+            static if (is(ReturnType!Setter : StringResult))
                 return __traits(child, instance, Setter)(arg.move);
+            else static if (is(ReturnType!Setter : const(char)[]))
+                return StringResult(__traits(child, instance, Setter)(arg.move));
             else
             {
                 __traits(child, instance, Setter)(arg.move);
-                return null;
+                return StringResult.success;
             }
         }
     }}
     if (Setters.length == 1)
-        return error;
-    return tconcat("Couldn't set property '" ~ __traits(identifier, Setters[0]) ~ "' with value: ", value);
+        return StringResult(error);
+    return StringResult(tconcat("Couldn't set property '" ~ __traits(identifier, Setters[0]) ~ "' with value: ", value));
 }
 
 template SynthSuggest(Setters...)

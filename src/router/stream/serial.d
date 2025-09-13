@@ -4,6 +4,7 @@ import urt.io;
 import urt.lifetime;
 import urt.log;
 import urt.meta.nullable;
+import urt.result;
 import urt.string;
 import urt.string.format;
 
@@ -94,41 +95,41 @@ nothrow @nogc:
 
     String device() const pure
         => _device;
-    const(char)[] device(String value)
+    StringResult device(String value)
     {
         if (!value)
-            return "device cannot be empty";
+            return StringResult("device cannot be empty");
         if (_device == value)
-            return null;
+            return StringResult.success;
         _device = value.move;
         restart();
-        return null;
+        return StringResult.success;
     }
 
     uint baud_rate() const pure
         => params.baudRate;
-    const(char)[] baud_rate(uint value)
+    StringResult baud_rate(uint value)
     {
         if (value == 0)
-            return "baud rate must be greater than 0";
+            return StringResult("baud rate must be greater than 0");
         if (params.baudRate == value)
-            return null;
+            return StringResult.success;
         params.baudRate = value;
         restart();
-        return null;
+        return StringResult.success;
     }
 
     uint data_bits() const pure
         => params.dataBits;
-    const(char)[] data_bits(uint value)
+    StringResult data_bits(uint value)
     {
         if (value < 5 || value > 9)
-            return "data bits must be between 5 and 9";
+            return StringResult("data bits must be between 5 and 9");
         if (params.dataBits == cast(ubyte)value)
-            return null;
+            return StringResult.success;
         params.dataBits = cast(ubyte)value;
         restart();
-        return null;
+        return StringResult.success;
     }
 
     Parity parity() const pure

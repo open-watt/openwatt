@@ -4,6 +4,7 @@ import urt.array;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
+import urt.result;
 import urt.string;
 import urt.variant;
 
@@ -247,9 +248,10 @@ nothrow @nogc:
 
         foreach (ref arg; namedArgs)
         {
-            if (const(char)[] error = item.set(arg.name, arg.value))
+            StringResult result = item.set(arg.name, arg.value);
+            if (!result)
             {
-                session.writeLine("Set '", arg.name, "\' failed: ", error);
+                session.writeLine("Set '", arg.name, "\' failed: ", result.message);
                 // TODO: should we bail out at first error, or try and set the rest?
 //                return null;
             }
