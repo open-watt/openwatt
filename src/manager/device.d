@@ -38,11 +38,11 @@ nothrow @nogc:
 //            foreach (ref Element e; c.elements)
 //            {
 //                if (e.method == Element.Method.Sample)
-//                    sampleElements ~= &e;
+//                    sample_elements ~= &e;
 //            }
 //        }
 //
-//        lastPoll = getTime();
+//        last_poll = getTime();
 
         return true;
     }
@@ -53,12 +53,12 @@ nothrow @nogc:
             s.update();
 
 //        MonoTime now = getTime();
-//        Duration elapsed = now - lastPoll;
-//        lastPoll = now;
+//        Duration elapsed = now - last_poll;
+//        last_poll = now;
 //
 //        // gather all elements that need to be sampled
 //        Element*[] elements;
-//        foreach (Element* e; sampleElements)
+//        foreach (Element* e; sample_elements)
 //        {
 //            if (e.sampler.updateIntervalMs == 0)
 //            {
@@ -101,7 +101,7 @@ nothrow @nogc:
 //        }
     }
 
-    Array!(Element*) sampleElements;
-    MonoTime lastPoll;
+    Array!(Element*) sample_elements;
+    MonoTime last_poll;
 }
 

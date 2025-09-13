@@ -289,7 +289,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
         return "Invalid value";
 
     alias Type = Unqual!T;
-    Collection!Type* collection = collectionFor!Type();
+    Collection!Type* collection = collection_for!Type();
     assert(collection !is null, "No collection for " ~ Type.stringof);
 
     T* item = collection.exists(n);
@@ -304,7 +304,7 @@ const(char[]) convertVariant(ref const Variant v, out Component r) nothrow @nogc
     if (!v.isString)
         return "Invalid component value";
     const(char)[] s = v.asString;
-    r = g_app.findComponent(s);
+    r = g_app.find_component(s);
     return r ? null : tconcat("No component '", s, '\'');
 }
 
@@ -313,7 +313,7 @@ const(char[]) convertVariant(ref const Variant v, out Device r) nothrow @nogc
     if (!v.isString)
         return "Invalid device value";
     const(char)[] s = v.asString;
-    r = g_app.findDevice(s);
+    r = g_app.find_device(s);
     return r ? null : tconcat("No device '", s, '\'');
 }
 
@@ -328,7 +328,7 @@ const(char[]) convertVariant(I)(ref const Variant v, out I r) nothrow @nogc
         n = v.asString;
     else
         return "Invalid interface value";
-    if (BaseInterface i = getModule!InterfaceModule.interfaces.get(n))
+    if (BaseInterface i = get_module!InterfaceModule.interfaces.get(n))
     {
         r = cast(I)i;
         static if (!is(Unqual!I == BaseInterface))
@@ -348,7 +348,7 @@ const(char[]) convertVariant(S)(ref const Variant v, out S r) nothrow @nogc
         n = v.asString;
     else
         return "Invalid stream value";
-    if (Stream stream = getModule!StreamModule.streams.get(n))
+    if (Stream stream = get_module!StreamModule.streams.get(n))
     {
         r = cast(S)stream;
         static if (!is(Unqual!S == Stream))
@@ -472,7 +472,7 @@ Array!String suggestCompletion(I)(const(char)[] argumentText)
     if (!is(I == typeof(null)) && is(const I == const BaseInterface))
 {
     Array!String completions;
-    foreach (ref name; getModule!InterfaceModule.interfaces.keys)
+    foreach (ref name; get_module!InterfaceModule.interfaces.keys)
     {
         if (name.startsWith(argumentText))
             completions ~= name;
@@ -484,7 +484,7 @@ Array!String suggestCompletion(S)(const(char)[] argumentText)
     if (!is(S == typeof(null)) && is(const S == const Stream))
 {
     Array!String completions;
-    foreach (ref name; getModule!StreamModule.streams.keys)
+    foreach (ref name; get_module!StreamModule.streams.keys)
     {
         if (name.startsWith(argumentText))
             completions ~= name;
@@ -496,7 +496,7 @@ Array!String suggestCompletion(T)(const(char)[] argumentText)
     if (!is(T == typeof(null)) && is(T : const BaseObject) && !is(const T == const BaseInterface) && !is(const T == const Stream))
 {
     alias Type = Unqual!T;
-    const collection = collectionFor!Type();
+    const collection = collection_for!Type();
     if (collection is null)
         return Array!String();
 

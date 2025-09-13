@@ -43,8 +43,8 @@ nothrow @nogc:
 
     override void update()
     {
-        coordinators.updateAll();
-        clients.updateAll();
+        coordinators.update_all();
+        clients.update_all();
     }
 
     // some useful tools zigbee...
@@ -53,7 +53,7 @@ nothrow @nogc:
     // TODO: update the string arg to ZigbeeClient
     RequestState scan(Session session, const(char)[] ezsp_client, Nullable!bool energy_scan)
     {
-        EZSPClient c = getModule!EZSPProtocolModule.clients.get(ezsp_client);
+        EZSPClient c = get_module!EZSPProtocolModule.clients.get(ezsp_client);
         if (!c)
         {
             session.writeLine("EZSP client does not exist: ", ezsp_client);

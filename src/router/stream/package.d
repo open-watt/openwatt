@@ -46,8 +46,8 @@ nothrow @nogc:
     {
         super(typeInfo, name.move, flags);
 
-        assert(!getModule!StreamModule.streams.exists(this.name), "HOW DID THIS HAPPEN?");
-        getModule!StreamModule.streams.add(this);
+        assert(!get_module!StreamModule.streams.exists(this.name), "HOW DID THIS HAPPEN?");
+        get_module!StreamModule.streams.add(this);
 
         this.options = options;
     }
@@ -56,7 +56,7 @@ nothrow @nogc:
     {
         super(name.move, type);
 
-        getModule!StreamModule.streams.add(this);
+        get_module!StreamModule.streams.add(this);
 
         this.options = options;
     }
@@ -68,13 +68,13 @@ nothrow @nogc:
 
         setLogFile(null);
 
-        getModule!StreamModule.streams.remove(this);
+        get_module!StreamModule.streams.remove(this);
     }
 
-    static const(char)[] validateName(const(char)[] name)
+    static const(char)[] validate_name(const(char)[] name)
     {
         import urt.mem.temp;
-        if (getModule!StreamModule.streams.exists(name))
+        if (get_module!StreamModule.streams.exists(name))
             return tconcat("Stream with name '", name[], "' already exists");
         return null;
     }
@@ -99,8 +99,8 @@ nothrow @nogc:
         _status.recvDropped = 0;
     }
 
-    override const(char)[] statusMessage() const
-        => running ? "Running" : super.statusMessage();
+    override const(char)[] status_message() const
+        => running ? "Running" : super.status_message();
 
     // TODO: remove public when everyting ported to collections...
     override void update()
@@ -108,16 +108,16 @@ nothrow @nogc:
         assert(_status.linkStatus == Status.Link.Up, "Stream is not online, it shouldn't be in Running state!");
     }
 
-    override void setOnline()
+    override void set_online()
     {
-        super.setOnline();
+        super.set_online();
         _status.linkStatus = Status.Link.Up;
         _status.linkStatusChangeTime = getSysTime();
     }
 
-    override void setOffline()
+    override void set_offline()
     {
-        super.setOffline();
+        super.set_offline();
         _status.linkStatus = Status.Link.Down;
         _status.linkStatusChangeTime = getSysTime();
         ++_status.linkDowns;

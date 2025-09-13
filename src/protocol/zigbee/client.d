@@ -20,7 +20,7 @@ nothrow @nogc:
 
     this(String name, ObjectFlags flags = ObjectFlags.None) nothrow @nogc
     {
-        super(collectionTypeInfo!ZigbeeClient, name.move, flags);
+        super(collection_type_info!ZigbeeClient, name.move, flags);
     }
 
     // Properties...

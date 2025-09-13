@@ -10,5 +10,5 @@ nothrow @nogc:
 interface Subscriber
 {
 nothrow @nogc:
-    void onChange(Element* e, ref const Variant val, Subscriber whoMadeChange);
+    void on_change(Element* e, ref const Variant val, Subscriber who_made_change);
 }

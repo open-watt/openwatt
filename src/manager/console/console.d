@@ -231,7 +231,7 @@ nothrow @nogc:
     {
         pragma(inline, true);
 
-        ref Collection!Type* c = collectionFor!Type();
+        ref Collection!Type* c = collection_for!Type();
         assert(c is null, "Collection has been registered before!");
         c = &collection;
 

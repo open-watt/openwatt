@@ -22,7 +22,7 @@ nothrow @nogc:
 
     this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        super(collectionTypeInfo!BridgeInterface, name.move, flags);
+        super(collection_type_info!BridgeInterface, name.move, flags);
 
         macTable = MACTable(16, 256, 60);
     }
@@ -53,7 +53,7 @@ nothrow @nogc:
             if (!mb.master)
                 macTable.insert(mb.masterMac, port, vlan);
 
-            auto mod_mb = getModule!ModbusInterfaceModule;
+            auto mod_mb = get_module!ModbusInterfaceModule;
             foreach (ref map; mod_mb.remoteServers.values)
             {
                 if (map.iface is iface)
@@ -198,7 +198,7 @@ nothrow @nogc:
 
     override void update()
     {
-        bridges.updateAll();
+        bridges.update_all();
     }
 
     void port_add(Session session, BridgeInterface bridge, BaseInterface _interface)

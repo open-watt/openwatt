@@ -29,7 +29,7 @@ nothrow @nogc:
 
     this(String name, ObjectFlags flags = ObjectFlags.None, StreamOptions options = StreamOptions.None)
     {
-        super(collectionTypeInfo!TCPStream, name.move, flags, options);
+        super(collection_type_info!TCPStream, name.move, flags, options);
     }
 
     // Properties...
@@ -386,7 +386,7 @@ nothrow @nogc:
 
     this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        super(collectionTypeInfo!TCPServer, name.move, flags);
+        super(collection_type_info!TCPServer, name.move, flags);
     }
 
     // Properties
@@ -480,20 +480,20 @@ nothrow @nogc:
         conn.set_socket_option(SocketOption.non_blocking, true);
 
         // prevent duplicate stream names...
-        String newName = getModule!StreamModule.streams.generateName(name).makeString(defaultAllocator());
+        String newName = get_module!StreamModule.streams.generate_name(name).makeString(defaultAllocator());
 
 //        if (_rawConnectionCallback)
 //            _rawConnectionCallback(conn, userData);
 //        else if (_connectionCallback)
         if (_connectionCallback)
         {
-            TCPStream stream = getModule!TCPStreamModule.tcp_streams.alloc(newName.move, cast(ObjectFlags)(ObjectFlags.Dynamic | ObjectFlags.Temporary));
+            TCPStream stream = get_module!TCPStreamModule.tcp_streams.alloc(newName.move, cast(ObjectFlags)(ObjectFlags.Dynamic | ObjectFlags.Temporary));
 
             // assign the socket to the stream and bypass the startup process
             stream._socket = conn;
             conn.get_peer_name(stream._remote);
             stream._state = State.Running;
-            getModule!TCPStreamModule.tcp_streams.add(stream);
+            get_module!TCPStreamModule.tcp_streams.add(stream);
 
             _connectionCallback(stream, _userData);
         }
@@ -542,13 +542,13 @@ nothrow @nogc:
         g_app.console.registerCollection("/stream/tcp-server", tcp_servers);
     }
 
-    override void preUpdate()
+    override void pre_update()
     {
-        tcp_streams.updateAll();
+        tcp_streams.update_all();
     }
 
     override void update()
     {
-        tcp_servers.updateAll();
+        tcp_servers.update_all();
     }
 }

@@ -66,7 +66,7 @@ class EZSPClient : BaseObject
 
     this(String name, ObjectFlags flags = ObjectFlags.None) nothrow
     {
-        super(collectionTypeInfo!EZSPClient, name.move, flags);
+        super(collection_type_info!EZSPClient, name.move, flags);
     }
 
     // Properties...

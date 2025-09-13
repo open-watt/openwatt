@@ -29,9 +29,9 @@ nothrow @nogc:
         m_allocator = allocator;
         m_console = console;
 
-        const(char)[] server_name = getModule!TCPStreamModule.tcp_servers.generateName(this.name);
+        const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name(this.name);
 
-        m_server = getModule!TCPStreamModule.tcp_servers.create(server_name.makeString(defaultAllocator), ObjectFlags.Dynamic);
+        m_server = get_module!TCPStreamModule.tcp_servers.create(server_name.makeString(defaultAllocator), ObjectFlags.Dynamic);
         m_server.port = port;
         m_server.setConnectionCallback(&acceptConnection, null);
     }

@@ -15,7 +15,7 @@ import urt.util : min;
 
 import manager.console.argument;
 
-public import manager.collection : collectionTypeInfo, CollectionTypeInfo;
+public import manager.collection : collection_type_info, CollectionTypeInfo;
 
 //version = DebugStateFlow;
 enum DebugType = null;
@@ -102,7 +102,7 @@ class BaseObject
                                          Property.create!("comment", comment)(),
                                          Property.create!("running", running)(),
                                          Property.create!("flags", flags)(),
-                                         Property.create!("status", statusMessage)() ];
+                                         Property.create!("status", status_message)() ];
 nothrow @nogc:
 
     // TODO: delete this constructor!!!
@@ -115,13 +115,13 @@ nothrow @nogc:
         _name = name.move;
     }
 
-    this(const CollectionTypeInfo* typeInfo, String name, ObjectFlags flags = ObjectFlags.None)
+    this(const CollectionTypeInfo* type_info, String name, ObjectFlags flags = ObjectFlags.None)
     {
         assert((flags & ~(ObjectFlags.Dynamic | ObjectFlags.Temporary | ObjectFlags.Disabled)) == 0,
                "`flags` may only contain Dynamic, Temporary, or Disabled flags");
 
-        _typeInfo = typeInfo;
-        _type = typeInfo.type[].addString();
+        _typeInfo = type_info;
+        _type = type_info.type[].addString();
         _name = name.move;
         _flags = flags;
 
@@ -181,7 +181,7 @@ nothrow @nogc:
     }
 
     // give a helpful status string, e.g. "Ready", "Disabled", "Error: <message>"
-    const(char)[] statusMessage() const pure
+    const(char)[] status_message() const pure
     {
         switch (_state)
         {
@@ -228,7 +228,7 @@ nothrow @nogc:
         if (_state & _Valid)
             _state |= _Stop;
 
-        signalStateChange(StateSignal.Destroyed);
+        signal_state_change(StateSignal.Destroyed);
     }
 
     // return a list of properties that can be set on this object
@@ -272,7 +272,7 @@ nothrow @nogc:
         {
             if (p.name[] == property)
             {
-                propsSet &= ~(1 << i);
+                _props_set &= ~(1 << i);
                 if (p.reset)
                     p.reset(this);
                 return;
@@ -281,10 +281,10 @@ nothrow @nogc:
     }
 
     // get the whole config
-    final Variant getConfig() const
+    final Variant get_config() const
         => Variant();
 
-    final MutableString!0 exportConfig() const pure
+    final MutableString!0 export_config() const pure
     {
         // TODO: this should return a string that contains the command which would recreate this object...
         return MutableString!0();
@@ -292,13 +292,13 @@ nothrow @nogc:
 
     final void subscribe(StateSignalHandler handler)
     {
-        assert(!subscribers[].exists(handler), "Already registered");
-        subscribers ~= handler;
+        assert(!_subscribers[].exists(handler), "Already registered");
+        _subscribers ~= handler;
     }
 
     final void unsubscribe(StateSignalHandler handler) pure
     {
-        subscribers.removeFirstSwapLast(handler);
+        _subscribers.removeFirstSwapLast(handler);
     }
 
     int opCmp(const BaseObject rhs) const pure
@@ -336,45 +336,45 @@ protected:
     }
 
     const CollectionTypeInfo* _typeInfo;
-    size_t propsSet;
+    size_t _props_set;
     State _state = State.Validate;
     ObjectFlags _flags;
 
-    final void setState(State newState)
+    final void set_state(State new_state)
     {
         assert(_state != State.Destroyed, "Cannot change state of a destroyed object!");
 
-        if (newState == _state)
+        if (new_state == _state)
             return;
 
         State old = _state;
-        _state = newState;
+        _state = new_state;
 
         debug version (DebugStateFlow)
             if (!DebugType || _type[] == DebugType)
-                writeDebug(_type[], " '", _name, "' state change: ", old, " -> ", newState);
+                writeDebug(_type[], " '", _name, "' state change: ", old, " -> ", new_state);
 
-        switch (newState)
+        switch (new_state)
         {
             case State.InitFailed:
                 debug version (DebugStateFlow)
                     if (!DebugType || _type[] == DebugType)
-                        writeDebug(_type[], " '", _name, "' init fail - try again in ", backoff_ms, "ms");
+                        writeDebug(_type[], " '", _name, "' init fail - try again in ", _backoff_ms, "ms");
                 goto case;
             case State.Disabled:
             case State.Destroyed:
                 break;
 
             case State.Running:
-                backoff_ms = 0;
-                setOnline();
+                _backoff_ms = 0;
+                set_online();
                 goto do_update;
 
             case State.Validate:
                 goto do_update;
 
             case State.Starting:
-                last_init_attempt = getTime();
+                _last_init_attempt = getTime();
                 goto do_update;
 
             case State.Restarting:
@@ -382,7 +382,7 @@ protected:
             case State.Stopping:
             case State.Failure:
                 if (old == State.Running)
-                    setOffline();
+                    set_offline();
                 goto do_update;
 
             do_update:
@@ -411,22 +411,22 @@ protected:
     {
     }
 
-    void setOnline()
+    void set_online()
     {
         writeInfo(_type[], " '", _name, "' online...");
-        signalStateChange(StateSignal.Online);
+        signal_state_change(StateSignal.Online);
     }
 
-    void setOffline()
+    void set_offline()
     {
         writeInfo(_type[], " '", _name, "' offline...");
-        signalStateChange(StateSignal.Offline);
+        signal_state_change(StateSignal.Offline);
     }
 
     // sends a signal to all clients
-    final void signalStateChange(StateSignal signal)
+    final void signal_state_change(StateSignal signal)
     {
-        foreach (handler; subscribers)
+        foreach (handler; _subscribers)
             handler(this, signal);
     }
 
@@ -434,10 +434,9 @@ private:
     const CacheString _type; // TODO: DELETE THIS MEMBER!!!
     String _name;
     String _comment;
-    Array!StateSignalHandler subscribers;
-    MonoTime last_init_attempt;
-    ushort backoff_ms = 0;
-
+    Array!StateSignalHandler _subscribers;
+    MonoTime _last_init_attempt;
+    ushort _backoff_ms = 0;
 
     package bool do_update()
     {
@@ -451,10 +450,10 @@ private:
                 break;
 
             case State.InitFailed:
-                if (getTime() - last_init_attempt >= backoff_ms.msecs)
+                if (getTime() - _last_init_attempt >= _backoff_ms.msecs)
                 {
-                    backoff_ms = cast(ushort)(backoff_ms == 0 ? 100 : min(backoff_ms * 2, 60_000));
-                    setState(State.Validate);
+                    _backoff_ms = cast(ushort)(_backoff_ms == 0 ? 100 : min(_backoff_ms * 2, 60_000));
+                    set_state(State.Validate);
                 }
                 break;
 
@@ -462,15 +461,15 @@ private:
                 CompletionStatus s = validating();
                 debug assert(s != CompletionStatus.Continue, "validating() should return Success or Failure");
                 if (s == CompletionStatus.Complete)
-                    setState(State.Starting);
+                    set_state(State.Starting);
                 break;
 
             case State.Starting:
                 CompletionStatus s = startup();
                 if (s == CompletionStatus.Complete)
-                    setState(State.Running);
+                    set_state(State.Running);
                 else if (s == CompletionStatus.Error)
-                    setState(State.Failure);
+                    set_state(State.Failure);
                 break;
 
             case State.Restarting:
@@ -480,7 +479,7 @@ private:
                 CompletionStatus s = shutdown();
                 debug assert(s != CompletionStatus.Error, "shutdown() should not fail; just clear/reset the state!");
                 if (s == CompletionStatus.Complete)
-                    setState(cast(State)(_state & ~(_Stop | _Valid)));
+                    set_state(cast(State)(_state & ~(_Stop | _Valid)));
                 break;
 
             case State.Running:
@@ -580,7 +579,7 @@ private:
 
 const(Property*)[] allProperties(Type)()
 {
-    alias AllProps = allPropertiesImpl!(Type, 0);
+    alias AllProps = all_properties_impl!(Type, 0);
     enum Count = typeof(AllProps()).length;
     __gshared const(Property*)[Count] props = AllProps();
     return props[];
@@ -589,7 +588,7 @@ const(Property*)[] allProperties(Type)()
 
 private:
 
-auto allPropertiesImpl(Type, size_t allocCount)()
+auto all_properties_impl(Type, size_t allocCount)()
 {
     import urt.traits : Unqual;
 
@@ -600,7 +599,7 @@ auto allPropertiesImpl(Type, size_t allocCount)()
             enum PropCount = Type.Properties.length;
         else
             enum PropCount = 0;
-        auto result = allPropertiesImpl!(Super, PropCount + allocCount)();
+        auto result = all_properties_impl!(Super, PropCount + allocCount)();
     }
     else
     {

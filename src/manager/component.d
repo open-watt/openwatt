@@ -46,7 +46,7 @@ nothrow @nogc:
     Array!(Component) components;
     Array!(Element*) elements;
 
-    void addComponent(Component component) // TODO: include sampler here...
+    void add_component(Component component) // TODO: include sampler here...
     {
         foreach (Component c; components)
         {
@@ -60,18 +60,18 @@ nothrow @nogc:
         components.pushBack(component);
     }
 
-    inout(Component) findComponent(const(char)[] name) inout pure nothrow @nogc
+    inout(Component) find_component(const(char)[] name) inout pure nothrow @nogc
     {
         const(char)[] id = name.split!'.';
         foreach (inout Component c; components)
         {
             if (c.id[] == id[])
-                return name.empty ? c : c.findComponent(name);
+                return name.empty ? c : c.find_component(name);
         }
         return null;
     }
 
-    inout(Element)* findElement(const(char)[] name) inout pure nothrow @nogc
+    inout(Element)* find_element(const(char)[] name) inout pure nothrow @nogc
     {
         const(char)[] id = name.split!'.';
         if (!name.empty)
@@ -79,7 +79,7 @@ nothrow @nogc:
             foreach (inout Component c; components)
             {
                 if (c.id[] == id[])
-                    return c.findElement(name);
+                    return c.find_element(name);
             }
         }
         else
@@ -93,19 +93,19 @@ nothrow @nogc:
         return null;
     }
 
-    Component getFirstComponentByTemplate(const char[] templateName)
+    Component get_first_component_by_template(const char[] template_name)
     {
         foreach (Component c; components)
-            if (c.template_[] == templateName[])
+            if (c.template_[] == template_name[])
                 return c;
         return null;
     }
 
-    Array!Component findComponentsByTemplate(const char[] templateName)
+    Array!Component find_components_by_template(const char[] template_name)
     {
         Array!Component result;
         foreach (Component c; components)
-            if (c.template_[] == templateName[])
+            if (c.template_[] == template_name[])
                 result ~= c;
         return result;
     }
@@ -118,7 +118,7 @@ nothrow @nogc:
 }
 
 
-Map!(const(char)[], FieldTemplate*) componentTemplates;
+//__gshared Map!(const(char)[], FieldTemplate*) g_component_templates;
 //__gshared immutable FieldTemplate[] templates = [
 //    FieldTemplate("switch");
 //];

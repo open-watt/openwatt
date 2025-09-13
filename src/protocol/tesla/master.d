@@ -149,7 +149,7 @@ nothrow @nogc:
 
         iface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.OW, owSubType: OW_SubType.TeslaTWC));
 
-        getModule!TeslaInterfaceModule.addServer(name[], iface, id);
+        get_module!TeslaInterfaceModule.addServer(name[], iface, id);
     }
 
     ~this()

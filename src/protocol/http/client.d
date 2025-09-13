@@ -35,7 +35,7 @@ nothrow @nogc:
 
     this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        super(collectionTypeInfo!HTTPClient, name.move, flags);
+        super(collection_type_info!HTTPClient, name.move, flags);
         parser = HTTPParser(&dispatch_message);
     }
 
@@ -88,7 +88,7 @@ nothrow @nogc:
     {
         if (_stream.detached)
         {
-            if (Stream s = getModule!StreamModule.streams.get(_stream.name))
+            if (Stream s = get_module!StreamModule.streams.get(_stream.name))
                 _stream = s;
         }
         return super.validating();
@@ -101,7 +101,7 @@ nothrow @nogc:
             if (!_host && _remote == InetAddress())
                 return CompletionStatus.Error;
 
-            const(char)[] stream_name = getModule!StreamModule.streams.generateName(name);
+            const(char)[] stream_name = get_module!StreamModule.streams.generate_name(name);
             if (_host)
             {
                 const(char)[] host = _host[];
@@ -144,7 +144,7 @@ nothrow @nogc:
                             return CompletionStatus.Error; // invalid port string!
                     }
 
-                    TCPStream tcp_stream = getModule!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.Dynamic);
+                    TCPStream tcp_stream = get_module!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.Dynamic);
                     tcp_stream.remote = host.makeString(defaultAllocator);
                     tcp_stream.port = port;
                     _stream = tcp_stream;
@@ -153,12 +153,12 @@ nothrow @nogc:
                 {
                     assert(false, "TODO: need TLS stream");
 //                    stream = g_app.allocator.allocT!SSLStream(name, host, ushort(0));
-//                    getModule!StreamModule.addStream(stream);
+//                    get_module!StreamModule.addStream(stream);
                 }
             }
             else
             {
-                TCPStream tcp_stream = getModule!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.Dynamic);
+                TCPStream tcp_stream = get_module!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.Dynamic);
                 tcp_stream.remote = _remote;
                 _stream = tcp_stream;
             }

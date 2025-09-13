@@ -162,8 +162,8 @@ class UDPStreamModule : Module
 //        g_app.console.registerCollection("/stream/udp-client", udp_streams);
 //    }
 //
-//    override void preUpdate()
+//    override void pre_update()
 //    {
-//        udp_streams.updateAll();
+//        udp_streams.update_all();
 //    }
 }

@@ -42,7 +42,7 @@ nothrow @nogc:
 
     void add_server(Session session, const(char)[] name, ushort port)
     {
-        auto mod_if = getModule!InterfaceModule;
+        auto mod_if = get_module!InterfaceModule;
 
 //        BaseInterface i = mod_if.findInterface(_interface);
 //        if(i is null)

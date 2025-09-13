@@ -82,7 +82,7 @@ nothrow @nogc:
 
     this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        super(collectionTypeInfo!ModbusInterface, name.move, flags);
+        super(collection_type_info!ModbusInterface, name.move, flags);
 
         // this is the proper value for modbus, irrespective of the L2 MTU
         // modbus jumbo's are theoretically possible if all hops support it... (fragmentation is not possible)
@@ -175,7 +175,7 @@ nothrow @nogc:
     {
         if (_stream.detached)
         {
-            if (Stream s = getModule!StreamModule.streams.get(_stream.name))
+            if (Stream s = get_module!StreamModule.streams.get(_stream.name))
                 _stream = s;
         }
         return super.validating();
@@ -344,7 +344,7 @@ nothrow @nogc:
             return false;
         }
 
-        auto mod_mb = getModule!ModbusInterfaceModule();
+        auto mod_mb = get_module!ModbusInterfaceModule();
 
         ushort sequenceNumber = (cast(ubyte[])packet.data)[0..2].bigEndianToNative!ushort;
         ModbusFrameType packetType = *cast(ModbusFrameType*)&packet.data[2];
@@ -544,7 +544,7 @@ private:
             frameMac = MACAddress.broadcast;
         else
         {
-            auto mod_mb = getModule!ModbusInterfaceModule();
+            auto mod_mb = get_module!ModbusInterfaceModule();
 
             // we probably need to find a way to cache these lookups.
             // doing this every packet feels kinda bad...
@@ -717,7 +717,7 @@ nothrow @nogc:
 
     override void update()
     {
-        modbus_interfaces.updateAll();
+        modbus_interfaces.update_all();
     }
 
     ServerMap* findServerByName(const(char)[] name)
@@ -811,7 +811,7 @@ nothrow @nogc:
             return;
         }
 
-        BaseInterface iface = getModule!InterfaceModule.interfaces.get(_interface);
+        BaseInterface iface = get_module!InterfaceModule.interfaces.get(_interface);
         if (!iface)
         {
             session.writeLine("Interface '", _interface, "' not found.");

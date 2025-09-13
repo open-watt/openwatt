@@ -34,7 +34,7 @@ nothrow @nogc:
 
     this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        super(collectionTypeInfo!HTTPServer, name.move, flags);
+        super(collection_type_info!HTTPServer, name.move, flags);
     }
 
     // Properties...
@@ -83,8 +83,8 @@ nothrow @nogc:
 
     override CompletionStatus startup()
     {
-        const(char)[] server_name = getModule!TCPStreamModule.tcp_servers.generateName(name);
-        _server = getModule!TCPStreamModule.tcp_servers.create(server_name.makeString(defaultAllocator), ObjectFlags.Dynamic, NamedArgument("port", _port));
+        const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name(name);
+        _server = get_module!TCPStreamModule.tcp_servers.create(server_name.makeString(defaultAllocator), ObjectFlags.Dynamic, NamedArgument("port", _port));
         if (!_server)
             return CompletionStatus.Error;
 

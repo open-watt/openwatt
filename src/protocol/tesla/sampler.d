@@ -99,7 +99,7 @@ nothrow @nogc:
         elements.removeFirstSwapLast(element);
     }
 
-    void onChange(Element* e, ref const Variant val, Subscriber whoMadeChange)
+    void on_change(Element* e, ref const Variant val, Subscriber who_made_change)
     {
         if (!master) // if not bound, we can't apply any values
             return;

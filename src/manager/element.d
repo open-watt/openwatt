@@ -69,6 +69,6 @@ nothrow @nogc:
     void signal(ref const Variant v, Subscriber who)
     {
         foreach (s; subscribers)
-            s.onChange(&this, v, who);
+            s.on_change(&this, v, who);
     }
 }

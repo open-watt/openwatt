@@ -41,7 +41,7 @@ nothrow @nogc:
 
     this(String name, ObjectFlags flags = ObjectFlags.None)
     {
-        super(collectionTypeInfo!TeslaInterface, name.move, flags);
+        super(collection_type_info!TeslaInterface, name.move, flags);
     }
 
     // Properties...
@@ -215,7 +215,7 @@ private:
         p.eth.ether_type = EtherType.OW;
         p.eth.ow_sub_type = OW_SubType.TeslaTWC;
 
-        auto mod_tesla = getModule!TeslaInterfaceModule();
+        auto mod_tesla = get_module!TeslaInterfaceModule();
 
         DeviceMap* map = mod_tesla.findServerByAddress(message.sender);
         if (!map)
@@ -257,7 +257,7 @@ nothrow @nogc:
 
     override void update()
     {
-        twc_interfaces.updateAll();
+        twc_interfaces.update_all();
     }
 
     DeviceMap* findServerByName(const(char)[] name)
