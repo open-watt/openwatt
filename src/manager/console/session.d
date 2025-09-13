@@ -265,7 +265,7 @@ nothrow @nogc:
                     i += 1;
                     goto close_session;
                 }
-                else if (t[i] == '\r')
+                else if (t[i] == '\r' || t[i] == '\n')
                 {
                     return i;
                 }
@@ -417,12 +417,8 @@ protected:
             }
             else if (taken < input.length)
             {
-                assert(input[taken] == '\r', "Should only be here when user presses enter?");
-
-//                // TODO: what about not-telnet?
-//                //       consume following '\n'?? do enter keypresses expect a '\n'? maybe ClientFeatures.CRLF?
-//                if (taken + 1 < input.length && (input[taken + 1] == '\n'))
-//                    ++taken;
+                if (input[taken] == '\r' && input.length > taken + 1 && input[taken + 1] == '\n')
+                    ++taken;
 
                 MutableString!0 cmdInput = takeInput();
                 const(char)[] command = cmdInput.trimCmdLine;

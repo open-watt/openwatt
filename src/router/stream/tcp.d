@@ -477,6 +477,8 @@ nothrow @nogc:
 //        if (options & ServerOptions.JustOne)
 //            stop();
 
+        conn.set_socket_option(SocketOption.non_blocking, true);
+
         // prevent duplicate stream names...
         String newName = getModule!StreamModule.streams.generateName(name).makeString(defaultAllocator());
 
