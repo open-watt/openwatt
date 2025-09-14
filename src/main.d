@@ -96,15 +96,19 @@ void main()
     +/
 
 
-    int i = 0;
     while (true)
     {
+        // update the application
+        MonoTime start = getTime();
         g_app.update();
+        Duration frame_time = getTime() - start;
 
-        // Process program logic
-        // ...
-
-        sleep(msecs(1));
+        // work out how long to sleep
+        int sleep_usecs = 1000_000 / g_app.update_rate_hz;
+        sleep_usecs -= frame_time.as!"usecs";
+        // only sleep if we need to sleep >20us or so...
+        if (sleep_usecs > 20)
+            sleep(usecs(sleep_usecs));
     }
 
     shutdown_application();

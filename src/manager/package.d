@@ -5,6 +5,8 @@ import urt.lifetime : move;
 import urt.map;
 import urt.mem.allocator;
 import urt.mem.string;
+import urt.si.quantity;
+import urt.si.unit;
 import urt.string;
 
 import manager.component;
@@ -55,6 +57,8 @@ nothrow @nogc:
 
     Map!(const(char)[], Device) devices;
 
+    uint update_rate_hz = 20;
+
     // database...
 
     this()
@@ -73,6 +77,7 @@ nothrow @nogc:
 
         console.registerCommand!log_level("/system", this);
         console.registerCommand!set_hostname("/system", this);
+        console.registerCommand!set_update_rate("/system", this, "update-rate");
 
         console.registerCommand!device_print("/device", this, "print");
 
@@ -82,6 +87,11 @@ nothrow @nogc:
     ~this()
     {
         g_app = null;
+    }
+
+    void set_update_rate(Session, Quantity!(uint, Hertz) rate)
+    {
+        update_rate_hz = rate.value;
     }
 
     void register_module(Module mod)
