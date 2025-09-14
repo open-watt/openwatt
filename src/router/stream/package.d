@@ -208,6 +208,14 @@ class StreamModule : Module
 nothrow @nogc:
 
     Collection!Stream streams;
+
+    override void init()
+    {
+        // HACK: Stream collection is not a natural collection, so we'll init it here...
+        ref Collection!Stream* c = collection_for!Stream();
+        assert(c is null, "Collection has been registered before!");
+        c = &streams;
+    }
 }
 
 

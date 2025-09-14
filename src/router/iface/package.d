@@ -406,6 +406,11 @@ nothrow @nogc:
 
     override void init()
     {
+        // HACK: BaseInterface collection is not a natural collection, so we'll init it here...
+        ref Collection!BaseInterface* c = collection_for!BaseInterface();
+        assert(c is null, "Collection has been registered before!");
+        c = &interfaces;
+
         g_app.console.registerCommand!print("/interface", this);
     }
 
