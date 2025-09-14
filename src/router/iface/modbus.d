@@ -68,7 +68,7 @@ struct ModbusRequest
     ushort sequenceNumber;
     ubyte localServerAddress;
     bool inFlight;
-    const(Packet)* bufferedPacket;
+    Packet* bufferedPacket;
 }
 
 class ModbusInterface : BaseInterface
