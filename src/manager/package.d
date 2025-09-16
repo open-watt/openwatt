@@ -9,15 +9,28 @@ import urt.si.quantity;
 import urt.si.unit;
 import urt.string;
 
+import manager.collection;
 import manager.component;
 import manager.console;
 import manager.device;
 import manager.plugin;
+import manager.secret;
 import manager.system;
 
 public static import manager.pcap;
 
 nothrow @nogc:
+
+
+enum AuthResult : ubyte
+{
+    accepted,
+    unknown_user,
+    wrong_password,
+    no_service_access,
+}
+
+alias AuthCallback = void delegate(AuthResult result, const(char)[] profile) nothrow @nogc;
 
 
 __gshared Application g_app = null;
@@ -59,6 +72,8 @@ nothrow @nogc:
 
     uint update_rate_hz = 20;
 
+    Collection!Secret secrets;
+
     // database...
 
     this()
@@ -73,13 +88,15 @@ nothrow @nogc:
 
         console = Console(this, String("console".addString), Mallocator.instance);
 
-        console.setPrompt(StringLit!"enermon > ");
+        console.setPrompt(StringLit!"openwatt > ");
 
         console.registerCommand!log_level("/system", this);
         console.registerCommand!set_hostname("/system", this);
         console.registerCommand!set_update_rate("/system", this, "update-rate");
 
         console.registerCommand!device_print("/device", this, "print");
+
+        console.registerCollection("/secret", secrets);
 
         register_modules(this);
     }
@@ -119,6 +136,29 @@ nothrow @nogc:
         if (is(Mod : Module))
     {
         return cast(Mod)module_instance(Mod.ModuleName);
+    }
+
+    bool validate_login(const(char)[] username, const(char)[] password, const(char)[] service, scope AuthCallback callback) const
+    {
+        if (const Secret* secret = secrets.exists(username[]))
+        {
+            if (secret.validate_password(password))
+            {
+                String profile;
+                if (secret.allow_service(service, &profile))
+                    callback(AuthResult.accepted, profile[]);
+                else
+                    callback(AuthResult.no_service_access, null);
+                return true;
+            }
+            else
+                callback(AuthResult.wrong_password, null);
+            return true;
+        }
+
+        // TODO: request auth from RADIUS servers, etc...
+
+        return false;
     }
 
     Device find_device(const(char)[] device_id) pure

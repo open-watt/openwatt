@@ -162,6 +162,9 @@
     <DCompile Include="src\manager\device.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\manager\secret.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
     <DCompile Include="src\router\modbus\profile\goodwe.d">
       <Filter>src\router\modbus\profile</Filter>
     </DCompile>

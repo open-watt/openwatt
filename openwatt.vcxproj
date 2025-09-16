@@ -81,6 +81,7 @@
     <DCompile Include="src\manager\pcap.d" />
     <DCompile Include="src\manager\plugin.d" />
     <DCompile Include="src\manager\sampler.d" />
+    <DCompile Include="src\manager\secret.d" />
     <DCompile Include="src\manager\subscriber.d" />
     <DCompile Include="src\manager\system.d" />
     <DCompile Include="src\protocol\dns\mdns.d" />
