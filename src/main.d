@@ -108,7 +108,7 @@ void main()
         sleep_usecs -= frame_time.as!"usecs";
         // only sleep if we need to sleep >20us or so...
         if (sleep_usecs > 20)
-            sleep(usecs(sleep_usecs));
+            sleep(sleep_usecs.usecs);
     }
 
     shutdown_application();
