@@ -102,6 +102,9 @@
     <DCompile Include="src\protocol\mqtt\package.d" />
     <DCompile Include="src\protocol\mqtt\util.d" />
     <DCompile Include="src\protocol\package.d" />
+    <DCompile Include="src\protocol\ppp\client.d" />
+    <DCompile Include="src\protocol\ppp\package.d" />
+    <DCompile Include="src\protocol\ppp\server.d" />
     <DCompile Include="src\protocol\snmp\package.d" />
     <DCompile Include="src\protocol\telnet\package.d" />
     <DCompile Include="src\protocol\telnet\server.d" />

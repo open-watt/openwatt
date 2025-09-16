@@ -20,16 +20,18 @@ enum PacketType : ushort
 
 enum EtherType : ushort
 {
-    IP4  = 0x0800,  // Internet Protocol version 4 (IPv4)
-    ARP  = 0x0806,  // Address Resolution Protocol (ARP)
-    WOL  = 0x0842,  // Wake-on-LAN
-    VLAN = 0x8100,  // IEEE 802.1Q VLAN tag
-    IP6  = 0x86DD,  // Internet Protocol version 6 (IPv6)
-    QinQ = 0x88A8,  // Service VLAN tag identifier (S-Tag) on Q-in-Q tunnel
-    OW   = 0x88B5,  // OpenWatt: this is the official experimental ethertype for development use
-    MTik = 0x88BF,  // MikroTik RoMON
-    LLDP = 0x88CC,  // Link Layer Discovery Protocol (LLDP)
-    HPGP = 0x88E1,  // HomePlug Green PHY (HPGP)
+    IP4     = 0x0800,   // Internet Protocol version 4 (IPv4)
+    ARP     = 0x0806,   // Address Resolution Protocol (ARP)
+    WOL     = 0x0842,   // Wake-on-LAN
+    VLAN    = 0x8100,   // IEEE 802.1Q VLAN tag
+    IP6     = 0x86DD,   // Internet Protocol version 6 (IPv6)
+    PPPoED  = 0x8863,   // PPPoE Discovery (PADI/PADO/PADR/PADS/PADT)
+    PPPoES  = 0x8864,   // PPPoE Session (carries PPP: LCP, IPCP/IPv6CP, etc.)
+    QinQ    = 0x88A8,   // Service VLAN tag identifier (S-Tag) on Q-in-Q tunnel
+    OW      = 0x88B5,   // OpenWatt: this is the official experimental ethertype for development use
+    MTik    = 0x88BF,   // MikroTik RoMON
+    LLDP    = 0x88CC,   // Link Layer Discovery Protocol (LLDP)
+    HPGP    = 0x88E1,   // HomePlug Green PHY (HPGP)
 }
 
 enum OW_SubType : ushort
