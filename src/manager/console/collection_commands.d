@@ -81,9 +81,10 @@ nothrow @nogc:
         {
             if (arg.name[] == "name")
                 continue;
-            if (item.set(arg.name, arg.value))
+            StringResult result = item.set(arg.name, arg.value);
+            if (!result)
             {
-                session.writeLine("Invalid value for property '", arg.name, "': ", arg.value);
+                session.writeLine("Invalid value for property: ", arg.name, "=", arg.value, " - ", result.message);
                 defaultAllocator.freeT(item);
                 return null;
             }

@@ -4,6 +4,7 @@ import urt.array;
 import urt.lifetime;
 import urt.map;
 import urt.mem.allocator;
+import urt.result;
 import urt.string;
 
 public import manager.base;
@@ -75,7 +76,8 @@ nothrow @nogc:
 
         foreach (ref arg; named_args)
         {
-            if (item.set(arg.name, arg.value))
+            StringResult result = item.set(arg.name, arg.value);
+            if (!result)
             {
                 defaultAllocator.freeT(item);
                 return null;
