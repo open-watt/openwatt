@@ -1,13 +1,20 @@
 module protocol.mqtt.client;
 
-import urt.array : empty;
+import urt.array : duplicate, empty;
 import urt.log;
+import urt.mem;
+import urt.string;
 import urt.time;
+
+import manager;
 
 import protocol.mqtt.broker;
 import protocol.mqtt.util;
 
 import router.stream;
+
+nothrow @nogc:
+
 
 enum MQTTPacketType : byte
 {
@@ -60,8 +67,10 @@ enum MQTTProperties : ubyte
     SharedSubscriptionAvailable     = 0x2A, // Byte - CONNACK
 }
 
-struct Client
+struct MQTTClient
 {
+nothrow @nogc:
+
     enum ConnectionState
     {
         WaitingIntroduction = 0,
@@ -72,21 +81,20 @@ struct Client
 
     MQTTBroker broker;
     Stream stream;
-    Session* session;
+    MQTTSession* session;
 
-    MonoTime lastContactTime;
+    MonoTime last_contact_time;
     ConnectionState state = ConnectionState.WaitingIntroduction;
-    ubyte protocolLevel;
-    ubyte connFlags;
-    ushort keepAliveTime;
+    ubyte protocol_level;
+    ubyte conn_flags;
+    ushort keep_alive_time;
     string identifier;
-    const(MQTTClientCredentials)* credentials;
 
     this(MQTTBroker broker, Stream stream)
     {
         this.broker = broker;
         this.stream = stream;
-        lastContactTime = getTime();
+        last_contact_time = getTime();
     }
 
     void terminate()
@@ -94,10 +102,10 @@ struct Client
         // close the stream
         stream.disconnect();
 
-        if (session.willDelay == 0)
-            broker.sendLWT(*session);
-        if (session.sessionExpiryInterval == 0)
-            broker.destroySession(*session);
+        if (session.will_delay == 0)
+            broker.send_lwt(*session);
+        if (session.session_expiry_interval == 0)
+            broker.destroy_session(*session);
 
         state = ConnectionState.Terminated;
     }
@@ -112,8 +120,8 @@ struct Client
         msg.put(topic);
         if (qos > 0)
         {
-            msg.put(session.packetId);
-            session.packetId += 2;
+            msg.put(session.packet_id);
+            session.packet_id += 2;
         }
         msg.put(payload);
         buffer[1] = cast(ubyte)(buffer.length - msg.length - 2);
@@ -121,47 +129,33 @@ struct Client
 
         // TODO: retain message for qos 1,2...
 
-        writeInfo("MQTT - Sent PUBLISH to ", identifier ,": ", qos > 0 ? session.packetId : 0, ", ", topic, " = ", cast(char[])payload, " (qos: ", qos, dup ? " DUP" : "", retain ? " RET" : "", ")");
+        writeInfo("MQTT - Sent PUBLISH to ", identifier ,": ", qos > 0 ? session.packet_id : 0, ", ", topic, " = ", cast(char[])payload, " (qos: ", qos, dup ? " DUP" : "", retain ? " RET" : "", ")");
     }
 
-    void subscribe(ubyte requestedQos, string[] topics...)
+    void subscribe(ubyte requested_qos, string[] topics...)
     {
-        assert(requestedQos <= 2);
+        assert(requested_qos <= 2);
 
         ubyte[258] buffer;
         buffer[0] = (MQTTPacketType.Subscribe << 4) | 2; // always QoS 1
         ubyte[] msg = buffer[2..$];
-        msg.put(session.packetId); session.packetId += 2;
+        msg.put(session.packet_id); session.packet_id += 2;
         foreach (topic; topics)
         {
             msg.put(topic);
-            msg.put(requestedQos);
+            msg.put(requested_qos);
         }
         buffer[1] = cast(ubyte)(buffer.length - msg.length - 2);
         stream.write(buffer[0 .. buffer.length - msg.length]);
 
         // TODO: retain message for qos 1...
-        writeInfo("MQTT - Sent SUBSCRIBE to ", identifier ,": ", session.packetId, ", ", topics, " (req qos: ", requestedQos ,")");
+        writeInfo("MQTT - Sent SUBSCRIBE to ", identifier ,": ", session.packet_id, ", ", topics, " (req qos: ", requested_qos ,")");
     }
 
     bool update()
     {
         if (!stream.running)
             return false;
-
-        if (state == ConnectionState.Active)
-        {
-            static bool b = false;
-            if (!b)
-            {
-//                subscribe(0, "obk125DAED5/0/get");
-                b = true;
-            }
-
-//            static int x = 0;
-//            if ((++x % 30) == 0)
-//                publish("tele/obk125DAED5/SENSOR", null, 0, false, false);
-        }
 
         MonoTime now = getTime();
 
@@ -174,19 +168,19 @@ struct Client
         const(ubyte)[] packet = buffer[0 .. bytes];
         if (bytes == 0)
         {
-            if (state == ConnectionState.WaitingIntroduction && now - lastContactTime >= 1000.msecs)
+            if (state == ConnectionState.WaitingIntroduction && now - last_contact_time >= 1000.msecs)
             {
                 // if no introduction was offered in reasonable time, assume this isn't an mqtt client and terminate
                 return false;
             }
-            else if (keepAliveTime != 0 && now - lastContactTime >= (keepAliveTime*3/2).seconds) // x*3/2 == x*1.5
+            else if (keep_alive_time != 0 && now - last_contact_time >= (keep_alive_time*3/2).seconds) // x*3/2 == x*1.5
             {
                 // if keepAlive is enabled and we haven't received a control packet in the allotted time
                 return false;
             }
             return true;
         }
-        lastContactTime = now;
+        last_contact_time = now;
 
         while (!packet.empty)
         {
@@ -206,18 +200,19 @@ struct Client
 
             // parse and validate the packet header
             ubyte control = packet.take!ubyte;
-            uint messageLen = packet.takeVarInt;
-            if (messageLen == -1)
+            uint message_len = packet.take_var_int;
+            if (message_len == -1)
                 return false;
 
             // take the message
             const(ubyte)[] message;
-            if (messageLen <= packet.length)
-                message = packet.take(messageLen);
+            if (message_len <= packet.length)
+                message = packet.take(message_len);
             else
             {
                 // if the message is small enough to fit into the stack buffer, well just shuffle the data back to the start of the buffer, otherwise allocate
-                ubyte[] t = (messageLen <= buffer.length && packet.ptr >= buffer.ptr + buffer.sizeof/2) ? buffer[0 .. messageLen] : new ubyte[messageLen];
+                assert(message_len <= buffer.length && packet.ptr >= buffer.ptr + buffer.sizeof/2, "TODO: implement grow-able buffer!");
+                ubyte[] t = buffer[0 .. message_len];
                 t[0 .. packet.length] = packet[];
                 ubyte[] remain = t[packet.length .. $];
                 packet = null;
@@ -245,47 +240,50 @@ struct Client
                     if (name[] != "MQTT" && name[] != "MQIsdp")
                         return false;
 
-                    protocolLevel = message.take!ubyte;
-                    connFlags = message.take!ubyte;
+                    protocol_level = message.take!ubyte;
+                    conn_flags = message.take!ubyte;
 
-                    // validate connFlags
-                    if (connFlags & 1) // bit 0 must be zero
+                    // validate conn_flags
+                    if (conn_flags & 1) // bit 0 must be zero
                         return false;
                     // TODO: validate last will & testament...
-                    if ((connFlags & 4) == 0 && (connFlags & 0x38) != 0)
+                    if ((conn_flags & 4) == 0 && (conn_flags & 0x38) != 0)
                         return false; // will retain/qof flags must be 0 is will is 0
-                    if ((connFlags & 0x80) == 0 && (connFlags & 0x40) != 0)
-                        return false; // password must not be present if username is not present
-
-                    keepAliveTime = message.take!ushort;
-
-                    const(char)[] id, username, password, willTopic;
-                    const(ubyte)[] properties, willMessage, willProps;
-                    bool sessionPresent;
-
-                    if (protocolLevel >= 5)
+                    if (protocol_level < 5)
                     {
-                        uint propLen = message.takeVarInt;
+                        if ((conn_flags & 0x80) == 0 && (conn_flags & 0x40) != 0)
+                            return false; // password must not be present if username is not present
+                    }
+
+                    keep_alive_time = message.take!ushort;
+
+                    const(char)[] id, username, will_topic;
+                    const(ubyte)[] password, properties, will_message, will_props;
+                    bool session_present;
+
+                    if (protocol_level >= 5)
+                    {
+                        uint propLen = message.take_var_int;
                         properties = message.take(propLen);
                     }
 
                     id = message.take!(char[]);
-                    if (connFlags & 4)
+                    if (conn_flags & 4)
                     {
-                        if (protocolLevel >= 5)
+                        if (protocol_level >= 5)
                         {
-                            uint propLen = message.takeVarInt;
-                            willProps = message.take(propLen);
+                            uint propLen = message.take_var_int;
+                            will_props = message.take(propLen);
                         }
-                        willTopic = message.take!(char[]);
-                        willMessage = message.take!(ubyte[]);
+                        will_topic = message.take!(char[]);
+                        will_message = message.take!(ubyte[]);
                     }
-                    if (connFlags & 0x80)
+                    if (conn_flags & 0x80)
                         username = message.take!(char[]);
-                    if (connFlags & 0x40)
-                        password = message.take!(char[]);
+                    if (conn_flags & 0x40)
+                        password = message.take!(ubyte[]);
 
-                    if (!id.validateString || !willTopic.validateString || !username.validateString || !password.validateString)
+                    if (!id.validate_string || !will_topic.validate_string || !username.validate_string)
                         return false;
 
                     // we have parsed the message, now we can begin formatting a reply; we'll reuse buffer[]
@@ -293,48 +291,66 @@ struct Client
                     buffer[3] = 0; // accepted
 
                     ubyte[] response = buffer[4 .. $];
-                    if (protocolLevel >= 5)
+                    if (protocol_level >= 5)
                     {
                         // write properties...
-                        response.putVarInt(0);
+                        response.put_var_int(0);
                     }
 
                     // having reached here, the CONNECT packet is valid and we should confirm the protocol level
-                    if (protocolLevel < 3 && protocolLevel > 5)
+                    if (protocol_level < 3 && protocol_level > 5)
                     {
-                        buffer[3] = 0x01; // unacceptable protocol level
-                        goto sendConnAck;
+                        buffer[3] = protocol_level < 5 ? 0x01 : 0x84; // unacceptable protocol level
+                        goto send_conn_ack;
                     }
-                    if (protocolLevel == 3 || protocolLevel == 5)
+                    if (protocol_level == 3 || protocol_level == 5)
                         writeWarning("MQTT protocol level has never been tested... implementation may or may not work!");
 
                     // check username and password
+                    if (username.empty && password.empty)
                     {
-                        bool authenticated = false;
-                        foreach (ref cred; broker.options.clientCredentials)
+                        if (!broker.allow_anonymous)
                         {
-                            if (cred.username[] == username[] && cred.password[] == password[])
-                            {
-                                credentials = &cred;
-                                authenticated = true;
-                                break;
-                            }
+                            buffer[3] = protocol_level < 5 ? 0x05 : 0x87; // not authorised
+                            goto send_conn_ack;
                         }
-                        if (!authenticated && !(broker.options.flags & MQTTBrokerOptions.Flags.AllowAnonymousLogin))
+                    }
+                    else
+                    {
+                        if (username.empty)
                         {
-                            buffer[3] = 0x04;
-                            goto sendConnAck;
+                            // TODO: MQTT allows a password without a username; but what does it mean?
+                            //       we could take it as a public key and auth like ssh?
+                            buffer[3] = protocol_level < 5 ? 0x05 : 0x87; // not authorised
+                            goto send_conn_ack;
+                        }
+                        else
+                        {
+                            bool authorised = false;
+                            void login_response(AuthResult result, const(char)[] profile)
+                            {
+                                authorised = result == AuthResult.accepted;
+                            }
+
+                            if (!g_app.validate_login(username, cast(const(char)[])password, "mqtt", &login_response) || !authorised)
+                            {
+                                buffer[3] = protocol_level < 5 ? 0x04 : 0x86;
+                                goto send_conn_ack;
+
+                                // TODO: anything to do with the profile?
+                                //       MQTT user profiles often have whitelist/blacklist stuff...
+                            }
                         }
                     }
 
                     // if client has not supplied an ID, and we should generate one
                     if (id.empty)
                     {
-                        if ((connFlags & 2) == 0)
+                        if ((conn_flags & 2) == 0)
                         {
                             // unspecified client id requires clean session
-                            buffer[3] = 0x02;
-                            goto sendConnAck;
+                            buffer[3] = protocol_level < 5 ? 0x02 : 0x85;
+                            goto send_conn_ack;
                         }
 
                         // TODO: the mac address would be a better identifier...
@@ -344,28 +360,28 @@ struct Client
                         // replace '.' with '_', truncate port
                         assert(0);
                     }
+                    // TODO: ...
 //                    if (unacceptable id)
 //                    {
-//                        buffer[3] = 0x02;
-//                        goto sendConnAck;
+//                        buffer[3] = protocol_level < 5 ? 0x02 : 0x85;
+//                        goto send_conn_ack;
 //                    }
 
                     // if client is not authorised to connect, for any reason
 //                    if (client not authorised)
 //                    {
-//                        buffer[3] = 0x05;
-//                        goto sendConnAck;
+//                        buffer[3] = protocol_level < 5 ? 0x05 : 0x87;
+//                        goto send_conn_ack;
 //                    }
 
                     {
                         // dig up the session or create a new one
                         session = id in broker.sessions;
-                        sessionPresent = session !is null;
+                        session_present = session !is null;
                         if (!session)
                         {
-                            string identifier = id.idup;
-                            broker.sessions[identifier] = Session(identifier);
-                            session = &broker.sessions[id];
+                            String identifier = id.makeString(defaultAllocator());
+                            session = broker.sessions.insert(identifier[], MQTTSession(identifier.move));
                         }
 
                         // if session already has a live client
@@ -374,44 +390,43 @@ struct Client
                             // send DISCONNECT with reason 0x8E to the existing client and terminate
                             ubyte[4] disconnect;
                             disconnect[0] = MQTTPacketType.Disconnect;
-                            disconnect[1] = protocolLevel < 5 ? 0 : 2;
-                            if (protocolLevel >= 5)
+                            disconnect[1] = protocol_level < 5 ? 0 : 2;
+                            if (protocol_level >= 5)
                             {
                                 disconnect[2] = 0x8E; // session taken over
                                 disconnect[3] = 0; // no props
                             }
-                            session.client.stream.write(disconnect[0 .. protocolLevel < 5 ? 2 : 4]);
+                            session.client.stream.write(disconnect[0 .. protocol_level < 5 ? 2 : 4]);
 
                             // termiante the client
                             session.client.terminate();
                         }
-                        
 
                         // if clean session was requested...
-                        if (connFlags & 2)
+                        if (conn_flags & 2)
                         {
-                            if (sessionPresent)
-                                broker.destroySession(*session);
-                            sessionPresent = false;
+                            if (session_present)
+                                broker.destroy_session(*session);
+                            session_present = false;
                         }
                         session.client = &this;
 
                         // record last will and testament
-                        if (connFlags & 4)
+                        if (conn_flags & 4)
                         {
-                            session.willTopic = willTopic.idup;
-                            session.willMessage = willMessage.idup;
-                            session.willProps = willProps.idup;
-                            session.willFlags = ((connFlags >> 2) & 0x6) | ((connFlags & 0x20) ? 1 : 0);
+                            session.will_topic = will_topic.makeString(defaultAllocator());
+                            session.will_message = will_message.duplicate(defaultAllocator());
+                            session.will_props = will_props.duplicate(defaultAllocator());
+                            session.will_flags = ((conn_flags >> 2) & 0x6) | ((conn_flags & 0x20) ? 1 : 0);
 
                             // process the will properties...
-                            while (!willProps.empty)
+                            while (!will_props.empty)
                             {
-                                ubyte propId = willProps.take!ubyte;
-                                switch (propId)
+                                ubyte prop_id = will_props.take!ubyte;
+                                switch (prop_id)
                                 {
                                     case MQTTProperties.WillDelayInterval:
-                                        session.willDelay = willProps.take!uint;
+                                        session.will_delay = will_props.take!uint;
                                         break;
 
                                     case MQTTProperties.PayloadFormatIndicator:
@@ -434,11 +449,11 @@ struct Client
                     // process the properties...
                     while (!properties.empty)
                     {
-                        ubyte propId = message.take!ubyte;
-                        switch (propId)
+                        ubyte prop_id = message.take!ubyte;
+                        switch (prop_id)
                         {
                             case MQTTProperties.SessionExpiryInterval:
-                                session.sessionExpiryInterval = properties.take!uint;
+                                session.session_expiry_interval = properties.take!uint;
                                 break;
 
                             case MQTTProperties.AuthenticationMethod:
@@ -458,10 +473,10 @@ struct Client
                         }
                     }
 
-                sendConnAck:
+                send_conn_ack:
                     // send CONNACK
                     buffer[1] = cast(ubyte)(buffer.length - response.length - 2); // write length
-                    buffer[2] = sessionPresent && buffer[3] == 0 ? 1 : 0;
+                    buffer[2] = session_present && buffer[3] == 0 ? 1 : 0;
                     stream.write(buffer[0 .. buffer.length - response.length]);
                     if (buffer[3] != 0)
                     {
@@ -474,7 +489,7 @@ struct Client
                     writeInfo("MQTT - Accept CONNECT from '", stream.remoteName, "' as '", identifier ,"', login: ", username);
                     writeDebug("MQTT - Sent CONNACK to ", identifier);
 
-                    if (sessionPresent)
+                    if (session_present)
                     {
                         // if we picked up an old session, we need to resend pending messages...
                         // TODO...
@@ -489,14 +504,14 @@ struct Client
 
                     //...
 
-                    if (protocolLevel >= 5)
+                    if (protocol_level >= 5)
                     {
-                        uint propertyLen = message.takeVarInt;
-                        const(ubyte)[] properties = message.take(propertyLen);
+                        uint property_len = message.take_var_int;
+                        const(ubyte)[] properties = message.take(property_len);
                         while (!properties.empty)
                         {
-                            ubyte propId = message.take!ubyte;
-                            switch (propId)
+                            ubyte prop_id = message.take!ubyte;
+                            switch (prop_id)
                             {
                                 case MQTTProperties.SessionExpiryInterval:
                                 case MQTTProperties.AssignedClientIdentifier:
@@ -540,23 +555,23 @@ struct Client
                     if (qos > 2)
                         return false;
 
-                    const(char)[] topicName = message.take!(char[]);
-                    if (!topicName.validateString)
+                    const(char)[] topic_name = message.take!(char[]);
+                    if (!topic_name.validate_string)
                         return false;
 
-                    ushort packetIdentifier;
+                    ushort packet_identifier;
                     if (qos > 0)
-                        packetIdentifier = message.take!ushort;
+                        packet_identifier = message.take!ushort;
 
                     const(ubyte)[] properties;
-                    if (protocolLevel >= 5)
+                    if (protocol_level >= 5)
                     {
-                        uint propertyLen = message.takeVarInt;
-                        properties = message.take(propertyLen);
+                        uint property_len = message.take_var_int;
+                        properties = message.take(property_len);
                         while (!properties.empty)
                         {
-                            ubyte propId = message.take!ubyte;
-                            switch (propId)
+                            ubyte prop_id = message.take!ubyte;
+                            switch (prop_id)
                             {
                                 case MQTTProperties.PayloadFormatIndicator:
                                 case MQTTProperties.MessageExpiryInterval:
@@ -576,37 +591,37 @@ struct Client
                         }
                     }
 
-                    broker.publish(identifier, control & 0xF, topicName, message, properties);
+                    broker.publish(identifier, control & 0xF, topic_name, message, properties);
 
                     if (qos > 0)
                     {
                         buffer[0] = (qos == 1 ? MQTTPacketType.PubAck : MQTTPacketType.PubRec) << 4;
                         buffer[1] = 2;
-                        buffer[2..4].put(packetIdentifier);
+                        buffer[2..4].put(packet_identifier);
                         stream.write(buffer[0 .. 4]);
                     }
 
-                    writeInfo("MQTT - Received PUBLISH from ", identifier,": ", packetIdentifier, ", ", topicName, " = ", cast(const(char)[])message, " (qos: ", qos, dup ? " DUP" : "", retain ? " RET" : "", ")");
+                    writeInfo("MQTT - Received PUBLISH from ", identifier,": ", packet_identifier, ", ", topic_name, " = ", cast(const(char)[])message, " (qos: ", qos, dup ? " DUP" : "", retain ? " RET" : "", ")");
                     if (qos > 0)
-                        writeDebug("MQTT - Sent ", qos == 1 ? "PUBACK" : "PUBREC" ," to ", identifier,": ", packetIdentifier);
+                        writeDebug("MQTT - Sent ", qos == 1 ? "PUBACK" : "PUBREC" ," to ", identifier,": ", packet_identifier);
                     break;
 
                 case MQTTPacketType.PubAck:
                     if (state != ConnectionState.Active || message.length != 2 || (control & 0xF) != 0)
                         return false;
 
-                    ushort packetIdentifier = message.take!ushort;
+                    ushort packet_identifier = message.take!ushort;
 
-                    if (protocolLevel >= 5 && !message.empty)
+                    if (protocol_level >= 5 && !message.empty)
                     {
                         ubyte reason = message.take!ubyte;
 
-                        uint propertyLen = message.takeVarInt;
-                        const(ubyte)[] properties = message.take(propertyLen);
+                        uint property_len = message.take_var_int;
+                        const(ubyte)[] properties = message.take(property_len);
                         while (!properties.empty)
                         {
-                            ubyte propId = message.take!ubyte;
-                            switch (propId)
+                            ubyte prop_id = message.take!ubyte;
+                            switch (prop_id)
                             {
                                 case MQTTProperties.ReasonString:
                                 case MQTTProperties.UserProperty:
@@ -620,25 +635,25 @@ struct Client
                     }
 
                     // TODO: delete the pending message...
-                    writeDebug("MQTT - Received PUBACK from ", identifier, ": ", packetIdentifier);
+                    writeDebug("MQTT - Received PUBACK from ", identifier, ": ", packet_identifier);
                     break;
 
                 case MQTTPacketType.PubRec:
                     if (state != ConnectionState.Active || message.length != 2 || (control & 0xF) != 0)
                         return false;
 
-                    ushort packetIdentifier = message.take!ushort;
+                    ushort packet_identifier = message.take!ushort;
 
-                    if (protocolLevel >= 5 && !message.empty)
+                    if (protocol_level >= 5 && !message.empty)
                     {
                         ubyte reason = message.take!ubyte;
 
-                        uint propertyLen = message.takeVarInt;
-                        const(ubyte)[] properties = message.take(propertyLen);
+                        uint property_len = message.take_var_int;
+                        const(ubyte)[] properties = message.take(property_len);
                         while (!properties.empty)
                         {
-                            ubyte propId = message.take!ubyte;
-                            switch (propId)
+                            ubyte prop_id = message.take!ubyte;
+                            switch (prop_id)
                             {
                                 case MQTTProperties.ReasonString:
                                 case MQTTProperties.UserProperty:
@@ -653,29 +668,29 @@ struct Client
 
                     buffer[0] = MQTTPacketType.PubRel << 4;
                     buffer[1] = 2;
-                    buffer[2..4].put(packetIdentifier);
+                    buffer[2..4].put(packet_identifier);
                     stream.write(buffer[0 .. 4]);
 
-                    writeDebug("MQTT - Received PUBREC from ", identifier, ": ", packetIdentifier);
-                    writeDebug("MQTT - Sent PUBREL to ", identifier, ": ", packetIdentifier);
+                    writeDebug("MQTT - Received PUBREC from ", identifier, ": ", packet_identifier);
+                    writeDebug("MQTT - Sent PUBREL to ", identifier, ": ", packet_identifier);
                     break;
 
                 case MQTTPacketType.PubRel:
                     if (state != ConnectionState.Active || message.length != 2 || (control & 0xF) != 2)
                         return false;
 
-                    ushort packetIdentifier = message.take!ushort;
+                    ushort packet_identifier = message.take!ushort;
 
-                    if (protocolLevel >= 5 && !message.empty)
+                    if (protocol_level >= 5 && !message.empty)
                     {
                         ubyte reason = message.take!ubyte;
 
-                        uint propertyLen = message.takeVarInt;
-                        const(ubyte)[] properties = message.take(propertyLen);
+                        uint property_len = message.take_var_int;
+                        const(ubyte)[] properties = message.take(property_len);
                         while (!properties.empty)
                         {
-                            ubyte propId = message.take!ubyte;
-                            switch (propId)
+                            ubyte prop_id = message.take!ubyte;
+                            switch (prop_id)
                             {
                                 case MQTTProperties.ReasonString:
                                 case MQTTProperties.UserProperty:
@@ -690,29 +705,29 @@ struct Client
 
                     buffer[0] = MQTTPacketType.PubComp << 4;
                     buffer[1] = 2;
-                    buffer[2..4].put(packetIdentifier);
+                    buffer[2..4].put(packet_identifier);
                     stream.write(buffer[0 .. 4]);
 
-                    writeDebug("MQTT - Received PUBREL from ", identifier, ": ", packetIdentifier);
-                    writeDebug("MQTT - Sent PUBCOMP to ", identifier, ": ", packetIdentifier);
+                    writeDebug("MQTT - Received PUBREL from ", identifier, ": ", packet_identifier);
+                    writeDebug("MQTT - Sent PUBCOMP to ", identifier, ": ", packet_identifier);
                     break;
 
                 case MQTTPacketType.PubComp:
                     if (state != ConnectionState.Active || message.length != 2 || (control & 0xF) != 0)
                         return false;
 
-                    ushort packetIdentifier = message.take!ushort;
+                    ushort packet_identifier = message.take!ushort;
 
-                    if (protocolLevel >= 5 && !message.empty)
+                    if (protocol_level >= 5 && !message.empty)
                     {
                         ubyte reason = message.take!ubyte;
 
-                        uint propertyLen = message.takeVarInt;
-                        const(ubyte)[] properties = message.take(propertyLen);
+                        uint property_len = message.take_var_int;
+                        const(ubyte)[] properties = message.take(property_len);
                         while (!properties.empty)
                         {
-                            ubyte propId = message.take!ubyte;
-                            switch (propId)
+                            ubyte prop_id = message.take!ubyte;
+                            switch (prop_id)
                             {
                                 case MQTTProperties.ReasonString:
                                 case MQTTProperties.UserProperty:
@@ -725,23 +740,23 @@ struct Client
                         }
                     }
 
-                    writeDebug("MQTT - Received PUBCOMP from ", identifier, ": ", packetIdentifier);
+                    writeDebug("MQTT - Received PUBCOMP from ", identifier, ": ", packet_identifier);
                     break;
 
                 case MQTTPacketType.Subscribe:
                     if (state != ConnectionState.Active || (control & 0xF) != 2)
                         return false;
 
-                    ushort packetIdentifier = message.take!ushort;
+                    ushort packet_identifier = message.take!ushort;
 
-                    if (protocolLevel >= 5)
+                    if (protocol_level >= 5)
                     {
-                        uint propertyLen = message.takeVarInt;
-                        const(ubyte)[] properties = message.take(propertyLen);
+                        uint property_len = message.take_var_int;
+                        const(ubyte)[] properties = message.take(property_len);
                         while (!properties.empty)
                         {
-                            ubyte propId = message.take!ubyte;
-                            switch (propId)
+                            ubyte prop_id = message.take!ubyte;
+                            switch (prop_id)
                             {
                                 case MQTTProperties.SubscriptionIdentifier:
                                 case MQTTProperties.UserProperty:
@@ -757,51 +772,51 @@ struct Client
                     // format the response
                     buffer[0] = MQTTPacketType.SubAck << 4;
                     ubyte[] response = buffer[2 .. $];
-                    response.put(packetIdentifier);
-                    if (protocolLevel >= 5)
+                    response.put(packet_identifier);
+                    if (protocol_level >= 5)
                     {
-                        response.putVarInt(0);
+                        response.put_var_int(0);
                     }
 
                     while (!message.empty)
                     {
                         const(char)[] topic = message.take!(char[]);
                         ubyte opts = message.take!ubyte;
-                        if (!topic.validateString || (opts & (protocolLevel < 5 ? 0xFC : 0xC0)) != 0) // upper bits must be zero
+                        if (!topic.validate_string || (opts & (protocol_level < 5 ? 0xFC : 0xC0)) != 0) // upper bits must be zero
                             return false;
 
-                        ubyte maxQos = opts & 3;
-//                        bool noLocal = protocolLevel >= 5 && (opts & 4) != 0;
-//                        bool retainAsPublished = protocolLevel >= 5 && (opts & 8) != 0;
-                        ubyte retainHandling = (opts >> 4) & 3;
+                        ubyte max_qos = opts & 3;
+//                        bool no_local = protocol_level >= 5 && (opts & 4) != 0;
+//                        bool retain_as_published = protocol_level >= 5 && (opts & 8) != 0;
+                        ubyte retain_handling = (opts >> 4) & 3;
 
-                        Session.Subscription** sub = topic in session.subsByFilter;
+                        MQTTSession.Subscription** sub = topic in session.subs_by_filter;
                         if (!sub)
                         {
-                            session.subs ~= Session.Subscription(topic.idup, opts);
-                            session.subsByFilter[topic] = &session.subs[$-1];
+                            MQTTSession.Subscription* newSub = &session.subs.emplaceBack(topic.makeString(defaultAllocator()), opts);
+                            session.subs_by_filter[newSub.topic] = newSub;
                         }
                         else
-                            **sub = Session.Subscription((**sub).topic, opts);
+                            **sub = MQTTSession.Subscription((**sub).topic, opts);
 
-                        if (retainHandling == 0 || (retainHandling == 1 && !sub))
+                        if (retain_handling == 0 || (retain_handling == 1 && !sub))
                         {
                             // send retained message for this topic
                             // TODO:
                         }
 
-                        ubyte code = maxQos; // grant whatever qos was requested...
+                        ubyte code = max_qos; // grant whatever qos was requested...
 //                        if (failed)
 //                            code = 0x80;
                         response.put(code);
 
-                        writeInfo("MQTT - Received SUBSCRIBE from ", identifier ,": ", packetIdentifier, ", ", topic," (", opts & 3, ")");
+                        writeInfo("MQTT - Received SUBSCRIBE from ", identifier ,": ", packet_identifier, ", ", topic," (", opts & 3, ")");
                     }
 
                     // respond with suback
                     buffer[1] = cast(ubyte)(buffer.length - response.length - 2); // write length
                     stream.write(buffer[0 .. buffer.length - response.length]);
-                    writeDebug("MQTT - Sent SUBACK to ", identifier,": ", packetIdentifier);
+                    writeDebug("MQTT - Sent SUBACK to ", identifier,": ", packet_identifier);
                     break;
 
                 case MQTTPacketType.SubAck:
@@ -835,16 +850,16 @@ struct Client
                         return false;
 
                     ubyte reason = 0;
-                    if (protocolLevel >= 5)
+                    if (protocol_level >= 5)
                     {
                         reason = message.take!ubyte;
 
-                        uint propertyLen = message.takeVarInt;
-                        const(ubyte)[] properties = message.take(propertyLen);
+                        uint property_len = message.take_var_int;
+                        const(ubyte)[] properties = message.take(property_len);
                         while (!properties.empty)
                         {
-                            ubyte propId = message.take!ubyte;
-                            switch (propId)
+                            ubyte prop_id = message.take!ubyte;
+                            switch (prop_id)
                             {
                                 case MQTTProperties.SessionExpiryInterval:
                                 case MQTTProperties.ServerReference:
@@ -864,10 +879,10 @@ struct Client
                     // clear last will and testament
                     if (reason == 0)
                     {
-                        session.willTopic = null;
-                        session.willMessage = null;
-                        session.willProps = null;
-                        session.willFlags = 0;
+                        session.will_topic = null;
+                        session.will_message = null;
+                        session.will_props = null;
+                        session.will_flags = 0;
                     }
 
                     // signal to terminate connection
@@ -888,7 +903,7 @@ struct Client
 }
 
 
-bool validateString(const char[] s)
+bool validate_string(const char[] s)
 {
     foreach (c; s)
     {
