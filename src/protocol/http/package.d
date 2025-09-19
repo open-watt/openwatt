@@ -19,7 +19,7 @@ import manager.plugin;
 import protocol.http.client;
 import protocol.http.message;
 import protocol.http.server;
-import protocol.http.message;
+import protocol.http.websocket;
 
 import router.stream.tcp;
 
@@ -33,12 +33,22 @@ nothrow @nogc:
 
     Collection!HTTPServer servers;
     Collection!HTTPClient clients;
+    Collection!HTTPClient ws_servers;
+    Collection!WebSocket websockets;
 
     override void init()
     {
         g_app.console.registerCollection("/protocol/http/client", clients);
         g_app.console.registerCollection("/protocol/http/server", servers);
+        g_app.console.registerCollection("/protocol/websocket/server", ws_servers);
+
         g_app.console.registerCommand!request("/protocol/http", this);
+
+    }
+
+    override void preUpdate()
+    {
+        websockets.updateAll();
     }
 
     override void update()
