@@ -171,7 +171,7 @@ nothrow @nogc:
     {
         version(Windows)
         {
-            hCom = CreateFile(device.twstringz, GENERIC_READ | GENERIC_WRITE, 0, null, OPEN_EXISTING, 0, null);
+            hCom = CreateFile(_device[].twstringz, GENERIC_READ | GENERIC_WRITE, 0, null, OPEN_EXISTING, 0, null);
             if (hCom == INVALID_HANDLE_VALUE)
                 return CompletionStatus.Error;
 
