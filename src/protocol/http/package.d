@@ -20,6 +20,7 @@ import protocol.http.client;
 import protocol.http.message;
 import protocol.http.server;
 import protocol.http.message;
+import protocol.http.tls;
 
 import router.stream.tcp;
 
@@ -31,11 +32,13 @@ class HTTPModule : Module
     mixin DeclareModule!"http";
 nothrow @nogc:
 
+    Collection!TLSStream tls_streams;
     Collection!HTTPServer servers;
     Collection!HTTPClient clients;
 
     override void init()
     {
+        g_app.console.registerCollection("/stream/tls", tls_streams);
         g_app.console.registerCollection("/protocol/http/client", clients);
         g_app.console.registerCollection("/protocol/http/server", servers);
         g_app.console.registerCommand!request("/protocol/http", this);
@@ -43,6 +46,7 @@ nothrow @nogc:
 
     override void update()
     {
+        tls_streams.update_all();
         servers.update_all();
         clients.update_all();
     }

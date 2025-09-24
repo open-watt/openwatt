@@ -255,8 +255,7 @@ const(char[]) convertVariant(U)(ref const Variant v, out U[] r) nothrow @nogc
         r = tempAllocator().allocArray!U(arr.length);
         foreach (i, ref e; arr)
         {
-            const(char[]) error = convertVariant(e, r[i]);
-            if (error)
+            if (const(char[]) error = convertVariant(e, r[i]))
                 return error;
         }
         return null;
