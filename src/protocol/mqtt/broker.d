@@ -234,7 +234,7 @@ private:
     }
     Value _root;
 
-    void new_connection(TCPStream client, void* user_data)
+    void new_connection(Stream client, void* user_data)
     {
         _clients ~= MQTTClient(this, client);
 

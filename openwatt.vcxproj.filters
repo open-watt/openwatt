@@ -369,13 +369,13 @@
     <DCompile Include="src\router\iface\can.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\dns\mdns.d">
-      <Filter>src\protocol\dns</Filter>
-    </DCompile>
     <DCompile Include="src\protocol\dns\message.d">
       <Filter>src\protocol\dns</Filter>
     </DCompile>
     <DCompile Include="src\protocol\dns\package.d">
+      <Filter>src\protocol\dns</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dns\server.d">
       <Filter>src\protocol\dns</Filter>
     </DCompile>
     <DCompile Include="src\apps\energy\appliance.d">
