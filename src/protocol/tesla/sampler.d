@@ -84,7 +84,7 @@ nothrow @nogc:
 
     final void addElement(Element* element)
     {
-        if (!elements[].exists(element))
+        if (!elements[].contains(element))
         {
             elements ~= element;
             if (element.access != Access.Read)

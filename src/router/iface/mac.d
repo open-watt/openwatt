@@ -84,7 +84,7 @@ nothrow @nogc:
     bool isBroadcast() const pure
         => ul == broadcast.ul;
 
-    bool isMulticast() const pure
+    bool is_multicast() const pure
         => (b[0] & 0x01) != 0;
 
     bool isLocal() const pure

@@ -229,7 +229,7 @@ private:
         // 2-4 Reception type (000 = not specified, 001 = unicast, 010 = multicast, 011 = broadcast, 100 = promiscuous)
         if (p.eth.dst.isBroadcast)
             flags |= 3 << 2;
-        else if (p.eth.dst.isMulticast)
+        else if (p.eth.dst.is_multicast)
             flags |= 2 << 2;
         else
             flags |= 1 << 2;

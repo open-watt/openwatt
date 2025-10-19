@@ -278,7 +278,7 @@ protected:
             packet.vlan = src_vlan;
         }
 
-        if (!packet.eth.src.isMulticast)
+        if (!packet.eth.src.is_multicast)
             _mac_table.insert(packet.eth.src, src_vlan, src_port);
 
         if (packet.eth.dst == mac)
@@ -345,7 +345,7 @@ protected:
         if (!running)
             return;
 
-        if (!packet.eth.dst.isMulticast)
+        if (!packet.eth.dst.is_multicast)
         {
             byte dst_port;
             if (_mac_table.get(packet.eth.dst, packet.vlan, dst_port))

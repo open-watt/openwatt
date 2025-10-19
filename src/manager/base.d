@@ -293,7 +293,7 @@ nothrow @nogc:
 
     final void subscribe(StateSignalHandler handler)
     {
-        assert(!_subscribers[].exists(handler), "Already registered");
+        assert(!_subscribers[].contains(handler), "Already registered");
         _subscribers ~= handler;
     }
 
