@@ -34,6 +34,9 @@
     <Filter Include="src\manager\console">
       <UniqueIdentifier>{5b7f73d6-de14-482f-86a8-89a77e2af436}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\manager\os">
+      <UniqueIdentifier>{a17bdf4a-06e2-4856-bb09-afe42c85e130}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\router\iface">
       <UniqueIdentifier>{0e965bb7-e2d4-44f9-a982-88df797db1fb}</UniqueIdentifier>
     </Filter>
@@ -72,6 +75,9 @@
     </Filter>
     <Filter Include="src\protocol\ppp">
       <UniqueIdentifier>{508dd041-891d-4aa4-9154-de16fc507aa5}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\protocol\ip">
+      <UniqueIdentifier>{7a6b8c28-6a40-46e8-9b2e-2e28576d413a}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\apps">
       <UniqueIdentifier>{8643bbe8-bb9e-448c-88a7-e8beae4c45e8}</UniqueIdentifier>
@@ -218,6 +224,9 @@
     </DCompile>
     <DCompile Include="src\manager\log.d">
       <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\os\npcap.d">
+      <Filter>src\manager\os</Filter>
     </DCompile>
     <DCompile Include="src\manager\console\command.d">
       <Filter>src\manager\console</Filter>
@@ -398,6 +407,12 @@
     </DCompile>
     <DCompile Include="src\protocol\http\server.d">
       <Filter>src\protocol\http</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\address.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\package.d">
+      <Filter>src\protocol\ip</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ppp\client.d">
       <Filter>src\protocol\ppp</Filter>

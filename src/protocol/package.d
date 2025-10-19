@@ -4,6 +4,7 @@ module protocol;
 public static import protocol.dns;
 public static import protocol.ezsp;
 public static import protocol.http;
+public static import protocol.ip;
 public static import protocol.modbus;
 public static import protocol.mqtt;
 public static import protocol.ppp;
