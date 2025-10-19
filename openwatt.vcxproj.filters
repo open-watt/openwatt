@@ -414,6 +414,9 @@
     <DCompile Include="src\protocol\ip\package.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\ip\route.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\ppp\client.d">
       <Filter>src\protocol\ppp</Filter>
     </DCompile>

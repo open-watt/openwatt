@@ -10,6 +10,7 @@ import manager.console;
 import manager.plugin;
 
 import protocol.ip.address;
+import protocol.ip.route;
 
 import router.iface;
 import router.iface.ethernet;
@@ -28,10 +29,12 @@ class IPModule : Module
 nothrow @nogc:
 
     Collection!IPAddress addresses;
+    Collection!IPRoute routes;
 
     override void init()
     {
         g_app.console.registerCollection("/protocol/ip/address", addresses);
+        g_app.console.registerCollection("/protocol/ip/route", routes);
     }
 
     override void post_init()
@@ -87,5 +90,6 @@ nothrow @nogc:
     override void update()
     {
         addresses.update_all();
+        routes.update_all();
     }
 }

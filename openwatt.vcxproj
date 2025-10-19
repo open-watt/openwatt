@@ -100,6 +100,7 @@
     <DCompile Include="src\protocol\http\websocket.d" />
     <DCompile Include="src\protocol\ip\address.d" />
     <DCompile Include="src\protocol\ip\package.d" />
+    <DCompile Include="src\protocol\ip\route.d" />
     <DCompile Include="src\protocol\modbus\client.d" />
     <DCompile Include="src\protocol\modbus\package.d" />
     <DCompile Include="src\protocol\modbus\sampler.d" />
