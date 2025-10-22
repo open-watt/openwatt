@@ -689,15 +689,18 @@ StringResult SynthSetter(Setters...)(ref const Variant value, BaseObject item) n
         error = convertVariant(value, arg);
         if (!error)
         {
-            static if (is(ReturnType!Setter : StringResult))
+            alias RT = ReturnType!Setter;
+            static if (is(RT : StringResult))
                 return __traits(child, instance, Setter)(arg.move);
-            else static if (is(ReturnType!Setter : const(char)[]))
+            else static if (is(RT : const(char)[]))
                 return StringResult(__traits(child, instance, Setter)(arg.move));
-            else
+            else static if (is(RT == void))
             {
                 __traits(child, instance, Setter)(arg.move);
                 return StringResult.success;
             }
+            else
+                static assert(false, "Setter must return void, const(char)[], or StringResult");
         }
     }}
     if (Setters.length == 1)

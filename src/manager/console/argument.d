@@ -249,10 +249,8 @@ const(char[]) convertVariant(U)(ref const Variant v, out U[] r) nothrow @nogc
         const(Variant)[] arr;
         if (v.isArray)
             arr = v.asArray()[];
-        else if (v.isString)
-            assert(false, "TODO: split on ',' and re-tokenise all the elements...");
         else
-            return "Invalid array";
+            arr = (&v)[0..1];
 
         r = tempAllocator().allocArray!U(arr.length);
         foreach (i, ref e; arr)
