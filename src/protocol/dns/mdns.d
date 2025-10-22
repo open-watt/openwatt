@@ -87,7 +87,7 @@ nothrow @nogc:
         {
             lastAction = now;
 
-            if (!socket && !create_socket(AddressFamily.IPv4, SocketType.datagram, Protocol.udp, socket))
+            if (!socket && !create_socket(AddressFamily.ipv4, SocketType.datagram, Protocol.udp, socket))
             {
                 if (!alreadyComplained)
                 {

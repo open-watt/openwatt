@@ -72,8 +72,8 @@ nothrow @nogc:
             return;
 
         _port = value;
-        if ((_remote.family == AddressFamily.IPv4 && _remote._a.ipv4.port == value) ||
-            (_remote.family == AddressFamily.IPv6 && _remote._a.ipv6.port == value))
+        if ((_remote.family == AddressFamily.ipv4 && _remote._a.ipv4.port == value) ||
+            (_remote.family == AddressFamily.ipv6 && _remote._a.ipv6.port == value))
             return;
         update_port(_remote, _port);
 
@@ -98,8 +98,8 @@ nothrow @nogc:
         {
             if (!_host.empty)
                 return false;
-            if ((_remote.family == AddressFamily.IPv4 && _remote._a.ipv4.port != 0) ||
-                (_remote.family == AddressFamily.IPv6 && _remote._a.ipv6.port != 0))
+            if ((_remote.family == AddressFamily.ipv4 && _remote._a.ipv4.port != 0) ||
+                (_remote.family == AddressFamily.ipv6 && _remote._a.ipv6.port != 0))
                 return true;
         }
         else if (_host.empty)
@@ -122,7 +122,7 @@ nothrow @nogc:
             assert(_host, "No remote set for TCP stream!");
 
             AddressInfo addrInfo;
-            addrInfo.family = AddressFamily.IPv4;
+            addrInfo.family = AddressFamily.ipv4;
             addrInfo.sock_type = SocketType.stream;
             addrInfo.protocol = Protocol.tcp;
             AddressInfoResolver results;
@@ -145,7 +145,7 @@ nothrow @nogc:
                 return CompletionStatus.Continue;
             _last_retry = now;
 
-            Result r = create_socket(AddressFamily.IPv4, SocketType.stream, Protocol.tcp, _socket);
+            Result r = create_socket(AddressFamily.ipv4, SocketType.stream, Protocol.tcp, _socket);
             if (!r)
             {
                 debug writeError(type, " '", name, "' - create_socket() failed with error: ", r.socket_result);
@@ -354,12 +354,12 @@ private:
 
     bool update_port(ref InetAddress addr, ushort port)
     {
-        if (addr.family == AddressFamily.IPv4)
+        if (addr.family == AddressFamily.ipv4)
         {
             addr._a.ipv4.port = port;
             return true;
         }
-        else if (addr.family == AddressFamily.IPv6)
+        else if (addr.family == AddressFamily.ipv6)
         {
             addr._a.ipv6.port = port;
             return true;
@@ -415,7 +415,7 @@ nothrow @nogc:
     {
         assert(!_serverSocket);
 
-        Result r = create_socket(AddressFamily.IPv4, SocketType.stream, Protocol.tcp, _serverSocket);
+        Result r = create_socket(AddressFamily.ipv4, SocketType.stream, Protocol.tcp, _serverSocket);
         if (r.failed)
         {
             debug writeError(type, " '", name, "' - failed to create socket. Error ", r.systemCode);

@@ -400,7 +400,7 @@ package:
         _status.recvBytes += packet.length;
 
         // check if we ever saw the sender before...
-        if (!packet.eth.src.isMulticast)
+        if (!packet.eth.src.is_multicast)
         {
             if (findMacAddress(packet.eth.src) is null)
                 addAddress(packet.eth.src, this);
