@@ -114,9 +114,11 @@
     <DCompile Include="src\protocol\tesla\package.d" />
     <DCompile Include="src\protocol\tesla\sampler.d" />
     <DCompile Include="src\protocol\tesla\twc.d" />
+    <DCompile Include="src\protocol\zigbee\aps.d" />
     <DCompile Include="src\protocol\zigbee\client.d" />
     <DCompile Include="src\protocol\zigbee\coordinator.d" />
     <DCompile Include="src\protocol\zigbee\package.d" />
+    <DCompile Include="src\protocol\zigbee\zcl.d" />
     <DCompile Include="src\router\goodwe\aa55.d" />
     <DCompile Include="src\router\goodwe\package.d" />
     <DCompile Include="src\router\iface\bridge.d" />

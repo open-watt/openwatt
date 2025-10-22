@@ -187,7 +187,7 @@ private:
             buffer ~= idb.asBytes;
             buffer.writeOption(2, i.name[]); // if_name
             if (auto z = cast(ZigbeeInterface)i)
-                buffer.writeOption(7, z.eui[]); // if_EUIaddr
+                buffer.writeOption(7, z.eui.b[]); // if_EUIaddr
             else
                 buffer.writeOption(6, i.mac.b[]); // if_MACaddr
             ubyte ts = 9; // 6 = microseconds, 9 = nanoseconds
