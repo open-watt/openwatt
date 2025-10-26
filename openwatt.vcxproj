@@ -123,6 +123,7 @@
     <DCompile Include="src\router\goodwe\package.d" />
     <DCompile Include="src\router\iface\bridge.d" />
     <DCompile Include="src\router\iface\can.d" />
+    <DCompile Include="src\router\iface\ethernet.d" />
     <DCompile Include="src\router\iface\mac.d" />
     <DCompile Include="src\router\iface\modbus.d" />
     <DCompile Include="src\router\iface\package.d" />
@@ -225,6 +226,29 @@
     <None Include="conf\rest_profiles\smartevse.conf" />
     <None Include="conf\startup.conf" />
     <None Include="Makefile" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\npcap-bpf.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\npcap-defs.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\Packet32.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap-bpf.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap-namedb.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\bluetooth.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\bpf.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\can_socketcan.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\compiler-tests.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\dlt.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\funcattrs.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\ipnet.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\namedb.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\nflog.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\pcap-inttypes.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\pcap.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\sll.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\socket.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\usb.h" />
+    <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\vlan.h" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E12D037A-40C8-4F1B-B8B3-DE527A1E9D41}</ProjectGuid>
@@ -544,6 +568,7 @@
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <ImportCPaths>third_party/npcap-sdk-1.15/Include/</ImportCPaths>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
