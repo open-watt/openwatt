@@ -25,7 +25,7 @@ class TCPStream : Stream
                                          Property.create!("keepalive", keepalive)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"tcp-client";
+    alias TypeName = StringLit!"tcp";
 
     this(String name, ObjectFlags flags = ObjectFlags.None, StreamOptions options = StreamOptions.None)
     {

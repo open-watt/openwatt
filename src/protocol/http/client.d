@@ -14,9 +14,11 @@ import urt.time;
 
 import manager;
 import manager.base;
+import manager.collection;
 
 import protocol.http;
 import protocol.http.message;
+import protocol.http.tls;
 
 import router.stream;
 import router.stream.tcp;
@@ -123,40 +125,40 @@ nothrow @nogc:
                 // TODO: I don't think we need a resource when connecting?
                 //       maybe we should keep it and make all requests relative to this resource?
 
+                // see if host has a port...
+                ushort port;
+                size_t colon = host.findFirst(":");
+                if (colon != host.length)
+                {
+                    size_t taken;
+                    long i = host[colon + 1 .. $].parse_int(&taken);
+                    if (i > ushort.max || taken != host.length - colon - 1)
+                        return CompletionStatus.Error; // bad address!
+                    port = cast(ushort)i;
+                }
+
                 if (protocol.icmp("http") == 0)
                 {
-                    ushort port = 80;
-
-                    // see if host has a port...
-                    size_t colon = host.findFirst(":");
-                    if (colon != host.length)
-                    {
-                        const(char)[] portStr = host[colon + 1 .. $];
-                        host = host[0 .. colon];
-
-                        size_t taken;
-                        long i = portStr.parse_int(&taken);
-                        if (i > ushort.max || taken != portStr.length)
-                            return CompletionStatus.Error; // invalid port string!
-                    }
-
-                    TCPStream tcp_stream = get_module!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.Dynamic);
-                    tcp_stream.remote = host.makeString(defaultAllocator);
-                    tcp_stream.port = port;
-                    _stream = tcp_stream;
+                    if (port == 0)
+                        port = 80;
+                    _stream = get_module!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.Dynamic, NamedArgument("port", port), NamedArgument("remote", host));
                 }
                 else if (protocol.icmp("https") == 0)
                 {
-                    assert(false, "TODO: need TLS stream");
-//                    stream = g_app.allocator.allocT!SSLStream(name, host, ushort(0));
-//                    get_module!StreamModule.addStream(stream);
+                    if (port == 0)
+                        host = tconcat(host, ":443");
+                    _stream = get_module!HTTPModule.tls_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.Dynamic, NamedArgument("remote", host));
                 }
             }
             else
             {
-                TCPStream tcp_stream = get_module!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.Dynamic);
-                tcp_stream.remote = _remote;
-                _stream = tcp_stream;
+                // connecting to IP; assume http (https requires hostname for certificate)
+                InetAddress addr = _remote;
+                if (addr.family == AddressFamily.ipv6 && addr._a.ipv6.port == 0)
+                    addr._a.ipv6.port = 80;
+                else if (addr.family == AddressFamily.ipv4 && addr._a.ipv4.port == 0)
+                    addr._a.ipv4.port = 80;
+                _stream = get_module!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.Dynamic, NamedArgument("remote", addr));
             }
 
             // we should have created a stream...
