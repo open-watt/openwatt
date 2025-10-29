@@ -1,10 +1,13 @@
 module router.iface.zigbee;
 
+import urt.array;
 import urt.endian;
 import urt.lifetime;
 import urt.log;
 import urt.map;
+import urt.mem.freelist;
 import urt.meta.nullable;
+import urt.result;
 import urt.string;
 import urt.time;
 import urt.variant;
@@ -22,14 +25,13 @@ import router.iface;
 import router.iface.mac;
 import router.iface.packet;
 
-version = DebugZigbeeMessageFlow;
+//version = DebugZigbeeMessageFlow;
 
 nothrow @nogc:
 
-
 // devices who rx while idle (exclude sleepy devices)
 enum broadcast_active           = EUI64(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD);
-// routing-capable devices (routers, _coordinators)
+// routing-capable devices (routers, coordinators)
 enum broadcast_routers          = EUI64(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC);
 // low-power routers
 enum broadcast_lowpower_routers = EUI64(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFB);
@@ -45,13 +47,13 @@ EUI64 zigbee_multicast_addr(ushort group)
     => EUI64(0x3, 0, 0, 0, 0, 0, group >> 8, cast(ubyte)group);
 
 
+alias MessageProgressCallback = void delegate(ZigbeeResult status, ref const APSFrame frame) nothrow;
+
+
 class ZigbeeInterface : BaseInterface
 {
-    __gshared Property[4] Properties = [ Property.create!("ezsp-client", ezsp_client)(),
-                                         Property.create!("is-coordinator", is_coordinator)(),
-                                         Property.create!("eui", eui)(),
-                                         Property.create!("node-id", node_id)() ];
-                                         // TODO: it should be possible to layer a sigbee interface on a base interface...
+    __gshared Property[2] Properties = [ Property.create!("ezsp-client", ezsp_client)(),
+                                         Property.create!("max-in-flight", max_in_flight)() ];
 nothrow @nogc:
 
     alias TypeName = StringLit!"zigbee";
@@ -65,12 +67,12 @@ nothrow @nogc:
 
     inout(EZSPClient) ezsp_client() inout pure
         => _ezsp_client;
-    const(char)[] ezsp_client(EZSPClient value)
+    StringResult ezsp_client(EZSPClient value)
     {
         if (!value)
-            return "ezsp-client cannot be null";
+            return StringResult("ezsp-client cannot be null");
         if (_ezsp_client is value)
-            return null;
+            return StringResult.success;
         if (_ezsp_client && is_coordinator)
             _coordinator.subscribe_client(_ezsp_client, false);
 
@@ -82,84 +84,45 @@ nothrow @nogc:
         _network_status = EmberStatus.NETWORK_DOWN;
 
         restart();
-        return null;
+        return StringResult.success;
+    }
+
+    ubyte max_in_flight() const pure
+        => _max_in_flight;
+    StringResult max_in_flight(ubyte value)
+    {
+        if (value == 0)
+            return StringResult("max-in-flight must be non-zero");
+        if (_max_in_flight == value)
+            return StringResult.success;
+        _max_in_flight = value;
+        return StringResult.success;
     }
 
     bool is_coordinator() const pure
         => _coordinator !is null;
 
-    EUI64 eui() const pure
-        => _eui;
-
-    ushort node_id() const pure
-        => _node_id;
-
     // API...
 
-    void bindEndpoint(ZigbeeEndpoint endpoint) pure
+    final ZigbeeResult forward_async(ref Packet packet, MessageProgressCallback callback)
     {
-        if (endpoint.endpoint == 0)
-            _zdo = endpoint;
-        else
-            assert(_state != State.Running, "Endpoints must be added prior to network startup");
+        if (!running)
+            return ZigbeeResult.no_network;
 
-        // TODO: we shouldn't need to be the coordinator to bind an endpoint to this node
-//        if (is_coordinator)
-//            _coordinator.bindEndpoint(endpoint);
-    }
-
-
-    alias send = typeof(super).send;
-
-    bool send(EUI64 eui, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message)
-    {
-        assert(message.length <= 256, "TODO: what actually is the maximum zigbee payload?");
-
-        Packet p;
-        ref aps = p.init!APSFrame(message);
-
-        aps.type = APSFrameType.data;
-        if (eui.is_zigbee_broadcast)
+        foreach (ref subscriber; subscribers[0..numSubscribers])
         {
-            aps.delivery_mode = APSDeliveryMode.broadcast;
-            aps.dst = 0xFF00 | eui.b[7];
+            if ((subscriber.filter.direction & PacketDirection.Outgoing) && subscriber.filter.match(packet))
+                subscriber.recvPacket(packet, this, PacketDirection.Outgoing, subscriber.userData);
         }
-        else if (eui.is_zigbee_multicast)
-        {
-            aps.delivery_mode = APSDeliveryMode.group;
-            aps.dst = cast(ushort)((eui.b[6] << 8) | eui.b[7]);
-        }
-        else
-        {
-            aps.delivery_mode = APSDeliveryMode.unicast;
-            NodeMap* n = get_module!ZigbeeProtocolModule.find_node(eui);
-            assert(n, "TODO: what to do if we don't know where it's going? just drop it?");
-            aps.dst = n.id;
-        }
-        aps.src = _node_id;
-        aps.dst_endpoint = dst_endpoint;
-        aps.src_endpoint = src_endpoint;
-        aps.profile_id = profile_id;
-        aps.cluster_id = cluster_id;
 
-        // TODO: anything else?
-
-        return forward(p);
+        return transmit_async(packet, callback);
     }
 
     override bool validate() const
-        => _ezsp_client !is null; // TODO: || _interface
+        => _ezsp_client !is null;
 
     override CompletionStatus startup()
     {
-        // create zdo endpoint...
-        if (!_zdo)
-        {
-            ZigbeeEndpoint zdo = get_module!ZigbeeProtocolModule.endpoints.create(name, ObjectFlags.Dynamic, NamedArgument("interface", Variant(name)));
-            zdo.set_message_handler(&zdo_message_handler);
-            bindEndpoint(zdo);
-        }
-
         if (_ezsp_client)
         {
             // boot up the ezsp client...
@@ -170,7 +133,7 @@ nothrow @nogc:
 
         if (is_coordinator)
         {
-            if (_coordinator.running)
+            if (_coordinator.ready)
             {
                 // TODO: do we need to do any local init after the coordinator started?
                 //...
@@ -196,15 +159,8 @@ nothrow @nogc:
 
     override CompletionStatus shutdown()
     {
-        if (_zdo)
-        {
-            _zdo.destroy();
-            _zdo = null;
-        }
-
         // HACK: this was moved from coordinator; rethink this...!
         get_module!ZigbeeProtocolModule.remove_all_nodes(this);
-        _nodes.clear();
 
         if (is_coordinator)
         {
@@ -221,8 +177,6 @@ nothrow @nogc:
                 assert(false, "TODO");
             }
 
-            _eui = EUI64();
-            _node_id = 0xFFFE;
             _network_status = EmberStatus.NETWORK_DOWN;
         }
 
@@ -232,6 +186,24 @@ nothrow @nogc:
     override void update()
     {
         MonoTime now = getTime();
+
+        // TODO: timeout stale messages
+//        size_t i = 0;
+//        for (i = 0; i < _send_queue.length;)
+//        {
+//            if (_send_queue.state >= 2 || now - _send_queue.send_time > 1200.msecs)
+//            {
+//                _send_queue.remove(i);
+//                --_in_flight;
+//            }
+//            else
+//                ++i;
+//        }
+
+        send_queued_messages();
+
+        // NOTE: 10ms interval feels a bit spammy on a serial bus... but I also like counters being responsive!
+        //       TODO: should we back-off from this polling when there are actual commands in flight?
         if ((now - _last_ping).as!"msecs" >= 10)
         {
             _last_ping = now;
@@ -245,16 +217,14 @@ nothrow @nogc:
     void attach_coordiantor(ZigbeeCoordinator coordinator)
     {
         _coordinator = coordinator;
-        if (!coordinator)
-        {
-            get_module!ZigbeeProtocolModule.remove_node(_eui);
-            _eui = EUI64();
-        }
         restart();
     }
 
 protected:
     override bool transmit(ref const Packet packet) nothrow @nogc
+        => transmit_async(packet, null) == ZigbeeResult.success ? true : false;
+
+    final ZigbeeResult transmit_async(ref const Packet packet, MessageProgressCallback callback) nothrow @nogc
     {
         // can only handle zigbee packets
         switch (packet.type)
@@ -275,78 +245,39 @@ protected:
 
             default:
                 ++_status.sendDropped;
-                return false;
+                return ZigbeeResult.unsupported;
         }
 
         ref hdr = packet.hdr!APSFrame;
 
-        if (_ezsp_client)
+        QueuedMessage* msg = _message_pool.alloc();
+        msg.progress_callback = callback;
+        msg.aps = hdr;
+        msg.message = cast(ubyte[])packet.data[];
+        msg.send_time = getTime();
+        msg.tag = next_seq();
+
+        if (_in_flight >= _max_in_flight)
         {
-            if (hdr.type != APSFrameType.data)
-            {
-                writeWarning("Zigbee: cannot send non-data APS frames via EZSP");
-                ++_status.sendDropped;
-                return false;
-            }
-
-            EmberApsFrame aps;
-            aps.profileId = hdr.profile_id;
-            aps.clusterId = hdr.cluster_id;
-            aps.sourceEndpoint = hdr.src_endpoint;
-            aps.destinationEndpoint = hdr.dst_endpoint;
-            aps.options = cast(EmberApsOption)(EmberApsOption.ENABLE_ROUTE_DISCOVERY | (hdr.security ? EmberApsOption.ENCRYPTION : EmberApsOption.NONE));
-            aps.sequence = hdr.counter;
-
-            ubyte message_tag = 0;
-
-            bool sent;
-            if (hdr.delivery_mode == APSDeliveryMode.broadcast)
-                sent = _ezsp_client.send_command!EZSP_SendBroadcast(&send_message_response, EmberNodeId(hdr.dst), aps, 0, message_tag, cast(const(ubyte)[])packet.data[]);
-            else if (hdr.delivery_mode == APSDeliveryMode.group)
-            {
-                aps.groupId = hdr.dst;
-                sent = _ezsp_client.send_command!EZSP_SendMulticast(&send_message_response, aps, 0, 7, message_tag, cast(const(ubyte)[])packet.data[]);
-            }
-            else
-            {
-                // TODO: handle fragmentation...
-                if (hdr.fragmentation != APSFragmentation.none)
-                {
-                    aps.options |= EmberApsOption.FRAGMENT;
-                    if (hdr.fragmentation == APSFragmentation.first)
-                        aps.groupId = cast(ushort)(hdr.block_number << 8); // block count in high byte
-                    else
-                        aps.groupId = hdr.block_number; // block number in low byte
-                }
-
-                sent = _ezsp_client.send_command!EZSP_SendUnicast(&send_message_response, EmberOutgoingMessageType.DIRECT, EmberNodeId(hdr.dst), aps, message_tag, cast(const(ubyte)[])packet.data[]);
-            }
-            if (!sent)
-                return false;
-
-            // TODO: probably shouldn't increment these counters until we receive the sent confirmation from the NCP?
-            ++_status.sendPackets;
-            _status.sendBytes += packet.data.length;
-            return true;
+            version (DebugZigbeeMessageFlow)
+                print_transaction_state(*msg, "queued");
+            return ZigbeeResult.success;
         }
 
-        // TODO: based on an underlying interface... wpan? ethernet?
-        assert(false);
+        ZigbeeResult r = send_message(*msg);
+        if (r != ZigbeeResult.success)
+        {
+            _message_pool.free(msg);
+            ++_status.sendDropped;
+            return r;
+        }
+
+        msg.state = 1; // in_flight
+        _send_queue ~= msg;
+        return ZigbeeResult.success;
     }
 
 private:
-    struct Node
-    {
-        ushort id;
-        ushort parent;
-        ubyte ncp_index;
-        EmberNodeType node_type;
-        bool available;
-//        ubyte last_lqi;
-//        byte last_rssi;
-        NodeMap* node_map;
-    }
-
     union {
 //        struct
 //        {
@@ -362,80 +293,208 @@ private:
         }
     }
     ZigbeeCoordinator _coordinator;
-    ZigbeeEndpoint _zdo;
 
     MonoTime _last_ping;
 
-package(protocol.zigbee): // TODO: this package declaration should go!
-    EUI64 _eui;
-    ushort _node_id = 0xFFFE;
-
-    Map!(ushort, Node) _nodes;
-
-    Node* add_node(ushort id, EUI64 eui) nothrow
+private:
+    struct QueuedMessage
     {
-        Node* n = id in _nodes;
-        if (!n)
-            n = _nodes.insert(id, Node(id: id));
+        MessageProgressCallback progress_callback;
+        MonoTime send_time;
+        APSFrame aps;
+        Array!ubyte message; // TODO: probably move this to a ring buffer at some point...
+        ubyte tag;
+        ubyte state; // 0: waiting, 1: submit, 2: received, 3: delivered 4: failed
+    }
 
-        bool validEui = eui != EUI64.init;
-        if (validEui && !n.node_map)
+    FreeList!QueuedMessage _message_pool;
+    Array!(QueuedMessage*) _send_queue;
+    ubyte _max_in_flight = 6;
+    ubyte _in_flight;
+    ubyte _sequence_number;
+
+    ubyte next_seq() pure
+    {
+        if (_sequence_number == 0)
+            _sequence_number = 1;
+        return _sequence_number++;
+    }
+
+    void destroy_message(QueuedMessage* msg)
+    {
+        for (size_t i = 0; i < _send_queue.length; ++i)
         {
-            NodeMap* mn = get_module!ZigbeeProtocolModule.find_node(eui);
-            if (mn)
+            if (_send_queue[i] is msg)
             {
-                n.node_map = mn;
-                if (mn.id == 0xFFFE)
-                    mn.id = id;
-                else
-                    assert(mn.id == id, "Node already exists with different id!");
+                _send_queue.remove(i);
+                _message_pool.free(msg);
+                return;
+            }
+        }
+        assert(false, "message not in queue");
+    }
+
+    void send_queued_messages()
+    {
+        outer: while (_in_flight < _max_in_flight)
+        {
+            for (size_t i = 0; i < _send_queue.length; ++i)
+            {
+                QueuedMessage* msg = _send_queue[i];
+                if (msg.state == 0)
+                {
+                    ZigbeeResult r = send_message(*msg);
+                    if (r == ZigbeeResult.success)
+                    {
+                        msg.state = 1; // in_flight
+                    }
+                    else
+                    {
+                        ++_status.sendDropped;
+                        if (msg.progress_callback)
+                            msg.progress_callback(r, msg.aps);
+
+                        _send_queue.remove(i);
+                        _message_pool.free(msg);
+                    }
+                    continue outer;
+                }
+            }
+            break; // none left to send
+        }
+    }
+
+    ZigbeeResult send_message(ref QueuedMessage msg)
+    {
+        if (_ezsp_client)
+        {
+            if (msg.aps.type != APSFrameType.data)
+            {
+                writeWarning("Zigbee: cannot send non-data APS frames via EZSP");
+                return ZigbeeResult.unsupported;
+            }
+
+            EmberApsFrame aps;
+            aps.profileId = msg.aps.profile_id;
+            aps.clusterId = msg.aps.cluster_id;
+            aps.sourceEndpoint = msg.aps.src_endpoint;
+            aps.destinationEndpoint = msg.aps.dst_endpoint;
+            aps.options = cast(EmberApsOption)(EmberApsOption.ENABLE_ROUTE_DISCOVERY | (msg.aps.security ? EmberApsOption.ENCRYPTION : EmberApsOption.NONE));
+            aps.sequence = msg.aps.counter;
+
+            bool sent;
+            if (msg.aps.delivery_mode == APSDeliveryMode.broadcast)
+                sent = _ezsp_client.send_command!EZSP_SendBroadcast(&send_message_response, EmberNodeId(msg.aps.dst), aps, 0, msg.tag, msg.message[], &msg);
+            else if (msg.aps.delivery_mode == APSDeliveryMode.group)
+            {
+                aps.groupId = msg.aps.dst;
+                sent = _ezsp_client.send_command!EZSP_SendMulticast(&send_message_response, aps, 0, 7, msg.tag, msg.message[], &msg);
             }
             else
             {
-                MACAddress mac = void;
-                mac.b[] = eui.b[0..6];
-                mac.b[0] = (mac.b[0] & 0xFC) | 2;
-                n.node_map = get_module!ZigbeeProtocolModule.add_node(eui, mac, this);
-                addAddress(mac, this);
+                // TODO: handle fragmentation...
+                if (msg.aps.fragmentation != APSFragmentation.none)
+                {
+                    aps.options |= EmberApsOption.FRAGMENT;
+                    if (msg.aps.fragmentation == APSFragmentation.first)
+                        aps.groupId = cast(ushort)(msg.aps.block_number << 8); // block count in high byte
+                    else
+                        aps.groupId = msg.aps.block_number; // block number in low byte
+                }
+
+                sent = _ezsp_client.send_command!EZSP_SendUnicast(&send_message_response, EmberOutgoingMessageType.DIRECT, EmberNodeId(msg.aps.dst), aps, msg.tag, msg.message[], &msg);
             }
+            if (!sent)
+            {
+                version (DebugZigbeeMessageFlow)
+                    print_transaction_state(msg, "dispatch FAILED");
+                return ZigbeeResult.failed;
+            }
+
+            version (DebugZigbeeMessageFlow)
+                print_transaction_state(msg, "dispatch");
         }
         else
-            assert(!validEui || n.node_map.eui == eui, "Node already exists with different eui!");
-
-        return n;
-    }
-
-    void remove_node(ushort id) nothrow
-    {
-        Node* n = id in _nodes;
-        if (!n)
-            return;
-
-        if (n.node_map)
         {
-            // TODO: if node was 'discovered' then remove it
-
-            get_module!ZigbeeProtocolModule.remove_node(n.node_map.eui);
-            n.node_map = null;
+            // TODO: based on an underlying interface... wpan? ethernet?
+            assert(false);
         }
-        _nodes.remove(id);
+
+        ++_in_flight;
+        return ZigbeeResult.success;
     }
 
-    inout(Node)* find_node(ushort id) inout nothrow
-        => id in _nodes;
-
-private:
-    void zdo_message_handler(ref const APSFrame header, const(void)[] message) nothrow
+    void send_message_response(void* user_data, EmberStatus status, ubyte aps_sequence)
     {
-        // TODO: what ZDO messages do we need to handle?
-        int x = 0;
+        QueuedMessage* msg = cast(QueuedMessage*)user_data;
+
+        // TODO: if we timed the message out, then we might get a callback with a message we destroyed...?
+
+        if (status != EmberStatus.SUCCESS)
+        {
+            // complain that the message didn't send? should we try and resend?
+
+            msg.state = 3; // failed
+            ++_status.sendDropped;
+
+            version (DebugZigbeeMessageFlow)
+                writeDebugf("Zigbee: APS send FAILED ({0, 03}): EmberStatus {1, 02x}", msg.tag, status);
+
+            --_in_flight;
+            if (msg.progress_callback)
+                msg.progress_callback(ZigbeeResult.failed, msg.aps);
+
+            destroy_message(msg);
+            send_queued_messages();
+            return;
+        }
+
+        msg.send_time = getTime(); // reset time for the in-flight state
+        msg.aps.counter = aps_sequence;
+        ++_status.sendPackets;
+        _status.sendBytes += msg.message.length;
+
+        version (DebugZigbeeMessageFlow)
+            print_transaction_state(*msg, "sent");
+
+        // does the user actually want to know this?
+        if (msg.progress_callback)
+            msg.progress_callback(ZigbeeResult.pending, msg.aps);
     }
 
-    // EZSP related:
-
-    void send_message_response(EmberStatus status, ubyte aps_sequence)
+    void message_sent_handler(EmberOutgoingMessageType type, ushort index_or_destination, EmberApsFrame aps_frame, ubyte message_tag, EmberStatus status, const(ubyte)[] message) nothrow
     {
-        assert(false);
+        foreach (ref msg; _send_queue)
+        {
+            if (msg.tag != message_tag)
+                continue;
+
+            if (status != EmberStatus.SUCCESS)
+            {
+                // complain that the message didn't send? should we try and resend?
+                // are we supposed to expect a default response to clear the queue?
+                version (DebugZigbeeMessageFlow)
+                    print_transaction_state(*msg, "delivery FAILED");
+            }
+            else
+            {
+                version (DebugZigbeeMessageFlow)
+                    print_transaction_state(*msg, "delivered");
+            }
+
+            --_in_flight;
+            if (msg.progress_callback)
+                msg.progress_callback(status == EmberStatus.SUCCESS ? ZigbeeResult.success : ZigbeeResult.failed, msg.aps);
+
+            destroy_message(msg);
+            send_queued_messages();
+            return;
+        }
+
+        // the message isn't in the queue; maybe we timed-out or something?
+        // should we make a noise about this?
+        version (DebugZigbeeMessageFlow)
+            writeDebugf("Zigbee: APS unsolicited message sent ({0, 03}) - {1, 04x}:{2, 02x}->{3, 04x}:{4, 02x} [{5}:{6, 04x}] - [{7}]", message_tag, _coordinator.node_id, aps_frame.sourceEndpoint, index_or_destination, aps_frame.destinationEndpoint, profile_name(aps_frame.profileId), aps_frame.clusterId, cast(void[])message);
     }
 
     void subscribe_ezsp_client(bool subscribe) nothrow
@@ -453,46 +512,6 @@ private:
         _ezsp_client.set_callback_handler!EZSP_MacPassthroughMessageHandler(subscribe ? &mac_passthrough_handler : null);
         _ezsp_client.set_callback_handler!EZSP_CustomFrameHandler(subscribe ? &custom_frame_handler : null);
         _ezsp_client.set_callback_handler!EZSP_CounterRolloverHandler(subscribe ? &counter_rollover_handler : null);
-        _ezsp_client.set_callback_handler!EZSP_IdConflictHandler(subscribe ? &id_conflict_handler : null);
-    }
-
-    void send_message_via_ezsp(EUI64 dst, ref EmberApsFrame aps_frame, const(void)[] message, ubyte tag) nothrow
-    {
-        NodeMap* n = get_module!ZigbeeProtocolModule.find_node(dst);
-
-        assert(n, "TODO: what if we don't know this guy? Should we find him, or just drop the message?");
-
-        // TODO: I THINK THERE'S A WAY TO FLAG? DISCOVER_ROUTE...?
-
-        assert(n.id != 0xFFFE, "TODO: the node isn't known... we should find it");
-        // and should we store this until we do, or discard it for now?
-
-        send_message_via_ezsp(n.id, aps_frame, message, tag);
-    }
-
-    void send_message_via_ezsp(ushort dst, ref EmberApsFrame aps_frame, const(void)[] message, ubyte tag) nothrow
-    {
-        if ((dst & 0xFFFC) == 0xFFFC)
-        {
-            ubyte radius = 0; // infinite radius
-
-            _ezsp_client.send_command!EZSP_SendBroadcast((EmberStatus status, ubyte sequence)
-                {
-                    if (status != EmberStatus.SUCCESS)
-                        writeWarning("Zigbee: SendBroadcast FAILED - ", status);
-                    else version (DebugZigbeeMessageFlow)
-                        writeDebug("Zigbee: SendBroadcast - seq: ", sequence);
-                }, dst, aps_frame, radius, tag, cast(const ubyte[])message);
-            return;
-        }
-
-        _ezsp_client.send_command!EZSP_SendUnicast((EmberStatus status, ubyte sequence)
-            {
-                if (status != EmberStatus.SUCCESS)
-                    writeWarning("Zigbee: SendUnicast FAILED - ", status);
-                else version (DebugZigbeeMessageFlow)
-                    writeDebug("Zigbee: SendUnicast - seq: ", sequence);
-            }, EmberOutgoingMessageType.DIRECT, dst, aps_frame, tag, cast(const ubyte[])message);
     }
 
     void ezsp_state_change(BaseObject object, StateSignal signal) nothrow
@@ -504,7 +523,7 @@ private:
 
     void status_handler(EmberStatus status)
     {
-        writeInfo("Zigbee: NETWORK STATUS CHANGE: ", status);
+        writeInfo("Zigbee: EZSP NETWORK STATUS CHANGE: ", status);
 
         if (status == EmberStatus.NETWORK_UP || status == EmberStatus.NETWORK_DOWN)
             _network_status = status;
@@ -524,9 +543,6 @@ private:
     }
     void incoming_message_handler(EmberIncomingMessageType type, EmberApsFrame aps_frame, ubyte last_hop_lqi, int8s last_hop_rssi, EmberNodeId sender, ubyte bindingIndex, ubyte addressIndex, const(ubyte)[] message) nothrow
     {
-        version (DebugZigbeeMessageFlow)
-            writeDebugf("Zigbee: incoming message - from {0, 04x} frame {1} - [{2}]", sender, aps_frame, cast(void[])message);
-
         Packet p;
         ref hdr = p.init!APSFrame(message);
         switch (type)
@@ -534,7 +550,7 @@ private:
             case EmberIncomingMessageType.UNICAST:
             case EmberIncomingMessageType.UNICAST_REPLY:
                 // EZSP only provides unicast messages if they were destined for "me"
-                hdr.dst = _node_id;
+                hdr.dst = _coordinator.node_id;
                 hdr.delivery_mode = APSDeliveryMode.unicast;
                 break;
             case EmberIncomingMessageType.MULTICAST_LOOPBACK:
@@ -563,6 +579,7 @@ private:
         }
 
         hdr.type = APSFrameType.data;
+        hdr.pan_id = _coordinator.pan_id;
         hdr.src = sender;
         hdr.security = (aps_frame.options & EmberApsOption.ENCRYPTION) ? true : false;
         hdr.ack_request = false;
@@ -573,14 +590,11 @@ private:
         hdr.profile_id = aps_frame.profileId;
         hdr.counter = aps_frame.sequence;
 
-        if (aps_frame.options & EmberApsOption.ZDO_RESPONSE_REQUIRED)
-        {
-            // TODO: this incoming message is a ZDO request not handled by the EmberZNet stack,
-            //       the application is responsible for sending a ZDO response.
-            //       this flag is used only when the ZDO is configured to have requests handled by the application.
-            //       see the EZSP_CONFIG_APPLICATION_ZDO_FLAGS configuration parameter for more information.
-            assert(false, "TODO");
-        }
+        hdr.flags |= aps_frame.options & EmberApsOption.ZDO_RESPONSE_REQUIRED;
+
+        // TODO: do we need bookkeeping for messages that expect replies?
+        //       older stack's required explicit SendReply for reply messages, and I can't determine if it's safe to ignore SendReply these days...
+        //       What do we keep? How do we match the NCP bookkeeping expectations for SendReply translation?
 
         if (aps_frame.options & EmberApsOption.FRAGMENT)
         {
@@ -604,11 +618,23 @@ private:
         hdr.last_hop_lqi = last_hop_lqi;
         hdr.last_hop_rssi = last_hop_rssi;
 
-        // translate sender...
-        auto n = add_node(sender, _sender_eui);
-        _sender_eui = EUI64();
-
-        // TODO: if we don't know the sender's EUI, let's find out what it is...
+        // record sender...
+        ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
+        auto n = mod_zb.find_node(_coordinator.pan_id, sender);
+        if (!n)
+        {
+            if (_sender_eui != EUI64())
+            {
+                n = mod_zb.attach_node(_sender_eui, _coordinator.pan_id, sender);    
+                n.via = this;
+                _sender_eui = EUI64();
+            }
+            else
+            {
+                // TODO: if we don't know the sender's EUI, let's find out what it is...
+                writeWarningf("Zigbee: TODO: we need to lookup the sender EUI64 for the discovered node {0, 04x}... somehow?", sender);
+            }
+        }
 /+
         if (!n.node_map)
         {
@@ -640,13 +666,10 @@ private:
         }
 +/
 
-        dispatch(p);
-    }
-
-    void message_sent_handler(EmberOutgoingMessageType type, ushort index_or_destination, EmberApsFrame aps_frame, ubyte message_tag, EmberStatus status, const(ubyte)[] message) nothrow
-    {
         version (DebugZigbeeMessageFlow)
-            writeDebug("Zigbee: sent message - to ", index_or_destination, " frame ", aps_frame, " - ", cast(void[])message);
+            writeDebugf("Zigbee: APS recv ({0, 03}) - {1, 04x}:{2, 02x}<-{3, 04x}:{4, 02x} [{5}:{6, 04x}] - [{7}]", hdr.counter, hdr.dst, hdr.dst_endpoint, hdr.src, hdr.src_endpoint, profile_name(hdr.profile_id), hdr.cluster_id, cast(void[])message);
+
+        dispatch(p);
     }
 
     void mac_passthrough_handler(EmberMacPassthroughType message_type, ubyte last_hop_lqi, int8s last_hop_rssi, const(ubyte)[] message) nothrow
@@ -688,13 +711,6 @@ private:
         }
     }
 
-    void id_conflict_handler(EmberNodeId id)
-    {
-        // TODO: this is called when the NCP detects multiple nodes using the same id
-        //       the stack will remove references to this id, and we should also remove the ID from our records
-        assert(false, "TODO");
-    }
-
     void custom_frame_handler(const(ubyte)[] payload) nothrow
     {
         assert(false, "TODO");
@@ -705,7 +721,15 @@ private:
         switch (command)
         {
             default:
-                writeErrorf("Zigbee: unhandled EZSP message: x{0,02x}", command);
+                writeErrorf("Zigbee: unhandled EZSP message: x{0,04x}", command);
+        }
+    }
+
+    version (DebugZigbeeMessageFlow)
+    {
+        void print_transaction_state(ref QueuedMessage msg, const(char)[] state)
+        {
+            writeDebugf("Zigbee: APS {0,10} ({1,3}) {2,4}ms - {3, 04x}:{4, 02x}->{5, 04x}:{6, 02x} [{7}:{8, 04x}] - [{9}]", state, msg.tag, (getTime() - msg.send_time).as!"msecs", msg.aps.src, msg.aps.src_endpoint, msg.aps.dst, msg.aps.dst_endpoint, profile_name(msg.aps.profile_id), msg.aps.cluster_id, cast(void[])msg.message[]);
         }
     }
 }

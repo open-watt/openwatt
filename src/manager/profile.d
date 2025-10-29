@@ -37,6 +37,7 @@ enum Frequency : ubyte
     low,    // ie, minutes
     constant,
     on_demand,
+    report,
     configuration
 }
 
@@ -81,6 +82,11 @@ struct ElementDesc_Modbus
 
 struct ElementDesc_Zigbee
 {
+    ushort cluster_id;
+    ushort attribute_id;
+    ushort manufacturer_code;
+    Access access = Access.read;
+    ValueDesc value_desc;
 }
 
 struct ElementDesc_HTTP
@@ -108,6 +114,9 @@ pure nothrow @nogc:
     const(char)[] get_id(ref const(Profile) profile) const
         => as_dstring(profile.id_strings.ptr + _id);
 
+    ushort get_index() const
+        => _index;
+
     const(char)[] get_constant_value(ref const(Profile) profile) const
     {
         assert(type == Type.constant, "ElementTemplate is not of type Constant");
@@ -123,6 +132,7 @@ pure nothrow @nogc:
 private:
     ushort _id;
     ushort _value;
+    ushort _index;
 }
 
 struct ComponentTemplate
@@ -371,6 +381,17 @@ private:
     Map!(String, const(VoidEnumInfo)*) enum_templates;
 }
 
+Profile* load_profile(const(char)[] filename, NoGCAllocator allocator = defaultAllocator())
+{
+    import urt.file;
+
+    void[] file = load_file(filename, allocator);
+    scope (exit) { allocator.free(file); }
+    if (!file)
+        return null;
+    return parse_profile(cast(const char[])file, allocator);
+}
+
 Profile* parse_profile(const(char)[] conf, NoGCAllocator allocator = defaultAllocator())
 {
     ConfItem root = parseConfig(conf);
@@ -617,6 +638,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                     else if (freq.ieq("low")) frequency = Frequency.low;
                     else if (freq.ieq("const")) frequency = Frequency.constant;
                     else if (freq.ieq("ondemand")) frequency = Frequency.on_demand;
+                    else if (freq.ieq("report")) frequency = Frequency.report;
                     else if (freq.ieq("config")) frequency = Frequency.configuration;
                     else writeWarning("Invalid frequency value: ", freq);
                 }
@@ -721,8 +743,69 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         break;
 
                     case "zb":
+                        const(char)[] tail = reg_item.value;
+                        tail = tail.split_element_and_desc();
+
+                        const(char)[] cluster = tail.split!',';
+                        const(char)[] mfg = tail.split!',';
+                        const(char)[] attrib = mfg.split!'(';
+                        const(char)[] type = tail.split!','.unQuote;
+                        const(char)[] units = tail.split!','.unQuote;
+
                         e.element_index = cast(ushort)((ElementType.zigbee << 13) | zb_count);
                         ref ElementDesc_Zigbee zb = profile.zb_elements[zb_count++];
+
+                        size_t taken;
+                        ulong t = cluster.parse_uint_with_base(&taken);
+                        if (taken != cluster.length || t > 0xFFFF)
+                        {
+                            writeWarning("Invalid Zigbee cluster ID: ", cluster);
+                            break;
+                        }
+                        zb.cluster_id = cast(ushort)t;
+
+                        t = attrib.parse_uint_with_base(&taken);
+                        if (taken != attrib.length || t > 0xFFFF)
+                        {
+                            writeWarning("Invalid Zigbee attribute ID: ", attrib);
+                            break;
+                        }
+                        zb.attribute_id = cast(ushort)t;
+
+                        if (mfg.length > 0)
+                        {
+                            if (mfg[$-1] != ')')
+                            {
+                                writeWarning("Invalid Zigbee manufacturer code: ", mfg);
+                                break;
+                            }
+                            mfg = mfg[0.. $-1].trimBack;
+
+                            t = mfg.parse_uint_with_base(&taken);
+                            if (taken != mfg.length || t > 0xFFFF)
+                            {
+                                writeWarning("Invalid Zigbee manufacturer code: ", mfg);
+                                break;
+                            }
+                            zb.manufacturer_code = cast(ushort)t;
+                        }
+                        else
+                            zb.manufacturer_code = 0;
+
+                        DataType ty = type.split!('/', false).parse_data_type();
+                        if (type.length > 0)
+                        {
+                            if (type[0] == 'R')
+                            {
+                                if (type.length > 1 && type[1] == 'W')
+                                    zb.access = Access.read_write;
+                                else
+                                    zb.access = Access.read;
+                            }
+                            else if (type[0] == 'W')
+                                zb.access = Access.write;
+                        }
+                        parse_value_desc(zb.value_desc, ty, units);
                         break;
 
                     case "http":
@@ -887,10 +970,25 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                                     writeWarning("Invalid element-map value: ", id);
                                     continue;
                                 }
-                                ptrdiff_t i = profile.find_element(id[1 .. $]);
+                                id = id[1 .. $];
+                                const(char)[] index = id.split!':';
+                                if (!id)
+                                    id = index;
+                                else
+                                {
+                                    ulong i = index.parse_uint();
+                                    if (i > ushort.max)
+                                    {
+                                        writeWarning("Invalid element index in element-map: ", index);
+                                        continue;
+                                    }
+                                    e._index = cast(ushort)i;
+                                }
+
+                                ptrdiff_t i = profile.find_element(id);
                                 if (i < 0)
                                 {
-                                    writeWarning("Unknown element in element-map: ", id[1 .. $]);
+                                    writeWarning("Unknown element in element-map: ", id);
                                     continue;
                                 }
                                 // add the element index to the template...

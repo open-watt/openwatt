@@ -25,26 +25,30 @@ import protocol.zigbee.client;
 @nogc:
 
 
-class ZigbeeCoordinator : BaseObject
+class ZigbeeCoordinator : ZigbeeRouter
 {
-    __gshared Property[4] Properties = [ Property.create!("interface", iface)(),
-                                         Property.create!("channel", channel)(),
-                                         Property.create!("pan-eui", _pan_eui)(),
-                                         Property.create!("pan-id", _pan_id)() ];
+    __gshared Property[2] Properties = [ Property.create!("interface", iface)(),
+                                         Property.create!("channel", channel)() ];
 @nogc:
 
-    enum TypeName = StringLit!"zigbee-coordinator";
+    enum TypeName = StringLit!"zb-coordinator";
 
     this(String name, ObjectFlags flags = ObjectFlags.None) nothrow
     {
         super(collection_type_info!ZigbeeCoordinator, name.move, flags);
+
+        get_module!ZigbeeProtocolModule.routers.add(this);
+    }
+
+    ~this()
+    {
+        get_module!ZigbeeProtocolModule.routers.remove(this);
     }
 
     // Properties...
 
-    final inout(ZigbeeInterface) iface() inout pure nothrow
-        => _interface;
-    final StringResult iface(BaseInterface value) nothrow
+    alias iface = typeof(super).iface; // merge the overload set
+    final override StringResult iface(BaseInterface value) nothrow
     {
         if (!value)
             return StringResult("interface cannot be null");
@@ -57,18 +61,18 @@ class ZigbeeCoordinator : BaseObject
                 return StringResult.success;
             _interface.unsubscribe(&state_change);
             _interface.unsubscribe(&incoming_packet);
-            _interface.attach_coordiantor(null);
-            if (_interface.ezsp_client)
-                subscribe_client(_interface.ezsp_client, false);
+            zigbee_iface.attach_coordiantor(null);
+            if (auto ezsp = get_ezsp())
+                subscribe_client(ezsp, false);
         }
         if (zi.is_coordinator)
             return StringResult("interface is already a coordinator");
         _interface = zi;
         _interface.subscribe(&state_change);
-        _interface.subscribe(&incoming_packet, PacketFilter());
-        _interface.attach_coordiantor(this);
-        if (_interface.ezsp_client)
-            subscribe_client(_interface.ezsp_client, true);
+        _interface.subscribe(&incoming_packet, PacketFilter(type: PacketType.ZigbeeAPS));
+        zigbee_iface.attach_coordiantor(this);
+        if (auto ezsp = get_ezsp())
+            subscribe_client(ezsp, true);
         return StringResult.success;
     }
 
@@ -94,6 +98,12 @@ class ZigbeeCoordinator : BaseObject
         return StringResult.success;
     }
 
+    final override bool is_coordinator() const pure nothrow
+        => true;
+
+    final bool ready() const pure nothrow
+        => _ready;
+
     // API...
 
     void reboot()
@@ -108,12 +118,22 @@ class ZigbeeCoordinator : BaseObject
     }
 
     override bool validate() const
-        => _interface !is null;
+        => super.validate();
 
     override CompletionStatus startup()
     {
-        if (auto ezsp = get_ezsp())
+        auto zb = zigbee_iface();
+        if (!zb || !zb.is_coordinator)
         {
+            CompletionStatus s = super.startup();
+            if (s != CompletionStatus.Complete)
+                return s;
+        }
+        else
+        {
+            auto ezsp = get_ezsp();
+            assert(ezsp, "What happened here? I'm not sure what flow could lead to this case...");
+
             if (!ezsp.running)
             {
                 if (_init_promise)
@@ -123,25 +143,42 @@ class ZigbeeCoordinator : BaseObject
                 }
                 return CompletionStatus.Continue;
             }
-
-            if (!_init_promise)
+            else if (ezsp.protocol_version < 13)
             {
-                if (ezsp.stack_type != EZSPClient.StackType.Coordinator && !_already_complained)
-                {
-                    writeError("Zigbee: EZSP client device is not running cordinator firmware. To use this device, flash with the proper coordinator firmware.");
-                    _already_complained = true;
-                    // TODO: maybe we should have a sort of non-recoverable error, where it won't automatically try and restart?
-                    return CompletionStatus.Error;
-                }
-
-                _init_promise = async(&init);
+                // TODO: should we even attempt to support old firmware?
+                //       major difference: only single pending message slot; must use `SendReply` when replying to a ZCL message.
+                return CompletionStatus.Error;
             }
-            else if (_init_promise.state != PromiseState.Pending)
+
+            if (!_ready)
             {
-                bool failed = _init_promise.state == PromiseState.Failed ? true : !_init_promise.result;
-                freePromise(_init_promise);
-                if (failed)
-                    return CompletionStatus.Error;
+                if (!_init_promise)
+                {
+                    if (ezsp.stack_type != EZSPClient.StackType.Coordinator && !_already_complained)
+                    {
+                        writeError("Zigbee: EZSP client device is not running cordinator firmware. To use this device, flash with the proper coordinator firmware.");
+                        _already_complained = true;
+                        // TODO: maybe we should have a sort of non-recoverable error, where it won't automatically try and restart?
+                        return CompletionStatus.Error;
+                    }
+
+                    _init_promise = async(&init);
+                }
+                else if (_init_promise.state != PromiseState.Pending)
+                {
+                    bool failed = _init_promise.state == PromiseState.Failed ? true : !_init_promise.result;
+                    freePromise(_init_promise);
+                    if (failed)
+                        return CompletionStatus.Error;
+                    _ready = true;
+                }
+            }
+
+            if (_ready)
+            {
+                CompletionStatus s = super.startup();
+                if (s != CompletionStatus.Complete)
+                    return s;
                 return CompletionStatus.Complete;
             }
         }
@@ -162,21 +199,23 @@ class ZigbeeCoordinator : BaseObject
         {
             _interface.unsubscribe(&state_change);
             _interface.unsubscribe(&incoming_packet);
-            _interface.attach_coordiantor(null);
-            if (_interface.ezsp_client)
-                subscribe_client(_interface.ezsp_client, false);
+            zigbee_iface.attach_coordiantor(null);
+            if (auto ezsp = get_ezsp())
+                subscribe_client(ezsp, false);
             _interface = null;
         }
 
+        _network_params.pan_id = 0xFFFF;
         _already_complained = false;
+        _ready = false;
 
-        return CompletionStatus.Complete;
+        return super.shutdown();
     }
 
     override void update() nothrow
     {
         // TODO: any administrative activities for the coordinator?
-        if (_pan_eui != EUI64() && _pan_eui != _network_params.extended_pan_id)
+        if (_pan_eui != EUI64.broadcast && _pan_eui != _network_params.extended_pan_id)
         {
             writeInfo("Zigbee coordinator: PAN EUI changed - re-forming network");
             assert(false, "TODO");
@@ -200,8 +239,10 @@ class ZigbeeCoordinator : BaseObject
         }
     }
 
-    void subscribe_client(EZSPClient client, bool subscribe) nothrow
+    override final void subscribe_client(EZSPClient client, bool subscribe) nothrow
     {
+        super.subscribe_client(client, subscribe);
+
         client.set_callback_handler!EZSP_TrustCenterJoinHandler(subscribe ? &join_handler : null);
         client.set_callback_handler!EZSP_ChildJoinHandler(subscribe ? &child_join : null);
         client.set_callback_handler!EZSP_ZigbeeKeyEstablishmentHandler(subscribe ? &key_establishment : null);
@@ -210,34 +251,15 @@ class ZigbeeCoordinator : BaseObject
     }
 
 private:
-    struct NetworkParams
-    {
-        EUI64 extended_pan_id;
-        ushort pan_id;
-        ubyte radio_tx_power;
-        ubyte radio_channel;
-//        EmberJoinMethod join_method; // The method used to initially join the network.
-//        EmberNodeId nwk_manager_id;
-//        ubyte nwk_update_id;
-//        uint channels;
-    }
-
-    ZigbeeInterface _interface;
-    EUI64 _pan_eui;
-    ushort _pan_id = 0xFFFF;
     ubyte _channel = 0xFF;
 
     ubyte[16] _network_key = cast(ubyte[16])"ZigBeeAlliance09";
 
-    NetworkParams _network_params;
-
     MonoTime _last_action;
     bool _already_complained; // suppress repeat complaining about the same errors
+    bool _ready;
 
     Promise!bool* _init_promise;
-
-    inout(EZSPClient) get_ezsp() inout pure nothrow
-        => _interface ? _interface.ezsp_client : null;
 
     bool init()
     {
@@ -296,7 +318,8 @@ private:
         ezsp.set_configuration(EzspConfigId.STACK_PROFILE, 2);
 
         // Enable MAC passthrough for beacons and join requests
-        ezsp.set_configuration(EzspConfigId.APPLICATION_ZDO_FLAGS, EmberZdoConfigurationFlags.APP_RECEIVES_SUPPORTED_ZDO_REQUESTS);
+        // TODO: do we want to handle APP_HANDLES_ZDO_ENDPOINT_REQUESTS and APP_HANDLES_ZDO_BINDING_REQUESTS ourself? add them here...
+        ezsp.set_configuration(EzspConfigId.APPLICATION_ZDO_FLAGS, cast(EmberZdoConfigurationFlags)(EmberZdoConfigurationFlags.APP_HANDLES_UNSUPPORTED_ZDO_REQUESTS | EmberZdoConfigurationFlags.APP_RECEIVES_SUPPORTED_ZDO_REQUESTS));
 
         // TODO: do we need/want any of these?
 //        ezsp.set_configuration(EzspConfigId.INDIRECT_TRANSMISSION_TIMEOUT, 0x1000);
@@ -318,12 +341,7 @@ private:
             writeInfo("Zigbee coordinator: MAC_PASSTHROUGH_FLAGS failed: ", r);
 
         // update the EUI for this interface; since it's determined by the NCP...
-        _interface._eui.b = ezsp.request!EZSP_GetEui64();
-
-        // create the node for this coordinator...
-        ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
-        NodeMap* mn = mod_zb.add_node(_interface.eui, _interface.mac, _interface);
-        mn.name = _interface.name;
+        _eui.b = ezsp.request!EZSP_GetEui64();
 
 //        EmberInitialSecurityState security;
 //        security.bitmask = cast(EmberInitialSecurityBitmask)(EmberInitialSecurityBitmask.HAVE_PRECONFIGURED_KEY | EmberInitialSecurityBitmask.TRUST_CENTER_GLOBAL_LINK_KEY);
@@ -331,11 +349,9 @@ private:
 //        _client.send_command!EZSP_SetInitialSecurityState(&securityResponse, security);
 
         // register local endpoints
-        foreach (ref e; mn.endpoints.values)
+        foreach (ref e; _endpoints)
         {
-            if (e.endpoint == 0)
-                continue;
-            r = ezsp.request!EZSP_AddEndpoint(e.endpoint, e.profile, e.device, ubyte(0), e.in_clusters[], e.out_clusters[]);
+            r = ezsp.request!EZSP_AddEndpoint(e.id, e.endpoint.profile_id, e.endpoint.device, ubyte(0), e.endpoint.in_clusters[], e.endpoint.out_clusters[]);
             if (r != EzspStatus.SUCCESS)
                 writeInfo("Zigbee coordinator: AddEndpoint failed: ", r);
         }
@@ -360,10 +376,7 @@ private:
 
             // we should form a network here...
             EmberNetworkParameters params;
-            if (_pan_eui != EUI64())
-                params.extendedPanId = _pan_eui.b;
-            else
-                params.extendedPanId = _interface.eui.b;
+            params.extendedPanId = _pan_eui.b;
             params.panId = _pan_id;
             params.radioTxPower = 0;
             params.radioChannel = _channel;
@@ -380,33 +393,52 @@ private:
             }
         }
 
-        while (_interface._network_status != EmberStatus.NETWORK_UP)
+        while (zigbee_iface._network_status != EmberStatus.NETWORK_UP)
         {
             // TODO: implement timeout...
             yield();
         }
 
         auto nwk_params = ezsp.request!EZSP_GetNetworkParameters();
-        writeInfo("Zigbee coordinator: NETWORK UP: node-type=", nwk_params.nodeType, "  pan-id=", nwk_params.parameters.extendedPanId, "  channel=", nwk_params.parameters.radioChannel);
-
         _network_params.extended_pan_id.b = nwk_params.parameters.extendedPanId;
         _network_params.pan_id = nwk_params.parameters.panId;
         _network_params.radio_channel = nwk_params.parameters.radioChannel;
         _network_params.radio_tx_power = nwk_params.parameters.radioTxPower;
 
-        _interface._node_id = ezsp.request!EZSP_GetNodeId();
-        assert(_interface.node_id == nwk_params.parameters.nwkManagerId && _interface.node_id == 0x0000, "We are the coordinator, so shouldn't we have id 0?");
+        _node_id = ezsp.request!EZSP_GetNodeId();
+        assert(_node_id == nwk_params.parameters.nwkManagerId && _node_id == 0x0000, "We are the coordinator, so shouldn't we have id 0?");
 
-        auto node = _interface.find_node(_interface.node_id);
-        if (node)
+        writeInfof("Zigbee coordinator: NETWORK UP: node-id={0} type={1} pan-id={2} ({3, 04x}) channel={4}", _node_id, nwk_params.nodeType, _network_params.extended_pan_id, _network_params.pan_id, _network_params.radio_channel);
+
+        // create the node for this coordinator...
+        ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
+        NodeMap* nm = mod_zb.find_node(pan_id, _node_id);
+        if (nm)
         {
-            writeErrorf("Zigbee coordinator: node id {0, 04x} already exists in node table - something went wrong?", _interface.node_id);
+            writeErrorf("Zigbee coordinator: node id {0, 04x} already exists in node table - something went wrong?", _node_id);
             return false;
         }
-        node = _interface.add_node(_interface.node_id, _interface.eui);
-        node.node_type = EmberNodeType.COORDINATOR;
-        node.ncp_index = cast(ubyte)-1;
-        node.available = true;
+        nm = mod_zb.attach_node(_eui, pan_id, _node_id);
+        nm.name = name;
+        nm.desc.type = NodeType.coordinator;
+        nm.node = this;
+//        nm.via = _interface; // TODO: should we set `via` for a local node?
+
+        // populate the node
+        foreach (ref e; _endpoints)
+        {
+            ref ep = nm.get_endpoint(e.id);
+            ep.dynamic = false;
+            ep.profile_id = e.endpoint.profile_id;
+            ep.device_id = e.endpoint.device;
+            ep.device_version = 0; // TODO: add version property to endpoint?
+            foreach (c; e.endpoint.in_clusters)
+            {
+                ref cluster = ep.get_cluster(c);
+                cluster.dynamic = false;
+                // ...attributes?
+            }
+        }
 
         // TODO: are we supposed to permit joining for a little while after network-up?
         //       is this for all the clients to re-sync, or will they all join anyway?
@@ -428,8 +460,10 @@ private:
                 {
                     if (child.childData.id == 0xFFFF)
                         continue;
-                    auto n = _interface.add_node(child.childData.id, EUI64(child.childData.eui64));
-                    n.node_type = child.childData.type;
+                    nm = mod_zb.attach_node(EUI64(child.childData.eui64), pan_id, child.childData.id);
+//                    nm.parent_id = _node_id; // TODO: is the coordinator the parent, or it's preferred router?
+                    nm.desc.type = cast(NodeType)child.childData.type;
+                    nm.via = _interface;
                 }
             }
         }
@@ -445,88 +479,100 @@ private:
                 if (nodeId == 0xFFFF)
                     continue;
                 EmberEUI64 eui = ezsp.request!EZSP_GetAddressTableRemoteEui64(i);
-                _interface.add_node(nodeId, EUI64(eui));
+                nm = mod_zb.attach_node(EUI64(eui), pan_id, nodeId);
+//                nm.parent_id = _node_id; // TODO: is the coordinator the parent, or it's preferred router?
             }
         }
         return true;
     }
 
-    void join_handler(EmberNodeId new_node_id, EmberEUI64 new_node_eui64, EmberDeviceUpdate status, EmberJoinDecision policy_decision, EmberNodeId parent_of_new_node_id) nothrow
+nothrow:
+    void join_handler(EmberNodeId new_node_id, EmberEUI64 new_node_eui64, EmberDeviceUpdate status, EmberJoinDecision policy_decision, EmberNodeId parent_of_new_node_id)
     {
+        ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
+        auto eui = EUI64(new_node_eui64);
+
         if (policy_decision == EmberJoinDecision.DENY_JOIN)
         {
-            writeInfof("Zigbee coordinator: join denied for node {0, 04x} {1}", new_node_id, cast(void[])new_node_eui64);
+            writeInfof("Zigbee coordinator: join denied for node {0, 04x} {1}", new_node_id, eui);
             return;
         }
 
         if (status == EmberDeviceUpdate.DEVICE_LEFT)
         {
-            writeDebugf("Zigbee coordinator: TC left - {0, 04x} {1}", new_node_id, cast(void[])new_node_eui64);
-            _interface.remove_node(new_node_id);
+            writeDebugf("Zigbee coordinator: TC left - {0, 04x} {1}", new_node_id, eui);
+            mod_zb.detach_node(pan_id, new_node_id);
             return;
         }
 
         // TODO: should we EXPECT to find it if it is a rejoin?
-        auto n = _interface.add_node(new_node_id, EUI64(new_node_eui64));
-        n.parent = parent_of_new_node_id; // TODO: should we be concerned if we don't know who the parent is?
-        n.available = status != EmberDeviceUpdate.DEVICE_LEFT;
+        auto n = mod_zb.attach_node(eui, pan_id, new_node_id);
+        n.parent_id = parent_of_new_node_id; // TODO: should we be concerned if we don't know who the parent is?
+//        n.via = _interface; // TODO: should we set `via` for a local node?
 
         if (status == EmberDeviceUpdate.STANDARD_SECURITY_UNSECURED_JOIN)// && policy_decision == EmberJoinDecision.NO_ACTION)
         {
             // TODO: maybe we have the policy set so that we have to manually respond to the join request?
 //            assert(false);
-            _interface.ezsp_client.send_command!EZSP_UnicastNwkKeyUpdate((EmberStatus status)
+            get_ezsp.send_command!EZSP_UnicastNwkKeyUpdate((EmberStatus status)
                 {
                     if (status != EmberStatus.SUCCESS)
                         writeInfo("Zigbee coordinator: UnicastNwkKeyUpdate - ", status);
                 }, new_node_id, new_node_eui64, EmberKeyData(_network_key));
         }
 
-        writeDebugf("Zigbee coordinator: TC join - {0, 04x} [{1}] {2}", new_node_id, cast(void[])new_node_eui64, status);
+        writeDebugf("Zigbee coordinator: TC join - {0, 04x} [{1}] {2}", new_node_id, eui, status);
     }
 
-    void child_join(ubyte index, bool joining, EmberNodeId child_id, EmberEUI64 child_eui64, EmberNodeType child_type) nothrow
+    void child_join(ubyte index, bool joining, EmberNodeId child_id, EmberEUI64 child_eui64, EmberNodeType child_type)
     {
+        ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
+        auto eui = EUI64(child_eui64);
+
         if (!joining)
         {
-            writeDebugf("Zigbee coordinator: child left - {0, 04x} {1}", child_id, cast(void[])child_eui64);
-            _interface.remove_node(child_id);
+            writeDebugf("Zigbee coordinator: child left - {0, 04x} {1}", child_id, eui);
+            mod_zb.detach_node(pan_id, child_id);
             return;
         }
 
-        auto n = _interface.add_node(child_id, EUI64(child_eui64));
-        n.ncp_index = index;
-        n.available = joining;
-        n.node_type = child_type;
+        auto n = mod_zb.attach_node(eui, pan_id, child_id);
+        n.desc.type = cast(NodeType)child_type;
+//        n.via = _interface; // TODO: should we set `via` for a local node?
 
-        writeDebugf("Zigbee coordinator: child join - {0, 04x} [{1}] {2}", child_id, cast(void[])child_eui64, child_type);
+        writeDebugf("Zigbee coordinator: child join - {0, 04x} [{1}] {2}", child_id, eui, child_type);
     }
 
-    void key_establishment(EmberEUI64 partner, EmberKeyStatus status) nothrow
+    void key_establishment(EmberEUI64 partner, EmberKeyStatus status)
     {
         assert(false, "TODO");
     }
 
-    void remote_set_binding(EmberBindingTableEntry entry, ubyte index, EmberStatus policy_decision) nothrow
+    void remote_set_binding(EmberBindingTableEntry entry, ubyte index, EmberStatus policy_decision)
     {
         assert(false, "TODO");
     }
 
-    void remote_delete_binding(ubyte index, EmberStatus policy_decision) nothrow
+    void remote_delete_binding(ubyte index, EmberStatus policy_decision)
     {
         assert(false, "TODO");
     }
 
-    void state_change(BaseObject object, StateSignal signal) nothrow
+    void state_change(BaseObject object, StateSignal signal)
     {
         // if the interface goes offline, we should restart the coordinator...
         if (object is _interface && signal == StateSignal.Offline)
             restart();
     }
 
-    void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void* userData) nothrow
+protected:
+    final override bool handle_zdo_frame(ref const APSFrame aps, ref const Packet p)
     {
-        // TODO: what messages do we even want to know about as the coordinator?
+        bool response_required = (aps.flags & APSFlags.zdo_response_required) != 0;
+
+        //...
+
+        return super.handle_zdo_frame(aps, p);
     }
 }
 
