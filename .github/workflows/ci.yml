@@ -44,6 +44,26 @@ jobs:
         with:
           compiler: ${{ matrix.compiler == 'dmd' && 'dmd-master' || matrix.compiler }}
 
+      # Windows needs MSBuild setup, VisualD installed and vcpkg integrated
+      - name: Setup MSBuild (Windows)
+        if: ${{ matrix.os == 'windows' }}
+        uses: microsoft/setup-msbuild@v2
+      - name: Download VisualD (Windows)
+        if: ${{ matrix.os == 'windows' }}
+        run: curl -LO https://github.com/dlang/visuald/releases/download/v1.4.1/VisualD-v1.4.1.exe
+      - name: Install VisualD (Windows)
+        if: ${{ matrix.os == 'windows' }}
+        run: .\VisualD-v1.4.1.exe /S
+      - name: Register VisualD (Windows)
+        if: ${{ matrix.os == 'windows' }}
+        run: |
+          reg add "HKLM\SOFTWARE\DMD" /v "InstallationDir" /t REG_SZ /d "C:\hostedtoolcache\windows\dmd\master\x64" /reg:32 /f
+          reg add "HKLM\SOFTWARE\VisualD" /v "DMDInstallDir" /t REG_SZ /d "C:\hostedtoolcache\windows\dmd\master\x64\dmd2" /reg:32 /f
+          reg add "HKLM\SOFTWARE\VisualD" /v "LDCInstallDir" /t REG_SZ /d "C:\hostedtoolcache\windows\ldc2\1.41.0\x64\ldc2-1.41.0-windows-multilib" /reg:32 /f
+      - name: Integrate vcpkg
+        if: ${{ matrix.os == 'windows' }}
+        run: vcpkg integrate install
+
       # 32-bit linux needs libs to link and run tests...
       - name: Install 32-bit Toolchains (Linux)
         if: ${{ matrix.os == 'ubuntu' && matrix.platform == 'x86' }}
@@ -52,15 +72,26 @@ jobs:
         if: ${{ matrix.os == 'ubuntu' && matrix.platform == 'arm' }}
         run: sudo dpkg --add-architecture armhf && sudo apt-get update && sudo apt-get install -y libstdc++6:armhf
 
-      - name: Build release
-        if: ${{ github.ref == 'refs/heads/release' }}
+      - name: Build release (Linux)
+        if: ${{ github.ref == 'refs/heads/release' && matrix.os != 'windows' }}
         run: make PLATFORM=${{ matrix.platform }} CONFIG=release OS=${{ matrix.os }} COMPILER=${{ matrix.compiler }}
-      - name: Build unittest
+      - name: Build release (Windows)
+        if: ${{ github.ref == 'refs/heads/release' && matrix.os == 'windows' }}
+        run: msbuild openwatt.sln -property:Configuration="${{ matrix.compiler == 'dmd' && 'Release' || 'Release LDC' }}" -property:Platform=${{ matrix.platform == 'x86_64' && 'x64' || 'x86' }}
+      - name: Build unittest (Linux)
+        if: ${{ matrix.os != 'windows' }}
         run: make PLATFORM=${{ matrix.platform }} CONFIG=unittest OS=${{ matrix.os }} COMPILER=${{ matrix.compiler }}
+      - name: Build unittest (Windows)
+        if: ${{ matrix.os == 'windows' }}
+        run: msbuild openwatt.sln -property:Configuration="${{ matrix.compiler == 'dmd' && 'UnitTest' || 'UnitTest LDC' }}" -property:Platform=${{ matrix.platform == 'x86_64' && 'x64' || 'x86' }}
 
-      - name: Test
-        if: ${{ success() && (matrix.platform == 'x86_64' || matrix.platform == 'x86' || matrix.platform == 'arm64') }}
+      - name: Test (Linux)
+        if: ${{ success() && matrix.os != 'windows' && (matrix.platform == 'x86_64' || matrix.platform == 'x86' || matrix.platform == 'arm64') }}
         run: ./bin/${{ matrix.platform }}_unittest/openwatt_test
+      - name: Test (Windows)
+        if: ${{ success() && matrix.os == 'windows' && (matrix.platform == 'x86_64' || matrix.platform == 'x86' || matrix.platform == 'arm64') }}
+        run: |
+          & "./bin/${{ matrix.platform == 'x86_64' && 'x64' || 'Win32' }}/${{ matrix.compiler == 'dmd' && 'UnitTest' || 'UnitTest LDC' }}/openwatt_test"
 
       - name: Upload release binary
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/release' && matrix.compiler == 'ldc' }}
