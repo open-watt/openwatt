@@ -29,7 +29,7 @@ const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
                                                                             return null;
                                                                    }(),
                                                                    (ref BaseCollection c, const(char)[] n, ObjectFlags flags)
-                                                                       => defaultAllocator.allocT!Type((n ? n : c.generate_name(Type.TypeName)).makeString(defaultAllocator), flags)
+                                                                       => defaultAllocator.allocT!Type((n ? n : c.generate_name(Type.TypeName[])).makeString(defaultAllocator), flags)
                                                                    );
         return &ti;
     }

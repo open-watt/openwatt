@@ -255,6 +255,9 @@
     <DCompile Include="src\protocol\http\tls.d">
       <Filter>src\protocol\http</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\http\websocket.d">
+      <Filter>src\protocol\http</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\mqtt\broker.d">
       <Filter>src\protocol\mqtt</Filter>
     </DCompile>

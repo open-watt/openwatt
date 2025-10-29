@@ -19,8 +19,8 @@ import manager.plugin;
 import protocol.http.client;
 import protocol.http.message;
 import protocol.http.server;
-import protocol.http.message;
 import protocol.http.tls;
+import protocol.http.websocket;
 
 import router.stream.tcp;
 
@@ -35,13 +35,23 @@ nothrow @nogc:
     Collection!TLSStream tls_streams;
     Collection!HTTPServer servers;
     Collection!HTTPClient clients;
+    Collection!WebSocketServer ws_servers;
+    Collection!WebSocket websockets;
 
     override void init()
     {
         g_app.console.registerCollection("/stream/tls", tls_streams);
         g_app.console.registerCollection("/protocol/http/client", clients);
         g_app.console.registerCollection("/protocol/http/server", servers);
+        g_app.console.registerCollection("/protocol/websocket/server", ws_servers);
+        g_app.console.registerCollection("/protocol/websocket", websockets);
+
         g_app.console.registerCommand!request("/protocol/http", this);
+    }
+
+    override void pre_update()
+    {
+        websockets.update_all();
     }
 
     override void update()
@@ -49,6 +59,7 @@ nothrow @nogc:
         tls_streams.update_all();
         servers.update_all();
         clients.update_all();
+        ws_servers.update_all();
     }
 
     static class HTTPRequestState : FunctionCommandState
