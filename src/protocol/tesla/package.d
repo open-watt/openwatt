@@ -109,7 +109,7 @@ nothrow @nogc:
             device.name = name.value.makeString(g_app.allocator);
 
         // create a sampler for this modbus server...
-        TeslaTWCSampler sampler = g_app.allocator.allocT!TeslaTWCSampler(this, cast(ushort)(slave_id ? slave_id.value : 0), mac ? mac.value : MACAddress());
+        TeslaTWCSampler sampler = g_app.allocator.allocT!TeslaTWCSampler(cast(ushort)(slave_id ? slave_id.value : 0), mac ? mac.value : MACAddress());
         device.samplers ~= sampler;
 
         Component c;
