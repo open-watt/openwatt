@@ -1,0 +1,52 @@
+module protocol.zigbee.zdo;
+
+import urt.endian;
+
+nothrow @nogc:
+
+enum ZDOCluster : ushort
+{
+    NWK_Addr_req = 0x0000,
+    IEEE_Addr_req = 0x0001,
+    Node_Desc_req = 0x0002,
+    Power_Desc_req = 0x0003,
+    Simple_Desc_req = 0x0004,
+    Active_EP_req = 0x0005,
+    Match_Desc_req = 0x0006,
+    Complex_Desc_req = 0x0010,
+    User_Desc_req = 0x0011,
+    Discovery_Cache_req = 0x0012,
+    Device_annce = 0x0013,
+    User_Desc_Set_req = 0x0014,
+    System_Server_Discovery_req = 0x0015,
+    Discovery_Store_req = 0x0016,
+    Node_Desc_Store_req = 0x0017,
+    Power_Desc_Store_req = 0x0018,
+    Active_EP_Store_req = 0x0019,
+    Simple_Desc_Store_req = 0x001A,
+    Remove_Bkup_Cache_req = 0x001B,
+    Find_Node_Cache_req = 0x001C,
+    Extended_Simple_Desc_req = 0x001D,
+    Extended_Active_EP_req = 0x001E,
+    Parent_annce = 0x001F,
+    End_Device_Bind_req = 0x0020,
+    Bind_req = 0x0021,
+    Unbind_req = 0x0022,
+    Bind_Register_req = 0x0023,
+    Replace_Device_req = 0x0024,
+    Store_Bkup_Bind_Entry_req = 0x0025,
+    Remove_Bkup_Bind_Entry_req = 0x0026,
+    Backup_Bind_Table_req = 0x0027,
+    Recover_Bind_Table_req = 0x0028,
+    Backup_Source_Bind_req = 0x0029,
+    Recover_Source_Bind_req = 0x002A,
+    Mgmt_NWK_Disc_req = 0x0030,
+    Mgmt_Lqi_req = 0x0031,
+    Mgmt_Rtg_req = 0x0032,
+    Mgmt_Bind_req = 0x0033,
+    Mgmt_Leave_req = 0x0034,
+    Mgmt_Direct_Join_req = 0x0035,
+    Mgmt_Permit_Joining_req = 0x0036,
+    Mgmt_Cache_req = 0x0037,
+    Mgmt_NWK_Update_req = 0x0038,
+}

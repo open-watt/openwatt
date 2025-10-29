@@ -29,7 +29,7 @@ nothrow @nogc:
 
 // devices who rx while idle (exclude sleepy devices)
 enum broadcast_active           = EUI64(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFD);
-// routing-capable devices (routers, _coordinators)
+// routing-capable devices (routers, coordinators)
 enum broadcast_routers          = EUI64(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFC);
 // low-power routers
 enum broadcast_lowpower_routers = EUI64(0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFB);
@@ -47,11 +47,7 @@ EUI64 zigbee_multicast_addr(ushort group)
 
 class ZigbeeInterface : BaseInterface
 {
-    __gshared Property[4] Properties = [ Property.create!("ezsp-client", ezsp_client)(),
-                                         Property.create!("is-coordinator", is_coordinator)(),
-                                         Property.create!("eui", eui)(),
-                                         Property.create!("node-id", node_id)() ];
-                                         // TODO: it should be possible to layer a sigbee interface on a base interface...
+    __gshared Property[1] Properties = [ Property.create!("ezsp-client", ezsp_client)() ];
 nothrow @nogc:
 
     alias TypeName = StringLit!"zigbee";
@@ -88,78 +84,13 @@ nothrow @nogc:
     bool is_coordinator() const pure
         => _coordinator !is null;
 
-    EUI64 eui() const pure
-        => _eui;
-
-    ushort node_id() const pure
-        => _node_id;
-
     // API...
 
-    void bindEndpoint(ZigbeeEndpoint endpoint) pure
-    {
-        if (endpoint.endpoint == 0)
-            _zdo = endpoint;
-        else
-            assert(_state != State.Running, "Endpoints must be added prior to network startup");
-
-        // TODO: we shouldn't need to be the coordinator to bind an endpoint to this node
-//        if (is_coordinator)
-//            _coordinator.bindEndpoint(endpoint);
-    }
-
-
-    alias send = typeof(super).send;
-
-    bool send(EUI64 eui, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message)
-    {
-        assert(message.length <= 256, "TODO: what actually is the maximum zigbee payload?");
-
-        Packet p;
-        ref aps = p.init!APSFrame(message);
-
-        aps.type = APSFrameType.data;
-        if (eui.is_zigbee_broadcast)
-        {
-            aps.delivery_mode = APSDeliveryMode.broadcast;
-            aps.dst = 0xFF00 | eui.b[7];
-        }
-        else if (eui.is_zigbee_multicast)
-        {
-            aps.delivery_mode = APSDeliveryMode.group;
-            aps.dst = cast(ushort)((eui.b[6] << 8) | eui.b[7]);
-        }
-        else
-        {
-            aps.delivery_mode = APSDeliveryMode.unicast;
-            NodeMap* n = get_module!ZigbeeProtocolModule.find_node(eui);
-            assert(n, "TODO: what to do if we don't know where it's going? just drop it?");
-            aps.dst = n.id;
-        }
-        aps.src = _node_id;
-        aps.dst_endpoint = dst_endpoint;
-        aps.src_endpoint = src_endpoint;
-        aps.profile_id = profile_id;
-        aps.cluster_id = cluster_id;
-
-        // TODO: anything else?
-
-        return forward(p);
-    }
-
     override bool validate() const
-        => _ezsp_client !is null; // TODO: || _interface
+        => _ezsp_client !is null;
 
     override CompletionStatus startup()
     {
-        // create zdo endpoint...
-        if (!_zdo)
-        {
-            ZigbeeEndpoint zdo = get_module!ZigbeeProtocolModule.endpoints.create(name, ObjectFlags.Dynamic, NamedArgument("interface", Variant(name)));
-            zdo.set_message_handler(&zdo_message_handler);
-            bindEndpoint(zdo);
-        }
-
         if (_ezsp_client)
         {
             // boot up the ezsp client...
@@ -196,15 +127,8 @@ nothrow @nogc:
 
     override CompletionStatus shutdown()
     {
-        if (_zdo)
-        {
-            _zdo.destroy();
-            _zdo = null;
-        }
-
         // HACK: this was moved from coordinator; rethink this...!
         get_module!ZigbeeProtocolModule.remove_all_nodes(this);
-        _nodes.clear();
 
         if (is_coordinator)
         {
@@ -221,8 +145,6 @@ nothrow @nogc:
                 assert(false, "TODO");
             }
 
-            _eui = EUI64();
-            _node_id = 0xFFFE;
             _network_status = EmberStatus.NETWORK_DOWN;
         }
 
@@ -245,11 +167,6 @@ nothrow @nogc:
     void attach_coordiantor(ZigbeeCoordinator coordinator)
     {
         _coordinator = coordinator;
-        if (!coordinator)
-        {
-            get_module!ZigbeeProtocolModule.remove_node(_eui);
-            _eui = EUI64();
-        }
         restart();
     }
 
@@ -335,18 +252,6 @@ protected:
     }
 
 private:
-    struct Node
-    {
-        ushort id;
-        ushort parent;
-        ubyte ncp_index;
-        EmberNodeType node_type;
-        bool available;
-//        ubyte last_lqi;
-//        byte last_rssi;
-        NodeMap* node_map;
-    }
-
     union {
 //        struct
 //        {
@@ -362,75 +267,10 @@ private:
         }
     }
     ZigbeeCoordinator _coordinator;
-    ZigbeeEndpoint _zdo;
 
     MonoTime _last_ping;
 
-package(protocol.zigbee): // TODO: this package declaration should go!
-    EUI64 _eui;
-    ushort _node_id = 0xFFFE;
-
-    Map!(ushort, Node) _nodes;
-
-    Node* add_node(ushort id, EUI64 eui) nothrow
-    {
-        Node* n = id in _nodes;
-        if (!n)
-            n = _nodes.insert(id, Node(id: id));
-
-        bool validEui = eui != EUI64.init;
-        if (validEui && !n.node_map)
-        {
-            NodeMap* mn = get_module!ZigbeeProtocolModule.find_node(eui);
-            if (mn)
-            {
-                n.node_map = mn;
-                if (mn.id == 0xFFFE)
-                    mn.id = id;
-                else
-                    assert(mn.id == id, "Node already exists with different id!");
-            }
-            else
-            {
-                MACAddress mac = void;
-                mac.b[] = eui.b[0..6];
-                mac.b[0] = (mac.b[0] & 0xFC) | 2;
-                n.node_map = get_module!ZigbeeProtocolModule.add_node(eui, mac, this);
-                addAddress(mac, this);
-            }
-        }
-        else
-            assert(!validEui || n.node_map.eui == eui, "Node already exists with different eui!");
-
-        return n;
-    }
-
-    void remove_node(ushort id) nothrow
-    {
-        Node* n = id in _nodes;
-        if (!n)
-            return;
-
-        if (n.node_map)
-        {
-            // TODO: if node was 'discovered' then remove it
-
-            get_module!ZigbeeProtocolModule.remove_node(n.node_map.eui);
-            n.node_map = null;
-        }
-        _nodes.remove(id);
-    }
-
-    inout(Node)* find_node(ushort id) inout nothrow
-        => id in _nodes;
-
 private:
-    void zdo_message_handler(ref const APSFrame header, const(void)[] message) nothrow
-    {
-        // TODO: what ZDO messages do we need to handle?
-        int x = 0;
-    }
-
     // EZSP related:
 
     void send_message_response(EmberStatus status, ubyte aps_sequence)
@@ -453,7 +293,6 @@ private:
         _ezsp_client.set_callback_handler!EZSP_MacPassthroughMessageHandler(subscribe ? &mac_passthrough_handler : null);
         _ezsp_client.set_callback_handler!EZSP_CustomFrameHandler(subscribe ? &custom_frame_handler : null);
         _ezsp_client.set_callback_handler!EZSP_CounterRolloverHandler(subscribe ? &counter_rollover_handler : null);
-        _ezsp_client.set_callback_handler!EZSP_IdConflictHandler(subscribe ? &id_conflict_handler : null);
     }
 
     void send_message_via_ezsp(EUI64 dst, ref EmberApsFrame aps_frame, const(void)[] message, ubyte tag) nothrow
@@ -524,9 +363,6 @@ private:
     }
     void incoming_message_handler(EmberIncomingMessageType type, EmberApsFrame aps_frame, ubyte last_hop_lqi, int8s last_hop_rssi, EmberNodeId sender, ubyte bindingIndex, ubyte addressIndex, const(ubyte)[] message) nothrow
     {
-        version (DebugZigbeeMessageFlow)
-            writeDebugf("Zigbee: incoming message - from {0, 04x} frame {1} - [{2}]", sender, aps_frame, cast(void[])message);
-
         Packet p;
         ref hdr = p.init!APSFrame(message);
         switch (type)
@@ -534,7 +370,7 @@ private:
             case EmberIncomingMessageType.UNICAST:
             case EmberIncomingMessageType.UNICAST_REPLY:
                 // EZSP only provides unicast messages if they were destined for "me"
-                hdr.dst = _node_id;
+                hdr.dst = _coordinator.node_id;
                 hdr.delivery_mode = APSDeliveryMode.unicast;
                 break;
             case EmberIncomingMessageType.MULTICAST_LOOPBACK:
@@ -573,6 +409,8 @@ private:
         hdr.profile_id = aps_frame.profileId;
         hdr.counter = aps_frame.sequence;
 
+        hdr.flags |= aps_frame.options & EmberApsOption.ZDO_RESPONSE_REQUIRED;
+
         if (aps_frame.options & EmberApsOption.ZDO_RESPONSE_REQUIRED)
         {
             // TODO: this incoming message is a ZDO request not handled by the EmberZNet stack,
@@ -604,11 +442,23 @@ private:
         hdr.last_hop_lqi = last_hop_lqi;
         hdr.last_hop_rssi = last_hop_rssi;
 
-        // translate sender...
-        auto n = add_node(sender, _sender_eui);
-        _sender_eui = EUI64();
-
-        // TODO: if we don't know the sender's EUI, let's find out what it is...
+        // record sender...
+        ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
+        auto n = mod_zb.find_node(_coordinator.pan_id, sender);
+        if (!n)
+        {
+            if (_sender_eui != EUI64())
+            {
+                n = mod_zb.attach_node(_sender_eui, _coordinator.pan_id, sender);    
+                n.via = this;
+                _sender_eui = EUI64();
+            }
+            else
+            {
+                // TODO: if we don't know the sender's EUI, let's find out what it is...
+                writeWarningf("Zigbee: TODO: we need to lookup the sender EUI64 for the discovered node {0, 04x}... somehow?", sender);
+            }
+        }
 /+
         if (!n.node_map)
         {
@@ -640,13 +490,16 @@ private:
         }
 +/
 
+        version (DebugZigbeeMessageFlow)
+            writeDebugf("Zigbee: recv ({0, 03}) - {1, 04x}:{2, 02x}->{3, 04x}:{4, 02x} [{5}:{6, 04x}] - [{7}]", hdr.counter, hdr.src, hdr.src_endpoint, hdr.dst, hdr.dst_endpoint, profile_name(hdr.profile_id), hdr.cluster_id, cast(void[])message);
+
         dispatch(p);
     }
 
     void message_sent_handler(EmberOutgoingMessageType type, ushort index_or_destination, EmberApsFrame aps_frame, ubyte message_tag, EmberStatus status, const(ubyte)[] message) nothrow
     {
         version (DebugZigbeeMessageFlow)
-            writeDebug("Zigbee: sent message - to ", index_or_destination, " frame ", aps_frame, " - ", cast(void[])message);
+            writeDebugf("Zigbee: sent ({0, 03}) - {1, 04x}:{2, 02x}->{3, 04x}:{4, 02x} [{5}:{6, 04x}] - [{7}]", aps_frame.sequence, _coordinator.node_id, aps_frame.sourceEndpoint, index_or_destination, aps_frame.destinationEndpoint, profile_name(aps_frame.profileId), aps_frame.clusterId, cast(void[])message);
     }
 
     void mac_passthrough_handler(EmberMacPassthroughType message_type, ubyte last_hop_lqi, int8s last_hop_rssi, const(ubyte)[] message) nothrow
@@ -686,13 +539,6 @@ private:
                 writeWarning("Zigbee: EZSP counter rollover - ", type);
                 break;
         }
-    }
-
-    void id_conflict_handler(EmberNodeId id)
-    {
-        // TODO: this is called when the NCP detects multiple nodes using the same id
-        //       the stack will remove references to this id, and we should also remove the ID from our records
-        assert(false, "TODO");
     }
 
     void custom_frame_handler(const(ubyte)[] payload) nothrow

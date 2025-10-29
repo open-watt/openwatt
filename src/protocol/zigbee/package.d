@@ -22,6 +22,7 @@ import protocol.ezsp;
 import protocol.ezsp.client;
 import protocol.zigbee.client;
 import protocol.zigbee.coordinator;
+import protocol.zigbee.controller;
 
 import router.iface;
 import router.iface.zigbee;
@@ -29,25 +30,33 @@ import router.iface.zigbee;
 nothrow @nogc:
 
 
+enum NodeType : ubyte
+{
+    unknown = 0,
+    coordinator = 1,
+    router = 2,
+    end_device = 3,
+    sleepy_end_device = 4
+}
+
 struct NodeMap
 {
-    struct Endpoint
-    {
-        // TODO: name...?
-        ubyte endpoint;
-        ushort profile;
-        ushort device;
-        Array!ushort in_clusters;
-        Array!ushort out_clusters;
-    }
-
     String name;
     EUI64 eui;
+
+    ushort pan_id = 0xFFFF; // not joined
     ushort id = 0xFFFE; // not online
-    MACAddress mac;
+    ushort parent_id = 0xFFFE;
     bool discovered;
-    ZigbeeInterface iface;
-    Map!(ubyte, Endpoint) endpoints;
+    NodeType type;
+//    ubyte last_lqi;
+//    byte last_rssi;
+
+    ZigbeeNode node;
+    BaseInterface via;
+
+    bool available() const
+        => pan_id != 0xFFFF && id != 0xFFFE;
 }
 
 class ZigbeeProtocolModule : Module
@@ -55,20 +64,24 @@ class ZigbeeProtocolModule : Module
     mixin DeclareModule!"protocol.zigbee";
 nothrow @nogc:
 
-    Map!(EUI64, NodeMap) nodes;
-    Map!(MACAddress, NodeMap*) nodes_by_mac;
+    Map!(EUI64, NodeMap) nodes_by_eui;
+    Map!(uint, NodeMap*) nodes_by_pan;
 
     Collection!ZigbeeInterface zigbee_interfaces;
+    Collection!ZigbeeNode nodes;
+    Collection!ZigbeeRouter routers;
     Collection!ZigbeeCoordinator coordinators;
     Collection!ZigbeeEndpoint endpoints;
-
-    Map!(ubyte, ZigbeeEndpoint) endpoint_by_id;
+    Collection!ZigbeeController controllers;
 
     override void init()
     {
         g_app.console.registerCollection("/interface/zigbee", zigbee_interfaces);
+        g_app.console.registerCollection("/protocol/zigbee/node", nodes);
+        g_app.console.registerCollection("/protocol/zigbee/router", routers);
         g_app.console.registerCollection("/protocol/zigbee/coordinator", coordinators);
         g_app.console.registerCollection("/protocol/zigbee/endpoint", endpoints);
+        g_app.console.registerCollection("/protocol/zigbee/controller", controllers);
 
         g_app.console.registerCommand!scan("/protocol/zigbee", this);
     }
@@ -80,50 +93,71 @@ nothrow @nogc:
         zigbee_interfaces.update_all();
         coordinators.update_all();
         endpoints.update_all();
+        controllers.update_all();
     }
 
-    NodeMap* add_node(EUI64 eui, MACAddress mac, ZigbeeInterface iface)
+    NodeMap* add_node(EUI64 eui, BaseInterface via = null)
     {
-        assert(eui !in nodes, "Already exists");
+        assert(eui != EUI64.broadcast, "Invalid EUI64");
+        assert(eui !in nodes_by_eui, "Already exists");
+        return nodes_by_eui.insert(eui, NodeMap(eui: eui, discovered: via !is null, via: via));
+    }
 
-        NodeMap* n = nodes.insert(eui, NodeMap(eui: eui, mac: mac, iface: iface));
-        nodes_by_mac.insert(mac, n);
+    NodeMap* attach_node(EUI64 eui, ushort pan_id, ushort id)
+    {
+        assert(eui != EUI64.broadcast, "Invalid EUI64");
+        assert(pan_id != 0xFFFF && id != 0xFFFE, "Invalid pan_id/id");
+
+        NodeMap* n = eui in nodes_by_eui;
+        if (!n)
+            n = nodes_by_eui.insert(eui, NodeMap(eui: eui));
+        n.pan_id = pan_id;
+        n.id = id;
+        nodes_by_pan.insert((cast(uint)pan_id << 16) | id, n);
         return n;
     }
 
     void remove_node(EUI64 eui)
     {
-        NodeMap* n = eui in nodes;
+        NodeMap* n = eui in nodes_by_eui;
         if (!n)
             return;
-        nodes_by_mac.remove(n.mac);
-        nodes.remove(eui);
+        if (n.pan_id != 0xFFFF && n.id != 0xFFFE)
+            nodes_by_pan.remove((cast(uint)n.pan_id << 16) | n.id);
+        nodes_by_eui.remove(eui);
+    }
+
+    void detach_node(ushort pan_id, ushort id)
+    {
+        uint local_id = ((cast(uint)pan_id << 16) | id);
+        NodeMap** n = local_id in nodes_by_pan;
+        if (!n)
+            return;
+        (*n).pan_id = 0xFFFF;
+        (*n).id = 0xFFFE;
+        nodes_by_pan.remove(local_id);
     }
 
     void remove_all_nodes(BaseInterface iface)
     {
-        foreach (kvp; nodes)
+        foreach (kvp; nodes_by_eui)
         {
-            if (kvp.value.iface is iface)
+            if (kvp.value.discovered && kvp.value.via is iface)
             {
-                nodes_by_mac.remove(kvp.value.mac);
-                nodes.remove(kvp.key);
+                nodes_by_eui.remove(kvp.key);
             }
         }
     }
 
     NodeMap* find_node(EUI64 eui)
-        => eui in nodes;
+        => eui in nodes_by_eui;
 
-    NodeMap* find_node(BaseInterface iface)
-        => find_node(iface.mac);
-
-    NodeMap* find_node(MACAddress mac)
+    NodeMap* find_node(ushort pan_id, ushort id)
     {
-        auto n = mac in nodes_by_mac;
-        if (!n)
-            return null;
-        return *n;
+        NodeMap** n = ((cast(uint)pan_id << 16) | id) in nodes_by_pan;
+        if (n)
+            return *n;
+        return null;
     }
 /+
     UNCOMMENT THIS!!@!
@@ -166,7 +200,6 @@ nothrow @nogc:
 
         ZigbeeEndpoint ep = g_app.allocator.allocT!ZigbeeEndpoint(name.move, iface, endpoint, profile, device, in_clusters, out_clusters);
         endpoints.insert(ep.name[], ep);
-        endpoint_by_id.insert(ep.endpoint, ep);
 
         return ep;
     }

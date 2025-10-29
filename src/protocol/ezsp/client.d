@@ -214,7 +214,7 @@ nothrow:
                                                                           (const(ubyte)[] data){ EZSP_Command.Response r; data.ezsp_deserialise(r); return tconcat(r); }));
             }
 
-            ubyte[EZSP_Command.Request.sizeof] buffer = void;
+            ubyte[256] buffer = void; // TODO: what is the maximum ezsp payload length?
             EZSP_Command.Request tr = void;
             tr.tupleof[] = args[];
             size_t offset = tr.ezsp_serialise(buffer[]);
@@ -486,7 +486,7 @@ private:
                 writeInfof("EZSP: connected: {0} V{1} - protocol version {2}", r.stackType == 1 ? "ROUTER" : r.stackType == 2 ? "COORDINATOR" : "UNKNOWN", _stack_version, _known_version);
                 break;
 
-            case 0x0058: // invalidCommand
+            case 0x0058: // invalid command
                 EzspStatus reason = cast(EzspStatus)msg[0];
                 writeWarning("EZSP: invalid command: ", reason);
                 break;
