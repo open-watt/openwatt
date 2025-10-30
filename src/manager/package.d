@@ -92,7 +92,11 @@ nothrow @nogc:
 
         console.registerCommand!log_level("/system", this);
         console.registerCommand!set_hostname("/system", this);
+        console.registerCommand!get_hostname("/system", this, "hostname");
         console.registerCommand!set_update_rate("/system", this, "update-rate");
+        console.registerCommand!uptime("/system", this);
+        console.registerCommand!sysinfo("/system", this);
+        console.registerCommand!show_time("/system", this, "time");
 
         console.registerCommand!device_print("/device", this, "print");
 

@@ -8,6 +8,7 @@ import urt.meta.nullable;
 import urt.si.quantity;
 import urt.si.unit : ScaledUnit;
 import urt.string;
+import urt.time : Duration;
 import urt.traits;
 import urt.variant;
 
@@ -175,6 +176,22 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
             return "Invalid quantity value";
         return null;
     }
+}
+
+const(char[]) convertVariant(ref const Variant v, out Duration r) nothrow @nogc
+{
+    if (v.isDuration)
+        r = v.asDuration;
+    else if (v.isString)
+    {
+        const(char)[] s = v.asString;
+        ptrdiff_t taken = r.fromString(s);
+        if (taken != s.length)
+            return "Invalid duration value";
+    }
+    else
+        return "Invalid duration value";
+    return null;
 }
 
 const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
