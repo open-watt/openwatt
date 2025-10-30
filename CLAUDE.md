@@ -99,6 +99,7 @@ Collections are the backbone of runtime object management. Key features:
 - [src/manager/collection.d](src/manager/collection.d) - Collection implementation
 - [src/manager/base.d](src/manager/base.d) - BaseObject state machine
 - [src/manager/console/collection_commands.d](src/manager/console/collection_commands.d) - Auto-generated commands
+- [src/manager/console/argument.d](src/manager/console/argument.d) - Argument type conversion for CLI
 
 **Example:** When you register a `Collection!ModbusInterface`, the console automatically creates:
 - `/interface/modbus/add` - Create new interface
@@ -106,6 +107,12 @@ Collections are the backbone of runtime object management. Key features:
 - `/interface/modbus/get` - Get property value
 - `/interface/modbus/set` - Set property value
 - `/interface/modbus/print` - List all interfaces
+
+**Property type support:** The property system automatically converts CLI arguments to typed properties via `convertVariant()` functions in [src/manager/console/argument.d](src/manager/console/argument.d). Supported types include:
+- Primitives: `bool`, integers, floats, strings
+- Time types: `Duration` (with unit parsing: "5m", "30s"), `SysTime` (Unix timestamps)
+- Complex types: enums, arrays, Collection references (BaseObject, Device, Component, Stream, Interface)
+- Custom types can be added by implementing `convertVariant()` function
 
 #### 3. BaseObject State Machine
 
@@ -222,8 +229,46 @@ Core runtime providing:
 - **Collection**: Type-safe runtime object management
 - **Device/Component/Element**: Hierarchical data model
 - **Plugin/Module**: Extensibility mechanism
+- **Cron**: Scheduled task execution system
 
 **Entry point:** [src/main.d](src/main.d) - Creates Application, loads `conf/startup.conf`, runs main loop
+
+##### Cron System (src/manager/cron/)
+
+Scheduled task execution system for running console commands at specified intervals:
+
+**Key features:**
+- **Duration-based scheduling**: Single `schedule` property accepts Duration (e.g., "5m", "30s", "1h")
+- **Repeat flag**: Controls whether job repeats or runs once
+- **Concurrent execution**: Multiple instances of same command can run simultaneously if command latency exceeds interval
+- **Latent command support**: Tracks running commands via `Array!RunningCommand`, properly handles async operations
+- **Precise cadence**: Schedules from `_next_run`, not `now`, to prevent drift
+
+**Console usage:**
+```bash
+# Run every 5 minutes (repeating by default)
+/system/cron/add name=periodic schedule=5m command="/protocol/modbus/poll name=inv"
+
+# Run once after 30 seconds
+/system/cron/add name=delayed schedule=30s repeat=false command="/log/info Ready!"
+
+# List all jobs
+/system/cron/print
+
+# Disable/enable a job
+/system/cron/set name=periodic disabled=true
+```
+
+**Duration parsing** ([src/manager/console/argument.d](src/manager/console/argument.d)):
+- Supports: `s`/`sec`/`seconds`, `m`/`min`/`minutes`, `h`/`hr`/`hours`, `d`/`days`, `ms`/`msecs`, `us`/`usecs`
+- Pure numbers default to seconds
+- Example: `schedule=5m` → 5 minutes, `schedule=30s` → 30 seconds
+
+**Properties:**
+- Writable: `schedule` (Duration), `repeat` (bool), `command` (String)
+- Read-only: `last_run` (SysTime), `next_run` (SysTime), `run_count` (uint)
+
+See [src/manager/cron/job.d](src/manager/cron/job.d) for implementation.
 
 #### Router Layer (src/router/)
 
@@ -288,6 +333,48 @@ Follow these conventions (from [CONTRIBUTING.md](CONTRIBUTING.md)):
   if (simple)
       do_one_thing();
   ```
+- Increment operators: Prefer prefix (`++i`) over postfix (`i++`) where semantically equivalent
+- Comments: Avoid self-explanatory comments. Only add comments that explain WHY or provide context the code doesn't make obvious. Remove grouping comments like "// Schedule configuration" or "// Update counters" where the code is clear.
+
+**Import order:**
+- uRT imports first (e.g., `import urt.string;`, `import urt.time;`)
+- Manager imports second (e.g., `import manager.base;`)
+- Other imports follow
+
+**Code organization:**
+- Public API (properties, overrides) at top of class
+- `private:` section at bottom for private members and helper methods
+
+**Property patterns:**
+- **Mutually exclusive properties**: Later-set properties overwrite state of earlier ones. Don't validate mutual exclusion; instead, have each property setter update internal state to indicate which option is active.
+  ```d
+  // Example: schedule property overwrites previous schedule type
+  void schedule(Duration value)
+  {
+      _schedule = value;
+      _schedule_type = ScheduleType.Duration;  // Track which type is set
+      restart();
+  }
+  ```
+- **Property validation**: Check configuration validity in `validate()`, not in setters (allows partial configuration during construction)
+
+**Command lifecycle patterns:**
+- **Latent commands**: Commands may return `CommandState` for async operations. Track these and call `update()` to poll progress.
+- **Command cancellation**: Use `command.request_cancel()` to request cancellation (safe to call repeatedly - only transitions from `InProgress` state). During `shutdown()`, request cancellation for all commands, then return `CompletionStatus.Continue` to wait for them to finish. The state machine calls `shutdown()` repeatedly while in `State.Stopping`, NOT `update()`.
+  ```d
+  override CompletionStatus shutdown()
+  {
+      foreach (ref cmd; _running_commands)
+          cmd.command.request_cancel();
+
+      update_running_commands();  // Clean up finished commands
+
+      if (_running_commands.length > 0)
+          return CompletionStatus.Continue;
+
+      return CompletionStatus.Complete;
+  }
+  ```
 
 ### Third-Party Dependencies
 
@@ -330,6 +417,56 @@ Unit tests are embedded in source files using D's `unittest` blocks. Build with 
 - [docs/OVERVIEW.md](docs/OVERVIEW.md) - Detailed system overview
 - [docs/CLI.md](docs/CLI.md) - Console command structure
 - [docs/FEATURES.md](docs/FEATURES.md) - Feature roadmap
+
+### Testing
+
+OpenWatt has two types of tests:
+
+**1. Unit Tests (D `unittest` blocks)** - For testing individual functions and data structures
+```bash
+rm -rf obj bin && make CONFIG=unittest && ./bin/x86_64_unittest/openwatt_test 2>&1 | grep "passed"
+```
+
+**2. Runtime Tests (Python test harness in `test/`)** - For testing the full application
+
+The test harness provides **3 core capabilities**:
+
+1. **Quick Test** - Fast one-off commands
+   ```bash
+   # Default: /system/sysinfo (always works, environment-independent)
+   python test/test_runner.py
+
+   # Custom commands
+   python test/test_runner.py "/device/print"
+   ```
+
+2. **JSON Test Suite** - Sequential commands with assertions
+   ```bash
+   python test/test_harness.py --suite test_suite.json
+   ```
+
+3. **Persistent REPL** - Interactive investigation (recommended for Claude)
+   ```bash
+   # Start background REPL with named pipe (cross-platform)
+   # Binary: bin/x86_64_debug/openwatt (Linux) or openwatt.exe (Windows)
+   BINARY="bin/x86_64_debug/openwatt$([ "$(uname -s | grep -i mingw)" ] && echo .exe)"
+   mkfifo /tmp/ow_stdin
+   tail -f /tmp/ow_stdin | $BINARY --interactive > /tmp/ow_stdout.txt 2> /tmp/ow_stderr.txt &
+
+   # Send commands and analyze responses
+   echo "/system/sysinfo" > /tmp/ow_stdin
+   tail -10 /tmp/ow_stdout.txt
+
+   echo "/device/print" > /tmp/ow_stdin
+   tail -50 /tmp/ow_stdout.txt
+
+   # Check logs separately
+   tail -20 /tmp/ow_stderr.txt | grep -i error
+   ```
+
+The REPL method enables true interactive investigation: send a command, analyze the output, think about next steps, send another command to the SAME persistent OpenWatt session.
+
+**See:** [test/README.md](test/README.md) for complete documentation
 
 ## Common Development Tasks
 

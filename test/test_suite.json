@@ -1,0 +1,19 @@
+[
+  {
+    "name": "System info responds",
+    "command": "/system/sysinfo",
+    "assertions": [
+      {"type": "no_error"},
+      {"type": "contains", "value": "OpenWatt"}
+    ]
+  },
+  {
+    "name": "Devices exist",
+    "command": "/device/print",
+    "delay": 0.8,
+    "assertions": [
+      {"type": "no_error"},
+      {"type": "min_length", "value": 100}
+    ]
+  }
+]

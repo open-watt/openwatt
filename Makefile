@@ -75,7 +75,22 @@ else ifeq ($(PLATFORM),e907)
     OS = freertos
 else
     ARCH ?= $(PLATFORM)
-    OS ?= ubuntu
+    # Auto-detect OS - override default/environment OS variable
+    # Check for Windows via uname (Git Bash/MSYS/Cygwin)
+    UNAME_S := $(shell uname -s 2>/dev/null || echo Unknown)
+    ifneq ($(findstring MINGW,$(UNAME_S)),)
+        OS := windows
+    else ifneq ($(findstring MSYS,$(UNAME_S)),)
+        OS := windows
+    else ifneq ($(findstring CYGWIN,$(UNAME_S)),)
+        OS := windows
+    else ifeq ($(UNAME_S),Unknown)
+        # No uname, probably native Windows
+        OS := windows
+    else
+        # Linux/Unix
+        OS ?= ubuntu
+    endif
 endif
 
 RTSRCDIR := third_party/urt/src
