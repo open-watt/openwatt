@@ -85,9 +85,9 @@
     <DCompile Include="src\manager\secret.d" />
     <DCompile Include="src\manager\subscriber.d" />
     <DCompile Include="src\manager\system.d" />
-    <DCompile Include="src\protocol\dns\mdns.d" />
     <DCompile Include="src\protocol\dns\message.d" />
     <DCompile Include="src\protocol\dns\package.d" />
+    <DCompile Include="src\protocol\dns\server.d" />
     <DCompile Include="src\protocol\ezsp\ashv2.d" />
     <DCompile Include="src\protocol\ezsp\client.d" />
     <DCompile Include="src\protocol\ezsp\commands.d" />

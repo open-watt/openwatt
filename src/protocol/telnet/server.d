@@ -91,7 +91,7 @@ package:
 
     Array!TelnetSession m_sessions;
 
-    void acceptConnection(TCPStream client, void* userData)
+    void acceptConnection(Stream client, void* userData)
     {
         TelnetSession session = m_console.createSession!TelnetSession(client);
         m_sessions ~= session;

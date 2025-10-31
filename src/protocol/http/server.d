@@ -134,7 +134,7 @@ private:
     Array!Handler _handlers;
     Array!(Session*) _sessions;
 
-    void accept_connection(TCPStream stream, void*)
+    void accept_connection(Stream stream, void*)
     {
         _sessions.emplaceBack(defaultAllocator().allocT!Session(this, stream));
     }
