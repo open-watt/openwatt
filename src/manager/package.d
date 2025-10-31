@@ -99,6 +99,9 @@ nothrow @nogc:
         console.registerCollection("/secret", secrets);
 
         register_modules(this);
+
+        foreach (m; modules)
+            m.post_init();
     }
 
     ~this()

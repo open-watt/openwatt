@@ -19,6 +19,10 @@ nothrow @nogc:
     {
     }
 
+    void post_init()
+    {
+    }
+
     void pre_update()
     {
     }
@@ -43,6 +47,7 @@ protected:
 mixin template DeclareModule(string name)
 {
     import manager : Application;
+    import urt.string : StringLit;
 
     enum string ModuleName = name;
 
@@ -81,6 +86,7 @@ void register_modules(Application app)
     register_module!(protocol.dns)(app);
     register_module!(protocol.ezsp)(app);
     register_module!(protocol.http)(app);
+    register_module!(protocol.ip)(app);
     register_module!(protocol.modbus)(app);
     register_module!(protocol.mqtt)(app);
     register_module!(protocol.ppp)(app);
