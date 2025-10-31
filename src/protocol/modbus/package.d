@@ -124,20 +124,20 @@ nothrow @nogc:
         device.samplers ~= sampler;
     }
 
-    RequestState sendRequest(Session session, const(char)[] client, const(char)[] slave, ref ModbusPDU msg)
+    ModbusRequestState sendRequest(Session session, const(char)[] client, const(char)[] slave, ref ModbusPDU msg)
     {
         MACAddress addr;
         ModbusClient c = lookupClientAndMAC(session, client, slave, addr);
         if (!c)
             return null;
 
-        RequestState state = g_app.allocator.allocT!RequestState(session, slave);
+        ModbusRequestState state = g_app.allocator.allocT!ModbusRequestState(session, slave);
         c.sendRequest(addr, msg, &state.response_handler, &state.error_handler);
 
         return state;
     }
 
-    RequestState request_raw(Session session, const(char)[] client, const(char)[] slave, ubyte[] message)
+    ModbusRequestState request_raw(Session session, const(char)[] client, const(char)[] slave, ubyte[] message)
     {
         if (message.length == 0)
         {
@@ -148,7 +148,7 @@ nothrow @nogc:
         return sendRequest(session, client, slave, msg);
     }
 
-    RequestState request_read(Session session, const(char)[] client, const(char)[] slave, const(char)[] reg_type, ushort register, Nullable!ushort count, Nullable!(const(char)[]) data_type)
+    ModbusRequestState request_read(Session session, const(char)[] client, const(char)[] slave, const(char)[] reg_type, ushort register, Nullable!ushort count, Nullable!(const(char)[]) data_type)
     {
         RegisterType ty = parseRegisterType(reg_type);
         if (ty == RegisterType.invalid)
@@ -161,7 +161,7 @@ nothrow @nogc:
         return sendRequest(session, client, slave, msg);
     }
 
-    RequestState request_write(Session session, const(char)[] client, const(char)[] slave, const(char)[] reg_type, ushort register, Nullable!ushort value, Nullable!(ushort[]) values)
+    ModbusRequestState request_write(Session session, const(char)[] client, const(char)[] slave, const(char)[] reg_type, ushort register, Nullable!ushort value, Nullable!(ushort[]) values)
     {
         if (!value && !values)
         {
@@ -180,14 +180,14 @@ nothrow @nogc:
         return sendRequest(session, client, slave, msg);
     }
 
-    RequestState request_read_device_id(Session session, const(char)[] client, const(char)[] slave)
+    ModbusRequestState request_read_device_id(Session session, const(char)[] client, const(char)[] slave)
     {
         MACAddress addr;
         ModbusClient c = lookupClientAndMAC(session, client, slave, addr);
         if (!c)
             return null;
 
-        RequestState state = g_app.allocator.allocT!RequestState(session, slave);
+        ModbusRequestState state = g_app.allocator.allocT!ModbusRequestState(session, slave);
 
         ModbusPDU msg = createMessage_GetDeviceInformation();
         c.sendRequest(addr, msg, &state.response_handler, &state.error_handler);
@@ -256,7 +256,7 @@ nothrow @nogc:
 }
 
 
-class RequestState : FunctionCommandState
+class ModbusRequestState : FunctionCommandState
 {
 nothrow @nogc:
 
@@ -275,6 +275,11 @@ nothrow @nogc:
         // TODO: how to handle request cancellation? if we bail, then the client will try and call a dead delegate...
 
         return state;
+    }
+
+    override void request_cancel()
+    {
+        // TODO: how to handle request cancellation? if we bail, then the client will try and call a dead delegate...
     }
 
     void response_handler(ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time)

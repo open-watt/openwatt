@@ -13,6 +13,12 @@
     <Filter Include="src\manager">
       <UniqueIdentifier>{a7edf0a4-cbca-4a75-bf4f-548fe4b7764d}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\manager\console">
+      <UniqueIdentifier>{5b7f73d6-de14-482f-86a8-89a77e2af436}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\manager\cron">
+      <UniqueIdentifier>{24a67829-ea5b-41cb-8fb9-ccc6c1b10293}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\router\stream">
       <UniqueIdentifier>{e1c51f7a-999b-4f32-97d6-9364d012699e}</UniqueIdentifier>
     </Filter>
@@ -21,9 +27,6 @@
     </Filter>
     <Filter Include="src\devices\goodwe">
       <UniqueIdentifier>{40945e90-884d-42fe-af71-ebfa344845cc}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="src\manager\console">
-      <UniqueIdentifier>{5b7f73d6-de14-482f-86a8-89a77e2af436}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\manager\os">
       <UniqueIdentifier>{a17bdf4a-06e2-4856-bb09-afe42c85e130}</UniqueIdentifier>
@@ -150,19 +153,34 @@
     <DCompile Include="src\db\stream.d">
       <Filter>src\db</Filter>
     </DCompile>
-    <DCompile Include="src\manager\element.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
     <DCompile Include="src\manager\component.d">
       <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\config.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\cron\job.d">
+      <Filter>src\manager\cron</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\cron\package.d">
+      <Filter>src\manager\cron</Filter>
     </DCompile>
     <DCompile Include="src\manager\device.d">
       <Filter>src\manager</Filter>
     </DCompile>
-    <DCompile Include="src\manager\secret.d">
+    <DCompile Include="src\manager\element.d">
       <Filter>src\manager</Filter>
     </DCompile>
-    <DCompile Include="src\manager\config.d">
+    <DCompile Include="src\manager\package.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\plugin.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\profile.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\secret.d">
       <Filter>src\manager</Filter>
     </DCompile>
     <DCompile Include="src\router\stream\package.d">
@@ -179,15 +197,6 @@
     </DCompile>
     <DCompile Include="src\devices\goodwe\scanner.d">
       <Filter>src\devices\goodwe</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\package.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\plugin.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\profile.d">
-      <Filter>src\manager</Filter>
     </DCompile>
     <DCompile Include="src\router\stream\bridge.d">
       <Filter>src\router\stream</Filter>

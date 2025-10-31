@@ -93,6 +93,11 @@ nothrow @nogc:
             return state;
         }
 
+        override void request_cancel()
+        {
+            // TODO: how to handle request cancellation? if we bail, then the client will try and call a dead delegate...
+        }
+
         int response_handler(ref const HTTPMessage response)
         {
             if (response.status_code == 0)

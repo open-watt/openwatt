@@ -396,7 +396,7 @@ nothrow @nogc:
     import protocol.ezsp.commands;
 
     // /protocol/zigbee/scan command
-    RequestState scan(Session session, const(char)[] ezsp_client, Nullable!bool energy_scan)
+    EnergyScanState scan(Session session, const(char)[] ezsp_client, Nullable!bool energy_scan)
     {
         EZSPClient c = get_module!EZSPProtocolModule.clients.get(ezsp_client);
         if (!c)
@@ -405,7 +405,7 @@ nothrow @nogc:
             return null;
         }
 
-        RequestState state = g_app.allocator.allocT!RequestState(session, c);
+        EnergyScanState state = g_app.allocator.allocT!EnergyScanState(session, c);
         c.set_message_handler(&state.message_handler);
         c.send_command!EZSP_StartScan(&state.start_scan, energy_scan ? EzspNetworkScanType.ENERGY_SCAN : EzspNetworkScanType.ACTIVE_SCAN, 0x07FFF800, energy_scan ? 1 : 3);
         return state;
@@ -413,7 +413,7 @@ nothrow @nogc:
 }
 
 
-class RequestState : FunctionCommandState
+class EnergyScanState : FunctionCommandState
 {
 nothrow @nogc:
 
@@ -445,6 +445,12 @@ nothrow @nogc:
         }
 
         return state;
+    }
+
+    override void request_cancel()
+    {
+        if (state == CommandCompletionState.in_progress)
+            state = CommandCompletionState.cancel_requested;
     }
 
     void start_scan(sl_status state)
