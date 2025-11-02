@@ -33,6 +33,7 @@ class HTTPModule : Module
 nothrow @nogc:
 
     Collection!TLSStream tls_streams;
+    Collection!TLSServer tls_servers;
     Collection!HTTPServer servers;
     Collection!HTTPClient clients;
     Collection!WebSocketServer ws_servers;
@@ -41,6 +42,7 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.registerCollection("/stream/tls", tls_streams);
+        g_app.console.registerCollection("/protocol/tls/server", tls_servers);
         g_app.console.registerCollection("/protocol/http/client", clients);
         g_app.console.registerCollection("/protocol/http/server", servers);
         g_app.console.registerCollection("/protocol/websocket/server", ws_servers);

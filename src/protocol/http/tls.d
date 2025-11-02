@@ -11,6 +11,8 @@ import manager;
 import manager.base;
 import manager.collection;
 
+import protocol.http;
+
 import router.stream;
 import router.stream.tcp;
 
@@ -33,8 +35,10 @@ nothrow @nogc:
 
 class TLSStream : Stream
 {
-    __gshared Property[2] Properties = [ Property.create!("remote", remote)(),
-                                         Property.create!("keepalive", keepalive)() ];
+    __gshared Property[4] Properties = [ Property.create!("stream", stream)(),
+                                         Property.create!("remote", remote)(),
+                                         Property.create!("keepalive", keepalive)(),
+                                         Property.create!("private_key", private_key)() ];
 nothrow @nogc:
 
     alias TypeName = StringLit!"tls";
@@ -45,6 +49,19 @@ nothrow @nogc:
     }
 
     // Properties...
+    inout(Stream) stream() inout pure
+        => _stream.get();
+    const(char)[] stream(Stream value)
+    {
+        if (!value)
+            return "stream cannot be null";
+        if (value == _stream)
+            return null;
+        _stream = value;
+        restart();
+        return null;
+    }
+
     ref const(String) remote() const pure
         => _host;
     const(char)[] remote(String value)
@@ -64,8 +81,13 @@ nothrow @nogc:
     {
         if (_keep_enable == value)
             return;
-        if (_stream)
-            _stream.keepalive = value;
+        if (TCPStream tcp = cast(TCPStream)_stream)
+            tcp.keepalive = value;
+    }
+
+    void private_key(ubyte[] value)
+    {
+        assert(false, "TODO: implement server mode");
     }
 
     // API...
@@ -324,7 +346,7 @@ private:
     InetAddress _remote;
     bool _keep_enable = false;
 
-    ObjectRef!TCPStream _stream;
+    ObjectRef!Stream _stream;
     Array!ubyte _receive_buffer;
 
     void incoming_message(const(void)[] message)
@@ -477,6 +499,24 @@ private:
             if (consumed > 0)
                 _receive_buffer.remove(0, consumed);
         }
+    }
+}
+
+class TLSServer : TCPServer
+{
+nothrow @nogc:
+    alias TypeName = StringLit!"tls-server";
+
+    this(String name, ObjectFlags flags = ObjectFlags.None)
+    {
+        super(collection_type_info!TLSServer, name.move, flags);
+    }
+
+protected:
+    final override Stream create_stream(Socket conn)
+    {
+        Stream tcp = super.create_stream(conn);
+        return get_module!HTTPModule.tls_streams.create(tcp.name, cast(ObjectFlags)(ObjectFlags.Dynamic | ObjectFlags.Temporary), NamedArgument("stream", tcp));
     }
 }
 

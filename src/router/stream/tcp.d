@@ -20,7 +20,8 @@ public import router.stream;
 
 class TCPStream : Stream
 {
-    __gshared Property[3] Properties = [ Property.create!("remote", remote)(),
+    __gshared Property[4] Properties = [ Property.create!("remote", remote)(),
+                                         Property.create!("remote_address", remote_address)(),
                                          Property.create!("port", port)(),
                                          Property.create!("keepalive", keepalive)() ];
 nothrow @nogc:
@@ -48,19 +49,22 @@ nothrow @nogc:
 
         restart();
     }
-    const(char)[] remote(String value)
+    StringResult remote(String value)
     {
         if (value.empty)
-            return "remote cannot be empty";
+            return StringResult("remote cannot be empty");
         if (value == _host)
-            return null;
+            return StringResult();
 
         _host = value.move;
         _remote = InetAddress();
 
         restart();
-        return null;
+        return StringResult();
     }
+
+    InetAddress remote_address() const pure
+        => _remote;
 
     ushort port() const pure
         => _port;
@@ -246,7 +250,7 @@ nothrow @nogc:
         return tstring(remote);
     }
 
-    void enableKeepAlive(bool enable, Duration keep_idle = seconds(10), Duration keep_interval = seconds(1), int keep_count = 10)
+    final void enableKeepAlive(bool enable, Duration keep_idle = seconds(10), Duration keep_interval = seconds(1), int keep_count = 10)
     {
         _keep_enable = enable;
         _keep_idle = keep_idle;
@@ -382,7 +386,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"tcp-server";
 
-    alias NewConnection = void delegate(TCPStream client, void* userData) nothrow @nogc;
+    alias NewConnection = void delegate(Stream client, void* userData) nothrow @nogc;
 
     this(String name, ObjectFlags flags = ObjectFlags.None)
     {
@@ -413,34 +417,50 @@ nothrow @nogc:
 
     final override CompletionStatus startup()
     {
-        assert(!_serverSocket);
+        assert(!_ip4_listener);
+        assert(!_ip6_listener);
 
-        Result r = create_socket(AddressFamily.ipv4, SocketType.stream, Protocol.tcp, _serverSocket);
-        if (r.failed)
+        Result create(ref Socket sock)
         {
-            debug writeError(type, " '", name, "' - failed to create socket. Error ", r.systemCode);
+            Result r = create_socket(AddressFamily.ipv4, SocketType.stream, Protocol.tcp, sock);
+            if (r.failed)
+                return r;
+
+            r = sock.set_socket_option(SocketOption.non_blocking, true);
+            if (r.failed)
+                return r;
+
+            r = sock.set_socket_option(SocketOption.reuse_address, true);
+            if (r.failed)
+                return r;
+
+            r = sock.bind(InetAddress(IPAddr.any, _port));
+            if (r.failed)
+                return r;
+
+            r = sock.listen();
+            if (r.failed)
+                return r;
+            return Result.success;
+        }
+
+        Result r = create(_ip4_listener);
+        if (!r)
+        {
+            debug writeError(type, " '", name, "' - failed to create listening socket. Error ", r.systemCode);
             return CompletionStatus.Error;
         }
 
-        r = _serverSocket.set_socket_option(SocketOption.non_blocking, true);
-        if (r.failed)
+        // TODO: option to disable this???
+        r = create(_ip6_listener);
+        if (!r)
         {
-            debug writeError(type, " '", name, "' - set_socket_option failed.  Error ", r.systemCode);
-            return CompletionStatus.Error;
-        }
-
-        r = _serverSocket.bind(InetAddress(IPAddr.any, _port));
-        if (r.failed)
-        {
-            debug writeWarning(type, " '", name, "' - failed to bind port ", _port, ". Error ", r.systemCode);
-            return CompletionStatus.Error;
-        }
-
-        r = _serverSocket.listen();
-        if (r.failed)
-        {
-            debug writeError(type, " '", name, "' - listen failed. Error ", r.systemCode);
-            return CompletionStatus.Error;
+            // tolerate ipv6 failure... (do we want this?)
+            if (_ip6_listener)
+            {
+                _ip6_listener.close();
+                _ip6_listener = null;
+            }
         }
 
         debug writeInfo(type, " '", name, "' - listening on port ", _port);
@@ -449,10 +469,15 @@ nothrow @nogc:
 
     final override CompletionStatus shutdown()
     {
-        if (_serverSocket)
+        if (_ip4_listener)
         {
-            _serverSocket.close();
-            _serverSocket = null;
+            _ip4_listener.close();
+            _ip4_listener = null;
+        }
+        if (_ip4_listener)
+        {
+            _ip4_listener.close();
+            _ip4_listener = null;
         }
         return CompletionStatus.Complete;
     }
@@ -461,7 +486,7 @@ nothrow @nogc:
     {
         Socket conn;
         InetAddress remoteAddr;
-        Result r = _serverSocket.accept(conn, &remoteAddr);
+        Result r = _ip4_listener.accept(conn, &remoteAddr);
         if (r.failed)
         {
             if (r.socket_result != SocketResult.would_block)
@@ -479,23 +504,14 @@ nothrow @nogc:
 
         conn.set_socket_option(SocketOption.non_blocking, true);
 
-        // prevent duplicate stream names...
-        String newName = get_module!StreamModule.streams.generate_name(name).makeString(defaultAllocator());
-
 //        if (_rawConnectionCallback)
 //            _rawConnectionCallback(conn, userData);
 //        else if (_connectionCallback)
         if (_connectionCallback)
         {
-            TCPStream stream = get_module!TCPStreamModule.tcp_streams.alloc(newName.move, cast(ObjectFlags)(ObjectFlags.Dynamic | ObjectFlags.Temporary));
-
-            // assign the socket to the stream and bypass the startup process
-            stream._socket = conn;
-            conn.get_peer_name(stream._remote);
-            stream._state = State.Running;
-            get_module!TCPStreamModule.tcp_streams.add(stream);
-
-            _connectionCallback(stream, _userData);
+            Stream stream = create_stream(conn);
+            if (stream)
+                _connectionCallback(stream, _userData);
         }
 
         // TODO: should the stream we just created to into the stream pool...?
@@ -507,7 +523,7 @@ nothrow @nogc:
         }
     }
 
-private:
+protected:
     alias NewRawConnection = void function(Socket client, void* userData) nothrow @nogc;
 
 //    ServerOptions _options;
@@ -515,16 +531,28 @@ private:
     NewConnection _connectionCallback;
 //    NewRawConnection _rawConnectionCallback;
     void* _userData;
-    Socket _serverSocket;
+    Socket _ip4_listener;
+    Socket _ip6_listener;
 
-//    this(ushort port, NewRawConnection callback, void* userData, ServerOptions options = ServerOptions.None)
-//    {
-//        this.port = port;
-//        this.options = options;
-//        this.rawConnectionCallback = callback;
-//        this.userData = userData;
-//        mutex = new Mutex;
-//    }
+    this(const CollectionTypeInfo* type_info, String name, ObjectFlags flags)
+    {
+        super(type_info, name.move, flags);
+    }
+
+    Stream create_stream(Socket conn)
+    {
+        // prevent duplicate stream names...
+        String newName = get_module!StreamModule.streams.generate_name(name).makeString(defaultAllocator());
+
+        TCPStream stream = get_module!TCPStreamModule.tcp_streams.alloc(newName.move, cast(ObjectFlags)(ObjectFlags.Dynamic | ObjectFlags.Temporary));
+
+        // assign the socket to the stream and bypass the startup process
+        stream._socket = conn;
+        conn.get_peer_name(stream._remote);
+        stream._state = State.Running;
+        get_module!TCPStreamModule.tcp_streams.add(stream);
+        return stream;
+    }
 }
 
 
