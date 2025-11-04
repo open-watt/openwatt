@@ -18,6 +18,13 @@ public import manager.console.session;
 public import manager.expression : NamedArgument;
 
 
+// UDA to attach custom tab completion to a command function
+struct TabComplete
+{
+    Array!String function(bool is_value, const(char)[] name, const(char)[] value) nothrow @nogc suggest;
+}
+
+
 // uses GC
 char[] transformCommandName(const(char)[] name)
 {
@@ -30,6 +37,7 @@ char[] transformCommandName(const(char)[] name)
     }
     return result;
 }
+enum TransformCommandName(const(char)[] name) = transformCommandName(name);
 
 nothrow @nogc:
 
@@ -104,14 +112,14 @@ nothrow @nogc:
 
         FunctionCommand fnCmd = console.m_allocator.allocT!FunctionCommand(console, commandName ? commandName.makeString(defaultAllocator) : StringLit!FunctionName, cast(void*)i, &functionAdapter);
 
-        alias ParamNames = parameter_identifier_tuple!fun[1 .. $];
+        alias ParamNames = STATIC_MAP!(TransformCommandName, parameter_identifier_tuple!fun[1 .. $]);
         alias Params = STATIC_MAP!(Unqual, Parameters!fun[1 .. $]);
 
         static foreach (j; 0 .. ParamNames.length)
         {
-            static if (ParamNames[j] != "args")
+            static if (ParamNames[j] != "args" && ParamNames[j] != "named_args")
             {{
-                fnCmd.args ~= FunctionArgument(StringLit!(ParamNames[j].transformCommandName()));
+                fnCmd.args ~= FunctionArgument(StringLit!(ParamNames[j]));
                 static if (is(Params[j] == Nullable!T, T))
                     alias ArgTy = T;
                 else
@@ -119,6 +127,13 @@ nothrow @nogc:
                 static if (is(typeof(&suggestCompletion!ArgTy)))
                     fnCmd.args[$-1].suggest = &suggestCompletion!ArgTy;
             }}
+        }
+
+        // Check for TabComplete UDA on the function
+        static foreach (attr; __traits(getAttributes, fun))
+        {
+            static if (is(typeof(attr) == TabComplete))
+                fnCmd.custom_suggest = attr.suggest;
         }
 
         return fnCmd;
@@ -211,13 +226,16 @@ private:
     void* instance;
     GenericCall fn;
     Array!FunctionArgument args;
+    Array!String function(bool, const(char)[], const(char)[]) nothrow @nogc custom_suggest;
 
-    Array!String suggestArgs(const(char)[] argPrefix)
+    Array!String suggestArgs(const(char)[] arg_prefix)
     {
         Array!String suggestions;
+        if (custom_suggest !is null)
+            suggestions = custom_suggest(false, arg_prefix, null);
         foreach (ref arg; args)
         {
-            if (arg.name.startsWith(argPrefix))
+            if (arg.name.startsWith(arg_prefix))
                 suggestions ~= String(MutableString!0(Concat, arg.name, '=')); // TODO: MOVE construct!
         }
         return suggestions;
@@ -225,6 +243,13 @@ private:
 
     Array!String suggestValues(const(char)[] argument, const(char)[] value)
     {
+        if (custom_suggest !is null)
+        {
+            Array!String suggestions = custom_suggest(true, argument, value);
+            if (suggestions.length > 0)
+                return suggestions;
+        }
+
         foreach (ref arg; args)
         {
             if (arg.name[] == argument[])
@@ -253,7 +278,7 @@ auto makeArgTuple(alias F)(const Variant[] args, const NamedArgument[] parameter
     import urt.meta;
 
     alias Params = STATIC_MAP!(Unqual, Parameters!F[1 .. $]);
-    alias ParamNames = parameter_identifier_tuple!F[1 .. $];
+    alias ParamNames = STATIC_MAP!(TransformCommandName, parameter_identifier_tuple!F[1 .. $]);
 
     Tuple!Params params;
     error = null;
@@ -265,15 +290,18 @@ auto makeArgTuple(alias F)(const Variant[] args, const NamedArgument[] parameter
         {
             static foreach (i, P; Params)
             {
-                case Alias!(transformCommandName(ParamNames[i])):
-                    error = convertVariant(param.value, params[i]);
-                    if (error)
-                    {
-                        error = tconcat("Argument '", param.name, "' error: ", error);
-                        break outer;
-                    }
-                    gotArg[i] = true;
-                    break param_switch;
+                static if (ParamNames[i] != "args" && ParamNames[i] != "named-args")
+                {
+                    case ParamNames[i]:
+                        error = convertVariant(param.value, params[i]);
+                        if (error)
+                        {
+                            error = tconcat("Argument '", param.name, "' error: ", error);
+                            break outer;
+                        }
+                        gotArg[i] = true;
+                        break param_switch;
+                }
             }
             default:
                 error = tconcat("Unknown parameter '", param.name, "'");
@@ -284,16 +312,21 @@ auto makeArgTuple(alias F)(const Variant[] args, const NamedArgument[] parameter
     static foreach (i, P; Params)
     {
         {
-            static if (transformCommandName(ParamNames[i]) == "args")
+            static if (ParamNames[i] == "args")
             {
-                static assert(is(P == Variant[]), "`args` parameter must be of type Variant[]");
+                static assert(is(const(Variant)[] : P), "`args` parameter must be of type const(Variant)[]");
                 params[i] = args;
+            }
+            else static if (ParamNames[i] == "named-args")
+            {
+                static assert(is(const(NamedArgument)[] : P), "`named_args` parameter must be of type const(NamedArgument)[]");
+                params[i] = parameters;
             }
             else static if (!is(P : Nullable!U, U))
             {
                 if (!gotArg[i])
                 {
-                    error = tconcat("Missing argument: ", Alias!(transformCommandName(ParamNames[i])));
+                    error = tconcat("Missing argument: ", ParamNames[i]);
                     goto done;
                 }
             }
