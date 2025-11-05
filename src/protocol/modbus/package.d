@@ -363,6 +363,8 @@ class RequestState : FunctionCommandState
 {
 nothrow @nogc:
 
+    CommandCompletionState state = CommandCompletionState.InProgress;
+
     String slave;
 
     this(Session session, const(char)[] slave)

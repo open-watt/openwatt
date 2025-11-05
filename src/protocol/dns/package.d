@@ -51,6 +51,8 @@ nothrow @nogc:
     {
     nothrow @nogc:
 
+        CommandCompletionState state = CommandCompletionState.InProgress;
+
         this(Session session)
         {
             super(session);

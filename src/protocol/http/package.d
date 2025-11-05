@@ -67,6 +67,9 @@ nothrow @nogc:
     static class HTTPRequestState : FunctionCommandState
     {
     nothrow @nogc:
+
+        CommandCompletionState state = CommandCompletionState.InProgress;
+
         HTTPClient client;
 
         this(Session session)
