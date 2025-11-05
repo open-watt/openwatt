@@ -1,29 +1,17 @@
 module main;
 
-import urt.io;
 import urt.log;
-import urt.mem.string;
-import urt.string;
-import urt.string.format;
+import urt.mem.allocator;
 import urt.system;
 import urt.time;
 
 import manager;
-import manager.component;
 import manager.console.session;
-import manager.config;
-import manager.device;
-import manager.element;
 
-import protocol.mqtt.broker;
-
-import router.modbus.coding;
-import router.modbus.message;
-import router.modbus.profile;
-import router.stream;
+nothrow @nogc:
 
 
-void main()
+int main(string[] args)
 {
     // init the string heap with 1mb!
 //    initStringHeap(1024*1024); // TODO: uncomment when remove the module constructor...
@@ -31,76 +19,97 @@ void main()
     // TODO: prime the string cache with common strings, like unit names and common variable names
     //       the idea is to make dedup lookups much faster...
 
-    Application app = create_application();
+    bool interactive_mode = false;
+    foreach (arg; args[1 .. $])
+    {
+        if (arg == "--interactive" || arg == "-i")
+        {
+            interactive_mode = true;
+            break;
+        }
+    }
 
-    // execute startup script
-    const(char)[] conf;
-    try
+    if (interactive_mode)
     {
-        import urt.file : load_file;
-        conf = cast(char[])"conf/startup.conf".load_file();
+        // check if stdout is redirected
+        version (Windows)
+        {
+            import core.sys.windows.windows : GetStdHandle, GetConsoleMode, STD_OUTPUT_HANDLE, DWORD;
+            auto h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+
+            DWORD mode;
+            bool is_console = GetConsoleMode(h_stdout, &mode) != 0;
+            if (!is_console)
+            {
+                // piped output - log to stderr so stdout stays clean for command output
+                register_log_sink(&stderr_log_sink);
+            }
+        }
+        else version (Posix)
+        {
+            import core.sys.posix.unistd : isatty, STDOUT_FILENO;
+            if (!isatty(STDOUT_FILENO))
+            {
+                // piped - log to stderr
+                register_log_sink(&stderr_log_sink);
+            }
+        }
     }
-    catch (Exception e)
+    else
+        register_log_sink(&default_log_sink);
+
+    Application app = create_application();
+    Session active_session = null;
+    SimpleSession startup_session = null;
+
+    import urt.file : load_file;
+    char[] conf = cast(char[])load_file("conf/startup.conf");
+    if (!conf)
     {
-        // TODO: warn user that can't load profile...
-        assert(false);
+        writeError("Failed to load startup configuration file: conf/startup.conf");
+        if (!interactive_mode)
+            return -1;
     }
-    ConsoleSession s = new ConsoleSession(g_app.console);
-    s.setInput(conf);
+    else
+    {
+        startup_session = defaultAllocator().allocT!SimpleSession(g_app.console);
+        startup_session.setInput(conf);
+        active_session = startup_session;
+
+        defaultAllocator().free(conf);
+    }
 
     // stop the computer from sleeping while this application is running...
     set_system_idle_params(IdleParams.SystemRequired);
-
-    /+
--    35000 - 33  Device infio
--    37000 - 15  BMS info
--    47504 - 11  Export power control
--    37060 - 16  Battery SN
--    write multiple: 45200 - 3 [6148, 1550, 8461]  UPDATE THE CLOCK
-    47504 - 11
--    47595 - 3   Load switch settings
-    35000 - 33
--    35100 - 125 Inverter running data
--    36000 - 27  Meter data
-    37000 - 15
-    37060 - 16
--    45248 - 7   Some operating params
--    36043 - 6   Meter sub-data
--    47745 - 18  UNKNOWN
--    36197 - 1   UNKNOWN
--    47001 - 2   Meter check...
--    47000 - 1   Operating mode
--    45350 - 9   Battery charge.discharge protection params
--    35365 - 1   No idea; near some meter energy stats
-    47504 - 11
-    35000 - 33
-    35100 - 125
-    36000 - 27
-    37000 - 15
-    37060 - 16
-    45248 - 7
-    36043 - 6
-    47745 - 18
-    47595 - 3
-    36197 - 1
-    47001 - 2
-    47000 - 1
-    45350 - 9
-    35365 - 1
-    47504 - 11
-    35000 - 33
-    35100 - 125
-    36000 - 27
-    37000 - 15
-    37060 - 16
-    +/
-
 
     while (true)
     {
         // update the application
         MonoTime start = getTime();
         g_app.update();
+
+        // check to see if startup is finished...
+        if (startup_session)
+        {
+            // SimpleSession is done when it has no active commands and no more buffered input
+            if (startup_session.is_idle())
+            {
+                defaultAllocator().freeT(startup_session);
+                startup_session = null;
+
+                if (interactive_mode)
+                    active_session = defaultAllocator().allocT!ConsoleSession(g_app.console);
+                else
+                    active_session = null;
+            }
+        }
+        else if (interactive_mode && !active_session.isAttached())
+            break; // exit if interactive session was closed
+
+        // update the startup/interactive session
+        if (active_session && active_session.isAttached())
+            active_session.update();
+
         Duration frame_time = getTime() - start;
 
         // work out how long to sleep
@@ -112,4 +121,21 @@ void main()
     }
 
     shutdown_application();
+
+    return 0;
+}
+
+
+private:
+
+void default_log_sink(Level level, const(char)[] message) nothrow @nogc
+{
+    import urt.io;
+    writeln(message);
+}
+
+void stderr_log_sink(Level level, const(char)[] message) nothrow @nogc
+{
+    import core.stdc.stdio : fprintf, stderr;
+    fprintf(stderr, "%.*s\n", cast(int)message.length, message.ptr);
 }

@@ -57,15 +57,7 @@ nothrow @nogc:
         do_(TelnetOptions.WINDOW_SIZE);
         do_(TelnetOptions.CHARSET);
 
-        parseHistory();
-    }
-
-    ~this()
-    {
-        if (m_historyFile.is_open())
-            m_historyFile.close();
-
-        closeSession();
+        load_history(".telnet_history");
     }
 
     override void update()
@@ -642,44 +634,6 @@ private:
 
         char[] prompt = tformat("{0, ?1}{2}{3}{@5, ?4}", Clear, withErase, m_prompt, m_buffer, m_position < m_buffer.length, "\x1b[{6}D", m_buffer.length - m_position);
         ptrdiff_t sent = m_stream.write(prompt);
-    }
-
-    final void parseHistory()
-    {
-        Result result = open(m_historyFile, ".telnet_history", FileOpenMode.ReadWrite);
-        if (result.failed)
-        {
-            writeError("Error opening telnet history :", result.file_result);
-            return;
-        }
-
-        ulong size = m_historyFile.get_size();
-
-        // TODO: maybe we should specify a "MAX_ALLOC" or something...
-        assert(size <= size_t.max, "File too large to read into memory");
-        size_t fileSize = cast(size_t)size;
-
-        char[] mem = cast(char[])allocator.alloc(fileSize);
-        if (mem == null)
-        {
-            writeError("Error allocating memory for telnet history");
-            return;
-        }
-
-        scope(exit)
-            allocator.free(mem);
-
-        m_historyFile.read(mem, fileSize);
-
-        char[] buff = mem.trim;
-        while (!buff.empty)
-        {
-            // take the next line
-            const(char)[] line = buff.split!('\n', false);
-            if (!line.empty)
-                m_history ~= MutableString!0(line);
-        }
-        m_historyCursor = cast(uint)m_history.length;
     }
 }
 
