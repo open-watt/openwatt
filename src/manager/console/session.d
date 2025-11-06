@@ -13,6 +13,23 @@ import urt.util;
 import urt.file;
 import urt.result;
 
+version (Windows)
+{
+    import core.sys.windows.windows;
+
+    extern(Windows) BOOL SetConsoleOutputCP(UINT wCodePageID) nothrow @nogc;
+}
+else version(Posix)
+{
+    import core.sys.posix.termios;
+    import core.sys.posix.unistd;
+    import core.sys.posix.fcntl;
+}
+else
+    static assert(false, "Unsupported platform!");
+
+nothrow @nogc:
+
 
 enum ClientFeatures : ushort
 {
@@ -51,6 +68,7 @@ nothrow @nogc:
 
     ~this()
     {
+        close_history();
         closeSession();
     }
 
@@ -79,6 +97,10 @@ nothrow @nogc:
     /// Test if the session is attached to a console instance. A detached session is effectively 'closed', and ready to be cleaned up.
     final bool isAttached() pure
         => m_console != null;
+
+    /// Test if the session has no active commands executing
+    final bool is_idle() const pure
+        => m_currentCommand is null;
 
     /// Close this session and detach from the bound console instance.
     void closeSession()
@@ -185,26 +207,26 @@ nothrow @nogc:
                 }
                 else if (seq[] == ANSI_ARROW_UP)
                 {
-                    if (m_historyCursor > 0)
+                    if (_history_cursor > 0)
                     {
-                        if (m_historyCursor == m_history.length)
-                            m_historyHead = m_buffer.move;
-                        m_historyCursor--;
-                        m_buffer = m_history[m_historyCursor][];
+                        if (_history_cursor == _history.length)
+                            _history_head = m_buffer.move;
+                        _history_cursor--;
+                        m_buffer = _history[_history_cursor][];
                         m_position = cast(uint)m_buffer.length;
                     }
                 }
                 else if (seq[] == ANSI_ARROW_DOWN)
                 {
-                    if (m_historyCursor < m_history.length)
+                    if (_history_cursor < _history.length)
                     {
-                        m_historyCursor++;
-                        if (m_historyCursor != m_history.length)
-                            m_buffer = m_history[m_historyCursor];
+                        _history_cursor++;
+                        if (_history_cursor != _history.length)
+                            m_buffer = _history[_history_cursor];
                         else
                         {
-                            m_buffer = m_historyHead.move;
-                            m_historyHead.clear();
+                            m_buffer = _history_head.move;
+                            _history_head.clear();
                         }
                         m_position = cast(uint)m_buffer.length;
                     }
@@ -456,7 +478,7 @@ protected:
     {
         // TODO: command history!
         addToHistory(command);
-        m_historyHead.clear();
+        _history_head.clear();
 
         enterCommand(command);
 
@@ -474,15 +496,61 @@ protected:
         return m_currentCommand is null;
     }
 
+    final void load_history(const char[] filename)
+    {
+        // TODO: probably should store a history file per user... (pending user login?)
+
+        Result result = open(_history_file, filename, FileOpenMode.ReadWrite);
+        if (result.failed)
+        {
+            writeError("Error opening history:", result.file_result);
+            return;
+        }
+
+        ulong size = _history_file.get_size();
+
+        // TODO: maybe we should specify a "MAX_ALLOC" or something...
+        assert(size <= size_t.max, "File too large to read into memory");
+        size_t fileSize = cast(size_t)size;
+
+        char[] mem = cast(char[])allocator.alloc(fileSize);
+        if (mem == null)
+        {
+            writeError("Error allocating memory for history");
+            return;
+        }
+
+        scope(exit)
+            allocator.free(mem);
+
+        _history_file.read(mem, fileSize);
+
+        char[] buff = mem.trim;
+        while (!buff.empty)
+        {
+            // take the next line
+            const(char)[] line = buff.split!('\n', false);
+            if (!line.empty)
+                _history ~= MutableString!0(line);
+        }
+        _history_cursor = cast(uint)_history.length;
+    }
+
+    final void close_history()
+    {
+        if (_history_file.is_open())
+            _history_file.close();
+    }
+
     final void addToHistory(const(char)[] line)
     {
-        if (!line.empty && (m_history.empty || line[] != m_history[$-1]))
+        if (!line.empty && (_history.empty || line[] != _history[$-1]))
         {
-            m_history.pushBack(MutableString!0(line));
-            if (m_history.length > 50)
-                m_history.popFront();
+            _history.pushBack(MutableString!0(line));
+            if (_history.length > 50)
+                _history.popFront();
 
-            if (m_historyFile.is_open)
+            if (_history_file.is_open)
             {
                 static bool WriteToFile(char[] text, ref File file) {
                     size_t bytesWritten;
@@ -494,18 +562,18 @@ protected:
                     return false;
                 };
 
-                m_historyFile.set_pos(0);
+                _history_file.set_pos(0);
                 size_t totalSize;
                 bool success = true;
-                foreach (entry; m_history)
+                foreach (entry; _history)
                 {
-                    success = WriteToFile(entry, m_historyFile);
+                    success = WriteToFile(entry, _history_file);
                     if (!success)
                         break;
 
                     totalSize += entry.length;
 
-                    success = WriteToFile(cast(char[])"\n", m_historyFile);
+                    success = WriteToFile(cast(char[])"\n", _history_file);
                     if (!success)
                         break;
 
@@ -513,12 +581,12 @@ protected:
                 }
 
                 if (success)
-                    m_historyFile.set_size(totalSize);
+                    _history_file.set_size(totalSize);
                 else
-                    m_historyFile.close();
+                    _history_file.close();
             }
         }
-        m_historyCursor = cast(uint)m_history.length;
+        _history_cursor = cast(uint)_history.length;
     }
 
 
@@ -538,13 +606,13 @@ protected:
 
     Map!(String, String) localVariables;
 
-//    list<String> m_history;
-//    list<String>::iterator m_historyCursor;
+//    list<String> _history;
+//    list<String>::iterator _history_cursor;
     // TODO: swap to SharedString, and also swap to List
-    Array!(MutableString!0) m_history;
-    uint m_historyCursor = 0;
-    MutableString!0 m_historyHead;
-    File m_historyFile;
+    Array!(MutableString!0) _history;
+    uint _history_cursor = 0;
+    MutableString!0 _history_head;
+    File _history_file;
 
     Array!(Console*) m_sessionStack;
 
@@ -597,7 +665,7 @@ private:
     MutableString!0 m_output;
 }
 
-class ConsoleSession : Session
+class SimpleSession : Session
 {
 nothrow @nogc:
 
@@ -613,6 +681,340 @@ nothrow @nogc:
             write(text);
         else
             writeln(text);
+    }
+}
+
+class ConsoleSession : Session
+{
+    nothrow @nogc:
+
+    this(ref Console console)
+    {
+        super(console);
+        features = ClientFeatures.ANSI;
+
+        // set up raw terminal mode for character-by-character input
+        version (Windows)
+        {
+            _h_stdin = GetStdHandle(STD_INPUT_HANDLE);
+            _h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+            _h_stderr = GetStdHandle(STD_ERROR_HANDLE);
+
+            // set console to UTF-8
+            SetConsoleOutputCP(65001); // CP_UTF8
+
+            // save original console modes
+            GetConsoleMode(_h_stdin, &_original_input_mode);
+            GetConsoleMode(_h_stdout, &_original_output_mode);
+            GetConsoleMode(_h_stderr, &_original_stderr_mode);
+
+            // Enable virtual terminal processing for ANSI escape sequences on both streams
+            DWORD outputMode = _original_output_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+            SetConsoleMode(_h_stdout, outputMode);
+
+            DWORD stderrMode = _original_stderr_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+            SetConsoleMode(_h_stderr, stderrMode);
+
+            // Enable raw console input - we want key events, not processed input
+            // Disable ENABLE_LINE_INPUT and ENABLE_ECHO_INPUT to get character-by-character input
+            // Disable ENABLE_PROCESSED_INPUT to handle Ctrl+C ourselves
+            DWORD inputMode = ENABLE_WINDOW_INPUT;
+            // Optionally keep ENABLE_MOUSE_INPUT if you want mouse support later
+            SetConsoleMode(_h_stdin, inputMode);
+
+            // Get console screen buffer info to determine height
+            CONSOLE_SCREEN_BUFFER_INFO csbi;
+            if (GetConsoleScreenBufferInfo(_h_stdout, &csbi))
+            {
+                m_width = cast(ushort)(csbi.srWindow.Right - csbi.srWindow.Left + 1);
+                m_height = cast(ushort)(csbi.srWindow.Bottom - csbi.srWindow.Top + 1);
+            }
+        }
+        else version(Posix)
+        {
+            // save original terminal settings
+            tcgetattr(STDIN_FILENO, &_original_termios);
+
+            // set up new terminal settings for raw mode
+            termios raw = _original_termios;
+            raw.c_lflag &= ~(ICANON | ECHO);  // disable canonical mode and echo
+            raw.c_cc[VMIN] = 0;   // non-blocking read
+            raw.c_cc[VTIME] = 0;  // no timeout
+            tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+
+            // make stdin non-blocking
+            int flags = fcntl(STDIN_FILENO, F_GETFL, 0);
+            fcntl(STDIN_FILENO, F_SETFL, flags | O_NONBLOCK);
+        }
+
+        load_history(".history");
+
+        if (m_showPrompt)
+            send_prompt_and_buffer(true);
+    }
+
+    override void update()
+    {
+        super.update();
+
+        if (!isAttached())
+            return;
+
+        enum DefaultBufferLen = 512;
+        ubyte[DefaultBufferLen] recvbuf = void;
+
+        // read from stdin
+        version (Windows)
+        {
+            DWORD numEvents = 0;
+            GetNumberOfConsoleInputEvents(_h_stdin, &numEvents);
+            if (numEvents == 0)
+                return;
+
+            Array!(char, 0) input; // TODO: stack-allocate some bytes when move semantics land!
+            input.reserve(numEvents + 32); // add some extra bytes for escape sequences
+
+            INPUT_RECORD[32] events = void;
+            DWORD eventsRead;
+            while  (numEvents && ReadConsoleInputA(_h_stdin, events.ptr, numEvents < events.length ? numEvents : events.length, &eventsRead))
+            {
+                numEvents -= eventsRead;
+
+                for (DWORD i = 0; i < eventsRead; i++)
+                {
+                    // filter out non-key-down events
+                    if (events[i].EventType != KEY_EVENT || !events[i].KeyEvent.bKeyDown)
+                        continue;
+
+                    char ch = events[i].KeyEvent.AsciiChar;
+                    if (ch != 0)
+                        input ~= ch;
+                    else
+                    {
+                        // not an ascii character...
+                        WORD vk = events[i].KeyEvent.wVirtualKeyCode;
+                        DWORD controlKeyState = events[i].KeyEvent.dwControlKeyState;
+
+                        if (vk == VK_UP)
+                            input ~= ANSI_ARROW_UP;
+                        else if (vk == VK_DOWN)
+                            input ~= ANSI_ARROW_DOWN;
+                        else if (vk == VK_LEFT)
+                        {
+                            if (controlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED))
+                                input ~= "\x1b[1;5D"; // Ctrl+Left
+                            else
+                                input ~= ANSI_ARROW_LEFT;
+                        }
+                        else if (vk == VK_RIGHT)
+                        {
+                            if (controlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED))
+                                input ~= "\x1b[1;5C"; // Ctrl+Right
+                            else
+                                input ~= ANSI_ARROW_RIGHT;
+                        }
+                        else if (vk == VK_HOME)
+                            input ~= ANSI_HOME1;
+                        else if (vk == VK_END)
+                            input ~= ANSI_END1;
+                        else if (vk == VK_DELETE)
+                            input ~= ANSI_DEL;
+                        else if (vk == VK_BACK)
+                            input ~= '\b';
+                    }
+                }
+            }
+
+            if (!input.empty)
+                receiveInput(input[]);
+        }
+        else version(Posix)
+        {
+            ptrdiff_t r = read(STDIN_FILENO, recvbuf.ptr, recvbuf.length);
+            if (r > 0)
+                receiveInput(cast(char[])recvbuf[0 .. r]);
+        }
+    }
+
+    override void enterCommand(const(char)[] command)
+    {
+        writeOutput("", true);
+    }
+
+    override void commandFinished(CommandState commandState, CommandCompletionState state)
+    {
+        if (m_showPrompt)
+            send_prompt_and_buffer(false);
+    }
+
+    override void closeSession()
+    {
+        restore_terminal();
+        super.closeSession();
+    }
+
+    override void writeOutput(const(char)[] text, bool newline)
+    {
+        version (Windows)
+        {
+            DWORD written;
+            if (text.length > 0)
+                WriteConsoleA(_h_stdout, text.ptr, cast(DWORD)text.length, &written, null);
+            if (newline)
+                WriteConsoleA(_h_stdout, "\r\n".ptr, 2, &written, null);
+        }
+        else version(Posix)
+        {
+            core.sys.posix.unistd.write(STDOUT_FILENO, text.ptr, text.length);
+            if (newline)
+                core.sys.posix.unistd.write(STDOUT_FILENO, "\n".ptr, 1);
+        }
+    }
+
+    override void showSuggestions(const(String)[] suggestions)
+    {
+        writeOutput("", true);
+        super.showSuggestions(suggestions);
+        if (m_showPrompt)
+            send_prompt_and_buffer(false);
+    }
+
+    override bool showPrompt(bool show)
+    {
+        bool old = super.showPrompt(show);
+
+        if (!m_currentCommand)
+        {
+            if (show && !old)
+                send_prompt_and_buffer(true);
+            else if (!show && old)
+                clear_line();
+        }
+        return old;
+    }
+
+    override const(char)[] setPrompt(const(char)[] prompt)
+    {
+        const(char)[] old = super.setPrompt(prompt);
+        if (!m_currentCommand && m_showPrompt && prompt[] != old[])
+            send_prompt_and_buffer(true);
+        return old;
+    }
+
+    override ptrdiff_t appendInput(const(char)[] text)
+    {
+        import urt.util : min;
+
+        MutableString!0 before = m_buffer;
+        uint beforePos = m_position;
+
+        ptrdiff_t taken = super.appendInput(text);
+        if (taken < 0)
+            return taken;
+
+        // echo changes back to the terminal
+        size_t diffOffset = 0;
+        size_t len = min(m_buffer.length, before.length);
+        while (diffOffset < len && before[diffOffset] == m_buffer[diffOffset])
+            ++diffOffset;
+        bool noChange = m_buffer.length == before.length && diffOffset == m_buffer.length;
+
+        MutableString!0 echo;
+        if (noChange)
+        {
+            // maybe the cursor moved?
+            if (beforePos != m_position)
+            {
+                if (m_position < beforePos)
+                    echo.concat("\x1b[", beforePos - m_position, 'D');
+                else
+                    echo.concat("\x1b[", m_position - beforePos, 'C');
+            }
+        }
+        else
+        {
+            if (diffOffset != beforePos)
+            {
+                // shift the cursor to the change position
+                if (diffOffset < beforePos)
+                    echo.concat("\x1b[", beforePos - diffOffset, 'D');
+                else
+                    echo.concat("\x1b[", diffOffset - beforePos, 'C');
+            }
+
+            if (diffOffset < m_buffer.length)
+                echo.append(m_buffer[diffOffset .. $]);
+
+            if (m_buffer.length < before.length)
+            {
+                // erase the tail
+                echo.append("\x1b[K");
+            }
+
+            if (echo.length && m_position != m_buffer.length)
+            {
+                assert(m_position < m_buffer.length); // shouldn't be possible for the cursor to be beyond the end of the line
+                echo.append("\x1b[", m_buffer.length - m_position, 'D');
+            }
+        }
+
+        if (echo.length)
+            writeOutput(echo[], false);
+
+        return taken;
+    }
+
+private:
+    version (Windows)
+    {
+        HANDLE _h_stdin;
+        HANDLE _h_stdout;
+        HANDLE _h_stderr;
+        DWORD _original_input_mode;
+        DWORD _original_output_mode;
+        DWORD _original_stderr_mode;
+    }
+    else version(Posix)
+    {
+        termios _original_termios;
+    }
+
+    bool _terminal_restored;
+
+    void restore_terminal()
+    {
+        if (_terminal_restored)
+            return;
+
+        version (Windows)
+        {
+            SetConsoleMode(_h_stdin, _original_input_mode);
+            SetConsoleMode(_h_stdout, _original_output_mode);
+            SetConsoleMode(_h_stderr, _original_stderr_mode);
+        }
+        else version(Posix)
+        {
+            tcsetattr(STDIN_FILENO, TCSANOW, &_original_termios);
+        }
+
+        _terminal_restored = true;
+    }
+
+    void clear_line()
+    {
+        enum Clear = ANSI_ERASE_LINE ~ "\x1b[80D"; // clear and move left 80
+        writeOutput(Clear, false);
+    }
+
+    void send_prompt_and_buffer(bool with_clear = false)
+    {
+        import urt.string.format;
+
+        enum Clear = ANSI_ERASE_LINE ~ "\r"; // clear line and return to start
+
+        // format: [clear?] [prompt] [buffer] [move cursor back if not at end?]
+        char[] prompt = tformat("{0, ?1}{2}{3}{@5, ?4}", Clear, with_clear, m_prompt, m_buffer, m_position < m_buffer.length, "\x1b[{6}D", m_buffer.length - m_position);
+        writeOutput(prompt, false);
     }
 }
 
