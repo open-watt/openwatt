@@ -106,6 +106,33 @@ void show_time(Session session)
     session.writeLine(getDateTime());
 }
 
+auto sleep(Session session, Duration duration)
+{
+    import manager.console.command : CommandCompletionState;
+    import manager.console.function_command : FunctionCommandState;
+
+    static class SleepCommandState : FunctionCommandState
+    {
+    nothrow @nogc:
+        MonoTime wake_time;
+
+        this(Session session, Duration duration)
+        {
+            super(session);
+            wake_time = getTime() + duration;
+        }
+
+        override CommandCompletionState update()
+        {
+            if (getTime() >= wake_time)
+                return CommandCompletionState.Finished;
+            return CommandCompletionState.InProgress;
+        }
+    }
+
+    return defaultAllocator().allocT!SleepCommandState(session, duration);
+}
+
 // Helper function to format bytes with appropriate unit
 private auto format_bytes(ulong bytes) nothrow @nogc
 {

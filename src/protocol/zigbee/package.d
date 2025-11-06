@@ -272,6 +272,8 @@ class RequestState : FunctionCommandState
 {
 nothrow @nogc:
 
+    CommandCompletionState state = CommandCompletionState.InProgress;
+
     EZSPClient client;
     bool finished = false;
 

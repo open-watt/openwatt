@@ -97,6 +97,7 @@ nothrow @nogc:
         console.registerCommand!uptime("/system", this);
         console.registerCommand!sysinfo("/system", this);
         console.registerCommand!show_time("/system", this, "time");
+        console.registerCommand!sleep("/system", this);
 
         console.registerCommand!device_print("/device", this, "print");
 

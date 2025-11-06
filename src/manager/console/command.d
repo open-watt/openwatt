@@ -36,7 +36,6 @@ nothrow @nogc:
 
     Session session;
     Command command;
-    CommandCompletionState state;
 
     this(Session session, Command command)
     {
