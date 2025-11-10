@@ -281,7 +281,7 @@ private:
         }
 
         MutableString!0 message;
-        message.concat(enum_keys!HTTPMethod[request.method], ' ', request.url, get, " HTTP/", request.http_version >> 4, '.', request.http_version & 0xF,
+        message.concat(enum_key_from_value!HTTPMethod(request.method), ' ', request.url, get, " HTTP/", request.http_version >> 4, '.', request.http_version & 0xF,
                        "\r\nHost: ", _host,
                        "\r\nUser-Agent: OpenWatt\r\nAccept-Encoding: gzip, deflate\r\n");
         if (request.http_version == HTTPVersion.V1_1)
@@ -319,7 +319,7 @@ private:
 
         version (DebugHTTPMessageFlow) {
             import urt.log;
-            writeDebug("HTTP: request to ", host, " - ", enum_keys!HTTPMethod[request.method], " ", request.url, " (", request.content.length, " bytes)");
+            writeDebug("HTTP: request to ", host, " - ", enum_key_from_value!HTTPMethod(request.method), " ", request.url, " (", request.content.length, " bytes)");
         }
     }
 

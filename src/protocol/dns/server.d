@@ -98,7 +98,7 @@ nothrow @nogc:
             {
                 if (r.length)
                     r ~= ',';
-                r ~= enum_keys!NSProtocol[i];
+                r ~= enum_key_by_decl_index!NSProtocol(i);
             }
         }
         // TODO: we should be able to promote MutableString to String!!
@@ -109,9 +109,9 @@ nothrow @nogc:
         // populate the bitfield
         foreach (ref v; value)
         {
-            NSProtocol p = enum_from_string!NSProtocol(v[]);
-            if (p != ubyte.max)
-                _protocols |= 1 << p;
+            const NSProtocol* p = enum_from_key!NSProtocol(v[]);
+            if (p)
+                _protocols |= 1 << *p;
         }
     }
 
