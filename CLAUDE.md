@@ -21,15 +21,18 @@ Makefile-based build supporting multiple D compilers and cross-compilation to va
 
 ```bash
 # Basic builds
-make                                    # Debug build with DMD (default)
+make                                   # Debug build with DMD (default)
 make COMPILER=ldc CONFIG=release       # Release build with LDC (recommended for production)
-make COMPILER=dmd CONFIG=debug         # Debug build with DMD
 make clean                             # Clean build artifacts
 
-# Cross-platform builds (requires LDC)
-make COMPILER=ldc PLATFORM=arm64       # ARM64 build
-make COMPILER=ldc PLATFORM=riscv64     # RISC-V 64-bit
-make COMPILER=ldc PLATFORM=x86         # 32-bit x86
+# Special platform builds
+make PLATFORM=routeros CONFIG=release  # MikroTik RouterOS (ARM64 + container)
+make PLATFORM=esp32                    # ESP32 embedded target
+make PLATFORM=k210                     # K210 RISC-V microcontroller
+
+# Cross-architecture builds (set ARCH directly)
+make ARCH=arm64 OS=linux               # Generic ARM64 Linux build
+make ARCH=riscv64                      # Generic RISC-V 64-bit build
 
 # Testing
 make CONFIG=unittest                    # Build with unit tests enabled
@@ -37,11 +40,24 @@ make CONFIG=unittest                    # Build with unit tests enabled
 ```
 
 **Build variables:**
-- `COMPILER`: `dmd` (default, fast compilation), `ldc` (best optimization), `gdc`
+- `COMPILER`: `dmd` (default, fast compilation), `ldc` (best optimization), `gdc` - auto-selects LDC for cross-compilation
 - `CONFIG`: `debug` (default), `release`, `unittest`
-- `PLATFORM`: `x86_64` (default), `x86`, `arm64`, `arm`, `riscv64`, `riscv`, plus embedded targets (esp32, stm32, etc.)
+- `PLATFORM`: Auto-detected from host if unspecified. Values: `windows`, `linux`, `routeros`, embedded targets (`esp32`, `k210`, `cortex-a7`, etc.)
+- `ARCH`: Target architecture (`x86_64`, `arm64`, `riscv64`, etc.) - auto-detected or set by PLATFORM
+- `OS`: Target OS (`windows`, `linux`, `freertos`) - usually auto-detected
 
-Binaries output to `bin/$(PLATFORM)_$(CONFIG)/openwatt`. Windows users can alternatively use Visual Studio or MSBuild with `openwatt.sln`.
+**Output directories:**
+- Special platforms: `bin/$(PLATFORM)_$(CONFIG)/` (e.g., `bin/routeros_release/`)
+- Generic platforms: `bin/$(ARCH)_$(OS)_$(CONFIG)/` (e.g., `bin/arm64_linux_release/`)
+
+**Special platform: `routeros`**
+- Builds statically-linked ARM64 binary for MikroTik RouterOS
+- Automatically packages binary into minimal Alpine-based container
+- Provides additional targets: `routeros-container`, `routeros-tar`, `routeros-clean`
+- Requires Docker or Podman for container builds
+- See [docs/MIKROTIK_DEPLOYMENT.md](docs/MIKROTIK_DEPLOYMENT.md) for deployment guide
+
+Windows users can alternatively use Visual Studio or MSBuild with `openwatt.sln`.
 
 ## Architecture: The Big Picture
 
@@ -233,42 +249,9 @@ Core runtime providing:
 
 **Entry point:** [src/main.d](src/main.d) - Creates Application, loads `conf/startup.conf`, runs main loop
 
-##### Cron System (src/manager/cron/)
+##### Cron System
 
-Scheduled task execution system for running console commands at specified intervals:
-
-**Key features:**
-- **Duration-based scheduling**: Single `schedule` property accepts Duration (e.g., "5m", "30s", "1h")
-- **Repeat flag**: Controls whether job repeats or runs once
-- **Concurrent execution**: Multiple instances of same command can run simultaneously if command latency exceeds interval
-- **Latent command support**: Tracks running commands via `Array!RunningCommand`, properly handles async operations
-- **Precise cadence**: Schedules from `_next_run`, not `now`, to prevent drift
-
-**Console usage:**
-```bash
-# Run every 5 minutes (repeating by default)
-/system/cron/add name=periodic schedule=5m command="/protocol/modbus/poll name=inv"
-
-# Run once after 30 seconds
-/system/cron/add name=delayed schedule=30s repeat=false command="/log/info Ready!"
-
-# List all jobs
-/system/cron/print
-
-# Disable/enable a job
-/system/cron/set name=periodic disabled=true
-```
-
-**Duration parsing** ([src/manager/console/argument.d](src/manager/console/argument.d)):
-- Supports: `s`/`sec`/`seconds`, `m`/`min`/`minutes`, `h`/`hr`/`hours`, `d`/`days`, `ms`/`msecs`, `us`/`usecs`
-- Pure numbers default to seconds
-- Example: `schedule=5m` → 5 minutes, `schedule=30s` → 30 seconds
-
-**Properties:**
-- Writable: `schedule` (Duration), `repeat` (bool), `command` (String)
-- Read-only: `last_run` (SysTime), `next_run` (SysTime), `run_count` (uint)
-
-See [src/manager/cron/job.d](src/manager/cron/job.d) for implementation.
+Scheduled task execution for running console commands at intervals. Example: `/system/cron/add name=poll schedule=5m command="/device/print"`. Supports duration-based scheduling (5m, 30s, 1h), repeat flag, concurrent execution of slow commands. See [src/manager/cron/job.d](src/manager/cron/job.d).
 
 #### Router Layer (src/router/)
 
@@ -388,15 +371,6 @@ Follow these conventions (from [CONTRIBUTING.md](CONTRIBUTING.md)):
 
 uRT replaces the D standard library to enable embedded targets without OS dependencies.
 
-### Configuration Files
-
-- **Runtime config**: `conf/startup.conf` - Console command script executed at startup
-- **Modbus profiles**: `conf/modbus_profiles/` (referenced in README but may use different paths)
-- **No static config format**: Everything is console commands
-
-### Testing
-
-Unit tests are embedded in source files using D's `unittest` blocks. Build with `CONFIG=unittest` and run the test binary.
 
 ### Important Files & Directories
 
@@ -493,10 +467,3 @@ The REPL method enables true interactive investigation: send a command, analyze 
 - Set `enum DebugType = "type_name"` to debug specific type
 - Console commands execute synchronously - use `/device/print` to inspect runtime state
 - PCAP logging available for packet capture/analysis
-
-## Recent Development
-
-Current branch: `zigbee`
-- Implementing ZigbeeController for managing Zigbee device networks
-- EZSP driver communication working
-- Recent additions: WebSocket support, TLS stream (for HTTPS)
