@@ -386,8 +386,8 @@ private:
 
     static int read_request_line(ref const(char)[] msg, ref HTTPMessage message)
     {
-        HTTPMethod method = msg.split!(' ', false).enum_from_string!HTTPMethod;
-        if (byte(method) == -1)
+        const HTTPMethod* method = msg.split!(' ', false).enum_from_key!HTTPMethod;
+        if (!method)
             return -1;
 
         if (int result = read_request_target(msg, message))
@@ -562,8 +562,8 @@ void http_field_lines(scope const HTTPParam[] params, ref MutableString!0 str)
 
 void http_date(ref const DateTime date, ref MutableString!0 str)
 {
-    const(char)[] day = enum_keys!Day[date.wday];
-    const(char)[] month = enum_keys!Month[date.month];
+    const(char)[] day = enum_key_by_decl_index!Day(date.wday);
+    const(char)[] month = enum_key_by_decl_index!Month(date.month - 1);
 
     // IMF-fixdate
     // Sun, 06 Nov 1994 08:49:37 GMT
