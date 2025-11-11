@@ -20,12 +20,15 @@ int main(string[] args)
     //       the idea is to make dedup lookups much faster...
 
     bool interactive_mode = false;
-    foreach (arg; args[1 .. $])
+    const(char)[] config_path = "conf/startup.conf";
+    foreach (i, arg; args[1 .. $])
     {
         if (arg == "--interactive" || arg == "-i")
-        {
             interactive_mode = true;
-            break;
+        else if (arg == "--config" || arg == "-c")
+        {
+            if (i < args.length - 1)
+                config_path = args[i + 2]; // i+2 because we're indexing from args[1..$]
         }
     }
 
@@ -63,10 +66,11 @@ int main(string[] args)
     SimpleSession startup_session = null;
 
     import urt.file : load_file;
-    char[] conf = cast(char[])load_file("conf/startup.conf");
+    char[] conf = cast(char[])load_file(config_path);
     if (!conf)
     {
-        writeError("Failed to load startup configuration file: conf/startup.conf");
+        import urt.string.format;
+        writeError("Failed to load startup configuration file: ", config_path);
         if (!interactive_mode)
             return -1;
     }
