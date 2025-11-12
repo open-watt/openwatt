@@ -674,6 +674,7 @@
       <Filter>conf\rest_profiles</Filter>
     </None>
     <None Include="Makefile" />
+    <None Include="vcpkg.json" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\npcap-bpf.h">
