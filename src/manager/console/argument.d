@@ -318,9 +318,10 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
     }
     else if (v.isString)
     {
+        const(char)[] s;
         static if (__traits(compiles, { r.fromString(s); }))
         {
-            const(char)[] s = v.asString;
+            s = v.asString;
             return r.fromString(s) == s.length ? null : tconcat("Couldn't parse `" ~ Type.stringof ~ "` from string: ", v);
         }
         else

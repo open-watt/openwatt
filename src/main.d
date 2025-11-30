@@ -113,7 +113,7 @@ int main(string[] args)
         Duration frame_time = getTime() - start;
 
         // work out how long to sleep
-        int sleep_usecs = 1000_000 / g_app.update_rate_hz;
+        long sleep_usecs = 1000_000 / g_app.update_rate_hz;
         sleep_usecs -= frame_time.as!"usecs";
         // only sleep if we need to sleep >20us or so...
         if (sleep_usecs > 20)

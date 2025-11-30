@@ -172,6 +172,7 @@ nothrow @nogc:
                             const ubyte[] ebyteFrame = buffer[offset .. offset + EbyteFrameSize];
 
                             frame.control = ebyteFrame[0];
+                            assert((frame.control & 0xF) <= 8, "TODO: bad CAN frame; did we fall off the rails? bad data? skip this message? how do we resync?");
 
                             frame.id = ebyteFrame[1 .. 5].bigEndianToNative!uint;
                             frame.id &= (frame.extended ? 0x1FFFFFFF : 0x7FF);
