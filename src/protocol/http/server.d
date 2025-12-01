@@ -21,6 +21,8 @@ import protocol.http.message;
 import router.stream.tcp;
 import router.iface;
 
+//version = DebugHTTPMessageFlow;
+
 nothrow @nogc:
 
 
@@ -67,11 +69,11 @@ nothrow @nogc:
         foreach (ref h; _handlers)
         {
             // if a higher level handler already exists, we can't add this handler
-            if (h.method == method && uri_prefix.startsWith(h.uri_prefix))
+            if ((h.methods & (1 << method)) && uri_prefix.startsWith(h.uri_prefix))
                 return false;
         }
 
-        _handlers ~= Handler(method, uri_prefix.makeString(defaultAllocator), request_handler);
+        _handlers ~= Handler(1 << method, uri_prefix.makeString(defaultAllocator), request_handler);
         return true;
     }
 
@@ -122,7 +124,7 @@ nothrow @nogc:
 private:
     struct Handler
     {
-        HTTPMethod method;
+        uint methods;
         String uri_prefix;
         RequestHandler request_handler;
     }
@@ -168,7 +170,7 @@ private:
         {
             foreach (ref h; server._handlers)
             {
-                if (request.method == h.method && request.request_target.startsWith(h.uri_prefix[]))
+                if (((1 << request.method) & h.methods) && request.request_target.startsWith(h.uri_prefix[]))
                     return h.request_handler(request, stream);
             }
 
@@ -177,18 +179,9 @@ private:
 
             // implement default response...
             enum message_body = "OpenWatt Webserver";
+            HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"text/plain", message_body);
+            stream.write(response.format_message()[]);
 
-            MutableString!0 response;
-            http_status_line(request.http_version, request.status_code == 0 ? 200 : request.status_code, "", response);
-            http_date(getDateTime(), response);
-
-            http_field_lines([ HTTPParam(StringLit!"Content-Type", StringLit!"text/plain"),
-                             HTTPParam(StringLit!"Content-Length", makeString(tstring(message_body.length), defaultAllocator())) ], response);
-
-            response ~= "\r\n";
-            response ~= message_body;
-
-            stream.write(response);
             return 0;
         }
 

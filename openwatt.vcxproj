@@ -51,6 +51,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <DCompile Include="src\apps\api\package.d" />
     <DCompile Include="src\apps\energy\appliance.d" />
     <DCompile Include="src\apps\energy\circuit.d" />
     <DCompile Include="src\apps\energy\manager.d" />
@@ -484,6 +485,7 @@
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <Warnings>None</Warnings>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -513,6 +515,7 @@
       <Main>true</Main>
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <Warnings>None</Warnings>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -545,6 +548,7 @@
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <Warnings>None</Warnings>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -575,6 +579,7 @@
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <ImportCPaths>third_party/npcap-sdk-1.15/Include/</ImportCPaths>
+      <Warnings>None</Warnings>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -604,6 +609,7 @@
       <Main>true</Main>
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <Warnings>None</Warnings>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -636,6 +642,7 @@
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <Warnings>None</Warnings>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
