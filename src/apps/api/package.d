@@ -73,6 +73,7 @@ nothrow @nogc:
         {
             _server.add_uri_handler(HTTPMethod.GET, _uri, &handle_request);
             _server.add_uri_handler(HTTPMethod.POST, _uri, &handle_request);
+            _server.add_uri_handler(HTTPMethod.OPTIONS, _uri, &handle_request);
         }
         else
             _default_handler = _server.hook_global_handler(&handle_request);
@@ -110,6 +111,10 @@ private:
     {
         const(char)[] tail = request.request_target[_uri.length .. $];
 
+        // Handle CORS preflight OPTIONS requests
+        if (request.method == HTTPMethod.OPTIONS)
+            return handle_options(request, stream);
+
         if (tail == "/health")
             return handle_health(request, stream);
         if (tail == "/cli/execute")
@@ -126,9 +131,25 @@ private:
         return 0;
     }
 
+    void add_cors_headers(ref HTTPMessage response)
+    {
+        response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", StringLit!"*");
+        response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Methods", StringLit!"GET, POST, PUT, DELETE, OPTIONS");
+        response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Headers", StringLit!"Content-Type");
+    }
+
+    int handle_options(ref const HTTPMessage request, ref Stream stream)
+    {
+        HTTPMessage response = create_response(request.http_version, 204, StringLit!"No Content", String(), null);
+        add_cors_headers(response);
+        stream.write(response.format_message()[]);
+        return 0;
+    }
+
     int handle_health(ref const HTTPMessage request, ref Stream stream)
     {
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", tconcat("{\"status\":\"healthy\",\"uptime\":", getAppTime().as!"seconds", "}"));
+        add_cors_headers(response);
         stream.write(response.format_message()[]);
         return 0;
     }
@@ -149,6 +170,7 @@ private:
         if (command_text.length == 0)
         {
             HTTPMessage response = create_response(request.http_version, 400, StringLit!"Bad Request", StringLit!"application/json", "{\"error\":\"Command body required\"}");
+            add_cors_headers(response);
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -186,7 +208,7 @@ private:
         }
         else
             response.content ~= "\"\"}";
-
+        add_cors_headers(response);
         stream.write(response.format_message()[]);
     }
 

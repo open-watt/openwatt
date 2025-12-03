@@ -198,6 +198,8 @@ nothrow @nogc:
                         break;
                     }
 
+                    message.content_type = message.header("Content-Type");
+
                     if (state == ParseState.ReadingTailHeaders || message.method == HTTPMethod.HEAD)
                         goto message_done;
 
@@ -323,7 +325,7 @@ nothrow @nogc:
 private:
     static bool read_http_version(ref const(char)[] msg, ref HTTPMessage message)
     {
-        string http = "HTTP/";
+        enum http = "HTTP/";
         if (msg[0..http.length] != http)
             return false;
 
@@ -353,7 +355,7 @@ private:
 
     static bool is_response(const char[] msg)
     {
-        string http = "HTTP/";
+        enum http = "HTTP/";
         return msg[0..http.length] == http;
     }
 
@@ -413,14 +415,6 @@ private:
         if (message.method == HTTPMethod.CONNECT)
         {
             // CONNECT www.example.com:80 HTTP/1.1
-            message.request_target = StringLit!"/";
-            return 0;
-        }
-
-        // asterisk-form
-        if (message.method == HTTPMethod.OPTIONS)
-        {
-            // OPTIONS * HTTP/1.1
             message.request_target = StringLit!"/";
             return 0;
         }
