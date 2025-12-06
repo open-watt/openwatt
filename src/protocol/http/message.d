@@ -67,11 +67,11 @@ nothrow @nogc:
 
     this(this) @disable;
 
-    HTTPVersion http_version;        // HTTP version (e.g., "HTTP/1.1", "HTTP/2")
+    HTTPVersion http_version;       // HTTP version (e.g., "HTTP/1.1", "HTTP/2")
     HTTPMethod method;              // HTTP method (e.g., GET, POST, PUT, DELETE)
     HTTPFlags flags;                // Request flags
 
-    ushort status_code;              // Status code (e.g., 200, 404, 500) // TODO: Collapse with flags
+    ushort status_code;             // Status code (e.g., 200, 404, 500) // TODO: Collapse with flags
     String reason;                  // Reason
 
     // TODO: these fields don't feel right... not clear what they are.
@@ -83,11 +83,13 @@ nothrow @nogc:
 
     size_t contentLength;           // Length of the body, if applicable
     Array!ubyte content;            // Optional body for POST/PUT requests
+    String content_type;            // Content-Type of the body
+
     Array!HTTPParam headers;        // Array of additional headers
-    Array!HTTPParam query_params;    // Query parameters
+    Array!HTTPParam query_params;   // Query parameters
 
     HTTPMessageHandler response_handler;
-    SysTime request_time;
+    SysTime timestamp;
 
     bool is_request() const pure
         => status_code == 0;
@@ -196,6 +198,8 @@ nothrow @nogc:
                         break;
                     }
 
+                    message.content_type = message.header("Content-Type");
+
                     if (state == ParseState.ReadingTailHeaders || message.method == HTTPMethod.HEAD)
                         goto message_done;
 
@@ -290,7 +294,7 @@ nothrow @nogc:
                         return -1;
 
                     if (message.is_request)
-                        message.request_time = getSysTime();
+                        message.timestamp = getSysTime();
 
                     // message complete
                     if (message_handler(message) < 0)
@@ -321,7 +325,7 @@ nothrow @nogc:
 private:
     static bool read_http_version(ref const(char)[] msg, ref HTTPMessage message)
     {
-        string http = "HTTP/";
+        enum http = "HTTP/";
         if (msg[0..http.length] != http)
             return false;
 
@@ -351,7 +355,7 @@ private:
 
     static bool is_response(const char[] msg)
     {
-        string http = "HTTP/";
+        enum http = "HTTP/";
         return msg[0..http.length] == http;
     }
 
@@ -389,6 +393,7 @@ private:
         const HTTPMethod* method = msg.split!(' ', false).enum_from_key!HTTPMethod;
         if (!method)
             return -1;
+        message.method = *method;
 
         if (int result = read_request_target(msg, message))
             return result;
@@ -410,14 +415,6 @@ private:
         if (message.method == HTTPMethod.CONNECT)
         {
             // CONNECT www.example.com:80 HTTP/1.1
-            message.request_target = StringLit!"/";
-            return 0;
-        }
-
-        // asterisk-form
-        if (message.method == HTTPMethod.OPTIONS)
-        {
-            // OPTIONS * HTTP/1.1
             message.request_target = StringLit!"/";
             return 0;
         }
@@ -571,4 +568,116 @@ void http_date(ref const DateTime date, ref MutableString!0 str)
     //                      wday  day  month year hours  mins   secs
     str.appendFormat("Date:{0}, {1,02} {2}, {3}, {4,02}:{5,02}:{6,02} GMT \r\n",
                      day[0..3], date.day, month[0..3], date.year, date.hour, date.minute, date.second);
+}
+
+HTTPMessage create_request(HTTPVersion http_version, HTTPMethod method, String url, String content_type, const(void)[] content)
+{
+    // TODO: break the URL into host and request_target
+    assert(false, "NOT TESTED");
+
+    HTTPMessage msg;
+    msg.http_version = http_version;
+    msg.method = method;
+    msg.url = url.move;
+    assert (method < HTTPMethod.POST && (content_type || content), "Method can not have body data!");
+    msg.content_type = content_type.move;
+    msg.content = cast(ubyte[])content;
+    return msg;
+}
+
+HTTPMessage create_response(HTTPVersion http_version, ushort status_code, String reason, String content_type, const(void)[] content)
+{
+    HTTPMessage msg;
+    msg.http_version = http_version;
+    msg.status_code = status_code;
+    msg.reason = reason.move;
+    msg.timestamp = getSysTime();
+    msg.content_type = content_type.move;
+    msg.content = cast(ubyte[])content;
+    return msg;
+}
+
+MutableString!0 format_message(ref HTTPMessage message, const(char)[] host = null)
+{
+    import urt.mem.temp : tconcat;
+
+    bool include_body = true;
+    if (message.method == HTTPMethod.HEAD || message.method == HTTPMethod.TRACE || message.method == HTTPMethod.CONNECT)
+        include_body = false;
+    if (include_body && message.content.length == 0 && !(message.flags & HTTPFlags.ForceBody))
+        include_body = false;
+
+    MutableString!0 msg;
+
+    bool is_request = message.is_request;
+    if (is_request)
+    {
+        // build the query string
+        MutableString!0 get;
+        foreach (ref q; message.query_params)
+        {
+            bool first = get.empty;
+
+            size_t keyLen = q.key.url_encode_length();
+            size_t valLen = q.value.url_encode_length();
+            char[] ext = get.extend(keyLen + valLen + 2);
+
+            if (first)
+                ext[0] = '?';
+            else
+                ext[0] = '&';
+            if (q.key.url_encode(ext[1 .. 1 + keyLen]) != keyLen)
+                return MutableString!0(); // bad encoding!
+            ext = ext[1 + keyLen .. $];
+            ext[0] = '=';
+            if (q.value.url_encode(ext[1 .. 1 + valLen]) != valLen)
+                return MutableString!0(); // bad encoding!
+        }
+
+        msg.concat(enum_key_from_value!HTTPMethod(message.method), ' ', message.request_target, get, ' ');
+    }
+
+    msg.append("HTTP/", message.http_version >> 4, '.', message.http_version & 0xF);
+
+    if (is_request)
+    {
+        msg.append("\r\n");
+        if (host)
+            msg.append("Host: ", host, "\r\n");
+        msg.append("User-Agent: OpenWatt\r\nAccept-Encoding: gzip, deflate\r\n");
+        if (message.http_version == HTTPVersion.V1_1)
+            msg.append("Connection: keep-alive\r\n");
+
+        if (message.username || message.password)
+        {
+            if (!(message.username && message.password))
+                return MutableString!0(); // must have both or neither
+
+            msg ~= "Authorization: Basic ";
+
+            const(char)[] auth = tconcat(message.username, ':', message.password);
+            auth.base64_encode(msg.extend(base64_encode_length(auth.length)));
+        }
+    }
+    else
+    {
+        msg.append(' ', message.status_code, ' ', message.reason, "\r\n");
+        msg.append("Server: OpenWatt\r\n");
+        http_date(message.timestamp.getDateTime(), msg);
+    }
+
+    foreach (ref h; message.headers)
+        msg.append(h.key, ": ", h.value, "\r\n");
+
+    if (include_body)
+    {
+        if (message.content_type)
+            msg.append("Content-Type: ", message.content_type, "\r\n");
+        msg.append("Content-Length: ", message.content.length, "\r\n\r\n");
+        msg ~= cast(char[])message.content[];
+    }
+    else
+        msg ~= "\r\n";
+
+    return msg;
 }

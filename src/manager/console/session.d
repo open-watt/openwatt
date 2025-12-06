@@ -656,7 +656,7 @@ nothrow @nogc:
     override void writeOutput(const(char)[] text, bool newline)
     {
         if (newline)
-            m_output.concat(text, '\n');
+            m_output.append(text, '\n');
         else
             m_output ~= text;
     }

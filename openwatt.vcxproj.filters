@@ -82,6 +82,9 @@
     <Filter Include="src\apps">
       <UniqueIdentifier>{8643bbe8-bb9e-448c-88a7-e8beae4c45e8}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\apps\api">
+      <UniqueIdentifier>{8e7eb135-c8b1-4d1c-9b24-0b1b9e1f0f07}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\apps\energy">
       <UniqueIdentifier>{64b88f6a-915f-4210-b838-b7905c8455ad}</UniqueIdentifier>
     </Filter>
@@ -377,6 +380,9 @@
     </DCompile>
     <DCompile Include="src\protocol\dns\server.d">
       <Filter>src\protocol\dns</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\api\package.d">
+      <Filter>src\apps\api</Filter>
     </DCompile>
     <DCompile Include="src\apps\energy\appliance.d">
       <Filter>src\apps\energy</Filter>

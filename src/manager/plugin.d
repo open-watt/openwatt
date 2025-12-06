@@ -95,6 +95,9 @@ void register_modules(Application app)
     register_module!(protocol.tesla)(app);
     register_module!(protocol.zigbee)(app);
 
+    import apps.api;
+    register_module!(apps.api)(app);
+
     import apps.energy;
     register_module!(apps.energy)(app);
 }

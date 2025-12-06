@@ -202,7 +202,7 @@ nothrow @nogc:
         for (size_t i = 0; i < requests.length; )
         {
             HTTPMessage* r = requests[i];
-            if (now - r.request_time > 5.seconds)
+            if (now - r.timestamp > 5.seconds)
             {
                 requests.remove(i);
                 defaultAllocator().freeT(r);
@@ -231,7 +231,7 @@ nothrow @nogc:
         request.headers = additional_headers.move;
         request.query_params = params.move;
         request.response_handler = response_handler;
-        request.request_time = getSysTime();
+        request.timestamp = getSysTime();
 
         if (requests.length == 0) // OR CONCURRENT REQUESTS...
             send_request(*request);
@@ -252,66 +252,10 @@ private:
 
     void send_request(ref HTTPMessage request)
     {
-        bool include_body = true;
-        if (request.method == HTTPMethod.HEAD || request.method == HTTPMethod.TRACE || request.method == HTTPMethod.CONNECT)
-            include_body = false;
-        if (include_body && request.content.length == 0 && !(request.flags & HTTPFlags.ForceBody))
-            include_body = false;
-
-        // build the query string
-        MutableString!0 get;
-        foreach (ref q; request.query_params)
-        {
-            bool first = get.empty;
-
-            size_t keyLen = q.key.url_encode_length();
-            size_t valLen = q.value.url_encode_length();
-            char[] ext = get.extend(keyLen + valLen + 2);
-
-            if (first)
-                ext[0] = '?';
-            else
-                ext[0] = '&';
-            if (q.key.url_encode(ext[1 .. 1 + keyLen]) != keyLen)
-                return; // bad encoding!
-            ext = ext[1 + keyLen .. $];
-            ext[0] = '=';
-            if (q.value.url_encode(ext[1 .. 1 + valLen]) != valLen)
-                return; // bad encoding!
-        }
-
-        MutableString!0 message;
-        message.concat(enum_key_from_value!HTTPMethod(request.method), ' ', request.url, get, " HTTP/", request.http_version >> 4, '.', request.http_version & 0xF,
-                       "\r\nHost: ", _host,
-                       "\r\nUser-Agent: OpenWatt\r\nAccept-Encoding: gzip, deflate\r\n");
-        if (request.http_version == HTTPVersion.V1_1)
-            message.append("Connection: keep-alive\r\n");
-
-        if (request.username || request.password)
-        {
-            if (!(request.username && request.password))
-                return; // must have both or neither
-
-            message ~= "Authorization: Basic ";
-
-            const(char)[] auth = tconcat(request.username, ':', request.password);
-            auth.base64_encode(message.extend(base64_encode_length(auth.length)));
-        }
-
-        if (include_body)
-        {
-            message.append("Content-Length: ", request.content.length, "\r\n");
-            // TODO: how do we determine the content type?
-//            message.append("Content-Type: application/x-www-form-urlencoded\r\n");
-        }
-        foreach (ref h; request.headers)
-            message.append(h.key, ": ", h.value, "\r\n");
-        message ~= "\r\n";
-
-        if (include_body)
-            message ~= cast(char[])request.content[];
-
-        ptrdiff_t r = stream.write(message);
+        MutableString!0 message = request.format_message(_host);
+        if (message.empty)
+            return;
+        ptrdiff_t r = stream.write(message[]);
         if (r != message.length)
         {
             assert(false, "TODO: handle error!");
@@ -319,7 +263,7 @@ private:
 
         version (DebugHTTPMessageFlow) {
             import urt.log;
-            writeDebug("HTTP: request to ", host, " - ", enum_key_from_value!HTTPMethod(request.method), " ", request.url, " (", request.content.length, " bytes)");
+            writeDebug("HTTP: request to ", _host, " - ", enum_key_from_value!HTTPMethod(request.method), " ", request.url, " (", request.content.length, " bytes)");
         }
     }
 
@@ -327,7 +271,7 @@ private:
     {
         version (DebugHTTPMessageFlow) {
             import urt.log;
-            writeDebug("HTTP: response from ", host, " - ", response.statusCode, " (", response.content.length, " bytes)");
+            writeDebug("HTTP: response from ", _host, " - ", response.status_code, " (", response.content.length, " bytes)");
         }
 
         if (requests.empty)

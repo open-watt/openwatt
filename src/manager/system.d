@@ -73,7 +73,7 @@ void sysinfo(Session session, const(Variant)[] args)
         session.writeLine("Processor:    ", info.processor);
         session.writeLine("Total Memory: ", info.total_memory.format_bytes());
         session.writeLine("Available:    ", info.available_memory.format_bytes());
-        session.writeLine("Uptime:       ", getAppTime());
+        session.writeLine("Uptime:       ", seconds(getAppTime().as!"seconds"));
     }
     else foreach (ref arg; args)
     {
@@ -95,7 +95,7 @@ void sysinfo(Session session, const(Variant)[] args)
         else if (icmp(prop, "available-memory") == 0)
             session.writeLine(info.available_memory.format_bytes());
         else if (icmp(prop, "uptime") == 0)
-            session.writeLine(getAppTime());
+            session.writeLine(seconds(getAppTime().as!"seconds"));
         else
             session.writeLine("Unknown property: ", prop);
     }
