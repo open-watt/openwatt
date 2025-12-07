@@ -528,6 +528,9 @@
     <DCompile Include="third_party\urt\src\urt\intrinsic\x86.d">
       <Filter>third_party\urt\intrinsic</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\lifetime.d">
+      <Filter>third_party\urt\internal</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\os.c">
       <Filter>third_party\urt\internal</Filter>
     </DCompile>

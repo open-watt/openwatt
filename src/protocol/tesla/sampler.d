@@ -92,7 +92,7 @@ nothrow @nogc:
         }
     }
 
-    final override void removeElement(Element* element)
+    final override void remove_element(Element* element)
     {
         if (element.access != Access.Read)
             element.removeSubscriber(this);
