@@ -286,7 +286,7 @@ nothrow @nogc:
         const k = Entry.Key(mac, vlan).k;
         ubyte slot = hash(k);
         ushort first = _table[slot];
-        if (first < 0)
+        if (first == 0xFFFF)
             return false;
         ushort element = first;
         while (1)
