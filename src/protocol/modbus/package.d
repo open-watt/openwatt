@@ -6,20 +6,22 @@ import urt.mem;
 import urt.meta.nullable;
 import urt.string;
 import urt.time;
+import urt.variant;
 
 import manager;
 import manager.console.command;
 import manager.console.function_command : FunctionCommandState;
 import manager.console.session;
 import manager.plugin;
+import manager.profile;
+import manager.sampler;
 
 import protocol.modbus.client;
+import protocol.modbus.message;
 import protocol.modbus.sampler;
 
 import router.iface;
 import router.iface.modbus;
-
-import router.modbus.message;
 
 
 class ModbusProtocolModule : Module
@@ -56,11 +58,12 @@ nothrow @nogc:
 
     void device_add(Session session, const(char)[] id, const(char)[] _client, const(char)[] slave, Nullable!(const(char)[]) name, Nullable!(const(char)[]) _profile)
     {
-        if (id in g_app.devices)
-        {
-            session.writeLine("Device '", id, "' already exists");
-            return;
-        }
+        import manager.component;
+        import manager.device;
+        import manager.element;
+        import urt.file;
+        import urt.si;
+        import urt.string.format;
 
         ServerMap* map;
         ModbusClient client = lookupClientAndSlave(session, _client, slave, map);
@@ -94,137 +97,31 @@ nothrow @nogc:
             profileName = _profile.value;
         }
 
-        import manager.component;
-        import manager.device;
-        import manager.element;
-        import router.modbus.profile;
-        import urt.file;
-        import urt.string.format;
-
         void[] file = load_file(tconcat("conf/modbus_profiles/", profileName, ".conf"), g_app.allocator);
-        ModbusProfile* profile = parseModbusProfile(cast(char[])file, g_app.allocator);
-
-        // create the device
-        Device device = g_app.allocator.allocT!Device(id.makeString(g_app.allocator));
-        if (name)
-            device.name = name.value.makeString(g_app.allocator);
+        Profile* profile = parse_profile(cast(char[])file, g_app.allocator);
 
         // create a sampler for this modbus server...
         ModbusSampler sampler = g_app.allocator.allocT!ModbusSampler(client, target);
+
+        Device device = create_device_from_profile(*profile, null, id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc) {
+            assert(desc.type == ElementType.modbus);
+            ref const ElementDesc_Modbus mb = profile.get_mb(desc.element);
+
+            // write a null value of the proper type
+            ubyte[256] tmp = void;
+            tmp[0 .. mb.value_desc.data_length] = 0;
+            e.value = sample_value(tmp.ptr, mb.value_desc);
+
+            // record samper data...
+            sampler.addElement(e, desc, mb);
+            device.sample_elements ~= e; // TODO: remove this?
+        });
+        if (!device)
+        {
+            session.writeLine("Failed to create device '", id, "'");
+            return;
+        }
         device.samplers ~= sampler;
-
-        Component createComponent(ref ComponentTemplate ct)
-        {
-            Component c = g_app.allocator.allocT!Component(ct.id.move);
-            c.template_ = ct.template_.move;
-
-            foreach (ref child; ct.components)
-            {
-                Component childComponent = createComponent(child);
-                c.components ~= childComponent;
-            }
-
-            foreach (ref el; ct.elements)
-            {
-                Element* e = g_app.allocator.allocT!Element();
-                e.id = el.id.move;
-
-                if (el.value.length > 0)
-                {
-                    final switch (el.type)
-                    {
-                        case ElementTemplate.Type.Constant:
-                            e.latest.fromString(el.value);
-                            break;
-
-                        case ElementTemplate.Type.Map:
-                            const(char)[] mapReg = el.value.unQuote;
-                            ModbusRegInfo** pReg;
-                            if (mapReg.length >= 2 && mapReg[0] == '@')
-                                pReg = mapReg[1..$] in profile.regByName;
-                            if (!pReg)
-                            {
-                                session.writeLine("Invalid register specified for element-map '", e.id, "': ", mapReg);
-                                g_app.allocator.freeT(e);
-                                continue;
-                            }
-
-                            // HACK: rework this whole function, it's all old and rubbish
-                            import urt.si;
-                            ScaledUnit unit;
-                            float scale;
-                            ptrdiff_t taken = unit.parseUnit((*pReg).units[], scale);
-                            if (taken != (*pReg).units.length)
-                            {
-                                assert(false, "Unit was not parsed correctly...?");
-                            }
-
-                            e.access = cast(manager.element.Access)(*pReg).access; // HACK: delete the rh type!
-
-                            // init the value with the proper type and unit if specified...
-                            switch ((*pReg).type)
-                            {
-                                case RecordType.uint16:
-                                case RecordType.int16:
-                                case RecordType.uint32le:
-                                case RecordType.uint32:
-                                case RecordType.int32le:
-                                case RecordType.int32:
-                                case RecordType.uint64le:
-                                case RecordType.uint64:
-                                case RecordType.int64le:
-                                case RecordType.int64:
-                                case RecordType.uint8H:
-                                case RecordType.uint8L:
-                                case RecordType.int8H:
-                                case RecordType.int8L:
-                                case RecordType.bf16:
-                                case RecordType.bf32:
-                                case RecordType.bf64:
-                                case RecordType.enum16:
-                                case RecordType.enum32:
-                                    e.value = Quantity!uint(0, unit);
-                                    break;
-                                case RecordType.exp10:
-                                case RecordType.float32le:
-                                case RecordType.float32:
-                                case RecordType.float64le:
-                                case RecordType.float64:
-                                case RecordType.enum32_float:
-                                    e.value = Quantity!float(0.0, unit);
-                                    break;
-                                default:
-                                    e.value = "";
-                                    break;
-                            }
-
-                            // TODO: if values are bitfields or enums, we should record the keys...
-
-                            // record samper data...
-                            sampler.addElement(e, **pReg);
-                            device.sample_elements ~= e; // TODO: remove this?
-                            break;
-                    }
-                }
-
-                c.elements ~= e;
-            }
-
-            return c;
-        }
-
-        // create a bunch of components from the profile template
-        foreach (ref ct; profile.componentTemplates)
-        {
-            Component c = createComponent(ct);
-            device.components ~= c;
-        }
-
-        g_app.devices.insert(device.id, device);
-
-        // clean up...
-        g_app.allocator.freeT(profile);
-        g_app.allocator.free(file);
     }
 
     RequestState sendRequest(Session session, const(char)[] client, const(char)[] slave, ref ModbusPDU msg)
