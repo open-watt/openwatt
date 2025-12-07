@@ -8,14 +8,13 @@ import urt.time;
 
 import manager.component;
 import manager.element;
+import manager.profile;
 import manager.sampler;
-
-import router.modbus.message;
-import router.modbus.profile;
 
 nothrow @nogc:
 
 
+alias CreateElementHandler = void delegate(Device device, Element* e, ref const ElementDesc desc) nothrow @nogc;
 
 extern(C++)
 class Device : Component
@@ -105,3 +104,72 @@ nothrow @nogc:
     MonoTime last_poll;
 }
 
+Device create_device_from_profile(ref Profile profile, const(char)[] model, const(char)[] id, const(char)[] name, scope CreateElementHandler create_element_handler)
+{
+    import urt.mem.allocator;
+    import manager;
+
+    if (id in g_app.devices)
+    {
+        writeWarning("Device '", id, "' already exists");
+        return null;
+    }
+
+    DeviceTemplate* device_template = profile.get_model_template(model);
+    if (!device_template)
+    {
+        writeWarning("No device template for model '", model, "'");
+//        session.writeLine("No device template for model '", model, "' in profile '", profileName, "'");
+        return null;
+    }
+
+    Device device = g_app.allocator.allocT!Device(id.makeString(g_app.allocator));
+    if (name)
+        device.name = name.makeString(g_app.allocator);
+
+    Component create_component(ref ComponentTemplate ct)
+    {
+        Component c = g_app.allocator.allocT!Component(ct.get_id(profile).makeString(defaultAllocator()));
+        c.template_ = ct.get_template().makeString(defaultAllocator());
+
+        foreach (ref child; ct.components(profile))
+        {
+            Component child_component = create_component(child);
+            c.components ~= child_component;
+        }
+
+        foreach (ref el; ct.elements(profile))
+        {
+            Element* e = g_app.allocator.allocT!Element();
+            e.id = el.get_id(profile).makeString(defaultAllocator());
+
+            final switch (el.type) with (ElementTemplate.Type)
+            {
+                case constant:
+                    // TODO: we should parse the value string with the expression parser...
+                    const(char)[] value = el.get_constant_value(profile);
+                    e.latest.fromString(value);
+                    break;
+
+                case map:
+                    create_element_handler(device, e, el.get_element_desc(profile));
+                    break;
+            }
+
+            c.elements ~= e;
+        }
+
+        return c;
+    }
+
+    // create a bunch of components from the profile template
+    foreach (ref ct; device_template.components(profile))
+    {
+        Component c = create_component(ct);
+        device.components ~= c;
+    }
+
+    g_app.devices.insert(device.id, device);
+
+    return device;
+}

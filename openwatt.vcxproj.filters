@@ -210,10 +210,13 @@
     <DCompile Include="src\router\goodwe\aa55.d">
       <Filter>src\router\goodwe</Filter>
     </DCompile>
+    <DCompile Include="src\manager\package.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
     <DCompile Include="src\manager\plugin.d">
       <Filter>src\manager</Filter>
     </DCompile>
-    <DCompile Include="src\manager\package.d">
+    <DCompile Include="src\manager\profile.d">
       <Filter>src\manager</Filter>
     </DCompile>
     <DCompile Include="src\router\goodwe\package.d">
