@@ -312,6 +312,50 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
             f[i][1] = f[i][0];
     }
 
+    // if we have an incomplete primary set (V,I,P), then we can calculate the missing values
+    enum primary_fields = FieldFlags.Voltage | FieldFlags.Current | FieldFlags.Power;
+    if (r.type == CircuitType.DC)
+    {
+        if ((r.fields & primary_fields) == (FieldFlags.Voltage | FieldFlags.Current))
+        {
+            foreach (i; 0..4)
+                r.active[i] = r.voltage[i] * r.current[i]; // P = VI
+            r.fields |= FieldFlags.Power;
+        }
+        else if ((r.fields & primary_fields) == (FieldFlags.Voltage | FieldFlags.Power))
+        {
+            foreach (i; 0..4)
+                r.current[i] = r.active[i] / r.voltage[i]; // I = P/V
+            r.fields |= FieldFlags.Current;
+        }
+        else if ((r.fields & primary_fields) == (FieldFlags.Current | FieldFlags.Power))
+        {
+            foreach (i; 0..4)
+                r.voltage[i] = MeterVolts(r.active[i] / r.current[i]); // V = P/I
+            r.fields |= FieldFlags.Voltage;
+        }
+    }
+    else
+    {
+        // TODO: AC circuits are much more of a pain in the arse; and we need to assess what details we do know...
+        if ((r.fields & primary_fields) == (FieldFlags.Voltage | FieldFlags.Current))
+        {
+            assert(false, "TODO");
+            r.fields |= FieldFlags.Power;
+        }
+        else if ((r.fields & primary_fields) == (FieldFlags.Voltage | FieldFlags.Power))
+        {
+            assert(false, "TODO");
+            r.fields |= FieldFlags.Current;
+        }
+        else if ((r.fields & primary_fields) == (FieldFlags.Current | FieldFlags.Power))
+        {
+            assert(false, "TODO");
+            r.fields |= FieldFlags.Voltage;
+        }
+    }
+
+    // normalise power factor and calcualte phase angle
     foreach (i; 0..4)
     {
         // should we settle on 0 or -1 for invalid pf?
@@ -320,6 +364,7 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
 
         if ((r.fields & FieldFlags.PhaseAngle) == 0 && r.pf[i] != 0)
         {
+            // TODO: is reactive signed? what if we don't know reactive? are we guessing at the sign?
             r.phase[i] = -acos(r.pf[i])*(1.0/(2*PI));
             if (r.reactive[i] > 0)
                 r.phase[i] = -r.phase[i];
