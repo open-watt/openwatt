@@ -170,6 +170,7 @@
     <DCompile Include="third_party\urt\src\urt\format\json.d" />
     <DCompile Include="third_party\urt\src\urt\hash.d" />
     <DCompile Include="third_party\urt\src\urt\inet.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\lifetime.d" />
     <DCompile Include="third_party\urt\src\urt\internal\os.c" />
     <DCompile Include="third_party\urt\src\urt\intrinsic\package.d" />
     <DCompile Include="third_party\urt\src\urt\intrinsic\x86.d" />

@@ -156,7 +156,7 @@ nothrow @nogc:
         needsSort = true;
     }
 
-    final override void removeElement(Element* element)
+    final override void remove_element(Element* element)
     {
         // TODO: find the element in the list and remove it...
     }
