@@ -127,8 +127,8 @@ nothrow @nogc:
                     a.backup = backup.value;
                 if (battery)
                     a.mppt ~= battery.value;
-                if (mppt)
-                    a.mppt ~= mppt.value;
+                if (mppt) foreach (pv; mppt.value)
+                    a.mppt ~= pv;
 
                 // TODO: dummy meter stuff...
                 break;
@@ -281,7 +281,7 @@ nothrow @nogc:
 
         foreach (ref l; lines[0..i])
         {
-            session.writef("{'', *17}{0, -*1}  {2, *3}W  {4, *5}kWh  {6, *7}kWh  {8, *9}VA  {10, *11}var  {12, 5.4}V  {13, *14}A  {@19, 12}  {16, 5.4}Hz\n",
+            session.writef("{'', *17}{0, -*1}  {2, *3}  {4, *5}kWh  {6, *7}kWh  {8, *9}VA  {10, *11}var  {12, 5.4}  {13, *14}  {@19, 12}  {16, 5.4}Hz\n",
                             l.id, nameLen - l.indent,
                             l.data.active[0], powerLen-1,
                             l.data.totalImportActive[0] * 0.001f, importLen-3, l.data.totalExportActive[0] * 0.001f, exportLen-3,
@@ -298,17 +298,20 @@ nothrow @nogc:
                         MeterData mpptData = getMeterData(mppt);
                         float soc;
                         bool hasSoc = false;
-                        string name = "mppt";
+                        const(char)[] name = mppt.id[];
                         if (mppt.template_[] == "Battery")
                         {
-                            name = "battery";
                             if (Element* socEl = mppt.find_element("soc"))
                             {
                                 soc = socEl.value.asFloat();
                                 hasSoc = true;
                             }
                         }
-                        session.writef("{'', *10}{0, -*1}  {@3,?2}  {5}W  {6}V  {7}A ({8}kWh/{9}kWh)\n", name, nameLen - l.indent - 7, hasSoc, "{4, 3}%  ", soc, 
+                        if (mppt.template_[] == "Solar")
+                        {
+                            // anything special?
+                        }
+                        session.writef("{'', *10}{0, -*1}  {@3,?2}{'    ',!2}  {5}  {6}  {7} ({8}kWh/{9}kWh)\n", name, nameLen - l.indent - 7, hasSoc, "{4, 3}%  ", soc, 
                                         mpptData.active[0], mpptData.voltage[0], mpptData.current[0], mpptData.totalImportActive[0] * 0.001f, mpptData.totalExportActive[0] * 0.001f, l.indent + 2);
                     }
                 }
