@@ -82,6 +82,7 @@
     <DCompile Include="src\manager\package.d" />
     <DCompile Include="src\manager\pcap.d" />
     <DCompile Include="src\manager\plugin.d" />
+    <DCompile Include="src\manager\profile.d" />
     <DCompile Include="src\manager\sampler.d" />
     <DCompile Include="src\manager\secret.d" />
     <DCompile Include="src\manager\subscriber.d" />
