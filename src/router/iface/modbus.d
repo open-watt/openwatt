@@ -17,9 +17,10 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
+import protocol.modbus.message;
+
 import router.iface;
 import router.iface.packet;
-import router.modbus.message;
 import router.stream;
 
 //version = DebugModbusMessageFlow;

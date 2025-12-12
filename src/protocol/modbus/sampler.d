@@ -8,17 +8,61 @@ import urt.time;
 import urt.util : align_up;
 
 import manager.element;
+import manager.profile;
 import manager.sampler;
 
 import protocol.modbus.client;
+import protocol.modbus.message;
 
 import router.iface.mac;
-import router.modbus.message;
-import router.modbus.profile;
 
 //version = DebugModbusSampler;
 
 nothrow @nogc:
+
+
+template modbus_data_type(const(char)[] str)
+{
+    private enum DataType value = parse_modbus_data_type(str);
+    static assert(value != DataType.invalid, "invalid modbus data type: " ~ str);
+    alias modbus_data_type = value;
+}
+
+DataType parse_modbus_data_type(const(char)[] desc)
+{
+    if (desc.length == 3 && desc[1] == '8')
+    {
+        uint flags;
+        if (desc[0] == 'i')
+            flags |= DataType.signed;
+        else if (desc[0] != 'u')
+            return DataType.invalid;
+        if (desc[2] == 'h')
+            return make_data_type(flags, DataKind.high_byte);
+        else if (desc[2] == 'l')
+            return make_data_type(flags, DataKind.low_byte);
+        return DataType.invalid;
+    }
+
+    // TODO: this may be insifficient, but it's what we already model...
+    DataType r = parse_data_type(desc);
+    if (r == DataType.invalid)
+        return DataType.invalid;
+
+    if ((r & DataType.little_endian) != 0)
+    {
+        r &= ~DataType.little_endian;
+        r |= DataType.big_endian | DataType.word_reverse;
+    }
+    else
+        r |= DataType.big_endian;
+
+    // modbus strings are (normally?) space-padded, and the length is in words
+    if (r.data_kind == DataKind.string_z || r.data_kind == DataKind.string_sp)
+        r = make_data_type(DataType.u16 | DataType.array, DataKind.string_sp, r.data_count);
+
+    return r;
+}
 
 
 class ModbusSampler : Sampler
@@ -37,7 +81,7 @@ nothrow @nogc:
 
     final override void update()
     {
-        import router.modbus.message;
+        import protocol.modbus.message;
 
         if (needsSort)
         {
@@ -123,33 +167,23 @@ nothrow @nogc:
         }
     }
 
-    final void addElement(Element* element, ref const ModbusRegInfo regInfo)
+    final void addElement(Element* element, ref const ElementDesc desc, ref const ElementDesc_Modbus reg_info)
     {
         SampleElement* e = &elements.pushBack();
         e.element = element;
-        e.register = regInfo.reg;
-        e.regKind = regInfo.regType;
-        e.type = encodeType(regInfo.type, regInfo.seqLen);
-        e.seqLen = regInfo.seqLen;
-        switch (regInfo.desc.updateFrequency)
+        e.register = reg_info.reg;
+        e.regKind = reg_info.reg_type;
+        e.desc = reg_info.value_desc;
+        switch (desc.update_frequency)
         {
-            case Frequency.Realtime:       e.sampleTimeMs = 400;         break; // as fast as possible
-            case Frequency.High:           e.sampleTimeMs = 1_000;       break; // seconds
-            case Frequency.Medium:         e.sampleTimeMs = 10_000;      break; // 10s seconds
-            case Frequency.Low:            e.sampleTimeMs = 60_000;      break; // minutes
-            case Frequency.Constant:       e.sampleTimeMs = 0;           break; // just once
-            case Frequency.Configuration:  e.sampleTimeMs = 0;           break; // HACK: sample config items once
-            case Frequency.OnDemand:       e.sampleTimeMs = ushort.max;  break; // only explicit
+            case Frequency.realtime:       e.sampleTimeMs = 400;         break; // as fast as possible
+            case Frequency.high:           e.sampleTimeMs = 1_000;       break; // seconds
+            case Frequency.medium:         e.sampleTimeMs = 10_000;      break; // 10s seconds
+            case Frequency.low:            e.sampleTimeMs = 60_000;      break; // minutes
+            case Frequency.constant:       e.sampleTimeMs = 0;           break; // just once
+            case Frequency.configuration:  e.sampleTimeMs = 0;           break; // HACK: sample config items once
+            case Frequency.on_demand:      e.sampleTimeMs = ushort.max;  break; // only explicit
             default: assert(false);
-        }
-
-        float scale;
-        ptrdiff_t taken = e.unit.parseUnit(regInfo.units[], e.scale);
-        if (taken != regInfo.units.length)
-        {
-            // TODO: not sure what to do about these awkward units...
-            // I guess we need a way to scale them into valuid units while sampling...?
-            writeWarning("Failed to parse unit for ", element.id, ": ", regInfo.units);
         }
 
         // we need to re-sort the regs after adding any new ones...
@@ -175,13 +209,12 @@ private:
         SysTime lastUpdate;
         ushort register;
         ubyte regKind;
-        ubyte seqLen;
-        ubyte type;
         ubyte flags; // 1 - in-flight, 2 - constant-sampled, 4 - ...
         ushort sampleTimeMs;
         Element* element;
-        ScaledUnit unit;
-        float scale;
+        ValueDesc desc;
+        ubyte seqLen() const pure nothrow @nogc
+            => cast(ubyte)(desc.data_length / 2);
     }
 
     void responseHandler(ref const ModbusPDU request, ref ModbusPDU response, SysTime requestTime, SysTime responseTime)
@@ -244,113 +277,7 @@ private:
                 assert(false, "TODO: test this and store the value...");
             }
             else
-            {
-                Type type;
-                ubyte arrayLen;
-                Endian endian;
-
-                if (!e.type.decodeType(type, arrayLen, endian))
-                    continue;
-
-                final switch (type)
-                {
-                    case Type.U8_L:
-                    case Type.S8_L:
-                        ++byteOffset;
-                        goto case;
-                    case Type.U8_H:
-                    case Type.S8_H:
-                        e.element.latest = Quantity!float(((type & 1) ? cast(byte)data[byteOffset] : data[byteOffset]) * e.scale, e.unit);
-                        break;
-
-                    case Type.YM_DH_MS:
-                    case Type.YY_MD_HM:
-                        assert(false, "TODO");
-
-                    case Type.U16:
-                    case Type.S16:
-                        ushort val;
-                        if (endian < Endian.LE_BE)
-                            val = data[byteOffset..byteOffset+2][0..2].bigEndianToNative!ushort;
-                        else
-                            val = data[byteOffset..byteOffset+2][0..2].littleEndianToNative!ushort;
-                        e.element.latest = Quantity!float((type == Type.U16 ? val : cast(short)val) * e.scale, e.unit);
-                        break;
-
-                    case Type.U32:
-                    case Type.S32:
-                    case Type.F32:
-                        uint val;
-                        final switch (endian)
-                        {
-                            case Endian.BE_BE:
-                                val = data[byteOffset..byteOffset+4][0..4].bigEndianToNative!uint;
-                                break;
-                            case Endian.LE_LE:
-                                val = data[byteOffset..byteOffset+4][0..4].littleEndianToNative!uint;
-                                break;
-                            case Endian.BE_LE:
-                                val = data[byteOffset..byteOffset+2][0..2].bigEndianToNative!ushort |
-                                      (data[byteOffset+2..byteOffset+4][0..2].bigEndianToNative!ushort << 16);
-                                break;
-                            case Endian.LE_BE:
-                                val = (data[byteOffset..byteOffset+2][0..2].littleEndianToNative!ushort << 16) |
-                                      data[byteOffset+2..byteOffset+4][0..2].littleEndianToNative!ushort;
-                                break;
-                        }
-                        if (type == Type.F32)
-                            e.element.latest = Quantity!float(*cast(float*)&val * e.scale, e.unit);
-                        else if (type == Type.U32)
-                            e.element.latest = Quantity!double(double(val) * e.scale, e.unit);
-                        else
-                            e.element.latest = Quantity!double(double(cast(int)val) * e.scale, e.unit);
-                        break;
-
-                    case Type.U64:
-                    case Type.S64:
-                    case Type.F64:
-                        ulong val;
-                        final switch (endian)
-                        {
-                            case Endian.BE_BE:
-                                val = data[byteOffset..byteOffset+8][0..8].bigEndianToNative!ulong;
-                                break;
-                            case Endian.LE_LE:
-                                val = data[byteOffset..byteOffset+8][0..8].littleEndianToNative!ulong;
-                                break;
-                            case Endian.BE_LE:
-                                val = data[byteOffset..byteOffset+2][0..2].bigEndianToNative!ushort |
-                                    (data[byteOffset+2..byteOffset+4][0..2].bigEndianToNative!ushort << 16) |
-                                    (cast(ulong)data[byteOffset+4..byteOffset+6][0..2].bigEndianToNative!ushort << 32) |
-                                    (cast(ulong)data[byteOffset+6..byteOffset+8][0..2].bigEndianToNative!ushort << 48);
-                                break;
-                            case Endian.LE_BE:
-                                val = (cast(ulong)data[byteOffset..byteOffset+2][0..2].littleEndianToNative!ushort << 48) |
-                                    (cast(ulong)data[byteOffset+2..byteOffset+4][0..2].littleEndianToNative!ushort << 32) |
-                                    (data[byteOffset+4..byteOffset+6][0..2].littleEndianToNative!ushort << 16) |
-                                    data[byteOffset+6..byteOffset+8][0..2].littleEndianToNative!ushort;
-                                break;
-                        }
-                        if (type == Type.F64)
-                            e.element.latest = Quantity!double(*cast(double*)&val * e.scale, e.unit);
-                        else if (type == Type.U64)
-                            e.element.latest = Quantity!double(double(val) * e.scale, e.unit);
-                        else
-                            e.element.latest = Quantity!double(double(cast(long)val) * e.scale, e.unit);
-                        break;
-
-                    case Type.U128:
-                    case Type.S128:
-                        assert(false, "TODO: our value only has int!");
-
-                    case Type.String:
-                        size_t len = 0;
-                        while (len < arrayLen*2 && data[len] != '\0')
-                            ++len;
-                        e.element.latest = cast(char[])data[0..len];
-                        break;
-                }
-            }
+                e.element.latest = sample_value(data.ptr + byteOffset, e.desc);
 
             version (DebugModbusSampler)
                 writeDebugf("Got reg {0, 04x}: {1} = {2}", e.register, e.element.id, e.element.value);
@@ -393,164 +320,4 @@ private:
 
         responseHandler(request, response, requestTime, responseTime);
     }
-}
-
-
-/+
-// value TYPE encoding into 1 byte...
-
-000xxxxx  // u/hb, u/lb, date/date, u/s_be, u/s_le (22 remaining)
-001eettt  // u/i, u/l, u/c, f/d
-01        // 64 unassigned values (this could be used for arrays of int,uint,float,double up to max length 16
-10strlen
-110uslen
-111sslen
-// 86 values remaining!
-
-+/
-
-enum Type : ubyte
-{
-    U8_H,
-    S8_H,
-    U8_L,
-    S8_L,
-    YM_DH_MS,
-    YY_MD_HM,
-    U16,
-    S16,
-    U32,
-    S32,
-    U64,
-    S64,
-    U128,
-    S128,
-    F32,
-    F64,
-    String
-}
-enum Endian : ubyte
-{
-    BE_BE, // words are big endian, sequence of words are high-word-first
-    BE_LE, // words are big endian, sequence of words are low-word-first
-    LE_BE, // words are little endian, sequence of words are high-word-first
-    LE_LE, // words are little endian, sequence of words are low-word-first
-}
-enum Access : ubyte
-{
-    RO, // read-only
-    WO, // write-only
-    RW, // read-write
-}
-
-
-ubyte encodeType(const(char)[] s)
-{
-    assert(false, "TODO: take directly from string, delete RecordType");
-}
-
-ubyte encodeType(RecordType rt, ubyte seqLen)
-{
-    struct RecEnd
-    {
-        Type ty;
-        Endian en;
-        ubyte words;
-    }
-    __gshared immutable RecEnd[RecordType.str] rtMap = [
-        RecEnd(Type.U16, Endian.BE_BE, 1),
-        RecEnd(Type.S16, Endian.BE_BE, 1),
-        RecEnd(Type.U32, Endian.BE_LE, 2),
-        RecEnd(Type.U32, Endian.BE_BE, 2),
-        RecEnd(Type.S32, Endian.BE_LE, 2),
-        RecEnd(Type.S32, Endian.BE_BE, 2),
-        RecEnd(Type.U64, Endian.BE_LE, 4),
-        RecEnd(Type.U64, Endian.BE_BE, 4),
-        RecEnd(Type.S64, Endian.BE_LE, 4),
-        RecEnd(Type.S64, Endian.BE_BE, 4),
-        RecEnd(Type.U8_H, Endian.BE_BE, 1),
-        RecEnd(Type.U8_L, Endian.BE_BE, 1),
-        RecEnd(Type.S8_H, Endian.BE_BE, 1),
-        RecEnd(Type.S8_L, Endian.BE_BE, 1),
-        RecEnd(Type.U16, Endian.BE_BE, 1),
-        RecEnd(Type.F32, Endian.BE_LE, 2),
-        RecEnd(Type.F32, Endian.BE_BE, 2),
-        RecEnd(Type.F64, Endian.BE_LE, 4),
-        RecEnd(Type.F64, Endian.BE_BE, 4),
-        RecEnd(Type.U16, Endian.BE_BE, 1),
-        RecEnd(Type.U32, Endian.BE_BE, 2),
-        RecEnd(Type.U64, Endian.BE_BE, 4),
-        RecEnd(Type.U16, Endian.BE_BE, 1),
-        RecEnd(Type.U32, Endian.BE_BE, 2),
-        RecEnd(Type.F32, Endian.BE_BE, 2),
-    ];
-
-    assert(rt != RecordType.exp10, "TODO: support me!");
-    if (rt >= RecordType.str)
-    {
-        assert(seqLen > 0 && seqLen <= 64);
-        return cast(ubyte)(0x80 | (seqLen - 1));
-    }
-    assert(rtMap[rt].words == seqLen);
-    return encodeType(rtMap[rt].ty, 0, rtMap[rt].en);
-}
-
-ubyte encodeType(Type type, ubyte arrayLen, Endian endian = Endian.BE_BE)
-{
-    if (type == Type.String)
-    {
-        assert(arrayLen > 0 && arrayLen <= 64);
-        return cast(ubyte)(0x80 | (arrayLen - 1));
-    }
-    else if (arrayLen > 0)
-    {
-        assert(type == Type.U16 || type == Type.S16);
-        assert(arrayLen <= 32);
-        return cast(ubyte)((type == Type.U16 ? 0xC0 : 0xE0) | (arrayLen - 1));
-    }
-    else if (type >= Type.U32 && type <= Type.F64)
-        return cast(ubyte)(0x20 | (endian << 3) | (type - Type.U32));
-    else if (type >= Type.U16 && type <= Type.S16 && endian >= Endian.LE_BE)
-        return cast(ubyte)(type + 2);
-    else
-        return type;
-}
-
-bool decodeType(ubyte encoded, out Type type, out ubyte arrayLen, out Endian endian)
-{
-    final switch (encoded >> 5)
-    {
-        case 0:
-            type = cast(Type)(encoded & 0x1F);
-            if (type >= Type.U32)
-            {
-                if (type >= Type.U32 + 2)
-                    return false;
-                type -= 2;
-                endian = Endian.LE_BE;
-            }
-            break;
-        case 1:
-            type = cast(Type)(Type.U32 + (encoded & 0x7));
-            endian = cast(Endian)((encoded >> 3) & 0x3);
-            break;
-        case 2:
-        case 3:
-            // 64 reserved values...
-            return false;
-        case 4:
-        case 5:
-            type = Type.String;
-            arrayLen = (encoded & 0x3F) + 1;
-            break;
-        case 6:
-            type = Type.U16;
-            arrayLen = (encoded & 0x1F) + 1;
-            break;
-        case 7:
-            type = Type.S16;
-            arrayLen = (encoded & 0x1F) + 1;
-            break;
-    }
-    return true;
 }

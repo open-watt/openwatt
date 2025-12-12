@@ -104,6 +104,7 @@
     <DCompile Include="src\protocol\ip\package.d" />
     <DCompile Include="src\protocol\ip\route.d" />
     <DCompile Include="src\protocol\modbus\client.d" />
+    <DCompile Include="src\protocol\modbus\message.d" />
     <DCompile Include="src\protocol\modbus\package.d" />
     <DCompile Include="src\protocol\modbus\sampler.d" />
     <DCompile Include="src\protocol\mqtt\broker.d" />
@@ -139,13 +140,6 @@
     <DCompile Include="src\router\iface\tesla.d" />
     <DCompile Include="src\router\iface\vlan.d" />
     <DCompile Include="src\router\iface\zigbee.d" />
-    <DCompile Include="src\router\modbus\coding.d" />
-    <DCompile Include="src\router\modbus\message.d" />
-    <DCompile Include="src\router\modbus\profile\goodwe.d" />
-    <DCompile Include="src\router\modbus\profile\goodwe_ems.d" />
-    <DCompile Include="src\router\modbus\profile\goodwe_inverter.d" />
-    <DCompile Include="src\router\modbus\profile\package.d" />
-    <DCompile Include="src\router\modbus\profile\solaredge_meter.d" />
     <DCompile Include="src\router\port\package.d" />
     <DCompile Include="src\router\status.d" />
     <DCompile Include="src\router\stream\bridge.d" />

@@ -9,8 +9,6 @@ import manager.plugin;
 
 import router.goodwe.aa55;
 
-import router.modbus.profile;
-
 import urt.log;
 import urt.mem.string;
 import urt.string;

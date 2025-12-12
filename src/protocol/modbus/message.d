@@ -1,4 +1,4 @@
-module router.modbus.message;
+module protocol.modbus.message;
 
 import urt.endian;
 

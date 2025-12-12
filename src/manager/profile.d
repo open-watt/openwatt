@@ -70,6 +70,13 @@ private:
 
 struct ElementDesc_Modbus
 {
+    import protocol.modbus.message : RegisterType;
+    import protocol.modbus.sampler : modbus_data_type;
+
+    ushort reg;
+    RegisterType reg_type = RegisterType.HoldingRegister;
+    Access access = Access.read;
+    ValueDesc value_desc = ValueDesc(modbus_data_type!"u16");
 }
 
 struct ElementDesc_Zigbee
@@ -639,8 +646,64 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 switch (reg_item.name)
                 {
                     case "mb", "reg":
+                        const(char)[] tail = reg_item.value;
+                        tail = tail.split_element_and_desc();
+
+                        const(char)[] register = tail.split!',';
+                        const(char)[] type = tail.split!','.unQuote;
+                        const(char)[] units = tail.split!','.unQuote;
+
                         e.element_index = cast(ushort)((ElementType.modbus << 13) | mb_count);
                         ref ElementDesc_Modbus mb = profile.mb_elements[mb_count++];
+
+                        // TODO: MOVE THIS CODE!
+                        import protocol.modbus.message : RegisterType;
+                        import protocol.modbus.sampler : parse_modbus_data_type;
+
+                        size_t taken;
+                        ulong reg = register.parse_uint_with_base(&taken);
+                        if (taken != register.length || reg > 105535)
+                        {
+                            writeWarning("Invalid Modbus register: ", register);
+                            break;
+                        }
+                        if (reg < 10000)
+                        {
+                            mb.reg_type = RegisterType.Coil;
+                            mb.reg = cast(ushort)reg;
+                        }
+                        else if (reg < 20000)
+                        {
+                            mb.reg_type = RegisterType.DiscreteInput;
+                            mb.reg = cast(ushort)(reg - 10000);
+                        }
+                        else if (reg < 30000)
+                            break;
+                        else if (reg < 40000)
+                        {
+                            mb.reg_type = RegisterType.InputRegister;
+                            mb.reg = cast(ushort)(reg - 30000);
+                        }
+                        else
+                        {
+                            mb.reg_type = RegisterType.HoldingRegister;
+                            mb.reg = cast(ushort)(reg - 40000);
+                        }
+
+                        DataType ty = type.split!('/', false).parse_modbus_data_type();
+                        if (type.length > 0)
+                        {
+                            if (type[0] == 'R')
+                            {
+                                if (type.length > 1 && type[1] == 'W')
+                                    mb.access = Access.read_write;
+                                else
+                                    mb.access = Access.read;
+                            }
+                            else if (type[0] == 'W')
+                                mb.access = Access.write;
+                        }
+                        parse_value_desc(mb.value_desc, ty, units);
                         break;
 
                     case "zb":

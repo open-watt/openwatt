@@ -9,10 +9,10 @@ import urt.string;
 import urt.time;
 
 import protocol.modbus;
+import protocol.modbus.message;
 
 import router.iface;
 import router.iface.modbus : ModbusFrameType; // TODO: move this?
-import router.modbus.message;
 
 import manager;
 

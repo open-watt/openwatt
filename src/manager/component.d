@@ -9,8 +9,6 @@ import urt.string;
 import manager.device;
 import manager.element;
 
-import router.modbus.profile;
-
 nothrow @nogc:
 
 
