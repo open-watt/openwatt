@@ -319,6 +319,8 @@ nothrow @nogc:
     ref const(ElementDesc_Modbus) get_mb(size_t i) const pure
         => mb_elements[i];
 
+    ref const(ElementDesc_AA55) get_aa55(size_t i) const pure
+        => aa55_elements[i];
 
     void drop_lookup_strings()
     {
@@ -634,6 +636,18 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             desc = ValueDesc(type);
                         }
                     }
+                    else if (type.data_kind == DataKind.date_time)
+                    {
+                        switch (units)
+                        {
+                            case "yymmddhhmmss":
+                                desc = ValueDesc(type, DateFormat.yymmddhhmmss);
+                                break;
+                            default:
+                                writeWarning("Invalid date_time format: ", units);
+                                break;
+                        }
+                    }
                     else
                     {
                         desc = ValueDesc(type);
@@ -717,8 +731,36 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         break;
 
                     case "aa55":
+                        import protocol.goodwe.aa55;
+
+                        const(char)[] tail = reg_item.value;
+                        tail = tail.split_element_and_desc();
+
+                        const(char)[] fn = tail.split!',';
+                        const(char)[] offset = tail.split!',';
+                        const(char)[] type = tail.split!','.unQuote;
+                        const(char)[] units = tail.split!','.unQuote;
+
                         e.element_index = cast(ushort)((ElementType.aa55 << 13) | aa55_count);
                         ref ElementDesc_AA55 aa55 = profile.aa55_elements[aa55_count++];
+
+                        size_t taken;
+                        ulong ti = fn.parse_uint_with_base(&taken);
+                        if (taken != fn.length || ti > ubyte.max)
+                        {
+                            writeWarning("Invalid AA55 control code: ", fn);
+                            break;
+                        }
+                        aa55.function_code = cast(ubyte)ti;
+                        ti = offset.parse_uint_with_base(&taken);
+                        if (taken != offset.length || ti > ubyte.max)
+                        {
+                            writeWarning("Invalid AA55 function code: ", offset);
+                            break;
+                        }
+                        aa55.offset = cast(ubyte)ti;
+
+                        parse_value_desc(aa55.value_desc, type.parse_data_type(), units);
                         break;
 
                     default:

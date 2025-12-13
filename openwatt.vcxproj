@@ -94,6 +94,9 @@
     <DCompile Include="src\protocol\ezsp\client.d" />
     <DCompile Include="src\protocol\ezsp\commands.d" />
     <DCompile Include="src\protocol\ezsp\package.d" />
+    <DCompile Include="src\protocol\goodwe\aa55.d" />
+    <DCompile Include="src\protocol\goodwe\package.d" />
+    <DCompile Include="src\protocol\goodwe\sampler.d" />
     <DCompile Include="src\protocol\http\client.d" />
     <DCompile Include="src\protocol\http\message.d" />
     <DCompile Include="src\protocol\http\package.d" />
@@ -128,8 +131,6 @@
     <DCompile Include="src\protocol\zigbee\coordinator.d" />
     <DCompile Include="src\protocol\zigbee\package.d" />
     <DCompile Include="src\protocol\zigbee\zcl.d" />
-    <DCompile Include="src\router\goodwe\aa55.d" />
-    <DCompile Include="src\router\goodwe\package.d" />
     <DCompile Include="src\router\iface\bridge.d" />
     <DCompile Include="src\router\iface\can.d" />
     <DCompile Include="src\router\iface\ethernet.d" />
