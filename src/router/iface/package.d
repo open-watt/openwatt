@@ -419,7 +419,8 @@ package:
         }
     }
 
-private:
+//private:
+protected: // TODO: should probably be private?
     InterfaceSubscriber[4] subscribers;
     ubyte numSubscribers;
 }

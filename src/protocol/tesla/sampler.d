@@ -4,6 +4,7 @@ import urt.array;
 import urt.si.quantity;
 import urt.variant;
 
+import manager;
 import manager.element;
 import manager.sampler;
 import manager.subscriber;
@@ -20,9 +21,8 @@ class TeslaTWCSampler : Sampler
 {
 nothrow @nogc:
 
-    this(TeslaProtocolModule tesla_mod, ushort chargerId, MACAddress mac)
+    this(ushort chargerId, MACAddress mac)
     {
-        this.tesla_mod = tesla_mod;
         this.chargerId = chargerId;
         this.mac = mac;
     }
@@ -31,6 +31,7 @@ nothrow @nogc:
     {
         if (!master)
         {
+            auto tesla_mod = get_module!TeslaProtocolModule;
             outer: foreach (twc; tesla_mod.twcMasters.values)
             {
                 foreach (i, ref c; twc.chargers)
@@ -114,7 +115,6 @@ nothrow @nogc:
         }
     }
 
-    TeslaProtocolModule tesla_mod;
     TeslaTWCMaster master;
     ubyte chargerIndex;
     ushort chargerId;

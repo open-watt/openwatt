@@ -222,7 +222,7 @@ nothrow @nogc:
 
     final void destroy()
     {
-        writeInfo(_type[], " '", _name, "' destroyed...");
+        writeInfo(_type[], " '", _name, "' destroyed");
 
         _state |= _Disabled | _Destroyed;
         _state &= ~_Start;
@@ -414,13 +414,13 @@ protected:
 
     void set_online()
     {
-        writeInfo(_type[], " '", _name, "' online...");
+        writeInfo(_type[], " '", _name, "' online");
         signal_state_change(StateSignal.Online);
     }
 
     void set_offline()
     {
-        writeInfo(_type[], " '", _name, "' offline...");
+        writeInfo(_type[], " '", _name, "' offline");
         signal_state_change(StateSignal.Offline);
     }
 

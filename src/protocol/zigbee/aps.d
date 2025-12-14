@@ -4,8 +4,11 @@ import urt.endian;
 
 import router.iface.packet;
 
-pure nothrow @nogc:
+nothrow @nogc:
 
+//
+// APS spec here: https://zigbeealliance.org/wp-content/uploads/2019/11/docs-05-3474-21-0csg-zigbee-specification.pdf
+//
 
 enum APSFrameType : ubyte
 {
@@ -31,12 +34,23 @@ enum APSFragmentation : ubyte
     reserved  = 3,
 }
 
+enum APSFlags : ushort
+{
+    none = 0x0000,
+    zdo_response_required = 0x4000
+}
+
+
 struct APSFrame
 {
     enum Type = PacketType.ZigbeeAPS;
 
     APSFrameType type;
     APSDeliveryMode delivery_mode;
+
+    APSFlags flags; // we can trim this if we need more bytes
+
+    ushort pan_id;
 
     ushort dst;
     ushort src;
@@ -60,7 +74,7 @@ struct APSFrame
     byte last_hop_rssi;
 }
 
-ptrdiff_t parse_aps_frame(const void[] packet, out APSFrame frame)
+ptrdiff_t parse_aps_frame(const void[] packet, out APSFrame frame) pure
 {
     if (packet.length < 8)
         return -1;
@@ -114,4 +128,24 @@ ptrdiff_t parse_aps_frame(const void[] packet, out APSFrame frame)
     }
 
     return i;
+}
+
+const(char)[] profile_name(ushort profile)
+{
+    import urt.mem.temp : tformat;
+
+    switch (profile)
+    {
+        case 0x0000: return "zdo";
+        case 0x0101: return "ipm";  // industrial plant monitoring
+        case 0x0104: return "ha";   // home assistant
+        case 0x0105: return "ba";   // building automation
+        case 0x0107: return "ta";   // telco automation
+        case 0x0108: return "hc";   // health care
+        case 0x0109: return "se";   // smart energy
+        case 0xA1E0: return "gp";   // green power
+        case 0xC05E: return "zll";  // zigbee light link
+        default:
+            return tformat("{0, 04x}", profile);
+    }
 }
