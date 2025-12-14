@@ -85,6 +85,7 @@ void register_modules(Application app)
     import protocol;
     register_module!(protocol.dns)(app);
     register_module!(protocol.ezsp)(app);
+    register_module!(protocol.goodwe)(app);
     register_module!(protocol.http)(app);
     register_module!(protocol.ip)(app);
     register_module!(protocol.modbus)(app);

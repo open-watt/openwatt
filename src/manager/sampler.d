@@ -72,13 +72,18 @@ enum DataKind : ubyte
     // integer types first
     integer = 0,
     bitfield = 1,
-    date_ = 2, // there are lots of date formats...
+    date_time = 2,
     // special-cases after
     floating = 3,
     low_byte = 4,
     high_byte = 5,
     string_z = 6,
     string_sp = 7,
+}
+
+enum DateFormat : ubyte
+{
+    yymmddhhmmss,
 }
 
 ubyte data_bytes(DataType type) pure
@@ -113,9 +118,18 @@ nothrow @nogc:
         _pre_scale = pre_scale;
     }
 
+    this(DataType type, DateFormat date_format) pure
+    {
+        assert(type.data_kind == DataKind.date_time, "dates require date_time");
+        _type = type;
+        _enum_info = null; // HACK: clear the high bits
+        _date_format = date_format;
+    }
+
     this(DataType type, const VoidEnumInfo* enum_info) pure
     {
         assert(type & DataType.enumeration, "enum_info requires enumeration data type");
+        _type = type;
         _enum_info = enum_info;
     }
 
@@ -152,6 +166,9 @@ nothrow @nogc:
         return true;
     }
 
+    DataType data_type() const pure
+        => _type;
+
     ushort data_length() const pure
         => _type.data_length;
 
@@ -171,6 +188,7 @@ private:
             ScaledUnit _unit;
             float _pre_scale = 1;
         }
+        DateFormat _date_format;
         const(VoidEnumInfo)* _enum_info; // these padd the struct; booo!
         CustomSample _custom_sample;
     }
@@ -196,7 +214,7 @@ Variant sample_value(const void* data, ref const ValueDesc desc)
     DataKind kind = desc._type.data_kind;
     final switch (kind) with (DataKind)
     {
-        case integer, bitfield, date_:
+        case integer, bitfield, date_time:
             if (load_little_endian)
             {
                 final switch (desc._type & 0x1F)
@@ -359,9 +377,25 @@ Variant sample_value(const void* data, ref const ValueDesc desc)
             r = Variant(f_value);
             break;
 
-        case date_:
-            assert(false, "TODO");
-            break;
+        case date_time:
+            import urt.time;
+            DateTime dt;
+            switch (desc._date_format) with (DateFormat)
+            {
+                case yymmddhhmmss:
+                    dt.year = 2000 + cast(ushort)((raw_value >> 40) & 0xFF);
+                    dt.month = cast(Month)((raw_value >> 32) & 0xFF);
+                    dt.day = cast(ushort)((raw_value >> 24) & 0xFF);
+                    dt.hour = cast(ushort)((raw_value >> 16) & 0xFF);
+                    dt.minute = cast(ushort)((raw_value >> 8) & 0xFF);
+                    dt.second = cast(ushort)(raw_value & 0xFF);
+                    dt.ns = 0;
+                    break;
+
+                default:
+                    assert(false, "unknown date_time format");
+            }
+            return Variant(dt);
 
         case bitfield:
         case string_z:
@@ -399,6 +433,11 @@ DataType parse_data_type(const(char)[] desc) pure
     {
         flags |= DataType.enumeration;
         kind = DataKind.bitfield;
+        desc = desc[2 .. $];
+    }
+    else if (desc[0 .. 2] == "dt")
+    {
+        kind = DataKind.date_time;
         desc = desc[2 .. $];
     }
     else if (desc.length > 4 && desc[0 .. 4] == "enum")

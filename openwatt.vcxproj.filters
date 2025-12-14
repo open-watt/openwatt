@@ -28,9 +28,6 @@
     <Filter Include="src\devices\goodwe">
       <UniqueIdentifier>{40945e90-884d-42fe-af71-ebfa344845cc}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\router\goodwe">
-      <UniqueIdentifier>{a67ded80-224a-4703-a3a0-d4df1bb6a2a6}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\manager\console">
       <UniqueIdentifier>{5b7f73d6-de14-482f-86a8-89a77e2af436}</UniqueIdentifier>
     </Filter>
@@ -42,6 +39,9 @@
     </Filter>
     <Filter Include="src\protocol">
       <UniqueIdentifier>{e3d26653-740a-4de4-ad46-6df4e33023d0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\protocol\goodwe">
+      <UniqueIdentifier>{45765f37-2305-4031-b32b-a2c3b88bebe0}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\protocol\modbus">
       <UniqueIdentifier>{aba64285-47d8-4af3-a4bf-5284dbbeea44}</UniqueIdentifier>
@@ -186,9 +186,6 @@
     <DCompile Include="src\devices\goodwe\scanner.d">
       <Filter>src\devices\goodwe</Filter>
     </DCompile>
-    <DCompile Include="src\router\goodwe\aa55.d">
-      <Filter>src\router\goodwe</Filter>
-    </DCompile>
     <DCompile Include="src\manager\package.d">
       <Filter>src\manager</Filter>
     </DCompile>
@@ -197,9 +194,6 @@
     </DCompile>
     <DCompile Include="src\manager\profile.d">
       <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\router\goodwe\package.d">
-      <Filter>src\router\goodwe</Filter>
     </DCompile>
     <DCompile Include="src\router\stream\bridge.d">
       <Filter>src\router\stream</Filter>
@@ -236,6 +230,15 @@
     </DCompile>
     <DCompile Include="src\router\port\package.d">
       <Filter>src\router\port</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\goodwe\aa55.d">
+      <Filter>src\protocol\goodwe</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\goodwe\package.d">
+      <Filter>src\protocol\goodwe</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\goodwe\sampler.d">
+      <Filter>src\protocol\goodwe</Filter>
     </DCompile>
     <DCompile Include="src\protocol\http\client.d">
       <Filter>src\protocol\http</Filter>
