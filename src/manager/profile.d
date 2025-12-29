@@ -56,17 +56,17 @@ pure nothrow @nogc:
     Frequency update_frequency = Frequency.medium;
 
     ElementType type() const
-        => cast(ElementType)(element_index >> 13);
+        => cast(ElementType)(_element_index >> 13);
 
     size_t element() const
-        => element_index & 0x1FFF;
+        => _element_index & 0x1FFF;
 
     const(char)[] get_description(ref const(Profile) profile) const
-        => profile.desc_strings ? as_dstring(profile.desc_strings.ptr + description) : null;
+        => profile.desc_strings ? as_dstring(profile.desc_strings.ptr + _description) : null;
 
 private:
-    ushort element_index; // bits 0-12: index, bits 13-15: type
-    ushort description;
+    ushort _element_index; // bits 0-12: index, bits 13-15: type
+    ushort _description;
 }
 
 struct ElementDesc_Modbus
@@ -110,12 +110,10 @@ pure nothrow @nogc:
     }
 
     Type type;
+    ubyte index;
 
     const(char)[] get_id(ref const(Profile) profile) const
         => as_dstring(profile.id_strings.ptr + _id);
-
-    ushort get_index() const
-        => _index;
 
     const(char)[] get_constant_value(ref const(Profile) profile) const
     {
@@ -132,7 +130,6 @@ pure nothrow @nogc:
 private:
     ushort _id;
     ushort _value;
-    ushort _index;
 }
 
 struct ComponentTemplate
@@ -328,6 +325,9 @@ nothrow @nogc:
 
     ref const(ElementDesc_Modbus) get_mb(size_t i) const pure
         => mb_elements[i];
+
+    ref const(ElementDesc_Zigbee) get_zb(size_t i) const pure
+        => zb_elements[i];
 
     ref const(ElementDesc_AA55) get_aa55(size_t i) const pure
         => aa55_elements[i];
@@ -622,7 +622,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         l.id = lookup_cache.add_string(id);
                         l.hash = fnv1a(cast(ubyte[])id) & 0xFFFF;
 
-                        e.description = desc_cache.add_string(desc);
+                        e._description = desc_cache.add_string(desc);
                         break;
 
                     default:
@@ -689,7 +689,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         const(char)[] type = tail.split!','.unQuote;
                         const(char)[] units = tail.split!','.unQuote;
 
-                        e.element_index = cast(ushort)((ElementType.modbus << 13) | mb_count);
+                        e._element_index = cast(ushort)((ElementType.modbus << 13) | mb_count);
                         ref ElementDesc_Modbus mb = profile.mb_elements[mb_count++];
 
                         // TODO: MOVE THIS CODE!
@@ -752,7 +752,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         const(char)[] type = tail.split!','.unQuote;
                         const(char)[] units = tail.split!','.unQuote;
 
-                        e.element_index = cast(ushort)((ElementType.zigbee << 13) | zb_count);
+                        e._element_index = cast(ushort)((ElementType.zigbee << 13) | zb_count);
                         ref ElementDesc_Zigbee zb = profile.zb_elements[zb_count++];
 
                         size_t taken;
@@ -809,7 +809,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         break;
 
                     case "http":
-                        e.element_index = cast(ushort)((ElementType.http << 13) | http_count);
+                        e._element_index = cast(ushort)((ElementType.http << 13) | http_count);
                         ref ElementDesc_HTTP http = profile.http_elements[http_count++];
                         break;
 
@@ -824,7 +824,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         const(char)[] type = tail.split!','.unQuote;
                         const(char)[] units = tail.split!','.unQuote;
 
-                        e.element_index = cast(ushort)((ElementType.aa55 << 13) | aa55_count);
+                        e._element_index = cast(ushort)((ElementType.aa55 << 13) | aa55_count);
                         ref ElementDesc_AA55 aa55 = profile.aa55_elements[aa55_count++];
 
                         size_t taken;
@@ -977,12 +977,12 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                                 else
                                 {
                                     ulong i = index.parse_uint();
-                                    if (i > ushort.max)
+                                    if (i > ubyte.max)
                                     {
                                         writeWarning("Invalid element index in element-map: ", index);
                                         continue;
                                     }
-                                    e._index = cast(ushort)i;
+                                    e.index = cast(ubyte)i;
                                 }
 
                                 ptrdiff_t i = profile.find_element(id);

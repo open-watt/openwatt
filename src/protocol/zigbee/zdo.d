@@ -2,6 +2,8 @@ module protocol.zigbee.zdo;
 
 import urt.endian;
 
+import protocol.zigbee;
+
 nothrow @nogc:
 
 //
@@ -114,4 +116,66 @@ enum ZDOMACCaps : ubyte
     receiver_on_when_idle = 0x08,
     security_capable = 0x40,
     allocate_address = 0x80
+}
+
+
+bool parse_node_desc(const(ubyte)[] message, NodeMap* node)
+{
+    if (message.length < 15)
+        return false;
+    if (message[0..2].littleEndianToNative!ushort != node.id)
+        return false;
+
+    ubyte type = message[2] & 0x07;
+    node.desc.freq_bands = message[3] >> 3;
+    node.desc.mac_capabilities = message[4];
+    NodeType new_type;
+    if (type == 0)
+        new_type = NodeType.coordinator;
+    else if (type == 1)
+        new_type = NodeType.router;
+    else
+    {
+//        if (node.desc.mac_capabilities == 0x80) // HACK: lots of Tuya devices only report this 'allocate address' flag
+//            new_type = NodeType.router;         //       ...and apparently that means they're a router?
+//        else
+        assert((node.desc.mac_capabilities & 0x2) == 0, "FFD flag, but not a router? the information is in conflict... who do we trust?");
+
+        if (node.desc.mac_capabilities & 0x08) // receiver-on-while-idle
+            new_type = NodeType.end_device;
+        else
+            new_type = NodeType.sleepy_end_device;
+    }
+    if (node.desc.type != NodeType.unknown && node.desc.type != new_type)
+    {
+        import urt.log;
+        writeDebugf("Zigbee: node {0, 04x} type mismatch: old = {1}, new = {2}", node.id, node.desc.type, new_type);
+    }
+    node.desc.type = new_type;
+    node.desc.manufacturer_code = message[5..7].littleEndianToNative!ushort;
+    ushort server_mask = message[10..12].littleEndianToNative!ushort;
+    node.desc.server_capabilities = server_mask & ZDOServerCapability.mask;
+    node.desc.stack_compliance_revision = server_mask >> 9;
+    node.desc.max_nsdu = message[7];
+    node.desc.max_asdu_in = message[8..10].littleEndianToNative!ushort;
+    node.desc.max_asdu_out = message[12..14].littleEndianToNative!ushort;
+    node.desc.complex_desc = (message[2] & 0x08) != 0;
+    node.desc.user_desc = (message[2] & 0x10) != 0;
+    node.desc.extended_active_ep_list = (message[14] & 0x01) != 0;
+    node.desc.extended_simple_desc_list = (message[14] & 0x02) != 0;
+
+    if (node.desc.complex_desc)
+    {
+        // TODO: request complex descriptor??
+        assert(false);
+    }
+    if (node.desc.user_desc)
+    {
+        // TODO: request user descriptor??
+        assert(false);
+    }
+
+    node.initialised |= 0x01;
+
+    return true;
 }

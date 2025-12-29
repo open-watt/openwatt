@@ -348,7 +348,7 @@
     <DCompile Include="src\protocol\zigbee\package.d">
       <Filter>src\protocol\zigbee</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\zigbee\sampler.d">
+    <DCompile Include="src\protocol\zigbee\router.d">
       <Filter>src\protocol\zigbee</Filter>
     </DCompile>
     <DCompile Include="src\protocol\zigbee\zcl.d">

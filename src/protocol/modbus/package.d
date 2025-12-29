@@ -103,7 +103,7 @@ nothrow @nogc:
         // create a sampler for this modbus server...
         ModbusSampler sampler = g_app.allocator.allocT!ModbusSampler(client, target);
 
-        Device device = create_device_from_profile(*profile, null, id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc) {
+        Device device = create_device_from_profile(*profile, null, id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
             assert(desc.type == ElementType.modbus);
             ref const ElementDesc_Modbus mb = profile.get_mb(desc.element);
 

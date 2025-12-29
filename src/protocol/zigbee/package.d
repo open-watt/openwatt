@@ -24,6 +24,7 @@ import protocol.ezsp.client;
 import protocol.zigbee.client;
 import protocol.zigbee.coordinator;
 import protocol.zigbee.controller;
+import protocol.zigbee.router;
 import protocol.zigbee.zcl;
 
 import router.iface;
@@ -60,7 +61,11 @@ enum ZigbeeResult : ubyte
     success = 0,
     failed,
     buffered,
+    insufficient_buffer,
+    truncated,
+    unexpected,
     pending,
+    aborted,
     no_network,
     timeout,
     invalid_parameter,
@@ -71,6 +76,21 @@ enum ZigbeeResult : ubyte
 
 struct NodeMap
 {
+    struct BasicInfo
+    {
+        // basic info: (from basic cluster)
+        ubyte zcl_ver;
+        ubyte app_ver;
+        ubyte stack_ver;
+        ubyte hw_ver;
+        ZCLPowerSource power_source;
+        String mfg_name;
+        String model_name;
+        String sw_build_id;
+        String product_code;
+        String product_url;
+    }
+
     struct NodeDescriptor
     {
         NodeType type;
@@ -112,6 +132,9 @@ struct NodeMap
         Array!ushort out_clusters; // the clusters that this endpoint can send requests to
 
     nothrow @nogc:
+        bool has_cluster(ushort cluster_id) const pure
+            => (cluster_id in clusters) !is null;
+
         ref Cluster get_cluster(ushort cluster_id)
         {
             Cluster* cluster = cluster_id in clusters;
@@ -128,7 +151,8 @@ struct NodeMap
     {
         ushort cluster_id;
         bool dynamic; // true when the cluster was reported but not listed in the zdo...
-        ubyte scanning;
+        ubyte initialised;
+        bool scan_in_progress;
         Map!(ushort, Attribute) attributes;
 
     nothrow @nogc:
@@ -158,6 +182,7 @@ struct NodeMap
             this.value = rh.value;
             this.last_updated = rh.last_updated;
         }
+        version (EnableMoveSemantics) {
         this(Attribute rh)
         {
             this.attribute_id = rh.attribute_id;
@@ -165,21 +190,7 @@ struct NodeMap
             this.value = rh.value.move;
             this.last_updated = rh.last_updated;
         }
-    }
-
-    struct BasicInfo
-    {
-        // basic info: (from basic cluster)
-        ubyte zcl_ver;
-        ubyte app_ver;
-        ubyte stack_ver;
-        ubyte hw_ver;
-        ZCLPowerSource power_source;
-        String mfg_name;
-        String model_name;
-        String sw_build_id;
-        String product_code;
-        String product_url;
+        }
     }
 
     String name;
@@ -191,21 +202,23 @@ struct NodeMap
     ushort pan_id = 0xFFFF; // not joined
     ushort id = 0xFFFE; // not online
     ushort parent_id = 0xFFFE;
+    bool discovered;
 
     ubyte initialised;
-    bool discovered;
+    bool scan_in_progress;
+    bool device_created;
 
 //    ubyte last_lqi;
 //    byte last_rssi;
 
     NodeDescriptor desc;
     PowerDescriptor power;
-
     BasicInfo basic_info;
 
     Map!(ubyte, Endpoint) endpoints;
+    Map!(ubyte, Variant) tuya_datapoints;
 
-    MonoTime lastRequest;
+    SysTime last_seen;
 
 nothrow @nogc:
     bool available() const pure
@@ -237,7 +250,10 @@ nothrow @nogc:
     MutableString!0 get_fingerprint()
     {
         // build a fingerprint string...
-        return MutableString!0(Concat, basic_info.mfg_name, ':', basic_info.model_name);
+        if (basic_info.sw_build_id)
+            return MutableString!0(Concat, basic_info.mfg_name, ':', basic_info.model_name, ':', basic_info.sw_build_id);
+        else
+            return MutableString!0(Concat, basic_info.mfg_name, ':', basic_info.model_name, ':', basic_info.hw_ver, '.', basic_info.app_ver);
     }
 }
 
@@ -246,8 +262,18 @@ class ZigbeeProtocolModule : Module
     mixin DeclareModule!"protocol.zigbee";
 nothrow @nogc:
 
+    struct UnknownNode
+    {
+        BaseInterface via;
+        ushort pan_id;
+        ushort id;
+        bool scanning;
+    }
+
+
     Map!(EUI64, NodeMap) nodes_by_eui;
     Map!(uint, NodeMap*) nodes_by_pan;
+    Array!UnknownNode unknown_nodes;
 
     Collection!ZigbeeInterface zigbee_interfaces;
     Collection!ZigbeeNode nodes;
@@ -281,21 +307,23 @@ nothrow @nogc:
 
     NodeMap* add_node(EUI64 eui, BaseInterface via = null)
     {
-        assert(eui != EUI64.broadcast, "Invalid EUI64");
+        assert(!eui.is_zigbee_broadcast, "Invalid EUI64");
         assert(eui !in nodes_by_eui, "Already exists");
         return nodes_by_eui.insert(eui, NodeMap(eui: eui, discovered: via !is null, via: via));
     }
 
     NodeMap* attach_node(EUI64 eui, ushort pan_id, ushort id)
     {
-        assert(eui != EUI64.broadcast, "Invalid EUI64");
+        assert(!eui.is_zigbee_broadcast, "Invalid EUI64");
         assert(pan_id != 0xFFFF && id != 0xFFFE, "Invalid pan_id/id");
 
         NodeMap* n = eui in nodes_by_eui;
         if (!n)
             n = nodes_by_eui.insert(eui, NodeMap(eui: eui));
-        n.pan_id = pan_id;
+        if ((n.id != 0xFFFE && id != n.id) || (n.pan_id != 0xFFFF && pan_id != n.pan_id))
+            detach_node(n.pan_id, n.id);
         n.id = id;
+        n.pan_id = pan_id;
         nodes_by_pan.insert((cast(uint)pan_id << 16) | id, n);
         return n;
     }
@@ -306,12 +334,21 @@ nothrow @nogc:
         if (!n)
             return;
         if (n.pan_id != 0xFFFF && n.id != 0xFFFE)
-            nodes_by_pan.remove((cast(uint)n.pan_id << 16) | n.id);
+            detach_node(n.pan_id, n.id);
         nodes_by_eui.remove(eui);
     }
 
     void detach_node(ushort pan_id, ushort id)
     {
+        foreach (i, ref unk; unknown_nodes)
+        {
+            if (pan_id == unk.pan_id && id == unk.id)
+            {
+                unknown_nodes.remove(i);
+                break;
+            }
+        }
+
         uint local_id = ((cast(uint)pan_id << 16) | id);
         NodeMap** n = local_id in nodes_by_pan;
         if (!n)
@@ -341,6 +378,18 @@ nothrow @nogc:
         if (n)
             return *n;
         return null;
+    }
+
+    void discover_node(BaseInterface via, ushort pan_id, ushort id)
+    {
+        if (find_node(pan_id, id))
+            return;
+        foreach (ref n; unknown_nodes)
+        {
+            if (n.pan_id == pan_id && n.id == id)
+                return;
+        }
+        unknown_nodes.pushBack(UnknownNode(via, pan_id, id));
     }
 
     // some useful tools zigbee...

@@ -14,7 +14,7 @@ import manager.sampler;
 nothrow @nogc:
 
 
-alias CreateElementHandler = void delegate(Device device, Element* e, ref const ElementDesc desc) nothrow @nogc;
+alias CreateElementHandler = void delegate(Device device, Element* e, ref const ElementDesc desc, ubyte index) nothrow @nogc;
 
 extern(C++)
 class Device : Component
@@ -152,7 +152,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     break;
 
                 case map:
-                    create_element_handler(device, e, el.get_element_desc(profile));
+                    create_element_handler(device, e, el.get_element_desc(profile), el.index);
                     break;
             }
 

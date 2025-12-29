@@ -22,7 +22,7 @@ enum ZCLControlFlags : ubyte
 
 enum ZCLCommand : ushort
 {
-    read_attributes = 0x00,
+    read_attributes = 0x00,                     // [ u16: attr_id, ... ]
     read_attributes_response = 0x01,
     write_attributes = 0x02,
     write_attributes_undivided = 0x03,
@@ -46,7 +46,33 @@ enum ZCLCommand : ushort
     discover_attributes_extended = 0x15,
     discover_attributes_extended_response = 0x16,
 
-    // Manufacturer-specific commands can be defined starting from 0x80
+    // Cluster-local commands can be defined starting from 0x4000
+
+    // Cluster 0: basic
+    factory_reset = 0x4000,
+
+    // Cluster 6: onoff
+    onoff_off = 0x4000,
+    onoff_on = 0x4001,
+    onoff_toggle = 0x4002,
+    onoff_off_with_effect = 0x4040,             // [ u8: effect_id, u8: effect_variant ]
+    onoff_on_with_recall_global_scene = 0x4041,
+    onoff_on_with_timed_off = 0x4042,           // [ u8: on_off_control, u16: on_time, u16: off_wait_time ]
+
+    // Cluster EF00: Tuya
+    tuya_data_request = 0x4000,
+    tuya_data_response = 0x4001,
+    tuya_data_report = 0x4002,
+    tuya_data_query = 0x4003,
+    tuya_mcu_version_req = 0x4010,
+    tuya_mcu_version_rsp = 0x4011,
+    tuya_mcu_ota_notify = 0x4012,
+    tuya_ota_block_data_req = 0x4013,
+    tuya_ota_block_data_rsp = 0x4014,
+    tuya_mcu_ota_result = 0x4015,
+    tuya_mcu_sync_time = 0x4024,
+
+    // Manufacturer-specific commands can be defined starting from 0x8000
 }
 
 enum ZCLClusterCommand : ubyte
@@ -182,10 +208,13 @@ enum ZCLPowerSource : ubyte
 
 struct ZCLHeader
 {
+    enum min_length = 3;
+
     ubyte control;
-    ushort manufacturer_code;
     ubyte seq;
     ubyte command;
+    bool cluster_local;
+    ushort manufacturer_code;
 }
 
 ptrdiff_t decode_zcl_header(const(void)[] data, out ZCLHeader hdr)
@@ -204,21 +233,22 @@ ptrdiff_t decode_zcl_header(const(void)[] data, out ZCLHeader hdr)
     }
     hdr.seq = bytes[1 + offset];
     hdr.command = cast(ZCLCommand)bytes[2 + offset];
+    hdr.cluster_local = (hdr.control & ZCLControlFlags.frame_type_mask) == ZCLControlFlags.frame_type_cluster;
     return 3 + offset;
 }
 
 ptrdiff_t format_zcl_header(ref ZCLHeader hdr, void[] buffer)
 {
-    size_t offset = (hdr.control & ZCLControlFlags.manufacturer_specific) ? 2 : 0;
+    size_t offset = hdr.manufacturer_code != 0 ? 2 : 0;
     if (buffer.length < 3 + offset)
         return -1;
 
     auto bytes = cast(ubyte[])buffer;
-    bytes[0] = hdr.control;
-    if (offset)
+    bytes[0] = hdr.control | (hdr.cluster_local ? ZCLControlFlags.frame_type_cluster : 0) | (hdr.manufacturer_code ? ZCLControlFlags.manufacturer_specific : 0);
+    if (hdr.manufacturer_code)
         bytes[1..3] = hdr.manufacturer_code.nativeToLittleEndian;
     bytes[1 + offset] = hdr.seq;
-    bytes[2 + offset] = hdr.command;
+    bytes[2 + offset] = hdr.command & 0xFF;
     return 3 + offset;
 }
 

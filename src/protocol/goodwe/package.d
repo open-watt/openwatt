@@ -136,7 +136,7 @@ nothrow @nogc:
         // create a sampler for this modbus server...
         GoodWeSampler sampler = g_app.allocator.allocT!GoodWeSampler(aa55_client);
 
-        Device device = create_device_from_profile(*profile, aa55_client.model[], id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc) {
+        Device device = create_device_from_profile(*profile, aa55_client.model[], id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
             assert(desc.type == ElementType.aa55);
             ref const ElementDesc_AA55 aa55 = profile.get_aa55(desc.element);
 

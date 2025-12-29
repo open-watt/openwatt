@@ -58,7 +58,7 @@ class EZSPClient : BaseObject
                                          Property.create!("protocol-version", protocol_version)() ];
 @nogc:
 
-    enum TypeName = StringLit!"ezsp";
+    alias TypeName = StringLit!"ezsp";
 
     enum StackType : ubyte
     {

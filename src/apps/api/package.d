@@ -28,7 +28,7 @@ class APIManager : BaseObject
                                          Property.create!("uri", uri)() ];
 nothrow @nogc:
 
-    enum TypeName = StringLit!"api";
+    alias TypeName = StringLit!"api";
 
     this(String name, ObjectFlags flags = ObjectFlags.None)
     {
