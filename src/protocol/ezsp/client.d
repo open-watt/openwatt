@@ -1,5 +1,6 @@
 module protocol.ezsp.client;
 
+import urt.array;
 import urt.endian;
 import urt.fibre;
 import urt.lifetime;
@@ -51,11 +52,13 @@ template EZSPResult(T)
 
 class EZSPClient : BaseObject
 {
-    __gshared Property[2] Properties = [ Property.create!("stream", stream)(),
-                                         Property.create!("stack-type", stack_type)() ];
+    __gshared Property[4] Properties = [ Property.create!("stream", stream)(),
+                                         Property.create!("stack-type", stack_type)(),
+                                         Property.create!("stack-version", stack_version)(),
+                                         Property.create!("protocol-version", protocol_version)() ];
 @nogc:
 
-    enum TypeName = StringLit!"ezsp";
+    alias TypeName = StringLit!"ezsp";
 
     enum StackType : ubyte
     {
@@ -87,6 +90,12 @@ class EZSPClient : BaseObject
 
     final StackType stack_type() const pure nothrow
         => _stack_type;
+
+    final String stack_version() const pure nothrow
+        => _stack_version;
+
+    final ubyte protocol_version() const pure nothrow
+        => _known_version;
 
     // API...
 
@@ -214,7 +223,7 @@ nothrow:
                                                                           (const(ubyte)[] data){ EZSP_Command.Response r; data.ezsp_deserialise(r); return tconcat(r); }));
             }
 
-            ubyte[EZSP_Command.Request.sizeof] buffer = void;
+            ubyte[256] buffer = void; // TODO: what is the maximum ezsp payload length?
             EZSP_Command.Request tr = void;
             tr.tupleof[] = args[];
             size_t offset = tr.ezsp_serialise(buffer[]);
@@ -318,6 +327,15 @@ nothrow:
             return;
 
         ash.update();
+
+        MonoTime now = getTime();
+        if (_queued_requests.length > 0 && now - _queued_requests[0].ts > 200.msecs)
+        {
+            writeWarningf("EZSP: request x{0,02x} timed out", _queued_requests[0].sequence_number);
+            _queued_requests.popFront();
+
+            send_queued_message();
+        }
     }
 
 private:
@@ -329,13 +347,16 @@ private:
         override bool ready() { return finished; }
     }
 
-    struct ActiveRequests
+    struct QueuedRequest
     {
+        MonoTime ts;
+        ubyte sequence_number;
+        ushort cmd;
+        Array!ubyte data;
         void function(const(ubyte)[], void*, void*, void*) nothrow @nogc response_shim;
         void* cb_funcptr;
         void* cb_instance;
         void* user_data;
-        ubyte sequence_number;
     }
 
     struct CommandHandler
@@ -361,7 +382,7 @@ private:
 
     void delegate(ubyte, ushort, const(ubyte)[]) nothrow @nogc _message_handler;
     Map!(ushort, CommandHandler) _command_handlers;
-    ActiveRequests[16] _active_requests;
+    Array!QueuedRequest _queued_requests;
 
     version(DebugMessageFlow)
     {
@@ -383,7 +404,7 @@ private:
             _sequence_number = 0;
             _stack_type = StackType.Unknown;
             _stack_version = null;
-            _active_requests[] = ActiveRequests();
+            _queued_requests.clear();
             restart();
         }
         else
@@ -454,10 +475,10 @@ private:
 
         _last_event = getTime();
 
-        dispatch_command(seq, cmd, msg);
+        dispatch_command(seq, callback_type, cmd, msg);
     }
 
-    void dispatch_command(ubyte seq, ushort command, const(ubyte)[] msg)
+    void dispatch_command(ubyte seq, ubyte cb_type, ushort command, const(ubyte)[] msg)
     {
         switch (command)
         {
@@ -486,7 +507,7 @@ private:
                 writeInfof("EZSP: connected: {0} V{1} - protocol version {2}", r.stackType == 1 ? "ROUTER" : r.stackType == 2 ? "COORDINATOR" : "UNKNOWN", _stack_version, _known_version);
                 break;
 
-            case 0x0058: // invalidCommand
+            case 0x0058: // invalid command
                 EzspStatus reason = cast(EzspStatus)msg[0];
                 writeWarning("EZSP: invalid command: ", reason);
                 break;
@@ -495,17 +516,49 @@ private:
                 version(DebugMessageFlow)
                 {
                     CommandData* cmdName = command in commandNames;
-                    writeDebugf("EZSP: <-- [{0}] - {1}(x{2,04x}) - {3,?5}{4,!5}", seq, cmdName ? cmdName.name : "UNKNOWN", command, cmdName ? cmdName.resFmt(msg) : null, cast(void[])msg, cmdName !is null);
+                    writeDebugf("EZSP: <-- [{0,!2}{1,?2}] - {3}(x{4,04x}) - {5,?7}{6,!7}", seq, "CB", cb_type != 0, cmdName ? cmdName.name : "UNKNOWN", command, cmdName ? cmdName.resFmt(msg) : null, cast(void[])msg, cmdName !is null);
                 }
 
-                int slot = seq & 0xF;
-                if (_active_requests[slot].response_shim != null)
+                if (cb_type == 1)
                 {
-                    _active_requests[slot].response_shim(msg, _active_requests[slot].cb_funcptr, _active_requests[slot].cb_instance, _active_requests[slot].user_data);
-                    _active_requests[slot].response_shim = null;
+                    // TODO: can we confirm when and why this is sent? does it need special handling?
+                    assert(false); // this is a solicited callback, or something?
+                }
+
+                if (cb_type == 0)
+                {
+                    // message is a response to a queued request...
+
+                    if (_queued_requests.length == 0 || seq < _queued_requests[0].sequence_number)
+                    {
+                        // stale response?
+                        writeWarning("EZSP: received stale response - seq: ", seq);
+                        return;
+                    }
+                    if (seq > _queued_requests[0].sequence_number)
+                    {
+                        // out-of-order response? (this could be because the seq counter wrapped?)
+                        writeWarning("EZSP: received unsolicited or out-of-order response - seq: ", seq);
+                        return;
+                    }
+                    if (command != _queued_requests[0].cmd)
+                    {
+                        // mismatched response?
+                        writeWarningf("EZSP: received mismatched response - expected cmd x{0,04x} but got x{1,04x}", _queued_requests[0].cmd, command);
+                        return;
+                    }
+
+                    debug assert(_queued_requests[0].response_shim);
+
+                    _queued_requests[0].response_shim(msg, _queued_requests[0].cb_funcptr, _queued_requests[0].cb_instance, _queued_requests[0].user_data);
+                    _queued_requests.popFront();
+
+                    send_queued_message();
                 }
                 else
                 {
+                    // message is some callback...
+
                     if (auto cmdHandler = command in _command_handlers)
                         cmdHandler.response_shim(msg, cmdHandler.cb_funcptr, cmdHandler.cb_instance, cmdHandler.user_data);
                     else if (_message_handler)
@@ -521,24 +574,45 @@ private:
 
     bool send_command_impl(ushort cmd, ubyte[] data, void function(const(ubyte)[], void*, void*, void*) nothrow @nogc response_handler, void* cb, void* inst, void* user_data)
     {
-        int seq = send_message(cmd, data);
-        if (seq < 0)
-            return false;
+        ref QueuedRequest req = _queued_requests.pushBack();
+        req.cmd = cmd;
+        req.response_shim = response_handler;
+        req.cb_funcptr = cb;
+        req.cb_instance = inst;
+        req.user_data = user_data;
 
-        if (_active_requests[seq & 0xF].response_shim != null)
+        if (_queued_requests.length == 1)
         {
-            // TODO: we seem to have overflowed the active requests; we should probably timeout old requests?
-            assert(false, "TODO: how to handle this case?");
-            return false;
+            int seq = send_message(cmd, data);
+            if (seq < 0)
+            {
+                _queued_requests.popFront();
+                return false;
+            }
+            req.sequence_number = cast(ubyte)seq;
+            req.ts = getTime();
         }
-
-        _active_requests[seq & 0xF].response_shim = response_handler;
-        _active_requests[seq & 0xF].cb_funcptr = cb;
-        _active_requests[seq & 0xF].cb_instance = inst;
-        _active_requests[seq & 0xF].user_data = user_data;
-        _active_requests[seq & 0xF].sequence_number = seq & 0xFF;
+        else
+            req.data = data[];
 
         return true;
+    }
+
+    void send_queued_message()
+    {
+        while (_queued_requests.length > 0)
+        {
+            ref QueuedRequest req = _queued_requests[0];
+            int seq = send_message(req.cmd, req.data[]);
+            if (seq < 0)
+            {
+                _queued_requests.popFront();
+                continue;
+            }
+            req.sequence_number = cast(ubyte)seq;
+            req.ts = getTime();
+            break;
+        }
     }
 }
 
@@ -556,7 +630,12 @@ void response_shim(bool withUserdata, Args...)(const(ubyte)[] response, void* cb
             return;
         }
         if (taken < response.length)
-            writeWarning("EZSP: response buffer contains more bytes than expected! tail bytes: ", cast(void[])response[taken .. $]);
+        {
+            // TODO: WE SEE THIS WEIRD 02 TAIL BYTE ALL THE TIME IN NORMAL COMMUNICATION!
+            //       WTF IS IT? WHY DO WE SEE IT?
+            if (taken != response.length - 1 || response[$ - 1] != 0x02)
+                writeWarning("EZSP: response buffer contains more bytes than expected! tail bytes: ", cast(void[])response[taken .. $]);
+        }
     }
 
     if (inst)
