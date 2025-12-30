@@ -348,6 +348,9 @@
     <DCompile Include="src\protocol\zigbee\package.d">
       <Filter>src\protocol\zigbee</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\zigbee\router.d">
+      <Filter>src\protocol\zigbee</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\zigbee\zcl.d">
       <Filter>src\protocol\zigbee</Filter>
     </DCompile>
@@ -419,6 +422,9 @@
     </DCompile>
     <DCompile Include="src\protocol\ppp\server.d">
       <Filter>src\protocol\ppp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\zigbee\zdo.d">
+      <Filter>src\protocol\zigbee</Filter>
     </DCompile>
     <DCompile Include="src\manager\console\argument.d">
       <Filter>src\manager\console</Filter>
