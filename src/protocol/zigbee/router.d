@@ -181,6 +181,7 @@ protected:
 
                 auto n = mod_zb.attach_node(eui, _network_params.pan_id, id);
 
+                n.desc.mac_capabilities = caps;
                 NodeType type;
                 if (caps & 0x02) // fully-functional device
                     type = (caps & 0x01) ? NodeType.coordinator : NodeType.router;
@@ -189,14 +190,14 @@ protected:
 
                 // TODO: save the power source (0x04) and security caps (0x40) somewhere?
 
-                if (n.type != NodeType.unknown && n.type != type)
+                if (n.desc.type != NodeType.unknown && n.desc.type != type)
                 {
                     version (DebugZigbee)
-                        writeInfof("Zigbee: device announce: {0, 04x} [{1}] - type changed: old={2}, new={3} ({4,02x})", id, eui, n.type, type, caps);
+                        writeInfof("Zigbee: device announce: {0, 04x} [{1}] - type changed: old={2}, new={3} ({4,02x})", id, eui, n.desc.type, type, caps);
                 }
                 else version (DebugZigbee)
                     writeInfof("Zigbee: device announce: {0, 04x} [{1}] - type={2}", id, eui, type);
-                n.type = type;
+                n.desc.type = type;
                 break;
 
             default:

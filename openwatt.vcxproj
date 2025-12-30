@@ -128,6 +128,7 @@
     <DCompile Include="src\protocol\tesla\twc.d" />
     <DCompile Include="src\protocol\zigbee\aps.d" />
     <DCompile Include="src\protocol\zigbee\client.d" />
+    <DCompile Include="src\protocol\zigbee\controller.d" />
     <DCompile Include="src\protocol\zigbee\coordinator.d" />
     <DCompile Include="src\protocol\zigbee\package.d" />
     <DCompile Include="src\protocol\zigbee\router.d" />

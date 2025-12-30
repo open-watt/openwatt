@@ -82,6 +82,11 @@ struct ElementDesc_Modbus
 
 struct ElementDesc_Zigbee
 {
+    ushort cluster_id;
+    ushort attribute_id;
+    ushort manufacturer_code;
+    Access access = Access.read;
+    ValueDesc value_desc;
 }
 
 struct ElementDesc_HTTP
@@ -320,6 +325,9 @@ nothrow @nogc:
 
     ref const(ElementDesc_Modbus) get_mb(size_t i) const pure
         => mb_elements[i];
+
+    ref const(ElementDesc_Zigbee) get_zb(size_t i) const pure
+        => zb_elements[i];
 
     ref const(ElementDesc_AA55) get_aa55(size_t i) const pure
         => aa55_elements[i];
@@ -735,8 +743,69 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         break;
 
                     case "zb":
+                        const(char)[] tail = reg_item.value;
+                        tail = tail.split_element_and_desc();
+
+                        const(char)[] cluster = tail.split!',';
+                        const(char)[] mfg = tail.split!',';
+                        const(char)[] attrib = mfg.split!'(';
+                        const(char)[] type = tail.split!','.unQuote;
+                        const(char)[] units = tail.split!','.unQuote;
+
                         e._element_index = cast(ushort)((ElementType.zigbee << 13) | zb_count);
                         ref ElementDesc_Zigbee zb = profile.zb_elements[zb_count++];
+
+                        size_t taken;
+                        ulong t = cluster.parse_uint_with_base(&taken);
+                        if (taken != cluster.length || t > 0xFFFF)
+                        {
+                            writeWarning("Invalid Zigbee cluster ID: ", cluster);
+                            break;
+                        }
+                        zb.cluster_id = cast(ushort)t;
+
+                        t = attrib.parse_uint_with_base(&taken);
+                        if (taken != attrib.length || t > 0xFFFF)
+                        {
+                            writeWarning("Invalid Zigbee attribute ID: ", attrib);
+                            break;
+                        }
+                        zb.attribute_id = cast(ushort)t;
+
+                        if (mfg.length > 0)
+                        {
+                            if (mfg[$-1] != ')')
+                            {
+                                writeWarning("Invalid Zigbee manufacturer code: ", mfg);
+                                break;
+                            }
+                            mfg = mfg[0.. $-1].trimBack;
+
+                            t = mfg.parse_uint_with_base(&taken);
+                            if (taken != mfg.length || t > 0xFFFF)
+                            {
+                                writeWarning("Invalid Zigbee manufacturer code: ", mfg);
+                                break;
+                            }
+                            zb.manufacturer_code = cast(ushort)t;
+                        }
+                        else
+                            zb.manufacturer_code = 0;
+
+                        DataType ty = type.split!('/', false).parse_data_type();
+                        if (type.length > 0)
+                        {
+                            if (type[0] == 'R')
+                            {
+                                if (type.length > 1 && type[1] == 'W')
+                                    zb.access = Access.read_write;
+                                else
+                                    zb.access = Access.read;
+                            }
+                            else if (type[0] == 'W')
+                                zb.access = Access.write;
+                        }
+                        parse_value_desc(zb.value_desc, ty, units);
                         break;
 
                     case "http":
