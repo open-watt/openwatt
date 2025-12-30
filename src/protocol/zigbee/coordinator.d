@@ -498,7 +498,7 @@ private:
         }
         nm = mod_zb.attach_node(_eui, pan_id, _node_id);
         nm.name = name;
-        nm.type = NodeType.coordinator;
+        nm.desc.type = NodeType.coordinator;
         nm.node = this;
 //        nm.via = _interface; // TODO: should we set `via` for a local node?
 
@@ -506,11 +506,15 @@ private:
         foreach (ref e; _endpoints)
         {
             ref ep = nm.get_endpoint(e.id);
-            ep.profile = e.endpoint.profile_id;
-            ep.device = e.endpoint.device;
+            ep.dynamic = false;
+            ep.profile_id = e.endpoint.profile_id;
+            ep.device_id = e.endpoint.device;
+            ep.device_version = 0; // TODO: add version property to endpoint?
             foreach (c; e.endpoint.in_clusters)
             {
-                //...
+                ref cluster = ep.get_cluster(c);
+                cluster.dynamic = false;
+                // ...attributes?
             }
         }
 
@@ -536,7 +540,7 @@ private:
                         continue;
                     nm = mod_zb.attach_node(EUI64(child.childData.eui64), pan_id, child.childData.id);
 //                    nm.parent_id = _node_id; // TODO: is the coordinator the parent, or it's preferred router?
-                    nm.type = cast(NodeType)child.childData.type;
+                    nm.desc.type = cast(NodeType)child.childData.type;
                     nm.via = _interface;
                 }
             }
@@ -610,7 +614,7 @@ nothrow:
             get_ezsp.send_command!EZSP_UnicastCurrentNetworkKey(&unicast_network_key_result, new_node_id, new_node_eui64, parent_of_new_node_id);
         }
 
-        if (n.type == NodeType.unknown)
+        if (n.desc.type == NodeType.unknown)
         {
             // TODO: should probably only do this if `parent_of_new_node_id == _node_id`, because if we're not the parent; not our child?
             get_ezsp.send_command!EZSP_Id(&get_child_index, new_node_id);
@@ -650,7 +654,7 @@ nothrow:
 
         auto n = get_module!ZigbeeProtocolModule.attach_node(EUI64(childData.eui64), pan_id, childData.id);
         n.parent_id = _node_id;
-        n.type = cast(NodeType)childData.type;
+        n.desc.type = cast(NodeType)childData.type;
 //        n.via = _interface; // TODO: should we set `via` for a local node?
 
         // TODO: do we want to record phy/power/timeout/remaining?
@@ -676,7 +680,7 @@ nothrow:
         auto eui = EUI64(child_eui64);
 
         auto n = mod_zb.attach_node(eui, pan_id, child_id);
-        n.type = cast(NodeType)child_type;
+        n.desc.type = cast(NodeType)child_type;
         n.last_seen = getSysTime();
 //        n.via = _interface; // TODO: should we set `via` for a local node?
 

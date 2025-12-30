@@ -708,7 +708,7 @@ private:
         {
             n.last_seen = getSysTime();
 
-            if (n.type == NodeType.sleepy_end_device)
+            if (n.desc.type == NodeType.sleepy_end_device)
             {
                 // TODO: we can try and send some queued messages here?
             }
@@ -731,6 +731,8 @@ private:
             n.last_seen = getSysTime(); // NOTE: we're here because we received a message
             n.via = this;
         }
+        else
+            mod_zb.discover_node(this, _coordinator.pan_id, sender);
     }
 
     void mac_passthrough_handler(EmberMacPassthroughType message_type, ubyte last_hop_lqi, int8s last_hop_rssi, const(ubyte)[] message) nothrow

@@ -10,6 +10,7 @@ import urt.mem.allocator;
 import urt.meta.nullable;
 import urt.string;
 import urt.time;
+import urt.variant;
 
 import manager;
 import manager.collection;
@@ -22,7 +23,9 @@ import protocol.ezsp;
 import protocol.ezsp.client;
 import protocol.zigbee.client;
 import protocol.zigbee.coordinator;
+import protocol.zigbee.controller;
 import protocol.zigbee.router;
+import protocol.zigbee.zcl;
 
 import router.iface;
 import router.iface.zigbee;
@@ -37,6 +40,20 @@ enum NodeType : ubyte
     router = 2,
     end_device = 3,
     sleepy_end_device = 4
+}
+
+enum CurrentPowerMode : ubyte
+{
+    receiver_on_when_idle = 0,
+    receiver_off_when_idle = 1,
+    rx_on_during_periodic_intervals = 2,
+}
+
+enum PowerSource : ubyte
+{
+    mains = 1,
+    battery = 2,
+    disposable_battery = 4,
 }
 
 enum ZigbeeResult : ubyte
@@ -59,14 +76,121 @@ enum ZigbeeResult : ubyte
 
 struct NodeMap
 {
+    struct BasicInfo
+    {
+        // basic info: (from basic cluster)
+        ubyte zcl_ver;
+        ubyte app_ver;
+        ubyte stack_ver;
+        ubyte hw_ver;
+        ZCLPowerSource power_source;
+        String mfg_name;
+        String model_name;
+        String sw_build_id;
+        String product_code;
+        String product_url;
+    }
+
+    struct NodeDescriptor
+    {
+        NodeType type;
+        ubyte freq_bands;
+        ubyte mac_capabilities;
+
+        ushort manufacturer_code;
+
+        ubyte server_capabilities;
+        ubyte stack_compliance_revision;
+
+        ubyte max_nsdu; // max message payload size
+        ushort max_asdu_in; // max message size with fragmentation
+        ushort max_asdu_out;
+
+        bool complex_desc;
+        bool user_desc;
+        bool extended_active_ep_list;
+        bool extended_simple_desc_list;
+    }
+
+    struct PowerDescriptor
+    {
+        CurrentPowerMode current_mode;
+        ubyte available_sources;
+        ubyte current_source;
+        ubyte batt_level; // percent
+    }
+
     struct Endpoint
     {
-        // TODO: name...?
         ubyte endpoint;
-        ushort profile;
-        ushort device;
-        Array!ushort in_clusters;
-        Array!ushort out_clusters;
+        bool dynamic;
+        ushort profile_id;
+        ushort device_id;
+        ubyte device_version;
+        ubyte initialised;
+        Map!(ushort, Cluster) clusters;
+        Array!ushort out_clusters; // the clusters that this endpoint can send requests to
+
+    nothrow @nogc:
+        bool has_cluster(ushort cluster_id) const pure
+            => (cluster_id in clusters) !is null;
+
+        ref Cluster get_cluster(ushort cluster_id)
+        {
+            Cluster* cluster = cluster_id in clusters;
+            if (!cluster)
+                cluster = clusters.insert(cluster_id, Cluster(cluster_id: cluster_id, dynamic: true));
+            return *cluster;
+        }
+
+        ref Attribute get_attribute(ushort cluster_id, ushort attribute_id)
+            => get_cluster(cluster_id).get_attribute(attribute_id);
+    }
+
+    struct Cluster
+    {
+        ushort cluster_id;
+        bool dynamic; // true when the cluster was reported but not listed in the zdo...
+        ubyte initialised;
+        bool scan_in_progress;
+        Map!(ushort, Attribute) attributes;
+
+    nothrow @nogc:
+        ref Attribute get_attribute(ushort attribute_id)
+        {
+            Attribute* attr = attribute_id in attributes;
+            if (!attr)
+                attr = attributes.insert(attribute_id, Attribute(attribute_id: attribute_id, data_type: ZCLDataType.no_data));
+            return *attr;
+        }
+    }
+
+    struct Attribute
+    {
+        ushort attribute_id;
+        ZCLDataType data_type;
+        ZCLAccess access;
+        Variant value;
+        SysTime last_updated;
+
+    nothrow @nogc:
+        this(this) @disable;
+        this(ref Attribute rh)
+        {
+            this.attribute_id = rh.attribute_id;
+            this.data_type = rh.data_type;
+            this.value = rh.value;
+            this.last_updated = rh.last_updated;
+        }
+        version (EnableMoveSemantics) {
+        this(Attribute rh)
+        {
+            this.attribute_id = rh.attribute_id;
+            this.data_type = rh.data_type;
+            this.value = rh.value.move;
+            this.last_updated = rh.last_updated;
+        }
+        }
     }
 
     String name;
@@ -87,9 +211,12 @@ struct NodeMap
 //    ubyte last_lqi;
 //    byte last_rssi;
 
-    NodeType type;
+    NodeDescriptor desc;
+    PowerDescriptor power;
+    BasicInfo basic_info;
 
     Map!(ubyte, Endpoint) endpoints;
+    Map!(ubyte, Variant) tuya_datapoints;
 
     SysTime last_seen;
 
@@ -102,10 +229,31 @@ nothrow @nogc:
         Endpoint* ep = endpoint_id in endpoints;
         if (ep is null)
         {
-            ep = endpoints.insert(endpoint_id, Endpoint(endpoint: endpoint_id));
+            ep = endpoints.insert(endpoint_id, Endpoint(endpoint: endpoint_id, dynamic: true));
             initialised &= 0xF;
         }
         return *ep;
+    }
+
+    ref Cluster get_cluster(ubyte endpoint_id, ushort cluster_id)
+    {
+        ref Endpoint ep = get_endpoint(endpoint_id);
+        return ep.get_cluster(cluster_id);
+    }
+
+    ref Attribute get_attribute(ubyte endpoint_id, ushort cluster_id, ushort attribute_id)
+    {
+        ref Endpoint ep = get_endpoint(endpoint_id);
+        return ep.get_attribute(cluster_id, attribute_id);
+    }
+
+    MutableString!0 get_fingerprint()
+    {
+        // build a fingerprint string...
+        if (basic_info.sw_build_id)
+            return MutableString!0(Concat, basic_info.mfg_name, ':', basic_info.model_name, ':', basic_info.sw_build_id);
+        else
+            return MutableString!0(Concat, basic_info.mfg_name, ':', basic_info.model_name, ':', basic_info.hw_ver, '.', basic_info.app_ver);
     }
 }
 
@@ -114,22 +262,34 @@ class ZigbeeProtocolModule : Module
     mixin DeclareModule!"protocol.zigbee";
 nothrow @nogc:
 
+    struct UnknownNode
+    {
+        BaseInterface via;
+        ushort pan_id;
+        ushort id;
+        bool scanning;
+    }
+
+
     Map!(EUI64, NodeMap) nodes_by_eui;
     Map!(uint, NodeMap*) nodes_by_pan;
+    Array!UnknownNode unknown_nodes;
 
     Collection!ZigbeeInterface zigbee_interfaces;
     Collection!ZigbeeNode nodes;
     Collection!ZigbeeRouter routers;
     Collection!ZigbeeCoordinator coordinators;
     Collection!ZigbeeEndpoint endpoints;
-
-    Map!(ubyte, ZigbeeEndpoint) endpoint_by_id;
+    Collection!ZigbeeController controllers;
 
     override void init()
     {
         g_app.console.registerCollection("/interface/zigbee", zigbee_interfaces);
+        g_app.console.registerCollection("/protocol/zigbee/node", nodes);
+        g_app.console.registerCollection("/protocol/zigbee/router", routers);
         g_app.console.registerCollection("/protocol/zigbee/coordinator", coordinators);
         g_app.console.registerCollection("/protocol/zigbee/endpoint", endpoints);
+        g_app.console.registerCollection("/protocol/zigbee/controller", controllers);
 
         g_app.console.registerCommand!scan("/protocol/zigbee", this);
     }
@@ -142,6 +302,7 @@ nothrow @nogc:
         coordinators.update_all();
         // TODO: routers? nodes? should they be updated together? shoud routers populate the node pool?
         endpoints.update_all();
+        controllers.update_all();
     }
 
     NodeMap* add_node(EUI64 eui, BaseInterface via = null)
@@ -179,6 +340,15 @@ nothrow @nogc:
 
     void detach_node(ushort pan_id, ushort id)
     {
+        foreach (i, ref unk; unknown_nodes)
+        {
+            if (pan_id == unk.pan_id && id == unk.id)
+            {
+                unknown_nodes.remove(i);
+                break;
+            }
+        }
+
         uint local_id = ((cast(uint)pan_id << 16) | id);
         NodeMap** n = local_id in nodes_by_pan;
         if (!n)
@@ -209,128 +379,19 @@ nothrow @nogc:
             return *n;
         return null;
     }
-/+
-    UNCOMMENT THIS!!@!
-    ZigbeeEndpoint addEndpoint(String name, BaseInterface iface, int endpointId = -1, ushort profile, ushort device, ushort[] in_clusters, ushort[] out_clusters)
+
+    void discover_node(BaseInterface via, ushort pan_id, ushort id)
     {
-        NodeMap* n = find_node(iface);
-        if (!n)
-        {
-            ZigbeeInterface zi = cast(ZigbeeInterface)iface;
-
-            ubyte[8] eui = void;
-            if (zi && zi.eui != ubyte[8].init)
-                eui = zi.eui;
-            else
-            {
-                import urt.crc;
-                import urt.endian;
-                eui[0..6] = iface.mac.b[0..6];
-                eui[6..8] = nativeToLittleEndian(calculate_crc!(Algorithm.crc16_ezsp)(iface.name[]));
-
-                if (zi)
-                    zi.eui = eui;
-            }
-
-            n = add_node(eui, iface.mac, iface);
-        }
-
-        if (endpointId == -1)
-        {
-            endpointId = 1;
-            while (endpointId in n.endpoints)
-                ++endpointId;
-            assert(endpointId < 241, "No free endpoint id available");
-        }
-        ubyte endpoint = cast(ubyte)endpointId;
-
-        NodeMap.Endpoint* ne = n.endpoints.insert(endpoint, NodeMap.Endpoint(endpoint, profile, device));
-        ne.in_clusters = in_clusters;
-        ne.out_clusters = out_clusters;
-
-        ZigbeeEndpoint ep = g_app.allocator.allocT!ZigbeeEndpoint(name.move, iface, endpoint, profile, device, in_clusters, out_clusters);
-        endpoints.insert(ep.name[], ep);
-        endpoint_by_id.insert(ep.endpoint, ep);
-
-        return ep;
-    }
-+/
-
-/+
-    // /protocol/zigbee/endpoint/add command
-    void endpoint_add(Session session, const(char)[] name, const(char)[] _interface, Nullable!ubyte id, Nullable!(const(char)[]) profile, Nullable!(const(char)[]) device, Nullable!(ushort[]) in_clusters, Nullable!(ushort[]) out_clusters)
-    {
-        BaseInterface i = getModule!InterfaceModule.interfaces.get(_interface);
-        if(i is null)
-        {
-            session.writeLine("Interface '", _interface, "' not found");
+        if (find_node(pan_id, id))
             return;
-        }
-
-        ushort p = 0x0104; // default to ha
-        if (profile)
+        foreach (ref n; unknown_nodes)
         {
-            switch (profile.value)
-            {
-                case "zdo":
-                case "zdp":     p = 0x0000; break;
-                case "ipm":     p = 0x0101; break; // industrial plant monitoring
-                case "ha":
-                case "zha":     p = 0x0104; break; // home assistant
-                case "ba":
-                case "cba":     p = 0x0105; break; // building automation
-                case "ta":      p = 0x0107; break; // telco automation
-                case "hc":
-                case "hcp":
-                case "phhc":    p = 0x0108; break; // health care
-                case "zse":
-                case "se":      p = 0x0109; break; // smart energy
-                case "gp":
-                case "zgp":     p = 0xA1E0; break; // green power
-                case "zll":     p = 0xC05E; break; // only for the commissioning cluster (0x1000); zll commands use `ha`
-                default:
-                    size_t taken;
-                    ulong ul = parse_uint_with_base(profile.value, &taken);
-                    if (taken == 0 || taken != profile.value.length || ul > ushort.max)
-                    {
-                        session.writeLine("Invalid profile: ", profile.value);
-                        return;
-                    }
-                    p = cast(ushort)ul;
-                    break;
-            }
+            if (n.pan_id == pan_id && n.id == id)
+                return;
         }
-        ushort d = 0x0007; // combined interface
-        if (device)
-        {
-            switch (device.value)
-            {
-                // TODO: are there standard device names?
-//                case "onoff": d = 0x0000; break;
-
-                default:
-                    size_t taken;
-                    ulong ul = parse_uint_with_base(device.value, &taken);
-                    if (taken == 0 || taken != device.value.length || ul > ushort.max)
-                    {
-                        session.writeLine("Invalid device: ", device.value);
-                        return;
-                    }
-                    d = cast(ushort)ul;
-                    break;
-            }
-        }
-
-        NoGCAllocator a = g_app.allocator;
-
-        // TODO: generate name if not supplied
-        String n = name.makeString(a);
-
-        ZigbeeEndpoint endpoint = addEndpoint(n.move, i, id ? id.value : -1, p, d, in_clusters ? in_clusters.value : null, out_clusters ? out_clusters.value : null);
-
-        writeInfof("Create Zigbee endpoint '{0}' - interface: {1}", name, i.name);
+        unknown_nodes.pushBack(UnknownNode(via, pan_id, id));
     }
-+/
+
     // some useful tools zigbee...
     import protocol.ezsp.commands;
 
