@@ -130,7 +130,9 @@
     <DCompile Include="src\protocol\zigbee\client.d" />
     <DCompile Include="src\protocol\zigbee\coordinator.d" />
     <DCompile Include="src\protocol\zigbee\package.d" />
+    <DCompile Include="src\protocol\zigbee\router.d" />
     <DCompile Include="src\protocol\zigbee\zcl.d" />
+    <DCompile Include="src\protocol\zigbee\zdo.d" />
     <DCompile Include="src\router\iface\bridge.d" />
     <DCompile Include="src\router\iface\can.d" />
     <DCompile Include="src\router\iface\ethernet.d" />

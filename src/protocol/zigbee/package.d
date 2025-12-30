@@ -22,12 +22,40 @@ import protocol.ezsp;
 import protocol.ezsp.client;
 import protocol.zigbee.client;
 import protocol.zigbee.coordinator;
+import protocol.zigbee.router;
 
 import router.iface;
 import router.iface.zigbee;
 
 nothrow @nogc:
 
+
+enum NodeType : ubyte
+{
+    unknown = 0,
+    coordinator = 1,
+    router = 2,
+    end_device = 3,
+    sleepy_end_device = 4
+}
+
+enum ZigbeeResult : ubyte
+{
+    success = 0,
+    failed,
+    buffered,
+    insufficient_buffer,
+    truncated,
+    unexpected,
+    pending,
+    aborted,
+    no_network,
+    timeout,
+    invalid_parameter,
+    not_permitted,
+    unsupported_cluster,
+    unsupported
+}
 
 struct NodeMap
 {
@@ -43,11 +71,42 @@ struct NodeMap
 
     String name;
     EUI64 eui;
+
+    ZigbeeNode node;
+    BaseInterface via; // TODO: do we need this? DELETE ME?
+
+    ushort pan_id = 0xFFFF; // not joined
     ushort id = 0xFFFE; // not online
-    MACAddress mac;
+    ushort parent_id = 0xFFFE;
     bool discovered;
-    ZigbeeInterface iface;
+
+    ubyte initialised;
+    bool scan_in_progress;
+    bool device_created;
+
+//    ubyte last_lqi;
+//    byte last_rssi;
+
+    NodeType type;
+
     Map!(ubyte, Endpoint) endpoints;
+
+    SysTime last_seen;
+
+nothrow @nogc:
+    bool available() const pure
+        => pan_id != 0xFFFF && id != 0xFFFE;
+
+    ref Endpoint get_endpoint(ubyte endpoint_id)
+    {
+        Endpoint* ep = endpoint_id in endpoints;
+        if (ep is null)
+        {
+            ep = endpoints.insert(endpoint_id, Endpoint(endpoint: endpoint_id));
+            initialised &= 0xF;
+        }
+        return *ep;
+    }
 }
 
 class ZigbeeProtocolModule : Module
@@ -55,10 +114,12 @@ class ZigbeeProtocolModule : Module
     mixin DeclareModule!"protocol.zigbee";
 nothrow @nogc:
 
-    Map!(EUI64, NodeMap) nodes;
-    Map!(MACAddress, NodeMap*) nodes_by_mac;
+    Map!(EUI64, NodeMap) nodes_by_eui;
+    Map!(uint, NodeMap*) nodes_by_pan;
 
     Collection!ZigbeeInterface zigbee_interfaces;
+    Collection!ZigbeeNode nodes;
+    Collection!ZigbeeRouter routers;
     Collection!ZigbeeCoordinator coordinators;
     Collection!ZigbeeEndpoint endpoints;
 
@@ -75,55 +136,78 @@ nothrow @nogc:
 
     override void update()
     {
-        // TODO: check; should coordinators or inrterfaces come first?
+        // TODO: check; should coordinators or interfaces come first?
         //       does one produce changes which will be consumed by the other?
         zigbee_interfaces.update_all();
         coordinators.update_all();
+        // TODO: routers? nodes? should they be updated together? shoud routers populate the node pool?
         endpoints.update_all();
     }
 
-    NodeMap* add_node(EUI64 eui, MACAddress mac, ZigbeeInterface iface)
+    NodeMap* add_node(EUI64 eui, BaseInterface via = null)
     {
-        assert(eui !in nodes, "Already exists");
+        assert(!eui.is_zigbee_broadcast, "Invalid EUI64");
+        assert(eui !in nodes_by_eui, "Already exists");
+        return nodes_by_eui.insert(eui, NodeMap(eui: eui, discovered: via !is null, via: via));
+    }
 
-        NodeMap* n = nodes.insert(eui, NodeMap(eui: eui, mac: mac, iface: iface));
-        nodes_by_mac.insert(mac, n);
+    NodeMap* attach_node(EUI64 eui, ushort pan_id, ushort id)
+    {
+        assert(!eui.is_zigbee_broadcast, "Invalid EUI64");
+        assert(pan_id != 0xFFFF && id != 0xFFFE, "Invalid pan_id/id");
+
+        NodeMap* n = eui in nodes_by_eui;
+        if (!n)
+            n = nodes_by_eui.insert(eui, NodeMap(eui: eui));
+        if ((n.id != 0xFFFE && id != n.id) || (n.pan_id != 0xFFFF && pan_id != n.pan_id))
+            detach_node(n.pan_id, n.id);
+        n.id = id;
+        n.pan_id = pan_id;
+        nodes_by_pan.insert((cast(uint)pan_id << 16) | id, n);
         return n;
     }
 
     void remove_node(EUI64 eui)
     {
-        NodeMap* n = eui in nodes;
+        NodeMap* n = eui in nodes_by_eui;
         if (!n)
             return;
-        nodes_by_mac.remove(n.mac);
-        nodes.remove(eui);
+        if (n.pan_id != 0xFFFF && n.id != 0xFFFE)
+            detach_node(n.pan_id, n.id);
+        nodes_by_eui.remove(eui);
+    }
+
+    void detach_node(ushort pan_id, ushort id)
+    {
+        uint local_id = ((cast(uint)pan_id << 16) | id);
+        NodeMap** n = local_id in nodes_by_pan;
+        if (!n)
+            return;
+        (*n).pan_id = 0xFFFF;
+        (*n).id = 0xFFFE;
+        nodes_by_pan.remove(local_id);
     }
 
     void remove_all_nodes(BaseInterface iface)
     {
-        foreach (kvp; nodes)
+        foreach (kvp; nodes_by_eui)
         {
-            if (kvp.value.iface is iface)
+            if (kvp.value.discovered && kvp.value.via is iface)
             {
-                nodes_by_mac.remove(kvp.value.mac);
-                nodes.remove(kvp.key);
+                nodes_by_eui.remove(kvp.key);
             }
         }
     }
 
     NodeMap* find_node(EUI64 eui)
-        => eui in nodes;
+        => eui in nodes_by_eui;
 
-    NodeMap* find_node(BaseInterface iface)
-        => find_node(iface.mac);
-
-    NodeMap* find_node(MACAddress mac)
+    NodeMap* find_node(ushort pan_id, ushort id)
     {
-        auto n = mac in nodes_by_mac;
-        if (!n)
-            return null;
-        return *n;
+        NodeMap** n = ((cast(uint)pan_id << 16) | id) in nodes_by_pan;
+        if (n)
+            return *n;
+        return null;
     }
 /+
     UNCOMMENT THIS!!@!
