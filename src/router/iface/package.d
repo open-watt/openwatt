@@ -289,7 +289,7 @@ nothrow @nogc:
     ushort pcapType() const
         => 1; // LINKTYPE_ETHERNET
 
-    void pcapWrite(ref const Packet packet, PacketDirection dir, scope void delegate(const void[] packetData) nothrow @nogc sink) const
+    void pcapWrite(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packetData) nothrow @nogc sink) const
     {
         import urt.endian;
 

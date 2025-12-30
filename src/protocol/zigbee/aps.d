@@ -130,6 +130,71 @@ ptrdiff_t parse_aps_frame(const void[] packet, out APSFrame frame) pure
     return i;
 }
 
+ptrdiff_t format_aps_frame(ref const APSFrame frame, void[] buffer) pure
+{
+    if (buffer.length < 2)
+        return -1;
+
+    auto p = cast(ubyte[])buffer;
+    size_t i = 0;
+
+    ubyte control = cast(ubyte)frame.type;
+    control |= (cast(ubyte)frame.delivery_mode) << 2;
+    control |= frame.security ? 0x20 : 0;
+    control |= frame.ack_request ? 0x40 : 0;
+    control |= frame.fragmentation != APSFragmentation.none ? 0x80 : 0;
+    p[i++] = control;
+
+    if ((frame.delivery_mode & 1) == 0) // APSDeliveryMode == Unicast or Broadcast
+        p[i++] = frame.dst_endpoint;
+    else if (frame.delivery_mode == APSDeliveryMode.group)
+    {
+        if (buffer.length < 3)
+            return -1;
+        p[1..3] = frame.dst.nativeToLittleEndian;
+        i += 2;
+    }
+
+    if ((frame.type & 1) == 0) // data or ack
+    {
+        if (buffer.length < i + 4)
+            return -1;
+        p[i..i+2][0..2] = frame.cluster_id.nativeToLittleEndian;
+        p[i+2..i+4][0..2] = frame.profile_id.nativeToLittleEndian;
+        i += 4;
+    }
+
+    if (buffer.length < i + 2)
+        return -1;
+    p[i++] = frame.src_endpoint; // TODO: isn't this field optional??
+    p[i++] = frame.counter;
+
+    // extended header
+    if (control & 0x80)
+    {
+        if (buffer.length < i + 1)
+            return -1;
+        ubyte ext = cast(ubyte)frame.fragmentation;
+        p[i++] = ext;
+
+        if (frame.fragmentation != APSFragmentation.none)
+        {
+            if (buffer.length < i + 1)
+                return -1;
+            p[i++] = frame.block_number;
+
+            if (frame.type == APSFrameType.ack)
+            {
+                if (buffer.length < i + 1)
+                    return -1;
+                p[i++] = frame.ack_bitfield;
+            }
+        }
+    }
+
+    return i;
+}
+
 const(char)[] profile_name(ushort profile)
 {
     import urt.mem.temp : tformat;

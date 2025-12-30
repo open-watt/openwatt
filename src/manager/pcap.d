@@ -99,7 +99,7 @@ nothrow @nogc:
 
     void subscribeInterface(BaseInterface iface)
     {
-        auto filter = PacketFilter(direction: cast(PacketDirection)(PacketDirection.Incoming | PacketDirection.Outgoing));
+        auto filter = PacketFilter(type: PacketType.Unknown, direction: cast(PacketDirection)(PacketDirection.Incoming | PacketDirection.Outgoing));
 
         iface.subscribe(&packetHandler, filter);
     }
@@ -186,12 +186,7 @@ private:
             idb.linkType = ib.linkType;
             buffer ~= idb.asBytes;
             buffer.writeOption(2, i.name[]); // if_name
-            if (auto z = cast(ZigbeeInterface)i)
-            {
-                assert(false, "TODO: how to get the MAC address?");
-//                buffer.writeOption(7, z.eui.b[]); // if_EUIaddr
-            }
-            else
+            if (cast(ZigbeeInterface)i is null)
                 buffer.writeOption(6, i.mac.b[]); // if_MACaddr
             ubyte ts = 9; // 6 = microseconds, 9 = nanoseconds
             buffer.writeOption(9, (&ts)[0..1]); // if_tsresol

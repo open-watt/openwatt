@@ -208,8 +208,8 @@ struct NodeMap
     bool scan_in_progress;
     bool device_created;
 
-//    ubyte last_lqi;
-//    byte last_rssi;
+    ubyte lqi;
+    byte rssi;
 
     NodeDescriptor desc;
     PowerDescriptor power;

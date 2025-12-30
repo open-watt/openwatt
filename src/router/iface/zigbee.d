@@ -62,8 +62,9 @@ alias MessageProgressCallback = void delegate(ZigbeeResult status, ref const APS
 
 class ZigbeeInterface : BaseInterface
 {
-    __gshared Property[2] Properties = [ Property.create!("ezsp-client", ezsp_client)(),
-                                         Property.create!("max-in-flight", max_in_flight)() ];
+    __gshared Property[3] Properties = [ Property.create!("ezsp-client", ezsp_client)(),
+                                         Property.create!("max-in-flight", max_in_flight)(),
+                                         Property.create!("pan-id", pan_id)() ];
 nothrow @nogc:
 
     alias TypeName = StringLit!"zigbee";
@@ -111,6 +112,9 @@ nothrow @nogc:
 
     bool is_coordinator() const pure
         => _coordinator !is null;
+
+    ushort pan_id() const pure
+        => _coordinator ? _coordinator.pan_id : 0;
 
     // API...
 
@@ -296,6 +300,66 @@ protected:
 
     override bool transmit(ref const Packet packet) nothrow @nogc
         => transmit_async(packet, null, MessagePriority.normal) < 0 ? false : true;
+
+    override ushort pcapType() const
+        => 283; // DLT_IEEE802_15_4_TAP
+
+    override void pcapWrite(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packetData) nothrow @nogc sink) const
+    {
+        ref aps = packet.hdr!APSFrame;
+        const(ubyte)[] data = cast(ubyte[])packet.data;
+
+        ubyte[28] tmp = 0;
+
+        // write the TAP header
+        ubyte tlv_len = 20;
+        tmp[6] = 1; // FCS_TYPE len
+        tmp[12] = 3; tmp[14] = 3; // channel
+        tmp[16] = _coordinator.channel;
+        if (dir == PacketDirection.Incoming)
+        {
+            tmp[20] = 1; tmp[22] = 4; // RSSI
+            tmp[24..28] = float(aps.last_hop_rssi).nativeToLittleEndian;
+            tlv_len += 8;
+        }
+        tmp[2] = tlv_len; // TLV header length
+        sink(tmp[0 .. tlv_len]);
+
+        // MAC header
+        tmp[0] = 0x41; // data frame | pan comp
+        tmp[1] = 0x98;
+        tmp[2] = 1; // seq num (TODO: should we fake a sequence?)
+        tmp[3..5] = aps.pan_id.nativeToLittleEndian; // PAN
+        if (aps.delivery_mode == APSDeliveryMode.broadcast)
+            tmp[5..7] = ushort(0xFFFF).nativeToLittleEndian; // FFFD/FFFC are not used in MAC
+        else
+            tmp[5..7] = aps.dst.nativeToLittleEndian; // dst addr
+        tmp[7..9] = aps.src.nativeToLittleEndian; // src addr
+        sink(tmp[0 .. 9]);
+
+        // NWK header
+        size_t len = 8;
+        tmp[0] = 0x08; // fcf-low
+        tmp[1] = 0; // fcf-high (0x08 = dst eui, 0x10 = src eui)
+        tmp[2..4] = aps.dst.nativeToLittleEndian; // dst addr
+        tmp[4..6] = aps.src.nativeToLittleEndian; // src addr
+        tmp[6] = 30; // radius
+        tmp[7] = 1; // seq num (TODO: should we fake a sequence?)
+        if (NodeMap* n = get_module!ZigbeeProtocolModule.find_node(aps.pan_id, dir == PacketDirection.Incoming ? aps.src : aps.dst))
+        {
+            tmp[1] |= dir == PacketDirection.Incoming ? 0x10 : 0x08;
+            tmp[8..16] = n.eui.b; // dst eui64
+            len += 8;
+        }
+        sink(tmp[0 .. len]);
+
+        // write the APS frame
+        len = aps.format_aps_frame(tmp);
+        sink(tmp[0 .. len]);
+
+        // and finally, the payload...
+        sink(data);
+    }
 
 private:
 
@@ -707,6 +771,8 @@ private:
         else
         {
             n.last_seen = getSysTime();
+            n.lqi = last_hop_lqi;
+            n.rssi = last_hop_rssi;
 
             if (n.desc.type == NodeType.sleepy_end_device)
             {
