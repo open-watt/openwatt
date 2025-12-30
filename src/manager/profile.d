@@ -37,6 +37,7 @@ enum Frequency : ubyte
     low,    // ie, minutes
     constant,
     on_demand,
+    report,
     configuration
 }
 
@@ -55,17 +56,17 @@ pure nothrow @nogc:
     Frequency update_frequency = Frequency.medium;
 
     ElementType type() const
-        => cast(ElementType)(element_index >> 13);
+        => cast(ElementType)(_element_index >> 13);
 
     size_t element() const
-        => element_index & 0x1FFF;
+        => _element_index & 0x1FFF;
 
     const(char)[] get_description(ref const(Profile) profile) const
-        => profile.desc_strings ? as_dstring(profile.desc_strings.ptr + description) : null;
+        => profile.desc_strings ? as_dstring(profile.desc_strings.ptr + _description) : null;
 
 private:
-    ushort element_index; // bits 0-12: index, bits 13-15: type
-    ushort description;
+    ushort _element_index; // bits 0-12: index, bits 13-15: type
+    ushort _description;
 }
 
 struct ElementDesc_Modbus
@@ -104,6 +105,7 @@ pure nothrow @nogc:
     }
 
     Type type;
+    ubyte index;
 
     const(char)[] get_id(ref const(Profile) profile) const
         => as_dstring(profile.id_strings.ptr + _id);
@@ -371,6 +373,17 @@ private:
     Map!(String, const(VoidEnumInfo)*) enum_templates;
 }
 
+Profile* load_profile(const(char)[] filename, NoGCAllocator allocator = defaultAllocator())
+{
+    import urt.file;
+
+    void[] file = load_file(filename, allocator);
+    scope (exit) { allocator.free(file); }
+    if (!file)
+        return null;
+    return parse_profile(cast(const char[])file, allocator);
+}
+
 Profile* parse_profile(const(char)[] conf, NoGCAllocator allocator = defaultAllocator())
 {
     ConfItem root = parseConfig(conf);
@@ -601,7 +614,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         l.id = lookup_cache.add_string(id);
                         l.hash = fnv1a(cast(ubyte[])id) & 0xFFFF;
 
-                        e.description = desc_cache.add_string(desc);
+                        e._description = desc_cache.add_string(desc);
                         break;
 
                     default:
@@ -617,6 +630,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                     else if (freq.ieq("low")) frequency = Frequency.low;
                     else if (freq.ieq("const")) frequency = Frequency.constant;
                     else if (freq.ieq("ondemand")) frequency = Frequency.on_demand;
+                    else if (freq.ieq("report")) frequency = Frequency.report;
                     else if (freq.ieq("config")) frequency = Frequency.configuration;
                     else writeWarning("Invalid frequency value: ", freq);
                 }
@@ -667,7 +681,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         const(char)[] type = tail.split!','.unQuote;
                         const(char)[] units = tail.split!','.unQuote;
 
-                        e.element_index = cast(ushort)((ElementType.modbus << 13) | mb_count);
+                        e._element_index = cast(ushort)((ElementType.modbus << 13) | mb_count);
                         ref ElementDesc_Modbus mb = profile.mb_elements[mb_count++];
 
                         // TODO: MOVE THIS CODE!
@@ -721,12 +735,12 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         break;
 
                     case "zb":
-                        e.element_index = cast(ushort)((ElementType.zigbee << 13) | zb_count);
+                        e._element_index = cast(ushort)((ElementType.zigbee << 13) | zb_count);
                         ref ElementDesc_Zigbee zb = profile.zb_elements[zb_count++];
                         break;
 
                     case "http":
-                        e.element_index = cast(ushort)((ElementType.http << 13) | http_count);
+                        e._element_index = cast(ushort)((ElementType.http << 13) | http_count);
                         ref ElementDesc_HTTP http = profile.http_elements[http_count++];
                         break;
 
@@ -741,7 +755,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         const(char)[] type = tail.split!','.unQuote;
                         const(char)[] units = tail.split!','.unQuote;
 
-                        e.element_index = cast(ushort)((ElementType.aa55 << 13) | aa55_count);
+                        e._element_index = cast(ushort)((ElementType.aa55 << 13) | aa55_count);
                         ref ElementDesc_AA55 aa55 = profile.aa55_elements[aa55_count++];
 
                         size_t taken;
@@ -887,10 +901,25 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                                     writeWarning("Invalid element-map value: ", id);
                                     continue;
                                 }
-                                ptrdiff_t i = profile.find_element(id[1 .. $]);
+                                id = id[1 .. $];
+                                const(char)[] index = id.split!':';
+                                if (!id)
+                                    id = index;
+                                else
+                                {
+                                    ulong i = index.parse_uint();
+                                    if (i > ubyte.max)
+                                    {
+                                        writeWarning("Invalid element index in element-map: ", index);
+                                        continue;
+                                    }
+                                    e.index = cast(ubyte)i;
+                                }
+
+                                ptrdiff_t i = profile.find_element(id);
                                 if (i < 0)
                                 {
-                                    writeWarning("Unknown element in element-map: ", id[1 .. $]);
+                                    writeWarning("Unknown element in element-map: ", id);
                                     continue;
                                 }
                                 // add the element index to the template...
