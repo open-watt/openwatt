@@ -172,6 +172,16 @@ nothrow @nogc:
     ushort data_length() const pure
         => _type.data_length;
 
+    // awkward bool hack; maybe there's a better way?
+    bool is_bool() const pure
+        => (_type & (DataType.big_endian | DataType.little_endian)) == (DataType.big_endian | DataType.little_endian);
+
+    bool is_numeric() const pure
+        => (_type.data_kind == 0 || (_type.data_kind >= DataKind.floating && _type.data_kind <= DataKind.high_byte));
+
+    bool is_date_time() const pure
+        => _type.data_kind == DataKind.date_time;
+
     bool is_enum() const pure
         => (_type & DataType.enumeration) != 0;
 
@@ -361,6 +371,8 @@ Variant sample_value(const void* data, ref const ValueDesc desc)
     final switch (kind) with (DataKind)
     {
         case integer, low_byte, high_byte:
+            if (desc.is_bool)
+                return Variant(raw_value != 0);
             if (desc._pre_scale != 1)
             {
                 // if we have a pre-scale, we'll convert to floating point
@@ -406,6 +418,34 @@ Variant sample_value(const void* data, ref const ValueDesc desc)
     return r;
 }
 
+void adjust_value(ref Variant value, ref const ValueDesc desc)
+{
+    if (value.isNumber())
+    {
+        if (desc.is_bool)
+        {
+            value = value != 0;
+        }
+        else if (desc.is_numeric)
+        {
+            if (desc._pre_scale != 1)
+                value = value.asDouble() * desc._pre_scale;
+            value.set_unit(desc._unit);
+        }
+        else if (desc.is_enum)
+        {
+            // associate the enum info with the variant somehow
+            //...
+        }
+        else if (desc.is_date_time)
+        {
+            // TODO: parse date time...
+            assert(false, "TODO");
+        }
+    }
+}
+
+
 ptrdiff_t write_value(const void[] data, ref const Variant value, ref const ValueDesc desc)
 {
     assert(false, "TODO");
@@ -449,6 +489,11 @@ DataType parse_data_type(const(char)[] desc) pure
             kind = DataKind.floating;
             desc = desc[1 .. $];
         }
+    }
+    else if (desc.length > 4 && desc[0 .. 4] == "bool")
+    {
+        flags |= DataType.little_endian | DataType.big_endian;
+        desc = desc[4 .. $];
     }
     else if (desc.length >= 3 && desc[0 .. 3] == "str")
     {
