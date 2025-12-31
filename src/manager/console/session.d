@@ -691,7 +691,6 @@ class ConsoleSession : Session
     this(ref Console console)
     {
         super(console);
-        features = ClientFeatures.ANSI;
 
         // set up raw terminal mode for character-by-character input
         version (Windows)
@@ -700,34 +699,58 @@ class ConsoleSession : Session
             _h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
             _h_stderr = GetStdHandle(STD_ERROR_HANDLE);
 
-            // set console to UTF-8
-            SetConsoleOutputCP(65001); // CP_UTF8
+            // Check if stdout is a real console or redirected (pipe/file)
+            DWORD mode;
+            bool is_console = GetConsoleMode(_h_stdout, &mode) != 0;
 
-            // save original console modes
-            GetConsoleMode(_h_stdin, &_original_input_mode);
-            GetConsoleMode(_h_stdout, &_original_output_mode);
-            GetConsoleMode(_h_stderr, &_original_stderr_mode);
-
-            // Enable virtual terminal processing for ANSI escape sequences on both streams
-            DWORD outputMode = _original_output_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-            SetConsoleMode(_h_stdout, outputMode);
-
-            DWORD stderrMode = _original_stderr_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-            SetConsoleMode(_h_stderr, stderrMode);
-
-            // Enable raw console input - we want key events, not processed input
-            // Disable ENABLE_LINE_INPUT and ENABLE_ECHO_INPUT to get character-by-character input
-            // Disable ENABLE_PROCESSED_INPUT to handle Ctrl+C ourselves
-            DWORD inputMode = ENABLE_WINDOW_INPUT;
-            // Optionally keep ENABLE_MOUSE_INPUT if you want mouse support later
-            SetConsoleMode(_h_stdin, inputMode);
-
-            // Get console screen buffer info to determine height
-            CONSOLE_SCREEN_BUFFER_INFO csbi;
-            if (GetConsoleScreenBufferInfo(_h_stdout, &csbi))
+            if (is_console)
             {
-                m_width = cast(ushort)(csbi.srWindow.Right - csbi.srWindow.Left + 1);
-                m_height = cast(ushort)(csbi.srWindow.Bottom - csbi.srWindow.Top + 1);
+                // Real console - enable full ANSI features
+                features = ClientFeatures.ANSI;
+
+                // set console to UTF-8
+                SetConsoleOutputCP(65001); // CP_UTF8
+
+                // save original console modes
+                GetConsoleMode(_h_stdin, &_original_input_mode);
+                GetConsoleMode(_h_stdout, &_original_output_mode);
+                GetConsoleMode(_h_stderr, &_original_stderr_mode);
+
+                // Enable virtual terminal processing for ANSI escape sequences on both streams
+                DWORD outputMode = _original_output_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+                SetConsoleMode(_h_stdout, outputMode);
+
+                DWORD stderrMode = _original_stderr_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING;
+                SetConsoleMode(_h_stderr, stderrMode);
+
+                // Enable raw console input - we want key events, not processed input
+                // Disable ENABLE_LINE_INPUT and ENABLE_ECHO_INPUT to get character-by-character input
+                // Disable ENABLE_PROCESSED_INPUT to handle Ctrl+C ourselves
+                DWORD inputMode = ENABLE_WINDOW_INPUT;
+                SetConsoleMode(_h_stdin, inputMode);
+
+                // Get console screen buffer info to determine height
+                CONSOLE_SCREEN_BUFFER_INFO csbi;
+                if (GetConsoleScreenBufferInfo(_h_stdout, &csbi))
+                {
+                    m_width = cast(ushort)(csbi.srWindow.Right - csbi.srWindow.Left + 1);
+                    m_height = cast(ushort)(csbi.srWindow.Bottom - csbi.srWindow.Top + 1);
+                }
+            }
+            else
+            {
+                // Redirected output - disable ANSI to avoid escape codes in pipes
+                features = ClientFeatures.None;
+                _original_input_mode = 0;
+                _original_output_mode = 0;
+                _original_stderr_mode = 0;
+
+                // Disable prompt rendering when piped - just read commands and write output
+                m_showPrompt = false;
+
+                // Piped I/O - use line-buffered mode
+                m_width = 80;
+                m_height = 24;
             }
         }
         else version(Posix)
@@ -766,67 +789,84 @@ class ConsoleSession : Session
         // read from stdin
         version (Windows)
         {
-            DWORD numEvents = 0;
-            GetNumberOfConsoleInputEvents(_h_stdin, &numEvents);
-            if (numEvents == 0)
-                return;
-
-            Array!(char, 0) input; // TODO: stack-allocate some bytes when move semantics land!
-            input.reserve(numEvents + 32); // add some extra bytes for escape sequences
-
-            INPUT_RECORD[32] events = void;
-            DWORD eventsRead;
-            while  (numEvents && ReadConsoleInputA(_h_stdin, events.ptr, numEvents < events.length ? numEvents : events.length, &eventsRead))
+            if (features & ClientFeatures.ANSI)
             {
-                numEvents -= eventsRead;
+                // Real console - use console input events
+                DWORD numEvents = 0;
+                GetNumberOfConsoleInputEvents(_h_stdin, &numEvents);
+                if (numEvents == 0)
+                    return;
 
-                for (DWORD i = 0; i < eventsRead; i++)
+                Array!(char, 0) input; // TODO: stack-allocate some bytes when move semantics land!
+                input.reserve(numEvents + 32); // add some extra bytes for escape sequences
+
+                INPUT_RECORD[32] events = void;
+                DWORD eventsRead;
+                while  (numEvents && ReadConsoleInputA(_h_stdin, events.ptr, numEvents < events.length ? numEvents : events.length, &eventsRead))
                 {
-                    // filter out non-key-down events
-                    if (events[i].EventType != KEY_EVENT || !events[i].KeyEvent.bKeyDown)
-                        continue;
+                    numEvents -= eventsRead;
 
-                    char ch = events[i].KeyEvent.AsciiChar;
-                    if (ch != 0)
-                        input ~= ch;
-                    else
+                    for (DWORD i = 0; i < eventsRead; i++)
                     {
-                        // not an ascii character...
-                        WORD vk = events[i].KeyEvent.wVirtualKeyCode;
-                        DWORD controlKeyState = events[i].KeyEvent.dwControlKeyState;
+                        // filter out non-key-down events
+                        if (events[i].EventType != KEY_EVENT || !events[i].KeyEvent.bKeyDown)
+                            continue;
 
-                        if (vk == VK_UP)
-                            input ~= ANSI_ARROW_UP;
-                        else if (vk == VK_DOWN)
-                            input ~= ANSI_ARROW_DOWN;
-                        else if (vk == VK_LEFT)
+                        char ch = events[i].KeyEvent.AsciiChar;
+                        if (ch != 0)
+                            input ~= ch;
+                        else
                         {
-                            if (controlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED))
-                                input ~= "\x1b[1;5D"; // Ctrl+Left
-                            else
-                                input ~= ANSI_ARROW_LEFT;
+                            // not an ascii character...
+                            WORD vk = events[i].KeyEvent.wVirtualKeyCode;
+                            DWORD controlKeyState = events[i].KeyEvent.dwControlKeyState;
+
+                            if (vk == VK_UP)
+                                input ~= ANSI_ARROW_UP;
+                            else if (vk == VK_DOWN)
+                                input ~= ANSI_ARROW_DOWN;
+                            else if (vk == VK_LEFT)
+                            {
+                                if (controlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED))
+                                    input ~= "\x1b[1;5D"; // Ctrl+Left
+                                else
+                                    input ~= ANSI_ARROW_LEFT;
+                            }
+                            else if (vk == VK_RIGHT)
+                            {
+                                if (controlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED))
+                                    input ~= "\x1b[1;5C"; // Ctrl+Right
+                                else
+                                    input ~= ANSI_ARROW_RIGHT;
+                            }
+                            else if (vk == VK_HOME)
+                                input ~= ANSI_HOME1;
+                            else if (vk == VK_END)
+                                input ~= ANSI_END1;
+                            else if (vk == VK_DELETE)
+                                input ~= ANSI_DEL;
+                            else if (vk == VK_BACK)
+                                input ~= '\b';
                         }
-                        else if (vk == VK_RIGHT)
-                        {
-                            if (controlKeyState & (LEFT_CTRL_PRESSED | RIGHT_CTRL_PRESSED))
-                                input ~= "\x1b[1;5C"; // Ctrl+Right
-                            else
-                                input ~= ANSI_ARROW_RIGHT;
-                        }
-                        else if (vk == VK_HOME)
-                            input ~= ANSI_HOME1;
-                        else if (vk == VK_END)
-                            input ~= ANSI_END1;
-                        else if (vk == VK_DELETE)
-                            input ~= ANSI_DEL;
-                        else if (vk == VK_BACK)
-                            input ~= '\b';
                     }
                 }
-            }
 
-            if (!input.empty)
-                receiveInput(input[]);
+                if (!input.empty)
+                    receiveInput(input[]);
+            }
+            else
+            {
+                // Piped input - use ReadFile with non-blocking I/O
+                DWORD bytesRead;
+                DWORD bytesAvail;
+
+                // Check if data is available without blocking
+                if (PeekNamedPipe(_h_stdin, null, 0, null, &bytesAvail, null) && bytesAvail > 0)
+                {
+                    if (ReadFile(_h_stdin, recvbuf.ptr, recvbuf.length, &bytesRead, null) && bytesRead > 0)
+                        receiveInput(cast(char[])recvbuf[0 .. bytesRead]);
+                }
+            }
         }
         else version(Posix)
         {
@@ -859,9 +899,28 @@ class ConsoleSession : Session
         {
             DWORD written;
             if (text.length > 0)
-                WriteConsoleA(_h_stdout, text.ptr, cast(DWORD)text.length, &written, null);
+            {
+                // Check if stdout is a console or a pipe/file
+                DWORD mode;
+                if (GetConsoleMode(_h_stdout, &mode))
+                {
+                    // It's a real console - use WriteConsoleA for proper Unicode support
+                    WriteConsoleA(_h_stdout, text.ptr, cast(DWORD)text.length, &written, null);
+                }
+                else
+                {
+                    // It's redirected (pipe/file) - use WriteFile
+                    WriteFile(_h_stdout, text.ptr, cast(DWORD)text.length, &written, null);
+                }
+            }
             if (newline)
-                WriteConsoleA(_h_stdout, "\r\n".ptr, 2, &written, null);
+            {
+                DWORD mode;
+                if (GetConsoleMode(_h_stdout, &mode))
+                    WriteConsoleA(_h_stdout, "\r\n".ptr, 2, &written, null);
+                else
+                    WriteFile(_h_stdout, "\n".ptr, 1, &written, null);  // Use \n for pipes
+            }
         }
         else version(Posix)
         {
@@ -912,54 +971,59 @@ class ConsoleSession : Session
         if (taken < 0)
             return taken;
 
-        // echo changes back to the terminal
-        size_t diffOffset = 0;
-        size_t len = min(m_buffer.length, before.length);
-        while (diffOffset < len && before[diffOffset] == m_buffer[diffOffset])
-            ++diffOffset;
-        bool noChange = m_buffer.length == before.length && diffOffset == m_buffer.length;
-
-        MutableString!0 echo;
-        if (noChange)
+        // Only echo input back to terminal in interactive ANSI mode
+        // When piped, don't echo - just accept commands silently
+        if (features & ClientFeatures.ANSI)
         {
-            // maybe the cursor moved?
-            if (beforePos != m_position)
+            // echo changes back to the terminal
+            size_t diffOffset = 0;
+            size_t len = min(m_buffer.length, before.length);
+            while (diffOffset < len && before[diffOffset] == m_buffer[diffOffset])
+                ++diffOffset;
+            bool noChange = m_buffer.length == before.length && diffOffset == m_buffer.length;
+
+            MutableString!0 echo;
+            if (noChange)
             {
-                if (m_position < beforePos)
-                    echo.concat("\x1b[", beforePos - m_position, 'D');
-                else
-                    echo.concat("\x1b[", m_position - beforePos, 'C');
+                // maybe the cursor moved?
+                if (beforePos != m_position)
+                {
+                    if (m_position < beforePos)
+                        echo.concat("\x1b[", beforePos - m_position, 'D');
+                    else
+                        echo.concat("\x1b[", m_position - beforePos, 'C');
+                }
             }
+            else
+            {
+                if (diffOffset != beforePos)
+                {
+                    // shift the cursor to the change position
+                    if (diffOffset < beforePos)
+                        echo.concat("\x1b[", beforePos - diffOffset, 'D');
+                    else
+                        echo.concat("\x1b[", diffOffset - beforePos, 'C');
+                }
+
+                if (diffOffset < m_buffer.length)
+                    echo.append(m_buffer[diffOffset .. $]);
+
+                if (m_buffer.length < before.length)
+                {
+                    // erase the tail
+                    echo.append("\x1b[K");
+                }
+
+                if (echo.length && m_position != m_buffer.length)
+                {
+                    assert(m_position < m_buffer.length); // shouldn't be possible for the cursor to be beyond the end of the line
+                    echo.append("\x1b[", m_buffer.length - m_position, 'D');
+                }
+            }
+
+            if (echo.length)
+                writeOutput(echo[], false);
         }
-        else
-        {
-            if (diffOffset != beforePos)
-            {
-                // shift the cursor to the change position
-                if (diffOffset < beforePos)
-                    echo.concat("\x1b[", beforePos - diffOffset, 'D');
-                else
-                    echo.concat("\x1b[", diffOffset - beforePos, 'C');
-            }
-
-            if (diffOffset < m_buffer.length)
-                echo.append(m_buffer[diffOffset .. $]);
-
-            if (m_buffer.length < before.length)
-            {
-                // erase the tail
-                echo.append("\x1b[K");
-            }
-
-            if (echo.length && m_position != m_buffer.length)
-            {
-                assert(m_position < m_buffer.length); // shouldn't be possible for the cursor to be beyond the end of the line
-                echo.append("\x1b[", m_buffer.length - m_position, 'D');
-            }
-        }
-
-        if (echo.length)
-            writeOutput(echo[], false);
 
         return taken;
     }
@@ -1010,11 +1074,22 @@ private:
     {
         import urt.string.format;
 
-        enum Clear = ANSI_ERASE_LINE ~ "\r"; // clear line and return to start
+        if (features & ClientFeatures.ANSI)
+        {
+            enum Clear = ANSI_ERASE_LINE ~ "\r"; // clear line and return to start
 
-        // format: [clear?] [prompt] [buffer] [move cursor back if not at end?]
-        char[] prompt = tformat("{0, ?1}{2}{3}{@5, ?4}", Clear, with_clear, m_prompt, m_buffer, m_position < m_buffer.length, "\x1b[{6}D", m_buffer.length - m_position);
-        writeOutput(prompt, false);
+            // format: [clear?] [prompt] [buffer] [move cursor back if not at end?]
+            char[] prompt = tformat("{0, ?1}{2}{3}{@5, ?4}", Clear, with_clear, m_prompt, m_buffer, m_position < m_buffer.length, "\x1b[{6}D", m_buffer.length - m_position);
+            writeOutput(prompt, false);
+        }
+        else
+        {
+            // No ANSI - simple output
+            if (with_clear)
+                writeOutput("\r", false);  // Just carriage return
+            char[] prompt = tformat("{0}{1}", m_prompt, m_buffer);
+            writeOutput(prompt, false);
+        }
     }
 }
 
