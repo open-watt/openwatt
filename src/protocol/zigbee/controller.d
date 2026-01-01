@@ -20,6 +20,7 @@ import manager.component;
 import manager.device;
 import manager.element;
 import manager.profile;
+import manager.sampler;
 
 import protocol.zigbee;
 import protocol.zigbee.aps;
@@ -235,22 +236,25 @@ protected:
     {
         ulong[2] key = make_sample_key(eui, endpoint, zb.cluster_id, zb.attribute_id, zb.manufacturer_code);
         assert(key !in _sample_elements, "TODO: support element duplicates?");
-        _sample_elements.insert(key, element);
+        _sample_elements.insert(key, SampleElement(element, zb.value_desc));
     }
 
-    final Element* find_sample_element(EUI64 eui, ubyte endpoint, ushort cluster, ushort attribute, ushort manufacturer = 0) nothrow
+    final SampleElement* find_sample_element(EUI64 eui, ubyte endpoint, ushort cluster, ushort attribute, ushort manufacturer = 0) nothrow
     {
         ulong[2] key = make_sample_key(eui, endpoint, cluster, attribute, manufacturer);
-        auto e = key in _sample_elements;
-        if (e)
-            return *e;
-        return null;
+        return key in _sample_elements;
     }
 
-    final Element* find_sample_element_tuya(EUI64 eui, ubyte endpoint, ushort dp) nothrow
+    final SampleElement* find_sample_element_tuya(EUI64 eui, ubyte endpoint, ushort dp) nothrow
         => find_sample_element(eui, endpoint, 0xEF00, dp);
 
 private:
+
+    struct SampleElement
+    {
+        Element* element;
+        ValueDesc desc;
+    }
 
     struct TuyaDedup
     {
@@ -261,7 +265,7 @@ private:
     }
 
     // TODO: I'd prefer is we used a sorted array...
-    Map!(ulong[2], Element*) _sample_elements;
+    Map!(ulong[2], SampleElement) _sample_elements;
 
     bool _auto_create_devices;
 
@@ -538,8 +542,12 @@ private:
                         attr.last_updated = now; // TODO: this timestamp should come from the packet! but we lost that here...
 
                         // update runtime element
-                        if (Element* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, attr_id, zcl.manufacturer_code))
-                            e.value = attr.value;
+                        if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, attr_id, zcl.manufacturer_code))
+                        {
+                            Variant v = attr.value;
+                            adjust_value(v, e.desc);
+                            e.element.value = v.move;
+                        }
 
                         payload = payload[3 + taken .. $];
 
@@ -605,28 +613,28 @@ private:
                             attr_delay.last_updated = now;
 
                             // update runtime elements
-                            if (Element* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC00))
-                                e.value = (zone_status & 1) != 0;
-                            if (Element* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC01))
-                                e.value = (zone_status & 2) != 0;
-                            if (Element* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC02))
-                                e.value = (zone_status & 4) != 0;
-                            if (Element* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC03))
-                                e.value = (zone_status & 8) != 0;
-                            if (Element* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC06))
-                                e.value = (zone_status & 0x40) != 0;
-                            if (Element* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC07))
-                                e.value = (zone_status & 0x80) != 0;
-                            if (Element* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC09))
-                                e.value = (zone_status & 0x200) != 0;
-                            if (Element* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC10))
-                                e.value = zone_id;
-                            if (Element* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC20))
-                                e.value = delay;
+                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC00))
+                                e.element.value = (zone_status & 1) != 0;
+                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC01))
+                                e.element.value = (zone_status & 2) != 0;
+                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC02))
+                                e.element.value = (zone_status & 4) != 0;
+                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC03))
+                                e.element.value = (zone_status & 8) != 0;
+                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC06))
+                                e.element.value = (zone_status & 0x40) != 0;
+                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC07))
+                                e.element.value = (zone_status & 0x80) != 0;
+                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC09))
+                                e.element.value = (zone_status & 0x200) != 0;
+                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC10))
+                                e.element.value = zone_id;
+                            if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, 0xFC20))
+                                e.element.value = delay;
                         }
 
                         version (DebugZigbeeController)
-                            writeDebugf("ZigbeeController: {0,04x}:{1,02x} sent IAS zone: status={2,04x} ext={3,02x} zone={4} delayu={5}", aps.src, aps.src_endpoint, zone_status, extended_status, zone_id, delay);
+                            writeDebugf("ZigbeeController: {0,04x}:{1,02x} sent IAS zone: status={2,04x} ext={3,02x} zone={4} delay={5}", aps.src, aps.src_endpoint, zone_status, extended_status, zone_id, delay);
                         return;
                     }
                     else
@@ -675,9 +683,12 @@ private:
                                 writeDebugf("ZigbeeController: {0,04x}:{1,02x} Tuya report dp{2} = {3}", aps.src, aps.src_endpoint, dp.dp_id, v);
                             if (nm)
                             {
-                                if (Element* e = find_sample_element_tuya(nm.eui, aps.src_endpoint, dp.dp_id))
-                                    e.value = v;
-                                nm.tuya_datapoints[dp.dp_id] = v.move;
+                                nm.tuya_datapoints[dp.dp_id] = v;
+                                if (SampleElement* e = find_sample_element_tuya(nm.eui, aps.src_endpoint, dp.dp_id))
+                                {
+                                    adjust_value(v, e.desc);
+                                    e.element.value = v.move;
+                                }
                             }
                             return;
 
@@ -1230,21 +1241,21 @@ Variant decode_dp(ref TuyaDP dp)
     switch (dp.dp_type)
     {
         case 0: // raw
-            return Variant((cast(const(void)[])dp.dp_data));
+            return Variant(cast(const(void)[])dp.dp_data);
         case 1: // boolean
             return Variant(dp.dp_data[0] != 0);
         case 2: // integer
             return Variant(dp.dp_data[0..4].bigEndianToNative!uint);
         case 3: // string
-            return Variant((cast(const(char)[])dp.dp_data));
+            return Variant(cast(const(char)[])dp.dp_data);
         case 4: // enum
             return Variant(dp.dp_data[0]); // TODO: confirm this one?
         case 5: // bitmap
             if (dp.dp_data.length == 1)
                 return Variant(dp.dp_data[0]); // TODO: confirm this one?
-            else if (dp.dp_data.length == 1)
+            else if (dp.dp_data.length == 2)
                 return Variant(dp.dp_data[0..2].bigEndianToNative!ushort); // TODO: confirm this one?
-            else if (dp.dp_data.length == 1)
+            else if (dp.dp_data.length == 4)
                 return Variant(dp.dp_data[0..4].bigEndianToNative!uint); // TODO: confirm this one?
             assert(false, "Unexpected Tuya BITMAP length");
         default:
