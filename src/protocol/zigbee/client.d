@@ -131,6 +131,7 @@ class ZigbeeNode : BaseObject
             aps.delivery_mode = APSDeliveryMode.broadcast;
         else
             aps.delivery_mode = group ? APSDeliveryMode.group : APSDeliveryMode.unicast;
+        aps.pan_id = zigbee_iface.pan_id;
         aps.src = _node_id;
         aps.src_endpoint = src_endpoint;
         aps.dst_endpoint = dst_endpoint;

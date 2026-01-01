@@ -78,8 +78,8 @@ class ZigbeeCoordinator : ZigbeeRouter
         return StringResult.success;
     }
 
-    final uint channel() inout pure nothrow
-        => _channel;
+    final ubyte channel() inout pure nothrow
+        => _network_params.radio_channel ? _network_params.radio_channel : _channel;
     final StringResult channel(uint value) nothrow
     {
         if (value == 0)
@@ -236,7 +236,7 @@ class ZigbeeCoordinator : ZigbeeRouter
             _interface = null;
         }
 
-        _network_params.pan_id = 0xFFFF;
+        _network_params = NetworkParams();
         _already_complained = false;
         _ready = false;
 
