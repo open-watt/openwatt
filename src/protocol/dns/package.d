@@ -14,7 +14,7 @@ import manager.console.session;
 import manager.plugin;
 
 import protocol.dns;
-import protocol.dns.mdns;
+import protocol.dns.server;
 
 nothrow @nogc:
 
