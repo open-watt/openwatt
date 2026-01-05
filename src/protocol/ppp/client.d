@@ -23,7 +23,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"ppp";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!PPPClient, name.move, flags);
 
@@ -70,14 +70,14 @@ nothrow @nogc:
         {
             assert(false, "TODO: begin PPP handshake...");
 
-            return CompletionStatus.Complete;
+            return CompletionStatus.complete;
         }
-        return CompletionStatus.Continue;
+        return CompletionStatus.continue_;
     }
 
     final override CompletionStatus shutdown()
     {
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override void update()
@@ -188,7 +188,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"pppoe";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!PPPoEClient, name.move, flags);
 
@@ -199,7 +199,7 @@ nothrow @nogc:
     ~this()
     {
         if (_interface)
-            _interface.unsubscribe(&incomingPacket);
+            _interface.unsubscribe(&incoming_packet);
     }
 
     // Properties...
@@ -213,10 +213,10 @@ nothrow @nogc:
         if (_interface is value)
             return null;
         if (_interface)
-            _interface.unsubscribe(&incomingPacket);
+            _interface.unsubscribe(&incoming_packet);
 
         _interface = value;
-        _interface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.PPPoES, etherType2: EtherType.PPPoED), null);
+        _interface.subscribe(&incoming_packet, PacketFilter(ether_type: EtherType.pppoes, ether_type_2: EtherType.pppoed), null);
 
         restart();
         return null;
@@ -243,13 +243,13 @@ nothrow @nogc:
     final override CompletionStatus startup()
     {
         if (_protocol >= TunnelProtocol.PPPoE && _interface.running)
-            return CompletionStatus.Complete;
-        return CompletionStatus.Continue;
+            return CompletionStatus.complete;
+        return CompletionStatus.continue_;
     }
 
     final override CompletionStatus shutdown()
     {
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override void update()
@@ -268,7 +268,7 @@ private:
     ObjectRef!BaseInterface _interface;
     TunnelProtocol _protocol;
 
-    void incomingPacket(ref const Packet packet, BaseInterface srcInterface, PacketDirection dir, void* userData)
+    void incoming_packet(ref const Packet packet, BaseInterface srcInterface, PacketDirection dir, void* user_data)
     {
         assert(false, "TODO: Listen for PPPoE Discovery and Session packets");
     }

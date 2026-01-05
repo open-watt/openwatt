@@ -326,7 +326,7 @@ struct SettingInfo
 }
 
 
-alias AA55Response = void delegate(bool success, ref const AA55Request request, SysTime responseTime, const(ubyte)[] response_data, void* user_data) nothrow @nogc;
+alias AA55Response = void delegate(bool success, ref const AA55Request request, SysTime response_time, const(ubyte)[] response_data, void* user_data) nothrow @nogc;
 
 struct AA55Request
 {
@@ -353,7 +353,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"aa55";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!AA55Client, name.move, flags);
     }
@@ -467,7 +467,7 @@ nothrow @nogc:
                     size_t taken;
                     long i = host[colon + 1 .. $].parse_int(&taken);
                     if (i > ushort.max || taken != host.length - colon - 1)
-                        return CompletionStatus.Error;
+                        return CompletionStatus.error;
                     port = cast(ushort)i;
                     host = host[0 .. colon];
                 }
@@ -480,7 +480,7 @@ nothrow @nogc:
                 AddressInfoResolver results;
                 get_address_info(host, null, &addrInfo, results);
                 if (!results.next_address(addrInfo))
-                    return CompletionStatus.Continue;
+                    return CompletionStatus.continue_;
 
                 _remote = InetAddress(addrInfo.address._a.ipv4.addr, port);
             }
@@ -490,7 +490,7 @@ nothrow @nogc:
 
         // Check if we're active (received a response)
         if (_active)
-            return CompletionStatus.Complete;
+            return CompletionStatus.complete;
 
         MonoTime now = getTime();
 
@@ -533,9 +533,9 @@ nothrow @nogc:
         {
             version (DebugAA55)
                 writeWarning("aa55: '", name, "' handshake timeout");
-            return CompletionStatus.Error;
+            return CompletionStatus.error;
         }
-        return CompletionStatus.Continue;
+        return CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()
@@ -550,7 +550,7 @@ nothrow @nogc:
         _handshake_in_progress = false;
         _active = false;
 
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override void update()
@@ -752,7 +752,7 @@ private:
         return true;
     }
 
-    void offline_response(bool success, ref const AA55Request request, SysTime responseTime, const(ubyte)[] response, void* user_data)
+    void offline_response(bool success, ref const AA55Request request, SysTime response_time, const(ubyte)[] response, void* user_data)
     {
         if (!success)
             return;
@@ -774,7 +774,7 @@ private:
         _inverter_addr = 0x0D;
     }
 
-    void reg_response(bool success, ref const AA55Request request, SysTime responseTime, const(ubyte)[] response, void* user_data)
+    void reg_response(bool success, ref const AA55Request request, SysTime response_time, const(ubyte)[] response, void* user_data)
     {
         if (!success)
             return;
@@ -788,7 +788,7 @@ private:
         send_request_internal(req, null);
     }
 
-    void id_response(bool success, ref const AA55Request request, SysTime responseTime, const(ubyte)[] response, void* user_data)
+    void id_response(bool success, ref const AA55Request request, SysTime response_time, const(ubyte)[] response, void* user_data)
     {
         if (!success)
             return;

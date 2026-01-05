@@ -36,9 +36,9 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCollection("/protocol/dns/server", servers);
+        g_app.console.register_collection("/protocol/dns/server", servers);
 
-        g_app.console.registerCommand!request("/protocol/dns", this, "lookup");
+        g_app.console.register_command!request("/protocol/dns", this, "lookup");
     }
 
     override void update()
@@ -51,7 +51,7 @@ nothrow @nogc:
     {
     nothrow @nogc:
 
-        CommandCompletionState state = CommandCompletionState.InProgress;
+        CommandCompletionState state = CommandCompletionState.in_progress;
 
         this(Session session)
         {

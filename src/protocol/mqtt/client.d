@@ -355,7 +355,7 @@ nothrow @nogc:
 
                         // TODO: the mac address would be a better identifier...
                         //       like `anon_mac`
-                        id = stream.remoteName;
+                        id = stream.remote_name;
                         // the name should be a valid identifier
                         // replace '.' with '_', truncate port
                         assert(0);
@@ -486,7 +486,7 @@ nothrow @nogc:
 
                     state = ConnectionState.Active;
 
-                    writeInfo("MQTT - Accept CONNECT from '", stream.remoteName, "' as '", identifier ,"', login: ", username);
+                    writeInfo("MQTT - Accept CONNECT from '", stream.remote_name, "' as '", identifier ,"', login: ", username);
                     writeDebug("MQTT - Sent CONNACK to ", identifier);
 
                     if (session_present)

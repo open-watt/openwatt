@@ -23,9 +23,9 @@ nothrow @nogc:
 /// \returns Pointer to the console instance, or `nullptr` if no console with that name exists.
 Console* findConsole(const(char)[] identifier) nothrow @nogc
 {
-    Console* instance = s_consoleInstances;
-    while (instance && instance.m_identifier != identifier[])
-        instance = instance.m_nextConsoleInstance;
+    Console* instance = g_console_instances;
+    while (instance && instance._identifier != identifier[])
+        instance = instance._next_console_instance;
     return instance;
 }
 
@@ -45,43 +45,43 @@ nothrow @nogc:
     this(Application appInstance, String identifier, NoGCAllocator allocator, NoGCAllocator tempAllocator = null)
     {
         this.appInstance = appInstance;
-        m_allocator = allocator;
-        m_tempAllocator = tempAllocator ? tempAllocator : allocator;
-        m_identifier = identifier;
+        _allocator = allocator;
+        _tempAllocator = tempAllocator ? tempAllocator : allocator;
+        _identifier = identifier;
 
         // add the console instance to the registry
         // TODO: this is not threadsafe! creating/destroying console instances should be threadsafe!
         assert(findConsole(identifier) is null, tconcat("Console '", identifier[], "' already exists!"));
-        m_nextConsoleInstance = s_consoleInstances;
-        s_consoleInstances = &this;
+        _next_console_instance = g_console_instances;
+        g_console_instances = &this;
 
-        root = m_allocator.allocT!Scope(this, String(null));
+        root = _allocator.allocT!Scope(this, String(null));
         RegisterBuiltinCommands(this);
     }
 
     ~this()
     {
         assert(false);
-//        for (dcConsoleSession* session : m_sessions)
-//            m_allocator.Delete(session);
+//        for (dcConsoleSession* session : _sessions)
+//            _allocator.Delete(session);
 //
-//        for (auto&& pair : m_commands)
-//            m_allocator.Delete(pair.val);
+//        for (auto&& pair : _commands)
+//            _allocator.Delete(pair.val);
 //
-//        dcDebugConsole* list = s_consoleInstances;
+//        dcDebugConsole* list = g_console_instances;
 //        if (list == this)
-//            s_consoleInstances = m_nextConsoleInstance;
+//            g_console_instances = _next_console_instance;
 //        else
 //        {
-//            while (list->m_nextConsoleInstance && list->m_nextConsoleInstance != this)
-//                list = list->m_nextConsoleInstance;
+//            while (list->_next_console_instance && list->_next_console_instance != this)
+//                list = list->_next_console_instance;
 //            BC_ASSERT(list != nullptr, "Console instance was not in the registry somehow?");
-//            // m_nextConsoleInstance is 'this'; remove it from the list
-//            list->m_nextConsoleInstance = list->m_nextConsoleInstance->m_nextConsoleInstance;
+//            // _next_console_instance is 'this'; remove it from the list
+//            list->_next_console_instance = list->_next_console_instance->_next_console_instance;
 //        }
     }
 
-    inout(Scope) getRoot() inout nothrow @nogc
+    inout(Scope) get_root() inout nothrow @nogc
     {
         return root;
     }
@@ -89,25 +89,25 @@ nothrow @nogc:
     /// Update the console instance. This will update all attached sessions.
     void update()
     {
-        foreach (session; m_sessions)
+        foreach (session; _sessions)
         {
-            if (session.isAttached)
+            if (session.is_attached)
                 session.update();
 //            if (!session.IsAttached)
-//                m_sessions.Erase(*it);
+//                _sessions.Erase(*it);
         }
     }
 
     /// Get the console's identifier
-    const(char)[] identifier() { return m_identifier[]; }
+    const(char)[] identifier() { return _identifier[]; }
 
     /// Get the console's prompt string
-    const(char)[] getPrompt() nothrow @nogc { return m_prompt[]; }
+    const(char)[] get_prompt() nothrow @nogc { return _prompt[]; }
 
     /// Set the prompt that text-based sessions will show when accepting commands.
-    String setPrompt(String prompt)
+    String set_prompt(String prompt)
     {
-        return m_prompt.swap(prompt);
+        return _prompt.swap(prompt);
     }
 
     /// Create a new session instance of the type `SessionType` (derived from Session) bound to this console instance.
@@ -117,36 +117,36 @@ nothrow @nogc:
     SessionType createSession(SessionType, Args...)(auto ref Args args)
         if (is(SessionType : Session))
         {
-            SessionType session = m_allocator.allocT!SessionType(this, forward!args);
-            session.setPrompt(m_prompt);
-            m_sessions ~= session;
+            SessionType session = _allocator.allocT!SessionType(this, forward!args);
+            session.set_prompt(_prompt);
+            _sessions ~= session;
             return session;
         }
 
-    void destroySession(Session session)
+    void destroy_session(Session session)
     {
-        assert(session.m_console is &this, "Session does not belong to this console instance.");
+        assert(session._console is &this, "Session does not belong to this console instance.");
 
-        m_sessions.removeFirstSwapLast(session);
-        m_allocator.freeT(session);
+        _sessions.removeFirstSwapLast(session);
+        _allocator.freeT(session);
     }
 
     // TODO: don't like this API, it should be a method of Session...
     CommandState execute(Session session, const(char)[] cmdLine)
     {
-        assert(session._currentCommand is null, "TODO: gotta do something about concurrent command execution...");
+        assert(session.current_command is null, "TODO: gotta do something about concurrent command execution...");
 
-        Scope s = session.curScope;
+        Scope s = session._cur_scope;
 
         // TODO: reorg this code to stash context and run script...
         try
         {
-            Array!ScriptCommand cmds = parseCommands(cmdLine);
+            Array!ScriptCommand cmds = parse_commands(cmdLine);
             if (cmds.empty)
                 return null;
 
-            if(cmds[0].command.frontIs('/'))
-                s = getRoot();
+            if(cmds[0].command.front_is('/'))
+                s = get_root();
 
             Context ctx = Context(session, s, cmds.move);
             // TODO: return context to caller...
@@ -165,7 +165,7 @@ nothrow @nogc:
     /// \param cmdLine
     ///  A command line string to attempt completion.
     /// \returns A new command line with the attempted auto-completion applied. If no completion was applicable, the result is `cmdLine` as given.
-    MutableString!0 complete(const(char)[] cmdLine, Scope curScope)
+    MutableString!0 complete(const(char)[] cmdLine, Scope _cur_scope)
     {
         version (ExcludeAutocomplete)
             return null;
@@ -175,8 +175,8 @@ nothrow @nogc:
             while (i < cmdLine.length && (cmdLine[i] == ' ' || cmdLine[i] == '\t'))
                  ++i;
             if (i < cmdLine.length && cmdLine[i] == '/')
-                curScope = root;
-            return curScope.complete(cmdLine[i .. $]).insert(0, cmdLine[0 .. i]);
+                _cur_scope = root;
+            return _cur_scope.complete(cmdLine[i .. $]).insert(0, cmdLine[0 .. i]);
         }
     }
 
@@ -185,7 +185,7 @@ nothrow @nogc:
     /// \param cmdLine
     ///  A command line string to analyse for auto-complete suggestions.
     /// \returns A filtered list of possible completion terms.
-    Array!String suggest(const(char)[] cmdLine, Scope curScope)
+    Array!String suggest(const(char)[] cmdLine, Scope _cur_scope)
     {
         version (ExcludeAutocomplete)
             return null;
@@ -196,38 +196,38 @@ nothrow @nogc:
                 ++i;
             if (i < cmdLine.length && cmdLine[i] == '/')
             {
-                curScope = root;
+                _cur_scope = root;
                 ++i;
                 while (i < cmdLine.length && (cmdLine[i] == ' ' || cmdLine[i] == '\t'))
                     ++i;
             }
-            return curScope.suggest(cmdLine[i .. $]);
+            return _cur_scope.suggest(cmdLine[i .. $]);
         }
     }
 
-    void registerCommand(const(char)[] _scope, Command command)
+    void register_command(const(char)[] _scope, Command command)
     {
-        Scope s = createScope(_scope);
-        s.addCommand(command);
+        Scope s = create_scope(_scope);
+        s.add_command(command);
     }
 
-    void registerCommands(const(char)[] _scope, Command[] commands)
+    void register_commands(const(char)[] _scope, Command[] commands)
     {
-        Scope s = createScope(_scope);
+        Scope s = create_scope(_scope);
         foreach (cmd; commands)
-            s.addCommand(cmd);
+            s.add_command(cmd);
     }
 
-    void registerCommand(alias method, Instance)(const(char)[] _scope, Instance instance, const(char)[] commandName = null)
+    void register_command(alias method, Instance)(const(char)[] _scope, Instance instance, const(char)[] commandName = null)
     {
         // TODO: put this back in to tell users how to get the signature right!
 //        alias Fun = typeof(method)*;
 //        static assert(is(Fun : R function(Session, A) nothrow @nogc, R, A...), typeof(method).stringof ~ " must be nothrow @nogc!");
 
-        return registerCommand(_scope, FunctionCommand.create!method(this, instance, commandName));
+        return register_command(_scope, FunctionCommand.create!method(this, instance, commandName));
     }
 
-    void registerCollection(Type)(const(char)[] _scope, ref Collection!Type collection)
+    void register_collection(Type)(const(char)[] _scope, ref Collection!Type collection)
     {
         pragma(inline, true);
 
@@ -235,28 +235,28 @@ nothrow @nogc:
         debug assert(c is null, "Collection has been registered before!");
         c = &collection;
 
-        registerCollectionImpl(_scope, collection);
+        register_collection_impl(_scope, collection);
     }
-    private void registerCollectionImpl(const(char)[] _scope, ref BaseCollection collection)
+    private void register_collection_impl(const(char)[] _scope, ref BaseCollection collection)
     {
         import manager.console.collection_commands;
 
-        Scope s = createScope(_scope);
-        s.addCollectionCommands(collection);
+        Scope s = create_scope(_scope);
+        s.add_collection_commands(collection);
     }
 
-    void unregisterCommand(const(char)[] _scope, const(char)[] command)
+    void unregister_command(const(char)[] _scope, const(char)[] command)
     {
-        Scope s = cast(Scope)findCommand(_scope);
+        Scope s = cast(Scope)find_command(_scope);
         assert(s !is null, tconcat("No scope: ", _scope));
 
         assert(false);
         // TODO
     }
 
-    void unregisterCommands(const(char)[] _scope, const(char)[][] commands)
+    void unregister_commands(const(char)[] _scope, const(char)[][] commands)
     {
-        Scope s = cast(Scope)findCommand(_scope);
+        Scope s = cast(Scope)find_command(_scope);
         assert(s !is null, tconcat("No scope: ", _scope));
 
         foreach (cmd; commands)
@@ -269,20 +269,20 @@ nothrow @nogc:
 
 
 
-    void addCommand(Command command, Scope parent)
+    void add_command(Command command, Scope parent)
     {
-        parent.addCommand(command);
+        parent.add_command(command);
     }
 
-    Command findCommand(const(char)[] cmdPath)
+    Command find_command(const(char)[] cmdPath)
     {
-        Scope s = getRoot();
+        Scope s = get_root();
         Command cmd = null;
 
-        if (cmdPath.frontIs('/'))
+        if (cmdPath.front_is('/'))
         {
             cmdPath = cmdPath[1..$];
-            s = getRoot();
+            s = get_root();
         }
 
         while (!cmdPath.empty)
@@ -290,9 +290,9 @@ nothrow @nogc:
             if (s is null)
                 return null;
 
-            if (cmdPath.frontIs(".."))
+            if (cmdPath.front_is(".."))
             {
-                s = s.parent;
+                s = s._parent;
                 cmd = s;
                 if (cmdPath.length == 2)
                     return cmd;
@@ -302,10 +302,10 @@ nothrow @nogc:
             }
             else
             {
-                const(char)[] identifier = cmdPath.takeIdentifier;
+                const(char)[] identifier = cmdPath.take_identifier;
                 if (identifier.empty)
                     return null;
-                cmd = s.getCommand(identifier);
+                cmd = s.get_command(identifier);
                 if (!cmd)
                     return null;
                 if (cmdPath.empty)
@@ -319,25 +319,25 @@ nothrow @nogc:
         return cmd;
     }
 
-    Scope createScope(const(char)[] path)
+    Scope create_scope(const(char)[] path)
     {
-        assert(path.frontIs('/'), "Scope path must be root relative, ie: /path/to/scope");
+        assert(path.front_is('/'), "Scope path must be root relative, ie: /path/to/scope");
         path = path[1..$];
 
-        Scope s = getRoot();
+        Scope s = get_root();
 
         while (!path.empty)
         {
             // check for child
-            const(char)[] identifier = path.takeIdentifier;
+            const(char)[] identifier = path.take_identifier;
             assert(!identifier.empty, "Invalid scope idenitifier");
 
-            Command cmd = s.getCommand(identifier);
+            Command cmd = s.get_command(identifier);
             if (!cmd)
             {
                 import urt.mem.string : addString;
-                Scope newScope = m_allocator.allocT!Scope(this, String(identifier.addString));
-                s.addCommand(newScope);
+                Scope newScope = _allocator.allocT!Scope(this, String(identifier.addString));
+                s.add_command(newScope);
                 s = newScope;
             }
             else
@@ -358,26 +358,26 @@ nothrow @nogc:
     }
 
 package:
-    NoGCAllocator m_allocator;
-    NoGCAllocator m_tempAllocator;
+    NoGCAllocator _allocator;
+    NoGCAllocator _tempAllocator;
 
-    String m_identifier;
-    String m_prompt;
+    String _identifier;
+    String _prompt;
 
-    Map!(String, Command) m_commands;
-//    HashSet<dcConsoleSession*> m_sessions;
-    Array!Session m_sessions;
+    Map!(String, Command) _commands;
+//    HashSet!Session _sessions;
+    Array!Session _sessions;
 
-    Console* m_nextConsoleInstance = null;
+    Console* _next_console_instance = null;
 }
 
 
-bool isSeparator(char c)
+bool is_separator(char c)
 {
     return c == ' ' || c == '\t';
 }
 
-MutableString!0 getCompletionSuffix(const(char)[] tokenStart, ref const Array!String tokens)
+MutableString!0 get_completion_suffix(const(char)[] token_start, ref const Array!String tokens)
 {
     MutableString!0 result;
     if (tokens.length == 0)
@@ -385,13 +385,13 @@ MutableString!0 getCompletionSuffix(const(char)[] tokenStart, ref const Array!St
     if (tokens.length == 1)
     {
         // only one token; we'll emit the token completion, and the following space
-        result = tokens[0][tokenStart.length .. tokens[0].length];
+        result = tokens[0][token_start.length .. tokens[0].length];
         result ~= ' ';
     }
     else
     {
         // we emit as many characters are common between all tokens
-        size_t offset = tokenStart.length;
+        size_t offset = token_start.length;
         while (offset < tokens[0].length)
         {
             char c = tokens[0][offset];
@@ -408,7 +408,7 @@ MutableString!0 getCompletionSuffix(const(char)[] tokenStart, ref const Array!St
                 break;
             ++offset;
         }
-        result = tokens[0][tokenStart.length .. offset];
+        result = tokens[0][token_start.length .. offset];
     }
     return result;
 }
@@ -416,4 +416,4 @@ MutableString!0 getCompletionSuffix(const(char)[] tokenStart, ref const Array!St
 
 private:
 
-__gshared Console* s_consoleInstances = null;
+__gshared Console* g_console_instances = null;

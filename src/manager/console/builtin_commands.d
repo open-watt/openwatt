@@ -25,14 +25,14 @@ nothrow @nogc:
 
     Array!Command commands;
 
-    bool addCommand(Command cmd)
+    bool add_command(Command cmd)
     {
-        assert(getCommand(cmd.name) is null, "Command already exists");
+        assert(get_command(cmd.name) is null, "Command already exists");
         commands ~= cmd;
         return true;
     }
 
-    Command getCommand(const(char)[] name)
+    Command get_command(const(char)[] name)
     {
         foreach (Command cmd; commands)
             if (cmd.name[] == name[])
@@ -49,7 +49,7 @@ nothrow @nogc:
         // move to scope...
         if (args.length == 0)
         {
-            session.curScope = this;
+            session._cur_scope = this;
             return null;
         }
 
@@ -58,18 +58,18 @@ nothrow @nogc:
         const(char)[] cmd = args[0].asString;
 
         // skip the path separator...
-        if (cmd.frontIs('/'))
+        if (cmd.front_is('/'))
             cmd = cmd[1..$];
 
         // check for '..'
-        if (cmd.frontIs(".."))
+        if (cmd.front_is(".."))
         {
-            if (parent is null)
+            if (_parent is null)
             {
-                session.writeOutput("Error: '..' used at top level", true);
+                session.write_output("Error: '..' used at top level", true);
                 return null;
             }
-            return parent.execute(session, args[1..$], namedArgs);
+            return _parent.execute(session, args[1..$], namedArgs);
         }
 
         // see if the identifier is a child...
@@ -79,7 +79,7 @@ nothrow @nogc:
                 return c.execute(session, args[1..$], namedArgs);
         }
 
-        session.writeOutput(tconcat("Error: no command `", cmd[], "`"), true);
+        session.write_output(tconcat("Error: no command `", cmd[], "`"), true);
         return null;
     }
 
@@ -90,7 +90,7 @@ nothrow @nogc:
         else
         {
             size_t i = 0;
-            if (cmdLine.frontIs('/'))
+            if (cmdLine.front_is('/'))
                 ++i;
             while (i < cmdLine.length && is_whitespace(cmdLine[i]))
                 ++i;
@@ -119,7 +119,7 @@ nothrow @nogc:
                 bool isScope;
             }
             Array!Cmd cmds; // TODO: some static buffer would be nice!
-//            if (this !is m_console.root)
+//            if (this !is _console.root)
 //                cmds ~= Cmd("..", true);
             foreach (Command cmd; commands)
             {
@@ -170,7 +170,7 @@ nothrow @nogc:
             }
 
             Array!String r;
-//            if (this !is m_console.root)
+//            if (this !is _console.root)
 //                r ~= MutableString!0("..");
             foreach (Command cmd; commands)
             {
@@ -205,7 +205,7 @@ public:
 
         // see if we can find the command
         bcString lowerCommand = dcToLower(bcString{ TempAllocator(), command.data(), uint32(command.size()) });
-        auto it = m_console.m_commands.Find(lowerCommand);
+        auto it = _console.m_commands.Find(lowerCommand);
         if (it == nullptr)
             session.WriteF("Unknown command: `%.*s`\n", int(command.size()), command.data());
         else
@@ -222,7 +222,7 @@ public:
             return bcVector<bcString>(Allocator());
 
         // get command name suggestions
-        return m_console.Suggest(!tokens.IsEmpty() ? tokens[0] : bcStringView());
+        return _console.Suggest(!tokens.IsEmpty() ? tokens[0] : bcStringView());
     }
 
     bcString Help(bcStringView) const override

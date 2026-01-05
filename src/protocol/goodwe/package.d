@@ -31,8 +31,8 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCollection("/protocol/goodwe/aa55", clients);
-        g_app.console.registerCommand!device_add("/protocol/goodwe/device", this, "add");
+        g_app.console.register_collection("/protocol/goodwe/aa55", clients);
+        g_app.console.register_command!device_add("/protocol/goodwe/device", this, "add");
 
         // Create socket for AA55 clients
         Socket socket;
@@ -120,7 +120,7 @@ nothrow @nogc:
         void[] file = load_file(tconcat("conf/goodwe_profiles/", profileName, ".conf"), g_app.allocator);
         if (!file)
         {
-            session.writeLine("Profile file not found: '", profileName, "'");
+            session.write_line("Profile file not found: '", profileName, "'");
             return;
         }
         scope(exit) g_app.allocator.free(file);
@@ -128,7 +128,7 @@ nothrow @nogc:
         Profile* profile = parse_profile(cast(char[])file, g_app.allocator);
         if (!profile)
         {
-            session.writeLine("Failed to load profile: '", profileName, "'");
+            session.write_line("Failed to load profile: '", profileName, "'");
             return;
         }
         scope(exit) g_app.allocator.freeT(profile);
@@ -151,7 +151,7 @@ nothrow @nogc:
         });
         if (!device)
         {
-            session.writeLine("Failed to create device '", id, "'");
+            session.write_line("Failed to create device '", id, "'");
             return;
         }
         device.samplers ~= sampler;

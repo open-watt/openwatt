@@ -12,11 +12,11 @@ import manager.plugin;
 
 enum Category
 {
-    Info,
-    Warning,
-    Error,
-    Alert,
-    Debug
+    info,
+    warning,
+    error,
+    alert,
+    debug_
 }
 
 class LogModule : Module
@@ -27,14 +27,14 @@ nothrow @nogc
     override void init()
     {
         Command[5] commands = [
-            g_app.allocator.allocT!LogCommand(g_app.console, "info", Category.Info, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "warn", Category.Warning, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "error", Category.Error, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "alert", Category.Alert, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "debug", Category.Debug, this)
+            g_app.allocator.allocT!LogCommand(g_app.console, "info", Category.info, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "warn", Category.warning, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "error", Category.error, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "alert", Category.alert, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "debug", Category.debug_, this)
         ];
 
-        g_app.console.registerCommands("/log", commands);
+        g_app.console.register_commands("/log", commands);
     }
 }
 
@@ -61,26 +61,26 @@ nothrow @nogc:
     {
         if (args.length == 0 || args.length > 1)
         {
-            session.writeLine("/log command expected string argument");
+            session.write_line("/log command expected string argument");
             return null;
         }
 
         final switch (category)
         {
-            case Category.Info:
+            case Category.info:
                 writeInfo(args[0]);
                 break;
-            case Category.Warning:
+            case Category.warning:
                 writeWarning(args[0]);
                 break;
-            case Category.Error:
+            case Category.error:
                 writeError(args[0]);
                 break;
-            case Category.Alert:
+            case Category.alert:
                 // TODO: implement ALERT type...
                 writeError(args[0]);
                 break;
-            case Category.Debug:
+            case Category.debug_:
                 writeDebug(args[0]);
                 break;
         }

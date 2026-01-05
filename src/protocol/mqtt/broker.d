@@ -27,7 +27,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"mqqt-broker";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!MQTTBroker, name.move, flags);
     }
@@ -61,7 +61,7 @@ nothrow @nogc:
     {
         if (!_server)
         {
-            _server = get_module!TCPStreamModule.tcp_servers.create(name, ObjectFlags.Dynamic);
+            _server = get_module!TCPStreamModule.tcp_servers.create(name, ObjectFlags.dynamic);
             _server.port = _port ? _port : 1883;
             _server.setConnectionCallback(&new_connection, null);
         }
@@ -69,9 +69,9 @@ nothrow @nogc:
         if (_server.running)
         {
             writeInfo("MQTT broker listening on port ", _server.port);
-            return CompletionStatus.Complete;
+            return CompletionStatus.complete;
         }
-        return CompletionStatus.Continue;
+        return CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()
@@ -81,7 +81,7 @@ nothrow @nogc:
             _server.destroy();
             _server = null;
         }
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override void update()
@@ -238,7 +238,7 @@ private:
     {
         _clients ~= MQTTClient(this, client);
 
-        writeInfo("MQTT client connected: ", client.remoteName());
+        writeInfo("MQTT client connected: ", client.remote_name());
     }
 }
 

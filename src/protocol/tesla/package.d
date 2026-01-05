@@ -26,18 +26,18 @@ class TeslaProtocolModule : Module
     mixin DeclareModule!"protocol.tesla";
 nothrow @nogc:
 
-    Map!(const(char)[], TeslaTWCMaster) twcMasters;
+    Map!(const(char)[], TeslaTWCMaster) twc_masters;
 
     override void init()
     {
-        g_app.console.registerCommand!twc_add("/protocol/tesla/twc", this, "add");
-        g_app.console.registerCommand!twc_set("/protocol/tesla/twc", this, "set");
-        g_app.console.registerCommand!device_add("/protocol/tesla/twc/device", this, "add");
+        g_app.console.register_command!twc_add("/protocol/tesla/twc", this, "add");
+        g_app.console.register_command!twc_set("/protocol/tesla/twc", this, "set");
+        g_app.console.register_command!device_add("/protocol/tesla/twc/device", this, "add");
     }
 
     override void update()
     {
-        foreach(m; twcMasters.values)
+        foreach(m; twc_masters.values)
             m.update();
     }
 
@@ -48,12 +48,12 @@ nothrow @nogc:
         BaseInterface i = mod_if.interfaces.get(_interface);
         if(i is null)
         {
-            session.writeLine("Interface '", _interface, "' not found");
+            session.write_line("Interface '", _interface, "' not found");
             return;
         }
 
         TeslaTWCMaster master;
-        foreach (m; twcMasters.values)
+        foreach (m; twc_masters.values)
         {
             if (m.iface is i)
             {
@@ -66,21 +66,21 @@ nothrow @nogc:
             String n = tconcat(_interface, "_twc").makeString(defaultAllocator());
 
             master = defaultAllocator().allocT!TeslaTWCMaster(this, n.move, i);
-            twcMasters[master.name[]] = master;
+            twc_masters[master.name[]] = master;
         }
 
         String n = name.makeString(defaultAllocator());
 
-        master.addCharger(n.move, id, cast(ushort)(max_current * 100));
+        master.add_charger(n.move, id, cast(ushort)(max_current * 100));
     }
 
     void twc_set(Session session, const(char)[] name, float target_current)
     {
         auto mod_if = get_module!TeslaInterfaceModule;
 
-        foreach (m; twcMasters.values)
+        foreach (m; twc_masters.values)
         {
-            if (m.setTargetCurrent(name, cast(ushort)(target_current * 100)) >= 0)
+            if (m.set_target_current(name, cast(ushort)(target_current * 100)) >= 0)
                 return;
         }
     }
@@ -93,13 +93,13 @@ nothrow @nogc:
 
         if (id in g_app.devices)
         {
-            session.writeLine("Device '", id, "' already exists");
+            session.write_line("Device '", id, "' already exists");
             return;
         }
 
         if ((mac && slave_id) || (!mac && !slave_id))
         {
-            session.writeLine("Must specify either mac or slave-id");
+            session.write_line("Must specify either mac or slave-id");
             return;
         }
 
@@ -134,18 +134,18 @@ nothrow @nogc:
         e = g_app.allocator.allocT!Element();
         e.id = "serialNumber".addString;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "lifetimeEnergy".addString;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         // HACK: remove this, move to car component...
         e = g_app.allocator.allocT!Element();
         e.id = "vin".addString;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         device.components ~= c;
 
@@ -156,18 +156,18 @@ nothrow @nogc:
         e = g_app.allocator.allocT!Element();
         e.id = "state".addString;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "targetCurrent".addString;
-        e.access = Access.ReadWrite;
+        e.access = Access.read_write;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "maxCurrent".addString;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         device.components ~= c;
 
@@ -178,7 +178,7 @@ nothrow @nogc:
 //        e = g_app.allocator.allocT!Element();
 //        e.id = "vin".addString;
 //        c.elements ~= e;
-//        sampler.addElement(e);
+//        sampler.add_element(e);
 //
 //        device.components ~= c;
 
@@ -194,42 +194,42 @@ nothrow @nogc:
         e = g_app.allocator.allocT!Element();
         e.id = "voltage1".addString;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "voltage2".addString;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "voltage3".addString;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "current".addString;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "power1".addString;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "power2".addString;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "power3".addString;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "power".addString;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         device.components ~= c;
 
@@ -245,7 +245,7 @@ nothrow @nogc:
         e = g_app.allocator.allocT!Element();
         e.id = "totalImportActiveEnergy".addString;
         c.elements ~= e;
-        sampler.addElement(e);
+        sampler.add_element(e);
 
         device.components ~= c;
 

@@ -7,43 +7,43 @@ public import router.iface.mac;
 
 enum PacketType : ushort
 {
-    Unknown,
-    Ethernet,
-    WPAN,
-    _6LoWPAN,
-    ZigbeeNWK,
-    ZigbeeAPS,
-    Modbus,
-    CAN,
-    TeslaTWC,
+    unknown,
+    ethernet,
+    wpan,
+    _6lowpan,
+    zigbee_nwk,
+    zigbee_aps,
+    modbus,
+    can,
+    tesla_twc,
 }
 
 enum EtherType : ushort
 {
-    IP4     = 0x0800,   // Internet Protocol version 4 (IPv4)
-    ARP     = 0x0806,   // Address Resolution Protocol (ARP)
-    WOL     = 0x0842,   // Wake-on-LAN
-    VLAN    = 0x8100,   // IEEE 802.1Q VLAN tag
-    IP6     = 0x86DD,   // Internet Protocol version 6 (IPv6)
-    PPPoED  = 0x8863,   // PPPoE Discovery (PADI/PADO/PADR/PADS/PADT)
-    PPPoES  = 0x8864,   // PPPoE Session (carries PPP: LCP, IPCP/IPv6CP, etc.)
-    QinQ    = 0x88A8,   // Service VLAN tag identifier (S-Tag) on Q-in-Q tunnel
-    OW      = 0x88B5,   // OpenWatt: this is the official experimental ethertype for development use
-    MTik    = 0x88BF,   // MikroTik RoMON
-    LLDP    = 0x88CC,   // Link Layer Discovery Protocol (LLDP)
-    HPGP    = 0x88E1,   // HomePlug Green PHY (HPGP)
+    ip4     = 0x0800,   // Internet Protocol version 4 (IPv4)
+    arp     = 0x0806,   // Address Resolution Protocol (ARP)
+    wol     = 0x0842,   // Wake-on-LAN
+    vlan    = 0x8100,   // IEEE 802.1Q VLAN tag
+    ip6     = 0x86DD,   // Internet Protocol version 6 (IPv6)
+    pppoed  = 0x8863,   // PPPoE Discovery (PADI/PADO/PADR/PADS/PADT)
+    pppoes  = 0x8864,   // PPPoE Session (carries PPP: LCP, IPCP/IPv6CP, etc.)
+    qinq    = 0x88A8,   // Service VLAN tag identifier (S-Tag) on Q-in-Q tunnel
+    ow      = 0x88B5,   // OpenWatt: this is the official experimental ethertype for development use
+    mtik    = 0x88BF,   // MikroTik RoMON
+    lldp    = 0x88CC,   // Link Layer Discovery Protocol (LLDP)
+    hpgp    = 0x88E1,   // HomePlug Green PHY (HPGP)
 }
 
 enum OW_SubType : ushort
 {
-    Unspecified         = 0x0000,
-    AgentDiscover       = 0x0001,   // probably need some way to find peers on the network?
-    Modbus              = 0x0010,   // modbus
-    CAN                 = 0x0020,   // CAN bus
-    MAC_802_15_4        = 0x0030,   // 802.15.4 MAC encapsulation
-    ZigbeeNWK           = 0x0031,   // zigbee NWK frame
-    ZigbeeAPS           = 0x0032,   // zigbee APS frame
-    TeslaTWC            = 0x0040,   // tesla-twc
+    unspecified         = 0x0000,
+    agent_discover      = 0x0001,   // probably need some way to find peers on the network?
+    modbus              = 0x0010,   // modbus
+    can                 = 0x0020,   // CAN bus
+    mac_802_15_4        = 0x0030,   // 802.15.4 MAC encapsulation
+    zigbee_nwk          = 0x0031,   // zigbee NWK frame
+    zigbee_aps          = 0x0032,   // zigbee APS frame
+    tesla_twc           = 0x0040,   // tesla-twc
 }
 
 
@@ -54,7 +54,7 @@ nothrow @nogc:
     {
         static assert(T.sizeof <= embed.length);
         assert(payload.length <= ushort.max, "Payload too large");
-        creationTime = create_time;
+        creation_time = create_time;
         type = T.Type;
         vlan = 0;
         _flags = 0;
@@ -110,7 +110,7 @@ nothrow @nogc:
         return r;
     }
 
-    SysTime creationTime; // time received, or time of call to send
+    SysTime creation_time; // time received, or time of call to send
     union {
         Ethernet eth;
         void[24] embed;
@@ -127,7 +127,7 @@ package:
 
 struct Ethernet
 {
-    enum Type = PacketType.Ethernet;
+    enum Type = PacketType.ethernet;
 
     MACAddress dst;
     MACAddress src;

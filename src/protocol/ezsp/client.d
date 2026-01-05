@@ -67,7 +67,7 @@ class EZSPClient : BaseObject
         Coordinator = 2
     }
 
-    this(String name, ObjectFlags flags = ObjectFlags.None) nothrow
+    this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
     {
         super(collection_type_info!EZSPClient, name.move, flags);
     }
@@ -157,7 +157,7 @@ nothrow:
     {
         alias ResponseParams = typeof(EZSP_Command.Response.tupleof);
 
-        final void set_callback_handler(Callback)(Callback responseHandler, void* user_data = null) nothrow
+        final void set_callback_handler(Callback)(Callback response_handler, void* user_data = null) nothrow
         {
             static if (is(Callback == typeof(null)))
             {
@@ -184,12 +184,12 @@ nothrow:
                 handler.user_data = HasUserData ? user_data : null;
                 static if (is_delegate!Callback)
                 {
-                    handler.cb_funcptr = responseHandler.funcptr;
-                    handler.cb_instance = responseHandler.ptr;
+                    handler.cb_funcptr = response_handler.funcptr;
+                    handler.cb_instance = response_handler.ptr;
                 }
                 else
                 {
-                    handler.cb_funcptr = responseHandler;
+                    handler.cb_funcptr = response_handler;
                     handler.cb_instance = null;
                 }
             }
@@ -202,7 +202,7 @@ nothrow:
         alias RequestParams = typeof(EZSP_Command.Request.tupleof);
         alias ResponseParams = typeof(EZSP_Command.Response.tupleof);
 
-        final bool send_command(Callback)(Callback responseHandler, auto ref RequestParams args, void* user_data = null)
+        final bool send_command(Callback)(Callback response_handler, auto ref RequestParams args, void* user_data = null)
         {
             if (!running)
                 return false;
@@ -231,9 +231,9 @@ nothrow:
             static if (is(Callback == typeof(null)))
                 return send_command_impl(EZSP_Command.Command, buffer[0..offset], null, null, null, null);
             else static if (is_delegate!Callback)
-                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), responseHandler.funcptr, responseHandler.ptr, HasUserData ? user_data : null);
+                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), response_handler.funcptr, response_handler.ptr, HasUserData ? user_data : null);
             else
-                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), responseHandler, null, HasUserData ? user_data : null);
+                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), response_handler, null, HasUserData ? user_data : null);
         }
     }
 
@@ -292,7 +292,7 @@ nothrow:
         ash.update();
 
         if (_known_version)
-            return CompletionStatus.Complete;
+            return CompletionStatus.complete;
 
         if (ash.isConnected())
         {
@@ -307,9 +307,9 @@ nothrow:
                 _last_event = getTime();
             }
             else if (getTime() - _last_event > 10.seconds)
-                return CompletionStatus.Error;
+                return CompletionStatus.error;
         }
-        return CompletionStatus.Continue;
+        return CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()
@@ -318,7 +318,7 @@ nothrow:
         _known_version = 0;
         _requested_version = 0;
         _sequence_number = 0;
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     final override void update()

@@ -33,8 +33,8 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCollection("/protocol/ip/address", addresses);
-        g_app.console.registerCollection("/protocol/ip/route", routes);
+        g_app.console.register_collection("/protocol/ip/address", addresses);
+        g_app.console.register_collection("/protocol/ip/route", routes);
     }
 
     override void post_init()

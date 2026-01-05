@@ -29,7 +29,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCollection("/protocol/ezsp/client", clients);
+        g_app.console.register_collection("/protocol/ezsp/client", clients);
     }
 
     override void update()

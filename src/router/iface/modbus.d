@@ -25,33 +25,33 @@ import router.stream;
 
 //version = DebugModbusMessageFlow;
 
-alias modbusCRC = calculate_crc!(Algorithm.crc16_modbus);
-alias modbusCRC_2 = calculate_crc_2!(Algorithm.crc16_modbus);
+alias modbus_crc = calculate_crc!(Algorithm.crc16_modbus);
+alias modbus_crc_2 = calculate_crc_2!(Algorithm.crc16_modbus);
 
 nothrow @nogc:
 
 
 enum ModbusProtocol : byte
 {
-    Unknown = -1,
-    RTU,
-    TCP,
-    ASCII
+    unknown = -1,
+    rtu,
+    tcp,
+    ascii
 }
 
 enum ModbusFrameType : ubyte
 {
-    Unknown,
-    Request,
-    Response
+    unknown,
+    request,
+    response
 }
 
 struct ServerMap
 {
     String name;
     MACAddress mac;
-    ubyte localAddress;
-    ubyte universalAddress;
+    ubyte local_address;
+    ubyte universal_address;
     ModbusInterface iface;
     String profile;
 }
@@ -60,16 +60,16 @@ struct ModbusRequest
 {
     ~this() nothrow @nogc
     {
-        if (bufferedPacket)
-            defaultAllocator().free((cast(void*)bufferedPacket)[0 .. Packet.sizeof + bufferedPacket.length]);
+        if (buffered_packet)
+            defaultAllocator().free((cast(void*)buffered_packet)[0 .. Packet.sizeof + buffered_packet.length]);
     }
 
-    SysTime requestTime;
-    MACAddress requestFrom;
-    ushort sequenceNumber;
-    ubyte localServerAddress;
-    bool inFlight;
-    Packet* bufferedPacket;
+    SysTime request_time;
+    MACAddress request_from;
+    ushort sequence_number;
+    ubyte local_server_address;
+    bool in_flight;
+    Packet* buffered_packet;
 }
 
 class ModbusInterface : BaseInterface
@@ -81,7 +81,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"modbus";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!ModbusInterface, name.move, flags);
 
@@ -94,9 +94,9 @@ nothrow @nogc:
         _l2mtu = _max_l2mtu;
 
         // master defaults to false, so we'll generate a mac for the remote bus master...
-        masterMac = generateMacAddress();
-        masterMac.b[5] = 0xFF;
-        addAddress(masterMac, this);
+        _master_mac = generate_mac_address();
+        _master_mac.b[5] = 0xFF;
+        add_address(_master_mac, this);
 
         // TODO: warn the user if they configure an interface to use modbus tcp over a serial line
         //       user should be warned that data corruption may occur!
@@ -110,33 +110,33 @@ nothrow @nogc:
         => _protocol;
     const(char)[] protocol(ModbusProtocol value)
     {
-        if (value == ModbusProtocol.Unknown)
+        if (value == ModbusProtocol.unknown)
             return "Error: Invalid modbus protocol 'unknown'";
         _protocol = value;
-        supportSimultaneousRequests = value == ModbusProtocol.TCP;
+        _support_simultaneous_requests = value == ModbusProtocol.tcp;
         return null;
     }
 
     bool master() const pure
-        => isBusMaster;
+        => _is_bus_master;
     void master(bool value)
     {
-        if (isBusMaster == value)
+        if (_is_bus_master == value)
             return;
 
-        isBusMaster = value;
+        _is_bus_master = value;
         if (value)
         {
-            removeAddress(masterMac);
-            masterMac = MACAddress();
-            if (_protocol == ModbusProtocol.Unknown)
+            remove_address(_master_mac);
+            _master_mac = MACAddress();
+            if (_protocol == ModbusProtocol.unknown)
                 restart();
         }
         else
         {
-            masterMac = generateMacAddress();
-            masterMac.b[5] = 0xFF;
-            addAddress(masterMac, this);
+            _master_mac = generate_mac_address();
+            _master_mac.b[5] = 0xFF;
+            add_address(_master_mac, this);
         }
     }
 
@@ -158,7 +158,7 @@ nothrow @nogc:
             import router.stream.tcp : TCPStream;
             auto tcpStream = cast(TCPStream)_stream;
             if (tcpStream)
-                tcpStream.enableKeepAlive(true, seconds(10), seconds(1), 10);
+                tcpStream.enable_keep_alive(true, seconds(10), seconds(1), 10);
         }
 
         // flush messages and the address mapping tables
@@ -170,7 +170,7 @@ nothrow @nogc:
     // API...
 
     override bool validate() const
-        => _stream !is null && (!master || _protocol != ModbusProtocol.Unknown);
+        => _stream !is null && (!master || _protocol != ModbusProtocol.unknown);
 
     override CompletionStatus validating()
     {
@@ -181,37 +181,37 @@ nothrow @nogc:
     override CompletionStatus startup()
     {
         if (!_stream)
-            return CompletionStatus.Error;
+            return CompletionStatus.error;
         if (!_stream.running)
-            return CompletionStatus.Continue;
+            return CompletionStatus.continue_;
 
-        if (!isBusMaster && _protocol == ModbusProtocol.Unknown)
+        if (!_is_bus_master && _protocol == ModbusProtocol.unknown)
         {
             // listen for a frame and detect the protocol...
             assert(false, "TODO");
         }
-        if (_protocol != ModbusProtocol.Unknown)
+        if (_protocol != ModbusProtocol.unknown)
         {
-            localToUni.insert(ubyte(0), ubyte(0));
-            uniToLocal.insert(ubyte(0), ubyte(0));
-            return CompletionStatus.Complete;
+            _local_to_uni.insert(ubyte(0), ubyte(0));
+            _uni_to_local.insert(ubyte(0), ubyte(0));
+            return CompletionStatus.complete;
         }
-        return CompletionStatus.Continue;
+        return CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()
     {
-        sequenceNumber = 0;
-        expectMessageType = ModbusFrameType.Unknown;
-        lastReceiveEvent = SysTime();
+        _sequence_number = 0;
+        _expect_message_type = ModbusFrameType.unknown;
+        _last_receive_event = SysTime();
 
-        _status.sendDropped += pendingRequests.length;
-        pendingRequests.clear();
+        _status.send_dropped += _pending_requests.length;
+        _pending_requests.clear();
 
-        localToUni.clear();
-        uniToLocal.clear();
+        _local_to_uni.clear();
+        _uni_to_local.clear();
 
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override void update()
@@ -224,47 +224,47 @@ nothrow @nogc:
         SysTime now = getSysTime();
 
         // check for timeouts
-        for (size_t i = 0; i < pendingRequests.length; )
+        for (size_t i = 0; i < _pending_requests.length; )
         {
-            auto req = &pendingRequests[i];
-            Duration elapsed = now - req.requestTime;
-            if (elapsed > (req.inFlight ? requestTimeout.msecs : queueTimeout.msecs))
+            auto req = &_pending_requests[i];
+            Duration elapsed = now - req.request_time;
+            if (elapsed > (req.in_flight ? _request_timeout.msecs : _queue_timeout.msecs))
             {
-                pendingRequests.remove(i);
-                if (!req.inFlight)
-                    ++_status.sendDropped;
+                _pending_requests.remove(i);
+                if (!req.in_flight)
+                    ++_status.send_dropped;
             }
             else
                 ++i;
         }
 
         // check for latent transmit
-        while (!pendingRequests.empty && !pendingRequests[0].inFlight && now - lastReceiveEvent >= gapTime.msecs)
+        while (!_pending_requests.empty && !_pending_requests[0].in_flight && now - _last_receive_event >= _gap_time.msecs)
         {
-            if (forward(*pendingRequests[0].bufferedPacket))
+            if (forward(*_pending_requests[0].buffered_packet))
             {
                 // we'll reset the request time so it doesn't timeout straight away
-                pendingRequests[0].requestTime = now;
-                pendingRequests[0].inFlight = true;
+                _pending_requests[0].request_time = now;
+                _pending_requests[0].in_flight = true;
             }
             else
             {
                 // if send failed we won't try again
-                pendingRequests.remove(0);
+                _pending_requests.remove(0);
             }
         }
 
         // check for data
         ubyte[1024] buffer = void;
-        buffer[0 .. tailBytes] = tail[0 .. tailBytes];
-        ptrdiff_t readOffset = tailBytes;
-        ptrdiff_t length = tailBytes;
-        tailBytes = 0;
+        buffer[0 .. _tail_bytes] = _tail[0 .. _tail_bytes];
+        ptrdiff_t read_offset = _tail_bytes;
+        ptrdiff_t length = _tail_bytes;
+        _tail_bytes = 0;
         read_loop: while (true)
         {
             assert(length < 260);
 
-            ptrdiff_t r = stream.read(buffer[readOffset .. $]);
+            ptrdiff_t r = stream.read(buffer[read_offset .. $]);
             if (r < 0)
             {
                 assert(false, "TODO: what causes read to fail?");
@@ -272,9 +272,9 @@ nothrow @nogc:
             }
             if (r == 0)
             {
-                // if there were no extra bytes available, stash the tail until later
-                tail[0 .. length] = buffer[0 .. length];
-                tailBytes = cast(ushort)length;
+                // if there were no extra bytes available, stash the _tail until later
+                _tail[0 .. length] = buffer[0 .. length];
+                _tail_bytes = cast(ushort)length;
                 break read_loop;
             }
             length += r;
@@ -288,21 +288,21 @@ nothrow @nogc:
             {
                 // parse packets from the stream...
                 const(void)[] message = void;
-                ModbusFrameInfo frameInfo = void;
+                ModbusFrameInfo frame_info = void;
                 size_t taken = 0;
                 final switch (protocol)
                 {
-                    case ModbusProtocol.Unknown:
+                    case ModbusProtocol.unknown:
                         assert(false, "Modbus protocol not specified");
                         break;
-                    case ModbusProtocol.RTU:
-                        taken = parseRTU(buffer[offset .. length], message, frameInfo);
+                    case ModbusProtocol.rtu:
+                        taken = parse_rtu(buffer[offset .. length], message, frame_info);
                         break;
-                    case ModbusProtocol.TCP:
-                        taken = parseTCP(buffer[offset .. length], message, frameInfo);
+                    case ModbusProtocol.tcp:
+                        taken = parse_tcp(buffer[offset .. length], message, frame_info);
                         break;
-                    case ModbusProtocol.ASCII:
-                        taken = parseASCII(buffer[offset .. length], message, frameInfo);
+                    case ModbusProtocol.ascii:
+                        taken = parse_ascii(buffer[offset .. length], message, frame_info);
                         break;
                 }
 
@@ -318,13 +318,13 @@ nothrow @nogc:
                     size_t trunc = remain - keepBytes;
                     memmove(buffer.ptr, buffer.ptr + offset + trunc, keepBytes);
                     length = keepBytes;
-                    readOffset = keepBytes;
+                    read_offset = keepBytes;
                     offset = 0;
                     continue read_loop;
                 }
                 offset += taken;
 
-                incomingPacket(message, now, frameInfo);
+                incoming_packet(message, now, frame_info);
             }
 
             // we've eaten the whole buffer...
@@ -335,31 +335,31 @@ nothrow @nogc:
     protected override bool transmit(ref const Packet packet) nothrow @nogc
     {
         // can only handle modbus packets
-        if (packet.eth.ether_type != EtherType.OW || packet.eth.ow_sub_type != OW_SubType.Modbus || packet.data.length < 5)
+        if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.modbus || packet.data.length < 5)
         {
-            ++_status.sendDropped;
+            ++_status.send_dropped;
             return false;
         }
 
         auto mod_mb = get_module!ModbusInterfaceModule();
 
-        ushort sequenceNumber = (cast(ubyte[])packet.data)[0..2].bigEndianToNative!ushort;
+        ushort _sequence_number = (cast(ubyte[])packet.data)[0..2].bigEndianToNative!ushort;
         ModbusFrameType packetType = *cast(ModbusFrameType*)&packet.data[2];
         ubyte packetAddress = *cast(ubyte*)&packet.data[3];
 
         ushort length = 0;
         ubyte address = 0;
 
-        if (isBusMaster)
+        if (_is_bus_master)
         {
-            assert(packetType == ModbusFrameType.Request);
+            assert(packetType == ModbusFrameType.request);
 
             if (!packet.eth.dst.isBroadcast)
             {
-                ServerMap* map = mod_mb.findServerByMac(packet.eth.dst);
+                ServerMap* map = mod_mb.find_server_by_mac(packet.eth.dst);
                 if (!map)
                 {
-                    ++_status.sendDropped;
+                    ++_status.send_dropped;
                     return false; // we don't know who this server is!
                 }
                 if (map.iface !is this)
@@ -367,57 +367,57 @@ nothrow @nogc:
                     // this server belongs to a different interface, but this interface received it...
                     // this probably happened because a bridge didn't know where to direct the packet.
                     // we have 2 options; just forward it, or drop it... since we know it should be directed somewhere else...?
-                    ++_status.sendDropped;
+                    ++_status.send_dropped;
                     return false; // this server belongs to a different interface...
                 }
-                debug assert(packetAddress == map.universalAddress, "Packet address does not match dest address?!");
+                debug assert(packetAddress == map.universal_address, "Packet address does not match dest address?!");
                 // TODO: we could use uni -> local lookup
-                address = map.localAddress;
+                address = map.local_address;
             }
 
             // we can transmit immediately if simultaneous requests are accepted
             // or if there are no messages currently queued, and we satisfied the message gap time
             SysTime now = getSysTime();
-            bool transmitImmediately = supportSimultaneousRequests || (pendingRequests.empty ? (now - lastReceiveEvent >= gapTime.msecs) : (&packet == pendingRequests[0].bufferedPacket));
+            bool transmitImmediately = _support_simultaneous_requests || (_pending_requests.empty ? (now - _last_receive_event >= _gap_time.msecs) : (&packet == _pending_requests[0].buffered_packet));
 
             // we need to queue the request so we can return the response to the sender...
             // but check that it's not a re-send attempt of the head queued packet
-            if (pendingRequests.empty || &packet != pendingRequests[0].bufferedPacket)
-                pendingRequests ~= ModbusRequest(now, packet.eth.src, sequenceNumber, address, transmitImmediately, packet.clone());
+            if (_pending_requests.empty || &packet != _pending_requests[0].buffered_packet)
+                _pending_requests ~= ModbusRequest(now, packet.eth.src, _sequence_number, address, transmitImmediately, packet.clone());
 
             if (!transmitImmediately)
                 return true;
         }
         else
         {
-            assert(packetType == ModbusFrameType.Response);
+            assert(packetType == ModbusFrameType.response);
 
             // if we're not a bus master, we can only send response packets destined for the master
-            if (packet.eth.dst != masterMac)
+            if (packet.eth.dst != _master_mac)
             {
-                ++_status.sendDropped;
+                ++_status.send_dropped;
                 return false;
             }
 
             address = packetAddress;
 
             // the packet is a response to the master; just frame it and send it...
-            ServerMap* map = mod_mb.findServerByUniversalAddress(packetAddress);
+            ServerMap* map = mod_mb.find_server_by_universal_address(packetAddress);
             if (!map)
             {
-                ++_status.sendDropped;
+                ++_status.send_dropped;
                 return false; // how did we even get a response if we don't know who the server is?
             }
 
             if (map.iface is this)
             {
                 assert(false, "This should be impossible; it should have served its own response...?");
-                address = map.localAddress;
+                address = map.local_address;
             }
             else
             {
-                debug assert(packetAddress == map.universalAddress, "Packet address does not match dest address?!");
-                address = map.universalAddress;
+                debug assert(packetAddress == map.universal_address, "Packet address does not match dest address?!");
+                address = map.universal_address;
             }
         }
 
@@ -427,19 +427,19 @@ nothrow @nogc:
 
         final switch (protocol)
         {
-            case ModbusProtocol.Unknown:
+            case ModbusProtocol.unknown:
                 assert(false, "Modbus protocol not specified");
-            case ModbusProtocol.RTU:
+            case ModbusProtocol.rtu:
                 // frame the packet
                 length = cast(ushort)(1 + pdu.length);
                 buffer[0] = address;
                 buffer[1 .. length] = pdu[];
-                buffer[length .. length + 2][0 .. 2] = buffer[0 .. length].modbusCRC().nativeToLittleEndian;
+                buffer[length .. length + 2][0 .. 2] = buffer[0 .. length].modbus_crc().nativeToLittleEndian;
                 length += 2;
                 break;
-            case ModbusProtocol.TCP:
+            case ModbusProtocol.tcp:
                 assert(false);
-            case ModbusProtocol.ASCII:
+            case ModbusProtocol.ascii:
                 // calculate the LRC
                 ubyte lrc = address;
                 foreach (b; cast(ubyte[])pdu[])
@@ -464,25 +464,25 @@ nothrow @nogc:
             // if the stream disconnected, maybe we should buffer the message incase it reconnects promptly?
 
             // just drop it for now...
-            ++_status.sendDropped;
+            ++_status.send_dropped;
             return false;
         }
 
-        ++_status.sendPackets;
-        _status.sendBytes += length;
+        ++_status.send_packets;
+        _status.send_bytes += length;
         return true;
     }
 
-    override ushort pcapType() const
+    override ushort pcap_type() const
         => 147; // DLT_USER
 
-    override void pcapWrite(ref const Packet packet, PacketDirection dir, scope void delegate(const void[] packetData) nothrow @nogc sink) const
+    override void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(const void[] packetData) nothrow @nogc sink) const
     {
         // write the address and pdu
         sink(packet.data[3..$]);
 
         // calculate and write the crc
-        ushort crc = packet.data[3 .. $].modbusCRC();
+        ushort crc = packet.data[3 .. $].modbus_crc();
         sink(crc.nativeToLittleEndian());
     }
 
@@ -490,28 +490,28 @@ private:
     ObjectRef!Stream _stream;
 
     ModbusProtocol _protocol;
-    bool isBusMaster;
-    bool supportSimultaneousRequests = false;
-    ushort requestTimeout = 500; // default 500ms? longer?
-    ushort queueTimeout = 500;   // same as request timeout?
-    ushort gapTime = 35;         // what's a reasonable RTU gap time?
-    SysTime lastReceiveEvent;
+    bool _is_bus_master;
+    bool _support_simultaneous_requests = false;
+    ushort _request_timeout = 500; // default 500ms? longer?
+    ushort _queue_timeout = 500;   // same as request timeout?
+    ushort _gap_time = 35;         // what's a reasonable RTU gap time?
+    SysTime _last_receive_event;
 
     // if we are the bus master
-    Array!ModbusRequest pendingRequests;
+    Array!ModbusRequest _pending_requests;
 
     // if we are not the bus master
-    package MACAddress masterMac; // TODO: `package` because bridge interface backdoors this... rethink?
-    ushort sequenceNumber;
-    ModbusFrameType expectMessageType = ModbusFrameType.Unknown;
+    package MACAddress _master_mac; // TODO: `package` because bridge interface backdoors this... rethink?
+    ushort _sequence_number;
+    ModbusFrameType _expect_message_type = ModbusFrameType.unknown;
 
-    Map!(ubyte, ubyte) localToUni;
-    Map!(ubyte, ubyte) uniToLocal;
+    Map!(ubyte, ubyte) _local_to_uni;
+    Map!(ubyte, ubyte) _uni_to_local;
 
-    ubyte[260] tail;
-    ushort tailBytes;
+    ubyte[260] _tail;
+    ushort _tail_bytes;
 
-    final void incomingPacket(const(void)[] message, SysTime recvTime, ref ModbusFrameInfo frameInfo)
+    final void incoming_packet(const(void)[] message, SysTime recvTime, ref ModbusFrameInfo frame_info)
     {
         debug assert(running, "Shouldn't receive packets while not running...?");
 
@@ -522,23 +522,23 @@ private:
         }
 
         // if we are the bus master, then we can only receive responses...
-        ModbusFrameType type = isBusMaster ? ModbusFrameType.Response : frameInfo.frameType;
-        if (type == ModbusFrameType.Unknown && expectMessageType != ModbusFrameType.Unknown)
+        ModbusFrameType type = _is_bus_master ? ModbusFrameType.response : frame_info.frame_type;
+        if (type == ModbusFrameType.unknown && _expect_message_type != ModbusFrameType.unknown)
         {
             // if we haven't seen a packet for longer than the timeout interval, then we can't trust our guess
-            if (recvTime - lastReceiveEvent > requestTimeout.msecs)
-                expectMessageType = ModbusFrameType.Unknown;
+            if (recvTime - _last_receive_event > _request_timeout.msecs)
+                _expect_message_type = ModbusFrameType.unknown;
             else
-                type = expectMessageType;
+                type = _expect_message_type;
         }
 
-        lastReceiveEvent = recvTime;
+        _last_receive_event = recvTime;
 
-        MACAddress frameMac = void;
+        MACAddress frame_mac = void;
         ubyte address = 0;
 
-        if (frameInfo.address == 0)
-            frameMac = MACAddress.broadcast;
+        if (frame_info.address == 0)
+            frame_mac = MACAddress.broadcast;
         else
         {
             auto mod_mb = get_module!ModbusInterfaceModule();
@@ -550,9 +550,9 @@ private:
             //    ...so the address must be their local bus address
             // if we are not the bus master, then it could be a request from a master to a local or remote slave, or a response from a local slave
             //    ...the response is local, so it can only be a universal address if it's a request!
-            ServerMap* map = mod_mb.findServerByLocalAddress(frameInfo.address, this);
-            if (!map && type == ModbusFrameType.Request)
-                map = mod_mb.findServerByUniversalAddress(frameInfo.address);
+            ServerMap* map = mod_mb.find_server_by_local_address(frame_info.address, this);
+            if (!map && type == ModbusFrameType.request)
+                map = mod_mb.find_server_by_universal_address(frame_info.address);
             if (!map)
             {
                 // apparently this is the first time we've seen this guy...
@@ -560,19 +560,19 @@ private:
                 // so, it must be a communication from a local master with a local slave we don't know...
 
                 // let's confirm and then record their existence...
-                if (isBusMaster)
+                if (_is_bus_master)
                 {
                     // if we are the bus-master, it should have been impossible to receive a packet from an unknown guy
                     // it's possibly a false packet from a corrupt bitstream, or there's another master on the bus!
                     // we'll drop this packet to be safe...
-                    ++_status.recvDropped;
+                    ++_status.recv_dropped;
                     return;
                 }
 
-                map = mod_mb.addRemoteServer(null, this, frameInfo.address, null);
+                map = mod_mb.add_remote_server(null, this, frame_info.address, null);
             }
-            address = map.universalAddress;
-            frameMac = map.mac;
+            address = map.universal_address;
+            frame_mac = map.mac;
         }
 
         ubyte[255] buffer = void;
@@ -582,29 +582,29 @@ private:
 
         Packet p;
         p.init!Ethernet(buffer[0 .. 4 + message.length]);
-        p.creationTime = recvTime;
+        p.creation_time = recvTime;
         p.vlan = _pvid;
-        p.eth.ether_type = EtherType.OW;
-        p.eth.ow_sub_type = OW_SubType.Modbus;
+        p.eth.ether_type = EtherType.ow;
+        p.eth.ow_sub_type = OW_SubType.modbus;
 
-        if (isBusMaster)
+        if (_is_bus_master)
         {
             // if we are the bus master, we expect to receive packets in response to queued requests
-            if (!supportSimultaneousRequests)
+            if (!_support_simultaneous_requests)
             {
                 // if there are no pending requests, then we probably received a late reply to something we timed out...
-                if (pendingRequests.empty)
+                if (_pending_requests.empty)
                 {
-                    ++_status.recvDropped;
+                    ++_status.recv_dropped;
                     return;
                 }
 
                 // expect incoming messages are a response to the front message
-                if (pendingRequests[0].localServerAddress == frameInfo.address)
+                if (_pending_requests[0].local_server_address == frame_info.address)
                 {
-                    p.eth.src = frameMac;
-                    p.eth.dst = pendingRequests[0].requestFrom;
-                    buffer[0..2] = nativeToBigEndian(pendingRequests[0].sequenceNumber);
+                    p.eth.src = frame_mac;
+                    p.eth.dst = _pending_requests[0].request_from;
+                    buffer[0..2] = nativeToBigEndian(_pending_requests[0].sequence_number);
                     dispatch(p);
                 }
                 else
@@ -617,29 +617,29 @@ private:
                     //  3. dismiss ALL pending requests, because we may be out of cadence so drop everything to start over?
 
                     // we'll do 2 for now...
-                    ++_status.recvDropped;
+                    ++_status.recv_dropped;
                 }
 
-                pendingRequests.remove(0);
+                _pending_requests.remove(0);
             }
             else
             {
-                if (!frameInfo.hasSequenceNumber)
+                if (!frame_info.has_sequence_number)
                 {
-                    // how can we supportSimultaneousRequests and not have a sequence number?
-                    // we must be using modbus TCP to supportSimultaneousRequests, no?
+                    // how can we _support_simultaneous_requests and not have a sequence number?
+                    // we must be using modbus TCP to _support_simultaneous_requests, no?
                     assert(false);
                 }
-                ushort seq = frameInfo.sequenceNumber;
+                ushort seq = frame_info.sequence_number;
                 bool dispatched = false;
 
-                foreach (i, ref req; pendingRequests)
+                foreach (i, ref req; _pending_requests)
                 {
-                    if (req.localServerAddress != frameInfo.address || req.sequenceNumber != seq)
+                    if (req.local_server_address != frame_info.address || req.sequence_number != seq)
                         continue;
 
-                    p.eth.src = frameMac;
-                    p.eth.dst = req.requestFrom;
+                    p.eth.src = frame_mac;
+                    p.eth.dst = req.request_from;
 
                     buffer[0..2] = nativeToBigEndian(seq);
 
@@ -647,7 +647,7 @@ private:
                     dispatched = true;
 
                     // remove the request from the queue
-                    pendingRequests.remove(i);
+                    _pending_requests.remove(i);
                     break;
                 }
 
@@ -656,43 +656,43 @@ private:
                     // we received a packet with no pending request...
                     // maybe it was a late response to a message that we already dismissed as timeout?
                     // ...or something else?
-                    ++_status.recvDropped;
+                    ++_status.recv_dropped;
                 }
             }
         }
         else
         {
-            if (type != ModbusFrameType.Request)
+            if (type != ModbusFrameType.request)
             {
-                if (frameMac == mac)
+                if (frame_mac == mac)
                 {
-                    debug assert(type != ModbusFrameType.Response, "This seems like a request, but the FrameInfo disagrees!");
-                    buffer[2] = type = ModbusFrameType.Request;
+                    debug assert(type != ModbusFrameType.response, "This seems like a request, but the FrameInfo disagrees!");
+                    buffer[2] = type = ModbusFrameType.request;
                 }
-                else if (type == ModbusFrameType.Unknown)
+                else if (type == ModbusFrameType.unknown)
                 {
                     // we can't dispatch this message if we don't know if its a request or a response...
                     // we'll need to discard messages until we get one that we know, and then we can predict future messages from there
-                    ++_status.recvDropped;
+                    ++_status.recv_dropped;
                     return;
                 }
             }
 
-            p.eth.src = type == ModbusFrameType.Request ? masterMac : frameMac;
-            p.eth.dst = type == ModbusFrameType.Request ? frameMac : masterMac;
+            p.eth.src = type == ModbusFrameType.request ? _master_mac : frame_mac;
+            p.eth.dst = type == ModbusFrameType.request ? frame_mac : _master_mac;
 
-            ushort seq = frameInfo.sequenceNumber;
-            if (!frameInfo.hasSequenceNumber)
+            ushort seq = frame_info.sequence_number;
+            if (!frame_info.has_sequence_number)
             {
-                if (type == ModbusFrameType.Request)
-                    ++sequenceNumber;
-                seq = sequenceNumber;
+                if (type == ModbusFrameType.request)
+                    ++_sequence_number;
+                seq = _sequence_number;
             }
             buffer[0..2] = nativeToBigEndian(seq);
 
             dispatch(p);
 
-            expectMessageType = type == ModbusFrameType.Request ? ModbusFrameType.Response : ModbusFrameType.Request;
+            _expect_message_type = type == ModbusFrameType.request ? ModbusFrameType.response : ModbusFrameType.request;
         }
     }
 }
@@ -704,12 +704,12 @@ class ModbusInterfaceModule : Module
 nothrow @nogc:
 
     Collection!ModbusInterface modbus_interfaces;
-    Map!(ubyte, ServerMap) remoteServers;
+    Map!(ubyte, ServerMap) remote_servers;
 
     override void init()
     {
-        g_app.console.registerCollection("/interface/modbus", modbus_interfaces);
-        g_app.console.registerCommand!remote_server_add("/interface/modbus/remote-server", this, "add");
+        g_app.console.register_collection("/interface/modbus", modbus_interfaces);
+        g_app.console.register_command!remote_server_add("/interface/modbus/remote-server", this, "add");
     }
 
     override void update()
@@ -717,9 +717,9 @@ nothrow @nogc:
         modbus_interfaces.update_all();
     }
 
-    ServerMap* findServerByName(const(char)[] name)
+    final ServerMap* find_server_by_name(const(char)[] name)
     {
-        foreach (ref map; remoteServers.values)
+        foreach (ref map; remote_servers.values)
         {
             if (map.name[] == name)
                 return &map;
@@ -727,9 +727,9 @@ nothrow @nogc:
         return null;
     }
 
-    ServerMap* findServerByMac(MACAddress mac)
+    final ServerMap* find_server_by_mac(MACAddress mac)
     {
-        foreach (ref map; remoteServers.values)
+        foreach (ref map; remote_servers.values)
         {
             if (map.mac == mac)
                 return &map;
@@ -737,101 +737,101 @@ nothrow @nogc:
         return null;
     }
 
-    ServerMap* findServerByLocalAddress(ubyte localAddress, BaseInterface iface)
+    final ServerMap* find_server_by_local_address(ubyte local_address, BaseInterface iface)
     {
-        foreach (ref map; remoteServers.values)
+        foreach (ref map; remote_servers.values)
         {
-            if (map.localAddress == localAddress && map.iface is iface)
+            if (map.local_address == local_address && map.iface is iface)
                 return &map;
         }
         return null;
     }
 
-    ServerMap* findServerByUniversalAddress(ubyte universalAddress)
+    final ServerMap* find_server_by_universal_address(ubyte universal_address)
     {
-        return universalAddress in remoteServers;
+        return universal_address in remote_servers;
     }
 
-    ServerMap* addRemoteServer(const(char)[] name, ModbusInterface iface, ubyte address, const(char)[] profile, ubyte universalAddress = 0)
+    final ServerMap* add_remote_server(const(char)[] name, ModbusInterface iface, ubyte address, const(char)[] profile, ubyte universal_address = 0)
     {
         if (!name)
             name = tconcat(iface.name[], '.', address);
 
         ServerMap map;
         map.name = name.makeString(defaultAllocator());
-        map.mac = iface.generateMacAddress();
+        map.mac = iface.generate_mac_address();
         map.mac.b[5] = address;
 
-        if (!universalAddress)
+        if (!universal_address)
         {
-            const ubyte initialAddress = universalAddress = map.mac.b[4] ^ address;
+            const ubyte initialAddress = universal_address = map.mac.b[4] ^ address;
             while (true)
             {
-                if (universalAddress == 0 || universalAddress == 0xFF)
-                    universalAddress += 2;
-                if (universalAddress !in remoteServers)
+                if (universal_address == 0 || universal_address == 0xFF)
+                    universal_address += 2;
+                if (universal_address !in remote_servers)
                     break;
-                ++universalAddress;
-                assert(universalAddress != initialAddress, "No available universal addresses!");
+                ++universal_address;
+                assert(universal_address != initialAddress, "No available universal addresses!");
             }
         }
         else
-            assert(universalAddress !in remoteServers, "Universal address already in use.");
+            assert(universal_address !in remote_servers, "Universal address already in use.");
 
-        iface.localToUni[address] = universalAddress;
-        iface.uniToLocal[universalAddress] = address;
+        iface._local_to_uni[address] = universal_address;
+        iface._uni_to_local[universal_address] = address;
 
-        map.localAddress = address;
-        map.universalAddress = universalAddress;
+        map.local_address = address;
+        map.universal_address = universal_address;
         map.iface = iface;
         map.profile = profile.makeString(defaultAllocator());
 
-        remoteServers[universalAddress] = map;
-        iface.addAddress(map.mac, iface);
+        remote_servers[universal_address] = map;
+        iface.add_address(map.mac, iface);
 
         import urt.log;
-        writeInfof("Create modbus server '{0}' - mac: {1}  uid: {2}  at-interface: {3}({4})", map.name, map.mac, map.universalAddress, iface.name, map.localAddress);
+        writeInfof("Create modbus server '{0}' - mac: {1}  uid: {2}  at-interface: {3}({4})", map.name, map.mac, map.universal_address, iface.name, map.local_address);
 
-        return universalAddress in remoteServers;
+        return universal_address in remote_servers;
     }
 
-    void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, const(char)[] profile, Nullable!ubyte universal_address)
+    final void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, const(char)[] profile, Nullable!ubyte universal_address)
     {
         if (!_interface)
         {
-            session.writeLine("Interface must be specified.");
+            session.write_line("Interface must be specified.");
             return;
         }
         if (!address)
         {
-            session.writeLine("Local address must be specified.");
+            session.write_line("Local address must be specified.");
             return;
         }
 
         BaseInterface iface = get_module!InterfaceModule.interfaces.get(_interface);
         if (!iface)
         {
-            session.writeLine("Interface '", _interface, "' not found.");
+            session.write_line("Interface '", _interface, "' not found.");
             return;
         }
         ModbusInterface modbusInterface = cast(ModbusInterface)iface;
         if (!modbusInterface)
         {
-            session.writeLine("Interface '", _interface, "' is not a modbus interface.");
+            session.write_line("Interface '", _interface, "' is not a modbus interface.");
             return;
         }
 
         if (universal_address)
         {
-            ServerMap* t = universal_address.value in remoteServers;
+            ServerMap* t = universal_address.value in remote_servers;
             if (t)
             {
-                session.writeLine("Universal address '", universal_address.value, "' already in use by '", t.name, "'.");
+                session.write_line("Universal address '", universal_address.value, "' already in use by '", t.name, "'.");
                 return;
             }
         }
 
-        addRemoteServer(name, modbusInterface, address, profile, universal_address ? universal_address.value : 0);
+        add_remote_server(name, modbusInterface, address, profile, universal_address ? universal_address.value : 0);
     }
 }
 
@@ -840,24 +840,24 @@ private:
 
 struct ModbusFrameInfo
 {
-    bool hasSequenceNumber;
-    bool hasCRC;
-    ushort sequenceNumber;
+    bool has_sequence_number;
+    bool has_crc;
+    ushort sequence_number;
     ushort crc;
-    ModbusFrameType frameType = ModbusFrameType.Unknown;
+    ModbusFrameType frame_type = ModbusFrameType.unknown;
     ubyte address;
-    FunctionCode functionCode;
-    ExceptionCode exceptionCode = ExceptionCode.None;
+    FunctionCode function_code;
+    ExceptionCode exception_code = ExceptionCode.none;
 }
 
-__gshared immutable ushort[25] functionLens = [
+__gshared immutable ushort[25] function_lens = [
     0x0000, 0x2306, 0x2306, 0x2306, 0x2306, 0x0606, 0x0606, 0x0302,
     0xFFFF, 0xFFFF, 0xFFFF, 0x0602, 0x2302, 0xFFFF, 0xFFFF, 0x0667,
     0x0667, 0x2302, 0xFFFF, 0xFFFF, 0x3232, 0x3232, 0x0808, 0x23AB,
     0x3404
 ];
 
-int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
+int parse_frame(const(ubyte)[] data, out ModbusFrameInfo frame_info)
 {
     // RTU has no sync markers, so we need to get pretty creative to validate frames!
     // 1: packets are delimited by a 2-byte CRC, so any sequence of bytes where the running CRC is followed by 2 bytes with that value might be a frame...
@@ -882,26 +882,26 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
     ubyte address = data[0];
     if (address >= 248 && address <= 255) // @unlikely
         return 0;
-    frameInfo.address = address;
+    frame_info.address = address;
 
     // frames must start with a valid function code...
     ubyte f = data[1];
     FunctionCode fc = cast(FunctionCode)(f & 0x7F);
-    ushort fnData = fc < functionLens.length ? functionLens[fc] : fc == 0x2B ? 0xFFFF : 0;
-    if (fnData == 0) // @unlikely
+    ushort fn_data = fc < function_lens.length ? function_lens[fc] : fc == 0x2B ? 0xFFFF : 0;
+    if (fn_data == 0) // @unlikely
         return 0;
-    frameInfo.functionCode = fc;
-    frameInfo.hasCRC = true;
+    frame_info.function_code = fc;
+    frame_info.has_crc = true;
 
     // exceptions are always 3 bytes
-    ubyte reqLength = void;
-    ubyte resLength = void;
+    ubyte req_length = void;
+    ubyte res_length = void;
     if (f & 0x80) // @unlikely
     {
-        frameInfo.exceptionCode = cast(ExceptionCode)data[2];
-        frameInfo.frameType = ModbusFrameType.Response;
-        reqLength = 3;
-        resLength = 3;
+        frame_info.exception_code = cast(ExceptionCode)data[2];
+        frame_info.frame_type = ModbusFrameType.response;
+        req_length = 3;
+        res_length = 3;
     }
 
     // zero bytes (broadcast address) are common in data streams, and if the function code can't broadcast, we can exclude this packet
@@ -913,17 +913,17 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
 //    }
 
     // if the function code can determine the length...
-    else if (fnData != 0xFFFF) // @likely
+    else if (fn_data != 0xFFFF) // @likely
     {
         // TODO: we can instead load these bytes separately if the bit-shifting is worse than loads...
-        reqLength = fnData & 0xF;
-        ubyte reqExtra = (fnData >> 4) & 0xF;
-        resLength = (fnData >> 8) & 0xF;
-        ubyte resExtra = fnData >> 12;
-        if (reqExtra && reqExtra < data.length)
-            reqLength += data[reqExtra];
-        if (resExtra)
-            resLength += data[resExtra];
+        req_length = fn_data & 0xF;
+        ubyte req_extra = (fn_data >> 4) & 0xF;
+        res_length = (fn_data >> 8) & 0xF;
+        ubyte res_extra = fn_data >> 12;
+        if (req_extra && req_extra < data.length)
+            req_length += data[req_extra];
+        if (res_extra)
+            res_length += data[res_extra];
     }
     else
     {
@@ -931,75 +931,75 @@ int parseFrame(const(ubyte)[] data, out ModbusFrameInfo frameInfo)
 
         // realistically, this is almost always a result of stream corruption...
         // and the implementation is quite a lot of code!
-        const(ubyte)[] message = crawlForRTU(data, &frameInfo.crc);
+        const(ubyte)[] message = crawl_for_rtu(data, &frame_info.crc);
         if (message != null)
             return cast(int)message.length;
         return 0;
     }
 
-    int failResult = 0;
-    if (reqLength != resLength) // @likely
+    int fail_result = 0;
+    if (req_length != res_length) // @likely
     {
-        ubyte length = void, smallerLength = void;
-        ModbusFrameType type = void, smallerType = void;
-        if (reqLength > resLength)
+        ubyte length = void, smaller_length = void;
+        ModbusFrameType type = void, smaller_type = void;
+        if (req_length > res_length)
         {
-            length = reqLength;
-            smallerLength = resLength;
-            type = ModbusFrameType.Request;
-            smallerType = ModbusFrameType.Response;
+            length = req_length;
+            smaller_length = res_length;
+            type = ModbusFrameType.request;
+            smaller_type = ModbusFrameType.response;
         }
         else
         {
-            length = resLength;
-            smallerLength = reqLength;
-            type = ModbusFrameType.Response;
-            smallerType = ModbusFrameType.Request;
+            length = res_length;
+            smaller_length = req_length;
+            type = ModbusFrameType.response;
+            smaller_type = ModbusFrameType.request;
         }
 
         if (data.length >= length + 2) // @likely
         {
-            uint crc2 = data[0 .. length].modbusCRC_2(smallerLength);
+            uint crc2 = data[0 .. length].modbus_crc_2(smaller_length);
 
-            if ((crc2 >> 16) == (data[smallerLength] | cast(ushort)data[smallerLength + 1] << 8))
+            if ((crc2 >> 16) == (data[smaller_length] | cast(ushort)data[smaller_length + 1] << 8))
             {
-                frameInfo.frameType = smallerType;
-                frameInfo.crc = crc2 >> 16;
-                return smallerLength;
+                frame_info.frame_type = smaller_type;
+                frame_info.crc = crc2 >> 16;
+                return smaller_length;
             }
             if ((crc2 & 0xFFFF) == (data[length] | cast(ushort)data[length + 1] << 8))
             {
-                frameInfo.frameType = type;
-                frameInfo.crc = crc2 & 0xFFFF;
+                frame_info.frame_type = type;
+                frame_info.crc = crc2 & 0xFFFF;
                 return length;
             }
             return 0;
         }
         else
         {
-            failResult = -1;
-            reqLength = smallerLength;
-            frameInfo.frameType = smallerType;
+            fail_result = -1;
+            req_length = smaller_length;
+            frame_info.frame_type = smaller_type;
         }
     }
 
     // check we have enough data...
-    if (data.length < reqLength + 2) // @unlikely
+    if (data.length < req_length + 2) // @unlikely
         return -1;
 
-    ushort crc = data[0 .. reqLength].modbusCRC();
+    ushort crc = data[0 .. req_length].modbus_crc();
 
-    if (crc == (data[reqLength] | cast(ushort)data[reqLength + 1] << 8))
+    if (crc == (data[req_length] | cast(ushort)data[req_length + 1] << 8))
     {
-        frameInfo.crc = crc;
-        return reqLength;
+        frame_info.crc = crc;
+        return req_length;
     }
 
-    return failResult;
+    return fail_result;
 }
 
 
-size_t parseRTU(const(ubyte)[] data, out const(void)[] message, out ModbusFrameInfo frameInfo)
+size_t parse_rtu(const(ubyte)[] data, out const(void)[] message, out ModbusFrameInfo frame_info)
 {
     if (data.length < 4)
         return 0;
@@ -1008,7 +1008,7 @@ size_t parseRTU(const(ubyte)[] data, out const(void)[] message, out ModbusFrameI
     size_t offset = 0;
     for (; offset < data.length - 4; ++offset)
     {
-        int length = parseFrame(data[offset .. data.length], frameInfo);
+        int length = parse_frame(data[offset .. data.length], frame_info);
         if (length < 0)
             return 0;
         if (length == 0)
@@ -1022,29 +1022,29 @@ size_t parseRTU(const(ubyte)[] data, out const(void)[] message, out ModbusFrameI
     return 0;
 }
 
-size_t parseTCP(const(ubyte)[] data, out const(void)[] message, out ModbusFrameInfo frameInfo)
+size_t parse_tcp(const(ubyte)[] data, out const(void)[] message, out ModbusFrameInfo frame_info)
 {
     assert(false);
     return 0;
 }
 
-size_t parseASCII(const(ubyte)[] data, out const(void)[] message, out ModbusFrameInfo frameInfo)
+size_t parse_ascii(const(ubyte)[] data, out const(void)[] message, out ModbusFrameInfo frame_info)
 {
     assert(false);
     return 0;
 }
 
-inout(ubyte)[] crawlForRTU(inout(ubyte)[] data, ushort* rcrc = null)
+inout(ubyte)[] crawl_for_rtu(inout(ubyte)[] data, ushort* rcrc = null)
 {
     alias modbus_crc_table = crc_table!(Algorithm.crc16_modbus);
 
 //    if (data.length < 4)
 //        return null;
 
-    enum NumCRC = 8;
-    ushort[NumCRC] foundCRC = void;
-    size_t[NumCRC] foundCRCPos = void;
-    int numfoundCRC = 0;
+    enum num_crc = 8;
+    ushort[num_crc] found_crc = void;
+    size_t[num_crc] found_crc_pos = void;
+    int num_found_crc = 0;
 
     // crawl through the buffer accumulating a CRC and looking for the following bytes to match
     ushort crc = 0xFFFF;
@@ -1061,37 +1061,37 @@ inout(ubyte)[] crawlForRTU(inout(ubyte)[] data, ushort* rcrc = null)
         // if the running CRC matches the next word, we probably have an RTU packet delimiter
         if (crc == next)
         {
-            foundCRC[numfoundCRC] = crc;
-            foundCRCPos[numfoundCRC++] = pos;
-            if (numfoundCRC == NumCRC)
+            found_crc[num_found_crc] = crc;
+            found_crc_pos[num_found_crc++] = pos;
+            if (num_found_crc == num_crc)
                 break;
         }
     }
 
-    if (numfoundCRC > 0)
+    if (num_found_crc > 0)
     {
-        int bestMatch = 0;
+        int best_match = 0;
 
         // TODO: this is a lot of code!
         // we should do some statistics to work out which conditions actually lead to better outcomes and compress the logic to only what is iecessary
 
-        if (numfoundCRC > 1)
+        if (num_found_crc > 1)
         {
             // if we matched multiple CRC's in the buffer, then we need to work out which CRC is not a false-positive...
-            int[NumCRC] score;
-            for (int i = 0; i < numfoundCRC; ++i)
+            int[num_crc] score;
+            for (int i = 0; i < num_found_crc; ++i)
             {
                 // if the CRC is at the end of the buffer, we have a single complete message, and that's a really good indicator
-                if (foundCRCPos[i] == data.length)
+                if (found_crc_pos[i] == data.length)
                     score[i] += 10;
-                else if (foundCRCPos[i] <= data.length - 2)
+                else if (found_crc_pos[i] <= data.length - 2)
                 {
                     // we can check the bytes following the CRC appear to begin a new message...
                     // confirm the function code is valid
-                    if (validFunctionCode(cast(FunctionCode)data[foundCRCPos[i] + 1]))
+                    if (valid_function_code(cast(FunctionCode)data[found_crc_pos[i] + 1]))
                         score[i] += 5;
                     // we can also give a nudge if the address looks plausible
-                    ubyte addr = data[foundCRCPos[i]];
+                    ubyte addr = data[found_crc_pos[i]];
                     if (addr <= 247)
                     {
                         if (addr == 0)
@@ -1103,41 +1103,41 @@ inout(ubyte)[] crawlForRTU(inout(ubyte)[] data, ushort* rcrc = null)
                     }
                 }
             }
-            for (int i = 1; i < numfoundCRC; ++i)
+            for (int i = 1; i < num_found_crc; ++i)
             {
                 if (score[i] > score[i - 1])
-                    bestMatch = i;
+                    best_match = i;
             }
         }
 
         if (rcrc)
-            *rcrc = foundCRC[bestMatch];
-        return data[0 .. foundCRCPos[bestMatch]];
+            *rcrc = found_crc[best_match];
+        return data[0 .. found_crc_pos[best_match]];
     }
 
     // didn't find anything...
     return null;
 }
 
-bool validFunctionCode(FunctionCode functionCode)
+bool valid_function_code(FunctionCode function_code)
 {
-    if (functionCode & 0x80)
-        functionCode ^= 0x80;
+    if (function_code & 0x80)
+        function_code ^= 0x80;
 
     version (X86_64) // TODO: use something more general!
     {
-        enum ulong validCodes = 0b10000000000000000001111100111001100111111110;
-        if (functionCode >= 64) // TODO: REMOVE THIS LINE (DMD BUG!)
+        enum ulong valid_codes = 0b10000000000000000001111100111001100111111110;
+        if (function_code >= 64) // TODO: REMOVE THIS LINE (DMD BUG!)
             return false;       // TODO: REMOVE THIS LINE (DMD BUG!)
-        return ((1uL << functionCode) & validCodes) != 0;
+        return ((1uL << function_code) & valid_codes) != 0;
     }
     else
     {
-        enum uint validCodes = 0b1111100111001100111111110;
-        if (functionCode >= 32) // TODO: REMOVE THIS LINE (DMD BUG!)
+        enum uint valid_codes = 0b1111100111001100111111110;
+        if (function_code >= 32) // TODO: REMOVE THIS LINE (DMD BUG!)
             return false;       // TODO: REMOVE THIS LINE (DMD BUG!)
-        if ((1 << functionCode) & validCodes)
+        if ((1 << function_code) & valid_codes)
             return true;
-        return functionCode == FunctionCode.MEI;
+        return function_code == FunctionCode.mei;
     }
 }

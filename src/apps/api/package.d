@@ -30,7 +30,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"api";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!APIManager, name.move, flags);
     }
@@ -78,13 +78,13 @@ nothrow @nogc:
         else
             _default_handler = _server.hook_global_handler(&handle_request);
 
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
         // TODO: need to unlink these things...
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override void update()
@@ -219,7 +219,7 @@ private:
         {
             ref PendingRequest req = _pending_requests[i];
 
-            if (req.command.update() == CommandCompletionState.InProgress)
+            if (req.command.update() == CommandCompletionState.in_progress)
             {
                 ++i;
                 continue;
@@ -244,7 +244,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCollection("/apps/api", managers);
+        g_app.console.register_collection("/apps/api", managers);
     }
 
     override void update()

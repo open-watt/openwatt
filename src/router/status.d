@@ -10,30 +10,30 @@ struct Status
 nothrow @nogc:
     enum Connection : byte
     {
-        Unknown = -1,
-        Disconnected = 0,
-        Connected
+        unknown = -1,
+        disconnected = 0,
+        connected
     }
 
     enum Link : byte
     {
-        Unknown = -1,
-        Down = 0,
-        Up
+        unknown = -1,
+        down = 0,
+        up
     }
 
-    SysTime linkStatusChangeTime;
-    Connection connected = Connection.Unknown;
-    Link linkStatus = Link.Down;
-    int linkDowns;
+    SysTime link_status_change_time;
+    Connection connected = Connection.unknown;
+    Link link_status = Link.down;
+    int link_downs;
 
-    ulong sendBytes;
-    ulong recvBytes;
-    ulong sendPackets;
-    ulong recvPackets;
-    ulong sendDropped;
-    ulong recvDropped;
+    ulong send_bytes;
+    ulong recv_bytes;
+    ulong send_packets;
+    ulong recv_packets;
+    ulong send_dropped;
+    ulong recv_dropped;
 
-    ulong txLinkSpeed;
-    ulong rxLinkSpeed;
+    ulong tx_link_speed;
+    ulong rx_link_speed;
 }

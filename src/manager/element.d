@@ -13,9 +13,9 @@ nothrow @nogc:
 
 enum Access : ubyte
 {
-    Read,
-    Write,
-    ReadWrite
+    read,
+    write,
+    read_write
 }
 
 
@@ -27,27 +27,27 @@ nothrow @nogc:
     String name;
 
     Variant latest;
-//    ScaledUnit displayUnit; // TODO: I think we should probably distinguish the display unit from the sampled unit
+//    ScaledUnit display_unit; // TODO: I think we should probably distinguish the display unit from the sampled unit
 
     Access access;
 
     Array!Subscriber subscribers;
-    ushort subscribersDirty;
+    ushort subscribers_dirty;
 
     this(this) @disable;
 
-    void addSubscriber(Subscriber s)
+    void add_subscriber(Subscriber s)
     {
         if (subscribers[].findFirst(s) == subscribers.length)
             subscribers ~= s;
     }
 
-    void removeSubscriber(Subscriber s)
+    void remove_subscriber(Subscriber s)
     {
         subscribers.removeFirstSwapLast(s);
     }
 
-    float normalisedValue() const
+    float normalised_value() const
     {
         return cast(float)value.asQuantity().normalise().value;
     }

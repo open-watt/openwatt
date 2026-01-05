@@ -60,7 +60,7 @@ class ZigbeeNode : BaseObject
 
     alias TypeName = StringLit!"zb-node";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None) nothrow
+    this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
     {
         this(collection_type_info!ZigbeeNode, name.move, flags);
     }
@@ -80,7 +80,7 @@ class ZigbeeNode : BaseObject
             _interface.unsubscribe(&incoming_packet);
         }
         _interface = value;
-        _interface.subscribe(&incoming_packet, PacketFilter(type: PacketType.ZigbeeAPS));
+        _interface.subscribe(&incoming_packet, PacketFilter(type: PacketType.zigbee_aps));
         return StringResult.success;
     }
 
@@ -545,7 +545,7 @@ protected:
         => _interface !is null;
 
     override CompletionStatus startup() nothrow
-        => _interface.running ? CompletionStatus.Complete : CompletionStatus.Continue;
+        => _interface.running ? CompletionStatus.complete : CompletionStatus.continue_;
 
     override CompletionStatus shutdown() nothrow
     {
@@ -555,7 +555,7 @@ protected:
         while (!_zcl_requests.empty)
             abort_zcl_request(_zcl_requests.back.tag);
 
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override void update() nothrow
@@ -896,7 +896,7 @@ class ZigbeeEndpoint : BaseObject
 
     alias TypeName = StringLit!"zb-endpoint";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None) nothrow
+    this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
     {
         super(collection_type_info!ZigbeeEndpoint, name.move, flags);
     }
@@ -1053,7 +1053,7 @@ protected:
     }
 
     override CompletionStatus startup() nothrow
-        => _node.running ? CompletionStatus.Complete : CompletionStatus.Continue;
+        => _node.running ? CompletionStatus.complete : CompletionStatus.continue_;
 
     override void update() nothrow
     {

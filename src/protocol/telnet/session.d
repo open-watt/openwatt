@@ -48,7 +48,7 @@ nothrow @nogc:
     this(ref Console console, Stream clientStream)
     {
         super(console);
-        this.m_stream = clientStream;
+        this._stream = clientStream;
 
         will(TelnetOptions.ECHO);
         dont(TelnetOptions.ECHO, true);
@@ -64,9 +64,9 @@ nothrow @nogc:
     {
         super.update();
 
-        if (!m_stream)
+        if (!_stream)
         {
-            closeSession();
+            close_session();
             return;
         }
 
@@ -75,14 +75,14 @@ nothrow @nogc:
 
         Array!(char, 0) input; // allocate some stack-local buffer...
 
-        size_t bytes = m_tail.length;
-        recvbuf[0 .. bytes] = m_tail[];
+        size_t bytes = _tail.length;
+        recvbuf[0 .. bytes] = _tail[];
         while (true)
         {
-            ptrdiff_t r = m_stream.read(recvbuf[bytes .. $]);
+            ptrdiff_t r = _stream.read(recvbuf[bytes .. $]);
             if (r < 0)
             {
-                closeSession();
+                close_session();
                 return;
             }
             if (r == 0)
@@ -133,7 +133,7 @@ nothrow @nogc:
                             // check if the remote server is still connected and responding
                             // emit the BELL, or should we write some text, like "[I'M HERE]"?
 //                            stream.write("[I'M HERE]");
-                            m_stream.write("\a"); // bell
+                            _stream.write("\a"); // bell
                             break;
 
                         case NVT.EC: // Erase Character
@@ -144,10 +144,10 @@ nothrow @nogc:
                         case NVT.EL: // Erase Line
                             // erase the entire current line of input
                             // to do this correctly, I think we must flush the buffer to this point, and then clear the buffer, and then continue...
-                            receiveInput(input[]);
+                            receive_input(input[]);
                             input.clear();
-                            m_buffer.clear();
-                            m_position = 0;
+                            _buffer.clear();
+                            _position = 0;
                             break;
 
                         case NVT.GA: // Go Ahead
@@ -190,8 +190,8 @@ nothrow @nogc:
                                     case TelnetOptions.WINDOW_SIZE:
                                         if (sub.length == 5)
                                         {
-                                            m_width = cast(uint)sub[1] << 8 | (cast(uint)sub[2]);
-                                            m_height = cast(uint)sub[3] << 8 | (cast(uint)sub[4]);
+                                            _width = cast(uint)sub[1] << 8 | (cast(uint)sub[2]);
+                                            _height = cast(uint)sub[3] << 8 | (cast(uint)sub[4]);
                                         }
                                         break;
                                     case TelnetOptions.CHARSET:
@@ -217,21 +217,21 @@ nothrow @nogc:
                             {
                                 case NVT.WILL:
                                     bool activated = false;
-                                    if (clientStateReq & (1UL << opt))
+                                    if (_client_state_req & (1UL << opt))
                                     {
-                                        if (!(clientState & (1UL << opt)))
+                                        if (!(_client_state & (1UL << opt)))
                                             activated = true;
 
                                         // request was granted
-                                        clientState |= 1UL << opt;
+                                        _client_state |= 1UL << opt;
                                     }
                                     else
                                     {
                                         // do we want this option?
                                         if (SupportedOptions & (1UL << opt))
                                         {
-                                            clientState |= 1UL << opt;
-                                            clientStateReq |= 1UL << opt;
+                                            _client_state |= 1UL << opt;
+                                            _client_state_req |= 1UL << opt;
                                             activated = true;
                                             response = NVT.DO;
                                         }
@@ -246,7 +246,7 @@ nothrow @nogc:
                                             // client has agreed to negotiate terminal type; we'll request "ANSI"
                                             // or should we send "XTERM"?
                                             ubyte[6] t = [ NVT.IAC, NVT.SB, TelnetOptions.TERMINAL_TYPE, 0x01, NVT.IAC, NVT.SE ];
-                                            m_stream.write(t);
+                                            _stream.write(t);
                                         }
                                     }
 
@@ -255,10 +255,10 @@ nothrow @nogc:
                                     break;
 
                                 case NVT.WONT:
-                                    clientState &= ~(1UL << opt);
-                                    if (clientStateReq & (1UL << opt))
+                                    _client_state &= ~(1UL << opt);
+                                    if (_client_state_req & (1UL << opt))
                                     {
-                                        clientStateReq ^= 1UL << opt;
+                                        _client_state_req ^= 1UL << opt;
                                         response = NVT.DONT;
                                     }
 
@@ -267,18 +267,18 @@ nothrow @nogc:
                                     break;
 
                                 case NVT.DO:
-                                    if (serverState & (1UL << opt))
+                                    if (_server_state & (1UL << opt))
                                     {
                                         // offer was accepted
-                                        serverStateReq |= 1UL << opt;
+                                        _server_state_req |= 1UL << opt;
                                     }
                                     else
                                     {
                                         // do we handle any option requests?
                                         if (SupportedOptions & (1UL << opt))
                                         {
-                                            serverState |= 1UL << opt;
-                                            serverStateReq |= 1UL << opt;
+                                            _server_state |= 1UL << opt;
+                                            _server_state_req |= 1UL << opt;
                                             response = NVT.WILL;
 
                                             if (opt == TelnetOptions.CHARSET)
@@ -297,8 +297,8 @@ nothrow @nogc:
                                     break;
 
                                 case NVT.DONT:
-                                    serverState &= ~(1UL << opt);
-                                    serverStateReq &= ~(1UL << opt);
+                                    _server_state &= ~(1UL << opt);
+                                    _server_state_req &= ~(1UL << opt);
                                     response = NVT.WONT;
 
                                     version (TelnetDebug)
@@ -311,7 +311,7 @@ nothrow @nogc:
                             if (response)
                             {
                                 ubyte[3] t = [ NVT.IAC, response, opt ];
-                                m_stream.write(t);
+                                _stream.write(t);
 
                                 debug version (TelnetDebug)
                                 {
@@ -368,177 +368,177 @@ nothrow @nogc:
         }
 
         // dispatch input up to this point
-//        size_t taken = receiveInput(input[]);
-        receiveInput(input[]);
+//        size_t taken = receive_input(input[]);
+        receive_input(input[]);
 
         // possible that not all bytes were consumed; there could have been incomplete ansi sequences, etc...
 //        if (taken < input.length)
 //        {
-//            m_tail = input[taken .. $];
-//            m_tail ~= recvbuf[0 .. bytes];
+//            _tail = input[taken .. $];
+//            _tail ~= recvbuf[0 .. bytes];
 //        }
 //        else
-            m_tail = recvbuf[0 .. bytes];
+            _tail = recvbuf[0 .. bytes];
         return;
     }
 
-    override void enterCommand(const(char)[] command)
+    override void enter_command(const(char)[] command)
     {
         write("\r\n");
     }
 
-    override void commandFinished(CommandState commandState, CommandCompletionState state)
+    override void command_finished(CommandState command_state, CommandCompletionState state)
     {
-        if (m_showPrompt)
-            sendPromptAndBuffer(false);
+        if (_show_prompt)
+            send_prompt_and_buffer(false);
     }
 
-    override void closeSession()
+    override void close_session()
     {
-        super.closeSession();
+        super.close_session();
 
-        if (!isAttached() && m_stream)
+        if (!is_attached() && _stream)
         {
-            m_stream.destroy();
-            m_stream.release();
+            _stream.destroy();
+            _stream.release();
         }
     }
 
 
-    override void writeOutput(const(char)[] text, bool newline)
+    override void write_output(const(char)[] text, bool newline)
     {
         // translate "\n" to "\r\n"
         // if no LF's are discovered, we don't allocate
         MutableString!0 convert;
-        size_t lineStart = 0;
+        size_t line_start = 0;
         for (size_t i = 0; i < text.length; ++i)
         {
             if (text[i] == '\n')
             {
-                if (lineStart == 0)
+                if (line_start == 0)
                     convert.reserve(cast(ushort)(text.length + 64)); // reserve for a bunch of CR's
 
-                convert.append(text[lineStart .. i], "\r\n");
-                lineStart = i + 1;
+                convert.append(text[line_start .. i], "\r\n");
+                line_start = i + 1;
             }
         }
-        if (lineStart != 0)
+        if (line_start != 0)
         {
-            convert.append(text[lineStart .. $]);
+            convert.append(text[line_start .. $]);
             text = convert[];
         }
 
-        ptrdiff_t sent = m_stream.write(text[]);
+        ptrdiff_t sent = _stream.write(text[]);
         if (newline)
-            sent = m_stream.write("\r\n");
+            sent = _stream.write("\r\n");
     }
 
-    override void showSuggestions(const(String)[] suggestions)
+    override void show_suggestions(const(String)[] suggestions)
     {
         // move to next line
-        ptrdiff_t sent = m_stream.write("\r\n");
+        ptrdiff_t sent = _stream.write("\r\n");
 
         // write the suggestions
-        super.showSuggestions(suggestions);
+        super.show_suggestions(suggestions);
 
         // put the prompt back
-        if (m_showPrompt)
-            sendPromptAndBuffer(false);
+        if (_show_prompt)
+            send_prompt_and_buffer(false);
     }
 
-    override bool showPrompt(bool show)
+    override bool show_prompt(bool show)
     {
-        bool old = super.showPrompt(show);
+        bool old = super.show_prompt(show);
 
-        if (!m_currentCommand)
+        if (!_current_command)
         {
             if (show && !old)
-                sendPromptAndBuffer(true);
+                send_prompt_and_buffer(true);
             else if (!show && old)
-                clearLine();
+                clear_line();
         }
         return old;
     }
 
-    override const(char)[] setPrompt(const(char)[] prompt)
+    override const(char)[] set_prompt(const(char)[] prompt)
     {
-        const(char)[] old = super.setPrompt(prompt);
-        if (!m_currentCommand && m_showPrompt && prompt[] != old[])
-            sendPromptAndBuffer(true);
+        const(char)[] old = super.set_prompt(prompt);
+        if (!_current_command && _show_prompt && prompt[] != old[])
+            send_prompt_and_buffer(true);
         return old;
     }
 
-    override MutableString!0 setInput(const(char)[] text)
+    override MutableString!0 set_input(const(char)[] text)
     {
         assert(false);
 //        bcString r = dcConsoleSession.SetInput(bcMove(text));
-//        if (!m_currentCommand && m_showPrompt)
-//            sendPromptAndBuffer(true);
+//        if (!_current_command && _show_prompt)
+//            send_prompt_and_buffer(true);
 //        return r;
     }
 
-    override ptrdiff_t appendInput(const(char)[] text)
+    override ptrdiff_t append_input(const(char)[] text)
     {
         import urt.util : min;
 
-        MutableString!0 before = m_buffer;
-        uint beforePos = m_position;
+        MutableString!0 before = _buffer;
+        uint before_pos = _position;
 
-        ptrdiff_t taken = super.appendInput(text);
+        ptrdiff_t taken = super.append_input(text);
         if (taken < 0)
             return taken;
 
         // echo changes back to the terminal...
-        if (serverEnabled(TelnetOptions.ECHO))
+        if (server_enabled(TelnetOptions.ECHO))
         {
-            size_t diffOffset = 0;
-            size_t len = min(m_buffer.length, before.length);
-            while (diffOffset < len && before[diffOffset] == m_buffer[diffOffset])
-                ++diffOffset;
-            bool noChange = m_buffer.length == before.length && diffOffset == m_buffer.length;
+            size_t diff_offset = 0;
+            size_t len = min(_buffer.length, before.length);
+            while (diff_offset < len && before[diff_offset] == _buffer[diff_offset])
+                ++diff_offset;
+            bool no_change = _buffer.length == before.length && diff_offset == _buffer.length;
 
             MutableString!0 echo;
-            if (noChange)
+            if (no_change)
             {
                 // maybe the cursor moved?
-                if (beforePos != m_position)
+                if (before_pos != _position)
                 {
-                    if (m_position < beforePos)
-                        echo.concat("\x1b[", beforePos - m_position, 'D');
+                    if (_position < before_pos)
+                        echo.concat("\x1b[", before_pos - _position, 'D');
                     else
-                        echo.concat("\x1b[", m_position - beforePos, 'C');
+                        echo.concat("\x1b[", _position - before_pos, 'C');
                 }
             }
             else
             {
-                if (diffOffset != beforePos)
+                if (diff_offset != before_pos)
                 {
                     // shift the cursor to the change position
-                    if (diffOffset < beforePos)
-                        echo.concat("\x1b[", beforePos - diffOffset, 'D');
+                    if (diff_offset < before_pos)
+                        echo.concat("\x1b[", before_pos - diff_offset, 'D');
                     else
-                        echo.concat("\x1b[", diffOffset - beforePos, 'C');
+                        echo.concat("\x1b[", diff_offset - before_pos, 'C');
                 }
 
-                if (diffOffset < m_buffer.length)
-                    echo.append(m_buffer[diffOffset .. $]);
+                if (diff_offset < _buffer.length)
+                    echo.append(_buffer[diff_offset .. $]);
 
-                if (m_buffer.length < before.length)
+                if (_buffer.length < before.length)
                 {
                     // erase the tail
                     echo.append("\x1b[K");
                 }
 
-                if (echo.length && m_position != m_buffer.length)
+                if (echo.length && _position != _buffer.length)
                 {
-                    assert(m_position < m_buffer.length); // shouldn't be possible for the cursor to be beyond the end of the line
-                    echo.append("\x1b[", m_buffer.length - m_position, 'D');
+                    assert(_position < _buffer.length); // shouldn't be possible for the cursor to be beyond the end of the line
+                    echo.append("\x1b[", _buffer.length - _position, 'D');
                 }
             }
 
             if (echo.length)
             {
-                ptrdiff_t sent = m_stream.write(echo[]);
+                ptrdiff_t sent = _stream.write(echo[]);
             }
         }
 
@@ -546,27 +546,27 @@ nothrow @nogc:
     }
 
 private:
-    ObjectRef!Stream m_stream;
-    Array!ubyte m_tail;
+    ObjectRef!Stream _stream;
+    Array!ubyte _tail;
 
-    ulong serverState;
-    ulong serverStateReq;
-    ulong clientState;
-    ulong clientStateReq;
+    ulong _server_state;
+    ulong _server_state_req;
+    ulong _client_state;
+    ulong _client_state_req;
 
-    bool serverEnabled(TelnetOptions opt)
-        => (serverState & serverStateReq & (1UL << opt)) != 0;
-    bool clientEnabled(TelnetOptions opt)
-        => (clientState & clientStateReq & (1UL << opt)) != 0;
+    bool server_enabled(TelnetOptions opt)
+        => (_server_state & _server_state_req & (1UL << opt)) != 0;
+    bool client_enabled(TelnetOptions opt)
+        => (_client_state & _client_state_req & (1UL << opt)) != 0;
 
     void will(TelnetOptions opt)
     {
-        if (serverState & (1UL << opt))
+        if (_server_state & (1UL << opt))
             return;
-        serverState |= 1UL << opt;
+        _server_state |= 1UL << opt;
 
         ubyte[3] t = [ NVT.IAC, NVT.WILL, cast(ubyte)opt ];
-        m_stream.write(t[]);
+        _stream.write(t[]);
 
         version (TelnetDebug)
             debug writeDebugf("Telnet: --> WILL {0}", opt);
@@ -574,12 +574,12 @@ private:
 
     void wont(TelnetOptions opt, bool force)
     {
-        if ((serverState & (1UL << opt)) || force)
+        if ((_server_state & (1UL << opt)) || force)
         {
             ubyte[3] t = [ NVT.IAC, NVT.WONT, cast(ubyte)opt ];
-            m_stream.write(t[]);
+            _stream.write(t[]);
         }
-        serverState &= ~(1UL << opt);
+        _server_state &= ~(1UL << opt);
 
         version (TelnetDebug)
             debug writeDebugf("Telnet: --> WON'T {0}", opt);
@@ -587,12 +587,12 @@ private:
 
     void do_(TelnetOptions opt)
     {
-        if (clientStateReq & (1UL << opt))
+        if (_client_state_req & (1UL << opt))
             return;
-        clientStateReq |= 1UL << opt;
+        _client_state_req |= 1UL << opt;
 
         ubyte[3] t = [ NVT.IAC, NVT.DO, cast(ubyte)opt ];
-        m_stream.write(t[]);
+        _stream.write(t[]);
 
         version (TelnetDebug)
             debug writeDebugf("Telnet: --> DO {0}", opt);
@@ -600,31 +600,31 @@ private:
 
     void dont(TelnetOptions opt, bool force)
     {
-        if ((clientStateReq & (1UL << opt)) || force)
+        if ((_client_state_req & (1UL << opt)) || force)
         {
             ubyte[3] t = [ NVT.IAC, NVT.DONT, cast(ubyte)opt ];
-            m_stream.write(t[]);
+            _stream.write(t[]);
         }
-        clientStateReq &= ~(1UL << opt);
+        _client_state_req &= ~(1UL << opt);
 
         version (TelnetDebug)
             debug writeDebugf("Telnet: --> DON'T {0}", opt);
     }
 
-    void clearLine()
+    void clear_line()
     {
         enum Clear = ANSI_ERASE_LINE ~ "\x1b[80D"; // clear and move left 80
 
-        m_stream.write(Clear);
+        _stream.write(Clear);
     }
 
-    void sendPromptAndBuffer(bool withErase = false)
+    void send_prompt_and_buffer(bool withErase = false)
     {
         import urt.string.format;
 
         enum Clear = ANSI_ERASE_LINE ~ "\x1b[80D"; // clear and move left 80
 
-        if (m_position < m_buffer.length)
+        if (_position < _buffer.length)
         {
             import urt.dbg;
             breakpoint;
@@ -632,8 +632,8 @@ private:
             // then delete this code block...
         }
 
-        char[] prompt = tformat("{0, ?1}{2}{3}{@5, ?4}", Clear, withErase, m_prompt, m_buffer, m_position < m_buffer.length, "\x1b[{6}D", m_buffer.length - m_position);
-        ptrdiff_t sent = m_stream.write(prompt);
+        char[] prompt = tformat("{0, ?1}{2}{3}{@5, ?4}", Clear, withErase, _prompt, _buffer, _position < _buffer.length, "\x1b[{6}D", _buffer.length - _position);
+        ptrdiff_t sent = _stream.write(prompt);
     }
 }
 

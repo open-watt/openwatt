@@ -63,7 +63,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"dns-server";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!DNSServer, name.move, flags);
     }
@@ -82,7 +82,7 @@ nothrow @nogc:
             _interface.unsubscribe(&incoming_packet);
 
         _interface = value;
-        _interface.subscribe(&incoming_packet, PacketFilter(etherType: EtherType.IP4, etherType2: EtherType.IP6), null);
+        _interface.subscribe(&incoming_packet, PacketFilter(ether_type: EtherType.ip4, ether_type_2: EtherType.ip6), null);
 
         restart();
         return null;
@@ -178,7 +178,7 @@ nothrow @nogc:
             _udp6_socket = create_listener(AddressFamily.ipv6, DNSPort);
 
             String new_name = get_module!TCPStreamModule.tcp_servers.generate_name(name).makeString(defaultAllocator());
-            _tcp_server = get_module!TCPStreamModule.tcp_servers.create(new_name.move, ObjectFlags.Dynamic, NamedArgument("port", DNSPort));
+            _tcp_server = get_module!TCPStreamModule.tcp_servers.create(new_name.move, ObjectFlags.dynamic, NamedArgument("port", DNSPort));
             _tcp_server.setConnectionCallback(&new_client, null);
 
             if (_udp4_socket && _tcp_server) // we can tolerate no ipv6 listener (?)
@@ -235,7 +235,7 @@ nothrow @nogc:
         if (_protocols & (1 << NSProtocol.dot) && !((_active | _failed) & (1 << NSProtocol.dot)))
         {
             String new_name = get_module!HTTPModule.tls_servers.generate_name(name).makeString(defaultAllocator());
-            _dot_server = get_module!HTTPModule.tls_servers.create(new_name.move, ObjectFlags.Dynamic, NamedArgument("port", DoTPort));
+            _dot_server = get_module!HTTPModule.tls_servers.create(new_name.move, ObjectFlags.dynamic, NamedArgument("port", DoTPort));
             _dot_server.setConnectionCallback(&new_client, null);
             if (_dot_server)
                 _active |= 1 << NSProtocol.dot;
@@ -293,9 +293,9 @@ nothrow @nogc:
         if (_failed == _protocols)
         {
             writeError("DNS server '", name, "' failed to start");
-            return CompletionStatus.Error;
+            return CompletionStatus.error;
         }
-        return (_active | _failed) == _protocols ? CompletionStatus.Complete : CompletionStatus.Continue;
+        return (_active | _failed) == _protocols ? CompletionStatus.complete : CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()
@@ -364,7 +364,7 @@ nothrow @nogc:
         _active = 0;
         _failed = 0;
 
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override void update()
@@ -619,7 +619,7 @@ private:
         return r;
     }
 
-    void new_client(Stream client, void* userData)
+    void new_client(Stream client, void* user_data)
     {
         _clients ~= Client(client, last_activity: getTime());
     }
@@ -646,7 +646,7 @@ private:
         // TODO: handle requests with `Content-Type: application/dns-message` as a DNS request...
     }
 
-    void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void* userData) nothrow @nogc
+    void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void* user_data) nothrow @nogc
     {
         if (!running)
             return;
@@ -659,7 +659,7 @@ private:
             ushort checksum;
         }
 
-        if (p.eth.ether_type == EtherType.IP4)
+        if (p.eth.ether_type == EtherType.ip4)
         {
             struct IPv4Header
             {

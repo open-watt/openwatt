@@ -126,7 +126,7 @@ nothrow @nogc:
     }
 
     enum StringLen = Bytes == 6 ? 17 : 23;
-    ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const
+    ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] format_args) const
     {
         import urt.string.ascii : hex_digits;
 

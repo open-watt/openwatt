@@ -28,7 +28,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"tcp";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None, StreamOptions options = StreamOptions.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
         super(collection_type_info!TCPStream, name.move, flags, options);
     }
@@ -90,7 +90,7 @@ nothrow @nogc:
     {
         if (_keep_enable == value)
             return;
-        enableKeepAlive(value);
+        enable_keep_alive(value);
     }
 
 
@@ -115,25 +115,25 @@ nothrow @nogc:
     {
         // a reverse-connect socket will be handled by a companion TCPServer
         // TODO...
-        if (options & StreamOptions.ReverseConnect)
+        if (_options & StreamOptions.reverse_connect)
         {
             assert(false);
-            return CompletionStatus.Continue;
+            return CompletionStatus.continue_;
         }
 
         if (_remote == InetAddress())
         {
             assert(_host, "No remote set for TCP stream!");
 
-            AddressInfo addrInfo;
-            addrInfo.family = AddressFamily.ipv4;
-            addrInfo.sock_type = SocketType.stream;
-            addrInfo.protocol = Protocol.tcp;
+            AddressInfo addr_info;
+            addr_info.family = AddressFamily.ipv4;
+            addr_info.sock_type = SocketType.stream;
+            addr_info.protocol = Protocol.tcp;
             AddressInfoResolver results;
-            get_address_info(_host, _port ? _port.tstring : null, &addrInfo, results);
-            if (!results.next_address(addrInfo))
-                return CompletionStatus.Continue;
-            _remote = addrInfo.address;
+            get_address_info(_host, _port ? _port.tstring : null, &addr_info, results);
+            if (!results.next_address(addr_info))
+                return CompletionStatus.continue_;
+            _remote = addr_info.address;
 
             // apply explicit port if assigned
             if (_port != 0)
@@ -146,14 +146,14 @@ nothrow @nogc:
             // we don't want to spam connection attempts...
             SysTime now = getSysTime();
             if (now < _last_retry + seconds(5))
-                return CompletionStatus.Continue;
+                return CompletionStatus.continue_;
             _last_retry = now;
 
             Result r = create_socket(AddressFamily.ipv4, SocketType.stream, Protocol.tcp, _socket);
             if (!r)
             {
                 debug writeError(type, " '", name, "' - create_socket() failed with error: ", r.socket_result);
-                return CompletionStatus.Error;
+                return CompletionStatus.error;
             }
 
             set_socket_option(_socket, SocketOption.non_blocking, true);
@@ -161,7 +161,7 @@ nothrow @nogc:
             if (!r.succeeded && r.socket_result != SocketResult.would_block)
             {
                 debug writeWarning(type, " '", name, "' - connect() failed with error: ", r.socket_result);
-                return CompletionStatus.Error;
+                return CompletionStatus.error;
             }
         }
 
@@ -170,23 +170,23 @@ nothrow @nogc:
         PollFd fd;
         fd.socket = _socket;
         fd.request_events = PollEvents.write;
-        uint numEvents;
-        Result r = poll(fd, Duration.zero, numEvents);
+        uint num_events;
+        Result r = poll(fd, Duration.zero, num_events);
         if (r.failed)
         {
             debug writeError(type, " '", name, "' - poll() failed with error: ", r.socket_result);
-            return CompletionStatus.Error;
+            return CompletionStatus.error;
         }
 
         // no events returned, still waiting...
-        if (numEvents == 0)
-            return CompletionStatus.Continue;
+        if (num_events == 0)
+            return CompletionStatus.continue_;
 
         // check error conditions
         if (fd.return_events & (PollEvents.error | PollEvents.hangup | PollEvents.invalid))
         {
             debug writeError(type, " '", name, "' - connection failed to ", _remote);
-            return CompletionStatus.Error;
+            return CompletionStatus.error;
         }
 
         // this should be the only case left, we've successfully connected!
@@ -196,7 +196,7 @@ nothrow @nogc:
         if (_keep_enable)
             set_keepalive(_socket, _keep_enable, _keep_idle, _keep_interval, _keep_count);
 
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     final override CompletionStatus shutdown()
@@ -206,10 +206,10 @@ nothrow @nogc:
 
         close_socket();
 
-        if (_flags & ObjectFlags.Temporary)
+        if (_flags & ObjectFlags.temporary)
             destroy();
 
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     final override void update()
@@ -236,21 +236,21 @@ nothrow @nogc:
 
     override void disconnect()
     {
-//        if (reverseConnectServer !is null)
+//        if (_reverse_connect_server !is null)
 //        {
-//            reverseConnectServer.stop();
-//            reverseConnectServer = null;
+//            _reverse_connect_server.stop();
+//            _reverse_connect_server = null;
 //        }
 
         close_socket();
     }
 
-    override const(char)[] remoteName()
+    override const(char)[] remote_name()
     {
         return tstring(remote);
     }
 
-    final void enableKeepAlive(bool enable, Duration keep_idle = seconds(10), Duration keep_interval = seconds(1), int keep_count = 10)
+    final void enable_keep_alive(bool enable, Duration keep_idle = seconds(10), Duration keep_interval = seconds(1), int keep_count = 10)
     {
         _keep_enable = enable;
         _keep_idle = keep_idle;
@@ -274,9 +274,9 @@ nothrow @nogc:
                 restart();
             return 0;
         }
-        if (logging)
-            writeToLog(true, buffer[0 .. bytes]);
-        _status.recvBytes += bytes;
+        if (_logging)
+            write_to_log(true, buffer[0 .. bytes]);
+        _status.recv_bytes += bytes;
         return bytes;
     }
 
@@ -296,12 +296,12 @@ nothrow @nogc:
         }
         else
         {
-            if (logging)
-                writeToLog(false, data[0 .. bytes]);
+            if (_logging)
+                write_to_log(false, data[0 .. bytes]);
             return bytes;
         }
 
-        if (options & StreamOptions.BufferData)
+        if (_options & StreamOptions.buffer_data)
         {
             assert(false, "TODO: buffer data for when the stream becomes available again");
             // how long should buffered data linger? how big is the buffer?
@@ -339,7 +339,7 @@ private:
     ushort _port;
     SysTime _last_retry;
     String _host;
-//    TCPServer reverseConnectServer;
+//    TCPServer _reverse_connect_server;
 
     bool _keep_enable = false;
     int _keep_count = 10;
@@ -350,7 +350,7 @@ private:
     {
         if (_socket == Socket.invalid)
             return;
-        if (_state == State.Stopping)
+        if (_state == State.stopping)
             _socket.shutdown(SocketShutdownMode.read_write);
         _socket.close();
         _socket = Socket.invalid;
@@ -386,9 +386,9 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"tcp-server";
 
-    alias NewConnection = void delegate(Stream client, void* userData) nothrow @nogc;
+    alias NewConnection = void delegate(Stream client, void* user_data) nothrow @nogc;
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!TCPServer, name.move, flags);
     }
@@ -406,10 +406,10 @@ nothrow @nogc:
 
     // API...
 
-    void setConnectionCallback(NewConnection callback, void* userData)
+    void setConnectionCallback(NewConnection callback, void* user_data)
     {
-        _connectionCallback = callback;
-        _userData = userData;
+        _connection_callback = callback;
+        _user_data = user_data;
     }
 
     final override bool validate() const pure
@@ -448,7 +448,7 @@ nothrow @nogc:
         if (!r)
         {
             debug writeError(type, " '", name, "' - failed to create listening socket. Error ", r.systemCode);
-            return CompletionStatus.Error;
+            return CompletionStatus.error;
         }
 
         // TODO: option to disable this???
@@ -464,7 +464,7 @@ nothrow @nogc:
         }
 
         debug writeInfo(type, " '", name, "' - listening on port ", _port);
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     final override CompletionStatus shutdown()
@@ -479,14 +479,14 @@ nothrow @nogc:
             _ip4_listener.close();
             _ip4_listener = null;
         }
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     final override void update()
     {
         Socket conn;
-        InetAddress remoteAddr;
-        Result r = _ip4_listener.accept(conn, &remoteAddr);
+        InetAddress remote_addr;
+        Result r = _ip4_listener.accept(conn, &remote_addr);
         if (r.failed)
         {
             if (r.socket_result != SocketResult.would_block)
@@ -504,14 +504,14 @@ nothrow @nogc:
 
         conn.set_socket_option(SocketOption.non_blocking, true);
 
-//        if (_rawConnectionCallback)
-//            _rawConnectionCallback(conn, userData);
-//        else if (_connectionCallback)
-        if (_connectionCallback)
+//        if (_raw_connection_callback)
+//            _raw_connection_callback(conn, user_data);
+//        else if (_connection_callback)
+        if (_connection_callback)
         {
             Stream stream = create_stream(conn);
             if (stream)
-                _connectionCallback(stream, _userData);
+                _connection_callback(stream, _user_data);
         }
 
         // TODO: should the stream we just created to into the stream pool...?
@@ -524,13 +524,13 @@ nothrow @nogc:
     }
 
 protected:
-    alias NewRawConnection = void function(Socket client, void* userData) nothrow @nogc;
+    alias NewRawConnection = void function(Socket client, void* user_data) nothrow @nogc;
 
 //    ServerOptions _options;
     ushort _port;
-    NewConnection _connectionCallback;
-//    NewRawConnection _rawConnectionCallback;
-    void* _userData;
+    NewConnection _connection_callback;
+//    NewRawConnection _raw_connection_callback;
+    void* _user_data;
     Socket _ip4_listener;
     Socket _ip6_listener;
 
@@ -544,12 +544,12 @@ protected:
         // prevent duplicate stream names...
         String newName = get_module!StreamModule.streams.generate_name(name).makeString(defaultAllocator());
 
-        TCPStream stream = get_module!TCPStreamModule.tcp_streams.alloc(newName.move, cast(ObjectFlags)(ObjectFlags.Dynamic | ObjectFlags.Temporary));
+        TCPStream stream = get_module!TCPStreamModule.tcp_streams.alloc(newName.move, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
 
         // assign the socket to the stream and bypass the startup process
         stream._socket = conn;
         conn.get_peer_name(stream._remote);
-        stream._state = State.Running;
+        stream._state = State.running;
         get_module!TCPStreamModule.tcp_streams.add(stream);
         return stream;
     }
@@ -566,8 +566,8 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCollection("/stream/tcp-client", tcp_streams);
-        g_app.console.registerCollection("/stream/tcp-server", tcp_servers);
+        g_app.console.register_collection("/stream/tcp-client", tcp_streams);
+        g_app.console.register_collection("/stream/tcp-server", tcp_servers);
     }
 
     override void pre_update()

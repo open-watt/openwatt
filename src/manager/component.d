@@ -109,7 +109,7 @@ nothrow @nogc:
     }
 
     import urt.string.format;
-    ptrdiff_t toString(char[] buffer, const(char)[] fmt, const(FormatArg)[] formatArgs) const
+    ptrdiff_t toString(char[] buffer, const(char)[] fmt, const(FormatArg)[] format_args) const
     {
         return format(buffer, "Component({0}, \"{1}\", ...)", id, name).length;
     }

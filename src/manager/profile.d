@@ -75,7 +75,7 @@ struct ElementDesc_Modbus
     import protocol.modbus.sampler : modbus_data_type;
 
     ushort reg;
-    RegisterType reg_type = RegisterType.HoldingRegister;
+    RegisterType reg_type = RegisterType.holding_register;
     Access access = Access.read;
     ValueDesc value_desc = ValueDesc(modbus_data_type!"u16");
 }
@@ -394,7 +394,7 @@ Profile* load_profile(const(char)[] filename, NoGCAllocator allocator = defaultA
 
 Profile* parse_profile(const(char)[] conf, NoGCAllocator allocator = defaultAllocator())
 {
-    ConfItem root = parseConfig(conf);
+    ConfItem root = parse_config(conf);
     return parse_profile(root);
 }
 
@@ -417,7 +417,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     size_t aa55_count = 0;
 
     // we need to count the items and buffer lengths
-    foreach (ref root_item; conf.subItems) switch (root_item.name)
+    foreach (ref root_item; conf.sub_items) switch (root_item.name)
     {
         case "enum":
             const(char)[] enum_name = root_item.value.unQuote;
@@ -442,9 +442,9 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
             break;
 
         case "elements", "registers":
-            item_count += root_item.subItems.length;
+            item_count += root_item.sub_items.length;
 
-            foreach (ref reg_item; root_item.subItems)
+            foreach (ref reg_item; root_item.sub_items)
             {
                 // HACK: this is bad!
                 const(char)[] extra = reg_item.value;
@@ -452,10 +452,10 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 if (!extra.empty)
                 {
                     const(char)[] name = extra.split!':';
-                    reg_item.subItems.pushFront(ConfItem(name, extra));
+                    reg_item.sub_items.pushFront(ConfItem(name, extra));
                 }
 
-                foreach (ref reg_conf; reg_item.subItems) switch (reg_conf.name)
+                foreach (ref reg_conf; reg_item.sub_items) switch (reg_conf.name)
                 {
                     case "desc":
                         tail = reg_conf.value;
@@ -502,7 +502,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 ++num_component_templates;
                 ++num_indirections;
 
-                foreach (ref cItem; conf.subItems)
+                foreach (ref cItem; conf.sub_items)
                 {
                     ElementTemplate.Type ty = ElementTemplate.Type.constant;
                     switch (cItem.name)
@@ -540,7 +540,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 }
             }
 
-            foreach (ref item; root_item.subItems) switch (item.name)
+            foreach (ref item; root_item.sub_items) switch (item.name)
             {
                 case "model":
                     id_string_length += cache_len(item.value.unQuote.length);
@@ -599,10 +599,10 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     aa55_count = 0;
 
     // parse the elements
-    foreach (ref root_item; conf.subItems) switch (root_item.name)
+    foreach (ref root_item; conf.sub_items) switch (root_item.name)
     {
         case "elements", "registers":
-            foreach (i, ref reg_item; root_item.subItems)
+            foreach (i, ref reg_item; root_item.sub_items)
             {
                 ref ElementDesc e = profile.elements[item_count];
                 ref Profile.Lookup l = profile.lookup_table[item_count++];
@@ -610,7 +610,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
 
                 const(char)[] id, displayUnits, freq;
 
-                foreach (ref reg_conf; reg_item.subItems) switch (reg_conf.name)
+                foreach (ref reg_conf; reg_item.sub_items) switch (reg_conf.name)
                 {
                     case "desc":
                         const(char)[] tail = reg_conf.value;
@@ -705,24 +705,24 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         }
                         if (reg < 10000)
                         {
-                            mb.reg_type = RegisterType.Coil;
+                            mb.reg_type = RegisterType.coil;
                             mb.reg = cast(ushort)reg;
                         }
                         else if (reg < 20000)
                         {
-                            mb.reg_type = RegisterType.DiscreteInput;
+                            mb.reg_type = RegisterType.discrete_input;
                             mb.reg = cast(ushort)(reg - 10000);
                         }
                         else if (reg < 30000)
                             break;
                         else if (reg < 40000)
                         {
-                            mb.reg_type = RegisterType.InputRegister;
+                            mb.reg_type = RegisterType.input_register;
                             mb.reg = cast(ushort)(reg - 30000);
                         }
                         else
                         {
-                            mb.reg_type = RegisterType.HoldingRegister;
+                            mb.reg_type = RegisterType.holding_register;
                             mb.reg = cast(ushort)(reg - 40000);
                         }
 
@@ -860,7 +860,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
             {
                 ref ComponentTemplate component = profile.component_templates[num_component_templates++];
 
-                foreach (ref cItem; conf.subItems) switch (cItem.name)
+                foreach (ref cItem; conf.sub_items) switch (cItem.name)
                 {
                     case "element-map":
                     case "element":
@@ -877,7 +877,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 }
             }
 
-            foreach (ref item; root_item.subItems) switch (item.name)
+            foreach (ref item; root_item.sub_items) switch (item.name)
             {
                 case "component":
                     ++device._num_components;
@@ -903,7 +903,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     num_component_templates = 0;
 
     // now finally parse the templates
-    foreach (ref root_item; conf.subItems) switch (root_item.name)
+    foreach (ref root_item; conf.sub_items) switch (root_item.name)
     {
         case "device-template":
             ref DeviceTemplate device = profile.device_templates[num_device_templates++];
@@ -920,7 +920,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 size_t component_count = 0;
                 size_t element_count = 0;
 
-                foreach (ref cItem; conf.subItems) switch (cItem.name)
+                foreach (ref cItem; conf.sub_items) switch (cItem.name)
                 {
                     case "id":
                         component._id = id_cache.add_string(cItem.value.unQuote);
@@ -939,7 +939,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         break;
                 }
 
-                foreach (ref cItem; conf.subItems)
+                foreach (ref cItem; conf.sub_items)
                 {
                     ElementTemplate.Type ty = ElementTemplate.Type.constant;
                     switch (cItem.name)
@@ -1002,7 +1002,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 }
             }
 
-            foreach (ref item; root_item.subItems) switch (item.name)
+            foreach (ref item; root_item.sub_items) switch (item.name)
             {
                 case "model":
                     device._models ~= id_cache.add_string(item.value.unQuote);
@@ -1029,12 +1029,12 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
 VoidEnumInfo* parse_enum(ConfItem conf)
 {
     const(char)[] enum_name = conf.value.unQuote;
-    size_t count = conf.subItems.length;
+    size_t count = conf.sub_items.length;
 
     auto keys = Array!(const(char)[])(Reserve, count);
     auto t_vals = Array!long(Reserve, count);
     long min, max;
-    foreach (i, ref item; conf.subItems)
+    foreach (i, ref item; conf.sub_items)
     {
         keys ~= item.name.unQuote;
         const(char)[] val = item.value.split!',';

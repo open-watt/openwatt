@@ -21,8 +21,8 @@ nothrow @nogc:
 
 enum CANInterfaceProtocol : byte
 {
-    Unknown = -1,
-    EBYTE
+    unknown = -1,
+    ebyte
 }
 
 struct CANFrame
@@ -47,7 +47,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"can";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!CANInterface, name.move, flags);
 
@@ -83,7 +83,7 @@ nothrow @nogc:
     const(char)[] protocol(CANInterfaceProtocol value)
     {
         import urt.mem.temp;
-        if (value != CANInterfaceProtocol.EBYTE)
+        if (value != CANInterfaceProtocol.ebyte)
             return tconcat("Invalid CAN protocol '", protocol, "': expect 'ebyte|??'.");
         _protocol = value;
         return null;
@@ -93,7 +93,7 @@ nothrow @nogc:
     // API...
 
     override bool validate() const
-        => _stream !is null && _protocol == CANInterfaceProtocol.EBYTE;
+        => _stream !is null && _protocol == CANInterfaceProtocol.ebyte;
 
     override CompletionStatus validating()
     {
@@ -104,10 +104,10 @@ nothrow @nogc:
     override CompletionStatus startup()
     {
         if (!_stream)
-            return CompletionStatus.Error;
+            return CompletionStatus.error;
         if (_stream.running)
-            return CompletionStatus.Complete;
-        return CompletionStatus.Continue;
+            return CompletionStatus.complete;
+        return CompletionStatus.continue_;
     }
 
     override void update()
@@ -123,10 +123,10 @@ nothrow @nogc:
 
         // check for data
         ubyte[1024] buffer = void;
-        buffer[0 .. tailBytes] = tail[0 .. tailBytes];
-        ptrdiff_t readOffset = tailBytes;
-        ptrdiff_t length = tailBytes;
-        tailBytes = 0;
+        buffer[0 .. _tail_bytes] = _tail[0 .. _tail_bytes];
+        ptrdiff_t readOffset = _tail_bytes;
+        ptrdiff_t length = _tail_bytes;
+        _tail_bytes = 0;
         read_loop: while (true)
         {
             assert(length < LargestProtocolFrame);
@@ -139,9 +139,9 @@ nothrow @nogc:
             }
             if (r == 0)
             {
-                // if there were no extra bytes available, stash the tail until later
-                tail[0 .. length] = buffer[0 .. length];
-                tailBytes = cast(ushort)length;
+                // if there were no extra bytes available, stash the _tail until later
+                _tail[0 .. length] = buffer[0 .. length];
+                _tail_bytes = cast(ushort)length;
                 break read_loop;
             }
             length += r;
@@ -160,14 +160,14 @@ nothrow @nogc:
                 size_t taken = 0;
                 switch (protocol)
                 {
-                    case CANInterfaceProtocol.EBYTE:
+                    case CANInterfaceProtocol.ebyte:
                         enum EbyteFrameSize = 13;
 
                         if (length - offset >= EbyteFrameSize)
                         {
                             // TODO: how can we even do any packet validation?
                             //       there's basically no error detection data available
-                            //       I guess we could confirm assumed zero bits in the header and tail?
+                            //       I guess we could confirm assumed zero bits in the header and _tail?
 
                             const ubyte[] ebyteFrame = buffer[offset .. offset + EbyteFrameSize];
 
@@ -205,7 +205,7 @@ nothrow @nogc:
                 }
                 offset += taken;
 
-                incomingPacket(frame, now);
+                incoming_packet(frame, now);
             }
 
             // we've eaten the whole buffer...
@@ -216,9 +216,9 @@ nothrow @nogc:
     protected override bool transmit(ref const Packet packet)
     {
         // can only handle can packets
-        if (packet.eth.ether_type != EtherType.OW || packet.eth.ow_sub_type != OW_SubType.CAN)
+        if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.can)
         {
-            ++_status.sendDropped;
+            ++_status.send_dropped;
             return false;
         }
 
@@ -235,7 +235,7 @@ nothrow @nogc:
 
         switch (protocol)
         {
-            case CANInterfaceProtocol.EBYTE:
+            case CANInterfaceProtocol.ebyte:
                 ubyte[] data = cast(ubyte[])packet.data;
                 ubyte dataLen = cast(ubyte)(packet.data.length - 4);
 
@@ -258,7 +258,7 @@ nothrow @nogc:
             if (written <= 0)
                 writeDebug("CAN packet send failed on interface '", name, "'");
             else
-                writeDebug("CAN packet sent on interface '", name, "': id=", (cast(ubyte[4])packet.data[0 .. 4]).bigEndianToNative!uint & 0x1FFFFFFF, " (", packet.data.length - 4, ")[ ", packet.data[4 .. $], " - ", packet.data[4 .. $].binToAscii(), " ]");
+                writeDebug("CAN packet sent on interface '", name, "': id=", (cast(ubyte[4])packet.data[0 .. 4]).bigEndianToNative!uint & 0x1FFFFFFF, " (", packet.data.length - 4, ")[ ", packet.data[4 .. $], " - ", packet.data[4 .. $].bin_to_ascii(), " ]");
         }
 
         if (written <= 0)
@@ -269,20 +269,20 @@ nothrow @nogc:
             // if the stream disconnected, maybe we should buffer the message incase it reconnects promptly?
 
             // just drop it for now...
-            ++_status.sendDropped;
+            ++_status.send_dropped;
             return false;
         }
 
-        ++_status.sendPackets;
-        _status.sendBytes += length;
+        ++_status.send_packets;
+        _status.send_bytes += length;
         // TODO: or should we record `length`? payload bytes, or full protocol bytes?
         return true;
     }
 
-    override ushort pcapType() const
+    override ushort pcap_type() const
         => 227; // CAN_SOCKETCAN
 
-    override void pcapWrite(ref const Packet packet, PacketDirection dir, scope void delegate(const void[] packetData) nothrow @nogc sink) const
+    override void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(const void[] packetData) nothrow @nogc sink) const
     {
         // write socket_can struct...
         struct socket_can
@@ -309,15 +309,15 @@ nothrow @nogc:
 private:
     ObjectRef!Stream _stream;
     CANInterfaceProtocol _protocol;
-    ubyte[13] tail; // EBYTE proto has 13byte frames
-    ushort tailBytes;
+    ubyte[13] _tail; // EBYTE proto has 13byte frames
+    ushort _tail_bytes;
 
-    final void incomingPacket(ref const CANFrame frame, SysTime recvTime)
+    final void incoming_packet(ref const CANFrame frame, SysTime recvTime)
     {
         debug assert(running, "Shouldn't receive packets while not running...?");
 
         version (DebugCANInterface)
-            writeDebug("CAN packet received from interface '", name, "': id=", frame.id, " (", frame.data.length , ")[ ", cast(void[])frame.data[], " - ", frame.data.binToAscii(), " ]");
+            writeDebug("CAN packet received from interface '", name, "': id=", frame.id, " (", frame.data.length , ")[ ", cast(void[])frame.data[], " - ", frame.data.bin_to_ascii(), " ]");
 
         ubyte[12] packet;
         packet[0 .. 4] = nativeToBigEndian(frame.id | ((frame.control & 0xC0) << 24));
@@ -325,10 +325,10 @@ private:
 
         Packet p;
         p.init!Ethernet(packet[0 .. 4 + frame.data.length]);
-        p.creationTime = recvTime;
+        p.creation_time = recvTime;
         p.vlan = _pvid;
-        p.eth.ether_type = EtherType.OW;
-        p.eth.ow_sub_type = OW_SubType.CAN;
+        p.eth.ether_type = EtherType.ow;
+        p.eth.ow_sub_type = OW_SubType.can;
 
         // all CAN messages are broadcasts...
         p.eth.dst = MACAddress.broadcast;
@@ -344,16 +344,16 @@ class CANInterfaceModule : Module
     mixin DeclareModule!"interface.can";
 nothrow @nogc:
 
-    Collection!CANInterface canInterfaces;
+    Collection!CANInterface can_interfaces;
 
     override void init()
     {
-        g_app.console.registerCollection("/interface/can", canInterfaces);
+        g_app.console.register_collection("/interface/can", can_interfaces);
     }
 
     override void update()
     {
-        canInterfaces.update_all();
+        can_interfaces.update_all();
     }
 }
 
@@ -361,7 +361,7 @@ nothrow @nogc:
 version (DebugCANInterface)
 {
     // TODO: maybe this function is cool in other palces where we log binary?
-    char[] binToAscii(const void[] bin)
+    char[] bin_to_ascii(const void[] bin)
     {
         import urt.mem.temp : talloc;
         char[] t = cast(char[])talloc(bin.length);

@@ -43,7 +43,7 @@ enum APSFlags : ushort
 
 struct APSFrame
 {
-    enum Type = PacketType.ZigbeeAPS;
+    enum Type = PacketType.zigbee_aps;
 
     APSFrameType type;
     APSDeliveryMode delivery_mode;

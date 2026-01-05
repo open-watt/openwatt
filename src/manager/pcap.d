@@ -40,17 +40,17 @@ struct PcapInterface
 {
 nothrow @nogc:
 
-    bool openFile(const char[] filename, bool overwrite = false)
+    bool open_file(const char[] filename, bool overwrite = false)
     {
-        if (pcapFile.is_open)
+        if (pcap_file.is_open)
             return false;
 
         // open file
-        Result r = pcapFile.open(filename, overwrite ? FileOpenMode.WriteTruncate : FileOpenMode.WriteAppend, FileOpenFlags.Sequential);
+        Result r = pcap_file.open(filename, overwrite ? FileOpenMode.WriteTruncate : FileOpenMode.WriteAppend, FileOpenFlags.Sequential);
         if (r != Result.success)
             return false;
 
-        startOffset = pcapFile.get_pos();
+        start_offset = pcap_file.get_pos();
 
         // write section header...
         auto buffer = Array!ubyte(Reserve, 256);
@@ -70,7 +70,7 @@ nothrow @nogc:
         return true;
     }
 
-    bool openRemote(const char[] remotehost)
+    bool open_remote(const char[] remotehost)
     {
         return false;
     }
@@ -78,61 +78,61 @@ nothrow @nogc:
     void close()
     {
         // update section header length
-        ulong endOffset = pcapFile.get_pos();
-        pcapFile.set_pos(startOffset + SectionHeaderBlock.sectionLength.offsetof);
+        ulong endOffset = pcap_file.get_pos();
+        pcap_file.set_pos(start_offset + SectionHeaderBlock.sectionLength.offsetof);
         size_t written;
-        pcapFile.write((endOffset - startOffset).asBytes, written);
+        pcap_file.write((endOffset - start_offset).asBytes, written);
         assert(written == 8);
 
         // close file
-        pcapFile.close();
+        pcap_file.close();
     }
 
     bool enable(bool enable)
         => enabled.swap(enable);
 
-    void setBufferParams(Duration maxTime = 0.seconds, size_t maxBytes = 0)
+    void set_buffer_params(Duration max_time = 0.seconds, size_t max_bytes = 0)
     {
-        maxBufferTime = maxTime;
-        maxBufferBytes = maxBytes;
+        max_buffer_time = max_time;
+        max_buffer_bytes = max_bytes;
     }
 
-    void subscribeInterface(BaseInterface iface)
+    void subscribe_interface(BaseInterface iface)
     {
-        auto filter = PacketFilter(type: PacketType.Unknown, direction: cast(PacketDirection)(PacketDirection.Incoming | PacketDirection.Outgoing));
+        auto filter = PacketFilter(type: PacketType.unknown, direction: cast(PacketDirection)(PacketDirection.incoming | PacketDirection.outgoing));
 
-        iface.subscribe(&packetHandler, filter);
+        iface.subscribe(&packet_handler, filter);
     }
 
     void flush()
     {
-        lastUpdate = getTime();
+        last_update = getTime();
 
-        foreach (ref InterfacePacketBuffer ib; packetBuffers.values)
+        foreach (ref InterfacePacketBuffer ib; packet_buffers.values)
         {
-            if (ib.packetBuffer.empty)
+            if (ib.packet_buffer.empty)
                 continue;
 
-            write(ib.packetBuffer[]);
-            ib.packetBuffer.clear();
+            write(ib.packet_buffer[]);
+            ib.packet_buffer.clear();
         }
     }
 
     void write(const void[] data)
     {
         // TODO: should we actually just bail? maybe something more particular?
-        if (!pcapFile.is_open)
+        if (!pcap_file.is_open)
             return;
 
         size_t written;
-        pcapFile.write(data, written);
+        pcap_file.write(data, written);
         assert(written == data.length, "Write length wrong! ... what to do?");
         // TODO: what to do? try again?
     }
 
     void update()
     {
-        if (getTime() - lastUpdate < maxBufferTime)
+        if (getTime() - last_update < max_buffer_time)
             return;
         flush();
     }
@@ -140,18 +140,18 @@ nothrow @nogc:
 private:
 
     String name;
-    Map!(BaseInterface, InterfacePacketBuffer) packetBuffers;
+    Map!(BaseInterface, InterfacePacketBuffer) packet_buffers;
 
-    ulong startOffset;
-    MonoTime lastUpdate;
+    ulong start_offset;
+    MonoTime last_update;
 
-    File pcapFile;
+    File pcap_file;
 
-    uint nextInterfaceIndex = 0;
+    uint next_interface_index = 0;
     bool enabled = true;
 
-    Duration maxBufferTime;
-    size_t maxBufferBytes;
+    Duration max_buffer_time;
+    size_t max_buffer_bytes;
 
     struct InterfacePacketBuffer
     {
@@ -159,25 +159,25 @@ private:
         int index = -1;
         ushort linkType;
 
-        Array!ubyte packetBuffer;
+        Array!ubyte packet_buffer;
     }
 
-    void packetHandler(ref const Packet p, BaseInterface i, PacketDirection dir, void*)
+    void packet_handler(ref const Packet p, BaseInterface i, PacketDirection dir, void*)
     {
-        writePacket(p, i, dir);
+        write_packet(p, i, dir);
     }
 
-    void writePacket(ref const Packet p, BaseInterface i, PacketDirection dir)
+    void write_packet(ref const Packet p, BaseInterface i, PacketDirection dir)
     {
         import router.iface.zigbee;
 
         if (!enabled)
             return;
 
-        InterfacePacketBuffer* ib = packetBuffers.get(i);
+        InterfacePacketBuffer* ib = packet_buffers.get(i);
         if (!ib)
         {
-            ib = packetBuffers.insert(i, InterfacePacketBuffer(i, nextInterfaceIndex++, i.pcapType()));
+            ib = packet_buffers.insert(i, InterfacePacketBuffer(i, next_interface_index++, i.pcap_type()));
 
             // write IDB header...
             auto buffer = Array!ubyte(Reserve, 256);
@@ -197,8 +197,8 @@ private:
             buffer.clear();
         }
 
-        size_t packetOffset = ib.packetBuffer.length;
-        ulong timestamp = unixTimeNs(p.creationTime);
+        size_t packetOffset = ib.packet_buffer.length;
+        ulong timestamp = unixTimeNs(p.creation_time);
 
         // write packet block...
         EnhancedPacketBlock epb;
@@ -207,22 +207,22 @@ private:
         epb.timestampLow = cast(uint)timestamp;
 //        epb.capturedLength = cast(uint)p.data.length; // write it later
 //        epb.originalLength = cast(uint)p.data.length;
-        ib.packetBuffer ~= epb.asBytes;
-        size_t capturedLengthOffset = ib.packetBuffer.length - 8;
+        ib.packet_buffer ~= epb.asBytes;
+        size_t capturedLengthOffset = ib.packet_buffer.length - 8;
 
         uint packetLen;
-        i.pcapWrite(p, dir, (const void[] packetData) {
+        i.pcap_write(p, dir, (const void[] packetData) {
             packetLen += cast(uint)packetData.length;
-            ib.packetBuffer ~= cast(const ubyte[])packetData;
+            ib.packet_buffer ~= cast(const ubyte[])packetData;
         });
-        ib.packetBuffer.alignBlock();
+        ib.packet_buffer.alignBlock();
 
         // write capture length...
-        ib.packetBuffer[][capturedLengthOffset .. capturedLengthOffset + 4] = packetLen.asBytes;
-        ib.packetBuffer[][capturedLengthOffset + 4 .. capturedLengthOffset + 8] = packetLen.asBytes;
+        ib.packet_buffer[][capturedLengthOffset .. capturedLengthOffset + 4] = packetLen.asBytes;
+        ib.packet_buffer[][capturedLengthOffset + 4 .. capturedLengthOffset + 8] = packetLen.asBytes;
 
         // write packet flags:
-        uint flags = (dir == PacketDirection.Incoming) ? 1 : 2; // 01 = inbound, 10 = outbound
+        uint flags = (dir == PacketDirection.incoming) ? 1 : 2; // 01 = inbound, 10 = outbound
 
         // 2-4 Reception type (000 = not specified, 001 = unicast, 010 = multicast, 011 = broadcast, 100 = promiscuous)
         if (p.eth.dst.isBroadcast)
@@ -231,15 +231,15 @@ private:
             flags |= 2 << 2;
         else
             flags |= 1 << 2;
-        ib.packetBuffer.writeOption(2, flags.asBytes); // epb_flags
+        ib.packet_buffer.writeOption(2, flags.asBytes); // epb_flags
 
         // epb_dropcount
         // epb_packetid
 
-        ib.packetBuffer.writeOption(0, null);
-        ib.packetBuffer.writeBlockLen(packetOffset);
+        ib.packet_buffer.writeOption(0, null);
+        ib.packet_buffer.writeBlockLen(packetOffset);
 
-        if (ib.packetBuffer.length > maxBufferBytes)
+        if (ib.packet_buffer.length > max_buffer_bytes)
             flush();
     }
 }
@@ -270,7 +270,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCommand!add("/tools/pcap", this);
+        g_app.console.register_command!add("/tools/pcap", this);
     }
 
     override void post_update()
@@ -286,14 +286,14 @@ nothrow @nogc:
     {
         if (name.empty)
         {
-            session.writeLine("PCAP interface must have a name");
+            session.write_line("PCAP interface must have a name");
             return;
         }
         foreach (PcapInterface* pcap; interfaces)
         {
             if (pcap.name == name)
             {
-                session.writeLine("PCAP interface '", name, "' already exists");
+                session.write_line("PCAP interface '", name, "' already exists");
                 return;
             }
         }
@@ -302,7 +302,7 @@ nothrow @nogc:
         PcapInterface* pcap = g_app.allocator.allocT!PcapInterface();
         pcap.name = n.move;
 
-        if (!pcap.openFile(file))
+        if (!pcap.open_file(file))
         {
             writeInfo("Couldn't open PCAP file '", file, "'");
             g_app.allocator.freeT(pcap);
@@ -362,12 +362,12 @@ void writeOption(ref Array!ubyte buffer, ushort option, const void[] data)
     buffer.alignBlock();
 }
 
-void writeBlockLen(ref Array!ubyte buffer, size_t startOffset = 0)
+void writeBlockLen(ref Array!ubyte buffer, size_t start_offset = 0)
 {
-    uint len = cast(uint)((buffer.length - startOffset) + 4);
+    uint len = cast(uint)((buffer.length - start_offset) + 4);
     buffer ~= len.asBytes;
-    buffer[][startOffset + 4 .. startOffset + 8] = len.asBytes; // TODO: what is wrong with array indexing?
-    assert(buffer.length - startOffset == len);
+    buffer[][start_offset + 4 .. start_offset + 8] = len.asBytes; // TODO: what is wrong with array indexing?
+    assert(buffer.length - start_offset == len);
 }
 
 void alignBlock(ref Array!ubyte buffer)

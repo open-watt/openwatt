@@ -30,7 +30,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"zb-router";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         this(collection_type_info!ZigbeeRouter, name.move, flags);
     }
@@ -92,12 +92,12 @@ protected:
     override CompletionStatus startup()
     {
         CompletionStatus s = super.startup();
-        if (s != CompletionStatus.Complete)
+        if (s != CompletionStatus.complete)
             return s;
 
         // router startup?
 
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()

@@ -26,29 +26,29 @@ nothrow @nogc:
 
 enum ObjectFlags : ubyte
 {
-    None        = 0,
-    Dynamic     = 1 << 0, // D
-    Temporary   = 1 << 1, // T
-    Disabled    = 1 << 2, // X
-    Invalid     = 1 << 3, // I
-    Running     = 1 << 4, // R
-    Slave       = 1 << 5, // S
-    LinkPresent = 1 << 6, // L
-    Hardware    = 1 << 7, // H
+    none         = 0,
+    dynamic      = 1 << 0, // D
+    temporary    = 1 << 1, // T
+    disabled     = 1 << 2, // X
+    invalid      = 1 << 3, // I
+    running      = 1 << 4, // R
+    slave        = 1 << 5, // S
+    link_present = 1 << 6, // L
+    hardware     = 1 << 7, // H
 }
 
 enum CompletionStatus
 {
-    Continue,
-    Complete,
-    Error = -1,
+    continue_,
+    complete,
+    error = -1,
 }
 
 enum StateSignal
 {
-    Online,
-    Offline,
-    Destroyed
+    online,
+    offline,
+    destroyed
 }
 
 alias StateSignalHandler = void delegate(BaseObject object, StateSignal signal) nothrow @nogc;
@@ -116,9 +116,9 @@ nothrow @nogc:
         _name = name.move;
     }
 
-    this(const CollectionTypeInfo* type_info, String name, ObjectFlags flags = ObjectFlags.None)
+    this(const CollectionTypeInfo* type_info, String name, ObjectFlags flags = ObjectFlags.none)
     {
-        assert((flags & ~(ObjectFlags.Dynamic | ObjectFlags.Temporary | ObjectFlags.Disabled)) == 0,
+        assert((flags & ~(ObjectFlags.dynamic | ObjectFlags.temporary | ObjectFlags.disabled)) == 0,
                "`flags` may only contain Dynamic, Temporary, or Disabled flags");
 
         _typeInfo = type_info;
@@ -126,10 +126,10 @@ nothrow @nogc:
         _name = name.move;
         _flags = flags;
 
-        if (_flags & ObjectFlags.Disabled)
+        if (_flags & ObjectFlags.disabled)
         {
-            _flags ^= ObjectFlags.Disabled;
-            _state = State.Disabled;
+            _flags ^= ObjectFlags.disabled;
+            _state = State.disabled;
         }
     }
 
@@ -160,25 +160,25 @@ nothrow @nogc:
     }
 
     final bool disabled() const pure
-        => _state & _Disabled;
+        => _state & _disabled;
     final void disabled(bool value)
     {
-        _state |= _Disabled;
-        _state &= ~_Start;
-        if (_state & _Valid)
-            _state |= _Stop;
+        _state |= _disabled;
+        _state &= ~_start;
+        if (_state & _valid)
+            _state |= _stop;
     }
 
     // TODO: PUT FINAL BACK WHEN EVERYTHING PORTED!
     /+final+/ bool running() const pure
-        => _state == State.Running;
+        => _state == State.running;
 
     ObjectFlags flags() const
     {
         return cast(ObjectFlags)(_flags |
-                                 ((_state & _Valid) || validate() ? ObjectFlags.None : ObjectFlags.Invalid) |
-                                 ((_state & _Disabled) ? ObjectFlags.Disabled :
-                                 _state == State.Running ? ObjectFlags.Running : ObjectFlags.None));
+                                 ((_state & _valid) || validate() ? ObjectFlags.none : ObjectFlags.invalid) |
+                                 ((_state & _disabled) ? ObjectFlags.disabled :
+                                 _state == State.running ? ObjectFlags.running : ObjectFlags.none));
     }
 
     // give a helpful status string, e.g. "Ready", "Disabled", "Error: <message>"
@@ -186,22 +186,22 @@ nothrow @nogc:
     {
         switch (_state)
         {
-            case State.Disabled:
-            case State.Stopping:
+            case State.disabled:
+            case State.stopping:
                 return "Disabled";
-            case State.Destroying:
-            case State.Destroyed:
+            case State.destroying:
+            case State.destroyed:
                 return "Destroyed";
-            case State.InitFailed:
-            case State.Failure:
+            case State.init_failed:
+            case State.failure:
                 return "Failed";
-            case State.Validate:
+            case State.validate:
                 return "Invalid";
-            case State.Starting:
+            case State.starting:
                 return "Starting";
-            case State.Restarting:
+            case State.restarting:
                 return "Restarting";
-            case State.Running:
+            case State.running:
                 return "Running";
             default:
                 assert(false, "Invalid state!");
@@ -213,10 +213,10 @@ nothrow @nogc:
 
     final void restart()
     {
-        if (_state & _Valid)
+        if (_state & _valid)
         {
-            _state &= ~_Start;
-            _state |= _Stop;
+            _state &= ~_start;
+            _state |= _stop;
         }
     }
 
@@ -224,12 +224,12 @@ nothrow @nogc:
     {
         writeInfo(_type[], " '", _name, "' destroyed");
 
-        _state |= _Disabled | _Destroyed;
-        _state &= ~_Start;
-        if (_state & _Valid)
-            _state |= _Stop;
+        _state |= _disabled | _destroyed;
+        _state &= ~_start;
+        if (_state & _valid)
+            _state |= _stop;
 
-        signal_state_change(StateSignal.Destroyed);
+        signal_state_change(StateSignal.destroyed);
     }
 
     // return a list of properties that can be set on this object
@@ -315,35 +315,35 @@ nothrow @nogc:
         => _name == rhs._name && type[] == rhs.type[];
 
 protected:
-    enum ubyte _Disabled   = 1 << 0;
-    enum ubyte _Destroyed  = 1 << 1;
-    enum ubyte _Start      = 1 << 2;
-    enum ubyte _Stop       = 1 << 3;
-    enum ubyte _Valid      = 1 << 4;
-    enum ubyte _Fail       = 1 << 5;
+    enum ubyte _disabled   = 1 << 0;
+    enum ubyte _destroyed  = 1 << 1;
+    enum ubyte _start      = 1 << 2;
+    enum ubyte _stop       = 1 << 3;
+    enum ubyte _valid      = 1 << 4;
+    enum ubyte _fail       = 1 << 5;
 
     enum State : ubyte
     {
-        Validate    = 0,
-        InitFailed  = _Fail,
-        Disabled    = _Disabled,
-        Destroyed   = _Disabled | _Destroyed,
-        Running     = _Valid,
-        Starting    = _Start | _Valid,
-        Restarting  = _Stop | _Valid,
-        Failure     = _Fail | _Stop | _Valid,
-        Stopping    = _Disabled | _Stop | _Valid,
-        Destroying  = _Disabled | _Destroyed | _Stop | _Valid,
+        validate    = 0,
+        init_failed = _fail,
+        disabled    = _disabled,
+        destroyed   = _disabled | _destroyed,
+        running     = _valid,
+        starting    = _start | _valid,
+        restarting  = _stop | _valid,
+        failure     = _fail | _stop | _valid,
+        stopping    = _disabled | _stop | _valid,
+        destroying  = _disabled | _destroyed | _stop | _valid,
     }
 
     const CollectionTypeInfo* _typeInfo;
     size_t _props_set;
-    State _state = State.Validate;
+    State _state = State.validate;
     ObjectFlags _flags;
 
     final void set_state(State new_state)
     {
-        assert(_state != State.Destroyed, "Cannot change state of a destroyed object!");
+        assert(_state != State.destroyed, "Cannot change state of a destroyed object!");
 
         if (new_state == _state)
             return;
@@ -357,32 +357,32 @@ protected:
 
         switch (new_state)
         {
-            case State.InitFailed:
+            case State.init_failed:
                 debug version (DebugStateFlow)
                     if (!DebugType || _type[] == DebugType)
                         writeDebug(_type[], " '", _name, "' init fail - try again in ", _backoff_ms, "ms");
                 goto case;
-            case State.Disabled:
-            case State.Destroyed:
+            case State.disabled:
+            case State.destroyed:
                 break;
 
-            case State.Running:
+            case State.running:
                 _backoff_ms = 0;
                 set_online();
                 goto do_update;
 
-            case State.Validate:
+            case State.validate:
                 goto do_update;
 
-            case State.Starting:
+            case State.starting:
                 _last_init_attempt = getTime();
                 goto do_update;
 
-            case State.Restarting:
-            case State.Destroying:
-            case State.Stopping:
-            case State.Failure:
-                if (old == State.Running)
+            case State.restarting:
+            case State.destroying:
+            case State.stopping:
+            case State.failure:
+                if (old == State.running)
                     set_offline();
                 goto do_update;
 
@@ -400,13 +400,13 @@ protected:
         => true;
 
     CompletionStatus validating()
-        => validate() ? CompletionStatus.Complete : CompletionStatus.Error;
+        => validate() ? CompletionStatus.complete : CompletionStatus.error;
 
     CompletionStatus startup()
-        => CompletionStatus.Complete;
+        => CompletionStatus.complete;
 
     CompletionStatus shutdown()
-        => CompletionStatus.Complete;
+        => CompletionStatus.complete;
 
     void update()
     {
@@ -415,13 +415,13 @@ protected:
     void set_online()
     {
         writeInfo(_type[], " '", _name, "' online");
-        signal_state_change(StateSignal.Online);
+        signal_state_change(StateSignal.online);
     }
 
     void set_offline()
     {
         writeInfo(_type[], " '", _name, "' offline");
-        signal_state_change(StateSignal.Offline);
+        signal_state_change(StateSignal.offline);
     }
 
     // sends a signal to all clients
@@ -443,54 +443,54 @@ private:
     {
         switch (_state)
         {
-            case State.Destroyed:
+            case State.destroyed:
                 return true;
 
-            case State.Disabled:
+            case State.disabled:
                 // do nothing...
                 break;
 
-            case State.InitFailed:
+            case State.init_failed:
                 if (getTime() - _last_init_attempt >= _backoff_ms.msecs)
                 {
                     _backoff_ms = cast(ushort)(_backoff_ms == 0 ? 100 : min(_backoff_ms * 2, 60_000));
-                    set_state(State.Validate);
+                    set_state(State.validate);
                 }
                 break;
 
-            case State.Validate:
+            case State.validate:
                 CompletionStatus s = validating();
-                debug assert(s != CompletionStatus.Continue, "validating() should return Success or Failure");
-                if (s == CompletionStatus.Complete)
-                    set_state(State.Starting);
+                debug assert(s != CompletionStatus.continue_, "validating() should return Success or Failure");
+                if (s == CompletionStatus.complete)
+                    set_state(State.starting);
                 break;
 
-            case State.Starting:
+            case State.starting:
                 CompletionStatus s = startup();
-                if (s == CompletionStatus.Complete)
-                    set_state(State.Running);
-                else if (s == CompletionStatus.Error)
-                    set_state(State.Failure);
+                if (s == CompletionStatus.complete)
+                    set_state(State.running);
+                else if (s == CompletionStatus.error)
+                    set_state(State.failure);
                 break;
 
-            case State.Restarting:
-            case State.Stopping:
-            case State.Destroying:
-            case State.Failure:
+            case State.restarting:
+            case State.stopping:
+            case State.destroying:
+            case State.failure:
                 CompletionStatus s = shutdown();
-                debug assert(s != CompletionStatus.Error, "shutdown() should not fail; just clear/reset the state!");
-                if (s == CompletionStatus.Complete)
-                    set_state(cast(State)(_state & ~(_Stop | _Valid)));
+                debug assert(s != CompletionStatus.error, "shutdown() should not fail; just clear/reset the state!");
+                if (s == CompletionStatus.complete)
+                    set_state(cast(State)(_state & ~(_stop | _valid)));
                 break;
 
-            case State.Running:
+            case State.running:
                 update();
                 break;
 
             default:
                 assert(false, "Invalid state!");
         }
-        return _state == State.Destroyed;
+        return _state == State.destroyed;
     }
 }
 
@@ -582,7 +582,7 @@ private:
     void destroy_handler(BaseObject object, StateSignal signal)
     {
         assert(object is _object, "Object reference mismatch!");
-        if (signal != StateSignal.Destroyed)
+        if (signal != StateSignal.destroyed)
             return;
         _name = _object.name;
         assert((_ptr & 1) == 0, "Objects and strings should never have the 1-bit of their pointers set!?");
@@ -591,7 +591,7 @@ private:
 }
 
 
-const(Property*)[] allProperties(Type)()
+const(Property*)[] all_properties(Type)()
 {
     alias AllProps = all_properties_impl!(Type, 0);
     enum Count = typeof(AllProps()).length;
@@ -657,7 +657,7 @@ template IsSetter(alias Func)
 template HasSuggest(alias Func)
 {
     static if (is(typeof(&Func) == R function(Args) nothrow @nogc, R, Args...) && IsSetter!Func)
-        enum HasSuggest = is(typeof(suggestCompletion!(Args[0])));
+        enum HasSuggest = is(typeof(suggest_completion!(Args[0])));
     else
         enum HasSuggest = false;
 }
@@ -686,7 +686,7 @@ StringResult SynthSetter(Setters...)(ref const Variant value, BaseObject item) n
     {{
         alias PropType = Parameters!Setter[0];
         PropType arg;
-        error = convertVariant(value, arg);
+        error = convert_variant(value, arg);
         if (!error)
         {
             alias RT = ReturnType!Setter;
@@ -714,7 +714,7 @@ template SynthSuggest(Setters...)
     static if (Setters.length == 1)
     {
         alias PropType = Parameters!(Setters[0])[0];
-        alias SynthSuggest = suggestCompletion!PropType;
+        alias SynthSuggest = suggest_completion!PropType;
     }
     else
     {
@@ -724,8 +724,8 @@ template SynthSuggest(Setters...)
             static foreach (Setter; Setters)
             {{
                 alias PropType = Parameters!Setter[0];
-                static if (is(typeof(suggestCompletion!PropType)))
-                    tokens ~= suggestCompletion!PropType(arg);
+                static if (is(typeof(suggest_completion!PropType)))
+                    tokens ~= suggest_completion!PropType(arg);
 
                 // TODO: also support types with a suggest member function...
             }}

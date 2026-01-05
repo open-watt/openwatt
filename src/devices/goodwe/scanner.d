@@ -11,7 +11,7 @@ GOODWE scanning works like this:
      "192.168.3.4,289C6E05B350,Solar-WiFi22CW0007"
 
 {
-    UDPStream udp = new UDPStream(48899, options: StreamOptions.AllowBroadcast);
+    UDPStream udp = new UDPStream(48899, options: StreamOptions.allow_broadcast);
     udp.connect();
 
     udp.write("WIFIKIT-214028-READ");

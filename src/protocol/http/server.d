@@ -35,7 +35,7 @@ nothrow @nogc:
 
     alias RequestHandler = int delegate(ref const HTTPMessage, ref Stream stream) nothrow @nogc;
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!HTTPServer, name.move, flags);
     }
@@ -87,15 +87,15 @@ nothrow @nogc:
     override CompletionStatus startup()
     {
         const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name(name);
-        _server = get_module!TCPStreamModule.tcp_servers.create(server_name.makeString(defaultAllocator), ObjectFlags.Dynamic, NamedArgument("port", _port));
+        _server = get_module!TCPStreamModule.tcp_servers.create(server_name.makeString(defaultAllocator), ObjectFlags.dynamic, NamedArgument("port", _port));
         if (!_server)
-            return CompletionStatus.Error;
+            return CompletionStatus.error;
 
         _server.setConnectionCallback(&accept_connection, null);
 
         writeInfo(type, ": '", name, "' listening on port ", _port, "...");
 
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
@@ -103,7 +103,7 @@ nothrow @nogc:
         if (_server)
             _server.destroy();
 
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override void update()

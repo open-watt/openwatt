@@ -88,20 +88,20 @@ nothrow @nogc:
 
         console = Console(this, String("console".addString), Mallocator.instance);
 
-        console.setPrompt(StringLit!"openwatt > ");
+        console.set_prompt(StringLit!"openwatt > ");
 
-        console.registerCommand!log_level("/system", this);
-        console.registerCommand!set_hostname("/system", this);
-        console.registerCommand!get_hostname("/system", this, "hostname");
-        console.registerCommand!set_update_rate("/system", this, "update-rate");
-        console.registerCommand!uptime("/system", this);
-        console.registerCommand!sysinfo("/system", this);
-        console.registerCommand!show_time("/system", this, "time");
-        console.registerCommand!sleep("/system", this);
+        console.register_command!log_level("/system", this);
+        console.register_command!set_hostname("/system", this);
+        console.register_command!get_hostname("/system", this, "hostname");
+        console.register_command!set_update_rate("/system", this, "update-rate");
+        console.register_command!uptime("/system", this);
+        console.register_command!sysinfo("/system", this);
+        console.register_command!show_time("/system", this, "time");
+        console.register_command!sleep("/system", this);
 
-        console.registerCommand!device_print("/device", this, "print");
+        console.register_command!device_print("/device", this, "print");
 
-        console.registerCollection("/secret", secrets);
+        console.register_collection("/secret", secrets);
 
         register_modules(this);
 
@@ -228,7 +228,7 @@ nothrow @nogc:
         const(char)[] newLine = "";
         foreach (dev; devices.values)
         {
-            session.writeLine(newLine, dev.id, ": ", dev.name);
+            session.write_line(newLine, dev.id, ": ", dev.name);
             newLine = "\n";
             foreach (c; dev.components)
                 printComponent(c, 2);
@@ -248,7 +248,7 @@ nothrow @nogc:
             // TODO: MTU stuff?
         }
 
-        session.writeLine("Flags: R - RUNNING; S - SLAVE");
+        session.write_line("Flags: R - RUNNING; S - SLAVE");
         if (stats)
         {
             size_t rxLen = 7;
@@ -260,12 +260,12 @@ nothrow @nogc:
 
             foreach (i, iface; interfaces)
             {
-                rxLen = max(rxLen, iface.getStatus.recvBytes.format_int(null));
-                txLen = max(txLen, iface.getStatus.sendBytes.format_int(null));
-                rpLen = max(rpLen, iface.getStatus.recvPackets.format_int(null));
-                tpLen = max(tpLen, iface.getStatus.sendPackets.format_int(null));
-                rdLen = max(rdLen, iface.getStatus.recvDropped.format_int(null));
-                tdLen = max(tdLen, iface.getStatus.sendDropped.format_int(null));
+                rxLen = max(rxLen, iface.getStatus.recv_bytes.format_int(null));
+                txLen = max(txLen, iface.getStatus.send_bytes.format_int(null));
+                rpLen = max(rpLen, iface.getStatus.recv_packets.format_int(null));
+                tpLen = max(tpLen, iface.getStatus.send_packets.format_int(null));
+                rdLen = max(rdLen, iface.getStatus.recv_dropped.format_int(null));
+                tdLen = max(tdLen, iface.getStatus.send_dropped.format_int(null));
             }
 
             session.writef(" ID    {0, *1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",
@@ -278,11 +278,11 @@ nothrow @nogc:
             foreach (iface; interfaces)
             {
                 session.writef("{0, 3} {1}{2} {3, *4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
-                               i, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ',
+                               i, iface.getStatus.link_status ? 'R' : ' ', iface.master ? 'S' : ' ',
                                iface.name, nameLen,
-                               iface.getStatus.recvBytes, rxLen, iface.getStatus.sendBytes, txLen,
-                               iface.getStatus.recvPackets, rpLen, iface.getStatus.sendPackets, tpLen,
-                               iface.getStatus.recvDropped, rdLen, iface.getStatus.sendDropped, tdLen);
+                               iface.getStatus.recv_bytes, rxLen, iface.getStatus.send_bytes, txLen,
+                               iface.getStatus.recv_packets, rpLen, iface.getStatus.send_packets, tpLen,
+                               iface.getStatus.recv_dropped, rdLen, iface.getStatus.send_dropped, tdLen);
                 ++i;
             }
         }
@@ -292,7 +292,7 @@ nothrow @nogc:
             size_t i = 0;
             foreach (iface; interfaces)
             {
-                session.writef("{0, 3} {6}{7}  {1, *2}  {3, *4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.getStatus.linkStatus ? 'R' : ' ', iface.master ? 'S' : ' ');
+                session.writef("{0, 3} {6}{7}  {1, *2}  {3, *4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.getStatus.link_status ? 'R' : ' ', iface.master ? 'S' : ' ');
                 ++i;
             }
         }

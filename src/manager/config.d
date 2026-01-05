@@ -16,17 +16,17 @@ struct ConfItem
 
     const(char)[] name;
     const(char)[] value;
-    Array!ConfItem subItems;
+    Array!ConfItem sub_items;
 
     this(ref typeof(this) other) nothrow @nogc
     {
         this.name = other.name;
         this.value = other.value;
-        this.subItems = other.subItems[];
+        this.sub_items = other.sub_items[];
     }
 }
 
-ConfItem parseConfig(const(char)[] text)
+ConfItem parse_config(const(char)[] text)
 {
     struct ParseStack
     {
@@ -43,7 +43,7 @@ ConfItem parseConfig(const(char)[] text)
     {
         const(char)[] line = text.takeLine;
         ulong indent;
-        line = line.stripIndentation(indent);
+        line = line.strip_indentation(indent);
         line = line.trimComment!CommentDelimiter;
         if (line.empty)
             continue;
@@ -56,11 +56,11 @@ ConfItem parseConfig(const(char)[] text)
 
         if (indent > stack[depth].indent)
         {
-            if (depth == 0 && stack[0].item.subItems.length == 0)
+            if (depth == 0 && stack[0].item.sub_items.length == 0)
                 stack[0].indent = indent;
             else
             {
-                stack[depth + 1].item = &stack[depth].item.subItems[$-1];
+                stack[depth + 1].item = &stack[depth].item.sub_items[$-1];
                 stack[++depth].indent = indent;
             }
         }
@@ -81,12 +81,12 @@ ConfItem parseConfig(const(char)[] text)
             if (key[] == DirectiveDelimiter ~ "import")
             {
                 assert(false);
-//                ConfItem subConfig = parseConfigFile(value);
-//                stack[depth].item.subItems ~= subConfig.subItems[];
+//                ConfItem subConfig = parse_config_file(value);
+//                stack[depth].item.sub_items ~= subConfig.sub_items[];
             }
         }
         else
-            stack[depth].item.subItems ~= ConfItem(key, value);
+            stack[depth].item.sub_items ~= ConfItem(key, value);
     }
 
     return root;
@@ -95,7 +95,7 @@ ConfItem parseConfig(const(char)[] text)
 
 private:
 
-const(char)[] stripIndentation(const(char)[] s, out ulong indentPattern)
+const(char)[] strip_indentation(const(char)[] s, out ulong indent_pattern)
 {
     ulong pattern = 0;
     size_t i = 0;
@@ -108,6 +108,6 @@ const(char)[] stripIndentation(const(char)[] s, out ulong indentPattern)
         else
             break;
     }
-    indentPattern = pattern;
+    indent_pattern = pattern;
     return s[i .. $];
 }

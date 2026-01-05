@@ -33,7 +33,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"ether";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         this(collection_type_info!EthernetInterface, name.move, flags);
     }
@@ -66,17 +66,17 @@ nothrow @nogc:
             if (_pcap_handle is null)
             {
                 writeError("pcap_open_live failed for adapter '", _adapter, "': ", errbuf.ptr[0 .. strlen(errbuf.ptr)]);
-                return CompletionStatus.Error;
+                return CompletionStatus.error;
             }
             if (pcap_setnonblock(_pcap_handle, 1, errbuf.ptr) != 0)
             {
                 writeError("pcap_setnonblock failed on adapter '", _adapter, "': ", errbuf.ptr[0 .. strlen(errbuf.ptr)]);
                 pcap_close(_pcap_handle);
                 _pcap_handle = null;
-                return CompletionStatus.Error;
+                return CompletionStatus.error;
             }
         }
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
@@ -89,7 +89,7 @@ nothrow @nogc:
                 _pcap_handle = null;
             }
         }
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override void update()
@@ -117,7 +117,7 @@ nothrow @nogc:
 
                 if (header.caplen < header.len || header.caplen < 14)
                 {
-                    ++_status.recvDropped;
+                    ++_status.recv_dropped;
                     continue;
                 }
 
@@ -134,7 +134,7 @@ nothrow @nogc:
                 if (eth.ether_type == 0x88E5) // MACsec
                 {
                     // TODO: handle MACsec frames?
-                    ++_status.recvDropped;
+                    ++_status.recv_dropped;
                     continue;
                 }
 
@@ -146,11 +146,11 @@ nothrow @nogc:
                 }
 
                 // check for vlan tagged packets...
-                if (eth.ether_type == EtherType.VLAN)// || eth.ether_type == 0x88A8)
+                if (eth.ether_type == EtherType.vlan)// || eth.ether_type == 0x88A8)
                 {
                     if (header.caplen < 18)
                     {
-                        ++_status.recvDropped;
+                        ++_status.recv_dropped;
                         continue;
                     }
 
@@ -173,13 +173,13 @@ nothrow @nogc:
                     }
 
                     // no vlan sub-interface captured this frame, and it's not for us
-                    _status.recvDropped++;
+                    _status.recv_dropped++;
                     continue;
                 }
 
                 switch (eth.ether_type)
                 {
-                    case EtherType.OW:
+                    case EtherType.ow:
                         // de-capsulate open-watt encapsulated packets...
                         switch (mac_hdr.ow_sub_type)
                         {
@@ -194,7 +194,7 @@ nothrow @nogc:
 
                     default:
                         // dispatch ethernet packet
-                        _status.recvBytes += header.caplen - packet.length; // adjust the recv counter since dispatch only counts payload length
+                        _status.recv_bytes += header.caplen - packet.length; // adjust the recv counter since dispatch only counts payload length
                         dispatch(packet);
                         break;
                 }
@@ -219,7 +219,7 @@ protected:
 
             switch (packet.type)
             {
-                case PacketType.Ethernet:
+                case PacketType.ethernet:
                     Ethernet* eth = cast(Ethernet*)buffer.ptr;
                     eth.dst = packet.eth.dst;
                     eth.src = packet.eth.src;
@@ -228,7 +228,7 @@ protected:
                     // if there should be a vlan header
                     if (packet.vlan)
                     {
-                        storeBigEndian(ethertype++, ushort(EtherType.VLAN));
+                        storeBigEndian(ethertype++, ushort(EtherType.vlan));
                         storeBigEndian(ethertype++, packet.vlan);
                     }
                     storeBigEndian(ethertype++, packet.eth.ether_type);
@@ -238,19 +238,19 @@ protected:
                     if (packet.data.length > buffer.sizeof - (payload - buffer.ptr))
                     {
                         // packet is too big! (TODO: but what about jumbos?)
-                        _status.sendDropped++;
+                        _status.send_dropped++;
                         return;
                     }
                     payload[0 .. packet.data.length] = cast(ubyte[])packet.data[];
                     packet_len = (payload + packet.data.length) - buffer.ptr;
                     break;
 
-                case PacketType._6LoWPAN:
+                case PacketType._6lowpan:
                     assert(false, "TODO: reframe as ipv6?");
 
                 default:
                     assert(false, "TODO: reframe other protocols as open-watt ethernet...");
-                    ++_status.sendDropped;
+                    ++_status.send_dropped;
                     return;
             }
 
@@ -258,11 +258,11 @@ protected:
             {
                 writeError("pcap_sendpacket failed: ", pcap_geterr(_pcap_handle));
                 // TODO: any specific error handling? restart interface?
-                _status.sendDropped++;
+                _status.send_dropped++;
             }
 
-            ++_status.sendPackets;
-            _status.sendBytes += packet_len;
+            ++_status.send_packets;
+            _status.send_bytes += packet_len;
         }
     }
 
@@ -283,7 +283,7 @@ protected:
     }
 
 private:
-    this(const CollectionTypeInfo* typeInfo, String name, ObjectFlags flags = ObjectFlags.None)
+    this(const CollectionTypeInfo* typeInfo, String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(typeInfo, name.move, flags);
 
@@ -309,7 +309,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"wifi";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!WiFiInterface, name.move, flags);
     }
@@ -406,8 +406,8 @@ nothrow @nogc:
             }
         }
 
-        g_app.console.registerCollection("/interface/ethernet", ethernet_interfaces);
-        g_app.console.registerCollection("/interface/wifi", wifi_interfaces);
+        g_app.console.register_collection("/interface/ethernet", ethernet_interfaces);
+        g_app.console.register_collection("/interface/wifi", wifi_interfaces);
     }
 
     override void update()

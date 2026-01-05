@@ -27,11 +27,11 @@ nothrow @nogc:
     {
         this.name = name.move;
         m_allocator = allocator;
-        m_console = console;
+        _console = console;
 
         const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name(this.name);
 
-        m_server = get_module!TCPStreamModule.tcp_servers.create(server_name.makeString(defaultAllocator), ObjectFlags.Dynamic);
+        m_server = get_module!TCPStreamModule.tcp_servers.create(server_name.makeString(defaultAllocator), ObjectFlags.dynamic);
         m_server.port = port;
         m_server.setConnectionCallback(&acceptConnection, null);
     }
@@ -69,11 +69,11 @@ nothrow @nogc:
             TelnetSession s = m_sessions[i];
 
             // update session
-            if (s.isAttached)
+            if (s.is_attached)
                 s.update();
 
             // clean up closed sessions
-            if (!s.isAttached)
+            if (!s.is_attached)
             {
                 m_allocator.freeT(s);
                 m_sessions.removeSwapLast(i);
@@ -86,14 +86,14 @@ nothrow @nogc:
 package:
     NoGCAllocator m_allocator;
 
-    Console* m_console;
+    Console* _console;
     TCPServer m_server;
 
     Array!TelnetSession m_sessions;
 
-    void acceptConnection(Stream client, void* userData)
+    void acceptConnection(Stream client, void* user_data)
     {
-        TelnetSession session = m_console.createSession!TelnetSession(client);
+        TelnetSession session = _console.createSession!TelnetSession(client);
         m_sessions ~= session;
 
         // TODO: we might implement a login script here...

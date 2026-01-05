@@ -256,7 +256,7 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         if (i == MeterField.Frequency)
         {
             if (Element* e = c.find_element(fieldNames[i]))
-                r.freq = e.normalisedValue();
+                r.freq = e.normalised_value();
             r.fields |= FieldFlags.Frequency;
             continue;
         }
@@ -266,7 +266,7 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         {
             if (Element* e = c.find_element(j == 0 ? fieldNames[i] : tconcat(fieldNames[i], j)))
             {
-                f[i][j] = e.normalisedValue();
+                f[i][j] = e.normalised_value();
                 valuesPresent |= 1 << j;
             }
         }

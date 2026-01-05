@@ -76,7 +76,7 @@ nothrow @nogc:
 
         snooping = client.isSnooping;
         if (snooping)
-            client.setSnoopHandler(&snoopHandler);
+            client.setSnoopHandler(&snoop_handler);
     }
 
     final override void update()
@@ -158,7 +158,7 @@ nothrow @nogc:
 
             // send request
             ModbusPDU pdu = createMessage_Read(cast(RegisterType)elements[i].regKind, firstReg, count);
-            client.sendRequest(server, pdu, &responseHandler, &errorHandler, 0, retryTime);
+            client.sendRequest(server, pdu, &response_handler, &error_handler, 0, retryTime);
 
             version (DebugModbusSampler)
                 writeDebugf("Request: {0} [{1}{2,04x}:{3}]", server, elements[i].regKind, firstReg, count);
@@ -167,7 +167,7 @@ nothrow @nogc:
         }
     }
 
-    final void addElement(Element* element, ref const ElementDesc desc, ref const ElementDesc_Modbus reg_info)
+    final void add_element(Element* element, ref const ElementDesc desc, ref const ElementDesc_Modbus reg_info)
     {
         SampleElement* e = &elements.pushBack();
         e.element = element;
@@ -217,12 +217,12 @@ private:
             => cast(ubyte)(desc.data_length / 2);
     }
 
-    void responseHandler(ref const ModbusPDU request, ref ModbusPDU response, SysTime requestTime, SysTime responseTime)
+    void response_handler(ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time)
     {
-        ubyte kind = request.functionCode == FunctionCode.ReadHoldingRegisters ? 4 :
-                     request.functionCode == FunctionCode.ReadInputRegisters ? 3 :
-                     request.functionCode == FunctionCode.ReadDiscreteInputs ? 1 :
-                     request.functionCode == FunctionCode.ReadCoils ? 0 : ubyte.max;
+        ubyte kind = request.function_code == FunctionCode.read_holding_registers ? 4 :
+                     request.function_code == FunctionCode.read_input_registers ? 3 :
+                     request.function_code == FunctionCode.read_discrete_inputs ? 1 :
+                     request.function_code == FunctionCode.read_coils ? 0 : ubyte.max;
         ushort first = request.data[0..2].bigEndianToNative!ushort;
         ushort count = request.data[2..4].bigEndianToNative!ushort;
 
@@ -233,7 +233,7 @@ private:
             writeWarning("Incomplete or corrupt modbus response from ", server);
             return;
         }
-        if (response.functionCode != request.functionCode)
+        if (response.function_code != request.function_code)
         {
             // should be an exception? ...or some other corruption.
             return;
@@ -247,7 +247,7 @@ private:
             return;
 
         version (DebugModbusSampler)
-            writeDebugf("Response: {0}, [{1}{2,04x}:{3}] - {4}", server, kind, first, count, responseTime - requestTime);
+            writeDebugf("Response: {0}, [{1}{2,04x}:{3}] - {4}", server, kind, first, count, response_time - request_time);
 
         ubyte[] data = response.data[1 .. 1 + responseBytes];
 
@@ -256,7 +256,7 @@ private:
             if (e.regKind != kind || e.register < first || e.register >= first + count)
                 continue;
 
-            e.lastUpdate = responseTime;
+            e.lastUpdate = response_time;
 
             if (!snooping)
             {
@@ -284,17 +284,17 @@ private:
         }
     }
 
-    void errorHandler(ModbusErrorType errorType, ref const ModbusPDU request, SysTime requestTime)
+    void error_handler(ModbusErrorType errorType, ref const ModbusPDU request, SysTime request_time)
     {
-        ubyte kind = request.functionCode == FunctionCode.ReadHoldingRegisters ? 4 :
-                     request.functionCode == FunctionCode.ReadInputRegisters ? 3 :
-                     request.functionCode == FunctionCode.ReadDiscreteInputs ? 1 :
-                     request.functionCode == FunctionCode.ReadCoils ? 0 : ubyte.max;
+        ubyte kind = request.function_code == FunctionCode.read_holding_registers ? 4 :
+                     request.function_code == FunctionCode.read_input_registers ? 3 :
+                     request.function_code == FunctionCode.read_discrete_inputs ? 1 :
+                     request.function_code == FunctionCode.read_coils ? 0 : ubyte.max;
         ushort first = request.data[0..2].bigEndianToNative!ushort;
         ushort count = request.data[2..4].bigEndianToNative!ushort;
 
         version (DebugModbusSampler)
-            writeDebugf("Timeout: [{0}{1,04x}:{2}] - {3}", kind, first, count, getTime()-requestTime);
+            writeDebugf("Timeout: [{0}{1,04x}:{2}] - {3}", kind, first, count, getTime()-request_time);
 
         // release all the in-flight flags...
         foreach (ref e; elements)
@@ -312,12 +312,12 @@ private:
         }
     }
 
-    void snoopHandler(ref const MACAddress server, ref const ModbusPDU request, ref ModbusPDU response, SysTime requestTime, SysTime responseTime)
+    void snoop_handler(ref const MACAddress server, ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time)
     {
         // check it's a response from the server we're interested in
         if (server != this.server)
             return;
 
-        responseHandler(request, response, requestTime, responseTime);
+        response_handler(request, response, request_time, response_time);
     }
 }

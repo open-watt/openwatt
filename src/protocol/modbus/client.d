@@ -26,10 +26,10 @@ enum ModbusErrorType
     Failed,
 }
 
-alias ModbusRequestHandler = void delegate(ref const MACAddress client, ushort sequenceNumber, ref const ModbusPDU request, SysTime requestTime) nothrow @nogc;
-alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref ModbusPDU response, SysTime requestTime, SysTime responseTime) nothrow @nogc;
-alias ModbusErrorHandler = void delegate(ModbusErrorType errorType, ref const ModbusPDU request, SysTime requestTime) nothrow @nogc;
-alias ModbusSnoopHandler = void delegate(ref const MACAddress server, ref const ModbusPDU request, ref ModbusPDU response, SysTime requestTime, SysTime responseTime) nothrow @nogc;
+alias ModbusRequestHandler = void delegate(ref const MACAddress client, ushort sequenceNumber, ref const ModbusPDU request, SysTime request_time) nothrow @nogc;
+alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time) nothrow @nogc;
+alias ModbusErrorHandler = void delegate(ModbusErrorType errorType, ref const ModbusPDU request, SysTime request_time) nothrow @nogc;
+alias ModbusSnoopHandler = void delegate(ref const MACAddress server, ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time) nothrow @nogc;
 
 class ModbusClient
 {
@@ -41,7 +41,7 @@ nothrow @nogc:
     BaseInterface iface;
 
     ModbusRequestHandler requestHandler;
-    ModbusSnoopHandler snoopHandler;
+    ModbusSnoopHandler snoop_handler;
 
     bool snooping;
 
@@ -55,7 +55,7 @@ nothrow @nogc:
         if (snooping)
             pending.pushBack(); // temp storage for the requests
 
-        _interface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.OW, owSubType: OW_SubType.Modbus));
+        _interface.subscribe(&incoming_packet, PacketFilter(ether_type: EtherType.ow, ow_subtype: OW_SubType.modbus));
     }
 
     ~this()
@@ -68,15 +68,15 @@ nothrow @nogc:
         requestHandler = handler;
     }
 
-    void setSnoopHandler(ModbusSnoopHandler snoopHandler)
+    void setSnoopHandler(ModbusSnoopHandler snoop_handler)
     {
-        this.snoopHandler = snoopHandler;
+        this.snoop_handler = snoop_handler;
     }
 
     bool isSnooping() const
         => snooping;
 
-    void sendRequest(ref const MACAddress server, ref const ModbusPDU request, ModbusResponseHandler responseHandler, ModbusErrorHandler errorHandler = null, ubyte numRetries = 0, ushort timeout = 500) nothrow @nogc
+    void sendRequest(ref const MACAddress server, ref const ModbusPDU request, ModbusResponseHandler response_handler, ModbusErrorHandler error_handler = null, ubyte numRetries = 0, ushort timeout = 500) nothrow @nogc
     {
         if (snooping)
         {
@@ -85,14 +85,14 @@ nothrow @nogc:
         }
 
         SysTime now = getSysTime();
-        PendingRequest* r = &pending.pushBack(PendingRequest(now, now, request, ++sequenceNumber, numRetries, timeout, server, responseHandler, errorHandler));
+        PendingRequest* r = &pending.pushBack(PendingRequest(now, now, request, ++sequenceNumber, numRetries, timeout, server, response_handler, error_handler));
 
-        sendPacket(server, sequenceNumber, request, ModbusFrameType.Request);
+        sendPacket(server, sequenceNumber, request, ModbusFrameType.request);
     }
 
     void sendResponse(ref const MACAddress client, ushort sequenceNumber, ref const ModbusPDU response) nothrow @nogc
     {
-        sendPacket(client, sequenceNumber, response, ModbusFrameType.Response);
+        sendPacket(client, sequenceNumber, response, ModbusFrameType.response);
     }
 
     void update()
@@ -113,12 +113,12 @@ nothrow @nogc:
                     req.numRetries--;
                     req.retryTime = now;
                     void[] msg = (cast(void*)&req.request)[0 .. 1 + req.request.data.length];
-                    iface.send(req.server, msg, EtherType.OW, OW_SubType.Modbus);
-                    req.errorHandler(ModbusErrorType.Retrying, req.request, req.retryTime);
+                    iface.send(req.server, msg, EtherType.ow, OW_SubType.modbus);
+                    req.error_handler(ModbusErrorType.Retrying, req.request, req.retryTime);
                 }
                 else
                 {
-                    req.errorHandler(ModbusErrorType.Timeout, req.request, req.requestTime);
+                    req.error_handler(ModbusErrorType.Timeout, req.request, req.request_time);
                     pending.remove(i);
                     continue;
                 }
@@ -130,21 +130,21 @@ nothrow @nogc:
 private:
     struct PendingRequest
     {
-        SysTime requestTime;
+        SysTime request_time;
         SysTime retryTime;
         ModbusPDU request;
         ushort sequenceNumber;
         ubyte numRetries;
         ushort timeout;
         MACAddress server;
-        ModbusResponseHandler responseHandler;
-        ModbusErrorHandler errorHandler;
+        ModbusResponseHandler response_handler;
+        ModbusErrorHandler error_handler;
     }
 
     ushort sequenceNumber = 0;
     Array!PendingRequest pending;
 
-    void incomingPacket(ref const Packet p, BaseInterface iface, PacketDirection dir, void* userData) nothrow @nogc
+    void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void* user_data) nothrow @nogc
     {
         // we can't even identify what request a message belongs to if it's been truncated
         auto message = cast(const(ubyte)[])p.data;
@@ -155,7 +155,7 @@ private:
         ModbusFrameType type = cast(ModbusFrameType)message[2];
         ubyte address = message[3];
 
-        if (type == ModbusFrameType.Request && (p.eth.dst == iface.mac || p.eth.dst.isBroadcast))
+        if (type == ModbusFrameType.request && (p.eth.dst == iface.mac || p.eth.dst.isBroadcast))
         {
             // check that we're accepting requests...
             if (!requestHandler)
@@ -163,7 +163,7 @@ private:
 
             // it's a request for us...
             ModbusPDU request = ModbusPDU(cast(FunctionCode)message[4], message[5 .. $]);
-            requestHandler(p.eth.src, seq, request, p.creationTime);
+            requestHandler(p.eth.src, seq, request, p.creation_time);
         }
         else if (!snooping)
         {
@@ -176,32 +176,32 @@ private:
 
                 // this appears to be the message we're waiting for!
                 ModbusPDU response = ModbusPDU(cast(FunctionCode)message[4], message[5 .. $]);
-                req.responseHandler(req.request, response, req.requestTime, p.creationTime);
+                req.response_handler(req.request, response, req.request_time, p.creation_time);
 
                 pending.remove(i);
                 return;
             }
         }
-        else if (snoopHandler)
+        else if (snoop_handler)
         {
             // if the sequence number changes, it must be a new transaction
             if (pending[0].sequenceNumber != seq)
             {
-                if (type != ModbusFrameType.Request)
+                if (type != ModbusFrameType.request)
                     return;
 
-                pending[0].requestTime = p.creationTime;
+                pending[0].request_time = p.creation_time;
                 pending[0].request = ModbusPDU(cast(FunctionCode)message[4], message[5 .. $]);
                 pending[0].sequenceNumber = seq;
                 pending[0].server = p.eth.dst;
             }
             else
             {
-                if (type != ModbusFrameType.Response || pending[0].requestTime == SysTime())
+                if (type != ModbusFrameType.response || pending[0].request_time == SysTime())
                     return;
 
                 ModbusPDU response = ModbusPDU(cast(FunctionCode)message[4], message[5 .. $]);
-                snoopHandler(p.eth.src, pending[0].request, response, pending[0].requestTime, p.creationTime);
+                snoop_handler(p.eth.src, pending[0].request, response, pending[0].request_time, p.creation_time);
             }
         }
     }
@@ -209,17 +209,17 @@ private:
     void sendPacket(ref const MACAddress server, ushort sequenceNumber, ref const ModbusPDU message, ModbusFrameType type) nothrow @nogc
     {
         import router.iface.modbus;
-        ServerMap* map = get_module!ModbusInterfaceModule().findServerByMac(server);
+        ServerMap* map = get_module!ModbusInterfaceModule().find_server_by_mac(server);
         if (!map)
             return;
 
         ubyte[4 + ModbusMessageDataMaxLength] buffer = void;
         buffer[0..2] = sequenceNumber.nativeToBigEndian;
         buffer[2] = type;
-        buffer[3] = map.universalAddress;
-        buffer[4] = message.functionCode;
+        buffer[3] = map.universal_address;
+        buffer[4] = message.function_code;
         buffer[5 .. 5 + message.data.length] = message.data[];
 
-        iface.send(server, buffer[0 .. 5 + message.data.length], EtherType.OW, OW_SubType.Modbus);
+        iface.send(server, buffer[0 .. 5 + message.data.length], EtherType.ow, OW_SubType.modbus);
     }
 }

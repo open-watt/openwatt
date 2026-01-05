@@ -56,9 +56,9 @@ struct TWCMessage
     ubyte ver;
     union
     {
-        LinkReady linkready;
+        LinkReady link_ready;
         Heartbeat heartbeat;
-        ChargeInfo chargeinfo;
+        ChargeInfo charge_info;
         char[11] sn;            // Charger serial number
         char[7] vin;            // VIN bytes
     }
@@ -72,11 +72,11 @@ struct TWCMessage
     {
         TWCState state;
         ushort current;
-        ushort currentInUse;
+        ushort current_in_use;
     }
     struct ChargeInfo
     {
-        uint lifetimeEnergy;    // Lifetime energy delivery for this charger
+        uint lifetime_energy;    // Lifetime energy delivery for this charger
         ushort voltage1;        // V - Phase 1
         ushort voltage2;        // V - Phase 2
         ushort voltage3;        // V - Phase 3
@@ -84,10 +84,10 @@ struct TWCMessage
     }
 }
 
-bool parseTWCMessage(const(ubyte)[] data, out TWCMessage msg)
+bool parse_twc_message(const(ubyte)[] data, out TWCMessage msg)
 {
     ushort cmd = data[0..2].bigEndianToNative!ushort;
-    foreach (i, c; messageCode[])
+    foreach (i, c; g_message_code[])
     {
         if (c == cmd)
         {
@@ -106,12 +106,12 @@ bool parseTWCMessage(const(ubyte)[] data, out TWCMessage msg)
         case TWCMessageType.MasterLinkReady1:
         case TWCMessageType.MasterLinkReady2:
             msg.sender = data[2..4].bigEndianToNative!ushort;
-            msg.linkready.signature = data[4];
+            msg.link_ready.signature = data[4];
             break;
         case TWCMessageType.SlaveLinkReady:
             msg.sender = data[2..4].bigEndianToNative!ushort;
-            msg.linkready.signature = data[4];
-            msg.linkready.amps = data[5..7].bigEndianToNative!ushort;
+            msg.link_ready.signature = data[4];
+            msg.link_ready.amps = data[5..7].bigEndianToNative!ushort;
             break;
         case TWCMessageType.MasterHeartbeat:
             msg.sender = data[2..4].bigEndianToNative!ushort;
@@ -149,7 +149,7 @@ bool parseTWCMessage(const(ubyte)[] data, out TWCMessage msg)
                 case 0x07:
                 case 0x09:
                 case 0x0A:
-                    msg.heartbeat.currentInUse = params[3..5].bigEndianToNative!ushort;
+                    msg.heartbeat.current_in_use = params[3..5].bigEndianToNative!ushort;
                     goto case;
                 case 0x00:
                 case 0x03:
@@ -174,11 +174,11 @@ bool parseTWCMessage(const(ubyte)[] data, out TWCMessage msg)
                 return false;
             msg.ver = 2;
             ubyte[15] params = data[4..19];
-            msg.chargeinfo.lifetimeEnergy = params[0..4].bigEndianToNative!uint;
-            msg.chargeinfo.voltage1 = params[4..6].bigEndianToNative!ushort;
-            msg.chargeinfo.voltage2 = params[6..8].bigEndianToNative!ushort;
-            msg.chargeinfo.voltage3 = params[8..10].bigEndianToNative!ushort;
-            msg.chargeinfo.current = params[10];
+            msg.charge_info.lifetime_energy = params[0..4].bigEndianToNative!uint;
+            msg.charge_info.voltage1 = params[4..6].bigEndianToNative!ushort;
+            msg.charge_info.voltage2 = params[6..8].bigEndianToNative!ushort;
+            msg.charge_info.voltage3 = params[8..10].bigEndianToNative!ushort;
+            msg.charge_info.current = params[10];
             break;
         case TWCMessageType._FDEC:
             msg.sender = data[2..4].bigEndianToNative!ushort;
@@ -221,7 +221,7 @@ bool parseTWCMessage(const(ubyte)[] data, out TWCMessage msg)
 
 private:
 
-__gshared immutable ushort[17] messageCode = [
+__gshared immutable ushort[17] g_message_code = [
     0xFCE1, 0xFBE2, 0xFDE2, 0xFBE0,
     0xFDE0, 0xFBEB, 0xFBEC, 0xFBED,
     0xFBEE, 0xFBEF, 0xFBF1, 0xFDEB,

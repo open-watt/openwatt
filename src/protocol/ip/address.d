@@ -19,7 +19,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"ip-address";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!IPAddress, name.move, flags);
     }

@@ -17,61 +17,61 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"udp";
 
-    this(String name, ushort remotePort, const char[] remoteHost = "255.255.255.255", ushort localPort = 0, const char[] localHost = "0.0.0.0", StreamOptions options = StreamOptions.None)
+    this(String name, ushort remote_port, const char[] remote_host = "255.255.255.255", ushort local_port = 0, const char[] local_host = "0.0.0.0", StreamOptions options = StreamOptions.none)
     {
         super(name.move, TypeName, options);
 
-        // TODO: if remoteHost is a broadcast address and options doesn't have `AllowBroadcast`, make a warning...
+        // TODO: if remote_host is a broadcast address and options doesn't have `allow_broadcast`, make a warning...
 
-        this.localHost = localHost.makeString(defaultAllocator());
-        this.localPort = localPort;
-        this.remoteHost = remoteHost.makeString(defaultAllocator());
-        this.remotePort = remotePort;
+        _local_host = local_host.makeString(defaultAllocator());
+        _local_port = local_port;
+        _remote_host = remote_host.makeString(defaultAllocator());
+        _remote_port = remote_port;
 
         AddressInfoResolver resolve;
-        Result r = localHost.get_address_info(tconcat(localPort), null, resolve);
+        Result r = local_host.get_address_info(tconcat(local_port), null, resolve);
         assert(r, "What do we even do about fails like this?");
 
         AddressInfo addr;
         while (resolve.next_address(addr))
         {
-            local = addr.address;
+            _local = addr.address;
             break; // TODO: what do we even do with multiple addresses?
         }
 
-        r = remoteHost.get_address_info(tconcat(remotePort), null, resolve);
+        r = remote_host.get_address_info(tconcat(remote_port), null, resolve);
         assert(r, "What do we even do about fails like this?");
 
         while (resolve.next_address(addr))
         {
-            remote = addr.address;
+            _remote = addr.address;
             break; // TODO: what do we even do with multiple addresses?
         }
 
-        _status.linkStatus = Status.Link.Up;
+        _status.link_status = Status.Link.up;
     }
 
     override bool running() const pure
-        => status.linkStatus == Status.Link.Up;
+        => status.link_status == Status.Link.up;
 
-    override const(char)[] remoteName()
+    override const(char)[] remote_name()
     {
-        return remoteHost[];
+        return _remote_host[];
     }
 
     override ptrdiff_t read(void[] buffer) nothrow @nogc
     {
         // TODO: if a packet doesn't fill buffer, we should loop...
         size_t bytes;
-        Result r = socket.recvfrom(buffer, MsgFlags.none, null, &bytes);
+        Result r = _socket.recvfrom(buffer, MsgFlags.none, null, &bytes);
         if (!r)
         {
             if (r.socket_result() == SocketResult.would_block)
                 return 0;
             assert(0);
         }
-        if (logging)
-            writeToLog(true, buffer[0 .. bytes]);
+        if (_logging)
+            write_to_log(true, buffer[0 .. bytes]);
         return bytes;
     }
 
@@ -79,18 +79,18 @@ nothrow @nogc:
     {
         // TODO: fragment on MTU...?
         size_t bytes;
-        Result r = socket.sendto(data, MsgFlags.none, &remote, &bytes);
+        Result r = _socket.sendto(data, MsgFlags.none, &_remote, &bytes);
         if (!r)
             assert(0);
-        if (logging)
-            writeToLog(true, data[0 .. bytes]);
+        if (_logging)
+            write_to_log(true, data[0 .. bytes]);
         return bytes;
     }
 
-    ptrdiff_t recvfrom(ubyte[] msgBuffer, out InetAddress srcAddr)
+    ptrdiff_t recvfrom(ubyte[] msg_buffer, out InetAddress src_addr)
     {
         size_t bytes;
-        Result r = socket.recvfrom(msgBuffer, MsgFlags.none, &srcAddr, &bytes);
+        Result r = _socket.recvfrom(msg_buffer, MsgFlags.none, &src_addr, &bytes);
         if (!r)
         {
             // TODO?
@@ -99,10 +99,10 @@ nothrow @nogc:
         return bytes;
     }
 
-    ptrdiff_t sendto(const ubyte[] data, InetAddress destAddr)
+    ptrdiff_t sendto(const ubyte[] data, InetAddress dest_addr)
     {
         size_t sent;
-        Result r = socket.sendto(data, MsgFlags.none, &destAddr, &sent);
+        Result r = _socket.sendto(data, MsgFlags.none, &dest_addr, &sent);
         if (!r)
         {
             // TODO?
@@ -141,13 +141,13 @@ nothrow @nogc:
     }
 
 private:
-    Socket socket;
-    String localHost;
-    String remoteHost;
-    ushort localPort;
-    ushort remotePort;
-    InetAddress local;
-    InetAddress remote;
+    Socket _socket;
+    String _local_host;
+    String _remote_host;
+    ushort _local_port;
+    ushort _remote_port;
+    InetAddress _local;
+    InetAddress _remote;
 }
 
 
@@ -159,7 +159,7 @@ class UDPStreamModule : Module
 //
 //    override void init()
 //    {
-//        g_app.console.registerCollection("/stream/udp-client", udp_streams);
+//        g_app.console.register_collection("/stream/udp-client", udp_streams);
 //    }
 //
 //    override void pre_update()
