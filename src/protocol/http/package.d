@@ -41,14 +41,14 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCollection("/stream/tls", tls_streams);
-        g_app.console.registerCollection("/protocol/tls/server", tls_servers);
-        g_app.console.registerCollection("/protocol/http/client", clients);
-        g_app.console.registerCollection("/protocol/http/server", servers);
-        g_app.console.registerCollection("/protocol/websocket/server", ws_servers);
-        g_app.console.registerCollection("/protocol/websocket", websockets);
+        g_app.console.register_collection("/stream/tls", tls_streams);
+        g_app.console.register_collection("/protocol/tls/server", tls_servers);
+        g_app.console.register_collection("/protocol/http/client", clients);
+        g_app.console.register_collection("/protocol/http/server", servers);
+        g_app.console.register_collection("/protocol/websocket/server", ws_servers);
+        g_app.console.register_collection("/protocol/websocket", websockets);
 
-        g_app.console.registerCommand!request("/protocol/http", this);
+        g_app.console.register_command!request("/protocol/http", this);
     }
 
     override void pre_update()
@@ -68,7 +68,7 @@ nothrow @nogc:
     {
     nothrow @nogc:
 
-        CommandCompletionState state = CommandCompletionState.InProgress;
+        CommandCompletionState state = CommandCompletionState.in_progress;
 
         HTTPClient client;
 
@@ -98,12 +98,12 @@ nothrow @nogc:
             if (response.status_code == 0)
             {
                 session.writef("HTTP request failed!");
-                state = CommandCompletionState.Error;
+                state = CommandCompletionState.error;
                 return -1;
             }
 
             session.writef("HTTP response: {0}\n{1}", response.status_code, cast(const char[])response.content[]);
-            state = CommandCompletionState.Finished;
+            state = CommandCompletionState.finished;
             return 0;
         }
     }

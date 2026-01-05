@@ -23,7 +23,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"ip-route";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!IPRoute, name.move, flags);
     }

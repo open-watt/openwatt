@@ -29,7 +29,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"bridge";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!BridgeInterface, name.move, flags);
         _mac_table = MACTable(16, 256, 60);
@@ -92,10 +92,10 @@ nothrow @nogc:
             ushort vlan = 0;
 
             if (!mb.master)
-                _mac_table.insert(mb.masterMac, vlan, port);
+                _mac_table.insert(mb._master_mac, vlan, port);
 
             auto mod_mb = get_module!ModbusInterfaceModule;
-            foreach (ref map; mod_mb.remoteServers.values)
+            foreach (ref map; mod_mb.remote_servers.values)
             {
                 if (map.iface is iface)
                     _mac_table.insert(map.mac, vlan, port);
@@ -146,7 +146,7 @@ nothrow @nogc:
         {
             ushort src_vlan;
 
-            if (packet.type == PacketType.Ethernet && packet.eth.ether_type == EtherType.VLAN)
+            if (packet.type == PacketType.ethernet && packet.eth.ether_type == EtherType.vlan)
             {
                 if (packet.vlan != 0)
                 {
@@ -167,7 +167,7 @@ nothrow @nogc:
                 if (_bridge_port.pvid == 0)
                 {
                     // don't admit untagged
-                    ++_status.sendDropped;
+                    ++_status.send_dropped;
                     return false;
                 }
                 packet.vlan |= _bridge_port.pvid;
@@ -183,8 +183,8 @@ nothrow @nogc:
 
         send(packet);
 
-        ++_status.sendPackets;
-        _status.sendBytes += packet.data.length;
+        ++_status.send_packets;
+        _status.send_bytes += packet.data.length;
 
         return true;
     }
@@ -233,7 +233,7 @@ protected:
         ushort src_vlan = 0;
 
         // check for link-local frames (bridges must not forward link-local frames)
-        if (packet.eth.dst.is_link_local && packet.type == PacketType.Ethernet)
+        if (packet.eth.dst.is_link_local && packet.type == PacketType.ethernet)
         {
             // STP/LACP/EAPOL/LLDP... should we support these?
             debug assert(false, "TODO?");
@@ -243,7 +243,7 @@ protected:
         if (_vlan_filtering)
         {
             // check and strip vlan tag...
-            if (packet.type == PacketType.Ethernet && packet.eth.ether_type == EtherType.VLAN)
+            if (packet.type == PacketType.ethernet && packet.eth.ether_type == EtherType.vlan)
             {
                 if (packet.data.length < 4)
                     goto drop_packet;
@@ -265,7 +265,7 @@ protected:
                     assert(false, "TODO");
                 }
 
-                if (packet.eth.ether_type == EtherType.OW)
+                if (packet.eth.ether_type == EtherType.ow)
                 {
                     if (packet.data.length < 2)
                         goto drop_packet;
@@ -356,7 +356,7 @@ protected:
         return;
 
     drop_packet:
-        ++_status.recvDropped;
+        ++_status.recv_dropped;
     }
 
     void send(ref Packet packet, int src_port = -1) nothrow @nogc
@@ -432,8 +432,8 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCollection("/interface/bridge", bridges);
-        g_app.console.registerCommand!port_add("/interface/bridge/port", this, "add");
+        g_app.console.register_collection("/interface/bridge", bridges);
+        g_app.console.register_command!port_add("/interface/bridge/port", this, "add");
     }
 
     override void update()
@@ -445,18 +445,18 @@ nothrow @nogc:
     {
         if (bridge is _interface)
         {
-            session.writeLine("Can't add a bridge to itself.");
+            session.write_line("Can't add a bridge to itself.");
             return;
         }
         if (_interface._master)
         {
-            session.writeLine("Interface '", _interface.name[], "' is already a slave to '", _interface._master.name[], "'.");
+            session.write_line("Interface '", _interface.name[], "' is already a slave to '", _interface._master.name[], "'.");
             return;
         }
 
         if (!bridge.add_member(_interface, pvid ? pvid.value : 1, ingress_filtering ? ingress_filtering.value : true, untagged_egress ? untagged_egress.value : true))
         {
-            session.writeLine("Failed to add interface '", _interface.name[], "' to bridge '", bridge.name[], "'.");
+            session.write_line("Failed to add interface '", _interface.name[], "' to bridge '", bridge.name[], "'.");
             return;
         }
 

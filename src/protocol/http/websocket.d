@@ -50,7 +50,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"websocket";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!WebSocket, name.move, flags);
     }
@@ -320,7 +320,7 @@ nothrow @nogc:
 
     alias NewConnection = void delegate(WebSocket client, void* user_data) nothrow @nogc;
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!WebSocketServer, name.move, flags);
     }
@@ -373,14 +373,14 @@ nothrow @nogc:
         else
             _default_handler = _server.hook_global_handler(&handle_request);
 
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
         // TODO: need to unlink these things...
 
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override void update()
@@ -416,7 +416,7 @@ private:
             import urt.mem.temp;
             String n = tconcat(name, ++_num_connections).makeString(defaultAllocator);
 
-            WebSocket ws = get_module!HTTPModule.websockets.create(n.move, cast(ObjectFlags)(ObjectFlags.Dynamic | ObjectFlags.Temporary));
+            WebSocket ws = get_module!HTTPModule.websockets.create(n.move, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
             ws._stream = stream;
             ws._is_server = true;
             stream = null; // TODO: better strategy to notify the caller that we claimed the stream!?

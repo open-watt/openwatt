@@ -26,7 +26,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCommand!add_server("/protocol/telnet/server", this, "add");
+        g_app.console.register_command!add_server("/protocol/telnet/server", this, "add");
 
         // create telnet server
     }
@@ -47,7 +47,7 @@ nothrow @nogc:
 //        BaseInterface i = mod_if.findInterface(_interface);
 //        if(i is null)
 //        {
-//            session.writeLine("Interface '", _interface, "' not found");
+//            session.write_line("Interface '", _interface, "' not found");
 //            return;
 //        }
 

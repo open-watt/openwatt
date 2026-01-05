@@ -73,7 +73,7 @@ int main(string[] args)
     else
     {
         startup_session = defaultAllocator().allocT!SimpleSession(g_app.console);
-        startup_session.setInput(conf);
+        startup_session.set_input(conf);
         active_session = startup_session;
 
         defaultAllocator().free(conf);
@@ -103,11 +103,11 @@ int main(string[] args)
                     active_session = null;
             }
         }
-        else if (interactive_mode && !active_session.isAttached())
+        else if (interactive_mode && !active_session.is_attached())
             break; // exit if interactive session was closed
 
         // update the startup/interactive session
-        if (active_session && active_session.isAttached())
+        if (active_session && active_session.is_attached())
             active_session.update();
 
         Duration frame_time = getTime() - start;

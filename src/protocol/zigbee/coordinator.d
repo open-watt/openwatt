@@ -35,7 +35,7 @@ class ZigbeeCoordinator : ZigbeeRouter
 
     alias TypeName = StringLit!"zb-coordinator";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None) nothrow
+    this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
     {
         super(collection_type_info!ZigbeeCoordinator, name.move, flags);
 
@@ -71,7 +71,7 @@ class ZigbeeCoordinator : ZigbeeRouter
             return StringResult("interface is already a coordinator");
         _interface = zi;
         _interface.subscribe(&state_change);
-        _interface.subscribe(&incoming_packet, PacketFilter(type: PacketType.ZigbeeAPS));
+        _interface.subscribe(&incoming_packet, PacketFilter(type: PacketType.zigbee_aps));
         zigbee_iface.attach_coordiantor(this);
         if (auto ezsp = get_ezsp())
             subscribe_client(ezsp, true);
@@ -142,7 +142,7 @@ class ZigbeeCoordinator : ZigbeeRouter
         if (!zb || !zb.is_coordinator)
         {
             CompletionStatus s = super.startup();
-            if (s != CompletionStatus.Complete)
+            if (s != CompletionStatus.complete)
                 return s;
         }
         else
@@ -155,15 +155,15 @@ class ZigbeeCoordinator : ZigbeeRouter
                 if (_init_promise)
                 {
                     // the client went down during initialisation...
-                    return CompletionStatus.Error;
+                    return CompletionStatus.error;
                 }
-                return CompletionStatus.Continue;
+                return CompletionStatus.continue_;
             }
             else if (ezsp.protocol_version < 13)
             {
                 // TODO: should we even attempt to support old firmware?
                 //       major difference: only single pending message slot; must use `SendReply` when replying to a ZCL message.
-                return CompletionStatus.Error;
+                return CompletionStatus.error;
             }
 
             if (_destroying)
@@ -171,9 +171,9 @@ class ZigbeeCoordinator : ZigbeeRouter
                 if (_init_promise.state != PromiseState.Pending)
                 {
                     freePromise(_init_promise);
-                    return CompletionStatus.Error;
+                    return CompletionStatus.error;
                 }
-                return CompletionStatus.Continue;
+                return CompletionStatus.continue_;
             }
 
             if (!_ready)
@@ -185,7 +185,7 @@ class ZigbeeCoordinator : ZigbeeRouter
                         writeError("Zigbee: EZSP client device is not running cordinator firmware. To use this device, flash with the proper coordinator firmware.");
                         _already_complained = true;
                         // TODO: maybe we should have a sort of non-recoverable error, where it won't automatically try and restart?
-                        return CompletionStatus.Error;
+                        return CompletionStatus.error;
                     }
 
                     _init_promise = async(&init);
@@ -195,7 +195,7 @@ class ZigbeeCoordinator : ZigbeeRouter
                     bool failed = _init_promise.state == PromiseState.Failed ? true : !_init_promise.result;
                     freePromise(_init_promise);
                     if (failed)
-                        return CompletionStatus.Error;
+                        return CompletionStatus.error;
                     _ready = true;
                 }
             }
@@ -203,13 +203,13 @@ class ZigbeeCoordinator : ZigbeeRouter
             if (_ready)
             {
                 CompletionStatus s = super.startup();
-                if (s != CompletionStatus.Complete)
+                if (s != CompletionStatus.complete)
                     return s;
-                return CompletionStatus.Complete;
+                return CompletionStatus.complete;
             }
         }
 
-        return CompletionStatus.Continue;
+        return CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown() nothrow
@@ -219,7 +219,7 @@ class ZigbeeCoordinator : ZigbeeRouter
             if (!_init_promise.finished)
             {
                 if (_destroying)
-                    return CompletionStatus.Continue;
+                    return CompletionStatus.continue_;
                 _init_promise.abort();
             }
             freePromise(_init_promise);
@@ -717,7 +717,7 @@ nothrow:
     void state_change(BaseObject object, StateSignal signal)
     {
         // if the interface goes offline, we should restart the coordinator...
-        if (object is _interface && signal == StateSignal.Offline)
+        if (object is _interface && signal == StateSignal.offline)
             restart();
     }
 

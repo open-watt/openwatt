@@ -29,12 +29,12 @@ void set_hostname(Session session, const(char)[] hostname)
 
 void get_hostname(Session session)
 {
-    session.writeLine(hostname);
+    session.write_line(hostname);
 }
 
 void uptime(Session session)
 {
-    session.writeLine(getAppTime());
+    session.write_line(getAppTime());
 }
 
 Array!String sysinfo_suggest(bool, const(char)[] arg_name, const(char)[]) nothrow @nogc
@@ -68,42 +68,42 @@ void sysinfo(Session session, const(Variant)[] args)
 
     if (args.length == 0)
     {
-        session.writeLine("Hostname:     ", hostname[]);
-        session.writeLine("OS:           ", info.os_name);
-        session.writeLine("Processor:    ", info.processor);
-        session.writeLine("Total Memory: ", info.total_memory.format_bytes());
-        session.writeLine("Available:    ", info.available_memory.format_bytes());
-        session.writeLine("Uptime:       ", seconds(getAppTime().as!"seconds"));
+        session.write_line("Hostname:     ", hostname[]);
+        session.write_line("OS:           ", info.os_name);
+        session.write_line("Processor:    ", info.processor);
+        session.write_line("Total Memory: ", info.total_memory.format_bytes());
+        session.write_line("Available:    ", info.available_memory.format_bytes());
+        session.write_line("Uptime:       ", seconds(getAppTime().as!"seconds"));
     }
     else foreach (ref arg; args)
     {
         if (!arg.isString)
         {
-            session.writeLine("Error: Arguments must be property names");
+            session.write_line("Error: Arguments must be property names");
             continue;
         }
 
         const(char)[] prop = arg.asString;
         if (icmp(prop, "hostname") == 0)
-            session.writeLine(hostname[]);
+            session.write_line(hostname[]);
         else if (icmp(prop, "os") == 0)
-            session.writeLine(info.os_name);
+            session.write_line(info.os_name);
         else if (icmp(prop, "processor") == 0)
-            session.writeLine(info.processor);
+            session.write_line(info.processor);
         else if (icmp(prop, "total-memory") == 0)
-            session.writeLine(info.total_memory.format_bytes());
+            session.write_line(info.total_memory.format_bytes());
         else if (icmp(prop, "available-memory") == 0)
-            session.writeLine(info.available_memory.format_bytes());
+            session.write_line(info.available_memory.format_bytes());
         else if (icmp(prop, "uptime") == 0)
-            session.writeLine(seconds(getAppTime().as!"seconds"));
+            session.write_line(seconds(getAppTime().as!"seconds"));
         else
-            session.writeLine("Unknown property: ", prop);
+            session.write_line("Unknown property: ", prop);
     }
 }
 
 void show_time(Session session)
 {
-    session.writeLine(getDateTime());
+    session.write_line(getDateTime());
 }
 
 auto sleep(Session session, Duration duration)
@@ -125,8 +125,8 @@ auto sleep(Session session, Duration duration)
         override CommandCompletionState update()
         {
             if (getTime() >= wake_time)
-                return CommandCompletionState.Finished;
-            return CommandCompletionState.InProgress;
+                return CommandCompletionState.finished;
+            return CommandCompletionState.in_progress;
         }
     }
 

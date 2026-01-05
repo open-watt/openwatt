@@ -33,26 +33,26 @@ nothrow @nogc:
 
 enum ClientFeatures : ushort
 {
-    None = 0,
+    none = 0,
 
-    CRLF = 1 << 1,          // Client recognises CR-LF for newline
-    LineMode = 1 << 2,      // Client uses line-mode
-    Escape = 1 << 3,        // Client can parse control sequences
-    Cursor = 1 << 4,        // Client supports cursor movement
-    Format = 1 << 5,        // Client supports screen formatting
-    TextAttrs = 1 << 6,     // Client supports text attributes
-    Gfx = 1 << 7,           // Client supports graphics
-    BasicColour = 1 << 8,   // Client supports color
-    FullColour = 1 << 9,    // Client supports full color
-    Resize = 1 << 10,       // Client supports terminal resizing
-    Mouse = 1 << 11,        // Client supports mouse events
-    UTF8 = 1 << 12,         // Client supports UTF-8
+    crlf = 1 << 1,          // Client recognises CR-LF for newline
+    linemode = 1 << 2,      // Client uses line-mode
+    escape = 1 << 3,        // Client can parse control sequences
+    cursor = 1 << 4,        // Client supports cursor movement
+    format = 1 << 5,        // Client supports screen formatting
+    textattrs = 1 << 6,     // Client supports text attributes
+    gfx = 1 << 7,           // Client supports graphics
+    basiccolour = 1 << 8,   // Client supports color
+    fullcolour = 1 << 9,    // Client supports full color
+    resize = 1 << 10,       // Client supports terminal resizing
+    mouse = 1 << 11,        // Client supports mouse events
+    utf8 = 1 << 12,         // Client supports UTF-8
 
-    NVT = CRLF,
-    VT100 = Escape | Cursor | Format | TextAttrs | Gfx,
-    ANSI = Escape | Cursor | Format | TextAttrs | BasicColour | UTF8,
-    XTERM = ANSI | Gfx | FullColour | Mouse | Resize | UTF8,
-    Windows = CRLF | Cursor | Format | TextAttrs | BasicColour | Resize | UTF8,
+    nvt = crlf,
+    vt100 = escape | cursor | format | textattrs | gfx,
+    ansi = escape | cursor | format | textattrs | basiccolour | utf8,
+    xterm = ansi | gfx | fullcolour | mouse | resize | utf8,
+    windows = crlf | cursor | format | textattrs | basiccolour | resize | utf8,
 }
 
 class Session
@@ -61,69 +61,69 @@ nothrow @nogc:
 
     this(ref Console console)
     {
-        m_console = &console;
-        m_prompt = "> ";
-        curScope = console.getRoot;
+        _console = &console;
+        _prompt = "> ";
+        _cur_scope = console.get_root;
     }
 
     ~this()
     {
         close_history();
-        closeSession();
+        close_session();
     }
 
     /// Update the session.
     /// This is called periodically from the session's console instances `Update()` method.
     void update()
     {
-        if (m_currentCommand)
+        if (_current_command)
         {
-            CommandCompletionState state = m_currentCommand.update();
-            if (state >= CommandCompletionState.Finished)
+            CommandCompletionState state = _current_command.update();
+            if (state >= CommandCompletionState.finished)
             {
-                CommandState commandData = m_currentCommand;
-                m_currentCommand = null;
+                CommandState commandData = _current_command;
+                _current_command = null;
 
-                commandFinished(commandData, state);
+                command_finished(commandData, state);
                 allocator.freeT(commandData);
 
                 // untaken input should be fed back into the command line
-                const(char)[] input = takeInput();
-                receiveInput(input);
+                const(char)[] input = take_input();
+                receive_input(input);
             }
         }
     }
 
     /// Test if the session is attached to a console instance. A detached session is effectively 'closed', and ready to be cleaned up.
-    final bool isAttached() pure
-        => m_console != null;
+    final bool is_attached() pure
+        => _console != null;
 
     /// Test if the session has no active commands executing
     final bool is_idle() const pure
-        => m_currentCommand is null;
+        => _current_command is null;
 
     /// Close this session and detach from the bound console instance.
-    void closeSession()
+    void close_session()
     {
-        if (m_currentCommand)
+        if (_current_command)
         {
-            allocator.freeT(m_currentCommand);
-            m_currentCommand = null;
+            allocator.freeT(_current_command);
+            _current_command = null;
         }
 
-        if (m_sessionStack.length)
-            m_console = m_sessionStack.popBack();
+        if (_session_stack.length)
+            _console = _session_stack.popBack();
         else
-            m_console = null;
+            _console = null;
     }
 
 
-    abstract void writeOutput(const(char)[] text, bool newline);
+    abstract void write_output(const(char)[] text, bool newline);
 
     pragma(inline, true) final void write(Args...)(ref Args args)
         if (Args.length == 1 && is(Args[0] : const(char)[]))
     {
-        return writeOutput(args[0], false);
+        return write_output(args[0], false);
     }
 
     final void write(Args...)(auto ref Args args)
@@ -132,58 +132,58 @@ nothrow @nogc:
         import urt.string.format;
 
         char[1024] text;
-        writeOutput(concat(text, forward!args), false);
+        write_output(concat(text, forward!args), false);
     }
 
-    pragma(inline, true) final void writeLine(Args...)(auto ref Args args)
+    pragma(inline, true) final void write_line(Args...)(auto ref Args args)
         if (Args.length == 1 && is(Args[0] : const(char)[]))
     {
-        return writeOutput(args[0], true);
+        return write_output(args[0], true);
     }
 
-    final void writeLine(Args...)(auto ref Args args)
+    final void write_line(Args...)(auto ref Args args)
         if (Args.length != 1 || !is(Args[0] : const(char)[]))
     {
         import urt.string.format;
 
-        writeOutput(tconcat(forward!args), true);
+        write_output(tconcat(forward!args), true);
     }
 
     final void writef(Args...)(const(char)[] format, auto ref Args args)
     {
         import urt.string.format;
 
-        writeOutput(tformat(format, forward!args), false);
+        write_output(tformat(format, forward!args), false);
     }
 
-    bool showPrompt(bool show)
-        => m_showPrompt.swap(show);
+    bool show_prompt(bool show)
+        => _show_prompt.swap(show);
 
-    const(char)[] setPrompt(const(char)[] prompt)
-        => m_prompt.swap(prompt);
+    const(char)[] set_prompt(const(char)[] prompt)
+        => _prompt.swap(prompt);
 
     // TODO: I don't like this API... needs work!
-    final const(char[]) getInput()
-        => m_buffer;
+    final const(char[]) get_input()
+        => _buffer;
 
-    MutableString!0 setInput(const(char)[] text)
+    MutableString!0 set_input(const(char)[] text)
     {
-        MutableString!0 old = m_buffer.move;
-        m_buffer = null;
-        m_position = 0;
-        receiveInput(text);
+        MutableString!0 old = _buffer.move;
+        _buffer = null;
+        _position = 0;
+        receive_input(text);
         return old.move;
     }
 
-    ptrdiff_t appendInput(const(char)[] text)
+    ptrdiff_t append_input(const(char)[] text)
     {
-        assert(m_console != null, "Session was closed!");
+        assert(_console != null, "Session was closed!");
 
         // TODO: well, actually, the current command should receive this input, and ^C should cancel the command
-        assert(!m_currentCommand);
+        assert(!_current_command);
 
-        assert(m_buffer.length + text.length <= MaxStringLen, "Exceeds max string length");
-        m_buffer.reserve(cast(ushort)(m_buffer.length + text.length));
+        assert(_buffer.length + text.length <= MaxStringLen, "Exceeds max string length");
+        _buffer.reserve(cast(ushort)(_buffer.length + text.length));
 
         const(char)* t = text.ptr;
         size_t len = text.length;
@@ -202,18 +202,18 @@ nothrow @nogc:
                 // ANSI sequences...
                 if (seq[] == ANSI_DEL)
                 {
-                    if (m_position < m_buffer.length)
-                        m_buffer.erase(m_position, 1);
+                    if (_position < _buffer.length)
+                        _buffer.erase(_position, 1);
                 }
                 else if (seq[] == ANSI_ARROW_UP)
                 {
                     if (_history_cursor > 0)
                     {
                         if (_history_cursor == _history.length)
-                            _history_head = m_buffer.move;
+                            _history_head = _buffer.move;
                         _history_cursor--;
-                        m_buffer = _history[_history_cursor][];
-                        m_position = cast(uint)m_buffer.length;
+                        _buffer = _history[_history_cursor][];
+                        _position = cast(uint)_buffer.length;
                     }
                 }
                 else if (seq[] == ANSI_ARROW_DOWN)
@@ -222,62 +222,62 @@ nothrow @nogc:
                     {
                         _history_cursor++;
                         if (_history_cursor != _history.length)
-                            m_buffer = _history[_history_cursor];
+                            _buffer = _history[_history_cursor];
                         else
                         {
-                            m_buffer = _history_head.move;
+                            _buffer = _history_head.move;
                             _history_head.clear();
                         }
-                        m_position = cast(uint)m_buffer.length;
+                        _position = cast(uint)_buffer.length;
                     }
                 }
                 else if (seq[] == ANSI_ARROW_LEFT)
                 {
-                    if (m_position > 0)
-                        --m_position;
+                    if (_position > 0)
+                        --_position;
                 }
                 else if (seq[] == ANSI_ARROW_RIGHT)
                 {
-                    if (m_position < m_buffer.length)
-                        ++m_position;
+                    if (_position < _buffer.length)
+                        ++_position;
                 }
                 else if (seq[] == "\x1b[1;5D" || seq[] == "\x1bOD") // CTRL_LEFT
                 {
                     bool passedAny = false;
-                    while (m_position > 0)
+                    while (_position > 0)
                     {
-                        if (m_buffer[m_position - 1] == ' ' && passedAny)
+                        if (_buffer[_position - 1] == ' ' && passedAny)
                             break;
-                        if (m_buffer[--m_position] != ' ')
+                        if (_buffer[--_position] != ' ')
                             passedAny = true;
                     }
                 }
                 else if (seq[] == "\x1b[1;5C" || seq[] == "\x1bOC") // CTRL_RIGHT
                 {
                     bool passedAny = false;
-                    while (m_position < m_buffer.length)
+                    while (_position < _buffer.length)
                     {
-                        if (m_buffer[m_position] != ' ')
+                        if (_buffer[_position] != ' ')
                             passedAny = true;
-                        if (m_buffer[m_position++] == ' ' && passedAny)
+                        if (_buffer[_position++] == ' ' && passedAny)
                             break;
                     }
                 }
                 else if (seq[] == ANSI_HOME1)
                 {
-                    m_position = 0;
+                    _position = 0;
                 }
                 else if (seq[] == ANSI_HOME2 || seq[] == ANSI_HOME3)
                 {
-                    m_position = 0;
+                    _position = 0;
                 }
                 else if (seq[] == ANSI_END1)
                 {
-                    m_position = cast(uint)m_buffer.length;
+                    _position = cast(uint)_buffer.length;
                 }
                 else if (seq[] == ANSI_END2 || seq[] == ANSI_END3)
                 {
-                    m_position = cast(uint)m_buffer.length;
+                    _position = cast(uint)_buffer.length;
                 }
             }
             else if (t[i] < '\x20')
@@ -294,31 +294,31 @@ nothrow @nogc:
                 else if (t[i] == '\b')
                 {
                 erase_char:
-                    if (m_position > 0)
-                        m_buffer.erase(--m_position, 1);
+                    if (_position > 0)
+                        _buffer.erase(--_position, 1);
                 }
                 else if (t[i] == '\t')
                 {
-                    if (m_suggestionPending)
+                    if (_suggestion_pending)
                     {
-                        Array!String suggestions = m_console.suggest(m_buffer, curScope);
+                        Array!String suggestions = _console.suggest(_buffer, _cur_scope);
                         if (!suggestions.empty)
-                            showSuggestions(suggestions[]);
+                            show_suggestions(suggestions[]);
                     }
                     else
                     {
-                        const(char)[] completeFrom = m_buffer[0 .. m_position];
-                        MutableString!0 completed = m_console.complete(completeFrom, curScope);
+                        const(char)[] completeFrom = _buffer[0 .. _position];
+                        MutableString!0 completed = _console.complete(completeFrom, _cur_scope);
                         if (completed[] != completeFrom[])
                         {
-                            uint oldPos = m_position;
-                            m_position = cast(uint)completed.length;
-                            completed ~= m_buffer[oldPos .. $];
-                            m_buffer = completed.move;
+                            uint oldPos = _position;
+                            _position = cast(uint)completed.length;
+                            completed ~= _buffer[oldPos .. $];
+                            _buffer = completed.move;
                         }
                         else
                         {
-                            m_suggestionPending = true;
+                            _suggestion_pending = true;
 
                             // advance i since we skip the bottom part of the loop
                             i += take;
@@ -334,46 +334,46 @@ nothrow @nogc:
             }
             else
             {
-                m_buffer.insert(m_position, t[i .. i + take]);
-                m_position += take;
+                _buffer.insert(_position, t[i .. i + take]);
+                _position += take;
             }
 
             i += take;
-            m_suggestionPending = false;
+            _suggestion_pending = false;
         }
 
         return len;
 
     close_session:
         // Ctrl-C
-        closeSession();
+        close_session();
 
     early_return:
         // store the tail of the input buffer so the outer context can claim it
-        m_buffer = text[i .. $];
+        _buffer = text[i .. $];
         return -1;
     }
 
-    MutableString!0 takeInput()
+    MutableString!0 take_input()
     {
-        MutableString!0 take = m_buffer.move;
-        m_buffer = null;
-        m_position = 0;
+        MutableString!0 take = _buffer.move;
+        _buffer = null;
+        _position = 0;
         return take.move;
     }
 
 
     /// \returns The width of the terminal in characters.
-    final ushort width() => m_width;
+    final ushort width() => _width;
 
     /// \returns The height of the terminal in characters.
-    final ushort height() => m_height;
+    final ushort height() => _height;
 
     /// Set the size of the console. Some session types may not support this feature.
     void setConsoleSize(ushort width, ushort height)
     {
-        m_width = width;
-        m_height = height;
+        _width = width;
+        _height = height;
     }
 
 protected:
@@ -381,7 +381,7 @@ protected:
     /// It may be used, for instance, to update any visual state required by the session on execution of a command.
     /// \param command
     ///  The complete command line being executed.
-    void enterCommand(const(char)[] command)
+    void enter_command(const(char)[] command)
     {
     }
 
@@ -391,7 +391,7 @@ protected:
     ///  The command state for the completing command.
     /// \param state
     ///  The completion state of the command. This can determine if the command completed, or was aborted.
-    void commandFinished(CommandState commandState, CommandCompletionState state)
+    void command_finished(CommandState command_state, CommandCompletionState state)
     {
     }
 
@@ -400,37 +400,37 @@ protected:
     /// a tooltip that the user can select from, etc. Default implementation will write the suggestions to the output stream.
     /// \param suggestions
     ///  Set of suggestion that apply to the current context
-    void showSuggestions(const(String)[] suggestions)
+    void show_suggestions(const(String)[] suggestions)
     {
         size_t max = 0;
         foreach (ref s; suggestions)
             max = max < s.length ? s.length : max;
 
         MutableString!0 text;
-        size_t lineOffset = 0;
+        size_t line_offset = 0;
         foreach (ref s; suggestions)
         {
-            if (lineOffset + max + 3 > m_width)
+            if (line_offset + max + 3 > _width)
             {
-                text ~= (features & ClientFeatures.CRLF) ? "\r\n" : "\n";
-                lineOffset = 0;
+                text ~= (_features & ClientFeatures.crlf) ? "\r\n" : "\n";
+                line_offset = 0;
             }
             text.appendFormat("   {0, *1}", s[], max);
-            lineOffset += max + 3;
+            line_offset += max + 3;
         }
 
-        writeLine(text);
+        write_line(text);
     }
 
-    final void receiveInput(const(char)[] input)
+    final void receive_input(const(char)[] input)
     {
-        if (m_currentCommand)
-            m_buffer ~= input;
+        if (_current_command)
+            _buffer ~= input;
 
-        MutableString!0 inputBackup;
-        while (!m_currentCommand && !input.empty)
+        MutableString!0 input_backup;
+        while (!_current_command && !input.empty)
         {
-            ptrdiff_t taken = appendInput(input);
+            ptrdiff_t taken = append_input(input);
 
             if (taken < 0)
             {
@@ -442,19 +442,19 @@ protected:
                 if (input[taken] == '\r' && input.length > taken + 1 && input[taken + 1] == '\n')
                     ++taken;
 
-                MutableString!0 cmdInput = takeInput();
-                const(char)[] command = cmdInput.trimCmdLine;
-                m_buffer = input[taken + 1 .. $];
+                MutableString!0 cmdInput = take_input();
+                const(char)[] command = cmdInput.trim_cmd_line;
+                _buffer = input[taken + 1 .. $];
 
                 if (command.empty || execute(command))
                 {
                     // possible the command terminated the session
-                    if (!isAttached())
+                    if (!is_attached())
                         return;
 
                     // command was instantaneous; take leftover input and continue
-                    inputBackup = takeInput();
-                    input = inputBackup[];
+                    input_backup = take_input();
+                    input = input_backup[];
                 }
             }
             else
@@ -465,9 +465,9 @@ protected:
 protected:
 
     final NoGCAllocator allocator() pure
-        => m_console.m_allocator;
+        => _console._allocator;
     final NoGCAllocator tempAllocator() pure
-        => m_console.m_tempAllocator;
+        => _console._tempAllocator;
 
     void doBell()
     {
@@ -477,23 +477,23 @@ protected:
     final bool execute(const(char)[] command)
     {
         // TODO: command history!
-        addToHistory(command);
+        add_to_history(command);
         _history_head.clear();
 
-        enterCommand(command);
+        enter_command(command);
 
-        m_currentCommand = m_console.execute(this, command);
+        _current_command = _console.execute(this, command);
 
         // possible the command terminated the session
-        if (!isAttached())
+        if (!is_attached())
         {
-            assert(m_currentCommand is null);
+            assert(_current_command is null);
             return true;
         }
 
-        if (!m_currentCommand)
-            commandFinished(null, CommandCompletionState.Finished);
-        return m_currentCommand is null;
+        if (!_current_command)
+            command_finished(null, CommandCompletionState.finished);
+        return _current_command is null;
     }
 
     final void load_history(const char[] filename)
@@ -511,9 +511,9 @@ protected:
 
         // TODO: maybe we should specify a "MAX_ALLOC" or something...
         assert(size <= size_t.max, "File too large to read into memory");
-        size_t fileSize = cast(size_t)size;
+        size_t file_size = cast(size_t)size;
 
-        char[] mem = cast(char[])allocator.alloc(fileSize);
+        char[] mem = cast(char[])allocator.alloc(file_size);
         if (mem == null)
         {
             writeError("Error allocating memory for history");
@@ -523,7 +523,7 @@ protected:
         scope(exit)
             allocator.free(mem);
 
-        _history_file.read(mem, fileSize);
+        _history_file.read(mem, file_size);
 
         char[] buff = mem.trim;
         while (!buff.empty)
@@ -542,7 +542,7 @@ protected:
             _history_file.close();
     }
 
-    final void addToHistory(const(char)[] line)
+    final void add_to_history(const(char)[] line)
     {
         if (!line.empty && (_history.empty || line[] != _history[$-1]))
         {
@@ -563,7 +563,7 @@ protected:
                 };
 
                 _history_file.set_pos(0);
-                size_t totalSize;
+                size_t total_size;
                 bool success = true;
                 foreach (entry; _history)
                 {
@@ -571,17 +571,17 @@ protected:
                     if (!success)
                         break;
 
-                    totalSize += entry.length;
+                    total_size += entry.length;
 
                     success = WriteToFile(cast(char[])"\n", _history_file);
                     if (!success)
                         break;
 
-                    totalSize += 1;
+                    total_size += 1;
                 }
 
                 if (success)
-                    _history_file.set_size(totalSize);
+                    _history_file.set_size(total_size);
                 else
                     _history_file.close();
             }
@@ -590,43 +590,37 @@ protected:
     }
 
 
-    ClientFeatures features;
-    ushort m_width = 80;
-    ushort m_height = 24;
-    char escapeChar;
+    ClientFeatures _features;
+    ushort _width = 80;
+    ushort _height = 24;
+    char _escape_char;
 
-    bool m_showPrompt = true;
-    bool m_suggestionPending = false;
+    bool _show_prompt = true;
+    bool _suggestion_pending = false;
 
-    const(char)[] m_prompt;
-    MutableString!0 m_buffer;
-    uint m_position = 0;
+    const(char)[] _prompt;
+    MutableString!0 _buffer;
+    uint _position = 0;
 
-    CommandState m_currentCommand = null;
+    CommandState _current_command = null;
 
-    Map!(String, String) localVariables;
+    Map!(String, String) _local_variables;
 
-//    list<String> _history;
-//    list<String>::iterator _history_cursor;
+//    list!String _history;
+//    list!String.iterator _history_cursor;
     // TODO: swap to SharedString, and also swap to List
     Array!(MutableString!0) _history;
     uint _history_cursor = 0;
     MutableString!0 _history_head;
     File _history_file;
 
-    Array!(Console*) m_sessionStack;
+    Array!(Console*) _session_stack;
 
 package:
+    Console* _console;
+    Scope _cur_scope = null;
 
-    Console* m_console;
-    Scope curScope = null;
-
-    final ref auto _currentCommand() => m_currentCommand;
-    final ref auto _prompt() => m_prompt;
-    final ref auto _buffer() => m_buffer;
-    final ref auto _position() => m_position;
-    final ref auto _showPrompt() => m_showPrompt;
-    final ref auto _suggestionPending() => m_suggestionPending;
+    ref CommandState current_command() => _current_command;
 }
 
 class StringSession : Session
@@ -640,29 +634,29 @@ nothrow @nogc:
 
     const(char[]) getOutput() const pure
     {
-        return m_output;
+        return _output;
     }
 
     MutableString!0 takeOutput()
     {
-        return m_output.move;
+        return _output.move;
     }
 
     void clearOutput()
     {
-        m_output = null;
+        _output = null;
     }
 
-    override void writeOutput(const(char)[] text, bool newline)
+    override void write_output(const(char)[] text, bool newline)
     {
         if (newline)
-            m_output.append(text, '\n');
+            _output.append(text, '\n');
         else
-            m_output ~= text;
+            _output ~= text;
     }
 
 private:
-    MutableString!0 m_output;
+    MutableString!0 _output;
 }
 
 class SimpleSession : Session
@@ -674,7 +668,7 @@ nothrow @nogc:
         super(console);
     }
 
-    override void writeOutput(const(char)[] text, bool newline)
+    override void write_output(const(char)[] text, bool newline)
     {
         import urt.io;
         if (newline)
@@ -691,7 +685,7 @@ class ConsoleSession : Session
     this(ref Console console)
     {
         super(console);
-        features = ClientFeatures.ANSI;
+        _features = ClientFeatures.ansi;
 
         // set up raw terminal mode for character-by-character input
         version (Windows)
@@ -726,8 +720,8 @@ class ConsoleSession : Session
             CONSOLE_SCREEN_BUFFER_INFO csbi;
             if (GetConsoleScreenBufferInfo(_h_stdout, &csbi))
             {
-                m_width = cast(ushort)(csbi.srWindow.Right - csbi.srWindow.Left + 1);
-                m_height = cast(ushort)(csbi.srWindow.Bottom - csbi.srWindow.Top + 1);
+                _width = cast(ushort)(csbi.srWindow.Right - csbi.srWindow.Left + 1);
+                _height = cast(ushort)(csbi.srWindow.Bottom - csbi.srWindow.Top + 1);
             }
         }
         else version(Posix)
@@ -749,7 +743,7 @@ class ConsoleSession : Session
 
         load_history(".history");
 
-        if (m_showPrompt)
+        if (_show_prompt)
             send_prompt_and_buffer(true);
     }
 
@@ -757,7 +751,7 @@ class ConsoleSession : Session
     {
         super.update();
 
-        if (!isAttached())
+        if (!is_attached())
             return;
 
         enum DefaultBufferLen = 512;
@@ -766,21 +760,21 @@ class ConsoleSession : Session
         // read from stdin
         version (Windows)
         {
-            DWORD numEvents = 0;
-            GetNumberOfConsoleInputEvents(_h_stdin, &numEvents);
-            if (numEvents == 0)
+            DWORD num_events = 0;
+            GetNumberOfConsoleInputEvents(_h_stdin, &num_events);
+            if (num_events == 0)
                 return;
 
             Array!(char, 0) input; // TODO: stack-allocate some bytes when move semantics land!
-            input.reserve(numEvents + 32); // add some extra bytes for escape sequences
+            input.reserve(num_events + 32); // add some extra bytes for escape sequences
 
             INPUT_RECORD[32] events = void;
-            DWORD eventsRead;
-            while  (numEvents && ReadConsoleInputA(_h_stdin, events.ptr, numEvents < events.length ? numEvents : events.length, &eventsRead))
+            DWORD events_read;
+            while  (num_events && ReadConsoleInputA(_h_stdin, events.ptr, num_events < events.length ? num_events : events.length, &events_read))
             {
-                numEvents -= eventsRead;
+                num_events -= events_read;
 
-                for (DWORD i = 0; i < eventsRead; i++)
+                for (DWORD i = 0; i < events_read; i++)
                 {
                     // filter out non-key-down events
                     if (events[i].EventType != KEY_EVENT || !events[i].KeyEvent.bKeyDown)
@@ -826,34 +820,34 @@ class ConsoleSession : Session
             }
 
             if (!input.empty)
-                receiveInput(input[]);
+                receive_input(input[]);
         }
         else version(Posix)
         {
             ptrdiff_t r = read(STDIN_FILENO, recvbuf.ptr, recvbuf.length);
             if (r > 0)
-                receiveInput(cast(char[])recvbuf[0 .. r]);
+                receive_input(cast(char[])recvbuf[0 .. r]);
         }
     }
 
-    override void enterCommand(const(char)[] command)
+    override void enter_command(const(char)[] command)
     {
-        writeOutput("", true);
+        write_output("", true);
     }
 
-    override void commandFinished(CommandState commandState, CommandCompletionState state)
+    override void command_finished(CommandState command_state, CommandCompletionState state)
     {
-        if (m_showPrompt)
+        if (_show_prompt)
             send_prompt_and_buffer(false);
     }
 
-    override void closeSession()
+    override void close_session()
     {
         restore_terminal();
-        super.closeSession();
+        super.close_session();
     }
 
-    override void writeOutput(const(char)[] text, bool newline)
+    override void write_output(const(char)[] text, bool newline)
     {
         version (Windows)
         {
@@ -871,19 +865,19 @@ class ConsoleSession : Session
         }
     }
 
-    override void showSuggestions(const(String)[] suggestions)
+    override void show_suggestions(const(String)[] suggestions)
     {
-        writeOutput("", true);
-        super.showSuggestions(suggestions);
-        if (m_showPrompt)
+        write_output("", true);
+        super.show_suggestions(suggestions);
+        if (_show_prompt)
             send_prompt_and_buffer(false);
     }
 
-    override bool showPrompt(bool show)
+    override bool show_prompt(bool show)
     {
-        bool old = super.showPrompt(show);
+        bool old = super.show_prompt(show);
 
-        if (!m_currentCommand)
+        if (!_current_command)
         {
             if (show && !old)
                 send_prompt_and_buffer(true);
@@ -893,73 +887,73 @@ class ConsoleSession : Session
         return old;
     }
 
-    override const(char)[] setPrompt(const(char)[] prompt)
+    override const(char)[] set_prompt(const(char)[] prompt)
     {
-        const(char)[] old = super.setPrompt(prompt);
-        if (!m_currentCommand && m_showPrompt && prompt[] != old[])
+        const(char)[] old = super.set_prompt(prompt);
+        if (!_current_command && _show_prompt && prompt[] != old[])
             send_prompt_and_buffer(true);
         return old;
     }
 
-    override ptrdiff_t appendInput(const(char)[] text)
+    override ptrdiff_t append_input(const(char)[] text)
     {
         import urt.util : min;
 
-        MutableString!0 before = m_buffer;
-        uint beforePos = m_position;
+        MutableString!0 before = _buffer;
+        uint before_pos = _position;
 
-        ptrdiff_t taken = super.appendInput(text);
+        ptrdiff_t taken = super.append_input(text);
         if (taken < 0)
             return taken;
 
         // echo changes back to the terminal
-        size_t diffOffset = 0;
-        size_t len = min(m_buffer.length, before.length);
-        while (diffOffset < len && before[diffOffset] == m_buffer[diffOffset])
-            ++diffOffset;
-        bool noChange = m_buffer.length == before.length && diffOffset == m_buffer.length;
+        size_t diff_offset = 0;
+        size_t len = min(_buffer.length, before.length);
+        while (diff_offset < len && before[diff_offset] == _buffer[diff_offset])
+            ++diff_offset;
+        bool no_change = _buffer.length == before.length && diff_offset == _buffer.length;
 
         MutableString!0 echo;
-        if (noChange)
+        if (no_change)
         {
             // maybe the cursor moved?
-            if (beforePos != m_position)
+            if (before_pos != _position)
             {
-                if (m_position < beforePos)
-                    echo.concat("\x1b[", beforePos - m_position, 'D');
+                if (_position < before_pos)
+                    echo.concat("\x1b[", before_pos - _position, 'D');
                 else
-                    echo.concat("\x1b[", m_position - beforePos, 'C');
+                    echo.concat("\x1b[", _position - before_pos, 'C');
             }
         }
         else
         {
-            if (diffOffset != beforePos)
+            if (diff_offset != before_pos)
             {
                 // shift the cursor to the change position
-                if (diffOffset < beforePos)
-                    echo.concat("\x1b[", beforePos - diffOffset, 'D');
+                if (diff_offset < before_pos)
+                    echo.concat("\x1b[", before_pos - diff_offset, 'D');
                 else
-                    echo.concat("\x1b[", diffOffset - beforePos, 'C');
+                    echo.concat("\x1b[", diff_offset - before_pos, 'C');
             }
 
-            if (diffOffset < m_buffer.length)
-                echo.append(m_buffer[diffOffset .. $]);
+            if (diff_offset < _buffer.length)
+                echo.append(_buffer[diff_offset .. $]);
 
-            if (m_buffer.length < before.length)
+            if (_buffer.length < before.length)
             {
                 // erase the tail
                 echo.append("\x1b[K");
             }
 
-            if (echo.length && m_position != m_buffer.length)
+            if (echo.length && _position != _buffer.length)
             {
-                assert(m_position < m_buffer.length); // shouldn't be possible for the cursor to be beyond the end of the line
-                echo.append("\x1b[", m_buffer.length - m_position, 'D');
+                assert(_position < _buffer.length); // shouldn't be possible for the cursor to be beyond the end of the line
+                echo.append("\x1b[", _buffer.length - _position, 'D');
             }
         }
 
         if (echo.length)
-            writeOutput(echo[], false);
+            write_output(echo[], false);
 
         return taken;
     }
@@ -1003,7 +997,7 @@ private:
     void clear_line()
     {
         enum Clear = ANSI_ERASE_LINE ~ "\x1b[80D"; // clear and move left 80
-        writeOutput(Clear, false);
+        write_output(Clear, false);
     }
 
     void send_prompt_and_buffer(bool with_clear = false)
@@ -1013,8 +1007,8 @@ private:
         enum Clear = ANSI_ERASE_LINE ~ "\r"; // clear line and return to start
 
         // format: [clear?] [prompt] [buffer] [move cursor back if not at end?]
-        char[] prompt = tformat("{0, ?1}{2}{3}{@5, ?4}", Clear, with_clear, m_prompt, m_buffer, m_position < m_buffer.length, "\x1b[{6}D", m_buffer.length - m_position);
-        writeOutput(prompt, false);
+        char[] prompt = tformat("{0, ?1}{2}{3}{@5, ?4}", Clear, with_clear, _prompt, _buffer, _position < _buffer.length, "\x1b[{6}D", _buffer.length - _position);
+        write_output(prompt, false);
     }
 }
 
@@ -1023,13 +1017,13 @@ class SerialSession : Session
     import router.stream;
 nothrow @nogc:
 
-    this(ref Console console, Stream stream, ClientFeatures features = ClientFeatures.ANSI, ushort width = 80, ushort height = 24)
+    this(ref Console console, Stream stream, ClientFeatures features = ClientFeatures.ansi, ushort width = 80, ushort height = 24)
     {
         super(console);
-        features |= features;
-        m_stream = stream;
-        m_width = width;
-        m_height = height;
+        _features |= features;
+        _stream = stream;
+        _width = width;
+        _height = height;
     }
 
     override void update()
@@ -1042,10 +1036,10 @@ nothrow @nogc:
         ptrdiff_t read;
         do
         {
-            read = m_stream.read(recvbuf[]);
+            read = _stream.read(recvbuf[]);
             if (read < 0)
             {
-                closeSession();
+                close_session();
                 return;
             }
             else if (read == 0)
@@ -1058,7 +1052,7 @@ nothrow @nogc:
                 char c = cast(char)recvbuf[i];
                 if (c == '\r')
                 {
-                    if (features & ClientFeatures.CRLF)
+                    if (_features & ClientFeatures.crlf)
                     {
                         if (i == read - 1)
                         {
@@ -1092,19 +1086,19 @@ nothrow @nogc:
         while (read == recvbuf.length);
 
         if (!input.empty)
-            receiveInput(input[]);
+            receive_input(input[]);
 
         super.update();
     }
 
-    override void writeOutput(const(char)[] text, bool newline)
+    override void write_output(const(char)[] text, bool newline)
     {
         import urt.io;
-        m_stream.write(text);
+        _stream.write(text);
         if (newline)
-            m_stream.write((features & ClientFeatures.CRLF) ? "\r\n" : "\n");
+            _stream.write((_features & ClientFeatures.crlf) ? "\r\n" : "\n");
     }
 
 private:
-    Stream m_stream;
+    Stream _stream;
 }

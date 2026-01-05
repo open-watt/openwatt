@@ -29,7 +29,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"secret";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!Secret, name.move, flags);
     }

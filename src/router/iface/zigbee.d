@@ -69,7 +69,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"zigbee";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!ZigbeeInterface, name.move, flags);
     }
@@ -123,10 +123,10 @@ nothrow @nogc:
         if (!running)
             return -1;
 
-        foreach (ref subscriber; subscribers[0..numSubscribers])
+        foreach (ref subscriber; _subscribers[0.._num_subscribers])
         {
-            if ((subscriber.filter.direction & PacketDirection.Outgoing) && subscriber.filter.match(packet))
-                subscriber.recvPacket(packet, this, PacketDirection.Outgoing, subscriber.userData);
+            if ((subscriber.filter.direction & PacketDirection.outgoing) && subscriber.filter.match(packet))
+                subscriber.recv_packet(packet, this, PacketDirection.outgoing, subscriber.user_data);
         }
 
         return transmit_async(packet, callback, priority);
@@ -187,7 +187,7 @@ protected:
             // boot up the ezsp client...
 
             if (!_ezsp_client.running)
-                return CompletionStatus.Continue;
+                return CompletionStatus.continue_;
         }
 
         if (is_coordinator)
@@ -197,7 +197,7 @@ protected:
                 // TODO: do we need to do any local init after the coordinator started?
                 //...
 
-                return CompletionStatus.Complete;
+                return CompletionStatus.complete;
             }
         }
         else
@@ -205,15 +205,15 @@ protected:
             if (_ezsp_client.stack_type == EZSPClient.StackType.Coordinator)
             {
                 writeError("EZSP device must run router firmware be used as an interface");
-                return CompletionStatus.Error;
+                return CompletionStatus.error;
             }
 
             // startup in router mode...
             assert(false, "TODO");
 
-            return CompletionStatus.Complete;
+            return CompletionStatus.complete;
         }
-        return CompletionStatus.Continue;
+        return CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()
@@ -262,7 +262,7 @@ protected:
             _network_status = EmberStatus.NETWORK_DOWN;
         }
 
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override void update()
@@ -301,10 +301,10 @@ protected:
     override bool transmit(ref const Packet packet) nothrow @nogc
         => transmit_async(packet, null, MessagePriority.normal) < 0 ? false : true;
 
-    override ushort pcapType() const
+    override ushort pcap_type() const
         => 283; // DLT_IEEE802_15_4_TAP
 
-    override void pcapWrite(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packetData) nothrow @nogc sink) const
+    override void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packetData) nothrow @nogc sink) const
     {
         ref aps = packet.hdr!APSFrame;
         const(ubyte)[] data = cast(ubyte[])packet.data;
@@ -316,7 +316,7 @@ protected:
         tmp[6] = 1; // FCS_TYPE len
         tmp[12] = 3; tmp[14] = 3; // channel
         tmp[16] = _coordinator.channel;
-        if (dir == PacketDirection.Incoming)
+        if (dir == PacketDirection.incoming)
         {
             tmp[20] = 1; tmp[22] = 4; // RSSI
             tmp[24..28] = float(aps.last_hop_rssi).nativeToLittleEndian;
@@ -345,9 +345,9 @@ protected:
         tmp[4..6] = aps.src.nativeToLittleEndian; // src addr
         tmp[6] = 30; // radius
         tmp[7] = 1; // seq num (TODO: should we fake a sequence?)
-        if (NodeMap* n = get_module!ZigbeeProtocolModule.find_node(aps.pan_id, dir == PacketDirection.Incoming ? aps.src : aps.dst))
+        if (NodeMap* n = get_module!ZigbeeProtocolModule.find_node(aps.pan_id, dir == PacketDirection.incoming ? aps.src : aps.dst))
         {
-            tmp[1] |= dir == PacketDirection.Incoming ? 0x10 : 0x08;
+            tmp[1] |= dir == PacketDirection.incoming ? 0x10 : 0x08;
             tmp[8..16] = n.eui.b; // dst eui64
             len += 8;
         }
@@ -422,7 +422,7 @@ private:
                     ZigbeeResult r = send_message(msg);
                     if (r != ZigbeeResult.success)
                     {
-                        ++_status.sendDropped;
+                        ++_status.send_dropped;
                         if (msg.progress_callback)
                             msg.progress_callback(r, msg.aps);
                         _message_pool.free(msg);
@@ -439,11 +439,11 @@ private:
         // can only handle zigbee packets
         switch (packet.type)
         {
-            case PacketType.ZigbeeAPS:
+            case PacketType.zigbee_aps:
                 // the APS code follows this switch...
                 break;
 
-            case PacketType.ZigbeeNWK:
+            case PacketType.zigbee_nwk:
                 if (_ezsp_client)
                 {
                     writeWarning("Zigbee: cannot send raw NWK frames via EZSP");
@@ -454,7 +454,7 @@ private:
                 assert(false, "TODO: handle NWK frame... or de-frame APS message and goto ZigbeeAPS?");
 
             default:
-                ++_status.sendDropped;
+                ++_status.send_dropped;
                 return ZigbeeResult.unsupported;
         }
 
@@ -479,7 +479,7 @@ private:
         if (r != ZigbeeResult.success)
         {
             _message_pool.free(msg);
-            ++_status.sendDropped;
+            ++_status.send_dropped;
             return -1;
         }
         return msg.tag;
@@ -564,7 +564,7 @@ private:
             // complain that the message didn't send? should we try and resend?
 
             msg.state = 3; // failed
-            ++_status.sendDropped;
+            ++_status.send_dropped;
 
             version (DebugZigbeeMessageFlow)
                 writeDebugf("Zigbee: APS send FAILED ({0, 03}): EmberStatus {1, 02x}", msg.tag, status);
@@ -582,7 +582,7 @@ private:
 
         msg.send_time = getTime(); // reset time for the in-flight state
         msg.aps.counter = aps_sequence;
-        _status.sendBytes += msg.message.length; // doesn't include NWK or APS header bytes...
+        _status.send_bytes += msg.message.length; // doesn't include NWK or APS header bytes...
 
         version (DebugZigbeeMessageFlow)
             print_transaction_state(*msg, "sent");
@@ -650,7 +650,7 @@ private:
     void ezsp_state_change(BaseObject object, StateSignal signal) nothrow
     {
         // if the ezsp interface goes offline, we should restart this interface...
-        if (object is _ezsp_client && signal == StateSignal.Offline)
+        if (object is _ezsp_client && signal == StateSignal.offline)
             restart();
     }
 
@@ -809,11 +809,11 @@ private:
     void counter_response_handler(ushort[EmberCounterType.TYPE_COUNT] counters) nothrow
     {
         // TODO: consider; should we count MAC_TX/RX_XXX or APS_DATA_TX/RX_XXX?
-        _status.recvPackets += counters[EmberCounterType.MAC_RX_BROADCAST];
-        _status.sendPackets += counters[EmberCounterType.MAC_TX_BROADCAST];
-        _status.recvPackets += counters[EmberCounterType.MAC_RX_UNICAST];
-        _status.sendPackets += counters[EmberCounterType.MAC_TX_UNICAST_SUCCESS];
-        _status.sendDropped += counters[EmberCounterType.MAC_TX_UNICAST_FAILED];
+        _status.recv_packets += counters[EmberCounterType.MAC_RX_BROADCAST];
+        _status.send_packets += counters[EmberCounterType.MAC_TX_BROADCAST];
+        _status.recv_packets += counters[EmberCounterType.MAC_RX_UNICAST];
+        _status.send_packets += counters[EmberCounterType.MAC_TX_UNICAST_SUCCESS];
+        _status.send_dropped += counters[EmberCounterType.MAC_TX_UNICAST_FAILED];
 
         // TODO: is there any other statistics we want to collect or log?
         //       useful debug information?
@@ -824,15 +824,15 @@ private:
         switch (type)
         {
             case EmberCounterType.MAC_RX_BROADCAST:
-                _status.recvPackets += 0x10000; break;
+                _status.recv_packets += 0x10000; break;
             case EmberCounterType.MAC_TX_BROADCAST:
-                _status.sendPackets += 0x10000; break;
+                _status.send_packets += 0x10000; break;
             case EmberCounterType.MAC_RX_UNICAST:
-                _status.recvPackets += 0x10000; break;
+                _status.recv_packets += 0x10000; break;
             case EmberCounterType.MAC_TX_UNICAST_SUCCESS:
-                _status.sendPackets += 0x10000; break;
+                _status.send_packets += 0x10000; break;
             case EmberCounterType.MAC_TX_UNICAST_FAILED:
-                _status.sendDropped += 0x10000; break;
+                _status.send_dropped += 0x10000; break;
             default:
                 // should we log this? is it interesting?
                 writeWarning("Zigbee: EZSP counter rollover - ", type);

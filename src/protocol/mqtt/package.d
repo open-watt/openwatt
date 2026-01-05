@@ -21,7 +21,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCollection("/protocol/mqtt/broker", brokers);
+        g_app.console.register_collection("/protocol/mqtt/broker", brokers);
     }
 
     override void update()

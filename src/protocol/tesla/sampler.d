@@ -21,9 +21,9 @@ class TeslaTWCSampler : Sampler
 {
 nothrow @nogc:
 
-    this(ushort chargerId, MACAddress mac)
+    this(ushort charger_id, MACAddress mac)
     {
-        this.chargerId = chargerId;
+        this.charger_id = charger_id;
         this.mac = mac;
     }
 
@@ -32,14 +32,14 @@ nothrow @nogc:
         if (!master)
         {
             auto tesla_mod = get_module!TeslaProtocolModule;
-            outer: foreach (twc; tesla_mod.twcMasters.values)
+            outer: foreach (twc; tesla_mod.twc_masters.values)
             {
                 foreach (i, ref c; twc.chargers)
                 {
-                    if (chargerId == c.id || mac == c.mac)
+                    if (charger_id == c.id || mac == c.mac)
                     {
                         master = twc;
-                        chargerIndex = cast(ubyte)i;
+                        charger_index = cast(ubyte)i;
                         break outer;
                     }
                 }
@@ -48,7 +48,7 @@ nothrow @nogc:
         if (!master)
             return;
 
-        TeslaTWCMaster.Charger* charger = &master.chargers[chargerIndex];
+        TeslaTWCMaster.Charger* charger = &master.chargers[charger_index];
 
         // we'll just update the element values by name
         // TODO: user can write to targetCurrent, and we should update it here...
@@ -58,24 +58,24 @@ nothrow @nogc:
             {
                 case "targetCurrent":
                     // TODO: user can write to targetCurrent...
-                    e.value(CentiAmps(charger.targetCurrent));
+                    e.value(CentiAmps(charger.target_current));
                     break;
-                case "state":           e.value(charger.chargerState);                                  break;
-                case "maxCurrent":      e.value(CentiAmps(charger.maxCurrent));                         break;
+                case "state":           e.value(charger.charger_state);                                 break;
+                case "maxCurrent":      e.value(CentiAmps(charger.max_current));                        break;
                 case "current":         e.value(CentiAmps((charger.flags & 2) ? charger.current : 0));  break;
                 case "voltage1":        e.value(Volts((charger.flags & 2) ? charger.voltage1 : 0));     break;
                 case "voltage2":        e.value(Volts((charger.flags & 2) ? charger.voltage2 : 0));     break;
                 case "voltage3":        e.value(Volts((charger.flags & 2) ? charger.voltage3 : 0));     break;
-                case "power":           e.value(Watts((charger.flags & 2) ? charger.totalPower : 0));   break;
+                case "power":           e.value(Watts((charger.flags & 2) ? charger.total_power : 0));  break;
                 case "power1":          e.value(Watts((charger.flags & 2) ? charger.power1 : 0));       break;
                 case "power2":          e.value(Watts((charger.flags & 2) ? charger.power2 : 0));       break;
                 case "power3":          e.value(Watts((charger.flags & 2) ? charger.power3 : 0));       break;
                 case "totalImportActiveEnergy":
                 case "lifetimeEnergy":
                     // TODO: could that multiply realistically overflow?
-                    e.value(WattHours((charger.flags & 2) ? ulong(charger.lifetimeEnergy) * 1000 : 0));
+                    e.value(WattHours((charger.flags & 2) ? ulong(charger.lifetime_energy) * 1000 : 0));
                     break;
-                case "serialNumber":    e.value((charger.flags & 4) ? charger.serialNumber : "");       break;
+                case "serialNumber":    e.value((charger.flags & 4) ? charger.serial_number : "");      break;
                 case "vin":             e.value((charger.flags & 0xF0) == 0xF0 ? charger.vin : "");     break;
                 default:
                     assert(false, "Invalid element for Tesla TWC");
@@ -83,20 +83,20 @@ nothrow @nogc:
         }
     }
 
-    final void addElement(Element* element)
+    final void add_element(Element* element)
     {
         if (!elements[].contains(element))
         {
             elements ~= element;
-            if (element.access != Access.Read)
-                element.addSubscriber(this);
+            if (element.access != Access.read)
+                element.add_subscriber(this);
         }
     }
 
     final override void remove_element(Element* element)
     {
-        if (element.access != Access.Read)
-            element.removeSubscriber(this);
+        if (element.access != Access.read)
+            element.remove_subscriber(this);
         elements.removeFirstSwapLast(element);
     }
 
@@ -105,19 +105,19 @@ nothrow @nogc:
         if (!master) // if not bound, we can't apply any values
             return;
 
-        if (e.id[] == "targetCurrent")
+        if (e.id[] == "target_current")
         {
-            TeslaTWCMaster.Charger* charger = &master.chargers[chargerIndex];
-            charger.targetCurrent = (cast(CentiAmps)val.asQuantity()).value;
+            TeslaTWCMaster.Charger* charger = &master.chargers[charger_index];
+            charger.target_current = (cast(CentiAmps)val.asQuantity()).value;
 
             import urt.log;
-            writeDebug("Set target current: ", charger.targetCurrent);
+            writeDebug("Set target current: ", charger.target_current);
         }
     }
 
     TeslaTWCMaster master;
-    ubyte chargerIndex;
-    ushort chargerId;
+    ubyte charger_index;
+    ushort charger_id;
     MACAddress mac;
 
     Array!(Element*) elements;

@@ -16,17 +16,17 @@ import manager.console.command;
 nothrow @nogc:
 
 
-void addCollectionCommands(Scope s, ref BaseCollection collection)
+void add_collection_commands(Scope s, ref BaseCollection collection)
 {
     if (collection.type_info)
     {
-        s.addCommand(defaultAllocator.allocT!CollectionAddCommand(s.console, collection));
-        s.addCommand(defaultAllocator.allocT!CollectionRemoveCommand(s.console, collection));
+        s.add_command(defaultAllocator.allocT!CollectionAddCommand(s.console, collection));
+        s.add_command(defaultAllocator.allocT!CollectionRemoveCommand(s.console, collection));
     }
-    s.addCommand(defaultAllocator.allocT!CollectionGetCommand(s.console, collection));
-    s.addCommand(defaultAllocator.allocT!CollectionSetCommand(s.console, collection));
-    s.addCommand(defaultAllocator.allocT!CollectionResetCommand(s.console, collection));
-    s.addCommand(defaultAllocator.allocT!CollectionPrintCommand(s.console, collection));
+    s.add_command(defaultAllocator.allocT!CollectionGetCommand(s.console, collection));
+    s.add_command(defaultAllocator.allocT!CollectionSetCommand(s.console, collection));
+    s.add_command(defaultAllocator.allocT!CollectionResetCommand(s.console, collection));
+    s.add_command(defaultAllocator.allocT!CollectionPrintCommand(s.console, collection));
 }
 
 
@@ -37,14 +37,14 @@ nothrow @nogc:
     this(ref Console console, ref BaseCollection collection)
     {
         super(console, StringLit!"add");
-        this.collection = &collection;
+        _collection = &collection;
     }
 
     override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
     {
         if (args.length != 0)
         {
-            session.writeLine("Usage: add [<property=value> [...]]");
+            session.write_line("Usage: add [<property=value> [...]]");
             return null;
         }
 
@@ -56,16 +56,16 @@ nothrow @nogc:
             {
                 assert(arg.value.isString, "TODO: what if it's not a string?!");
                 name = arg.value.asString();
-                if (collection.exists(name))
+                if (_collection.exists(name))
                 {
-                    session.writeLine("Item with name '", name, "' already exists");
+                    session.write_line("Item with name '", name, "' already exists");
                     return null;
                 }
-                if (collection.type_info.validate_name)
+                if (_collection.type_info.validate_name)
                 {
-                    if (const(char)[] error = collection.type_info.validate_name(name))
+                    if (const(char)[] error = _collection.type_info.validate_name(name))
                     {
-                        session.writeLine(error);
+                        session.write_line(error);
                         return null;
                     }
                 }
@@ -74,7 +74,7 @@ nothrow @nogc:
         }
 
         // create an instance
-        BaseObject item = collection.alloc(name);
+        BaseObject item = _collection.alloc(name);
 
         // set all the properties...
         foreach (ref arg; namedArgs)
@@ -84,12 +84,12 @@ nothrow @nogc:
             StringResult result = item.set(arg.name, arg.value);
             if (!result)
             {
-                session.writeLine("Invalid value for property: ", arg.name, "=", arg.value, " - ", result.message);
+                session.write_line("Invalid value for property: ", arg.name, "=", arg.value, " - ", result.message);
                 defaultAllocator.freeT(item);
                 return null;
             }
         }
-        collection.add(item);
+        _collection.add(item);
 
         // TODO: maybe something better? perhaps a virtual on the object which lets it supply a creation message?
         //       how do we know what properties are relevant for the create logs?
@@ -103,16 +103,16 @@ nothrow @nogc:
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, *collection, SuggestFlags.Add);
+            return .complete(cmdLine, *_collection, SuggestFlags.Add);
     }
 
     final override Array!String suggest(const(char)[] cmdLine)
     {
-        return .suggest(cmdLine, *collection, SuggestFlags.Add);
+        return .suggest(cmdLine, *_collection, SuggestFlags.Add);
     }
 
 private:
-    BaseCollection* collection;
+    BaseCollection* _collection;
 }
 
 class CollectionRemoveCommand : Command
@@ -122,14 +122,14 @@ nothrow @nogc:
     this(ref Console console, ref BaseCollection collection)
     {
         super(console, StringLit!"remove");
-        this.collection = &collection;
+        _collection = &collection;
     }
 
     override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
     {
         if (args.length != 1 || namedArgs.length != 0)
         {
-            session.writeLine("Usage: remove <name>");
+            session.write_line("Usage: remove <name>");
             return null;
         }
 
@@ -143,16 +143,16 @@ nothrow @nogc:
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, *collection, SuggestFlags.Remove);
+            return .complete(cmdLine, *_collection, SuggestFlags.Remove);
     }
 
     final override Array!String suggest(const(char)[] cmdLine)
     {
-        return .suggest(cmdLine, *collection, SuggestFlags.Remove);
+        return .suggest(cmdLine, *_collection, SuggestFlags.Remove);
     }
 
 private:
-    BaseCollection* collection;
+    BaseCollection* _collection;
 }
 
 class CollectionGetCommand : Command
@@ -162,31 +162,31 @@ nothrow @nogc:
     this(ref Console console, ref BaseCollection collection)
     {
         super(console, StringLit!"get");
-        this.collection = &collection;
+        _collection = &collection;
     }
 
     override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
     {
         if (args.length != 2 || namedArgs.length != 0)
         {
-            session.writeLine("Usage: get <name> <property>");
+            session.write_line("Usage: get <name> <property>");
             return null;
         }
         if (!args[0].isString)
         {
-            session.writeLine("'name' must be a string");
+            session.write_line("'name' must be a string");
             return null;
         }
         if (!args[1].isString)
         {
-            session.writeLine("'property' must be a string");
+            session.write_line("'property' must be a string");
             return null;
         }
 
-        BaseObject item = collection.get(args[0].asString());
+        BaseObject item = _collection.get(args[0].asString());
         if (!item)
         {
-            session.writeLine("No item '", args[0].asString(), '\'');
+            session.write_line("No item '", args[0].asString(), '\'');
             return null;
         }
 
@@ -196,7 +196,7 @@ nothrow @nogc:
         ptrdiff_t l = value.toString(buffer, null, null);
         assert(l >= 0, "TODO: fix stringify-failure, or print error...?");
         if (l > 0)
-            session.writeLine(buffer[0..l]);
+            session.write_line(buffer[0..l]);
         return null;
     }
 
@@ -205,16 +205,16 @@ nothrow @nogc:
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, *collection, SuggestFlags.Get);
+            return .complete(cmdLine, *_collection, SuggestFlags.Get);
     }
 
     final override Array!String suggest(const(char)[] cmdLine)
     {
-        return .suggest(cmdLine, *collection, SuggestFlags.Get);
+        return .suggest(cmdLine, *_collection, SuggestFlags.Get);
     }
 
 private:
-    BaseCollection* collection;
+    BaseCollection* _collection;
 }
 
 class CollectionSetCommand : Command
@@ -224,26 +224,26 @@ nothrow @nogc:
     this(ref Console console, ref BaseCollection collection)
     {
         super(console, StringLit!"set");
-        this.collection = &collection;
+        _collection = &collection;
     }
 
     override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
     {
         if (args.length != 1 || namedArgs.length == 0)
         {
-            session.writeLine("Usage: set <name> <property=value> [<property=value> [...]]");
+            session.write_line("Usage: set <name> <property=value> [<property=value> [...]]");
             return null;
         }
         if (!args[0].isString)
         {
-            session.writeLine("'name' must be a string");
+            session.write_line("'name' must be a string");
             return null;
         }
 
-        BaseObject item = collection.get(args[0].asString());
+        BaseObject item = _collection.get(args[0].asString());
         if (!item)
         {
-            session.writeLine("No item '", args[0].asString(), '\'');
+            session.write_line("No item '", args[0].asString(), '\'');
             return null;
         }
 
@@ -252,7 +252,7 @@ nothrow @nogc:
             StringResult result = item.set(arg.name, arg.value);
             if (!result)
             {
-                session.writeLine("Set '", arg.name, "\' failed: ", result.message);
+                session.write_line("Set '", arg.name, "\' failed: ", result.message);
                 // TODO: should we bail out at first error, or try and set the rest?
 //                return null;
             }
@@ -265,16 +265,16 @@ nothrow @nogc:
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, *collection, SuggestFlags.Set);
+            return .complete(cmdLine, *_collection, SuggestFlags.Set);
     }
 
     final override Array!String suggest(const(char)[] cmdLine)
     {
-        return .suggest(cmdLine, *collection, SuggestFlags.Set);
+        return .suggest(cmdLine, *_collection, SuggestFlags.Set);
     }
 
 private:
-    BaseCollection* collection;
+    BaseCollection* _collection;
 }
 
 class CollectionResetCommand : Command
@@ -284,26 +284,26 @@ nothrow @nogc:
     this(ref Console console, ref BaseCollection collection)
     {
         super(console, StringLit!"reset");
-        this.collection = &collection;
+        _collection = &collection;
     }
 
     override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
     {
         if (namedArgs.length != 0)
         {
-            session.writeLine("Usage: reset [<name>] [<property> [...]]");
+            session.write_line("Usage: reset [<name>] [<property> [...]]");
             return null;
         }
         foreach (i, ref a; args)
         {
             if (!a.isString)
             {
-                session.writeLine("arguments must be strings");
+                session.write_line("arguments must be strings");
                 return null;
             }
         }
 
-        static void resetItem(BaseObject item, const Variant[] args)
+        static void reset_item(BaseObject item, const Variant[] args)
         {
             if (args.length == 0)
             {
@@ -318,13 +318,13 @@ nothrow @nogc:
         }
 
         // TODO: first arg may not be an item name; it may be a property name applied to all items...
-        BaseObject item = args.length > 0 ? collection.get(args[0].asString()) : null;
+        BaseObject item = args.length > 0 ? _collection.get(args[0].asString()) : null;
         if (item)
-            resetItem(item, args[1 .. $]);
+            reset_item(item, args[1 .. $]);
         else
         {
-            foreach (i; collection.values)
-                resetItem(i, args[0 .. $]);
+            foreach (i; _collection.values)
+                reset_item(i, args[0 .. $]);
         }
         return null;
     }
@@ -334,16 +334,16 @@ nothrow @nogc:
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, *collection, SuggestFlags.Reset);
+            return .complete(cmdLine, *_collection, SuggestFlags.Reset);
     }
 
     final override Array!String suggest(const(char)[] cmdLine)
     {
-        return .suggest(cmdLine, *collection, SuggestFlags.Reset);
+        return .suggest(cmdLine, *_collection, SuggestFlags.Reset);
     }
 
 private:
-    BaseCollection* collection;
+    BaseCollection* _collection;
 }
 
 // TODO: enable/disbale commands, which act on multiple items...
@@ -357,16 +357,16 @@ nothrow @nogc:
     this(ref Console console, ref BaseCollection collection)
     {
         super(console, StringLit!"print");
-        this.collection = &collection;
+        _collection = &collection;
     }
 
     override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
     {
         assert(false, "TODO!");
-//        BaseObject item = args.length > 0 ? collection.get(args[0].asString()) : null;
+//        BaseObject item = args.length > 0 ? _collection.get(args[0].asString()) : null;
 //        if (!item)
 //        {
-//            session.writeLine("No item '", args[0].asString(), '\'');
+//            session.write_line("No item '", args[0].asString(), '\'');
 //            return null;
 //        }
         return null;
@@ -377,16 +377,16 @@ nothrow @nogc:
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, *collection, SuggestFlags.Reset);
+            return .complete(cmdLine, *_collection, SuggestFlags.Reset);
     }
 
     final override Array!String suggest(const(char)[] cmdLine)
     {
-        return .suggest(cmdLine, *collection, SuggestFlags.Reset);
+        return .suggest(cmdLine, *_collection, SuggestFlags.Reset);
     }
 
 private:
-    BaseCollection* collection;
+    BaseCollection* _collection;
 }
 
 private:
@@ -418,9 +418,9 @@ MutableString!0 complete(const(char)[] cmdLine, ref BaseCollection collection, S
     Array!String tokens;
 
     size_t firstToken = 0, lastToken = cmdLine.length;
-    while (firstToken < cmdLine.length && isSeparator(cmdLine[firstToken]))
+    while (firstToken < cmdLine.length && is_separator(cmdLine[firstToken]))
         ++firstToken;
-    while (lastToken > firstToken && !isSeparator(cmdLine[lastToken - 1]))
+    while (lastToken > firstToken && !is_separator(cmdLine[lastToken - 1]))
         --lastToken;
     const(char)[] lastTok = cmdLine[lastToken .. $];
 
@@ -435,7 +435,7 @@ MutableString!0 complete(const(char)[] cmdLine, ref BaseCollection collection, S
                 if (k[].startsWith(lastTok))
                     tokens ~= k;
             }
-            result ~= getCompletionSuffix(lastTok, tokens);
+            result ~= get_completion_suffix(lastTok, tokens);
             if (result[$-1] != ' ')
                 return result;
 
@@ -451,7 +451,7 @@ MutableString!0 complete(const(char)[] cmdLine, ref BaseCollection collection, S
         const(char)[] name;
         for (size_t i = firstToken; i < result.length; ++i)
         {
-            if (isSeparator(result[i]))
+            if (is_separator(result[i]))
             {
                 name = result[firstToken .. i];
                 break;
@@ -480,7 +480,7 @@ MutableString!0 complete(const(char)[] cmdLine, ref BaseCollection collection, S
             if (p.name[].startsWith(lastTok))
                 tokens ~= p.name;
         }
-        result ~= getCompletionSuffix(lastTok, tokens);
+        result ~= get_completion_suffix(lastTok, tokens);
         lastTok = result[lastToken .. $];
         if (lastTok.length > 0)
         {
@@ -498,7 +498,7 @@ MutableString!0 complete(const(char)[] cmdLine, ref BaseCollection collection, S
                     if (p.suggest)
                     {
                         tokens = p.suggest(null);
-                        result ~= getCompletionSuffix(null, tokens);
+                        result ~= get_completion_suffix(null, tokens);
                     }
                     break;
                 }
@@ -515,7 +515,7 @@ MutableString!0 complete(const(char)[] cmdLine, ref BaseCollection collection, S
             if (p.suggest)
             {
                 tokens = p.suggest(lastTok[equals + 1 .. $]);
-                result ~= getCompletionSuffix(lastTok[equals + 1 .. $], tokens);
+                result ~= get_completion_suffix(lastTok[equals + 1 .. $], tokens);
             }
             break;
         }

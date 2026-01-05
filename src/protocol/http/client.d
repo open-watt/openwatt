@@ -35,7 +35,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"http-client";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!HTTPClient, name.move, flags);
         parser = HTTPParser(&dispatch_message);
@@ -97,7 +97,7 @@ nothrow @nogc:
         if (!_stream)
         {
             if (!_host && _remote == InetAddress())
-                return CompletionStatus.Error;
+                return CompletionStatus.error;
 
             const(char)[] stream_name = get_module!StreamModule.streams.generate_name(name);
             if (_host)
@@ -133,7 +133,7 @@ nothrow @nogc:
                     size_t taken;
                     long i = host[colon + 1 .. $].parse_int(&taken);
                     if (i > ushort.max || taken != host.length - colon - 1)
-                        return CompletionStatus.Error; // bad address!
+                        return CompletionStatus.error; // bad address!
                     port = cast(ushort)i;
                 }
 
@@ -141,13 +141,13 @@ nothrow @nogc:
                 {
                     if (port == 0)
                         port = 80;
-                    _stream = get_module!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.Dynamic, NamedArgument("port", port), NamedArgument("remote", host));
+                    _stream = get_module!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.dynamic, NamedArgument("port", port), NamedArgument("remote", host));
                 }
                 else if (protocol.icmp("https") == 0)
                 {
                     if (port == 0)
                         host = tconcat(host, ":443");
-                    _stream = get_module!HTTPModule.tls_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.Dynamic, NamedArgument("remote", host));
+                    _stream = get_module!HTTPModule.tls_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.dynamic, NamedArgument("remote", host));
                 }
             }
             else
@@ -158,20 +158,20 @@ nothrow @nogc:
                     addr._a.ipv6.port = 80;
                 else if (addr.family == AddressFamily.ipv4 && addr._a.ipv4.port == 0)
                     addr._a.ipv4.port = 80;
-                _stream = get_module!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.Dynamic, NamedArgument("remote", addr));
+                _stream = get_module!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.dynamic, NamedArgument("remote", addr));
             }
 
             // we should have created a stream...
             if (!_stream)
             {
                 assert(false, "error strategy... just write log output?");
-                return CompletionStatus.Error;
+                return CompletionStatus.error;
             }
         }
 
         if (_stream.running)
-            return CompletionStatus.Complete;
-        return CompletionStatus.Continue;
+            return CompletionStatus.complete;
+        return CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()
@@ -181,7 +181,7 @@ nothrow @nogc:
             _stream.destroy();
             _stream = null;
         }
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override void update()

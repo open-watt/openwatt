@@ -39,7 +39,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"tesla-twc";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!TeslaInterface, name.move, flags);
     }
@@ -74,10 +74,10 @@ nothrow @nogc:
     override CompletionStatus startup()
     {
         if (!_stream)
-            return CompletionStatus.Error;
+            return CompletionStatus.error;
         if (_stream.running)
-            return CompletionStatus.Complete;
-        return CompletionStatus.Continue;
+            return CompletionStatus.complete;
+        return CompletionStatus.continue_;
     }
 
     override void update()
@@ -129,7 +129,7 @@ nothrow @nogc:
             // let's check if the message looks valid...
             if (msg.length < 13)
                 continue;
-            msg = unescapeMsg(msg);
+            msg = unescape_msg(msg);
             if (!msg)
                 continue;
             ubyte checksum = 0;
@@ -140,15 +140,15 @@ nothrow @nogc:
             msg = msg[0 .. $-1];
 
             // we seem to have a valid packet...
-            incomingPacket(msg, now);
+            incoming_packet(msg, now);
         }
     }
 
     protected override bool transmit(ref const Packet packet) nothrow @nogc
     {
-        if (packet.eth.ether_type != EtherType.OW || packet.eth.ow_sub_type != OW_SubType.TeslaTWC)
+        if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.tesla_twc)
         {
-            ++_status.sendDropped;
+            ++_status.send_dropped;
             return false;
         }
 
@@ -186,17 +186,17 @@ nothrow @nogc:
         if (written != offset)
         {
             debug writeDebug("Failed to write to stream '", _stream.name, "'");
-            ++_status.sendDropped;
+            ++_status.send_dropped;
             return false;
         }
 
         version (DebugTeslaInterface) {
             import urt.io;
-            writef("{4} - {0}: TWC packet sent {1}-->{2} [{3}]\n", name, packet.src, packet.dst, packet.data, packet.creationTime);
+            writef("{4} - {0}: TWC packet sent {1}-->{2} [{3}]\n", name, packet.src, packet.dst, packet.data, packet.creation_time);
         }
 
-        ++_status.sendPackets;
-        _status.sendBytes += packet.data.length;
+        ++_status.send_packets;
+        _status.send_bytes += packet.data.length;
         // TODO: but should we record the ACTUAL protocol packet?
         return true;
     }
@@ -204,28 +204,28 @@ nothrow @nogc:
 private:
     ObjectRef!Stream _stream;
 
-    final void incomingPacket(const(ubyte)[] msg, SysTime recvTime)
+    final void incoming_packet(const(ubyte)[] msg, SysTime recv_time)
     {
         debug assert(running, "Shouldn't receive packets while not running...?");
 
         // we need to extract the sender/receiver addresses...
         TWCMessage message;
-        bool r = msg.parseTWCMessage(message);
+        bool r = msg.parse_twc_message(message);
         if (!r)
             return;
 
         Packet p;
         p.init!Ethernet(msg);
-        p.creationTime = recvTime;
+        p.creation_time = recv_time;
         p.vlan = _pvid;
-        p.eth.ether_type = EtherType.OW;
-        p.eth.ow_sub_type = OW_SubType.TeslaTWC;
+        p.eth.ether_type = EtherType.ow;
+        p.eth.ow_sub_type = OW_SubType.tesla_twc;
 
         auto mod_tesla = get_module!TeslaInterfaceModule();
 
-        DeviceMap* map = mod_tesla.findServerByAddress(message.sender);
+        DeviceMap* map = mod_tesla.find_server_by_address(message.sender);
         if (!map)
-            map = mod_tesla.addDevice(null, this, message.sender);
+            map = mod_tesla.add_device(null, this, message.sender);
         p.eth.src = map.mac;
 
         if (!message.receiver)
@@ -233,7 +233,7 @@ private:
         else
         {
             // find receiver... do we have a global device registry?
-            map = mod_tesla.findServerByAddress(message.receiver);
+            map = mod_tesla.find_server_by_address(message.receiver);
             if (!map)
             {
                 // we haven't seen the other guy, so we can't assign a dst address
@@ -258,7 +258,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCollection("/interface/tesla-twc", twc_interfaces);
+        g_app.console.register_collection("/interface/tesla-twc", twc_interfaces);
     }
 
     override void update()
@@ -266,7 +266,7 @@ nothrow @nogc:
         twc_interfaces.update_all();
     }
 
-    DeviceMap* findServerByName(const(char)[] name)
+    DeviceMap* find_server_by_name(const(char)[] name)
     {
         foreach (ref map; devices.values)
         {
@@ -276,7 +276,7 @@ nothrow @nogc:
         return null;
     }
 
-    DeviceMap* findServerByMac(MACAddress mac)
+    DeviceMap* find_server_by_mac(MACAddress mac)
     {
         foreach (ref map; devices.values)
         {
@@ -286,12 +286,12 @@ nothrow @nogc:
         return null;
     }
 
-    DeviceMap* findServerByAddress(ushort address)
+    DeviceMap* find_server_by_address(ushort address)
     {
         return address in devices;
     }
 
-    DeviceMap* addDevice(const(char)[] name, TeslaInterface iface, ushort address)
+    DeviceMap* add_device(const(char)[] name, TeslaInterface iface, ushort address)
     {
         if (!name)
             name = tformat("{0}.{1,04X}", iface.name[], address);
@@ -299,18 +299,18 @@ nothrow @nogc:
         DeviceMap map;
         map.name = name.makeString(defaultAllocator());
         map.address = address;
-        map.mac = iface.generateMacAddress();
+        map.mac = iface.generate_mac_address();
         map.mac.b[4] = address >> 8;
         map.mac.b[5] = address & 0xFF;
-//        while (findMacAddress(map.mac) !is null)
+//        while (find_mac_address(map.mac) !is null)
 //            ++map.mac.b[5];
         map.iface = iface;
 
-        iface.addAddress(map.mac, iface);
+        iface.add_address(map.mac, iface);
         return devices.insert(address, map);
     }
 
-    DeviceMap* addServer(const(char)[] name, BaseInterface iface, ushort address)
+    DeviceMap* add_server(const(char)[] name, BaseInterface iface, ushort address)
     {
         DeviceMap map;
         map.name = name.makeString(defaultAllocator());
@@ -324,7 +324,7 @@ nothrow @nogc:
 
 private:
 
-ubyte[] unescapeMsg(ubyte[] msg) nothrow @nogc
+ubyte[] unescape_msg(ubyte[] msg) nothrow @nogc
 {
     size_t offset = 0;
     for (size_t i = 0; i < msg.length; i++)

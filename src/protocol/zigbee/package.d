@@ -284,14 +284,14 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCollection("/interface/zigbee", zigbee_interfaces);
-        g_app.console.registerCollection("/protocol/zigbee/node", nodes);
-        g_app.console.registerCollection("/protocol/zigbee/router", routers);
-        g_app.console.registerCollection("/protocol/zigbee/coordinator", coordinators);
-        g_app.console.registerCollection("/protocol/zigbee/endpoint", endpoints);
-        g_app.console.registerCollection("/protocol/zigbee/controller", controllers);
+        g_app.console.register_collection("/interface/zigbee", zigbee_interfaces);
+        g_app.console.register_collection("/protocol/zigbee/node", nodes);
+        g_app.console.register_collection("/protocol/zigbee/router", routers);
+        g_app.console.register_collection("/protocol/zigbee/coordinator", coordinators);
+        g_app.console.register_collection("/protocol/zigbee/endpoint", endpoints);
+        g_app.console.register_collection("/protocol/zigbee/controller", controllers);
 
-        g_app.console.registerCommand!scan("/protocol/zigbee", this);
+        g_app.console.register_command!scan("/protocol/zigbee", this);
     }
 
     override void update()
@@ -401,7 +401,7 @@ nothrow @nogc:
         EZSPClient c = get_module!EZSPProtocolModule.clients.get(ezsp_client);
         if (!c)
         {
-            session.writeLine("EZSP client does not exist: ", ezsp_client);
+            session.write_line("EZSP client does not exist: ", ezsp_client);
             return null;
         }
 
@@ -417,7 +417,7 @@ class RequestState : FunctionCommandState
 {
 nothrow @nogc:
 
-    CommandCompletionState state = CommandCompletionState.InProgress;
+    CommandCompletionState state = CommandCompletionState.in_progress;
 
     EZSPClient client;
     bool finished = false;
@@ -433,15 +433,15 @@ nothrow @nogc:
 
     override CommandCompletionState update()
     {
-        if (state == CommandCompletionState.CancelRequested)
+        if (state == CommandCompletionState.cancel_requested)
         {
             client.send_command!EZSP_StopScan(&stop_scan);
-            state = CommandCompletionState.CancelPending;
+            state = CommandCompletionState.cancel_pending;
         }
         else if (getTime() - start_time > 5.seconds)
         {
-            session.writeLine("Zigbee scan timed out");
-            state = CommandCompletionState.Timeout;
+            session.write_line("Zigbee scan timed out");
+            state = CommandCompletionState.timeout;
         }
 
         return state;
@@ -451,11 +451,11 @@ nothrow @nogc:
     {
         if (state != sl_status.OK)
         {
-            session.writeLine("Zigbee scan failed: ", state);
-            this.state = CommandCompletionState.Error;
+            session.write_line("Zigbee scan failed: ", state);
+            this.state = CommandCompletionState.error;
         }
         else
-            session.writeLine("Zigbee scan started");
+            session.write_line("Zigbee scan started");
     }
 
     void stop_scan(EmberStatus status)
@@ -464,7 +464,7 @@ nothrow @nogc:
         assert(false, "TODO: test this!");
 
         // flag as finished, but maybe we should flag an error state to emit a message or something?
-        state = CommandCompletionState.Cancelled;
+        state = CommandCompletionState.cancelled;
     }
 
     void message_handler(ubyte sequence, ushort command, const(ubyte)[] message) nothrow @nogc
@@ -489,13 +489,13 @@ nothrow @nogc:
                     return;
                 if (r.status == EmberStatus.SUCCESS)
                 {
-                    session.writeLine("Zigbee scan complete");
-                    state = CommandCompletionState.Finished;
+                    session.write_line("Zigbee scan complete");
+                    state = CommandCompletionState.finished;
                 }
                 else
                 {
-                    session.writeLine("Zigbee scan failed at channel: ", r.channel);
-                    state = CommandCompletionState.Error;
+                    session.write_line("Zigbee scan failed at channel: ", r.channel);
+                    state = CommandCompletionState.error;
                 }
                 break;
             default:

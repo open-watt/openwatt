@@ -42,10 +42,10 @@ nothrow @nogc:
 
         manager = defaultAllocator.allocT!EnergyManager();
 
-        g_app.console.registerCommand!circuit_add("/apps/energy/circuit", this, "add");
-        g_app.console.registerCommand!circuit_print("/apps/energy/circuit", this, "print");
+        g_app.console.register_command!circuit_add("/apps/energy/circuit", this, "add");
+        g_app.console.register_command!circuit_print("/apps/energy/circuit", this, "print");
 
-        g_app.console.registerCommand!appliance_add("/apps/energy/appliance", this, "add");
+        g_app.console.register_command!appliance_add("/apps/energy/appliance", this, "add");
     }
 
     void registerApplianceType(ApplianceType)()
@@ -72,7 +72,7 @@ nothrow @nogc:
             p = manager.findCircuit(parent.value);
             if (!p)
             {
-                session.writeLine("Circuit '", parent.value, "' not found");
+                session.write_line("Circuit '", parent.value, "' not found");
                 return;
             }
         }
@@ -96,7 +96,7 @@ nothrow @nogc:
                 type = infoEl.value.asString();
             if (!type)
             {
-                session.writeLine("No appliance type for '", id, "'");
+                session.write_line("No appliance type for '", id, "'");
                 return;
             }
         }
@@ -104,7 +104,7 @@ nothrow @nogc:
         Appliance appliance = createAppliance(type, id.makeString(g_app.allocator), manager);
         if (!appliance)
         {
-            session.writeLine("Couldn't create appliance of type '", type, "'");
+            session.write_line("Couldn't create appliance of type '", type, "'");
             return;
         }
 
@@ -179,7 +179,7 @@ nothrow @nogc:
             Circuit** t = circuit.value in manager.circuits;
             if (!t)
             {
-                session.writeLine("Circuit '", circuit.value, "' not found");
+                session.write_line("Circuit '", circuit.value, "' not found");
                 return;
             }
             c = *t;

@@ -17,43 +17,43 @@ public import urt.variant;
 enum Type : ubyte
 {
     // primary
-    Str = 0,
-    Num,
-    Var,
-    Arr,
+    str = 0,
+    num,
+    var,
+    arr,
 
     // lists
-    CmdList,
+    cmd_list,
 
     // unary
-    Neg,
-    Not,
+    neg,
+    not,
 
     // postfix
-    Idx,
+    idx,
 
     // binary
-    Or,
-    And,
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Cat,
-    Add,
-    Sub,
-    Mul,
-    Div,
-    Mod,
+    or,
+    and,
+    eq,
+    ne,
+    lt,
+    le,
+    cat,
+    add,
+    sub,
+    mul,
+    div,
+    mod,
 }
 
 enum Flags : ubyte
 {
-    Identifier = 1 << 0,
-    InterpolatedString = 1 << 1,
-    CommandEval = 1 << 2,
-    Constant = 1 << 3,
-    NoQuotes = 1 << 4,
+    identifier = 1 << 0,
+    interpolated_string = 1 << 1,
+    command_eval = 1 << 2,
+    constant = 1 << 3,
+    no_quotes = 1 << 4,
 }
 
 struct NamedArgument
@@ -100,8 +100,8 @@ nothrow @nogc:
         vars ~= Variant(script[0].command);
         foreach (ref arg; script[0].args)
             vars ~= arg.evaluate();
-        foreach (ref arg; script[0].namedArgs)
-            namedVars ~= NamedArgument(arg.name.getStr(), arg.value.evaluate());
+        foreach (ref arg; script[0].named_args)
+            namedVars ~= NamedArgument(arg.name.get_str(), arg.value.evaluate());
         return scope_.execute(session, vars[], namedVars[]);
     }
 }
@@ -110,7 +110,7 @@ struct ScriptCommand
 {
     const(char)[] command;
     Array!(Expression*) args;
-    Array!Argument namedArgs;
+    Array!Argument named_args;
 
 private:
     struct Argument
@@ -131,13 +131,13 @@ nothrow @nogc:
 
     this(bool b)
     {
-        ty = Type.Num;
+        ty = Type.num;
         f = b ? 1 : 0;
     }
 
     this(S : MutableString!0)(auto ref S s)
     {
-        ty = Type.Str;
+        ty = Type.str;
         flags = 0; // TODO: we might need to scan for variable references...
         new(str) typeof(str)(forward!s);
     }
@@ -145,16 +145,16 @@ nothrow @nogc:
     ~this()
     {
         // strings with pointer and zero length are actually a `String` and that needs to be destroyed
-        if (isString())
+        if (is_string())
             str.destroy!false();
-        else if (ty == Type.Arr)
+        else if (ty == Type.arr)
             arr.destroy!false();
-        else if (ty == Type.CmdList)
+        else if (ty == Type.cmd_list)
             cmds.destroy!false();
-        else if (ty >= Type.Neg)
+        else if (ty >= Type.neg)
         {
             left.freeExpression();
-            if (ty >= Type.Idx)
+            if (ty >= Type.idx)
                 right.freeExpression();
         }
     }
@@ -173,35 +173,35 @@ nothrow @nogc:
     void opAssign(S : String)(auto ref S s)
     {
         this.destroy!false();
-        ty = Type.Str;
+        ty = Type.str;
         flags = 0; // TODO: we might need to scan for variable references...
         new(str) typeof(str)(forward!s);
         s.length = 0;
     }
 
-    bool isString() const
-        => (ty == Type.Str || ty == Type.Var) && s.length == 0 && s.ptr !is null;
+    bool is_string() const
+        => (ty == Type.str || ty == Type.var) && s.length == 0 && s.ptr !is null;
 
-    bool asBool() const
+    bool as_bool() const
     {
         switch (ty)
         {
-            case Type.Num: return f != 0;
-            case Type.Str: return getStr().length != 0;
+            case Type.num: return f != 0;
+            case Type.str: return get_str().length != 0;
             default:
                 // this is just for getting constants; we don't do expression evaluation here...
                 assert(false);
         }
     }
 
-    double asNum() const
+    double as_num() const
     {
         switch (ty)
         {
-            case Type.Num: return f;
-            case Type.Str:
+            case Type.num: return f;
+            case Type.str:
                 size_t taken;
-                double d = getStr().parse_float(&taken);
+                double d = get_str().parse_float(&taken);
                 if (taken != s.length)
                     return 0;
                 return d;
@@ -211,16 +211,16 @@ nothrow @nogc:
         }
     }
 
-    const(char)[] getStr() const
+    const(char)[] get_str() const
     {
-        if (ty == Type.Str || ty == Type.Var)
+        if (ty == Type.str || ty == Type.var)
             return (s.length == 0 && s.ptr !is null) ? str[] : s;
         assert(false);
     }
 
     Variant evaluate() const
     {
-        static bool asBool(Variant v)
+        static bool as_bool(Variant v)
         {
             if (v.isBool)
                 return v.asBool;
@@ -235,7 +235,7 @@ nothrow @nogc:
             assert(false, "TODO: what is this? should it convert to a boolean?");
         }
 
-        static double asNumber(Variant v)
+        static double as_number(Variant v)
         {
             if (v.isNumber)
                 return v.asDouble;
@@ -252,56 +252,56 @@ nothrow @nogc:
 
         final switch (ty)
         {
-            case Type.Num:
+            case Type.num:
                 return Variant(f);
-            case Type.Str:
-                return Variant(getStr());
-            case Type.Var:
+            case Type.str:
+                return Variant(get_str());
+            case Type.var:
                 assert(false, "TODO: lookup variable...");
-            case Type.Arr:
+            case Type.arr:
                 Variant r;
                 ref Array!Variant va = r.asArray();
                 foreach (e; arr)
                     va ~= e.evaluate();
                 return r.move;
-            case Type.CmdList:
+            case Type.cmd_list:
                 assert(false, "TODO: how do we shuttle this value into commands? in a variant? some other way?");
-            case Type.Neg:
-                return Variant(-asNumber(left.evaluate()));
-            case Type.Not:
-                return Variant(!asBool(left.evaluate()));
-            case Type.Idx:
+            case Type.neg:
+                return Variant(-as_number(left.evaluate()));
+            case Type.not:
+                return Variant(!as_bool(left.evaluate()));
+            case Type.idx:
                 assert(false, "TODO: index operator (array/map lookup)");
-            case Type.Cat:
+            case Type.cat:
                 Variant l = left.evaluate();
                 Variant r = right.evaluate();
                 const(char)[] s = tconcat(l, r); // TODO: tconcat has a max str length...
                 return Variant(s);
-            case Type.Or:
-            case Type.And:
+            case Type.or:
+            case Type.and:
                 bool l = left.evaluate().asBool();
                 bool r = right.evaluate().asBool();
-                return Variant(ty == Type.Or ? l || r : l && r);
-            case Type.Eq:
-            case Type.Ne:
+                return Variant(ty == Type.or ? l || r : l && r);
+            case Type.eq:
+            case Type.ne:
                 assert(false, "TODO: equality operators");
-            case Type.Lt:
-            case Type.Le:
+            case Type.lt:
+            case Type.le:
                 assert(false, "TODO: comparison operators");
-            case Type.Add:
-            case Type.Sub:
-            case Type.Mul:
-            case Type.Div:
-            case Type.Mod:
-                double l = asNumber(left.evaluate());
-                double r = asNumber(right.evaluate());
+            case Type.add:
+            case Type.sub:
+            case Type.mul:
+            case Type.div:
+            case Type.mod:
+                double l = as_number(left.evaluate());
+                double r = as_number(right.evaluate());
                 switch (ty)
                 {
-                    case Type.Add: return Variant(l + r);
-                    case Type.Sub: return Variant(l - r);
-                    case Type.Mul: return Variant(l * r);
-                    case Type.Div: return Variant(l / r);
-                    case Type.Mod: return Variant(l % r);
+                    case Type.add: return Variant(l + r);
+                    case Type.sub: return Variant(l - r);
+                    case Type.mul: return Variant(l * r);
+                    case Type.div: return Variant(l / r);
+                    case Type.mod: return Variant(l % r);
                     default: assert(false);
                 }
         }
@@ -345,7 +345,7 @@ noreturn syntaxError(Args...)(auto ref Args args)
     throw tempAllocator().allocT!SyntaxError(tconcat(forward!args));
 }
 
-void skipWhitespace(ref const(char)[] text) nothrow
+void skip_whitespace(ref const(char)[] text) nothrow
 {
     while (text.length > 0)
     {
@@ -361,7 +361,7 @@ void skipWhitespace(ref const(char)[] text) nothrow
     }
 }
 
-void skipWhitespaceAndNewlines(ref const(char)[] text) nothrow
+void skip_whitespace_and_newlines(ref const(char)[] text) nothrow
 {
     while (text.length > 0)
     {
@@ -401,7 +401,7 @@ void expect(ref const(char)[] text, char expected)
         syntaxError("Expected '", expected, "'");
 }
 
-Expression* allocExpression(Args...)(auto ref Args args) nothrow
+Expression* alloc_expression(Args...)(auto ref Args args) nothrow
     => defaultAllocator().allocT!Expression(forward!args);
 
 void freeExpression(Expression* exp) nothrow
@@ -410,7 +410,7 @@ void freeExpression(Expression* exp) nothrow
 }
 
 
-Array!ScriptCommand parseCommands(ref const(char)[] text)
+Array!ScriptCommand parse_commands(ref const(char)[] text)
 {
     version (ExpressionDebug)
         writeDebug("PARSE: ", text);
@@ -418,11 +418,11 @@ Array!ScriptCommand parseCommands(ref const(char)[] text)
     Array!ScriptCommand commands;
     while (text.length > 0)
     {
-        skipWhitespaceAndNewlines(text);
+        skip_whitespace_and_newlines(text);
         if (text.length == 0 || text[0] == ']' || text[0] == '}')
             break;
-        commands ~= parseCommand(text);
-        skipWhitespace(text);
+        commands ~= parse_command(text);
+        skip_whitespace(text);
         if (text.length > 0)
         {
             if (text[0] == ';' ||  text[0].is_newline)
@@ -440,25 +440,25 @@ Array!ScriptCommand parseCommands(ref const(char)[] text)
     return commands;
 }
 
-ScriptCommand parseCommand(ref const(char)[] text)
+ScriptCommand parse_command(ref const(char)[] text)
 {
-    Expression* e = parsePrimaryExp(text);
+    Expression* e = parse_primary_exp(text);
 
-    if (e.ty != Type.Str || !(e.flags & Flags.Identifier))
+    if (e.ty != Type.str || !(e.flags & Flags.identifier))
         syntaxError("Invalid command");
 
     ScriptCommand c;
-    c.command = e.getStr();
+    c.command = e.get_str();
 
     while (text.length > 0)
     {
-        skipWhitespace(text);
+        skip_whitespace(text);
         if (text.length == 0 || text[0].is_newline || text[0] == ';' || text[0] == '}' || text[0] == ']')
             break;
 
-        ScriptCommand.Argument a = parseArgument(text);
+        ScriptCommand.Argument a = parse_argument(text);
         if (a.name)
-            c.namedArgs ~= a;
+            c.named_args ~= a;
         else
             c.args ~= a.value;
     }
@@ -466,16 +466,16 @@ ScriptCommand parseCommand(ref const(char)[] text)
     return c;
 }
 
-ScriptCommand.Argument parseArgument(ref const(char)[] text)
+ScriptCommand.Argument parse_argument(ref const(char)[] text)
 {
     ScriptCommand.Argument a;
-    Expression* arg = parsePrimaryExp(text);
+    Expression* arg = parse_primary_exp(text);
     if (text.length > 0 && text[0] == '=')
     {
-        if (arg.ty != Type.Str || !(arg.flags & Flags.Identifier))
+        if (arg.ty != Type.str || !(arg.flags & Flags.identifier))
             syntaxError("Expected identifier left of '='");
         text = text[1 .. $];
-        a.value = parsePrimaryExp(text);
+        a.value = parse_primary_exp(text);
         a.name = arg;
     }
     else
@@ -483,169 +483,169 @@ ScriptCommand.Argument parseArgument(ref const(char)[] text)
     return a;
 }
 
-alias parseExpression = parseLogicalOrExp;
+alias parseExpression = parse_logical_or_exp;
 
-Expression* parseLogicalOrExp(ref const(char)[] text)
+Expression* parse_logical_or_exp(ref const(char)[] text)
 {
-    Expression* left = parseLogicalAndExp(text);
+    Expression* left = parse_logical_and_exp(text);
     scope(failure) freeExpression(left);
-    skipWhitespace(text);
+    skip_whitespace(text);
     while (text.match("||"))
     {
         version (ExpressionDebug)
             writeDebug("OR");
-        skipWhitespace(text);
-        Expression* right = parseLogicalAndExp(text);
-        left = tryFold(Type.Or, left, right);
-        skipWhitespace(text);
+        skip_whitespace(text);
+        Expression* right = parse_logical_and_exp(text);
+        left = try_fold(Type.or, left, right);
+        skip_whitespace(text);
     }
     return left;
 }
 
-Expression* parseLogicalAndExp(ref const(char)[] text)
+Expression* parse_logical_and_exp(ref const(char)[] text)
 {
-    Expression* left = parseEqualityExp(text);
+    Expression* left = parse_equality_exp(text);
     scope(failure) freeExpression(left);
-    skipWhitespace(text);
+    skip_whitespace(text);
     while (text.match("&&"))
     {
         version (ExpressionDebug)
             writeDebug("AND");
-        skipWhitespace(text);
-        Expression* right = parseEqualityExp(text);
-        left = tryFold(Type.And, left, right);
-        skipWhitespace(text);
+        skip_whitespace(text);
+        Expression* right = parse_equality_exp(text);
+        left = try_fold(Type.and, left, right);
+        skip_whitespace(text);
     }
     return left;
 }
 
-Expression* parseEqualityExp(ref const(char)[] text)
+Expression* parse_equality_exp(ref const(char)[] text)
 {
-    Expression* left = parseRelationalExp(text);
+    Expression* left = parse_relational_exp(text);
     scope(failure) freeExpression(left);
-    skipWhitespace(text);
+    skip_whitespace(text);
     while (text.match("==") || text.match("!="))
     {
         version (ExpressionDebug)
             writeDebug("EQ");
-        Type ty = text.ptr[-1] == '=' ? Type.Eq : Type.Ne;
-        skipWhitespace(text);
-        Expression* right = parseRelationalExp(text);
-        left = tryFold(ty, left, right);
-        skipWhitespace(text);
+        Type ty = text.ptr[-1] == '=' ? Type.eq : Type.ne;
+        skip_whitespace(text);
+        Expression* right = parse_relational_exp(text);
+        left = try_fold(ty, left, right);
+        skip_whitespace(text);
     }
     return left;
 }
 
-Expression* parseRelationalExp(ref const(char)[] text)
+Expression* parse_relational_exp(ref const(char)[] text)
 {
-    Expression* left = parseConcatExp(text);
+    Expression* left = parse_concat_exp(text);
     scope(failure) freeExpression(left);
-    skipWhitespace(text);
+    skip_whitespace(text);
     while (text.match('<') || text.match("<=") || text.match('>') || text.match(">="))
     {
         version (ExpressionDebug)
             writeDebug("REL");
-        Type ty = text.ptr[-1] == '=' ? Type.Le : Type.Lt;
+        Type ty = text.ptr[-1] == '=' ? Type.le : Type.lt;
         bool swap = text.ptr[text.ptr[-1] == '=' ? -2 : -1] == '>';
-        skipWhitespace(text);
-        Expression* right = parseConcatExp(text);
-        left = tryFold(ty, swap ? right : left, swap ? left : right);
-        skipWhitespace(text);
+        skip_whitespace(text);
+        Expression* right = parse_concat_exp(text);
+        left = try_fold(ty, swap ? right : left, swap ? left : right);
+        skip_whitespace(text);
     }
     return left;
 }
 
-Expression* parseConcatExp(ref const(char)[] text)
+Expression* parse_concat_exp(ref const(char)[] text)
 {
-    Expression* left = parseAdditiveExp(text);
+    Expression* left = parse_additive_exp(text);
     scope(failure) freeExpression(left);
-    skipWhitespace(text);
+    skip_whitespace(text);
     while (text.match(".."))
     {
         version (ExpressionDebug)
             writeDebug("CAT");
-        skipWhitespace(text);
-        Expression* right = parseAdditiveExp(text);
-        left = tryFold(Type.Cat, left, right);
-        skipWhitespace(text);
+        skip_whitespace(text);
+        Expression* right = parse_additive_exp(text);
+        left = try_fold(Type.cat, left, right);
+        skip_whitespace(text);
     }
     return left;
 }
 
-Expression* parseAdditiveExp(ref const(char)[] text)
+Expression* parse_additive_exp(ref const(char)[] text)
 {
-    Expression* left = parseMultiplicativeExp(text);
+    Expression* left = parse_multiplicative_exp(text);
     scope(failure) freeExpression(left);
-    skipWhitespace(text);
+    skip_whitespace(text);
     while (text.match('+') || text.match('-'))
     {
         version (ExpressionDebug)
             writeDebug("ADD");
-        Type ty = text.ptr[-1] == '+' ? Type.Add : Type.Sub;
-        skipWhitespace(text);
-        Expression* right = parseMultiplicativeExp(text);
-        left = tryFold(ty, left, right);
-        skipWhitespace(text);
+        Type ty = text.ptr[-1] == '+' ? Type.add : Type.sub;
+        skip_whitespace(text);
+        Expression* right = parse_multiplicative_exp(text);
+        left = try_fold(ty, left, right);
+        skip_whitespace(text);
     }
     return left;
 }
 
-Expression* parseMultiplicativeExp(ref const(char)[] text)
+Expression* parse_multiplicative_exp(ref const(char)[] text)
 {
-    Expression* left = parseUnaryExp(text);
+    Expression* left = parse_unary_exp(text);
     scope(failure) freeExpression(left);
-    skipWhitespace(text);
+    skip_whitespace(text);
     while (text.match('*') || text.match('/') || text.match('%'))
     {
         version (ExpressionDebug)
             writeDebug("MUL");
-        Type ty = text.ptr[-1] == '*' ? Type.Mul : text.ptr[-1] == '/' ? Type.Div : Type.Mod;
-        skipWhitespace(text);
-        Expression* right = parseUnaryExp(text);
-        left = tryFold(ty, left, right);
-        skipWhitespace(text);
+        Type ty = text.ptr[-1] == '*' ? Type.mul : text.ptr[-1] == '/' ? Type.div : Type.mod;
+        skip_whitespace(text);
+        Expression* right = parse_unary_exp(text);
+        left = try_fold(ty, left, right);
+        skip_whitespace(text);
     }
     return left;
 }
 
-Expression* parseUnaryExp(ref const(char)[] text)
+Expression* parse_unary_exp(ref const(char)[] text)
 {
     if (text.match('-') || text.match('!') || text.match('+'))
     {
         version (ExpressionDebug)
             writeDebug("UNARY");
         char op = text.ptr[-1];
-        Expression* expr = parseUnaryExp(text);
+        Expression* expr = parse_unary_exp(text);
         if (op == '+')
             return expr;
-        Type ty = op ? Type.Neg : Type.Not;
-        return tryFold(ty, expr, null);
+        Type ty = op ? Type.neg : Type.not;
+        return try_fold(ty, expr, null);
     }
-    return parsePostfixExp(text);
+    return parse_postfix_exp(text);
 }
 
-Expression* parsePostfixExp(ref const(char)[] text)
+Expression* parse_postfix_exp(ref const(char)[] text)
 {
-    Expression* left = parsePrimaryExp(text);
+    Expression* left = parse_primary_exp(text);
     scope(failure) freeExpression(left);
     while (text.match('['))
     {
         version (ExpressionDebug)
             writeDebug("IDX [");
-        skipWhitespace(text);
+        skip_whitespace(text);
         Expression* expr = parseExpression(text);
         scope(failure) freeExpression(expr);
-        skipWhitespace(text);
+        skip_whitespace(text);
         text.expect(']');
         version (ExpressionDebug)
             writeDebug("IDX ]");
-        left = tryFold(Type.Idx, left, expr);
+        left = try_fold(Type.idx, left, expr);
     }
     return left;
 }
 
-Expression* parsePrimaryExp(ref const(char)[] text)
+Expression* parse_primary_exp(ref const(char)[] text)
 {
     if (text.length == 0)
         syntaxError("Expected expression");
@@ -655,10 +655,10 @@ Expression* parsePrimaryExp(ref const(char)[] text)
     {
         version (ExpressionDebug)
             writeDebug("PAREN (");
-        skipWhitespace(text);
+        skip_whitespace(text);
         Expression* expr = parseExpression(text);
         scope(failure) freeExpression(expr);
-        skipWhitespace(text);
+        skip_whitespace(text);
         text.expect(')');
         version (ExpressionDebug)
             writeDebug("PAREN )");
@@ -669,15 +669,15 @@ Expression* parsePrimaryExp(ref const(char)[] text)
     if (text.match('[') || text.match('{'))
     {
         bool eval = text.ptr[-1] == '[';
-        Array!ScriptCommand commands = parseCommands(text);
+        Array!ScriptCommand commands = parse_commands(text);
         if (eval)
             text.expect(']');
         else
             text.expect('}');
-        Expression* cmds = allocExpression(Type.CmdList);
+        Expression* cmds = alloc_expression(Type.cmd_list);
         commands.moveEmplace(cmds.cmds);
         if (eval)
-            cmds.flags |= Flags.CommandEval;
+            cmds.flags |= Flags.command_eval;
         return cmds;
     }
 
@@ -707,15 +707,15 @@ Expression* parsePrimaryExp(ref const(char)[] text)
 
         Expression* r;
         if (copy)
-            r = allocExpression(copy.move);
+            r = alloc_expression(copy.move);
         else
         {
-            r = allocExpression(Type.Str);
+            r = alloc_expression(Type.str);
             r.s = text[0 .. len];
         }
-        r.flags = Flags.Constant;
+        r.flags = Flags.constant;
         if (interpolated)
-            r.flags |= Flags.InterpolatedString;
+            r.flags |= Flags.interpolated_string;
 
         text = text[len + 1 .. $];
         return r;
@@ -793,8 +793,8 @@ Expression* parsePrimaryExp(ref const(char)[] text)
                 syntaxError("Expected number");
             else
                 text = text[taken .. $];
-            r = allocExpression(Type.Num);
-            r.flags = Flags.Constant;
+            r = alloc_expression(Type.num);
+            r.flags = Flags.constant;
             r.f = f;
 
             version (ExpressionDebug)
@@ -804,10 +804,10 @@ Expression* parsePrimaryExp(ref const(char)[] text)
         {
             if (isVar && !identifier && !numeric)
                 syntaxError("Expected identifier");
-            r = allocExpression(isVar ? Type.Var : Type.Str);
-            r.flags = Flags.NoQuotes;
+            r = alloc_expression(isVar ? Type.var : Type.str);
+            r.flags = Flags.no_quotes;
             if (identifier)
-                r.flags |= Flags.Identifier;
+                r.flags |= Flags.identifier;
             r.s = text[0 .. len];
             text = text[len .. $];
 
@@ -828,7 +828,7 @@ Expression* parsePrimaryExp(ref const(char)[] text)
     if (arr.length > 0)
     {
         arr ~= r;
-        r = allocExpression(Type.Arr);
+        r = alloc_expression(Type.arr);
         arr.moveEmplace(r.arr);
     }
 
@@ -836,7 +836,7 @@ Expression* parsePrimaryExp(ref const(char)[] text)
 }
 
 
-Expression* tryFold(Type ty, Expression* l, Expression* r)
+Expression* try_fold(Type ty, Expression* l, Expression* r)
 {
     Expression* exp = fold(ty, l, r);
     if (exp)
@@ -847,7 +847,7 @@ Expression* tryFold(Type ty, Expression* l, Expression* r)
     }
     else
     {
-        exp = allocExpression(ty);
+        exp = alloc_expression(ty);
         exp.left = l;
         exp.right = r;
     }
@@ -859,7 +859,7 @@ Expression* fold(Type ty, Expression* l, Expression* r)
     // attempt constant folding...
 
     // can only fold if both sides are constant...
-    if (l.ty >= Type.Var || (ty >= Type.Idx && r.ty >= Type.Var))
+    if (l.ty >= Type.var || (ty >= Type.idx && r.ty >= Type.var))
         return null;
 
     // result will overwrite and return `l`
@@ -867,75 +867,75 @@ Expression* fold(Type ty, Expression* l, Expression* r)
 
     switch (ty)
     {
-        case Type.Not:
-            bool lb = l.asBool;
-            *l = Expression(Type.Num);
+        case Type.not:
+            bool lb = l.as_bool;
+            *l = Expression(Type.num);
             l.f = !lb;
             return l;
 
-        case Type.Neg:
-            double lf = l.asNum;
-            *l = Expression(Type.Num);
+        case Type.neg:
+            double lf = l.as_num;
+            *l = Expression(Type.num);
             l.f = -lf;
             return l;
 
-        case Type.Cat:
+        case Type.cat:
             MutableString!0 s;
-            if (l.ty == Type.Str)
-                s = l.getStr;
+            if (l.ty == Type.str)
+                s = l.get_str;
             else
-                s ~= l.asNum;
-            if (r.ty == Type.Str)
-                s ~= r.getStr;
+                s ~= l.as_num;
+            if (r.ty == Type.str)
+                s ~= r.get_str;
             else
-                s ~= r.asNum;
+                s ~= r.as_num;
             *l = Expression(s.move);
             return l;
 
-        case Type.Or:
-        case Type.And:
-            bool ltrue = l.asBool;
-            bool rtrue = r.asBool;
-            *l = Expression(Type.Num);
-            l.f = ty == Type.Or ? ltrue || rtrue : ltrue && rtrue;
+        case Type.or:
+        case Type.and:
+            bool ltrue = l.as_bool;
+            bool rtrue = r.as_bool;
+            *l = Expression(Type.num);
+            l.f = ty == Type.or ? ltrue || rtrue : ltrue && rtrue;
             return l;
 
-        case Type.Eq:
-        case Type.Ne:
-        case Type.Lt:
-        case Type.Le:
-            if (l.ty == Type.Str && r.ty == Type.Str)
+        case Type.eq:
+        case Type.ne:
+        case Type.lt:
+        case Type.le:
+            if (l.ty == Type.str && r.ty == Type.str)
             {
                 // string comparison
-                ptrdiff_t t = l.getStr().cmp(r.getStr());
-                *l = Expression(Type.Num);
-                l.f = ty == Type.Eq ? t == 0 :
-                      ty == Type.Ne ? t != 0 :
-                      ty == Type.Lt ? t < 0 :
+                ptrdiff_t t = l.get_str().cmp(r.get_str());
+                *l = Expression(Type.num);
+                l.f = ty == Type.eq ? t == 0 :
+                      ty == Type.ne ? t != 0 :
+                      ty == Type.lt ? t < 0 :
                                       t <= 0;
                 return l;
             }
             goto case;
 
-        case Type.Add:
-        case Type.Sub:
-        case Type.Mul:
-        case Type.Div:
-        case Type.Mod:
-            double lf = l.asNum;
-            double rf = r.asNum;
-            *l = Expression(Type.Num);
+        case Type.add:
+        case Type.sub:
+        case Type.mul:
+        case Type.div:
+        case Type.mod:
+            double lf = l.as_num;
+            double rf = r.as_num;
+            *l = Expression(Type.num);
             switch (ty)
             {
-                case Type.Eq: l.f = lf == rf; break;
-                case Type.Ne: l.f = lf != rf; break;
-                case Type.Lt: l.f = lf < rf; break;
-                case Type.Le: l.f = lf <= rf; break;
-                case Type.Add: l.f = lf + rf; break;
-                case Type.Sub: l.f = lf - rf; break;
-                case Type.Mul: l.f = lf * rf; break;
-                case Type.Div: l.f = lf / rf; break;
-                case Type.Mod: l.f = lf % rf; break;
+                case Type.eq: l.f = lf == rf; break;
+                case Type.ne: l.f = lf != rf; break;
+                case Type.lt: l.f = lf < rf; break;
+                case Type.le: l.f = lf <= rf; break;
+                case Type.add: l.f = lf + rf; break;
+                case Type.sub: l.f = lf - rf; break;
+                case Type.mul: l.f = lf * rf; break;
+                case Type.div: l.f = lf / rf; break;
+                case Type.mod: l.f = lf % rf; break;
                 default: assert(0); // unreachable
             }
             return l;

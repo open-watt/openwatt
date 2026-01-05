@@ -19,15 +19,15 @@ import urt.variant;
 
 enum CommandCompletionState : ubyte
 {
-    InProgress,         ///< Command is still in progress
-    CancelRequested,    ///< A cancel has been requested
-    CancelPending,      ///< Waiting for cancellation to complete
+    in_progress,        ///< Command is still in progress
+    cancel_requested,   ///< A cancel has been requested
+    cancel_pending,     ///< Waiting for cancellation to complete
 
     // These are finishing states, command will stop
-    Finished,           ///< Command execution has finished
-    Cancelled,          ///< Command was aborted for some reason
-    Error,              ///< Command was aborted for some reason
-    Timeout,            ///< Command was aborted for some reason
+    finished,           ///< Command execution has finished
+    cancelled,          ///< Command was aborted for some reason
+    error,              ///< Command was aborted for some reason
+    timeout,            ///< Command was aborted for some reason
 }
 
 class CommandState
@@ -45,7 +45,7 @@ nothrow @nogc:
 
     CommandCompletionState update()
     {
-        return CommandCompletionState.Finished;
+        return CommandCompletionState.finished;
     }
 }
 
@@ -57,12 +57,12 @@ nothrow @nogc:
 
     this(ref Console console, String name) nothrow @nogc
     {
-        m_console = &console;
+        _console = &console;
         this.name = name.move;
     }
 
-    final Application app() pure nothrow @nogc => m_console.appInstance;
-    final ref Console console() pure nothrow @nogc => *m_console;
+    final Application app() pure nothrow @nogc => _console.appInstance;
+    final ref Console console() pure nothrow @nogc => *_console;
 
     abstract CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs);
 
@@ -77,9 +77,9 @@ nothrow @nogc:
             if (tokens.empty)
                 return result;
             size_t lastToken = cmdLine.length;
-            while (lastToken > 0 && !isSeparator(cmdLine[lastToken - 1]))
+            while (lastToken > 0 && !is_separator(cmdLine[lastToken - 1]))
                 --lastToken;
-            result ~= getCompletionSuffix(cmdLine[lastToken .. cmdLine.length], tokens);
+            result ~= get_completion_suffix(cmdLine[lastToken .. cmdLine.length], tokens);
             return result;
         }
     }
@@ -104,17 +104,17 @@ nothrow @nogc:
 
 
 package:
-    final NoGCAllocator allocator() => m_console.m_allocator;
-    final NoGCAllocator tempAllocator() => m_console.m_tempAllocator;
+    final NoGCAllocator allocator() => _console._allocator;
+    final NoGCAllocator tempAllocator() => _console._tempAllocator;
 
-    Console* m_console;
-    Scope parent = null;
+    Console* _console;
+    Scope _parent = null;
 }
 
 
 nothrow @nogc:
 
-bool isValidIdentifier(const(char)[] s) pure
+bool is_valid_identifier(const(char)[] s) pure
 {
     if (s.length == 0)
         return false;
@@ -129,7 +129,7 @@ bool isValidIdentifier(const(char)[] s) pure
     return true;
 }
 
-inout(char)[] takeIdentifier(ref inout(char)[] s) pure
+inout(char)[] take_identifier(ref inout(char)[] s) pure
 {
     if (s.length == 0)
         return s[0..0];
@@ -146,7 +146,7 @@ inout(char)[] takeIdentifier(ref inout(char)[] s) pure
     return r;
 }
 
-inout(char)[] trimCmdLine(inout(char)[] s) pure
+inout(char)[] trim_cmd_line(inout(char)[] s) pure
 {
     while(s.length > 0)
     {
@@ -160,12 +160,12 @@ inout(char)[] trimCmdLine(inout(char)[] s) pure
     return s;
 }
 
-bool frontIs(const(char)[] s, char c) pure
+bool front_is(const(char)[] s, char c) pure
 {
     return s.length > 0 && s[0] == c;
 }
 
-bool frontIs(const(char)[] s, const(char)[] s2) pure
+bool front_is(const(char)[] s, const(char)[] s2) pure
 {
     return s.length >= s2.length && s[0..s2.length] == s2[];
 }

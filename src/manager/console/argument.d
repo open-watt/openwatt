@@ -28,7 +28,7 @@ nothrow @nogc:
 // argument conversion functions...
 // TODO: THESE NEED ADL STYLE LOOKUP!
 
-const(char[]) convertVariant(ref const Variant v, out typeof(null) r) nothrow @nogc
+const(char[]) convert_variant(ref const Variant v, out typeof(null) r) nothrow @nogc
 {
     if (!v.isNull)
         return "Not null";
@@ -36,7 +36,7 @@ const(char[]) convertVariant(ref const Variant v, out typeof(null) r) nothrow @n
     return null;
 }
 
-const(char[]) convertVariant(ref const Variant v, out bool r) nothrow @nogc
+const(char[]) convert_variant(ref const Variant v, out bool r) nothrow @nogc
 {
     if (v.isBool)
         r = v.asBool;
@@ -65,7 +65,7 @@ const(char[]) convertVariant(ref const Variant v, out bool r) nothrow @nogc
     return null;
 }
 
-const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
+const(char[]) convert_variant(T)(ref const Variant v, out T r) nothrow @nogc
     if (is_some_int!T)
 {
     if (v.isNumber)
@@ -121,7 +121,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
     return null;
 }
 
-const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
+const(char[]) convert_variant(T)(ref const Variant v, out T r) nothrow @nogc
     if (is_some_float!T)
 {
     if (v.isNumber)
@@ -148,7 +148,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
     return null;
 }
 
-const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
+const(char[]) convert_variant(T)(ref const Variant v, out T r) nothrow @nogc
     if (is(T == Quantity!(U, _U), U, ScaledUnit _U))
 {
     static if (is(T == Quantity!(U, _U), U, ScaledUnit _U))
@@ -178,7 +178,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
     }
 }
 
-const(char[]) convertVariant(ref const Variant v, out Duration r) nothrow @nogc
+const(char[]) convert_variant(ref const Variant v, out Duration r) nothrow @nogc
 {
     if (v.isDuration)
         r = v.asDuration;
@@ -194,7 +194,7 @@ const(char[]) convertVariant(ref const Variant v, out Duration r) nothrow @nogc
     return null;
 }
 
-const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
+const(char[]) convert_variant(T)(ref const Variant v, out T r) nothrow @nogc
     if (is(const(char)[] : T))
 {
     if (v.isString)
@@ -207,7 +207,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
     return null;
 }
 
-const(char[]) convertVariant(ref const Variant v, out String r) nothrow @nogc
+const(char[]) convert_variant(ref const Variant v, out String r) nothrow @nogc
 {
     if (v.isString)
         r = v.asString.makeString(defaultAllocator);
@@ -219,7 +219,7 @@ const(char[]) convertVariant(ref const Variant v, out String r) nothrow @nogc
     return null;
 }
 
-const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
+const(char[]) convert_variant(T)(ref const Variant v, out T r) nothrow @nogc
     if (is(T U == enum))
 {
     // TODO: variant may be an enum...
@@ -251,13 +251,13 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
     return "Invalid value";
 }
 
-const(char[]) convertVariant(U)(ref const Variant v, out U[] r) nothrow @nogc
+const(char[]) convert_variant(U)(ref const Variant v, out U[] r) nothrow @nogc
     if (!is_some_char!U)
 {
     static if (is(U == const V, V))
     {
         V[] tmp;
-        const(char[]) err = v.convertVariant(tmp);
+        const(char[]) err = v.convert_variant(tmp);
         r = tmp;
         return err;
     }
@@ -272,18 +272,18 @@ const(char[]) convertVariant(U)(ref const Variant v, out U[] r) nothrow @nogc
         r = tempAllocator().allocArray!U(arr.length);
         foreach (i, ref e; arr)
         {
-            if (const(char[]) error = convertVariant(e, r[i]))
+            if (const(char[]) error = convert_variant(e, r[i]))
                 return error;
         }
         return null;
     }
 }
 
-const(char[]) convertVariant(U, size_t N)(ref const Variant v, out U[N] r) nothrow @nogc
+const(char[]) convert_variant(U, size_t N)(ref const Variant v, out U[N] r) nothrow @nogc
     if (!is(U : dchar))
 {
     U[] tmp;
-    const(char)[] err = convertVariant!(U[])(v, tmp);
+    const(char)[] err = convert_variant!(U[])(v, tmp);
     if (err)
         return err;
     if (tmp.length != N)
@@ -292,16 +292,16 @@ const(char[]) convertVariant(U, size_t N)(ref const Variant v, out U[N] r) nothr
     return null;
 }
 
-const(char[]) convertVariant(T : Nullable!U, U)(ref const Variant v, out T r) nothrow @nogc
+const(char[]) convert_variant(T : Nullable!U, U)(ref const Variant v, out T r) nothrow @nogc
 {
     U tmp;
-    const(char[]) error = convertVariant(v, tmp);
+    const(char[]) error = convert_variant(v, tmp);
     if (!error)
         r = tmp.move;
     return error;
 }
 
-const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
+const(char[]) convert_variant(T)(ref const Variant v, out T r) nothrow @nogc
     if (ValidUserType!(Unqual!T) && !is(T : const BaseObject))
 {
     alias Type = Unqual!T;
@@ -332,7 +332,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
     return null;
 }
 
-const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
+const(char[]) convert_variant(T)(ref const Variant v, out T r) nothrow @nogc
     if (ValidUserType!(Unqual!T) && is(T : const BaseObject) && !is(T : const BaseInterface) && !is(T : const Stream))
 {
     const(char)[] n;
@@ -354,7 +354,7 @@ const(char[]) convertVariant(T)(ref const Variant v, out T r) nothrow @nogc
     return null;
 }
 
-const(char[]) convertVariant(ref const Variant v, out Component r) nothrow @nogc
+const(char[]) convert_variant(ref const Variant v, out Component r) nothrow @nogc
 {
     if (!v.isString)
         return "Invalid component value";
@@ -363,7 +363,7 @@ const(char[]) convertVariant(ref const Variant v, out Component r) nothrow @nogc
     return r ? null : tconcat("No component '", s, '\'');
 }
 
-const(char[]) convertVariant(ref const Variant v, out Device r) nothrow @nogc
+const(char[]) convert_variant(ref const Variant v, out Device r) nothrow @nogc
 {
     if (!v.isString)
         return "Invalid device value";
@@ -372,7 +372,7 @@ const(char[]) convertVariant(ref const Variant v, out Device r) nothrow @nogc
     return r ? null : tconcat("No device '", s, '\'');
 }
 
-const(char[]) convertVariant(I)(ref const Variant v, out I r) nothrow @nogc
+const(char[]) convert_variant(I)(ref const Variant v, out I r) nothrow @nogc
     if (is(I : const BaseInterface))
 {
     // TODO: parse as mac address...?
@@ -393,7 +393,7 @@ const(char[]) convertVariant(I)(ref const Variant v, out I r) nothrow @nogc
     return r ? null : tconcat("Interface does not exist: ", n);
 }
 
-const(char[]) convertVariant(S)(ref const Variant v, out S r) nothrow @nogc
+const(char[]) convert_variant(S)(ref const Variant v, out S r) nothrow @nogc
     if (is(S : const Stream))
 {
     const(char)[] n;
@@ -417,14 +417,14 @@ const(char[]) convertVariant(S)(ref const Variant v, out S r) nothrow @nogc
 // argument completions...
 // TODO: THESE NEED ADL STYLE LOOKUP!
 
-Array!String suggestCompletion(T : typeof(null))(const(char)[] argumentText)
+Array!String suggest_completion(T : typeof(null))(const(char)[] argumentText)
 {
     if (StringLit!"null".startsWith(argumentText))
         return Array!String(Concat, StringLit!"null");
     return Array!String();
 }
 
-Array!String suggestCompletion(T : bool)(const(char)[] argumentText)
+Array!String suggest_completion(T : bool)(const(char)[] argumentText)
 {
     __gshared const String[4] vals = [ StringLit!"true", StringLit!"false", StringLit!"yes", StringLit!"no" ];
     Array!String completions;
@@ -436,7 +436,7 @@ Array!String suggestCompletion(T : bool)(const(char)[] argumentText)
     return completions;
 }
 
-Array!String suggestCompletion(E)(const(char)[] argumentText)
+Array!String suggest_completion(E)(const(char)[] argumentText)
     if (is(E == enum))
 {
     Array!String completions;
@@ -449,14 +449,14 @@ Array!String suggestCompletion(E)(const(char)[] argumentText)
     return completions;
 }
 
-Array!String suggestCompletion(T : const Component)(const(char)[] argumentText)
+Array!String suggest_completion(T : const Component)(const(char)[] argumentText)
     if(!is(T == typeof(null)))
 {
     Array!String devices;
     size_t dot = argumentText.findFirst('.');
     if (dot == argumentText.length)
     {
-        devices = suggestCompletion!Device(argumentText);
+        devices = suggest_completion!Device(argumentText);
         if (devices.length == 1)
         {
             dot = devices[0].length;
@@ -511,7 +511,7 @@ Array!String suggestCompletion(T : const Component)(const(char)[] argumentText)
     return completions;
 }
 
-Array!String suggestCompletion(T : const Device)(const(char)[] argumentText)
+Array!String suggest_completion(T : const Device)(const(char)[] argumentText)
     if(!is(T == typeof(null)))
 {
     Array!String completions;
@@ -523,7 +523,7 @@ Array!String suggestCompletion(T : const Device)(const(char)[] argumentText)
     return completions;
 }
 
-Array!String suggestCompletion(I)(const(char)[] argumentText)
+Array!String suggest_completion(I)(const(char)[] argumentText)
     if (!is(I == typeof(null)) && is(const I == const BaseInterface))
 {
     Array!String completions;
@@ -535,7 +535,7 @@ Array!String suggestCompletion(I)(const(char)[] argumentText)
     return completions;
 }
 
-Array!String suggestCompletion(S)(const(char)[] argumentText)
+Array!String suggest_completion(S)(const(char)[] argumentText)
     if (!is(S == typeof(null)) && is(const S == const Stream))
 {
     Array!String completions;
@@ -547,7 +547,7 @@ Array!String suggestCompletion(S)(const(char)[] argumentText)
     return completions;
 }
 
-Array!String suggestCompletion(T)(const(char)[] argumentText)
+Array!String suggest_completion(T)(const(char)[] argumentText)
     if (!is(T == typeof(null)) && is(T : const BaseObject) && !is(const T == const BaseInterface) && !is(const T == const Stream))
 {
     alias Type = Unqual!T;

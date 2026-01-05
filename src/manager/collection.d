@@ -21,7 +21,7 @@ const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
     {
         import urt.mem.allocator;
         __gshared const CollectionTypeInfo ti = CollectionTypeInfo(Type.TypeName,
-                                                                   allProperties!Type(),
+                                                                   all_properties!Type(),
                                                                    (){
                                                                         static if (is(typeof(Type.validate_name) == function))
                                                                             return &Type.validate_name;
@@ -44,7 +44,7 @@ ref Collection!Type* collection_for(Type)() nothrow @nogc
 struct CollectionTypeInfo
 {
     alias ValidateName = const(char)[] function(const(char)[] name) nothrow @nogc;
-    alias CreateFun = BaseObject function(ref BaseCollection collection, const(char)[] name, ObjectFlags flags = ObjectFlags.None) nothrow @nogc;
+    alias CreateFun = BaseObject function(ref BaseCollection collection, const(char)[] name, ObjectFlags flags = ObjectFlags.none) nothrow @nogc;
 
     String type;
     const(Property*)[] properties;
@@ -63,7 +63,7 @@ nothrow @nogc:
         this.type_info = type_info;
     }
 
-    BaseObject create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] named_args...)
+    BaseObject create(const(char)[] name, ObjectFlags flags = ObjectFlags.none, in NamedArgument[] named_args...)
     {
         assert(type_info, "Can't create into a base collection!");
 
@@ -88,7 +88,7 @@ nothrow @nogc:
         return item;
     }
 
-    BaseObject alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.None)
+    BaseObject alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.none)
     {
         assert(type_info, "Can't create into a base collection!");
         return type_info.create(this, name, flags);
@@ -168,10 +168,10 @@ nothrow @nogc:
     BaseCollection _base = BaseCollection(collection_type_info!Type);
     alias _base this;
 
-    Type create(const(char)[] name, ObjectFlags flags = ObjectFlags.None, in NamedArgument[] named_args...)
+    Type create(const(char)[] name, ObjectFlags flags = ObjectFlags.none, in NamedArgument[] named_args...)
         => cast(Type)_base.create(name, flags, named_args);
 
-    Type alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.None)
+    Type alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.none)
         => cast(Type)_base.alloc(name, flags);
 
     void add(Type item)

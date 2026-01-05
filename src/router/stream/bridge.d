@@ -23,7 +23,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"bridge-stream";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None, StreamOptions options = StreamOptions.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
         super(collection_type_info!BridgeStream, name.move, flags, options);
     }
@@ -46,7 +46,7 @@ nothrow @nogc:
         {
             if (i > 0)
                 m_remoteName ~= '|';
-            m_remoteName ~= s.remoteName();
+            m_remoteName ~= s.remote_name();
         }
         m_remoteName ~= ']';
     }
@@ -93,7 +93,7 @@ nothrow @nogc:
         }
     }
 
-    override const(char)[] remoteName()
+    override const(char)[] remote_name()
         => m_remoteName;
 
     override ptrdiff_t read(void[] buffer)
@@ -111,8 +111,8 @@ nothrow @nogc:
             buffer[0 .. read] = m_inputBuffer[];
             m_inputBuffer.clear();
         }
-        if (logging)
-            writeToLog(true, buffer[0 .. read]);
+        if (_logging)
+            write_to_log(true, buffer[0 .. read]);
         return read;
     }
 
@@ -127,8 +127,8 @@ nothrow @nogc:
                     written += m_streams[i].write(data[written .. $]);
             }
         }
-        if (logging)
-            writeToLog(false, data);
+        if (_logging)
+            write_to_log(false, data);
         return 0;
     }
 
@@ -161,7 +161,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCollection("/stream/bridge", bridges);
+        g_app.console.register_collection("/stream/bridge", bridges);
     }
 
     override void pre_update()

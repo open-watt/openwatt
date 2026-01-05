@@ -33,56 +33,56 @@ nothrow @nogc:
 
 enum BufferOverflowBehaviour : byte
 {
-    DropOldest, // drop oldest data in buffer
-    DropNewest, // drop newest data in buffer (or don't add new data to full buffer)
-    Fail        // cause the call to fail
+    drop_oldest,    // drop oldest data in buffer
+    drop_newest,    // drop newest data in buffer (or don't add new data to full buffer)
+    fail            // cause the call to fail
 }
 
 enum PacketDirection : ubyte
 {
-    Incoming = 1,
-    Outgoing = 2
+    incoming = 1,
+    outgoing = 2
 }
 
 struct PacketFilter
 {
 nothrow @nogc:
-    PacketType type = PacketType.Ethernet;
-    PacketDirection direction = PacketDirection.Incoming;
+    PacketType type = PacketType.ethernet;
+    PacketDirection direction = PacketDirection.incoming;
     MACAddress src;
     MACAddress dst;
-    ushort etherType;
+    ushort ether_type;
     union {
-        ushort owSubType; // if etherType == EtherType.OW
-        ushort etherType2;
+        ushort ow_subtype; // if ether_type == EtherType.ow
+        ushort ether_type_2;
     }
     ushort vlan;
 
     bool match(ref const Packet p)
     {
-        if (type != PacketType.Unknown)
+        if (type != PacketType.unknown)
         {
             if (type != p.type)
                 return false;
-            if (type == PacketType.Ethernet)
+            if (type == PacketType.ethernet)
             {
-                if (etherType)
+                if (ether_type)
                 {
-                    if (p.eth.ether_type != etherType)
+                    if (p.eth.ether_type != ether_type)
                     {
-                        if (!etherType2 || etherType == EtherType.OW)
+                        if (!ether_type_2 || ether_type == EtherType.ow)
                             return false;
-                        if (p.eth.ether_type != etherType2)
+                        if (p.eth.ether_type != ether_type_2)
                             return false;
                     }
-                    else if (etherType == EtherType.OW)
+                    else if (ether_type == EtherType.ow)
                     {
-                        if (owSubType && p.eth.ow_sub_type != owSubType)
+                        if (ow_subtype && p.eth.ow_sub_type != ow_subtype)
                             return false;
                     }
                 }
                 else
-                    debug assert(etherType2 == 0, "etherType must be set if etherType 2 is set!");
+                    debug assert(ether_type_2 == 0, "ether_type must be set if ether_type_2 is set!");
                 if (src && p.eth.src != src)
                     return false;
                 if (dst && p.eth.dst != dst)
@@ -100,8 +100,8 @@ struct InterfaceSubscriber
     alias PacketHandler = void delegate(ref const Packet p, BaseInterface i, PacketDirection dir, void* u) nothrow @nogc;
 
     PacketFilter filter;
-    PacketHandler recvPacket;
-    void* userData;
+    PacketHandler recv_packet;
+    void* user_data;
 }
 
 // MAC: 02:xx:xx:ra:nd:yy
@@ -125,15 +125,15 @@ nothrow @nogc:
     MACAddress mac;
     Map!(MACAddress, BaseInterface) macTable;
 
-    this(const CollectionTypeInfo* typeInfo, String name, ObjectFlags flags = ObjectFlags.None)
+    this(const CollectionTypeInfo* type_info, String name, ObjectFlags flags = ObjectFlags.none)
     {
-        super(typeInfo, name.move, flags);
+        super(type_info, name.move, flags);
 
         assert(!get_module!InterfaceModule.interfaces.exists(this.name), "HOW DID THIS HAPPEN?");
         get_module!InterfaceModule.interfaces.add(this);
 
-        mac = generateMacAddress();
-        addAddress(mac, this);
+        mac = generate_mac_address();
+        add_address(mac, this);
     }
 
     ~this()
@@ -183,7 +183,7 @@ nothrow @nogc:
         if (!cap)
             return tconcat("Failed to attach pcap interface '", value, "' to '", name, "'; doesn't exist");
         else
-            cap.subscribeInterface(this);
+            cap.subscribe_interface(this);
         return null;
     }
 
@@ -193,15 +193,15 @@ nothrow @nogc:
     ref const(Status) status() const pure
         => _status;
 
-    final void resetCounters() pure
+    final void reset_counters() pure
     {
-        _status.linkDowns = 0;
-        _status.sendBytes = 0;
-        _status.recvBytes = 0;
-        _status.sendPackets = 0;
-        _status.recvPackets = 0;
-        _status.sendDropped = 0;
-        _status.recvDropped = 0;
+        _status.link_downs = 0;
+        _status.send_bytes = 0;
+        _status.recv_bytes = 0;
+        _status.send_packets = 0;
+        _status.recv_packets = 0;
+        _status.send_dropped = 0;
+        _status.recv_dropped = 0;
     }
 
     override const(char)[] status_message() const
@@ -220,26 +220,26 @@ nothrow @nogc:
     alias subscribe = typeof(super).subscribe;
     alias unsubscribe = typeof(super).unsubscribe;
 
-    void subscribe(InterfaceSubscriber.PacketHandler packetHandler, ref const PacketFilter filter, void* userData = null)
+    void subscribe(InterfaceSubscriber.PacketHandler packet_handler, ref const PacketFilter filter, void* user_data = null)
     {
-        subscribers[numSubscribers++] = InterfaceSubscriber(filter, packetHandler, userData);
+        _subscribers[_num_subscribers++] = InterfaceSubscriber(filter, packet_handler, user_data);
     }
 
-    void unsubscribe(InterfaceSubscriber.PacketHandler packetHandler)
+    void unsubscribe(InterfaceSubscriber.PacketHandler packet_handler)
     {
-        foreach (i, ref sub; subscribers[0..numSubscribers])
+        foreach (i, ref sub; _subscribers[0.._num_subscribers])
         {
-            if (sub.recvPacket is packetHandler)
+            if (sub.recv_packet is packet_handler)
             {
                 // remove this subscriber
-                if (i < --numSubscribers)
-                    sub = subscribers[numSubscribers];
+                if (i < --_num_subscribers)
+                    sub = _subscribers[_num_subscribers];
                 return;
             }
         }
     }
 
-    bool send(MACAddress dest, const(void)[] message, EtherType type, OW_SubType subType = OW_SubType.Unspecified)
+    bool send(MACAddress dest, const(void)[] message, EtherType type, OW_SubType subtype = OW_SubType.unspecified)
     {
         if (!running)
             return false;
@@ -249,7 +249,7 @@ nothrow @nogc:
         eth.src = mac;
         eth.dst = dest;
         eth.ether_type = type;
-        eth.ow_sub_type = subType;
+        eth.ow_sub_type = subtype;
         return forward(p);
     }
 
@@ -258,27 +258,27 @@ nothrow @nogc:
         if (!running)
             return false;
 
-        foreach (ref subscriber; subscribers[0..numSubscribers])
+        foreach (ref subscriber; _subscribers[0.._num_subscribers])
         {
-            if ((subscriber.filter.direction & PacketDirection.Outgoing) && subscriber.filter.match(packet))
-                subscriber.recvPacket(packet, this, PacketDirection.Outgoing, subscriber.userData);
+            if ((subscriber.filter.direction & PacketDirection.outgoing) && subscriber.filter.match(packet))
+                subscriber.recv_packet(packet, this, PacketDirection.outgoing, subscriber.user_data);
         }
 
         return transmit(packet);
     }
 
-    final void addAddress(MACAddress mac, BaseInterface iface)
+    final void add_address(MACAddress mac, BaseInterface iface)
     {
         assert(mac !in macTable, "MAC address already in use!");
         macTable[mac] = iface;
     }
 
-    final void removeAddress(MACAddress mac)
+    final void remove_address(MACAddress mac)
     {
         macTable.remove(mac);
     }
 
-    final BaseInterface findMacAddress(MACAddress mac)
+    final BaseInterface find_mac_address(MACAddress mac)
     {
         BaseInterface* i = mac in macTable;
         if (i)
@@ -286,14 +286,14 @@ nothrow @nogc:
         return null;
     }
 
-    ushort pcapType() const
+    ushort pcap_type() const
         => 1; // LINKTYPE_ETHERNET
 
-    void pcapWrite(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packetData) nothrow @nogc sink) const
+    void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packet_data) nothrow @nogc sink) const
     {
         import urt.endian;
 
-        bool isOW = packet.eth.ether_type == EtherType.OW;
+        bool is_ow = packet.eth.ether_type == EtherType.ow;
 
         // write ethernet header...
         struct Header
@@ -301,20 +301,20 @@ nothrow @nogc:
             MACAddress dst;
             MACAddress src;
             ubyte[2] type;
-            ubyte[2] subType;
+            ubyte[2] subtype;
         }
         Header h;
         h.dst = packet.eth.dst;
         h.src = packet.eth.src;
         h.type = nativeToBigEndian(packet.eth.ether_type);
-        if (isOW)
-            h.subType = nativeToBigEndian(packet.eth.ow_sub_type);
-        sink((cast(ubyte*)&h)[0 .. (isOW ? Header.sizeof : Header.subType.offsetof)]);
+        if (is_ow)
+            h.subtype = nativeToBigEndian(packet.eth.ow_sub_type);
+        sink((cast(ubyte*)&h)[0 .. (is_ow ? Header.sizeof : Header.subtype.offsetof)]);
 
         // write packet data
         sink(packet.data);
 
-        if (isOW && packet.eth.ow_sub_type == OW_SubType.Modbus)
+        if (is_ow && packet.eth.ow_sub_type == OW_SubType.modbus)
         {
             // wireshark wants RTU packets for its decoder, so we need to append the crc...
             import urt.crc;
@@ -323,7 +323,7 @@ nothrow @nogc:
         }
     }
 
-    ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc
+    ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] format_args) const nothrow @nogc
     {
         if (buffer.length < "interface:".length + name.length)
             return -1; // Not enough space
@@ -337,27 +337,27 @@ protected:
     ushort _l2mtu;
     ushort _max_l2mtu;  // 0 = unspecified/unknown
 
-    BufferOverflowBehaviour sendBehaviour;
-    BufferOverflowBehaviour recvBehaviour;
+    BufferOverflowBehaviour _send_behaviour;
+    BufferOverflowBehaviour _recv_behaviour;
 
     override void update()
     {
-        assert(_status.linkStatus == Status.Link.Up, "Interface is not online, it shouldn't be in Running state!");
+        assert(_status.link_status == Status.Link.up, "Interface is not online, it shouldn't be in Running state!");
     }
 
     override void set_online()
     {
-        _status.linkStatus = Status.Link.Up;
-        _status.linkStatusChangeTime = getSysTime();
+        _status.link_status = Status.Link.up;
+        _status.link_status_change_time = getSysTime();
         super.set_online();
     }
 
     override void set_offline()
     {
         super.set_offline();
-        _status.linkStatus = Status.Link.Down;
-        _status.linkStatusChangeTime = getSysTime();
-        ++_status.linkDowns;
+        _status.link_status = Status.Link.down;
+        _status.link_status_change_time = getSysTime();
+        ++_status.link_downs;
     }
 
     abstract bool transmit(ref Packet packet);
@@ -378,16 +378,16 @@ package:
     BaseInterface _master;
     byte _slave_id;
 
-    Packet[] sendQueue;
+    Packet[] _send_queue;
 
-    MACAddress generateMacAddress() pure
+    MACAddress generate_mac_address() pure
     {
         import urt.crc;
-        alias crcFun = calculate_crc!(Algorithm.crc32_iso_hdlc);
+        alias crc_fun = calculate_crc!(Algorithm.crc32_iso_hdlc);
 
         enum ushort MAGIC = 0x1337;
 
-        uint crc = crcFun(name);
+        uint crc = crc_fun(name);
         MACAddress addr = MACAddress(0x02, MAGIC >> 8, MAGIC & 0xFF, crc & 0xFF, (crc >> 8) & 0xFF, crc >> 24);
         if (addr.b[5] < 100 || addr.b[5] >= 240)
             addr.b[5] ^= 0x80;
@@ -397,32 +397,32 @@ package:
     void dispatch(ref Packet packet)
     {
         // update the stats
-        ++_status.recvPackets;
-        _status.recvBytes += packet.length;
+        ++_status.recv_packets;
+        _status.recv_bytes += packet.length;
 
         // check if we ever saw the sender before...
         if (!packet.eth.src.is_multicast)
         {
-            if (findMacAddress(packet.eth.src) is null)
-                addAddress(packet.eth.src, this);
+            if (find_mac_address(packet.eth.src) is null)
+                add_address(packet.eth.src, this);
         }
 
         if (_master)
             _master.slave_incoming(packet, _slave_id);
         else
         {
-            foreach (ref subscriber; subscribers[0..numSubscribers])
+            foreach (ref subscriber; _subscribers[0.._num_subscribers])
             {
-                if ((subscriber.filter.direction & PacketDirection.Incoming) && subscriber.filter.match(packet))
-                    subscriber.recvPacket(packet, this, PacketDirection.Incoming, subscriber.userData);
+                if ((subscriber.filter.direction & PacketDirection.incoming) && subscriber.filter.match(packet))
+                    subscriber.recv_packet(packet, this, PacketDirection.incoming, subscriber.user_data);
             }
         }
     }
 
 //private:
 protected: // TODO: should probably be private?
-    InterfaceSubscriber[4] subscribers;
-    ubyte numSubscribers;
+    InterfaceSubscriber[4] _subscribers;
+    ubyte _num_subscribers;
 }
 
 
@@ -441,8 +441,8 @@ nothrow @nogc:
         assert(c is null, "Collection has been registered before!");
         c = &interfaces;
 
-        g_app.console.registerCollection("/interface/vlan", vlan_interfaces);
-        g_app.console.registerCommand!print("/interface", this);
+        g_app.console.register_collection("/interface/vlan", vlan_interfaces);
+        g_app.console.register_command!print("/interface", this);
     }
 
     override void update()
@@ -450,13 +450,13 @@ nothrow @nogc:
         vlan_interfaces.update_all();
     }
 
-    final String addInterfaceName(Session session, const(char)[] name, const(char)[] defaultNamePrefix)
+    final String add_interface_name(Session session, const(char)[] name, const(char)[] default_name_prefix)
     {
         if (name.empty)
-            name = interfaces.generate_name(defaultNamePrefix);
+            name = interfaces.generate_name(default_name_prefix);
         else if (interfaces.exists(name))
         {
-            session.writeLine("Interface '", name, " already exists");
+            session.write_line("Interface '", name, " already exists");
             return String();
         }
 
@@ -470,61 +470,61 @@ nothrow @nogc:
     {
         import urt.util;
 
-        size_t nameLen = 4;
-        size_t typeLen = 4;
+        size_t name_len = 4;
+        size_t type_len = 4;
         foreach (iface; interfaces.values)
         {
-            nameLen = max(nameLen, iface.name.length);
-            typeLen = max(typeLen, iface.type.length);
+            name_len = max(name_len, iface.name.length);
+            type_len = max(type_len, iface.type.length);
 
             // TODO: MTU stuff?
         }
 
-        session.writeLine("Flags: R - RUNNING; S - SLAVE");
+        session.write_line("Flags: R - RUNNING; S - SLAVE");
         if (stats)
         {
-            size_t rxLen = 7;
-            size_t txLen = 7;
-            size_t rpLen = 9;
-            size_t tpLen = 9;
-            size_t rdLen = 7;
-            size_t tdLen = 7;
+            size_t rx_len = 7;
+            size_t tx_len = 7;
+            size_t rp_len = 9;
+            size_t tp_len = 9;
+            size_t rd_len = 7;
+            size_t td_len = 7;
 
             foreach (iface; interfaces.values)
             {
-                rxLen = max(rxLen, iface.status.recvBytes.format_int(null));
-                txLen = max(txLen, iface.status.sendBytes.format_int(null));
-                rpLen = max(rpLen, iface.status.recvPackets.format_int(null));
-                tpLen = max(tpLen, iface.status.sendPackets.format_int(null));
-                rdLen = max(rdLen, iface.status.recvDropped.format_int(null));
-                tdLen = max(tdLen, iface.status.sendDropped.format_int(null));
+                rx_len = max(rx_len, iface.status.recv_bytes.format_int(null));
+                tx_len = max(tx_len, iface.status.send_bytes.format_int(null));
+                rp_len = max(rp_len, iface.status.recv_packets.format_int(null));
+                tp_len = max(tp_len, iface.status.send_packets.format_int(null));
+                rd_len = max(rd_len, iface.status.recv_dropped.format_int(null));
+                td_len = max(td_len, iface.status.send_dropped.format_int(null));
             }
 
             session.writef(" ID     {0, -*1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",
-                            "NAME", nameLen,
-                            "RX-BYTE", rxLen, "TX-BYTE", txLen,
-                            "RX-PACKET", rpLen, "TX-PACKET", tpLen,
-                            "RX-DROP", rdLen, "TX-DROP", tdLen);
+                            "NAME", name_len,
+                            "RX-BYTE", rx_len, "TX-BYTE", tx_len,
+                            "RX-PACKET", rp_len, "TX-PACKET", tp_len,
+                            "RX-DROP", rd_len, "TX-DROP", td_len);
 
             size_t i = 0;
             foreach (iface; interfaces.values)
             {
                 session.writef("{0, 3} {1}{2}  {3, -*4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
-                                i, iface.status.linkStatus ? 'R' : ' ', iface._master ? 'S' : ' ',
-                                iface.name, nameLen,
-                                iface.status.recvBytes, rxLen, iface.status.sendBytes, txLen,
-                                iface.status.recvPackets, rpLen, iface.status.sendPackets, tpLen,
-                                iface.status.recvDropped, rdLen, iface.status.sendDropped, tdLen);
+                                i, iface.status.link_status ? 'R' : ' ', iface._master ? 'S' : ' ',
+                                iface.name, name_len,
+                                iface.status.recv_bytes, rx_len, iface.status.send_bytes, tx_len,
+                                iface.status.recv_packets, rp_len, iface.status.send_packets, tp_len,
+                                iface.status.recv_dropped, rd_len, iface.status.send_dropped, td_len);
                 ++i;
             }
         }
         else
         {
-            session.writef(" ID     {0, -*1}  {2, -*3}  MAC-ADDRESS\n", "NAME", nameLen, "TYPE", typeLen);
+            session.writef(" ID     {0, -*1}  {2, -*3}  MAC-ADDRESS\n", "NAME", name_len, "TYPE", type_len);
             size_t i = 0;
             foreach (iface; interfaces.values)
             {
-                session.writef("{0, 3} {6}{7}  {1, -*2}  {3, -*4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.status.linkStatus ? 'R' : ' ', iface._master ? 'S' : ' ');
+                session.writef("{0, 3} {6}{7}  {1, -*2}  {3, -*4}  {5}\n", i, iface.name, name_len, iface.type, type_len, iface.mac, iface.status.link_status ? 'R' : ' ', iface._master ? 'S' : ' ');
                 ++i;
             }
         }

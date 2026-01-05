@@ -35,43 +35,43 @@ nothrow @nogc:
 
 enum StopBits : ubyte
 {
-    One,
-    OnePointFive,
-    Two,
+    one,
+    one_point_five,
+    two,
 }
 
 enum Parity : ubyte
 {
-    None,
-    Even,
-    Odd,
-    Mark,
-    Space
+    none,
+    even,
+    odd,
+    mark,
+    space
 }
 
 enum FlowControl : ubyte
 {
-    None,
-    Hardware,
-    Software,
-    DSR_DTR,
+    none,
+    hardware,
+    software,
+    dsr_dtr,
 
-    RTS_CTS = Hardware,
-    XON_XOFF = Software
+    rts_cts = hardware,
+    xon_xoff = software
 }
 
 struct SerialParams
 {
     this(int baud)
     {
-        this.baudRate = baud;
+        this.baud_rate = baud;
     }
 
-    uint baudRate = 9600;
-    ubyte dataBits = 8;
-    StopBits stopBits = StopBits.One;
-    Parity parity = Parity.None;
-    FlowControl flowControl = FlowControl.None;
+    uint baud_rate = 9600;
+    ubyte data_bits = 8;
+    StopBits stop_bits = StopBits.one;
+    Parity parity = Parity.none;
+    FlowControl flow_control = FlowControl.none;
 }
 
 class SerialStream : Stream
@@ -86,7 +86,7 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"serial";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None, StreamOptions options = StreamOptions.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
         super(collection_type_info!SerialStream, name.move, flags, options);
     }
@@ -107,58 +107,58 @@ nothrow @nogc:
     }
 
     uint baud_rate() const pure
-        => params.baudRate;
+        => _params.baud_rate;
     StringResult baud_rate(uint value)
     {
         if (value == 0)
             return StringResult("baud rate must be greater than 0");
-        if (params.baudRate == value)
+        if (_params.baud_rate == value)
             return StringResult.success;
-        params.baudRate = value;
+        _params.baud_rate = value;
         restart();
         return StringResult.success;
     }
 
     uint data_bits() const pure
-        => params.dataBits;
+        => _params.data_bits;
     StringResult data_bits(uint value)
     {
         if (value < 5 || value > 9)
             return StringResult("data bits must be between 5 and 9");
-        if (params.dataBits == cast(ubyte)value)
+        if (_params.data_bits == cast(ubyte)value)
             return StringResult.success;
-        params.dataBits = cast(ubyte)value;
+        _params.data_bits = cast(ubyte)value;
         restart();
         return StringResult.success;
     }
 
     Parity parity() const pure
-        => params.parity;
+        => _params.parity;
     void parity(Parity value)
     {
-        if (params.parity == value)
+        if (_params.parity == value)
             return;
-        params.parity = value;
+        _params.parity = value;
         restart();
     }
 
     StopBits stop_bits() const pure
-        => params.stopBits;
+        => _params.stop_bits;
     void stop_bits(StopBits value)
     {
-        if (params.stopBits == value)
+        if (_params.stop_bits == value)
             return;
-        params.stopBits = value;
+        _params.stop_bits = value;
         restart();
     }
 
     FlowControl flow_control() const pure
-        => params.flowControl;
+        => _params.flow_control;
     void flow_control(FlowControl value)
     {
-        if (params.flowControl == value)
+        if (_params.flow_control == value)
             return;
-        params.flowControl = value;
+        _params.flow_control = value;
         restart();
     }
 
@@ -171,63 +171,63 @@ nothrow @nogc:
     {
         version(Windows)
         {
-            hCom = CreateFile(_device[].twstringz, GENERIC_READ | GENERIC_WRITE, 0, null, OPEN_EXISTING, 0, null);
-            if (hCom == INVALID_HANDLE_VALUE)
-                return CompletionStatus.Error;
+            _h_com = CreateFile(_device[].twstringz, GENERIC_READ | GENERIC_WRITE, 0, null, OPEN_EXISTING, 0, null);
+            if (_h_com == INVALID_HANDLE_VALUE)
+                return CompletionStatus.error;
 
             DCB dcb;
             ZeroMemory(&dcb, DCB.sizeof);
             dcb.DCBlength = DCB.sizeof;
-            if (!GetCommState(hCom, &dcb))
-                return CompletionStatus.Error;
+            if (!GetCommState(_h_com, &dcb))
+                return CompletionStatus.error;
 
             dcb._bf = 1;
 
-            dcb.BaudRate = DWORD(params.baudRate);
-            dcb.ByteSize = params.dataBits;
+            dcb.BaudRate = DWORD(_params.baud_rate);
+            dcb.ByteSize = _params.data_bits;
 
-            if (params.stopBits == StopBits.One)
+            if (_params.stop_bits == StopBits.one)
                 dcb.StopBits = ONESTOPBIT;
-            else if (params.stopBits == StopBits.OnePointFive)
+            else if (_params.stop_bits == StopBits.one_point_five)
                 dcb.StopBits = ONE5STOPBITS;
-            else if (params.stopBits == StopBits.Two)
+            else if (_params.stop_bits == StopBits.two)
                 dcb.StopBits = TWOSTOPBITS;
 
-            switch (params.parity)
+            switch (_params.parity)
             {
-                case Parity.None:   dcb.Parity = NOPARITY;      break;
-                case Parity.Even:   dcb.Parity = EVENPARITY;    break;
-                case Parity.Odd:    dcb.Parity = ODDPARITY;     break;
-                case Parity.Mark:   dcb.Parity = MARKPARITY;    break;
-                case Parity.Space:  dcb.Parity = SPACEPARITY;   break;
+                case Parity.none:   dcb.Parity = NOPARITY;      break;
+                case Parity.even:   dcb.Parity = EVENPARITY;    break;
+                case Parity.odd:    dcb.Parity = ODDPARITY;     break;
+                case Parity.mark:   dcb.Parity = MARKPARITY;    break;
+                case Parity.space:  dcb.Parity = SPACEPARITY;   break;
                 default: assert(false);
             }
-            if (params.parity != Parity.None)
+            if (_params.parity != Parity.none)
                 dcb._bf |= 2; // fParity: set to enable parity checking?
 
-            switch (params.flowControl)
+            switch (_params.flow_control)
             {
-                case FlowControl.None:
+                case FlowControl.none:
                     dcb._bf &= ~4; // fOutxCtsFlow
                     dcb._bf &= ~8; // fOutxDsrFlow
                     dcb._bf &= ~0x40; // fDsrSensitivity
                     dcb._bf &= ~0x100; // fOutX
                     dcb._bf &= ~0x200; // fInX
                     dcb._bf &= ~0x3030;
-                    dcb._bf |= RTSControl.Disable << 12; // fRtsControl
-                    dcb._bf |= DTRControl.Disable << 4; // fDtrControl
+                    dcb._bf |= RTSControl.disable << 12; // fRtsControl
+                    dcb._bf |= DTRControl.disable << 4; // fDtrControl
                     break;
-                case FlowControl.Hardware:
+                case FlowControl.hardware:
                     dcb._bf |= 4; // fOutxCtsFlow
                     dcb._bf &= ~8; // fOutxDsrFlow
                     dcb._bf &= ~0x100; // fOutX
                     dcb._bf &= ~0x200; // fInX
                     dcb._bf &= ~0x3030;
-                    dcb._bf |= RTSControl.Handshake << 12; // fRtsControl
-//                    dcb._bf |= RTSControl.Enable << 12; // fRtsControl
-                    dcb._bf |= DTRControl.Enable << 4; // fDtrControl
+                    dcb._bf |= RTSControl.handshake << 12; // fRtsControl
+//                    dcb._bf |= RTSControl.enable << 12; // fRtsControl
+                    dcb._bf |= DTRControl.enable << 4; // fDtrControl
                     break;
-                case FlowControl.Software:
+                case FlowControl.software:
                     dcb._bf &= ~4; // fOutxCtsFlow
                     dcb._bf &= ~8; // fOutxDsrFlow
                     dcb._bf &= ~0x40; // fDsrSensitivity
@@ -238,25 +238,25 @@ nothrow @nogc:
                     dcb.XonLim = 200;
                     dcb.XoffLim = 200;
                     dcb._bf &= ~0x3030;
-                    dcb._bf |= RTSControl.Disable << 12; // fRtsControl
-                    dcb._bf |= DTRControl.Enable << 4; // fDtrControl
+                    dcb._bf |= RTSControl.disable << 12; // fRtsControl
+                    dcb._bf |= DTRControl.enable << 4; // fDtrControl
                     break;
-                case FlowControl.DSR_DTR:
+                case FlowControl.dsr_dtr:
                     dcb._bf &= ~4; // fOutxCtsFlow
                     dcb._bf |= 8; // fOutxDsrFlow
                     dcb._bf |= 0x40; // fDsrSensitivity
                     dcb._bf &= ~0x100; // fOutX
                     dcb._bf &= ~0x200; // fInX
                     dcb._bf &= ~0x3030;
-                    dcb._bf |= RTSControl.Disable << 12; // fRtsControl
-                    dcb._bf |= DTRControl.Handshake << 4; // fDtrControl
+                    dcb._bf |= RTSControl.disable << 12; // fRtsControl
+                    dcb._bf |= DTRControl.handshake << 4; // fDtrControl
                     break;
                 default:
                     assert(false);
             }
 
-            if (!SetCommState(hCom, &dcb))
-                return CompletionStatus.Error;
+            if (!SetCommState(_h_com, &dcb))
+                return CompletionStatus.error;
 
             COMMTIMEOUTS timeouts = {};
             timeouts.ReadIntervalTimeout = -1;
@@ -264,23 +264,23 @@ nothrow @nogc:
             timeouts.ReadTotalTimeoutMultiplier = 0;
             timeouts.WriteTotalTimeoutConstant = 0;
             timeouts.WriteTotalTimeoutMultiplier = 0;
-            if (!SetCommTimeouts(hCom, &timeouts))
-                return CompletionStatus.Error;
+            if (!SetCommTimeouts(_h_com, &timeouts))
+                return CompletionStatus.error;
         }
         else version(Posix)
         {
-            fd = core.sys.posix.fcntl.open(device.tstringz, O_RDWR | O_NOCTTY | O_NDELAY);
-            if (fd == -1)
+            _fd = core.sys.posix.fcntl.open(device.tstringz, O_RDWR | O_NOCTTY | O_NDELAY);
+            if (_fd == -1)
             {
                 writeln("Failed to open device %s.\n", this.device);
-                return CompletionStatus.Error;
+                return CompletionStatus.error;
             }
 
             termios tty;
-            tcgetattr(fd, &tty);
+            tcgetattr(_fd, &tty);
 
-            cfsetospeed(&tty, params.baudRate);
-            cfsetispeed(&tty, params.baudRate);
+            cfsetospeed(&tty, _params.baud_rate);
+            cfsetispeed(&tty, _params.baud_rate);
 
             tty.c_cflag &= ~PARENB; // Clear parity bit
             tty.c_cflag &= ~CSTOPB; // Clear stop field
@@ -303,32 +303,32 @@ nothrow @nogc:
             tty.c_cc[VTIME] = 1;    // Wait for up to 1 deciseconds, return as soon as any data is received
             tty.c_cc[VMIN] = 0;
 
-            if (tcsetattr(fd, TCSANOW, &tty) != 0)
+            if (tcsetattr(_fd, TCSANOW, &tty) != 0)
             {
                 // Handle error ???
-                return CompletionStatus.Error;
+                return CompletionStatus.error;
             }
         }
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
         version (Windows)
         {
-            if (hCom != INVALID_HANDLE_VALUE)
-                CloseHandle(hCom);
-            hCom = INVALID_HANDLE_VALUE;
+            if (_h_com != INVALID_HANDLE_VALUE)
+                CloseHandle(_h_com);
+            _h_com = INVALID_HANDLE_VALUE;
         }
         else version (Posix)
         {
-            if (fd != -1)
+            if (_fd != -1)
             {
-                core.sys.posix.unistd.close(fd);
-                fd = -1;
+                core.sys.posix.unistd.close(_fd);
+                _fd = -1;
             }
         }
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
 
@@ -338,7 +338,7 @@ nothrow @nogc:
         {
             DWORD errors;
             COMSTAT stat;
-            if (ClearCommError(hCom, &errors, &stat))
+            if (ClearCommError(_h_com, &errors, &stat))
             {
                 if (errors != 0)
                 {
@@ -360,22 +360,22 @@ nothrow @nogc:
     {
         version(Windows)
         {
-            DWORD bytesRead;
-            if (!ReadFile(hCom, buffer.ptr, cast(DWORD)buffer.length, &bytesRead, null))
+            DWORD bytes_read;
+            if (!ReadFile(_h_com, buffer.ptr, cast(DWORD)buffer.length, &bytes_read, null))
             {
                 restart();
                 return -1;
             }
-            if (logging)
-                writeToLog(true, buffer[0 .. bytesRead]);
-            return bytesRead;
+            if (_logging)
+                write_to_log(true, buffer[0 .. bytes_read]);
+            return bytes_read;
         }
         else version(Posix)
         {
-            ssize_t bytesRead = core.sys.posix.unistd.read(fd, buffer.ptr, buffer.length);
-            if (logging)
-                writeToLog(true, buffer[0 .. bytesRead]);
-            return bytesRead;
+            ssize_t bytes_read = core.sys.posix.unistd.read(_fd, buffer.ptr, buffer.length);
+            if (_logging)
+                write_to_log(true, buffer[0 .. bytes_read]);
+            return bytes_read;
         }
     }
 
@@ -383,26 +383,26 @@ nothrow @nogc:
     {
         version(Windows)
         {
-            DWORD bytesWritten;
-            if (!WriteFile(hCom, data.ptr, cast(DWORD)data.length, &bytesWritten, null))
+            DWORD bytes_written;
+            if (!WriteFile(_h_com, data.ptr, cast(DWORD)data.length, &bytes_written, null))
             {
                 restart();
                 return -1;
             }
-            if (logging)
-                writeToLog(false, data[0 .. bytesWritten]);
-            return bytesWritten;
+            if (_logging)
+                write_to_log(false, data[0 .. bytes_written]);
+            return bytes_written;
         }
         else version(Posix)
         {
-            ssize_t bytesWritten = core.sys.posix.unistd.write(fd, data.ptr, data.length);
-            if (logging)
-                writeToLog(false, data[0 .. bytesWritten]);
-            return bytesWritten;
+            ssize_t bytes_written = core.sys.posix.unistd.write(_fd, data.ptr, data.length);
+            if (_logging)
+                write_to_log(false, data[0 .. bytes_written]);
+            return bytes_written;
         }
     }
 
-    override const(char)[] remoteName()
+    override const(char)[] remote_name()
     {
         return _device[];
     }
@@ -421,12 +421,12 @@ nothrow @nogc:
 
 private:
     version (Windows)
-        HANDLE hCom = INVALID_HANDLE_VALUE;
+        HANDLE _h_com = INVALID_HANDLE_VALUE;
     else version (Posix)
-        int fd = -1;
+        int _fd = -1;
 
     String _device;
-    SerialParams params;
+    SerialParams _params;
 }
 
 
@@ -439,7 +439,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCollection("/stream/serial", serial_streams);
+        g_app.console.register_collection("/stream/serial", serial_streams);
     }
 
     override void pre_update()
@@ -455,10 +455,10 @@ version(Windows)
 {
     enum RTSControl : ubyte
     {
-        Disable, Enable, Handshake, Toggle
+        disable, enable, handshake, toggle
     }
     enum DTRControl : ubyte
     {
-        Disable, Enable, Handshake
+        disable, enable, handshake
     }
 }

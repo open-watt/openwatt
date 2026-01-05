@@ -62,7 +62,7 @@ nothrow @nogc:
 //            if (e.sampler.updateIntervalMs == 0)
 //            {
 //                // sample constants just once
-//                if (!e.sampler.constantSampled && !e.sampler.inFlight)
+//                if (!e.sampler.constantSampled && !e.sampler.in_flight)
 //                    elements ~= e;
 //                continue;
 //            }
@@ -70,7 +70,7 @@ nothrow @nogc:
 //            {
 //                // sample regular values
 //                e.sampler.nextSample -= elapsed;
-//                if (e.sampler.nextSample <= Duration.zero && !e.sampler.inFlight)
+//                if (e.sampler.nextSample <= Duration.zero && !e.sampler.in_flight)
 //                    elements ~= e;
 //            }
 //        }
@@ -119,7 +119,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
     if (!device_template)
     {
         writeWarning("No device template for model '", model, "'");
-//        session.writeLine("No device template for model '", model, "' in profile '", profileName, "'");
+//        session.write_line("No device template for model '", model, "' in profile '", profileName, "'");
         return null;
     }
 

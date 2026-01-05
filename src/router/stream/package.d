@@ -30,11 +30,11 @@ nothrow @nogc:
 
 enum StreamOptions : ubyte
 {
-    None = 0,
+    none = 0,
 
-    ReverseConnect = 1 << 0, // For TCP connections where remote will initiate connection
-    BufferData =     1 << 1, // Buffer read/write data when stream is not ready
-    AllowBroadcast = 1 << 2, // Allow broadcast messages
+    reverse_connect = 1 << 0, // For TCP connections where remote will initiate connection
+    buffer_data =     1 << 1, // Buffer read/write data when stream is not ready
+    allow_broadcast = 1 << 2, // Allow broadcast messages
 }
 
 abstract class Stream : BaseObject
@@ -42,14 +42,14 @@ abstract class Stream : BaseObject
 //    __gshared Property[1] Properties = [ Property.create!("running", running)() ];
 nothrow @nogc:
 
-    this(const CollectionTypeInfo* typeInfo, String name, ObjectFlags flags = ObjectFlags.None, StreamOptions options = StreamOptions.None)
+    this(const CollectionTypeInfo* type_info, String name, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
-        super(typeInfo, name.move, flags);
+        super(type_info, name.move, flags);
 
         assert(!get_module!StreamModule.streams.exists(this.name), "HOW DID THIS HAPPEN?");
         get_module!StreamModule.streams.add(this);
 
-        this.options = options;
+        this._options = options;
     }
 
     this(String name, const(char)[] type, StreamOptions options)
@@ -58,7 +58,7 @@ nothrow @nogc:
 
         get_module!StreamModule.streams.add(this);
 
-        this.options = options;
+        this._options = options;
     }
 
     ~this()
@@ -66,7 +66,7 @@ nothrow @nogc:
         // TODO: should we check if it's already disconnected before calling this?
         disconnect();
 
-        setLogFile(null);
+        set_log_file(null);
 
         get_module!StreamModule.streams.remove(this);
     }
@@ -88,15 +88,15 @@ nothrow @nogc:
     ref const(Status) status() const pure
         => _status;
 
-    final void resetCounters() pure
+    final void reset_counters() pure
     {
-        _status.linkDowns = 0;
-        _status.sendBytes = 0;
-        _status.recvBytes = 0;
-        _status.sendPackets = 0;
-        _status.recvPackets = 0;
-        _status.sendDropped = 0;
-        _status.recvDropped = 0;
+        _status.link_downs = 0;
+        _status.send_bytes = 0;
+        _status.recv_bytes = 0;
+        _status.send_packets = 0;
+        _status.recv_packets = 0;
+        _status.send_dropped = 0;
+        _status.recv_dropped = 0;
     }
 
     override const(char)[] status_message() const
@@ -105,22 +105,22 @@ nothrow @nogc:
     // TODO: remove public when everyting ported to collections...
     override void update()
     {
-        assert(_status.linkStatus == Status.Link.Up, "Stream is not online, it shouldn't be in Running state!");
+        assert(_status.link_status == Status.Link.up, "Stream is not online, it shouldn't be in Running state!");
     }
 
     override void set_online()
     {
         super.set_online();
-        _status.linkStatus = Status.Link.Up;
-        _status.linkStatusChangeTime = getSysTime();
+        _status.link_status = Status.Link.up;
+        _status.link_status_change_time = getSysTime();
     }
 
     override void set_offline()
     {
         super.set_offline();
-        _status.linkStatus = Status.Link.Down;
-        _status.linkStatusChangeTime = getSysTime();
-        ++_status.linkDowns;
+        _status.link_status = Status.Link.down;
+        _status.link_status_change_time = getSysTime();
+        ++_status.link_downs;
     }
 
     // Initiate an on-demand connection
@@ -132,7 +132,7 @@ nothrow @nogc:
     {
     }
 
-    abstract const(char)[] remoteName();
+    abstract const(char)[] remote_name();
 
     // Read data from the stream
     abstract ptrdiff_t read(void[] buffer);
@@ -146,28 +146,28 @@ nothrow @nogc:
     // Flush the receive buffer (return number of bytes destroyed)
     abstract ptrdiff_t flush();
 
-    void setLogFile(const(char)[] baseFilename)
+    void set_log_file(const(char)[] base_filename)
     {
         version (SupportLogging)
         {
-            if (log[0].is_open())
-                log[0].close();
-            if (log[1].is_open())
-                log[1].close();
-            logging = false;
-            if (baseFilename)
+            if (_log[0].is_open())
+                _log[0].close();
+            if (_log[1].is_open())
+                _log[1].close();
+            _logging = false;
+            if (base_filename)
             {
                 // TODO: should we not append, and instead bump a number on the end of the filename and write a new one?
                 //       probably want to separate the logs for each session...?
                 //       and should we disable buffering? kinda slow, but if we crash, we want to know what crashed it, right?
-                log[0].open(tconcat(baseFilename, ".tx"), FileOpenMode.WriteAppend, FileOpenFlags.Sequential /+| FileOpenFlags.NoBuffering+/);
-                log[1].open(tconcat(baseFilename, ".rx"), FileOpenMode.WriteAppend, FileOpenFlags.Sequential /+| FileOpenFlags.NoBuffering+/);
-                logging = log[0].is_open() || log[1].is_open();
+                _log[0].open(tconcat(base_filename, ".tx"), FileOpenMode.WriteAppend, FileOpenFlags.Sequential /+| FileOpenFlags.NoBuffering+/);
+                _log[1].open(tconcat(base_filename, ".rx"), FileOpenMode.WriteAppend, FileOpenFlags.Sequential /+| FileOpenFlags.NoBuffering+/);
+                _logging = _log[0].is_open() || _log[1].is_open();
             }
         }
     }
 
-    ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] formatArgs) const nothrow @nogc
+    ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] format_args) const nothrow @nogc
     {
         if (buffer.length < "stream:".length + name.length)
             return -1; // Not enough space
@@ -176,26 +176,26 @@ nothrow @nogc:
 
 protected:
     Status _status;
-    StreamOptions options;
+    StreamOptions _options;
     version (SupportLogging)
     {
-        bool logging;
-        File[2] log;
+        bool _logging;
+        File[2] _log;
     }
     else
-        enum logging = false;
+        enum _logging = false;
 
-    uint bufferLen = 0;
-    void[] sendBuffer;
+    uint _buffer_len = 0;
+    void[] _send_buffer;
 
-    final void writeToLog(bool rx, const void[] buffer)
+    final void write_to_log(bool rx, const void[] buffer)
     {
         version (SupportLogging)
         {
-            if (!logging || !log[rx].is_open)
+            if (!_logging || !_log[rx].is_open)
                 return;
             size_t written;
-            log[rx].write(buffer, written);
+            _log[rx].write(buffer, written);
             // TODO: do we want to assert the write was successful? maybe disk full? should probably not crash the app...
 //            assert(written == buffer.length, "Failed to write to log file...?");
         }

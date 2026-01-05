@@ -33,12 +33,12 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.registerCommand!client_add("/protocol/modbus/client", this, "add");
-        g_app.console.registerCommand!device_add("/protocol/modbus/device", this, "add");
-        g_app.console.registerCommand!request_raw("/protocol/modbus/client/request", this, "raw");
-        g_app.console.registerCommand!request_read("/protocol/modbus/client/request", this, "read");
-        g_app.console.registerCommand!request_write("/protocol/modbus/client/request", this, "write");
-        g_app.console.registerCommand!request_read_device_id("/protocol/modbus/client/request", this, "read-device-id");
+        g_app.console.register_command!client_add("/protocol/modbus/client", this, "add");
+        g_app.console.register_command!device_add("/protocol/modbus/device", this, "add");
+        g_app.console.register_command!request_raw("/protocol/modbus/client/request", this, "raw");
+        g_app.console.register_command!request_read("/protocol/modbus/client/request", this, "read");
+        g_app.console.register_command!request_write("/protocol/modbus/client/request", this, "write");
+        g_app.console.register_command!request_read_device_id("/protocol/modbus/client/request", this, "read-device-id");
     }
 
     override void update()
@@ -76,7 +76,7 @@ nothrow @nogc:
         {
             if (!map.profile)
             {
-                session.writeLine("Slave '", slave, "' doesn't have a profile specified");
+                session.write_line("Slave '", slave, "' doesn't have a profile specified");
                 return;
             }
             target = map.mac;
@@ -86,12 +86,12 @@ nothrow @nogc:
         {
             if (target.fromString(slave) != slave.length)
             {
-                session.writeLine("Invalid slave identifier or address '", slave, "'");
+                session.write_line("Invalid slave identifier or address '", slave, "'");
                 return;
             }
             if (!_profile)
             {
-                session.writeLine("No profile specified");
+                session.write_line("No profile specified");
                 return;
             }
             profileName = _profile.value;
@@ -113,12 +113,12 @@ nothrow @nogc:
             e.value = sample_value(tmp.ptr, mb.value_desc);
 
             // record samper data...
-            sampler.addElement(e, desc, mb);
+            sampler.add_element(e, desc, mb);
             device.sample_elements ~= e; // TODO: remove this?
         });
         if (!device)
         {
-            session.writeLine("Failed to create device '", id, "'");
+            session.write_line("Failed to create device '", id, "'");
             return;
         }
         device.samplers ~= sampler;
@@ -132,7 +132,7 @@ nothrow @nogc:
             return null;
 
         RequestState state = g_app.allocator.allocT!RequestState(session, slave);
-        c.sendRequest(addr, msg, &state.responseHandler, &state.errorHandler);
+        c.sendRequest(addr, msg, &state.response_handler, &state.error_handler);
 
         return state;
     }
@@ -141,7 +141,7 @@ nothrow @nogc:
     {
         if (message.length == 0)
         {
-            session.writeLine("Message must contain at least one byte (function code).");
+            session.write_line("Message must contain at least one byte (function code).");
             return null;
         }
         ModbusPDU msg = ModbusPDU(cast(FunctionCode)message[0], message[1..$]);
@@ -151,9 +151,9 @@ nothrow @nogc:
     RequestState request_read(Session session, const(char)[] client, const(char)[] slave, const(char)[] reg_type, ushort register, Nullable!ushort count, Nullable!(const(char)[]) data_type)
     {
         RegisterType ty = parseRegisterType(reg_type);
-        if (ty == RegisterType.Invalid)
+        if (ty == RegisterType.invalid)
         {
-            session.writeLine("Invalid register type '", reg_type, "'");
+            session.write_line("Invalid register type '", reg_type, "'");
             return null;
         }
 
@@ -165,14 +165,14 @@ nothrow @nogc:
     {
         if (!value && !values)
         {
-            session.writeLine("No `value` or `values` specified for write request");
+            session.write_line("No `value` or `values` specified for write request");
             return null;
         }
 
         RegisterType ty = parseRegisterType(reg_type);
-        if (ty == RegisterType.Invalid)
+        if (ty == RegisterType.invalid)
         {
-            session.writeLine("Invalid register type '", reg_type, "'");
+            session.write_line("Invalid register type '", reg_type, "'");
             return null;
         }
 
@@ -190,7 +190,7 @@ nothrow @nogc:
         RequestState state = g_app.allocator.allocT!RequestState(session, slave);
 
         ModbusPDU msg = createMessage_GetDeviceInformation();
-        c.sendRequest(addr, msg, &state.responseHandler, &state.errorHandler);
+        c.sendRequest(addr, msg, &state.response_handler, &state.error_handler);
 
         return state;
     }
@@ -200,17 +200,17 @@ nothrow @nogc:
         auto c = client in clients;
         if(c is null)
         {
-            session.writeLine("Client '", client, "' doesn't exist");
+            session.write_line("Client '", client, "' doesn't exist");
             return null;
         }
 
         // TODO: this should be a global MAC->name table, not a modbus specific table...
-        map = get_module!ModbusInterfaceModule.findServerByName(slave);
+        map = get_module!ModbusInterfaceModule.find_server_by_name(slave);
         if (!map)
         {
             MACAddress addr;
             if (addr.fromString(slave))
-                map = get_module!ModbusInterfaceModule.findServerByMac(addr);
+                map = get_module!ModbusInterfaceModule.find_server_by_mac(addr);
         }
 
         return *c;
@@ -226,7 +226,7 @@ nothrow @nogc:
                 addr = map.mac;
             else if (addr.fromString(slave) != slave.length)
             {
-                session.writeLine("Invalid slave identifier or address '", slave, "'");
+                session.write_line("Invalid slave identifier or address '", slave, "'");
                 return null;
             }
         }
@@ -239,18 +239,18 @@ nothrow @nogc:
         {
             case "0":
             case "coil":
-                return RegisterType.Coil;
+                return RegisterType.coil;
             case "1":
             case "discrete":
-                return RegisterType.DiscreteInput;
+                return RegisterType.discrete_input;
             case "3":
             case "input":
-                return RegisterType.InputRegister;
+                return RegisterType.input_register;
             case "4":
             case "holding":
-                return RegisterType.HoldingRegister;
+                return RegisterType.holding_register;
             default:
-                return RegisterType.Invalid;
+                return RegisterType.invalid;
         }
     }
 }
@@ -260,7 +260,7 @@ class RequestState : FunctionCommandState
 {
 nothrow @nogc:
 
-    CommandCompletionState state = CommandCompletionState.InProgress;
+    CommandCompletionState state = CommandCompletionState.in_progress;
 
     String slave;
 
@@ -277,45 +277,45 @@ nothrow @nogc:
         return state;
     }
 
-    void responseHandler(ref const ModbusPDU request, ref ModbusPDU response, SysTime requestTime, SysTime responseTime)
+    void response_handler(ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time)
     {
-        if (response.functionCode & 0x80)
+        if (response.function_code & 0x80)
         {
             import urt.meta : enum_key_from_value;
-            session.writeLine("Exception response from ", slave[], ", code: ", enum_key_from_value!ExceptionCode(response.data[0]));
+            session.write_line("Exception response from ", slave[], ", code: ", enum_key_from_value!ExceptionCode(response.data[0]));
         }
         else
         {
-            session.writeLine("Response from ", slave[], " in ", (responseTime - requestTime).as!"msecs", "ms: ", toHexString(response.data));
-            switch (response.functionCode)
+            session.write_line("Response from ", slave[], " in ", (response_time - request_time).as!"msecs", "ms: ", toHexString(response.data));
+            switch (response.function_code)
             {
-                case FunctionCode.ReadCoils:
-                case FunctionCode.ReadDiscreteInputs:
-                case FunctionCode.ReadInputRegisters:
-                case FunctionCode.ReadHoldingRegisters:
+                case FunctionCode.read_coils:
+                case FunctionCode.read_discrete_inputs:
+                case FunctionCode.read_input_registers:
+                case FunctionCode.read_holding_registers:
                     ubyte byteCount = response.data[0];
                     ushort first = request.data[0..2].bigEndianToNative!ushort;
                     ushort count = request.data[2..4].bigEndianToNative!ushort;
-                    switch (response.functionCode)
+                    switch (response.function_code)
                     {
-                        case FunctionCode.ReadCoils:
-                        case FunctionCode.ReadDiscreteInputs:
+                        case FunctionCode.read_coils:
+                        case FunctionCode.read_discrete_inputs:
                             if (byteCount * 8 < count)
                             {
-                                session.writeLine("Invalid byte count in response...");
+                                session.write_line("Invalid byte count in response...");
                                 break;
                             }
                             for (ushort i = 0; i < count; i++)
                             {
                                 bool value = (response.data[1 + i / 8] & (1 << (i % 8))) != 0;
-                                session.writeLine("  ", first + i, ": ", value ? "ON" : "OFF");
+                                session.write_line("  ", first + i, ": ", value ? "ON" : "OFF");
                             }
                             break;
-                        case FunctionCode.ReadInputRegisters:
-                        case FunctionCode.ReadHoldingRegisters:
+                        case FunctionCode.read_input_registers:
+                        case FunctionCode.read_holding_registers:
                             if (byteCount != count * 2)
                             {
-                                session.writeLine("Invalid byte count in response...");
+                                session.write_line("Invalid byte count in response...");
                                 break;
                             }
                             if (count == 2)
@@ -337,36 +337,36 @@ nothrow @nogc:
                             assert(0); // unreachable
                     }
                     break;
-                case FunctionCode.WriteSingleCoil:
-                case FunctionCode.WriteSingleRegister:
+                case FunctionCode.write_single_coil:
+                case FunctionCode.write_single_register:
                     ushort reg = request.data[0..2].bigEndianToNative!ushort;
                     ushort value = request.data[2..4].bigEndianToNative!ushort;
                     session.writef("  {0}: {1, 04x} ({2})\n", reg, value, value);
                     break;
-                case FunctionCode.WriteMultipleCoils:
-                case FunctionCode.WriteMultipleRegisters:
+                case FunctionCode.write_multiple_coils:
+                case FunctionCode.write_multiple_registers:
                     assert(false, "TODO: pretty-print the output?");
-//                    session.writeLine("Starting register: ", toHexString(response.data[0..2], 2, 4, "_ "));
-//                    session.writeLine("Number of registers written: ", toHexString(response.data[2..4], 2, 4, "_ "));
+//                    session.write_line("Starting register: ", toHexString(response.data[0..2], 2, 4, "_ "));
+//                    session.write_line("Number of registers written: ", toHexString(response.data[2..4], 2, 4, "_ "));
                     break;
                 default:
                     break;
             }
         }
-        state = CommandCompletionState.Finished;
+        state = CommandCompletionState.finished;
     }
 
-    void errorHandler(ModbusErrorType errorType, ref const ModbusPDU request, SysTime requestTime)
+    void error_handler(ModbusErrorType errorType, ref const ModbusPDU request, SysTime request_time)
     {
-        Duration reqDuration = getTime() - requestTime;
+        Duration reqDuration = getTime() - request_time;
         if (errorType == ModbusErrorType.Timeout)
         {
-            session.writeLine("Timeout waiting for response from ", slave[], " after ", reqDuration.as!"msecs", "ms");
-            state = CommandCompletionState.Timeout;
+            session.write_line("Timeout waiting for response from ", slave[], " after ", reqDuration.as!"msecs", "ms");
+            state = CommandCompletionState.timeout;
         }
         else if (errorType == ModbusErrorType.Retrying)
-            session.writeLine("Timeout (", reqDuration.as!"msecs", "ms); retrying...");
+            session.write_line("Timeout (", reqDuration.as!"msecs", "ms); retrying...");
         else
-            state = CommandCompletionState.Error;
+            state = CommandCompletionState.error;
     }
 }

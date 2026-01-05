@@ -46,7 +46,7 @@ class ZigbeeController : BaseObject
 
     alias TypeName = StringLit!"zigbee-controller";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None) nothrow
+    this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
     {
         super(collection_type_info!ZigbeeController, name.move, flags);
 
@@ -107,7 +107,7 @@ protected:
         if (!_zigbee_profile)
             _zigbee_profile = load_profile("conf/zigbee_profiles/zigbee.conf", defaultAllocator());
 
-        return _endpoint.running ? CompletionStatus.Complete : CompletionStatus.Continue;
+        return _endpoint.running ? CompletionStatus.complete : CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown() nothrow
@@ -131,7 +131,7 @@ protected:
 
         tuya_dedup.clear();
 
-        return CompletionStatus.Complete;
+        return CompletionStatus.complete;
     }
 
     override void update() nothrow

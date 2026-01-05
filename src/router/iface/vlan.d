@@ -20,12 +20,12 @@ nothrow @nogc:
 
     alias TypeName = StringLit!"vlan";
 
-    this(String name, ObjectFlags flags = ObjectFlags.None)
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!VLANInterface, name.move, flags);
 
         // the super made a mac address, but we don't actually want one...
-        removeAddress(mac);
+        remove_address(mac);
         mac = MACAddress();
     }
 
@@ -83,8 +83,8 @@ nothrow @nogc:
         packet.vlan = _vlan;
         _interface.forward(packet);
 
-        ++_status.sendPackets;
-        _status.sendBytes += packet.data.length;
+        ++_status.send_packets;
+        _status.send_bytes += packet.data.length;
         return true;
     }
 

@@ -32,12 +32,12 @@ nothrow @nogc:
 
     enum ChargerState : ubyte
     {
-        Unknown,
-        Idle,
-        Stopped,
-        Scheduled,
-        Charging,
-        Error
+        unknown,
+        idle,
+        stopped,
+        scheduled,
+        charging,
+        error
     }
 
     struct Charger
@@ -47,78 +47,78 @@ nothrow @nogc:
         MACAddress mac;
         ushort id;
 
-        ubyte reqSeq;
-        bool linkready;
-        ubyte sigByte; // we don't know what this is for...
+        ubyte req_seq;
+        bool link_ready;
+        ubyte sig_byte; // we don't know what this is for...
 
-        ubyte heartbeatSent;
-        ubyte heartbeatReceived;
+        ubyte heartbeat_sent;
+        ubyte heartbeat_received;
 
         TWCState state;
 
         ubyte flags; // 1 = got state, 2 = got charge info, 4 = got sn, 10 = car connected, 20 = got vin1, 40 = got vin2, 80 = got vin3
-        ubyte vinAttempts;
+        ubyte vin_attempts;
 
-        ushort specifiedMaxCurrent; // the maximum current we're allowed to charge with
-        ushort deviceMaxCurrent;    // the maximum current supported by the charger
-        ushort targetCurrent;       // the current we're trying to charge with
-        ushort chargeCurrentTarget; // the current the car is requesting
+        ushort specified_max_current; // the maximum current we're allowed to charge with
+        ushort device_max_current;    // the maximum current supported by the charger
+        ushort target_current;       // the current we're trying to charge with
+        ushort charge_current_target; // the current the car is requesting
 
         ushort current;
         ushort voltage1;
         ushort voltage2;
         ushort voltage3;
-        ushort totalPower;
+        ushort total_power;
         ushort power1;
         ushort power2;
         ushort power3;
 
-        uint lifetimeEnergy;
+        uint lifetime_energy;
 
-        char[11] serialNumber;
+        char[11] serial_number;
         char[17] vin;
 
-        ushort maxCurrent()
-            => min(deviceMaxCurrent, specifiedMaxCurrent);
+        ushort max_current()
+            => min(device_max_current, specified_max_current);
 
-        ushort chargeCurrent()
-            => min(maxCurrent, targetCurrent);
+        ushort charge_current()
+            => min(max_current, target_current);
 
-        ChargerState chargerState()
+        ChargerState charger_state()
         {
             switch (state)
             {
                 case TWCState.Ready:
                     // it seems that if the charger is reporting a current, a car is connected
-                    if (chargeCurrentTarget > 0)
-                        return ChargerState.Stopped;
-                    return ChargerState.Idle; // not sure if it's possible that the car is plugged in?
+                    if (charge_current_target > 0)
+                        return ChargerState.stopped;
+                    return ChargerState.idle; // not sure if it's possible that the car is plugged in?
                 case TWCState.Charging:
                 case TWCState.RaisingCurrent:
                 case TWCState.LoweringCurrent:
                 case TWCState.LimitCurrent:
                 case TWCState._A:
-                    return ChargerState.Charging;
+                    return ChargerState.charging;
                 case TWCState.PluggedIn_DoNotCharge:
                 case TWCState.StartingToCharge:
                 case TWCState.Busy: // ???? what is this?
-                    return ChargerState.Stopped;
+                    return ChargerState.stopped;
                 case TWCState.PluggedIn_ChargeScheduled:
-                    return ChargerState.Scheduled;
+                    return ChargerState.scheduled;
                 case TWCState.Error:
-                    return ChargerState.Error;
+                    return ChargerState.error;
                 default:
-                    return ChargerState.Unknown;
+                    return ChargerState.unknown;
             }
         }
 
         void reset()
         {
-            linkready = false;
+            link_ready = false;
             state = TWCState.Ready;
             flags = 0;
-            vinAttempts = 0;
-            reqSeq = 0;
+            vin_attempts = 0;
+            req_seq = 0;
         }
     }
 
@@ -126,14 +126,14 @@ nothrow @nogc:
 
     String name;
     BaseInterface iface;
-    Status.Link lastLinkStatus = Status.Link.Down;
+    Status.Link last_link_status = Status.Link.down;
 
-    MonoTime lastAction;
+    MonoTime last_action;
 
     ushort id;
     ubyte sig;
 
-    byte roundRobinIndex;
+    byte round_robin_index;
 
     Array!Charger chargers;
 
@@ -143,32 +143,32 @@ nothrow @nogc:
         this.name = name.move;
         this.iface = iface;
 
-        static ubyte idCounter = 0;
-        this.id = 0x7770 + idCounter++;
+        static ubyte id_counter = 0;
+        this.id = 0x7770 + id_counter++;
         this.sig = iface.mac.b[3];
 
-        iface.subscribe(&incomingPacket, PacketFilter(etherType: EtherType.OW, owSubType: OW_SubType.TeslaTWC));
+        iface.subscribe(&incoming_packet, PacketFilter(ether_type: EtherType.ow, ow_subtype: OW_SubType.tesla_twc));
 
-        get_module!TeslaInterfaceModule.addServer(name[], iface, id);
+        get_module!TeslaInterfaceModule.add_server(name[], iface, id);
     }
 
     ~this()
     {
     }
 
-    void addCharger(String name, ushort twcId, ushort maxCurrent)
+    void add_charger(String name, ushort twc_id, ushort max_current)
     {
         Charger* charger = &chargers.pushBack();
 
         charger.name = name.move;
-        charger.id = twcId;
+        charger.id = twc_id;
 
-        charger.specifiedMaxCurrent = maxCurrent;
-        charger.targetCurrent = maxCurrent;
+        charger.specified_max_current = max_current;
+        charger.target_current = max_current;
 
     }
 
-    Charger* findCharger(const(char)[] name)
+    Charger* find_charger(const(char)[] name)
     {
         foreach (ref c; chargers)
         {
@@ -178,67 +178,67 @@ nothrow @nogc:
         return null;
     }
 
-    int setTargetCurrent(const(char)[] name, ushort current)
+    int set_target_current(const(char)[] name, ushort current)
     {
-        Charger* c = findCharger(name);
+        Charger* c = find_charger(name);
         if (c)
         {
-            c.targetCurrent = min(current, c.maxCurrent);
-            return c.targetCurrent;
+            c.target_current = min(current, c.max_current);
+            return c.target_current;
         }
         return -1;
     }
 
     void update()
     {
-        Status.Link linkStatus = iface.status.linkStatus;
-        if (linkStatus != lastLinkStatus && linkStatus == Status.Link.Up)
+        Status.Link link_status = iface.status.link_status;
+        if (link_status != last_link_status && link_status == Status.Link.up)
         {
             // if the link returned after being offline for a bit, we'll issue a full restart
-            roundRobinIndex = -10;
+            round_robin_index = -10;
             foreach (ref c; chargers)
                 c.reset();
-            lastAction = MonoTime();
+            last_action = MonoTime();
         }
-        lastLinkStatus = linkStatus;
-        if (linkStatus != Status.Link.Up)
+        last_link_status = link_status;
+        if (link_status != Status.Link.up)
             return;
 
         MonoTime now = getTime();
-        if (now < lastAction + 400.msecs)
+        if (now < last_action + 400.msecs)
             return;
-        lastAction = now;
+        last_action = now;
 
         // we will immitate the bootup sequence... but I don't really know why?
         // I can't really see evidence the slaves care about this!
-        if (roundRobinIndex < 0)
+        if (round_robin_index < 0)
         {
             ubyte[15] message = 0;
-            message[0..2] = ushort(roundRobinIndex++ < -5 ? 0xFCE1 : 0xFBE2).nativeToBigEndian;
+            message[0..2] = ushort(round_robin_index++ < -5 ? 0xFCE1 : 0xFBE2).nativeToBigEndian;
             message[2..4] = id.nativeToBigEndian;
             message[4] = sig;
-            iface.send(MACAddress.broadcast, message[], EtherType.OW, OW_SubType.TeslaTWC);
+            iface.send(MACAddress.broadcast, message[], EtherType.ow, OW_SubType.tesla_twc);
             return;
         }
 
         // iterate through the ready chargers...
-        Charger* c = &chargers[roundRobinIndex++];
-        if (roundRobinIndex >= chargers.length)
-            roundRobinIndex = 0;
+        Charger* c = &chargers[round_robin_index++];
+        if (round_robin_index >= chargers.length)
+            round_robin_index = 0;
 
-        while (!c.linkready)
+        while (!c.link_ready)
             return; // TODO: preferably, advance to the next charger...
-        if (c.heartbeatReceived != c.heartbeatSent)
-            c.reqSeq = 0; // send heartbeats until the device responds
+        if (c.heartbeat_received != c.heartbeat_sent)
+            c.req_seq = 0; // send heartbeats until the device responds
 
         ubyte[15] message = 0;
         message[2..4] = id.nativeToBigEndian;
         message[4..6] = c.id.nativeToBigEndian;
 
         // command selection logic...
-        if ((c.reqSeq & 1) == 0)
+        if ((c.req_seq & 1) == 0)
         {
-            if (c.heartbeatSent - c.heartbeatReceived >= 20)
+            if (c.heartbeat_sent - c.heartbeat_received >= 20)
             {
                 // the slave stopped responding... I guess we should assume it's offline?
                 c.reset();
@@ -246,14 +246,14 @@ nothrow @nogc:
             }
 
             version (DebugTWCMaster)
-                writeDebugf("Charger {0}({1,04x}) - SN: {2}\n   {3}/{4}/{5}V  {6}A({7}A)  {8}W - {9}\n   VIN {10}", c.name, c.id, c.serialNumber[], c.voltage1, c.voltage2, c.voltage3, cast(float)c.current/100, cast(float)c.maxCurrent / 100, c.totalPower, c.chargerState(), c.vin[]);
+                writeDebugf("Charger {0}({1,04x}) - SN: {2}\n   {3}/{4}/{5}V  {6}A({7}A)  {8}W - {9}\n   VIN {10}", c.name, c.id, c.serial_number[], c.voltage1, c.voltage2, c.voltage3, cast(float)c.current/100, cast(float)c.max_current / 100, c.total_power, c.charger_state(), c.vin[]);
 
             message[0..2] = ushort(0xFBE0).nativeToBigEndian;
 
             switch (c.state)
             {
                 case TWCState.Ready:
-                    if (c.chargeCurrentTarget == 0)
+                    if (c.charge_current_target == 0)
                     {
                         // the charger is idle...
                         break;
@@ -263,28 +263,28 @@ nothrow @nogc:
                 case TWCState.PluggedIn_ChargeScheduled:
                     // we'll advertise the available charge current...
                     message[6] = TWCState.Busy;
-                    message[7..9] = c.maxCurrent.nativeToBigEndian;
+                    message[7..9] = c.max_current.nativeToBigEndian;
                     break;
                 case TWCState.StartingToCharge:
                     // car is requesting to charge...
-                    if (c.chargeCurrent != 0)
+                    if (c.charge_current != 0)
                     {
                         // accept the request
                         message[6] = TWCState.StartingToCharge;
-                        message[7..9] = c.maxCurrent.nativeToBigEndian;
+                        message[7..9] = c.max_current.nativeToBigEndian;
                     }
                     break;
                 case TWCState.Charging:
-                    if (c.chargeCurrent == 0)
+                    if (c.charge_current == 0)
                     {
                         // the car is requesting to stop charging...
                         // TODO: we don't know how to do this!
                     }
-                    else if (c.chargeCurrent != c.chargeCurrentTarget)
+                    else if (c.charge_current != c.charge_current_target)
                     {
                         // the car is requesting to change the current...
                         message[6] = TWCState.LimitCurrent;
-                        message[7..9] = c.chargeCurrent.nativeToBigEndian;
+                        message[7..9] = c.charge_current.nativeToBigEndian;
                     }
                     break;
                 default:
@@ -292,21 +292,21 @@ nothrow @nogc:
                     break;
             }
 
-            ++c.heartbeatSent;
-            ++c.reqSeq;
+            ++c.heartbeat_sent;
+            ++c.req_seq;
         }
         else
         {
             __gshared static ushort[5] reqs = [0xFBEB, 0xFBED, 0xFBEE, 0xFBEF, 0xFBF1];
 
-            byte item = c.reqSeq >> 1;
+            byte item = c.req_seq >> 1;
 
             if (item == 1)
             {
                 if (c.flags & 4)
                     ++item;
             }
-            if (item >= 2 && ((c.flags & 0x10) == 0 || (c.flags & 0xF0) == 0xF0 || c.vinAttempts >= 10))
+            if (item >= 2 && ((c.flags & 0x10) == 0 || (c.flags & 0xF0) == 0xF0 || c.vin_attempts >= 10))
                 item = 0;
             else
             {
@@ -323,17 +323,17 @@ nothrow @nogc:
             if (++item >= 5)
                 item = 0;
 
-            c.reqSeq = cast(ubyte)(item << 1);
+            c.req_seq = cast(ubyte)(item << 1);
         }
 
         // send request
-        iface.send(c.mac, message[], EtherType.OW, OW_SubType.TeslaTWC);
+        iface.send(c.mac, message[], EtherType.ow, OW_SubType.tesla_twc);
     }
 
-    void incomingPacket(ref const Packet p, BaseInterface iface, PacketDirection dir, void* userData) nothrow @nogc
+    void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void* user_data) nothrow @nogc
     {
         TWCMessage msg;
-        if (parseTWCMessage(cast(ubyte[])p.data, msg))
+        if (parse_twc_message(cast(ubyte[])p.data, msg))
         {
             Charger* slave;
             foreach (ref c; chargers)
@@ -355,43 +355,43 @@ nothrow @nogc:
                 switch (msg.type)
                 {
                     case TWCMessageType.SlaveLinkReady:
-                        if (slave.linkready)
+                        if (slave.link_ready)
                             break;
                         slave.mac = p.eth.src;
-                        slave.linkready = true;
-                        slave.sigByte = msg.linkready.signature;
-                        slave.deviceMaxCurrent = msg.linkready.amps;
-                        slave.heartbeatSent = 0;
-                        slave.heartbeatReceived = 0;
+                        slave.link_ready = true;
+                        slave.sig_byte = msg.link_ready.signature;
+                        slave.device_max_current = msg.link_ready.amps;
+                        slave.heartbeat_sent = 0;
+                        slave.heartbeat_received = 0;
                         break;
                     case TWCMessageType.ChargeInfo:
-                        slave.lifetimeEnergy = msg.chargeinfo.lifetimeEnergy;
-                        slave.voltage1 = msg.chargeinfo.voltage1;
-                        slave.voltage2 = msg.chargeinfo.voltage2;
-                        slave.voltage3 = msg.chargeinfo.voltage3;
+                        slave.lifetime_energy = msg.charge_info.lifetime_energy;
+                        slave.voltage1 = msg.charge_info.voltage1;
+                        slave.voltage2 = msg.charge_info.voltage2;
+                        slave.voltage3 = msg.charge_info.voltage3;
                         // the current in this message is more closely temporally aligned, but it's only 500mA precision
-//                        slave.power1 = cast(ushort)(msg.chargeinfo.voltage1 * msg.chargeinfo.current / 2);
-//                        slave.power2 = cast(ushort)(msg.chargeinfo.voltage2 * msg.chargeinfo.current / 2);
-//                        slave.power3 = cast(ushort)(msg.chargeinfo.voltage3 * msg.chargeinfo.current / 2);
+//                        slave.power1 = cast(ushort)(msg.charge_info.voltage1 * msg.charge_info.current / 2);
+//                        slave.power2 = cast(ushort)(msg.charge_info.voltage2 * msg.charge_info.current / 2);
+//                        slave.power3 = cast(ushort)(msg.charge_info.voltage3 * msg.charge_info.current / 2);
                         // the current we recorded is half a second old, but it's 10mA precision
-                        slave.power1 = cast(ushort)(msg.chargeinfo.voltage1 * slave.current / 100);
-                        slave.power2 = cast(ushort)(msg.chargeinfo.voltage2 * slave.current / 100);
-                        slave.power3 = cast(ushort)(msg.chargeinfo.voltage3 * slave.current / 100);
-                        slave.totalPower = cast(ushort)(slave.power1 + slave.power2 + slave.power3);
+                        slave.power1 = cast(ushort)(msg.charge_info.voltage1 * slave.current / 100);
+                        slave.power2 = cast(ushort)(msg.charge_info.voltage2 * slave.current / 100);
+                        slave.power3 = cast(ushort)(msg.charge_info.voltage3 * slave.current / 100);
+                        slave.total_power = cast(ushort)(slave.power1 + slave.power2 + slave.power3);
                         slave.flags |= 0x2;
                         break;
                     case TWCMessageType._FDEC:
                         break;
                     case TWCMessageType.TWCSerialNumber:
-                        slave.serialNumber[0..11] = msg.sn[0..11];
+                        slave.serial_number[0..11] = msg.sn[0..11];
                         slave.flags |= 0x4;
                         break;
                     case TWCMessageType.VIN1:
                         slave.vin[0..7] = msg.vin[];
                         if (*cast(uint*)msg.vin.ptr == 0)
                         {
-                            ++slave.vinAttempts;
-                            slave.reqSeq = 0;
+                            ++slave.vin_attempts;
+                            slave.req_seq = 0;
                         }
                         else
                             slave.flags |= 0x20;
@@ -400,8 +400,8 @@ nothrow @nogc:
                         slave.vin[7..14] = msg.vin[];
                         if (*cast(uint*)msg.vin.ptr == 0)
                         {
-                            ++slave.vinAttempts;
-                            slave.reqSeq = 0;
+                            ++slave.vin_attempts;
+                            slave.req_seq = 0;
                         }
                         else
                             slave.flags |= 0x40;
@@ -410,8 +410,8 @@ nothrow @nogc:
                         slave.vin[14..17] = msg.vin[0..3];
                         if (*cast(uint*)msg.vin.ptr == 0)
                         {
-                            ++slave.vinAttempts;
-                            slave.reqSeq = 0;
+                            ++slave.vin_attempts;
+                            slave.req_seq = 0;
                         }
                         else
                             slave.flags |= 0x80;
@@ -426,8 +426,8 @@ nothrow @nogc:
             {
                 // record heartbeat response state...
                 slave.state = msg.heartbeat.state;
-                slave.chargeCurrentTarget = msg.heartbeat.current;
-                slave.current = msg.heartbeat.currentInUse;
+                slave.charge_current_target = msg.heartbeat.current;
+                slave.current = msg.heartbeat.current_in_use;
 
                 slave.flags |= 0x1;
 
@@ -438,7 +438,7 @@ nothrow @nogc:
                         writeDebug("Car disconnected from ", slave.name);
 
                     slave.flags &= 0xF;
-                    slave.vinAttempts = 0;
+                    slave.vin_attempts = 0;
                 }
                 else
                 {
@@ -448,12 +448,12 @@ nothrow @nogc:
                     slave.flags |= 0x10;
                 }
 
-                slave.heartbeatReceived = slave.heartbeatSent;
-                if (slave.heartbeatReceived >= 128)
+                slave.heartbeat_received = slave.heartbeat_sent;
+                if (slave.heartbeat_received >= 128)
                 {
                     // handle graceful overflow...
-                    slave.heartbeatSent -= slave.heartbeatReceived;
-                    slave.heartbeatReceived = 0;
+                    slave.heartbeat_sent -= slave.heartbeat_received;
+                    slave.heartbeat_received = 0;
                 }
             }
         }
