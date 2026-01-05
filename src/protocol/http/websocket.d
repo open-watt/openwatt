@@ -48,7 +48,7 @@ class WebSocket : BaseObject
 {
 nothrow @nogc:
 
-    enum TypeName = StringLit!"websocket";
+    alias TypeName = StringLit!"websocket";
 
     this(String name, ObjectFlags flags = ObjectFlags.None)
     {

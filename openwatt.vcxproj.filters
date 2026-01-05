@@ -10,12 +10,6 @@
     <Filter Include="src\router">
       <UniqueIdentifier>{246d3667-a7d7-4f96-bd0a-7d418f4c1d4d}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\router\modbus">
-      <UniqueIdentifier>{1bee7aca-c082-410d-85f8-d7b21877b501}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="src\router\modbus\profile">
-      <UniqueIdentifier>{d74b0e76-0264-4e38-a6cf-a3bd6be27eb3}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\manager">
       <UniqueIdentifier>{a7edf0a4-cbca-4a75-bf4f-548fe4b7764d}</UniqueIdentifier>
     </Filter>

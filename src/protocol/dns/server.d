@@ -1,4 +1,4 @@
-module protocol.dns.mdns;
+module protocol.dns.server;
 
 import urt.array;
 import urt.inet;
