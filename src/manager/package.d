@@ -17,8 +17,6 @@ import manager.plugin;
 import manager.secret;
 import manager.system;
 
-public static import manager.pcap;
-
 nothrow @nogc:
 
 

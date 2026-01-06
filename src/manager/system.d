@@ -128,6 +128,11 @@ auto sleep(Session session, Duration duration)
                 return CommandCompletionState.finished;
             return CommandCompletionState.in_progress;
         }
+
+        override void request_cancel()
+        {
+            wake_time = MonoTime();
+        }
     }
 
     return defaultAllocator().allocT!SleepCommandState(session, duration);

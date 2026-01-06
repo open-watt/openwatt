@@ -63,9 +63,10 @@ mixin template DeclareModule(string name)
 //
 void register_modules(Application app)
 {
-    import manager.log;
+    import manager.log, manager.pcap, manager.cron;
     register_module!(manager.log)(app);
     register_module!(manager.pcap)(app);
+    register_module!(manager.cron)(app);
 
     import router.stream;
     register_module!(router.stream)(app);

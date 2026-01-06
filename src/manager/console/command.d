@@ -47,6 +47,8 @@ nothrow @nogc:
     {
         return CommandCompletionState.finished;
     }
+
+    abstract void request_cancel();
 }
 
 class Command
