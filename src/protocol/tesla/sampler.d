@@ -70,12 +70,12 @@ nothrow @nogc:
                 case "power1":          e.value(Watts((charger.flags & 2) ? charger.power1 : 0));       break;
                 case "power2":          e.value(Watts((charger.flags & 2) ? charger.power2 : 0));       break;
                 case "power3":          e.value(Watts((charger.flags & 2) ? charger.power3 : 0));       break;
-                case "totalImportActiveEnergy":
-                case "lifetimeEnergy":
+                case "total_import":
+                case "lifetime_energy":
                     // TODO: could that multiply realistically overflow?
                     e.value(WattHours((charger.flags & 2) ? ulong(charger.lifetime_energy) * 1000 : 0));
                     break;
-                case "serialNumber":    e.value((charger.flags & 4) ? charger.serial_number : "");      break;
+                case "serial_number":    e.value((charger.flags & 4) ? charger.serial_number : "");      break;
                 case "vin":             e.value((charger.flags & 0xF0) == 0xF0 ? charger.vin : "");     break;
                 default:
                     assert(false, "Invalid element for Tesla TWC");

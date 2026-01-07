@@ -94,7 +94,7 @@ nothrow @nogc:
         }
         if (!type && info)
         {
-            if (Element* infoEl = info.find_element("deviceType"))
+            if (Element* infoEl = info.find_element("type"))
                 type = infoEl.value.asString();
             if (!type)
             {

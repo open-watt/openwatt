@@ -76,7 +76,7 @@ struct TWCMessage
     }
     struct ChargeInfo
     {
-        uint lifetime_energy;    // Lifetime energy delivery for this charger
+        uint lifetime_energy;   // Lifetime energy delivery for this charger
         ushort voltage1;        // V - Phase 1
         ushort voltage2;        // V - Phase 2
         ushort voltage3;        // V - Phase 3
