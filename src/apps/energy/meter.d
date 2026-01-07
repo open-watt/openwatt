@@ -28,8 +28,6 @@ enum MeterField : ubyte
     TotalImportReactive,
     TotalExportReactive,
     TotalApparent,
-    TotalImportApparent,
-    TotalExportApparent
 }
 
 enum FieldFlags : uint
@@ -38,8 +36,8 @@ enum FieldFlags : uint
     Basic = Voltage | InterPhaseVoltage| Current | Power,
     Realtime = Basic | Reactive | Apparent | PowerFactor | Frequency | PhaseAngle,
     BasicCumulative = TotalActive | TotalImportActive | TotalExportActive,
-    Cumulative = BasicCumulative | TotalReactive | TotalImportReactive | TotalExportReactive | TotalApparent | TotalImportApparent | TotalExportApparent,
-    //    Demand = ,
+    Cumulative = BasicCumulative | TotalReactive | TotalImportReactive | TotalExportReactive | TotalApparent,
+//    Demand = ,
     All = Realtime | Cumulative, //| Demand,
 
     Voltage = 1 << MeterField.Voltage,
@@ -58,8 +56,6 @@ enum FieldFlags : uint
     TotalImportReactive = 1 << MeterField.TotalImportReactive,
     TotalExportReactive = 1 << MeterField.TotalExportReactive,
     TotalApparent = 1 << MeterField.TotalApparent,
-    TotalImportApparent = 1 << MeterField.TotalImportApparent,
-    TotalExportApparent = 1 << MeterField.TotalExportApparent
 
     // TODO: demand meter?
 
@@ -100,8 +96,6 @@ struct MeterData
     float[4] totalImportReactive = 0;   // Sum, L1, L2, L3
     float[4] totalExportReactive = 0;   // Sum, L1, L2, L3
     float[4] totalApparent = 0;         // Sum, L1, L2, L3
-    float[4] totalImportApparent = 0;   // Sum, L1, L2, L3
-    float[4] totalExportApparent = 0;   // Sum, L1, L2, L3
 }
 
 static CircuitType getMeterType(Component meter)
@@ -109,7 +103,7 @@ static CircuitType getMeterType(Component meter)
     import manager.element;
 
     if (!meter)
-        return CircuitType.Unknown;
+        return CircuitType.unknown;
 
     if (meter.template_[] == "RealtimeEnergyMeter" || meter.template_[] == "CumulativeEnergyMeter")
     {
@@ -117,12 +111,12 @@ static CircuitType getMeterType(Component meter)
         // TODO: this should compare to-lower!! (case-insensitive)
         switch(e && e.value.isString ? e.value.asString : "")
         {
-            case "dc":              return CircuitType.DC;
-            case "single-phase":    return CircuitType.SinglePhase;
-            case "split-phase":     return CircuitType.SplitPhase;
-            case "three-phase":     return CircuitType.ThreePhase;
-            case "delta":           return CircuitType.Delta;
-            default:                return CircuitType.Unknown;
+            case "dc":              return CircuitType.dc;
+            case "single-phase":    return CircuitType.single_phase;
+            case "split-phase":     return CircuitType.split_phase;
+            case "three-phase":     return CircuitType.three_phase;
+            case "delta":           return CircuitType.delta;
+            default:                return CircuitType.unknown;
         }
     }
 
@@ -132,12 +126,12 @@ static CircuitType getMeterType(Component meter)
         if (c.template_[] == "RealtimeEnergyMeter" || c.template_[] == "CumulativeEnergyMeter")
         {
             CircuitType t = getMeterType(c);
-            if (t != CircuitType.Unknown)
+            if (t != CircuitType.unknown)
             {
-                if (type != CircuitType.Unknown && type != t)
+                if (type != CircuitType.unknown && type != t)
                 {
                     assert(type == t, "Inconsistent meter types!");
-                    return CircuitType.Unknown;
+                    return CircuitType.unknown;
                 }
                 type = t;
             }
@@ -169,8 +163,6 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         "totalImportReactiveEnergy",
         "totalExportReactiveEnergy",
         "totalApparentEnergy",
-        "totalImportApparentEnergy",
-        "totalExportApparentEnergy"
     ];
 
     __gshared immutable FieldFlags[NumFields] fieldTypes = [
@@ -190,8 +182,6 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         FieldFlags.TotalImportReactive,
         FieldFlags.TotalExportReactive,
         FieldFlags.TotalApparent,
-        FieldFlags.TotalImportApparent,
-        FieldFlags.TotalExportApparent,
     ];
 
     Component realtime;
@@ -224,8 +214,6 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         r.totalImportReactive.ptr,
         r.totalExportReactive.ptr,
         r.totalApparent.ptr,
-        r.totalImportApparent.ptr,
-        r.totalExportApparent.ptr
     ];
 
     if (meter.template_[] == "RealtimeEnergyMeter")
@@ -276,7 +264,7 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         r.fields |= bit;
 
         // calculate the sums...
-        if (r.type == CircuitType.SplitPhase)
+        if (r.type == CircuitType.split_phase)
         {
             // a little more complicated to integrate L-L loads...
             // TODO:
@@ -308,13 +296,13 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         }
 
         // if a single-phase meter only read a sum, then assign L1 to match
-        if ((valuesPresent & 3) == 1 && r.type == CircuitType.SinglePhase)
+        if ((valuesPresent & 3) == 1 && r.type == CircuitType.single_phase)
             f[i][1] = f[i][0];
     }
 
     // if we have an incomplete primary set (V,I,P), then we can calculate the missing values
     enum primary_fields = FieldFlags.Voltage | FieldFlags.Current | FieldFlags.Power;
-    if (r.type == CircuitType.DC)
+    if (r.type == CircuitType.dc)
     {
         if ((r.fields & primary_fields) == (FieldFlags.Voltage | FieldFlags.Current))
         {

@@ -34,6 +34,8 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.register_enum!CircuitType();
+
         registerApplianceType!Inverter();
         registerApplianceType!EVSE();
         registerApplianceType!Car();

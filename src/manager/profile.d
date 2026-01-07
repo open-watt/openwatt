@@ -268,6 +268,18 @@ nothrow @nogc:
         return null;
     }
 
+    const(VoidEnumInfo)* find_enum_template(const(char)[] name)
+    {
+        import manager;
+
+        const(VoidEnumInfo)** enum_info = name in enum_templates;
+        if (!enum_info)
+            enum_info = name in g_app.enum_templates;
+        if (!enum_info)
+            return null;
+        return *enum_info;
+    }
+
     ref inout(ComponentTemplate) get_component(ref const(DeviceTemplate) device, size_t index) inout pure
     {
         assert(index < device._num_components, "Component index out of range");
@@ -426,7 +438,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 writeWarning("Enum definition missing name; use \"enum: name\"");
                 break;
             }
-            if (enum_name[] in profile.enum_templates)
+            if (profile.find_enum_template(enum_name))
             {
                 writeWarning("Duplicate enum definition: ", enum_name);
                 break;
@@ -649,9 +661,9 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 {
                     if ((type & DataType.enumeration) && units)
                     {
-                        const(VoidEnumInfo)** enum_info = units in profile.enum_templates;
+                        const(VoidEnumInfo)* enum_info = profile.find_enum_template(units);
                         if (enum_info)
-                            desc = ValueDesc(type, *enum_info);
+                            desc = ValueDesc(type, enum_info);
                         else
                         {
                             writeWarning("Unknown enum type: ", units);

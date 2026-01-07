@@ -16,7 +16,7 @@ import manager.element;
 nothrow @nogc:
 
 
-enum CircuitType : ubyte { Unknown, DC, SinglePhase, SplitPhase, ThreePhase, Delta }
+enum CircuitType : ubyte { unknown, dc, single_phase, split_phase, three_phase, delta }
 
 
 struct Circuit

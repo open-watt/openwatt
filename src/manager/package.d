@@ -5,9 +5,11 @@ import urt.lifetime : move;
 import urt.map;
 import urt.mem.allocator;
 import urt.mem.string;
+import urt.meta : VoidEnumInfo;
 import urt.si.quantity;
 import urt.si.unit;
 import urt.string;
+import urt.traits : is_enum;
 
 import manager.collection;
 import manager.component;
@@ -71,6 +73,8 @@ nothrow @nogc:
     uint update_rate_hz = 20;
 
     Collection!Secret secrets;
+
+    Map!(String, const(VoidEnumInfo)*) enum_templates;
 
     // database...
 
@@ -180,6 +184,13 @@ nothrow @nogc:
         if (Device* d = device_name[] in devices)
             return name.empty ? *d : (*d).find_component(name);
         return null;
+    }
+
+    void register_enum(E)()
+        if (is_enum!E)
+    {
+        import urt.meta : enum_info;
+        enum_templates.insert(StringLit!(E.stringof), enum_info!E.make_void());
     }
 
     void update()
