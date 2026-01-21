@@ -123,6 +123,21 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
         return null;
     }
 
+    ModelMask model_bit;
+    if (model)
+    {
+        foreach (i; 0 .. device_template.num_models)
+        {
+            if (device_template.get_model(i, profile).wildcard_match_i(model))
+            {
+                model_bit = cast(ModelMask)(1 << i);
+                break;
+            }
+        }
+    }
+    else
+        model_bit = ModelMask.max;
+
     Device device = g_app.allocator.allocT!Device(id.makeString(g_app.allocator));
     if (name)
         device.name = name.makeString(g_app.allocator);
@@ -134,12 +149,18 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
 
         foreach (ref child; ct.components(profile))
         {
+            if ((ct._model_mask & model_bit) == 0)
+                continue;
+
             Component child_component = create_component(child);
             c.components ~= child_component;
         }
 
         foreach (ref el; ct.elements(profile))
         {
+            if ((el._model_mask & model_bit) == 0)
+                continue;
+
             Element* e = g_app.allocator.allocT!Element();
             e.id = el.get_id(profile).makeString(defaultAllocator());
 
@@ -165,6 +186,9 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
     // create a bunch of components from the profile template
     foreach (ref ct; device_template.components(profile))
     {
+        if ((ct._model_mask & model_bit) == 0)
+            continue;
+
         Component c = create_component(ct);
         device.components ~= c;
     }

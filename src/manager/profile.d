@@ -22,6 +22,8 @@ version = IncludeDescription;
 nothrow @nogc:
 
 
+alias ModelMask = ushort;
+
 enum Access : ubyte
 {
     read,
@@ -112,8 +114,19 @@ pure nothrow @nogc:
     Type type;
     ubyte index;
 
+    // 1-byte padding here...
+    Frequency update_frequency = Frequency.medium;
+
+    CacheString display_units;
+
     const(char)[] get_id(ref const(Profile) profile) const
         => as_dstring(profile.id_strings.ptr + _id);
+
+    const(char)[] get_name(ref const(Profile) profile) const
+        => profile.name_strings ? as_dstring(profile.name_strings.ptr + _name) : null;
+
+    const(char)[] get_desc(ref const(Profile) profile) const
+        => profile.desc_strings ? as_dstring(profile.desc_strings.ptr + _description) : null;
 
     const(char)[] get_constant_value(ref const(Profile) profile) const
     {
@@ -130,6 +143,9 @@ pure nothrow @nogc:
 private:
     ushort _id;
     ushort _value;
+    ushort _name;
+    ushort _description;
+    package ModelMask _model_mask;
 }
 
 struct ComponentTemplate
@@ -182,11 +198,15 @@ private:
     ushort _components;
     ushort _num_elements;
     ushort _num_components;
+    package ModelMask _model_mask;
 }
 
 struct DeviceTemplate
 {
 pure nothrow @nogc:
+    size_t num_models() const
+        => _models.length;
+
     const(char)[] get_model(size_t i, ref const(Profile) profile) const
         => as_dstring(profile.id_strings.ptr + _models[i]);
 
@@ -237,6 +257,8 @@ nothrow @nogc:
             defaultAllocator().freeArray(indirections);
         if (id_strings)
             defaultAllocator().freeArray(id_strings);
+        if (name_strings)
+            defaultAllocator().freeArray(name_strings);
         if (lookup_strings)
             defaultAllocator().freeArray(lookup_strings);
         if (desc_strings)
@@ -261,7 +283,7 @@ nothrow @nogc:
 
             foreach (i; 0 .. dt._models.length)
             {
-                if (dt.get_model(i, this).icmp(model) == 0)
+                if (wildcard_match_i(dt.get_model(i, this), model))
                     return &dt;
             }
         }
@@ -318,7 +340,7 @@ nothrow @nogc:
                 const(char)[] eid = as_dstring(lookup_strings.ptr + lookup_table[i].id);
                 if (eid[] == id[])
                     return lookup_table[i].index;
-                if (++i < lookup_table.length || lookup_table[i].hash != low_hash)
+                if (++i == lookup_table.length || lookup_table[i].hash != low_hash)
                     return -1;
             }
         }
@@ -328,7 +350,7 @@ nothrow @nogc:
             {
                 if (lookup_table[i].id == hash >> 16)
                     return lookup_table[i].index;
-                if (++i < lookup_table.length || lookup_table[i].hash != low_hash)
+                if (++i == lookup_table.length || lookup_table[i].hash != low_hash)
                     return -1;
             }
         }
@@ -387,6 +409,7 @@ private:
     ElementDesc_AA55[] aa55_elements;
     ushort[] indirections;
     char[] id_strings;
+    char[] name_strings;
     char[] lookup_strings;
     char[] desc_strings;
 
@@ -417,6 +440,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     // first we need to count up all the memory...
     size_t item_count = 0;
     size_t id_string_length = 0;
+    size_t name_string_length = 0;
     size_t lookup_string_len = 0;
     size_t desc_string_len = 0;
     size_t num_device_templates = 0;
@@ -467,30 +491,23 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                     reg_item.sub_items.pushFront(ConfItem(name, extra));
                 }
 
-                foreach (ref reg_conf; reg_item.sub_items) switch (reg_conf.name)
+                foreach (ref reg_conf; reg_item.sub_items)
                 {
-                    case "desc":
-                        tail = reg_conf.value;
-                        const(char)[] id = tail.split!','.unQuote;
-                        const(char)[] displayUnits = tail.split!','.unQuote;
-                        const(char)[] freq = tail.split!','.unQuote;
-                        const(char)[] desc = tail.split!','.unQuote;
-                        // TODO: if !tail.empty, warn about unexpected data...
-
-                        lookup_string_len += cache_len(id.length);
-                        desc_string_len += cache_len(desc.length);
-                        break;
-
-                    case "valueid", "valuedesc":
-                        // TODO: CREATE ENUM FROM DEPRECATED ENUM DESCRIPTION...
-                        break;
-
-                    // handled in second pass...
-//                    case "others":
-//                        continue;
-
-                    default:
+                    if (reg_conf.name != "desc")
+                    {
                         writeWarning("Invalid token: ", reg_conf.name);
+                        continue;
+                    }
+
+                    tail = reg_conf.value;
+                    const(char)[] id = tail.split!','.unQuote;
+                    const(char)[] display_units = tail.split!','.unQuote;
+                    const(char)[] freq = tail.split!','.unQuote;
+                    const(char)[] desc = tail.split!','.unQuote;
+                    // TODO: if !tail.empty, warn about unexpected data...
+
+                    lookup_string_len += cache_len(id.length);
+                    desc_string_len += cache_len(desc.length);
                 }
 
                 switch (reg_item.name)
@@ -534,11 +551,37 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             ++num_element_templates;
                             ++num_indirections;
 
-                            const(char)[] tail = cItem.value;
+                            const(char)[] extra = cItem.value;
+                            const(char)[] tail = extra.split_element_and_desc();
+                            if (!extra.empty)
+                            {
+                                const(char)[] name = extra.split!':';
+                                cItem.sub_items.pushFront(ConfItem(name, extra));
+                            }
+
                             id_string_length += cache_len(tail.split!','.unQuote.length);
 
                             if (ty == ElementTemplate.Type.constant)
                                 id_string_length += cache_len(tail.split!','.length);
+
+                            foreach (ref el_item; cItem.sub_items)
+                            {
+                                if (el_item.name[] != "desc")
+                                {
+                                    writeWarning("Invalid token: ", el_item.name);
+                                    continue;
+                                }
+
+                                tail = el_item.value;
+                                const(char)[] display_units = tail.split!','.unQuote;
+                                const(char)[] freq = tail.split!','.unQuote;
+                                const(char)[] name = tail.split!','.unQuote;
+                                const(char)[] desc = tail.split!','.unQuote;
+                                // TODO: if !tail.empty, warn about unexpected data...
+
+                                name_string_length += cache_len(name.unQuote.length);
+                                desc_string_len += cache_len(desc.length);
+                            }
                             break;
 
                         case "component":
@@ -555,7 +598,9 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
             foreach (ref item; root_item.sub_items) switch (item.name)
             {
                 case "model":
-                    id_string_length += cache_len(item.value.unQuote.length);
+                    const(char)[] models = item.value;
+                    while (const(char)[] model = models.split!',')
+                        id_string_length += cache_len(model.unQuote.length);
                     break;
 
                 case "component":
@@ -584,6 +629,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     profile.lookup_table = allocator.allocArray!(Profile.Lookup)(item_count);
     profile.indirections = allocator.allocArray!ushort(num_indirections);
     profile.id_strings = allocator.allocArray!char(id_string_length);
+    profile.name_strings = allocator.allocArray!char(name_string_length);
     profile.lookup_strings = allocator.allocArray!char(lookup_string_len);
     profile.desc_strings = allocator.allocArray!char(desc_string_len);
 
@@ -597,6 +643,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
         profile.aa55_elements = allocator.allocArray!ElementDesc_AA55(aa55_count);
 
     auto id_cache = StringCacheBuilder(profile.id_strings);
+    auto name_cache = StringCacheBuilder(profile.name_strings);
     auto lookup_cache = StringCacheBuilder(profile.lookup_strings);
     auto desc_cache = StringCacheBuilder(profile.desc_strings);
 
@@ -620,25 +667,27 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 ref Profile.Lookup l = profile.lookup_table[item_count++];
                 l.index = cast(ushort)i;
 
-                const(char)[] id, displayUnits, freq;
+                const(char)[] id, display_units, freq;
 
-                foreach (ref reg_conf; reg_item.sub_items) switch (reg_conf.name)
+                foreach (ref reg_conf; reg_item.sub_items)
                 {
-                    case "desc":
-                        const(char)[] tail = reg_conf.value;
-                        id = tail.split!','.unQuote;
-                        displayUnits = tail.split!','.unQuote;
-                        freq = tail.split!','.unQuote;
-                        const(char)[] desc = tail.split!','.unQuote;
-
-                        l.id = lookup_cache.add_string(id);
-                        l.hash = fnv1a(cast(ubyte[])id) & 0xFFFF;
-
-                        e._description = desc_cache.add_string(desc);
-                        break;
-
-                    default:
+                    if (reg_conf.name[] != "desc")
                         continue;
+
+                    const(char)[] tail = reg_conf.value;
+                    id = tail.split!','.unQuote;
+                    display_units = tail.split!','.unQuote;
+                    freq = tail.split!','.unQuote;
+                    const(char)[] desc = tail.split!','.unQuote;
+
+                    uint hash = fnv1a(cast(ubyte[])id);
+                    l.hash = hash & 0xFFFF;
+                    if (profile.lookup_strings)
+                        l.id = lookup_cache.add_string(id);
+                    else
+                        l.id = hash >> 16;
+
+                    e._description = desc_cache.add_string(desc);
                 }
 
                 Frequency frequency = Frequency.medium;
@@ -655,7 +704,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                     else writeWarning("Invalid frequency value: ", freq);
                 }
                 e.update_frequency = frequency;
-                e.display_units = addString(displayUnits);
+                e.display_units = addString(display_units);
 
                 void parse_value_desc(ref ValueDesc desc, DataType type, const(char)[] units)
                 {
@@ -889,15 +938,13 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 }
             }
 
-            foreach (ref item; root_item.sub_items) switch (item.name)
+            foreach (ref item; root_item.sub_items)
             {
-                case "component":
-                    ++device._num_components;
-                    allocate_component(item);
-                    break;
+                if (item.name[] != "component")
+                    continue;
 
-                default:
-                    break;
+                ++device._num_components;
+                allocate_component(item);
             }
             break;
 
@@ -923,6 +970,21 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
             num_indirections += device._num_components;
             size_t component_count = 0;
 
+            ushort parse_model_filter(const(char)[] models)
+            {
+                models = models.trim();
+                ushort mask;
+                while (const(char)[] model = models.split!','.unQuote)
+                {
+                    foreach (i; 0 .. device.num_models)
+                    {
+                        if (wildcard_match_i(model, device.get_model(i, *profile), true))
+                            mask |= 1 << i;
+                    }
+                }
+                return mask;
+            }
+
             void parse_component(ref ComponentTemplate component, ref ConfItem conf)
             {
                 component._components = component._num_components ? cast(ushort)num_indirections : 0;
@@ -932,6 +994,15 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 size_t component_count = 0;
                 size_t element_count = 0;
 
+                // get model filter
+                const(char)[] model_filter = conf.value;
+                const(char)[] tail = model_filter.split!'[';
+                if (!model_filter.empty && model_filter[$-1] == ']')
+                    component._model_mask = parse_model_filter(model_filter[0 .. $-1]);
+                else
+                    component._model_mask = ModelMask.max;
+
+                // first pass - metadata and children
                 foreach (ref cItem; conf.sub_items) switch (cItem.name)
                 {
                     case "id":
@@ -951,6 +1022,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         break;
                 }
 
+                // second pass - the elements
                 foreach (ref cItem; conf.sub_items)
                 {
                     ElementTemplate.Type ty = ElementTemplate.Type.constant;
@@ -964,8 +1036,25 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             ref ElementTemplate e = profile.element_templates[profile.indirections[component._elements + element_count++]];
                             e.type = ty;
 
-                            const(char)[] tail = cItem.value;
-                            e._id = id_cache.add_string(tail.split!','.unQuote);
+                            const(char)[] extra = cItem.value;
+                            model_filter = extra.split_element_and_desc();
+                            tail = model_filter.split!'[';
+                            if (!extra.empty)
+                            {
+                                const(char)[] item_name = extra.split!':';
+                                cItem.sub_items.pushFront(ConfItem(item_name, extra));
+                            }
+
+                            // get model filter
+                            if (!model_filter.empty && model_filter[$-1] == ']')
+                                e._model_mask = parse_model_filter(model_filter[0 .. $-1]);
+                            else
+                                e._model_mask = ModelMask.max;
+
+                            const(ElementDesc)* elem_desc;
+
+                            const(char)[] elem_id = tail.split!','.unQuote;
+                            e._id = id_cache.add_string(elem_id);
 
                             if (ty == ElementTemplate.Type.constant)
                             {
@@ -983,7 +1072,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                                     continue;
                                 }
                                 id = id[1 .. $];
-                                const(char)[] index = id.split!':';
+                                const(char)[] index = id.split!'$';
                                 if (!id)
                                     id = index;
                                 else
@@ -1005,7 +1094,45 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                                 }
                                 // add the element index to the template...
                                 e._value = cast(ushort)i;
+
+                                elem_desc = &e.get_element_desc(*profile);
                             }
+
+                            const(char)[] display_units, freq, description;
+
+                            foreach (ref el_item; cItem.sub_items)
+                            {
+                                if (el_item.name[] != "desc")
+                                    continue;
+
+                                tail = el_item.value;
+                                display_units = tail.split!','.unQuote;
+                                freq = tail.split!','.unQuote;
+                                const(char)[] name = tail.split!','.unQuote;
+                                description = tail.split!','.unQuote;
+
+                                e._name = desc_cache.add_string(name);
+                            }
+
+                            e.display_units = display_units ? addString(display_units) : elem_desc ? elem_desc.display_units : CacheString();
+                            e._description = description ? desc_cache.add_string(description) : elem_desc ? elem_desc._description : 0;
+
+                            // TODO: default should be on-demand, but this is more useful while debugging...
+                            e.update_frequency = Frequency.medium;
+                            if (!freq.empty)
+                            {
+                                if (freq.ieq("realtime")) e.update_frequency = Frequency.realtime;
+                                else if (freq.ieq("high")) e.update_frequency = Frequency.high;
+                                else if (freq.ieq("medium")) e.update_frequency = Frequency.medium;
+                                else if (freq.ieq("low")) e.update_frequency = Frequency.low;
+                                else if (freq.ieq("const")) e.update_frequency = Frequency.constant;
+                                else if (freq.ieq("ondemand")) e.update_frequency = Frequency.on_demand;
+                                else if (freq.ieq("report")) e.update_frequency = Frequency.report;
+                                else if (freq.ieq("config")) e.update_frequency = Frequency.configuration;
+                                else writeWarning("Invalid frequency value: ", freq);
+                            }
+                            else if (elem_desc)
+                                e.update_frequency = elem_desc.update_frequency;
                             break;
 
                         default:
@@ -1014,20 +1141,32 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 }
             }
 
-            foreach (ref item; root_item.sub_items) switch (item.name)
+            // gather the models first; we'll need them in the components...
+            models: foreach (ref item; root_item.sub_items)
             {
-                case "model":
-                    device._models ~= id_cache.add_string(item.value.unQuote);
-                    break;
+                if (item.name[] != "model")
+                    continue;
 
-                case "component":
-                    profile.indirections[device._components + component_count] = cast(ushort)num_component_templates++;
-                    parse_component(profile.component_templates[profile.indirections[device._components + component_count++]], item);
-                    break;
+                const(char)[] models = item.value;
+                while (const(char)[] model = models.split!',')
+                {
+                    if (device._models.length >= 16)
+                    {
+                        writeWarning("Device template can (currently) have a maximum of 16 models!");
+                        break models;
+                    }
 
-                default:
-                    writeWarning("Invalid token: ", item.name);
-                    break;
+                    device._models ~= id_cache.add_string(model.unQuote);
+                }
+            }
+
+            foreach (ref item; root_item.sub_items)
+            {
+                if (item.name[] != "component")
+                    continue;
+
+                profile.indirections[device._components + component_count] = cast(ushort)num_component_templates++;
+                parse_component(profile.component_templates[profile.indirections[device._components + component_count++]], item);
             }
             break;
 
@@ -1112,9 +1251,12 @@ int lookup_cmp(ref const Profile.Lookup a, ref const Profile.Lookup b) pure noth
 
 const(char)[] split_element_and_desc(ref const(char)[] line)
 {
+    import urt.util : swap;
+
     size_t colon = line.findFirst(':');
     if (colon == line.length)
-        return line;
+        return line.swap(null);
+
     // seek back to beginning of token before the colon...
     while (colon > 0 && is_whitespace(line[colon - 1]))
         --colon;
