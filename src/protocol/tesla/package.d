@@ -122,22 +122,22 @@ nothrow @nogc:
         c.template_ = "DeviceInfo".addString;
 
         e = g_app.allocator.allocT!Element();
-        e.id = "deviceType".addString;
+        e.id = "type".addString;
         e.latest = "evse";
         c.elements ~= e;
 
         e = g_app.allocator.allocT!Element();
-        e.id = "deviceName".addString;
+        e.id = "name".addString;
         e.latest = "Tesla Wall Charger Gen2";
         c.elements ~= e;
 
         e = g_app.allocator.allocT!Element();
-        e.id = "serialNumber".addString;
+        e.id = "serial_number".addString;
         c.elements ~= e;
         sampler.add_element(e);
 
         e = g_app.allocator.allocT!Element();
-        e.id = "lifetimeEnergy".addString;
+        e.id = "lifetime_energy".addString;
         c.elements ~= e;
         sampler.add_element(e);
 
@@ -243,7 +243,7 @@ nothrow @nogc:
         c.elements ~= e;
 
         e = g_app.allocator.allocT!Element();
-        e.id = "totalImportActiveEnergy".addString;
+        e.id = "total_import".addString;
         c.elements ~= e;
         sampler.add_element(e);
 

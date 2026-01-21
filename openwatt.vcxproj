@@ -224,6 +224,7 @@
   <ItemGroup>
     <None Include=".editorconfig" />
     <None Include=".gitignore" />
+    <None Include="conf\goodwe_profiles\gwxx48es.conf" />
     <None Include="conf\modbus_profiles\eastron_sdm120.conf" />
     <None Include="conf\modbus_profiles\eastron_sdm630.conf" />
     <None Include="conf\modbus_profiles\gm1000.conf" />
@@ -234,6 +235,12 @@
     <None Include="conf\modbus_profiles\tac1100.conf" />
     <None Include="conf\rest_profiles\smartevse.conf" />
     <None Include="conf\startup.conf" />
+    <None Include="conf\zigbee_profiles\zigbee.conf" />
+    <None Include="docs\CLI.md" />
+    <None Include="docs\COMPONENT_TEMPLATES.md" />
+    <None Include="docs\FEATURES.md" />
+    <None Include="docs\OVERVIEW.md" />
+    <None Include="docs\PROFILE_FILE_FORMAT.md" />
     <None Include="Makefile" />
   </ItemGroup>
   <ItemGroup>

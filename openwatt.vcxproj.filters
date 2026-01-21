@@ -1,6 +1,24 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <Filter Include="conf">
+      <UniqueIdentifier>{7f37cbda-422d-4bb4-a2b2-d913b4cf3ba9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="conf\goodwe_profiles">
+      <UniqueIdentifier>{a5e82299-0fc3-4ab5-be5b-974362653f16}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="conf\modbus_profiles">
+      <UniqueIdentifier>{44799e0d-95be-4f50-83d3-bb8473558560}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="conf\rest_profiles">
+      <UniqueIdentifier>{adb46336-8e98-41fa-9701-bcda31f4d3ec}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="conf\zigbee_profiles">
+      <UniqueIdentifier>{93769be7-b621-4abb-87b0-29e9db81fbc9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="docs">
+      <UniqueIdentifier>{8b262c04-bc01-4af0-ab2c-8678c8779f0c}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src">
       <UniqueIdentifier>{9560f9a9-c6dd-4b6c-9b32-ada7955c0346}</UniqueIdentifier>
     </Filter>
@@ -84,15 +102,6 @@
     </Filter>
     <Filter Include="src\apps\energy">
       <UniqueIdentifier>{64b88f6a-915f-4210-b838-b7905c8455ad}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf">
-      <UniqueIdentifier>{7f37cbda-422d-4bb4-a2b2-d913b4cf3ba9}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf\modbus_profiles">
-      <UniqueIdentifier>{44799e0d-95be-4f50-83d3-bb8473558560}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf\rest_profiles">
-      <UniqueIdentifier>{adb46336-8e98-41fa-9701-bcda31f4d3ec}</UniqueIdentifier>
     </Filter>
     <Filter Include="third_party">
       <UniqueIdentifier>{bfd0dc75-e884-4b56-bee1-3f94570b47b0}</UniqueIdentifier>
@@ -655,6 +664,9 @@
     <None Include="conf\startup.conf">
       <Filter>conf</Filter>
     </None>
+    <None Include="conf\goodwe_profiles\gwxx48es.conf">
+      <Filter>conf\goodwe_profiles</Filter>
+    </None>
     <None Include="conf\modbus_profiles\eastron_sdm120.conf">
       <Filter>conf\modbus_profiles</Filter>
     </None>
@@ -681,6 +693,24 @@
     </None>
     <None Include="conf\rest_profiles\smartevse.conf">
       <Filter>conf\rest_profiles</Filter>
+    </None>
+    <None Include="conf\zigbee_profiles\zigbee.conf">
+      <Filter>conf\zigbee_profiles</Filter>
+    </None>
+    <None Include="docs\CLI.md">
+      <Filter>docs</Filter>
+    </None>
+    <None Include="docs\COMPONENT_TEMPLATES.md">
+      <Filter>docs</Filter>
+    </None>
+    <None Include="docs\FEATURES.md">
+      <Filter>docs</Filter>
+    </None>
+    <None Include="docs\OVERVIEW.md">
+      <Filter>docs</Filter>
+    </None>
+    <None Include="docs\PROFILE_FILE_FORMAT.md">
+      <Filter>docs</Filter>
     </None>
     <None Include="Makefile" />
   </ItemGroup>
