@@ -163,6 +163,22 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
 
             Element* e = g_app.allocator.allocT!Element();
             e.id = el.get_id(profile).makeString(defaultAllocator());
+            e.name = el.get_name(profile).makeString(defaultAllocator());
+            e.desc = el.get_desc(profile).makeString(defaultAllocator());
+            e.display_unit = el.display_units;
+
+            if (!e.name || !e.desc || !e.display_unit)
+            {
+                if (const KnownElementTemplate* et = find_known_element(c.template_[], e.id[]))
+                {
+                    if (!e.display_unit)
+                        e.display_unit = et.units.makeString(defaultAllocator());
+                    if (!e.name)
+                        e.name = et.name.makeString(defaultAllocator());
+                    if (!e.desc)
+                        e.desc = et.desc.makeString(defaultAllocator());
+                }
+            }
 
             final switch (el.type) with (ElementTemplate.Type)
             {

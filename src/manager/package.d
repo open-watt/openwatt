@@ -88,6 +88,8 @@ nothrow @nogc:
         assert(!g_app, "Application already created!");
         g_app = this;
 
+        register_enum!Boolean();
+
         console = Console(this, String("console".addString), Mallocator.instance);
 
         console.set_prompt(StringLit!"openwatt > ");
@@ -307,4 +309,13 @@ nothrow @nogc:
         }
 +/
     }
+}
+
+
+private:
+
+enum Boolean : ubyte
+{
+    true_ = 0,
+    false_ = 1
 }

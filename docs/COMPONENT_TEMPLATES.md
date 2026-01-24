@@ -31,14 +31,15 @@ Device identification and metadata.
 
 ### Required
 - `type: string` - Device category: "energy-meter", "inverter", "bms", "evse", "battery", "light-switch", "contact-sensor"
-- `name: string` - Human-readable device name
+- `name: string` - Device display name
 
 ### Optional
-- `manufacturer: string` - Manufacturer name
-- `brand_name: string` - Brand
-- `model: string` / `model_number: string` - Model identifier
-- `model_id: string` - Model ID
+- `manufacturer_name: string` - Manufacturer display name
+- `manufacturer_id: string` - Manufacturer identifier code
+- `brand_name: string` - Brand display name (where it may differ from manufacturer; ie, non-OEM products)
+- `brand_id: string` - Brand identifier code
 - `model_name: string` - Model display name
+- `model_id: string` - Model identifier code
 - `serial_number: string` - Serial number
 - `firmware_version: string` / `software_version: string` - Firmware version
 - `hardware_version: string` - Hardware version
@@ -56,7 +57,7 @@ Device runtime and operating status.
 ### Optional
 - `time: systime` - Current device time
 - `up_time: s` - Uptime since power-on
-- `running_time: s/min/hr` - Total running time
+- `running_time: s/min/hr` - Total running time (from installation)
 - `running_time_with_load: s/min/hr` - Running time under load
 - `network: Network` - Network connectivity status (sub-component)
 
@@ -78,7 +79,6 @@ Can be nested for grouped parameters. Standard network sub-components:
 ### ethernet: Ethernet
 - `status: enum/string` - Connection status
 - `ip_address: string` - IPv4 address
-- `subnet_mask: string` - Subnet mask
 - `gateway: string` - Default gateway
 - `mac_address: string` - MAC address
 - `link_speed: Mbps` - Link speed
@@ -153,29 +153,34 @@ Accumulated energy totals.
 - `type: string` - "single-phase", "three-phase", or "dc"
 
 ### Active Energy
-- `total_import: kWh` - Total import
-- `total_import1-3: kWh` - Per-phase import
-- `total_export: kWh` - Total export
-- `total_export1-3: kWh` - Per-phase export
-- `total: kWh` - Total (net)
-- `total1-3: kWh` - Per-phase total
+- `import: kWh` - Total import
+- `import1-3: kWh` - Per-phase import
+- `export: kWh` - Total export
+- `export1-3: kWh` - Per-phase export
+- `net: kWh` - Total (net)
+- `net1-3: kWh` - Per-phase total
+- `absolute: kWh` - Gross (absolute)
+- `absolute1-3: kWh` - Per-phase gross
 
 ### Reactive Energy
-- `total_import_reactive: kvarh` - Total import
-- `total_import_reactive1-3: kvarh` - Per-phase import
-- `total_export_reactive: kvarh` - Total export
-- `total_export_reactive1-3: kvarh` - Per-phase export
-- `total_reactive: kvarh` - Total (net)
-- `total_reactive1-3: kvarh` - Per-phase total
+- `import_reactive: kvarh` - Total import
+- `import_reactive1-3: kvarh` - Per-phase import
+- `export_reactive: kvarh` - Total export
+- `export_reactive1-3: kvarh` - Per-phase export
+- `net_reactive: kvarh` - Total (net)
+- `net_reactive1-3: kvarh` - Per-phase total
+- `absolute_reactive: kvarh` - Gross (absolute)
+- `absolute_reactive1-3: kvarh` - Per-phase gross
 
 ### Apparent Energy
-- `total_apparent: kVAh` - Total apparent
-- `total_apparent1-3: kVAh` - Per-phase apparent
+- `apparent: kVAh` - Total apparent
+- `apparent1-3: kVAh` - Per-phase apparent
 
 ### DC
-- `total_import: kWh` - Total import (or charge)
-- `total_export: kWh` - Total export (or discharge)
-- `total: kWh` - Total (net)
+- `import: kWh` - Total import (or charge)
+- `export: kWh` - Total export (or discharge)
+- `net: kWh` - Total (net)
+- `absolute: kWh` - Gross (absolute)
 
 ---
 
@@ -316,8 +321,7 @@ Static solar PV configuration and specifications.
 ### Array Arrangement (system level)
 - `panel_count: count` - Total number of panels
 - `string_count: count` - Number of strings
-- `panels_per_string: count` - Panels per string
-- `topology: string` - Array arrangement description (e.g., "2S10P" for 2 strings of 10 panels)
+- `topology: string` - Array arrangement description (e.g., "10P+6P" for 2 strings of 10 panels and 6 panels)
 
 ### Panel Specifications (panel/string level)
 - `rated_power: W` - Panel rated power (Wp)
@@ -343,12 +347,13 @@ Solar/battery/hybrid inverter with optional grid, battery, renewable inputs, and
 - `bus_voltage: V` - DC bus voltage
 
 ### Sub-components
-- `pv: Solar` - Solar PV input(s)
+- `solar: Solar` - Solar PV input(s)
 - `battery: Battery` - Connected battery system
 - `charge_control: ChargeControl` - Battery charge controller (for managing battery charging)
 - `grid: RealtimeEnergyMeter` / `grid_cumulative: CumulativeEnergyMeter` - Grid connection (import/export)
 - `load: RealtimeEnergyMeter` / `load_cumulative: CumulativeEnergyMeter` - Load output (consumption)
 - `backup: RealtimeEnergyMeter` / `backup_cumulative: CumulativeEnergyMeter` - Backup/EPS output
+- `meter: RealtimeEnergyMeter` / `meter_cumulative: CumulativeEnergyMeter` - External energy meter for self-consumption reference
 - `evse: EVSE` - Integrated EV charger (for inverters with built-in EVSE)
 - `config: Configuration` - Inverter configuration
 
@@ -358,14 +363,13 @@ Solar/battery/hybrid inverter with optional grid, battery, renewable inputs, and
 
 Electric Vehicle Supply Equipment (EV charger).
 
-### Required
-- `state: enum` - J1772 pilot state: A (standby), B (vehicle detected), C (ready/charging), D (ventilation required), etc.
-
 ### Optional
-- `error: bitfield/enum` - Error flags
-- `connected: boolean` - Vehicle connected
+- `temp: °C` - EVSE temperature
 - `session_energy: Wh` - Energy delivered in current charging session
 - `lifetime_energy: Wh` - Energy delivered in the lifetime of the charger
+- `state: enum` - J1772 pilot state: A (standby), B (vehicle detected), C (ready/charging), D (ventilation required), etc.
+- `error: bitfield/enum` - Error flags
+- `connected: boolean` - Vehicle connected
 
 ### Sub-components
 - `charge_control: ChargeControl` - Charge control sub-component (for controllable chargers)
@@ -424,7 +428,6 @@ Door/window sensors.
 
 ### Required
 - `open: boolean` - Open/closed state, OR
-- `alarm: boolean` - Alarm status
 
 ### Optional
 - `alarm: boolean` - Alarm status
@@ -457,7 +460,6 @@ Modbus/RS485 network configuration (writable settings).
 Ethernet network configuration (writable settings).
 - `dhcp_enabled: boolean` - DHCP enable/disable
 - `ip_address: string` - Static IPv4 address (when DHCP disabled)
-- `subnet_mask: string` - Subnet mask
 - `gateway: string` - Default gateway
 - `dns_primary: string` - Primary DNS server
 - `dns_secondary: string` - Secondary DNS server
@@ -470,7 +472,6 @@ Wi-Fi network configuration (writable settings).
 - `security: enum` - Security mode (open, wep, wpa, wpa2, wpa3)
 - `dhcp_enabled: boolean` - DHCP enable/disable
 - `ip_address: string` - Static IPv4 address (when DHCP disabled)
-- `subnet_mask: string` - Subnet mask
 - `gateway: string` - Default gateway
 
 #### `cellular: CellularConfig`
@@ -511,8 +512,8 @@ device-template:
         id: cumulative
         template: CumulativeEnergyMeter
         element: type, "single-phase"
-        element-map: total_import, @importActiveEnergy
-        element-map: total_export, @exportActiveEnergy
+        element-map: import, @importActiveEnergy
+        element-map: export, @exportActiveEnergy
 ```
 
 ### Battery System with BMS
@@ -543,8 +544,8 @@ device-template:
             id: cumulative
             template: CumulativeEnergyMeter
             element: type, "dc"
-            element-map: total_import, @total_charge
-            element-map: total_export, @total_discharge
+            element-map: import, @total_charge
+            element-map: export, @total_discharge
 ```
 
 ### Hybrid Solar Inverter
@@ -635,7 +636,7 @@ device-template:
             id: cumulative
             template: CumulativeEnergyMeter
             element: type, "three-phase"
-            element-map: total_import, @energy_total
+            element-map: import, @energy_total
         component:
             id: config
             template: Configuration
