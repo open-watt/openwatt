@@ -33,7 +33,7 @@ nothrow @nogc:
     String name;
     Circuit* parent;
     Component meter;
-    uint maxCurrent;
+    uint max_current;
     Array!(Circuit*) subCircuits;
     Array!Appliance appliances;
 
