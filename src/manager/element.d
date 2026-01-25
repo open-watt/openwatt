@@ -1,6 +1,7 @@
 module manager.element;
 
 import urt.array;
+import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.variant;
 
@@ -50,6 +51,17 @@ nothrow @nogc:
     float normalised_value() const
     {
         return cast(float)value.asQuantity().normalise().value;
+    }
+
+    float scaled_value(ScaledUnit unit)() const
+    {
+        import urt.si.quantity : Quantity;
+        return cast(float)Quantity!(double, unit)(value.asQuantity()).value;
+    }
+
+    float scaled_value(ScaledUnit unit) const
+    {
+        return cast(float)value.asQuantity().adjust_scale(unit).value;
     }
 
     ref const(Variant) value() const
