@@ -150,7 +150,7 @@ nothrow @nogc:
         device.components ~= c;
 
         // charge control
-        c = g_app.allocator.allocT!Component(String("control".addString));
+        c = g_app.allocator.allocT!Component(String("charge_control".addString));
         c.template_ = "ChargeControl".addString;
 
         e = g_app.allocator.allocT!Element();
@@ -159,13 +159,13 @@ nothrow @nogc:
         sampler.add_element(e);
 
         e = g_app.allocator.allocT!Element();
-        e.id = "targetCurrent".addString;
+        e.id = "target_current".addString;
         e.access = Access.read_write;
         c.elements ~= e;
         sampler.add_element(e);
 
         e = g_app.allocator.allocT!Element();
-        e.id = "maxCurrent".addString;
+        e.id = "max_current".addString;
         c.elements ~= e;
         sampler.add_element(e);
 
@@ -243,7 +243,7 @@ nothrow @nogc:
         c.elements ~= e;
 
         e = g_app.allocator.allocT!Element();
-        e.id = "total_import".addString;
+        e.id = "import".addString;
         c.elements ~= e;
         sampler.add_element(e);
 
