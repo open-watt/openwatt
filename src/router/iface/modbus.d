@@ -54,6 +54,7 @@ struct ServerMap
     ubyte universal_address;
     ModbusInterface iface;
     String profile;
+    String model;
 }
 
 struct ModbusRequest
@@ -569,7 +570,7 @@ private:
                     return;
                 }
 
-                map = mod_mb.add_remote_server(null, this, frame_info.address, null);
+                map = mod_mb.add_remote_server(null, this, frame_info.address, null, null);
             }
             address = map.universal_address;
             frame_mac = map.mac;
@@ -752,7 +753,7 @@ nothrow @nogc:
         return universal_address in remote_servers;
     }
 
-    final ServerMap* add_remote_server(const(char)[] name, ModbusInterface iface, ubyte address, const(char)[] profile, ubyte universal_address = 0)
+    final ServerMap* add_remote_server(const(char)[] name, ModbusInterface iface, ubyte address, const(char)[] profile, const(char)[] model, ubyte universal_address = 0)
     {
         if (!name)
             name = tconcat(iface.name[], '.', address);
@@ -785,6 +786,7 @@ nothrow @nogc:
         map.universal_address = universal_address;
         map.iface = iface;
         map.profile = profile.makeString(defaultAllocator());
+        map.model = model.makeString(defaultAllocator());
 
         remote_servers[universal_address] = map;
         iface.add_address(map.mac, iface);
@@ -795,7 +797,7 @@ nothrow @nogc:
         return universal_address in remote_servers;
     }
 
-    final void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, const(char)[] profile, Nullable!ubyte universal_address)
+    final void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, const(char)[] profile, Nullable!(const(char)[]) model, Nullable!ubyte universal_address)
     {
         if (!_interface)
         {
@@ -831,7 +833,7 @@ nothrow @nogc:
             }
         }
 
-        add_remote_server(name, modbusInterface, address, profile, universal_address ? universal_address.value : 0);
+        add_remote_server(name, modbusInterface, address, profile, model ? model.value : null, universal_address ? universal_address.value : 0);
     }
 }
 
