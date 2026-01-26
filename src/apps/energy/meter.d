@@ -244,7 +244,7 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         if (i == MeterField.Frequency)
         {
             if (Element* e = c.find_element(fieldNames[i]))
-                r.freq = e.normalised_value();
+                r.freq = e.scaled_value!Hertz();
             r.fields |= FieldFlags.Frequency;
             continue;
         }
