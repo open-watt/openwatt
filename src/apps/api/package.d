@@ -567,7 +567,7 @@ private:
 
     void build_component_list(Component comp, ref MutableString!0 json, bool shallow, bool is_device = false)
     {
-        json.append('\"', comp.id[], "\":{\"type\":\"", is_device ? "device" : "component", "\",\"components\":", shallow ? '[' : '{');
+        json.append('\"', comp.id[], "\":{\"type\":\"", is_device ? "device" : "component", "\",\"template\":\"", comp.template_[], "\",\"components\":", shallow ? '[' : '{');
 
         bool first = true;
         foreach (child; comp.components)
