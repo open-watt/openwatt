@@ -45,10 +45,10 @@ nothrow @nogc:
     Circuit* circuit;
     Component meter;
 
-    MeterData meterData;
+    MeterData meter_data;
 
-    bool enabled;
-    Watts targetPower = Watts(0);
+    bool enabled = true;
+    Watts target_power = Watts(0);
 
     // HACK: distribute power according to priority...
     int priority;
@@ -76,7 +76,7 @@ nothrow @nogc:
 
     // get the power currently being consumed by the appliance
     Watts currentConsumption() const
-        => meterData.active[0] > Watts(0) ? cast(Watts)meterData.active[0] : Watts(0);
+        => meter_data.active[0] > Watts(0) ? cast(Watts)meter_data.active[0] : Watts(0);
 
     // returns true if the appliance can be controlled
     bool canControl() const
@@ -101,12 +101,12 @@ nothrow @nogc:
     {
         Watts min, max;
         if (minPowerLimit(min) && watts < min)
-            targetPower = min;
+            target_power = min;
         else if (maxPowerLimit(max) && watts > max)
-            targetPower = max;
+            target_power = max;
         else
-            targetPower = watts;
-        return targetPower;
+            target_power = watts;
+        return target_power;
     }
 
     // specifies the minimum power that the appliance can accept
@@ -235,12 +235,12 @@ nothrow @nogc:
 
     final override bool minPowerLimit(out Watts watts) const
     {
-        watts = meterData.voltage[0] ? cast(Volts)meterData.voltage[0] * Amps(6) : Volts(230) * Amps(6);
+        watts = meter_data.voltage[0] ? cast(Volts)meter_data.voltage[0] * Amps(6) : Volts(230) * Amps(6);
         return true;
     }
     final override bool maxPowerLimit(out Watts watts) const
     {
-        watts = meterData.voltage[0] ? cast(Volts)meterData.voltage[0] * Amps(32) : Volts(240) * Amps(32);
+        watts = meter_data.voltage[0] ? cast(Volts)meter_data.voltage[0] * Amps(32) : Volts(240) * Amps(32);
         return true;
     }
 
@@ -276,13 +276,13 @@ nothrow @nogc:
             }
         }
 
-        Watts target = targetPower;
+        Watts target = target_power;
         if (connectedCar)
         {
-            if (connectedCar.targetPower > Watts(0))
-                target = max(targetPower, connectedCar.targetPower);
+            if (connectedCar.target_power > Watts(0))
+                target = max(target_power, connectedCar.target_power);
         }
-        Amps target_current = target / (meterData.voltage[0] ? cast(Volts)meterData.voltage[0] : Volts(230));
+        Amps target_current = target / (meter_data.voltage[0] ? cast(Volts)meter_data.voltage[0] : Volts(230));
         if (target_current > Amps(0))
         {
             // set the
@@ -344,12 +344,12 @@ nothrow @nogc:
 
     final override bool minPowerLimit(out Watts watts) const
     {
-        watts = meterData.voltage[0] ? cast(Volts)meterData.voltage[0] * Amps(6) : Volts(230) * Amps(6);
+        watts = meter_data.voltage[0] ? cast(Volts)meter_data.voltage[0] * Amps(6) : Volts(230) * Amps(6);
         return true;
     }
     final override bool maxPowerLimit(out Watts watts) const
     {
-        watts = meterData.voltage[0] ? cast(Volts)meterData.voltage[0] * Amps(32) : Volts(240) * Amps(32);
+        watts = meter_data.voltage[0] ? cast(Volts)meter_data.voltage[0] * Amps(32) : Volts(240) * Amps(32);
         return true;
     }
 
