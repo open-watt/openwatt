@@ -1,14 +1,21 @@
 module apps.energy;
 
+import urt.array;
 import urt.map;
 import urt.mem;
 import urt.meta.nullable;
 import urt.string;
 
+import apps.api : APIModule;
 import apps.energy.appliance;
 import apps.energy.circuit;
 import apps.energy.manager;
 import apps.energy.meter;
+
+import protocol.http.message;
+import protocol.http.server;
+
+import router.stream;
 
 import manager;
 import manager.component;
@@ -48,6 +55,8 @@ nothrow @nogc:
         g_app.console.register_command!circuit_print("/apps/energy/circuit", this, "print");
 
         g_app.console.register_command!appliance_add("/apps/energy/appliance", this, "add");
+
+        get_module!APIModule.register_api_handler("/energy", &energy_api);
     }
 
     void registerApplianceType(ApplianceType)()
@@ -382,6 +391,235 @@ nothrow @nogc:
         if (lines !is line_cache[])
             defaultAllocator().freeArray(lines);
     }
+
+    int energy_api(const(char)[] uri, ref const HTTPMessage request, ref Stream stream)
+    {
+        import urt.format.json;
+
+        if (uri == "/circuit")
+            return handle_circuit_api(request, stream);
+        if (uri == "/appliances")
+            return handle_appliances_api(request, stream);
+
+        HTTPMessage response = create_response(request.http_version, 404, StringLit!"Not Found", StringLit!"application/json", "{\"error\":\"Not Found\"}");
+        add_cors_headers(response);
+        stream.write(response.format_message()[]);
+        return 0;
+    }
+
+    int handle_circuit_api(ref const HTTPMessage request, ref Stream stream)
+    {
+        if (!manager.main)
+        {
+            HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", "{}");
+            add_cors_headers(response);
+            stream.write(response.format_message()[]);
+            return 0;
+        }
+
+        Array!char json;
+        json.reserve(4096);
+        json ~= '{';
+
+        build_circuit_json(manager.main, json);
+
+        json ~= '}';
+
+        HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", json[]);
+        add_cors_headers(response);
+        stream.write(response.format_message()[]);
+        return 0;
+    }
+
+    void build_circuit_json(Circuit* circuit, ref Array!char json)
+    {
+        json.append('\"', circuit.id[], "\":{");
+
+        if (circuit.name.length > 0)
+            json.append("\"name\":\"", circuit.name[], "\",");
+
+        json.append("\"type\":\"", circuit.type, "\",");
+        json.append("\"max_current\":", circuit.max_current, ',');
+
+        if (circuit.meter)
+            json.append("\"meter\":\"", circuit.meter.id[], "\",");
+
+        append_meter_data(circuit.meter_data, json);
+
+        if (circuit.sub_circuits.length > 0)
+        {
+            json ~= ",\"sub_circuits\":{";
+            bool first = true;
+            foreach (sub; circuit.sub_circuits)
+            {
+                if (!first)
+                    json ~= ',';
+                first = false;
+                build_circuit_json(sub, json);
+            }
+            json ~= "}";
+        }
+
+        if (circuit.appliances.length > 0)
+        {
+            json ~= ",\"appliances\":[";
+            bool first = true;
+            foreach (a; circuit.appliances)
+            {
+                if (!first)
+                    json ~= ',';
+                first = false;
+                json.append('\"', a.id[], '\"');
+            }
+            json ~= "]";
+        }
+
+        json ~= '}';
+    }
+
+    int handle_appliances_api(ref const HTTPMessage request, ref Stream stream)
+    {
+        Array!char json;
+        json.reserve(4096);
+        json ~= '{';
+
+        bool first = true;
+        foreach (a; manager.appliances.values)
+        {
+            if (!first)
+                json ~= ',';
+            first = false;
+
+            json.append('\"', a.id[], "\":{");
+
+            json.append("\"type\":\"", a.type, '\"');
+
+            if (a.name.length > 0)
+                json.append(",\"name\":\"", a.name[], '\"');
+
+            if (a.circuit)
+                json.append(",\"circuit\":\"", a.circuit.id[], '\"');
+
+            if (a.meter)
+                json.append(",\"meter\":\"", a.meter.id[], '\"');
+
+            json.append(",\"enabled\":", a.enabled ? "true" : "false");
+            json.append(",\"priority\":", a.priority);
+
+            json ~= ',';
+            append_meter_data(a.meter_data, json);
+
+            if (Inverter inv = a.as!Inverter)
+            {
+                json ~= ",\"inverter\":{";
+                json.append("\"rated_power\":", inv.ratedPower.value);
+
+                if (inv.mppt.length > 0)
+                {
+                    json ~= ",\"mppt\":[";
+                    bool first_mppt = true;
+                    foreach (mppt; inv.mppt)
+                    {
+                        if (!first_mppt)
+                            json ~= ',';
+                        first_mppt = false;
+                        json.append("{\"id\":\"", mppt.id[], "\",\"template\":\"", mppt.template_[], '\"');
+
+                        MeterData mppt_data = getMeterData(mppt);
+                        json ~= ',';
+                        append_meter_data(mppt_data, json);
+
+                        if (mppt.template_[] == "Battery")
+                        {
+                            if (Element* soc_el = mppt.find_element("soc"))
+                                json.append(",\"soc\":", soc_el.value.asFloat());
+                        }
+                        json ~= '}';
+                    }
+                    json ~= ']';
+                }
+                json ~= '}';
+            }
+            else if (EVSE evse = a.as!EVSE)
+            {
+                json ~= ",\"evse\":{";
+                if (evse.connectedCar)
+                    json.append("\"connected_car\":\"", evse.connectedCar.id[], '\"');
+                else
+                    json ~= "\"connected_car\":null";
+                json ~= '}';
+            }
+            else if (Car car = a.as!Car)
+            {
+                json ~= ",\"car\":{";
+                if (car.vin.length > 0)
+                    json.append("\"vin\":\"", car.vin[], '\"');
+                if (car.evse)
+                {
+                    if (car.vin.length > 0)
+                        json ~= ',';
+                    json.append("\"evse\":\"", car.evse.id[], '\"');
+                }
+                json ~= '}';
+            }
+
+            json ~= '}';
+        }
+
+        json ~= '}';
+
+        HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", json[]);
+        add_cors_headers(response);
+        stream.write(response.format_message()[]);
+        return 0;
+    }
+
+    void append_meter_data(ref const MeterData data, ref Array!char json)
+    {
+        json ~= "\"meter_data\":{";
+
+        bool first = true;
+
+        void append_element(T)(const(char)[] name, ref const T[4] values, bool multi)
+        {
+            static if (is(T == float))
+                alias f = values;
+            else
+            {
+                float[4] f = void;
+                foreach (i; 0 .. multi ? 4 : 1)
+                   f[i] = values[i].value;
+            }
+
+            if (multi)
+                json.append(first ? "\"" : ",\"", name, "\":[", f[0], ',', f[1], ',', f[2], ',', f[3], ']');
+            else
+                json.append(first ? "\"" : ",\"", name, "\":", f[0]);
+            first = false;
+        }
+
+        bool is_multi = data.type.is_multi_phase;
+        if (data.fields & FieldFlags.voltage)
+            append_element("voltage", data.voltage, is_multi);
+        if (data.fields & FieldFlags.current)
+            append_element("current", data.current, is_multi);
+        if (data.fields & FieldFlags.power)
+            append_element("power", data.active, is_multi);
+        if (data.fields & FieldFlags.reactive)
+            append_element("reactive", data.reactive, is_multi);
+        if (data.fields & FieldFlags.apparent)
+            append_element("apparent", data.apparent, is_multi);
+        if (data.fields & FieldFlags.power_factor)
+            append_element("pf", data.pf, is_multi);
+        if (data.fields & FieldFlags.phase_angle)
+            append_element("phase", data.phase, is_multi);
+        if (data.fields & FieldFlags.total_import_active)
+            append_element("total_import", data.total_import_active, is_multi);
+        if (data.fields & FieldFlags.total_export_active)
+            append_element("total_export", data.total_export_active, is_multi);
+        if (data.fields & FieldFlags.frequency)
+            append_element("frequency", (&data.freq)[0..4], false);
+
+        json ~= '}';
+    }
 }
-
-
