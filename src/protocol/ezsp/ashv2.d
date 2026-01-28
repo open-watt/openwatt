@@ -328,7 +328,8 @@ nothrow @nogc:
         rxSeq = (rxSeq + 1) & 7;
         ashAck(rxSeq, false);
 
-        packetCallback(data);
+        if (data.length > 0) // Note: I have observed zero-length frames; maybe it's a keepalive or something?
+            packetCallback(data);
 
         ackInFlight(ackNum);
     }
