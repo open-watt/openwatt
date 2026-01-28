@@ -27,16 +27,13 @@ enum CANInterfaceProtocol : byte
 
 struct CANFrame
 {
-    uint id;
-    ubyte control; // IDE, RTR, _, _, LEN[0..4]
-    const(ubyte)* ptr;
+    enum Type = PacketType.can;
 
-nothrow @nogc:
-    bool extended() const
-        => (control & 0x80) != 0;
-    const(ubyte)[] data() const
-        => ptr[0 .. (control & 0xF)];
+    uint id;
+    bool remote_transmission_request;
+    bool extended;
 }
+
 
 class CANInterface : BaseInterface
 {
@@ -119,8 +116,6 @@ nothrow @nogc:
 
         SysTime now = getSysTime();
 
-        enum LargestProtocolFrame = 13; // EBYTE proto has 13byte frames
-
         // check for data
         ubyte[1024] buffer = void;
         buffer[0 .. _tail_bytes] = _tail[0 .. _tail_bytes];
@@ -151,17 +146,18 @@ nothrow @nogc:
 //            if (connParams.logDataStream)
 //                logStream.rawWrite(buffer[0 .. length]);
 
-            CANFrame frame;
+            Packet packet;
 
             size_t offset = 0;
             while (offset < length)
             {
                 // parse packets from the stream...
+                ref CANFrame can = packet.init!CANFrame(null, now);
+
                 size_t taken = 0;
                 switch (protocol)
                 {
                     case CANInterfaceProtocol.ebyte:
-                        enum EbyteFrameSize = 13;
 
                         if (length - offset >= EbyteFrameSize)
                         {
@@ -171,13 +167,19 @@ nothrow @nogc:
 
                             const ubyte[] ebyteFrame = buffer[offset .. offset + EbyteFrameSize];
 
-                            frame.control = ebyteFrame[0];
-                            assert((frame.control & 0xF) <= 8, "TODO: bad CAN frame; did we fall off the rails? bad data? skip this message? how do we resync?");
+                            uint len = ebyteFrame[0] & 0xF;
+                            if (len > 8)
+                            {
+                                debug assert(len <= 8, "TODO: bad CAN frame; did we fall off the rails? bad data? skip this message? how do we resync?");
+                                break;
+                            }
 
-                            frame.id = ebyteFrame[1 .. 5].bigEndianToNative!uint;
-                            frame.id &= (frame.extended ? 0x1FFFFFFF : 0x7FF);
+                            can.remote_transmission_request = (ebyteFrame[0] & 0x40) != 0;
+                            can.extended = (ebyteFrame[0] & 0x80) != 0;
 
-                            frame.ptr = ebyteFrame.ptr + 5;
+                            can.id = ebyteFrame[1 .. 5].bigEndianToNative!uint;
+
+                            packet.data = ebyteFrame[5 .. 5 + len];
 
                             taken = EbyteFrameSize;
                         }
@@ -205,7 +207,20 @@ nothrow @nogc:
                 }
                 offset += taken;
 
-                incoming_packet(frame, now);
+                if (can.id > (can.extended ? 0x1FFFFFFF : 0x7FF))
+                {
+                    version (DebugCANInterface)
+                        writeDebug("CAN packet dropped on interface '", name, "': invalid frame - bad ID");
+                    ++_status.recv_dropped;
+                    continue;
+                }
+
+                version (DebugCANInterface)
+                    writeDebug("CAN packet received from interface '", name, "': id=", can.id, " (", packet.length , ")[ ", packet.data, " - ", packet.data.bin_to_ascii(), " ]");
+
+                packet.vlan = _pvid;
+
+                dispatch(packet);
             }
 
             // we've eaten the whole buffer...
@@ -216,35 +231,40 @@ nothrow @nogc:
     protected override bool transmit(ref const Packet packet)
     {
         // can only handle can packets
-        if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.can)
+        if (packet.type != PacketType.can)
         {
+            if (packet.type == PacketType.ethernet && packet.eth.ether_type == EtherType.ow && packet.eth.ow_sub_type == OW_SubType.can)
+            {
+                // de-frame CANoE...
+                assert(false, "TODO");
+            }
             ++_status.send_dropped;
             return false;
         }
 
-        if (packet.data.length < 4 || packet.data.length > 12)
+        if (packet.data.length > 8)
         {
             version (DebugCANInterface)
-                writeDebug("CAN packet dropped on interface '", name, "': invalid frame");
+                writeDebug("CAN packet dropped on interface '", name, "': invalid frame - data too long");
+            ++_status.send_dropped;
             return false;
         }
 
+        ref can = packet.hdr!CANFrame;
+
         // frame it up and send...
-        ubyte[13] buffer = void;
+        ubyte[LargestProtocolFrame] buffer = void;
         size_t length = 0;
 
         switch (protocol)
         {
             case CANInterfaceProtocol.ebyte:
-                ubyte[] data = cast(ubyte[])packet.data;
-                ubyte dataLen = cast(ubyte)(packet.data.length - 4);
-
-                buffer[0] = (data[0] & 0xC0) | dataLen;
-                buffer[1 .. 5] = data[0 .. 4];
-                buffer[1] &= 0x1F; // clear the flags
-                buffer[5 .. 5 + dataLen] = data[4 .. $];
-                buffer[5 + dataLen .. 13] = 0;
-                length = 13;
+                ubyte dataLen = cast(ubyte)packet.length;
+                buffer[0] = (can.extended << 7) | (can.remote_transmission_request << 6) | dataLen;
+                buffer[1 .. 5] = can.id.nativeToBigEndian;
+                buffer[5 .. 5 + packet.length] = cast(ubyte[])packet.data[];
+                buffer[5 + packet.length .. EbyteFrameSize] = 0;
+                length = EbyteFrameSize;
                 break;
 
             default:
@@ -258,7 +278,7 @@ nothrow @nogc:
             if (written <= 0)
                 writeDebug("CAN packet send failed on interface '", name, "'");
             else
-                writeDebug("CAN packet sent on interface '", name, "': id=", (cast(ubyte[4])packet.data[0 .. 4]).bigEndianToNative!uint & 0x1FFFFFFF, " (", packet.data.length - 4, ")[ ", packet.data[4 .. $], " - ", packet.data[4 .. $].bin_to_ascii(), " ]");
+                writeDebug("CAN packet sent on interface '", name, "': id=", can.id, " (", packet.length, ")[ ", packet.data, " - ", packet.data.bin_to_ascii(), " ]");
         }
 
         if (written <= 0)
@@ -296,10 +316,14 @@ nothrow @nogc:
         }
         static assert(socket_can.sizeof == 16);
 
+        ref can = packet.hdr!CANFrame;
+
         socket_can f;
-        f.id = (cast(const ubyte[])packet.data)[0..4];
-        f.len = cast(ubyte)(packet.data.length - 4);
-        f.data[0 .. f.len] = cast(const ubyte[])packet.data[4 .. $];
+        f.id = can.id.nativeToBigEndian;
+        f.id[0] |= can.extended << 7;
+        f.id[0] |= can.remote_transmission_request << 6;
+        f.len = cast(ubyte)packet.length;
+        f.data[0 .. f.len] = cast(const ubyte[])packet.data[];
 
         // TODO: what's the go with the error bit (bit 29 of ID)???
 
@@ -309,33 +333,8 @@ nothrow @nogc:
 private:
     ObjectRef!Stream _stream;
     CANInterfaceProtocol _protocol;
-    ubyte[13] _tail; // EBYTE proto has 13byte frames
+    ubyte[LargestProtocolFrame] _tail;
     ushort _tail_bytes;
-
-    final void incoming_packet(ref const CANFrame frame, SysTime recvTime)
-    {
-        debug assert(running, "Shouldn't receive packets while not running...?");
-
-        version (DebugCANInterface)
-            writeDebug("CAN packet received from interface '", name, "': id=", frame.id, " (", frame.data.length , ")[ ", cast(void[])frame.data[], " - ", frame.data.bin_to_ascii(), " ]");
-
-        ubyte[12] packet;
-        packet[0 .. 4] = nativeToBigEndian(frame.id | ((frame.control & 0xC0) << 24));
-        packet[4 .. 4 + frame.data.length] = frame.data[];
-
-        Packet p;
-        p.init!Ethernet(packet[0 .. 4 + frame.data.length]);
-        p.creation_time = recvTime;
-        p.vlan = _pvid;
-        p.eth.ether_type = EtherType.ow;
-        p.eth.ow_sub_type = OW_SubType.can;
-
-        // all CAN messages are broadcasts...
-        p.eth.dst = MACAddress.broadcast;
-        p.eth.src = mac; // TODO: feels a bit odd, since it didn't come from us; but we don't want switches sending it back to us...
-
-        dispatch(p);
-    }
 }
 
 
@@ -371,3 +370,9 @@ version (DebugCANInterface)
         return t;
     }
 }
+
+
+private:
+
+enum EbyteFrameSize = 13;
+enum LargestProtocolFrame = EbyteFrameSize;

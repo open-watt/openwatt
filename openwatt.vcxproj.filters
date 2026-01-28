@@ -55,6 +55,9 @@
     <Filter Include="src\protocol">
       <UniqueIdentifier>{e3d26653-740a-4de4-ad46-6df4e33023d0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\can">
+      <UniqueIdentifier>{9922e1c0-3780-4a00-9212-478d66443f98}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\protocol\goodwe">
       <UniqueIdentifier>{45765f37-2305-4031-b32b-a2c3b88bebe0}</UniqueIdentifier>
     </Filter>
@@ -242,6 +245,12 @@
     </DCompile>
     <DCompile Include="src\router\port\package.d">
       <Filter>src\router\port</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\can\package.d">
+      <Filter>src\protocol\can</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\can\sampler.d">
+      <Filter>src\protocol\can</Filter>
     </DCompile>
     <DCompile Include="src\protocol\goodwe\aa55.d">
       <Filter>src\protocol\goodwe</Filter>
