@@ -444,13 +444,13 @@ nothrow @nogc:
         if (circuit.meter)
             json.append("\"meter\":\"", circuit.meter.id[], "\",");
 
-        append_meter_data(circuit.meterData, json);
+        append_meter_data(circuit.meter_data, json);
 
-        if (circuit.subCircuits.length > 0)
+        if (circuit.sub_circuits.length > 0)
         {
-            json ~= ",\"subcircuits\":{";
+            json ~= ",\"sub_circuits\":{";
             bool first = true;
-            foreach (sub; circuit.subCircuits)
+            foreach (sub; circuit.sub_circuits)
             {
                 if (!first)
                     json ~= ',';
@@ -507,7 +507,7 @@ nothrow @nogc:
             json.append(",\"priority\":", a.priority);
 
             json ~= ',';
-            append_meter_data(a.meterData, json);
+            append_meter_data(a.meter_data, json);
 
             if (Inverter inv = a.as!Inverter)
             {
@@ -525,14 +525,14 @@ nothrow @nogc:
                         first_mppt = false;
                         json.append("{\"id\":\"", mppt.id[], "\",\"template\":\"", mppt.template_[], '\"');
 
-                        MeterData mpptData = getMeterData(mppt);
+                        MeterData mppt_data = getMeterData(mppt);
                         json ~= ',';
-                        append_meter_data(mpptData, json);
+                        append_meter_data(mppt_data, json);
 
                         if (mppt.template_[] == "Battery")
                         {
-                            if (Element* socEl = mppt.find_element("soc"))
-                                json.append(",\"soc\":", socEl.value.asFloat());
+                            if (Element* soc_el = mppt.find_element("soc"))
+                                json.append(",\"soc\":", soc_el.value.asFloat());
                         }
                         json ~= '}';
                     }
@@ -578,34 +578,47 @@ nothrow @nogc:
     {
         json ~= "\"meter_data\":{";
 
-        bool multi_phase = data.type == CircuitType.three_phase || data.type == CircuitType.delta;
+        bool first = true;
 
-        if (multi_phase)
+        void append_element(T)(const(char)[] name, ref const T[4] values, bool multi)
         {
-            json.append("\"voltage\":[", data.voltage[0].value, ',', data.voltage[1].value, ',', data.voltage[2].value, ',', data.voltage[3].value, "],");
-            json.append("\"current\":[", data.current[0].value, ',', data.current[1].value, ',', data.current[2].value, ',', data.current[3].value, "],");
-            json.append("\"power\":[", data.active[0].value, ',', data.active[1].value, ',', data.active[2].value, ',', data.active[3].value, "],");
-            json.append("\"reactive\":[", data.reactive[0], ',', data.reactive[1], ',', data.reactive[2], ',', data.reactive[3], "],");
-            json.append("\"apparent\":[", data.apparent[0], ',', data.apparent[1], ',', data.apparent[2], ',', data.apparent[3], "],");
-            json.append("\"pf\":[", data.pf[0], ',', data.pf[1], ',', data.pf[2], ',', data.pf[3], "],");
-            json.append("\"phase\":[", data.phase[0], ',', data.phase[1], ',', data.phase[2], ',', data.phase[3], "],");
-            json.append("\"total_import\":[", data.totalImportActive[0], ',', data.totalImportActive[1], ',', data.totalImportActive[2], ',', data.totalImportActive[3], "],");
-            json.append("\"total_export\":[", data.totalExportActive[0], ',', data.totalExportActive[1], ',', data.totalExportActive[2], ',', data.totalExportActive[3], "],");
-        }
-        else
-        {
-            json.append("\"voltage\":", data.voltage[0].value, ',');
-            json.append("\"current\":", data.current[0].value, ',');
-            json.append("\"power\":", data.active[0].value, ',');
-            json.append("\"reactive\":", data.reactive[0], ',');
-            json.append("\"apparent\":", data.apparent[0], ',');
-            json.append("\"pf\":", data.pf[0], ',');
-            json.append("\"phase\":", data.phase[0], ',');
-            json.append("\"total_import\":", data.totalImportActive[0], ',');
-            json.append("\"total_export\":", data.totalExportActive[0], ',');
+            static if (is(T == float))
+                alias f = values;
+            else
+            {
+                float[4] f = void;
+                foreach (i; 0 .. multi ? 4 : 1)
+                   f[i] = values[i].value;
+            }
+
+            if (multi)
+                json.append(first ? "\"" : ",\"", name, "\":[", f[0], ',', f[1], ',', f[2], ',', f[3], ']');
+            else
+                json.append(first ? "\"" : ",\"", name, "\":", f[0]);
+            first = false;
         }
 
-        json.append("\"frequency\":", data.freq);
+        bool is_multi = data.type.is_multi_phase;
+        if (data.fields & FieldFlags.voltage)
+            append_element("voltage", data.voltage, is_multi);
+        if (data.fields & FieldFlags.current)
+            append_element("current", data.current, is_multi);
+        if (data.fields & FieldFlags.power)
+            append_element("power", data.active, is_multi);
+        if (data.fields & FieldFlags.reactive)
+            append_element("reactive", data.reactive, is_multi);
+        if (data.fields & FieldFlags.apparent)
+            append_element("apparent", data.apparent, is_multi);
+        if (data.fields & FieldFlags.power_factor)
+            append_element("pf", data.pf, is_multi);
+        if (data.fields & FieldFlags.phase_angle)
+            append_element("phase", data.phase, is_multi);
+        if (data.fields & FieldFlags.total_import_active)
+            append_element("total_import", data.total_import_active, is_multi);
+        if (data.fields & FieldFlags.total_export_active)
+            append_element("total_export", data.total_export_active, is_multi);
+        if (data.fields & FieldFlags.frequency)
+            append_element("frequency", (&data.freq)[0..4], false);
 
         json ~= '}';
     }
