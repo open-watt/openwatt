@@ -25,7 +25,7 @@ nothrow @nogc:
     Map!(const(char)[], Circuit*) circuits;
     Map!(const(char)[], Appliance) appliances;
 
-    inout(Circuit)* findCircuit(const(char)[] name) pure inout
+    inout(Circuit)* find_circuit(const(char)[] name) pure inout
     {
         inout(Circuit*)* c = name in circuits;
         if (c)
@@ -33,7 +33,7 @@ nothrow @nogc:
         return null;
     }
 
-    Circuit* addCircuit(String name, Circuit* parent, uint max_current, Component meter)
+    Circuit* add_circuit(String name, Circuit* parent, uint max_current, Component meter, CircuitType type = CircuitType.unknown, ubyte parent_phase = 0, ubyte meter_phase = 0)
     {
         Circuit* circuit = defaultAllocator.allocT!Circuit(name.move);
 
@@ -45,18 +45,24 @@ nothrow @nogc:
         else
         {
             circuit.parent = parent;
-            circuit.parent.subCircuits ~= circuit;
+            circuit.parent.sub_circuits ~= circuit;
         }
 
         circuit.max_current = max_current;
         circuit.meter = meter;
+        circuit.type = type;
+        circuit.parent_phase = parent_phase;
+        circuit.meter_phase = meter_phase;
+
+        if (circuit.type == CircuitType.unknown && meter)
+            circuit.type = get_meter_type(meter);
 
         circuits.insert(circuit.id, circuit);
 
         return circuit;
     }
 
-    Appliance addAppliance(Appliance appliance, Circuit* circuit)
+    Appliance add_appliance(Appliance appliance, Circuit* circuit)
     {
         if (circuit)
         {
@@ -71,7 +77,7 @@ nothrow @nogc:
 
     Volts getMainsVoltage(int phase = 0) pure
     {
-        return cast(Volts)main.meterData.voltage[phase];
+        return cast(Volts)main.meter_data.voltage[phase];
     }
 
     void update()
@@ -82,7 +88,7 @@ nothrow @nogc:
         main.update();
 
         Array!Appliance wantPower;
-        Watts excessSolar = main.meterData.active[0] < Watts(0) ? cast(Watts)-main.meterData.active[0] : Watts(0);
+        Watts excessSolar = main.meter_data.active[0] < Watts(0) ? cast(Watts)-main.meter_data.active[0] : Watts(0);
         foreach (a; appliances.values)
         {
             if (a.canControl)

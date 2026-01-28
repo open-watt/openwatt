@@ -28,7 +28,7 @@ class EnergyAppModule : Module
     mixin DeclareModule!"apps.energy";
 nothrow @nogc:
 
-    Map!(const(char)[], Appliance function(String id, EnergyManager* manager) nothrow @nogc) applianceFactory;
+    Map!(const(char)[], Appliance function(String id, EnergyManager* manager) nothrow @nogc) appliance_factory;
 
     EnergyManager* manager;
 
@@ -52,11 +52,11 @@ nothrow @nogc:
 
     void registerApplianceType(ApplianceType)()
     {
-        applianceFactory.insert(ApplianceType.Type, (String id, EnergyManager* manager) => cast(Appliance)defaultAllocator().allocT!ApplianceType(id.move, manager));
+        appliance_factory.insert(ApplianceType.Type, (String id, EnergyManager* manager) => cast(Appliance)defaultAllocator().allocT!ApplianceType(id.move, manager));
     }
-    Appliance createAppliance(const char[] type, String id, EnergyManager* manager)
+    Appliance create_appliance(const char[] type, String id, EnergyManager* manager)
     {
-        if (auto fn = type in applianceFactory)
+        if (auto fn = type in appliance_factory)
             return (*fn)(id.move, manager);
         return null;
     }
@@ -66,12 +66,12 @@ nothrow @nogc:
         manager.update();
     }
 
-    void circuit_add(Session session, const(char)[] name, Nullable!(const(char)[]) parent, Nullable!Component meter, Nullable!(uint) max_current)
+    void circuit_add(Session session, const(char)[] name, Nullable!(const(char)[]) parent, Nullable!Component meter, Nullable!(uint) max_current, Nullable!CircuitType _type, Nullable!(uint) parent_phase, Nullable!(uint) meter_phase)
     {
         Circuit* p;
         if (parent)
         {
-            p = manager.findCircuit(parent.value);
+            p = manager.find_circuit(parent.value);
             if (!p)
             {
                 session.write_line("Circuit '", parent.value, "' not found");
@@ -79,7 +79,57 @@ nothrow @nogc:
             }
         }
 
-        manager.addCircuit(name.makeString(g_app.allocator), p, max_current ? max_current.value : 0, meter ? meter.value : null);
+        CircuitType type = _type ? _type.value : CircuitType.unknown;
+        ubyte pphase = 0, mphase = 0;
+
+        if (parent_phase)
+        {
+            if (parent_phase.value < 1 || parent_phase.value > 3)
+            {
+                session.write_line("Parent phase must be 1, 2, or 3");
+                return;
+            }
+            pphase = cast(ubyte)parent_phase.value;
+        }
+        if (meter_phase)
+        {
+            if (meter_phase.value < 1 || meter_phase.value > 3)
+            {
+                session.write_line("Meter phase must be 1, 2, or 3");
+                return;
+            }
+            mphase = cast(ubyte)meter_phase.value;
+        }
+
+        if (type.is_multi_phase)
+        {
+            if (mphase != 0)
+            {
+                session.write_line("3-phase circuit cannot specify meter_phase");
+                return;
+            }
+            if (p)
+            {
+                CircuitType parent_type = p.type != CircuitType.unknown ? p.type : (p.meter ? get_meter_type(p.meter) : CircuitType.unknown);
+                if (!parent_type.is_multi_phase && parent_type != CircuitType.unknown)
+                {
+                    session.write_line("3-phase circuit must have 3-phase parent");
+                    return;
+                }
+            }
+        }
+
+        if (p)
+        {
+            CircuitType parent_type = p.type != CircuitType.unknown ? p.type : (p.meter ? get_meter_type(p.meter) : CircuitType.unknown);
+            if (parent_type.is_multi_phase && !type.is_multi_phase && type != CircuitType.unknown && pphase == 0)
+            {
+                session.write_line("Non-3-phase circuit on 3-phase parent must specify parent_phase");
+                return;
+            }
+        }
+
+        manager.add_circuit(name.makeString(g_app.allocator), p, max_current ? max_current.value : 0, meter ? meter.value : null, type, pphase, mphase);
     }
 
     void appliance_add(Session session, const(char)[] id, Nullable!(Device) device, Nullable!(const(char)[]) _type, Nullable!(const(char)[]) name, Nullable!(const(char)[]) circuit, Nullable!(int) priority, Nullable!Component meter, Nullable!(const(char)[]) vin, Nullable!Component _info, Nullable!Component control, Nullable!(Component[]) mppt, Nullable!Component backup, Nullable!Component battery)
@@ -103,7 +153,7 @@ nothrow @nogc:
             }
         }
 
-        Appliance appliance = createAppliance(type, id.makeString(g_app.allocator), manager);
+        Appliance appliance = create_appliance(type, id.makeString(g_app.allocator), manager);
         if (!appliance)
         {
             session.write_line("Couldn't create appliance of type '", type, "'");
@@ -191,7 +241,7 @@ nothrow @nogc:
             c = *t;
         }
 
-        manager.addAppliance(appliance, c);
+        manager.add_appliance(appliance, c);
     }
 
     // /apps/energy/print command
@@ -210,44 +260,44 @@ nothrow @nogc:
             MeterData* data;
         }
 
-        Line[20] lineCache = void;
+        Line[20] line_cache = void;
         Line[] lines;
-        size_t numLines = this.manager.circuits.length*2 + this.manager.appliances.length;
-        if (numLines > 20)
-            lines = defaultAllocator().allocArray!Line(numLines);
+        size_t num_lines = this.manager.circuits.length*2 + this.manager.appliances.length;
+        if (num_lines > 20)
+            lines = defaultAllocator().allocArray!Line(num_lines);
         else
         {
-            lines = lineCache[0 .. numLines];
+            lines = line_cache[0 .. num_lines];
             lines[] = Line();
         }
 
         size_t i = 0;
-        size_t nameLen = 4;
-        size_t powerLen = 5;
-        size_t importLen = 6;
-        size_t exportLen = 6;
-        size_t apparentLen = 8;
-        size_t reactiveLen = 8;
-        size_t currentLen = 1;
+        size_t name_len = 4;
+        size_t power_len = 5;
+        size_t import_len = 6;
+        size_t export_len = 6;
+        size_t apparent_len = 8;
+        size_t reactive_len = 8;
+        size_t current_len = 1;
 
         void traverse(Circuit* c, uint indent)
         {
             Line* circuit = &lines[i++];
             circuit.indent = cast(ubyte)indent;
             circuit.id = c.id[];
-            circuit.data = &c.meterData;
+            circuit.data = &c.meter_data;
 
-            nameLen = max(nameLen, circuit.indent + c.id.length);
-            powerLen = max(powerLen, c.meterData.active[0].value.format_float(null) + 1);
-            importLen = max(importLen, c.meterData.totalImportActive[0].format_float(null) + 3);
-            exportLen = max(exportLen, c.meterData.totalExportActive[0].format_float(null) + 3);
-            apparentLen = max(apparentLen, c.meterData.apparent[0].format_float(null) + 2);
-            reactiveLen = max(reactiveLen, c.meterData.reactive[0].format_float(null) + 3);
-            currentLen = max(currentLen, c.meterData.current[0].value.format_float(null) + 1);
+            name_len = max(name_len, circuit.indent + c.id.length);
+            power_len = max(power_len, c.meter_data.active[0].value.format_float(null) + 1);
+            import_len = max(import_len, c.meter_data.total_import_active[0].format_float(null) + 3);
+            export_len = max(export_len, c.meter_data.total_export_active[0].format_float(null) + 3);
+            apparent_len = max(apparent_len, c.meter_data.apparent[0].format_float(null) + 2);
+            reactive_len = max(reactive_len, c.meter_data.reactive[0].format_float(null) + 3);
+            current_len = max(current_len, c.meter_data.current[0].value.format_float(null) + 1);
 
             Line* unknown;
-            bool hasLeftover = c.meter && (c.appliances.length != 0 || c.subCircuits.length != 0);
-            if (hasLeftover)
+            bool has_leftover = c.meter && (c.appliances.length != 0 || c.sub_circuits.length != 0);
+            if (has_leftover)
             {
                 unknown = &lines[i++];
                 unknown.indent = cast(ubyte)(indent + 2);
@@ -261,38 +311,38 @@ nothrow @nogc:
                 line.appliance = a;
                 line.indent = cast(ubyte)(indent + 2);
                 line.id = a.id[];
-                line.data = &a.meterData;
+                line.data = &a.meter_data;
 
-                nameLen = max(nameLen, line.indent + a.id.length);
-                powerLen = max(powerLen, a.meterData.active[0].value.format_float(null) + 1);
-                importLen = max(importLen, a.meterData.totalImportActive[0].format_float(null) + 3);
-                exportLen = max(exportLen, a.meterData.totalExportActive[0].format_float(null) + 3);
-                apparentLen = max(apparentLen, a.meterData.apparent[0].format_float(null) + 2);
-                reactiveLen = max(reactiveLen, a.meterData.reactive[0].format_float(null) + 3);
-                currentLen = max(currentLen, a.meterData.current[0].value.format_float(null) + 1);
+                name_len = max(name_len, line.indent + a.id.length);
+                power_len = max(power_len, a.meter_data.active[0].value.format_float(null) + 1);
+                import_len = max(import_len, a.meter_data.total_import_active[0].format_float(null) + 3);
+                export_len = max(export_len, a.meter_data.total_export_active[0].format_float(null) + 3);
+                apparent_len = max(apparent_len, a.meter_data.apparent[0].format_float(null) + 2);
+                reactive_len = max(reactive_len, a.meter_data.reactive[0].format_float(null) + 3);
+                current_len = max(current_len, a.meter_data.current[0].value.format_float(null) + 1);
             }
 
-            foreach (sub; c.subCircuits)
+            foreach (sub; c.sub_circuits)
                 traverse(sub, indent + 2);
         }
 
         traverse(this.manager.main, 0);
 
         session.writef("{0, -*1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {'V', 6}  {'I', *12}  {'PF (ϕ)', 12}  {'FREQ', 6}\n",
-                        "NAME", nameLen,
-                        "POWER", powerLen,
-                        "IMPORT", importLen, "EXPORT", exportLen,
-                        "APPARENT", apparentLen, "REACTIVE", reactiveLen,
-                        currentLen);
+                        "NAME", name_len,
+                        "POWER", power_len,
+                        "IMPORT", import_len, "EXPORT", export_len,
+                        "APPARENT", apparent_len, "REACTIVE", reactive_len,
+                        current_len);
 
         foreach (ref l; lines[0..i])
         {
             session.writef("{'', *17}{0, -*1}  {2, *3}  {4, *5}kWh  {6, *7}kWh  {8, *9}VA  {10, *11}var  {12, 5.4}  {13, *14}  {@19, 12}  {16, 5.4}Hz\n",
-                            l.id, nameLen - l.indent,
-                            l.data.active[0], powerLen-1,
-                            l.data.totalImportActive[0] * 0.001f, importLen-3, l.data.totalExportActive[0] * 0.001f, exportLen-3,
-                            l.data.apparent[0], apparentLen-2, l.data.reactive[0], reactiveLen-3,
-                            l.data.voltage[0], l.data.current[0], currentLen-2,
+                            l.id, name_len - l.indent,
+                            l.data.active[0], power_len-1,
+                            l.data.total_import_active[0] * 0.001f, import_len-3, l.data.total_export_active[0] * 0.001f, export_len-3,
+                            l.data.apparent[0], apparent_len-2, l.data.reactive[0], reactive_len-3,
+                            l.data.voltage[0], l.data.current[0], current_len-2,
                             l.data.pf[0], l.data.freq, l.indent, l.data.phase[0]*360, "{15, 4.2} ({18, .3}°)");
             if (l.appliance)
             {
@@ -301,35 +351,35 @@ nothrow @nogc:
                     // show the MPPT's?
                     foreach (mppt; inverter.mppt)
                     {
-                        MeterData mpptData = getMeterData(mppt);
+                        MeterData mppt_data = getMeterData(mppt);
                         float soc;
-                        bool hasSoc = false;
+                        bool has_soc = false;
                         const(char)[] name = mppt.id[];
                         if (mppt.template_[] == "Battery")
                         {
-                            if (Element* socEl = mppt.find_element("soc"))
+                            if (Element* soc_el = mppt.find_element("soc"))
                             {
-                                soc = socEl.value.asFloat();
-                                hasSoc = true;
+                                soc = soc_el.value.asFloat();
+                                has_soc = true;
                             }
                         }
                         if (mppt.template_[] == "Solar")
                         {
                             // anything special?
                         }
-                        session.writef("{'', *10}{0, -*1}  {@3,?2}{'    ',!2}  {5}  {6}  {7} ({8}kWh/{9}kWh)\n", name, nameLen - l.indent - 7, hasSoc, "{4, 3}%  ", soc, 
-                                        mpptData.active[0], mpptData.voltage[0], mpptData.current[0], mpptData.totalImportActive[0] * 0.001f, mpptData.totalExportActive[0] * 0.001f, l.indent + 2);
+                        session.writef("{'', *10}{0, -*1}  {@3,?2}{'    ',!2}  {5}  {6}  {7} ({8}kWh/{9}kWh)\n", name, name_len - l.indent - 7, has_soc, "{4, 3}%  ", soc, 
+                                        mppt_data.active[0], mppt_data.voltage[0], mppt_data.current[0], mppt_data.total_import_active[0] * 0.001f, mppt_data.total_export_active[0] * 0.001f, l.indent + 2);
                     }
                 }
                 else if (EVSE evse = l.appliance.as!EVSE)
                 {
                     if (evse.connectedCar)
-                        session.writef("{'', *3}{0, -*1}  {2}\n", evse.connectedCar.id, nameLen - l.indent - 4, evse.connectedCar.vin, l.indent + 2);
+                        session.writef("{'', *3}{0, -*1}  {2}\n", evse.connectedCar.id, name_len - l.indent - 4, evse.connectedCar.vin, l.indent + 2);
                 }
             }
         }
 
-        if (lines !is lineCache[])
+        if (lines !is line_cache[])
             defaultAllocator().freeArray(lines);
     }
 }
