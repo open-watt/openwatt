@@ -594,6 +594,13 @@ HTTPMessage create_response(HTTPVersion http_version, ushort status_code, String
     return msg;
 }
 
+void add_cors_headers(ref HTTPMessage response)
+{
+    response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", StringLit!"*");
+    response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Methods", StringLit!"GET, POST, PUT, DELETE, OPTIONS");
+    response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Headers", StringLit!"Content-Type");
+}
+
 Array!char format_message(ref HTTPMessage message, const(char)[] host = null)
 {
     import urt.mem.temp : tconcat;
