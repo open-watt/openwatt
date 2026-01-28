@@ -543,18 +543,18 @@ private:
     }
 }
 
-void http_status_line(HTTPVersion http_version, ushort status_code, const(char)[] reason, ref MutableString!0 str)
+void http_status_line(HTTPVersion http_version, ushort status_code, const(char)[] reason, ref Array!char str)
 {
     str.append("HTTP/", http_version >> 4, '.', http_version & 0xF, ' ', status_code, ' ', reason, "\r\n");
 }
 
-void http_field_lines(scope const HTTPParam[] params, ref MutableString!0 str)
+void http_field_lines(scope const HTTPParam[] params, ref Array!char str)
 {
     foreach (ref const kvp; params)
         str.append(kvp.key, ':', kvp.value, "\r\n");
 }
 
-void http_date(ref const DateTime date, ref MutableString!0 str)
+void http_date(ref const DateTime date, ref Array!char str)
 {
     const(char)[] day = enum_key_by_decl_index!Day(date.wday);
     const(char)[] month = enum_key_by_decl_index!Month(date.month - 1);
@@ -563,7 +563,7 @@ void http_date(ref const DateTime date, ref MutableString!0 str)
     // Sun, 06 Nov 1994 08:49:37 GMT
 
     //                      wday  day  month year hours  mins   secs
-    str.appendFormat("Date:{0}, {1,02} {2}, {3}, {4,02}:{5,02}:{6,02} GMT \r\n",
+    str.append_format("Date:{0}, {1,02} {2}, {3}, {4,02}:{5,02}:{6,02} GMT \r\n",
                      day[0..3], date.day, month[0..3], date.year, date.hour, date.minute, date.second);
 }
 
@@ -594,7 +594,7 @@ HTTPMessage create_response(HTTPVersion http_version, ushort status_code, String
     return msg;
 }
 
-MutableString!0 format_message(ref HTTPMessage message, const(char)[] host = null)
+Array!char format_message(ref HTTPMessage message, const(char)[] host = null)
 {
     import urt.mem.temp : tconcat;
 
@@ -604,13 +604,13 @@ MutableString!0 format_message(ref HTTPMessage message, const(char)[] host = nul
     if (include_body && message.content.length == 0 && !(message.flags & HTTPFlags.ForceBody))
         include_body = false;
 
-    MutableString!0 msg;
+    Array!char msg;
 
     bool is_request = message.is_request;
     if (is_request)
     {
         // build the query string
-        MutableString!0 get;
+        Array!char get;
         foreach (ref q; message.query_params)
         {
             bool first = get.empty;
@@ -624,11 +624,11 @@ MutableString!0 format_message(ref HTTPMessage message, const(char)[] host = nul
             else
                 ext[0] = '&';
             if (q.key.url_encode(ext[1 .. 1 + keyLen]) != keyLen)
-                return MutableString!0(); // bad encoding!
+                return Array!char(); // bad encoding!
             ext = ext[1 + keyLen .. $];
             ext[0] = '=';
             if (q.value.url_encode(ext[1 .. 1 + valLen]) != valLen)
-                return MutableString!0(); // bad encoding!
+                return Array!char(); // bad encoding!
         }
 
         msg.concat(enum_key_from_value!HTTPMethod(message.method), ' ', message.request_target, get, ' ');
@@ -648,7 +648,7 @@ MutableString!0 format_message(ref HTTPMessage message, const(char)[] host = nul
         if (message.username || message.password)
         {
             if (!(message.username && message.password))
-                return MutableString!0(); // must have both or neither
+                return Array!char(); // must have both or neither
 
             msg ~= "Authorization: Basic ";
 
