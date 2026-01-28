@@ -12,50 +12,50 @@ nothrow @nogc:
 
 enum MeterField : ubyte
 {
-    Voltage,
-    InterPhaseVoltage,
-    Current,
-    Power,
-    Reactive,
-    Apparent,
-    PowerFactor,
-    Frequency,
-    PhaseAngle,
-    TotalActive,
-    TotalImportActive,
-    TotalExportActive,
-    TotalReactive,
-    TotalImportReactive,
-    TotalExportReactive,
-    TotalApparent,
+    voltage,
+    inter_phase_voltage,
+    current,
+    power,
+    reactive,
+    apparent,
+    power_factor,
+    frequency,
+    phase_angle,
+    total_active,
+    total_import_active,
+    total_export_active,
+    total_reactive,
+    total_import_reactive,
+    total_export_reactive,
+    total_apparent,
 }
 
 enum FieldFlags : uint
 {
-    None = 0,
-    Basic = Voltage | InterPhaseVoltage| Current | Power,
-    Realtime = Basic | Reactive | Apparent | PowerFactor | Frequency | PhaseAngle,
-    BasicCumulative = TotalActive | TotalImportActive | TotalExportActive,
-    Cumulative = BasicCumulative | TotalReactive | TotalImportReactive | TotalExportReactive | TotalApparent,
-//    Demand = ,
-    All = Realtime | Cumulative, //| Demand,
+    none = 0,
+    basic = voltage | inter_phase_voltage| current | power,
+    realtime = basic | reactive | apparent | power_factor | frequency | phase_angle,
+    basic_cumulative = total_active | total_import_active | total_export_active,
+    cumulative = basic_cumulative | total_reactive | total_import_reactive | total_export_reactive | total_apparent,
+//    demand = ,
+    all = realtime | cumulative, //| demand,
 
-    Voltage = 1 << MeterField.Voltage,
-    InterPhaseVoltage = 1 << MeterField.InterPhaseVoltage,
-    Current = 1 << MeterField.Current,
-    Power = 1 << MeterField.Power,
-    Reactive = 1 << MeterField.Reactive,
-    Apparent = 1 << MeterField.Apparent,
-    PowerFactor = 1 << MeterField.PowerFactor,
-    Frequency = 1 << MeterField.Frequency,
-    PhaseAngle = 1 << MeterField.PhaseAngle,
-    TotalActive = 1 << MeterField.TotalActive,
-    TotalImportActive = 1 << MeterField.TotalImportActive,
-    TotalExportActive = 1 << MeterField.TotalExportActive,
-    TotalReactive = 1 << MeterField.TotalReactive,
-    TotalImportReactive = 1 << MeterField.TotalImportReactive,
-    TotalExportReactive = 1 << MeterField.TotalExportReactive,
-    TotalApparent = 1 << MeterField.TotalApparent,
+    voltage = 1 << MeterField.voltage,
+    inter_phase_voltage = 1 << MeterField.inter_phase_voltage,
+    current = 1 << MeterField.current,
+    power = 1 << MeterField.power,
+    reactive = 1 << MeterField.reactive,
+    apparent = 1 << MeterField.apparent,
+    power_factor = 1 << MeterField.power_factor,
+    frequency = 1 << MeterField.frequency,
+    phase_angle = 1 << MeterField.phase_angle,
+    total_active = 1 << MeterField.total_active,
+    total_import_active = 1 << MeterField.total_import_active,
+    total_export_active = 1 << MeterField.total_export_active,
+    total_reactive = 1 << MeterField.total_reactive,
+    total_import_reactive = 1 << MeterField.total_import_reactive,
+    total_export_reactive = 1 << MeterField.total_export_reactive,
+    total_apparent = 1 << MeterField.total_apparent,
 
     // TODO: demand meter?
 
@@ -65,8 +65,8 @@ enum FieldFlags : uint
     // ...
 }
 
-enum NumFields = MeterField.max + 1;
-enum CumulativeFields = MeterField.TotalActive;
+enum num_fields = MeterField.max + 1;
+enum cumulative_fields = MeterField.total_active;
 
 
 alias MeterVolts = Quantity!(float, ScaledUnit(Volt));
@@ -79,7 +79,7 @@ struct MeterData
     FieldFlags fields;
 
     MeterVolts[4] voltage;              // Avg, L1-N, L2-N, L3-N
-    MeterVolts[4] crossPhaseVoltage;    // Avg, L1-L2, L2-L3, L3-L1
+    MeterVolts[4] cross_phase_voltage;  // Avg, L1-L2, L2-L3, L3-L1
     MeterAmps[4] current;               // Sum, L1, L2, L3
     MeterWatts[4] active;               // Sum, L1, L2, L3
 
@@ -89,16 +89,16 @@ struct MeterData
     float freq = 0;
     float[4] phase = 0;                 // INV, L1, L2, L3
 
-    float[4] totalActive = 0;           // Sum, L1, L2, L3
-    float[4] totalImportActive = 0;     // Sum, L1, L2, L3
-    float[4] totalExportActive = 0;     // Sum, L1, L2, L3
-    float[4] totalReactive = 0;         // Sum, L1, L2, L3
-    float[4] totalImportReactive = 0;   // Sum, L1, L2, L3
-    float[4] totalExportReactive = 0;   // Sum, L1, L2, L3
-    float[4] totalApparent = 0;         // Sum, L1, L2, L3
+    float[4] total_active = 0;          // Sum, L1, L2, L3
+    float[4] total_import_active = 0;   // Sum, L1, L2, L3
+    float[4] total_export_active = 0;   // Sum, L1, L2, L3
+    float[4] total_reactive = 0;        // Sum, L1, L2, L3
+    float[4] total_import_reactive = 0; // Sum, L1, L2, L3
+    float[4] total_export_reactive = 0; // Sum, L1, L2, L3
+    float[4] total_apparent = 0;        // Sum, L1, L2, L3
 }
 
-static CircuitType getMeterType(Component meter)
+static CircuitType get_meter_type(Component meter)
 {
     import manager.element;
 
@@ -125,7 +125,7 @@ static CircuitType getMeterType(Component meter)
     {
         if (c.template_[] == "RealtimeEnergyMeter" || c.template_[] == "CumulativeEnergyMeter")
         {
-            CircuitType t = getMeterType(c);
+            CircuitType t = get_meter_type(c);
             if (t != CircuitType.unknown)
             {
                 if (type != CircuitType.unknown && type != t)
@@ -140,13 +140,13 @@ static CircuitType getMeterType(Component meter)
     return type;
 }
 
-static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.All)
+static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.all)
 {
     import manager.element;
     import urt.string.format;
     import urt.math : sqrt, fabs, acos, PI;
 
-    __gshared immutable string[NumFields] fieldNames = [
+    __gshared immutable string[num_fields] field_names = [
         "voltage",
         "ipv",      // inter-phase voltage
         "current",
@@ -165,30 +165,30 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         "total_apparent",
     ];
 
-    __gshared immutable FieldFlags[NumFields] fieldTypes = [
-        FieldFlags.Voltage,
-        FieldFlags.InterPhaseVoltage,
-        FieldFlags.Current,
-        FieldFlags.Power,
-        FieldFlags.Reactive,
-        FieldFlags.Apparent,
-        FieldFlags.PowerFactor,
-        FieldFlags.Frequency,
-        FieldFlags.PhaseAngle,
-        FieldFlags.TotalActive,
-        FieldFlags.TotalImportActive,
-        FieldFlags.TotalExportActive,
-        FieldFlags.TotalReactive,
-        FieldFlags.TotalImportReactive,
-        FieldFlags.TotalExportReactive,
-        FieldFlags.TotalApparent,
+    __gshared immutable FieldFlags[num_fields] field_types = [
+        FieldFlags.voltage,
+        FieldFlags.inter_phase_voltage,
+        FieldFlags.current,
+        FieldFlags.power,
+        FieldFlags.reactive,
+        FieldFlags.apparent,
+        FieldFlags.power_factor,
+        FieldFlags.frequency,
+        FieldFlags.phase_angle,
+        FieldFlags.total_active,
+        FieldFlags.total_import_active,
+        FieldFlags.total_export_active,
+        FieldFlags.total_reactive,
+        FieldFlags.total_import_reactive,
+        FieldFlags.total_export_reactive,
+        FieldFlags.total_apparent,
     ];
 
     Component realtime;
     Component cumulative;
 
     MeterData r;
-    r.type = getMeterType(meter);
+    r.type = get_meter_type(meter);
 
     if (!meter)
         return r;
@@ -197,9 +197,9 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
 //
 //    Setter x = (float v, bool set) { if (set) { r.voltage = MeterVolts(v); } return (cast(Quantity!(float, ScaledUnit(Volt)))r.voltage).value; };
 
-    float*[NumFields] f = [
+    float*[num_fields] f = [
         cast(float*)r.voltage.ptr,
-        cast(float*)r.crossPhaseVoltage.ptr,
+        cast(float*)r.cross_phase_voltage.ptr,
         cast(float*)r.current.ptr,
         cast(float*)r.active.ptr,
         r.reactive.ptr,
@@ -207,13 +207,13 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         r.pf.ptr,
         &r.freq,
         r.phase.ptr,
-        r.totalActive.ptr,
-        r.totalImportActive.ptr,
-        r.totalExportActive.ptr,
-        r.totalReactive.ptr,
-        r.totalImportReactive.ptr,
-        r.totalExportReactive.ptr,
-        r.totalApparent.ptr,
+        r.total_active.ptr,
+        r.total_import_active.ptr,
+        r.total_export_active.ptr,
+        r.total_reactive.ptr,
+        r.total_import_reactive.ptr,
+        r.total_export_reactive.ptr,
+        r.total_apparent.ptr,
     ];
 
     if (meter.template_[] == "RealtimeEnergyMeter")
@@ -231,34 +231,34 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         }
     }
 
-    bool needCalculateSystemPF;
-    for (size_t i = 0, bit = 1; i < NumFields; ++i, bit <<= 1)
+    bool need_calculate_system_pf;
+    for (size_t i = 0, bit = 1; i < num_fields; ++i, bit <<= 1)
     {
         if ((fields & bit) == 0)
             continue;
-        Component c = i >= CumulativeFields ? cumulative : realtime;
+        Component c = i >= cumulative_fields ? cumulative : realtime;
         if (!c)
             continue;
 
         // frequency is a global value
-        if (i == MeterField.Frequency)
+        if (i == MeterField.frequency)
         {
-            if (Element* e = c.find_element(fieldNames[i]))
+            if (Element* e = c.find_element(field_names[i]))
                 r.freq = e.scaled_value!Hertz();
-            r.fields |= FieldFlags.Frequency;
+            r.fields |= FieldFlags.frequency;
             continue;
         }
 
-        ubyte valuesPresent = 0;
+        ubyte values_present = 0;
         for (size_t j = 0; j < 4; ++j)
         {
-            if (Element* e = c.find_element(j == 0 ? fieldNames[i] : tconcat(fieldNames[i], j)))
+            if (Element* e = c.find_element(j == 0 ? field_names[i] : tconcat(field_names[i], j)))
             {
                 f[i][j] = e.normalised_value();
-                valuesPresent |= 1 << j;
+                values_present |= 1 << j;
             }
         }
-        if (valuesPresent == 0)
+        if (values_present == 0)
             continue;
 
         r.fields |= bit;
@@ -270,18 +270,18 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
             // TODO:
         }
 
-        if ((valuesPresent & 1) == 0)
+        if ((values_present & 1) == 0)
         {
-            if (i == MeterField.PowerFactor)
-                needCalculateSystemPF = true;
-            else if (i == MeterField.Current)
+            if (i == MeterField.power_factor)
+                need_calculate_system_pf = true;
+            else if (i == MeterField.current)
                 f[i][0] = sqrt(f[i][1]*f[i][1] + f[i][2]*f[i][2] + f[i][3]*f[i][3]);
             else
             {
                 int nearZeroCount = 0;
                 for (size_t j = 1; j < 4; ++j)
                 {
-                    if (valuesPresent & (1 << j))
+                    if (values_present & (1 << j))
                     {
                         f[i][0] += f[i][j];
                         if (f[i][j] >= 1)
@@ -296,50 +296,50 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         }
 
         // if a single-phase meter only read a sum, then assign L1 to match
-        if ((valuesPresent & 3) == 1 && r.type == CircuitType.single_phase)
+        if ((values_present & 3) == 1 && r.type == CircuitType.single_phase)
             f[i][1] = f[i][0];
     }
 
     // if we have an incomplete primary set (V,I,P), then we can calculate the missing values
-    enum primary_fields = FieldFlags.Voltage | FieldFlags.Current | FieldFlags.Power;
+    enum primary_fields = FieldFlags.voltage | FieldFlags.current | FieldFlags.power;
     if (r.type == CircuitType.dc)
     {
-        if ((r.fields & primary_fields) == (FieldFlags.Voltage | FieldFlags.Current))
+        if ((r.fields & primary_fields) == (FieldFlags.voltage | FieldFlags.current))
         {
             foreach (i; 0..4)
                 r.active[i] = r.voltage[i] * r.current[i]; // P = VI
-            r.fields |= FieldFlags.Power;
+            r.fields |= FieldFlags.power;
         }
-        else if ((r.fields & primary_fields) == (FieldFlags.Voltage | FieldFlags.Power))
+        else if ((r.fields & primary_fields) == (FieldFlags.voltage | FieldFlags.power))
         {
             foreach (i; 0..4)
                 r.current[i] = r.active[i] / r.voltage[i]; // I = P/V
-            r.fields |= FieldFlags.Current;
+            r.fields |= FieldFlags.current;
         }
-        else if ((r.fields & primary_fields) == (FieldFlags.Current | FieldFlags.Power))
+        else if ((r.fields & primary_fields) == (FieldFlags.current | FieldFlags.power))
         {
             foreach (i; 0..4)
                 r.voltage[i] = MeterVolts(r.active[i] / r.current[i]); // V = P/I
-            r.fields |= FieldFlags.Voltage;
+            r.fields |= FieldFlags.voltage;
         }
     }
     else
     {
         // TODO: AC circuits are much more of a pain in the arse; and we need to assess what details we do know...
-        if ((r.fields & primary_fields) == (FieldFlags.Voltage | FieldFlags.Current))
+        if ((r.fields & primary_fields) == (FieldFlags.voltage | FieldFlags.current))
         {
             assert(false, "TODO");
-            r.fields |= FieldFlags.Power;
+            r.fields |= FieldFlags.power;
         }
-        else if ((r.fields & primary_fields) == (FieldFlags.Voltage | FieldFlags.Power))
+        else if ((r.fields & primary_fields) == (FieldFlags.voltage | FieldFlags.power))
         {
             assert(false, "TODO");
-            r.fields |= FieldFlags.Current;
+            r.fields |= FieldFlags.current;
         }
-        else if ((r.fields & primary_fields) == (FieldFlags.Current | FieldFlags.Power))
+        else if ((r.fields & primary_fields) == (FieldFlags.current | FieldFlags.power))
         {
             assert(false, "TODO");
-            r.fields |= FieldFlags.Voltage;
+            r.fields |= FieldFlags.voltage;
         }
     }
 
@@ -350,7 +350,7 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         if (r.pf[i] == -1)
             r.pf[i] = 0;
 
-        if ((r.fields & FieldFlags.PhaseAngle) == 0 && r.pf[i] != 0)
+        if ((r.fields & FieldFlags.phase_angle) == 0 && r.pf[i] != 0)
         {
             // TODO: is reactive signed? what if we don't know reactive? are we guessing at the sign?
             r.phase[i] = -acos(r.pf[i])*(1.0/(2*PI));
@@ -362,9 +362,9 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
     // should we try and infer missing values?
     // - what kind of meter that can read PF doesn't also read apparent and reactive?
     // - for primitive meters; should we assume PF=1 and assign apparent=active and reactive=0?
-    if ((r.fields & (FieldFlags.Apparent | FieldFlags.Reactive)) == 0)
+    if ((r.fields & (FieldFlags.apparent | FieldFlags.reactive)) == 0)
     {
-        if ((r.fields & FieldFlags.PowerFactor) == 0)
+        if ((r.fields & FieldFlags.power_factor) == 0)
         {
             r.pf = 1;
             foreach (i; 0..4)
@@ -381,7 +381,7 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         }
     }
 
-    if (needCalculateSystemPF)
+    if (need_calculate_system_pf)
         r.pf[0] = r.active[0].value / r.apparent[0];
 
 //    if ((fields & Cumulative) && !
@@ -399,7 +399,7 @@ private:
 
 bool hasAvg(size_t field)
 {
-    if (field == MeterField.Voltage || field == MeterField.InterPhaseVoltage || field == MeterField.PowerFactor)
+    if (field == MeterField.voltage || field == MeterField.inter_phase_voltage || field == MeterField.power_factor)
         return true;
     return false;
 }
