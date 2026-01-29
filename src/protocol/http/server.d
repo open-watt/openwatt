@@ -100,8 +100,18 @@ nothrow @nogc:
 
     override CompletionStatus shutdown()
     {
+        while (!_sessions.empty)
+        {
+            Session* s = _sessions.popBack();
+            s.close();
+            defaultAllocator().freeT(s);
+        }
+
         if (_server)
+        {
             _server.destroy();
+            _server = null;
+        }
 
         return CompletionStatus.complete;
     }
@@ -149,20 +159,27 @@ private:
         {
             this.server = server;
             this.stream = stream;
+            stream.subscribe(&signal_handler);
             parser = HTTPParser(&request_callback);
+        }
+
+        void close()
+        {
+            if (!stream)
+                return;
+            stream.destroy();
+            stream = null;
         }
 
         int update()
         {
             if (!stream)
                 return -1;
-            int result = parser.update(stream);
-            if (result != 0)
+            if (int result = parser.update(stream))
             {
-                stream.destroy();
+                close();
                 return result;
             }
-
             return 0;
         }
 
@@ -186,9 +203,18 @@ private:
         }
 
         HTTPServer server;
-        ObjectRef!Stream stream;
+        Stream stream;
 
     private:
         HTTPParser parser;
+
+        void signal_handler(BaseObject object, StateSignal signal)
+        {
+            if (signal != StateSignal.online)
+            {
+                stream.unsubscribe(&signal_handler);
+                stream = null;
+            }
+        }
     }
 }
