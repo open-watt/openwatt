@@ -252,7 +252,7 @@ private:
 
     void send_request(ref HTTPMessage request)
     {
-        MutableString!0 message = request.format_message(_host);
+        Array!char message = request.format_message(_host);
         if (message.empty)
             return;
         ptrdiff_t r = stream.write(message[]);

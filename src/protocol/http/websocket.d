@@ -454,7 +454,7 @@ private:
             enum EncodeLen = base64_encode_length(digest.length);
 
             // complete the handshake...
-            MutableString!0 response;
+            Array!char response;
             http_status_line(request.http_version, 101, "Switching Protocols", response);
             response ~= "Upgrade: websocket\r\n" ~
                         "Connection: Upgrade\r\n" ~
@@ -463,7 +463,7 @@ private:
             response ~= "\r\n" ~
 //                        "Sec-WebSocket-Protocol: chat, superchat\r\n" ~
                         "\r\n";
-            ws._stream.write(response);
+            ws._stream.write(response[]);
 
             if (_connection_callback)
                 _connection_callback(ws, _user_data);

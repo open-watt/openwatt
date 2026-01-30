@@ -210,9 +210,9 @@ private:
 
             const v = Variant(output);
             size_t bytes = v.write_json(null);
-            auto buf = cast(char[])talloc(bytes);
-            v.write_json(buf);
-            response.content ~= buf[];
+            Array!char tmp;
+            v.write_json(tmp.extend(bytes));
+            response.content ~= tmp[];
             response.content ~= "}";
         }
         else
@@ -266,7 +266,7 @@ private:
         }
 
         // build response
-        MutableString!0 response_json;
+        Array!char response_json;
         response_json.reserve(4096);
         response_json ~= '{';
 
@@ -300,7 +300,7 @@ private:
         return 0;
     }
 
-    void collect_elements_from_component(Component comp, const(char)[] path, ref MutableString!0 json, ref bool first, ref MutableString!0 prefix)
+    void collect_elements_from_component(Component comp, const(char)[] path, ref Array!char json, ref bool first, ref MutableString!0 prefix)
     {
         import urt.mem.temp;
 
@@ -338,7 +338,7 @@ private:
         }
     }
 
-    void collect_with_wildcard(Component comp, const(char)[] path, ref MutableString!0 json, ref bool first, ref MutableString!0 prefix)
+    void collect_with_wildcard(Component comp, const(char)[] path, ref Array!char json, ref bool first, ref MutableString!0 prefix)
     {
         import urt.mem.temp;
 
@@ -382,7 +382,7 @@ private:
             collect_with_wildcard(child, path, json, first, prefix);
     }
 
-    void append_element(ref MutableString!0 json, ref bool first, const(char)[] prefix, Element* elem)
+    void append_element(ref Array!char json, ref bool first, const(char)[] prefix, Element* elem)
     {
         import urt.si.quantity;
         import urt.si.unit;
@@ -448,7 +448,7 @@ private:
             return 0;
         }
 
-        MutableString!0 response_json;
+        Array!char response_json;
         response_json.reserve(1024);
         response_json ~= "{\"results\":{";
 
@@ -537,7 +537,7 @@ private:
         if (shallow_var && shallow_var.isBool)
             shallow = shallow_var.asBool();
 
-        MutableString!0 response_json;
+        Array!char response_json;
         response_json.reserve(4096);
         response_json ~= '{';
 
@@ -578,7 +578,7 @@ private:
         return 0;
     }
 
-    void build_component_list(Component comp, ref MutableString!0 json, bool shallow, bool is_device = false)
+    void build_component_list(Component comp, ref Array!char json, bool shallow, bool is_device = false)
     {
         json.append('\"', comp.id[], "\":{\"type\":\"", is_device ? "device" : "component", "\",\"template\":\"", comp.template_[], "\",\"components\":", shallow ? '[' : '{');
 

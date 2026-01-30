@@ -415,7 +415,7 @@ protected:
                 text ~= (_features & ClientFeatures.crlf) ? "\r\n" : "\n";
                 line_offset = 0;
             }
-            text.appendFormat("   {0, *1}", s[], max);
+            text.append_format("   {0, *1}", s[], max);
             line_offset += max + 3;
         }
 
