@@ -1,9 +1,10 @@
 module protocol;
 
 // protocol packages
-public static import protocol.goodwe;
+public static import protocol.can;
 public static import protocol.dns;
 public static import protocol.ezsp;
+public static import protocol.goodwe;
 public static import protocol.http;
 public static import protocol.ip;
 public static import protocol.modbus;

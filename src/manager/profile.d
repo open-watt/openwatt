@@ -46,6 +46,7 @@ enum Frequency : ubyte
 enum ElementType : ubyte
 {
     modbus,
+    can,
     zigbee,
     http,
     aa55
@@ -80,6 +81,13 @@ struct ElementDesc_Modbus
     RegisterType reg_type = RegisterType.holding_register;
     Access access = Access.read;
     ValueDesc value_desc = ValueDesc(modbus_data_type!"u16");
+}
+
+struct ElementDesc_CAN
+{
+    uint message_id;
+    ubyte offset;
+    ValueDesc value_desc;
 }
 
 struct ElementDesc_Zigbee
@@ -265,6 +273,8 @@ nothrow @nogc:
            defaultAllocator().freeArray(desc_strings);
         if(mb_elements)
             defaultAllocator().freeArray(mb_elements);
+        if(can_elements)
+            defaultAllocator().freeArray(can_elements);
         if(zb_elements)
             defaultAllocator().freeArray(zb_elements);
         if(http_elements)
@@ -360,6 +370,9 @@ nothrow @nogc:
     ref const(ElementDesc_Modbus) get_mb(size_t i) const pure
         => mb_elements[i];
 
+    ref const(ElementDesc_CAN) get_can(size_t i) const pure
+        => can_elements[i];
+
     ref const(ElementDesc_Zigbee) get_zb(size_t i) const pure
         => zb_elements[i];
 
@@ -404,6 +417,7 @@ private:
     ElementDesc[] elements;
     Lookup[] lookup_table;
     ElementDesc_Modbus[] mb_elements;
+    ElementDesc_CAN[] can_elements;
     ElementDesc_Zigbee[] zb_elements;
     ElementDesc_HTTP[] http_elements;
     ElementDesc_AA55[] aa55_elements;
@@ -448,6 +462,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     size_t num_element_templates = 0;
     size_t num_indirections = 0;
     size_t mb_count = 0;
+    size_t can_count = 0;
     size_t zb_count = 0;
     size_t http_count = 0;
     size_t aa55_count = 0;
@@ -514,6 +529,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 switch (reg_item.name)
                 {
                     case "mb", "reg": ++mb_count; break;
+                    case "can": ++can_count; break;
                     case "zb": ++zb_count; break;
                     case "http": ++http_count; break;
                     case "aa55": ++aa55_count; break;
@@ -637,6 +653,8 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
 
     if(mb_count)
         profile.mb_elements = allocator.allocArray!ElementDesc_Modbus(mb_count);
+    if(can_count)
+        profile.can_elements = allocator.allocArray!ElementDesc_CAN(can_count);
     if(zb_count)
         profile.zb_elements = allocator.allocArray!ElementDesc_Zigbee(zb_count);
     if(http_count)
@@ -655,6 +673,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     num_indirections = 0;
     item_count = 0;
     mb_count = 0;
+    can_count = 0;
     zb_count = 0;
     http_count = 0;
     aa55_count = 0;
@@ -805,6 +824,37 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         parse_value_desc(mb.value_desc, ty, units);
                         break;
 
+                    case "can":
+                        const(char)[] tail = reg_item.value;
+                        tail = tail.split_element_and_desc();
+
+                        const(char)[] msg_id = tail.split!',';
+                        const(char)[] offset = tail.split!',';
+                        const(char)[] type = tail.split!','.unQuote;
+                        const(char)[] units = tail.split!','.unQuote;
+
+                        e._element_index = cast(ushort)((ElementType.can << 13) | can_count);
+                        ref ElementDesc_CAN can = profile.can_elements[can_count++];
+
+                        size_t taken;
+                        ulong ti = msg_id.parse_uint_with_base(&taken);
+                        if (taken != msg_id.length || ti > 0x1FFFFFFF) // 29 bits for CAN2.0B
+                        {
+                            writeWarning("Invalid CAN message id: ", msg_id);
+                            break;
+                        }
+                        can.message_id = cast(uint)ti;
+                        ti = offset.parse_uint_with_base(&taken);
+                        if (taken != offset.length || ti >= 64)
+                        {
+                            writeWarning("Invalid CAN message offset: ", offset);
+                            break;
+                        }
+                        can.offset = cast(ubyte)ti;
+
+                        parse_value_desc(can.value_desc, type.parse_data_type(), units);
+                        break;
+
                     case "zb":
                         const(char)[] tail = reg_item.value;
                         tail = tail.split_element_and_desc();
@@ -894,14 +944,14 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         ulong ti = fn.parse_uint_with_base(&taken);
                         if (taken != fn.length || ti > ubyte.max)
                         {
-                            writeWarning("Invalid AA55 control code: ", fn);
+                            writeWarning("Invalid AA55 function code: ", fn);
                             break;
                         }
                         aa55.function_code = cast(ubyte)ti;
                         ti = offset.parse_uint_with_base(&taken);
                         if (taken != offset.length || ti > ubyte.max)
                         {
-                            writeWarning("Invalid AA55 function code: ", offset);
+                            writeWarning("Invalid AA55 value offset: ", offset);
                             break;
                         }
                         aa55.offset = cast(ubyte)ti;

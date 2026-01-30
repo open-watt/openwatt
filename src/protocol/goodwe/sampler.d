@@ -150,13 +150,15 @@ private:
             assert(e.offset + e.desc.data_length <= response.length, "response too small for element data?!");
 
             e.last_update = response_time;
-            import urt.variant;
-            ValueDesc raw_desc = ValueDesc(e.desc.data_type);
-            Variant raw = sample_value(response.ptr + e.offset, raw_desc);
             e.element.latest = sample_value(response.ptr + e.offset, e.desc);
 
             version (DebugGoodWeSampler)
+            {
+                import urt.variant;
+                ValueDesc raw_desc = ValueDesc(e.desc.data_type);
+                Variant raw = sample_value(response.ptr + e.offset, raw_desc);
                 writeDebugf("aa55: sample - offset: {0} value: {1} = {2} (raw: {3} - 0x{4,x})", e.offset, e.element.id, e.element.latest, raw, raw.isLong() ? cast(uint)cast(ulong)raw.asLong() : 0);
+            }
         }
     }
 }

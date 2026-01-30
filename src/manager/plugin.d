@@ -84,6 +84,7 @@ void register_modules(Application app)
     register_module!(router.iface.tesla)(app);
 
     import protocol;
+    register_module!(protocol.can)(app);
     register_module!(protocol.dns)(app);
     register_module!(protocol.ezsp)(app);
     register_module!(protocol.goodwe)(app);

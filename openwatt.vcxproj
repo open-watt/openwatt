@@ -89,6 +89,8 @@
     <DCompile Include="src\manager\secret.d" />
     <DCompile Include="src\manager\subscriber.d" />
     <DCompile Include="src\manager\system.d" />
+    <DCompile Include="src\protocol\can\package.d" />
+    <DCompile Include="src\protocol\can\sampler.d" />
     <DCompile Include="src\protocol\dns\message.d" />
     <DCompile Include="src\protocol\dns\package.d" />
     <DCompile Include="src\protocol\dns\server.d" />
