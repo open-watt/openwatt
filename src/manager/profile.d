@@ -15,6 +15,7 @@ import urt.string.format;
 import manager.component;
 import manager.config;
 import manager.device;
+import manager.element;
 import manager.sampler;
 
 version = IncludeDescription;
@@ -52,10 +53,31 @@ enum ElementType : ubyte
     aa55
 }
 
+SamplingMode freq_to_element_mode(Frequency frequency)
+{
+    final switch (frequency)
+    {
+        case Frequency.realtime:
+        case Frequency.high:
+        case Frequency.medium:
+        case Frequency.low:
+            return SamplingMode.poll;
+        case Frequency.constant:
+            return SamplingMode.constant;
+        case Frequency.on_demand:
+            return SamplingMode.on_demand;
+        case Frequency.report:
+            return SamplingMode.report;
+        case Frequency.configuration:
+            return SamplingMode.config;
+    }
+}
+
 struct ElementDesc
 {
 pure nothrow @nogc:
     CacheString display_units;
+    Access access = Access.read;
     Frequency update_frequency = Frequency.medium;
 
     ElementType type() const
@@ -79,7 +101,6 @@ struct ElementDesc_Modbus
 
     ushort reg;
     RegisterType reg_type = RegisterType.holding_register;
-    Access access = Access.read;
     ValueDesc value_desc = ValueDesc(modbus_data_type!"u16");
 }
 
@@ -95,7 +116,6 @@ struct ElementDesc_Zigbee
     ushort cluster_id;
     ushort attribute_id;
     ushort manufacturer_code;
-    Access access = Access.read;
     ValueDesc value_desc;
 }
 
@@ -122,7 +142,7 @@ pure nothrow @nogc:
     Type type;
     ubyte index;
 
-    // 1-byte padding here...
+    Access access = Access.read;
     Frequency update_frequency = Frequency.medium;
 
     CacheString display_units;
@@ -814,12 +834,12 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             if (type[0] == 'R')
                             {
                                 if (type.length > 1 && type[1] == 'W')
-                                    mb.access = Access.read_write;
+                                    e.access = Access.read_write;
                                 else
-                                    mb.access = Access.read;
+                                    e.access = Access.read;
                             }
                             else if (type[0] == 'W')
-                                mb.access = Access.write;
+                                e.access = Access.write;
                         }
                         parse_value_desc(mb.value_desc, ty, units);
                         break;
@@ -911,12 +931,12 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             if (type[0] == 'R')
                             {
                                 if (type.length > 1 && type[1] == 'W')
-                                    zb.access = Access.read_write;
+                                    e.access = Access.read_write;
                                 else
-                                    zb.access = Access.read;
+                                    e.access = Access.read;
                             }
                             else if (type[0] == 'W')
-                                zb.access = Access.write;
+                                e.access = Access.write;
                         }
                         parse_value_desc(zb.value_desc, ty, units);
                         break;
@@ -1163,7 +1183,11 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             e.display_units = display_units ? addString(display_units) : elem_desc ? elem_desc.display_units : CacheString();
                             e._description = description ? desc_cache.add_string(description) : elem_desc ? elem_desc._description : 0;
 
-                            // TODO: default should be on-demand, but this is more useful while debugging...
+                            // TODO: should we be able to specify this at the element template level?
+                            //       ElementDesc will always override it since there's no 'unknown' state...
+                            e.access = elem_desc ? elem_desc.access : Access.read;
+
+                            // TODO: default should be on-demand, but this is more useful while debugging.
                             e.update_frequency = Frequency.medium;
                             if (!freq.empty)
                             {
@@ -1173,6 +1197,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                                 else if (freq.ieq("low")) e.update_frequency = Frequency.low;
                                 else if (freq.ieq("const")) e.update_frequency = Frequency.constant;
                                 else if (freq.ieq("ondemand")) e.update_frequency = Frequency.on_demand;
+                                else if (freq.ieq("on_demand")) e.update_frequency = Frequency.on_demand;
                                 else if (freq.ieq("report")) e.update_frequency = Frequency.report;
                                 else if (freq.ieq("config")) e.update_frequency = Frequency.configuration;
                                 else writeWarning("Invalid frequency value: ", freq);
