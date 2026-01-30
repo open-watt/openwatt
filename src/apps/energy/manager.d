@@ -33,7 +33,7 @@ nothrow @nogc:
         return null;
     }
 
-    Circuit* addCircuit(String name, Circuit* parent, uint maxCurrent, Component meter)
+    Circuit* addCircuit(String name, Circuit* parent, uint max_current, Component meter)
     {
         Circuit* circuit = defaultAllocator.allocT!Circuit(name.move);
 
@@ -48,7 +48,7 @@ nothrow @nogc:
             circuit.parent.subCircuits ~= circuit;
         }
 
-        circuit.maxCurrent = maxCurrent;
+        circuit.max_current = max_current;
         circuit.meter = meter;
 
         circuits.insert(circuit.id, circuit);

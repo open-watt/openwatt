@@ -156,12 +156,12 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.Al
         "pf",
         "frequency",
         "phase",
-        "total",
-        "total_import",
-        "total_export",
-        "total_reactive",
-        "total_import_reactive",
-        "total_export_reactive",
+        "net",
+        "import",
+        "export",
+        "net_reactive",
+        "import_reactive",
+        "export_reactive",
         "total_apparent",
     ];
 

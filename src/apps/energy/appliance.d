@@ -215,7 +215,7 @@ nothrow @nogc:
 
     final override ControlCapability hasControl() const
     {
-        if (control && control.find_element("targetCurrent"))
+        if (control && control.find_element("target_current"))
             return ControlCapability.Linear;
         // on/off control?
 
@@ -282,16 +282,16 @@ nothrow @nogc:
             if (connectedCar.targetPower > Watts(0))
                 target = max(targetPower, connectedCar.targetPower);
         }
-        Amps targetCurrent = target / (meterData.voltage[0] ? cast(Volts)meterData.voltage[0] : Volts(230));
-        if (targetCurrent > Amps(0))
+        Amps target_current = target / (meterData.voltage[0] ? cast(Volts)meterData.voltage[0] : Volts(230));
+        if (target_current > Amps(0))
         {
             // set the
 
             if (control)
             {
-                Element* e = control.find_element("targetCurrent");
+                Element* e = control.find_element("target_current");
                 if (e)
-                    e.value = targetCurrent;
+                    e.value = target_current;
             }
 
         }

@@ -141,7 +141,11 @@ nothrow @nogc:
                 if (control)
                     a.control = control.value;
                 else if (device)
-                    a.control = device.value.find_component("control");
+                {
+                    a.control = device.value.find_component("charge_control");
+                    if (!a.control)
+                        a.control = device.value.find_component("control"); // TODO: delete this alias? or should we allow it for non-chargers?
+                }
                 break;
 
             case "car":
