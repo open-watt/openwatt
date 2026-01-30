@@ -967,10 +967,12 @@ private:
                 msg = zdo_res.message[];
                 if (msg.length < 3)
                     return fail("response too short");
-                ubyte length = zdo_res.message[2];
-                if (length > zdo_res.message.length - 3)
+                ubyte length = msg[2];
+                if (length > msg.length - 3)
                     return fail("response too short");
-                if (zdo_res.message[3] != ep.endpoint)
+                if (length < 10)
+                    return fail("response too short");
+                if (msg[3] != ep.endpoint)
                 {
                     // this seems like a stale response; why did we receive response to an earlier request?
                     goto try_again;
