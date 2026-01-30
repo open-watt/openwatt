@@ -231,7 +231,7 @@ nothrow @nogc:
         {
             session.writef("{'', *0}{1}: {2} [{3}]\n", indent, c.id, c.name, c.template_);
             foreach (e; c.elements)
-                session.writef("{'', *5}  {0}{@4, ?3}: {2}\n", e.id, e.name, e.latest, e.name.length > 0, " ({1})", indent);
+                session.writef("{'', *5}  {0}{@4, ?3}: {2}\n", e.id, e.name, e.value, e.name.length > 0, " ({1})", indent);
             foreach (c2; c.components)
                 printComponent(c2, indent + 2);
         }

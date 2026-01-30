@@ -80,8 +80,7 @@ private:
 
             assert(e.offset + e.desc.data_length <= p.length, "message too small for element data?!");
 
-            e.last_update = p.creation_time;
-            e.element.value = sample_value(p.data.ptr + e.offset, e.desc);
+            e.element.value(sample_value(p.data.ptr + e.offset, e.desc), p.creation_time);
 
             version (DebugCANSampler)
             {
