@@ -49,7 +49,8 @@ enum ElementType : ubyte
     can,
     zigbee,
     http,
-    aa55
+    aa55,
+    mqtt
 }
 
 struct ElementDesc
@@ -108,6 +109,16 @@ struct ElementDesc_AA55
     ubyte function_code;
     ubyte offset;
     ValueDesc value_desc;
+}
+
+struct ElementDesc_MQTT
+{
+    ushort topic_offset;    // Offset into topic string table
+    TextValueDesc value_desc;
+
+pure nothrow @nogc:
+    const(char)[] get_topic(ref const(Profile) profile) const
+        => profile.mqtt_strings ? as_dstring(profile.mqtt_strings.ptr + topic_offset) : null;
 }
 
 struct ElementTemplate
@@ -271,6 +282,8 @@ nothrow @nogc:
             defaultAllocator().freeArray(lookup_strings);
         if (desc_strings)
            defaultAllocator().freeArray(desc_strings);
+        if(mqtt_strings)
+            defaultAllocator().freeArray(mqtt_strings);
         if(mb_elements)
             defaultAllocator().freeArray(mb_elements);
         if(can_elements)
@@ -281,6 +294,8 @@ nothrow @nogc:
             defaultAllocator().freeArray(http_elements);
         if(aa55_elements)
             defaultAllocator().freeArray(aa55_elements);
+        if(mqtt_elements)
+            defaultAllocator().freeArray(mqtt_elements);
     }
 
     inout(DeviceTemplate)* get_model_template(const(char)[] model) inout pure
@@ -379,6 +394,15 @@ nothrow @nogc:
     ref const(ElementDesc_AA55) get_aa55(size_t i) const pure
         => aa55_elements[i];
 
+    ref const(ElementDesc_MQTT) get_mqtt(size_t i) const pure
+        => mqtt_elements[i];
+
+    auto get_mqtt_vars() const pure
+        => StringRange(mqtt_strings, indirections[_mqtt_vars .. _mqtt_vars + _mqtt_var_count]);
+
+    auto get_mqtt_subs() const pure
+        => StringRange(mqtt_strings, indirections[_mqtt_subs .. _mqtt_subs + _mqtt_sub_count]);
+
     void drop_lookup_strings()
     {
         if (!lookup_strings)
@@ -409,6 +433,24 @@ private:
         ushort index;
     }
 
+    struct StringRange
+    {
+        const(char)[] str_cache;
+        const(ushort)[] list;
+
+    pure nothrow @nogc:
+        bool empty() const
+            => list.length == 0;
+        size_t length() const
+            => list.length;
+        const(char)[] front() const
+            => as_dstring(str_cache.ptr + list[0]);
+        void popFront()
+        {
+            list = list[1 .. $];
+        }
+    }
+
     String name;
 
     DeviceTemplate[] device_templates;
@@ -421,11 +463,15 @@ private:
     ElementDesc_Zigbee[] zb_elements;
     ElementDesc_HTTP[] http_elements;
     ElementDesc_AA55[] aa55_elements;
+    ElementDesc_MQTT[] mqtt_elements;
     ushort[] indirections;
     char[] id_strings;
     char[] name_strings;
     char[] lookup_strings;
     char[] desc_strings;
+    char[] mqtt_strings;         // String table for MQTT topic patterns
+    ushort _mqtt_vars, _mqtt_var_count;
+    ushort _mqtt_subs, _mqtt_sub_count;
 
     Map!(String, const(VoidEnumInfo)*) enum_templates;
 }
@@ -457,6 +503,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     size_t name_string_length = 0;
     size_t lookup_string_len = 0;
     size_t desc_string_len = 0;
+    size_t mqtt_string_len = 0;
     size_t num_device_templates = 0;
     size_t num_component_templates = 0;
     size_t num_element_templates = 0;
@@ -466,6 +513,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     size_t zb_count = 0;
     size_t http_count = 0;
     size_t aa55_count = 0;
+    size_t mqtt_count = 0;
 
     // we need to count the items and buffer lengths
     foreach (ref root_item; conf.sub_items) switch (root_item.name)
@@ -490,6 +538,21 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
             }
 
             profile.enum_templates.insert(enum_name.makeString(allocator), enum_info);
+            break;
+
+        case "mqtt-variables":
+        case "mqtt-subscribe":
+            const(char)[] tail = root_item.value;
+            bool is_variables = root_item.name[] == "mqtt-variables";
+            while (!tail.empty)
+            {
+                const(char)[] value = tail.split!','.unQuote;
+                if (value.empty)
+                    continue;
+
+                mqtt_string_len += cache_len(value.length);
+                ++num_indirections;
+            }
             break;
 
         case "elements", "registers":
@@ -533,6 +596,12 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                     case "zb": ++zb_count; break;
                     case "http": ++http_count; break;
                     case "aa55": ++aa55_count; break;
+                    case "mqtt":
+                        ++mqtt_count;
+                        tail = reg_item.value;
+                        const(char)[] topic = tail.split!','.unQuote;
+                        mqtt_string_len += cache_len(topic.length);
+                        break;
                     default:
                         writeWarning("Unknown element type: ", reg_item.name);
                         break;
@@ -650,6 +719,8 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     profile.name_strings = allocator.allocArray!char(name_string_length);
     profile.lookup_strings = allocator.allocArray!char(lookup_string_len);
     profile.desc_strings = allocator.allocArray!char(desc_string_len);
+    if(mqtt_string_len)
+        profile.mqtt_strings = allocator.allocArray!char(mqtt_string_len);
 
     if(mb_count)
         profile.mb_elements = allocator.allocArray!ElementDesc_Modbus(mb_count);
@@ -661,11 +732,14 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
         profile.http_elements = allocator.allocArray!ElementDesc_HTTP(http_count);
     if(aa55_count)
         profile.aa55_elements = allocator.allocArray!ElementDesc_AA55(aa55_count);
+    if(mqtt_count)
+        profile.mqtt_elements = allocator.allocArray!ElementDesc_MQTT(mqtt_count);
 
     auto id_cache = StringCacheBuilder(profile.id_strings);
     auto name_cache = StringCacheBuilder(profile.name_strings);
     auto lookup_cache = StringCacheBuilder(profile.lookup_strings);
     auto desc_cache = StringCacheBuilder(profile.desc_strings);
+    auto mqtt_string_cache = StringCacheBuilder(profile.mqtt_strings);
 
     num_device_templates = 0;
     num_component_templates = 0;
@@ -677,10 +751,40 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     zb_count = 0;
     http_count = 0;
     aa55_count = 0;
+    mqtt_count = 0;
 
     // parse the elements
     foreach (ref root_item; conf.sub_items) switch (root_item.name)
     {
+        case "mqtt-variables":
+        case "mqtt-subscribe":
+            bool is_variables = root_item.name == "mqtt-variables";
+            if (is_variables ? profile._mqtt_var_count : profile._mqtt_sub_count > 0)
+            {
+                writeWarning("Duplicate mqtt-", is_variables ? "variables" : "subscribe", " definition");
+                break;
+            }
+
+            if (is_variables)
+                profile._mqtt_vars = cast(ushort)num_indirections;
+            else
+                profile._mqtt_subs = cast(ushort)num_indirections;
+
+            const(char)[] tail = root_item.value;
+            while (!tail.empty)
+            {
+                const(char)[] value = tail.split!','.unQuote;
+                if (value.empty)
+                    continue;
+
+                profile.indirections[num_indirections++] = mqtt_string_cache.add_string(value);
+                if (is_variables)
+                    ++profile._mqtt_var_count;
+                else
+                    ++profile._mqtt_sub_count;
+            }
+            break;
+
         case "elements", "registers":
             foreach (i, ref reg_item; root_item.sub_items)
             {
@@ -957,6 +1061,27 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         aa55.offset = cast(ubyte)ti;
 
                         parse_value_desc(aa55.value_desc, type.parse_data_type(), units);
+                        break;
+
+                    case "mqtt":
+                        const(char)[] tail = reg_item.value;
+                        tail = tail.split_element_and_desc();
+
+                        const(char)[] topic = tail.split!','.unQuote;
+                        const(char)[] type = tail.split!','.unQuote;
+                        const(char)[] units = tail.split!','.unQuote;
+
+                        e._element_index = cast(ushort)((ElementType.mqtt << 13) | mqtt_count);
+                        ref ElementDesc_MQTT mqtt = profile.mqtt_elements[mqtt_count++];
+
+                        // Store topic pattern in string table
+                        mqtt.topic_offset = mqtt_string_cache.add_string(topic);
+
+                        // Parse text value descriptor
+                        TextType ty = parse_text_type(type);
+                        mqtt.value_desc = TextValueDesc(ty);
+                        if (!mqtt.value_desc.parse_units(units))
+                            writeWarning("Invalid units '", units, "' for MQTT element: ", id);
                         break;
 
                     default:

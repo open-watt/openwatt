@@ -17,6 +17,7 @@ import router.stream.tcp;
 
 nothrow @nogc:
 
+alias PublishCallback = void delegate(const(char)[] sender, const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp) nothrow @nogc;
 
 class MQTTBroker : BaseObject
 {
@@ -54,8 +55,84 @@ nothrow @nogc:
 
     // API...
 
-    override bool validate() const pure
-        => true;
+    void publish(const(char)[] client_id, ubyte flags, const(char)[] topic, const(ubyte)[] payload, const(ubyte)[] properties = null, MonoTime timestamp = getTime())
+    {
+        Value* get_record(Value* val, const(char)[] topic)
+        {
+            char sep;
+            const(char)[] level = topic.split!'/'(sep);
+            Value* child = level in val.children;
+            if (!child)
+                child = val.children.insert(level.makeString(defaultAllocator()), Value());
+            if (sep == 0)
+                return child;
+            return get_record(child, topic);
+        }
+
+        void delete_record(Value* val, const(char)[] topic) nothrow @nogc
+        {
+            char sep;
+            const(char)[] level = topic.split!'/'(sep);
+            Value* child = level in val.children;
+            if (sep == 0)
+                child.data = null;
+            else if(child)
+                delete_record(child, topic);
+            if (child.children.empty)
+                val.children.remove(level);
+        }
+
+        // retain message and/or push to subscribers...
+        ubyte qos = (flags >> 1) & 3;
+        bool retain = (flags & 1) != 0;
+        bool dup = (flags & 8) != 0;
+
+        if (payload.empty)
+        {
+            delete_record(&_root, topic);
+            return;
+        }
+
+        if (retain)
+        {
+            Value* value = get_record(&_root, topic);
+            if (value)
+            {
+                value.data = payload[];
+                if (properties)
+                    value.properties = properties[];
+                else
+                    value.properties = null;
+                value.flags = flags;
+            }
+        }
+
+        foreach (ref sub; _subs)
+        {
+            if (topic_matches_filter(topic, sub.topic_filter[]))
+                sub.callback(client_id, topic, payload, timestamp);
+        }
+    }
+
+    void subscribe(String topic_filter, PublishCallback callback)
+    {
+        Subscription* sub = &_subs.pushBack();
+        sub.topic_filter = topic_filter;
+        sub.callback = callback;
+    }
+
+    void unsubscribe(PublishCallback callback)
+    {
+        for (size_t i = 0; i < _subs.length; )
+        {
+            if (_subs[i].callback == callback)
+                _subs.removeSwapLast(i);
+            else
+                ++i;
+        }
+    }
+
+protected:
 
     override CompletionStatus startup()
     {
@@ -63,12 +140,12 @@ nothrow @nogc:
         {
             _server = get_module!TCPStreamModule.tcp_servers.create(name, ObjectFlags.dynamic);
             _server.port = _port ? _port : 1883;
-            _server.setConnectionCallback(&new_connection, null);
+            _server.set_connection_callback(&new_connection, null);
         }
 
         if (_server.running)
         {
-            writeInfo("MQTT broker listening on port ", _server.port);
+            writeInfo(type, ": listening on port ", _server.port, "...");
             return CompletionStatus.complete;
         }
         return CompletionStatus.continue_;
@@ -125,72 +202,12 @@ nothrow @nogc:
             sessions.remove(items_to_remove[i]);
     }
 
-    void publish(const(char)[] client, ubyte flags, const(char)[] topic, const(ubyte)[] payload, const(ubyte)[] properties = null)
-    {
-        Value* get_record(Value* val, const(char)[] topic)
-        {
-            char sep;
-            const(char)[] level = topic.split!'/'(sep);
-            Value* child = level in val.children;
-            if (!child)
-                child = val.children.insert(level.makeString(defaultAllocator()), Value());
-            if (sep == 0)
-                return child;
-            return get_record(child, topic);
-        }
-
-        void delete_record(Value* val, const(char)[] topic) nothrow @nogc
-        {
-            char sep;
-            const(char)[] level = topic.split!'/'(sep);
-            Value* child = level in val.children;
-            if (sep == 0)
-                child.data = null;
-            else if(child)
-                delete_record(child, topic);
-            if (child.children.empty)
-                val.children.remove(level);
-        }
-
-        // retain message and/or push to subscribers...
-        ubyte qos = (flags >> 1) & 3;
-        bool retain = (flags & 1) != 0;
-        bool dup = (flags & 8) != 0;
-
-        if (payload.empty)
-        {
-            delete_record(&_root, topic);
-            return;
-        }
-
-        if (retain)
-        {
-            Value* value = get_record(&_root, topic);
-            if (value)
-            {
-                value.data = payload[];
-                if (properties)
-                    value.properties = properties[];
-                else
-                    value.properties = null;
-                value.flags = flags;
-            }
-        }
-
-        // now notify all the other dubscribers...
-        // TODO: scan subscriptions and send...
-
-    }
-
-    void subscribe(ref MQTTClient client, const(char)[] topic)
-    {
-        // add subscription...
-    }
-
 package:
     void destroy_session(ref MQTTSession session)
     {
         send_lwt(session);
+
+        unsubscribe(&session.publish_callback);
 
         session.client = null;
         session.subs = null;
@@ -214,17 +231,7 @@ package:
     Map!(const(char)[], MQTTSession) sessions;
 
 private:
-    TCPServer _server;
-    ushort _port = 1883;
-    MQTTFlags _flags;
-    Duration _client_timeout;
 
-    Array!MQTTClient _clients;
-
-    // local subs
-    // network subs
-
-    // retained values
     struct Value
     {
         Map!(String, Value) children;
@@ -232,6 +239,22 @@ private:
         Array!ubyte properties;
         ubyte flags;
     }
+
+    struct Subscription
+    {
+        String topic_filter;    // Can include wildcards: +, #
+        PublishCallback callback;
+    }
+
+    TCPServer _server;
+    ushort _port = 1883;
+    MQTTFlags _flags;
+    Duration _client_timeout;
+
+    Array!MQTTClient _clients;
+    Array!Subscription _subs;
+
+    // retained values
     Value _root;
 
     void new_connection(Stream client, void* user_data)
@@ -284,4 +307,59 @@ package struct MQTTSession
 
     // TODO: pending messages...
     ubyte[] pending_messages;
+
+nothrow @nogc:
+    void publish_callback(const(char)[] sender, const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp)
+    {
+        if (sender[] == identifier[])
+            return; // don't echo back to sender
+
+        if (client)
+            client.publish(topic[], payload); // TODO: handle qos/retain/etc
+    }
+}
+
+bool topic_matches_filter(const(char)[] topic, const(char)[] filter) pure
+{
+    size_t topic_pos = 0;
+    size_t filter_pos = 0;
+
+    while (filter_pos < filter.length)
+    {
+        if (filter[filter_pos] == '#')
+        {
+            // Multi-level wildcard - matches everything remaining
+            return true;
+        }
+        else if (filter[filter_pos] == '+')
+        {
+            // Single-level wildcard - skip to next '/' in topic
+            while (topic_pos < topic.length && topic[topic_pos] != '/')
+                ++topic_pos;
+
+            // Skip the wildcard in filter
+            ++filter_pos;
+
+            // Both should either be at '/' or at end
+            if (filter_pos < filter.length && filter[filter_pos] == '/')
+            {
+                if (topic_pos >= topic.length || topic[topic_pos] != '/')
+                    return false;
+                ++filter_pos;
+                ++topic_pos;
+            }
+        }
+        else
+        {
+            // Literal character - must match exactly
+            if (topic_pos >= topic.length || topic[topic_pos] != filter[filter_pos])
+                return false;
+
+            ++topic_pos;
+            ++filter_pos;
+        }
+    }
+
+    // Both must be fully consumed
+    return topic_pos == topic.length && filter_pos == filter.length;
 }
