@@ -66,7 +66,7 @@ nothrow @nogc:
         return cast(float)value.asQuantity().adjust_scale(unit).value;
     }
 
-    ref const(Variant) value() const
+    ref inout(Variant) value() inout
     {
         return latest;
     }

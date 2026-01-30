@@ -100,6 +100,59 @@ ushort data_count(DataType type) pure
 
 alias CustomSample = Variant function(const void[] data, ushort user_data) nothrow @nogc;
 
+// Text parsing types for MQTT, HTTP, etc.
+enum TextType : ubyte
+{
+    bool_,
+    num,
+    str,
+    dt,
+    ipaddr,
+    ip6addr,
+}
+
+// For text-based protocols (MQTT, HTTP, etc.) where we parse strings
+struct TextValueDesc
+{
+nothrow @nogc:
+    TextType type;
+    ScaledUnit unit;
+    float pre_scale = 1;
+
+    this(TextType type_) pure
+    {
+        type = type_;
+    }
+
+    this(TextType type_, ScaledUnit unit_, float pre_scale_ = 1) pure
+    {
+        type = type_;
+        unit = unit_;
+        pre_scale = pre_scale_;
+    }
+
+    bool parse_units(const(char)[] units) pure
+    {
+        if (units is null)
+        {
+            unit = ScaledUnit();
+            pre_scale = 1;
+            return true;
+        }
+
+        ptrdiff_t taken = unit.parseUnit(units, pre_scale);
+        return taken == units.length;
+    }
+}
+
+TextType parse_text_type(const(char)[] type_str) pure
+{
+    const TextType* e = enum_from_key!TextType(type_str);
+    if (e is null)
+        return TextType.str;
+    return *e;
+}
+
 struct ValueDesc
 {
 nothrow @nogc:

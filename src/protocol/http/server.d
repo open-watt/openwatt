@@ -91,7 +91,7 @@ nothrow @nogc:
         if (!_server)
             return CompletionStatus.error;
 
-        _server.setConnectionCallback(&accept_connection, null);
+        _server.set_connection_callback(&accept_connection, null);
 
         writeInfo(type, ": '", name, "' listening on port ", _port, "...");
 
