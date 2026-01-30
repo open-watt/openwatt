@@ -354,7 +354,7 @@ nothrow @nogc:
                     input ~= '\0';
                 }
                 else
-                    input ~= recvbuf[i];
+                    input ~= char(recvbuf[i]);
             }
 
             if (i < bytes)
