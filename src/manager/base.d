@@ -427,8 +427,19 @@ protected:
     // sends a signal to all clients
     final void signal_state_change(StateSignal signal)
     {
-        foreach (handler; _subscribers)
+        // TODO: there's a potential (yet unlikely) issue here...
+        //       if a handler unsubscribes a handler *other than itself* during the callback, and
+        //       that handler is before the current index, then some other handler(/s) may be skipped!
+
+        for (size_t i = 0; i < _subscribers.length; )
+        {
+            auto handler = _subscribers[i];
             handler(this, signal);
+
+            // handlers often un-subscribe during the callback, so check if it's still there before we increment
+            if (_subscribers[i] is handler)
+                i++;
+        }
     }
 
 private:
