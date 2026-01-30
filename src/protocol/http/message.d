@@ -354,10 +354,7 @@ private:
     }
 
     static bool is_response(const char[] msg)
-    {
-        enum http = "HTTP/";
-        return msg[0..http.length] == http;
-    }
+        => msg.startsWith("HTTP/");
 
     static int read_status_line(ref const(char)[] msg, ref HTTPMessage message)
     {
