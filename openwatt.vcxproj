@@ -117,6 +117,7 @@
     <DCompile Include="src\protocol\mqtt\broker.d" />
     <DCompile Include="src\protocol\mqtt\client.d" />
     <DCompile Include="src\protocol\mqtt\package.d" />
+    <DCompile Include="src\protocol\mqtt\sampler.d" />
     <DCompile Include="src\protocol\mqtt\util.d" />
     <DCompile Include="src\protocol\package.d" />
     <DCompile Include="src\protocol\ppp\client.d" />
@@ -235,6 +236,7 @@
     <None Include="conf\modbus_profiles\se_meter.conf" />
     <None Include="conf\modbus_profiles\smartevse.conf" />
     <None Include="conf\modbus_profiles\tac1100.conf" />
+    <None Include="conf\mqtt_profiles\open_beken.conf" />
     <None Include="conf\rest_profiles\smartevse.conf" />
     <None Include="conf\startup.conf" />
     <None Include="conf\zigbee_profiles\zigbee.conf" />

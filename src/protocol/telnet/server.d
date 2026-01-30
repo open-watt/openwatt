@@ -33,7 +33,7 @@ nothrow @nogc:
 
         m_server = get_module!TCPStreamModule.tcp_servers.create(server_name.makeString(defaultAllocator), ObjectFlags.dynamic);
         m_server.port = port;
-        m_server.setConnectionCallback(&acceptConnection, null);
+        m_server.set_connection_callback(&acceptConnection, null);
     }
 
     ~this()
