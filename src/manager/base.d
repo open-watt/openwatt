@@ -437,7 +437,7 @@ protected:
             handler(this, signal);
 
             // handlers often un-subscribe during the callback, so check if it's still there before we increment
-            if (_subscribers[i] is handler)
+            if (i < _subscribers.length && _subscribers[i] is handler)
                 i++;
         }
     }
