@@ -396,11 +396,24 @@ private:
         if (elem.latest.isQuantity)
         {
             auto quantity = elem.latest.asQuantity!double();
-            json ~= quantity.value;
 
-            // write the unit separately for quantities
-            if (quantity.unit.pack != 0)
-                json.append(",\"unit\":\"", quantity.unit, '\"');
+            ScaledUnit su;
+            float pre_scale;
+
+            if (elem.display_unit && su.parseUnit(elem.display_unit[], pre_scale) > 0)
+            {
+                // convert to display unit
+                json ~= quantity.adjust_scale(su).value / pre_scale;
+                json.append(",\"unit\":\"", elem.display_unit[], '\"');
+            }
+            else
+            {
+                json ~= quantity.value;
+
+                // write the unit separately for quantities
+                if (quantity.unit.pack != 0)
+                    json.append(",\"unit\":\"", quantity.unit, '\"');
+            }
         }
         else
         {
@@ -596,11 +609,13 @@ private:
             json.append('\"', elem.id[], "\":{");
             if (!elem.name.empty)
                 json.append("\"name\":\"", elem.name[], "\",");
+            if (!elem.desc.empty)
+                json.append("\"desc\":\"", elem.desc[], "\",");
             json.append("\"access\":\"", g_access_strings[elem.access], '\"');
 
-            // TODO: description text, display units
-
-            if (elem.latest.isQuantity)
+            if (!elem.display_unit.empty)
+                json.append(",\"unit\":\"", elem.display_unit[], '\"');
+            else if (elem.latest.isQuantity)
             {
                 auto quantity = elem.latest.asQuantity!double();
                 if (quantity.unit.pack != 0)

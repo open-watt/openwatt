@@ -1,6 +1,7 @@
 module manager.element;
 
 import urt.array;
+import urt.mem.string;
 import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.variant;
@@ -24,11 +25,12 @@ struct Element
 {
 nothrow @nogc:
 
+    Variant latest;
+
     String id;
     String name;
-
-    Variant latest;
-//    ScaledUnit display_unit; // TODO: I think we should probably distinguish the display unit from the sampled unit
+    String desc;
+    String display_unit;
 
     Access access;
 
