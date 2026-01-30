@@ -2,6 +2,7 @@ module protocol.tesla.sampler;
 
 import urt.array;
 import urt.si.quantity;
+import urt.time;
 import urt.variant;
 
 import manager;
@@ -61,6 +62,7 @@ nothrow @nogc:
                     e.value(CentiAmps(charger.target_current));
                     break;
                 case "state":           e.value(charger.charger_state);                                 break;
+                case "twc_state":       e.value(charger.state);                                         break;
                 case "max_current":     e.value(CentiAmps(charger.max_current));                        break;
                 case "current":         e.value(CentiAmps((charger.flags & 2) ? charger.current : 0));  break;
                 case "voltage1":        e.value(Volts((charger.flags & 2) ? charger.voltage1 : 0));     break;
@@ -100,7 +102,7 @@ nothrow @nogc:
         elements.removeFirstSwapLast(element);
     }
 
-    void on_change(Element* e, ref const Variant val, Subscriber who_made_change)
+    void on_change(Element* e, ref const Variant val, SysTime timestamp, Subscriber who_made_change)
     {
         if (!master) // if not bound, we can't apply any values
             return;
