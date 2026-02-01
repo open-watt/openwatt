@@ -420,31 +420,37 @@ nothrow @nogc:
         assert(!_ip4_listener);
         assert(!_ip6_listener);
 
-        Result create(ref Socket sock)
+        Result create(AddressFamily af, ref Socket sock)
         {
-            Result r = create_socket(AddressFamily.ipv4, SocketType.stream, Protocol.tcp, sock);
-            if (r.failed)
-                return r;
+            Socket s;
+            Result r = create_socket(af, SocketType.stream, Protocol.tcp, s);
 
-            r = sock.set_socket_option(SocketOption.non_blocking, true);
-            if (r.failed)
-                return r;
+            if (!r.failed)
+                r = s.set_socket_option(SocketOption.non_blocking, true);
+            if (!r.failed)
+                r = s.set_socket_option(SocketOption.reuse_address, true);
 
-            r = sock.set_socket_option(SocketOption.reuse_address, true);
-            if (r.failed)
-                return r;
+            if (!r.failed)
+            {
+                if (af == AddressFamily.ipv4)
+                    r = s.bind(InetAddress(IPAddr.any, _port));
+                else if (af == AddressFamily.ipv6)
+                    r = s.bind(InetAddress(IPv6Addr.any, _port));
+                else
+                    assert(false);
+            }
 
-            r = sock.bind(InetAddress(IPAddr.any, _port));
-            if (r.failed)
-                return r;
+            if (!r.failed)
+                r = s.listen();
 
-            r = sock.listen();
             if (r.failed)
-                return r;
-            return Result.success;
+                s.close();
+            else
+                sock = s;
+            return r;
         }
 
-        Result r = create(_ip4_listener);
+        Result r = create(AddressFamily.ipv4, _ip4_listener);
         if (!r)
         {
             debug writeError(type, " '", name, "' - failed to create listening socket. Error ", r.systemCode);
@@ -452,15 +458,16 @@ nothrow @nogc:
         }
 
         // TODO: option to disable this???
-        r = create(_ip6_listener);
+        r = create(AddressFamily.ipv6, _ip6_listener);
         if (!r)
         {
             // tolerate ipv6 failure... (do we want this?)
-            if (_ip6_listener)
-            {
-                _ip6_listener.close();
-                _ip6_listener = null;
-            }
+//            if (_ip4_listener)
+//            {
+//                _ip4_listener.close();
+//                _ip4_listener = null;
+//            }
+//            return CompletionStatus.error;
         }
 
         debug writeInfo(type, " '", name, "' - listening on port ", _port);
@@ -474,52 +481,67 @@ nothrow @nogc:
             _ip4_listener.close();
             _ip4_listener = null;
         }
-        if (_ip4_listener)
+        if (_ip6_listener)
         {
-            _ip4_listener.close();
-            _ip4_listener = null;
+            _ip6_listener.close();
+            _ip6_listener = null;
         }
         return CompletionStatus.complete;
     }
 
     final override void update()
     {
-        Socket conn;
-        InetAddress remote_addr;
-        Result r = _ip4_listener.accept(conn, &remote_addr);
-        if (r.failed)
+        while (true)
         {
-            if (r.socket_result != SocketResult.would_block)
+            Socket conn;
+            InetAddress remote_addr;
+            Result r = _ip4_listener.accept(conn, &remote_addr);
+            if (r.failed)
             {
-                // do we want to know what went wrong??
-                restart();
+                if (r.socket_result != SocketResult.would_block)
+                {
+                    // do we want to know what went wrong??
+                    restart();
+                }
+                if (_ip6_listener)
+                {
+                    r = _ip6_listener.accept(conn, &remote_addr);
+                    if (r.failed)
+                    {
+                        if (r.socket_result != SocketResult.would_block)
+                        {
+                            // do we want to know what went wrong??
+                            restart();
+                        }
+                    }
+                }
+                return;
             }
-            return;
-        }
-        assert(conn);
+            assert(conn);
 
-        // if this was a temporary server. maybe we destroy it now?
-//        if (options & ServerOptions.JustOne)
-//            stop();
+            // if this was a temporary server. maybe we destroy it now?
+//            if (options & ServerOptions.JustOne)
+//                stop();
 
-        conn.set_socket_option(SocketOption.non_blocking, true);
+            conn.set_socket_option(SocketOption.non_blocking, true);
 
-//        if (_raw_connection_callback)
-//            _raw_connection_callback(conn, user_data);
-//        else if (_connection_callback)
-        if (_connection_callback)
-        {
-            Stream stream = create_stream(conn);
-            if (stream)
-                _connection_callback(stream, _user_data);
-        }
+//            if (_raw_connection_callback)
+//                _raw_connection_callback(conn, user_data);
+//            else if (_connection_callback)
+            if (_connection_callback)
+            {
+                Stream stream = create_stream(conn);
+                if (stream)
+                    _connection_callback(stream, _user_data);
+            }
 
-        // TODO: should the stream we just created to into the stream pool...?
-        else
-        {
-            // TODO: if nobody is accepting connections; I guess we should just terminate them as they come?
-            conn.shutdown(SocketShutdownMode.read_write);
-            conn.close();
+            // TODO: should the stream we just created to into the stream pool...?
+            else
+            {
+                // TODO: if nobody is accepting connections; I guess we should just terminate them as they come?
+                conn.shutdown(SocketShutdownMode.read_write);
+                conn.close();
+            }
         }
     }
 
