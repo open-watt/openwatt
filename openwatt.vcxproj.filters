@@ -10,6 +10,9 @@
     <Filter Include="conf\modbus_profiles">
       <UniqueIdentifier>{44799e0d-95be-4f50-83d3-bb8473558560}</UniqueIdentifier>
     </Filter>
+    <Filter Include="conf\mqtt_profiles">
+      <UniqueIdentifier>{4f846ad0-fba7-4420-8cea-b3a91e8585d6}</UniqueIdentifier>
+    </Filter>
     <Filter Include="conf\rest_profiles">
       <UniqueIdentifier>{adb46336-8e98-41fa-9701-bcda31f4d3ec}</UniqueIdentifier>
     </Filter>
@@ -292,6 +295,9 @@
       <Filter>src\protocol\mqtt</Filter>
     </DCompile>
     <DCompile Include="src\protocol\mqtt\package.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\sampler.d">
       <Filter>src\protocol\mqtt</Filter>
     </DCompile>
     <DCompile Include="src\protocol\mqtt\util.d">
@@ -699,6 +705,9 @@
     </None>
     <None Include="conf\modbus_profiles\tac1100.conf">
       <Filter>conf\modbus_profiles</Filter>
+    </None>
+    <None Include="conf\mqtt_profiles\open_beken.conf">
+      <Filter>conf\mqtt_profiles</Filter>
     </None>
     <None Include="conf\rest_profiles\smartevse.conf">
       <Filter>conf\rest_profiles</Filter>

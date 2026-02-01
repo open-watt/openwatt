@@ -406,7 +406,7 @@ nothrow @nogc:
 
     // API...
 
-    void setConnectionCallback(NewConnection callback, void* user_data)
+    void set_connection_callback(NewConnection callback, void* user_data)
     {
         _connection_callback = callback;
         _user_data = user_data;
