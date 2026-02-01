@@ -359,7 +359,7 @@ nothrow @nogc:
 
             if (i < bytes)
             {
-                size_t tail = bytes = i;
+                size_t tail = bytes - i;
                 recvbuf[0 .. tail] = recvbuf[i .. bytes];
                 bytes = tail;
             }
