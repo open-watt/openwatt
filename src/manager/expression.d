@@ -729,7 +729,6 @@ Expression* parse_primary_exp(ref const(char)[] text)
     {
         // parse string...
         bool isVar = text[0] == '$';
-        bool identifier;
         bool numeric;
         int numDots = 0;
 
@@ -741,7 +740,7 @@ Expression* parse_primary_exp(ref const(char)[] text)
                 syntaxError("Invalid variable name");
         }
 
-        identifier = text[0].is_alpha || text[0] == '_' || text[0] == '/';
+        bool identifier = text[0].is_alpha || text[0] == '_' || text[0] == '/';
         if (!identifier)
             numeric = text[0].is_numeric || (!isVar && (text[0] == '-' || text[0] == '+') && text.length > 1 && text[1].is_numeric);
 
