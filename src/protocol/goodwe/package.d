@@ -131,7 +131,6 @@ nothrow @nogc:
             session.write_line("Failed to load profile: '", profileName, "'");
             return;
         }
-        scope(exit) g_app.allocator.freeT(profile);
 
         // create a sampler for this modbus server...
         GoodWeSampler sampler = g_app.allocator.allocT!GoodWeSampler(aa55_client);
@@ -151,9 +150,11 @@ nothrow @nogc:
         });
         if (!device)
         {
+            g_app.allocator.freeT(profile);
             session.write_line("Failed to create device '", id, "'");
             return;
         }
+        device.profile = profile;
         device.samplers ~= sampler;
     }
 }
