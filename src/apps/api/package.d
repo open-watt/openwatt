@@ -3,6 +3,7 @@ module apps.api;
 import urt.array;
 import urt.format.json;
 import urt.lifetime;
+import urt.map;
 import urt.mem.allocator;
 import urt.mem.temp;
 import urt.string;
@@ -25,7 +26,10 @@ import router.stream;
 nothrow @nogc:
 
 
-class APIManager : BaseObject
+alias APIHandler = int delegate(const(char)[] uri, ref const HTTPMessage request, ref Stream stream) nothrow @nogc;
+
+
+class APIManager: BaseObject
 {
     __gshared Property[2] Properties = [ Property.create!("http-server", http_server)(),
                                          Property.create!("uri", uri)() ];
@@ -129,6 +133,12 @@ private:
         if (tail == "/list")
             return handle_list(request, stream);
 
+        foreach (handler; get_module!APIModule._custom_handlers[])
+        {
+            if (tail.startsWith(handler.key[]))
+                return handler.value()(tail[handler.key.length .. $], request, stream);
+        }
+
         if (_default_handler)
             _default_handler(request, stream);
         else if (_uri)
@@ -138,13 +148,6 @@ private:
         }
 
         return 0;
-    }
-
-    void add_cors_headers(ref HTTPMessage response)
-    {
-        response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", StringLit!"*");
-        response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Methods", StringLit!"GET, POST, PUT, DELETE, OPTIONS");
-        response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Headers", StringLit!"Content-Type");
     }
 
     int handle_options(ref const HTTPMessage request, ref Stream stream)
@@ -655,16 +658,23 @@ class APIModule : Module
     mixin DeclareModule!"apps.api";
 nothrow @nogc:
 
-    Collection!APIManager managers;
+    Collection!APIManager _managers;
+
+    Map!(String, APIHandler) _custom_handlers;
 
     override void init()
     {
-        g_app.console.register_collection("/apps/api", managers);
+        g_app.console.register_collection("/apps/api", _managers);
     }
 
     override void update()
     {
-        managers.update_all();
+        _managers.update_all();
+    }
+
+    void register_api_handler(const(char)[] uri, APIHandler handler)
+    {
+        _custom_handlers.insert(uri.makeString(g_app.allocator), handler);
     }
 }
 
