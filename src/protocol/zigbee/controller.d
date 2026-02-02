@@ -1115,9 +1115,9 @@ private:
                 info.append("    ep ", ep.endpoint, ":\n");
                 foreach (ref NodeMap.Cluster c; ep.clusters.values)
                 {
-                    info.appendFormat("        cluster {0,x}:", c.cluster_id);
+                    info.append_format("        cluster {0,x}:", c.cluster_id);
                     foreach (ref NodeMap.Attribute a; c.attributes.values)
-                        info.appendFormat(" {0,x}", a.attribute_id);
+                        info.append_format(" {0,x}", a.attribute_id);
                     info ~= "\n";
                 }
             }
