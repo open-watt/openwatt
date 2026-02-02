@@ -37,7 +37,7 @@ nothrow @nogc:
     {
     }
 
-    void device_add(Session session, const(char)[] id, BaseInterface _interface, Nullable!(const(char)[]) name, Nullable!(const(char)[]) _profile)
+    void device_add(Session session, const(char)[] id, BaseInterface _interface, Nullable!(const(char)[]) name, Nullable!(const(char)[]) _profile, Nullable!(const(char)[]) model)
     {
         import manager.component;
         import manager.device;
@@ -59,7 +59,7 @@ nothrow @nogc:
         // create a sampler for this can interface...
         CANSampler sampler = g_app.allocator.allocT!CANSampler(_interface);
 
-        Device device = create_device_from_profile(*profile, null, id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
+        Device device = create_device_from_profile(*profile, model ? model.value : null, id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
             assert(desc.type == ElementType.can);
             ref const ElementDesc_CAN can = profile.get_can(desc.element);
 
