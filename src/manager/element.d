@@ -1,7 +1,7 @@
 module manager.element;
 
 import urt.array;
-import urt.lifetime : forward;
+import urt.lifetime;
 import urt.mem.string;
 import urt.si.unit : ScaledUnit;
 import urt.string;
@@ -35,13 +35,14 @@ enum SamplingMode : ubyte
     config
 }
 
-alias OnChangeCallback = void delegate(ref Element e, ref const Variant val, SysTime timestamp) nothrow @nogc;
+alias OnChangeCallback = void delegate(ref Element e, ref const Variant val, SysTime timestamp, ref const Variant prev, SysTime prev_timestamp) nothrow @nogc;
 
 struct Element
 {
 nothrow @nogc:
 
     package Variant latest;
+    package Variant prev;
 
     String id;
     String name;
@@ -49,6 +50,7 @@ nothrow @nogc:
     String display_unit;
 
     SysTime last_update;
+    SysTime prev_update;
 
     Array!Subscriber subscribers;
     Array!OnChangeCallback subscribers_2;
@@ -100,20 +102,37 @@ nothrow @nogc:
 
     void value(T)(auto ref T v, SysTime timestamp = getSysTime()) @property
     {
-        last_update = timestamp;
+        bool is_newer = timestamp > last_update;
+        if (is_newer)
+        {
+            prev_update = last_update;
+            last_update = timestamp;
+        }
 
         if (latest != v)
         {
+            if (is_newer)
+                prev = latest.move;
             latest = forward!v;
-            signal(latest, timestamp, null); // TODO: who made the change? so we can break cycles...
+            signal(latest, timestamp, prev, prev_update, null); // TODO: who made the change? so we can break cycles...
         }
     }
 
-    void signal(ref const Variant v, SysTime timestamp, Subscriber who)
+    void signal(ref const Variant v, SysTime timestamp, ref const Variant prev, SysTime prev_timestamp, Subscriber who)
     {
         foreach (s; subscribers)
             s.on_change(&this, v, timestamp, who);
         foreach (s; subscribers_2)
-            s(this, v, timestamp);
+            s(this, v, timestamp, prev, prev_timestamp);
+    }
+
+    void force_update(SysTime timestamp)
+    {
+        if (timestamp <= last_update)
+            return;
+        prev_update = last_update;
+        last_update = timestamp;
+        prev = latest;
+        signal(latest, timestamp, prev, prev_update, null); // TODO: who made the change? so we can break cycles...
     }
 }

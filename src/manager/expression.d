@@ -248,7 +248,7 @@ nothrow @nogc:
         import manager;
         import manager.element;
 
-        static bool as_bool(ref const Variant v)
+        static int as_bool(ref const Variant v)
         {
             if (v.isBool)
                 return v.asBool;
@@ -260,7 +260,7 @@ nothrow @nogc:
             }
             if (v.isString)
                 return v.asString.length != 0;
-            assert(false, "TODO: what is this? should it convert to a boolean?");
+            return -1;
         }
 
         static bool as_quantity(ref const Variant v, out VarQuantity r)
@@ -280,7 +280,7 @@ nothrow @nogc:
                 r = q;
                 return true;
             }
-            assert(false, "TODO: what is this? should it convert to a number?");
+            return false;
         }
 
         final switch (ty)
@@ -314,7 +314,10 @@ nothrow @nogc:
                     return Variant();
                 return Variant(-num);
             case Type.not:
-                return Variant(!as_bool(left.evaluate(ctx)));
+                auto val = as_bool(left.evaluate(ctx));
+                if (val < 0)
+                    return Variant();
+                return Variant(!val);
             case Type.idx:
                 assert(false, "TODO: index operator (array/map lookup)");
             case Type.call:

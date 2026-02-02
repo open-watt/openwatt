@@ -1,8 +1,10 @@
 module protocol.goodwe.sampler;
 
 import urt.array;
+import urt.lifetime;
 import urt.log;
 import urt.time;
+import urt.variant;
 
 import manager.element;
 import manager.profile;
@@ -149,8 +151,8 @@ private:
 
             assert(e.offset + e.desc.data_length <= response.length, "response too small for element data?!");
 
-            e.last_update = response_time;
-            e.element.value(sample_value(response.ptr + e.offset, e.desc), response_time);
+            Variant sample = sample_value(response.ptr + e.offset, e.desc);
+            e.element.value(sample.move, response_time);
 
             version (DebugGoodWeSampler)
             {
