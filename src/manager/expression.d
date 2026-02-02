@@ -245,7 +245,7 @@ nothrow @nogc:
         import manager;
         import manager.element;
 
-        static bool as_bool(ref const Variant v)
+        static int as_bool(ref const Variant v)
         {
             if (v.isBool)
                 return v.asBool;
@@ -257,22 +257,27 @@ nothrow @nogc:
             }
             if (v.isString)
                 return v.asString.length != 0;
-            assert(false, "TODO: what is this? should it convert to a boolean?");
+            return -1;
         }
 
-        static double as_number(ref const Variant v)
+        static bool as_number(ref const Variant v, out VarQuantity r)
         {
             if (v.isNumber)
-                return v.asDouble;
+            {
+                r = v.asQuantity;
+                return true;
+            }
             if (v.isString)
             {
                 size_t taken;
-                double d = v.asString.parse_float(&taken);
-                if (taken != v.asString.length)
-                    return 0;
-                return d;
+                const(char)[] str = v.asString;
+                double d = str.parse_float(&taken);
+                if (taken != str.length)
+                    return false;
+                r = VarQuantity(d);
+                return true;
             }
-            assert(false, "TODO: what is this? should it convert to a number?");
+            return false;
         }
 
         final switch (ty)
@@ -301,9 +306,15 @@ nothrow @nogc:
                 assert(false, "Only for function args");
             case Type.neg:
                 Variant v = left.evaluate(ctx);
-                return Variant(v.isQuantity ? -v.asQuantity : VarQuantity(-as_number(v)));
+                VarQuantity num;
+                if (!as_number(v, num))
+                    return Variant();
+                return Variant(v.isQuantity ? -v.asQuantity : -num);
             case Type.not:
-                return Variant(!as_bool(left.evaluate(ctx)));
+                auto val = as_bool(left.evaluate(ctx));
+                if (val < 0)
+                    return Variant();
+                return Variant(!val);
             case Type.idx:
                 assert(false, "TODO: index operator (array/map lookup)");
             case Type.call:
@@ -374,8 +385,15 @@ nothrow @nogc:
             case Type.div:
                 Variant lv = left.evaluate(ctx);
                 Variant rv = right.evaluate(ctx);
-                VarQuantity l = lv.isQuantity ? lv.asQuantity : VarQuantity(as_number(lv));
-                VarQuantity r = rv.isQuantity ? rv.asQuantity : VarQuantity(as_number(rv));
+                VarQuantity l, r;
+                if (lv.isQuantity)
+                    l = lv.asQuantity;
+                else if (!as_number(lv, l))
+                    return Variant();
+                if (rv.isQuantity)
+                    r = rv.asQuantity;
+                else if (!as_number(rv, r))
+                    return Variant();
                 switch (ty)
                 {
                     case Type.add: return Variant(l + r);
@@ -386,11 +404,8 @@ nothrow @nogc:
                 }
             case Type.mod:
                 // TODO: it's not clear how this plays into unit arithmetic?
-                //       quantity/unit doesn't define mod; so we'll just truncate the unit for now...
-                Variant lv = left.evaluate(ctx);
-                Variant rv = right.evaluate(ctx);
-                double mod = as_number(lv) % as_number(rv);
-                return Variant(mod);
+                //       quantity/unit doesn't define mod... :/
+                assert(false, "TODO");
         }
     }
 
