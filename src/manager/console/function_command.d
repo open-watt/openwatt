@@ -283,6 +283,13 @@ auto make_arg_tuple(alias F)(const Variant[] args, const NamedArgument[] paramet
     Tuple!Params params;
     error = null;
     bool[Params.length] got_arg;
+    bool has_named_args = false;
+
+    static foreach (i, P; Params)
+    {
+        static if (ParamNames[i] != "named-args")
+            has_named_args = true;
+    }
 
     outer: foreach (ref param; parameters)
     {
@@ -304,8 +311,11 @@ auto make_arg_tuple(alias F)(const Variant[] args, const NamedArgument[] paramet
                 }
             }
             default:
-                error = tconcat("Unknown parameter '", param.name, "'");
-                break outer;
+                if (!has_named_args)
+                {
+                    error = tconcat("Unknown parameter '", param.name, "'");
+                    break outer;
+                }
         }
     }
 
