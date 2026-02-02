@@ -1,9 +1,11 @@
 module manager.element;
 
 import urt.array;
+import urt.lifetime;
 import urt.mem.string;
 import urt.si.unit : ScaledUnit;
 import urt.string;
+import urt.time;
 import urt.variant;
 
 import manager.component;
@@ -20,22 +22,42 @@ enum Access : ubyte
     read_write
 }
 
+enum SamplingMode : ubyte
+{
+    manual,
+    constant,
+    dependent,
+
+    // these signal how samplers intend to interact with the element
+    poll,
+    report,
+    on_demand,
+    config
+}
+
+alias OnChangeCallback = void delegate(ref Element e, ref const Variant val, SysTime timestamp, ref const Variant prev, SysTime prev_timestamp) nothrow @nogc;
 
 struct Element
 {
 nothrow @nogc:
 
-    Variant latest;
+    private Variant latest;
+    private Variant prev;
 
     String id;
     String name;
     String desc;
     String display_unit;
 
-    Access access;
+    SysTime last_update;
+    SysTime prev_update;
 
     Array!Subscriber subscribers;
+    Array!OnChangeCallback subscribers_2;
     ushort subscribers_dirty;
+
+    Access access;
+    SamplingMode sampling_mode;
 
     this(this) @disable;
 
@@ -44,45 +66,63 @@ nothrow @nogc:
         if (subscribers[].findFirst(s) == subscribers.length)
             subscribers ~= s;
     }
+    void add_subscriber(OnChangeCallback s)
+    {
+        if (subscribers_2[].findFirst(s) == subscribers_2.length)
+            subscribers_2 ~= s;
+    }
 
     void remove_subscriber(Subscriber s)
     {
         subscribers.removeFirstSwapLast(s);
     }
-
-    float normalised_value() const
+    void remove_subscriber(OnChangeCallback s)
     {
-        return cast(float)value.asQuantity().normalise().value;
+        subscribers_2.removeFirstSwapLast(s);
     }
 
-    float scaled_value(ScaledUnit unit)() const
+    double normalised_value() const
+    {
+        return value.asQuantity().normalise().value;
+    }
+
+    double scaled_value(ScaledUnit unit)() const
     {
         import urt.si.quantity : Quantity;
-        return cast(float)Quantity!(double, unit)(value.asQuantity()).value;
+        return Quantity!(double, unit)(value.asQuantity()).value;
     }
 
-    float scaled_value(ScaledUnit unit) const
+    double scaled_value(ScaledUnit unit) const
     {
-        return cast(float)value.asQuantity().adjust_scale(unit).value;
+        return value.asQuantity().adjust_scale(unit).value;
     }
 
-    ref const(Variant) value() const
-    {
-        return latest;
-    }
+    ref inout(Variant) value() @property inout
+        => latest;
 
-    void value(T)(auto ref T v)
+    void value(T)(auto ref T v, SysTime timestamp = getSysTime()) @property
     {
+        bool is_newer = timestamp > last_update;
+        if (is_newer)
+        {
+            prev_update = last_update;
+            last_update = timestamp;
+        }
+
         if (latest != v)
         {
-            latest = v;
-            signal(latest, null); // TODO: who made the change? so we can break cycles...
+            if (is_newer)
+                prev = latest.move;
+            latest = forward!v;
+            signal(latest, timestamp, prev, prev_update, null); // TODO: who made the change? so we can break cycles...
         }
     }
 
-    void signal(ref const Variant v, Subscriber who)
+    void signal(ref const Variant v, SysTime timestamp, ref const Variant prev, SysTime prev_timestamp, Subscriber who)
     {
         foreach (s; subscribers)
-            s.on_change(&this, v, who);
+            s.on_change(&this, v, timestamp, who);
+        foreach (s; subscribers_2)
+            s(this, v, timestamp, prev, prev_timestamp);
     }
 }

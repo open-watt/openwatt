@@ -123,12 +123,14 @@ nothrow @nogc:
 
         e = g_app.allocator.allocT!Element();
         e.id = "type".addString;
-        e.latest = "evse";
+        e.value = "evse";
+        e.sampling_mode = SamplingMode.constant;
         c.elements ~= e;
 
         e = g_app.allocator.allocT!Element();
         e.id = "name".addString;
-        e.latest = "Tesla Wall Charger Gen2";
+        e.value = "Tesla Wall Charger Gen2";
+        e.sampling_mode = SamplingMode.constant;
         c.elements ~= e;
 
         e = g_app.allocator.allocT!Element();
@@ -155,6 +157,11 @@ nothrow @nogc:
 
         e = g_app.allocator.allocT!Element();
         e.id = "state".addString;
+        c.elements ~= e;
+        sampler.add_element(e);
+
+        e = g_app.allocator.allocT!Element();
+        e.id = "twc_state".addString;
         c.elements ~= e;
         sampler.add_element(e);
 
@@ -189,6 +196,7 @@ nothrow @nogc:
         e = g_app.allocator.allocT!Element();
         e.id = "type".addString;
         e.value = "three-phase".addString;
+        e.sampling_mode = SamplingMode.constant;
         c.elements ~= e;
 
         e = g_app.allocator.allocT!Element();
@@ -240,6 +248,7 @@ nothrow @nogc:
         e = g_app.allocator.allocT!Element();
         e.id = "type".addString;
         e.value = "three-phase".addString;
+        e.sampling_mode = SamplingMode.constant;
         c.elements ~= e;
 
         e = g_app.allocator.allocT!Element();
