@@ -80,6 +80,15 @@ nothrow @nogc:
         foreach (s; samplers)
             s.update();
 
+        SysTime now = getSysTime();
+        foreach (ref sum; sums)
+        {
+            Element* src = sum.source;
+            // force an element update to progress accumulation
+            if (now - src.last_update >= 1.seconds)
+                src.force_update(now);
+        }
+
 //        MonoTime now = getTime();
 //        Duration elapsed = now - last_poll;
 //        last_poll = now;

@@ -125,4 +125,14 @@ nothrow @nogc:
         foreach (s; subscribers_2)
             s(this, v, timestamp, prev, prev_timestamp);
     }
+
+    void force_update(SysTime timestamp)
+    {
+        if (timestamp <= last_update)
+            return;
+        prev_update = last_update;
+        last_update = timestamp;
+        prev = latest;
+        signal(latest, timestamp, prev, prev_update, null); // TODO: who made the change? so we can break cycles...
+    }
 }
