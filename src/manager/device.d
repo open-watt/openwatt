@@ -39,6 +39,7 @@ nothrow @nogc:
 
     Profile* profile;
     Array!ExpressionElement expressions;
+    Array!SumElement sums;
     Array!Sampler samplers;
 
     bool finalise()
@@ -136,15 +137,75 @@ private:
     struct ExpressionElement
     {
         Device device;
-        Expression* expression;
         Element* element;
+        Expression* expression;
 
     nothrow @nogc:
-        void element_updated(ref Element, ref const Variant, SysTime timestamp)
+        void element_updated(ref Element, ref const Variant, SysTime timestamp, ref const Variant, SysTime)
         {
             EvalContext ctx;
             ctx.root = device;
-            element.value(expression.evaluate(ctx), timestamp);
+            Variant r = expression.evaluate(ctx);
+            element.value(r.move, timestamp);
+        }
+    }
+
+    struct SumElement
+    {
+        Device device;
+        Element* element;
+        Element* source;
+        SumType type;
+
+    nothrow @nogc:
+        void element_updated(ref Element, ref const Variant next_sample, SysTime timestamp, ref const Variant prev_sample, SysTime prev_timestamp)
+        {
+            import urt.si.quantity;
+            import urt.si.unit;
+
+            if (!next_sample.isNumber)
+                return; // we can't accumulate non-numbers...?
+            VarQuantity sample = next_sample.asQuantity;
+
+            if (type != SumType.sum)
+            {
+                enum Seconds = ScaledUnit(Second);
+
+                Duration t = timestamp - prev_timestamp;
+                ulong ns = t.as!"nsecs";
+                if (ns == 0)
+                    return;
+                auto dt = VarQuantity(ns / 1_000_000_000.0, Seconds);
+
+                if (type == SumType.right)
+                    sample = sample * dt;
+                else
+                {
+                    if (!prev_sample.isNumber)
+                        return; // we can't accumulate non-numbers...?
+                    VarQuantity prev = prev_sample.asQuantity;
+
+                    if (type == SumType.negative_trapezoid)
+                        sample = -sample, prev = -prev;
+
+                    auto zero = VarQuantity(0, sample.unit);
+
+                    if (type == SumType.trapezoid || (sample >= zero && prev >= zero))
+                        sample = (prev + sample) * (dt * 0.5);
+                    else if(sample < zero && prev < zero)
+                        sample = VarQuantity(0, sample.unit * Seconds);
+                    else if (prev > zero) // + to -
+                        sample = prev * (prev / (prev - sample)) * (dt * 0.5);
+                    else // - to +
+                        sample = sample * (sample / (sample - prev)) * (dt * 0.5);
+                }
+            }
+
+            Variant value = element.value;
+            if (!value.isNumber)
+                element.value(Variant(sample), timestamp);
+            else
+                element.value(Variant(value.asQuantity + sample), timestamp);
         }
     }
 }
@@ -258,13 +319,19 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     }
                     else
                     {
-                        device.expressions ~= Device.ExpressionElement(device, expr, e);
+                        device.expressions ~= Device.ExpressionElement(device, e, expr);
                         e.sampling_mode = SamplingMode.dependent;
                     }
                     break;
 
                 case map:
                     create_element_handler(device, e, el.get_element_desc(profile), el.index);
+                    break;
+
+                case sum:
+                    const(char)* src = el.get_source(profile);
+                    device.sums ~= Device.SumElement(device, e, cast(Element*)src, cast(SumType)el.index);
+                    e.sampling_mode = SamplingMode.dependent;
                     break;
             }
 
@@ -306,6 +373,20 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
             Element* e = device.find_element(r);
             e.add_subscriber(&expr.element_updated);
         }
+    }
+
+    // hookup sum samplers
+    foreach (ref sum; device.sums)
+    {
+        const(char)[] src = as_dstring(cast(const char*)sum.source);
+        Element* e = device.find_element(src);
+        if (!e)
+        {
+            writeWarning("Failed to find source element for sum element");
+            continue;
+        }
+        e.add_subscriber(&sum.element_updated);
+        sum.source = e;
     }
 
     g_app.devices.insert(device.id, device);
