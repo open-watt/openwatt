@@ -51,17 +51,17 @@ nothrow @nogc:
         TeslaTWCMaster.Charger* charger = &master.chargers[charger_index];
 
         // we'll just update the element values by name
-        // TODO: user can write to targetCurrent, and we should update it here...
+        // TODO: user can write to target_current, and we should update it here...
         foreach (e; elements)
         {
             switch (e.id[])
             {
-                case "targetCurrent":
-                    // TODO: user can write to targetCurrent...
+                case "target_current":
+                    // TODO: user can write to target_current...
                     e.value(CentiAmps(charger.target_current));
                     break;
                 case "state":           e.value(charger.charger_state);                                 break;
-                case "maxCurrent":      e.value(CentiAmps(charger.max_current));                        break;
+                case "max_current":     e.value(CentiAmps(charger.max_current));                        break;
                 case "current":         e.value(CentiAmps((charger.flags & 2) ? charger.current : 0));  break;
                 case "voltage1":        e.value(Volts((charger.flags & 2) ? charger.voltage1 : 0));     break;
                 case "voltage2":        e.value(Volts((charger.flags & 2) ? charger.voltage2 : 0));     break;
@@ -70,7 +70,7 @@ nothrow @nogc:
                 case "power1":          e.value(Watts((charger.flags & 2) ? charger.power1 : 0));       break;
                 case "power2":          e.value(Watts((charger.flags & 2) ? charger.power2 : 0));       break;
                 case "power3":          e.value(Watts((charger.flags & 2) ? charger.power3 : 0));       break;
-                case "total_import":
+                case "import":
                 case "lifetime_energy":
                     // TODO: could that multiply realistically overflow?
                     e.value(WattHours((charger.flags & 2) ? ulong(charger.lifetime_energy) * 1000 : 0));
