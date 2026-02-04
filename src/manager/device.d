@@ -365,24 +365,23 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
     }
 
     // hookup expressions
-    foreach (ref expr; device.expressions)
+    outer: foreach (ref expr; device.expressions)
     {
         bool _;
         Array!(const(char)[]) refs = expr.expression.get_element_refs(_);
         foreach (r; refs)
         {
             if (!device.find_element(r))
-                goto fail;
+            {
+                writeWarning("Failed to resolve element references in expression: @", r);
+                break outer;
+            }
         }
         foreach (r; refs)
         {
             Element* e = device.find_element(r);
             e.add_subscriber(&expr.element_updated);
         }
-        continue;
-
-    fail:
-        writeWarning("Failed to resolve element references in expression");
     }
 
     // hookup sum samplers
