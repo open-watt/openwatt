@@ -17,7 +17,7 @@ import manager.sampler;
 import protocol.mqtt.broker;
 import protocol.mqtt.client;
 
-version = DebugMQTTSampler;
+//version = DebugMQTTSampler;
 
 nothrow @nogc:
 
@@ -41,11 +41,12 @@ nothrow @nogc:
             broker.unsubscribe(&on_publish);
     }
 
-    final void add_element(Element* element, ref const ElementDesc desc, String topic, TextValueDesc value_desc)
+    final void add_element(Element* element, ref const ElementDesc desc, String read_topic, String write_topic, TextValueDesc value_desc)
     {
         SampleElement* e = &elements.pushBack();
         e.element = element;
-        e.topic = topic.move;
+        e.read_topic = read_topic.move;
+        e.write_topic =write_topic.move;
         e.desc = value_desc;
     }
 
@@ -70,7 +71,7 @@ nothrow @nogc:
 
         foreach (ref e; elements)
         {
-            if (e.topic[] != topic)
+            if (e.read_topic[] != topic)
                 continue;
 
             // Parse payload as UTF-8 text and convert to Variant
@@ -100,7 +101,8 @@ private:
         MonoTime last_update;
         Element* element;
         TextValueDesc desc;
-        String topic;
+        String read_topic;
+        String write_topic;
     }
 }
 

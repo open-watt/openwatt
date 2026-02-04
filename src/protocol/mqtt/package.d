@@ -105,12 +105,27 @@ nothrow @nogc:
             ref const ElementDesc_MQTT mqtt = profile.get_mqtt(desc.element);
 
             // substitute variable names for their given values
-            const(char)[] raw_topic = mqtt.get_topic(*profile);
-            String topic = raw_topic.substitute_variables(var_names, var_values);
-            if (!topic)
+            String read_topic, write_topic;
+            const(char)[] raw_topic = mqtt.get_read_topic(*profile);
+            if (raw_topic.length > 0)
             {
-                session.write_line("Failed to substitute variables in topic '", raw_topic, '\'');
-                return;
+                read_topic = raw_topic.substitute_variables(var_names, var_values);
+                if (!read_topic)
+                {
+                    session.write_line("Failed to substitute variables in topic '", raw_topic, '\'');
+                    return;
+                }
+            }
+
+            raw_topic = mqtt.get_write_topic(*profile);
+            if (raw_topic.length > 0)
+            {
+                write_topic = raw_topic.substitute_variables(var_names, var_values);
+                if (!write_topic)
+                {
+                    session.write_line("Failed to substitute variables in topic '", raw_topic, '\'');
+                    return;
+                }
             }
 
 //            // write a null value of the proper type
@@ -119,7 +134,7 @@ nothrow @nogc:
 //            e.value = sample_value(tmp.ptr, mqtt.value_desc);
 
             // record samper data...
-            sampler.add_element(e, desc, topic.move, mqtt.value_desc);
+            sampler.add_element(e, desc, read_topic.move, write_topic.move, mqtt.value_desc);
             device.sample_elements ~= e; // TODO: remove this?
         });
         if (!device)

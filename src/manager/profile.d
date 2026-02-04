@@ -142,12 +142,16 @@ struct ElementDesc_AA55
 
 struct ElementDesc_MQTT
 {
-    ushort topic_offset;    // Offset into topic string table
+    ushort read_topic;
+    ushort write_topic;
     TextValueDesc value_desc;
 
 pure nothrow @nogc:
-    const(char)[] get_topic(ref const(Profile) profile) const
-        => profile.mqtt_strings ? as_dstring(profile.mqtt_strings.ptr + topic_offset) : null;
+    const(char)[] get_read_topic(ref const(Profile) profile) const
+        => profile.mqtt_strings ? as_dstring(profile.mqtt_strings.ptr + read_topic) : null;
+
+    const(char)[] get_write_topic(ref const(Profile) profile) const
+        => profile.mqtt_strings ? as_dstring(profile.mqtt_strings.ptr + write_topic) : null;
 }
 
 struct ElementTemplate
@@ -613,10 +617,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 foreach (ref reg_conf; reg_item.sub_items)
                 {
                     if (reg_conf.name != "desc")
-                    {
-                        writeWarning("Invalid token: ", reg_conf.name);
                         continue;
-                    }
 
                     tail = reg_conf.value;
                     const(char)[] id = tail.split!','.unQuote;
@@ -641,6 +642,16 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         tail = reg_item.value;
                         const(char)[] topic = tail.split!','.unQuote;
                         mqtt_string_len += cache_len(topic.length);
+
+                        foreach (ref reg_conf; reg_item.sub_items)
+                        {
+                            if (reg_conf.name != "write")
+                                continue;
+                            tail = reg_conf.value;
+                            const(char)[] write_topic = tail.split!','.unQuote;
+                            mqtt_string_len += cache_len(write_topic.length);
+                            break;
+                        }
                         break;
                     default:
                         writeWarning("Unknown element type: ", reg_item.name);
@@ -774,33 +785,33 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     profile.elements = allocator.allocArray!ElementDesc(item_count);
     profile.lookup_table = allocator.allocArray!(Profile.Lookup)(item_count);
     profile.indirections = allocator.allocArray!ushort(num_indirections);
-    profile.id_strings = allocator.allocArray!char(id_string_length);
-    profile.name_strings = allocator.allocArray!char(name_string_length);
-    profile.lookup_strings = allocator.allocArray!char(lookup_string_len);
-    profile.expression_strings = allocator.allocArray!char(expression_string_len);
-    profile.desc_strings = allocator.allocArray!char(desc_string_len);
-    if(mqtt_string_len)
-        profile.mqtt_strings = allocator.allocArray!char(mqtt_string_len);
+    profile.id_strings = allocator.allocArray!char(2 + id_string_length);
+    profile.name_strings = allocator.allocArray!char(2 + name_string_length);
+    profile.lookup_strings = allocator.allocArray!char(2 + lookup_string_len);
+    profile.expression_strings = allocator.allocArray!char(2 + expression_string_len);
+    profile.desc_strings = allocator.allocArray!char(2 + desc_string_len);
+    profile.mqtt_strings = allocator.allocArray!char(2 + mqtt_string_len);
 
-    if(mb_count)
-        profile.mb_elements = allocator.allocArray!ElementDesc_Modbus(mb_count);
-    if(can_count)
-        profile.can_elements = allocator.allocArray!ElementDesc_CAN(can_count);
-    if(zb_count)
-        profile.zb_elements = allocator.allocArray!ElementDesc_Zigbee(zb_count);
-    if(http_count)
-        profile.http_elements = allocator.allocArray!ElementDesc_HTTP(http_count);
-    if(aa55_count)
-        profile.aa55_elements = allocator.allocArray!ElementDesc_AA55(aa55_count);
-    if(mqtt_count)
-        profile.mqtt_elements = allocator.allocArray!ElementDesc_MQTT(mqtt_count);
+    profile.mb_elements = allocator.allocArray!ElementDesc_Modbus(mb_count);
+    profile.can_elements = allocator.allocArray!ElementDesc_CAN(can_count);
+    profile.zb_elements = allocator.allocArray!ElementDesc_Zigbee(zb_count);
+    profile.http_elements = allocator.allocArray!ElementDesc_HTTP(http_count);
+    profile.aa55_elements = allocator.allocArray!ElementDesc_AA55(aa55_count);
+    profile.mqtt_elements = allocator.allocArray!ElementDesc_MQTT(mqtt_count);
 
-    auto id_cache = StringCacheBuilder(profile.id_strings);
-    auto name_cache = StringCacheBuilder(profile.name_strings);
-    auto lookup_cache = StringCacheBuilder(profile.lookup_strings);
-    auto expr_cache = StringCacheBuilder(profile.expression_strings);
-    auto desc_cache = StringCacheBuilder(profile.desc_strings);
-    auto mqtt_string_cache = StringCacheBuilder(profile.mqtt_strings);
+    StringCacheBuilder id_cache, name_cache, lookup_cache, expr_cache, desc_cache, mqtt_string_cache;
+    if (profile.name_strings)
+        id_cache = StringCacheBuilder(profile.id_strings);
+    if (profile.name_strings)
+        name_cache = StringCacheBuilder(profile.name_strings);
+    if (profile.mqtt_strings)
+        lookup_cache = StringCacheBuilder(profile.lookup_strings);
+    if (profile.mqtt_strings)
+        expr_cache = StringCacheBuilder(profile.expression_strings);
+    if (profile.mqtt_strings)
+        desc_cache = StringCacheBuilder(profile.desc_strings);
+    if (profile.mqtt_strings)
+        mqtt_string_cache = StringCacheBuilder(profile.mqtt_strings);
 
     num_device_templates = 0;
     num_component_templates = 0;
@@ -974,18 +985,8 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         }
 
                         DataType ty = type.split!('/', false).parse_modbus_data_type();
-                        if (type.length > 0)
-                        {
-                            if (type[0] == 'R')
-                            {
-                                if (type.length > 1 && type[1] == 'W')
-                                    e.access = Access.read_write;
-                                else
-                                    e.access = Access.read;
-                            }
-                            else if (type[0] == 'W')
-                                e.access = Access.write;
-                        }
+                        e.access = type.parse_access();
+
                         parse_value_desc(mb.value_desc, ty, units);
                         break;
 
@@ -1071,18 +1072,8 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             zb.manufacturer_code = 0;
 
                         DataType ty = type.split!('/', false).parse_data_type();
-                        if (type.length > 0)
-                        {
-                            if (type[0] == 'R')
-                            {
-                                if (type.length > 1 && type[1] == 'W')
-                                    e.access = Access.read_write;
-                                else
-                                    e.access = Access.read;
-                            }
-                            else if (type[0] == 'W')
-                                e.access = Access.write;
-                        }
+                        e.access = type.parse_access();
+
                         parse_value_desc(zb.value_desc, ty, units);
                         break;
 
@@ -1135,14 +1126,32 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         e._element_index = cast(ushort)((ElementType.mqtt << 13) | mqtt_count);
                         ref ElementDesc_MQTT mqtt = profile.mqtt_elements[mqtt_count++];
 
-                        // Store topic pattern in string table
-                        mqtt.topic_offset = mqtt_string_cache.add_string(topic);
+                        mqtt.read_topic = mqtt_string_cache.add_string(topic);
 
-                        // Parse text value descriptor
-                        TextType ty = parse_text_type(type);
+                        TextType ty = type.split!('/', false).parse_text_type();
                         mqtt.value_desc = TextValueDesc(ty);
                         if (!mqtt.value_desc.parse_units(units))
                             writeWarning("Invalid units '", units, "' for MQTT element: ", id);
+
+                        foreach (ref reg_conf; reg_item.sub_items)
+                        {
+                            if (reg_conf.name != "write")
+                                continue;
+                            tail = reg_conf.value;
+                            const(char)[] write_topic = tail.split!','.unQuote;
+                            mqtt.write_topic = mqtt_string_cache.add_string(write_topic);
+                            break;
+                        }
+
+                        if (!type.empty)
+                            e.access = type.parse_access();
+                        else if (mqtt.write_topic)
+                        {
+                            if (mqtt.read_topic)
+                                e.access = Access.read_write;
+                            else
+                                e.access = Access.write;
+                        }
                         break;
 
                     default:
@@ -1537,7 +1546,7 @@ const(KnownElementTemplate)* find_known_element(const(char)[] template_, const(c
 private:
 
 size_t cache_len(size_t str_len) pure nothrow @nogc
-    => 2 + str_len + (str_len & 1);
+    => str_len ? 2 + str_len + (str_len & 1) : 0;
 
 int lookup_cmp(ref const Profile.Lookup a, ref const Profile.Lookup b) pure nothrow @nogc
     => a.hash - b.hash;
@@ -1558,6 +1567,21 @@ const(char)[] split_element_and_desc(ref const(char)[] line)
     const(char)[] element = line[0 .. colon].trimBack;
     line = line[colon .. $];
     return element;
+}
+
+Access parse_access(ref const(char)[] access)
+{
+    if (access.length > 0)
+    {
+        if (access[0] == 'R')
+        {
+            if (access.length > 1 && access[1] == 'W')
+                return Access.read_write;
+        }
+        else if (access[0] == 'W')
+            return Access.write;
+    }
+    return Access.read;
 }
 
 template MakeElementTemplate(string id, string units, string name, string desc, Frequency update_frequency)
