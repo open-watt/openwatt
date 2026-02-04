@@ -9,7 +9,7 @@ Quick reference for standard component templates and their expected elements.
 | `DeviceInfo` | Device identification | `type`, `name` |
 | `RealtimeEnergyMeter` | Real-time electrical measurements | `type` |
 | `CumulativeEnergyMeter` | Accumulated energy totals | `type` |
-| `DemandEnergyMeter` | Demand measurements | - |
+| `DemandEnergyMeter` | Demand measurements | `type` |
 | `Battery` | Battery (recursive) | `soc` |
 | `BatteryConfig` | Battery specifications | - |
 | `Solar` | Solar PV array (recursive) | - |
@@ -17,8 +17,10 @@ Quick reference for standard component templates and their expected elements.
 | `Inverter` | Solar/battery/hybrid inverter | - |
 | `EVSE` | EV charger | `state` |
 | `Vehicle` | Connected vehicle | - |
-| `ChargeControl` | Charge controller | `max_current` |
+| `ChargeControl` | Charge controller | `target_current` |
+| `HVAC` | Climate control system | - |
 | `Switch` | On/off control | `switch` |
+| `Shutter` | Window/door shutter control | `position` |
 | `ContactSensor` | Contact/door sensor | `open` or `alarm` |
 | `Network` | Network connectivity | - |
 | `Configuration` | Device settings | varies |
@@ -30,7 +32,7 @@ Quick reference for standard component templates and their expected elements.
 Device identification and metadata.
 
 ### Required
-- `type: string` - Device category: "energy-meter", "inverter", "bms", "evse", "battery", "light-switch", "contact-sensor"
+- `type: string` - Device category: "energy-meter", "inverter", "battery", "evse", "smart-switch", "contact-sensor"
 - `name: string` - Device display name
 
 ### Optional
@@ -397,15 +399,32 @@ Vehicle information (typically EV connected to charger).
 Charge controller for managing charging current/power.
 
 ### Required
-- `max_current: A` - Maximum charging current/limit
+- `target_current: A` - Target/commanded current (writable)
 
 ### Optional
+- `max_current: A` - Maximum charging current/limit
 - `min_current: A` - Minimum charging current
-- `target_current: A` - Target/commanded current (writable)
 - `actual_current: A` - Actual charging current
 - `max_power: W` - Maximum charging power
 - `target_power: W` - Target/commanded power (writable)
 - `actual_power: W` - Actual charging power
+
+---
+
+## HVAC
+
+Heating, ventilation, and air conditioning systems.
+
+### Required
+
+### Optional
+- `temperature: °C/°F` - Current ambient temperature
+- `state: enum` - Current active state - off, heating, cooling, etc
+- `target_temperature: °C/°F` - Target/commanded temperature (writable)
+- `humidity: %` - Current relative humidity
+- `target_humidity: %` - Target/commanded humidity (writable)
+- `mode: enum` - Operating mode (off, heat, cool, auto, fan_only, dry)
+- `fan_speed: enum/%` - Fan speed (low, medium, high, auto, or 0-100%)
 
 ---
 
@@ -417,8 +436,25 @@ On/off control devices.
 - `switch: boolean/enum` - Switch state (on/off, 0/1)
 
 ### Optional
+- `type: enum` - Switch type - light, power, outlet (power outlet), fan, etc
 - `mode: enum` - Switch mode
 - `timer: s` - Timer value
+
+---
+
+## Shutter
+
+Window/door shutter control devices.
+
+### Required
+- `position: %` - Shutter position (0-100%)
+
+### Optional
+- `type: enum` - Shutter type - window, blind, garage, etc
+- `state: enum` - Shutter state (open, closed, opening, closing)
+- `tilt: %` - Shutter tilt angle (0-100%)
+- `target_position: %` - Target/commanded position (writable)
+- `target_tilt: %` - Target/commanded tilt (writable)
 
 ---
 
