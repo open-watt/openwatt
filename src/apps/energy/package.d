@@ -43,11 +43,11 @@ nothrow @nogc:
     {
         g_app.register_enum!CircuitType();
 
-        registerApplianceType!Inverter();
-        registerApplianceType!EVSE();
-        registerApplianceType!Car();
-        registerApplianceType!AirCon();
-        registerApplianceType!WaterHeater();
+        register_appliance_type!Inverter();
+        register_appliance_type!EVSE();
+        register_appliance_type!Car();
+        register_appliance_type!HVAC();
+        register_appliance_type!WaterHeater();
 
         manager = defaultAllocator.allocT!EnergyManager();
 
@@ -59,15 +59,15 @@ nothrow @nogc:
         get_module!APIModule.register_api_handler("/energy", &energy_api);
     }
 
-    void registerApplianceType(ApplianceType)()
+    void register_appliance_type(ApplianceType)()
     {
         appliance_factory.insert(ApplianceType.Type, (String id, EnergyManager* manager) => cast(Appliance)defaultAllocator().allocT!ApplianceType(id.move, manager));
     }
-    Appliance create_appliance(const char[] type, String id, EnergyManager* manager)
+    Appliance create_appliance(const(char)[] type, String id, EnergyManager* manager)
     {
         if (auto fn = type in appliance_factory)
             return (*fn)(id.move, manager);
-        return null;
+        return defaultAllocator().allocT!Appliance(id.move, type.makeString(defaultAllocator()), manager);
     }
 
     override void update()
@@ -146,20 +146,18 @@ nothrow @nogc:
         const(char)[] type = _type ? _type.value : null;
         Component info = _info ? _info.value : null;
 
-        if (device)
-        {
-            if (!info)
-                info = device.value.get_first_component_by_template("DeviceInfo");
-        }
+        if (device && !info)
+            info = device.value.get_first_component_by_template("DeviceInfo");
+
         if (!type && info)
         {
             if (Element* infoEl = info.find_element("type"))
                 type = infoEl.value.asString();
-            if (!type)
-            {
-                session.write_line("No appliance type for '", id, "'");
-                return;
-            }
+        }
+        if (!type)
+        {
+            session.write_line("No appliance type for '", id, "'");
+            return;
         }
 
         Appliance appliance = create_appliance(type, id.makeString(g_app.allocator), manager);
@@ -171,10 +169,10 @@ nothrow @nogc:
 
         appliance.name = name ? name.value.makeString(g_app.allocator) : String();
         appliance.info = info;
-        appliance.init(device ? device.value : null);
-
         appliance.meter = meter ? meter.value : null;
         appliance.priority = priority ? priority.value : int.max;
+
+        appliance.init(device ? device.value : null);
 
         // TODO: delete this, move it all into init functions...
         switch (type)
@@ -186,10 +184,13 @@ nothrow @nogc:
                     a.control = control.value;
                 if (backup)
                     a.backup = backup.value;
-                if (battery)
-                    a.mppt ~= battery.value;
                 if (mppt) foreach (pv; mppt.value)
                     a.mppt ~= pv;
+                if (battery)
+                {
+                    a.battery ~= battery.value;
+                    a.mppt ~= battery.value;
+                }
 
                 // TODO: dummy meter stuff...
                 break;
@@ -218,8 +219,8 @@ nothrow @nogc:
                     a.vin = vin.value.makeString(g_app.allocator);
                 break;
 
-            case "ac":
-                AirCon a = cast(AirCon)appliance;
+            case "hvac":
+                HVAC a = cast(HVAC)appliance;
 
                 if (info)
                     a.info = info;
@@ -533,6 +534,12 @@ nothrow @nogc:
                         {
                             if (Element* soc_el = mppt.find_element("soc"))
                                 json.append(",\"soc\":", soc_el.value.asFloat());
+                            if (Element* mode_el = mppt.find_element("mode"))
+                                json.append(",\"mode\":", mode_el.value.asFloat());
+                            if (Element* remain_el = mppt.find_element("remain_capacity"))
+                                json.append(",\"remain_capacity\":", remain_el.value.asFloat());
+                            if (Element* full_el = mppt.find_element("full_capacity"))
+                                json.append(",\"full_capacity\":", full_el.value.asFloat());
                         }
                         json ~= '}';
                     }
@@ -590,6 +597,8 @@ nothrow @nogc:
                 foreach (i; 0 .. multi ? 4 : 1)
                    f[i] = values[i].value;
             }
+            if (f[0] != f[0])
+                return; // NaN check
 
             if (multi)
                 json.append(first ? "\"" : ",\"", name, "\":[", f[0], ',', f[1], ',', f[2], ',', f[3], ']');
@@ -614,9 +623,9 @@ nothrow @nogc:
         if (data.fields & FieldFlags.phase_angle)
             append_element("phase", data.phase, is_multi);
         if (data.fields & FieldFlags.total_import_active)
-            append_element("total_import", data.total_import_active, is_multi);
+            append_element("import", data.total_import_active, is_multi);
         if (data.fields & FieldFlags.total_export_active)
-            append_element("total_export", data.total_export_active, is_multi);
+            append_element("export", data.total_export_active, is_multi);
         if (data.fields & FieldFlags.frequency)
             append_element("frequency", (&data.freq)[0..4], false);
 
