@@ -44,7 +44,7 @@ ConfItem parse_config(const(char)[] text)
         const(char)[] line = text.takeLine;
         ulong indent;
         line = line.strip_indentation(indent);
-        line = line.trimComment!CommentDelimiter;
+        line = line.trim_comment!CommentDelimiter;
         if (line.empty)
             continue;
 
@@ -110,4 +110,24 @@ const(char)[] strip_indentation(const(char)[] s, out ulong indent_pattern)
     }
     indent_pattern = pattern;
     return s[i .. $];
+}
+
+inout(char)[] trim_comment(char Delimiter)(inout(char)[] s) pure
+{
+    size_t i = 0;
+    uint in_quotes;
+    for (; i < s.length; ++i)
+    {
+        if (s[i] == '"' && (!in_quotes || (in_quotes == 1 && s[i-1] != '\\')))
+            in_quotes ^= 1;
+        else if (s[i] == '\'' && (!in_quotes || (in_quotes == 2 && s[i-1] != '\\')))
+            in_quotes ^= 2;
+        else if (s[i] == '`' && (!in_quotes || (in_quotes == 4 && s[i-1] != '\\')))
+            in_quotes ^= 4;
+        else if (s[i] == Delimiter && !in_quotes)
+            break;
+    }
+    while(i > 0 && (s[i-1] == ' ' || s[i-1] == '\t'))
+        --i;
+    return s[0 .. i];
 }
