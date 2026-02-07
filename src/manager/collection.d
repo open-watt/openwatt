@@ -94,6 +94,9 @@ nothrow @nogc:
         return type_info.create(this, name, flags);
     }
 
+    uint item_count() const
+        => cast(uint)pool.length;
+
     auto keys() const
         => pool.keys;
     auto values()
@@ -185,6 +188,9 @@ nothrow @nogc:
 
     Type get(const(char)[] name)
         => cast(Type)_base.get(name);
+
+    uint item_count() const
+        => _base.item_count;
 
     auto values()
     {
