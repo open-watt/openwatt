@@ -7,9 +7,7 @@ Quick reference for standard component templates and their expected elements.
 | Template | Purpose | Required Elements |
 |----------|---------|-------------------|
 | `DeviceInfo` | Device identification | `type`, `name` |
-| `RealtimeEnergyMeter` | Real-time electrical measurements | `type` |
-| `CumulativeEnergyMeter` | Accumulated energy totals | `type` |
-| `DemandEnergyMeter` | Demand measurements | `type` |
+| `EnergyMeter` | Electrical and energy measurements | `type` |
 | `Battery` | Battery (recursive) | `soc` |
 | `BatteryConfig` | Battery specifications | - |
 | `Solar` | Solar PV array (recursive) | - |
@@ -111,9 +109,9 @@ Can be nested for grouped parameters. Standard network sub-components:
 
 ---
 
-## RealtimeEnergyMeter
+## EnergyMeter
 
-Real-time electrical measurements.
+Electrical and energy measurements.
 
 ### Required
 - `type: string` - "single-phase", "three-phase", or "dc"
@@ -145,15 +143,6 @@ All single-phase elements plus:
 - `current: A` - DC current
 - `power: W` - DC power
 
----
-
-## CumulativeEnergyMeter
-
-Accumulated energy totals.
-
-### Required
-- `type: string` - "single-phase", "three-phase", or "dc"
-
 ### Active Energy
 - `import: kWh` - Total import
 - `import1-3: kWh` - Per-phase import
@@ -178,19 +167,13 @@ Accumulated energy totals.
 - `apparent: kVAh` - Total apparent
 - `apparent1-3: kVAh` - Per-phase apparent
 
-### DC
+### DC Energy
 - `import: kWh` - Total import (or charge)
 - `export: kWh` - Total export (or discharge)
 - `net: kWh` - Total (net)
 - `absolute: kWh` - Gross (absolute)
 
----
-
-## DemandEnergyMeter
-
-Demand measurements (averaged over demand period).
-
-### Elements
+### Demand
 - `demand: W` - Current demand (active power)
 - `reactive_demand: var` - Current reactive demand
 - `apparent_demand: VA` - Current apparent demand
@@ -247,8 +230,7 @@ Battery (recursive - can represent whole system, individual pack, or sub-pack).
 
 ### Sub-components
 - `pack1, pack2, ...packN: Battery` - Sub-batteries (for multi-pack systems)
-- `realtime: RealtimeEnergyMeter` (type: "dc") - DC measurements at this level
-- `cumulative: CumulativeEnergyMeter` (type: "dc") - Energy totals at this level
+- `meter: EnergyMeter` (type: "dc") - DC measurements at this level
 - `config: BatteryConfig` - Static configuration (cell count, topology, limits)
 
 ---
@@ -310,8 +292,7 @@ Solar PV array/input (recursive - can represent whole array, string, or individu
 ### Sub-components
 - `panel1, panel2, ...panelN: Solar` - Individual panels/modules (for optimizer/microinverter systems)
 - `string1, string2, ...stringN: Solar` - Individual strings (for multi-string systems)
-- `realtime: RealtimeEnergyMeter` - PV measurements (type: "dc" for string/optimizer, "single-phase" for microinverter)
-- `cumulative: CumulativeEnergyMeter` - Total PV energy production
+- `meter: EnergyMeter` - PV measurements (type: "dc" for string/optimizer, "single-phase" for microinverter)
 - `config: SolarConfig` - Static configuration (panel specs, array topology)
 
 ---
@@ -352,9 +333,9 @@ Solar/battery/hybrid inverter with optional grid, battery, renewable inputs, and
 - `solar: Solar` - Solar PV input(s)
 - `battery: Battery` - Connected battery system
 - `charge_control: ChargeControl` - Battery charge controller (for managing battery charging)
-- `load: RealtimeEnergyMeter` / `load_cumulative: CumulativeEnergyMeter` - Inverter load
-- `backup: RealtimeEnergyMeter` / `backup_cumulative: CumulativeEnergyMeter` - Backup/EPS output
-- `export_meter: RealtimeEnergyMeter` / `meter_cumulative: CumulativeEnergyMeter` - External energy meter for self-consumption reference
+- `load: EnergyMeter` - Inverter load
+- `backup: EnergyMeter` - Backup/EPS output
+- `export_meter: EnergyMeter` - External energy meter for self-consumption reference
 - `evse: EVSE` - Integrated EV charger (for inverters with built-in EVSE)
 - `config: Configuration` - Inverter configuration
 
@@ -375,8 +356,6 @@ Electric Vehicle Supply Equipment (EV charger).
 ### Sub-components
 - `charge_control: ChargeControl` - Charge control sub-component (for controllable chargers)
 - `vehicle: Vehicle` - Connected vehicle information (if EVSE can communicate with vehicle)
-- `realtime: RealtimeEnergyMeter` - Real-time charging measurements (type: "single-phase" or "three-phase")
-- `cumulative: CumulativeEnergyMeter` - Total energy delivered
 - `config: Configuration` - EVSE configuration (mode, limits, etc.)
 
 ---
@@ -440,7 +419,7 @@ On/off control devices.
 - `timer: s` - Timer value
 
 ### Sub-components
-- `meter: RealtimeEnergyMeter` / `meter_cumulative: CumulativeEnergyMeter` - Switched circuit energy meter
+- `meter: EnergyMeter` - Switched circuit energy meter
 
 ---
 
@@ -536,8 +515,8 @@ device-template:
         element: type, "energy-meter"
         element: name, "Eastron SDM120"
     component:
-        id: realtime
-        template: RealtimeEnergyMeter
+        id: meter
+        template: EnergyMeter
         element: type, "single-phase"
         element-map: voltage, @voltage
         element-map: current, @current
@@ -546,10 +525,6 @@ device-template:
         element-map: reactive, @reactivePower
         element-map: pf, @powerFactor
         element-map: frequency, @frequency
-    component:
-        id: cumulative
-        template: CumulativeEnergyMeter
-        element: type, "single-phase"
         element-map: import, @importActiveEnergy
         element-map: export, @exportActiveEnergy
 ```
@@ -572,16 +547,12 @@ device-template:
         element-map: remain_capacity, @capacity_ah
         element-map: cycle_count, @cycles
         component:
-            id: realtime
-            template: RealtimeEnergyMeter
+            id: meter
+            template: EnergyMeter
             element: type, "dc"
             element-map: voltage, @voltage
             element-map: current, @current
             element-map: power, @power
-        component:
-            id: cumulative
-            template: CumulativeEnergyMeter
-            element: type, "dc"
             element-map: import, @total_charge
             element-map: export, @total_discharge
 ```
@@ -595,18 +566,26 @@ device-template:
         element: type, "inverter"
         element: name, "Hybrid Inverter"
     component:
+        id: meter
+        template: EnergyMeter
+        element: type, "single-phase"
+        element-map: voltage, @grid_voltage
+        element-map: current, @grid_current
+        element-map: power, @grid_power
+        element-map: frequency, @grid_frequency
+    component:
         id: inverter
         template: Inverter
         element-map: state, @inv_state
         element-map: temp, @inv_temp
         element-map: bus_voltage, @dc_bus_voltage
         component:
-            id: pv
+            id: solar
             template: Solar
             element-map: state, @pv_state
             component:
                 id: realtime
-                template: RealtimeEnergyMeter
+                template: EnergyMeter
                 element: type, "dc"
                 element-map: voltage, @pv_voltage
                 element-map: current, @pv_current
@@ -618,25 +597,22 @@ device-template:
             element-map: mode, @bat_mode
             component:
                 id: realtime
-                template: RealtimeEnergyMeter
+                template: EnergyMeter
                 element: type, "dc"
                 element-map: voltage, @bat_voltage
                 element-map: current, @bat_current
                 element-map: power, @bat_power
         component:
-            id: grid
-            template: RealtimeEnergyMeter
+            id: backup
+            template: EnergyMeter
             element: type, "single-phase"
-            element-map: voltage, @grid_voltage
-            element-map: current, @grid_current
-            element-map: power, @grid_power
-            element-map: frequency, @grid_frequency
+            element-map: voltage, @backup_voltage
+            element-map: current, @backup_current
+            element-map: power, @backup_power
         component:
             id: load
-            template: RealtimeEnergyMeter
+            template: EnergyMeter
             element: type, "single-phase"
-            element-map: voltage, @load_voltage
-            element-map: current, @load_current
             element-map: power, @load_power
 ```
 
@@ -651,6 +627,16 @@ device-template:
         element-map: serial_number, @serial
         element-map: temp, @temperature
     component:
+        id: meter
+        template: EnergyMeter
+        element: type, "three-phase"
+        element-map: voltage1, @voltage_l1
+        element-map: voltage2, @voltage_l2
+        element-map: voltage3, @voltage_l3
+        element-map: current, @current_total
+        element-map: power, @power_total
+        element-map: import, @energy_total
+    component:
         id: evse
         template: EVSE
         element-map: state, @pilot_state
@@ -661,20 +647,6 @@ device-template:
             template: ChargeControl
             element-map: max_current, @max_current
             element-map: target_current, @set_current
-        component:
-            id: realtime
-            template: RealtimeEnergyMeter
-            element: type, "three-phase"
-            element-map: voltage1, @voltage_l1
-            element-map: voltage2, @voltage_l2
-            element-map: voltage3, @voltage_l3
-            element-map: current, @current_total
-            element-map: power, @power_total
-        component:
-            id: cumulative
-            template: CumulativeEnergyMeter
-            element: type, "three-phase"
-            element-map: import, @energy_total
         component:
             id: config
             template: Configuration

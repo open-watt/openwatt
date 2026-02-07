@@ -66,8 +66,8 @@ nothrow @nogc:
         {
             if (!meter)
             {
-                if (device.get_first_component_by_template("RealtimeEnergyMeter") || device.get_first_component_by_template("CumulativeEnergyMeter"))
-                    meter = device;
+                if (Component em = device.get_first_component_by_template("EnergyMeter"))
+                    meter = em;
             }
             if (!config)
                 config = device.get_first_component_by_template("Configuration");

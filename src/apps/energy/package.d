@@ -361,24 +361,28 @@ nothrow @nogc:
                     // show the MPPT's?
                     foreach (mppt; inverter.mppt)
                     {
-                        MeterData mppt_data = getMeterData(mppt);
-                        float soc;
-                        bool has_soc = false;
-                        const(char)[] name = mppt.id[];
-                        if (mppt.template_[] == "Battery")
+                        Component meter = mppt.get_first_component_by_template("EnergyMeter");
+                        if (meter)
                         {
-                            if (Element* soc_el = mppt.find_element("soc"))
+                            MeterData mppt_data = get_meter_data(meter);
+                            float soc;
+                            bool has_soc = false;
+                            const(char)[] name = mppt.id[];
+                            if (mppt.template_[] == "Battery")
                             {
-                                soc = soc_el.value.asFloat();
-                                has_soc = true;
+                                if (Element* soc_el = mppt.find_element("soc"))
+                                {
+                                    soc = soc_el.value.asFloat();
+                                    has_soc = true;
+                                }
                             }
+                            if (mppt.template_[] == "Solar")
+                            {
+                                // anything special?
+                            }
+                            session.writef("{'', *10}{0, -*1}  {@3,?2}{'    ',!2}  {5}  {6}  {7} ({8}kWh/{9}kWh)\n", name, name_len - l.indent - 7, has_soc, "{4, 3}%  ", soc, 
+                                            mppt_data.active[0], mppt_data.voltage[0], mppt_data.current[0], mppt_data.total_import_active[0] * 0.001f, mppt_data.total_export_active[0] * 0.001f, l.indent + 2);
                         }
-                        if (mppt.template_[] == "Solar")
-                        {
-                            // anything special?
-                        }
-                        session.writef("{'', *10}{0, -*1}  {@3,?2}{'    ',!2}  {5}  {6}  {7} ({8}kWh/{9}kWh)\n", name, name_len - l.indent - 7, has_soc, "{4, 3}%  ", soc, 
-                                        mppt_data.active[0], mppt_data.voltage[0], mppt_data.current[0], mppt_data.total_import_active[0] * 0.001f, mppt_data.total_export_active[0] * 0.001f, l.indent + 2);
                     }
                 }
                 else if (EVSE evse = l.appliance.as!EVSE)
@@ -526,9 +530,13 @@ nothrow @nogc:
                         first_mppt = false;
                         json.append("{\"id\":\"", mppt.id[], "\",\"template\":\"", mppt.template_[], '\"');
 
-                        MeterData mppt_data = getMeterData(mppt);
-                        json ~= ',';
-                        append_meter_data(mppt_data, json);
+                        Component meter = mppt.get_first_component_by_template("EnergyMeter");
+                        if (meter)
+                        {
+                            MeterData mppt_data = get_meter_data(meter);
+                            json ~= ',';
+                            append_meter_data(mppt_data, json);
+                        }
 
                         if (mppt.template_[] == "Battery")
                         {

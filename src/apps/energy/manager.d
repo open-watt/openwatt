@@ -75,7 +75,7 @@ nothrow @nogc:
         return appliance;
     }
 
-    Volts getMainsVoltage(int phase = 0) pure
+    Volts get_mains_voltage(int phase = 0) pure
     {
         return cast(Volts)main.meter_data.voltage[phase];
     }

@@ -55,13 +55,13 @@ nothrow @nogc:
         foreach (a; appliances)
         {
             if (a.meter)
-                a.meter_data = getMeterData(a.meter);
+                a.meter_data = get_meter_data(a.meter);
         }
 
         if (meter)
         {
             // if the circuit has a meter, just read the meter!
-            MeterData raw_meter_data = getMeterData(meter);
+            MeterData raw_meter_data = get_meter_data(meter);
 
             // if circuit type is unknown, inherit from meter
             if (type == CircuitType.unknown)
