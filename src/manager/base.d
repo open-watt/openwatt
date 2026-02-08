@@ -213,6 +213,8 @@ nothrow @nogc:
 
     final void restart()
     {
+        assert(!(_state & _destroyed), "Cannot restart a destroyed object!");
+
         if (_state & _valid)
         {
             _state &= ~_start;
@@ -222,6 +224,9 @@ nothrow @nogc:
 
     final void destroy()
     {
+        if (_state & _destroyed)
+            return; // destroy was already called
+
         writeInfo(_type[], " '", _name, "' destroyed");
 
         _state |= _disabled | _destroyed;
@@ -230,6 +235,7 @@ nothrow @nogc:
             _state |= _stop;
 
         signal_state_change(StateSignal.destroyed);
+        _subscribers.clear();
     }
 
     // return a list of properties that can be set on this object
