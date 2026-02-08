@@ -15,6 +15,7 @@ import urt.string.format;
 import manager.component;
 import manager.config;
 import manager.device;
+import manager.element;
 import manager.sampler;
 
 version = IncludeDescription;
@@ -52,10 +53,31 @@ enum ElementType : ubyte
     aa55
 }
 
+SamplingMode freq_to_element_mode(Frequency frequency)
+{
+    final switch (frequency)
+    {
+        case Frequency.realtime:
+        case Frequency.high:
+        case Frequency.medium:
+        case Frequency.low:
+            return SamplingMode.poll;
+        case Frequency.constant:
+            return SamplingMode.constant;
+        case Frequency.on_demand:
+            return SamplingMode.on_demand;
+        case Frequency.report:
+            return SamplingMode.report;
+        case Frequency.configuration:
+            return SamplingMode.config;
+    }
+}
+
 struct ElementDesc
 {
 pure nothrow @nogc:
     CacheString display_units;
+    Access access = Access.read;
     Frequency update_frequency = Frequency.medium;
 
     ElementType type() const
@@ -79,7 +101,6 @@ struct ElementDesc_Modbus
 
     ushort reg;
     RegisterType reg_type = RegisterType.holding_register;
-    Access access = Access.read;
     ValueDesc value_desc = ValueDesc(modbus_data_type!"u16");
 }
 
@@ -95,7 +116,6 @@ struct ElementDesc_Zigbee
     ushort cluster_id;
     ushort attribute_id;
     ushort manufacturer_code;
-    Access access = Access.read;
     ValueDesc value_desc;
 }
 
@@ -115,14 +135,14 @@ struct ElementTemplate
 pure nothrow @nogc:
     enum Type : ubyte
     {
-        constant,
+        expression,
         map
     }
 
     Type type;
     ubyte index;
 
-    // 1-byte padding here...
+    Access access = Access.read;
     Frequency update_frequency = Frequency.medium;
 
     CacheString display_units;
@@ -136,15 +156,15 @@ pure nothrow @nogc:
     const(char)[] get_desc(ref const(Profile) profile) const
         => profile.desc_strings ? as_dstring(profile.desc_strings.ptr + _description) : null;
 
-    const(char)[] get_constant_value(ref const(Profile) profile) const
+    const(char)[] get_expression(ref const(Profile) profile) const
     {
-        assert(type == Type.constant, "ElementTemplate is not of type Constant");
-        return as_dstring(profile.id_strings.ptr + _value);
+        assert(type == Type.expression, "ElementTemplate is not of type `expression`");
+        return as_dstring(profile.expression_strings.ptr + _value);
     }
 
     ref inout(ElementDesc) get_element_desc(ref inout(Profile) profile) inout
     {
-        assert(type == Type.map, "ElementTemplate is not of type Map");
+        assert(type == Type.map, "ElementTemplate is not of type `map`");
         return profile.elements[_value];
     }
 
@@ -271,6 +291,8 @@ nothrow @nogc:
             defaultAllocator().freeArray(lookup_strings);
         if (desc_strings)
            defaultAllocator().freeArray(desc_strings);
+        if (expression_strings)
+            defaultAllocator().freeArray(expression_strings);
         if(mb_elements)
             defaultAllocator().freeArray(mb_elements);
         if(can_elements)
@@ -425,6 +447,7 @@ private:
     char[] id_strings;
     char[] name_strings;
     char[] lookup_strings;
+    char[] expression_strings;
     char[] desc_strings;
 
     Map!(String, const(VoidEnumInfo)*) enum_templates;
@@ -456,6 +479,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     size_t id_string_length = 0;
     size_t name_string_length = 0;
     size_t lookup_string_len = 0;
+    size_t expression_string_len = 0;
     size_t desc_string_len = 0;
     size_t num_device_templates = 0;
     size_t num_component_templates = 0;
@@ -550,7 +574,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
 
                 foreach (ref cItem; conf.sub_items)
                 {
-                    ElementTemplate.Type ty = ElementTemplate.Type.constant;
+                    ElementTemplate.Type ty = ElementTemplate.Type.expression;
                     switch (cItem.name)
                     {
                         case "id":
@@ -579,8 +603,8 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
 
                             id_string_length += cache_len(tail.split!','.unQuote.length);
 
-                            if (ty == ElementTemplate.Type.constant)
-                                id_string_length += cache_len(tail.split!','.length);
+                            if (ty == ElementTemplate.Type.expression)
+                                expression_string_len += cache_len(tail.length);
 
                             foreach (ref el_item; cItem.sub_items)
                             {
@@ -649,6 +673,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     profile.id_strings = allocator.allocArray!char(id_string_length);
     profile.name_strings = allocator.allocArray!char(name_string_length);
     profile.lookup_strings = allocator.allocArray!char(lookup_string_len);
+    profile.expression_strings = allocator.allocArray!char(expression_string_len);
     profile.desc_strings = allocator.allocArray!char(desc_string_len);
 
     if(mb_count)
@@ -665,6 +690,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     auto id_cache = StringCacheBuilder(profile.id_strings);
     auto name_cache = StringCacheBuilder(profile.name_strings);
     auto lookup_cache = StringCacheBuilder(profile.lookup_strings);
+    auto expr_cache = StringCacheBuilder(profile.expression_strings);
     auto desc_cache = StringCacheBuilder(profile.desc_strings);
 
     num_device_templates = 0;
@@ -814,12 +840,12 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             if (type[0] == 'R')
                             {
                                 if (type.length > 1 && type[1] == 'W')
-                                    mb.access = Access.read_write;
+                                    e.access = Access.read_write;
                                 else
-                                    mb.access = Access.read;
+                                    e.access = Access.read;
                             }
                             else if (type[0] == 'W')
-                                mb.access = Access.write;
+                                e.access = Access.write;
                         }
                         parse_value_desc(mb.value_desc, ty, units);
                         break;
@@ -911,12 +937,12 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             if (type[0] == 'R')
                             {
                                 if (type.length > 1 && type[1] == 'W')
-                                    zb.access = Access.read_write;
+                                    e.access = Access.read_write;
                                 else
-                                    zb.access = Access.read;
+                                    e.access = Access.read;
                             }
                             else if (type[0] == 'W')
-                                zb.access = Access.write;
+                                e.access = Access.write;
                         }
                         parse_value_desc(zb.value_desc, ty, units);
                         break;
@@ -1077,7 +1103,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 // second pass - the elements
                 foreach (ref cItem; conf.sub_items)
                 {
-                    ElementTemplate.Type ty = ElementTemplate.Type.constant;
+                    ElementTemplate.Type ty = ElementTemplate.Type.expression;
                     switch (cItem.name)
                     {
                         case "element-map":
@@ -1102,10 +1128,10 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             const(char)[] elem_id = tail.split!','.unQuote;
                             e._id = id_cache.add_string(elem_id);
 
-                            if (ty == ElementTemplate.Type.constant)
+                            if (ty == ElementTemplate.Type.expression)
                             {
-                                // store the element value as the source string
-                                e._value = id_cache.add_string(tail.split!',');
+                                // element value is the expression
+                                e._value = expr_cache.add_string(tail);
                             }
                             else
                             {
@@ -1163,7 +1189,11 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             e.display_units = display_units ? addString(display_units) : elem_desc ? elem_desc.display_units : CacheString();
                             e._description = description ? desc_cache.add_string(description) : elem_desc ? elem_desc._description : 0;
 
-                            // TODO: default should be on-demand, but this is more useful while debugging...
+                            // TODO: should we be able to specify this at the element template level?
+                            //       ElementDesc will always override it since there's no 'unknown' state...
+                            e.access = elem_desc ? elem_desc.access : Access.read;
+
+                            // TODO: default should be on-demand, but this is more useful while debugging.
                             e.update_frequency = Frequency.medium;
                             if (!freq.empty)
                             {
@@ -1173,6 +1203,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                                 else if (freq.ieq("low")) e.update_frequency = Frequency.low;
                                 else if (freq.ieq("const")) e.update_frequency = Frequency.constant;
                                 else if (freq.ieq("ondemand")) e.update_frequency = Frequency.on_demand;
+                                else if (freq.ieq("on_demand")) e.update_frequency = Frequency.on_demand;
                                 else if (freq.ieq("report")) e.update_frequency = Frequency.report;
                                 else if (freq.ieq("config")) e.update_frequency = Frequency.configuration;
                                 else writeWarning("Invalid frequency value: ", freq);
