@@ -41,7 +41,7 @@ struct Element
 {
 nothrow @nogc:
 
-    private Variant latest;
+    package Variant latest;
 
     String id;
     String name;
