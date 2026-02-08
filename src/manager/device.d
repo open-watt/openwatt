@@ -5,6 +5,7 @@ import urt.lifetime;
 import urt.log;
 import urt.string;
 import urt.time;
+import urt.variant;
 
 import manager.component;
 import manager.element;
@@ -166,6 +167,8 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
             e.name = el.get_name(profile).makeString(defaultAllocator());
             e.desc = el.get_desc(profile).makeString(defaultAllocator());
             e.display_unit = el.display_units;
+            e.sampling_mode = el.update_frequency.freq_to_element_mode;
+            e.access = cast(manager.element.Access)el.access;
 
             if (!e.name || !e.desc || !e.display_unit)
             {
@@ -184,8 +187,10 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
             {
                 case constant:
                     // TODO: we should parse the value string with the expression parser...
-                    const(char)[] value = el.get_constant_value(profile);
-                    e.latest.fromString(value);
+                    Variant v;
+                    v.fromString(el.get_constant_value(profile));
+                    e.value = v.move;
+                    e.sampling_mode = SamplingMode.constant;
                     break;
 
                 case map:

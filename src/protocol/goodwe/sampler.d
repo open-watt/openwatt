@@ -150,7 +150,7 @@ private:
             assert(e.offset + e.desc.data_length <= response.length, "response too small for element data?!");
 
             e.last_update = response_time;
-            e.element.latest = sample_value(response.ptr + e.offset, e.desc);
+            e.element.value(sample_value(response.ptr + e.offset, e.desc), response_time);
 
             version (DebugGoodWeSampler)
             {
