@@ -3,6 +3,7 @@ module apps.api;
 import urt.array;
 import urt.format.json;
 import urt.lifetime;
+import urt.log;
 import urt.map;
 import urt.mem.allocator;
 import urt.mem.temp;
@@ -317,7 +318,10 @@ private:
 
         Array!char json;
         if (!e)
+        {
+            writeWarning("API enum request for unknown enum: ", name);
             json = "{}";
+        }
         else
         {
             json.reserve(512);

@@ -381,6 +381,9 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
         {
             Element* e = device.find_element(r);
             e.add_subscriber(&expr.element_updated);
+
+            // allow the expression to initialise by calling with the reference init values
+            expr.element_updated(*e, e.latest, e.last_update, e.prev, e.prev_update);
         }
     }
 

@@ -347,9 +347,11 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
 //    if ((fields & Cumulative) && !
     // accumulate total since last update?
 
-    import urt.dbg;
-    if (r.voltage[0] > Volts(400))
-        breakpoint();
+    if (r.voltage[0] > Volts(300))
+    {
+        import urt.log;
+        writeWarning("High voltage detected on meter ", meter.id, ": ", r.voltage[0]);
+    }
 
     return r;
 }
