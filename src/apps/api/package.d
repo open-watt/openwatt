@@ -6,6 +6,7 @@ import urt.lifetime;
 import urt.map;
 import urt.mem.allocator;
 import urt.mem.temp;
+import urt.meta : enum_key_from_value;
 import urt.string;
 import urt.time;
 
@@ -396,9 +397,10 @@ private:
 
         json.append('\"', prefix, '.', elem.id[], "\":{\"value\":");
 
-        if (elem.latest.isQuantity)
+        ref const Variant v = elem.value();
+        if (v.isQuantity)
         {
-            auto quantity = elem.latest.asQuantity!double();
+            auto quantity = v.asQuantity!double();
 
             ScaledUnit su;
             float pre_scale;
@@ -420,8 +422,14 @@ private:
         }
         else
         {
-            size_t bytes = elem.latest.write_json(null);
-            elem.latest.write_json(json.extend(bytes));
+            size_t bytes = v.write_json(null);
+            v.write_json(json.extend(bytes));
+        }
+
+        if (elem.sampling_mode != SamplingMode.constant)
+        {
+            ulong age = (getTime() - elem.last_update).as!"seconds";
+            json.append(",\"age\":", age);
         }
 
         json ~= '}';
@@ -616,11 +624,15 @@ private:
                 json.append("\"desc\":\"", elem.desc[], "\",");
             json.append("\"access\":\"", g_access_strings[elem.access], '\"');
 
+            const(char)[] mode = enum_key_from_value!SamplingMode(elem.sampling_mode);
+            if (mode)
+                json.append(",\"mode\":\"", mode, '\"');
+
             if (!elem.display_unit.empty)
                 json.append(",\"unit\":\"", elem.display_unit[], '\"');
-            else if (elem.latest.isQuantity)
+            else if (elem.value.isQuantity)
             {
-                auto quantity = elem.latest.asQuantity!double();
+                auto quantity = elem.value.asQuantity!double();
                 if (quantity.unit.pack != 0)
                     json.append(",\"unit\":\"", quantity.unit, '\"');
             }
