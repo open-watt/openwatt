@@ -16,6 +16,7 @@ import manager.console.argument;
 public import manager.console.command;
 public import manager.console.session;
 public import manager.expression : NamedArgument;
+import manager.value;
 
 
 // UDA to attach custom tab completion to a command function
@@ -147,13 +148,13 @@ nothrow @nogc:
         this._fn = _fn;
     }
 
-    override FunctionCommandState execute(Session session, const Variant[] _args, const NamedArgument[] namedArgs)
+    override FunctionCommandState execute(Session session, const Variant[] _args, const NamedArgument[] namedArgs, out Variant result)
     {
         FunctionCommandState state;
-        const(char)[] result = _fn(session, state, _args, namedArgs, _instance);
+        const(char)[] r = _fn(session, state, _args, namedArgs, _instance);
 
         // TODO: when a function returns a token, it might be fed into the calling context?
-        assert(!(state && result), "Shouldn't return a latent state AND a result...");
+        assert(!(state && r), "Shouldn't return a latent state AND a result...");
 
         if (state)
         {
@@ -161,8 +162,8 @@ nothrow @nogc:
             return state;
         }
 
-        if (result)
-            session.write_line(result);
+        if (r)
+            session.write_line(r);
         return null;
     }
 
@@ -300,7 +301,7 @@ auto make_arg_tuple(alias F)(const Variant[] args, const NamedArgument[] paramet
                 static if (ParamNames[i] != "args" && ParamNames[i] != "named-args")
                 {
                     case ParamNames[i]:
-                        error = convert_variant(param.value, params[i]);
+                        error = from_variant(param.value, params[i]);
                         if (error)
                         {
                             error = tconcat("Argument '", param.name, "' error: ", error);

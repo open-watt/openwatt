@@ -31,7 +31,7 @@ class HTTPServer : BaseObject
     __gshared Property[1] Properties = [ Property.create!("port", port)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"http-server";
+    enum type_name = "http-server";
 
     alias RequestHandler = int delegate(ref const HTTPMessage, ref Stream stream) nothrow @nogc;
 

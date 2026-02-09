@@ -15,6 +15,7 @@ import urt.traits : Parameters, ReturnType;
 import urt.util : min;
 
 import manager.console.argument;
+import manager.value;
 
 public import manager.collection : collection_type_info, collection_for,CollectionTypeInfo;
 
@@ -62,6 +63,7 @@ struct Property
     alias SuggestFun = Array!String function(const(char)[] arg) nothrow @nogc;
 
     String name;
+    String[2] type; // up to 2 types (sometimes like enum + string, or enum + int)
     GetFun get;
     SetFun set;
     ResetFun reset;
@@ -83,7 +85,18 @@ struct Property
         // synthesise setter
         alias Setters = FilterOverloads!(IsSetter, member);
         static if (Setters.length > 0)
+        {
             prop.set = &SynthSetter!Setters;
+
+            size_t num_types = 0;
+            static foreach (Setter; Setters)
+            {{
+                enum type = type_for!(Parameters!Setter[0]);
+                static if (type)
+                    prop.type[num_types++] = StringLit!type;
+            }}
+            debug assert(num_types != 0, "Couldn't determine type for setter overloads of property '" ~ name ~ "'; please specify the type(s) manually");
+        }
 
         // synthesise suggest
         alias Suggests = FilterOverloads!(HasSuggest, member);
@@ -688,9 +701,10 @@ Variant SynthGetter(Getters...)(BaseObject item) nothrow @nogc
     alias Type = __traits(parent, Getter);
     Type instance = cast(Type)item;
 
-    auto r = __traits(child, instance, Getter)();
-    assert(false, "TODO: convert to Variant...");
-    return Variant(/+...+/);
+    static if (is(ReturnType!(__traits(child, instance, Getter)) == Variant))
+        return __traits(child, instance, Getter)();
+    else
+        return Variant(to_variant(__traits(child, instance, Getter)()));
 }
 
 StringResult SynthSetter(Setters...)(ref const Variant value, BaseObject item) nothrow @nogc
@@ -703,7 +717,7 @@ StringResult SynthSetter(Setters...)(ref const Variant value, BaseObject item) n
     {{
         alias PropType = Parameters!Setter[0];
         PropType arg;
-        error = convert_variant(value, arg);
+        error = from_variant(value, arg);
         if (!error)
         {
             alias RT = ReturnType!Setter;

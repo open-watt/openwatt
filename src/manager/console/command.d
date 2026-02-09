@@ -36,6 +36,7 @@ nothrow @nogc:
 
     Session session;
     Command command;
+    Variant result;
 
     this(Session session, Command command)
     {
@@ -66,7 +67,7 @@ nothrow @nogc:
     final Application app() pure nothrow @nogc => _console.appInstance;
     final ref Console console() pure nothrow @nogc => *_console;
 
-    abstract CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs);
+    abstract CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result);
 
     MutableString!0 complete(const(char)[] cmdLine)
     {

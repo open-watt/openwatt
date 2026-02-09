@@ -37,7 +37,7 @@ class TeslaInterface : BaseInterface
     __gshared Property[1] Properties = [ Property.create!("stream", stream)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"tesla-twc";
+    enum type_name = "tesla-twc";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

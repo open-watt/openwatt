@@ -26,6 +26,7 @@ void add_collection_commands(Scope s, ref BaseCollection collection)
     s.add_command(defaultAllocator.allocT!CollectionGetCommand(s.console, collection));
     s.add_command(defaultAllocator.allocT!CollectionSetCommand(s.console, collection));
     s.add_command(defaultAllocator.allocT!CollectionResetCommand(s.console, collection));
+    s.add_command(defaultAllocator.allocT!CollectionListCommand(s.console, collection));
     s.add_command(defaultAllocator.allocT!CollectionPrintCommand(s.console, collection));
 }
 
@@ -40,7 +41,7 @@ nothrow @nogc:
         _collection = &collection;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
+    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         if (args.length != 0)
         {
@@ -81,10 +82,10 @@ nothrow @nogc:
         {
             if (arg.name[] == "name")
                 continue;
-            StringResult result = item.set(arg.name, arg.value);
-            if (!result)
+            StringResult r = item.set(arg.name, arg.value);
+            if (!r)
             {
-                session.write_line("Invalid value for property: ", arg.name, "=", arg.value, " - ", result.message);
+                session.write_line("Invalid value for property: ", arg.name, "=", arg.value, " - ", r.message);
                 defaultAllocator.freeT(item);
                 return null;
             }
@@ -125,7 +126,7 @@ nothrow @nogc:
         _collection = &collection;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
+    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         if (args.length != 1 || namedArgs.length != 0)
         {
@@ -165,7 +166,7 @@ nothrow @nogc:
         _collection = &collection;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
+    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         if (args.length != 2 || namedArgs.length != 0)
         {
@@ -190,13 +191,8 @@ nothrow @nogc:
             return null;
         }
 
-        Variant value = item.get(args[1].asString());
+        result = item.get(args[1].asString());
 
-        char[1024] buffer = void;
-        ptrdiff_t l = value.toString(buffer, null, null);
-        assert(l >= 0, "TODO: fix stringify-failure, or print error...?");
-        if (l > 0)
-            session.write_line(buffer[0..l]);
         return null;
     }
 
@@ -227,7 +223,7 @@ nothrow @nogc:
         _collection = &collection;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
+    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         if (args.length != 1 || namedArgs.length == 0)
         {
@@ -249,10 +245,10 @@ nothrow @nogc:
 
         foreach (ref arg; namedArgs)
         {
-            StringResult result = item.set(arg.name, arg.value);
-            if (!result)
+            StringResult r = item.set(arg.name, arg.value);
+            if (!r)
             {
-                session.write_line("Set '", arg.name, "\' failed: ", result.message);
+                session.write_line("Set '", arg.name, "\' failed: ", r.message);
                 // TODO: should we bail out at first error, or try and set the rest?
 //                return null;
             }
@@ -287,7 +283,7 @@ nothrow @nogc:
         _collection = &collection;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
+    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         if (namedArgs.length != 0)
         {
@@ -350,6 +346,48 @@ private:
 
 // TODO: export command which calls and returns item.export_config(), but also works on full collections...
 
+class CollectionListCommand : Command
+{
+nothrow @nogc:
+
+    this(ref Console console, ref BaseCollection collection)
+    {
+        super(console, StringLit!"list");
+        _collection = &collection;
+    }
+
+    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    {
+        bool json_output;
+        foreach (ref a; args)
+        {
+            if (a == "--json")
+                json_output = true;
+        }
+
+        foreach (object; _collection.values)
+            result.asArray ~= Variant(object.name[]);
+
+        return null;
+    }
+
+    final override MutableString!0 complete(const(char)[] cmdLine)
+    {
+        version (ExcludeAutocomplete)
+            return null;
+        else
+            return .complete(cmdLine, *_collection, SuggestFlags.Reset);
+    }
+
+    final override Array!String suggest(const(char)[] cmdLine)
+    {
+        return .suggest(cmdLine, *_collection, SuggestFlags.Reset);
+    }
+
+private:
+    BaseCollection* _collection;
+}
+
 class CollectionPrintCommand : Command
 {
 nothrow @nogc:
@@ -360,15 +398,24 @@ nothrow @nogc:
         _collection = &collection;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
+    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
-        assert(false, "TODO!");
-//        BaseObject item = args.length > 0 ? _collection.get(args[0].asString()) : null;
-//        if (!item)
-//        {
-//            session.write_line("No item '", args[0].asString(), '\'');
-//            return null;
-//        }
+        const(Property*)[] properties = _collection.type_info.properties;
+
+        auto items = Array!Variant(Reserve, _collection.item_count);
+        auto props = Array!VariantKVP(Reserve, properties.length);
+        foreach (item; _collection.values)
+        {
+            props.clear();
+            foreach (p; properties)
+            {
+                if (!p.get)
+                    continue;
+                props.emplaceBack(p.name[], p.get(item));
+            }
+            items.emplaceBack(props[]);
+        }
+        result = Variant(items.move);
         return null;
     }
 

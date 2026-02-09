@@ -21,7 +21,7 @@ class IPRoute : BaseObject
                                          Property.create!("distance", distance)()];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"ip-route";
+    enum type_name = "ip-route";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

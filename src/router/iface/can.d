@@ -42,7 +42,7 @@ class CANInterface : BaseInterface
 
 nothrow @nogc:
 
-    alias TypeName = StringLit!"can";
+    enum type_name = "can";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

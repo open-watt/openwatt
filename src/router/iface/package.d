@@ -171,10 +171,11 @@ nothrow @nogc:
     final ushort max_l2mtu() const pure
         => _max_l2mtu;
 
-    final const(char)[] pcap() const pure
-    {
-        assert(false, "TODO: we need to store the pcap thing!");
-    }
+    // TODO: maybe we should make the pcap instance a normal collection item?
+//    final const(char)[] pcap() const pure
+//    {
+//        assert(false, "TODO: we need to store the pcap thing!");
+//    }
     final const(char)[] pcap(const(char)[] value)
     {
         // TODO: unsubscribe from old pcap interface, if any...

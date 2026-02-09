@@ -62,6 +62,12 @@ class Application
 {
 nothrow @nogc:
 
+    struct RegisteredCollection
+    {
+        BaseCollection* collection;
+        string path;
+    }
+
     String name;
 
     NoGCAllocator allocator;
@@ -78,6 +84,7 @@ nothrow @nogc:
 
     Collection!Secret secrets;
 
+    Map!(String, RegisteredCollection) collections;
     Map!(String, const(VoidEnumInfo)*) enum_templates;
 
     // database...
@@ -201,6 +208,12 @@ nothrow @nogc:
         if (Device* d = device_name[] in devices)
             return name.empty ? null : (*d).find_element(name);
         return null;
+    }
+
+    void register_collection(ref BaseCollection collection, string path)
+    {
+        assert(collection.type_info.type !in collections, "Collection type already registered!");
+        collections.insert(collection.type_info.type, RegisteredCollection(&collection, path));
     }
 
     void register_enum(E)()

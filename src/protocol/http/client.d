@@ -33,7 +33,7 @@ class HTTPClient : BaseObject
                                          Property.create!("stream", stream)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"http-client";
+    enum type_name = "http-client";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

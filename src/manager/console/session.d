@@ -12,6 +12,7 @@ import urt.string.ansi;
 import urt.util;
 import urt.file;
 import urt.result;
+import urt.variant;
 
 version (Windows)
 {
@@ -446,11 +447,22 @@ protected:
                 const(char)[] command = cmdInput.trim_cmd_line;
                 _buffer = input[taken + 1 .. $];
 
-                if (command.empty || execute(command))
+                Variant result;
+                if (command.empty || execute(command, result))
                 {
                     // possible the command terminated the session
                     if (!is_attached())
                         return;
+
+                    // echo the result (since it wasn't captured)
+                    if (!result.isNull)
+                    {
+                        char[1024] buffer = void;
+                        ptrdiff_t l = result.toString(buffer, null, null);
+                        assert(l >= 0, "TODO: fix stringify-failure, or print error...?");
+                        if (l > 0)
+                            write_line(buffer[0..l]);
+                    }
 
                     // command was instantaneous; take leftover input and continue
                     input_backup = take_input();
@@ -474,7 +486,7 @@ protected:
         // TODO: anything to handle BEEP?
     }
 
-    final bool execute(const(char)[] command)
+    final bool execute(const(char)[] command, out Variant result)
     {
         // TODO: command history!
         add_to_history(command);
@@ -482,7 +494,7 @@ protected:
 
         enter_command(command);
 
-        _current_command = _console.execute(this, command);
+        _current_command = _console.execute(this, command, result);
 
         // possible the command terminated the session
         if (!is_attached())

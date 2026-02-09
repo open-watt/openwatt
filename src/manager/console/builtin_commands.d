@@ -40,7 +40,7 @@ nothrow @nogc:
         return null;
     }
 
-    override CommandState execute(Session session, const(Variant)[] args, const NamedArgument[] namedArgs)
+    override CommandState execute(Session session, const(Variant)[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         // a lone `/` should only be possible for a root-scope command
         if (args.length > 0 && args[0].isString && args[0].asString == "/")
@@ -69,14 +69,14 @@ nothrow @nogc:
                 session.write_output("Error: '..' used at top level", true);
                 return null;
             }
-            return _parent.execute(session, args[1..$], namedArgs);
+            return _parent.execute(session, args[1..$], namedArgs, result);
         }
 
         // see if the identifier is a child...
         foreach (Command c; commands)
         {
             if (c.name[] == cmd[])
-                return c.execute(session, args[1..$], namedArgs);
+                return c.execute(session, args[1..$], namedArgs, result);
         }
 
         session.write_output(tconcat("Error: no command `", cmd[], "`"), true);

@@ -18,7 +18,7 @@ class VLANInterface : BaseInterface
                                          Property.create!("vlan", vlan)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"vlan";
+    enum type_name = "vlan";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

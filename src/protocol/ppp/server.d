@@ -18,7 +18,7 @@ class PPPServer : BaseInterface
     __gshared Property[2] Properties = [ Property.create!("stream", stream)(),
                                          Property.create!("protocol", protocol)() ];
 nothrow @nogc:
-    alias TypeName = StringLit!"ppp-server";
+    enum type_name = "ppp-server";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {
@@ -102,7 +102,7 @@ class PPPoEServer : BaseObject
                                          Property.create!("protocol", protocol)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"pppoe-server";
+    enum type_name = "pppoe-server";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

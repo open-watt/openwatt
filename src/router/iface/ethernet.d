@@ -31,7 +31,7 @@ class EthernetInterface : BaseInterface
     __gshared Property[1] Properties = [ Property.create!("adapter", adapter)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"ether";
+    enum type_name = "ether";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {
@@ -307,7 +307,7 @@ class WiFiInterface : EthernetInterface
     __gshared Property[1] Properties = [ Property.create!("ssid", ssid)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"wifi";
+    enum type_name = "wifi";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

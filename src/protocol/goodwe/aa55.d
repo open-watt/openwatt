@@ -351,7 +351,7 @@ class AA55Client : BaseObject
                                          Property.create!("model", model)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"aa55";
+    enum type_name = "aa55";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

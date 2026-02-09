@@ -198,6 +198,9 @@
     <DCompile Include="src\manager\secret.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\manager\value.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
     <DCompile Include="src\router\stream\package.d">
       <Filter>src\router\stream</Filter>
     </DCompile>

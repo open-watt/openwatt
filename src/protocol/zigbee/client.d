@@ -58,7 +58,7 @@ class ZigbeeNode : BaseObject
                                          Property.create!("node-id", node_id)() ];
 @nogc:
 
-    alias TypeName = StringLit!"zb-node";
+    enum type_name = "zb-node";
 
     this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
     {
@@ -894,7 +894,7 @@ class ZigbeeEndpoint : BaseObject
                                          Property.create!("out-clusters", out_clusters)() ];
 @nogc:
 
-    alias TypeName = StringLit!"zb-endpoint";
+    enum type_name = "zb-endpoint";
 
     this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
     {
@@ -990,12 +990,20 @@ class ZigbeeEndpoint : BaseObject
     {
         _in_clusters = value;
     }
+    final void in_clusters(Array!ushort value) nothrow
+    {
+        _in_clusters = value.move;
+    }
 
     final const(ushort)[] out_clusters() inout pure nothrow
         => _out_clusters[];
     final void out_clusters(const(ushort)[] value) nothrow
     {
         _out_clusters = value;
+    }
+    final void out_clusters(Array!ushort value) nothrow
+    {
+        _out_clusters = value.move;
     }
 
 

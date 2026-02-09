@@ -21,7 +21,7 @@ class PPPClient : BaseInterface
                                          Property.create!("protocol", protocol)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"ppp";
+    enum type_name = "ppp";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {
@@ -186,7 +186,7 @@ class PPPoEClient : BaseInterface
                                          Property.create!("protocol", protocol)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"pppoe";
+    enum type_name = "pppoe";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

@@ -57,7 +57,7 @@ nothrow @nogc:
         this.category = category;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs)
+    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         if (args.length == 0 || args.length > 1)
         {

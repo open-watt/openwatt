@@ -61,7 +61,7 @@ class DNSServer : BaseObject
                                          Property.create!("doh-uri", doh_uri)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"dns-server";
+    enum type_name = "dns-server";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {
@@ -114,6 +114,8 @@ nothrow @nogc:
                 _protocols |= 1 << *p;
         }
     }
+    void protocols(ref Array!String value)
+        => protocols(value[]);
 
     inout(HTTPServer) doh_server() inout pure
         => _doh_server;

@@ -41,7 +41,7 @@ class TLSStream : Stream
                                          Property.create!("private_key", private_key)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"tls";
+    enum type_name = "tls";
 
     this(String name, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
@@ -89,6 +89,8 @@ nothrow @nogc:
     {
         assert(false, "TODO: implement server mode");
     }
+    void private_key(Array!ubyte value)
+        => private_key(value[]);
 
     // API...
 
@@ -505,7 +507,7 @@ private:
 class TLSServer : TCPServer
 {
 nothrow @nogc:
-    alias TypeName = StringLit!"tls-server";
+    enum type_name = "tls-server";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {
