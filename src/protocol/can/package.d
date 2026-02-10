@@ -30,6 +30,8 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.register_enum!CANInterfaceProtocol();
+
         g_app.console.register_command!device_add("/protocol/can/device", this, "add");
     }
 

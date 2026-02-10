@@ -55,6 +55,8 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.register_enum!TunnelProtocol();
+
         g_app.console.register_collection("/protocol/ppp/client", ppp_clients);
         g_app.console.register_collection("/protocol/pppoe/client", pppoe_clients);
         g_app.console.register_collection("/protocol/ppp/server", ppp_servers);

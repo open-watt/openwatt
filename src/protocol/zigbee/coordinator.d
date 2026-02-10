@@ -180,7 +180,7 @@ class ZigbeeCoordinator : ZigbeeRouter
             {
                 if (!_init_promise)
                 {
-                    if (ezsp.stack_type != EZSPClient.StackType.Coordinator && !_already_complained)
+                    if (ezsp.stack_type != EZSPStackType.coordinator && !_already_complained)
                     {
                         writeError("Zigbee: EZSP client device is not running cordinator firmware. To use this device, flash with the proper coordinator firmware.");
                         _already_complained = true;

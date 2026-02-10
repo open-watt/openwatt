@@ -439,6 +439,10 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.register_enum!StopBits();
+        g_app.register_enum!Parity();
+        g_app.register_enum!FlowControl();
+
         g_app.console.register_collection("/stream/serial", serial_streams);
     }
 

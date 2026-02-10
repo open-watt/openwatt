@@ -30,6 +30,12 @@ nothrow @nogc:
 // https://www.silabs.com/documents/public/user-guides/ug100-ezsp-reference-guide.pdf
 //
 
+enum EZSPStackType : ubyte
+{
+    unknown = 0,
+    router = 1,
+    coordinator = 2
+}
 
 enum IsEZSPRequest(T) = is(typeof(T.Command) : ushort) && is(T.Request == struct) && is(T.Response == struct);
 
@@ -60,13 +66,6 @@ class EZSPClient : BaseObject
 
     alias TypeName = StringLit!"ezsp";
 
-    enum StackType : ubyte
-    {
-        Unknown = 0,
-        Router = 1,
-        Coordinator = 2
-    }
-
     this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
     {
         super(collection_type_info!EZSPClient, name.move, flags);
@@ -88,7 +87,7 @@ class EZSPClient : BaseObject
         }
     }
 
-    final StackType stack_type() const pure nothrow
+    final EZSPStackType stack_type() const pure nothrow
         => _stack_type;
 
     final String stack_version() const pure nothrow
@@ -373,7 +372,7 @@ private:
 
     ubyte _requested_version;
     ubyte _known_version;
-    StackType _stack_type;
+    EZSPStackType _stack_type;
     String _stack_version;
 
     ubyte _sequence_number;
@@ -402,7 +401,7 @@ private:
             _known_version = 0;
             _requested_version = 0;
             _sequence_number = 0;
-            _stack_type = StackType.Unknown;
+            _stack_type = EZSPStackType.unknown;
             _stack_version = null;
             _queued_requests.clear();
             restart();
@@ -498,7 +497,7 @@ private:
                 import urt.string.format : tformat;
                 import urt.mem.allocator : defaultAllocator;
 
-                _stack_type = cast(StackType)r.stackType;
+                _stack_type = cast(EZSPStackType)r.stackType;
                 _stack_version = tformat("{0}.{1}.{2}.{3}", r.stackVersion >> 12, (r.stackVersion >> 8) & 0xF, (r.stackVersion >> 4) & 0xF, r.stackVersion & 0xF).makeString(defaultAllocator());
 
                 _known_version = _requested_version;

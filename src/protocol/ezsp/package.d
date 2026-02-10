@@ -29,6 +29,8 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.register_enum!EZSPStackType();
+
         g_app.console.register_collection("/protocol/ezsp/client", clients);
     }
 
