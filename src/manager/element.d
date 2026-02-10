@@ -1,9 +1,11 @@
 module manager.element;
 
 import urt.array;
+import urt.lifetime : forward;
 import urt.mem.string;
 import urt.si.unit : ScaledUnit;
 import urt.string;
+import urt.time;
 import urt.variant;
 
 import manager.component;
@@ -20,22 +22,37 @@ enum Access : ubyte
     read_write
 }
 
+enum SamplingMode : ubyte
+{
+    manual,
+    constant,
+
+    // these signal how samplers intend to interact with the element
+    poll,
+    report,
+    on_demand,
+    config
+}
+
 
 struct Element
 {
 nothrow @nogc:
 
-    Variant latest;
+    private Variant latest;
 
     String id;
     String name;
     String desc;
     String display_unit;
 
-    Access access;
+    SysTime last_update;
 
     Array!Subscriber subscribers;
     ushort subscribers_dirty;
+
+    Access access;
+    SamplingMode sampling_mode;
 
     this(this) @disable;
 
@@ -50,39 +67,41 @@ nothrow @nogc:
         subscribers.removeFirstSwapLast(s);
     }
 
-    float normalised_value() const
+    double normalised_value() const
     {
-        return cast(float)value.asQuantity().normalise().value;
+        return value.asQuantity().normalise().value;
     }
 
-    float scaled_value(ScaledUnit unit)() const
+    double scaled_value(ScaledUnit unit)() const
     {
         import urt.si.quantity : Quantity;
-        return cast(float)Quantity!(double, unit)(value.asQuantity()).value;
+        return Quantity!(double, unit)(value.asQuantity()).value;
     }
 
-    float scaled_value(ScaledUnit unit) const
+    double scaled_value(ScaledUnit unit) const
     {
-        return cast(float)value.asQuantity().adjust_scale(unit).value;
+        return value.asQuantity().adjust_scale(unit).value;
     }
 
-    ref const(Variant) value() const
+    ref inout(Variant) value() @property inout
     {
         return latest;
     }
 
-    void value(T)(auto ref T v)
+    void value(T)(auto ref T v, SysTime timestamp = getSysTime()) @property
     {
+        last_update = timestamp;
+
         if (latest != v)
         {
-            latest = v;
-            signal(latest, null); // TODO: who made the change? so we can break cycles...
+            latest = forward!v;
+            signal(latest, timestamp, null); // TODO: who made the change? so we can break cycles...
         }
     }
 
-    void signal(ref const Variant v, Subscriber who)
+    void signal(ref const Variant v, SysTime timestamp, Subscriber who)
     {
         foreach (s; subscribers)
-            s.on_change(&this, v, who);
+            s.on_change(&this, v, timestamp, who);
     }
 }

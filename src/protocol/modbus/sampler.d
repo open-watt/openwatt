@@ -277,7 +277,7 @@ private:
                 assert(false, "TODO: test this and store the value...");
             }
             else
-                e.element.latest = sample_value(data.ptr + byteOffset, e.desc);
+                e.element.value(sample_value(data.ptr + byteOffset, e.desc), response_time);
 
             version (DebugModbusSampler)
                 writeDebugf("Got reg {0, 04x}: {1} = {2}", e.register, e.element.id, e.element.value);
