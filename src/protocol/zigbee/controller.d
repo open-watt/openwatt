@@ -698,7 +698,7 @@ private:
 
                         case tuya_mcu_version_rsp:
                             writeInfof("ZigbeeController: {0,04x}:{1,02x} Tuya MCU version {2}.{3}.{4}", aps.src, aps.src_endpoint, payload[0], payload[1], payload[2]);
-                            assert(false, "TODO: record the version into a synthetic attribute"); // ie, EF00:FC00?
+                            writeWarning("TODO: record the version into a synthetic attribute!!"); // ie, EF00:FC00?
                             return;
 
                         case tuya_mcu_sync_time:
