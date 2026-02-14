@@ -179,7 +179,7 @@ nothrow @nogc:
 
             String new_name = get_module!TCPStreamModule.tcp_servers.generate_name(name).makeString(defaultAllocator());
             _tcp_server = get_module!TCPStreamModule.tcp_servers.create(new_name.move, ObjectFlags.dynamic, NamedArgument("port", DNSPort));
-            _tcp_server.setConnectionCallback(&new_client, null);
+            _tcp_server.set_connection_callback(&new_client, null);
 
             if (_udp4_socket && _tcp_server) // we can tolerate no ipv6 listener (?)
                 _active |= 1 << NSProtocol.dns;
@@ -236,7 +236,7 @@ nothrow @nogc:
         {
             String new_name = get_module!HTTPModule.tls_servers.generate_name(name).makeString(defaultAllocator());
             _dot_server = get_module!HTTPModule.tls_servers.create(new_name.move, ObjectFlags.dynamic, NamedArgument("port", DoTPort));
-            _dot_server.setConnectionCallback(&new_client, null);
+            _dot_server.set_connection_callback(&new_client, null);
             if (_dot_server)
                 _active |= 1 << NSProtocol.dot;
             else

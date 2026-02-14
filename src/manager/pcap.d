@@ -298,7 +298,7 @@ protected:
         if (!_server)
             return CompletionStatus.error;
 
-        _server.setConnectionCallback(&accept_connection, null);
+        _server.set_connection_callback(&accept_connection, null);
         writeInfo(type, ": '", name, "' listening on port ", _port, "...");
 
         return CompletionStatus.complete;
@@ -650,7 +650,7 @@ private:
                 }
 
                 data_server.port = data_port;
-                data_server.setConnectionCallback(&data_connection_callback, null);
+                data_server.set_connection_callback(&data_connection_callback, null);
                 get_module!TCPStreamModule.tcp_servers.add(data_server);
 
                 writeInfo("RPCAP: listening for data connection on port ", data_port);

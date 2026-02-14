@@ -7,11 +7,14 @@ import urt.string;
 import urt.time;
 
 import manager;
+import manager.base;
 
 import protocol.mqtt.broker;
 import protocol.mqtt.util;
 
 import router.stream;
+
+//version = DebugMQTTClient;
 
 nothrow @nogc:
 
@@ -88,29 +91,35 @@ nothrow @nogc:
     ubyte protocol_level;
     ubyte conn_flags;
     ushort keep_alive_time;
-    string identifier;
 
     this(MQTTBroker broker, Stream stream)
     {
         this.broker = broker;
         this.stream = stream;
+        stream.subscribe(&stream_signal);
         last_contact_time = getTime();
     }
 
     void terminate()
     {
         // close the stream
-        stream.disconnect();
+        if (stream)
+        {
+            stream.unsubscribe(&stream_signal);
+            stream.destroy();
+            stream = null;
+        }
 
         if (session.will_delay == 0)
             broker.send_lwt(*session);
         if (session.session_expiry_interval == 0)
             broker.destroy_session(*session);
+        session.client = null;
 
         state = ConnectionState.Terminated;
     }
 
-    void publish(string topic, const ubyte[] payload, ubyte qos = 0, bool retain = false, bool dup = false)
+    void publish(const char[] topic, const ubyte[] payload, ubyte qos = 0, bool retain = false, bool dup = false)
     {
         assert(qos <= 2);
 
@@ -129,7 +138,8 @@ nothrow @nogc:
 
         // TODO: retain message for qos 1,2...
 
-        writeInfo("MQTT - Sent PUBLISH to ", identifier ,": ", qos > 0 ? session.packet_id : 0, ", ", topic, " = ", cast(char[])payload, " (qos: ", qos, dup ? " DUP" : "", retain ? " RET" : "", ")");
+        version (DebugMQTTClient)
+            writeInfo("MQTT - Sent PUBLISH to ", session.identifier[] ,": ", qos > 0 ? session.packet_id : 0, ", ", topic, " = ", cast(char[])payload, " (qos: ", qos, dup ? " DUP" : "", retain ? " RET" : "", ")");
     }
 
     void subscribe(ubyte requested_qos, string[] topics...)
@@ -149,12 +159,13 @@ nothrow @nogc:
         stream.write(buffer[0 .. buffer.length - msg.length]);
 
         // TODO: retain message for qos 1...
-        writeInfo("MQTT - Sent SUBSCRIBE to ", identifier ,": ", session.packet_id, ", ", topics, " (req qos: ", requested_qos ,")");
+        version (DebugMQTTClient)
+            writeInfo("MQTT - Sent SUBSCRIBE to ", session.identifier[] ,": ", session.packet_id, ", ", topics, " (req qos: ", requested_qos ,")");
     }
 
     bool update()
     {
-        if (!stream.running)
+        if (!stream || !stream.running)
             return false;
 
         MonoTime now = getTime();
@@ -353,8 +364,7 @@ nothrow @nogc:
                             goto send_conn_ack;
                         }
 
-                        // TODO: the mac address would be a better identifier...
-                        //       like `anon_mac`
+                        // do we know a hostname for the remote?
                         id = stream.remote_name;
                         // the name should be a valid identifier
                         // replace '.' with '_', truncate port
@@ -486,8 +496,9 @@ nothrow @nogc:
 
                     state = ConnectionState.Active;
 
-                    writeInfo("MQTT - Accept CONNECT from '", stream.remote_name, "' as '", identifier ,"', login: ", username);
-                    writeDebug("MQTT - Sent CONNACK to ", identifier);
+                    writeInfo("MQTT - Accept CONNECT from '", stream.remote_name, "' as '", session.identifier[] ,"', login: ", username);
+                    version (DebugMQTTClient)
+                        writeDebug("MQTT - Sent CONNACK to ", session.identifier[]);
 
                     if (session_present)
                     {
@@ -591,7 +602,7 @@ nothrow @nogc:
                         }
                     }
 
-                    broker.publish(identifier, control & 0xF, topic_name, message, properties);
+                    broker.publish(session.identifier[], control & 0xF, topic_name, message, properties);
 
                     if (qos > 0)
                     {
@@ -601,9 +612,12 @@ nothrow @nogc:
                         stream.write(buffer[0 .. 4]);
                     }
 
-                    writeInfo("MQTT - Received PUBLISH from ", identifier,": ", packet_identifier, ", ", topic_name, " = ", cast(const(char)[])message, " (qos: ", qos, dup ? " DUP" : "", retain ? " RET" : "", ")");
-                    if (qos > 0)
-                        writeDebug("MQTT - Sent ", qos == 1 ? "PUBACK" : "PUBREC" ," to ", identifier,": ", packet_identifier);
+                    version (DebugMQTTClient)
+                    {
+                        writeInfo("MQTT - Received PUBLISH from ", session.identifier[], ": ", packet_identifier, ", ", topic_name, " = ", cast(const(char)[])message, " (qos: ", qos, dup ? " DUP" : "", retain ? " RET" : "", ")");
+                        if (qos > 0)
+                            writeDebug("MQTT - Sent ", qos == 1 ? "PUBACK" : "PUBREC" ," to ", session.identifier[], ": ", packet_identifier);
+                    }
                     break;
 
                 case MQTTPacketType.PubAck:
@@ -635,7 +649,8 @@ nothrow @nogc:
                     }
 
                     // TODO: delete the pending message...
-                    writeDebug("MQTT - Received PUBACK from ", identifier, ": ", packet_identifier);
+                    version (DebugMQTTClient)
+                        writeDebug("MQTT - Received PUBACK from ", session.identifier[], ": ", packet_identifier);
                     break;
 
                 case MQTTPacketType.PubRec:
@@ -671,8 +686,11 @@ nothrow @nogc:
                     buffer[2..4].put(packet_identifier);
                     stream.write(buffer[0 .. 4]);
 
-                    writeDebug("MQTT - Received PUBREC from ", identifier, ": ", packet_identifier);
-                    writeDebug("MQTT - Sent PUBREL to ", identifier, ": ", packet_identifier);
+                    version (DebugMQTTClient)
+                    {
+                        writeDebug("MQTT - Received PUBREC from ", session.identifier[], ": ", packet_identifier);
+                        writeDebug("MQTT - Sent PUBREL to ", session.identifier[], ": ", packet_identifier);
+                    }
                     break;
 
                 case MQTTPacketType.PubRel:
@@ -708,8 +726,11 @@ nothrow @nogc:
                     buffer[2..4].put(packet_identifier);
                     stream.write(buffer[0 .. 4]);
 
-                    writeDebug("MQTT - Received PUBREL from ", identifier, ": ", packet_identifier);
-                    writeDebug("MQTT - Sent PUBCOMP to ", identifier, ": ", packet_identifier);
+                    version (DebugMQTTClient)
+                    {
+                        writeDebug("MQTT - Received PUBREL from ", session.identifier[], ": ", packet_identifier);
+                        writeDebug("MQTT - Sent PUBCOMP to ", session.identifier[], ": ", packet_identifier);
+                    }
                     break;
 
                 case MQTTPacketType.PubComp:
@@ -740,7 +761,8 @@ nothrow @nogc:
                         }
                     }
 
-                    writeDebug("MQTT - Received PUBCOMP from ", identifier, ": ", packet_identifier);
+                    version (DebugMQTTClient)
+                        writeDebug("MQTT - Received PUBCOMP from ", session.identifier[], ": ", packet_identifier);
                     break;
 
                 case MQTTPacketType.Subscribe:
@@ -795,9 +817,11 @@ nothrow @nogc:
                         {
                             MQTTSession.Subscription* newSub = &session.subs.emplaceBack(topic.makeString(defaultAllocator()), opts);
                             session.subs_by_filter[newSub.topic] = newSub;
+
+                            broker.subscribe(newSub.topic, &session.publish_callback);
                         }
                         else
-                            **sub = MQTTSession.Subscription((**sub).topic, opts);
+                            **sub = MQTTSession.Subscription((**sub).topic.move, opts);
 
                         if (retain_handling == 0 || (retain_handling == 1 && !sub))
                         {
@@ -810,13 +834,16 @@ nothrow @nogc:
 //                            code = 0x80;
                         response.put(code);
 
-                        writeInfo("MQTT - Received SUBSCRIBE from ", identifier ,": ", packet_identifier, ", ", topic," (", opts & 3, ")");
+                        version (DebugMQTTClient)
+                            writeInfo("MQTT - Received SUBSCRIBE from ", session.identifier[], ": ", packet_identifier, ", ", topic," (", opts & 3, ")");
                     }
 
                     // respond with suback
                     buffer[1] = cast(ubyte)(buffer.length - response.length - 2); // write length
                     stream.write(buffer[0 .. buffer.length - response.length]);
-                    writeDebug("MQTT - Sent SUBACK to ", identifier,": ", packet_identifier);
+
+                    version (DebugMQTTClient)
+                        writeDebug("MQTT - Sent SUBACK to ", session.identifier[], ": ", packet_identifier);
                     break;
 
                 case MQTTPacketType.SubAck:
@@ -899,6 +926,16 @@ nothrow @nogc:
             }
         }
         return true;
+    }
+
+    void stream_signal(BaseObject object, StateSignal signal)
+    {
+        if (signal != StateSignal.online)
+        {
+            stream.unsubscribe(&stream_signal);
+            stream.destroy();
+            stream = null;
+        }
     }
 }
 
