@@ -286,7 +286,7 @@ nothrow @nogc:
     {
         if (response.function_code & 0x80)
         {
-            import urt.meta : enum_key_from_value;
+            import urt.meta.enuminfo : enum_key_from_value;
             session.write_line("Exception response from ", slave[], ", code: ", enum_key_from_value!ExceptionCode(response.data[0]));
         }
         else

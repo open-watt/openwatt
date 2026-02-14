@@ -5,7 +5,7 @@ import urt.lifetime : move;
 import urt.map;
 import urt.mem.allocator;
 import urt.mem.string;
-import urt.meta : VoidEnumInfo;
+import urt.meta.enuminfo : VoidEnumInfo;
 import urt.si.quantity;
 import urt.si.unit;
 import urt.string;
@@ -206,7 +206,7 @@ nothrow @nogc:
     void register_enum(E)()
         if (is_enum!E)
     {
-        import urt.meta : enum_info;
+        import urt.meta.enuminfo : enum_info;
         enum_templates.insert(StringLit!(E.stringof), enum_info!E.make_void());
     }
 

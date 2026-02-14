@@ -6,7 +6,7 @@ import urt.encoding;
 import urt.kvp;
 import urt.lifetime;
 import urt.log;
-import urt.meta;
+import urt.meta.enuminfo;
 import urt.string;
 import urt.mem : memmove;
 import urt.mem.allocator;

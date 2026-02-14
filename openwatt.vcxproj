@@ -195,6 +195,7 @@
     <DCompile Include="third_party\urt\src\urt\mem\scratchpad.d" />
     <DCompile Include="third_party\urt\src\urt\mem\string.d" />
     <DCompile Include="third_party\urt\src\urt\mem\temp.d" />
+    <DCompile Include="third_party\urt\src\urt\meta\enuminfo.d" />
     <DCompile Include="third_party\urt\src\urt\meta\nullable.d" />
     <DCompile Include="third_party\urt\src\urt\meta\package.d" />
     <DCompile Include="third_party\urt\src\urt\meta\tuple.d" />

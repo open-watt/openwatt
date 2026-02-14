@@ -5,7 +5,7 @@ import urt.inet;
 import urt.lifetime;
 import urt.log;
 import urt.map;
-import urt.meta;
+import urt.meta.enuminfo;
 import urt.mem.allocator;
 import urt.socket;
 import urt.string;
