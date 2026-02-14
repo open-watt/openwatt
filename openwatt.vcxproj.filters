@@ -507,6 +507,9 @@
     <DCompile Include="third_party\urt\src\urt\range\primitives.d">
       <Filter>third_party\urt\range</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\meta\enuminfo.d">
+      <Filter>third_party\urt\meta</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\meta\nullable.d">
       <Filter>third_party\urt\meta</Filter>
     </DCompile>

@@ -6,7 +6,7 @@ import urt.lifetime;
 import urt.map;
 import urt.mem.allocator;
 import urt.mem.temp;
-import urt.meta : enum_key_from_value;
+import urt.meta.enuminfo : enum_key_from_value;
 import urt.string;
 import urt.time;
 

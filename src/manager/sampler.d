@@ -2,7 +2,7 @@ module manager.sampler;
 
 import urt.conv : parse_int_fast;
 import urt.endian;
-import urt.meta;
+import urt.meta.enuminfo;
 import urt.si.unit;
 import urt.string;
 import urt.util : max, byte_reverse;
