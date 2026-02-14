@@ -34,7 +34,7 @@ extern(D):
 nothrow @nogc:
 
     String id;
-    string type;
+    String type;
     String name;
 
     EnergyManager* manager;
@@ -53,17 +53,25 @@ nothrow @nogc:
     // HACK: distribute power according to priority...
     int priority;
 
-    this(String id, string type, EnergyManager* manager)
+    this(String id, String type, EnergyManager* manager)
     {
         this.id = id.move;
-        this.type = type;
+        this.type = type.move;
         this.manager = manager;
     }
 
     void init(Device device) // TODO: rest of cmdline args...
     {
         if (device)
-            config = device.get_first_component_by_template("Configuration");
+        {
+            if (!meter)
+            {
+                if (device.get_first_component_by_template("RealtimeEnergyMeter") || device.get_first_component_by_template("CumulativeEnergyMeter"))
+                    meter = device;
+            }
+            if (!config)
+                config = device.get_first_component_by_template("Configuration");
+        }
     }
 
     T as(T)() pure
@@ -125,7 +133,9 @@ nothrow @nogc:
 class Inverter : Appliance
 {
 nothrow @nogc:
-    enum Type = "inverter";
+    enum Type = StringLit!"inverter";
+
+    Component inverter; // inverter container component
 
     Component control;
     Component backup; // meter for the backup circuit, if available...
@@ -141,6 +151,41 @@ nothrow @nogc:
         super(id.move, Type, manager);
     }
 
+    final override void init(Device device) // TODO: rest of cmdline args...
+    {
+        super.init(device);
+
+        if (device)
+        {
+            if (!inverter)
+                inverter = device.get_first_component_by_template("Inverter");
+
+            if (!backup && inverter)
+                backup = inverter.find_component("backup");
+
+            if (mppt.empty && inverter)
+            {
+                Component solar = inverter.get_first_component_by_template("Solar");
+                if (solar)
+                {
+                    mppt = solar.find_components_by_template("Solar");
+                    if (mppt.empty)
+                        mppt ~= solar;
+                }
+            }
+
+            if (battery.empty && inverter)
+            {
+                Component bat = inverter.get_first_component_by_template("Battery");
+                if (bat)
+                {
+                    battery ~= bat;
+                    mppt ~= bat;
+                }
+            }
+        }
+    }
+
     final override ControlCapability hasControl() const
     {
         // we need to drill into these components, and see what controls they actually offer...
@@ -148,7 +193,7 @@ nothrow @nogc:
             return ControlCapability.OnOff | ControlCapability.Linear | ControlCapability.Reverse;
 
         // if there are no controls but it's a battery inverter, then it should have implicit control
-        if (mppt.length && mppt[0].template_ == "Battery")
+        if (battery.length)
             return ControlCapability.Implicit | ControlCapability.Reverse;
 
         return ControlCapability.Reverse;
@@ -196,7 +241,7 @@ nothrow @nogc:
 class EVSE : Appliance
 {
 nothrow @nogc:
-    enum Type = "evse";
+    enum Type = StringLit!"evse";
 
     Component control;
 
@@ -211,6 +256,11 @@ nothrow @nogc:
     {
         super.init(device);
 
+        if (device)
+        {
+            if (!control)
+                control = device.get_first_component_by_template("ChargeControl");
+        }
     }
 
     final override ControlCapability hasControl() const
@@ -301,7 +351,7 @@ nothrow @nogc:
 class Car : Appliance
 {
 nothrow @nogc:
-    enum Type = "car";
+    enum Type = StringLit!"car";
 
     String vin;
     Component battery;
@@ -363,10 +413,10 @@ nothrow @nogc:
     }
 }
 
-class AirCon : Appliance
+class HVAC : Appliance
 {
 nothrow @nogc:
-    enum Type = "ac";
+    enum Type = StringLit!"hvac";
 
     Component control;
 
@@ -388,7 +438,7 @@ nothrow @nogc:
 class WaterHeater : Appliance
 {
 nothrow @nogc:
-    enum Type = "water_heater";
+    enum Type = StringLit!"water-heater";
 
     Component control;
 
