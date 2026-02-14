@@ -8,7 +8,7 @@ import urt.log;
 import urt.map;
 import urt.mem;
 import urt.mem.string;
-import urt.meta;
+import urt.meta.enuminfo;
 import urt.string;
 import urt.string.format;
 
