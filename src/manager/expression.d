@@ -20,9 +20,11 @@ enum Type : ubyte
     str = 0,
     num,
     var,
+    elem,
     arr,
 
     // lists
+    exp_list,
     cmd_list,
 
     // unary
@@ -31,6 +33,7 @@ enum Type : ubyte
 
     // postfix
     idx,
+    call,
 
     // binary
     or,
@@ -95,14 +98,16 @@ nothrow @nogc:
             return null;
 
         Array!Variant vars;
-        Array!NamedArgument namedVars;
+        Array!NamedArgument named_vars;
+        EvalContext ctx;
+        // TODO: set locals to ctx...
 
         vars ~= Variant(script[0].command);
         foreach (ref arg; script[0].args)
-            vars ~= arg.evaluate();
+            vars ~= arg.evaluate(ctx);
         foreach (ref arg; script[0].named_args)
-            namedVars ~= NamedArgument(arg.name.get_str(), arg.value.evaluate());
-        return scope_.execute(session, vars[], namedVars[]);
+            named_vars ~= NamedArgument(arg.name.get_str(), arg.value.evaluate(ctx));
+        return scope_.execute(session, vars[], named_vars[]);
     }
 }
 
@@ -118,6 +123,14 @@ private:
         Expression* name;
         Expression* value;
     }
+}
+
+struct EvalContext
+{
+    import manager.component;
+
+    // TODO: local variable storage...
+    Component root;
 }
 
 struct Expression
@@ -153,9 +166,9 @@ nothrow @nogc:
             cmds.destroy!false();
         else if (ty >= Type.neg)
         {
-            left.freeExpression();
+            left.free_expression();
             if (ty >= Type.idx)
-                right.freeExpression();
+                right.free_expression();
         }
     }
 
@@ -179,8 +192,15 @@ nothrow @nogc:
         s.length = 0;
     }
 
+    Array!(const(char)[]) get_element_refs(ref bool has_var_refs) const
+    {
+        Array!(const(char)[]) r;
+        gather_elements(r, has_var_refs);
+        return r;
+    }
+
     bool is_string() const
-        => (ty == Type.str || ty == Type.var) && s.length == 0 && s.ptr !is null;
+        => (ty == Type.str || ty == Type.var || ty == Type.elem) && s.length == 0 && s.ptr !is null;
 
     bool as_bool() const
     {
@@ -213,14 +233,19 @@ nothrow @nogc:
 
     const(char)[] get_str() const
     {
-        if (ty == Type.str || ty == Type.var)
+        if (ty == Type.str || ty == Type.var || ty == Type.elem)
             return (s.length == 0 && s.ptr !is null) ? str[] : s;
         assert(false);
     }
 
-    Variant evaluate() const
+    Variant evaluate(ref EvalContext ctx) const
     {
-        static bool as_bool(Variant v)
+        import urt.si.quantity;
+
+        import manager;
+        import manager.element;
+
+        static bool as_bool(ref const Variant v)
         {
             if (v.isBool)
                 return v.asBool;
@@ -235,7 +260,7 @@ nothrow @nogc:
             assert(false, "TODO: what is this? should it convert to a boolean?");
         }
 
-        static double as_number(Variant v)
+        static double as_number(ref const Variant v)
         {
             if (v.isNumber)
                 return v.asDouble;
@@ -258,33 +283,88 @@ nothrow @nogc:
                 return Variant(get_str());
             case Type.var:
                 assert(false, "TODO: lookup variable...");
+            case Type.elem:
+                const(char)[] id = get_str();
+                Element* e = ctx.root ? ctx.root.find_element(id) : g_app.find_element(id);
+                if (e)
+                    return Variant(e.value);
+                return Variant(null);
             case Type.arr:
                 Variant r;
                 ref Array!Variant va = r.asArray();
                 foreach (e; arr)
-                    va ~= e.evaluate();
+                    va ~= e.evaluate(ctx);
                 return r.move;
             case Type.cmd_list:
                 assert(false, "TODO: how do we shuttle this value into commands? in a variant? some other way?");
+            case Type.exp_list:
+                assert(false, "Only for function args");
             case Type.neg:
-                return Variant(-as_number(left.evaluate()));
+                Variant v = left.evaluate(ctx);
+                return Variant(v.isQuantity ? -v.asQuantity : VarQuantity(-as_number(v)));
             case Type.not:
-                return Variant(!as_bool(left.evaluate()));
+                return Variant(!as_bool(left.evaluate(ctx)));
             case Type.idx:
                 assert(false, "TODO: index operator (array/map lookup)");
+            case Type.call:
+                // find function
+                assert(left.flags & Flags.identifier, "Invalid function identifier");
+                const(char)[] name = left.get_str();
+
+                IntrinsicFunction* intrinsic;
+                Expression* expr;
+
+                intrinsic = name[] in g_app.intrinsic_functions;
+                if (!intrinsic)
+                    expr = null; // TODO: runtime function lookup...
+
+                if (!intrinsic && !expr)
+                    return Variant(null);
+
+                // gather args
+                Variant[16] args;
+                size_t i = args.length - 1;
+                const(Expression)* r = right;
+                while (r)
+                {
+                    if (r.ty == Type.exp_list)
+                    {
+                        args[i--] = r.right.evaluate(ctx);
+                        r = r.left;
+                    }
+                    else
+                    {
+                        args[i] = r.evaluate(ctx);
+                        r = null;
+                    }
+                }
+
+                // execute
+                Variant result;
+                if (intrinsic)
+                    result = (*intrinsic)(args[i .. $]);
+                else if (expr)
+                {
+                    // set the args to a local context and evaluate the expression...
+                    assert(false, "TODO");
+                }
+                return result;
             case Type.cat:
-                Variant l = left.evaluate();
-                Variant r = right.evaluate();
+                Variant l = left.evaluate(ctx);
+                Variant r = right.evaluate(ctx);
                 const(char)[] s = tconcat(l, r); // TODO: tconcat has a max str length...
                 return Variant(s);
             case Type.or:
             case Type.and:
-                bool l = left.evaluate().asBool();
-                bool r = right.evaluate().asBool();
+                bool l = left.evaluate(ctx).asBool();
+                bool r = right.evaluate(ctx).asBool();
                 return Variant(ty == Type.or ? l || r : l && r);
             case Type.eq:
             case Type.ne:
-                assert(false, "TODO: equality operators");
+                Variant l = left.evaluate(ctx);
+                Variant r = right.evaluate(ctx);
+                bool cmp = l == r;
+                return Variant(ty == Type.eq ? cmp : !cmp);
             case Type.lt:
             case Type.le:
                 assert(false, "TODO: comparison operators");
@@ -292,20 +372,29 @@ nothrow @nogc:
             case Type.sub:
             case Type.mul:
             case Type.div:
-            case Type.mod:
-                double l = as_number(left.evaluate());
-                double r = as_number(right.evaluate());
+                Variant lv = left.evaluate(ctx);
+                Variant rv = right.evaluate(ctx);
+                VarQuantity l = lv.isQuantity ? lv.asQuantity : VarQuantity(as_number(lv));
+                VarQuantity r = rv.isQuantity ? rv.asQuantity : VarQuantity(as_number(rv));
                 switch (ty)
                 {
                     case Type.add: return Variant(l + r);
                     case Type.sub: return Variant(l - r);
                     case Type.mul: return Variant(l * r);
                     case Type.div: return Variant(l / r);
-                    case Type.mod: return Variant(l % r);
                     default: assert(false);
                 }
+            case Type.mod:
+                // TODO: it's not clear how this plays into unit arithmetic?
+                //       quantity/unit doesn't define mod; so we'll just truncate the unit for now...
+                Variant lv = left.evaluate(ctx);
+                Variant rv = right.evaluate(ctx);
+                double mod = as_number(lv) % as_number(rv);
+                return Variant(mod);
         }
     }
+
+private:
 
     // data...
     Type ty;
@@ -327,6 +416,37 @@ nothrow @nogc:
         Array!(Expression*) arr;
         Array!ScriptCommand cmds;
     }
+
+    void gather_elements(ref Array!(const(char)[]) elements, ref bool has_var_ref) const
+    {
+        switch (ty)
+        {
+            case Type.elem:
+                const(char)[] e = get_str();
+                if (!elements[].contains(e))
+                    elements ~= e;
+                break;
+            case Type.var:
+                has_var_ref = true;
+                break;
+            case Type.arr:
+                foreach (e; arr)
+                    e.gather_elements(elements, has_var_ref);
+                break;
+            case Type.call:
+                right.gather_elements(elements, has_var_ref);
+                break;
+            case Type.neg, Type.not:
+                left.gather_elements(elements, has_var_ref);
+                break;
+            case Type.exp_list, Type.idx, Type.cat, Type.or, Type.and, Type.eq, Type.ne, Type.lt, Type.le, Type.add, Type.sub, Type.mul, Type.div, Type.mod:
+                left.gather_elements(elements, has_var_ref);
+                right.gather_elements(elements, has_var_ref);
+                break;
+            default:
+                break;
+        }
+    }
 }
 
 class SyntaxError : Exception
@@ -340,7 +460,7 @@ class SyntaxError : Exception
     }
 }
 
-noreturn syntaxError(Args...)(auto ref Args args)
+noreturn syntax_error(Args...)(auto ref Args args)
 {
     throw tempAllocator().allocT!SyntaxError(tconcat(forward!args));
 }
@@ -398,13 +518,13 @@ bool match(bool take = true)(ref const(char)[] text, const(char)[] s)
 void expect(ref const(char)[] text, char expected)
 {
     if (!text.match(expected))
-        syntaxError("Expected '", expected, "'");
+        syntax_error("Expected '", expected, "'");
 }
 
 Expression* alloc_expression(Args...)(auto ref Args args) nothrow
     => defaultAllocator().allocT!Expression(forward!args);
 
-void freeExpression(Expression* exp) nothrow
+void free_expression(Expression* exp) nothrow
 {
     defaultAllocator().freeT(exp);
 }
@@ -445,7 +565,7 @@ ScriptCommand parse_command(ref const(char)[] text)
     Expression* e = parse_primary_exp(text);
 
     if (e.ty != Type.str || !(e.flags & Flags.identifier))
-        syntaxError("Invalid command");
+        syntax_error("Invalid command");
 
     ScriptCommand c;
     c.command = e.get_str();
@@ -469,13 +589,39 @@ ScriptCommand parse_command(ref const(char)[] text)
 ScriptCommand.Argument parse_argument(ref const(char)[] text)
 {
     ScriptCommand.Argument a;
-    Expression* arg = parse_primary_exp(text);
+
+    static parse_arg_element(ref const(char)[] text)
+    {
+        Array!(Expression*) arr;
+        Expression* arg;
+        while (true)
+        {
+            arg = parse_primary_exp(text);
+            if (text.length == 0 || text[0] != ',')
+                break;
+
+            // append to array and take next token...
+            arr ~= arg;
+            text = text[1 .. $];
+            version (ExpressionDebug)
+                writeDebug(",");
+        }
+        if (arr.length > 0)
+        {
+            arr ~= arg;
+            arg = alloc_expression(Type.arr);
+            arr.moveEmplace(arg.arr);
+        }
+        return arg;
+    }
+
+    Expression* arg = parse_arg_element(text);
     if (text.length > 0 && text[0] == '=')
     {
         if (arg.ty != Type.str || !(arg.flags & Flags.identifier))
-            syntaxError("Expected identifier left of '='");
+            syntax_error("Expected identifier left of '='");
         text = text[1 .. $];
-        a.value = parse_primary_exp(text);
+        a.value = parse_arg_element(text);
         a.name = arg;
     }
     else
@@ -483,12 +629,12 @@ ScriptCommand.Argument parse_argument(ref const(char)[] text)
     return a;
 }
 
-alias parseExpression = parse_logical_or_exp;
+alias parse_expression = parse_logical_or_exp;
 
 Expression* parse_logical_or_exp(ref const(char)[] text)
 {
     Expression* left = parse_logical_and_exp(text);
-    scope(failure) freeExpression(left);
+    scope(failure) free_expression(left);
     skip_whitespace(text);
     while (text.match("||"))
     {
@@ -505,7 +651,7 @@ Expression* parse_logical_or_exp(ref const(char)[] text)
 Expression* parse_logical_and_exp(ref const(char)[] text)
 {
     Expression* left = parse_equality_exp(text);
-    scope(failure) freeExpression(left);
+    scope(failure) free_expression(left);
     skip_whitespace(text);
     while (text.match("&&"))
     {
@@ -522,7 +668,7 @@ Expression* parse_logical_and_exp(ref const(char)[] text)
 Expression* parse_equality_exp(ref const(char)[] text)
 {
     Expression* left = parse_relational_exp(text);
-    scope(failure) freeExpression(left);
+    scope(failure) free_expression(left);
     skip_whitespace(text);
     while (text.match("==") || text.match("!="))
     {
@@ -540,7 +686,7 @@ Expression* parse_equality_exp(ref const(char)[] text)
 Expression* parse_relational_exp(ref const(char)[] text)
 {
     Expression* left = parse_concat_exp(text);
-    scope(failure) freeExpression(left);
+    scope(failure) free_expression(left);
     skip_whitespace(text);
     while (text.match('<') || text.match("<=") || text.match('>') || text.match(">="))
     {
@@ -559,7 +705,7 @@ Expression* parse_relational_exp(ref const(char)[] text)
 Expression* parse_concat_exp(ref const(char)[] text)
 {
     Expression* left = parse_additive_exp(text);
-    scope(failure) freeExpression(left);
+    scope(failure) free_expression(left);
     skip_whitespace(text);
     while (text.match(".."))
     {
@@ -576,7 +722,7 @@ Expression* parse_concat_exp(ref const(char)[] text)
 Expression* parse_additive_exp(ref const(char)[] text)
 {
     Expression* left = parse_multiplicative_exp(text);
-    scope(failure) freeExpression(left);
+    scope(failure) free_expression(left);
     skip_whitespace(text);
     while (text.match('+') || text.match('-'))
     {
@@ -594,7 +740,7 @@ Expression* parse_additive_exp(ref const(char)[] text)
 Expression* parse_multiplicative_exp(ref const(char)[] text)
 {
     Expression* left = parse_unary_exp(text);
-    scope(failure) freeExpression(left);
+    scope(failure) free_expression(left);
     skip_whitespace(text);
     while (text.match('*') || text.match('/') || text.match('%'))
     {
@@ -628,19 +774,39 @@ Expression* parse_unary_exp(ref const(char)[] text)
 Expression* parse_postfix_exp(ref const(char)[] text)
 {
     Expression* left = parse_primary_exp(text);
-    scope(failure) freeExpression(left);
-    while (text.match('['))
+    scope(failure) free_expression(left);
+    while (text.match('(') || text.match('['))
     {
+        bool call = text.ptr[-1] == '(';
         version (ExpressionDebug)
-            writeDebug("IDX [");
-        skip_whitespace(text);
-        Expression* expr = parseExpression(text);
-        scope(failure) freeExpression(expr);
-        skip_whitespace(text);
-        text.expect(']');
+            writeDebug(call ? "CALL (" : "IDX [");
+        Expression* right;
+        scope(failure) if (right) free_expression(right);
+        do
+        {
+            skip_whitespace(text);
+            Expression* expr = parse_expression(text);
+
+            if (!right)
+                right = expr;
+            else
+            {
+                Expression* list = alloc_expression(Type.exp_list);
+                list.left = right;
+                list.right = expr;
+                right = list;
+            }
+            skip_whitespace(text);
+        }
+        while (text.match(','));
+
+        if (call)
+            text.expect(')');
+        else
+            text.expect(']');
         version (ExpressionDebug)
-            writeDebug("IDX ]");
-        left = try_fold(Type.idx, left, expr);
+            writeDebug(call ? "CALL ]" : "IDX ]");
+        left = try_fold(call ? Type.call : Type.idx, left, right);
     }
     return left;
 }
@@ -648,7 +814,9 @@ Expression* parse_postfix_exp(ref const(char)[] text)
 Expression* parse_primary_exp(ref const(char)[] text)
 {
     if (text.length == 0)
-        syntaxError("Expected expression");
+        syntax_error("Expected expression");
+
+    Expression* r;
 
     // parse paren-enclosed expression
     if (text.match('('))
@@ -656,8 +824,8 @@ Expression* parse_primary_exp(ref const(char)[] text)
         version (ExpressionDebug)
             writeDebug("PAREN (");
         skip_whitespace(text);
-        Expression* expr = parseExpression(text);
-        scope(failure) freeExpression(expr);
+        Expression* expr = parse_expression(text);
+        scope(failure) free_expression(expr);
         skip_whitespace(text);
         text.expect(')');
         version (ExpressionDebug)
@@ -693,7 +861,7 @@ Expression* parse_primary_exp(ref const(char)[] text)
             if (text[len] == '\\')
             {
                 if (++len == text.length)
-                    syntaxError("Expected '\"'");
+                    syntax_error("Expected '\"'");
                 copy = text[0 .. len - 1];
             }
             if (text[len] == '$')
@@ -703,9 +871,8 @@ Expression* parse_primary_exp(ref const(char)[] text)
             len++;
         }
         if (len == text.length)
-            syntaxError("Expected '\"'");
+            syntax_error("Expected '\"'");
 
-        Expression* r;
         if (copy)
             r = alloc_expression(copy.move);
         else
@@ -721,114 +888,95 @@ Expression* parse_primary_exp(ref const(char)[] text)
         return r;
     }
 
-    Array!(Expression*) arr;
-    Expression* r;
-
     // parse unquoted strings, numbers, maybe even lists...
-    while (true)
+
+    // parse string...
+    bool is_var = text[0] == '$';
+    bool is_element = text[0] == '@';
+    bool identifier;
+    bool numeric;
+    int num_dots = 0;
+
+    if (is_var || is_element)
     {
-        // parse string...
-        bool isVar = text[0] == '$';
-        bool numeric;
-        int numDots = 0;
-
-        if (isVar)
-        {
-            text = text[1 .. $];
-
-            if (text.length == 0 || text[0] == '/')
-                syntaxError("Invalid variable name");
-        }
-
-        bool identifier = text[0].is_alpha || text[0] == '_' || text[0] == '/';
-        if (!identifier)
-            numeric = text[0].is_numeric || (!isVar && (text[0] == '-' || text[0] == '+') && text.length > 1 && text[1].is_numeric);
-
-        string stringDelimiters = "/$=,;\"\\{}[]()?'`";
-        size_t len = identifier | numeric; // skip the first char; first char has some special cases
-        scan_string: while (len < text.length)
-        {
-            char c = text[len];
-            if (c <= ' ' || c >= 0x7F) // only ascii characters
-                break;
-            // TODO: use a lookup table?
-            foreach (d; stringDelimiters)
-            {
-                if (c == d)
-                    break scan_string;
-            }
-
-            if (identifier && !c.is_alpha_numeric && c != '_' && c != '-')
-            {
-                if (isVar)
-                    break;
-                identifier = false;
-            }
-            else if (numeric && !c.is_numeric)
-            {
-                if (isVar)
-                    break;
-                if (c == '.')
-                    ++numDots;
-                else
-                    numeric = false;
-            }
-            ++len;
-        }
-
-        // validate the string...
-        if (len < text.length)
-        {
-            // string should have terminated on a valid delimiter
-            if (!text[len].is_whitespace && text[len] != '=' && text[len] != '/' && text[len] != ';' && text[len] != ',' && text[len] != ')' && text[len] != '}' && text[len] != ']')
-                syntaxError("Invalid token");
-        }
-
-        if (numeric && numDots <= 1)
-        {
-            size_t taken = 0;
-            double f = text.parse_float(&taken);
-            if (taken == 0)
-                syntaxError("Expected number");
-            else
-                text = text[taken .. $];
-            r = alloc_expression(Type.num);
-            r.flags = Flags.constant;
-            r.f = f;
-
-            version (ExpressionDebug)
-                writeDebug("NUM: ", r.f);
-        }
-        else
-        {
-            if (isVar && !identifier && !numeric)
-                syntaxError("Expected identifier");
-            r = alloc_expression(isVar ? Type.var : Type.str);
-            r.flags = Flags.no_quotes;
-            if (identifier)
-                r.flags |= Flags.identifier;
-            r.s = text[0 .. len];
-            text = text[len .. $];
-
-            version (ExpressionDebug)
-                writeDebug(isVar ? "VAR: " : "STR: ", r.s);
-        }
-
-        if (text.length == 0 || text[0] != ',')
-            break;
-
-        // append to array and take next token...
-        arr ~= r;
         text = text[1 .. $];
-        version (ExpressionDebug)
-            writeDebug(",");
+
+        if (text.length == 0 || text[0] == '/')
+            syntax_error("Invalid ", is_var ? "variable" : "element", " name");
     }
 
-    if (arr.length > 0)
+    identifier = text[0].is_alpha || text[0] == '_' || text[0] == '/';
+    if (!identifier)
+        numeric = text[0].is_numeric || ((text[0] == '-' || text[0] == '+') && text.length > 1 && text[1].is_numeric);
+
+    string string_delimiters = "/$=,;\"\\{}[]()?'`";
+    size_t len = identifier | numeric; // skip the first char; first char has some special cases
+    scan_string: while (len < text.length)
     {
-        arr ~= r;
-        r = alloc_expression(Type.arr);
-        arr.moveEmplace(r.arr);
+        char c = text[len];
+        if (c <= ' ' || c >= 0x7F) // only ascii characters
+            break;
+        // TODO: use a lookup table?
+        foreach (d; string_delimiters)
+        {
+            if (c == d)
+                break scan_string;
+        }
+
+        if (identifier && !c.is_alpha_numeric && c != '_' && c != '-' && !(is_var || is_element && c == '.'))
+        {
+            if (is_var || is_element)
+                break;
+            identifier = false;
+        }
+        else if (numeric && !c.is_numeric)
+        {
+            if (is_var)
+                break;
+            if (c == '.')
+                ++num_dots;
+            else
+                numeric = false;
+        }
+        ++len;
+    }
+
+    // validate the string...
+    if (len < text.length)
+    {
+        // string should have terminated on a valid delimiter
+        if (!text[len].is_whitespace && text[len] != '=' && text[len] != '/' && text[len] != ';' && text[len] != ',' && text[len] != ')' && text[len] != '}' && text[len] != ']' && !(is_var && text[len] == '('))
+            syntax_error("Invalid token");
+    }
+
+    if (numeric && num_dots <= 1)
+    {
+        size_t taken = 0;
+        double f = text.parse_float(&taken);
+        if (taken == 0)
+            syntax_error("Expected number");
+        else
+            text = text[taken .. $];
+        r = alloc_expression(Type.num);
+        r.flags = Flags.constant;
+        r.f = f;
+
+        version (ExpressionDebug)
+            writeDebug("NUM: ", r.f);
+    }
+    else
+    {
+        if ((is_var || is_element) && !identifier && !numeric)
+            syntax_error("Expected identifier");
+        r = alloc_expression(is_var ? Type.var : is_element ? Type.elem : Type.str);
+        r.flags = Flags.no_quotes;
+        if (identifier)
+            r.flags |= Flags.identifier;
+        r.s = text[0 .. len];
+        text = text[len .. $];
+
+        version (ExpressionDebug)
+            writeDebug(is_var ? "VAR: " : is_element ? "ELEMENT: " : "STR: ", r.s);
     }
 
     return r;
@@ -842,7 +990,7 @@ Expression* try_fold(Type ty, Expression* l, Expression* r)
     {
         // left was recycled...
         if (r)
-            freeExpression(r);
+            free_expression(r);
     }
     else
     {
@@ -856,6 +1004,60 @@ Expression* try_fold(Type ty, Expression* l, Expression* r)
 Expression* fold(Type ty, Expression* l, Expression* r)
 {
     // attempt constant folding...
+
+    if (ty == Type.call)
+    {
+        import manager;
+
+        // find intrinsic
+        const(char)[] name = l.get_str();
+        IntrinsicFunction* fn = name[] in g_app.intrinsic_functions;
+        if (!fn)
+            return null;
+
+        // TODO: handle intrinsic function constant folding...
+        return null;
+/+
+        // gather args
+        Variant[16] args;
+        size_t i = args.length - 1;
+        while (r)
+        {
+            if (r.ty == Type.exp_list)
+            {
+                args[i--] = r.right.evaluate();
+                r = r.left;
+            }
+            else
+            {
+                args[i] = r.evaluate();
+                r = null;
+            }
+        }
+
+        // massage result
+        Variant result = (*fn)(args[i .. $]);
+        if (result.isBool)
+        {
+            *l = Expression(Type.num);
+            l.f = result.asBool() ? 1 : 0;
+        }
+        else if (result.isNumber || result.isQuantity)
+        {
+            *l = Expression(Type.num);
+            l.f = result.asDouble();
+            // TODO: capture the unit!
+        }
+        else if (result.isString)
+        {
+            *l = Expression(Type.str);
+            l.s = result.asString();
+        }
+        else
+            return null;
+        return l;
++/
+    }
 
     // can only fold if both sides are constant...
     if (l.ty >= Type.var || (ty >= Type.idx && r.ty >= Type.var))
@@ -950,7 +1152,7 @@ unittest
     logLevel = Level.Debug;
 
     const(char)[] text = "$a .. 10 + (-10.2 * 2 / --3) .. (\"wow\" .. \"wee\")";
-    Expression* e = parseExpression(text);
+    Expression* e = parse_expression(text);
     assert(text.length == 0);
 
 }

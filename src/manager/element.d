@@ -26,6 +26,7 @@ enum SamplingMode : ubyte
 {
     manual,
     constant,
+    dependent,
 
     // these signal how samplers intend to interact with the element
     poll,
@@ -34,6 +35,7 @@ enum SamplingMode : ubyte
     config
 }
 
+alias OnChangeCallback = void delegate(ref Element e, ref const Variant val, SysTime timestamp) nothrow @nogc;
 
 struct Element
 {
@@ -49,6 +51,7 @@ nothrow @nogc:
     SysTime last_update;
 
     Array!Subscriber subscribers;
+    Array!OnChangeCallback subscribers_2;
     ushort subscribers_dirty;
 
     Access access;
@@ -61,10 +64,19 @@ nothrow @nogc:
         if (subscribers[].findFirst(s) == subscribers.length)
             subscribers ~= s;
     }
+    void add_subscriber(OnChangeCallback s)
+    {
+        if (subscribers_2[].findFirst(s) == subscribers_2.length)
+            subscribers_2 ~= s;
+    }
 
     void remove_subscriber(Subscriber s)
     {
         subscribers.removeFirstSwapLast(s);
+    }
+    void remove_subscriber(OnChangeCallback s)
+    {
+        subscribers_2.removeFirstSwapLast(s);
     }
 
     double normalised_value() const
@@ -84,9 +96,7 @@ nothrow @nogc:
     }
 
     ref inout(Variant) value() @property inout
-    {
-        return latest;
-    }
+        => latest;
 
     void value(T)(auto ref T v, SysTime timestamp = getSysTime()) @property
     {
@@ -103,5 +113,7 @@ nothrow @nogc:
     {
         foreach (s; subscribers)
             s.on_change(&this, v, timestamp, who);
+        foreach (s; subscribers_2)
+            s(this, v, timestamp);
     }
 }

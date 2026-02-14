@@ -135,7 +135,7 @@ struct ElementTemplate
 pure nothrow @nogc:
     enum Type : ubyte
     {
-        constant,
+        expression,
         map
     }
 
@@ -156,15 +156,15 @@ pure nothrow @nogc:
     const(char)[] get_desc(ref const(Profile) profile) const
         => profile.desc_strings ? as_dstring(profile.desc_strings.ptr + _description) : null;
 
-    const(char)[] get_constant_value(ref const(Profile) profile) const
+    const(char)[] get_expression(ref const(Profile) profile) const
     {
-        assert(type == Type.constant, "ElementTemplate is not of type Constant");
-        return as_dstring(profile.id_strings.ptr + _value);
+        assert(type == Type.expression, "ElementTemplate is not of type `expression`");
+        return as_dstring(profile.expression_strings.ptr + _value);
     }
 
     ref inout(ElementDesc) get_element_desc(ref inout(Profile) profile) inout
     {
-        assert(type == Type.map, "ElementTemplate is not of type Map");
+        assert(type == Type.map, "ElementTemplate is not of type `map`");
         return profile.elements[_value];
     }
 
@@ -291,6 +291,8 @@ nothrow @nogc:
             defaultAllocator().freeArray(lookup_strings);
         if (desc_strings)
            defaultAllocator().freeArray(desc_strings);
+        if (expression_strings)
+            defaultAllocator().freeArray(expression_strings);
         if(mb_elements)
             defaultAllocator().freeArray(mb_elements);
         if(can_elements)
@@ -445,6 +447,7 @@ private:
     char[] id_strings;
     char[] name_strings;
     char[] lookup_strings;
+    char[] expression_strings;
     char[] desc_strings;
 
     Map!(String, const(VoidEnumInfo)*) enum_templates;
@@ -476,6 +479,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     size_t id_string_length = 0;
     size_t name_string_length = 0;
     size_t lookup_string_len = 0;
+    size_t expression_string_len = 0;
     size_t desc_string_len = 0;
     size_t num_device_templates = 0;
     size_t num_component_templates = 0;
@@ -570,7 +574,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
 
                 foreach (ref cItem; conf.sub_items)
                 {
-                    ElementTemplate.Type ty = ElementTemplate.Type.constant;
+                    ElementTemplate.Type ty = ElementTemplate.Type.expression;
                     switch (cItem.name)
                     {
                         case "id":
@@ -599,8 +603,8 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
 
                             id_string_length += cache_len(tail.split!','.unQuote.length);
 
-                            if (ty == ElementTemplate.Type.constant)
-                                id_string_length += cache_len(tail.split!','.length);
+                            if (ty == ElementTemplate.Type.expression)
+                                expression_string_len += cache_len(tail.length);
 
                             foreach (ref el_item; cItem.sub_items)
                             {
@@ -669,6 +673,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     profile.id_strings = allocator.allocArray!char(id_string_length);
     profile.name_strings = allocator.allocArray!char(name_string_length);
     profile.lookup_strings = allocator.allocArray!char(lookup_string_len);
+    profile.expression_strings = allocator.allocArray!char(expression_string_len);
     profile.desc_strings = allocator.allocArray!char(desc_string_len);
 
     if(mb_count)
@@ -685,6 +690,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     auto id_cache = StringCacheBuilder(profile.id_strings);
     auto name_cache = StringCacheBuilder(profile.name_strings);
     auto lookup_cache = StringCacheBuilder(profile.lookup_strings);
+    auto expr_cache = StringCacheBuilder(profile.expression_strings);
     auto desc_cache = StringCacheBuilder(profile.desc_strings);
 
     num_device_templates = 0;
@@ -1097,7 +1103,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 // second pass - the elements
                 foreach (ref cItem; conf.sub_items)
                 {
-                    ElementTemplate.Type ty = ElementTemplate.Type.constant;
+                    ElementTemplate.Type ty = ElementTemplate.Type.expression;
                     switch (cItem.name)
                     {
                         case "element-map":
@@ -1122,10 +1128,10 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             const(char)[] elem_id = tail.split!','.unQuote;
                             e._id = id_cache.add_string(elem_id);
 
-                            if (ty == ElementTemplate.Type.constant)
+                            if (ty == ElementTemplate.Type.expression)
                             {
-                                // store the element value as the source string
-                                e._value = id_cache.add_string(tail.split!',');
+                                // element value is the expression
+                                e._value = expr_cache.add_string(tail);
                             }
                             else
                             {

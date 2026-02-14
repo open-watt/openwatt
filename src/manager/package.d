@@ -10,11 +10,13 @@ import urt.si.quantity;
 import urt.si.unit;
 import urt.string;
 import urt.traits : is_enum;
+import urt.variant;
 
 import manager.collection;
 import manager.component;
 import manager.console;
 import manager.device;
+import manager.element;
 import manager.plugin;
 import manager.secret;
 import manager.system;
@@ -32,6 +34,7 @@ enum AuthResult : ubyte
 
 alias AuthCallback = void delegate(AuthResult result, const(char)[] profile) nothrow @nogc;
 
+alias IntrinsicFunction = Variant function(Variant[] args) nothrow @nogc;
 
 __gshared Application g_app = null;
 
@@ -67,6 +70,7 @@ nothrow @nogc:
     Array!Module modules;
 
     Console console;
+    Map!(String, IntrinsicFunction) intrinsic_functions;
 
     Map!(const(char)[], Device) devices;
 
@@ -89,6 +93,9 @@ nothrow @nogc:
         g_app = this;
 
         register_enum!Boolean();
+
+        register_intrinsic(StringLit!"select", &select);
+        register_intrinsic(StringLit!"math.pow", &pow);
 
         console = Console(this, String("console".addString), Mallocator.instance);
 
@@ -188,11 +195,25 @@ nothrow @nogc:
         return null;
     }
 
+    Element* find_element(const(char)[] name) pure
+    {
+        const(char)[] device_name = name.split!'.';
+        if (Device* d = device_name[] in devices)
+            return name.empty ? null : (*d).find_element(name);
+        return null;
+    }
+
     void register_enum(E)()
         if (is_enum!E)
     {
         import urt.meta : enum_info;
         enum_templates.insert(StringLit!(E.stringof), enum_info!E.make_void());
+    }
+
+    void register_intrinsic(String identifier, IntrinsicFunction func)
+    {
+        assert(identifier[] !in intrinsic_functions, "Intrinsic function already registered!");
+        intrinsic_functions.insert(identifier.move, func);
     }
 
     void update()
@@ -318,4 +339,49 @@ enum Boolean : ubyte
 {
     true_ = 0,
     false_ = 1
+}
+
+Variant select(Variant[] args)
+{
+    if (args.length != 3)
+        return Variant();
+    bool b;
+    if (args[0].isBool)
+        b = args[0].asBool;
+    else if (args[0].isNumber && !args[0].isQuantity)
+        b = args[0].asDouble() != 0;
+    else if (args[0].isString())
+    {
+        const(char)[] str = args[0].asString();
+        switch (str)
+        {
+            case "true":
+            case "yes":
+                b = true;
+                break;
+            case "false":
+            case "no":
+                b = false;
+                break;
+            default:
+                import urt.conv : parse_float;
+                size_t taken;
+                double f = str.parse_float(&taken);
+                if (taken != str.length)
+                    return Variant();
+                b = f ? true : false;
+                break;
+        }
+    }
+    else
+        return Variant();
+    return b ? args[1] : args[2];
+}
+
+Variant pow(Variant[] args)
+{
+    import urt.math : pow;
+    if (args.length != 2 || !args[0].isNumber || !args[1].isNumber)
+        return Variant();
+    return Variant(pow(args[0].asDouble(), args[1].asDouble()));
 }
