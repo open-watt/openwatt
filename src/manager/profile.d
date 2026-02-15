@@ -54,6 +54,15 @@ enum ElementType : ubyte
     mqtt
 }
 
+enum SumType : ubyte
+{
+    sum,                // strict sum
+    right,              // Riemann sum - right (when samples are already averages for the period)
+    trapezoid,          // Riemann sum - trapezoid (for instantaneous samples)
+    positive_trapezoid, // Riemann sum - trapezoid excluding negative signal
+    negative_trapezoid, // Riemann sum - trapezoid excluding positive signal
+}
+
 SamplingMode freq_to_element_mode(Frequency frequency)
 {
     final switch (frequency)
@@ -151,7 +160,8 @@ pure nothrow @nogc:
     enum Type : ubyte
     {
         expression,
-        map
+        map,
+        sum
     }
 
     Type type;
@@ -175,6 +185,12 @@ pure nothrow @nogc:
     {
         assert(type == Type.expression, "ElementTemplate is not of type `expression`");
         return as_dstring(profile.expression_strings.ptr + _value);
+    }
+
+    const(char*) get_source(ref const(Profile) profile) const
+    {
+        assert(type == Type.sum, "ElementTemplate is not of type `sum`");
+        return profile.id_strings.ptr + _value;
     }
 
     ref inout(ElementDesc) get_element_desc(ref inout(Profile) profile) inout
@@ -665,6 +681,9 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             // add template string to string cache...
                             break;
 
+                        case "element-sum":
+                            ty = ElementTemplate.Type.sum;
+                            goto case "element";
                         case "element-map":
                             ty = ElementTemplate.Type.map;
                             goto case;
@@ -685,6 +704,22 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
 
                             if (ty == ElementTemplate.Type.expression)
                                 expression_string_len += cache_len(tail.length);
+                            else if (ty == ElementTemplate.Type.sum)
+                            {
+                                const(char)[] alg = tail.split!',';
+                                const(char)[] src = tail.split!',';
+                                if (!enum_from_key!SumType(alg))
+                                {
+                                    writeWarning("Invalid element-sum algorithm: ", alg);
+                                    continue;
+                                }
+                                if (src.length < 2 || src[0] != '@')
+                                {
+                                    writeWarning("Invalid element-sum source: ", src);
+                                    continue;
+                                }
+                                id_string_length += cache_len(src.length);
+                            }
 
                             foreach (ref el_item; cItem.sub_items)
                             {
@@ -1135,6 +1170,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
 
                 foreach (ref cItem; conf.sub_items) switch (cItem.name)
                 {
+                    case "element-sum":
                     case "element-map":
                     case "element":
                         ++component._num_elements;
@@ -1240,6 +1276,9 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                     ElementTemplate.Type ty = ElementTemplate.Type.expression;
                     switch (cItem.name)
                     {
+                        case "element-sum":
+                            ty = ElementTemplate.Type.sum;
+                            goto case "element";
                         case "element-map":
                             ty = ElementTemplate.Type.map;
                             goto case;
@@ -1266,6 +1305,20 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             {
                                 // element value is the expression
                                 e._value = expr_cache.add_string(tail);
+                            }
+                            else if (ty == ElementTemplate.Type.sum)
+                            {
+                                const(char)[] alg = tail.split!',';
+                                const(char)[] src = tail.split!',';
+
+                                const(SumType)* sum_type = enum_from_key!SumType(alg);
+                                if (!sum_type || src.length < 2 || src[0] != '@')
+                                    continue; // error alrady reported in prior pass
+                                src = src[1 .. $];
+
+                                // index is the algorithm, _value is the data source
+                                e.index = *sum_type;
+                                e._value = id_cache.add_string(src);
                             }
                             else
                             {
