@@ -17,9 +17,10 @@ nothrow @nogc:
 
 enum Access : ubyte
 {
-    read,
-    write,
-    read_write
+    none = 0,
+    read = 1,
+    write = 2,
+    read_write = 3
 }
 
 enum SamplingMode : ubyte
@@ -100,7 +101,7 @@ nothrow @nogc:
     ref inout(Variant) value() @property inout
         => latest;
 
-    void value(T)(auto ref T v, SysTime timestamp = getSysTime()) @property
+    void value(T)(auto ref T v, SysTime timestamp = getSysTime(), Subscriber who = null)
     {
         bool is_newer = timestamp > last_update;
         if (is_newer)
@@ -114,14 +115,15 @@ nothrow @nogc:
             if (is_newer)
                 prev = latest.move;
             latest = forward!v;
-            signal(latest, timestamp, prev, prev_update, null); // TODO: who made the change? so we can break cycles...
+            signal(latest, timestamp, prev, prev_update, who);
         }
     }
 
     void signal(ref const Variant v, SysTime timestamp, ref const Variant prev, SysTime prev_timestamp, Subscriber who)
     {
         foreach (s; subscribers)
-            s.on_change(&this, v, timestamp, who);
+            if (s !is who)
+                s.on_change(&this, v, timestamp, who);
         foreach (s; subscribers_2)
             s(this, v, timestamp, prev, prev_timestamp);
     }

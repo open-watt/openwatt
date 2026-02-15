@@ -21,6 +21,7 @@ import manager.device;
 import manager.element;
 import manager.profile;
 import manager.sampler;
+import manager.subscriber;
 
 import protocol.zigbee;
 import protocol.zigbee.aps;
@@ -38,7 +39,7 @@ nothrow @nogc:
 enum MaxFibers = 2;
 
 
-class ZigbeeController : BaseObject
+class ZigbeeController : BaseObject, Subscriber
 {
     __gshared Property[2] Properties = [ Property.create!("endpoint", endpoint)(),
                                          Property.create!("auto-create", auto_create)() ];
@@ -236,7 +237,16 @@ protected:
     {
         ulong[2] key = make_sample_key(eui, endpoint, zb.cluster_id, zb.attribute_id, zb.manufacturer_code);
         assert(key !in _sample_elements, "TODO: support element duplicates?");
-        _sample_elements.insert(key, SampleElement(element, zb.value_desc));
+        SampleElement* se = _sample_elements.insert(key, SampleElement(element, zb.value_desc));
+        se.eui = eui;
+        se.endpoint = endpoint;
+        se.cluster = zb.cluster_id;
+        se.attribute = zb.attribute_id;
+        se.manufacturer = zb.manufacturer_code;
+        _sample_elements_by_element.insert(element, se);
+
+        if (element.access & manager.element.Access.write)
+            element.add_subscriber(this);
     }
 
     final SampleElement* find_sample_element(EUI64 eui, ubyte endpoint, ushort cluster, ushort attribute, ushort manufacturer = 0) nothrow
@@ -248,12 +258,24 @@ protected:
     final SampleElement* find_sample_element_tuya(EUI64 eui, ubyte endpoint, ushort dp) nothrow
         => find_sample_element(eui, endpoint, 0xEF00, dp);
 
+    final override void on_change(Element* e, ref const Variant val, SysTime timestamp, Subscriber)
+    {
+        SampleElement** pse = e in _sample_elements_by_element;
+        assert(pse, "Bookeeeping error!");
+        set_value(**pse, val, timestamp);
+    }
+
 private:
 
     struct SampleElement
     {
         Element* element;
         ValueDesc desc;
+        EUI64 eui;
+        ubyte endpoint;
+        ushort cluster;
+        ushort attribute;
+        ushort manufacturer;
     }
 
     struct TuyaDedup
@@ -264,10 +286,12 @@ private:
         ushort tag;
     }
 
-    // TODO: I'd prefer is we used a sorted array...
+    // TODO: I'd prefer if we used a sorted array...
     Map!(ulong[2], SampleElement) _sample_elements;
+    Map!(Element*, SampleElement*) _sample_elements_by_element;
 
     bool _auto_create_devices;
+    ushort tuya_txn_id = 1;
 
     ObjectRef!ZigbeeEndpoint _endpoint;
     Array!(Promise!bool*) _promises;
@@ -319,7 +343,7 @@ private:
         return _endpoint.send_zdo_message(dst, ZDOCluster.ieee_addr_req, addr_req_msg[], priority, response_hander, user_data);
     }
 
-    void message_handler(ref const APSFrame aps, const(void)[] message) nothrow
+    void message_handler(ref const APSFrame aps, const(void)[] message, SysTime timestamp) nothrow
     {
         if (message.length < ZCLHeader.min_length)
             return;
@@ -546,7 +570,7 @@ private:
                         {
                             Variant v = attr.value;
                             adjust_value(v, e.desc);
-                            e.element.value = v.move;
+                            e.element.value(v.move, timestamp, this);
                         }
 
                         payload = payload[3 + taken .. $];
@@ -680,14 +704,14 @@ private:
                             TuyaDP dp = parse_dp(payload[2 .. $]);
                             Variant v = decode_dp(dp);
                             version (DebugZigbeeController)
-                                writeDebugf("ZigbeeController: {0,04x}:{1,02x} Tuya report dp{2} = {3}", aps.src, aps.src_endpoint, dp.dp_id, v);
+                                writeDebugf("ZigbeeController: {0,04x}:{1,02x} Tuya report dp{2} = {3} ({4})", aps.src, aps.src_endpoint, dp.dp_id, v, dp.dp_type);
                             if (nm)
                             {
                                 nm.tuya_datapoints[dp.dp_id] = v;
                                 if (SampleElement* e = find_sample_element_tuya(nm.eui, aps.src_endpoint, dp.dp_id))
                                 {
                                     adjust_value(v, e.desc);
-                                    e.element.value = v.move;
+                                    e.element.value(v.move, timestamp, this);
                                 }
                             }
                             return;
@@ -728,6 +752,50 @@ private:
         if (zcl.control & ZCLControlFlags.disable_default_response)
             return; // request no default response
         send_default_response(aps.src, aps.src_endpoint, aps.profile_id, aps.cluster_id, zcl, zcl.command, status);
+    }
+
+    void set_value(ref SampleElement e, ref const Variant val, SysTime timestamp) nothrow
+    {
+        if (!(e.element.access & manager.element.Access.write))
+            return; // attribute is read-only!
+
+        switch (e.cluster)
+        {
+            case 0x0006: // on/off
+                if (e.attribute == 0)
+                {
+                    // on/off attribute must be translated to on/off command
+                    bool on = val.as!bool;
+                    ZCLCommand cmd = on ? ZCLCommand.onoff_on : ZCLCommand.onoff_off;
+
+                    // TODO: we should request an ACK!!!
+
+                    _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0x0006, cmd, APSFlags.none, null, MessagePriority.immediate);
+                    break;
+                }
+                goto default;
+
+            case 0xEF00: // Tuya
+                // attribute id is Tuya datapoint
+                ubyte[256] buffer = void;
+                buffer[0..2] = tuya_txn_id.nativeToBigEndian;
+                tuya_txn_id++;
+                tuya_txn_id += tuya_txn_id == 0;
+
+                assert(e.attribute < 256, "Invalid Tuya DP id!");
+                ptrdiff_t len = encode_dp(cast(ubyte)e.attribute, val, e.desc, buffer[2 .. $]);
+                if (len <= 0)
+                    break; // failed?!
+
+                // TODO: we should request an ACK!!!
+
+                _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0xEF00, ZCLCommand.tuya_data_request, APSFlags.none, buffer[0..2+len], MessagePriority.immediate);
+                break;
+
+            default:
+                // should we use a generic write_attributes?
+                break;
+        }
     }
 
     void create_device(ref NodeMap node) nothrow
@@ -1219,22 +1287,32 @@ private:
 
 __gshared immutable ubyte[4] g_power_levels = [ 0, 33, 66, 100 ];
 
+enum TuyaDataType : ubyte
+{
+    raw = 0,
+    bool_ = 1,
+    value = 2,
+    string = 3,
+    enum_ = 4,
+    bitmap = 5
+}
+
 struct TuyaDP
 {
     ubyte dp_id;
-    ubyte dp_type;
+    TuyaDataType dp_type;
     const(ubyte)[] dp_data;
 }
 
 TuyaDP parse_dp(const(ubyte)[] data)
 {
     if (data.length < 5)
-        return TuyaDP(0, 0, null);
+        return TuyaDP(0, cast(TuyaDataType)0, null);
     ubyte id = data[0];
-    ubyte type = data[1];
+    TuyaDataType type = cast(TuyaDataType)data[1];
     ushort len = data[2..4].bigEndianToNative!ushort;
     if (data.length < 4 + len)
-        return TuyaDP(0, 0, null);
+        return TuyaDP(0, cast(TuyaDataType)0, null);
     return TuyaDP(id, type, data[4 .. 4 + len]);
 }
 
@@ -1242,17 +1320,17 @@ Variant decode_dp(ref TuyaDP dp)
 {
     switch (dp.dp_type)
     {
-        case 0: // raw
+        case TuyaDataType.raw:
             return Variant(cast(const(void)[])dp.dp_data);
-        case 1: // boolean
-            return Variant(dp.dp_data[0] != 0);
-        case 2: // integer
-            return Variant(dp.dp_data[0..4].bigEndianToNative!uint);
-        case 3: // string
+        case TuyaDataType.string:
             return Variant(cast(const(char)[])dp.dp_data);
-        case 4: // enum
+        case TuyaDataType.bool_:
+            return Variant(dp.dp_data[0] != 0);
+        case TuyaDataType.value:
+            return Variant(dp.dp_data[0..4].bigEndianToNative!uint);
+        case TuyaDataType.enum_:
             return Variant(dp.dp_data[0]); // TODO: confirm this one?
-        case 5: // bitmap
+        case TuyaDataType.bitmap:
             if (dp.dp_data.length == 1)
                 return Variant(dp.dp_data[0]); // TODO: confirm this one?
             else if (dp.dp_data.length == 2)
@@ -1265,6 +1343,49 @@ Variant decode_dp(ref TuyaDP dp)
     }
 }
 
+TuyaDataType type_from_desc(ref const ValueDesc desc)
+{
+    // TODO: how do we determine a RAW?
+
+    if (desc.is_string)
+        return TuyaDataType.string;
+    if (desc.is_bitfield)
+        return TuyaDataType.bitmap;
+    else if (desc.is_enum)
+        return TuyaDataType.enum_;
+    else if (desc.is_bool)
+        return TuyaDataType.bool_;
+    else
+        return TuyaDataType.value;
+}
+
+ptrdiff_t encode_dp(ubyte datapoint, ref const Variant value, ValueDesc desc, ubyte[] buffer)
+{
+    TuyaDataType type = desc.type_from_desc();
+
+    buffer[0] = datapoint;
+    buffer[1] = type;
+
+    if (type == TuyaDataType.string)
+    {
+        if (!value.isString)
+            return -1;
+        const(char)[] str = value.asString[];
+        if (str.length > 0xFFFF)
+            return -1;
+        buffer[2..4] = (cast(ushort)str.length).nativeToBigEndian;
+        buffer[4..4 + str.length] = cast(ubyte[])str[];
+        return 4 + str.length;
+    }
+    if (!value.isNumber && !value.isBool)
+        return -1;
+
+    ptrdiff_t len = buffer[4..$].write_value(value, desc);
+    if (len <= 0)
+        return -1;
+    buffer[2..4] = (cast(ushort)len).nativeToBigEndian;
+    return 4 + len;
+}
 
 uint get_zigbee_time()
 {

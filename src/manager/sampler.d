@@ -238,6 +238,12 @@ nothrow @nogc:
     bool is_enum() const pure
         => (_type & DataType.enumeration) != 0;
 
+    bool is_bitfield() const pure
+        => _type.data_kind == DataKind.bitfield;
+
+    bool is_string() const pure
+        => _type.data_kind == DataKind.string_z || _type.data_kind == DataKind.string_sp;
+
     bool is_custom() const pure
         => (_type & 0xFFFF) == 0xFFFE;
 
@@ -414,10 +420,7 @@ Variant sample_value(const void* data, ref const ValueDesc desc)
     {
         if (kind == DataKind.floating)
             raw_value = cast(ulong)f_value;
-
-        // TODO: we want to associate the enum with the variant somehow?
-
-        return Variant(raw_value);
+        return Variant(raw_value, desc._enum_info);
     }
 
     Variant r;
@@ -499,18 +502,155 @@ void adjust_value(ref Variant value, ref const ValueDesc desc)
 }
 
 
-ptrdiff_t write_value(const void[] data, ref const Variant value, ref const ValueDesc desc)
+ptrdiff_t write_value(ubyte[] buffer, ref const Variant value, ref const ValueDesc desc)
 {
-    assert(false, "TODO");
+    ulong raw_value = void;
+    double f_value = void;
+    DataKind kind = desc._type.data_kind;
+
+    // first, condition the value back to its raw form...
+    final switch (kind) with (DataKind)
+    {
+        case integer, low_byte, high_byte, bitfield:
+            if (value.isBool)
+                raw_value = value.as!bool ? 1 : 0;
+            else if (value.isNumber)
+            {
+                if (desc._pre_scale != 1)
+                {
+                    f_value = value.as!double / desc._pre_scale;
+                    if (desc._type & DataType.signed)
+                        raw_value = cast(long)f_value;
+                    else
+                        raw_value = cast(ulong)f_value;
+                }
+                else if (desc._type & DataType.signed)
+                    raw_value = value.isLong ? value.as!long : cast(long)value.as!double;
+                else
+                    raw_value = value.isUlong ? value.as!ulong : cast(ulong)value.as!double;
+            }
+            else
+                return -1;
+            break;
+
+        case floating:
+            if (value.isBool)
+                f_value = value.as!bool ? 1 : 0;
+            else if (value.isNumber)
+            {
+                if (desc._pre_scale != 1)
+                    f_value = value.as!double / desc._pre_scale;
+                else
+                    f_value = value.as!double;
+            }
+            else
+                return -1;
+            if ((desc._type & 0x7) == 3)
+            {
+                float f = cast(float)f_value;
+                raw_value = *cast(uint*)&f;
+            }
+            else if ((desc._type & 0x7) == 7)
+            {
+                raw_value = *cast(ulong*)&f_value;
+            }
+            else
+            {
+                assert((desc._type & 0x7) != 1, "TODO: half-float");
+                assert(false, "invalid floating point size");
+            }
+            break;
+
+        case date_time:
+            import urt.time;
+            if (!value.isUser!DateTime && !value.isUser!SysTime)
+                return -1;
+            DateTime dt = value.as!DateTime;
+            switch (desc._date_format) with (DateFormat)
+            {
+                case yymmddhhmmss:
+                    raw_value = (ulong((dt.year - 2000) & 0xFF) << 40) |
+                                (ulong(dt.month) << 32) |
+                                (ulong(dt.day) << 24) |
+                                (ulong(dt.hour) << 16) |
+                                (ulong(dt.minute) << 8) |
+                                ulong(dt.second);
+                    break;
+                default:
+                    assert(false, "unknown date_time format");
+            }
+            break;
+
+        case string_z:
+        case string_sp:
+            assert(false, "TODO...");
+    }
+
+    if (desc._type & DataType.enumeration)
+    {
+        // TODO: if the variant carries an enum; check that it's the right one?
+    }
+
+    version (LittleEndian)
+        bool store_little_endian = (desc._type & DataType.big_endian) == 0;
+    else
+        bool store_little_endian = (desc._type & DataType.little_endian) != 0;
+
+    if (store_little_endian)
+    {
+        /+final+/ switch (desc._type & 0x1F)
+        {
+            case 0x0, 0x8, 0x10, 0x18: buffer[0] = raw_value & 0xFF; return 1;
+            case 0x1, 0x9, 0x11, 0x19: buffer[0..2] = (cast(ushort)raw_value).nativeToLittleEndian; return 2;
+            case 0x2, 0xA: buffer[0..2] = (cast(ushort)raw_value).nativeToLittleEndian; buffer[2] = (raw_value >> 16) & 0xFF; return 3;
+            case 0x3, 0xB: buffer[0..4] = (cast(uint)raw_value).nativeToLittleEndian; return 4;
+            case 0x4, 0xC: buffer[0..4] = (cast(uint)raw_value).nativeToLittleEndian; buffer[4] = (raw_value >> 32) & 0xFF; return 5;
+            case 0x5, 0xD: buffer[0..4] = (cast(uint)raw_value).nativeToLittleEndian; buffer[4..6] = (cast(ushort)(raw_value >> 32)).nativeToLittleEndian; return 6;
+            case 0x6, 0xE: buffer[0..4] = (cast(uint)raw_value).nativeToLittleEndian; buffer[4..6] = (cast(ushort)(raw_value >> 32)).nativeToLittleEndian; buffer[6] = (raw_value >> 48) & 0xFF; return 7;
+            case 0x7, 0xF: buffer[0..8] = raw_value.nativeToLittleEndian; return 8;
+//            // unsigned word-reverse
+//            case 0x13: raw_value = (ulong(loadLittleEndian(usptr)) << 16) | loadLittleEndian(usptr + 1); goto check_float;
+//            case 0x15: raw_value = (ulong(loadLittleEndian(usptr)) << 32) | (ulong(loadLittleEndian(usptr + 1)) << 16) | loadLittleEndian(usptr + 2); break;
+//            // signed word-reverse
+//            case 0x1B: raw_value = long(loadLittleEndian(sptr) << 16) | loadLittleEndian(usptr + 1); goto check_float;
+//            case 0x1D: raw_value = (long(loadLittleEndian(sptr)) << 32) | (ulong(loadLittleEndian(usptr + 1)) << 16) | loadLittleEndian(usptr + 2); break;
+//            case 0x17, 0x1F: raw_value = (ulong(loadLittleEndian(usptr)) << 48) | (ulong(loadLittleEndian(usptr + 1)) << 32) | (ulong(loadLittleEndian(usptr + 2)) << 16) | loadLittleEndian(usptr + 3); goto check_double;
+//            case 0x12, 0x14, 0x16, 0x1A, 0x1C, 0x1E: assert(false, "not a word multiple");
+            default: assert(false, "TODO");
+        }
+    }
+    else
+    {
+        /+final+/ switch (desc._type & 0x1F)
+        {
+            case 0x0, 0x8, 0x10, 0x18: buffer[0] = raw_value & 0xFF; return 1;
+            case 0x1, 0x9, 0x11, 0x19: buffer[0..2] = (cast(ushort)raw_value).nativeToBigEndian; return 2;
+            case 0x2, 0xA: buffer[0..2] = (cast(ushort)(raw_value >> 8)).nativeToBigEndian; buffer[2] = raw_value & 0xFF; return 3;
+            case 0x3, 0xB: buffer[0..4] = (cast(uint)raw_value).nativeToBigEndian; return 4;
+            case 0x4, 0xC: buffer[0..4] = (cast(uint)(raw_value >> 8)).nativeToBigEndian; buffer[4] = raw_value & 0xFF; return 5;
+            case 0x5, 0xD: buffer[0..4] = (cast(uint)(raw_value >> 16)).nativeToBigEndian; buffer[4..6] = (cast(ushort)raw_value).nativeToBigEndian; return 6;
+            case 0x6, 0xE: buffer[0..4] = (cast(uint)(raw_value >> 24)).nativeToBigEndian; buffer[4..6] = (cast(ushort)(raw_value >> 8)).nativeToBigEndian; buffer[6] = raw_value & 0xFF; return 7;
+            case 0x7, 0xF: buffer[0..8] = raw_value.nativeToBigEndian; return 8;
+//            // unsigned word-reverse
+//            case 0x13: raw_value = loadBigEndian(usptr) | (ulong(loadBigEndian(usptr + 1)) << 16); goto check_float;
+//            case 0x15: raw_value = loadBigEndian(usptr) | (ulong(loadBigEndian(usptr + 1)) << 16) | (ulong(loadBigEndian(usptr + 2)) << 32); break;
+//            // signed word-reverse
+//            case 0x1B: raw_value = loadBigEndian(usptr) | long(loadBigEndian(sptr + 1) << 16); goto check_float;
+//            case 0x1D: raw_value = loadBigEndian(usptr) | (ulong(loadBigEndian(usptr + 1)) << 16) | (long(loadBigEndian(sptr + 2)) << 32); break;
+//            case 0x17, 0x1F: raw_value = loadBigEndian(usptr) | (ulong(loadBigEndian(usptr + 1)) << 16) | (ulong(loadBigEndian(usptr + 2)) << 32) | (ulong(loadBigEndian(usptr + 3)) << 48); goto check_double;
+//            case 0x12, 0x14, 0x16, 0x1A, 0x1C, 0x1E: assert(false, "not a word multiple");
+            default: assert(false, "TODO");
+        }
+    }
 }
 
 
-DataType parse_data_type(const(char)[] desc) pure
+DataType parse_data_type(const(char)[] desc, ubyte default_flags = 0) pure
 {
     if (desc.length < 2)
         return DataType.invalid;
 
-    ubyte flags;
+    ubyte flags = default_flags;
     DataKind kind = DataKind.integer;
     if (desc[0] == 'u' || desc[0] == 'i')
     {

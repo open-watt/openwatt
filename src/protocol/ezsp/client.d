@@ -330,7 +330,7 @@ nothrow:
         MonoTime now = getTime();
         if (_queued_requests.length > 0 && now - _queued_requests[0].ts > 200.msecs)
         {
-            writeWarningf("EZSP: request x{0,02x} timed out", _queued_requests[0].sequence_number);
+            writeWarningf("EZSP: request {0,02x} timed out", _queued_requests[0].sequence_number);
             _queued_requests.popFront();
 
             send_queued_message();
