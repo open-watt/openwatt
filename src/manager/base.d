@@ -139,7 +139,7 @@ nothrow @nogc:
     // TODO: delete this constructor!!!
     this(String name, const(char)[] type)
     {
-        assert(name !is null, "`name` must not be empty");
+        assert(!name.empty, "`name` must not be empty");
 
         _typeInfo = null;
         _type = type.addString();
@@ -377,7 +377,7 @@ nothrow @nogc:
     }
 
     bool opEquals(const BaseObject rhs) const pure
-        => _name == rhs._name && type[] == rhs.type[];
+        => _name[] == rhs._name[] && type[] == rhs.type[];
 
 protected:
     enum ubyte _disabled   = 1 << 0;
@@ -621,7 +621,7 @@ nothrow @nogc:
     {
         if (!detached)
             return true;
-        if (Type obj = collection_for!Type.get(name))
+        if (Type obj = collection_for!Type.get(name[]))
         {
             this = obj;
             return true;
@@ -681,7 +681,7 @@ auto all_properties_impl(Type, size_t allocCount)()
 
     static if (is(Type S == super) && !is(Unqual!S == Object))
     {
-        alias Super = Unqual!S;
+        alias Super = Unqual!(S[0]);
         static if (!is(typeof(Type.Properties) == typeof(Super.Properties)) || &Type.Properties !is &Super.Properties)
             enum PropCount = Type.Properties.length;
         else

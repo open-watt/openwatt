@@ -89,8 +89,8 @@ nothrow @nogc:
                 allocator.freeT(commandData);
 
                 // untaken input should be fed back into the command line
-                const(char)[] input = take_input();
-                receive_input(input);
+                MutableString!0 input = take_input();
+                receive_input(input[]);
             }
         }
     }
@@ -165,7 +165,7 @@ nothrow @nogc:
 
     // TODO: I don't like this API... needs work!
     final const(char[]) get_input()
-        => _buffer;
+        => _buffer[];
 
     MutableString!0 set_input(const(char)[] text)
     {
@@ -302,7 +302,7 @@ nothrow @nogc:
                 {
                     if (_suggestion_pending)
                     {
-                        Array!String suggestions = _console.suggest(_buffer, _cur_scope);
+                        Array!String suggestions = _console.suggest(_buffer[], _cur_scope);
                         if (!suggestions.empty)
                             show_suggestions(suggestions[]);
                     }
@@ -444,7 +444,7 @@ protected:
                     ++taken;
 
                 MutableString!0 cmdInput = take_input();
-                const(char)[] command = cmdInput.trim_cmd_line;
+                const(char)[] command = cmdInput[].trim_cmd_line;
                 _buffer = input[taken + 1 .. $];
 
                 Variant result;
@@ -557,7 +557,7 @@ protected:
 
     final void add_to_history(const(char)[] line)
     {
-        if (!line.empty && (_history.empty || line[] != _history[$-1]))
+        if (!line.empty && (_history.empty || line[] != _history[$-1][]))
         {
             _history.pushBack(MutableString!0(line));
             if (_history.length > 50)
@@ -581,7 +581,7 @@ protected:
                 bool success = true;
                 foreach (entry; _history)
                 {
-                    success = write_to_file(entry, _history_file);
+                    success = write_to_file(entry[], _history_file);
                     if (!success)
                         break;
 
@@ -648,7 +648,7 @@ nothrow @nogc:
 
     const(char[]) getOutput() const pure
     {
-        return _output;
+        return _output[];
     }
 
     MutableString!0 takeOutput()

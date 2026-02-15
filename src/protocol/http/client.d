@@ -99,7 +99,7 @@ nothrow @nogc:
             if (!_host && _remote == InetAddress())
                 return CompletionStatus.error;
 
-            const(char)[] stream_name = get_module!StreamModule.streams.generate_name(name);
+            const(char)[] stream_name = get_module!StreamModule.streams.generate_name(name[]);
             if (_host)
             {
                 const(char)[] host = _host[];
@@ -141,13 +141,13 @@ nothrow @nogc:
                 {
                     if (port == 0)
                         port = 80;
-                    _stream = get_module!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.dynamic, NamedArgument("port", port), NamedArgument("remote", host));
+                    _stream = get_module!TCPStreamModule.tcp_streams.create(stream_name, ObjectFlags.dynamic, NamedArgument("port", port), NamedArgument("remote", host));
                 }
                 else if (protocol.icmp("https") == 0)
                 {
                     if (port == 0)
                         host = tconcat(host, ":443");
-                    _stream = get_module!HTTPModule.tls_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.dynamic, NamedArgument("remote", host));
+                    _stream = get_module!HTTPModule.tls_streams.create(stream_name, ObjectFlags.dynamic, NamedArgument("remote", host));
                 }
             }
             else
@@ -158,7 +158,7 @@ nothrow @nogc:
                     addr._a.ipv6.port = 80;
                 else if (addr.family == AddressFamily.ipv4 && addr._a.ipv4.port == 0)
                     addr._a.ipv4.port = 80;
-                _stream = get_module!TCPStreamModule.tcp_streams.create(stream_name.makeString(defaultAllocator), ObjectFlags.dynamic, NamedArgument("remote", addr));
+                _stream = get_module!TCPStreamModule.tcp_streams.create(stream_name, ObjectFlags.dynamic, NamedArgument("remote", addr));
             }
 
             // we should have created a stream...
@@ -252,7 +252,7 @@ private:
 
     void send_request(ref HTTPMessage request)
     {
-        Array!char message = request.format_message(_host);
+        Array!char message = request.format_message(_host[]);
         if (message.empty)
             return;
         ptrdiff_t r = stream.write(message[]);

@@ -62,15 +62,15 @@ nothrow @nogc:
             bool promiscuous = true;
             int timeout_ms = 1; // TODO: we could probably tune this to our program update rate...?
 
-            _pcap_handle = pcap_open_live(_adapter.tstringz, ushort.max, promiscuous, timeout_ms, errbuf.ptr);
+            _pcap_handle = pcap_open_live(_adapter[].tstringz, ushort.max, promiscuous, timeout_ms, errbuf.ptr);
             if (_pcap_handle is null)
             {
-                writeError("pcap_open_live failed for adapter '", _adapter, "': ", errbuf.ptr[0 .. strlen(errbuf.ptr)]);
+                writeError("pcap_open_live failed for adapter '", _adapter[], "': ", errbuf.ptr[0 .. strlen(errbuf.ptr)]);
                 return CompletionStatus.error;
             }
             if (pcap_setnonblock(_pcap_handle, 1, errbuf.ptr) != 0)
             {
-                writeError("pcap_setnonblock failed on adapter '", _adapter, "': ", errbuf.ptr[0 .. strlen(errbuf.ptr)]);
+                writeError("pcap_setnonblock failed on adapter '", _adapter[], "': ", errbuf.ptr[0 .. strlen(errbuf.ptr)]);
                 pcap_close(_pcap_handle);
                 _pcap_handle = null;
                 return CompletionStatus.error;
@@ -391,15 +391,15 @@ nothrow @nogc:
 
                 if (is_wifi)
                 {
-                    writeInfo("Found wifi interface: \"", description, "\" (", name, ")");
-                    auto iface = wifi_interfaces.create(tconcat("wifi", ++num_wifi_interfaces).makeString(defaultAllocator));
-                    iface.adapter = name.makeString(defaultAllocator);
+                    writeInfo("Found wifi interface: \"", description, "\" (", name[], ")");
+                    auto iface = wifi_interfaces.create(tconcat("wifi", ++num_wifi_interfaces));
+                    iface.adapter = name;
                 }
                 else
                 {
-                    writeInfo("Found ethernet interface: \"", description, "\" (", name, ")");
-                    auto iface = ethernet_interfaces.create(tconcat("ether", ++num_ether_interfaces).makeString(defaultAllocator));
-                    iface.adapter = name.makeString(defaultAllocator);
+                    writeInfo("Found ethernet interface: \"", description, "\" (", name[], ")");
+                    auto iface = ethernet_interfaces.create(tconcat("ether", ++num_ether_interfaces));
+                    iface.adapter = name;
                 }
 
                 // TODO: we need to set the MAC for the interface to the NIC MAC address...

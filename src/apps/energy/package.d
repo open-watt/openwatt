@@ -61,7 +61,7 @@ nothrow @nogc:
 
     void register_appliance_type(ApplianceType)()
     {
-        appliance_factory.insert(ApplianceType.Type, (String id, EnergyManager* manager) => cast(Appliance)defaultAllocator().allocT!ApplianceType(id.move, manager));
+        appliance_factory.insert(ApplianceType.Type[], (String id, EnergyManager* manager) => cast(Appliance)defaultAllocator().allocT!ApplianceType(id.move, manager));
     }
     Appliance create_appliance(const(char)[] type, String id, EnergyManager* manager)
     {

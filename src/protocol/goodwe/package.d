@@ -115,7 +115,7 @@ nothrow @nogc:
         import manager.element;
         import manager.profile;
 
-        const(char)[] profileName = aa55_client.profile;
+        const(char)[] profileName = aa55_client.profile[];
 
         void[] file = load_file(tconcat("conf/goodwe_profiles/", profileName, ".conf"), g_app.allocator);
         if (!file)

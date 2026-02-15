@@ -511,7 +511,7 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
 {
     const(char)[] n;
     if (v.isUser!T)
-        n = v.asUser!T.name;
+        n = v.asUser!T.name[];
     else if (v.isString)
         n = v.asString;
     else
@@ -552,7 +552,7 @@ const(char[]) from_variant(I)(ref const Variant v, out I r) nothrow @nogc
     // TODO: parse as mac address...?
     const(char)[] n;
     if (v.isUser!BaseInterface)
-        n = v.asUser!BaseInterface.name;
+        n = v.asUser!BaseInterface.name[];
     else if (v.isString)
         n = v.asString;
     else
@@ -572,7 +572,7 @@ const(char[]) from_variant(S)(ref const Variant v, out S r) nothrow @nogc
 {
     const(char)[] n;
     if (v.isUser!Stream)
-        n = v.asUser!Stream.name;
+        n = v.asUser!Stream.name[];
     else if (v.isString)
         n = v.asString;
     else

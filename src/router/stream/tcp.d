@@ -130,7 +130,7 @@ nothrow @nogc:
             addr_info.sock_type = SocketType.stream;
             addr_info.protocol = Protocol.tcp;
             AddressInfoResolver results;
-            get_address_info(_host, _port ? _port.tstring : null, &addr_info, results);
+            get_address_info(_host[], _port ? _port.tstring : null, &addr_info, results);
             if (!results.next_address(addr_info))
                 return CompletionStatus.continue_;
             _remote = addr_info.address;
@@ -564,9 +564,9 @@ protected:
     Stream create_stream(Socket conn)
     {
         // prevent duplicate stream names...
-        String newName = get_module!StreamModule.streams.generate_name(name).makeString(defaultAllocator());
+        const(char)[] newName = get_module!StreamModule.streams.generate_name(name[]);
 
-        TCPStream stream = get_module!TCPStreamModule.tcp_streams.alloc(newName.move, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
+        TCPStream stream = get_module!TCPStreamModule.tcp_streams.alloc(newName, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
 
         // assign the socket to the stream and bypass the startup process
         stream._socket = conn;

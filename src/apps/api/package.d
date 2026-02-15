@@ -25,6 +25,8 @@ import protocol.http.server;
 
 import router.stream;
 
+//version = DebugAPI;
+
 nothrow @nogc:
 
 
@@ -70,7 +72,7 @@ nothrow @nogc:
         if (_server.detached)
         {
             import protocol.http;
-            if (HTTPServer s = get_module!HTTPModule.servers.get(_server.name))
+            if (HTTPServer s = get_module!HTTPModule.servers.get(_server.name[]))
                 _server = s;
         }
         return super.validating();
@@ -80,9 +82,9 @@ nothrow @nogc:
     {
         if (_uri)
         {
-            _server.add_uri_handler(HTTPMethod.GET, _uri, &handle_request);
-            _server.add_uri_handler(HTTPMethod.POST, _uri, &handle_request);
-            _server.add_uri_handler(HTTPMethod.OPTIONS, _uri, &handle_request);
+            _server.add_uri_handler(HTTPMethod.GET, _uri[], &handle_request);
+            _server.add_uri_handler(HTTPMethod.POST, _uri[], &handle_request);
+            _server.add_uri_handler(HTTPMethod.OPTIONS, _uri[], &handle_request);
         }
         else
             _default_handler = _server.hook_global_handler(&handle_request);
@@ -123,6 +125,9 @@ private:
         // Handle CORS preflight OPTIONS requests
         if (request.method == HTTPMethod.OPTIONS)
             return handle_options(request, stream);
+
+        version (DebugAPI)
+            writeDebug("API request: ", request.method, " ", request.request_target);
 
         if (tail == "/health")
             return handle_health(request, stream);
@@ -174,6 +179,7 @@ private:
 
     int handle_cli_execute(ref const HTTPMessage request, ref Stream stream)
     {
+        Variant json;
         const(char)[] command_text;
         if (request.method == HTTPMethod.GET)
         {
@@ -181,7 +187,7 @@ private:
         }
         else
         {
-            Variant json = parse_json(cast(char[])request.content[]);
+            json = parse_json(cast(char[])request.content[]);
             command_text = json.getMember("command").asString();
         }
 
@@ -331,7 +337,7 @@ private:
         }
         else
         {
-            json.reserve(512);
+            json.reserve(1024);
             json ~= '{';
 
             // TODO: just one for now...
@@ -470,7 +476,7 @@ private:
             if (path.empty)
             {
                 if (Element* elem = comp.find_element(next))
-                    append_element(json, first, prefix, elem);
+                    append_element(json, first, prefix[], elem);
             }
             else
             {
@@ -513,7 +519,7 @@ private:
             else if (path_copy.empty)
             {
                 if (Element* elem = comp.find_element(next))
-                    append_element(json, first, prefix, elem);
+                    append_element(json, first, prefix[], elem);
             }
             else foreach (Component child; comp.components)
             {
@@ -655,7 +661,7 @@ private:
             }
         }
 
-        response_json ~= '}';
+        response_json ~= "}}";
 
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", response_json[]);
         add_cors_headers(response);
@@ -834,4 +840,4 @@ nothrow @nogc:
 
 private:
 
-__gshared immutable string[] g_access_strings = [ "r", "w", "rw" ];
+__gshared immutable string[4] g_access_strings = [ "", "r", "w", "rw" ];

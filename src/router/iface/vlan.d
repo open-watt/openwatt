@@ -68,7 +68,7 @@ nothrow @nogc:
     {
         if (_interface.detached)
         {
-            if (BaseInterface s = get_module!InterfaceModule.interfaces.get(_interface.name))
+            if (BaseInterface s = get_module!InterfaceModule.interfaces.get(_interface.name[]))
             {
                 _interface = s;
                 mac = _interface.mac;

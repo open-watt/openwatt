@@ -305,7 +305,7 @@ nothrow @nogc:
             if (args.length == 0)
             {
                 foreach (ref prop; item.properties)
-                    item.reset(prop.name);
+                    item.reset(prop.name[]);
             }
             else
             {

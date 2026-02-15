@@ -39,14 +39,13 @@ enum StreamOptions : ubyte
 
 abstract class Stream : BaseObject
 {
-//    __gshared Property[1] Properties = [ Property.create!("running", running)() ];
 nothrow @nogc:
 
     this(const CollectionTypeInfo* type_info, String name, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
         super(type_info, name.move, flags);
 
-        assert(!get_module!StreamModule.streams.exists(this.name), "HOW DID THIS HAPPEN?");
+        assert(!get_module!StreamModule.streams.exists(this.name[]), "HOW DID THIS HAPPEN?");
         get_module!StreamModule.streams.add(this);
 
         this._options = options;

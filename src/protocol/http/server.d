@@ -69,7 +69,7 @@ nothrow @nogc:
         foreach (ref h; _handlers)
         {
             // if a higher level handler already exists, we can't add this handler
-            if ((h.methods & (1 << method)) && uri_prefix.startsWith(h.uri_prefix))
+            if ((h.methods & (1 << method)) && uri_prefix[].startsWith(h.uri_prefix[]))
                 return false;
         }
 
@@ -86,8 +86,8 @@ nothrow @nogc:
 
     override CompletionStatus startup()
     {
-        const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name(name);
-        _server = get_module!TCPStreamModule.tcp_servers.create(server_name.makeString(defaultAllocator), ObjectFlags.dynamic, NamedArgument("port", _port));
+        const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name(name[]);
+        _server = get_module!TCPStreamModule.tcp_servers.create(server_name, ObjectFlags.dynamic, NamedArgument("port", _port));
         if (!_server)
             return CompletionStatus.error;
 
@@ -187,7 +187,7 @@ private:
         {
             foreach (ref h; server._handlers)
             {
-                if (((1 << request.method) & h.methods) && request.request_target.startsWith(h.uri_prefix[]))
+                if (((1 << request.method) & h.methods) && request.request_target[].startsWith(h.uri_prefix[]))
                     return h.request_handler(request, stream);
             }
 

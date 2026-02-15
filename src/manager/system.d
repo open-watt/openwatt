@@ -53,7 +53,7 @@ Array!String sysinfo_suggest(bool, const(char)[] arg_name, const(char)[]) nothro
     Array!String completions;
     foreach (ref prop; properties)
     {
-        if (prop.startsWith(arg_name))
+        if (prop[].startsWith(arg_name))
             completions ~= prop;
     }
     return completions;

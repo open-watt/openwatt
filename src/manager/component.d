@@ -50,7 +50,7 @@ nothrow @nogc:
         {
             if (c.name[] == component.name[])
             {
-                debug assert(false, "Component '" ~ component.name ~ "' already exists in device '" ~ name ~ "'");
+                debug assert(false, "Component '" ~ component.name[] ~ "' already exists in device '" ~ name[] ~ "'");
                 assert(false, "Already exists");
                 return;
             }

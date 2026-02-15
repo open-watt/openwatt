@@ -236,7 +236,7 @@ private:
             suggestions = _custom_suggest(false, arg_prefix, null);
         foreach (ref arg; _args)
         {
-            if (arg.name.startsWith(arg_prefix))
+            if (arg.name[].startsWith(arg_prefix))
                 suggestions ~= String(MutableString!0(Concat, arg.name, '=')); // TODO: MOVE construct!
         }
         return suggestions;

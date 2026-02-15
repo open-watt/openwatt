@@ -57,7 +57,7 @@ nothrow @nogc:
         if (circuit.type == CircuitType.unknown && meter)
             circuit.type = get_meter_type(meter);
 
-        circuits.insert(circuit.id, circuit);
+        circuits.insert(circuit.id[], circuit);
 
         return circuit;
     }
@@ -70,7 +70,7 @@ nothrow @nogc:
             circuit.appliances ~= appliance;
         }
 
-        appliances.insert(appliance.id, appliance);
+        appliances.insert(appliance.id[], appliance);
 
         return appliance;
     }

@@ -94,7 +94,7 @@ nothrow @nogc:
     }
 
     override const(char)[] remote_name()
-        => m_remoteName;
+        => m_remoteName[];
 
     override ptrdiff_t read(void[] buffer)
     {

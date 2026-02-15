@@ -143,7 +143,7 @@ nothrow @nogc:
     {
         super(type_info, name.move, flags);
 
-        assert(!get_module!InterfaceModule.interfaces.exists(this.name), "HOW DID THIS HAPPEN?");
+        assert(!get_module!InterfaceModule.interfaces.exists(this.name[]), "HOW DID THIS HAPPEN?");
         get_module!InterfaceModule.interfaces.add(this);
 
         mac = generate_mac_address();
@@ -414,7 +414,7 @@ package:
 
         enum ushort MAGIC = 0x1337;
 
-        uint crc = crc_fun(name);
+        uint crc = crc_fun(name[]);
         MACAddress addr = MACAddress(0x02, MAGIC >> 8, MAGIC & 0xFF, crc & 0xFF, (crc >> 8) & 0xFF, crc >> 24);
         if (addr.b[5] < 100 || addr.b[5] >= 240)
             addr.b[5] ^= 0x80;

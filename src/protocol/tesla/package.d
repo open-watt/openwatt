@@ -246,6 +246,6 @@ nothrow @nogc:
 
         device.components ~= c;
 
-        g_app.devices.insert(device.id, device);
+        g_app.devices.insert(device.id[], device);
     }
 }

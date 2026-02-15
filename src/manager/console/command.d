@@ -101,7 +101,7 @@ nothrow @nogc:
 //            help.PushBack(m_command);
 //            help.PushBack("`.");
 //            return help;
-            return String(null);
+            return null;
         }
     }
 

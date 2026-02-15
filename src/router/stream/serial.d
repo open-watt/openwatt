@@ -269,7 +269,7 @@ nothrow @nogc:
         }
         else version(Posix)
         {
-            _fd = core.sys.posix.fcntl.open(device.tstringz, O_RDWR | O_NOCTTY | O_NDELAY);
+            _fd = core.sys.posix.fcntl.open(device[].tstringz, O_RDWR | O_NOCTTY | O_NDELAY);
             if (_fd == -1)
             {
                 writeln("Failed to open device %s.\n", this.device);

@@ -360,7 +360,7 @@ nothrow @nogc:
         // TODO: change to try_reattach()
         if (_server.detached)
         {
-            if (HTTPServer s = get_module!HTTPModule.servers.get(_server.name))
+            if (HTTPServer s = get_module!HTTPModule.servers.get(_server.name[]))
                 _server = s;
         }
         return super.validating();
@@ -414,18 +414,18 @@ private:
 
             import urt.mem.allocator;
             import urt.mem.temp;
-            String n = tconcat(name, ++_num_connections).makeString(defaultAllocator);
+            const(char)[] n = tconcat(name, ++_num_connections);
 
-            WebSocket ws = get_module!HTTPModule.websockets.create(n.move, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
+            WebSocket ws = get_module!HTTPModule.websockets.create(n, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
             ws._stream = stream;
             ws._is_server = true;
             stream = null; // TODO: better strategy to notify the caller that we claimed the stream!?
 
-            if (const(char)[] proto = request.header("Sec-WebSocket-Protocol"))
-                ws._protocol = proto.makeString(defaultAllocator);
+            if (String proto = request.header("Sec-WebSocket-Protocol"))
+                ws._protocol = proto.move;
 
             ubyte request_extensions;
-            if (const(char)[] ext = request.header("Sec-WebSocket-Extensions"))
+            if (const(char)[] ext = request.header("Sec-WebSocket-Extensions")[])
             {
                 each_ext: while (const(char)[] e = ext.split!';'.trim)
                 {
@@ -448,7 +448,7 @@ private:
             // this is literally the STUPIDEST spec i've ever read in all my years!!
             SHA1Context sha_state;
             sha_init(sha_state);
-            sha_update(sha_state, request.header("Sec-WebSocket-Key").trim); // hash the challenge
+            sha_update(sha_state, request.header("Sec-WebSocket-Key")[].trim); // hash the challenge
             sha_update(sha_state, "258EAFA5-E914-47DA-95CA-C5AB0DC85B11");   // and this ridiculous magic string!
             auto digest = sha_finalise(sha_state);
             enum EncodeLen = base64_encode_length(digest.length);

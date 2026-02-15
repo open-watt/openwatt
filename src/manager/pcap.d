@@ -293,8 +293,8 @@ protected:
 
     override CompletionStatus startup()
     {
-        const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name(name);
-        _server = get_module!TCPStreamModule.tcp_servers.create(server_name.makeString(defaultAllocator), ObjectFlags.dynamic, NamedArgument("port", _port));
+        const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name(name[]);
+        _server = get_module!TCPStreamModule.tcp_servers.create(server_name, ObjectFlags.dynamic, NamedArgument("port", _port));
         if (!_server)
             return CompletionStatus.error;
 
@@ -642,7 +642,7 @@ private:
                     data_port = cast(ushort)(server._port + 1);  // HACK: we should use a proper ephemeral port allocator here!
 
                 const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name("rpcap-data");
-                data_server = get_module!TCPStreamModule.tcp_servers.alloc(server_name.makeString(defaultAllocator), cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
+                data_server = get_module!TCPStreamModule.tcp_servers.alloc(server_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
                 if (!data_server)
                 {
                     send_error("Failed to create data server");
