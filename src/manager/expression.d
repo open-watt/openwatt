@@ -5,6 +5,8 @@ import urt.conv;
 import urt.log;
 import urt.mem;
 import urt.mem.temp : tconcat;
+import urt.si.unit;
+import urt.si.quantity;
 import urt.string;
 
 public import urt.variant;
@@ -47,7 +49,6 @@ enum Type : ubyte
     sub,
     mul,
     div,
-    mod,
 }
 
 enum Flags : ubyte
@@ -206,7 +207,7 @@ nothrow @nogc:
     {
         switch (ty)
         {
-            case Type.num: return f != 0;
+            case Type.num: return f.value != 0 || f.unit != ScaledUnit(); // NOTE: 0V is 'true'! is this right?
             case Type.str: return get_str().length != 0;
             default:
                 // this is just for getting constants; we don't do expression evaluation here...
@@ -214,17 +215,17 @@ nothrow @nogc:
         }
     }
 
-    double as_num() const
+    VarQuantity as_num() const
     {
         switch (ty)
         {
             case Type.num: return f;
             case Type.str:
                 size_t taken;
-                double d = get_str().parse_float(&taken);
+                VarQuantity q = get_str().parse_quantity(&taken);
                 if (taken != s.length)
-                    return 0;
-                return d;
+                    return VarQuantity(0);
+                return q;
             default:
                 // this is just for getting constants; we don't do expression evaluation here...
                 assert(false);
@@ -260,17 +261,22 @@ nothrow @nogc:
             assert(false, "TODO: what is this? should it convert to a boolean?");
         }
 
-        static double as_number(ref const Variant v)
+        static bool as_quantity(ref const Variant v, out VarQuantity r)
         {
             if (v.isNumber)
-                return v.asDouble;
+            {
+                r = v.asQuantity;
+                return true;
+            }
             if (v.isString)
             {
                 size_t taken;
-                double d = v.asString.parse_float(&taken);
-                if (taken != v.asString.length)
-                    return 0;
-                return d;
+                const(char)[] str = v.asString;
+                VarQuantity q = str.parse_quantity(&taken);
+                if (taken != str.length)
+                    return false;
+                r = q;
+                return true;
             }
             assert(false, "TODO: what is this? should it convert to a number?");
         }
@@ -301,7 +307,10 @@ nothrow @nogc:
                 assert(false, "Only for function args");
             case Type.neg:
                 Variant v = left.evaluate(ctx);
-                return Variant(v.isQuantity ? -v.asQuantity : VarQuantity(-as_number(v)));
+                VarQuantity num;
+                if (!as_quantity(v, num))
+                    return Variant();
+                return Variant(-num);
             case Type.not:
                 return Variant(!as_bool(left.evaluate(ctx)));
             case Type.idx:
@@ -374,8 +383,15 @@ nothrow @nogc:
             case Type.div:
                 Variant lv = left.evaluate(ctx);
                 Variant rv = right.evaluate(ctx);
-                VarQuantity l = lv.isQuantity ? lv.asQuantity : VarQuantity(as_number(lv));
-                VarQuantity r = rv.isQuantity ? rv.asQuantity : VarQuantity(as_number(rv));
+                VarQuantity l, r;
+                if (lv.isQuantity)
+                    l = lv.asQuantity;
+                else if (!as_quantity(lv, l))
+                    return Variant();
+                if (rv.isQuantity)
+                    r = rv.asQuantity;
+                else if (!as_quantity(rv, r))
+                    return Variant();
                 switch (ty)
                 {
                     case Type.add: return Variant(l + r);
@@ -384,13 +400,6 @@ nothrow @nogc:
                     case Type.div: return Variant(l / r);
                     default: assert(false);
                 }
-            case Type.mod:
-                // TODO: it's not clear how this plays into unit arithmetic?
-                //       quantity/unit doesn't define mod; so we'll just truncate the unit for now...
-                Variant lv = left.evaluate(ctx);
-                Variant rv = right.evaluate(ctx);
-                double mod = as_number(lv) % as_number(rv);
-                return Variant(mod);
         }
     }
 
@@ -403,7 +412,7 @@ private:
     union
     {
         const(char)[] s = null;
-        double f;
+        VarQuantity f;
 
         // allocated types; require destruction...
         struct
@@ -439,7 +448,7 @@ private:
             case Type.neg, Type.not:
                 left.gather_elements(elements, has_var_ref);
                 break;
-            case Type.exp_list, Type.idx, Type.cat, Type.or, Type.and, Type.eq, Type.ne, Type.lt, Type.le, Type.add, Type.sub, Type.mul, Type.div, Type.mod:
+            case Type.exp_list, Type.idx, Type.cat, Type.or, Type.and, Type.eq, Type.ne, Type.lt, Type.le, Type.add, Type.sub, Type.mul, Type.div:
                 left.gather_elements(elements, has_var_ref);
                 right.gather_elements(elements, has_var_ref);
                 break;
@@ -742,11 +751,11 @@ Expression* parse_multiplicative_exp(ref const(char)[] text)
     Expression* left = parse_unary_exp(text);
     scope(failure) free_expression(left);
     skip_whitespace(text);
-    while (text.match('*') || text.match('/') || text.match('%'))
+    while (text.match('*') || text.match('/'))
     {
         version (ExpressionDebug)
             writeDebug("MUL");
-        Type ty = text.ptr[-1] == '*' ? Type.mul : text.ptr[-1] == '/' ? Type.div : Type.mod;
+        Type ty = text.ptr[-1] == '*' ? Type.mul : Type.div;
         skip_whitespace(text);
         Expression* right = parse_unary_exp(text);
         left = try_fold(ty, left, right);
@@ -894,8 +903,6 @@ Expression* parse_primary_exp(ref const(char)[] text)
     bool is_var = text[0] == '$';
     bool is_element = text[0] == '@';
     bool identifier;
-    bool numeric;
-    int num_dots = 0;
 
     if (is_var || is_element)
     {
@@ -906,11 +913,9 @@ Expression* parse_primary_exp(ref const(char)[] text)
     }
 
     identifier = text[0].is_alpha || text[0] == '_' || text[0] == '/';
-    if (!identifier)
-        numeric = text[0].is_numeric || ((text[0] == '-' || text[0] == '+') && text.length > 1 && text[1].is_numeric);
 
     string string_delimiters = "/$=,;\"\\{}[]()?'`";
-    size_t len = identifier | numeric; // skip the first char; first char has some special cases
+    size_t len = identifier; // skip the first char; first char has some special cases
     scan_string: while (len < text.length)
     {
         char c = text[len];
@@ -929,15 +934,6 @@ Expression* parse_primary_exp(ref const(char)[] text)
                 break;
             identifier = false;
         }
-        else if (numeric && !c.is_numeric)
-        {
-            if (is_var)
-                break;
-            if (c == '.')
-                ++num_dots;
-            else
-                numeric = false;
-        }
         ++len;
     }
 
@@ -949,39 +945,35 @@ Expression* parse_primary_exp(ref const(char)[] text)
             syntax_error("Invalid token");
     }
 
-    if (numeric && num_dots <= 1)
+    size_t taken = 0;
+    VarQuantity q = text[0..len].parse_quantity(&taken);
+    if (taken == len)
     {
-        size_t taken = 0;
-        double f = text.parse_float(&taken);
-        if (taken == 0)
-            syntax_error("Expected number");
-        else
-            text = text[taken .. $];
+        // we parsed a number!
         r = alloc_expression(Type.num);
         r.flags = Flags.constant;
-        r.f = f;
+        r.f = q;
 
         version (ExpressionDebug)
             writeDebug("NUM: ", r.f);
     }
     else
     {
-        if ((is_var || is_element) && !identifier && !numeric)
+        if ((is_var || is_element) && !identifier)
             syntax_error("Expected identifier");
         r = alloc_expression(is_var ? Type.var : is_element ? Type.elem : Type.str);
         r.flags = Flags.no_quotes;
         if (identifier)
             r.flags |= Flags.identifier;
         r.s = text[0 .. len];
-        text = text[len .. $];
 
         version (ExpressionDebug)
             writeDebug(is_var ? "VAR: " : is_element ? "ELEMENT: " : "STR: ", r.s);
     }
+    text = text[len .. $];
 
     return r;
 }
-
 
 Expression* try_fold(Type ty, Expression* l, Expression* r)
 {
@@ -1071,11 +1063,11 @@ Expression* fold(Type ty, Expression* l, Expression* r)
         case Type.not:
             bool lb = l.as_bool;
             *l = Expression(Type.num);
-            l.f = !lb;
+            l.f = VarQuantity(!lb);
             return l;
 
         case Type.neg:
-            double lf = l.as_num;
+            VarQuantity lf = l.as_num;
             *l = Expression(Type.num);
             l.f = -lf;
             return l;
@@ -1098,7 +1090,7 @@ Expression* fold(Type ty, Expression* l, Expression* r)
             bool ltrue = l.as_bool;
             bool rtrue = r.as_bool;
             *l = Expression(Type.num);
-            l.f = ty == Type.or ? ltrue || rtrue : ltrue && rtrue;
+            l.f = VarQuantity(ty == Type.or ? ltrue || rtrue : ltrue && rtrue);
             return l;
 
         case Type.eq:
@@ -1110,10 +1102,10 @@ Expression* fold(Type ty, Expression* l, Expression* r)
                 // string comparison
                 ptrdiff_t t = l.get_str().cmp(r.get_str());
                 *l = Expression(Type.num);
-                l.f = ty == Type.eq ? t == 0 :
-                      ty == Type.ne ? t != 0 :
-                      ty == Type.lt ? t < 0 :
-                                      t <= 0;
+                l.f = VarQuantity(ty == Type.eq ? t == 0 :
+                                  ty == Type.ne ? t != 0 :
+                                  ty == Type.lt ? t <  0 :
+                                                  t <= 0);
                 return l;
             }
             goto case;
@@ -1122,21 +1114,19 @@ Expression* fold(Type ty, Expression* l, Expression* r)
         case Type.sub:
         case Type.mul:
         case Type.div:
-        case Type.mod:
-            double lf = l.as_num;
-            double rf = r.as_num;
+            VarQuantity lf = l.as_num;
+            VarQuantity rf = r.as_num;
             *l = Expression(Type.num);
             switch (ty)
             {
-                case Type.eq: l.f = lf == rf; break;
-                case Type.ne: l.f = lf != rf; break;
-                case Type.lt: l.f = lf < rf; break;
-                case Type.le: l.f = lf <= rf; break;
+                case Type.eq: l.f = VarQuantity(lf == rf); break;
+                case Type.ne: l.f = VarQuantity(lf != rf); break;
+                case Type.lt: l.f = VarQuantity(lf <  rf); break;
+                case Type.le: l.f = VarQuantity(lf <= rf); break;
                 case Type.add: l.f = lf + rf; break;
                 case Type.sub: l.f = lf - rf; break;
                 case Type.mul: l.f = lf * rf; break;
                 case Type.div: l.f = lf / rf; break;
-                case Type.mod: l.f = lf % rf; break;
                 default: assert(0); // unreachable
             }
             return l;
