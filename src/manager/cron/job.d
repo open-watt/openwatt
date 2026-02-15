@@ -5,6 +5,7 @@ import urt.lifetime;
 import urt.log;
 import urt.string;
 import urt.time;
+import urt.variant;
 
 import manager.base;
 import manager.console;
@@ -24,7 +25,7 @@ class CronJob : BaseObject
                                          Property.create!("run_count", run_count)() ];
 @nogc nothrow:
 
-    alias TypeName = StringLit!"cron-job";
+    enum type_name = "cron-job";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {
@@ -175,8 +176,9 @@ private:
     {
         writeInfo("CronJob '", name, "': Executing command: ", _command);
 
+        Variant result;
         ConsoleSession session = g_app.allocator.allocT!ConsoleSession(g_app.console);
-        CommandState command = g_app.console.execute(session, _command[]);
+        CommandState command = g_app.console.execute(session, _command[], result);
 
         if (command)
             _running_commands ~= RunningCommand(session, command);

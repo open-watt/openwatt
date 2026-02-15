@@ -84,7 +84,7 @@ class SerialStream : Stream
                                          Property.create!("flow-control", flow_control)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"serial";
+    enum type_name = "serial";
 
     this(String name, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {

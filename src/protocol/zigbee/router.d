@@ -28,7 +28,7 @@ class ZigbeeRouter : ZigbeeNode
                                          Property.create!("pan-id", _pan_id)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"zb-router";
+    enum type_name = "zb-router";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

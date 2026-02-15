@@ -21,7 +21,7 @@ class BridgeStream : Stream
     __gshared Property[1] Properties = [ Property.create!("streams", streams)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"bridge-stream";
+    enum type_name = "bridge-stream";
 
     this(String name, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
@@ -30,8 +30,8 @@ nothrow @nogc:
 
     // Properties
 
-    ref const(Array!(ObjectRef!Stream)) streams() const
-        => m_streams;
+    inout(ObjectRef!Stream)[] streams() inout
+        => m_streams[];
     void streams(Stream[] value...)
     {
         m_streams.clear();
@@ -40,7 +40,7 @@ nothrow @nogc:
             m_streams.emplaceBack(s);
 
         m_remoteName.reserve(60);
-        m_remoteName = TypeName[]; // reset remote name
+        m_remoteName = "bridge"; // reset remote name
         m_remoteName ~= '[';
         foreach (i, s; value)
         {

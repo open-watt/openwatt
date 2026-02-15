@@ -80,7 +80,7 @@ class ModbusInterface : BaseInterface
                                          Property.create!("stream", stream)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"modbus";
+    enum type_name = "modbus";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

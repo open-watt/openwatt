@@ -256,7 +256,7 @@ class PCAPServer : BaseObject
                                          Property.create!("allow-anonymous", allow_anonymous)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"pcap-server";
+    enum type_name = "pcap-server";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

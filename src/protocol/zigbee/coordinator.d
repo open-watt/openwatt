@@ -33,7 +33,7 @@ class ZigbeeCoordinator : ZigbeeRouter
                                          Property.create!("channel", channel)() ];
 @nogc:
 
-    alias TypeName = StringLit!"zb-coordinator";
+    enum type_name = "zb-coordinator";
 
     this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
     {

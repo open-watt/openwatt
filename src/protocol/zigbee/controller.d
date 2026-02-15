@@ -44,7 +44,7 @@ class ZigbeeController : BaseObject
                                          Property.create!("auto-create", auto_create)() ];
 @nogc:
 
-    alias TypeName = StringLit!"zigbee-controller";
+    enum type_name = "zigbee-controller";
 
     this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
     {

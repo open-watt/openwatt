@@ -26,7 +26,7 @@ class TCPStream : Stream
                                          Property.create!("keepalive", keepalive)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"tcp";
+    enum type_name = "tcp";
 
     this(String name, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
@@ -384,7 +384,7 @@ class TCPServer : BaseObject
 
 nothrow @nogc:
 
-    alias TypeName = StringLit!"tcp-server";
+    enum type_name = "tcp-server";
 
     alias NewConnection = void delegate(Stream client, void* user_data) nothrow @nogc;
 

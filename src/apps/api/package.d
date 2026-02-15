@@ -6,7 +6,7 @@ import urt.lifetime;
 import urt.map;
 import urt.mem.allocator;
 import urt.mem.temp;
-import urt.meta.enuminfo : enum_key_from_value;
+import urt.meta.enuminfo;
 import urt.string;
 import urt.time;
 
@@ -36,7 +36,7 @@ class APIManager: BaseObject
                                          Property.create!("uri", uri)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"api";
+    enum type_name = "api";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {
@@ -127,6 +127,10 @@ private:
             return handle_health(request, stream);
         if (tail == "/cli/execute")
             return handle_cli_execute(request, stream);
+        if (tail == "/schema")
+            return handle_schema(request, stream);
+        if (tail.startsWith("/enum"))
+            return handle_enum(request, stream, tail[5..$]);
         if (tail == "/get")
             return handle_get(request, stream);
         if (tail == "/set")
@@ -188,12 +192,13 @@ private:
             return 0;
         }
 
+        Variant result;
         StringSession session = g_app.console.createSession!StringSession();
-        CommandState cmd = g_app.console.execute(session, command_text);
+        CommandState cmd = g_app.console.execute(session, command_text, result);
         if (cmd is null)
         {
             MutableString!0 output = session.takeOutput();
-            send_cli_response(request.http_version, stream, output[]);
+            send_cli_response(request.http_version, stream, output[], result);
             defaultAllocator().freeT(session);
             return 0;
         }
@@ -205,9 +210,21 @@ private:
         return 0;
     }
 
-    void send_cli_response(HTTPVersion http_version, ref Stream stream, const(char)[] output)
+    void send_cli_response(HTTPVersion http_version, ref Stream stream, const(char)[] output, ref Variant result)
     {
-        HTTPMessage response = create_response(http_version, 200, StringLit!"OK", StringLit!"application/json", "{\"output\":");
+        HTTPMessage response = create_response(http_version, 200, StringLit!"OK", StringLit!"application/json", "{\"result\":");
+
+        ptrdiff_t len = result.write_json(null, true, 0, 0);
+        if (len > 0)
+        {
+            auto tmp = Array!char(Reserve, len);
+            result.write_json(tmp.extend(len), true, 0, 0);
+            response.content ~= tmp[];
+        }
+        else
+            response.content ~= "null";
+        response.content ~= ",\"output\":";
+
         if (output.length > 0)
         {
             import urt.format.json;
@@ -223,6 +240,119 @@ private:
             response.content ~= "\"\"}";
         add_cors_headers(response);
         stream.write(response.format_message()[]);
+    }
+
+    int handle_schema(ref const HTTPMessage request, ref Stream stream)
+    {
+        Array!char json;
+        json.reserve(4096);
+        json ~= '{';
+
+        bool first_col = true;
+        foreach (col; g_app.collections.values)
+        {
+            if (!first_col)
+                json ~= ',';
+            first_col = false;
+
+            json.append('\"', col.collection.type_info.type[], "\":{\"path\":\"", col.path[], "\",\"properties\":{");
+
+            bool first_prop = true;
+            foreach (prop; col.collection.type_info.properties)
+            {
+                if (!first_prop)
+                    json ~= ',';
+                first_prop = false;
+
+                json.append('\"', prop.name[], "\":{\"access\":\"");
+                if (prop.get && prop.set)
+                    json ~= "rw";
+                else if (prop.get)
+                    json ~= "r";
+                else if (prop.set)
+                    json ~= "w";
+                json ~= '\"';
+
+                if (!prop.type[0].empty)
+                {
+                    json ~= ",\"type\":[";
+                    json.append('\"', prop.type[0][], '\"');
+                    if (!prop.type[1].empty)
+                        json.append(",\"", prop.type[1][], '\"');
+                    json ~= ']';
+                }
+                json ~= '}';
+            }
+            json ~= "}}";
+        }
+        json ~= '}';
+
+        HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", json[]);
+        add_cors_headers(response);
+        stream.write(response.format_message()[]);
+        return 0;
+    }
+
+    int handle_enum(ref const HTTPMessage request, ref Stream stream, const(char)[] name)
+    {
+        const(VoidEnumInfo)* e;
+        if (!name.empty)
+        {
+            if (name[0] != '/')
+            {
+                HTTPMessage response = create_response(request.http_version, 404, StringLit!"Not Found", StringLit!"application/json", "{\"error\":\"Not Found\"}");
+                stream.write(response.format_message()[]);
+                return 0;
+            }
+            name = name[1..$];
+
+            if (auto pe = name in g_app.enum_templates)
+                e = *pe;
+        }
+        else
+        {
+            // parse json request for many enums...
+            assert(false, "TODO");
+        }
+
+        Array!char json;
+        if (!e)
+            json = "{}";
+        else
+        {
+            json.reserve(512);
+            json ~= '{';
+
+            // TODO: just one for now...
+//            bool first_enum = true;
+//            foreach (kv; g_app.enums)
+            {
+//                if (!first_enum)
+//                    json ~= ',';
+//                first_enum = false;
+
+                json.append('\"', name, "\":{");
+                bool first_member = true;
+                foreach (i; 0 .. e.count)
+                {
+                    if (!first_member)
+                        json ~= ',';
+                    first_member = false;
+
+                    // TODO: return values and descriptions...
+                    const(char)[] key = e.key_by_decl_index(i);
+//                    json.append('\"', key, "\":", e.value_by_decl_index(i), '\"');
+                    json.append('\"', key, "\":", e.value_for(key)); // TODO: there should be a function to fetch it by declaration index!
+                }
+                json ~= '}';
+            }
+            json ~= '}';
+        }
+
+        HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", json[]);
+        add_cors_headers(response);
+        stream.write(response.format_message()[]);
+        return 0;
     }
 
     int handle_get(ref const HTTPMessage request, ref Stream stream)
@@ -501,7 +631,7 @@ private:
                     else
                     {
                         // TODO: is there any massaging for json type to data type we need to do here?
-                        elem.value = value;
+                        elem.value(value, request.timestamp);
                         response_json ~= "{\"success\":true}";
                         ++success_count;
                     }
@@ -656,7 +786,7 @@ private:
             }
 
             MutableString!0 output = req.session.takeOutput();
-            send_cli_response(req.ver, req.stream, output[]);
+            send_cli_response(req.ver, req.stream, output[], req.command.result);
 
             defaultAllocator().freeT(req.session);
             _pending_requests.remove(i);

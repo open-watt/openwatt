@@ -48,7 +48,7 @@ class WebSocket : BaseObject
 {
 nothrow @nogc:
 
-    alias TypeName = StringLit!"websocket";
+    enum type_name = "websocket";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {
@@ -316,7 +316,7 @@ class WebSocketServer : BaseObject
                                          Property.create!("uri", uri)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"websocket-server";
+    enum type_name = "websocket-server";
 
     alias NewConnection = void delegate(WebSocket client, void* user_data) nothrow @nogc;
 

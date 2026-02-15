@@ -27,7 +27,7 @@ class Secret : BaseObject
                                          Property.create!("services", services)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"secret";
+    enum type_name = "secret";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {
@@ -105,6 +105,9 @@ nothrow @nogc:
             }
         }
     }
+    void services(ref Array!String value)
+        => services(value[]);
+
 
     // TODO: profile specification
     //       support: profile=def_profile,l2tp:l2tp_profile,ppp:ppp_profile,wifi:wifi_profile

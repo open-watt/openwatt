@@ -11,6 +11,8 @@ import urt.string;
 
 public import urt.variant;
 
+import manager.value;
+
 //version = ExpressionDebug;
 
 @nogc:
@@ -71,7 +73,7 @@ struct NamedArgument
     this(T)(const(char)[] name, auto ref T value) nothrow @nogc
     {
         this.name = name;
-        this.value = Variant(forward!value);
+        this.value = to_variant(forward!value);
     }
 
     const(char)[] name;
@@ -93,7 +95,7 @@ nothrow @nogc:
     CommandState state;
 
     import manager.console;
-    CommandState execute(Session session, Scope scope_)
+    CommandState execute(Session session, Scope scope_, out Variant result)
     {
         if (script.length == 0)
             return null;
@@ -108,7 +110,7 @@ nothrow @nogc:
             vars ~= arg.evaluate(ctx);
         foreach (ref arg; script[0].named_args)
             named_vars ~= NamedArgument(arg.name.get_str(), arg.value.evaluate(ctx));
-        return scope_.execute(session, vars[], named_vars[]);
+        return scope_.execute(session, vars[], named_vars[], result);
     }
 }
 

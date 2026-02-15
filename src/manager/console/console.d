@@ -7,6 +7,7 @@ import urt.string;
 import urt.string.format;
 import urt.util;
 
+import manager : g_app;
 import manager.collection;
 import manager.console.builtin_commands;
 import manager.console.command;
@@ -132,7 +133,7 @@ nothrow @nogc:
     }
 
     // TODO: don't like this API, it should be a method of Session...
-    CommandState execute(Session session, const(char)[] cmdLine)
+    CommandState execute(Session session, const(char)[] cmdLine, out Variant result)
     {
         assert(session.current_command is null, "TODO: gotta do something about concurrent command execution...");
 
@@ -151,7 +152,7 @@ nothrow @nogc:
             Context ctx = Context(session, s, cmds.move);
             // TODO: return context to caller...
 
-            return ctx.execute(session, s);
+            return ctx.execute(session, s, result);
         }
         catch (Exception e)
         {
@@ -227,7 +228,7 @@ nothrow @nogc:
         return register_command(_scope, FunctionCommand.create!method(this, instance, commandName));
     }
 
-    void register_collection(Type)(const(char)[] _scope, ref Collection!Type collection)
+    void register_collection(Type)(string _scope, ref Collection!Type collection)
     {
         pragma(inline, true);
 
@@ -235,9 +236,11 @@ nothrow @nogc:
         debug assert(c is null, "Collection has been registered before!");
         c = &collection;
 
+        g_app.register_collection(*c, _scope);
+
         register_collection_impl(_scope, collection);
     }
-    private void register_collection_impl(const(char)[] _scope, ref BaseCollection collection)
+    private void register_collection_impl(string _scope, ref BaseCollection collection)
     {
         import manager.console.collection_commands;
 

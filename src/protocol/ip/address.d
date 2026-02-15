@@ -17,7 +17,7 @@ class IPAddress : BaseObject
                                          Property.create!("interface", iface)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"ip-address";
+    enum type_name = "ip-address";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

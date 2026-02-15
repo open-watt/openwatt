@@ -15,12 +15,12 @@ nothrow @nogc:
 
 const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
 {
-    static if (!is(typeof(Type.TypeName)))
-        return null; // Type.TypeName must be defined
+    static if (!is(typeof(Type.type_name)))
+        return null; // Type.type_name must be defined
     else
     {
         import urt.mem.allocator;
-        __gshared const CollectionTypeInfo ti = CollectionTypeInfo(Type.TypeName,
+        __gshared const CollectionTypeInfo ti = CollectionTypeInfo(StringLit!(Type.type_name),
                                                                    all_properties!Type(),
                                                                    (){
                                                                         static if (is(typeof(Type.validate_name) == function))
@@ -29,7 +29,7 @@ const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
                                                                             return null;
                                                                    }(),
                                                                    (ref BaseCollection c, const(char)[] n, ObjectFlags flags)
-                                                                       => defaultAllocator.allocT!Type((n ? n : c.generate_name(Type.TypeName[])).makeString(defaultAllocator), flags)
+                                                                       => defaultAllocator.allocT!Type((n ? n : c.generate_name(c.type_info.type[])).makeString(defaultAllocator), flags)
                                                                    );
         return &ti;
     }

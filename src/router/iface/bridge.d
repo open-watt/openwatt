@@ -27,7 +27,7 @@ class BridgeInterface : BaseInterface
                                          Property.create!("untagged-egress", untagged_egress)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"bridge";
+    enum type_name = "bridge";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

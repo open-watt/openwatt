@@ -67,7 +67,7 @@ class ZigbeeInterface : BaseInterface
                                          Property.create!("pan-id", pan_id)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"zigbee";
+    enum type_name = "zigbee";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

@@ -26,7 +26,7 @@ class MQTTBroker : BaseObject
                                          Property.create!("client-timeout", _client_timeout)() ];
 nothrow @nogc:
 
-    alias TypeName = StringLit!"mqqt-broker";
+    enum type_name = "mqqt-broker";
 
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {

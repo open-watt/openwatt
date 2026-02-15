@@ -64,7 +64,7 @@ class EZSPClient : BaseObject
                                          Property.create!("protocol-version", protocol_version)() ];
 @nogc:
 
-    alias TypeName = StringLit!"ezsp";
+    enum type_name = "ezsp";
 
     this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
     {
