@@ -202,7 +202,7 @@ protected:
         }
         else
         {
-            if (_ezsp_client.stack_type == EZSPClient.StackType.Coordinator)
+            if (_ezsp_client.stack_type == EZSPStackType.coordinator)
             {
                 writeError("EZSP device must run router firmware be used as an interface");
                 return CompletionStatus.error;

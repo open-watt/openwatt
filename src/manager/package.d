@@ -93,6 +93,8 @@ nothrow @nogc:
         g_app = this;
 
         register_enum!Boolean();
+        register_enum!ObjectFlags();
+        register_enum!HashFunction();
 
         register_intrinsic(StringLit!"select", &select);
         register_intrinsic(StringLit!"math.pow", &pow);

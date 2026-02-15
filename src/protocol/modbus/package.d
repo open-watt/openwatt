@@ -33,6 +33,8 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.register_enum!ModbusProtocol();
+
         g_app.console.register_command!client_add("/protocol/modbus/client", this, "add");
         g_app.console.register_command!device_add("/protocol/modbus/device", this, "add");
         g_app.console.register_command!request_raw("/protocol/modbus/client/request", this, "raw");
