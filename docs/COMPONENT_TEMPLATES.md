@@ -352,10 +352,9 @@ Solar/battery/hybrid inverter with optional grid, battery, renewable inputs, and
 - `solar: Solar` - Solar PV input(s)
 - `battery: Battery` - Connected battery system
 - `charge_control: ChargeControl` - Battery charge controller (for managing battery charging)
-- `grid: RealtimeEnergyMeter` / `grid_cumulative: CumulativeEnergyMeter` - Grid connection (import/export)
-- `load: RealtimeEnergyMeter` / `load_cumulative: CumulativeEnergyMeter` - Load output (consumption)
+- `load: RealtimeEnergyMeter` / `load_cumulative: CumulativeEnergyMeter` - Inverter load
 - `backup: RealtimeEnergyMeter` / `backup_cumulative: CumulativeEnergyMeter` - Backup/EPS output
-- `meter: RealtimeEnergyMeter` / `meter_cumulative: CumulativeEnergyMeter` - External energy meter for self-consumption reference
+- `export_meter: RealtimeEnergyMeter` / `meter_cumulative: CumulativeEnergyMeter` - External energy meter for self-consumption reference
 - `evse: EVSE` - Integrated EV charger (for inverters with built-in EVSE)
 - `config: Configuration` - Inverter configuration
 
@@ -439,6 +438,9 @@ On/off control devices.
 - `type: enum` - Switch type - light, power, outlet (power outlet), fan, etc
 - `mode: enum` - Switch mode
 - `timer: s` - Timer value
+
+### Sub-components
+- `meter: RealtimeEnergyMeter` / `meter_cumulative: CumulativeEnergyMeter` - Switched circuit energy meter
 
 ---
 
