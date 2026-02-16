@@ -190,8 +190,8 @@ nothrow @nogc:
 //        device.components ~= c;
 
         // energy meter
-        c = g_app.allocator.allocT!Component(String("realtime".addString));
-        c.template_ = "RealtimeEnergyMeter".addString;
+        c = g_app.allocator.allocT!Component(String("meter".addString));
+        c.template_ = "EnergyMeter".addString;
 
         e = g_app.allocator.allocT!Element();
         e.id = "type".addString;
@@ -238,18 +238,6 @@ nothrow @nogc:
         e.id = "power".addString;
         c.elements ~= e;
         sampler.add_element(e);
-
-        device.components ~= c;
-
-        // cumulative energy meter
-        c = g_app.allocator.allocT!Component(String("cumulative".addString));
-        c.template_ = "CumulativeEnergyMeter".addString;
-
-        e = g_app.allocator.allocT!Element();
-        e.id = "type".addString;
-        e.value = "three-phase".addString;
-        e.sampling_mode = SamplingMode.constant;
-        c.elements ~= e;
 
         e = g_app.allocator.allocT!Element();
         e.id = "import".addString;

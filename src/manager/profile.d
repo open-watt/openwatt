@@ -1600,9 +1600,7 @@ __gshared immutable KnownElementTemplate[][string] g_well_known_elements = [
     "Wifi": g_Wifi_elements,
     "Cellular": g_Cellular_elements,
     "Zigbee": g_Zigbee_elements,
-    "RealtimeEnergyMeter": g_RealtimeEnergyMeter_elements,
-    "CumulativeEnergyMeter": g_CumulativeEnergyMeter_elements,
-    "DemandEnergyMeter": g_DemandEnergyMeter_elements,
+    "EnergyMeter": g_EnergyMeter_elements,
     "Battery": g_Battery_elements,
     "BatteryConfig": g_BatteryConfig_elements,
     "Solar": g_Solar_elements,
@@ -1685,7 +1683,7 @@ __gshared immutable KnownElementTemplate[] g_Zigbee_elements = [
     MakeElementTemplate!("address", null, "Network Address", null, Frequency.medium),
 ];
 
-__gshared immutable KnownElementTemplate[] g_RealtimeEnergyMeter_elements = [
+__gshared immutable KnownElementTemplate[] g_EnergyMeter_elements = [
     MakeElementTemplate!("type", "CircuitType", "Meter Type", "Circuit type of energy meter", Frequency.constant),
     MakeElementTemplate!("voltage", "V", "Voltage", "Line voltage", Frequency.realtime),
     MakeElementTemplate!("voltage1", "V", "Voltage 1", "Phase A Voltage", Frequency.realtime),
@@ -1718,9 +1716,8 @@ __gshared immutable KnownElementTemplate[] g_RealtimeEnergyMeter_elements = [
     MakeElementTemplate!("frequency", "Hz", "Frequency", "Line frequency", Frequency.realtime),
     MakeElementTemplate!("phase", "deg", "Phase Angle", null, Frequency.realtime),
 //    MakeElementTemplate!("nature", "LoadNature", "Load Nature", "Load nature", Frequency.constant), // TODO: maybe move the LoadNature enum into core and make it 1st class?
-];
 
-__gshared immutable KnownElementTemplate[] g_CumulativeEnergyMeter_elements = [
+    // cumulative energy
     MakeElementTemplate!("type", "CircuitType", "Meter Type", "Circuit type of energy meter", Frequency.constant),
     MakeElementTemplate!("import", "kWh", "Total Import Energy", "Accumulated imported active energy", Frequency.medium),
     MakeElementTemplate!("import1", "kWh", "Total Import Energy 1", "Phase A imported active energy", Frequency.medium),
@@ -1758,9 +1755,8 @@ __gshared immutable KnownElementTemplate[] g_CumulativeEnergyMeter_elements = [
     MakeElementTemplate!("total_apparent1", "kVAh", "Total Apparent Energy 1", "Phase A accumulated apparent energy", Frequency.medium),
     MakeElementTemplate!("total_apparent2", "kVAh", "Total Apparent Energy 2", "Phase B accumulated apparent energy", Frequency.medium),
     MakeElementTemplate!("total_apparent3", "kVAh", "Total Apparent Energy 3", "Phase C accumulated apparent energy", Frequency.medium),
-];
 
-__gshared immutable KnownElementTemplate[] g_DemandEnergyMeter_elements = [
+    // demand
     MakeElementTemplate!("demand", "W", "Active Demand", "Active power demand", Frequency.medium),
     MakeElementTemplate!("demand1", "W", "Active Demand 1", "Phase A active power demand", Frequency.medium),
     MakeElementTemplate!("demand2", "W", "Active Demand 2", "Phase B active power demand", Frequency.medium),

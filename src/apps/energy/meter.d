@@ -105,42 +105,21 @@ static CircuitType get_meter_type(Component meter)
     if (!meter)
         return CircuitType.unknown;
 
-    if (meter.template_[] == "RealtimeEnergyMeter" || meter.template_[] == "CumulativeEnergyMeter")
+    Element* e = meter.find_element("type");
+    // TODO: this should compare to-lower!! (case-insensitive)
+    switch(e && e.value.isString ? e.value.asString : "")
     {
-        Element* e = meter.find_element("type");
-        // TODO: this should compare to-lower!! (case-insensitive)
-        switch(e && e.value.isString ? e.value.asString : "")
-        {
-            case "dc":              return CircuitType.dc;
-            case "single-phase":    return CircuitType.single_phase;
-            case "split-phase":     return CircuitType.split_phase;
-            case "three-phase":     return CircuitType.three_phase;
-            case "delta":           return CircuitType.delta;
-            default:                return CircuitType.unknown;
-        }
+        case "dc":              return CircuitType.dc;
+        case "single-phase":    return CircuitType.single_phase;
+        case "split-phase":     return CircuitType.split_phase;
+        case "three-phase":     return CircuitType.three_phase;
+        case "delta":           return CircuitType.delta;
+        default:                break;
     }
-
-    CircuitType type;
-    foreach (c; meter.components)
-    {
-        if (c.template_[] == "RealtimeEnergyMeter" || c.template_[] == "CumulativeEnergyMeter")
-        {
-            CircuitType t = get_meter_type(c);
-            if (t != CircuitType.unknown)
-            {
-                if (type != CircuitType.unknown && type != t)
-                {
-                    assert(type == t, "Inconsistent meter types!");
-                    return CircuitType.unknown;
-                }
-                type = t;
-            }
-        }
-    }
-    return type;
+    return CircuitType.unknown;
 }
 
-static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.all)
+static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.all)
 {
     import manager.element;
     import urt.string.format;
@@ -184,9 +163,6 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.al
         FieldFlags.total_apparent,
     ];
 
-    Component realtime;
-    Component cumulative;
-
     MeterData r;
     r.type = get_meter_type(meter);
 
@@ -216,34 +192,16 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.al
         r.total_apparent.ptr,
     ];
 
-    if (meter.template_[] == "RealtimeEnergyMeter")
-        realtime = meter;
-    else if (meter.template_[] == "CumulativeEnergyMeter")
-        cumulative = meter;
-    else
-    {
-        foreach (c; meter.components)
-        {
-            if (c.template_[] == "RealtimeEnergyMeter")
-                realtime = c;
-            else if (c.template_[] == "CumulativeEnergyMeter")
-                cumulative = c;
-        }
-    }
-
     bool need_calculate_system_pf;
     for (size_t i = 0, bit = 1; i < num_fields; ++i, bit <<= 1)
     {
         if ((fields & bit) == 0)
             continue;
-        Component c = i >= cumulative_fields ? cumulative : realtime;
-        if (!c)
-            continue;
 
         // frequency is a global value
         if (i == MeterField.frequency)
         {
-            if (Element* e = c.find_element(field_names[i]))
+            if (Element* e = meter.find_element(field_names[i]))
             {
                 r.freq = e.scaled_value!Hertz();
                 r.fields |= FieldFlags.frequency;
@@ -254,7 +212,7 @@ static MeterData getMeterData(Component meter, FieldFlags fields = FieldFlags.al
         ubyte values_present = 0;
         for (size_t j = 0; j < 4; ++j)
         {
-            if (Element* e = c.find_element(j == 0 ? field_names[i] : tconcat(field_names[i], j)))
+            if (Element* e = meter.find_element(j == 0 ? field_names[i] : tconcat(field_names[i], j)))
             {
                 f[i][j] = e.normalised_value();
                 values_present |= 1 << j;
