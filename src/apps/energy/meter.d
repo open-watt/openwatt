@@ -298,7 +298,16 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         }
         else if ((r.fields & primary_fields) == (FieldFlags.current | FieldFlags.power))
         {
-            assert(false, "TODO");
+            // TODO: we can do better if we know reactive or power factor... maybe the work down below needs to be moved up?
+            foreach (i; 0..4)
+            {
+                if (r.current[i] == MeterAmps(0))
+                    r.voltage[i] = MeterVolts(0);
+                if (r.fields & FieldFlags.apparent)
+                    r.voltage[i] = MeterWatts(r.apparent[i]) / r.current[i]; // V = VA/I
+                else
+                    r.voltage[i] = r.active[i] / r.current[i]; // V = P/I (assuming PF=1)
+            }
             r.fields |= FieldFlags.voltage;
         }
     }

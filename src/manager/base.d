@@ -359,11 +359,13 @@ nothrow @nogc:
     final void subscribe(StateSignalHandler handler)
     {
         assert(!_subscribers[].contains(handler), "Already registered");
+        debug writeDebug(_type[], " '", _name, "' (", cast(void*)this, ") new subscriber: ", handler.ptr);
         _subscribers ~= handler;
     }
 
     final void unsubscribe(StateSignalHandler handler) pure
     {
+        debug writeDebug(_type[], " '", _name, "' (", cast(void*)this, ") remove subscriber: ", handler.ptr);
         _subscribers.removeFirstSwapLast(handler);
     }
 
@@ -747,7 +749,7 @@ Variant SynthGetter(Getters...)(BaseObject item) nothrow @nogc
     static if (is(ReturnType!(__traits(child, instance, Getter)) == Variant))
         return __traits(child, instance, Getter)();
     else
-        return Variant(to_variant(__traits(child, instance, Getter)()));
+        return to_variant(__traits(child, instance, Getter)());
 }
 
 StringResult SynthSetter(Setters...)(ref const Variant value, BaseObject item) nothrow @nogc
