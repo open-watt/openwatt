@@ -86,6 +86,7 @@ void register_modules(Application app)
     import protocol;
     register_module!(protocol.can)(app);
     register_module!(protocol.dns)(app);
+    register_module!(protocol.esphome)(app);
     register_module!(protocol.ezsp)(app);
     register_module!(protocol.goodwe)(app);
     register_module!(protocol.http)(app);

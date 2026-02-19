@@ -92,6 +92,10 @@ Can be nested for grouped parameters. Standard network sub-components:
 - `mac_address: string` - MAC address
 - `ip_address: string` - IPv4 address
 
+### bluetooth: Bluetooth
+- `status: enum/string` - Connection status
+- `mac_address: string` - MAC address
+
 ### cellular: Cellular
 - `status: enum/string` - Connection status
 - `signal_strength: dBm/%` - Signal strength

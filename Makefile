@@ -180,7 +180,7 @@ endif
 
 ifeq ($(COMPILER),ldc)
     DC ?= ldc2
-    DFLAGS := $(DFLAGS) -I $(RTSRCDIR) -I $(SRCDIR)
+    DFLAGS := $(DFLAGS) -I $(RTSRCDIR) -I $(SRCDIR) -J $(SRCDIR)
 
     ifeq ($(ARCH),x86_64)
 #        DFLAGS := $(DFLAGS) -mtriple=x86_64-linux-gnu
@@ -246,7 +246,7 @@ ifeq ($(COMPILER),ldc)
     COMPILE_CMD = "$(DC)" $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -deps=$(DEPFILE) $(SOURCES)
 else ifeq ($(COMPILER),dmd)
     DC ?= dmd
-    DFLAGS := $(DFLAGS) -I=$(RTSRCDIR) -I=$(SRCDIR)
+    DFLAGS := $(DFLAGS) -I=$(RTSRCDIR) -I=$(SRCDIR) -J=$(SRCDIR)
 
     ifeq ($(ARCH),x86_64)
 #        DFLAGS := $(DFLAGS) -m64

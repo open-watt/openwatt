@@ -25,11 +25,17 @@
     <Filter Include="src">
       <UniqueIdentifier>{9560f9a9-c6dd-4b6c-9b32-ada7955c0346}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\apps">
+      <UniqueIdentifier>{8643bbe8-bb9e-448c-88a7-e8beae4c45e8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\apps\api">
+      <UniqueIdentifier>{8e7eb135-c8b1-4d1c-9b24-0b1b9e1f0f07}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\apps\energy">
+      <UniqueIdentifier>{64b88f6a-915f-4210-b838-b7905c8455ad}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\db">
       <UniqueIdentifier>{5d186ff6-592c-44bc-99a8-f871c74d47b3}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="src\router">
-      <UniqueIdentifier>{246d3667-a7d7-4f96-bd0a-7d418f4c1d4d}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\manager">
       <UniqueIdentifier>{a7edf0a4-cbca-4a75-bf4f-548fe4b7764d}</UniqueIdentifier>
@@ -40,9 +46,6 @@
     <Filter Include="src\manager\cron">
       <UniqueIdentifier>{24a67829-ea5b-41cb-8fb9-ccc6c1b10293}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\router\stream">
-      <UniqueIdentifier>{e1c51f7a-999b-4f32-97d6-9364d012699e}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\devices">
       <UniqueIdentifier>{84643f1c-1a0e-42b4-a548-df49e1005d4f}</UniqueIdentifier>
     </Filter>
@@ -52,23 +55,23 @@
     <Filter Include="src\manager\os">
       <UniqueIdentifier>{a17bdf4a-06e2-4856-bb09-afe42c85e130}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\router\iface">
-      <UniqueIdentifier>{0e965bb7-e2d4-44f9-a982-88df797db1fb}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\protocol">
       <UniqueIdentifier>{e3d26653-740a-4de4-ad46-6df4e33023d0}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\protocol\can">
       <UniqueIdentifier>{9922e1c0-3780-4a00-9212-478d66443f98}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\esphome">
+      <UniqueIdentifier>{03c25b68-9fb8-42a5-875f-998be53670a9}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\protocol\esphome\protobuf">
+      <UniqueIdentifier>{120add6b-a8dc-4a80-b82a-4c126e766583}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\protocol\goodwe">
       <UniqueIdentifier>{45765f37-2305-4031-b32b-a2c3b88bebe0}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\protocol\modbus">
       <UniqueIdentifier>{aba64285-47d8-4af3-a4bf-5284dbbeea44}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="src\router\port">
-      <UniqueIdentifier>{b7012d9a-641d-492c-8634-9dbdb9c38a25}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\protocol\mqtt">
       <UniqueIdentifier>{ff7e033e-b5f6-472c-8460-916db93b4dbe}</UniqueIdentifier>
@@ -100,14 +103,17 @@
     <Filter Include="src\protocol\ip">
       <UniqueIdentifier>{7a6b8c28-6a40-46e8-9b2e-2e28576d413a}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\apps">
-      <UniqueIdentifier>{8643bbe8-bb9e-448c-88a7-e8beae4c45e8}</UniqueIdentifier>
+    <Filter Include="src\router">
+      <UniqueIdentifier>{246d3667-a7d7-4f96-bd0a-7d418f4c1d4d}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\apps\api">
-      <UniqueIdentifier>{8e7eb135-c8b1-4d1c-9b24-0b1b9e1f0f07}</UniqueIdentifier>
+    <Filter Include="src\router\iface">
+      <UniqueIdentifier>{0e965bb7-e2d4-44f9-a982-88df797db1fb}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\apps\energy">
-      <UniqueIdentifier>{64b88f6a-915f-4210-b838-b7905c8455ad}</UniqueIdentifier>
+    <Filter Include="src\router\port">
+      <UniqueIdentifier>{b7012d9a-641d-492c-8634-9dbdb9c38a25}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\router\stream">
+      <UniqueIdentifier>{e1c51f7a-999b-4f32-97d6-9364d012699e}</UniqueIdentifier>
     </Filter>
     <Filter Include="third_party">
       <UniqueIdentifier>{bfd0dc75-e884-4b56-bee1-3f94570b47b0}</UniqueIdentifier>
@@ -257,6 +263,21 @@
     </DCompile>
     <DCompile Include="src\protocol\can\sampler.d">
       <Filter>src\protocol\can</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\esphome\client.d">
+      <Filter>src\protocol\esphome</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\esphome\package.d">
+      <Filter>src\protocol\esphome</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\esphome\protobuf\package.d">
+      <Filter>src\protocol\esphome\protobuf</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\esphome\protobuf\parse.d">
+      <Filter>src\protocol\esphome\protobuf</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\esphome\sampler.d">
+      <Filter>src\protocol\esphome</Filter>
     </DCompile>
     <DCompile Include="src\protocol\goodwe\aa55.d">
       <Filter>src\protocol\goodwe</Filter>
@@ -737,6 +758,9 @@
       <Filter>docs</Filter>
     </None>
     <None Include="Makefile" />
+    <None Include="src\protocol\esphome\api.proto">
+      <Filter>src\protocol\esphome</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\npcap-bpf.h">
