@@ -30,21 +30,21 @@ nothrow @nogc:
 
 template struct_name_override(T)
 {
-    static if (is(U == IPAddr))
+    static if (is(T == IPAddr))
         enum struct_name_override = "ipv4";
-    else static if (is(U == IPv6Addr))
+    else static if (is(T == IPv6Addr))
         enum struct_name_override = "ipv6";
-    else static if (is(U == IPNetworkAddress))
+    else static if (is(T == IPNetworkAddress))
         enum struct_name_override = "ipv4netwk";
-    else static if (is(U == IPv6NetworkAddress))
+    else static if (is(T == IPv6NetworkAddress))
         enum struct_name_override = "ipv6netwk";
-    else static if (is(U == InetAddress))
+    else static if (is(T == InetAddress))
         enum struct_name_override = "inetaddr";
-    else static if (is(U == MACAddress))
+    else static if (is(T == MACAddress))
         enum struct_name_override = "mac";
-    else static if (is(U == EUI64))
+    else static if (is(T == EUI64))
         enum struct_name_override = "eui";
-    else static if (is(U == DateTime) || is(U == SysTime))
+    else static if (is(T == DateTime) || is(T == SysTime))
         enum struct_name_override = "dt";
     else
         enum struct_name_override = T.stringof;
@@ -149,12 +149,16 @@ Variant to_variant(T)(ref ObjectRef!T v) nothrow @nogc
 Variant to_variant(Stream stream) nothrow @nogc
 {
     // TODO: remove this case and allow base collection type to cover it?
+    if (!stream)
+        return Variant();
     return Variant(stream.name[]);
 }
 
 Variant to_variant(BaseInterface iface) nothrow @nogc
 {
     // TODO: remove this case and allow base collection type to cover it?
+    if (!iface)
+        return Variant();
     return Variant(iface.name[]);
 }
 
@@ -164,6 +168,8 @@ Variant to_variant(T)(T v) nothrow @nogc
     // we would like to store collection types in variant, but we need a few things
     // 1. variant typeinfo needs to know the hierarchy for asUser!BaseType
     // 2. it must be stored as an ObjectRef!T, because if it's in a variant and the item is destroyed, the variant needs to be corrected!
+    if (!v)
+        return Variant();
     return Variant(v.name[]);
 }
 

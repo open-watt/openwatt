@@ -20,7 +20,8 @@ void add_collection_commands(Scope s, ref BaseCollection collection)
 {
     if (collection.type_info)
     {
-        s.add_command(defaultAllocator.allocT!CollectionAddCommand(s.console, collection));
+        if (collection.type_info.create)
+            s.add_command(defaultAllocator.allocT!CollectionAddCommand(s.console, collection));
         s.add_command(defaultAllocator.allocT!CollectionRemoveCommand(s.console, collection));
     }
     s.add_command(defaultAllocator.allocT!CollectionGetCommand(s.console, collection));
@@ -403,17 +404,10 @@ nothrow @nogc:
         const(Property*)[] properties = _collection.type_info.properties;
 
         auto items = Array!Variant(Reserve, _collection.item_count);
-        auto props = Array!VariantKVP(Reserve, properties.length);
         foreach (item; _collection.values)
         {
-            props.clear();
-            foreach (p; properties)
-            {
-                if (!p.get)
-                    continue;
-                props.emplaceBack(p.name[], p.get(item));
-            }
-            items.emplaceBack(props[]);
+            // filter items?
+            items ~= item.gather();
         }
         result = Variant(items.move);
         return null;
@@ -572,7 +566,7 @@ MutableString!0 complete(const(char)[] cmdLine, ref BaseCollection collection, S
 
 Array!String suggest(const(char)[] cmdLine, ref BaseCollection collection, SuggestFlags flags)
 {
-    cmdLine.trimFront();
+    cmdLine = cmdLine.trimFront();
 
     // get incomplete argument
     ptrdiff_t lastToken = cmdLine.length;

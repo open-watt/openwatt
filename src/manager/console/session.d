@@ -330,7 +330,7 @@ nothrow @nogc:
                 else if (t[i] == '\a')
                 {
                     i += 1;
-                    doBell();
+                    do_bell();
                 }
             }
             else
@@ -457,11 +457,12 @@ protected:
                     // echo the result (since it wasn't captured)
                     if (!result.isNull)
                     {
-                        char[1024] buffer = void;
-                        ptrdiff_t l = result.toString(buffer, null, null);
-                        assert(l >= 0, "TODO: fix stringify-failure, or print error...?");
-                        if (l > 0)
-                            write_line(buffer[0..l]);
+                        ptrdiff_t l = result.toString(null, null, null);
+                        if (l <= 0)
+                            return;
+                        Array!char buffer;
+                        l = result.toString(buffer.extend(l), null, null);
+                        write_line(buffer[0..l]);
                     }
 
                     // command was instantaneous; take leftover input and continue
@@ -481,7 +482,7 @@ protected:
     final NoGCAllocator tempAllocator() pure
         => _console._tempAllocator;
 
-    void doBell()
+    void do_bell()
     {
         // TODO: anything to handle BEEP?
     }

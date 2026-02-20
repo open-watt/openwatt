@@ -282,6 +282,13 @@ private:
                         json.append(",\"", prop.type[1][], '\"');
                     json ~= ']';
                 }
+
+                if (prop.category)
+                    json.append(",\"category\":\"", prop.category[], '\"');
+
+                if (prop.flags)
+                    json.append(",\"flags\":\"", (prop.flags & 1) ? "H" : "", '\"');
+
                 json ~= '}';
             }
             json ~= "}}";
