@@ -227,7 +227,6 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         if (r.type == CircuitType.split_phase)
         {
             // a little more complicated to integrate L-L loads...
-            // TODO:
         }
 
         if ((values_present & 1) == 0)

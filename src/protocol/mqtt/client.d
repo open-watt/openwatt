@@ -826,7 +826,6 @@ nothrow @nogc:
                         if (retain_handling == 0 || (retain_handling == 1 && !sub))
                         {
                             // send retained message for this topic
-                            // TODO:
                         }
 
                         ubyte code = max_qos; // grant whatever qos was requested...

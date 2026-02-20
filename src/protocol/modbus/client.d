@@ -60,7 +60,7 @@ nothrow @nogc:
 
     ~this()
     {
-        // TODO: unsubscribe!
+        iface.unsubscribe(&incoming_packet);
     }
 
     void setRequestHandler(ModbusRequestHandler handler) pure nothrow @nogc

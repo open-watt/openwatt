@@ -44,7 +44,7 @@ DataType parse_modbus_data_type(const(char)[] desc)
         return DataType.invalid;
     }
 
-    // TODO: this may be insifficient, but it's what we already model...
+    // TODO: this may be insufficient, but it's what we already model...
     DataType r = parse_data_type(desc);
     if (r == DataType.invalid)
         return DataType.invalid;

@@ -102,7 +102,7 @@ nothrow @nogc:
     override const(char)[] status_message() const
         => running ? "Running" : super.status_message();
 
-    // TODO: remove public when everyting ported to collections...
+    // TODO: remove public when everything ported to collections...
     override void update()
     {
         assert(_status.link_status == Status.Link.up, "Stream is not online, it shouldn't be in Running state!");
