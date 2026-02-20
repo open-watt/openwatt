@@ -226,16 +226,7 @@ class ZigbeeCoordinator : ZigbeeRouter
             _init_promise = null;
         }
 
-        if (_interface)
-        {
-            _interface.unsubscribe(&state_change);
-            _interface.unsubscribe(&incoming_packet);
-            zigbee_iface.attach_coordiantor(null);
-            if (auto ezsp = get_ezsp())
-                subscribe_client(ezsp, false);
-            _interface = null;
-        }
-
+        _previous_extended_pan_id = _network_params.extended_pan_id;
         _network_params = NetworkParams();
         _already_complained = false;
         _ready = false;
@@ -297,6 +288,7 @@ private:
     ubyte[16] _network_key;
     ubyte _channel = 0xFF;
 
+    EUI64 _previous_extended_pan_id;
     MonoTime _last_action;
     bool _already_complained; // suppress repeat complaining about the same errors
     bool _ready;
@@ -315,9 +307,10 @@ private:
             switch (network_status) with(EmberNetworkStatus)
             {
                 case JOINED_NETWORK:
-                    writeInfo("Zigbee coordinator: NETWORK JOINED");
-                    done = true;
-                    break;
+                    // ASH RST resets the NCP, so this shouldn't happen.
+                    // if it does, the stack is already running — just sync bookkeeping!
+                    writeWarning("Zigbee coordinator: unexpected JOINED_NETWORK at init — syncing state");
+                    return sync_network_state(ezsp);
 
                 case NO_NETWORK:
                     return init_network(ezsp);
@@ -477,6 +470,11 @@ private:
         while (zigbee_iface._network_status != EmberStatus.NETWORK_UP)
             sleep(100.msecs);
 
+        return sync_network_state(ezsp);
+    }
+
+    bool sync_network_state(EZSPClient ezsp)
+    {
         auto nwk_params = ezsp.request!EZSP_GetNetworkParameters();
         _network_params.extended_pan_id.b = nwk_params.parameters.extendedPanId;
         _network_params.pan_id = nwk_params.parameters.panId;
@@ -488,15 +486,24 @@ private:
 
         writeInfof("Zigbee coordinator: NETWORK UP: node-id={0} type={1} pan-id={2} ({3, 04x}) channel={4}", _node_id, nwk_params.nodeType, _network_params.extended_pan_id, _network_params.pan_id, _network_params.radio_channel);
 
-        // create the node for this coordinator...
         ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
-        NodeMap* nm = mod_zb.find_node(pan_id, _node_id);
-        if (nm)
+
+        // if the network identity changed, purge old node data
+        if (_previous_extended_pan_id != EUI64() && _previous_extended_pan_id != _network_params.extended_pan_id)
         {
-            writeErrorf("Zigbee coordinator: node id {0, 04x} already exists in node table - something went wrong?", _node_id);
+            writeInfo("Zigbee coordinator: network identity changed, clearing old node data");
+            mod_zb.remove_all_nodes(_interface);
+        }
+
+        // create or reuse the node for this coordinator...
+        NodeMap* nm = mod_zb.find_node(pan_id, _node_id);
+        if (nm && nm.eui != _eui)
+        {
+            writeErrorf("Zigbee coordinator: node id {0, 04x} already exists with different EUI - something went wrong?", _node_id);
             return false;
         }
-        nm = mod_zb.attach_node(_eui, pan_id, _node_id);
+        if (!nm)
+            nm = mod_zb.attach_node(_eui, pan_id, _node_id);
         nm.name = name;
         nm.desc.type = NodeType.coordinator;
         nm.node = this;
@@ -518,10 +525,21 @@ private:
             }
         }
 
+        // mark all non-coordinator nodes as offline; short addresses may be stale after NCP restart
+        // pre-population below will re-attach nodes the NCP confirms; remaining nodes recover when they next communicate
+        foreach (ref n; mod_zb.nodes_by_eui)
+        {
+            if (n.value.pan_id == pan_id && n.value.id != _node_id)
+            {
+                mod_zb.detach_node(n.value.pan_id, n.value.id);
+                n.value.scan_in_progress = false;
+            }
+        }
+
         // TODO: are we supposed to permit joining for a little while after network-up?
         //       is this for all the clients to re-sync, or will they all join anyway?
         //       if this is for new clients to join, then we don't need to do this here...
-        status = ezsp.request!EZSP_PermitJoining(0xFF);
+        EmberStatus status = ezsp.request!EZSP_PermitJoining(0xFF);
         if (status != EmberStatus.SUCCESS)
             writeInfo("Zigbee coordinator: PermitJoining failed - ", status);
 
