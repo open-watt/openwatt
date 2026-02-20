@@ -432,7 +432,7 @@ nothrow @nogc:
                     iov[i].iov_base = cast(void*)d.ptr;
                     iov[i].iov_len = d.length;
                 }
-                bytes_written = writev(_fd, iov.ptr, cast(int)data.length);
+                bytes_written = core.sys.posix.unistd.writev(_fd, iov.ptr, cast(int)data.length);
             }
             else
                 bytes_written = core.sys.posix.unistd.write(_fd, data[0].ptr, data[0].length);
