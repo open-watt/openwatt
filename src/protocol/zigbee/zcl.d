@@ -59,6 +59,15 @@ enum ZCLCommand : ushort
     onoff_on_with_recall_global_scene = 0x4041,
     onoff_on_with_timed_off = 0x4042,           // [ u8: on_off_control, u16: on_time, u16: off_wait_time ]
 
+    // Cluster 500: IAS Zone (server -> client)
+    ias_zone_enroll_response = 0x4000,
+    ias_zone_initiate_normal_operation = 0x4001,
+    ias_zone_initiate_test_mode = 0x4002,
+
+    // Cluster 500: IAS Zone (client -> server)
+    ias_zone_status_change = 0x4000,
+    ias_zone_enroll_request = 0x4001,
+
     // Cluster EF00: Tuya
     tuya_data_request = 0x4000,
     tuya_data_response = 0x4001,

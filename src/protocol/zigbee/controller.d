@@ -114,7 +114,7 @@ protected:
 
     override CompletionStatus shutdown() nothrow
     {
-        // abort any outstanding interviews (scope(failure) in zdo/zcl_request cleans up in-flight requests)
+        // abort any outstanding interviews
         while (!_promises.empty)
         {
             Promise!bool* p = _promises.popBack();
@@ -166,11 +166,20 @@ protected:
                 ++i;
         }
 
+        if (!_endpoint.node.is_network_up)
+            return;
+
         // update all the nodes...
         foreach (ref NodeMap nm; zb.nodes_by_eui.values)
         {
+            if (!nm.available)
+                continue;
+
             if (nm.initialised < 0xFF && !nm.scan_in_progress && _promises.length < MaxFibers)
             {
+                if (nm.retry_after != MonoTime() && now < nm.retry_after)
+                    continue;
+
                 nm.scan_in_progress = true;
                 _promises.pushBack(async(&do_node_interview, &nm));
             }
@@ -509,7 +518,8 @@ private:
 
                 case read_attributes_response:
                     // my request for attributes returned...
-                    assert(false, "TODO");
+                    version (DebugZigbeeController)
+                        writeDebugf("ZigbeeController: {0,04x}:{1,02x} UNEXPECTED read_attributes_response {2}:{3,04x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id);
                     return;
 
                 case write_attributes_response:
@@ -594,21 +604,18 @@ private:
         }
         else
         {
-            // handle the `manuSpecificTuya` cluster to the best of our knowledge... :/
+            ZCLCommand cmd = cast(ZCLCommand)(zcl.command | 0x4000);
+
             switch (aps.cluster_id)
             {
                 case 0:
-                    if (zcl.command == 0)
-                    {
-                        // factory reset!
+                    if (cmd == ZCLCommand.factory_reset)
                         writeDebugf("ZigbeeController: {0,04x}:{1,02x} sent UNSUPPORTED factory reset command...", aps.src, aps.src_endpoint);
-                    }
                     break;
 
                 case 0x500: // IAS Zone
-                    if (zcl.command == 0)
+                    if (cmd == ZCLCommand.ias_zone_status_change)
                     {
-                        // state change
                         ushort zone_status = payload[0..2].littleEndianToNative!ushort;
                         ubyte extended_status = payload[2];
                         ubyte zone_id = payload[3];
@@ -660,8 +667,23 @@ private:
                             writeDebugf("ZigbeeController: {0,04x}:{1,02x} sent IAS zone: status={2,04x} ext={3,02x} zone={4} delay={5}", aps.src, aps.src_endpoint, zone_status, extended_status, zone_id, delay);
                         return;
                     }
+                    else if (cmd == ZCLCommand.ias_zone_enroll_request)
+                    {
+                        ubyte[2] enroll_response = [0x00, 0x00];
+                        _endpoint.send_zcl_message(aps.src, aps.src_endpoint, 0x0104, 0x0500, ZCLCommand.ias_zone_enroll_response, ZCLControlFlags.disable_default_response, enroll_response[], PCP.ca);
+
+                        version (DebugZigbeeController)
+                        {
+                            ushort zone_type = payload.length >= 2 ? payload[0..2].littleEndianToNative!ushort : 0;
+                            writeDebugf("ZigbeeController: {0,04x}:{1,02x} IAS Zone Enroll Request: zone_type={2,04x}, accepted", aps.src, aps.src_endpoint, zone_type);
+                        }
+                        return;
+                    }
                     else
-                        assert(false, "TODO");
+                    {
+                        version (DebugZigbeeController)
+                            writeDebugf("ZigbeeController: {0,04x}:{1,02x} unknown IAS zone command {2}", aps.src, aps.src_endpoint, cast(ubyte)zcl.command);
+                    }
                     break;
 
                 case 0xEF00: // Tuya
@@ -687,7 +709,7 @@ private:
                     }
                     tuya_dedup.pushBack(TuyaDedup(now, now, aps.src, tuya_seq));
 
-                    switch (zcl.command | 0x4000) with (ZCLCommand)
+                    switch (cmd) with (ZCLCommand)
                     {
                         case tuya_data_request:
                             TuyaDP dp = parse_dp(payload[2 .. $]);
@@ -729,7 +751,7 @@ private:
                             response[0..2] = tuya_seq.nativeToBigEndian;
                             response[2..6] = time_secs.nativeToBigEndian; // TODO: CONFIRM is big or little endian??
                             response[6..10] = time_secs.nativeToBigEndian;
-                            _endpoint.send_zcl_response(aps.src, aps.src_endpoint, aps.profile_id, aps.cluster_id, cast(ZCLCommand)zcl.command, zcl, response[0..10]);
+                            _endpoint.send_zcl_response(aps.src, aps.src_endpoint, aps.profile_id, aps.cluster_id, cmd, zcl, response[0..10]);
                             return;
 
                         default:
@@ -919,9 +941,13 @@ private:
 
         bool fail(const(char)[] reason = "failed")
         {
+            import urt.util : min;
             node.scan_in_progress = false;
+            node.interview_failures = cast(ubyte)min(node.interview_failures + 1, 5);
+            uint backoff_secs = 2u << node.interview_failures;
+            node.retry_after = getTime() + backoff_secs.seconds;
             version (DebugZigbeeController)
-                writeWarningf("ZigbeeController: interview FAILED for device {0,04x}! result = {1} - {2}", node.id, r, reason);
+                writeWarningf("ZigbeeController: interview FAILED for device {0,04x}! result = {1} - {2} (retry in {3}s)", node.id, r, reason, backoff_secs);
             return false;
         }
 
@@ -1222,6 +1248,8 @@ private:
 
         node.initialised = 0xFF; // fully initialised
         node.scan_in_progress = false;
+        node.interview_failures = 0;
+        node.retry_after = MonoTime();
 
         return true;
     }
