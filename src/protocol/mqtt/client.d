@@ -100,15 +100,24 @@ nothrow @nogc:
         last_contact_time = getTime();
     }
 
+    void disconnect(ubyte reason)
+    {
+        ubyte[4] disconnect;
+        disconnect[0] = MQTTPacketType.Disconnect;
+        disconnect[1] = protocol_level < 5 ? 0 : 2;
+        if (protocol_level >= 5)
+        {
+            disconnect[2] = reason;
+            disconnect[3] = 0; // no props
+        }
+        stream.write(disconnect[0 .. protocol_level < 5 ? 2 : 4]);
+
+        terminate();
+    }
+
     void terminate()
     {
-        // close the stream
-        if (stream)
-        {
-            stream.unsubscribe(&stream_signal);
-            stream.destroy();
-            stream = null;
-        }
+        release_stream();
 
         if (session.will_delay == 0)
             broker.send_lwt(*session);
@@ -253,6 +262,7 @@ nothrow @nogc:
 
                     protocol_level = message.take!ubyte;
                     conn_flags = message.take!ubyte;
+                    ubyte clean_session = conn_flags & 2;
 
                     // validate conn_flags
                     if (conn_flags & 1) // bit 0 must be zero
@@ -357,7 +367,7 @@ nothrow @nogc:
                     // if client has not supplied an ID, and we should generate one
                     if (id.empty)
                     {
-                        if ((conn_flags & 2) == 0)
+                        if (!clean_session)
                         {
                             // unspecified client id requires clean session
                             buffer[3] = protocol_level < 5 ? 0x02 : 0x85;
@@ -386,39 +396,7 @@ nothrow @nogc:
 
                     {
                         // dig up the session or create a new one
-                        session = id in broker.sessions;
-                        session_present = session !is null;
-                        if (!session)
-                        {
-                            String identifier = id.makeString(defaultAllocator());
-                            session = broker.sessions.insert(identifier[], MQTTSession(identifier.move));
-                        }
-
-                        // if session already has a live client
-                        if (session.client)
-                        {
-                            // send DISCONNECT with reason 0x8E to the existing client and terminate
-                            ubyte[4] disconnect;
-                            disconnect[0] = MQTTPacketType.Disconnect;
-                            disconnect[1] = protocol_level < 5 ? 0 : 2;
-                            if (protocol_level >= 5)
-                            {
-                                disconnect[2] = 0x8E; // session taken over
-                                disconnect[3] = 0; // no props
-                            }
-                            session.client.stream.write(disconnect[0 .. protocol_level < 5 ? 2 : 4]);
-
-                            // termiante the client
-                            session.client.terminate();
-                        }
-
-                        // if clean session was requested...
-                        if (conn_flags & 2)
-                        {
-                            if (session_present)
-                                broker.destroy_session(*session);
-                            session_present = false;
-                        }
+                        session = broker.create_or_claim_session(id, clean_session, session_present);
                         session.client = &this;
 
                         // record last will and testament
@@ -928,14 +906,21 @@ nothrow @nogc:
         return true;
     }
 
-    void stream_signal(BaseObject object, StateSignal signal)
+    final void stream_signal(BaseObject object, StateSignal signal)
     {
+        debug assert(object is stream);
+
         if (signal != StateSignal.online)
-        {
-            stream.unsubscribe(&stream_signal);
-            stream.destroy();
-            stream = null;
-        }
+            release_stream();
+    }
+
+    final void release_stream()
+    {
+        if (!stream)
+            return;
+        stream.unsubscribe(&stream_signal);
+        stream.destroy();
+        stream = null;
     }
 }
 

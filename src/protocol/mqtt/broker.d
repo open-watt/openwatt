@@ -47,10 +47,10 @@ nothrow @nogc:
     }
 
     bool allow_anonymous() const pure
-        => (_flags & MQTTFlags.AllowAnonymousLogin) != 0;
+        => (_flags & MQTTFlags.allow_anonymous_login) != 0;
     void allow_anonymous(bool value)
     {
-        _flags = cast(MQTTFlags)((_flags & ~MQTTFlags.AllowAnonymousLogin) | (value ? MQTTFlags.AllowAnonymousLogin : 0));
+        _flags = cast(MQTTFlags)((_flags & ~MQTTFlags.allow_anonymous_login) | (value ? MQTTFlags.allow_anonymous_login : 0));
     }
 
     // API...
@@ -137,33 +137,31 @@ protected:
     override CompletionStatus startup()
     {
         if (!_server)
-        {
-            _server = get_module!TCPStreamModule.tcp_servers.create(name, ObjectFlags.dynamic);
-            _server.port = _port ? _port : 1883;
-            _server.set_connection_callback(&new_connection, null);
-        }
-
+            _server = create_server();
         if (_server.running)
-        {
-            writeInfo(type, ": listening on port ", _server.port, "...");
             return CompletionStatus.complete;
-        }
         return CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()
     {
-        if (_server)
-        {
-            _server.destroy();
-            _server = null;
-        }
+        _server.destroy();
+        _server = null;
+
+        foreach (ref client; _clients)
+            client.disconnect(0x98);
+        _clients.clear();
+
+        _sessions.clear();
+        _subs.clear();
+
         return CompletionStatus.complete;
     }
 
     override void update()
     {
-        _server.update();
+        if (_server.running)
+            _server.update();
 
         // update clients
         for (size_t i = 0; i < _clients.length; )
@@ -182,7 +180,7 @@ protected:
         MonoTime now = getTime();
         const(char)[][16] items_to_remove;
         size_t num_items_to_remove = 0;
-        foreach (ref session; sessions.values)
+        foreach (ref session; _sessions.values)
         {
             if (session.client)
                 continue;
@@ -199,18 +197,48 @@ protected:
             }
         }
         foreach (i; 0 .. num_items_to_remove)
-            sessions.remove(items_to_remove[i]);
+            _sessions.remove(items_to_remove[i]);
     }
 
 package:
+    MQTTSession* create_or_claim_session(const(char)[] id, ubyte clean_session, out bool exists)
+    {
+        MQTTSession* s = id in _sessions;
+        if (s)
+        {
+            if (clean_session)
+                destroy_session(*s);
+            else
+            {
+                exists = true;
+                if (s.client)
+                {
+                    s.client.disconnect(0x8E); // 8E = session taken over
+                    s.client = null;
+                }
+            }
+        }
+        else
+        {
+            String id_str = id.makeString(defaultAllocator());
+            s = _sessions.insert(id_str[], MQTTSession(id_str.move));
+        }
+        return s;
+    }
+
     void destroy_session(ref MQTTSession session)
     {
         send_lwt(session);
 
         unsubscribe(&session.publish_callback);
 
-        session.client = null;
-        session.subs = null;
+        if (session.client)
+        {
+            session.client.disconnect(0);
+            session.client = null;
+        }
+
+        session.subs.clear();
         session.subs_by_filter.clear();
         session.will_topic = null;
         session.will_message = null;
@@ -227,8 +255,6 @@ package:
         publish(session.identifier, session.will_flags, session.will_topic, session.will_message[], session.will_props[]);
         session.will_sent = true;
     }
-
-    Map!(const(char)[], MQTTSession) sessions;
 
 private:
 
@@ -251,13 +277,46 @@ private:
     MQTTFlags _flags;
     Duration _client_timeout;
 
+    Map!(const(char)[], MQTTSession) _sessions;
     Array!MQTTClient _clients;
     Array!Subscription _subs;
 
     // retained values
     Value _root;
 
-    void new_connection(Stream client, void* user_data)
+    final TCPServer create_server()
+    {
+        import manager.expression : NamedArgument;
+
+        TCPServer s = get_module!TCPStreamModule.tcp_servers.create(name[], ObjectFlags.dynamic, NamedArgument("port", _port ? _port : 1883));
+        s.subscribe(&server_signal);
+        s.set_connection_callback(&new_connection, null);
+        return s;
+    }
+
+    final void server_signal(BaseObject object, StateSignal signal)
+    {
+        final switch (signal)
+        {
+            case StateSignal.online:
+                writeInfo(type, ": listening on port ", _server.port, "...");
+                break;
+
+            case StateSignal.offline:
+                writeInfo(type, ": stopped listening");
+                break;
+
+            case StateSignal.destroyed:
+                debug assert(object is _server);
+                object.unsubscribe(&server_signal);
+
+                if (running) // if we're still running, we'll recreate a new server
+                    _server = create_server();
+                break;
+        }
+    }
+
+    final void new_connection(Stream client, void* user_data)
     {
         _clients ~= MQTTClient(this, client);
 
@@ -270,8 +329,8 @@ private:
 
 enum MQTTFlags
 {
-    None = 0,
-    AllowAnonymousLogin = 1 << 0,
+    none = 0,
+    allow_anonymous_login = 1 << 0,
 }
 
 package struct MQTTSession
