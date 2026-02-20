@@ -510,7 +510,8 @@ private:
 
                 case read_attributes_response:
                     // my request for attributes returned...
-                    assert(false, "TODO");
+                    version (DebugZigbeeController)
+                        writeDebugf("ZigbeeController: {0,04x}:{1,02x} UNEXPECTED read_attributes_response {2}:{3,04x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id);
                     return;
 
                 case write_attributes_response:
