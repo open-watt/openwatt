@@ -116,19 +116,25 @@ nothrow @nogc:
         return read;
     }
 
-    override ptrdiff_t write(const void[] data)
+    override ptrdiff_t write(const(void[])[] data...)
     {
         foreach (i; 0 .. m_streams.length)
         {
-            ptrdiff_t written = 0;
-            while (written < data.length)
+            foreach (j; 0 .. data.length)
             {
-                if (m_streams[i] && m_streams[i].running)
-                    written += m_streams[i].write(data[written .. $]);
+                ptrdiff_t written = 0;
+                while (written < data[j].length)
+                {
+                    if (m_streams[i] && m_streams[i].running)
+                        written += m_streams[i].write(data[j][written .. $]);
+                }
             }
         }
         if (_logging)
-            write_to_log(false, data);
+        {
+            foreach (ref d; data)
+                write_to_log(false, d[]);
+        }
         return 0;
     }
 

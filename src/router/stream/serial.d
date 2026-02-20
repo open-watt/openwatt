@@ -379,27 +379,77 @@ nothrow @nogc:
         }
     }
 
-    override ptrdiff_t write(const void[] data)
+    override ptrdiff_t write(const(void[])[] data...)
     {
         version(Windows)
         {
+            import urt.array;
+
+            // Windows has no gather WriteFile for serial; we need to gather manually! :(
+            const(void)[] send_buffer;
+            void[] gather_buffer;
+            Array!ubyte big_buffer; // TODO: use Array!(ubyte, 1024) !!
+            ubyte[1024] stack_buffer = void;
+            if (data.length > 1)
+            {
+                size_t total_length = 0;
+                foreach (d; data)
+                    total_length += d.length;
+                if (total_length > stack_buffer.length)
+                    gather_buffer = big_buffer.extend(total_length);
+                else
+                    gather_buffer = stack_buffer[0 .. total_length];
+                size_t offset = 0;
+                foreach (d; data)
+                {
+                    gather_buffer[offset .. offset + d.length] = d;
+                    offset += d.length;
+                }
+                send_buffer = gather_buffer;
+            }
+            else
+                send_buffer = data[0];
+
             DWORD bytes_written;
-            if (!WriteFile(_h_com, data.ptr, cast(DWORD)data.length, &bytes_written, null))
+            if (!WriteFile(_h_com, send_buffer.ptr, cast(DWORD)send_buffer.length, &bytes_written, null))
             {
                 restart();
                 return -1;
             }
+
             if (_logging)
-                write_to_log(false, data[0 .. bytes_written]);
-            return bytes_written;
+                write_to_log(false, send_buffer[0 .. bytes_written]);
         }
         else version(Posix)
         {
-            ssize_t bytes_written = core.sys.posix.unistd.write(_fd, data.ptr, data.length);
+            ssize_t bytes_written;
+            if (data.length > 1)
+            {
+                iovec[32] iov = null;
+                assert(data.length <= iov.length, "Too many buffers!");
+                foreach (i, d; data)
+                {
+                    iov[i].iov_base = cast(void*)d.ptr;
+                    iov[i].iov_len = d.length;
+                }
+                bytes_written = writev(_fd, iov.ptr, cast(int)data.length);
+            }
+            else
+                bytes_written = core.sys.posix.unistd.write(_fd, data[0].ptr, data[0].length);
+
             if (_logging)
-                write_to_log(false, data[0 .. bytes_written]);
-            return bytes_written;
+            {
+                import urt.util : min;
+                size_t remain = bytes_written;
+                for (size_t i = 0; remain > 0; ++i)
+                {
+                    size_t len = min(data[i].length, remain);
+                    write_to_log(false, data[i][0 .. len]);
+                    remain -= len;
+                }
+            }
         }
+        return bytes_written;
     }
 
     override const(char)[] remote_name()
@@ -465,4 +515,15 @@ version(Windows)
     {
         disable, enable, handshake
     }
+}
+
+version(Posix)
+{
+    struct iovec
+    {
+        void*   iov_base;
+        size_t  iov_len;
+    }
+
+    extern(C) ssize_t writev(int fd, const iovec* iov, int iovcnt);
 }

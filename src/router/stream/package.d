@@ -137,7 +137,7 @@ nothrow @nogc:
     abstract ptrdiff_t read(void[] buffer);
 
     // Write data to the stream
-    abstract ptrdiff_t write(const void[] data);
+    abstract ptrdiff_t write(const(void[])[] data...);
 
     // Return the number of bytes in the read buffer
     abstract ptrdiff_t pending();
