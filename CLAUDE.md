@@ -157,6 +157,50 @@ Validate → Starting → Running
 
 See [src/manager/base.d:325-495](src/manager/base.d#L325-L495) for state machine implementation.
 
+##### ObjectRef and Dependency Management
+
+When a BaseObject holds a reference to another BaseObject (e.g., an interface referencing its stream, or a protocol client referencing its interface), use `ObjectRef!Type` instead of a raw pointer. ObjectRef provides:
+
+- **Safe detach on destruction**: When the referenced object is destroyed, ObjectRef auto-detaches (stores the name instead of a dangling pointer)
+- **Name-based reattach**: `try_reattach()` looks up the stored name in the Collection to recover after the target is recreated
+
+**Offline detection via state subscriptions**: Don't poll `!dependency.running` in `update()` — this misses offline→online bounces between update cycles. Instead, subscribe to `StateSignal.offline` on the dependency and call `restart()` immediately:
+
+```d
+// Property setter — subscribe to dependency's state signals
+final void stream(Stream stream)
+{
+    if (_stream is stream)
+        return;
+    if (_stream)
+        _stream.unsubscribe(&stream_state_change);
+    _stream = stream;
+    if (_stream)
+        _stream.subscribe(&stream_state_change);
+    restart();
+}
+
+// validating() — recover detached ObjectRefs
+override CompletionStatus validating()
+{
+    _stream.try_reattach();
+    return super.validating();
+}
+
+// State change handler — restart when dependency goes offline
+void stream_state_change(BaseObject, StateSignal signal)
+{
+    if (signal == StateSignal.offline)
+        restart();
+}
+```
+
+**Key details:**
+- `ObjectRef` uses `alias get this`, so `_stream !is null` works naturally (covers both "never set" and "detached" cases)
+- `destroy()` fires `StateSignal.offline` before `StateSignal.destroyed` for running objects, so handling `offline` alone is sufficient
+- Subscribe/unsubscribe state signals in property setters (not startup/shutdown) so the subscription tracks the current reference
+- Call `try_reattach()` in `validating()` so objects recover after their dependency is destroyed and recreated
+
 #### 4. Module System
 
 Modules are the top-level organizational unit. Each module registers Collections and provides lifecycle hooks:

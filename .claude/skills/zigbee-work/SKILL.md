@@ -17,9 +17,11 @@ You are working on the Zigbee subsystem of OpenWatt. This skill provides deep ar
 | `src/protocol/zigbee/router.d` | **ZigbeeRouter** — base class for coordinator, ZDO frame handling, NetworkParams |
 | `src/protocol/zigbee/controller.d` | **ZigbeeController** — async node interview loop |
 | `src/protocol/zigbee/client.d` | **ZigbeeNode**, **ZigbeeEndpoint** — runtime node/endpoint objects |
-| `src/protocol/ezsp/client.d` | **EZSPClient** — serial transport to NCP chip |
+| `src/protocol/ezsp/client.d` | **EZSPClient** — EZSP command serialization, owns ASHInterface |
 | `src/protocol/ezsp/commands.d` | EZSP command definitions (EmberZNet protocol) |
-| `src/protocol/ezsp/ashv2.d` | ASHv2 framing over serial |
+| `src/protocol/ezsp/ashv2.d` | **ASHInterface** (BaseInterface) — ASHv2 framing over serial, sliding window |
+| `src/router/iface/priority_queue.d` | **PriorityPacketQueue** — standalone priority scheduling utility |
+| `src/router/iface/packet.d` | **Packet** struct + PCP/DEI/VID helpers |
 | `conf/zigbee_profiles/` | Zigbee device profiles (ZCL cluster/attribute mappings) |
 
 ## Component Relationships
@@ -28,9 +30,21 @@ You are working on the Zigbee subsystem of OpenWatt. This skill provides deep ar
 ZigbeeInterface (router/iface/zigbee.d)
     ├── owns _ezsp_client: EZSPClient (serial transport)
     ├── owns _coordinator: ZigbeeCoordinator (network mgmt)
-    ├── _send_queues[NumQueues], _in_flight[] (message queues)
+    ├── _send_queues[8] (PCP-ranked buckets), _in_flight[] (message queues)
     ├── _network_status: EmberStatus (NETWORK_UP/DOWN)
+    ├── counter polling: 10s interval (was 10ms)
     └── status_handler() ← EZSP_StackStatusHandler callback
+
+EZSPClient (protocol/ezsp/client.d)
+    ├── owns _ash: ASHInterface (created on stream set)
+    ├── EZSP command queue (_queued_requests)
+    └── version negotiation on startup
+
+ASHInterface (protocol/ezsp/ashv2.d) extends BaseInterface
+    ├── _stream: Stream (serial port)
+    ├── ASH framing, CRC, byte-stuffing
+    ├── sliding window: _maxInFlight=3 (was 1)
+    └── auto-registers in InterfaceModule.interfaces
 
 ZigbeeCoordinator (protocol/zigbee/coordinator.d) extends ZigbeeRouter
     ├── _network_params: NetworkParams (extended_pan_id, pan_id, channel, tx_power)
@@ -48,13 +62,54 @@ ZigbeeController (protocol/zigbee/controller.d)
     └── update() iterates nodes_by_eui, launches async interview fibres
 ```
 
+## Priority / QoS System
+
+### Layer Stack
+```
+ZigbeeInterface (BaseInterface) — APS message queue, PCP-based priority
+  → EZSPClient (BaseObject) — EZSP command serialization, owns ASHInterface
+    → ASHInterface (BaseInterface) — ASH framing, sliding window (maxInFlight=3)
+      → Stream (serial port)
+```
+
+### PCP Usage in Zigbee
+All send methods accept `PCP pcp = PCP.be` parameter. PCP is set on `Packet.vlan` via `p.pcp = pcp` in client.d's `send_message`, then flows through `forward_async` → `transmit_async` → `PriorityPacketQueue`.
+
+| PCP | Class | Rank | Use |
+|-----|-------|------|-----|
+| VO (5) | Voice | 5 | User commands (on/off, Tuya set_value), join handler |
+| CA (3) | Critical Apps | 3 | Protocol responses, IAS CIE write |
+| BE (0) | Best Effort | 1 | Default messages |
+| BK (1) | Background | 0 | Interview traffic (discovery, attribute reads) |
+
+- `PriorityPacketQueue` uses 8 rank-indexed buckets; `pcp_priority_map[]` converts PCP → rank
+- Dequeue order: highest rank first (7→0)
+- Reserved slots: high-priority PCP (≥ `reserved_min_pcp`) can use all in-flight slots
+
+### ASH Sliding Window
+- `_maxInFlight=3` (was 1, causing stop-and-wait bottleneck)
+- Supports up to 7 in-flight frames (ASH protocol limit)
+- ACK-based: frames freed when ACK received, retransmit on NAK/timeout
+
+### Counter Polling
+- Interval: 10 seconds (was 10ms — major latency bottleneck)
+- Uses `EZSP_ReadAndClearCounters` for MAC-level statistics
+- Fires in ZigbeeInterface.update(), occupies EZSP command slot
+
+### Key Files for QoS
+- `src/router/iface/packet.d` — `vlan_pcp()`, `vlan_set_pcp()`, `pcp_to_rank[]` helpers
+- `src/router/iface/priority_queue.d` — `PriorityPacketQueue` (standalone utility, not yet used by Zigbee)
+- `.claude/skills/packet-interface/SKILL.md` — full architecture doc for PCP/DEI/priority system
+
 ## EZSP Client — Two Command Modes
 
-The EZSPClient (`protocol/ezsp/client.d`) has two ways to send commands:
+The EZSPClient (`protocol/ezsp/client.d`) owns an `ASHInterface _ash` (created on first stream set). Two ways to send commands:
 
-1. **`request!CMD()`** (line 107) — Fibre-based synchronous. Yields fibre until response arrives. **Must be called from fibre context** (asserts on `isInFibre()`). Used by coordinator's `init()` which runs as `async(&init)`.
+1. **`request!CMD()`** — Fibre-based synchronous. Yields fibre until response arrives. **Must be called from fibre context** (asserts on `isInFibre()`). Used by coordinator's `init()` which runs as `async(&init)`.
 
-2. **`send_command!CMD(callback, args...)`** (line 198) — Async callback-based. Works from any context (nothrow). Pass `null` callback for fire-and-forget. Returns `bool` (false if `!running`). Used by the interface for message sending and shutdown.
+2. **`send_command!CMD(callback, args...)`** — Async callback-based. Works from any context (nothrow). Pass `null` callback for fire-and-forget. Returns `bool` (false if `!running`). Used by the interface for message sending and shutdown.
+
+**ASH lifecycle:** EZSPClient has mutually exclusive `ash_stream` (Stream) and `ash_interface` (ASHInterface) properties. In `startup()`, if `ash_stream` is set, it creates a dynamic ASHInterface via `Collection.create()` (owned, destroyed in shutdown). If `ash_interface` is set, it uses that external ASH (not owned). ASH is managed by `EZSPProtocolModule.ash_connections` collection — EZSPClient subscribes to ASH state signals for offline detection, does NOT poll or drive ASH updates.
 
 ## Node Storage System
 
@@ -163,8 +218,8 @@ Full nuclear option (used by explicit destroy command, NOT normal shutdown):
 
 ### Update (zigbee.d:268+)
 - If EZSP client not running → `restart()`
-- Periodic counter ping
-- Send queued messages
+- Send queued messages (PCP priority order: highest rank first)
+- Counter poll every 10s (EZSP_ReadAndClearCounters)
 
 ### Incoming Message Flow (zigbee.d:689-814)
 1. Look up sender in `nodes_by_pan`
