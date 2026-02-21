@@ -22,6 +22,7 @@ import protocol.modbus.message;
 
 import router.iface;
 import router.iface.packet;
+import router.iface.priority_queue;
 import router.stream;
 
 //version = DebugModbusMessageFlow;
@@ -56,22 +57,6 @@ struct ServerMap
     ModbusInterface iface;
     String profile;
     String model;
-}
-
-struct ModbusRequest
-{
-    ~this() nothrow @nogc
-    {
-        if (buffered_packet)
-            defaultAllocator().free((cast(void*)buffered_packet)[0 .. Packet.sizeof + buffered_packet.length]);
-    }
-
-    SysTime request_time;
-    MACAddress request_from;
-    ushort sequence_number;
-    ubyte local_server_address;
-    bool in_flight;
-    Packet* buffered_packet;
 }
 
 class ModbusInterface : BaseInterface
@@ -211,6 +196,7 @@ nothrow @nogc:
         {
             _local_to_uni.insert(ubyte(0), ubyte(0));
             _uni_to_local.insert(ubyte(0), ubyte(0));
+            _queue.configure((_queue_timeout + _request_timeout).msecs, cast(ubyte)(_support_simultaneous_requests ? 8 : 1), 0, PCP.be, &_status);
             return CompletionStatus.complete;
         }
         return CompletionStatus.continue_;
@@ -222,8 +208,13 @@ nothrow @nogc:
         _expect_message_type = ModbusFrameType.unknown;
         _last_receive_event = SysTime();
 
-        _status.send_dropped += _pending_requests.length;
-        _pending_requests.clear();
+        foreach (kvp; _pending[])
+        {
+            if (kvp.value.callback)
+                kvp.value.callback(kvp.key, MessageState.aborted);
+        }
+        _pending.clear();
+        _queue.cancel_all();
 
         _local_to_uni.clear();
         _uni_to_local.clear();
@@ -240,36 +231,8 @@ nothrow @nogc:
 
         SysTime now = getSysTime();
 
-        // check for timeouts
-        for (size_t i = 0; i < _pending_requests.length; )
-        {
-            auto req = &_pending_requests[i];
-            Duration elapsed = now - req.request_time;
-            if (elapsed > (req.in_flight ? _request_timeout.msecs : _queue_timeout.msecs))
-            {
-                _pending_requests.remove(i);
-                if (!req.in_flight)
-                    ++_status.send_dropped;
-            }
-            else
-                ++i;
-        }
-
-        // check for latent transmit
-        while (!_pending_requests.empty && !_pending_requests[0].in_flight && now - _last_receive_event >= _gap_time.msecs)
-        {
-            if (forward(*_pending_requests[0].buffered_packet))
-            {
-                // we'll reset the request time so it doesn't timeout straight away
-                _pending_requests[0].request_time = now;
-                _pending_requests[0].in_flight = true;
-            }
-            else
-            {
-                // if send failed we won't try again
-                _pending_requests.remove(0);
-            }
-        }
+        _queue.timeout_stale(getTime());
+        send_queued_messages();
 
         // check for data
         ubyte[1024] buffer = void;
@@ -349,7 +312,7 @@ nothrow @nogc:
         }
     }
 
-    protected override int transmit(ref const Packet packet, MessageCallback) nothrow @nogc
+    protected override int transmit(ref const Packet packet, MessageCallback callback = null) nothrow @nogc
     {
         // can only handle modbus packets
         if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.modbus || packet.data.length < 5)
@@ -360,70 +323,55 @@ nothrow @nogc:
 
         auto mod_mb = get_module!ModbusInterfaceModule();
 
-        ushort _sequence_number = (cast(ubyte[])packet.data)[0..2].bigEndianToNative!ushort;
+        ushort seq = (cast(ubyte[])packet.data)[0..2].bigEndianToNative!ushort;
         ModbusFrameType packetType = *cast(ModbusFrameType*)&packet.data[2];
         ubyte packetAddress = *cast(ubyte*)&packet.data[3];
-
-        ushort length = 0;
-        ubyte address = 0;
 
         if (_is_bus_master)
         {
             assert(packetType == ModbusFrameType.request);
 
+            ubyte local_address = 0;
             if (!packet.eth.dst.isBroadcast)
             {
                 ServerMap* map = mod_mb.find_server_by_mac(packet.eth.dst);
-                if (!map)
+                if (!map || map.iface !is this)
                 {
                     ++_status.send_dropped;
-                    return -1; // we don't know who this server is!
+                    return -1;
                 }
-                if (map.iface !is this)
-                {
-                    // this server belongs to a different interface, but this interface received it...
-                    // this probably happened because a bridge didn't know where to direct the packet.
-                    // we have 2 options; just forward it, or drop it... since we know it should be directed somewhere else...?
-                    ++_status.send_dropped;
-                    return -1; // this server belongs to a different interface...
-                }
-                debug assert(packetAddress == map.universal_address, "Packet address does not match dest address?!");
-                // TODO: we could use uni -> local lookup
-                address = map.local_address;
+                local_address = map.local_address;
             }
 
-            // we can transmit immediately if simultaneous requests are accepted
-            // or if there are no messages currently queued, and we satisfied the message gap time
-            SysTime now = getSysTime();
-            bool transmitImmediately = _support_simultaneous_requests || (_pending_requests.empty ? (now - _last_receive_event >= _gap_time.msecs) : (&packet == _pending_requests[0].buffered_packet));
+            Packet p = packet;
+            int tag = _queue.enqueue(p, &on_frame_complete);
+            if (tag < 0)
+            {
+                ++_status.send_dropped;
+                return -1;
+            }
 
-            // we need to queue the request so we can return the response to the sender...
-            // but check that it's not a re-send attempt of the head queued packet
-            if (_pending_requests.empty || &packet != _pending_requests[0].buffered_packet)
-                _pending_requests ~= ModbusRequest(now, packet.eth.src, _sequence_number, address, transmitImmediately, packet.clone());
+            _pending[cast(ubyte)tag] = PendingModbus(packet.eth.src, seq, local_address, callback);
 
-            if (!transmitImmediately)
-                return 0;
+            send_queued_messages();
+            return tag;
         }
         else
         {
             assert(packetType == ModbusFrameType.response);
 
-            // if we're not a bus master, we can only send response packets destined for the master
             if (packet.eth.dst != _master_mac)
             {
                 ++_status.send_dropped;
                 return -1;
             }
 
-            address = packetAddress;
-
-            // the packet is a response to the master; just frame it and send it...
+            ubyte address = packetAddress;
             ServerMap* map = mod_mb.find_server_by_universal_address(packetAddress);
             if (!map)
             {
                 ++_status.send_dropped;
-                return -1; // how did we even get a response if we don't know who the server is?
+                return -1;
             }
 
             if (map.iface is this)
@@ -436,58 +384,10 @@ nothrow @nogc:
                 debug assert(packetAddress == map.universal_address, "Packet address does not match dest address?!");
                 address = map.universal_address;
             }
+
+            const(ubyte)[] pdu = cast(ubyte[])packet.data[4 .. $];
+            return frame_and_send(address, pdu);
         }
-
-        // frame it up and send...
-        const(ubyte)[] pdu = cast(ubyte[])packet.data[4 .. $]; // PDU data
-        ubyte[520] buffer = void;
-
-        final switch (protocol)
-        {
-            case ModbusProtocol.unknown:
-                assert(false, "Modbus protocol not specified");
-            case ModbusProtocol.rtu:
-                // frame the packet
-                length = cast(ushort)(1 + pdu.length);
-                buffer[0] = address;
-                buffer[1 .. length] = pdu[];
-                buffer[length .. length + 2][0 .. 2] = buffer[0 .. length].modbus_crc().nativeToLittleEndian;
-                length += 2;
-                break;
-            case ModbusProtocol.tcp:
-                assert(false);
-            case ModbusProtocol.ascii:
-                // calculate the LRC
-                ubyte lrc = address;
-                foreach (b; cast(ubyte[])pdu[])
-                    lrc += cast(ubyte)b;
-                lrc = cast(ubyte)-lrc;
-
-                // format the packet
-                buffer[0] = ':';
-                format_int(address, cast(char[])buffer[1..3], 16, 2, '0');
-                length = cast(ushort)(3 + toHexString(pdu[], cast(char[])buffer[3..$]).length);
-                format_int(lrc, cast(char[])buffer[length .. length + 2], 16, 2, '0');
-                (cast(char[])buffer)[length + 2 .. length + 4] = "\r\n";
-                length += 4;
-        }
-
-        ptrdiff_t written = stream.write(buffer[0 .. length]);
-        if (written <= 0)
-        {
-            // what could have gone wrong here?
-            // TODO: proper error handling?
-
-            // if the stream disconnected, maybe we should buffer the message incase it reconnects promptly?
-
-            // just drop it for now...
-            ++_status.send_dropped;
-            return -1;
-        }
-
-        ++_status.send_packets;
-        _status.send_bytes += length;
-        return 0;
     }
 
     override ushort pcap_type() const
@@ -503,7 +403,39 @@ nothrow @nogc:
         sink(crc.nativeToLittleEndian());
     }
 
+    final override void abort(int msg_handle, MessageState reason = MessageState.aborted)
+    {
+        debug assert(msg_handle >= 0 && msg_handle <= 0xFF, "invalid msg_handle");
+
+        ubyte t = cast(ubyte)msg_handle;
+        if (auto pm = t in _pending)
+        {
+            if (pm.callback)
+                pm.callback(msg_handle, reason);
+            _pending.remove(t);
+        }
+        _queue.cancel(t);
+    }
+
+    final override MessageState msg_state(int msg_handle) const
+    {
+        if (cast(ubyte)msg_handle in _pending)
+            return MessageState.in_flight;
+        if (_queue.has_queued(cast(ubyte)msg_handle))
+            return MessageState.queued;
+        return MessageState.complete;
+    }
+
 private:
+
+    struct PendingModbus
+    {
+        MACAddress request_from;
+        ushort sequence_number;
+        ubyte local_server_address;
+        MessageCallback callback;
+    }
+
     ObjectRef!Stream _stream;
 
     ModbusProtocol _protocol;
@@ -514,8 +446,9 @@ private:
     ushort _gap_time = 35;         // what's a reasonable RTU gap time?
     SysTime _last_receive_event;
 
-    // if we are the bus master
-    Array!ModbusRequest _pending_requests;
+    // bus master: message queue and pending metadata
+    PriorityPacketQueue _queue;
+    Map!(ubyte, PendingModbus) _pending;
 
     // if we are not the bus master
     package MACAddress _master_mac; // TODO: `package` because bridge interface backdoors this... rethink?
@@ -527,6 +460,89 @@ private:
 
     ubyte[260] _tail;
     ushort _tail_bytes;
+
+    int frame_and_send(ubyte address, const(ubyte)[] pdu)
+    {
+        ushort length = 0;
+        ubyte[520] buffer = void;
+
+        final switch (protocol)
+        {
+            case ModbusProtocol.unknown:
+                assert(false, "Modbus protocol not specified");
+            case ModbusProtocol.rtu:
+                length = cast(ushort)(1 + pdu.length);
+                buffer[0] = address;
+                buffer[1 .. length] = pdu[];
+                buffer[length .. length + 2][0 .. 2] = buffer[0 .. length].modbus_crc().nativeToLittleEndian;
+                length += 2;
+                break;
+            case ModbusProtocol.tcp:
+                assert(false);
+            case ModbusProtocol.ascii:
+                ubyte lrc = address;
+                foreach (b; cast(ubyte[])pdu[])
+                    lrc += cast(ubyte)b;
+                lrc = cast(ubyte)-lrc;
+
+                buffer[0] = ':';
+                format_int(address, cast(char[])buffer[1..3], 16, 2, '0');
+                length = cast(ushort)(3 + toHexString(pdu[], cast(char[])buffer[3..$]).length);
+                format_int(lrc, cast(char[])buffer[length .. length + 2], 16, 2, '0');
+                (cast(char[])buffer)[length + 2 .. length + 4] = "\r\n";
+                length += 4;
+        }
+
+        ptrdiff_t written = stream.write(buffer[0 .. length]);
+        if (written <= 0)
+        {
+            ++_status.send_dropped;
+            return -1;
+        }
+
+        ++_status.send_packets;
+        _status.send_bytes += length;
+        return 0;
+    }
+
+    void send_queued_messages()
+    {
+        if (!_support_simultaneous_requests && getSysTime() - _last_receive_event < _gap_time.msecs)
+            return;
+
+        for (QueuedFrame* frame = _queue.dequeue(); frame !is null; frame = _queue.dequeue())
+        {
+            ubyte tag = frame.tag;
+            auto pm = tag in _pending;
+            if (!pm)
+            {
+                _queue.complete(tag, MessageState.failed);
+                continue;
+            }
+
+            const(ubyte)[] pdu = cast(ubyte[])frame.packet.data[4 .. $];
+
+            if (frame_and_send(pm.local_server_address, pdu) < 0)
+            {
+                _queue.complete(tag, MessageState.failed);
+                continue;
+            }
+
+            if (pm.callback)
+                pm.callback(tag, MessageState.in_flight);
+        }
+    }
+
+    void on_frame_complete(int tag, MessageState state)
+    {
+        ubyte t = cast(ubyte)tag;
+        if (auto pm = t in _pending)
+        {
+            if (pm.callback)
+                pm.callback(tag, state);
+            _pending.remove(t);
+        }
+    }
 
     final void incoming_packet(const(void)[] message, SysTime recvTime, ref ModbusFrameInfo frame_info)
     {
@@ -605,75 +621,76 @@ private:
 
         if (_is_bus_master)
         {
-            // if we are the bus master, we expect to receive packets in response to queued requests
             if (!_support_simultaneous_requests)
             {
-                // if there are no pending requests, then we probably received a late reply to something we timed out...
-                if (_pending_requests.empty)
+                // find the single in-flight entry (RTU: max_in_flight=1)
+                ubyte matched_tag = 0;
+                bool found = false;
+                foreach (kvp; _pending[])
+                {
+                    if (!_queue.has_queued(kvp.key))
+                    {
+                        matched_tag = kvp.key;
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found)
                 {
                     ++_status.recv_dropped;
                     return;
                 }
 
-                // expect incoming messages are a response to the front message
-                if (_pending_requests[0].local_server_address == frame_info.address)
+                auto pm = matched_tag in _pending;
+                if (pm.local_server_address == frame_info.address)
                 {
                     p.eth.src = frame_mac;
-                    p.eth.dst = _pending_requests[0].request_from;
-                    buffer[0..2] = nativeToBigEndian(_pending_requests[0].sequence_number);
+                    p.eth.dst = pm.request_from;
+                    buffer[0..2] = nativeToBigEndian(pm.sequence_number);
                     dispatch(p);
+                    _queue.complete(matched_tag, MessageState.complete);
                 }
                 else
                 {
-                    // what if we get a message we don't expect?
-                    // one possible case is a delayed response from a server to a message we dismissed as a timeout...
-                    // this is a wonky case; we have choices
-                    //  1. don't dismiss the pending request, we may expect the response to come next
-                    //  2. dismiss the pending request, we have no good reason to believe it's still in flight
-                    //  3. dismiss ALL pending requests, because we may be out of cadence so drop everything to start over?
-
-                    // we'll do 2 for now...
                     ++_status.recv_dropped;
+                    _queue.complete(matched_tag, MessageState.failed);
                 }
 
-                _pending_requests.remove(0);
+                send_queued_messages();
             }
             else
             {
                 if (!frame_info.has_sequence_number)
-                {
-                    // how can we _support_simultaneous_requests and not have a sequence number?
-                    // we must be using modbus TCP to _support_simultaneous_requests, no?
                     assert(false);
-                }
+
                 ushort seq = frame_info.sequence_number;
-                bool dispatched = false;
+                ubyte matched_tag = 0;
+                bool found = false;
 
-                foreach (i, ref req; _pending_requests)
+                foreach (kvp; _pending[])
                 {
-                    if (req.local_server_address != frame_info.address || req.sequence_number != seq)
-                        continue;
+                    if (kvp.value.local_server_address == frame_info.address && kvp.value.sequence_number == seq)
+                    {
+                        matched_tag = kvp.key;
+                        found = true;
+                        break;
+                    }
+                }
 
+                if (found)
+                {
+                    auto pm = matched_tag in _pending;
                     p.eth.src = frame_mac;
-                    p.eth.dst = req.request_from;
-
+                    p.eth.dst = pm.request_from;
                     buffer[0..2] = nativeToBigEndian(seq);
-
                     dispatch(p);
-                    dispatched = true;
-
-                    // remove the request from the queue
-                    _pending_requests.remove(i);
-                    break;
+                    _queue.complete(matched_tag, MessageState.complete);
                 }
-
-                if (!dispatched)
-                {
-                    // we received a packet with no pending request...
-                    // maybe it was a late response to a message that we already dismissed as timeout?
-                    // ...or something else?
+                else
                     ++_status.recv_dropped;
-                }
+
+                send_queued_messages();
             }
         }
         else
