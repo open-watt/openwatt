@@ -5,6 +5,8 @@ import urt.map;
 import urt.lifetime;
 import urt.mem.ring;
 import urt.mem.string;
+import urt.si.unit;
+import urt.si.quantity;
 import urt.string;
 import urt.string.format;
 import urt.time;
@@ -30,6 +32,7 @@ public static import router.iface.zigbee;
 
 nothrow @nogc:
 
+alias Milliseconds = Quantity!(float, ScaledUnit(Second, -3));
 
 enum BufferOverflowBehaviour : byte
 {
@@ -239,6 +242,9 @@ nothrow @nogc:
     ulong tx_rate() const => _status.tx_rate;
     ulong tx_rate_max() const => _status.tx_rate;
     ulong rx_rate_max() const => _status.rx_rate;
+//    Milliseconds avg_wait() const => Milliseconds(float(_status.avg_wait_us) / 1000);
+//    Milliseconds avg_service() const => Milliseconds(float(_status.avg_service_us) / 1000);
+//    Milliseconds max_service() const => Milliseconds(float(_status.max_service_us) / 1000);
     float avg_queue_time() const => float(_status.avg_queue_us) / 1000;
     float avg_service_time() const => float(_status.avg_service_us) / 1000;
     float max_service_time() const => float(_status.max_service_us) / 1000;
