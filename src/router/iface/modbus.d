@@ -349,13 +349,13 @@ nothrow @nogc:
         }
     }
 
-    protected override bool transmit(ref const Packet packet) nothrow @nogc
+    protected override int transmit(ref const Packet packet, MessageCallback) nothrow @nogc
     {
         // can only handle modbus packets
         if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.modbus || packet.data.length < 5)
         {
             ++_status.send_dropped;
-            return false;
+            return -1;
         }
 
         auto mod_mb = get_module!ModbusInterfaceModule();
@@ -377,7 +377,7 @@ nothrow @nogc:
                 if (!map)
                 {
                     ++_status.send_dropped;
-                    return false; // we don't know who this server is!
+                    return -1; // we don't know who this server is!
                 }
                 if (map.iface !is this)
                 {
@@ -385,7 +385,7 @@ nothrow @nogc:
                     // this probably happened because a bridge didn't know where to direct the packet.
                     // we have 2 options; just forward it, or drop it... since we know it should be directed somewhere else...?
                     ++_status.send_dropped;
-                    return false; // this server belongs to a different interface...
+                    return -1; // this server belongs to a different interface...
                 }
                 debug assert(packetAddress == map.universal_address, "Packet address does not match dest address?!");
                 // TODO: we could use uni -> local lookup
@@ -403,7 +403,7 @@ nothrow @nogc:
                 _pending_requests ~= ModbusRequest(now, packet.eth.src, _sequence_number, address, transmitImmediately, packet.clone());
 
             if (!transmitImmediately)
-                return true;
+                return 0;
         }
         else
         {
@@ -413,7 +413,7 @@ nothrow @nogc:
             if (packet.eth.dst != _master_mac)
             {
                 ++_status.send_dropped;
-                return false;
+                return -1;
             }
 
             address = packetAddress;
@@ -423,7 +423,7 @@ nothrow @nogc:
             if (!map)
             {
                 ++_status.send_dropped;
-                return false; // how did we even get a response if we don't know who the server is?
+                return -1; // how did we even get a response if we don't know who the server is?
             }
 
             if (map.iface is this)
@@ -482,12 +482,12 @@ nothrow @nogc:
 
             // just drop it for now...
             ++_status.send_dropped;
-            return false;
+            return -1;
         }
 
         ++_status.send_packets;
         _status.send_bytes += length;
-        return true;
+        return 0;
     }
 
     override ushort pcap_type() const
