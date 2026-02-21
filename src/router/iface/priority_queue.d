@@ -5,18 +5,17 @@ import urt.mem.allocator;
 import urt.mem.freelist;
 import urt.time;
 
+import router.iface : MessageCallback, MessageState;
 import router.iface.packet;
 import router.status : Status;
 
 nothrow @nogc:
 
 
-alias FrameProgressCallback = void delegate(bool success, ubyte tag) nothrow @nogc;
-
 struct QueuedFrame
 {
     Packet* packet;
-    FrameProgressCallback callback;
+    MessageCallback callback;
     MonoTime enqueue_time;
     MonoTime dispatch_time;
     ubyte tag;
@@ -57,7 +56,20 @@ nothrow @nogc:
         return _in_flight_count < limit;
     }
 
-    int enqueue(ref Packet packet, FrameProgressCallback callback = null)
+    bool is_queued(ubyte tag) const pure
+    {
+        foreach (ref bucket; _buckets)
+        {
+            foreach (frame; bucket[])
+            {
+                if (frame.tag == tag)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    int enqueue(ref Packet packet, MessageCallback callback = null)
     {
         PCP pcp = packet.pcp;
         bool dei = packet.dei;
@@ -111,7 +123,7 @@ nothrow @nogc:
         return null;
     }
 
-    void complete(ubyte tag, bool success, MonoTime timestamp = getTime())
+    void complete(ubyte tag, MessageState state = MessageState.complete, MonoTime timestamp = getTime())
     {
         foreach (i, frame; _in_flight[])
         {
@@ -119,7 +131,7 @@ nothrow @nogc:
             {
                 update_time_stats(frame, timestamp);
                 if (frame.callback)
-                    frame.callback(success, tag);
+                    frame.callback(tag, state);
                 free_frame(frame);
                 _in_flight.remove(i);
                 --_in_flight_count;
@@ -128,14 +140,14 @@ nothrow @nogc:
         }
     }
 
-    bool abort(ubyte tag)
+    bool abort(ubyte tag, MessageState reason = MessageState.aborted)
     {
         foreach (i, frame; _in_flight[])
         {
             if (frame.tag == tag)
             {
                 if (frame.callback)
-                    frame.callback(false, tag);
+                    frame.callback(tag, reason);
                 free_frame(frame);
                 _in_flight.remove(i);
                 --_in_flight_count;
@@ -149,7 +161,7 @@ nothrow @nogc:
                 if (frame.tag == tag)
                 {
                     if (frame.callback)
-                        frame.callback(false, tag);
+                        frame.callback(tag, reason);
                     free_frame(frame);
                     bucket.remove(i);
                     --_queued_count;
@@ -160,14 +172,14 @@ nothrow @nogc:
         return false;
     }
 
-    void abort_all()
+    void abort_all(MessageState reason = MessageState.aborted)
     {
         foreach (ref bucket; _buckets)
         {
             foreach (frame; bucket[])
             {
                 if (frame.callback)
-                    frame.callback(false, frame.tag);
+                    frame.callback(frame.tag, reason);
                 free_frame(frame);
             }
             bucket.clear();
@@ -177,19 +189,19 @@ nothrow @nogc:
         foreach (frame; _in_flight[])
         {
             if (frame.callback)
-                frame.callback(false, frame.tag);
+                frame.callback(frame.tag, reason);
             free_frame(frame);
         }
         _in_flight.clear();
         _in_flight_count = 0;
     }
 
-    void abort_all_in_flight()
+    void abort_all_in_flight(MessageState reason = MessageState.aborted)
     {
         foreach (frame; _in_flight[])
         {
             if (frame.callback)
-                frame.callback(false, frame.tag);
+                frame.callback(frame.tag, reason);
             free_frame(frame);
         }
         _in_flight.clear();
@@ -205,7 +217,7 @@ nothrow @nogc:
             if ((now - frame.enqueue_time) > _timeout)
             {
                 if (frame.callback)
-                    frame.callback(false, frame.tag);
+                    frame.callback(frame.tag, MessageState.timeout);
                 free_frame(frame);
                 _in_flight.remove(i);
                 --_in_flight_count;
@@ -269,7 +281,7 @@ private:
                 if (frame.dei)
                 {
                     if (frame.callback)
-                        frame.callback(false, frame.tag);
+                        frame.callback(frame.tag, MessageState.dropped);
                     free_frame(frame);
                     _buckets[rank].remove(i);
                     --_queued_count;

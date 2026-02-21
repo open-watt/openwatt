@@ -202,10 +202,10 @@ nothrow @nogc:
         }
     }
 
-    protected override bool transmit(ref const Packet packet)
+    protected override int transmit(ref const Packet packet, MessageCallback)
     {
         send(packet);
-        return true;
+        return 0;
     }
 
 protected:

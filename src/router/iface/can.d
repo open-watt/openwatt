@@ -228,7 +228,7 @@ nothrow @nogc:
         }
     }
 
-    protected override bool transmit(ref const Packet packet)
+    protected override int transmit(ref const Packet packet, MessageCallback)
     {
         // can only handle can packets
         if (packet.type != PacketType.can)
@@ -239,7 +239,7 @@ nothrow @nogc:
                 assert(false, "TODO");
             }
             ++_status.send_dropped;
-            return false;
+            return -1;
         }
 
         if (packet.data.length > 8)
@@ -290,13 +290,13 @@ nothrow @nogc:
 
             // just drop it for now...
             ++_status.send_dropped;
-            return false;
+            return -1;
         }
 
         ++_status.send_packets;
         _status.send_bytes += length;
         // TODO: or should we record `length`? payload bytes, or full protocol bytes?
-        return true;
+        return 0;
     }
 
     override ushort pcap_type() const
