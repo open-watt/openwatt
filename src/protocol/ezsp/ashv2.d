@@ -86,11 +86,11 @@ nothrow @nogc:
 
             immutable ubyte[5] RST = [ ASH_CANCEL_BYTE, 0xC0, 0x38, 0xBC, ASH_FLAG_BYTE ];
             if (_stream.write(RST) != 5)
-                ++_status.send_dropped;
+                ++_status.tx_dropped;
             else
             {
-                ++_status.send_packets;
-                _status.send_bytes += 5;
+                ++_status.tx_packets;
+                _status.tx_bytes += 5;
             }
 
             _last_event = now;
@@ -184,8 +184,8 @@ protected:
             }
         }
 
-        ++_status.send_packets;
-        _status.send_bytes += message.length;
+        ++_status.tx_packets;
+        _status.tx_bytes += message.length;
         return 0;
     }
 
@@ -255,7 +255,7 @@ private:
             if (r <= 0)
                 break;
 
-            _status.recv_bytes += r;
+            _status.rx_bytes += r;
 
             // skip any XON/XOFF bytes
             ubyte rxLen = _rx_offset;
@@ -284,7 +284,7 @@ private:
                 {
                     inputError = false;
                     start = cast(ubyte)(end + 1);
-                    ++_status.recv_dropped;
+                    ++_status.rx_dropped;
                     continue;
                 }
 
@@ -312,7 +312,7 @@ private:
                 if (frameLen < 2)
                 {
                     if (frameLen != 0)
-                        ++_status.recv_dropped;
+                        ++_status.rx_dropped;
                     continue;
                 }
 
@@ -324,11 +324,11 @@ private:
                 const ushort crc = frame.ezsp_crc();
                 if (_rx_buffer[frameEnd .. frameEnd + 2][0..2].bigEndianToNative!ushort != crc)
                 {
-                    ++_status.recv_dropped;
+                    ++_status.rx_dropped;
                     continue;
                 }
 
-                ++_status.recv_packets;
+                ++_status.rx_packets;
                 process_frame(frame, now);
             }
 
@@ -535,11 +535,11 @@ private:
         ack_msg[1..3] = ack_msg[0..1].ezsp_crc().nativeToBigEndian;
         if (_stream.write(ack_msg) != 4)
         {
-            ++_status.send_dropped;
+            ++_status.tx_dropped;
             return false;
         }
-        ++_status.send_packets;
-        _status.send_bytes += 4;
+        ++_status.tx_packets;
+        _status.tx_bytes += 4;
         return true;
     }
 
@@ -582,12 +582,12 @@ private:
         {
             version (DebugASHMessageFlow)
                 log.warning("stream write failed!");
-            ++_status.send_dropped;
+            ++_status.tx_dropped;
             return false;
         }
 
-        ++_status.send_packets;
-        _status.send_bytes += r;
+        ++_status.tx_packets;
+        _status.tx_bytes += r;
         return true;
     }
 

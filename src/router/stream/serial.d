@@ -21,14 +21,14 @@ version (Windows)
 }
 else version(Posix)
 {
-//    import urt.internal.os;
     import urt.internal.sys.posix;
     import urt.internal.sys.posix.termios;
 }
 else version (BL808)
 {
-    version = HasGPIO;
     import sys.bl808.uart;
+
+    version = HasGPIO;
 }
 else version (Espressif)
 {
@@ -36,10 +36,7 @@ else version (Espressif)
 
     enum NUM_UARTS = 3;
 
-    // C shim wrappers for ESP-IDF UART HAL (platforms/esp32s3/main/ow_shim.c)
-    extern(C) int ow_uart_open(int port, uint baud_rate, ubyte data_bits,
-                               StopBits stop_bits, Parity parity,
-                               byte tx_gpio, byte rx_gpio) nothrow @nogc;
+    extern(C) int ow_uart_open(int port, uint baud_rate, ubyte data_bits, StopBits stop_bits, Parity parity, byte tx_gpio, byte rx_gpio) nothrow @nogc;
     extern(C) void ow_uart_close(int port) nothrow @nogc;
     extern(C) int ow_uart_read(int port, ubyte* buf, int len) nothrow @nogc;
     extern(C) int ow_uart_write(int port, const(ubyte)* buf, int len) nothrow @nogc;
@@ -110,12 +107,12 @@ class SerialStream : Stream
                                              Property.create!("tx-gpio", tx_gpio)(),
                                              Property.create!("rx-gpio", rx_gpio)() ];
     else
-    __gshared Property[6] Properties = [ Property.create!("device", device)(),
-                                         Property.create!("baud-rate", baud_rate)(),
-                                         Property.create!("data-bits", data_bits)(),
-                                         Property.create!("parity", parity)(),
-                                         Property.create!("stop-bits", stop_bits)(),
-                                         Property.create!("flow-control", flow_control)() ];
+        __gshared Property[6] Properties = [ Property.create!("device", device)(),
+                                             Property.create!("baud-rate", baud_rate)(),
+                                             Property.create!("data-bits", data_bits)(),
+                                             Property.create!("parity", parity)(),
+                                             Property.create!("stop-bits", stop_bits)(),
+                                             Property.create!("flow-control", flow_control)() ];
 nothrow @nogc:
 
     enum type_name = "serial";
@@ -144,7 +141,7 @@ nothrow @nogc:
                 if (port < NUM_UARTS)
                 {
                     _uart_port = cast(byte)port;
-        _device = value.move;
+                    _device = value.move;
                     restart();
                     return StringResult.success;
                 }
@@ -155,9 +152,9 @@ nothrow @nogc:
         else
         {
             _device = value.move;
-        restart();
-        return StringResult.success;
-    }
+            restart();
+            return StringResult.success;
+        }
     }
 
     uint baud_rate() const pure
@@ -240,10 +237,10 @@ nothrow @nogc:
         final byte rx_gpio() const pure
             => _rx_gpio;
         final void rx_gpio(byte value)
-    {
-            _rx_gpio = value;
-            restart();
-    }
+        {
+                _rx_gpio = value;
+                restart();
+        }
     }
 
     // API...
@@ -406,9 +403,9 @@ nothrow @nogc:
 
             if (!uart_open(_uart_port, cfg))
                 return CompletionStatus.error;
-            }
+        }
         else version (Espressif)
-            {
+        {
             if (!ow_uart_open(_uart_port, _params.baud_rate, _params.data_bits, _params.stop_bits, _params.parity, _tx_gpio, _rx_gpio))
                 return CompletionStatus.error;
         }
@@ -471,7 +468,9 @@ nothrow @nogc:
         else version (Espressif)
         {
             // UART HAL is polled via read/pending -- no separate poll needed
-    }
+        }
+
+        super.update();
     }
 
     override ptrdiff_t read(void[] buffer)

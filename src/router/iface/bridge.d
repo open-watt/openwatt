@@ -202,7 +202,7 @@ nothrow @nogc:
                 if (_bridge_port.pvid == 0)
                 {
                     // don't admit untagged
-                    ++_status.send_dropped;
+                    ++_status.tx_dropped;
                     return -1;
                 }
                 packet.vlan |= _bridge_port.pvid;
@@ -225,8 +225,8 @@ nothrow @nogc:
 
         send(packet, _local_port);
 
-        ++_status.send_packets;
-        _status.send_bytes += packet.data.length;
+        ++_status.tx_packets;
+        _status.tx_bytes += packet.data.length;
 
         return 0;
     }
@@ -403,7 +403,7 @@ protected:
         return;
 
     drop_packet:
-        ++_status.recv_dropped;
+        ++_status.rx_dropped;
     }
 
 private:
@@ -547,7 +547,7 @@ private:
                     }
 
                     if (_members[dst_port].iface.forward(packet) < 0)
-                        ++_status.send_dropped;
+                        ++_status.tx_dropped;
                 }
                 return;
             }
@@ -573,7 +573,7 @@ private:
                 }
 
                 if (member.iface.forward(packet) < 0)
-                    ++_status.send_dropped;
+                    ++_status.tx_dropped;
             }
         }
         if (src_port != _local_port)
@@ -680,8 +680,8 @@ private:
 
                     if (tag == 0)
                     {
-                        ++_status.send_packets;
-                        _status.send_bytes += packet.data.length;
+                        ++_status.tx_packets;
+                        _status.tx_bytes += packet.data.length;
                     }
                     return tag;
                 }
@@ -724,8 +724,8 @@ private:
 
             if (any_succeeded)
             {
-                ++_status.send_packets;
-                _status.send_bytes += packet.data.length;
+                ++_status.tx_packets;
+                _status.tx_bytes += packet.data.length;
             }
             return any_succeeded ? 0 : -1;
         }
@@ -745,8 +745,8 @@ private:
         tracking.upstream_cb = callback;
         link_active(tracking);
 
-        ++_status.send_packets;
-        _status.send_bytes += packet.data.length;
+        ++_status.tx_packets;
+        _status.tx_bytes += packet.data.length;
         return btag;
     }
 }
