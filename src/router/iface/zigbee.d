@@ -185,16 +185,25 @@ protected:
 
     override CompletionStatus shutdown()
     {
-        // TODO: assure that this code places the coordinator in a state where it will not receive any further messages...
-
-        // HACK: this was moved from coordinator; rethink this...!
-        get_module!ZigbeeProtocolModule.remove_all_nodes(this);
-
-        if (is_coordinator)
+        // if the network is still up, leave it before tearing down context
+        if (_ezsp_client && _network_status == EmberStatus.NETWORK_UP)
         {
-            _coordinator.subscribe_client(_ezsp_client, false);
-            _coordinator = null;
+            if (_ezsp_client.running)
+            {
+                if (!_leave_sent)
+                {
+                    _ezsp_client.send_command!EZSP_LeaveNetwork(null);
+                    _leave_sent = true;
+                }
+                // wait for status_handler to confirm NETWORK_DOWN
+                return CompletionStatus.continue_;
+            }
+
+            _network_status = EmberStatus.NETWORK_DOWN;
         }
+        _leave_sent = false;
+
+        get_module!ZigbeeProtocolModule.detach_all_nodes(this);
 
         // abort all pending messages
         foreach (kvp; _pending[])
@@ -208,17 +217,8 @@ protected:
         _last_ping = MonoTime();
         _ezsp_offline_since = MonoTime();
 
-        // if we're based on an EZSP instance; clear the eui
         if (_ezsp_client)
-        {
-            if (_network_status == EmberStatus.NETWORK_UP)
-            {
-                // drop the network...
-                assert(false, "TODO");
-            }
-
             _network_status = EmberStatus.NETWORK_DOWN;
-        }
 
         return CompletionStatus.complete;
     }
@@ -365,6 +365,7 @@ private:
     package(protocol.zigbee) EmberStatus _network_status;
     ZigbeeCoordinator _coordinator;
 
+    bool _leave_sent;
     ubyte _max_in_flight = 3;
 
     MonoTime _last_ping;

@@ -361,12 +361,27 @@ nothrow @nogc:
         nodes_by_pan.remove(local_id);
     }
 
+    void detach_all_nodes(BaseInterface iface)
+    {
+        foreach (ref kvp; nodes_by_eui)
+        {
+            if (kvp.value.via is iface)
+            {
+                if (kvp.value.pan_id != 0xFFFF && kvp.value.id != 0xFFFE)
+                    detach_node(kvp.value.pan_id, kvp.value.id);
+                kvp.value.scan_in_progress = false;
+            }
+        }
+    }
+
     void remove_all_nodes(BaseInterface iface)
     {
         foreach (kvp; nodes_by_eui)
         {
-            if (kvp.value.discovered && kvp.value.via is iface)
+            if (kvp.value.via is iface)
             {
+                if (kvp.value.pan_id != 0xFFFF && kvp.value.id != 0xFFFE)
+                    detach_node(kvp.value.pan_id, kvp.value.id);
                 nodes_by_eui.remove(kvp.key);
             }
         }

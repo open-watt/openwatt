@@ -170,6 +170,9 @@ protected:
         // update all the nodes...
         foreach (ref NodeMap nm; zb.nodes_by_eui.values)
         {
+            if (!nm.available)
+                continue;
+
             if (nm.initialised < 0xFF && !nm.scan_in_progress && _promises.length < MaxFibers)
             {
                 nm.scan_in_progress = true;
