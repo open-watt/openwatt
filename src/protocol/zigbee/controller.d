@@ -30,7 +30,7 @@ import protocol.zigbee.zcl;
 import protocol.zigbee.zdo;
 
 import router.iface.mac;
-import router.iface.zigbee : MessagePriority;
+import router.iface.packet : PCP;
 
 version = DebugZigbeeController;
 
@@ -189,7 +189,7 @@ protected:
             if (!unk.scanning)
             {
                 unk.scanning = true;
-                send_ieee_request(unk.id, MessagePriority.priority, &probe_response, cast(void*)cast(size_t)unk.id);
+                send_ieee_request(unk.id, PCP.ca, &probe_response, cast(void*)cast(size_t)unk.id);
             }
         }
 
@@ -312,7 +312,7 @@ private:
     ulong[2] make_sample_key_tuya(EUI64 eui, ubyte endpoint, ubyte dp) nothrow
         => make_sample_key(eui, endpoint, 0xEF00, dp);
 
-    ZigbeeResult ieee_request(ushort dst, out EUI64 eui, MessagePriority priority = MessagePriority.normal)
+    ZigbeeResult ieee_request(ushort dst, out EUI64 eui, PCP pcp = PCP.be)
     {
         ubyte[5] addr_req_msg = void;
         addr_req_msg[0] = 0;
@@ -321,26 +321,26 @@ private:
         addr_req_msg[4] = 0; // start index
 
         ZDOResponse response;
-        ZigbeeResult r = _endpoint.zdo_request(dst, ZDOCluster.ieee_addr_req, addr_req_msg[], response, priority);
+        ZigbeeResult r = _endpoint.zdo_request(dst, ZDOCluster.ieee_addr_req, addr_req_msg[], response, pcp);
         if (r == ZigbeeResult.success && response.status == ZDOStatus.success && response.message.length >= 8)
             eui.b[] = response.message[0..8];
         return r;
     }
 
-    int send_default_response(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ref const ZCLHeader req, ubyte cmd, ubyte status, MessagePriority priority = MessagePriority.normal) nothrow
+    int send_default_response(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ref const ZCLHeader req, ubyte cmd, ubyte status, PCP pcp = PCP.be) nothrow
     {
         const ubyte[2] msg = [ cmd, status ];
-        return _endpoint.send_zcl_response(dst, endpoint, profile, cluster, ZCLCommand.default_response, req, msg[], priority);
+        return _endpoint.send_zcl_response(dst, endpoint, profile, cluster, ZCLCommand.default_response, req, msg[], pcp);
     }
 
-    int send_ieee_request(ushort dst, MessagePriority priority = MessagePriority.normal, ZDOResponseHandler response_hander = null, void* user_data = null) nothrow
+    int send_ieee_request(ushort dst, PCP pcp = PCP.be, ZDOResponseHandler response_hander = null, void* user_data = null) nothrow
     {
         ubyte[5] addr_req_msg = void;
         addr_req_msg[0] = 0;
         addr_req_msg[1..3] = dst.nativeToLittleEndian;
         addr_req_msg[3] = 0; // request type: single device response
         addr_req_msg[4] = 0; // start index
-        return _endpoint.send_zdo_message(dst, ZDOCluster.ieee_addr_req, addr_req_msg[], priority, response_hander, user_data);
+        return _endpoint.send_zdo_message(dst, ZDOCluster.ieee_addr_req, addr_req_msg[], pcp, response_hander, user_data);
     }
 
     void message_handler(ref const APSFrame aps, const(void)[] message, SysTime timestamp) nothrow
@@ -770,7 +770,7 @@ private:
 
                     // TODO: we should request an ACK!!!
 
-                    _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0x0006, cmd, APSFlags.none, null, MessagePriority.immediate);
+                    _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0x0006, cmd, APSFlags.none, null, PCP.vo);
                     break;
                 }
                 goto default;
@@ -789,7 +789,7 @@ private:
 
                 // TODO: we should request an ACK!!!
 
-                _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0xEF00, ZCLCommand.tuya_data_request, APSFlags.none, buffer[0..2+len], MessagePriority.immediate);
+                _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0xEF00, ZCLCommand.tuya_data_request, APSFlags.none, buffer[0..2+len], PCP.vo);
                 break;
 
             default:
@@ -933,7 +933,7 @@ private:
         {
             req_buffer[0] = 0;
             req_buffer[1..3] = node.id.nativeToLittleEndian;
-            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.node_desc_req, req_buffer[0..3], zdo_res, MessagePriority.immediate));
+            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.node_desc_req, req_buffer[0..3], zdo_res, PCP.vo));
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("node_desc_req failed");
 
@@ -948,7 +948,7 @@ private:
             req_buffer[0..2] = ushort(0x0010).nativeToLittleEndian;
             req_buffer[2] = 0xF0;
             req_buffer[3..11] = _endpoint.node.eui.b[];
-            int tag = _endpoint.send_zcl_message(node.id, 1, 0x0104, 0x0500, ZCLCommand.write_attributes_no_response, ZCLControlFlags.disable_default_response, req_buffer[0..11], MessagePriority.priority);
+            int tag = _endpoint.send_zcl_message(node.id, 1, 0x0104, 0x0500, ZCLCommand.write_attributes_no_response, ZCLControlFlags.disable_default_response, req_buffer[0..11], PCP.ca);
             if (tag < 0)
                 return fail("IAS subscribe failed");
         }
@@ -996,7 +996,7 @@ private:
         // request power descriptor
         if (!(node.initialised & 0x02))
         {
-            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.power_desc_req, req_buffer[0..3], zdo_res, MessagePriority.background));
+            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.power_desc_req, req_buffer[0..3], zdo_res, PCP.bk));
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("power_desc_req failed");
 
@@ -1017,7 +1017,7 @@ private:
         // request active endpoints
         if (!(node.initialised & 0x04))
         {
-            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.active_ep_req, req_buffer[0..3], zdo_res, MessagePriority.background));
+            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.active_ep_req, req_buffer[0..3], zdo_res, PCP.bk));
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("active_ep_req failed");
 
@@ -1053,7 +1053,7 @@ private:
                 req_buffer[1..3] = node.id.nativeToLittleEndian;
                 req_buffer[3] = ep.endpoint;
             try_again:
-                r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.simple_desc_req, req_buffer[0..4], zdo_res, MessagePriority.background));
+                r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.simple_desc_req, req_buffer[0..4], zdo_res, PCP.bk));
                 if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                     return fail("simple_desc_req failed");
 
@@ -1130,7 +1130,7 @@ private:
                         // try request extended attributes first, then normal if that fails
                         if (support_extended_attributes)
                         {
-                            r = try_thrice(() => _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes_extended, 0, req_buffer[0..3], zcl_res, MessagePriority.background));
+                            r = try_thrice(() => _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes_extended, 0, req_buffer[0..3], zcl_res, PCP.bk));
                             if (r != ZigbeeResult.success)
                                 return fail("discover_attributes_extended failed");
                             if (zcl_res.hdr.command == ZCLCommand.default_response)
@@ -1142,7 +1142,7 @@ private:
                         }
                         if (!support_extended_attributes)
                         {
-                            r = try_thrice(() => _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes, 0, req_buffer[0..3], zcl_res, MessagePriority.background));
+                            r = try_thrice(() => _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes, 0, req_buffer[0..3], zcl_res, PCP.bk));
                             if (r != ZigbeeResult.success)
                                 return fail("discover_attributes failed");
                         }
@@ -1240,7 +1240,7 @@ private:
             req_buffer[i*2..i*2 + 2][0..2] = basic_attributes[i].nativeToLittleEndian;
 
         // read basic attributes
-        ZigbeeResult r = try_thrice(() => _endpoint.zcl_request(node_id, ep.endpoint, 0x0104, 0, ZCLCommand.read_attributes, 0, req_buffer[0 .. basic_attributes.length*2], zcl_res, MessagePriority.background));
+        ZigbeeResult r = try_thrice(() => _endpoint.zcl_request(node_id, ep.endpoint, 0x0104, 0, ZCLCommand.read_attributes, 0, req_buffer[0 .. basic_attributes.length*2], zcl_res, PCP.bk));
         if (r != ZigbeeResult.success)
             return StringResult("request failed");
         if (zcl_res.hdr.command == ZCLCommand.default_response)

@@ -627,7 +627,7 @@ nothrow:
             ubyte[3] req_buffer = void;
             req_buffer[0] = 0;
             req_buffer[1..3] = new_node_id.nativeToLittleEndian;
-            send_zdo_message(new_node_id, ZDOCluster.node_desc_req, req_buffer[], MessagePriority.immediate, &get_node_desc, cast(void*)size_t(new_node_id));
+            send_zdo_message(new_node_id, ZDOCluster.node_desc_req, req_buffer[], PCP.vo, &get_node_desc, cast(void*)size_t(new_node_id));
         }
     }
 

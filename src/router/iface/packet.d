@@ -5,6 +5,9 @@ import urt.time;
 
 public import router.iface.mac;
 
+nothrow @nogc:
+
+
 enum PacketType : ushort
 {
     unknown,
@@ -46,6 +49,22 @@ enum OW_SubType : ushort
     zigbee_aps          = 0x0032,   // zigbee APS frame
     tesla_twc           = 0x0040,   // tesla-twc
 }
+
+// 802.1p PCP traffic classes
+// scheduling order: BK < BE < EE < CA < VI < VO < IC < NC
+enum PCP : ubyte
+{
+    be = 0,  // Best Effort (default)
+    bk = 1,  // Background  (lowest priority)
+    ee = 2,  // Excellent Effort
+    ca = 3,  // Critical Applications
+    vi = 4,  // Video
+    vo = 5,  // Voice
+    ic = 6,  // Internetwork Control
+    nc = 7,  // Network Control
+}
+
+immutable ubyte[8] pcp_priority_map = [1, 0, 2, 3, 4, 5, 6, 7];
 
 
 struct Packet
@@ -110,6 +129,23 @@ nothrow @nogc:
         cast(void[])r._ptr[0 .. _length] = _ptr[0 .. _length];
         return r;
     }
+
+    PCP pcp() const pure
+        => cast(PCP)(vlan >> 13);
+    void pcp(PCP value) pure
+    {
+        vlan = (vlan & 0x1FFF) | cast(ushort)(value << 13);
+    }
+
+    bool dei() const pure
+        => (vlan & 0x1000) != 0;
+    void dei(bool value) pure
+    {
+        vlan = value ? (vlan | 0x1000) : cast(ushort)(vlan & ~0x1000);
+    }
+
+    ushort vid() const pure
+        => vlan & 0x0FFF;
 
     SysTime creation_time; // time received, or time of call to send
     union {

@@ -115,7 +115,7 @@ struct InterfaceSubscriber
 
 class BaseInterface : BaseObject
 {
-    __gshared Property[17] Properties = [ Property.create!("mtu", mtu)(),
+    __gshared Property[24] Properties = [ Property.create!("mtu", mtu)(),
                                           Property.create!("actual-mtu", actual_mtu)(),
                                           Property.create!("l2mtu", l2mtu)(),
                                           Property.create!("max-l2mtu", max_l2mtu)(),
@@ -131,7 +131,14 @@ class BaseInterface : BaseObject
                                           Property.create!("send_packets", send_packets, "traffic")(),
                                           Property.create!("recv_packets", recv_packets, "traffic")(),
                                           Property.create!("send_dropped", send_dropped, "traffic")(),
-                                          Property.create!("recv_dropped", recv_dropped, "traffic")() ];
+                                          Property.create!("recv_dropped", recv_dropped, "traffic")(),
+                                          Property.create!("tx_rate", tx_rate, "traffic")(),
+                                          Property.create!("rx_rate", rx_rate, "traffic")(),
+                                          Property.create!("tx_rate_max", tx_rate_max, "traffic")(),
+                                          Property.create!("rx_rate_max", rx_rate_max, "traffic")(),
+                                          Property.create!("avg_queue_time", avg_queue_time, "traffic")(),
+                                          Property.create!("avg_service_time", avg_service_time, "traffic")(),
+                                          Property.create!("max_service_time", max_service_time, "traffic")() ];
 nothrow @nogc:
 
     enum type_name = "interface";
@@ -214,13 +221,20 @@ nothrow @nogc:
     ulong recv_packets() const => _status.recv_packets;
     ulong send_dropped() const => _status.send_dropped;
     ulong recv_dropped() const => _status.recv_dropped;
+    ulong rx_rate() const => _status.rx_rate;
+    ulong tx_rate() const => _status.tx_rate;
+    ulong tx_rate_max() const => _status.tx_rate;
+    ulong rx_rate_max() const => _status.rx_rate;
+    float avg_queue_time() const => float(_status.avg_queue_us) / 1000;
+    float avg_service_time() const => float(_status.avg_service_us) / 1000;
+    float max_service_time() const => float(_status.max_service_us) / 1000;
 
     // API...
 
     ref const(Status) status() const pure
         => _status;
 
-    final void reset_counters() pure
+    final void reset_counters()
     {
         _status.link_downs = 0;
         _status.send_bytes = 0;
@@ -229,6 +243,16 @@ nothrow @nogc:
         _status.recv_packets = 0;
         _status.send_dropped = 0;
         _status.recv_dropped = 0;
+        _status.tx_rate = 0;
+        _status.rx_rate = 0;
+        _status.tx_rate_max = 0;
+        _status.rx_rate_max = 0;
+        _status.avg_queue_us = 0;
+        _status.avg_service_us = 0;
+        _status.max_service_us = 0;
+        _last_send_bytes = 0;
+        _last_recv_bytes = 0;
+        _last_bitrate_sample = getTime();
     }
 
     override const(char)[] status_message() const
@@ -367,15 +391,39 @@ protected:
     BufferOverflowBehaviour _send_behaviour;
     BufferOverflowBehaviour _recv_behaviour;
 
+    MonoTime _last_bitrate_sample;
+    ulong _last_send_bytes;
+    ulong _last_recv_bytes;
+
     override void update()
     {
         assert(_status.link_status == LinkStatus.up, "Interface is not online, it shouldn't be in Running state!");
+
+        MonoTime now = getTime();
+        if ((now - _last_bitrate_sample) >= 1.seconds)
+        {
+            ulong elapsed_us = (now - _last_bitrate_sample).as!"usecs";
+            _status.tx_rate = (_status.send_bytes - _last_send_bytes) * 1_000_000 / elapsed_us;
+            _status.rx_rate = (_status.recv_bytes - _last_recv_bytes) * 1_000_000 / elapsed_us;
+
+            if (_status.tx_rate > _status.tx_rate_max)
+                _status.tx_rate_max = _status.tx_rate;
+            if (_status.rx_rate > _status.rx_rate_max)
+                _status.rx_rate_max = _status.rx_rate;
+
+            _last_send_bytes = _status.send_bytes;
+            _last_recv_bytes = _status.recv_bytes;
+            _last_bitrate_sample = now;
+        }
     }
 
     override void set_online()
     {
         _status.link_status = LinkStatus.up;
         _status.link_status_change_time = getSysTime();
+        _last_bitrate_sample = getTime();
+        _last_send_bytes = _status.send_bytes;
+        _last_recv_bytes = _status.recv_bytes;
         super.set_online();
     }
 
