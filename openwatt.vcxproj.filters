@@ -330,6 +330,9 @@
     <DCompile Include="src\router\iface\packet.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
+    <DCompile Include="src\router\iface\priority_queue.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
     <DCompile Include="src\router\iface\tesla.d">
       <Filter>src\router\iface</Filter>
     </DCompile>

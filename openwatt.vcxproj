@@ -152,6 +152,7 @@
     <DCompile Include="src\router\iface\modbus.d" />
     <DCompile Include="src\router\iface\package.d" />
     <DCompile Include="src\router\iface\packet.d" />
+    <DCompile Include="src\router\iface\priority_queue.d" />
     <DCompile Include="src\router\iface\tesla.d" />
     <DCompile Include="src\router\iface\vlan.d" />
     <DCompile Include="src\router\iface\zigbee.d" />
