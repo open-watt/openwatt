@@ -1,3 +1,8 @@
+---
+name: test-openwatt
+description: Testing and debugging OpenWatt — unit tests, runtime test harness, persistent REPL, and crash debugging workflows. Use when running or writing tests.
+---
+
 # OpenWatt Testing Skill
 
 You are helping test and debug the OpenWatt application (the IoT/industrial communications router).
