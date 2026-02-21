@@ -253,7 +253,8 @@ class ZigbeeNode : BaseObject
             {
                 ZDORequest* req = _zdo_requests[i];
                 _zdo_requests.remove(i);
-                req.response_handler(reason, ZDOStatus.success, null, req.user_data);
+                if (req.response_handler)
+                    req.response_handler(reason, ZDOStatus.success, null, req.user_data);
                 req.response_handler = null;
                 if (req.iface)
                     req.iface.abort(tag);
@@ -302,7 +303,7 @@ class ZigbeeNode : BaseObject
         if (tag < 0)
             return ZigbeeResult.failed;
 
-        scope (failure)
+        scope (exit)
             abort_zdo_request(tag);
 
         yield(ev);
@@ -311,7 +312,6 @@ class ZigbeeNode : BaseObject
         {
             version (DebugZigbee)
                 writeInfof("Zigbee: zdo TIMEOUT ->{0,04x} [zdo:{1,04x}] at {2}", dst, cluster, ev.timeout.elapsed);
-            abort_zdo_request(tag, ZigbeeResult.timeout);
             return ZigbeeResult.timeout;
         }
         else if (data.result != ZigbeeResult.success)
@@ -421,7 +421,8 @@ class ZigbeeNode : BaseObject
             {
                 ZCLRequest* req = _zcl_requests[i];
                 _zcl_requests.remove(i);
-                req.response_handler(reason, null, null, req.user_data);
+                if (req.response_handler)
+                    req.response_handler(reason, null, null, req.user_data);
                 req.response_handler = null;
                 if (req.iface)
                     req.iface.abort(tag);
@@ -471,7 +472,7 @@ class ZigbeeNode : BaseObject
         if (tag < 0)
             return ZigbeeResult.failed;
 
-        scope (failure)
+        scope (exit)
             abort_zcl_request(tag);
 
         yield(ev);
@@ -480,7 +481,6 @@ class ZigbeeNode : BaseObject
         {
             version (DebugZigbee)
                 writeInfof("Zigbee: zcl TIMEOUT ->{0,04x}:{1} [:{2,04x}] after {3}", dst, dst_endpoint, cluster, ev.timeout.elapsed);
-            abort_zcl_request(tag, ZigbeeResult.timeout);
             return ZigbeeResult.timeout;
         }
         else if (data.result != ZigbeeResult.success)
@@ -581,12 +581,7 @@ protected:
         for (size_t i = 0; i < _zdo_requests.length; )
         {
             ZDORequest* req = _zdo_requests[i];
-            if (req.tag == -1)
-            {
-                _zdo_requests.remove(i);
-                _zdo_request_pool.free(req);
-            }
-            else if (req.tag == -1 || getTime() - req.request_time > 2.seconds)
+            if (getTime() - req.request_time > 2.seconds)
             {
                 version (DebugZigbee)
                     writeWarningf("Zigbee: ZDO request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
@@ -600,12 +595,7 @@ protected:
         for (size_t i = 0; i < _zcl_requests.length; )
         {
             ZCLRequest* req = _zcl_requests[i];
-            if (req.tag == -1)
-            {
-                _zcl_requests.remove(i);
-                _zcl_request_pool.free(req);
-            }
-            else if (getTime() - req.request_time > 2.seconds)
+            if (getTime() - req.request_time > 2.seconds)
             {
                 version (DebugZigbee)
                     writeWarningf("Zigbee: ZCL request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
@@ -641,7 +631,8 @@ protected:
                     {
                         ZDORequest* req = _zdo_requests[i];
                         _zdo_requests.remove(i);
-                        req.response_handler(ZigbeeResult.success, cast(ZDOStatus)data[1], data[2..$], req.user_data);
+                        if (req.response_handler)
+                            req.response_handler(ZigbeeResult.success, cast(ZDOStatus)data[1], data[2..$], req.user_data);
                         _zdo_request_pool.free(req);
                         return;
                     }
@@ -679,7 +670,8 @@ protected:
 
                         ZCLRequest* req = _zcl_requests[i];
                         _zcl_requests.remove(i);
-                        req.response_handler(ZigbeeResult.success, &zcl, data[hdr_len .. $], req.user_data);
+                        if (req.response_handler)
+                            req.response_handler(ZigbeeResult.success, &zcl, data[hdr_len .. $], req.user_data);
                         _zcl_request_pool.free(req);
                         return;
                     }
@@ -831,7 +823,7 @@ private:
                                      ZigbeeResult.failed;
                     response_handler(r, ZDOStatus.success, null, user_data);
                 }
-                tag = -1;
+                response_handler = null;
             }
         }
     }
@@ -862,7 +854,7 @@ private:
                                      ZigbeeResult.failed;
                     response_handler(r, null, null, user_data);
                 }
-                tag = -1;
+                response_handler = null;
             }
         }
     }
