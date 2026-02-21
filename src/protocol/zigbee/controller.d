@@ -793,7 +793,7 @@ private:
 
                 // TODO: we should request an ACK!!!
 
-                _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0xEF00, ZCLCommand.tuya_data_request, APSFlags.none, buffer[0..2+len], MessagePriority.immediate);
+                _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0xEF00, ZCLCommand.tuya_data_request, APSFlags.none, buffer[0..2+len], PCP.vo);
                 break;
 
             default:
