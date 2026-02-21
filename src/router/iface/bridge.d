@@ -138,7 +138,7 @@ nothrow @nogc:
         _mac_table.update();
     }
 
-    protected override bool transmit(ref Packet packet)
+    protected override int transmit(ref Packet packet, MessageCallback)
     {
         // this is a packet entering the bridge from the bridge interface...
 
@@ -151,7 +151,7 @@ nothrow @nogc:
                 if (packet.vlan != 0)
                 {
                     debug assert(false, "packet with pre-processed vlan shouldn't carry vlan tag!");
-                    return false;
+                    return -1;
                 }
 
                 // parse vlan from frame...
@@ -168,7 +168,7 @@ nothrow @nogc:
                 {
                     // don't admit untagged
                     ++_status.send_dropped;
-                    return false;
+                    return -1;
                 }
                 packet.vlan |= _bridge_port.pvid;
             }
@@ -186,7 +186,7 @@ nothrow @nogc:
         ++_status.send_packets;
         _status.send_bytes += packet.data.length;
 
-        return true;
+        return 0;
     }
 
 protected:
@@ -390,7 +390,8 @@ protected:
                         }
                     }
 
-                    _members[dst_port].iface.forward(packet);
+                    if (_members[dst_port].iface.forward(packet) < 0)
+                        ++_status.send_dropped;
                 }
                 return;
             }
@@ -416,7 +417,8 @@ protected:
                     }
                 }
 
-                member.iface.forward(packet);
+                if (member.iface.forward(packet) < 0)
+                    ++_status.send_dropped;
             }
         }
     }

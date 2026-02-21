@@ -50,9 +50,6 @@ EUI64 zigbee_multicast_addr(ushort group)
     => EUI64(0x3, 0, 0, 0, 0, 0, group >> 8, cast(ubyte)group);
 
 
-alias MessageProgressCallback = void delegate(ZigbeeResult status, ref const APSFrame frame) nothrow;
-
-
 enum uint queue_timeout = 4000; // milliseconds
 
 
@@ -116,32 +113,27 @@ nothrow @nogc:
 
     // API...
 
-    final int forward_async(ref Packet packet, MessageProgressCallback callback)
+    final override void abort(int msg_handle, MessageState reason = MessageState.aborted)
     {
-        if (!running)
-            return -1;
+        debug assert(msg_handle >= 0 && msg_handle <= 0xFF, "invalid msg_handle");
 
-        foreach (ref subscriber; _subscribers[0.._num_subscribers])
-        {
-            if ((subscriber.filter.direction & PacketDirection.outgoing) && subscriber.filter.match(packet))
-                subscriber.recv_packet(packet, this, PacketDirection.outgoing, subscriber.user_data);
-        }
-
-        return transmit_async(packet, callback);
-    }
-
-    final void abort_async(int tag, ZigbeeResult reason = ZigbeeResult.aborted)
-    {
-        debug assert(tag >= 0 && tag <= 0xFF, "invalid tag");
-
-        ubyte t = cast(ubyte)tag;
+        ubyte t = cast(ubyte)msg_handle;
         if (auto pm = t in _pending)
         {
             if (pm.callback)
-                pm.callback(reason, pm.aps);
+                pm.callback(msg_handle, reason);
             _pending.remove(t);
         }
         _queue.abort(t);
+    }
+
+    final override MessageState msg_state(int msg_handle) const
+    {
+        if (cast(ubyte)msg_handle in _pending)
+            return MessageState.in_flight;
+        if (_queue.is_queued(cast(ubyte)msg_handle))
+            return MessageState.queued;
+        return MessageState.complete;
     }
 
 //package: // TODO: should this be hidden in some way?
@@ -205,10 +197,10 @@ protected:
         }
 
         // abort all pending messages
-        foreach (ref pm; _pending.values)
+        foreach (kvp; _pending[])
         {
-            if (pm.callback)
-                pm.callback(ZigbeeResult.aborted, pm.aps);
+            if (kvp.value.callback)
+                kvp.value.callback(kvp.key, MessageState.aborted);
         }
         _pending.clear();
         _queue.abort_all();
@@ -258,8 +250,43 @@ protected:
         // TODO: should we poll EZSP_NetworkState? or expect the state change callback to inform us?
     }
 
-    override bool transmit(ref const Packet packet) nothrow @nogc
-        => transmit_async(packet, null) < 0 ? false : true;
+    final override int transmit(ref const Packet packet, MessageCallback callback = null) nothrow @nogc
+    {
+        // can only handle zigbee packets
+        switch (packet.type)
+        {
+            case PacketType.zigbee_aps:
+                // the APS code follows this switch...
+                break;
+
+            case PacketType.zigbee_nwk:
+                if (_ezsp_client)
+                {
+                    writeWarning("Zigbee: cannot send raw NWK frames via EZSP");
+                    goto default;
+                }
+
+                // NWK frame; we need to implement the NWK protocol I guess?
+                assert(false, "TODO: handle NWK frame... or de-frame APS message and goto ZigbeeAPS?");
+
+            default:
+                ++_status.send_dropped;
+                return ZigbeeResult.unsupported;
+        }
+
+        Packet p = packet;
+        int tag = _queue.enqueue(p, &on_frame_complete);
+        if (tag < 0)
+        {
+            ++_status.send_dropped;
+            return -1;
+        }
+
+        _pending[cast(ubyte)tag] = PendingMessage(callback, packet.hdr!APSFrame, cast(ushort)packet.data.length, getTime());
+
+        send_queued_messages();
+        return tag;
+    }
 
     override ushort pcap_type() const
         => 283; // DLT_IEEE802_15_4_TAP
@@ -325,7 +352,7 @@ private:
 
     struct PendingMessage
     {
-        MessageProgressCallback callback;
+        MessageCallback callback;
         APSFrame aps;
         ushort message_length;
         MonoTime send_time;
@@ -359,47 +386,9 @@ private:
             if (result != ZigbeeResult.success)
             {
                 ++_status.send_dropped;
-                _queue.complete(frame.tag, false);
+                _queue.complete(frame.tag, MessageState.failed);
             }
         }
-    }
-
-    final int transmit_async(ref const Packet packet, MessageProgressCallback callback) nothrow @nogc
-    {
-        // can only handle zigbee packets
-        switch (packet.type)
-        {
-            case PacketType.zigbee_aps:
-                // the APS code follows this switch...
-                break;
-
-            case PacketType.zigbee_nwk:
-                if (_ezsp_client)
-                {
-                    writeWarning("Zigbee: cannot send raw NWK frames via EZSP");
-                    goto default;
-                }
-
-                // NWK frame; we need to implement the NWK protocol I guess?
-                assert(false, "TODO: handle NWK frame... or de-frame APS message and goto ZigbeeAPS?");
-
-            default:
-                ++_status.send_dropped;
-                return ZigbeeResult.unsupported;
-        }
-
-        Packet p = packet;
-        int tag = _queue.enqueue(p, &on_frame_complete);
-        if (tag < 0)
-        {
-            ++_status.send_dropped;
-            return -1;
-        }
-
-        _pending[cast(ubyte)tag] = PendingMessage(callback, packet.hdr!APSFrame, cast(ushort)packet.data.length, getTime());
-
-        send_queued_messages();
-        return tag;
     }
 
     ZigbeeResult send_message(ubyte tag, ref const APSFrame hdr, const(ubyte)[] data)
@@ -479,7 +468,7 @@ private:
             version (DebugZigbeeMessageFlow)
                 writeDebugf("Zigbee: APS send FAILED ({0,03}): EmberStatus {1, 02x}", tag, status);
 
-            _queue.complete(tag, false);
+            _queue.complete(tag, MessageState.failed);
             send_queued_messages();
             return;
         }
@@ -493,7 +482,7 @@ private:
                 writeDebugf("Zigbee: APS       sent ({0,03}) {1,4}ms - {2, 04x}:{3, 02x}->{4, 04x}:{5, 02x} [{6}:{7, 04x}]", tag, (getTime() - pm.send_time).as!"msecs", pm.aps.src, pm.aps.src_endpoint, pm.aps.dst, pm.aps.dst_endpoint, profile_name(pm.aps.profile_id), pm.aps.cluster_id);
 
             if (pm.callback)
-                pm.callback(ZigbeeResult.pending, pm.aps);
+                pm.callback(tag, MessageState.in_flight);
         }
     }
 
@@ -515,17 +504,18 @@ private:
                 writeDebugf("Zigbee: APS unsolicited message sent ({0,03}) - {1, 04x}:{2, 02x}->{3, 04x}:{4, 02x} [{5}:{6, 04x}] - [{7}]", message_tag, _coordinator.node_id, aps_frame.sourceEndpoint, index_or_destination, aps_frame.destinationEndpoint, profile_name(aps_frame.profileId), aps_frame.clusterId, cast(void[])message);
         }
 
-        _queue.complete(message_tag, status == EmberStatus.SUCCESS);
+        _queue.complete(message_tag, status == EmberStatus.SUCCESS ? MessageState.complete : MessageState.failed);
         send_queued_messages();
     }
 
-    void on_frame_complete(bool success, ubyte tag)
+    void on_frame_complete(int tag, MessageState state)
     {
-        if (auto pm = tag in _pending)
+        ubyte t = cast(ubyte)tag;
+        if (auto pm = t in _pending)
         {
             if (pm.callback)
-                pm.callback(success ? ZigbeeResult.success : ZigbeeResult.failed, pm.aps);
-            _pending.remove(tag);
+                pm.callback(tag, state);
+            _pending.remove(t);
         }
     }
 
@@ -551,7 +541,7 @@ private:
         if (signal == StateSignal.offline)
         {
             _ezsp_offline_since = getTime();
-            _queue.abort_all_in_flight();
+            _queue.abort_all_in_flight(MessageState.failed);
         }
         else if (signal == StateSignal.online)
             _ezsp_offline_since = MonoTime();

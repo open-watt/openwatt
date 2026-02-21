@@ -110,11 +110,13 @@ nothrow @nogc:
             {
                 if (req.numRetries > 0)
                 {
-                    req.numRetries--;
                     req.retryTime = now;
-                    void[] msg = (cast(void*)&req.request)[0 .. 1 + req.request.data.length];
-                    iface.send(req.server, msg, EtherType.ow, OW_SubType.modbus);
-                    req.error_handler(ModbusErrorType.Retrying, req.request, req.retryTime);
+                    if (sendPacket(req.server, req.sequenceNumber, req.request, ModbusFrameType.request))
+                    {
+                        req.numRetries--;
+                        if (req.error_handler)
+                            req.error_handler(ModbusErrorType.Retrying, req.request, req.retryTime);
+                    }
                 }
                 else
                 {
@@ -206,12 +208,12 @@ private:
         }
     }
 
-    void sendPacket(ref const MACAddress server, ushort sequenceNumber, ref const ModbusPDU message, ModbusFrameType type) nothrow @nogc
+    bool sendPacket(ref const MACAddress server, ushort sequenceNumber, ref const ModbusPDU message, ModbusFrameType type) nothrow @nogc
     {
         import router.iface.modbus;
         ServerMap* map = get_module!ModbusInterfaceModule().find_server_by_mac(server);
         if (!map)
-            return;
+            return false;
 
         ubyte[4 + ModbusMessageDataMaxLength] buffer = void;
         buffer[0..2] = sequenceNumber.nativeToBigEndian;
@@ -220,6 +222,13 @@ private:
         buffer[4] = message.function_code;
         buffer[5 .. 5 + message.data.length] = message.data[];
 
-        iface.send(server, buffer[0 .. 5 + message.data.length], EtherType.ow, OW_SubType.modbus);
+        Packet p;
+        ref Ethernet hdr = p.init!Ethernet(buffer[0 .. 5 + message.data.length]);
+        hdr.src = iface.mac;
+        hdr.dst = server;
+        hdr.ether_type = EtherType.ow;
+        hdr.ow_sub_type = OW_SubType.modbus;
+
+        return iface.forward(p) >= 0;
     }
 }
