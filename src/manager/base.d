@@ -96,6 +96,9 @@ struct Property
                     prop.type[num_types++] = StringLit!type;
             }}
             debug assert(num_types != 0, "Couldn't determine type for setter overloads of property '" ~ name ~ "'; please specify the type(s) manually");
+
+            // synthesise resetter
+            prop.reset = &SynthResetter!Setters;
         }
 
         // synthesise suggest
@@ -737,6 +740,17 @@ StringResult SynthSetter(Setters...)(ref const Variant value, BaseObject item) n
     if (Setters.length == 1)
         return StringResult(error);
     return StringResult(tconcat("Couldn't set property '" ~ __traits(identifier, Setters[0]) ~ "' with value: ", value));
+}
+
+void SynthResetter(Setters...)(BaseObject item) nothrow @nogc
+{
+    alias Type = __traits(parent, Setters[0]);
+    Type instance = cast(Type)item;
+
+    // reset will write the init value to the first setter
+    alias Setter = Setters[0];
+    alias PropType = Parameters!Setter[0];
+    __traits(child, instance, Setter)(PropType.init);
 }
 
 template SynthSuggest(Setters...)
