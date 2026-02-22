@@ -230,8 +230,8 @@ nothrow @nogc:
 
         if (_state & _valid)
         {
-            _state &= ~_start;
-            _state |= _stop;
+            State new_state = cast(State)((_state & ~_start) | _stop);
+            set_state(new_state);
         }
     }
 
@@ -239,6 +239,9 @@ nothrow @nogc:
     {
         if (_state & _destroyed)
             return; // destroy was already called
+
+        if (_state == State.running)
+            set_offline();
 
         writeInfo(_type[], " '", _name, "' destroyed");
 
@@ -374,6 +377,9 @@ protected:
             if (!DebugType || _type[] == DebugType)
                 writeDebug(_type[], " '", _name, "' state change: ", old, " -> ", new_state);
 
+        if (old == State.running)
+            set_offline();
+
         switch (new_state)
         {
             case State.init_failed:
@@ -390,21 +396,15 @@ protected:
                 set_online();
                 goto do_update;
 
-            case State.validate:
-                goto do_update;
-
             case State.starting:
                 _last_init_attempt = getTime();
                 goto do_update;
 
+            case State.validate:
             case State.restarting:
             case State.destroying:
             case State.stopping:
             case State.failure:
-                if (old == State.running)
-                    set_offline();
-                goto do_update;
-
             do_update:
                 do_update();
                 break;
