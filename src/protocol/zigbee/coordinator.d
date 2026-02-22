@@ -307,9 +307,10 @@ private:
             switch (network_status) with(EmberNetworkStatus)
             {
                 case JOINED_NETWORK:
-                    writeInfo("Zigbee coordinator: NETWORK JOINED");
-                    done = true;
-                    break;
+                    // ASH RST resets the NCP, so this shouldn't happen.
+                    // if it does, the stack is already running — just sync bookkeeping!
+                    writeWarning("Zigbee coordinator: unexpected JOINED_NETWORK at init — syncing state");
+                    return sync_network_state(ezsp);
 
                 case NO_NETWORK:
                     return init_network(ezsp);
@@ -469,6 +470,11 @@ private:
         while (zigbee_iface._network_status != EmberStatus.NETWORK_UP)
             sleep(100.msecs);
 
+        return sync_network_state(ezsp);
+    }
+
+    bool sync_network_state(EZSPClient ezsp)
+    {
         auto nwk_params = ezsp.request!EZSP_GetNetworkParameters();
         _network_params.extended_pan_id.b = nwk_params.parameters.extendedPanId;
         _network_params.pan_id = nwk_params.parameters.panId;
@@ -519,10 +525,21 @@ private:
             }
         }
 
+        // mark all non-coordinator nodes as offline; short addresses may be stale after NCP restart
+        // pre-population below will re-attach nodes the NCP confirms; remaining nodes recover when they next communicate
+        foreach (ref n; mod_zb.nodes_by_eui)
+        {
+            if (n.value.pan_id == pan_id && n.value.id != _node_id)
+            {
+                mod_zb.detach_node(n.value.pan_id, n.value.id);
+                n.value.scan_in_progress = false;
+            }
+        }
+
         // TODO: are we supposed to permit joining for a little while after network-up?
         //       is this for all the clients to re-sync, or will they all join anyway?
         //       if this is for new clients to join, then we don't need to do this here...
-        status = ezsp.request!EZSP_PermitJoining(0xFF);
+        EmberStatus status = ezsp.request!EZSP_PermitJoining(0xFF);
         if (status != EmberStatus.SUCCESS)
             writeInfo("Zigbee coordinator: PermitJoining failed - ", status);
 

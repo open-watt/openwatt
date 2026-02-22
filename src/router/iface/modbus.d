@@ -196,7 +196,9 @@ nothrow @nogc:
         {
             _local_to_uni.insert(ubyte(0), ubyte(0));
             _uni_to_local.insert(ubyte(0), ubyte(0));
-            _queue.configure((_queue_timeout + _request_timeout).msecs, cast(ubyte)(_support_simultaneous_requests ? 8 : 1), 0, PCP.be, &_status);
+            _queue.configure(_support_simultaneous_requests ? 8 : 1, 0, PCP.be, &_status);
+            _queue.set_queue_timeout(_queue_timeout.msecs);
+            _queue.set_transport_timeout(_request_timeout.msecs);
             return CompletionStatus.complete;
         }
         return CompletionStatus.continue_;
@@ -231,7 +233,7 @@ nothrow @nogc:
 
         SysTime now = getSysTime();
 
-        _queue.timeout_stale(getTime());
+        _queue.expire_stale(getTime());
         send_queued_messages();
 
         // check for data

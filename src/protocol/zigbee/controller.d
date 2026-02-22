@@ -167,6 +167,9 @@ protected:
                 ++i;
         }
 
+        if (!_endpoint.node.is_network_up)
+            return;
+
         // update all the nodes...
         foreach (ref NodeMap nm; zb.nodes_by_eui.values)
         {
@@ -175,6 +178,9 @@ protected:
 
             if (nm.initialised < 0xFF && !nm.scan_in_progress && _promises.length < MaxFibers)
             {
+                if (nm.retry_after != MonoTime() && now < nm.retry_after)
+                    continue;
+
                 nm.scan_in_progress = true;
                 _promises.pushBack(async(&do_node_interview, &nm));
             }
@@ -924,9 +930,13 @@ private:
 
         bool fail(const(char)[] reason = "failed")
         {
+            import urt.util : min;
             node.scan_in_progress = false;
+            node.interview_failures = cast(ubyte)min(node.interview_failures + 1, 5);
+            uint backoff_secs = 2u << node.interview_failures;
+            node.retry_after = getTime() + backoff_secs.seconds;
             version (DebugZigbeeController)
-                writeWarningf("ZigbeeController: interview FAILED for device {0,04x}! result = {1} - {2}", node.id, r, reason);
+                writeWarningf("ZigbeeController: interview FAILED for device {0,04x}! result = {1} - {2} (retry in {3}s)", node.id, r, reason, backoff_secs);
             return false;
         }
 
@@ -1223,6 +1233,8 @@ private:
 
         node.initialised = 0xFF; // fully initialised
         node.scan_in_progress = false;
+        node.interview_failures = 0;
+        node.retry_after = MonoTime();
 
         return true;
     }

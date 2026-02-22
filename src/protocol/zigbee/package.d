@@ -210,6 +210,8 @@ struct NodeMap
     ubyte initialised;
     bool scan_in_progress;
     bool device_created;
+    MonoTime retry_after;
+    ubyte interview_failures;
 
     ubyte lqi;
     byte rssi;

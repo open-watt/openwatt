@@ -533,6 +533,8 @@ class ZigbeeNode : BaseObject
         return ZigbeeResult.success;
     }
 
+    final bool is_network_up() const pure nothrow
+        => zigbee_iface()._network_status == EmberStatus.NETWORK_UP;
 
 protected:
 

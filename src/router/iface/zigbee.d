@@ -50,7 +50,8 @@ EUI64 zigbee_multicast_addr(ushort group)
     => EUI64(0x3, 0, 0, 0, 0, 0, group >> 8, cast(ubyte)group);
 
 
-enum uint queue_timeout = 4000; // milliseconds
+enum uint queue_timeout = 30_000; // milliseconds — safety net only; message_sent_handler is the real completion path
+enum uint ezsp_grace_period = 4000; // milliseconds — how long to wait for EZSP client to recover before restarting
 
 
 class ZigbeeInterface : BaseInterface
@@ -77,18 +78,16 @@ nothrow @nogc:
             return StringResult("ezsp-client cannot be null");
         if (_ezsp_client is value)
             return StringResult.success;
-        if (_ezsp_client)
+        if (_subscribed)
         {
-            subscribe_ezsp_client(false);
+            _ezsp_client.unsubscribe(&ezsp_state_change);
+            set_ezsp_callbacks(false);
             if (is_coordinator)
                 _coordinator.subscribe_client(_ezsp_client, false);
+            _subscribed = false;
         }
 
         _ezsp_client = value;
-        subscribe_ezsp_client(true);
-        if (is_coordinator)
-            _coordinator.subscribe_client(_ezsp_client, true);
-
         _network_status = EmberStatus.NETWORK_DOWN;
 
         restart();
@@ -159,11 +158,21 @@ protected:
         if (!_ezsp_client.running)
             return CompletionStatus.continue_;
 
+        // Register EZSP callback handlers early — the coordinator needs
+        // status_handler to receive NETWORK_UP during its init sequence.
+        // This is idempotent (set_callback_handler overwrites).
+        if (!_subscribed)
+            set_ezsp_callbacks(true);
+
         if (is_coordinator)
         {
             if (_coordinator.ready)
             {
-                _queue.init(queue_timeout.msecs, _max_in_flight, 1, PCP.ca, &_status);
+                _ezsp_client.subscribe(&ezsp_state_change);
+                _coordinator.subscribe_client(_ezsp_client, true);
+                _subscribed = true;
+                _queue.init(_max_in_flight, 1, PCP.ca, &_status);
+                _queue.set_transport_timeout(queue_timeout.msecs);
                 return CompletionStatus.complete;
             }
         }
@@ -174,6 +183,9 @@ protected:
                 writeError("EZSP device must run router firmware be used as an interface");
                 return CompletionStatus.error;
             }
+
+            _ezsp_client.subscribe(&ezsp_state_change);
+            _subscribed = true;
 
             // startup in router mode...
             assert(false, "TODO");
@@ -203,6 +215,18 @@ protected:
         }
         _leave_sent = false;
 
+        // Always clear EZSP callbacks — they may have been registered
+        // early in startup before _subscribed was set.
+        set_ezsp_callbacks(false);
+
+        if (_subscribed)
+        {
+            _ezsp_client.unsubscribe(&ezsp_state_change);
+            if (is_coordinator)
+                _coordinator.subscribe_client(_ezsp_client, false);
+            _subscribed = false;
+        }
+
         get_module!ZigbeeProtocolModule.detach_all_nodes(this);
 
         // abort all pending messages
@@ -230,12 +254,12 @@ protected:
         // delayed restart: give EZSP client a grace period to recover
         if (_ezsp_offline_since != MonoTime())
         {
-            if (now - _ezsp_offline_since > queue_timeout.msecs)
+            if (now - _ezsp_offline_since > ezsp_grace_period.msecs)
                 restart();
             return; // don't send while client is offline
         }
 
-        _queue.timeout_stale(now);
+        _queue.expire_stale(now);
 
         send_queued_messages();
 
@@ -366,6 +390,7 @@ private:
     ZigbeeCoordinator _coordinator;
 
     bool _leave_sent;
+    bool _subscribed;
     ubyte _max_in_flight = 3;
 
     MonoTime _last_ping;
@@ -466,6 +491,9 @@ private:
         {
             ++_status.send_dropped;
 
+            if (status == EmberStatus.NETWORK_DOWN)
+                _network_status = EmberStatus.NETWORK_DOWN;
+
             version (DebugZigbeeMessageFlow)
                 writeDebugf("Zigbee: APS send FAILED ({0,03}): EmberStatus {1, 02x}", tag, status);
 
@@ -520,21 +548,16 @@ private:
         }
     }
 
-    void subscribe_ezsp_client(bool subscribe) nothrow
+    void set_ezsp_callbacks(bool enable) nothrow
     {
-        if (subscribe)
-            _ezsp_client.subscribe(&ezsp_state_change);
-        else
-            _ezsp_client.unsubscribe(&ezsp_state_change);
-
-        _ezsp_client.set_message_handler(subscribe ? &unhandled_message : null);
-        _ezsp_client.set_callback_handler!EZSP_StackStatusHandler(subscribe ? &status_handler : null);
-        _ezsp_client.set_callback_handler!EZSP_IncomingSenderEui64Handler(subscribe ? &incoming_message_sender : null);
-        _ezsp_client.set_callback_handler!EZSP_IncomingMessageHandler(subscribe ? &incoming_message_handler : null);
-        _ezsp_client.set_callback_handler!EZSP_MessageSentHandler(subscribe ? &message_sent_handler : null);
-        _ezsp_client.set_callback_handler!EZSP_MacPassthroughMessageHandler(subscribe ? &mac_passthrough_handler : null);
-        _ezsp_client.set_callback_handler!EZSP_CustomFrameHandler(subscribe ? &custom_frame_handler : null);
-        _ezsp_client.set_callback_handler!EZSP_CounterRolloverHandler(subscribe ? &counter_rollover_handler : null);
+        _ezsp_client.set_message_handler(enable ? &unhandled_message : null);
+        _ezsp_client.set_callback_handler!EZSP_StackStatusHandler(enable ? &status_handler : null);
+        _ezsp_client.set_callback_handler!EZSP_IncomingSenderEui64Handler(enable ? &incoming_message_sender : null);
+        _ezsp_client.set_callback_handler!EZSP_IncomingMessageHandler(enable ? &incoming_message_handler : null);
+        _ezsp_client.set_callback_handler!EZSP_MessageSentHandler(enable ? &message_sent_handler : null);
+        _ezsp_client.set_callback_handler!EZSP_MacPassthroughMessageHandler(enable ? &mac_passthrough_handler : null);
+        _ezsp_client.set_callback_handler!EZSP_CustomFrameHandler(enable ? &custom_frame_handler : null);
+        _ezsp_client.set_callback_handler!EZSP_CounterRolloverHandler(enable ? &counter_rollover_handler : null);
     }
 
     void ezsp_state_change(BaseObject, StateSignal signal) nothrow

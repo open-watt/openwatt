@@ -55,6 +55,7 @@ enum MessageState
     failed,
     aborted,
     timeout,
+    expired,
     dropped
 }
 
