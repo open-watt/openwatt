@@ -170,20 +170,34 @@ nothrow @nogc:
 
         if (s.length < StringLen)
             return -1;
+        size_t i = 0, j = 0;
         for (size_t n = 0; n < StringLen; ++n)
         {
-            if (n % 3 == 2)
+            char c = s[n];
+            if (i == 2)
             {
-                if (s[n] != ':')
+                if (c != ':')
                     return -1;
+                ++j;
+                i = 0;
+                continue;
             }
-            else if (!is_hex(s[n]))
-                return -1;
+
+            uint digit = c - '0';
+            if (digit > 9)
+            {
+                digit = (c | 0x20) - 'a';
+                if (digit > 5)
+                    return -1;
+                digit += 10;
+            }
+
+            if (i == 0)
+                b[j] = cast(ubyte)(digit << 4);
+            else
+                b[j] |= cast(ubyte)digit;
+            ++i;
         }
-
-        for (size_t i = 0; i < Bytes; ++i)
-            b[i] = cast(ubyte)parse_int(s[i*3 .. i*3 + 2], null, 16);
-
         return StringLen;
     }
 
