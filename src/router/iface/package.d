@@ -115,12 +115,26 @@ struct InterfaceSubscriber
 
 class BaseInterface : BaseObject
 {
-    __gshared Property[5] Properties = [ Property.create!("mtu", mtu)(),
-                                         Property.create!("actual-mtu", actual_mtu)(),
-                                         Property.create!("l2mtu", l2mtu)(),
-                                         Property.create!("max-l2mtu", max_l2mtu)(),
-                                         Property.create!("pcap", pcap)() ];
+    __gshared Property[17] Properties = [ Property.create!("mtu", mtu)(),
+                                          Property.create!("actual-mtu", actual_mtu)(),
+                                          Property.create!("l2mtu", l2mtu)(),
+                                          Property.create!("max-l2mtu", max_l2mtu)(),
+                                          Property.create!("pcap", pcap)(),
+                                          Property.create!("last_status_change_time", last_status_change_time, "status")(),
+                                          Property.create!("connected", connected, "status")(),
+                                          Property.create!("link_status", link_status, "status")(),
+                                          Property.create!("link_downs", link_downs, "status")(),
+                                          Property.create!("tx_link_speed", tx_link_speed, "status")(),
+                                          Property.create!("rx_link_speed", rx_link_speed, "status")(),
+                                          Property.create!("send_bytes", send_bytes, "traffic")(),
+                                          Property.create!("recv_bytes", recv_bytes, "traffic")(),
+                                          Property.create!("send_packets", send_packets, "traffic")(),
+                                          Property.create!("recv_packets", recv_packets, "traffic")(),
+                                          Property.create!("send_dropped", send_dropped, "traffic")(),
+                                          Property.create!("recv_dropped", recv_dropped, "traffic")() ];
 nothrow @nogc:
+
+    enum type_name = "interface";
 
     MACAddress mac;
     Map!(MACAddress, BaseInterface) macTable;
@@ -188,6 +202,18 @@ nothrow @nogc:
         return null;
     }
 
+    SysTime last_status_change_time() const => _status.link_status_change_time;
+    ConnectionStatus connected() const => _status.connected;
+    LinkStatus link_status() const => _status.link_status;
+    ulong link_downs() const => _status.link_downs;
+    ulong tx_link_speed() const => _status.tx_link_speed;
+    ulong rx_link_speed() const => _status.rx_link_speed;
+    ulong send_bytes() const => _status.send_bytes;
+    ulong recv_bytes() const => _status.recv_bytes;
+    ulong send_packets() const => _status.send_packets;
+    ulong recv_packets() const => _status.recv_packets;
+    ulong send_dropped() const => _status.send_dropped;
+    ulong recv_dropped() const => _status.recv_dropped;
 
     // API...
 
@@ -343,12 +369,12 @@ protected:
 
     override void update()
     {
-        assert(_status.link_status == Status.Link.up, "Interface is not online, it shouldn't be in Running state!");
+        assert(_status.link_status == LinkStatus.up, "Interface is not online, it shouldn't be in Running state!");
     }
 
     override void set_online()
     {
-        _status.link_status = Status.Link.up;
+        _status.link_status = LinkStatus.up;
         _status.link_status_change_time = getSysTime();
         super.set_online();
     }
@@ -356,7 +382,7 @@ protected:
     override void set_offline()
     {
         super.set_offline();
-        _status.link_status = Status.Link.down;
+        _status.link_status = LinkStatus.down;
         _status.link_status_change_time = getSysTime();
         ++_status.link_downs;
     }
@@ -437,13 +463,19 @@ nothrow @nogc:
 
     override void init()
     {
-        // HACK: BaseInterface collection is not a natural collection, so we'll init it here...
-        ref Collection!BaseInterface* c = collection_for!BaseInterface();
-        assert(c is null, "Collection has been registered before!");
-        c = &interfaces;
+        g_app.register_enum!ConnectionStatus();
+        g_app.register_enum!LinkStatus();
 
+//        // HACK: BaseInterface collection is not a natural collection, so we'll init it here...
+//        ref Collection!BaseInterface* c = collection_for!BaseInterface();
+//        assert(c is null, "Collection has been registered before!");
+//        c = &interfaces;
+//
+//        g_app.register_collection(interfaces, "/interface");
+
+        g_app.console.register_collection("/interface", interfaces);
         g_app.console.register_collection("/interface/vlan", vlan_interfaces);
-        g_app.console.register_command!print("/interface", this);
+//        g_app.console.register_command!print("/interface", this);
     }
 
     override void update()

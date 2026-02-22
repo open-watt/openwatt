@@ -20,6 +20,20 @@ const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
     else
     {
         import urt.mem.allocator;
+
+        static if (__traits(isAbstractClass, Type))
+            enum create_instance = null;
+        else
+        {
+            static create(ref BaseCollection c, const(char)[] name, ObjectFlags flags)
+            {
+                if (!name)
+                    name = c.generate_name(c.type_info.type[]);
+                return defaultAllocator.allocT!Type(name.makeString(defaultAllocator), flags);
+            }
+            enum create_instance = &create;
+        }
+
         __gshared const CollectionTypeInfo ti = CollectionTypeInfo(StringLit!(Type.type_name),
                                                                    all_properties!Type(),
                                                                    (){
@@ -28,9 +42,7 @@ const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
                                                                         else
                                                                             return null;
                                                                    }(),
-                                                                   (ref BaseCollection c, const(char)[] n, ObjectFlags flags)
-                                                                       => defaultAllocator.allocT!Type((n ? n : c.generate_name(c.type_info.type[])).makeString(defaultAllocator), flags)
-                                                                   );
+                                                                   create_instance);
         return &ti;
     }
 }

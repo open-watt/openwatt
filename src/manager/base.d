@@ -54,7 +54,6 @@ enum StateSignal
 
 alias StateSignalHandler = void delegate(BaseObject object, StateSignal signal) nothrow @nogc;
 
-
 struct Property
 {
     alias GetFun = Variant function(BaseObject i) nothrow @nogc;
@@ -64,30 +63,47 @@ struct Property
 
     String name;
     String[2] type; // up to 2 types (sometimes like enum + string, or enum + int)
+    String category;
     GetFun get;
     SetFun set;
     ResetFun reset;
     SuggestFun suggest;
+    ubyte flags;
 
-    static Property create(string name, alias member)()
+    static Property create(string name, alias member, string category = null, string flags = null)()
     {
         alias Type = __traits(parent, member);
         static assert(is(Type : BaseObject), "Type must be a subclass of BaseObject");
 
         Property prop;
         prop.name = StringLit!name;
+        prop.category = category ? StringLit!category : String();
+        prop.flags = (flags.contains('h') ? 1 : 0); // hidden
+
+        alias Getters = FilterOverloads!(IsGetter, member);
+        alias Setters = FilterOverloads!(IsSetter, member);
+        alias Suggests = FilterOverloads!(HasSuggest, member);
 
         // synthesise getter
-        alias Getters = FilterOverloads!(IsGetter, member);
         static if (Getters.length > 0)
+        {
             prop.get = &SynthGetter!Getters;
 
+            // if there are no setters, we'll derive the property type from the getter
+            static if (Setters.length == 0)
+            {{
+                enum type = type_for!(ReturnType!(Getters[0]));
+                static if (type)
+                    prop.type[0] = StringLit!type;
+            }}
+        }
+
         // synthesise setter
-        alias Setters = FilterOverloads!(IsSetter, member);
         static if (Setters.length > 0)
         {
             prop.set = &SynthSetter!Setters;
 
+            // collect property types from the setters
             size_t num_types = 0;
             static foreach (Setter; Setters)
             {{
@@ -102,7 +118,6 @@ struct Property
         }
 
         // synthesise suggest
-        alias Suggests = FilterOverloads!(HasSuggest, member);
         static if (Suggests.length > 0)
             prop.suggest = &SynthSuggest!Suggests;
 
@@ -110,14 +125,13 @@ struct Property
     }
 }
 
-
 class BaseObject
 {
-    __gshared Property[7] Properties = [ Property.create!("type", type)(),
-                                         Property.create!("name", name)(),
-                                         Property.create!("disabled", disabled)(),
-                                         Property.create!("comment", comment)(),
-                                         Property.create!("running", running)(),
+    __gshared Property[7] Properties = [ Property.create!("name", name)(),
+                                         Property.create!("type", type)(),
+                                         Property.create!("disabled", disabled, null, "h")(),
+                                         Property.create!("comment", comment, null, "h")(),
+                                         Property.create!("running", running, null, "h")(),
                                          Property.create!("flags", flags)(),
                                          Property.create!("status", status_message)() ];
 nothrow @nogc:
@@ -306,9 +320,35 @@ nothrow @nogc:
         }
     }
 
+    final Variant gather(scope const(char)[][] patterns...)
+    {
+        auto props = Array!VariantKVP(Reserve, 16);
+        foreach (p; properties)
+        {
+            if (!p.get)
+                continue;
+
+            bool add_item = false;
+            if (!patterns)
+                add_item = true;
+            else foreach (pattern; patterns)
+            {
+                if (wildcard_match(pattern, p.name[]))
+                {
+                    add_item = true;
+                    break;
+                }
+            }
+
+            if (add_item)
+                props.emplaceBack(p.name[], p.get(this));
+        }
+        return Variant(props[]);
+    }
+
     // get the whole config
-    final Variant get_config() const
-        => Variant();
+    final Variant get_config()
+        => gather();
 
     final MutableString!0 export_config() const pure
     {

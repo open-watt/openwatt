@@ -105,20 +105,20 @@ nothrow @nogc:
     // TODO: remove public when everyting ported to collections...
     override void update()
     {
-        assert(_status.link_status == Status.Link.up, "Stream is not online, it shouldn't be in Running state!");
+        assert(_status.link_status == LinkStatus.up, "Stream is not online, it shouldn't be in Running state!");
     }
 
     override void set_online()
     {
         super.set_online();
-        _status.link_status = Status.Link.up;
+        _status.link_status = LinkStatus.up;
         _status.link_status_change_time = getSysTime();
     }
 
     override void set_offline()
     {
         super.set_offline();
-        _status.link_status = Status.Link.down;
+        _status.link_status = LinkStatus.down;
         _status.link_status_change_time = getSysTime();
         ++_status.link_downs;
     }

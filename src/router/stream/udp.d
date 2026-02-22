@@ -48,11 +48,11 @@ nothrow @nogc:
             break; // TODO: what do we even do with multiple addresses?
         }
 
-        _status.link_status = Status.Link.up;
+        _status.link_status = LinkStatus.up;
     }
 
     override bool running() const pure
-        => status.link_status == Status.Link.up;
+        => status.link_status == LinkStatus.up;
 
     override const(char)[] remote_name()
     {
