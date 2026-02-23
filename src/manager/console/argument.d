@@ -10,6 +10,9 @@ import manager.base : BaseObject;
 import manager.component : Component;
 import manager.device : Device;
 
+import router.iface : BaseInterface;
+import router.stream : Stream;
+
 nothrow @nogc:
 
 
@@ -18,7 +21,7 @@ nothrow @nogc:
 
 Array!String suggest_completion(T : typeof(null))(const(char)[] argument_text)
 {
-    if (StringLit!"null".startsWith(argument_text))
+    if (StringLit!"null"[].startsWith(argument_text))
         return Array!String(Concat, StringLit!"null");
     return Array!String();
 }
@@ -29,7 +32,7 @@ Array!String suggest_completion(T : bool)(const(char)[] argument_text)
     Array!String completions;
     foreach (ref s; vals)
     {
-        if (s.startsWith(argument_text))
+        if (s[].startsWith(argument_text))
             completions ~= s;
     }
     return completions;
@@ -95,7 +98,7 @@ Array!String suggest_completion(T : const Component)(const(char)[] argument_text
     size_t cid;
     foreach (i, c; cmp.components)
     {
-        if (c.id.startsWith(argument_text))
+        if (c.id[].startsWith(argument_text))
         {
             cid = i;
             completions ~= String(MutableString!0(Concat, prefix, c.id)); // TODO: MOVE construct!
@@ -116,7 +119,7 @@ Array!String suggest_completion(T : const Device)(const(char)[] argument_text)
     Array!String completions;
     foreach (name; g_app.devices.keys)
     {
-        if (name.startsWith(argument_text))
+        if (name[].startsWith(argument_text))
             completions ~= name.makeString(defaultAllocator);
     }
     return completions;
@@ -128,7 +131,7 @@ Array!String suggest_completion(I)(const(char)[] argument_text)
     Array!String completions;
     foreach (ref name; get_module!InterfaceModule.interfaces.keys)
     {
-        if (name.startsWith(argument_text))
+        if (name[].startsWith(argument_text))
             completions ~= name;
     }
     return completions;
@@ -140,7 +143,7 @@ Array!String suggest_completion(S)(const(char)[] argument_text)
     Array!String completions;
     foreach (ref name; get_module!StreamModule.streams.keys)
     {
-        if (name.startsWith(argument_text))
+        if (name[].startsWith(argument_text))
             completions ~= name;
     }
     return completions;
@@ -149,6 +152,8 @@ Array!String suggest_completion(S)(const(char)[] argument_text)
 Array!String suggest_completion(T)(const(char)[] argument_text)
     if (!is(T == typeof(null)) && is(T : const BaseObject) && !is(const T == const BaseInterface) && !is(const T == const Stream))
 {
+    import manager.collection : collection_for;
+
     alias Type = Unqual!T;
     const collection = collection_for!Type();
     if (collection is null)
@@ -157,7 +162,7 @@ Array!String suggest_completion(T)(const(char)[] argument_text)
     Array!String completions;
     foreach (ref name; collection.keys)
     {
-        if (name.startsWith(argument_text))
+        if (name[].startsWith(argument_text))
             completions ~= name;
     }
     return completions;
