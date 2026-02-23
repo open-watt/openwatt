@@ -16,6 +16,7 @@ enum PacketType : ushort
     modbus,
     can,
     tesla_twc,
+    ash
 }
 
 enum EtherType : ushort

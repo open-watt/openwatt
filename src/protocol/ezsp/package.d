@@ -13,6 +13,7 @@ import manager.console.function_command : FunctionCommandState;
 import manager.console.session;
 import manager.plugin;
 
+import protocol.ezsp.ashv2;
 import protocol.ezsp.client;
 
 import router.stream;
@@ -25,17 +26,20 @@ class EZSPProtocolModule : Module
     mixin DeclareModule!"protocol.ezsp";
 nothrow @nogc:
 
+    Collection!ASHInterface ash_connections;
     Collection!EZSPClient clients;
 
     override void init()
     {
         g_app.register_enum!EZSPStackType();
 
+        g_app.console.register_collection("/protocol/ezsp/ash", ash_connections);
         g_app.console.register_collection("/protocol/ezsp/client", clients);
     }
 
     override void update()
     {
+        ash_connections.update_all();
         clients.update_all();
     }
 }

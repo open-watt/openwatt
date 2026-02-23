@@ -389,6 +389,29 @@ protected:
 
     abstract bool transmit(ref Packet packet);
 
+    final void dispatch(ref Packet packet)
+    {
+        ++_status.recv_packets;
+        _status.recv_bytes += packet.length;
+
+        if (packet.type == PacketType.ethernet && !packet.eth.src.is_multicast)
+        {
+            if (find_mac_address(packet.eth.src) is null)
+                add_address(packet.eth.src, this);
+        }
+
+        if (_master)
+            _master.slave_incoming(packet, _slave_id);
+        else
+        {
+            foreach (ref subscriber; _subscribers[0.._num_subscribers])
+            {
+                if ((subscriber.filter.direction & PacketDirection.incoming) && subscriber.filter.match(packet))
+                    subscriber.recv_packet(packet, this, PacketDirection.incoming, subscriber.user_data);
+            }
+        }
+    }
+
     void slave_incoming(ref Packet packet, byte child_id)
     {
         assert(false, "Override this method to implement a _master interface");
@@ -419,31 +442,6 @@ package:
         if (addr.b[5] < 100 || addr.b[5] >= 240)
             addr.b[5] ^= 0x80;
         return addr;
-    }
-
-    void dispatch(ref Packet packet)
-    {
-        // update the stats
-        ++_status.recv_packets;
-        _status.recv_bytes += packet.length;
-
-        // check if we ever saw the sender before...
-        if (!packet.eth.src.is_multicast)
-        {
-            if (find_mac_address(packet.eth.src) is null)
-                add_address(packet.eth.src, this);
-        }
-
-        if (_master)
-            _master.slave_incoming(packet, _slave_id);
-        else
-        {
-            foreach (ref subscriber; _subscribers[0.._num_subscribers])
-            {
-                if ((subscriber.filter.direction & PacketDirection.incoming) && subscriber.filter.match(packet))
-                    subscriber.recv_packet(packet, this, PacketDirection.incoming, subscriber.user_data);
-            }
-        }
     }
 
 //private:
