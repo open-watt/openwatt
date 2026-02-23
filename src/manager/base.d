@@ -17,7 +17,7 @@ import urt.util : min;
 import manager.console.argument;
 import manager.value;
 
-public import manager.collection : collection_type_info, collection_for,CollectionTypeInfo;
+public import manager.collection : collection_type_info, collection_for, CollectionTypeInfo;
 
 //version = DebugStateFlow;
 enum DebugType = null;
@@ -241,6 +241,8 @@ nothrow @nogc:
 
     // Object API...
 
+    alias log = ObjectLog!(_type, _name);
+
     final void restart()
     {
         assert(!(_state & _destroyed), "Cannot restart a destroyed object!");
@@ -260,7 +262,7 @@ nothrow @nogc:
         if (_state == State.running)
             set_offline();
 
-        writeInfo(_type[], " '", _name, "' destroyed");
+        log.info("destroyed");
 
         _state |= _disabled | _destroyed;
         _state &= ~_start;
@@ -359,13 +361,13 @@ nothrow @nogc:
     final void subscribe(StateSignalHandler handler)
     {
         assert(!_subscribers[].contains(handler), "Already registered");
-        debug writeDebug(_type[], " '", _name, "' (", cast(void*)this, ") new subscriber: ", handler.ptr);
+        debug log.trace("new subscriber: ", handler.ptr);
         _subscribers ~= handler;
     }
 
     final void unsubscribe(StateSignalHandler handler) pure
     {
-        debug writeDebug(_type[], " '", _name, "' (", cast(void*)this, ") remove subscriber: ", handler.ptr);
+        debug log.trace("remove subscriber: ", handler.ptr);
         _subscribers.removeFirstSwapLast(handler);
     }
 
@@ -420,7 +422,7 @@ protected:
 
         debug version (DebugStateFlow)
             if (!DebugType || _type[] == DebugType)
-                writeDebug(_type[], " '", _name, "' state change: ", old, " -> ", new_state);
+                debug log.trace("state change: ", old, " -> ", new_state);
 
         if (old == State.running)
             set_offline();
@@ -430,7 +432,7 @@ protected:
             case State.init_failed:
                 debug version (DebugStateFlow)
                     if (!DebugType || _type[] == DebugType)
-                        writeDebug(_type[], " '", _name, "' init fail - try again in ", _backoff_ms, "ms");
+                        debug log.trace("init fail - retry in ", _backoff_ms, "ms");
                 goto case;
             case State.disabled:
             case State.destroyed:
@@ -478,13 +480,13 @@ protected:
 
     void set_online()
     {
-        writeInfo(_type[], " '", _name, "' online");
+        log.info("online");
         signal_state_change(StateSignal.online);
     }
 
     void set_offline()
     {
-        writeInfo(_type[], " '", _name, "' offline");
+        log.info("offline");
         signal_state_change(StateSignal.offline);
     }
 
@@ -665,6 +667,29 @@ private:
     }
 }
 
+template ObjectLog(alias tag, alias name)
+{
+nothrow @nogc:
+    void emergency(T...)(ref T args) { write_log(Severity.emergency, tag[], name[], args); }
+    void alert(T...)(ref T args) { write_log(Severity.alert, tag[], name[], args); }
+    void critical(T...)(ref T args) { write_log(Severity.critical, tag[], name[], args); }
+    void error(T...)(ref T args) { write_log(Severity.error, tag[], name[], args); }
+    void warning(T...)(ref T args) { write_log(Severity.warning, tag[], name[], args); }
+    void notice(T...)(ref T args) { write_log(Severity.notice, tag[], name[], args); }
+    void info(T...)(ref T args) { write_log(Severity.info, tag[], name[], args); }
+    void debug_(T...)(ref T args) { write_log(Severity.debug_, tag[], name[], args); }
+    void trace(T...)(ref T args) { write_log(Severity.trace, tag[], name[], args); }
+
+    void emergencyf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.emergency, tag[], name[], fmt, args); }
+    void alertf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.alert, tag[], name[], fmt, args); }
+    void criticalf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.critical, tag[], name[], fmt, args); }
+    void errorf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.error, tag[], name[], fmt, args); }
+    void warningf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.warning, tag[], name[], fmt, args); }
+    void noticef(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.notice, tag[], name[], fmt, args); }
+    void infof(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.info, tag[], name[], fmt, args); }
+    void debugf(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.debug_, tag[], name[], fmt, args); }
+    void tracef(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.trace, tag[], name[], fmt, args); }
+}
 
 const(Property*)[] all_properties(Type)()
 {

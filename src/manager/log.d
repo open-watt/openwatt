@@ -10,15 +10,6 @@ import manager.console.command;
 import manager.console.session;
 import manager.plugin;
 
-enum Category
-{
-    info,
-    warning,
-    error,
-    alert,
-    debug_
-}
-
 class LogModule : Module
 {
     mixin DeclareModule!"log";
@@ -26,12 +17,16 @@ nothrow @nogc
 
     override void init()
     {
-        Command[5] commands = [
-            g_app.allocator.allocT!LogCommand(g_app.console, "info", Category.info, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "warn", Category.warning, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "error", Category.error, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "alert", Category.alert, this),
-            g_app.allocator.allocT!LogCommand(g_app.console, "debug", Category.debug_, this)
+        Command[9] commands = [
+            g_app.allocator.allocT!LogCommand(g_app.console, "emergency", Severity.emergency, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "alert", Severity.alert, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "critical", Severity.critical, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "error", Severity.error, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "warning", Severity.warning, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "notice", Severity.notice, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "info", Severity.info, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "debug", Severity.debug_, this),
+            g_app.allocator.allocT!LogCommand(g_app.console, "trace", Severity.trace, this),
         ];
 
         g_app.console.register_commands("/log", commands);
@@ -46,15 +41,15 @@ class LogCommand : Command
 nothrow @nogc:
 
     LogModule instance;
-    Category category;
+    Severity severity;
 
-    this(ref Console console, const(char)[] name, Category category, LogModule instance)
+    this(ref Console console, const(char)[] name, Severity severity, LogModule instance)
     {
         import urt.mem.string;
 
         super(console, String(name.addString));
         this.instance = instance;
-        this.category = category;
+        this.severity = severity;
     }
 
     override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
@@ -65,25 +60,7 @@ nothrow @nogc:
             return null;
         }
 
-        final switch (category)
-        {
-            case Category.info:
-                writeInfo(args[0]);
-                break;
-            case Category.warning:
-                writeWarning(args[0]);
-                break;
-            case Category.error:
-                writeError(args[0]);
-                break;
-            case Category.alert:
-                // TODO: implement ALERT type...
-                writeError(args[0]);
-                break;
-            case Category.debug_:
-                writeDebug(args[0]);
-                break;
-        }
+        write_log(severity, "console", null, args[0]);
         return null;
     }
 

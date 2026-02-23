@@ -45,7 +45,7 @@ int main(string[] args)
             if (!is_console)
             {
                 // piped output - log to stderr so stdout stays clean for command output
-                register_log_sink(&stderr_log_sink);
+                register_log_sink(&stderr_log_sink, null);
             }
         }
         else version (Posix)
@@ -54,12 +54,12 @@ int main(string[] args)
             if (!isatty(STDOUT_FILENO))
             {
                 // piped - log to stderr
-                register_log_sink(&stderr_log_sink);
+                register_log_sink(&stderr_log_sink, null);
             }
         }
     }
     else
-        register_log_sink(&default_log_sink);
+        register_log_sink(&default_log_sink, null);
 
     Application app = create_application();
     Session active_session = null;
@@ -70,7 +70,7 @@ int main(string[] args)
     if (!conf)
     {
         import urt.string.format;
-        writeError("Failed to load startup configuration file: ", config_path);
+        log_error("system", "Failed to load startup configuration file: ", config_path);
         if (!interactive_mode)
             return -1;
     }
@@ -132,14 +132,74 @@ int main(string[] args)
 
 private:
 
-void default_log_sink(Level level, const(char)[] message) nothrow @nogc
+immutable string[9] severity_short = [
+    "EMRG", "ALRT", "CRIT", "ERR ", "WARN", "NOTE", "INFO", "DBG ", "TRC ",
+];
+
+immutable string[9] severity_colors = [
+    "\x1b[5;91m",   // emergency — flashing bright red
+    "\x1b[1;91m",   // alert — bold bright red
+    "\x1b[91m",     // critical — bright red
+    "\x1b[31m",     // error — red
+    "\x1b[33m",     // warning — yellow
+    "\x1b[36m",     // notice — cyan
+    "\x1b[0m",      // info — default
+    "\x1b[90m",     // debug — dim (bright black)
+    "\x1b[3;90m",   // trace — italic dim
+];
+
+immutable string[16] tag_bg_colors = [
+    "\x1b[48;2;60;15;15m",   // red
+    "\x1b[48;2;60;35;15m",   // orange
+    "\x1b[48;2;55;55;15m",   // yellow
+    "\x1b[48;2;30;55;15m",   // lime
+    "\x1b[48;2;15;55;15m",   // green
+    "\x1b[48;2;15;55;35m",   // spring
+    "\x1b[48;2;15;55;55m",   // cyan
+    "\x1b[48;2;15;35;60m",   // azure
+    "\x1b[48;2;15;15;60m",   // blue
+    "\x1b[48;2;35;15;60m",   // violet
+    "\x1b[48;2;55;15;55m",   // magenta
+    "\x1b[48;2;60;15;35m",   // rose
+    "\x1b[48;2;45;30;15m",   // brown
+    "\x1b[48;2;20;45;45m",   // teal
+    "\x1b[48;2;45;15;45m",   // plum
+    "\x1b[48;2;40;45;20m",   // olive
+];
+
+const(char)[] format_log_line(scope ref const LogMessage msg) nothrow @nogc
 {
-    import urt.io;
-    writeln(message);
+    import urt.mem.temp : tconcat;
+
+    auto color = severity_colors[msg.severity];
+    enum reset = "\x1b[0m";
+    enum bg_reset = "\x1b[49m";
+
+    if (msg.tag.length > 0)
+    {
+        size_t h = 5381;
+        foreach (c; msg.tag)
+            h = h * 33 + c;
+        auto tag_bg = tag_bg_colors[h % tag_bg_colors.length];
+
+        if (msg.object_name.length > 0)
+            return tconcat(color, severity_short[msg.severity], " - ", tag_bg, msg.tag, bg_reset ~ " '", msg.object_name, "': ", msg.message, reset);
+        else
+            return tconcat(color, severity_short[msg.severity], " - ", tag_bg, msg.tag, bg_reset ~ ": ", msg.message, reset);
+    }
+    else
+        return tconcat(color, severity_short[msg.severity], " - ", msg.message, reset);
 }
 
-void stderr_log_sink(Level level, const(char)[] message) nothrow @nogc
+void default_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
+{
+    import urt.io;
+    writeln(format_log_line(msg));
+}
+
+void stderr_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
 {
     import core.stdc.stdio : fprintf, stderr;
-    fprintf(stderr, "%.*s\n", cast(int)message.length, message.ptr);
+    auto line = format_log_line(msg);
+    fprintf(stderr, "%.*s\n", cast(int)line.length, line.ptr);
 }

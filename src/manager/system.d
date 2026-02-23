@@ -17,9 +17,20 @@ nothrow @nogc:
 String hostname = StringLit!("OpenWatt"); // TODO: we need to make this thing...
 
 
-void log_level(Session session, Level level)
+void log_level(Session session, Severity severity)
 {
-    logLevel = level;
+    set_global_log_level(severity);
+}
+
+private void set_global_log_level(Severity severity)
+{
+    // Update all active sinks to use this severity as their max
+    // This provides backward-compatible global log level control
+    foreach (i; 0 .. 16)
+    {
+        auto handle = LogSinkHandle(cast(int)i);
+        set_sink_filter(handle, LogFilter(severity));
+    }
 }
 
 void set_hostname(Session session, const(char)[] hostname)
