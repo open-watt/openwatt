@@ -434,7 +434,7 @@ nothrow @nogc:
     }
 
     // /protocol/zigbee/read command
-    ZCLReadState zcl_read(Session session, ZigbeeEndpoint source, ref const(Variant) node, ubyte endpoint, ushort cluster, ref const(Variant) attributes)
+    FunctionCommandState zcl_read(Session session, ZigbeeEndpoint source, ref const(Variant) node, ubyte endpoint, ushort cluster, ref const(Variant) attributes)
     {
         Array!ushort attrs;
         if (!parse_attr_list(attributes, attrs))
@@ -447,9 +447,39 @@ nothrow @nogc:
         if (!nm)
             return null;
 
+        if (cluster == 0xEF00)
+            return tuya_read(session, source, nm, endpoint, attrs);
+
         auto state = g_app.allocator.allocT!ZCLReadState(session, source, nm.id, endpoint, cluster, attrs);
         state.send_requests();
         return state;
+    }
+
+    static FunctionCommandState tuya_read(Session session, ZigbeeEndpoint source, NodeMap* nm, ubyte endpoint, ref Array!ushort attrs)
+    {
+        foreach (dp_id; attrs[])
+        {
+            if (dp_id >= 256)
+            {
+                session.write_line("Invalid Tuya DP id (must be 0-255)");
+                return null;
+            }
+        }
+
+        // Clear requested DPs from cache so we can detect fresh values
+        foreach (dp_id; attrs[])
+            nm.tuya_datapoints.remove(cast(ubyte)dp_id);
+
+        // Send tuya_data_query to request device to report all DPs
+        ubyte[2] buffer = void;
+        buffer[0..2] = tuya_seq.nativeToBigEndian;
+        ++tuya_seq;
+        tuya_seq += tuya_seq == 0;
+
+        source.send_zcl_message(nm.id, endpoint, source.profile_id, 0xEF00,
+            ZCLCommand.tuya_data_query, 0, buffer[], PCP.be);
+
+        return g_app.allocator.allocT!TuyaReadState(session, nm, attrs);
     }
 
     // /protocol/zigbee/write command
@@ -458,6 +488,9 @@ nothrow @nogc:
         NodeMap* nm = resolve_node(session, node);
         if (!nm)
             return null;
+
+        if (cluster == 0xEF00)
+            return tuya_write(session, source, nm, endpoint, attribute, value);
 
         ZCLDataType data_type = ZCLDataType.no_data;
         if (type)
@@ -483,6 +516,64 @@ nothrow @nogc:
         else
             state.send_type_discovery();
         return state;
+    }
+
+    static ZCLWriteState tuya_write(Session session, ZigbeeEndpoint source, NodeMap* nm, ubyte endpoint, ushort attribute, ref const(Variant) value)
+    {
+        if (attribute >= 256)
+        {
+            session.write_line("Invalid Tuya DP id (must be 0-255)");
+            return null;
+        }
+
+        // Encode Tuya DP frame: [seq_hi, seq_lo, dp_id, dp_type, len_hi, len_lo, data...]
+        ubyte[256] buffer = void;
+        buffer[0..2] = tuya_seq.nativeToBigEndian;
+        ++tuya_seq;
+        tuya_seq += tuya_seq == 0;
+
+        buffer[2] = cast(ubyte)attribute;
+
+        ubyte dp_type;
+        ptrdiff_t data_len;
+
+        if (value.isBool)
+        {
+            dp_type = 1; // bool
+            buffer[6] = value.as!bool ? 1 : 0;
+            data_len = 1;
+        }
+        else if (value.isNumber)
+        {
+            dp_type = 2; // value (uint32 big-endian)
+            buffer[6..10] = (value.as!uint).nativeToBigEndian;
+            data_len = 4;
+        }
+        else if (value.isString)
+        {
+            dp_type = 3; // string
+            const(char)[] str = value.asString[];
+            if (str.length > 245) // 256 - 11 bytes overhead
+            {
+                session.write_line("String value too long for Tuya DP");
+                return null;
+            }
+            buffer[6 .. 6 + str.length] = cast(const(ubyte)[])str[];
+            data_len = str.length;
+        }
+        else
+        {
+            session.write_line("Unsupported value type for Tuya DP");
+            return null;
+        }
+
+        buffer[3] = dp_type;
+        buffer[4..6] = (cast(ushort)data_len).nativeToBigEndian;
+
+        source.send_zcl_message(nm.id, endpoint, source.profile_id, 0xEF00,
+            ZCLCommand.tuya_data_request, 0, buffer[0 .. 6 + data_len], PCP.be);
+        session.writef("Sent Tuya DP {0} = {1}\n", attribute, value);
+        return null;
     }
 
     NodeMap* resolve_node(Session session, ref const Variant node_arg)
@@ -567,6 +658,8 @@ nothrow @nogc:
 
 
 private:
+
+__gshared ushort tuya_seq = 0x8000; // shared between tuya_read and tuya_write, offset from controller's counter
 
 class EnergyScanState : FunctionCommandState
 {
@@ -857,6 +950,85 @@ nothrow @nogc:
             result = Variant(results.move);
 
         state = had_error ? CommandCompletionState.error : CommandCompletionState.finished;
+    }
+}
+
+
+class TuyaReadState : FunctionCommandState
+{
+nothrow @nogc:
+
+    CommandCompletionState state = CommandCompletionState.in_progress;
+    MonoTime start_time;
+
+    NodeMap* nm;
+    Array!ushort requested;
+    Array!Variant results;
+
+    this(Session session, NodeMap* nm, Array!ushort attrs)
+    {
+        super(session);
+        this.nm = nm;
+        this.requested = attrs;
+        this.results.resize(attrs.length);
+        this.start_time = getTime();
+    }
+
+    override CommandCompletionState update()
+    {
+        if (state == CommandCompletionState.cancel_requested)
+        {
+            state = CommandCompletionState.cancelled;
+            return state;
+        }
+
+        // Check if all requested DPs have arrived in the cache
+        bool all_received = true;
+        foreach (i, dp_id; requested[])
+        {
+            Variant* val = cast(ubyte)dp_id in nm.tuya_datapoints;
+            if (val)
+                results.ptr[i] = *val;
+            else
+                all_received = false;
+        }
+
+        if (all_received)
+            return finish(false);
+
+        if (getTime() - start_time > 10.seconds)
+        {
+            session.write_line("Tuya read timed out");
+            return finish(true);
+        }
+
+        return state;
+    }
+
+    override void request_cancel()
+    {
+        if (state == CommandCompletionState.in_progress)
+            state = CommandCompletionState.cancel_requested;
+    }
+
+private:
+    CommandCompletionState finish(bool had_timeout)
+    {
+        foreach (i, dp_id; requested[])
+        {
+            if (!results[i].isNull)
+                session.writef("  dp {0}: {1}\n", dp_id, results[i]);
+            else
+                session.writef("  dp {0}: (no response)\n", dp_id);
+        }
+
+        if (requested.length == 1)
+            result = results[0];
+        else
+            result = Variant(results.move);
+
+        state = had_timeout ? CommandCompletionState.timeout : CommandCompletionState.finished;
+        return state;
     }
 }
 
