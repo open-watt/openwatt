@@ -780,7 +780,7 @@ private:
 
                     // TODO: we should request an ACK!!!
 
-                    _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0x0006, cmd, APSFlags.none, null, MessagePriority.immediate);
+                    _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0x0006, cmd, APSFlags.none, null, PCP.vo);
                     break;
                 }
                 goto default;

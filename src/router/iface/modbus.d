@@ -196,7 +196,7 @@ nothrow @nogc:
         {
             _local_to_uni.insert(ubyte(0), ubyte(0));
             _uni_to_local.insert(ubyte(0), ubyte(0));
-            _queue.configure(_support_simultaneous_requests ? 8 : 1, 0, PCP.be, &_status);
+            _queue.init(_support_simultaneous_requests ? 8 : 1, 0, PCP.be, &_status);
             _queue.set_queue_timeout(_queue_timeout.msecs);
             _queue.set_transport_timeout(_request_timeout.msecs);
             return CompletionStatus.complete;
@@ -216,7 +216,7 @@ nothrow @nogc:
                 kvp.value.callback(kvp.key, MessageState.aborted);
         }
         _pending.clear();
-        _queue.cancel_all();
+        _queue.abort_all();
 
         _local_to_uni.clear();
         _uni_to_local.clear();
@@ -233,7 +233,7 @@ nothrow @nogc:
 
         SysTime now = getSysTime();
 
-        _queue.expire_stale(getTime());
+        _queue.timeout_stale(getTime());
         send_queued_messages();
 
         // check for data
@@ -416,14 +416,14 @@ nothrow @nogc:
                 pm.callback(msg_handle, reason);
             _pending.remove(t);
         }
-        _queue.cancel(t);
+        _queue.abort(t);
     }
 
     final override MessageState msg_state(int msg_handle) const
     {
         if (cast(ubyte)msg_handle in _pending)
             return MessageState.in_flight;
-        if (_queue.has_queued(cast(ubyte)msg_handle))
+        if (_queue.is_queued(cast(ubyte)msg_handle))
             return MessageState.queued;
         return MessageState.complete;
     }
@@ -630,7 +630,7 @@ private:
                 bool found = false;
                 foreach (kvp; _pending[])
                 {
-                    if (!_queue.has_queued(kvp.key))
+                    if (!_queue.is_queued(kvp.key))
                     {
                         matched_tag = kvp.key;
                         found = true;

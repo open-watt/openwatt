@@ -259,7 +259,7 @@ protected:
             return; // don't send while client is offline
         }
 
-        _queue.expire_stale(now);
+        _queue.timeout_stale(now);
 
         send_queued_messages();
 
