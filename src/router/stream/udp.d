@@ -75,15 +75,24 @@ nothrow @nogc:
         return bytes;
     }
 
-    override ptrdiff_t write(const void[] data) nothrow @nogc
+    override ptrdiff_t write(const(void[])[] data...) nothrow @nogc
     {
         // TODO: fragment on MTU...?
         size_t bytes;
-        Result r = _socket.sendto(data, MsgFlags.none, &_remote, &bytes);
+        Result r = _socket.sendto(&_remote, &bytes, data);
         if (!r)
             assert(0);
         if (_logging)
-            write_to_log(true, data[0 .. bytes]);
+        {
+            import urt.util : min;
+            ptrdiff_t remain = bytes;
+            for (size_t i = 0; remain > 0; ++i)
+            {
+                size_t len = min(data[i].length, remain);
+                write_to_log(false, data[i][0 .. len]);
+                remain -= len;
+            }
+        }
         return bytes;
     }
 

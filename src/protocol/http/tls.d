@@ -276,7 +276,7 @@ nothrow @nogc:
         return 0;
     }
 
-    final override ptrdiff_t write(const void[] data)
+    final override ptrdiff_t write(const(void[])[] data...)
     {
         version (Windows)
         {
@@ -288,44 +288,66 @@ nothrow @nogc:
             if (status != SEC_E_OK)
                 return -1;
 
-            SecBuffer[4] bufs;
+            SecBuffer[35] bufs = void;
+            assert(data.length <= bufs.length - 3, "Too many buffers!");
+
             auto buffer = Array!(ubyte)(Alloc, sizes.cbHeader + sizes.cbTrailer);
 
             bufs[0].pvBuffer = &buffer[0];
             bufs[0].cbBuffer = sizes.cbHeader;
             bufs[0].BufferType = SECBUFFER_STREAM_HEADER;
 
-            bufs[1].pvBuffer = cast(void*)data.ptr;
-            bufs[1].cbBuffer = cast(ULONG)data.length;
-            bufs[1].BufferType = SECBUFFER_DATA;
+            ULONG i = 1;
+            foreach (ref d; data)
+            {
+                assert(d.length <= ULONG.max, "Buffer too large for Windows API");
+                bufs[i].pvBuffer = cast(void*)d.ptr;
+                bufs[i].cbBuffer = cast(ULONG)d.length;
+                bufs[i++].BufferType = SECBUFFER_DATA;
+            }
 
-            bufs[2].pvBuffer = &buffer[sizes.cbHeader];
-            bufs[2].cbBuffer = sizes.cbTrailer;
-            bufs[2].BufferType = SECBUFFER_STREAM_TRAILER;
+            bufs[i].pvBuffer = &buffer[sizes.cbHeader];
+            bufs[i].cbBuffer = sizes.cbTrailer;
+            bufs[i++].BufferType = SECBUFFER_STREAM_TRAILER;
 
-            bufs[3].pvBuffer = null;
-            bufs[3].cbBuffer = 0;
-            bufs[3].BufferType = SECBUFFER_EMPTY;
+            bufs[i].pvBuffer = null;
+            bufs[i].cbBuffer = 0;
+            bufs[i++].BufferType = SECBUFFER_EMPTY;
 
             SecBufferDesc buf_desc;
             buf_desc.ulVersion = 0;
-            buf_desc.cBuffers = 4;
+            buf_desc.cBuffers = i;
             buf_desc.pBuffers = bufs.ptr;
 
             status = EncryptMessage(&_context, 0, &buf_desc, 0);
             if (status != SEC_E_OK)
                 return -1;
 
-            ptrdiff_t bytes_sent = _stream.write(buffer[0 .. sizes.cbHeader]);
-            if (bytes_sent != buffer.length)
+            ref SecBuffer hdr = bufs[0];
+            ref SecBuffer tail = bufs[buf_desc.cBuffers - 2];
+
+            const(void)[][34] send_bufs = void;
+            size_t total_len = hdr.cbBuffer + tail.cbBuffer;
+            send_bufs[0] = hdr.pvBuffer[0 .. hdr.cbBuffer];
+            send_bufs[1 + data.length] = tail.pvBuffer[0 .. tail.cbBuffer];
+            size_t data_len = 0;
+            for (i = 1; i <= data.length; ++i)
+            {
+                data_len += bufs[i].cbBuffer;
+                send_bufs[i] = bufs[i].pvBuffer[0 .. bufs[i].cbBuffer];
+            }
+            total_len += data_len;
+
+            ptrdiff_t bytes_sent = _stream.write(send_bufs);
+            if (bytes_sent != total_len)
                 return -1;
-            bytes_sent = _stream.write(data);
-            if (bytes_sent != data.length)
-                return -1;
-            bytes_sent = _stream.write(buffer[sizes.cbHeader .. $]);
-            if (bytes_sent != buffer.length)
-                return -1;
-            return data.length;
+
+            if (_logging)
+            {
+                foreach (ref d; data)
+                    write_to_log(false, d[]);
+            }
+            return data_len;
         }
         else
             return -1;
