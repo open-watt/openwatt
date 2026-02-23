@@ -99,6 +99,9 @@ nothrow @nogc:
         _master_mac.b[5] = 0xFF;
         add_address(_master_mac, this);
 
+        // TODO: warn the user if they configure an interface to use modbus tcp over a serial line
+        //       user should be warned that data corruption may occur!
+
         // TODO: assert that recvBufferLen and sendBufferLen are both larger than a single PDU (254 bytes)!
     }
 
@@ -113,7 +116,13 @@ nothrow @nogc:
         _protocol = value;
         _support_simultaneous_requests = value == ModbusProtocol.tcp;
 
-        warn_if_tcp_over_serial();
+        if (_protocol == ModbusProtocol.tcp && _stream)
+        {
+            import router.stream.serial : SerialStream;
+            import urt.log : writeWarning;
+            if (cast(SerialStream)_stream)
+                writeWarning("Modbus interface '", name[], "': Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
+        }
 
         return null;
     }
@@ -153,7 +162,13 @@ nothrow @nogc:
 
         if (_stream)
         {
-            warn_if_tcp_over_serial();
+            if (_protocol == ModbusProtocol.tcp)
+            {
+                import router.stream.serial : SerialStream;
+                import urt.log : writeWarning;
+                if (cast(SerialStream)_stream)
+                    writeWarning("Modbus interface '", name[], "': Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
+            }
 
             // if we're not the master, we can't write to the bus unless we are responding...
             // and if the stream is TCP, we'll never know if the remote has dropped the connection
@@ -698,16 +713,6 @@ private:
             _expect_message_type = type == ModbusFrameType.request ? ModbusFrameType.response : ModbusFrameType.request;
         }
     }
-
-    void warn_if_tcp_over_serial()
-    {
-        if (_protocol != ModbusProtocol.tcp || !_stream)
-            return;
-        import router.stream.serial : SerialStream;
-        import urt.log : writeWarning;
-        if (cast(SerialStream)_stream)
-            writeWarning("Modbus interface '", name[], "': TCP protocol is incompatible with serial streams");
-    }
 }
 
 
@@ -1138,17 +1143,17 @@ bool valid_function_code(FunctionCode function_code)
     if (function_code & 0x80)
         function_code ^= 0x80;
 
-    version (D_LP64)
+    version (X86_64) // TODO: use something more general!
     {
         enum ulong valid_codes = 0b10000000000000000001111100111001100111111110;
-        if (function_code >= 64)
-            return false;
+        if (function_code >= 64) // TODO: REMOVE THIS LINE (DMD BUG!)
+            return false;       // TODO: REMOVE THIS LINE (DMD BUG!)
         return ((1uL << function_code) & valid_codes) != 0;
     }
     else
     {
         enum uint valid_codes = 0b1111100111001100111111110;
-        if (function_code >= 32)
+        if (function_code >= 25) // highest bit in valid_codes is 24; codes above are only MEI
             return function_code == FunctionCode.mei;
         return ((1u << function_code) & valid_codes) != 0;
     }
