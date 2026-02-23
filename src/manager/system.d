@@ -17,9 +17,14 @@ nothrow @nogc:
 String hostname = StringLit!("OpenWatt"); // TODO: we need to make this thing...
 
 
-void log_level(Session session, Level level)
+void log_level(Session session, Severity severity)
 {
-    logLevel = level;
+    // TODO: should this be deleted?
+    //       this command is a global log filter, but i reckon we should move filtering to the clients
+    foreach (i; 0 .. 16)
+    {
+        set_sink_filter(LogSinkHandle(i), LogFilter(severity));
+    }
 }
 
 void set_hostname(Session session, const(char)[] hostname)
