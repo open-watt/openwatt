@@ -107,7 +107,7 @@ nothrow @nogc:
         override const(char)[] help(const(char)[] args) const
         {
             assert(false);
-            return String(null);
+            return null;
         }
     }
 }

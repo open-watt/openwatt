@@ -52,7 +52,7 @@ nothrow @nogc:
 
         // add the console instance to the registry
         // TODO: this is not threadsafe! creating/destroying console instances should be threadsafe!
-        assert(findConsole(identifier) is null, tconcat("Console '", identifier[], "' already exists!"));
+        assert(findConsole(identifier[]) is null, tconcat("Console '", identifier[], "' already exists!"));
         _next_console_instance = g_console_instances;
         g_console_instances = &this;
 
@@ -119,7 +119,7 @@ nothrow @nogc:
         if (is(SessionType : Session))
         {
             SessionType session = _allocator.allocT!SessionType(this, forward!args);
-            session.set_prompt(_prompt);
+            session.set_prompt(_prompt[]);
             _sessions ~= session;
             return session;
         }

@@ -213,7 +213,7 @@ nothrow @nogc:
                         if (val)
                         {
                             bool success;
-                            size_t contentLen = val.parse_int_fast(success);
+                            size_t contentLen = val[].parse_int_fast(success);
                             if (!success)
                                 return -1; // bad content length
                             message.contentLength = contentLen;
@@ -459,7 +459,7 @@ private:
 
     int handle_encoding()
     {
-        switch (message.header("Content-Encoding"))
+        switch (message.header("Content-Encoding")[])
         {
             case "":
             case "identity":
@@ -622,19 +622,19 @@ Array!char format_message(ref HTTPMessage message, const(char)[] host = null)
         {
             bool first = get.empty;
 
-            size_t keyLen = q.key.url_encode_length();
-            size_t valLen = q.value.url_encode_length();
+            size_t keyLen = q.key[].url_encode_length();
+            size_t valLen = q.value[].url_encode_length();
             char[] ext = get.extend(keyLen + valLen + 2);
 
             if (first)
                 ext[0] = '?';
             else
                 ext[0] = '&';
-            if (q.key.url_encode(ext[1 .. 1 + keyLen]) != keyLen)
+            if (q.key[].url_encode(ext[1 .. 1 + keyLen]) != keyLen)
                 return Array!char(); // bad encoding!
             ext = ext[1 + keyLen .. $];
             ext[0] = '=';
-            if (q.value.url_encode(ext[1 .. 1 + valLen]) != valLen)
+            if (q.value[].url_encode(ext[1 .. 1 + valLen]) != valLen)
                 return Array!char(); // bad encoding!
         }
 

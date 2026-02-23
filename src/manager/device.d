@@ -401,7 +401,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
         sum.source = e;
     }
 
-    g_app.devices.insert(device.id, device);
+    g_app.devices.insert(device.id[], device);
 
     return device;
 }

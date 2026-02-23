@@ -82,7 +82,7 @@ nothrow @nogc:
                 return;
             }
             target = map.mac;
-            profileName = map.profile;
+            profileName = map.profile[];
         }
         else
         {

@@ -104,8 +104,8 @@ nothrow @nogc:
         if (!_stream)
         {
             // prevent duplicate stream names...
-            String new_name = get_module!StreamModule.streams.generate_name(name).makeString(defaultAllocator());
-            _stream = get_module!TCPStreamModule.tcp_streams.create(new_name.move, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("keepalive", _keep_enable), NamedArgument("remote", _host));
+            const(char)[] new_name = get_module!StreamModule.streams.generate_name(name[]);
+            _stream = get_module!TCPStreamModule.tcp_streams.create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("keepalive", _keep_enable), NamedArgument("remote", _host));
             if (!_stream)
             {
                 version (DebugTLS)
@@ -135,7 +135,7 @@ nothrow @nogc:
                         return CompletionStatus.error;
                     }
                     _receive_buffer ~= read_buffer[0 .. bytes_received];
-                    advance_handshake(_host, false);
+                    advance_handshake(_host[], false);
                 }
             }
             if (_handshake_state == HandshakeState.Completed)
@@ -402,7 +402,7 @@ private:
             if (!is_server)
             {
                 _handshake_state = HandshakeState.InProgress;
-                advance_handshake(_host, false);
+                advance_handshake(_host[], false);
             }
         }
 
@@ -518,7 +518,7 @@ protected:
     final override Stream create_stream(Socket conn)
     {
         Stream tcp = super.create_stream(conn);
-        return get_module!HTTPModule.tls_streams.create(tcp.name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("stream", tcp));
+        return get_module!HTTPModule.tls_streams.create(tcp.name[], cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("stream", tcp));
     }
 }
 

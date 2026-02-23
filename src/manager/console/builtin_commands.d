@@ -27,7 +27,7 @@ nothrow @nogc:
 
     bool add_command(Command cmd)
     {
-        assert(get_command(cmd.name) is null, "Command already exists");
+        assert(get_command(cmd.name[]) is null, "Command already exists");
         commands ~= cmd;
         return true;
     }
@@ -123,7 +123,7 @@ nothrow @nogc:
 //                cmds ~= Cmd("..", true);
             foreach (Command cmd; commands)
             {
-                if (cmd.name.startsWith(cmdLine[i..j]))
+                if (cmd.name[].startsWith(cmdLine[i..j]))
                     cmds ~= Cmd(cmd.name[], cast(Scope)cmd !is null);
             }
             if (cmds.length == 0)
@@ -174,8 +174,8 @@ nothrow @nogc:
 //                r ~= MutableString!0("..");
             foreach (Command cmd; commands)
             {
-                if (cmd.name.startsWith(cmdLine))
-                    r ~= cmd.name.makeString(defaultAllocator);
+                if (cmd.name[].startsWith(cmdLine))
+                    r ~= cmd.name;
             }
             return r;
         }

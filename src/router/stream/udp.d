@@ -19,7 +19,7 @@ nothrow @nogc:
 
     this(String name, ushort remote_port, const char[] remote_host = "255.255.255.255", ushort local_port = 0, const char[] local_host = "0.0.0.0", StreamOptions options = StreamOptions.none)
     {
-        super(name.move, StringLit!type_name, options);
+        super(name.move, type_name, options);
 
         // TODO: if remote_host is a broadcast address and options doesn't have `allow_broadcast`, make a warning...
 

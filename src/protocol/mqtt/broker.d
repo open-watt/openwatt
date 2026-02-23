@@ -192,7 +192,7 @@ protected:
                     // session expired
                     if (num_items_to_remove == 16)
                         break;
-                    items_to_remove[num_items_to_remove++] = session.identifier;
+                    items_to_remove[num_items_to_remove++] = session.identifier[];
                 }
             }
         }
@@ -252,7 +252,7 @@ package:
     {
         if (!session.will_topic || session.will_sent)
             return;
-        publish(session.identifier, session.will_flags, session.will_topic, session.will_message[], session.will_props[]);
+        publish(session.identifier[], session.will_flags, session.will_topic[], session.will_message[], session.will_props[]);
         session.will_sent = true;
     }
 

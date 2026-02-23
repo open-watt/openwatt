@@ -56,7 +56,7 @@ nothrow @nogc:
     {
         if (_iface.detached)
         {
-            if (BaseInterface s = get_module!InterfaceModule.interfaces.get(_iface.name))
+            if (BaseInterface s = get_module!InterfaceModule.interfaces.get(_iface.name[]))
                 _iface = s;
         }
         return super.validating();

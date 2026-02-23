@@ -794,7 +794,7 @@ nothrow @nogc:
                         if (!sub)
                         {
                             MQTTSession.Subscription* newSub = &session.subs.emplaceBack(topic.makeString(defaultAllocator()), opts);
-                            session.subs_by_filter[newSub.topic] = newSub;
+                            session.subs_by_filter[newSub.topic[]] = newSub;
 
                             broker.subscribe(newSub.topic, &session.publish_callback);
                         }
