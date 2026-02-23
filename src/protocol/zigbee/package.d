@@ -17,6 +17,7 @@ import manager.collection;
 import manager.console.command;
 import manager.console.function_command : FunctionCommandState;
 import manager.console.session;
+import manager.device;
 import manager.plugin;
 
 import protocol.ezsp;
@@ -198,6 +199,8 @@ struct NodeMap
 
     ZigbeeNode node;
     BaseInterface via; // TODO: do we need this? DELETE ME?
+
+    Device device; // if a device has been created for this node
 
     ushort pan_id = 0xFFFF; // not joined
     ushort id = 0xFFFE; // not online

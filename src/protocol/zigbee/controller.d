@@ -789,7 +789,32 @@ private:
                 });
 
                 if (!device)
+                {
                     writeWarning("Failed to create device for zigbee node ", node.eui, " with fingerprint: ", fingerprint[]);
+                    return;
+                }
+                node.device = device;
+
+                // set a bunch of status data
+                Element* e = device.find_or_create_element("status.network.mode");
+                e.value = StringLit!"zigbee";
+                e = device.find_or_create_element("status.network.zigbee.eui");
+                e.value = node.eui;
+                e = device.find_or_create_element("status.network.zigbee.address");
+                e.value = node.id;
+                e = device.find_or_create_element("status.network.zigbee.rssi");
+                e.value = node.rssi;
+                e = device.find_or_create_element("status.network.zigbee.lqi");
+                e.value = node.lqi;
+
+                // set component templates for components we ma have created
+                Component c = device.find_component("status");
+                c.template_ = StringLit!"DeviceStatus";
+                c = device.find_component("status.network");
+                c.template_ = StringLit!"Network";
+                c = device.find_component("status.network.zigbee");
+                c.template_ = StringLit!"Zigbee";
+
                 return;
             }
         }

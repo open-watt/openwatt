@@ -15,6 +15,7 @@ import urt.variant;
 
 import manager;
 import manager.collection;
+import manager.element;
 
 import protocol.ezsp.client;
 import protocol.zigbee;
@@ -773,6 +774,14 @@ private:
             n.last_seen = getSysTime();
             n.lqi = last_hop_lqi;
             n.rssi = last_hop_rssi;
+
+            if (n.device)
+            {
+                if (Element* e = n.device.find_element("status.network.zigbee.rssi"))
+                    e.value = n.rssi;
+                if (Element* e = n.device.find_element("status.network.zigbee.lqi"))
+                    e.value = n.lqi;
+            }
 
             if (n.desc.type == NodeType.sleepy_end_device)
             {

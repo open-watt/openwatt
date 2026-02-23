@@ -4,8 +4,10 @@ import urt.array;
 import urt.lifetime;
 import urt.log;
 import urt.map;
+import urt.mem.allocator;
 import urt.string;
 
+import manager;
 import manager.device;
 import manager.element;
 
@@ -89,6 +91,34 @@ nothrow @nogc:
             }
         }
         return null;
+    }
+
+    Element* find_or_create_element(const(char)[] name)
+    {
+        const(char)[] id = name.split!'.';
+        if (!name.empty)
+        {
+            foreach (Component c; components)
+            {
+                if (c.id[] == id[])
+                    return c.find_or_create_element(name);
+            }
+
+            Component c = g_app.allocator.allocT!Component(id.makeString(defaultAllocator()));
+            components ~= c;
+            return c.find_or_create_element(name);
+        }
+
+        foreach (Element* e; elements)
+        {
+            if (e.id[] == id[])
+                return e;
+        }
+
+        Element* e = g_app.allocator.allocT!Element();
+        elements ~= e;
+        e.id = id.makeString(defaultAllocator());
+        return e;
     }
 
     Component get_first_component_by_template(const char[] template_name)
