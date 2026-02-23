@@ -4,6 +4,7 @@ import urt.array;
 import urt.conv;
 import urt.crc;
 import urt.endian;
+import urt.log;
 import urt.map;
 import urt.mem;
 import urt.meta.nullable;
@@ -22,6 +23,7 @@ import protocol.modbus.message;
 import router.iface;
 import router.iface.packet;
 import router.stream;
+import router.stream.serial : SerialStream;
 
 //version = DebugModbusMessageFlow;
 
@@ -118,8 +120,6 @@ nothrow @nogc:
 
         if (_protocol == ModbusProtocol.tcp && _stream)
         {
-            import router.stream.serial : SerialStream;
-            import urt.log : writeWarning;
             if (cast(SerialStream)_stream)
                 writeWarning("Modbus interface '", name[], "': Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
         }
@@ -164,8 +164,6 @@ nothrow @nogc:
         {
             if (_protocol == ModbusProtocol.tcp)
             {
-                import router.stream.serial : SerialStream;
-                import urt.log : writeWarning;
                 if (cast(SerialStream)_stream)
                     writeWarning("Modbus interface '", name[], "': Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
             }
@@ -535,7 +533,6 @@ private:
 
         // TODO: some debug logging of the incoming packet stream?
         version (DebugModbusMessageFlow) {
-            import urt.log;
             writeDebug("Modbus packet received from interface: '", name, "' (", message.length, ")[ ", message[], " ]");
         }
 
@@ -808,7 +805,6 @@ nothrow @nogc:
         remote_servers[universal_address] = map;
         iface.add_address(map.mac, iface);
 
-        import urt.log;
         writeInfof("Create modbus server '{0}' - mac: {1}  uid: {2}  at-interface: {3}({4})", map.name, map.mac, map.universal_address, iface.name, map.local_address);
 
         return universal_address in remote_servers;
