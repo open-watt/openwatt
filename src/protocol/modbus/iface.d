@@ -1,4 +1,4 @@
-module router.iface.modbus;
+module protocol.modbus.iface;
 
 import urt.array;
 import urt.conv;
@@ -18,6 +18,7 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
+import protocol.modbus;
 import protocol.modbus.message;
 
 import router.iface;
@@ -48,16 +49,6 @@ enum ModbusFrameType : ubyte
     response
 }
 
-struct ServerMap
-{
-    String name;
-    MACAddress mac;
-    ubyte local_address;
-    ubyte universal_address;
-    ModbusInterface iface;
-    String profile;
-    String model;
-}
 
 class ModbusInterface : BaseInterface
 {
@@ -323,7 +314,7 @@ nothrow @nogc:
             return -1;
         }
 
-        auto mod_mb = get_module!ModbusInterfaceModule();
+        auto mod_mb = get_module!ModbusProtocolModule();
 
         ushort seq = (cast(ubyte[])packet.data)[0..2].bigEndianToNative!ushort;
         ModbusFrameType packetType = *cast(ModbusFrameType*)&packet.data[2];
@@ -428,6 +419,10 @@ nothrow @nogc:
         return MessageState.complete;
     }
 
+package:
+    final MACAddress generate_mac_address() pure
+        => super.generate_mac_address();
+
 private:
 
     struct PendingModbus
@@ -453,12 +448,12 @@ private:
     Map!(ubyte, PendingModbus) _pending;
 
     // if we are not the bus master
-    package MACAddress _master_mac; // TODO: `package` because bridge interface backdoors this... rethink?
+    package(router.iface) MACAddress _master_mac; // TODO: `package` because bridge interface backdoors this!... rethink?
     ushort _sequence_number;
     ModbusFrameType _expect_message_type = ModbusFrameType.unknown;
 
-    Map!(ubyte, ubyte) _local_to_uni;
-    Map!(ubyte, ubyte) _uni_to_local;
+    package Map!(ubyte, ubyte) _local_to_uni;
+    package Map!(ubyte, ubyte) _uni_to_local;
 
     ubyte[260] _tail;
     ushort _tail_bytes;
@@ -575,7 +570,7 @@ private:
             frame_mac = MACAddress.broadcast;
         else
         {
-            auto mod_mb = get_module!ModbusInterfaceModule();
+            auto mod_mb = get_module!ModbusProtocolModule();
 
             // we probably need to find a way to cache these lookups.
             // doing this every packet feels kinda bad...
@@ -729,144 +724,6 @@ private:
 
             _expect_message_type = type == ModbusFrameType.request ? ModbusFrameType.response : ModbusFrameType.request;
         }
-    }
-}
-
-
-class ModbusInterfaceModule : Module
-{
-    mixin DeclareModule!"interface.modbus";
-nothrow @nogc:
-
-    Collection!ModbusInterface modbus_interfaces;
-    Map!(ubyte, ServerMap) remote_servers;
-
-    override void init()
-    {
-        g_app.console.register_collection("/interface/modbus", modbus_interfaces);
-        g_app.console.register_command!remote_server_add("/interface/modbus/remote-server", this, "add");
-    }
-
-    override void update()
-    {
-        modbus_interfaces.update_all();
-    }
-
-    final ServerMap* find_server_by_name(const(char)[] name)
-    {
-        foreach (ref map; remote_servers.values)
-        {
-            if (map.name[] == name)
-                return &map;
-        }
-        return null;
-    }
-
-    final ServerMap* find_server_by_mac(MACAddress mac)
-    {
-        foreach (ref map; remote_servers.values)
-        {
-            if (map.mac == mac)
-                return &map;
-        }
-        return null;
-    }
-
-    final ServerMap* find_server_by_local_address(ubyte local_address, BaseInterface iface)
-    {
-        foreach (ref map; remote_servers.values)
-        {
-            if (map.local_address == local_address && map.iface is iface)
-                return &map;
-        }
-        return null;
-    }
-
-    final ServerMap* find_server_by_universal_address(ubyte universal_address)
-    {
-        return universal_address in remote_servers;
-    }
-
-    final ServerMap* add_remote_server(const(char)[] name, ModbusInterface iface, ubyte address, const(char)[] profile, const(char)[] model, ubyte universal_address = 0)
-    {
-        if (!name)
-            name = tconcat(iface.name[], '.', address);
-
-        ServerMap map;
-        map.name = name.makeString(defaultAllocator());
-        map.mac = iface.generate_mac_address();
-        map.mac.b[5] = address;
-
-        if (!universal_address)
-        {
-            const ubyte initialAddress = universal_address = map.mac.b[4] ^ address;
-            while (true)
-            {
-                if (universal_address == 0 || universal_address == 0xFF)
-                    universal_address += 2;
-                if (universal_address !in remote_servers)
-                    break;
-                ++universal_address;
-                assert(universal_address != initialAddress, "No available universal addresses!");
-            }
-        }
-        else
-            assert(universal_address !in remote_servers, "Universal address already in use.");
-
-        iface._local_to_uni[address] = universal_address;
-        iface._uni_to_local[universal_address] = address;
-
-        map.local_address = address;
-        map.universal_address = universal_address;
-        map.iface = iface;
-        map.profile = profile.makeString(defaultAllocator());
-        map.model = model.makeString(defaultAllocator());
-
-        remote_servers[universal_address] = map;
-        iface.add_address(map.mac, iface);
-
-        writeInfof("Create modbus server '{0}' - mac: {1}  uid: {2}  at-interface: {3}({4})", map.name, map.mac, map.universal_address, iface.name, map.local_address);
-
-        return universal_address in remote_servers;
-    }
-
-    final void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, const(char)[] profile, Nullable!(const(char)[]) model, Nullable!ubyte universal_address)
-    {
-        if (!_interface)
-        {
-            session.write_line("Interface must be specified.");
-            return;
-        }
-        if (!address)
-        {
-            session.write_line("Local address must be specified.");
-            return;
-        }
-
-        BaseInterface iface = get_module!InterfaceModule.interfaces.get(_interface);
-        if (!iface)
-        {
-            session.write_line("Interface '", _interface, "' not found.");
-            return;
-        }
-        ModbusInterface modbusInterface = cast(ModbusInterface)iface;
-        if (!modbusInterface)
-        {
-            session.write_line("Interface '", _interface, "' is not a modbus interface.");
-            return;
-        }
-
-        if (universal_address)
-        {
-            ServerMap* t = universal_address.value in remote_servers;
-            if (t)
-            {
-                session.write_line("Universal address '", universal_address.value, "' already in use by '", t.name, "'.");
-                return;
-            }
-        }
-
-        add_remote_server(name, modbusInterface, address, profile, model ? model.value : null, universal_address ? universal_address.value : 0);
     }
 }
 

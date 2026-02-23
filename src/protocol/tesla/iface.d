@@ -1,4 +1,4 @@
-module router.iface.tesla;
+module protocol.tesla.iface;
 
 import urt.log;
 import urt.map;
@@ -13,6 +13,7 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
+import protocol.tesla;
 import protocol.tesla.twc;
 
 import router.iface;
@@ -23,14 +24,6 @@ import router.stream;
 
 nothrow @nogc:
 
-
-struct DeviceMap
-{
-    String name;
-    MACAddress mac;
-    ushort address;
-    TeslaInterface iface;
-}
 
 class TeslaInterface : BaseInterface
 {
@@ -201,6 +194,10 @@ nothrow @nogc:
         return 0;
     }
 
+package:
+    final MACAddress generate_mac_address() pure
+        => super.generate_mac_address();
+
 private:
     ObjectRef!Stream _stream;
 
@@ -221,7 +218,7 @@ private:
         p.eth.ether_type = EtherType.ow;
         p.eth.ow_sub_type = OW_SubType.tesla_twc;
 
-        auto mod_tesla = get_module!TeslaInterfaceModule();
+        auto mod_tesla = get_module!TeslaProtocolModule();
 
         DeviceMap* map = mod_tesla.find_server_by_address(message.sender);
         if (!map)
@@ -244,80 +241,6 @@ private:
 
         if (p.eth.dst)
             dispatch(p);
-    }
-}
-
-
-class TeslaInterfaceModule : Module
-{
-    mixin DeclareModule!"interface.tesla-twc";
-nothrow @nogc:
-
-    Collection!TeslaInterface twc_interfaces;
-    Map!(ushort, DeviceMap) devices;
-
-    override void init()
-    {
-        g_app.console.register_collection("/interface/tesla-twc", twc_interfaces);
-    }
-
-    override void update()
-    {
-        twc_interfaces.update_all();
-    }
-
-    DeviceMap* find_server_by_name(const(char)[] name)
-    {
-        foreach (ref map; devices.values)
-        {
-            if (map.name[] == name[])
-                return &map;
-        }
-        return null;
-    }
-
-    DeviceMap* find_server_by_mac(MACAddress mac)
-    {
-        foreach (ref map; devices.values)
-        {
-            if (map.mac == mac)
-                return &map;
-        }
-        return null;
-    }
-
-    DeviceMap* find_server_by_address(ushort address)
-    {
-        return address in devices;
-    }
-
-    DeviceMap* add_device(const(char)[] name, TeslaInterface iface, ushort address)
-    {
-        if (!name)
-            name = tformat("{0}.{1,04X}", iface.name[], address);
-
-        DeviceMap map;
-        map.name = name.makeString(defaultAllocator());
-        map.address = address;
-        map.mac = iface.generate_mac_address();
-        map.mac.b[4] = address >> 8;
-        map.mac.b[5] = address & 0xFF;
-//        while (find_mac_address(map.mac) !is null)
-//            ++map.mac.b[5];
-        map.iface = iface;
-
-        iface.add_address(map.mac, iface);
-        return devices.insert(address, map);
-    }
-
-    DeviceMap* add_server(const(char)[] name, BaseInterface iface, ushort address)
-    {
-        DeviceMap map;
-        map.name = name.makeString(defaultAllocator());
-        map.address = address;
-        map.mac = iface.mac;
-//        map.iface = iface;
-        return devices.insert(address, map);
     }
 }
 

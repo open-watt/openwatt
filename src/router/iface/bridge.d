@@ -85,7 +85,8 @@ nothrow @nogc:
 
         // TODO: move this logic into the modbus interface...
         // For modbus member interfaces, we'll pre-populate the MAC table with known device addresses...
-        import router.iface.modbus;
+        import protocol.modbus;
+        import protocol.modbus.iface;
         ModbusInterface mb = cast(ModbusInterface)iface;
         if (mb)
         {
@@ -94,7 +95,7 @@ nothrow @nogc:
             if (!mb.master)
                 _mac_table.insert(mb._master_mac, vlan, port);
 
-            auto mod_mb = get_module!ModbusInterfaceModule;
+            auto mod_mb = get_module!ModbusProtocolModule;
             foreach (ref map; mod_mb.remote_servers.values)
             {
                 if (map.iface is iface)

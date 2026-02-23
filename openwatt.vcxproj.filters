@@ -246,9 +246,6 @@
     <DCompile Include="src\router\iface\bridge.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
-    <DCompile Include="src\router\iface\modbus.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
     <DCompile Include="src\router\iface\package.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
@@ -257,6 +254,9 @@
     </DCompile>
     <DCompile Include="src\router\port\package.d">
       <Filter>src\router\port</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\can\iface.d">
+      <Filter>src\protocol\can</Filter>
     </DCompile>
     <DCompile Include="src\protocol\can\package.d">
       <Filter>src\protocol\can</Filter>
@@ -303,6 +303,9 @@
     <DCompile Include="src\protocol\modbus\client.d">
       <Filter>src\protocol\modbus</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\modbus\iface.d">
+      <Filter>src\protocol\modbus</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\modbus\message.d">
       <Filter>src\protocol\modbus</Filter>
     </DCompile>
@@ -333,19 +336,25 @@
     <DCompile Include="src\router\iface\priority_queue.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
-    <DCompile Include="src\router\iface\tesla.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tesla\twc.d">
-      <Filter>src\protocol\tesla</Filter>
-    </DCompile>
     <DCompile Include="src\manager\console\function_command.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
     <DCompile Include="src\protocol\snmp\package.d">
       <Filter>src\protocol\snmp</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\tesla\iface.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\tesla\master.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\package.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\sampler.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tesla\twc.d">
       <Filter>src\protocol\tesla</Filter>
     </DCompile>
     <DCompile Include="src\manager\system.d">
@@ -369,14 +378,8 @@
     <DCompile Include="src\manager\console\console.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\tesla\package.d">
-      <Filter>src\protocol\tesla</Filter>
-    </DCompile>
     <DCompile Include="src\manager\sampler.d">
       <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tesla\sampler.d">
-      <Filter>src\protocol\tesla</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ezsp\package.d">
       <Filter>src\protocol\ezsp</Filter>
@@ -412,9 +415,6 @@
       <Filter>src\router\iface</Filter>
     </DCompile>
     <DCompile Include="src\router\iface\zigbee.d">
-      <Filter>src\router\iface</Filter>
-    </DCompile>
-    <DCompile Include="src\router\iface\can.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
     <DCompile Include="src\protocol\dns\message.d">
