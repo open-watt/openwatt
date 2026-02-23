@@ -75,9 +75,9 @@ struct ModbusRequest
 
 class ModbusInterface : BaseInterface
 {
-    __gshared Property[3] Properties = [ Property.create!("protocol", protocol)(),
-                                         Property.create!("master", master)(),
-                                         Property.create!("stream", stream)() ];
+    __gshared Property[3] Properties = [ Property.create!("stream", stream)(),
+                                         Property.create!("protocol", protocol)(),
+                                         Property.create!("master", master)() ];
 nothrow @nogc:
 
     enum type_name = "modbus";

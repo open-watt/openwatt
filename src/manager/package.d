@@ -9,7 +9,7 @@ import urt.meta.enuminfo : VoidEnumInfo;
 import urt.si.quantity;
 import urt.si.unit;
 import urt.string;
-import urt.traits : is_enum;
+import urt.traits : is_enum, Unqual;
 import urt.variant;
 
 import manager.collection;
@@ -221,6 +221,8 @@ nothrow @nogc:
     void register_enum(E)()
         if (is_enum!E)
     {
+        static assert(is(E == Unqual!E), "Enum type must not be qualified!");
+
         import urt.meta.enuminfo : enum_info;
         enum_templates.insert(StringLit!(E.stringof), enum_info!E.make_void());
     }
