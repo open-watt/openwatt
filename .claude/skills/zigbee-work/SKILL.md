@@ -30,7 +30,7 @@ You are working on the Zigbee subsystem of OpenWatt. This skill provides deep ar
 ZigbeeInterface (router/iface/zigbee.d)
     ├── owns _ezsp_client: EZSPClient (serial transport)
     ├── owns _coordinator: ZigbeeCoordinator (network mgmt)
-    ├── _send_queues[8] (PCP-ranked buckets), _in_flight[] (message queues)
+    ├── _queue (PriorityPacketQueue), _pending (Map tag→PendingMessage)
     ├── _network_status: EmberStatus (NETWORK_UP/DOWN)
     ├── counter polling: 10s interval (was 10ms)
     └── status_handler() ← EZSP_StackStatusHandler callback
@@ -73,7 +73,7 @@ ZigbeeInterface (BaseInterface) — APS message queue, PCP-based priority
 ```
 
 ### PCP Usage in Zigbee
-All send methods accept `PCP pcp = PCP.be` parameter. PCP is set on `Packet.vlan` via `p.pcp = pcp` in client.d's `send_message`, then flows through `forward_async` → `transmit_async` → `PriorityPacketQueue`.
+All send methods accept `PCP pcp = PCP.be` parameter. PCP is set on `Packet.vlan` via `p.pcp = pcp` in client.d's `send_message`, then flows through `forward()` → `transmit()` → `PriorityPacketQueue`.
 
 | PCP | Class | Rank | Use |
 |-----|-------|------|-----|
@@ -98,7 +98,7 @@ All send methods accept `PCP pcp = PCP.be` parameter. PCP is set on `Packet.vlan
 
 ### Key Files for QoS
 - `src/router/iface/packet.d` — `vlan_pcp()`, `vlan_set_pcp()`, `pcp_to_rank[]` helpers
-- `src/router/iface/priority_queue.d` — `PriorityPacketQueue` (standalone utility, not yet used by Zigbee)
+- `src/router/iface/priority_queue.d` — `PriorityPacketQueue` (used by both ZigbeeInterface and ModbusInterface)
 - `.claude/skills/packet-interface/SKILL.md` — full architecture doc for PCP/DEI/priority system
 
 ## EZSP Client — Two Command Modes
@@ -318,9 +318,9 @@ Property accessor: `ushort pan_id() => _network_params.pan_id == 0xFFFF ? _pan_i
 
 3. **`via` inconsistently set:** Coordinator's own node, join handler nodes, and address table pre-populated nodes don't set `via`. Only child table nodes, incoming message nodes, and controller-discovered nodes do.
 
-4. **`JOINED_NETWORK` path skips init_network:** When NCP already has the network, `init()` returns immediately without fetching network params or pre-populating nodes. `_network_params` stays empty after being cleared in shutdown.
+4. ~~**`JOINED_NETWORK` path skips bookkeeping:**~~ **FIXED.** `JOINED_NETWORK` calls `sync_network_state()` (bookkeeping only — fetch params, setup coordinator node, detach stale nodes, pre-populate from NCP tables). `NO_NETWORK` calls `init_network()` which does full NCP setup (config/policies/endpoints/NetworkInit/security/FormNetwork) then `sync_network_state()`. Note: ASH RST always resets the NCP, so `JOINED_NETWORK` at init time shouldn't happen in practice.
 
-5. **Controller has no availability guard:** Will attempt to interview detached nodes (pan_id=0xFFFF, id=0xFFFE) with invalid addresses.
+5. ~~**Controller has no availability guard:**~~ **FIXED.** Controller checks `_endpoint.node.is_network_up` before interview/probe loops. Also, nodes are detached during re-init so `available()` returns false until confirmed.
 
 6. **Coordinator's own node on restart:** `init_network()` line 493-498 errors if the coordinator's node already exists in `nodes_by_pan`. This can happen if nodes persist across restarts.
 
