@@ -9,6 +9,7 @@ import urt.time;
 import urt.variant;
 
 import manager;
+import manager.collection;
 import manager.console.command;
 import manager.console.function_command : FunctionCommandState;
 import manager.console.session;
@@ -17,10 +18,10 @@ import manager.profile;
 import manager.sampler;
 
 import protocol.can;
+import protocol.can.iface;
 import protocol.can.sampler;
 
 import router.iface;
-import router.iface.can;
 
 
 class CANProtocolModule : Module
@@ -28,15 +29,19 @@ class CANProtocolModule : Module
     mixin DeclareModule!"protocol.can";
 nothrow @nogc:
 
+    Collection!CANInterface can_interfaces;
+
     override void init()
     {
         g_app.register_enum!CANInterfaceProtocol();
 
+        g_app.console.register_collection("/interface/can", can_interfaces);
         g_app.console.register_command!device_add("/protocol/can/device", this, "add");
     }
 
     override void update()
     {
+        can_interfaces.update_all();
     }
 
     void device_add(Session session, const(char)[] id, BaseInterface _interface, Nullable!(const(char)[]) name, Nullable!(const(char)[]) _profile, Nullable!(const(char)[]) model)

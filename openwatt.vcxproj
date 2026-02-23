@@ -90,6 +90,7 @@
     <DCompile Include="src\manager\subscriber.d" />
     <DCompile Include="src\manager\system.d" />
     <DCompile Include="src\manager\value.d" />
+    <DCompile Include="src\protocol\can\iface.d" />
     <DCompile Include="src\protocol\can\package.d" />
     <DCompile Include="src\protocol\can\sampler.d" />
     <DCompile Include="src\protocol\dns\message.d" />
@@ -117,6 +118,7 @@
     <DCompile Include="src\protocol\ip\package.d" />
     <DCompile Include="src\protocol\ip\route.d" />
     <DCompile Include="src\protocol\modbus\client.d" />
+    <DCompile Include="src\protocol\modbus\iface.d" />
     <DCompile Include="src\protocol\modbus\message.d" />
     <DCompile Include="src\protocol\modbus\package.d" />
     <DCompile Include="src\protocol\modbus\sampler.d" />
@@ -133,6 +135,7 @@
     <DCompile Include="src\protocol\telnet\package.d" />
     <DCompile Include="src\protocol\telnet\server.d" />
     <DCompile Include="src\protocol\telnet\session.d" />
+    <DCompile Include="src\protocol\tesla\iface.d" />
     <DCompile Include="src\protocol\tesla\master.d" />
     <DCompile Include="src\protocol\tesla\package.d" />
     <DCompile Include="src\protocol\tesla\sampler.d" />
@@ -146,14 +149,11 @@
     <DCompile Include="src\protocol\zigbee\zcl.d" />
     <DCompile Include="src\protocol\zigbee\zdo.d" />
     <DCompile Include="src\router\iface\bridge.d" />
-    <DCompile Include="src\router\iface\can.d" />
     <DCompile Include="src\router\iface\ethernet.d" />
     <DCompile Include="src\router\iface\mac.d" />
-    <DCompile Include="src\router\iface\modbus.d" />
     <DCompile Include="src\router\iface\package.d" />
     <DCompile Include="src\router\iface\packet.d" />
     <DCompile Include="src\router\iface\priority_queue.d" />
-    <DCompile Include="src\router\iface\tesla.d" />
     <DCompile Include="src\router\iface\vlan.d" />
     <DCompile Include="src\router\iface\zigbee.d" />
     <DCompile Include="src\router\port\package.d" />

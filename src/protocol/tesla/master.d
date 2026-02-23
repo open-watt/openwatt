@@ -9,11 +9,11 @@ import urt.time;
 import urt.util;
 
 import protocol.tesla;
+import protocol.tesla.iface;
 import protocol.tesla.twc;
 
 import router.iface;
 import router.iface.packet;
-import router.iface.tesla;
 
 import manager;
 
@@ -149,7 +149,7 @@ nothrow @nogc:
 
         iface.subscribe(&incoming_packet, PacketFilter(ether_type: EtherType.ow, ow_subtype: OW_SubType.tesla_twc));
 
-        get_module!TeslaInterfaceModule.add_server(name[], iface, id);
+        get_module!TeslaProtocolModule.add_server(name[], iface, id);
     }
 
     ~this()

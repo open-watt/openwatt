@@ -8,13 +8,13 @@ import urt.mem.allocator;
 import urt.string;
 import urt.time;
 
+import manager;
+
 import protocol.modbus;
+import protocol.modbus.iface : ModbusFrameType; // TODO: move this?
 import protocol.modbus.message;
 
 import router.iface;
-import router.iface.modbus : ModbusFrameType; // TODO: move this?
-
-import manager;
 
 nothrow @nogc:
 
@@ -210,8 +210,7 @@ private:
 
     bool sendPacket(ref const MACAddress server, ushort sequenceNumber, ref const ModbusPDU message, ModbusFrameType type) nothrow @nogc
     {
-        import router.iface.modbus;
-        ServerMap* map = get_module!ModbusInterfaceModule().find_server_by_mac(server);
+        ServerMap* map = get_module!ModbusProtocolModule().find_server_by_mac(server);
         if (!map)
             return false;
 
