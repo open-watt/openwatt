@@ -23,7 +23,6 @@ import protocol.modbus.message;
 import router.iface;
 import router.iface.packet;
 import router.stream;
-import router.stream.serial : SerialStream;
 
 //version = DebugModbusMessageFlow;
 
@@ -120,6 +119,7 @@ nothrow @nogc:
 
         if (_protocol == ModbusProtocol.tcp && _stream)
         {
+            import router.stream.serial : SerialStream;
             if (cast(SerialStream)_stream)
                 writeWarning("Modbus interface '", name[], "': Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
         }
@@ -164,6 +164,7 @@ nothrow @nogc:
         {
             if (_protocol == ModbusProtocol.tcp)
             {
+                import router.stream.serial : SerialStream;
                 if (cast(SerialStream)_stream)
                     writeWarning("Modbus interface '", name[], "': Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
             }
