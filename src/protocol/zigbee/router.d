@@ -129,13 +129,13 @@ protected:
         // TODO: this is called when a route error message is received.
         //       the error indicates that a problem routing to or from the target node was encountered.
         version (DebugZigbee)
-            writeInfof("Zigbee Router: incoming route error from target {0,04x} - status: {1}", target, status);
+            log.debugf("incoming route error from target {0,04x} - status: {1}", target, status);
     }
 
     final void poll_handler(EmberNodeId childId, bool transmitExpected)
     {
         version (DebugZigbee)
-            writeInfof("Zigbee Router: receive poll request from {0,04x} - transmit_expected: {1}", childId, transmitExpected);
+            log.debugf("receive poll request from {0,04x} - transmit_expected: {1}", childId, transmitExpected);
     }
 
 
@@ -193,10 +193,10 @@ protected:
                 if (n.desc.type != NodeType.unknown && n.desc.type != type)
                 {
                     version (DebugZigbee)
-                        writeInfof("Zigbee: device announce: {0, 04x} [{1}] - type changed: old={2}, new={3} ({4,02x})", id, eui, n.desc.type, type, caps);
+                        log.debugf("device announce: {0, 04x} [{1}] - type changed: old={2}, new={3} ({4,02x})", id, eui, n.desc.type, type, caps);
                 }
                 else version (DebugZigbee)
-                    writeInfof("Zigbee: device announce: {0, 04x} [{1}] - type={2}", id, eui, type);
+                    log.debugf("device announce: {0, 04x} [{1}] - type={2}", id, eui, type);
                 n.desc.type = type;
 
                 // Tuya multi-endpoint devices need a basic cluster read on every

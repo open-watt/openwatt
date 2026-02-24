@@ -82,7 +82,7 @@ nothrow @nogc:
         // periodically send RST until we get RSTACK
         if (!_connected && now - _last_event > T_RSTACK_MAX.msecs)
         {
-            writeDebug("ASHv2: connecting on '", _stream.name, "'...");
+            log.debug_("connecting on '", _stream.name, "'...");
 
             immutable ubyte[5] RST = [ ASH_CANCEL_BYTE, 0xC0, 0x38, 0xBC, ASH_FLAG_BYTE ];
             if (_stream.write(RST) != 5)
@@ -358,7 +358,10 @@ private:
                 if (_ash_version == 2)
                     _connected = true;
 
-                writeDebug(_connected ? "ASHv2: connected! code=" : "ASHv2: connection failed; unsupported version! code=", code);
+                if (_connected)
+                    log.info("connected, code=", code);
+                else
+                    log.warning("connection failed; unsupported ASH version, code=", code);
                 return;
             }
         }
@@ -372,7 +375,7 @@ private:
             {
                 ubyte ver = frame[0];
                 ubyte code = frame[1];
-                writeDebug("ASHv2: <-- ERROR. code=", code);
+                log.warning("received ERROR frame, code=", code);
             }
             restart();
             return;
@@ -390,14 +393,14 @@ private:
             {
                 // ACK
                 version (DebugASHMessageFlow)
-                    writeDebugf("ASHv2: <-- ACK [{0,02x}]", control);
+                    log.tracef("<-- ACK [{0,02x}]", control);
                 ack_in_flight(ack_num, timestamp);
             }
             else if ((control & 0x60) == 0x20)
             {
                 // NAK
                 version (DebugASHMessageFlow)
-                    writeDebugf("ASHv2: <-- NAK [{0,02x}]", control);
+                    log.tracef("<-- NAK [{0,02x}]", control);
             }
             else
             {
@@ -423,7 +426,7 @@ private:
         randomise(frame, data);
 
         version (DebugASHMessageFlow)
-            writeDebugf("ASHv2: <-- [x{0, 02x}]: {1}", control, cast(void[])data);
+            log.tracef("<-- [x{0, 02x}]: {1}", control, cast(void[])data);
 
         _rx_seq = (_rx_seq + 1) & 7;
         ash_ack(_rx_seq, false);
@@ -526,7 +529,7 @@ private:
         ubyte control = 0x80 | (nak ? 0x20 : 0) | (ready << 3) | (ack & 7);
 
         version (DebugASHMessageFlow)
-            writeDebugf("ASHv2: --> {0} [x{1, 02x}]", nak ? "NAK" : "ACK", control);
+            log.tracef("--> {0} [x{1, 02x}]", nak ? "NAK" : "ACK", control);
 
         ubyte[4] ack_msg = [ control, 0, 0, ASH_FLAG_BYTE ];
         ack_msg[1..3] = ack_msg[0..1].ezsp_crc().nativeToBigEndian;
@@ -572,13 +575,13 @@ private:
         stuffed[len++] = 0x7E;
 
         version (DebugASHMessageFlow)
-            writeDebugf("ASHv2: --> [x{0, 02x}]: {1}", control, cast(void[])msg);
+            log.tracef("--> [x{0, 02x}]: {1}", control, cast(void[])msg);
 
         ptrdiff_t r = _stream.write(stuffed[0..len]);
         if (r != len)
         {
             version (DebugASHMessageFlow)
-                writeDebug("ASHv2: stream write failed!");
+                log.warning("stream write failed!");
             ++_status.send_dropped;
             return false;
         }

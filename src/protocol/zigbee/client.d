@@ -274,6 +274,8 @@ class ZigbeeNode : BaseObject
             YieldZB e;
             ZigbeeResult result;
             ZDOResponse* r;
+            version (DebugZigbee)
+                ZigbeeNode node;
             ushort dst, cluster;
 
             void response(ZigbeeResult result, ZDOStatus status, const(ubyte)[] message, void*) nothrow @nogc
@@ -287,7 +289,7 @@ class ZigbeeNode : BaseObject
                 if (result == ZigbeeResult.pending)
                 {
                     version (DebugZigbee)
-                        writeInfof("Zigbee: zdo TRANSMIT ->{0,04x} [zdo:{1,04x}] at {2}", dst, cluster, e.timeout.elapsed);
+                        node.log.tracef("zdo TRANSMIT ->{0,04x} [zdo:{1,04x}] at {2}", dst, cluster, e.timeout.elapsed);
                     e.timeout.reset();
                 }
                 else
@@ -295,7 +297,7 @@ class ZigbeeNode : BaseObject
             }
         }
         auto ev = InPlace!YieldZB(Default);
-        auto data = ResponseData(ev, ZigbeeResult.success, &response, dst, cluster);
+        auto data = ResponseData(ev, ZigbeeResult.success, &response, this, dst, cluster);
 
         // TODO: we should adjust this process to start counting after we know the message was delivered
         ev.timeout = Timer(10.seconds);
@@ -304,7 +306,7 @@ class ZigbeeNode : BaseObject
         if (tag < 0)
             return ZigbeeResult.failed;
 
-        scope (exit)
+        scope(failure)
             abort_zdo_request(tag);
 
         yield(ev);
@@ -312,16 +314,17 @@ class ZigbeeNode : BaseObject
         if (!ev.finished)
         {
             version (DebugZigbee)
-                writeInfof("Zigbee: zdo TIMEOUT ->{0,04x} [zdo:{1,04x}] at {2}", dst, cluster, ev.timeout.elapsed);
+                log.tracef("zdo TIMEOUT ->{0,04x} [zdo:{1,04x}] at {2}", dst, cluster, ev.timeout.elapsed);
+            abort_zdo_request(tag, ZigbeeResult.timeout);
             return ZigbeeResult.timeout;
         }
         else if (data.result != ZigbeeResult.success)
         {
             version (DebugZigbee)
-                writeInfof("Zigbee: zdo FAILED <-{0,04x} [zdo:{1,04x}] result {2}", dst, cluster, data.result);
+                log.tracef("zdo FAILED <-{0,04x} [zdo:{1,04x}] result {2}", dst, cluster, data.result);
         }
         else version (DebugZigbee)
-            writeInfof("Zigbee: zdo response <-{0,04x} [zdo:{1,04x}] after {2}", dst, cluster, ev.timeout.elapsed);
+            log.tracef("zdo response <-{0,04x} [zdo:{1,04x}] after {2}", dst, cluster, ev.timeout.elapsed);
         return data.result;
     }
 
@@ -443,6 +446,8 @@ class ZigbeeNode : BaseObject
             YieldZB e;
             ZigbeeResult result;
             ZCLResponse* r;
+            version (DebugZigbee)
+                ZigbeeNode node;
             ushort dst, cluster;
             ubyte dst_endpoint;
 
@@ -457,7 +462,7 @@ class ZigbeeNode : BaseObject
                 if (result == ZigbeeResult.pending)
                 {
                     version (DebugZigbee)
-                        writeInfof("Zigbee: zcl TRANSMIT ->{0,04x}:{1} [:{2,04x}] after {3}", dst, dst_endpoint, cluster, e.timeout.elapsed);
+                        node.log.tracef("zcl TRANSMIT ->{0,04x}:{1} [:{2,04x}] after {3}", dst, dst_endpoint, cluster, e.timeout.elapsed);
                     e.timeout.reset();
                 }
                 else
@@ -465,7 +470,7 @@ class ZigbeeNode : BaseObject
             }
         }
         auto ev = InPlace!YieldZB(Default);
-        auto data = ResponseData(ev, ZigbeeResult.success, &response, dst, cluster, dst_endpoint);
+        auto data = ResponseData(ev, ZigbeeResult.success, &response, this, dst, cluster, dst_endpoint);
 
         // TODO: we should adjust this process to start counting after we know the message was delivered
         ev.timeout = Timer(10.seconds);
@@ -474,7 +479,7 @@ class ZigbeeNode : BaseObject
         if (tag < 0)
             return ZigbeeResult.failed;
 
-        scope (exit)
+        scope(failure)
             abort_zcl_request(tag);
 
         yield(ev);
@@ -482,18 +487,19 @@ class ZigbeeNode : BaseObject
         if (!ev.finished)
         {
             version (DebugZigbee)
-                writeInfof("Zigbee: zcl TIMEOUT ->{0,04x}:{1} [:{2,04x}] after {3}", dst, dst_endpoint, cluster, ev.timeout.elapsed);
+                log.tracef("zcl TIMEOUT ->{0,04x}:{1} [:{2,04x}] after {3}", dst, dst_endpoint, cluster, ev.timeout.elapsed);
+            abort_zcl_request(tag, ZigbeeResult.timeout);
             return ZigbeeResult.timeout;
         }
         else if (data.result != ZigbeeResult.success)
         {
             version (DebugZigbee)
-                writeInfof("Zigbee: zcl FAILED ->{0,04x}:{1} [:{2,04x}] result {3}", dst, dst_endpoint, cluster, data.result);
+                log.tracef("zcl FAILED ->{0,04x}:{1} [:{2,04x}] result {3}", dst, dst_endpoint, cluster, data.result);
             return data.result;
         }
 
         version (DebugZigbee)
-            writeInfof("Zigbee: zcl response <-{0,04x}:{1} [:{2,04x}] after {3}", dst, dst_endpoint, cluster, ev.timeout.elapsed);
+            log.tracef("zcl response <-{0,04x}:{1} [:{2,04x}] after {3}", dst, dst_endpoint, cluster, ev.timeout.elapsed);
 
         // let's centralise some basic response validation
         if (response.hdr.command == ZCLCommand.default_response)
@@ -588,7 +594,7 @@ protected:
             if (getTime() - req.request_time > 2.seconds)
             {
                 version (DebugZigbee)
-                    writeWarningf("Zigbee: ZDO request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
+                    log.warningf("ZDO request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
 
                 abort_zdo_request(req.tag, ZigbeeResult.timeout);
             }
@@ -602,7 +608,7 @@ protected:
             if (getTime() - req.request_time > 2.seconds)
             {
                 version (DebugZigbee)
-                    writeWarningf("Zigbee: ZCL request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
+                    log.warningf("ZCL request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
 
                 abort_zcl_request(req.tag, ZigbeeResult.timeout);
             }
@@ -645,20 +651,20 @@ protected:
                 {
                     if (ak.seq == seq && ak.cluster == (aps.cluster_id & 0x7FFF))
                     {
-                        writeInfof("Zigbee: late ZDO response {0, 04x} from {1, 04x} seq {2} (aborted in-flight)", aps.cluster_id, aps.src, seq);
+                        log.debugf("late ZDO response {0, 04x} from {1, 04x} seq {2} (aborted in-flight)", aps.cluster_id, aps.src, seq);
                         return;
                     }
                 }
 
                 version (DebugZigbee)
-                    writeWarningf("Zigbee: received unexpected ZDO response {0, 04x} from {1, 04x} with seq {2}", aps.cluster_id, aps.src, seq);
+                    log.warningf("received unexpected ZDO response {0, 04x} from {1, 04x} with seq {2}", aps.cluster_id, aps.src, seq);
                 return;
             }
 
             bool response_sent = handle_zdo_frame(aps, p);
 
             if ((aps.flags & APSFlags.zdo_response_required) && !response_sent)
-                writeWarningf("Zigbee: ZDO request {0, 04x} from {1, 04x} requires a response but none was sent!", aps.cluster_id, aps.src);
+                log.warningf("ZDO request {0, 04x} from {1, 04x} requires a response but none was sent!", aps.cluster_id, aps.src);
             return;
         }
         else if (aps.src_endpoint == 0 || aps.profile_id == 0)
@@ -694,7 +700,7 @@ protected:
                 {
                     if (ak.seq == seq && ak.endpoint == aps.src_endpoint && ak.cluster == aps.cluster_id)
                     {
-                        writeInfof("Zigbee: late ZCL response from {0, 04x}:{1} [:{2, 04x}] seq {3} (aborted in-flight)", aps.src, aps.src_endpoint, aps.cluster_id, seq);
+                        log.debugf("late ZCL response from {0, 04x}:{1} [:{2, 04x}] seq {3} (aborted in-flight)", aps.src, aps.src_endpoint, aps.cluster_id, seq);
                         return;
                     }
                 }
