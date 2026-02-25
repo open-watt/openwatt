@@ -643,6 +643,9 @@ protected:
                         _zdo_requests.remove(i);
                         if (req.response_handler)
                             req.response_handler(ZigbeeResult.success, cast(ZDOStatus)data[1], data[2..$], req.user_data);
+                        req.response_handler = null;
+                        if (req.iface)
+                            req.iface.abort(req.tag);
                         _zdo_request_pool.free(req);
                         return;
                     }
@@ -691,6 +694,9 @@ protected:
                         _zcl_requests.remove(i);
                         if (req.response_handler)
                             req.response_handler(ZigbeeResult.success, &zcl, data[hdr_len .. $], req.user_data);
+                        req.response_handler = null;
+                        if (req.iface)
+                            req.iface.abort(req.tag);
                         _zcl_request_pool.free(req);
                         return;
                     }
