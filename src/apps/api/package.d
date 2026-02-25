@@ -126,9 +126,6 @@ private:
         if (request.method == HTTPMethod.OPTIONS)
             return handle_options(request, stream);
 
-        version (DebugAPI)
-            writeDebug("API request: ", request.method, " ", request.request_target);
-
         if (tail == "/health")
             return handle_health(request, stream);
         if (tail == "/cli/execute")
@@ -143,6 +140,9 @@ private:
             return handle_set(request, stream);
         if (tail == "/list")
             return handle_list(request, stream);
+
+        version (DebugAPI)
+            writeDebug("API request: ", request.method, " ", request.request_target);
 
         foreach (handler; get_module!APIModule._custom_handlers[])
         {
@@ -171,6 +171,9 @@ private:
 
     int handle_health(ref const HTTPMessage request, ref Stream stream)
     {
+        version (DebugAPI)
+            writeDebug("API request: ", request.method, " ", request.request_target);
+
         HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", tconcat("{\"status\":\"healthy\",\"uptime\":", getAppTime().as!"seconds", "}"));
         add_cors_headers(response);
         stream.write(response.format_message()[]);
@@ -190,6 +193,9 @@ private:
             json = parse_json(cast(char[])request.content[]);
             command_text = json.getMember("command").asString();
         }
+
+        version (DebugAPI)
+            writeDebug("API request: ", request.method, " ", request.request_target, " - ", command_text);
 
         if (command_text.length == 0)
         {
@@ -329,6 +335,9 @@ private:
             assert(false, "TODO");
         }
 
+        version (DebugAPI)
+            writeDebug("API request: ", request.method, " ", request.request_target, " - ", name);
+
         Array!char json;
         if (!e)
         {
@@ -415,6 +424,9 @@ private:
             stream.write(response.format_message()[]);
             return 0;
         }
+
+        version (DebugAPI)
+            writeDebug("API request: ", request.method, " ", request.request_target, " - ", paths);
 
         // build response
         Array!char response_json;
@@ -605,6 +617,9 @@ private:
             stream.write(response.format_message()[]);
             return 0;
         }
+
+        version (DebugAPI)
+            writeDebug("API request: ", request.method, " ", request.request_target, " - ", *values_var);
 
         Array!char response_json;
         response_json.reserve(1024);
