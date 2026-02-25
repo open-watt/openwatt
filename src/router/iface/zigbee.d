@@ -272,6 +272,8 @@ protected:
         }
 
         // TODO: should we poll EZSP_NetworkState? or expect the state change callback to inform us?
+
+        super.update();
     }
 
     final override int transmit(ref const Packet packet, MessageCallback callback = null) nothrow @nogc
