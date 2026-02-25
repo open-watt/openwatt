@@ -316,7 +316,7 @@ class WebSocketServer : BaseObject
                                          Property.create!("uri", uri)() ];
 nothrow @nogc:
 
-    enum type_name = "websocket-server";
+    enum type_name = "ws-server";
 
     alias NewConnection = void delegate(WebSocket client, void* user_data) nothrow @nogc;
 
