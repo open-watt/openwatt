@@ -132,63 +132,57 @@ int main(string[] args)
 
 private:
 
-immutable string[9] severity_short = [
-    "EMRG", "ALRT", "CRIT", "ERR ", "WARN", "NOTE", "INFO", "DBG ", "TRC ",
+struct SeverityStyle { string badge, color; }
+
+immutable SeverityStyle[9] severity_styles = [
+    SeverityStyle("\x1b[5;1;97;101m ! \x1b[0m", "\x1b[1;91m"),  // emergency — blink bold white on bright red
+    SeverityStyle("\x1b[1;97;101m A \x1b[0m",   "\x1b[91m"),    // alert — white on bright red
+    SeverityStyle("\x1b[1;97;41m C \x1b[0m",    "\x1b[91m"),    // critical — bold white on red
+    SeverityStyle("\x1b[97;41m E \x1b[0m",      "\x1b[31m"),    // error — white on red
+    SeverityStyle("\x1b[30;43m W \x1b[0m",      "\x1b[33m"),    // warning — black on yellow
+    SeverityStyle("\x1b[30;46m N \x1b[0m",      "\x1b[36m"),    // notice — black on cyan
+    SeverityStyle("\x1b[7m I \x1b[0m",          "\x1b[0m"),     // info — inverse
+    SeverityStyle("\x1b[97;100m D \x1b[0m",     "\x1b[90m"),    // debug — white on gray
+    SeverityStyle("\x1b[3;37;100m T \x1b[0m",   "\x1b[3;90m"),  // trace — italic white on gray
 ];
 
-immutable string[9] severity_colors = [
-    "\x1b[5;91m",   // emergency — flashing bright red
-    "\x1b[1;91m",   // alert — bold bright red
-    "\x1b[91m",     // critical — bright red
-    "\x1b[31m",     // error — red
-    "\x1b[33m",     // warning — yellow
-    "\x1b[36m",     // notice — cyan
-    "\x1b[0m",      // info — default
-    "\x1b[90m",     // debug — dim (bright black)
-    "\x1b[3;90m",   // trace — italic dim
-];
-
-immutable string[16] tag_bg_colors = [
-    "\x1b[48;2;60;15;15m",   // red
-    "\x1b[48;2;60;35;15m",   // orange
-    "\x1b[48;2;55;55;15m",   // yellow
-    "\x1b[48;2;30;55;15m",   // lime
-    "\x1b[48;2;15;55;15m",   // green
-    "\x1b[48;2;15;55;35m",   // spring
-    "\x1b[48;2;15;55;55m",   // cyan
-    "\x1b[48;2;15;35;60m",   // azure
-    "\x1b[48;2;15;15;60m",   // blue
-    "\x1b[48;2;35;15;60m",   // violet
-    "\x1b[48;2;55;15;55m",   // magenta
-    "\x1b[48;2;60;15;35m",   // rose
-    "\x1b[48;2;45;30;15m",   // brown
-    "\x1b[48;2;20;45;45m",   // teal
-    "\x1b[48;2;45;15;45m",   // plum
-    "\x1b[48;2;40;45;20m",   // olive
+immutable string[16] tag_colors = [
+    "\x1b[38;2;220;100;100m",  "\x1b[38;2;220;160;100m",
+    "\x1b[38;2;200;200;100m",  "\x1b[38;2;130;200;100m",
+    "\x1b[38;2;100;200;100m",  "\x1b[38;2;100;200;150m",
+    "\x1b[38;2;100;200;200m",  "\x1b[38;2;100;150;220m",
+    "\x1b[38;2;100;100;220m",  "\x1b[38;2;150;100;220m",
+    "\x1b[38;2;200;100;200m",  "\x1b[38;2;220;100;150m",
+    "\x1b[38;2;190;130;80m",   "\x1b[38;2;100;190;190m",
+    "\x1b[38;2;190;100;190m",  "\x1b[38;2;170;190;100m",
 ];
 
 const(char)[] format_log_line(scope ref const LogMessage msg) nothrow @nogc
 {
     import urt.mem.temp : tconcat;
 
-    auto color = severity_colors[msg.severity];
+    auto sev = severity_styles[msg.severity];
     enum reset = "\x1b[0m";
-    enum bg_reset = "\x1b[49m";
 
     if (msg.tag.length > 0)
     {
         size_t h = 5381;
         foreach (c; msg.tag)
             h = h * 33 + c;
-        auto tag_bg = tag_bg_colors[h % tag_bg_colors.length];
+        auto tag_fg = tag_colors[h % tag_colors.length];
+
+        // Left-justify tag in a 12-char field; minimum 1 space after tag
+        enum tag_width = 12;
+        char[tag_width + 1] pad_buf = ' ';
+        size_t pad = tag_width > msg.tag.length ? tag_width - msg.tag.length + 1 : 1;
 
         if (msg.object_name.length > 0)
-            return tconcat(color, severity_short[msg.severity], " - ", tag_bg, msg.tag, bg_reset ~ " '", msg.object_name, "': ", msg.message, reset);
+            return tconcat(sev.badge, ' ', tag_fg, msg.tag, pad_buf[0 .. pad], sev.color, '\'', msg.object_name, "': ", msg.message, reset);
         else
-            return tconcat(color, severity_short[msg.severity], " - ", tag_bg, msg.tag, bg_reset ~ ": ", msg.message, reset);
+            return tconcat(sev.badge, ' ', tag_fg, msg.tag, sev.color, pad_buf[0 .. pad], msg.message, reset);
     }
     else
-        return tconcat(color, severity_short[msg.severity], " - ", msg.message, reset);
+        return tconcat(sev.badge, ' ', sev.color, msg.message, reset);
 }
 
 void default_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
