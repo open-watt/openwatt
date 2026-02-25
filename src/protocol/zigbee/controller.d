@@ -45,7 +45,7 @@ class ZigbeeController : BaseObject, Subscriber
                                          Property.create!("auto-create", auto_create)() ];
 @nogc:
 
-    enum type_name = "zigbee-controller";
+    enum type_name = "zb-controller";
 
     this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
     {
