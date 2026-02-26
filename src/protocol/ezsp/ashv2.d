@@ -3,10 +3,16 @@ module protocol.ezsp.ashv2;
 import urt.array;
 import urt.crc;
 import urt.endian;
+import urt.lifetime;
 import urt.log;
 import urt.mem.allocator;
+import urt.string;
 import urt.time;
 
+import manager.base;
+import manager.collection;
+
+import router.iface;
 import router.stream;
 
 //version = DebugASHMessageFlow;
@@ -21,370 +27,171 @@ nothrow @nogc:
 // https://www.silabs.com/documents/public/user-guides/ug101-uart-gateway-protocol-reference.pdf
 //
 
-
-struct ASH
+struct ASHFrame
 {
+    enum Type = PacketType.ash;
+}
+
+class ASHInterface : BaseInterface
+{
+    __gshared Property[1] Properties = [ Property.create!("stream", stream)() ];
 nothrow @nogc:
 
-    enum Event
+    enum type_name = "ash";
+
+    this(String name, ObjectFlags flags = ObjectFlags.none)
     {
-        Reset
+        super(collection_type_info!ASHInterface, name.move, flags);
     }
 
-    this (Stream stream) pure
+    // Properties...
+
+    final inout(Stream) stream() inout pure
+        => _stream;
+    final void stream(Stream stream)
     {
-        this.stream = stream;
-    }
-
-    ~this()
-    {
-        reset();
-
-        while (freeList)
-        {
-            auto next = freeList.next;
-            defaultAllocator.freeT!Message(freeList);
-            freeList = next;
-        }
-    }
-
-    bool isConnected() const pure
-        => connected;
-
-    void setEventCallback(void delegate(Event event) nothrow @nogc callback) pure
-    {
-        eventCallback = callback;
-    }
-
-    void setPacketCallback(void delegate(const(ubyte)[]) nothrow @nogc callback) pure
-    {
-        packetCallback = callback;
-    }
-
-    void reset(bool reconnect = true)
-    {
-        connecting = reconnect;
-
-        if (!connected)
+        if (_stream is stream)
             return;
-        connected = false;
-
-        writeDebug("ASHv2: connection reset");
-
-        // clear all the queues...
-        txSeq = rxSeq = 0;
-        txAck = 0;
-        rxOffset = 0;
-
-        // shift all the in-flight packets to the free-list
-        Message* next;
-        while (txInFlight)
+        if (_subscribed)
         {
-            next = txInFlight.next;
-            freeMessage(txInFlight);
-            txInFlight = next;
+            _stream.unsubscribe(&stream_state_change);
+            _subscribed = false;
         }
-        while (txQueue)
-        {
-            next = txQueue.next;
-            freeMessage(txQueue);
-            txQueue = next;
-        }
-
-        lastEvent = MonoTime();
-
-        eventCallback(Event.Reset);
+        _stream = stream;
+        restart();
     }
 
-    void update()
+    // BaseInterface overrides...
+
+    override bool validate() const pure
+        => _stream !is null;
+
+    override CompletionStatus validating()
     {
+        _stream.try_reattach();
+        return super.validating();
+    }
+
+    override CompletionStatus startup()
+    {
+        if (!_stream || !_stream.running)
+            return CompletionStatus.continue_;
+
         MonoTime now = getTime();
 
-        if (!stream.running)
-            reset();
-
-        if (connecting && !connected && now - lastEvent > T_RSTACK_MAX.msecs && stream.running)
+        // periodically send RST until we get RSTACK
+        if (!_connected && now - _last_event > T_RSTACK_MAX.msecs)
         {
-            writeDebug("ASHv2: connecting on '", stream.name, "'...");
-            ashRst();
-            lastEvent = now;
-        }
+            writeDebug("ASHv2: connecting on '", _stream.name, "'...");
 
-        do
-        {
-            ptrdiff_t r = stream.read(rxBuffer[rxOffset..$]);
-            if (r <= 0)
-                break;
-
-            // should we record raw bytes, or protocol bytes?
-            rxBytes += r;
-
-            // skip any XON/XOFF bytes
-            ubyte rxLen = rxOffset;
-            for (ubyte i = rxOffset; i < rxOffset + r; ++i)
-            {
-                if (rxBuffer[i] == ASH_XON_BYTE || rxBuffer[i] == ASH_XOFF_BYTE)
-                    continue;
-                rxBuffer[rxLen++] = rxBuffer[i];
-            }
-
-            // parse frames from stream delimited by 0x7E bytes
-            ubyte start = 0;
-            ubyte end = 0;
-            bool inputError = false;
-            outer: for (; end < rxLen; ++end)
-            {
-                if (rxBuffer[end] == ASH_SUBSTITUTE_BYTE)
-                {
-                    // the 'substitution byte' is inserted by the UART in the event of a stream error
-                    // if we receive this byte, we should discard this frame
-                    inputError = true;
-                }
-                else if (rxBuffer[end] == ASH_CANCEL_BYTE)
-                {
-                    // the 'cancel byte' is used to cancel the current frame and start over from the next byte
-                    // used to discard any preceeding bytes, for example; rogue bytes emit during system startup, or dangling bytes sent prior to system reset
-                    start = cast(ubyte)(end + 1);
-                }
-                if (rxBuffer[end] != ASH_FLAG_BYTE)
-                    continue;
-
-                // if we encountered an input error in the stream (result of a substitution byte), we'll discard this frame
-                if (inputError)
-                {
-                    inputError = false;
-                    start = cast(ubyte)(end + 1);
-                    ++rxErrors;
-                    continue;
-                }
-
-                // remove byte-stuffing from the frame
-                ubyte frameLen = 0;
-                for (ubyte i = start; i < end; ++i)
-                {
-                    ubyte b = rxBuffer[i];
-                    if (b == ASH_ESCAPE_BYTE)
-                    {
-                        if (++i == end)
-                        {
-                            start = cast(ubyte)(end + 1);
-                            continue outer;
-                        }
-                        rxBuffer[start + frameLen++] = rxBuffer[i] ^ 0x20;
-                    }
-                    else
-                        rxBuffer[start + frameLen++] = b;
-                }
-
-                ubyte frameStart = start;
-                start = cast(ubyte)(end + 1);
-
-                if (frameLen < 2)
-                {
-                    if (frameLen != 0)
-                        ++rxErrors;
-                    continue;
-                }
-
-                // validate the frame
-                int frameEnd = frameStart + frameLen - 2;
-                ubyte[] frame = rxBuffer[frameStart .. frameEnd];
-
-                // check the crc
-                const ushort crc = frame.ezsp_crc();
-                if (rxBuffer[frameEnd .. frameEnd + 2][0..2].bigEndianToNative!ushort != crc)
-                {
-                    // corrupt frame!
-                    // TODO: but maybe we should send a NAK?
-                    ++rxErrors;
-                    continue;
-                }
-
-                ++rxPackets;
-
-                // submit the frame for processing
-                processFrame(frame);
-            }
-
-            // shuffle any tail bytes (incomplete frames) to the start of the buffer...
-            rxOffset = cast(ubyte)(rxLen - start);
-            if (start > 0)
-            {
-                import urt.mem : memmove;
-                memmove(rxBuffer.ptr, rxBuffer.ptr + start, rxOffset);
-            }
-        }
-        while(true);
-
-        // do we just try and resend the first in the queue?
-        if (txInFlight && now - txInFlight.sendTime >= 250.msecs)
-        {
-            ashNak(txInFlight.seq, false);
-            txInFlight.sendTime = now;
-        }
-    }
-
-    void processFrame(ubyte[] frame)
-    {
-        ubyte control = frame.popFront;
-
-        // check for RSTACK
-        if (control == 0xC1)
-        {
-            if (frame.length == 2)
-            {
-                ashVersion = frame[0];
-                ubyte code = frame[1];
-
-                connecting = false; // unsupported version, stop trying to connect!
-                if (ashVersion == 2)
-                    connected = true;
-
-                writeDebug(connected ? "ASHv2: connected! code=" : "ASHv2: connection failed; unsupported version! code=", code);
-                return;
-            }
-        }
-        // we can't accept any frames before we receive RSTACK
-        if (!connected)
-            return;
-
-        // check for ERROR
-        if (control == 0xC2)
-        {
-            // ERROR
-            if (frame.length == 2)
-            {
-                ubyte ver = frame[0];
-                ubyte code = frame[1];
-
-                writeDebug("ASHv2: <-- ERROR. code=", code);
-            }
-
-            // TODO: ...what to do when receiving an error frame?
-            reset();
-            return;
-        }
-
-        ubyte ackNum = control & 7;
-        int ackAhead = ackNum >= txAck ? ackNum - txAck : ackNum - txAck + 8;
-        if (ackAhead > txAhead())
-            return; // discard frames with invalid ackNum
-
-        // check for other control codes
-        if (control & 0x80)
-        {
-            if ((control & 0x60) == 0)
-            {
-                // ACK
-                version (DebugASHMessageFlow)
-                    writeDebugf("ASHv2: <-- ACK [{0,02x}]", control);
-
-                ackInFlight(ackNum);
-            }
-            else if ((control & 0x60) == 0x20)
-            {
-                // NAK
-                version (DebugASHMessageFlow)
-                    writeDebugf("ASHv2: <-- NAK [{0,02x}]", control);
-
-                // TODO: we're meant to retransmit a buffered message
-                //       ...but it's not clear from the control byte which message(/s) I should retransmit?
-                //       I guess we retransmit all messages from ackNum -> txSeq?
-                //       I guess it should also be the case that ackNum must be the FIRST message in send queue?
-            }
+            immutable ubyte[5] RST = [ ASH_CANCEL_BYTE, 0xC0, 0x38, 0xBC, ASH_FLAG_BYTE ];
+            if (_stream.write(RST) != 5)
+                ++_status.send_dropped;
             else
             {
-                // Invalid frame!
-                // ...just ignore it?
-                debug assert(false, "TODO: should we do anything here, or just return?");
+                ++_status.send_packets;
+                _status.send_bytes += 5;
             }
 
-            return;
+            _last_event = now;
         }
 
-        // DATA frame
-        ubyte frmNum = control >> 4;
-        bool retransmit = (control & 0x08) != 0;
+        // poll for incoming RSTACK response
+        service_stream();
 
-        // acknowledge frame
-        if (frmNum != rxSeq)
+        if (_connected)
         {
-            // not the frame we expected; request a retransmit and discard this frame
-            ashNak(rxSeq, false);
-            return;
+            _stream.subscribe(&stream_state_change);
+            _subscribed = true;
+            return CompletionStatus.complete;
         }
 
-        // get data buffer
-        ubyte[] data = void;
-        ubyte[ASH_MAX_LENGTH] tmp = void;
-        data = tmp[0 .. frame.length];
-
-        // de-randomise the frame data
-        randomise(frame, data);
-
-        version (DebugASHMessageFlow)
-            writeDebugf("ASHv2: <-- [x{0, 02x}]: {1}", control, cast(void[])data);
-
-        rxSeq = (rxSeq + 1) & 7;
-        ashAck(rxSeq, false);
-
-        if (data.length > 0) // Note: I have observed zero-length frames; maybe it's a keepalive or something?
-            packetCallback(data);
-
-        ackInFlight(ackNum);
+        return CompletionStatus.continue_;
     }
 
-    void ackInFlight(ubyte ackNum)
+    override CompletionStatus shutdown()
     {
-        while (txAck != ackNum)
+        _connected = false;
+
+        _tx_seq = _rx_seq = 0;
+        _tx_ack = 0;
+        _rx_offset = 0;
+
+        Message* next;
+        while (_tx_in_flight)
         {
-            if (!txInFlight || txInFlight.seq != txAck)
-            {
-                // TODO: what is the proper recovery strategy in this case? reset the connection?
-                assert(false, "We've gone off the rails!");
-            }
-
-            Message* msg = txInFlight;
-            txInFlight = txInFlight.next;
-            freeMessage(msg);
-
-            txAck = (txAck + 1) & 7;
+            next = _tx_in_flight.next;
+            free_message(_tx_in_flight);
+            _tx_in_flight = next;
+        }
+        while (_tx_queue)
+        {
+            next = _tx_queue.next;
+            free_message(_tx_queue);
+            _tx_queue = next;
         }
 
-        // we can send any queued frames here...
-        while (txQueue && txAhead < maxInFlight)
+        _last_event = MonoTime();
+
+        if (_subscribed)
         {
-            Message* next = txQueue.next;
-            if (!send(txQueue))
-                break;
-            txQueue = next;
+            _stream.unsubscribe(&stream_state_change);
+            _subscribed = false;
+        }
+
+        return CompletionStatus.complete;
+    }
+
+    override void update()
+    {
+        super.update();
+
+        service_stream();
+
+        // retransmit timeout
+        MonoTime now = getTime();
+        if (_tx_in_flight && now - _tx_in_flight.send_time >= 250.msecs)
+        {
+            ash_nak(_tx_in_flight.seq, false);
+            _tx_in_flight.send_time = now;
         }
     }
 
-    bool send(const(ubyte)[] message)
+protected:
+    override bool transmit(ref Packet packet)
     {
-        assert(message.length <= ASH_MAX_MSG_LENGTH);
+        if (packet.type != PacketType.ash)
+            return false;
+        const(ubyte)[] message = cast(ubyte[])packet.data();
+        if (message.length > ASH_MAX_MSG_LENGTH)
+            return false;
 
-        // TODO: this would be a little nicer if we had a list container...
-
-        Message* msg = allocMessage();
+        Message* msg = alloc_message();
         msg.length = cast(ubyte)message.length;
-        msg.buffer[0..message.length] = message[];
-        if (txAhead >= maxInFlight || !send(msg))
+        msg.buffer[0 .. message.length] = message[];
+        if (tx_ahead() >= _max_in_flight || !send_msg(msg))
         {
-            // couldn't send immediately; add to send queue
-            if (!txQueue)
-                txQueue = msg;
+            if (!_tx_queue)
+                _tx_queue = msg;
             else
             {
-                Message* m = txQueue;
+                Message* m = _tx_queue;
                 while (m.next)
                     m = m.next;
                 m.next = msg;
                 msg.next = null;
             }
         }
+
+        ++_status.send_packets;
+        _status.send_bytes += message.length;
         return true;
+    }
+
+    void stream_state_change(BaseObject, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
     }
 
 private:
@@ -404,7 +211,7 @@ private:
     struct Message
     {
         Message* next;
-        MonoTime sendTime;
+        MonoTime send_time;
         ubyte seq;
         ubyte length;
         ubyte[ASH_MAX_MSG_LENGTH] buffer;
@@ -413,131 +220,322 @@ private:
             => buffer[0 .. length];
     }
 
-    void delegate(Event event) nothrow @nogc eventCallback;
-    void delegate(const(ubyte)[] packet) nothrow @nogc packetCallback;
+    ObjectRef!Stream _stream;
+    MonoTime _last_event;
 
-    package Stream stream;
-    MonoTime lastEvent;
+    bool _connected;
+    bool _subscribed;
+    ubyte _ash_version;
 
-    bool connecting = true;
-    bool connected;
-    ubyte ashVersion;
+    ubyte _max_in_flight = 3; // how many frames we will send without being ack-ed (1-7)
 
-    ubyte maxInFlight = 1; // how many frames we will send without being ack-ed (1-7)
+    ubyte _tx_seq; // the next frame to be sent
+    ubyte _tx_ack = 0; // the next frame we expect an ack for
 
-    ubyte txSeq; // the next frame to be sent
-    ubyte txAck = 0; // the next frame we expect an ack for
-    ubyte txAhead() => txSeq >= txAck ? cast(ubyte)(txSeq - txAck) : cast(ubyte)(txSeq - txAck + 8);
+    ubyte tx_ahead() => _tx_seq >= _tx_ack ? cast(ubyte)(_tx_seq - _tx_ack) : cast(ubyte)(_tx_seq - _tx_ack + 8);
 
-    ubyte rxSeq = 0; // the next frame we expect to receive
-
-    uint rxBytes, txBytes;
-    uint rxPackets, txPackets;
-    uint rxErrors, txErrors;
+    ubyte _rx_seq = 0; // the next frame we expect to receive
 
     // TODO: received frames pending delivery because we missed one and sent a NAK
-    Message* txInFlight; // frames that have been sent but not yet ack-ed
-    Message* txQueue;    // frames waiting to be sent
-    Message* freeList;
+    Message* _tx_in_flight; // frames that have been sent but not yet ack-ed
+    Message* _tx_queue;    // frames waiting to be sent
+    Message* _free_list;
 
-    ubyte rxOffset;
-    ubyte[128] rxBuffer;
+    ubyte _rx_offset;
+    ubyte[128] _rx_buffer;
 
-    Message* allocMessage()
+    void service_stream()
+    {
+        do
+        {
+            ptrdiff_t r = _stream.read(_rx_buffer[_rx_offset..$]);
+            if (r <= 0)
+                break;
+
+            _status.recv_bytes += r;
+
+            // skip any XON/XOFF bytes
+            ubyte rxLen = _rx_offset;
+            for (ubyte i = _rx_offset; i < _rx_offset + r; ++i)
+            {
+                if (_rx_buffer[i] == ASH_XON_BYTE || _rx_buffer[i] == ASH_XOFF_BYTE)
+                    continue;
+                _rx_buffer[rxLen++] = _rx_buffer[i];
+            }
+
+            // parse frames from stream delimited by 0x7E bytes
+            ubyte start = 0;
+            ubyte end = 0;
+            bool inputError = false;
+            outer: for (; end < rxLen; ++end)
+            {
+                if (_rx_buffer[end] == ASH_SUBSTITUTE_BYTE)
+                    inputError = true;
+                else if (_rx_buffer[end] == ASH_CANCEL_BYTE)
+                    start = cast(ubyte)(end + 1);
+
+                if (_rx_buffer[end] != ASH_FLAG_BYTE)
+                    continue;
+
+                if (inputError)
+                {
+                    inputError = false;
+                    start = cast(ubyte)(end + 1);
+                    ++_status.recv_dropped;
+                    continue;
+                }
+
+                // remove byte-stuffing from the frame
+                ubyte frameLen = 0;
+                for (ubyte i = start; i < end; ++i)
+                {
+                    ubyte b = _rx_buffer[i];
+                    if (b == ASH_ESCAPE_BYTE)
+                    {
+                        if (++i == end)
+                        {
+                            start = cast(ubyte)(end + 1);
+                            continue outer;
+                        }
+                        _rx_buffer[start + frameLen++] = _rx_buffer[i] ^ 0x20;
+                    }
+                    else
+                        _rx_buffer[start + frameLen++] = b;
+                }
+
+                ubyte frameStart = start;
+                start = cast(ubyte)(end + 1);
+
+                if (frameLen < 2)
+                {
+                    if (frameLen != 0)
+                        ++_status.recv_dropped;
+                    continue;
+                }
+
+                // validate the frame
+                int frameEnd = frameStart + frameLen - 2;
+                ubyte[] frame = _rx_buffer[frameStart .. frameEnd];
+
+                // check the crc
+                const ushort crc = frame.ezsp_crc();
+                if (_rx_buffer[frameEnd .. frameEnd + 2][0..2].bigEndianToNative!ushort != crc)
+                {
+                    ++_status.recv_dropped;
+                    continue;
+                }
+
+                ++_status.recv_packets;
+                process_frame(frame);
+            }
+
+            // shuffle any tail bytes (incomplete frames) to the start of the buffer...
+            _rx_offset = cast(ubyte)(rxLen - start);
+            if (start > 0)
+            {
+                import urt.mem : memmove;
+                memmove(_rx_buffer.ptr, _rx_buffer.ptr + start, _rx_offset);
+            }
+        }
+        while(true);
+    }
+
+    void process_frame(ubyte[] frame)
+    {
+        ubyte control = frame.popFront;
+
+        // check for RSTACK
+        if (control == 0xC1)
+        {
+            if (frame.length == 2)
+            {
+                _ash_version = frame[0];
+                ubyte code = frame[1];
+
+                if (_ash_version == 2)
+                    _connected = true;
+
+                writeDebug(_connected ? "ASHv2: connected! code=" : "ASHv2: connection failed; unsupported version! code=", code);
+                return;
+            }
+        }
+        if (!_connected)
+            return;
+
+        // check for ERROR
+        if (control == 0xC2)
+        {
+            if (frame.length == 2)
+            {
+                ubyte ver = frame[0];
+                ubyte code = frame[1];
+                writeDebug("ASHv2: <-- ERROR. code=", code);
+            }
+            restart();
+            return;
+        }
+
+        ubyte ack_num = control & 7;
+        int ack_ahead = ack_num >= _tx_ack ? ack_num - _tx_ack : ack_num - _tx_ack + 8;
+        if (ack_ahead > tx_ahead())
+            return; // discard frames with invalid ack_num
+
+        // check for other control codes
+        if (control & 0x80)
+        {
+            if ((control & 0x60) == 0)
+            {
+                // ACK
+                version (DebugASHMessageFlow)
+                    writeDebugf("ASHv2: <-- ACK [{0,02x}]", control);
+                ack_in_flight(ack_num);
+            }
+            else if ((control & 0x60) == 0x20)
+            {
+                // NAK
+                version (DebugASHMessageFlow)
+                    writeDebugf("ASHv2: <-- NAK [{0,02x}]", control);
+            }
+            else
+            {
+                debug assert(false, "TODO: should we do anything here, or just return?");
+            }
+            return;
+        }
+
+        // DATA frame
+        ubyte frm_num = control >> 4;
+        bool retransmit = (control & 0x08) != 0;
+
+        if (frm_num != _rx_seq)
+        {
+            ash_nak(_rx_seq, false);
+            return;
+        }
+
+        ubyte[] data = void;
+        ubyte[ASH_MAX_LENGTH] tmp = void;
+        data = tmp[0 .. frame.length];
+
+        randomise(frame, data);
+
+        version (DebugASHMessageFlow)
+            writeDebugf("ASHv2: <-- [x{0, 02x}]: {1}", control, cast(void[])data);
+
+        _rx_seq = (_rx_seq + 1) & 7;
+        ash_ack(_rx_seq, false);
+
+        if (data.length > 0)
+        {
+            Packet p;
+            p.init!ASHFrame(data);
+            dispatch(p);
+        }
+
+        ack_in_flight(ack_num);
+    }
+
+    void ack_in_flight(ubyte ack_num)
+    {
+        while (_tx_ack != ack_num)
+        {
+            if (!_tx_in_flight || _tx_in_flight.seq != _tx_ack)
+            {
+                assert(false, "We've gone off the rails!");
+            }
+
+            Message* msg = _tx_in_flight;
+            _tx_in_flight = _tx_in_flight.next;
+            free_message(msg);
+
+            _tx_ack = (_tx_ack + 1) & 7;
+        }
+
+        // we can send any queued frames here...
+        while (_tx_queue && tx_ahead < _max_in_flight)
+        {
+            Message* next = _tx_queue.next;
+            if (!send_msg(_tx_queue))
+                break;
+            _tx_queue = next;
+        }
+    }
+
+    Message* alloc_message()
     {
         Message* msg;
-        if (freeList)
+        if (_free_list)
         {
-            msg = freeList;
-            freeList = freeList.next;
+            msg = _free_list;
+            _free_list = _free_list.next;
             msg.seq = 0;
             msg.next = null;
         }
         else
             msg = defaultAllocator.allocT!Message();
-        msg.sendTime = MonoTime();
+        msg.send_time = MonoTime();
         return msg;
     }
-    void freeMessage(Message* message)
+
+    void free_message(Message* message)
     {
-        message.next = freeList;
-        freeList = message;
+        message.next = _free_list;
+        _free_list = message;
     }
 
-    bool send(Message* msg)
+    bool send_msg(Message* msg)
     {
-        if (!connected || !ashSend(msg.payload(), txSeq, rxSeq, false))
+        if (!_connected || !ash_send(msg.payload(), _tx_seq, _rx_seq, false))
             return false;
 
-        // add to in-flight list
         msg.next = null;
-        msg.sendTime = getTime();
-        msg.seq = txSeq;
-        if (!txInFlight)
-            txInFlight = msg;
+        msg.send_time = getTime();
+        msg.seq = _tx_seq;
+        if (!_tx_in_flight)
+            _tx_in_flight = msg;
         else
         {
-            Message* m = txInFlight;
+            Message* m = _tx_in_flight;
             while (m.next)
                 m = m.next;
             m.next = msg;
         }
-        txSeq = (txSeq + 1) & 7;
+        _tx_seq = (_tx_seq + 1) & 7;
 
         return true;
     }
 
-    bool ashRst()
-    {
-        version (DebugASHMessageFlow)
-            writeDebug("ASHv2: --> RST");
-
-        immutable ubyte[5] RST = [ ASH_CANCEL_BYTE, 0xC0, 0x38, 0xBC, ASH_FLAG_BYTE ];
-        if (stream.write(RST) != 5)
-        {
-            ++txErrors;
-            return false;
-        }
-        ++txPackets;
-        txBytes += 5;
-        return true;
-    }
-
-    bool ashAck(ubyte ack, bool ready, bool nak = false)
+    bool ash_ack(ubyte ack, bool ready, bool nak = false)
     {
         ubyte control = 0x80 | (nak ? 0x20 : 0) | (ready << 3) | (ack & 7);
 
         version (DebugASHMessageFlow)
             writeDebugf("ASHv2: --> {0} [x{1, 02x}]", nak ? "NAK" : "ACK", control);
 
-        ubyte[4] ackMsg = [ control, 0, 0, ASH_FLAG_BYTE ];
-        ackMsg[1..3] = ackMsg[0..1].ezsp_crc().nativeToBigEndian;
-        if (stream.write(ackMsg) != 4)
+        ubyte[4] ack_msg = [ control, 0, 0, ASH_FLAG_BYTE ];
+        ack_msg[1..3] = ack_msg[0..1].ezsp_crc().nativeToBigEndian;
+        if (_stream.write(ack_msg) != 4)
         {
-            ++txErrors;
+            ++_status.send_dropped;
             return false;
         }
-        ++txPackets;
-        txBytes += 4;
+        ++_status.send_packets;
+        _status.send_bytes += 4;
         return true;
     }
 
-    bool ashNak(ubyte ack, bool ready)
-        => ashAck(ack, ready, true);
+    bool ash_nak(ubyte ack, bool ready)
+        => ash_ack(ack, ready, true);
 
-    bool ashSend(const(ubyte)[] msg, ubyte seq, ubyte ack, bool retransmit)
+    bool ash_send(const(ubyte)[] msg, ubyte seq, ubyte ack, bool retransmit)
     {
-        // TODO: what is the maximum frame len?
         ubyte[256] frame = void;
 
-        // add the control byte
         ubyte control = ((seq & 7) << 4) | (ack & 7) | (retransmit << 3);
         frame[0] = control;
 
-        // randomise the data
         randomise(msg, frame[1..$]);
 
-        // add the crc
         ushort crc = frame[0 .. 1 + msg.length].ezsp_crc();
         frame[1 + msg.length .. 3 + msg.length][0..2] = crc.nativeToBigEndian;
 
@@ -555,23 +553,22 @@ private:
                 stuffed[len++] = b;
         }
 
-        // add flag byte
         stuffed[len++] = 0x7E;
 
         version (DebugASHMessageFlow)
             writeDebugf("ASHv2: --> [x{0, 02x}]: {1}", control, cast(void[])msg);
 
-        ptrdiff_t r = stream.write(stuffed[0..len]);
+        ptrdiff_t r = _stream.write(stuffed[0..len]);
         if (r != len)
         {
             version (DebugASHMessageFlow)
                 writeDebug("ASHv2: stream write failed!");
-            ++txErrors;
+            ++_status.send_dropped;
             return false;
         }
 
-        ++txPackets;
-        txBytes += r;
+        ++_status.send_packets;
+        _status.send_bytes += r;
         return true;
     }
 
@@ -581,16 +578,8 @@ private:
         foreach (i, b; data)
         {
             buffer[i] = b ^ rand;
-
-            // TODO: which solution is actually better?
-
             ubyte b1 = cast(ubyte)-(rand & 1) & 0xB8;
             rand = (rand >> 1) ^ b1;
-
-//            ubyte b1 = rand & 1;
-//            rand >>= 1;
-//            if (b1)
-//                rand ^= 0xB8;
         }
     }
 }

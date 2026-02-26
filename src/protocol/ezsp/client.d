@@ -12,7 +12,9 @@ import urt.time;
 import urt.traits;
 
 import manager.base;
+import manager.plugin;
 
+import router.iface;
 import router.stream;
 
 import protocol.ezsp;
@@ -58,7 +60,8 @@ template EZSPResult(T)
 
 class EZSPClient : BaseObject
 {
-    __gshared Property[4] Properties = [ Property.create!("stream", stream)(),
+    __gshared Property[5] Properties = [ Property.create!("ash_stream", ash_stream)(),
+                                         Property.create!("ash_interface", ash_interface)(),
                                          Property.create!("stack-type", stack_type)(),
                                          Property.create!("stack-version", stack_version)(),
                                          Property.create!("protocol-version", protocol_version)() ];
@@ -73,18 +76,26 @@ class EZSPClient : BaseObject
 
     // Properties...
 
-    final inout(Stream) stream() inout pure nothrow
-        => ash.stream;
-    final void stream(Stream stream) nothrow
+    final inout(Stream) ash_stream() inout pure nothrow
+        => _stream;
+    final void ash_stream(Stream stream) nothrow
     {
-        if (ash.stream !is stream)
-        {
-            // rebuild ASH and reset
-            ash = ASH(stream);
-            ash.setEventCallback(&event_callback);
-            ash.setPacketCallback(&incoming_packet);
-            restart();
-        }
+        if (_stream is stream)
+            return;
+        _stream = stream;
+        _ash_ext = null;
+        restart();
+    }
+
+    final inout(ASHInterface) ash_interface() inout pure nothrow
+        => _ash_ext;
+    final void ash_interface(ASHInterface iface) nothrow
+    {
+        if (_ash_ext is iface)
+            return;
+        _ash_ext = iface;
+        _stream = null;
+        restart();
     }
 
     final EZSPStackType stack_type() const pure nothrow
@@ -271,7 +282,7 @@ nothrow:
             writeDebugf("EZSP: --> [{0}] - {1}(x{2, 04x}) - {3,?5}{4,!5}", _sequence_number, cmdName ? cmdName.name : "UNKNOWN", cmd, cmdName ? cmdName.reqFmt(buffer[5..i]) : null, cast(void[])buffer[0..i], cmdName !is null);
         }
 
-        if (!ash.send(buffer[0..i]))
+        if (!ash_send(buffer[0..i]))
         {
             version(DebugMessageFlow)
                 writeDebug("EZSP: send failed!");
@@ -284,16 +295,43 @@ nothrow:
     }
 
     final override bool validate() const pure
-        => ash.stream !is null;
+        => (_stream !is null) != (_ash_ext !is null);
+
+    override CompletionStatus validating()
+    {
+        _stream.try_reattach();
+        _ash_ext.try_reattach();
+        return super.validating();
+    }
 
     override CompletionStatus startup()
     {
-        ash.update();
+        import manager : get_module;
+        import manager.expression : NamedArgument;
+
+        if (!_ash)
+        {
+            if (_ash_ext)
+                _ash = _ash_ext;
+            else
+            {
+                ref ash_coll = get_module!EZSPProtocolModule.ash_connections;
+                const(char)[] ash_name = ash_coll.generate_name(name[]);
+                _ash = ash_coll.create(ash_name, ObjectFlags.dynamic, NamedArgument("stream", cast(Stream)_stream));
+                if (!_ash)
+                    return CompletionStatus.error;
+            }
+            PacketFilter filter;
+            filter.type = PacketType.ash;
+            filter.direction = PacketDirection.incoming;
+            _ash.subscribe(&incoming_packet, filter);
+            _ash.subscribe(&ash_state_change);
+        }
 
         if (_known_version)
             return CompletionStatus.complete;
 
-        if (ash.isConnected())
+        if (_ash.running)
         {
             if (_requested_version == 0)
             {
@@ -301,7 +339,7 @@ nothrow:
 
                 _requested_version = PREFERRED_VERSION;
                 immutable ubyte[4] version_msg = [ _sequence_number++, 0x00, 0x00, _requested_version ];
-                ash.send(version_msg);
+                ash_send(version_msg);
 
                 _last_event = getTime();
             }
@@ -313,20 +351,27 @@ nothrow:
 
     override CompletionStatus shutdown()
     {
-        ash.reset();
         _known_version = 0;
         _requested_version = 0;
         _sequence_number = 0;
+        _stack_type = EZSPStackType.unknown;
+        _stack_version = null;
+        _queued_requests.clear();
+
+        if (_ash)
+        {
+            _ash.unsubscribe(&incoming_packet);
+            _ash.unsubscribe(&ash_state_change);
+            if (_stream)
+                _ash.destroy();
+            _ash = null;
+        }
+
         return CompletionStatus.complete;
     }
 
     final override void update()
     {
-        if (!validate())
-            return;
-
-        ash.update();
-
         MonoTime now = getTime();
         if (_queued_requests.length > 0 && now - _queued_requests[0].ts > 200.msecs)
         {
@@ -377,7 +422,9 @@ private:
 
     ubyte _sequence_number;
 
-    ASH ash;
+    ObjectRef!Stream _stream;
+    ObjectRef!ASHInterface _ash_ext;
+    ASHInterface _ash;
 
     void delegate(ubyte, ushort, const(ubyte)[]) nothrow @nogc _message_handler;
     Map!(ushort, CommandHandler) _command_handlers;
@@ -394,24 +441,29 @@ private:
         Map!(ushort, CommandData) commandNames;
     }
 
-    void event_callback(ASH.Event event)
+    bool ash_send(const(ubyte)[] data)
     {
-        if (event == ASH.Event.Reset)
-        {
-            _known_version = 0;
-            _requested_version = 0;
-            _sequence_number = 0;
-            _stack_type = EZSPStackType.unknown;
-            _stack_version = null;
-            _queued_requests.clear();
-            restart();
-        }
-        else
-            assert(false, "Unhandled ASH event");
+        Packet p;
+        p.init!ASHFrame(data);
+        return _ash.forward(p);
     }
 
-    void incoming_packet(const(ubyte)[] msg)
+    void ash_state_change(BaseObject, StateSignal signal)
     {
+        if (signal == StateSignal.offline)
+            restart();
+        else if (signal == StateSignal.destroyed)
+        {
+            _ash.unsubscribe(&incoming_packet);
+            _ash.unsubscribe(&ash_state_change);
+            _ash = null;
+            restart();
+        }
+    }
+
+    void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void* ud)
+    {
+        const(ubyte)[] msg = cast(const(ubyte)[])p.data();
 //        writeWarningf("ASHv2: [!!!] empty frame received! [x{0,02x}]", control);
 
         ubyte seq;
@@ -490,7 +542,7 @@ private:
                     // we'll negotiate down to the version it supports
                     _requested_version = r.protocolVersion;
                     immutable ubyte[4] versionMsg = [ _sequence_number++, 0x00, 0x00, _requested_version ];
-                    ash.send(versionMsg);
+                    ash_send(versionMsg);
                     break;
                 }
 
