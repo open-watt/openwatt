@@ -27,12 +27,12 @@ import router.iface;
 import router.iface.packet;
 import router.iface.zigbee;
 
-//version = DebugZigbee;
+version = DebugZigbee;
 
 nothrow @nogc:
 
 
-alias ZigbeeMessageHandler = void delegate(ref const APSFrame header, const(void)[] message) nothrow @nogc;
+alias ZigbeeMessageHandler = void delegate(ref const APSFrame header, const(void)[] message, SysTime timestamp) nothrow @nogc;
 alias ZDOResponseHandler = void delegate(ZigbeeResult result, ZDOStatus status, const(ubyte)[] message, void* user_data) nothrow @nogc;
 alias ZCLResponseHandler = void delegate(ZigbeeResult result, const ZCLHeader* hdr, const(ubyte)[] message, void* user_data) nothrow @nogc;
 
@@ -320,6 +320,18 @@ class ZigbeeNode : BaseObject
         else version (DebugZigbee)
             writeInfof("Zigbee: zdo response <-{0,04x} [zdo:{1,04x}] after {2}", dst, cluster, ev.timeout.elapsed);
         return data.result;
+    }
+
+    final int send_zcl_message(EUI64 eui, ubyte dst_endpoint, ubyte src_endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, MessagePriority priority = MessagePriority.normal, ZCLResponseHandler response_handler = null, void* user_data = null) nothrow
+    {
+        if (eui.is_zigbee_broadcast)
+            return send_zcl_message(0xFF00 | eui.b[7], dst_endpoint, src_endpoint, profile, cluster, command, flags, payload, priority, response_handler, user_data);
+        else if (eui.is_zigbee_multicast)
+            return send_zcl_message(cast(ushort)((eui.b[6] << 8) | eui.b[7]), dst_endpoint, src_endpoint, profile, cluster, command, flags, payload, priority, response_handler, user_data);
+
+        NodeMap* n = get_module!ZigbeeProtocolModule.find_node(eui);
+        assert(n, "TODO: what to do if we don't know where it's going? should we ask the network if anyone has this EUI?");
+        return send_zcl_message(n.id, dst_endpoint, src_endpoint, profile, cluster, command, flags, payload, priority, response_handler, user_data);
     }
 
     final int send_zcl_message(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, MessagePriority priority = MessagePriority.normal, ZCLResponseHandler response_handler = null, void* user_data = null) nothrow
@@ -1041,6 +1053,9 @@ class ZigbeeEndpoint : BaseObject
     int send_zcl_message(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, MessagePriority priority = MessagePriority.normal, ZCLResponseHandler response_handler = null, void* user_data = null) nothrow
         => _node.send_zcl_message(dst, endpoint, _endpoint, profile, cluster, command, flags, payload, priority, response_handler, user_data);
 
+    int send_zcl_message(EUI64 eui, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, MessagePriority priority = MessagePriority.normal, ZCLResponseHandler response_handler = null, void* user_data = null) nothrow
+        => _node.send_zcl_message(eui, endpoint, _endpoint, profile, cluster, command, flags, payload, priority, response_handler, user_data);
+
     int send_zcl_response(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ref const ZCLHeader req, const(void)[] payload, MessagePriority priority = MessagePriority.normal) nothrow
         => _node.send_zcl_response(dst, endpoint, _endpoint, profile, cluster, command, req, payload, priority);
 
@@ -1082,6 +1097,6 @@ private:
     {
         // TODO: this seems inefficient!
         if (_message_handler)
-            _message_handler(p.hdr!APSFrame, p.data[]);
+            _message_handler(p.hdr!APSFrame, p.data[], p.creation_time);
     }
 }

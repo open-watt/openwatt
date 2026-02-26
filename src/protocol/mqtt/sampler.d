@@ -13,6 +13,7 @@ import manager.device;
 import manager.element;
 import manager.profile;
 import manager.sampler;
+import manager.subscriber;
 
 import protocol.mqtt.broker;
 import protocol.mqtt.client;
@@ -46,8 +47,11 @@ nothrow @nogc:
         SampleElement* e = &elements.pushBack();
         e.element = element;
         e.read_topic = read_topic.move;
-        e.write_topic =write_topic.move;
+        e.write_topic = write_topic.move;
         e.desc = value_desc;
+
+        if (element.access & manager.element.Access.write)
+            element.add_subscriber(this);
     }
 
     final override void remove_element(Element* element)
@@ -60,6 +64,17 @@ nothrow @nogc:
                 elements.removeSwapLast(i);
                 return;
             }
+        }
+    }
+
+    final void on_change(Element* e, ref const Variant val, SysTime timestamp, Subscriber)
+    {
+        // this is called when the element is changed...
+        foreach (se; elements)
+        {
+            if (se.element != e)
+                continue;
+//            broker.publish(null, 0, se.write_topic[], cast(ubyte[])"true", null, cast(MonoTime)timestamp);
         }
     }
 
@@ -80,7 +95,7 @@ nothrow @nogc:
 
             if (value != Variant())
             {
-                e.element.value = value;
+                e.element.value(value, cast(SysTime)timestamp, this);
 
                 version (DebugMQTTSampler)
                     writeDebugf("mqtt: sample - topic: {0} value: {1} = {2} (raw: {3})", topic, e.element.id, e.element.value, cast(const(char)[])payload);

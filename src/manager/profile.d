@@ -27,9 +27,10 @@ alias ModelMask = ushort;
 
 enum Access : ubyte
 {
-    read,
-    write,
-    read_write
+    none = 0,
+    read = 1,
+    write = 2,
+    read_write = 3
 }
 
 enum Frequency : ubyte
@@ -1071,10 +1072,36 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         else
                             zb.manufacturer_code = 0;
 
-                        DataType ty = type.split!('/', false).parse_data_type();
+                        DataType ty = type.split!('/', false).parse_data_type(zb.cluster_id == 0xEF00 ? DataType.big_endian : DataType.little_endian);
                         e.access = type.parse_access();
 
                         parse_value_desc(zb.value_desc, ty, units);
+
+                        if (zb.cluster_id == 0xEF00)
+                        {
+                            // confirm that the tuya data types are valid
+                            ushort len = zb.value_desc.data_length;
+                            if (zb.value_desc.is_bitfield)
+                            {
+                                if (!(len == 1 || len == 2 || len == 4))
+                                    writeWarning("Tuya bitmap datapoint '", id, "' must be 1, 2, 4 bytes");
+                            }
+                            else if (zb.value_desc.is_enum)
+                            {
+                                if (len != 1)
+                                    writeWarning("Tuya enum datapoint '", id, "' must be 1 byte");
+                            }
+                            else if (zb.value_desc.is_bool)
+                            {
+                                if (len != 1)
+                                    writeWarning("Tuya bool datapoint '", id, "' must be 1 byte");
+                            }
+                            else if (zb.value_desc.is_numeric)
+                            {
+                                if (len != 4)
+                                    writeWarning("Tuya value datapoint '", id, "' must be 4 bytes");
+                            }
+                        }
                         break;
 
                     case "http":
