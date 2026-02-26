@@ -4,6 +4,7 @@ import urt.array;
 import urt.conv;
 import urt.crc;
 import urt.endian;
+import urt.log;
 import urt.map;
 import urt.mem;
 import urt.meta.nullable;
@@ -115,6 +116,14 @@ nothrow @nogc:
             return "Error: Invalid modbus protocol 'unknown'";
         _protocol = value;
         _support_simultaneous_requests = value == ModbusProtocol.tcp;
+
+        if (_protocol == ModbusProtocol.tcp && _stream)
+        {
+            import router.stream.serial : SerialStream;
+            if (cast(SerialStream)_stream)
+                writeWarning("Modbus interface '", name[], "': Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
+        }
+
         return null;
     }
 
@@ -153,6 +162,13 @@ nothrow @nogc:
 
         if (_stream)
         {
+            if (_protocol == ModbusProtocol.tcp)
+            {
+                import router.stream.serial : SerialStream;
+                if (cast(SerialStream)_stream)
+                    writeWarning("Modbus interface '", name[], "': Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
+            }
+
             // if we're not the master, we can't write to the bus unless we are responding...
             // and if the stream is TCP, we'll never know if the remote has dropped the connection
             // we'll enable keep-alive in tcp streams to to detect this...
@@ -518,7 +534,6 @@ private:
 
         // TODO: some debug logging of the incoming packet stream?
         version (DebugModbusMessageFlow) {
-            import urt.log;
             writeDebug("Modbus packet received from interface: '", name, "' (", message.length, ")[ ", message[], " ]");
         }
 
@@ -791,7 +806,6 @@ nothrow @nogc:
         remote_servers[universal_address] = map;
         iface.add_address(map.mac, iface);
 
-        import urt.log;
         writeInfof("Create modbus server '{0}' - mac: {1}  uid: {2}  at-interface: {3}({4})", map.name, map.mac, map.universal_address, iface.name, map.local_address);
 
         return universal_address in remote_servers;
@@ -1136,10 +1150,8 @@ bool valid_function_code(FunctionCode function_code)
     else
     {
         enum uint valid_codes = 0b1111100111001100111111110;
-        if (function_code >= 32) // TODO: REMOVE THIS LINE (DMD BUG!)
-            return false;       // TODO: REMOVE THIS LINE (DMD BUG!)
-        if ((1 << function_code) & valid_codes)
-            return true;
-        return function_code == FunctionCode.mei;
+        if (function_code >= 25) // highest bit in valid_codes is 24; codes above are only MEI
+            return function_code == FunctionCode.mei;
+        return ((1u << function_code) & valid_codes) != 0;
     }
 }

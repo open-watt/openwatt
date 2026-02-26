@@ -625,7 +625,8 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                     const(char)[] display_units = tail.split!','.unQuote;
                     const(char)[] freq = tail.split!','.unQuote;
                     const(char)[] desc = tail.split!','.unQuote;
-                    // TODO: if !tail.empty, warn about unexpected data...
+                    if (!tail.empty)
+                        writeWarning("Unexpected data in element desc: ", tail);
 
                     lookup_string_len += cache_len(id.length);
                     desc_string_len += cache_len(desc.length);
@@ -735,7 +736,8 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                                 const(char)[] freq = tail.split!','.unQuote;
                                 const(char)[] name = tail.split!','.unQuote;
                                 const(char)[] desc = tail.split!','.unQuote;
-                                // TODO: if !tail.empty, warn about unexpected data...
+                                if (!tail.empty)
+                                    writeWarning("Unexpected data in element desc: ", tail);
 
                                 name_string_length += cache_len(name.length);
                                 desc_string_len += cache_len(desc.length);

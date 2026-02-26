@@ -210,7 +210,7 @@ private:
             return 0;
         }
 
-        // TODO: if it's a persistent seession; we need a reference to the session to produce a response.
+        // TODO: if it's a persistent session; we need a reference to the session to produce a response.
         //       if it's an ephemeral session, we need to take the stream from the session so we can produce a deferred response...?
         assert(false, "TODO: TEST THIS PATH, I'M NOT SURE THE HTTP REQUEST HANDLER CAN HANDLE HANDLE RELAYED RESPONSE?");
         _pending_requests ~= PendingRequest(request.http_version, stream, session, cmd);
