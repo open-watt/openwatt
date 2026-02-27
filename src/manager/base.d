@@ -78,7 +78,9 @@ struct Property
         Property prop;
         prop.name = StringLit!name;
         prop.category = category ? StringLit!category : String();
-        prop.flags = (flags.contains('h') ? 1 : 0); // hidden
+        prop.flags = flags.contains('*') ? 1 : 0; // always
+        prop.flags |= flags.contains('d') ? 2 : 0; // default
+        prop.flags |= flags.contains('h') ? 4 : 0; // hidden
 
         alias Getters = FilterOverloads!(IsGetter, member);
         alias Setters = FilterOverloads!(IsSetter, member);
@@ -127,13 +129,13 @@ struct Property
 
 class BaseObject
 {
-    __gshared Property[7] Properties = [ Property.create!("name", name)(),
-                                         Property.create!("type", type)(),
+    __gshared Property[7] Properties = [ Property.create!("name", name, null, "*")(),
+                                         Property.create!("type", type, null, "*")(),
                                          Property.create!("disabled", disabled, null, "h")(),
                                          Property.create!("comment", comment, null, "h")(),
                                          Property.create!("running", running, null, "h")(),
-                                         Property.create!("flags", flags)(),
-                                         Property.create!("status", status_message)() ];
+                                         Property.create!("flags", flags, null, "*")(),
+                                         Property.create!("status", status_message, null, "d")() ];
 nothrow @nogc:
 
     // TODO: delete this constructor!!!
