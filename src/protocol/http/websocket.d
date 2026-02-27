@@ -59,6 +59,11 @@ nothrow @nogc:
 
     // API...
 
+    void set_message_handler(WSMessageHandler handler)
+    {
+        _msg_handler = handler;
+    }
+
     ptrdiff_t send_text(const(char)[] text)
     {
         // TODO: confirm valid utf8, fail if not
