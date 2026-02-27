@@ -74,6 +74,7 @@
     <DCompile Include="src\manager\console\function_command.d" />
     <DCompile Include="src\manager\console\package.d" />
     <DCompile Include="src\manager\console\session.d" />
+    <DCompile Include="src\manager\console\table.d" />
     <DCompile Include="src\manager\cron\job.d" />
     <DCompile Include="src\manager\cron\package.d" />
     <DCompile Include="src\manager\device.d" />
