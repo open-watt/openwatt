@@ -462,7 +462,7 @@ nothrow @nogc:
         Result r = create(AddressFamily.ipv4, _ip4_listener);
         if (!r)
         {
-            debug writeError(type, " '", name, "' - failed to create listening socket. Error ", r.systemCode);
+            debug writeError(type, " '", name, "' - failed to create listening socket. Error ", r.system_code);
             return CompletionStatus.error;
         }
 
