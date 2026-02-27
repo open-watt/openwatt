@@ -349,7 +349,6 @@ nothrow @nogc:
         // Ctrl-C
         close_session();
 
-    early_return:
         // store the tail of the input buffer so the outer context can claim it
         _buffer = text[i .. $];
         return -1;
@@ -426,7 +425,20 @@ protected:
     final void receive_input(const(char)[] input)
     {
         if (_current_command)
-            _buffer ~= input;
+        {
+            import urt.string : findFirst;
+            size_t ctrl_c = input.findFirst('\x03');
+            if (ctrl_c < input.length)
+            {
+                _current_command.request_cancel();
+                _buffer.clear();
+                _position = 0;
+                _buffer ~= input[ctrl_c + 1 .. $];
+            }
+            else
+                _buffer ~= input;
+            return;
+        }
 
         MutableString!0 input_backup;
         while (!_current_command && !input.empty)
