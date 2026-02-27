@@ -282,7 +282,7 @@ nothrow:
             writeDebugf("EZSP: --> [{0}] - {1}(x{2, 04x}) - {3,?5}{4,!5}", _sequence_number, cmdName ? cmdName.name : "UNKNOWN", cmd, cmdName ? cmdName.reqFmt(buffer[5..i]) : null, cast(void[])buffer[0..i], cmdName !is null);
         }
 
-        if (!ash_send(buffer[0..i]))
+        if (ash_send(buffer[0..i]) < 0)
         {
             version(DebugMessageFlow)
                 writeDebug("EZSP: send failed!");
@@ -441,7 +441,7 @@ private:
         Map!(ushort, CommandData) commandNames;
     }
 
-    bool ash_send(const(ubyte)[] data)
+    int ash_send(const(ubyte)[] data)
     {
         Packet p;
         p.init!ASHFrame(data);

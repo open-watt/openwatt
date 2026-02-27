@@ -144,12 +144,12 @@ nothrow @nogc:
         }
     }
 
-    protected override bool transmit(ref const Packet packet) nothrow @nogc
+    protected override int transmit(ref const Packet packet, MessageCallback) nothrow @nogc
     {
         if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.tesla_twc)
         {
             ++_status.send_dropped;
-            return false;
+            return -1;
         }
 
         const(ubyte)[] msg = cast(ubyte[])packet.data;
@@ -187,7 +187,7 @@ nothrow @nogc:
         {
             debug writeDebug("Failed to write to stream '", _stream.name, "'");
             ++_status.send_dropped;
-            return false;
+            return -1;
         }
 
         version (DebugTeslaInterface) {
@@ -198,7 +198,7 @@ nothrow @nogc:
         ++_status.send_packets;
         _status.send_bytes += packet.data.length;
         // TODO: but should we record the ACTUAL protocol packet?
-        return true;
+        return 0;
     }
 
 private:

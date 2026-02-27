@@ -98,24 +98,24 @@ class ZigbeeNode : BaseObject
 
     // API...
 
-    final int send_message(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, MessagePriority priority = MessagePriority.normal, bool group = false) nothrow
-        => send_message(dst, dst_endpoint, src_endpoint, profile_id, cluster_id, message, null, priority, group);
+    final int send_message(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, PCP pcp = PCP.be, bool group = false) nothrow
+        => send_message(dst, dst_endpoint, src_endpoint, profile_id, cluster_id, message, null, pcp, group);
 
-    final int send_message(EUI64 eui, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster, const(void)[] message, MessagePriority priority = MessagePriority.normal) nothrow
+    final int send_message(EUI64 eui, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster, const(void)[] message, PCP pcp = PCP.be) nothrow
     {
         if (!running)
             return ZigbeeResult.no_network;
         if (eui.is_zigbee_broadcast)
-            return send_message(0xFF00 | eui.b[7], dst_endpoint, src_endpoint, profile_id, cluster, message, priority);
+            return send_message(0xFF00 | eui.b[7], dst_endpoint, src_endpoint, profile_id, cluster, message, pcp);
         else if (eui.is_zigbee_multicast)
-            return send_message(cast(ushort)((eui.b[6] << 8) | eui.b[7]), dst_endpoint, src_endpoint, profile_id, cluster, message, priority, true);
+            return send_message(cast(ushort)((eui.b[6] << 8) | eui.b[7]), dst_endpoint, src_endpoint, profile_id, cluster, message, pcp, true);
 
         NodeMap* n = get_module!ZigbeeProtocolModule.find_node(eui);
         assert(n, "TODO: what to do if we don't know where it's going? just drop it?");
-        return send_message(n.id, dst_endpoint, src_endpoint, profile_id, cluster, message, priority);
+        return send_message(n.id, dst_endpoint, src_endpoint, profile_id, cluster, message, pcp);
     }
 
-    final int send_message(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, MessageProgressCallback progress_callback, MessagePriority priority = MessagePriority.normal, bool group = false) nothrow
+    final int send_message(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, MessageCallback progress_callback, PCP pcp = PCP.be, bool group = false) nothrow
     {
         if (!running)
             return ZigbeeResult.no_network;
@@ -138,12 +138,12 @@ class ZigbeeNode : BaseObject
         aps.profile_id = profile_id;
         aps.cluster_id = cluster_id;
 
-        // TODO: anything else?
+        p.pcp = pcp;
 
-        return zigbee_iface.forward_async(p, progress_callback, priority);
+        return _interface.forward(p, progress_callback);
     }
 
-    final ZigbeeResult send_message_async(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, MessagePriority priority = MessagePriority.normal, bool group = false)
+    final ZigbeeResult send_message_async(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, PCP pcp = PCP.be, bool group = false)
     {
         debug assert(isInFibre(), "send_message_async() must be called from a fibre context");
 
@@ -153,11 +153,13 @@ class ZigbeeNode : BaseObject
             YieldZB e;
             ZigbeeResult r;
 
-            void progress(ZigbeeResult status, ref const APSFrame frame) pure nothrow @nogc
+            void progress(int, MessageState state) nothrow @nogc
             {
-                r = status;
-                if (status == ZigbeeResult.pending)
-                    return; // this is the intermediate update when the message is received by EZSP
+                if (state <= MessageState.in_flight)
+                    return; // intermediate; keep waiting
+                r = state == MessageState.complete ? ZigbeeResult.success :
+                    state == MessageState.timeout ? ZigbeeResult.timeout :
+                    ZigbeeResult.failed;
                 e.finished = true;
             }
         }
@@ -167,40 +169,40 @@ class ZigbeeNode : BaseObject
         data.e = ev;
         ev.timeout = Timer(4.seconds);
 
-        int tag = send_message(dst, dst_endpoint, src_endpoint, profile_id, cluster_id, message, &data.progress, priority, group);
+        int tag = send_message(dst, dst_endpoint, src_endpoint, profile_id, cluster_id, message, &data.progress, pcp, group);
         if (tag < 0)
             return ZigbeeResult.failed;
 
         scope (failure)
-            zigbee_iface().abort_async(tag);
+            _interface.abort(tag);
 
         yield(ev);
 
         if (!ev.finished)
         {
-            zigbee_iface().abort_async(tag);
+            _interface.abort(tag);
             return ZigbeeResult.timeout;
         }
         return data.r;
     }
 
-    final ZigbeeResult send_message_async(EUI64 eui, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster, const(void)[] message, MessagePriority priority = MessagePriority.normal)
+    final ZigbeeResult send_message_async(EUI64 eui, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster, const(void)[] message, PCP pcp = PCP.be)
     {
         debug assert(isInFibre(), "send_message_async() must be called from a fibre context");
 
         if (!running)
             return ZigbeeResult.no_network;
         if (eui.is_zigbee_broadcast)
-            return send_message_async(0xFF00 | eui.b[7], dst_endpoint, src_endpoint, profile_id, cluster, message, priority);
+            return send_message_async(0xFF00 | eui.b[7], dst_endpoint, src_endpoint, profile_id, cluster, message, pcp);
         else if (eui.is_zigbee_multicast)
-            return send_message_async(cast(ushort)((eui.b[6] << 8) | eui.b[7]), dst_endpoint, src_endpoint, profile_id, cluster, message, priority, true);
+            return send_message_async(cast(ushort)((eui.b[6] << 8) | eui.b[7]), dst_endpoint, src_endpoint, profile_id, cluster, message, pcp, true);
 
         NodeMap* n = get_module!ZigbeeProtocolModule.find_node(eui);
         assert(n, "TODO: what to do if we don't know where it's going? should we ask the network if anyone has this EUI?");
-        return send_message_async(n.id, dst_endpoint, src_endpoint, profile_id, cluster, message, priority);
+        return send_message_async(n.id, dst_endpoint, src_endpoint, profile_id, cluster, message, pcp);
     }
 
-    final int send_zdo_message(ushort dst, ushort cluster, void[] message, MessagePriority priority = MessagePriority.normal, ZDOResponseHandler response_handler = null, void* user_data = null) nothrow
+    final int send_zdo_message(ushort dst, ushort cluster, void[] message, PCP pcp = PCP.be, ZDOResponseHandler response_handler = null, void* user_data = null) nothrow
     {
         ubyte[] msg = cast(ubyte[])message;
 
@@ -208,7 +210,7 @@ class ZigbeeNode : BaseObject
             msg[0] = _seq++;
 
         ZDORequest* req = null;
-        MessageProgressCallback progress = null;
+        MessageCallback progress = null;
         if (response_handler && (cluster & 0x8000) == 0)
         {
             req = _zdo_request_pool.alloc();
@@ -217,7 +219,7 @@ class ZigbeeNode : BaseObject
             progress = &req.progress_callback;
         }
 
-        int tag = send_message(dst, 0, 0, 0, cluster, message, progress, priority);
+        int tag = send_message(dst, 0, 0, 0, cluster, message, progress, pcp);
         if (req)
         {
             if (tag < 0)
@@ -228,19 +230,19 @@ class ZigbeeNode : BaseObject
             else
             {
                 req.tag = tag;
-                req.iface = zigbee_iface();
+                req.iface = _interface;
             }
         }
         return tag;
     }
 
-    final int send_zdo_response(ushort dst, ushort cluster, ubyte tsn, ZDOStatus status, void[] message, MessagePriority priority = MessagePriority.normal) nothrow
+    final int send_zdo_response(ushort dst, ushort cluster, ubyte tsn, ZDOStatus status, void[] message, PCP pcp = PCP.be) nothrow
     {
         ubyte[256] buffer = void;
         buffer[0] = tsn;
         buffer[1] = status;
         buffer[2 .. 2 + message.length] = cast(ubyte[])message[];
-        return send_message(dst, 0, 0, 0, cluster, buffer[0 .. 2 + message.length], priority);
+        return send_message(dst, 0, 0, 0, cluster, buffer[0 .. 2 + message.length], pcp);
     }
 
     final void abort_zdo_request(int tag, ZigbeeResult reason = ZigbeeResult.aborted) nothrow
@@ -254,14 +256,14 @@ class ZigbeeNode : BaseObject
                 req.response_handler(reason, ZDOStatus.success, null, req.user_data);
                 req.response_handler = null;
                 if (req.iface)
-                    req.iface.abort_async(tag);
+                    req.iface.abort(tag);
                 _zdo_request_pool.free(req);
                 return;
             }
         }
     }
 
-    final ZigbeeResult zdo_request(ushort dst, ushort cluster, void[] message, out ZDOResponse response, MessagePriority priority = MessagePriority.normal)
+    final ZigbeeResult zdo_request(ushort dst, ushort cluster, void[] message, out ZDOResponse response, PCP pcp = PCP.be)
     {
         debug assert(isInFibre(), "send_message_async() must be called from a fibre context");
 
@@ -296,7 +298,7 @@ class ZigbeeNode : BaseObject
         // TODO: we should adjust this process to start counting after we know the message was delivered
         ev.timeout = Timer(10.seconds);
 
-        int tag = send_zdo_message(dst, cluster, message, priority, &data.response, null);
+        int tag = send_zdo_message(dst, cluster, message, pcp, &data.response, null);
         if (tag < 0)
             return ZigbeeResult.failed;
 
@@ -322,19 +324,19 @@ class ZigbeeNode : BaseObject
         return data.result;
     }
 
-    final int send_zcl_message(EUI64 eui, ubyte dst_endpoint, ubyte src_endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, MessagePriority priority = MessagePriority.normal, ZCLResponseHandler response_handler = null, void* user_data = null) nothrow
+    final int send_zcl_message(EUI64 eui, ubyte dst_endpoint, ubyte src_endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, PCP pcp = PCP.be, ZCLResponseHandler response_handler = null, void* user_data = null) nothrow
     {
         if (eui.is_zigbee_broadcast)
-            return send_zcl_message(0xFF00 | eui.b[7], dst_endpoint, src_endpoint, profile, cluster, command, flags, payload, priority, response_handler, user_data);
+            return send_zcl_message(0xFF00 | eui.b[7], dst_endpoint, src_endpoint, profile, cluster, command, flags, payload, pcp, response_handler, user_data);
         else if (eui.is_zigbee_multicast)
-            return send_zcl_message(cast(ushort)((eui.b[6] << 8) | eui.b[7]), dst_endpoint, src_endpoint, profile, cluster, command, flags, payload, priority, response_handler, user_data);
+            return send_zcl_message(cast(ushort)((eui.b[6] << 8) | eui.b[7]), dst_endpoint, src_endpoint, profile, cluster, command, flags, payload, pcp, response_handler, user_data);
 
         NodeMap* n = get_module!ZigbeeProtocolModule.find_node(eui);
         assert(n, "TODO: what to do if we don't know where it's going? should we ask the network if anyone has this EUI?");
-        return send_zcl_message(n.id, dst_endpoint, src_endpoint, profile, cluster, command, flags, payload, priority, response_handler, user_data);
+        return send_zcl_message(n.id, dst_endpoint, src_endpoint, profile, cluster, command, flags, payload, pcp, response_handler, user_data);
     }
 
-    final int send_zcl_message(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, MessagePriority priority = MessagePriority.normal, ZCLResponseHandler response_handler = null, void* user_data = null) nothrow
+    final int send_zcl_message(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, PCP pcp = PCP.be, ZCLResponseHandler response_handler = null, void* user_data = null) nothrow
     {
         ZCLHeader hdr;
         hdr.control = flags;
@@ -350,7 +352,7 @@ class ZigbeeNode : BaseObject
         hdr.seq = _seq++;
 
         ZCLRequest* req = null;
-        MessageProgressCallback progress = null;
+        MessageCallback progress = null;
         if (response_handler && (hdr.control & ZCLControlFlags.response) == 0)
         {
             req = _zcl_request_pool.alloc();
@@ -367,7 +369,7 @@ class ZigbeeNode : BaseObject
         assert(offset + payload.length <= buffer.length, "ZCL message too large!");
         buffer[offset .. offset + payload.length] = payload[];
 
-        int tag = send_message(dst, dst_endpoint, src_endpoint, profile, cluster, buffer[0 .. offset + payload.length], progress, priority);
+        int tag = send_message(dst, dst_endpoint, src_endpoint, profile, cluster, buffer[0 .. offset + payload.length], progress, pcp);
         if (req)
         {
             if (tag < 0)
@@ -378,13 +380,13 @@ class ZigbeeNode : BaseObject
             else
             {
                 req.tag = tag;
-                req.iface = zigbee_iface();
+                req.iface = _interface;
             }
         }
         return tag;
     }
 
-    final int send_zcl_response(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile, ushort cluster, ZCLCommand command, ref const ZCLHeader req, const(void)[] payload, MessagePriority priority = MessagePriority.normal) nothrow
+    final int send_zcl_response(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile, ushort cluster, ZCLCommand command, ref const ZCLHeader req, const(void)[] payload, PCP pcp = PCP.be) nothrow
     {
         ZCLHeader hdr;
         hdr.control = (req.control & ZCLControlFlags.response) | ZCLControlFlags.disable_default_response;
@@ -408,7 +410,7 @@ class ZigbeeNode : BaseObject
         assert(offset + payload.length <= buffer.length, "ZCL message too large!");
         buffer[offset .. offset + payload.length] = payload[];
 
-        return send_message(dst, dst_endpoint, src_endpoint, profile, cluster, buffer[0 .. offset + payload.length], priority);
+        return send_message(dst, dst_endpoint, src_endpoint, profile, cluster, buffer[0 .. offset + payload.length], pcp);
     }
 
     final void abort_zcl_request(int tag, ZigbeeResult reason = ZigbeeResult.aborted) nothrow
@@ -422,14 +424,14 @@ class ZigbeeNode : BaseObject
                 req.response_handler(reason, null, null, req.user_data);
                 req.response_handler = null;
                 if (req.iface)
-                    req.iface.abort_async(tag);
+                    req.iface.abort(tag);
                 _zcl_request_pool.free(req);
                 return;
             }
         }
     }
 
-    final ZigbeeResult zcl_request(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, out ZCLResponse response, MessagePriority priority = MessagePriority.normal)
+    final ZigbeeResult zcl_request(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, out ZCLResponse response, PCP pcp = PCP.be)
     {
         debug assert(isInFibre(), "send_message_async() must be called from a fibre context");
 
@@ -465,7 +467,7 @@ class ZigbeeNode : BaseObject
         // TODO: we should adjust this process to start counting after we know the message was delivered
         ev.timeout = Timer(10.seconds);
 
-        int tag = send_zcl_message(dst, dst_endpoint, src_endpoint, profile, cluster, command, flags, payload, priority, &data.response, null);
+        int tag = send_zcl_message(dst, dst_endpoint, src_endpoint, profile, cluster, command, flags, payload, pcp, &data.response, null);
         if (tag < 0)
             return ZigbeeResult.failed;
 
@@ -812,19 +814,24 @@ private:
         MonoTime request_time;
         ZDOResponseHandler response_handler;
         void* user_data;
-        ZigbeeInterface iface;
+        BaseInterface iface;
 
     private:
-        void progress_callback(ZigbeeResult status, ref const APSFrame frame) nothrow @nogc
+        void progress_callback(int, MessageState state) nothrow @nogc
         {
-            if (status != ZigbeeResult.pending)
-                iface = null;
-            if (status != ZigbeeResult.success)
+            if (state <= MessageState.in_flight)
+                return;
+            iface = null;
+            if (state != MessageState.complete)
             {
                 if (response_handler)
-                    response_handler(status, ZDOStatus.success, null, user_data);
-                if (status != ZigbeeResult.pending)
-                    tag = -1;
+                {
+                    ZigbeeResult r = state == MessageState.timeout ? ZigbeeResult.timeout :
+                                     state == MessageState.aborted ? ZigbeeResult.aborted :
+                                     ZigbeeResult.failed;
+                    response_handler(r, ZDOStatus.success, null, user_data);
+                }
+                tag = -1;
             }
         }
     }
@@ -838,19 +845,24 @@ private:
         MonoTime request_time;
         ZCLResponseHandler response_handler;
         void* user_data;
-        ZigbeeInterface iface;
+        BaseInterface iface;
 
     private:
-        void progress_callback(ZigbeeResult status, ref const APSFrame frame) nothrow @nogc
+        void progress_callback(int, MessageState state) nothrow @nogc
         {
-            if (status != ZigbeeResult.pending)
-                iface = null;
-            if (status != ZigbeeResult.success)
+            if (state <= MessageState.in_flight)
+                return;
+            iface = null;
+            if (state != MessageState.complete)
             {
                 if (response_handler)
-                    response_handler(status, null, null, user_data);
-                if (status != ZigbeeResult.pending)
-                    tag = -1;
+                {
+                    ZigbeeResult r = state == MessageState.timeout ? ZigbeeResult.timeout :
+                                     state == MessageState.aborted ? ZigbeeResult.aborted :
+                                     ZigbeeResult.failed;
+                    response_handler(r, null, null, user_data);
+                }
+                tag = -1;
             }
         }
     }
@@ -1026,44 +1038,44 @@ class ZigbeeEndpoint : BaseObject
         _message_handler = handler;
     }
 
-    int send_message(ushort dst, ubyte endpoint, ushort profile, ushort cluster, const(void)[] message, MessagePriority priority = MessagePriority.normal, bool group = false) nothrow
-        => _node.send_message(dst, endpoint, _endpoint, profile, cluster, message, priority, group);
+    int send_message(ushort dst, ubyte endpoint, ushort profile, ushort cluster, const(void)[] message, PCP pcp = PCP.be, bool group = false) nothrow
+        => _node.send_message(dst, endpoint, _endpoint, profile, cluster, message, pcp, group);
 
-    int send_message(EUI64 eui, ubyte endpoint, ushort profile, ushort cluster, const(void)[] message, MessagePriority priority = MessagePriority.normal) nothrow
-        => _node.send_message(eui, endpoint, _endpoint, profile, cluster, message, priority);
+    int send_message(EUI64 eui, ubyte endpoint, ushort profile, ushort cluster, const(void)[] message, PCP pcp = PCP.be) nothrow
+        => _node.send_message(eui, endpoint, _endpoint, profile, cluster, message, pcp);
 
-    ZigbeeResult send_message_async(ushort dst, ubyte endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, MessagePriority priority = MessagePriority.normal, bool group = false)
-        => _node.send_message_async(dst, endpoint, _endpoint, profile_id, cluster_id, message, priority, group);
+    ZigbeeResult send_message_async(ushort dst, ubyte endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, PCP pcp = PCP.be, bool group = false)
+        => _node.send_message_async(dst, endpoint, _endpoint, profile_id, cluster_id, message, pcp, group);
 
-    ZigbeeResult send_message_async(EUI64 eui, ubyte endpoint, ushort profile_id, ushort cluster, const(void)[] message, MessagePriority priority = MessagePriority.normal)
-        => _node.send_message_async(eui, endpoint, _endpoint, profile_id, cluster, message, priority);
+    ZigbeeResult send_message_async(EUI64 eui, ubyte endpoint, ushort profile_id, ushort cluster, const(void)[] message, PCP pcp = PCP.be)
+        => _node.send_message_async(eui, endpoint, _endpoint, profile_id, cluster, message, pcp);
 
-    int send_zdo_message(ushort dst, ushort cluster, void[] message, MessagePriority priority = MessagePriority.normal, ZDOResponseHandler response_handler = null, void* user_data = null) nothrow
-        => _node.send_zdo_message(dst, cluster, message, priority, response_handler, user_data);
+    int send_zdo_message(ushort dst, ushort cluster, void[] message, PCP pcp = PCP.be, ZDOResponseHandler response_handler = null, void* user_data = null) nothrow
+        => _node.send_zdo_message(dst, cluster, message, pcp, response_handler, user_data);
 
-    int send_zdo_response(ushort dst, ushort cluster, ubyte tsn, ZDOStatus status, void[] message, MessagePriority priority = MessagePriority.normal) nothrow
-        => _node.send_zdo_response(dst, cluster, tsn, status, message, priority);
+    int send_zdo_response(ushort dst, ushort cluster, ubyte tsn, ZDOStatus status, void[] message, PCP pcp = PCP.be) nothrow
+        => _node.send_zdo_response(dst, cluster, tsn, status, message, pcp);
 
     void abort_zdo_request(int tag) nothrow
         => _node.abort_zdo_request(tag);
 
-    ZigbeeResult zdo_request(ushort dst, ushort cluster, void[] message, out ZDOResponse response, MessagePriority priority = MessagePriority.normal)
-        => _node.zdo_request(dst, cluster, message, response, priority);
+    ZigbeeResult zdo_request(ushort dst, ushort cluster, void[] message, out ZDOResponse response, PCP pcp = PCP.be)
+        => _node.zdo_request(dst, cluster, message, response, pcp);
 
-    int send_zcl_message(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, MessagePriority priority = MessagePriority.normal, ZCLResponseHandler response_handler = null, void* user_data = null) nothrow
-        => _node.send_zcl_message(dst, endpoint, _endpoint, profile, cluster, command, flags, payload, priority, response_handler, user_data);
+    int send_zcl_message(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, PCP pcp = PCP.be, ZCLResponseHandler response_handler = null, void* user_data = null) nothrow
+        => _node.send_zcl_message(dst, endpoint, _endpoint, profile, cluster, command, flags, payload, pcp, response_handler, user_data);
 
-    int send_zcl_message(EUI64 eui, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, MessagePriority priority = MessagePriority.normal, ZCLResponseHandler response_handler = null, void* user_data = null) nothrow
-        => _node.send_zcl_message(eui, endpoint, _endpoint, profile, cluster, command, flags, payload, priority, response_handler, user_data);
+    int send_zcl_message(EUI64 eui, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, PCP pcp = PCP.be, ZCLResponseHandler response_handler = null, void* user_data = null) nothrow
+        => _node.send_zcl_message(eui, endpoint, _endpoint, profile, cluster, command, flags, payload, pcp, response_handler, user_data);
 
-    int send_zcl_response(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ref const ZCLHeader req, const(void)[] payload, MessagePriority priority = MessagePriority.normal) nothrow
-        => _node.send_zcl_response(dst, endpoint, _endpoint, profile, cluster, command, req, payload, priority);
+    int send_zcl_response(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ref const ZCLHeader req, const(void)[] payload, PCP pcp = PCP.be) nothrow
+        => _node.send_zcl_response(dst, endpoint, _endpoint, profile, cluster, command, req, payload, pcp);
 
     void abort_zcl_request(int tag) nothrow
         => _node.abort_zcl_request(tag);
 
-    ZigbeeResult zcl_request(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, out ZCLResponse response, MessagePriority priority = MessagePriority.normal)
-        => _node.zcl_request(dst, endpoint, _endpoint, profile, cluster, command, flags, payload, response, priority);
+    ZigbeeResult zcl_request(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, out ZCLResponse response, PCP pcp = PCP.be)
+        => _node.zcl_request(dst, endpoint, _endpoint, profile, cluster, command, flags, payload, response, pcp);
 
 protected:
 
