@@ -235,6 +235,7 @@ nothrow @nogc:
                             frame.callback(frame.tag, MessageState.expired);
                         free_frame(frame);
                         bucket.remove(i);
+                        --_queued_count;
                     }
                     else
                         ++i;
