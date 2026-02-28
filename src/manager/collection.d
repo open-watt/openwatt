@@ -31,6 +31,7 @@ enum CollectionType : ubyte
     interface_, // all interfaces
     ip_address,
     ip_route,
+    mb_client,
     mqtt_broker,
     pcap_server,
     ppp_server,

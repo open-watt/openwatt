@@ -97,7 +97,7 @@ nothrow @nogc:
         {
             import router.stream.serial : SerialStream;
             if (cast(SerialStream)_stream)
-                writeWarning("Modbus interface '", name[], "': Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
+                log.warning("Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
         }
 
         return null;
@@ -126,6 +126,21 @@ nothrow @nogc:
         }
     }
 
+    uint baud() const pure
+        => _user_baud;
+    void baud(uint value)
+    {
+        _user_baud = value;
+        restart();
+    }
+
+    bool estimate_baud() const pure
+        => _estimate_baud;
+    void estimate_baud(bool value)
+    {
+        _estimate_baud = value;
+    }
+
     inout(Stream) stream() inout pure
         => _stream;
     const(char)[] stream(Stream value)
@@ -142,7 +157,7 @@ nothrow @nogc:
             {
                 import router.stream.serial : SerialStream;
                 if (cast(SerialStream)_stream)
-                    writeWarning("Modbus interface '", name[], "': Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
+                    log.warning("Modbus-TCP has no CRC; using TCP framing over a serial line may cause silent data corruption");
             }
 
             // if we're not the master, we can't write to the bus unless we are responding...
@@ -187,6 +202,25 @@ nothrow @nogc:
         {
             _local_to_uni.insert(ubyte(0), ubyte(0));
             _uni_to_local.insert(ubyte(0), ubyte(0));
+
+            // compute timing parameters from baud rate
+            if (!_support_simultaneous_requests)
+            {
+                import router.stream.serial : SerialStream;
+                if (auto serial = cast(SerialStream)_stream)
+                {
+                    compute_timing(serial.baud_rate);
+                    _baud_estimated = true;
+                }
+                else
+                {
+                    uint baud = _user_baud != 0 ? _user_baud : _estimated_baud != 0 ? _estimated_baud : 9_600;
+                    compute_timing(baud);
+                    _gap_time_us = 0;
+                    _baud_estimated = _user_baud != 0 || _estimated_baud != 0;
+                }
+            }
+
             _queue.init(_support_simultaneous_requests ? 8 : 1, 0, PCP.be, &_status);
             _queue.set_queue_timeout(_queue_timeout.msecs);
             _queue.set_transport_timeout(_request_timeout.msecs);
@@ -200,6 +234,7 @@ nothrow @nogc:
         _sequence_number = 0;
         _expect_message_type = ModbusFrameType.unknown;
         _last_receive_event = SysTime();
+        _baud_estimated = false;
 
         foreach (kvp; _pending[])
         {
@@ -225,6 +260,11 @@ nothrow @nogc:
         SysTime now = getSysTime();
 
         _queue.timeout_stale(getTime());
+
+        // estimate remote baud rate for TCP bridges after collecting stats
+        if (_estimate_baud && !_baud_estimated && !_support_simultaneous_requests && _status.send_packets >= 20)
+            estimate_remote_baud();
+
         send_queued_messages();
 
         // check for data
@@ -310,6 +350,7 @@ nothrow @nogc:
         // can only handle modbus packets
         if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.modbus || packet.data.length < 5)
         {
+            log.debug_("tx-drop: not a modbus packet");
             ++_status.send_dropped;
             return -1;
         }
@@ -330,6 +371,7 @@ nothrow @nogc:
                 ServerMap* map = mod_mb.find_server_by_mac(packet.eth.dst);
                 if (!map || map.iface !is this)
                 {
+                    log.debug_("tx-drop: unknown server MAC");
                     ++_status.send_dropped;
                     return -1;
                 }
@@ -340,6 +382,7 @@ nothrow @nogc:
             int tag = _queue.enqueue(p, &on_frame_complete);
             if (tag < 0)
             {
+                log.debug_("tx-drop: queue full");
                 ++_status.send_dropped;
                 return -1;
             }
@@ -355,6 +398,7 @@ nothrow @nogc:
 
             if (packet.eth.dst != _master_mac)
             {
+                log.debug_("tx-drop: response dst != master MAC");
                 ++_status.send_dropped;
                 return -1;
             }
@@ -363,6 +407,7 @@ nothrow @nogc:
             ServerMap* map = mod_mb.find_server_by_universal_address(packetAddress);
             if (!map)
             {
+                log.debug_("tx-drop: unknown universal address ", packetAddress);
                 ++_status.send_dropped;
                 return -1;
             }
@@ -438,9 +483,13 @@ private:
     ModbusProtocol _protocol;
     bool _is_bus_master;
     bool _support_simultaneous_requests = false;
-    ushort _request_timeout = 500; // default 500ms? longer?
-    ushort _queue_timeout = 500;   // same as request timeout?
-    ushort _gap_time = 35;         // what's a reasonable RTU gap time?
+    uint _request_timeout = 800;   // ms — computed from baud rate in startup()
+    uint _queue_timeout = 2500;    // ms — computed from baud rate in startup()
+    uint _gap_time_us = 4000;      // microseconds — computed from baud rate in startup()
+    uint _user_baud;               // explicit remote baud rate (0 = not set)
+    uint _estimated_baud;          // estimated remote baud rate for TCP bridges
+    bool _estimate_baud;           // enable auto-estimation of remote baud rate
+    bool _baud_estimated;
     SysTime _last_receive_event;
 
     // bus master: message queue and pending metadata
@@ -491,8 +540,9 @@ private:
         }
 
         ptrdiff_t written = stream.write(buffer[0 .. length]);
-        if (written <= 0)
+        if (written != length)
         {
+            log.debug_("tx-drop: write failed (wrote ", written, " of ", length, ")");
             ++_status.send_dropped;
             return -1;
         }
@@ -504,7 +554,7 @@ private:
 
     void send_queued_messages()
     {
-        if (!_support_simultaneous_requests && getSysTime() - _last_receive_event < _gap_time.msecs)
+        if (!_support_simultaneous_requests && getSysTime() - _last_receive_event < _gap_time_us.usecs)
             return;
 
         for (QueuedFrame* frame = _queue.dequeue(); frame !is null; frame = _queue.dequeue())
@@ -513,6 +563,7 @@ private:
             auto pm = tag in _pending;
             if (!pm)
             {
+                log.debug_("dispatch: no pending entry for tag ", tag);
                 _queue.complete(tag, MessageState.failed);
                 continue;
             }
@@ -521,6 +572,7 @@ private:
 
             if (frame_and_send(pm.local_server_address, pdu) < 0)
             {
+                log.debug_("dispatch: frame_and_send failed for addr ", pm.local_server_address);
                 _queue.complete(tag, MessageState.failed);
                 continue;
             }
@@ -532,6 +584,9 @@ private:
 
     void on_frame_complete(int tag, MessageState state)
     {
+        if (state != MessageState.complete && state != MessageState.in_flight)
+            log.debug_("queue event: tag=", tag, " state=", cast(int)state);
+
         ubyte t = cast(ubyte)tag;
         if (auto pm = t in _pending)
         {
@@ -541,14 +596,124 @@ private:
         }
     }
 
+    bool validate_response_length(ubyte tag, const(void)[] response_message) const
+    {
+        auto frame = _queue.find_in_flight(tag);
+        if (!frame)
+            return true; // can't validate without the request
+
+        const(ubyte)[] request_pdu = cast(const(ubyte)[])frame.packet.data[4 .. $];
+        const(ubyte)[] response_pdu = cast(const(ubyte)[])response_message;
+
+        if (request_pdu.length < 5 || response_pdu.length < 2)
+            return true; // too short to validate
+
+        ubyte req_fc = request_pdu[0];
+        ubyte rsp_fc = response_pdu[0];
+
+        // error responses (function code | 0x80) are always valid
+        if (rsp_fc & 0x80)
+            return true;
+
+        // function code must match
+        if (rsp_fc != req_fc)
+            return false;
+
+        // for read register/coil responses, validate byte count
+        ushort count = request_pdu[3 .. 5].bigEndianToNative!ushort;
+        ubyte response_bytes = response_pdu[1];
+
+        switch (req_fc)
+        {
+            case FunctionCode.read_holding_registers:
+            case FunctionCode.read_input_registers:
+                return response_bytes == count * 2;
+
+            case FunctionCode.read_coils:
+            case FunctionCode.read_discrete_inputs:
+                return response_bytes == (count + 7) / 8;
+
+            default:
+                return true; // can't validate other function codes
+        }
+    }
+
+    // Compute inter-frame gap, transport timeout, and queue timeout from baud rate.
+    // Modbus RTU spec section 2.5.1.1:
+    //   baud <= 19200: t3.5 = 3.5 character times (11 bits/char)
+    //   baud > 19200: t3.5 = 1.75ms fixed
+    void compute_timing(uint baud)
+    {
+        if (baud == 0)
+            return;
+
+        // inter-frame gap in microseconds: 3.5 x 11 x 1_000_000 / baud
+        _gap_time_us = baud <= 19_200 ? 38_500_000 / baud : 1_750;
+
+        // transport timeout: 2x max frame time + 200ms processing margin
+        // max RTU frame = 256 bytes x 11 bits/char
+        uint max_frame_us = 256 * 11 * (1_000_000 / baud);
+        _request_timeout = max_frame_us * 2 / 1000 + 200;
+
+        // queue timeout: full queue drain time + 1s safety margin
+        uint single_tx_us = max_frame_us + _gap_time_us;
+        _queue_timeout = 32 * (single_tx_us / 1000) + 1000;
+    }
+
+    void estimate_remote_baud()
+    {
+        if (_status.send_packets < 20 || _status.avg_service_us == 0)
+            return;
+
+        uint avg_bytes = cast(uint)((_status.send_bytes + _status.recv_bytes) / _status.send_packets);
+        if (avg_bytes == 0)
+            return;
+
+        // subtract estimated device processing overhead (5ms)
+        uint serial_time_us = _status.avg_service_us > 5000 ? _status.avg_service_us - 5000 : _status.avg_service_us;
+        if (serial_time_us == 0)
+            return;
+
+        uint estimated = avg_bytes * 11 * (1_000_000 / serial_time_us);
+
+        // snap to nearest standard baud rate
+        static immutable uint[8] standard_bauds = [1_200, 2_400, 4_800, 9_600, 19_200, 38_400, 57_600, 115_200];
+        uint closest = standard_bauds[0];
+        uint min_diff = uint.max;
+        foreach (baud; standard_bauds)
+        {
+            uint diff = estimated > baud ? estimated - baud : baud - estimated;
+            if (diff < min_diff)
+            {
+                min_diff = diff;
+                closest = baud;
+            }
+        }
+
+        _estimated_baud = closest;
+        _baud_estimated = true;
+
+        // recompute timeouts from estimated baud (but keep gap=0 for TCP)
+        compute_timing(closest);
+        _gap_time_us = 0;
+
+        // TCP bridges add network latency on top of serial time;
+        // increase transport timeout to avoid premature eviction
+        _request_timeout = _request_timeout * 3 / 2;
+
+        _queue.set_queue_timeout(_queue_timeout.msecs);
+        _queue.set_transport_timeout(_request_timeout.msecs);
+
+        log.info("estimated remote baud rate: ", closest);
+    }
+
     final void incoming_packet(const(void)[] message, SysTime recvTime, ref ModbusFrameInfo frame_info)
     {
         debug assert(running, "Shouldn't receive packets while not running...?");
 
         // TODO: some debug logging of the incoming packet stream?
-        version (DebugModbusMessageFlow) {
-            writeDebug("Modbus packet received from interface: '", name, "' (", message.length, ")[ ", message[], " ]");
-        }
+        version (DebugModbusMessageFlow)
+            log.debug_("packet received: (", message.length, ")[ ", message[], " ]");
 
         // if we are the bus master, then we can only receive responses...
         ModbusFrameType type = _is_bus_master ? ModbusFrameType.response : frame_info.frame_type;
@@ -594,6 +759,7 @@ private:
                     // if we are the bus-master, it should have been impossible to receive a packet from an unknown guy
                     // it's possibly a false packet from a corrupt bitstream, or there's another master on the bus!
                     // we'll drop this packet to be safe...
+                    log.debug_("rx-drop: unknown local address ", frame_info.address, " on bus ", name[]);
                     ++_status.recv_dropped;
                     return;
                 }
@@ -622,36 +788,44 @@ private:
             {
                 // find the single in-flight entry (RTU: max_in_flight=1)
                 ubyte matched_tag = 0;
-                bool found = false;
+                PendingModbus* pm = null;
                 foreach (kvp; _pending[])
                 {
                     if (!_queue.is_queued(kvp.key))
                     {
                         matched_tag = kvp.key;
-                        found = true;
+                        pm = &kvp.value();
                         break;
                     }
                 }
 
-                if (!found)
+                if (pm is null)
                 {
+                    log.debug_("rx-drop: response but no in-flight request");
                     ++_status.recv_dropped;
                     return;
                 }
 
-                auto pm = matched_tag in _pending;
-                if (pm.local_server_address == frame_info.address)
+                if (pm.local_server_address != frame_info.address)
+                {
+                    log.debug_("rx-drop: address mismatch (got ", frame_info.address, " expected ", pm.local_server_address, ")");
+                    ++_status.recv_dropped;
+                    _queue.complete(matched_tag, MessageState.failed);
+                }
+                else if (!validate_response_length(matched_tag, message))
+                {
+                    // response length doesn't match request — likely a late response
+                    // to a previously timed-out request; drop it and keep waiting
+                    log.debug_("rx-drop: response length mismatch (late response after timeout?)");
+                    ++_status.recv_dropped;
+                }
+                else
                 {
                     p.eth.src = frame_mac;
                     p.eth.dst = pm.request_from;
                     buffer[0..2] = nativeToBigEndian(pm.sequence_number);
                     dispatch(p);
                     _queue.complete(matched_tag, MessageState.complete);
-                }
-                else
-                {
-                    ++_status.recv_dropped;
-                    _queue.complete(matched_tag, MessageState.failed);
                 }
 
                 send_queued_messages();
@@ -663,21 +837,20 @@ private:
 
                 ushort seq = frame_info.sequence_number;
                 ubyte matched_tag = 0;
-                bool found = false;
+                PendingModbus* pm = null;
 
                 foreach (kvp; _pending[])
                 {
                     if (kvp.value.local_server_address == frame_info.address && kvp.value.sequence_number == seq)
                     {
                         matched_tag = kvp.key;
-                        found = true;
+                        pm = &kvp.value();
                         break;
                     }
                 }
 
-                if (found)
+                if (pm !is null)
                 {
-                    auto pm = matched_tag in _pending;
                     p.eth.src = frame_mac;
                     p.eth.dst = pm.request_from;
                     buffer[0..2] = nativeToBigEndian(seq);
@@ -685,7 +858,10 @@ private:
                     _queue.complete(matched_tag, MessageState.complete);
                 }
                 else
+                {
+                    log.debug_("rx-drop: no pending match for addr=", frame_info.address, " seq=", seq);
                     ++_status.recv_dropped;
+                }
 
                 send_queued_messages();
             }
@@ -703,6 +879,7 @@ private:
                 {
                     // we can't dispatch this message if we don't know if its a request or a response...
                     // we'll need to discard messages until we get one that we know, and then we can predict future messages from there
+                    log.debug_("rx-drop: unknown modbus frame type, can't dispatch");
                     ++_status.recv_dropped;
                     return;
                 }
