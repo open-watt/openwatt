@@ -44,7 +44,7 @@ class ModbusProtocolModule : Module
 nothrow @nogc:
 
     Collection!ModbusInterface modbus_interfaces;
-    Map!(const(char)[], ModbusClient) clients;
+    Collection!ModbusClient clients;
     Map!(ubyte, ServerMap) remote_servers;
 
     override void init()
@@ -52,11 +52,11 @@ nothrow @nogc:
         g_app.register_enum!ModbusProtocol();
 
         g_app.console.register_collection("/interface/modbus", modbus_interfaces);
+        g_app.console.register_collection("/protocol/modbus/client", clients);
 
         // TODO: should we relocate this command?
         g_app.console.register_command!remote_server_add("/interface/modbus/remote-server", this, "add");
 
-        g_app.console.register_command!client_add("/protocol/modbus/client", this, "add");
         g_app.console.register_command!device_add("/protocol/modbus/device", this, "add");
         g_app.console.register_command!request_raw("/protocol/modbus/client/request", this, "raw");
         g_app.console.register_command!request_read("/protocol/modbus/client/request", this, "read");
@@ -67,8 +67,7 @@ nothrow @nogc:
     override void update()
     {
         modbus_interfaces.update_all();
-        foreach(client; clients.values)
-            client.update();
+        clients.update_all();
     }
 
         final ServerMap* find_server_by_name(const(char)[] name)
@@ -189,15 +188,6 @@ nothrow @nogc:
         }
 
         add_remote_server(name, modbusInterface, address, profile, model ? model.value : null, universal_address ? universal_address.value : 0);
-    }
-
-    void client_add(Session session, const(char)[] name, BaseInterface _interface, Nullable!bool snoop)
-    {
-        // TODO: generate name if not supplied
-        String n = name.makeString(g_app.allocator);
-
-        ModbusClient client = g_app.allocator.allocT!ModbusClient(this, n.move, _interface, snoop ? snoop.value : false);
-        clients[client.name[]] = client;
     }
 
     void device_add(Session session, const(char)[] id, const(char)[] _client, const(char)[] slave, Nullable!(const(char)[]) name, Nullable!(const(char)[]) _profile)
@@ -341,8 +331,8 @@ nothrow @nogc:
 
     ModbusClient lookupClientAndSlave(Session session, const(char)[] client, const(char)[] slave, out ServerMap* map)
     {
-        auto c = client in clients;
-        if(c is null)
+        ModbusClient c = clients.get(client);
+        if (c is null)
         {
             session.write_line("Client '", client, "' doesn't exist");
             return null;
@@ -357,7 +347,7 @@ nothrow @nogc:
                 map = get_module!ModbusProtocolModule.find_server_by_mac(addr);
         }
 
-        return *c;
+        return c;
     }
 
     ModbusClient lookupClientAndMAC(Session session, const(char)[] client, const(char)[] slave, out MACAddress addr)
