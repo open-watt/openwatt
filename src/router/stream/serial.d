@@ -17,7 +17,7 @@ public import router.stream;
 
 version (Windows)
 {
-    import core.sys.windows.windows;
+    import urt.internal.sys.windows;
 }
 else version(Posix)
 {
@@ -175,7 +175,7 @@ nothrow @nogc:
             if (_h_com == INVALID_HANDLE_VALUE)
                 return CompletionStatus.error;
 
-            DCB dcb;
+            DCB dcb = void;
             ZeroMemory(&dcb, DCB.sizeof);
             dcb.DCBlength = DCB.sizeof;
             if (!GetCommState(_h_com, &dcb))

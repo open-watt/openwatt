@@ -38,7 +38,7 @@ int main(string[] args)
         // check if stdout is redirected
         version (Windows)
         {
-            import core.sys.windows.windows : GetStdHandle, GetConsoleMode, STD_OUTPUT_HANDLE, DWORD;
+            import urt.internal.sys.windows : GetStdHandle, GetConsoleMode, STD_OUTPUT_HANDLE, DWORD;
             auto h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
 
             DWORD mode;
@@ -141,7 +141,7 @@ void default_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
 
 void stderr_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
 {
-    import core.stdc.stdio : fprintf, stderr;
+    import urt.internal.stdc : fprintf, stderr;
     auto line = format_log_line(msg);
     fprintf(stderr, "%.*s\n", cast(int)line.length, line.ptr);
 }

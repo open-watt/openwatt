@@ -18,12 +18,12 @@ import router.stream.tcp;
 
 version (Windows)
 {
-    import core.sys.windows.ntsecpkg;
-    import core.sys.windows.schannel;
-    import core.sys.windows.security;
-    import core.sys.windows.sspi;
-    import core.sys.windows.wincrypt;
-    import core.sys.windows.windows;
+    import urt.internal.sys.windows;
+    import urt.internal.sys.windows.ntsecpkg;
+    import urt.internal.sys.windows.schannel;
+    import urt.internal.sys.windows.security;
+    import urt.internal.sys.windows.sspi;
+    import urt.internal.sys.windows.wincrypt;
 
     pragma(lib, "Secur32");
 }
@@ -396,7 +396,8 @@ private:
 
         void init_context(bool is_server, const(CERT_CONTEXT)* pCertContext)
         {
-            SCHANNEL_CRED creds;
+            SCHANNEL_CRED creds = void;
+            ZeroMemory(&creds, SCHANNEL_CRED.sizeof);
             creds.dwVersion = SCHANNEL_CRED_VERSION;
             creds.grbitEnabledProtocols = 0;
             if (is_server)

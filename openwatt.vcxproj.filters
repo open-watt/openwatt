@@ -118,6 +118,9 @@
     <Filter Include="third_party">
       <UniqueIdentifier>{bfd0dc75-e884-4b56-bee1-3f94570b47b0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="third_party\std">
+      <UniqueIdentifier>{3e8cc76a-0495-4334-982d-0dad03c153f7}</UniqueIdentifier>
+    </Filter>
     <Filter Include="third_party\urt">
       <UniqueIdentifier>{116edccd-0839-4b40-bea5-164a59529949}</UniqueIdentifier>
     </Filter>
@@ -132,6 +135,12 @@
     </Filter>
     <Filter Include="third_party\urt\internal">
       <UniqueIdentifier>{89a11fa8-2d0a-4b9a-9d7c-52b0c5df40b8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\internal\sys">
+      <UniqueIdentifier>{6aed1c5f-ebc2-4e3e-8b87-f6f39b96eb12}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\internal\sys\winows">
+      <UniqueIdentifier>{51839fa1-68ac-4d92-b82c-33642d718550}</UniqueIdentifier>
     </Filter>
     <Filter Include="third_party\urt\intrinsic">
       <UniqueIdentifier>{40268c2d-d19f-45e8-83bb-6036d91e335e}</UniqueIdentifier>
@@ -705,6 +714,90 @@
     <DCompile Include="third_party\urt\src\urt\zip.d">
       <Filter>third_party\urt</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\std\math.d">
+      <Filter>third_party\std</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\object.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\exception.d">
+      <Filter>third_party\urt\internal</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\exception.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\atomic.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\aa.d">
+      <Filter>third_party\urt\internal</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\traits.d">
+      <Filter>third_party\urt\internal</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\bitop.d">
+      <Filter>third_party\urt\internal</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\sspi.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\subauth.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\w32api.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\wincon.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\wincrypt.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\windef.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winerror.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winnt.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winsock2.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winbase.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winuser.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\basetsd.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\basetyps.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\ntdef.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\ntsecapi.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\ntsecpkg.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\package.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\schannel.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\sdkddkver.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\security.d">
+      <Filter>third_party\urt\internal\sys\winows</Filter>
+    </DCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include=".gitignore" />
@@ -832,5 +925,10 @@
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\vlan.h">
       <Filter>third_party\npcap-sdk-1.15\Include\pcap</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="third_party\urt\src\urt\internal\stdc.c">
+      <Filter>third_party\urt\internal</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

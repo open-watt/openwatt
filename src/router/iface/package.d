@@ -238,8 +238,8 @@ nothrow @nogc:
     ulong recv_dropped() const => _status.recv_dropped;
     ulong rx_rate() const => _status.rx_rate;
     ulong tx_rate() const => _status.tx_rate;
-    ulong tx_rate_max() const => _status.tx_rate;
-    ulong rx_rate_max() const => _status.rx_rate;
+    ulong tx_rate_max() const => _status.tx_rate_max;
+    ulong rx_rate_max() const => _status.rx_rate_max;
 //    Milliseconds avg_wait() const => Milliseconds(float(_status.avg_wait_us) / 1000);
 //    Milliseconds avg_service() const => Milliseconds(float(_status.avg_service_us) / 1000);
 //    Milliseconds max_service() const => Milliseconds(float(_status.max_service_us) / 1000);

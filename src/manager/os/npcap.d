@@ -8,8 +8,8 @@ nothrow @nogc:
 
 version (Windows)
 {
-    import core.sys.windows.windows;
-    import core.sys.windows.winsock2 : sockaddr;
+    import urt.internal.sys.windows;
+    import urt.internal.sys.windows.winsock2 : sockaddr;
 
     HMODULE _npcap;
 

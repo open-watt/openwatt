@@ -16,7 +16,7 @@ import urt.variant;
 
 version (Windows)
 {
-    import core.sys.windows.windows;
+    import urt.internal.sys.windows;
 
     extern(Windows) BOOL SetConsoleOutputCP(UINT wCodePageID) nothrow @nogc;
 }
