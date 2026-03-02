@@ -157,6 +157,76 @@ Validate → Starting → Running
 
 See [src/manager/base.d:325-495](src/manager/base.d#L325-L495) for state machine implementation.
 
+##### ObjectRef and Dependency Management
+
+When a BaseObject holds a reference to another BaseObject (e.g., an interface referencing its stream, or a protocol client referencing its interface), use `ObjectRef!Type` instead of a raw pointer. ObjectRef provides:
+
+- **Safe detach on destruction**: When the referenced object is destroyed, ObjectRef auto-detaches (stores the name instead of a dangling pointer)
+- **Name-based reattach**: `try_reattach()` looks up the stored name in the Collection to recover after the target is recreated
+
+**Offline detection via state subscriptions**: Don't poll `!dependency.running` in `update()` — this misses offline→online bounces between update cycles. Instead, subscribe to `StateSignal.offline` on the dependency and call `restart()` immediately.
+
+**Subscription lifecycle rule**: Subscribe at the end of `startup()`, unsubscribe in `shutdown()`. Track with an explicit `_subscribed` flag (placed in struct padding). The flag ensures visibly symmetrical bookkeeping — every subscribe has a matching unsubscribe, no no-ops. Property setters unsubscribe and clear the flag when `_subscribed` is true, then store the new reference and `restart()` — startup will re-subscribe. This prevents use-after-free: destruction cycles through shutdown, which unsubscribes before the object is freed.
+
+```d
+// Property setter — tear down subscription, swap reference, restart
+final void stream(Stream stream)
+{
+    if (_stream is stream)
+        return;
+    if (_subscribed)
+    {
+        _stream.unsubscribe(&stream_state_change);
+        _subscribed = false;
+    }
+    _stream = stream;
+    restart();
+}
+
+// validating() — recover detached ObjectRefs
+override CompletionStatus validating()
+{
+    _stream.try_reattach();
+    return super.validating();
+}
+
+// startup() — subscribe when going online
+override CompletionStatus startup()
+{
+    if (!_stream || !_stream.running)
+        return CompletionStatus.continue_;
+    // ... initialization ...
+    _stream.subscribe(&stream_state_change);
+    _subscribed = true;
+    return CompletionStatus.complete;
+}
+
+// shutdown() — unsubscribe if subscribed
+override CompletionStatus shutdown()
+{
+    if (_subscribed)
+    {
+        _stream.unsubscribe(&stream_state_change);
+        _subscribed = false;
+    }
+    // ... cleanup ...
+    return CompletionStatus.complete;
+}
+
+// State change handler — restart when dependency goes offline
+void stream_state_change(BaseObject, StateSignal signal)
+{
+    if (signal == StateSignal.offline)
+        restart();
+}
+```
+
+**Key details:**
+- `ObjectRef` uses `alias get this`, so `_stream !is null` works naturally (covers both "never set" and "detached" cases)
+- `destroy()` fires `StateSignal.offline` before `StateSignal.destroyed` for running objects, so handling `offline` alone is sufficient
+- `unsubscribe()` is idempotent — safe to call in shutdown() even if startup() never completed
+- Call `try_reattach()` in `validating()` so objects recover after their dependency is destroyed and recreated
+
 #### 4. Module System
 
 Modules are the top-level organizational unit. Each module registers Collections and provides lifecycle hooks:
@@ -281,6 +351,15 @@ High-level application logic:
 - Future: Automation engine with event bindings
 
 ## Development Practices
+
+### Debugging & Root Cause Analysis
+
+**Never apply speculative fixes.** When investigating a bug:
+- Understand the FULL causal chain before writing any code. If the root cause isn't clear, say so — discuss the structural issues and what evidence is still needed rather than guessing.
+- Symptoms like invalid states, assertion failures, or unexpected values are signals to trace deeper, not to patch over. Ask: "why is this value wrong?" not "how can I handle this value?"
+- If you're not confident in a fix, explicitly state your uncertainty and present it as a hypothesis for discussion, not as a code change.
+- A fix that doesn't address the root cause is worse than no fix — it hides the real bug and creates false confidence.
+- Never take the easy path. When a structural issue is identified, address it directly — don't work around it with guards, special cases, or compatibility shims. Early structural fixes prevent compounding debt.
 
 ### Language & Tooling
 

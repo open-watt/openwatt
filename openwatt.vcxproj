@@ -74,6 +74,7 @@
     <DCompile Include="src\manager\console\function_command.d" />
     <DCompile Include="src\manager\console\package.d" />
     <DCompile Include="src\manager\console\session.d" />
+    <DCompile Include="src\manager\console\table.d" />
     <DCompile Include="src\manager\cron\job.d" />
     <DCompile Include="src\manager\cron\package.d" />
     <DCompile Include="src\manager\device.d" />
@@ -90,6 +91,7 @@
     <DCompile Include="src\manager\subscriber.d" />
     <DCompile Include="src\manager\system.d" />
     <DCompile Include="src\manager\value.d" />
+    <DCompile Include="src\protocol\can\iface.d" />
     <DCompile Include="src\protocol\can\package.d" />
     <DCompile Include="src\protocol\can\sampler.d" />
     <DCompile Include="src\protocol\dns\message.d" />
@@ -117,6 +119,7 @@
     <DCompile Include="src\protocol\ip\package.d" />
     <DCompile Include="src\protocol\ip\route.d" />
     <DCompile Include="src\protocol\modbus\client.d" />
+    <DCompile Include="src\protocol\modbus\iface.d" />
     <DCompile Include="src\protocol\modbus\message.d" />
     <DCompile Include="src\protocol\modbus\package.d" />
     <DCompile Include="src\protocol\modbus\sampler.d" />
@@ -133,6 +136,7 @@
     <DCompile Include="src\protocol\telnet\package.d" />
     <DCompile Include="src\protocol\telnet\server.d" />
     <DCompile Include="src\protocol\telnet\session.d" />
+    <DCompile Include="src\protocol\tesla\iface.d" />
     <DCompile Include="src\protocol\tesla\master.d" />
     <DCompile Include="src\protocol\tesla\package.d" />
     <DCompile Include="src\protocol\tesla\sampler.d" />
@@ -146,13 +150,11 @@
     <DCompile Include="src\protocol\zigbee\zcl.d" />
     <DCompile Include="src\protocol\zigbee\zdo.d" />
     <DCompile Include="src\router\iface\bridge.d" />
-    <DCompile Include="src\router\iface\can.d" />
     <DCompile Include="src\router\iface\ethernet.d" />
     <DCompile Include="src\router\iface\mac.d" />
-    <DCompile Include="src\router\iface\modbus.d" />
     <DCompile Include="src\router\iface\package.d" />
     <DCompile Include="src\router\iface\packet.d" />
-    <DCompile Include="src\router\iface\tesla.d" />
+    <DCompile Include="src\router\iface\priority_queue.d" />
     <DCompile Include="src\router\iface\vlan.d" />
     <DCompile Include="src\router\iface\zigbee.d" />
     <DCompile Include="src\router\port\package.d" />
@@ -162,9 +164,12 @@
     <DCompile Include="src\router\stream\serial.d" />
     <DCompile Include="src\router\stream\tcp.d" />
     <DCompile Include="src\router\stream\udp.d" />
+    <DCompile Include="third_party\urt\src\object.d" />
+    <DCompile Include="third_party\urt\src\std\math.d" />
     <DCompile Include="third_party\urt\src\urt\algorithm.d" />
     <DCompile Include="third_party\urt\src\urt\array.d" />
     <DCompile Include="third_party\urt\src\urt\async.d" />
+    <DCompile Include="third_party\urt\src\urt\atomic.d" />
     <DCompile Include="third_party\urt\src\urt\attribute.d" />
     <DCompile Include="third_party\urt\src\urt\compiler.d" />
     <DCompile Include="third_party\urt\src\urt\conv.d" />
@@ -175,13 +180,38 @@
     <DCompile Include="third_party\urt\src\urt\digest\sha.d" />
     <DCompile Include="third_party\urt\src\urt\encoding.d" />
     <DCompile Include="third_party\urt\src\urt\endian.d" />
+    <DCompile Include="third_party\urt\src\urt\exception.d" />
     <DCompile Include="third_party\urt\src\urt\fibre.d" />
     <DCompile Include="third_party\urt\src\urt\file.d" />
     <DCompile Include="third_party\urt\src\urt\format\json.d" />
     <DCompile Include="third_party\urt\src\urt\hash.d" />
     <DCompile Include="third_party\urt\src\urt\inet.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\aa.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\bitop.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\exception.d" />
     <DCompile Include="third_party\urt\src\urt\internal\lifetime.d" />
     <DCompile Include="third_party\urt\src\urt\internal\os.c" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\basetsd.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\basetyps.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\ntdef.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\ntsecapi.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\ntsecpkg.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\package.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\schannel.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\sdkddkver.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\security.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\sspi.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\subauth.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\w32api.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winbase.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\wincon.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\wincrypt.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\windef.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winerror.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winnt.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winsock2.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\windows\winuser.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\traits.d" />
     <DCompile Include="third_party\urt\src\urt\intrinsic\package.d" />
     <DCompile Include="third_party\urt\src\urt\intrinsic\x86.d" />
     <DCompile Include="third_party\urt\src\urt\io.d" />
@@ -277,6 +307,9 @@
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\socket.h" />
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\usb.h" />
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\pcap\vlan.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="third_party\urt\src\urt\internal\stdc.c" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{E12D037A-40C8-4F1B-B8B3-DE527A1E9D41}</ProjectGuid>
@@ -507,6 +540,7 @@
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
+      <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -537,6 +571,7 @@
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
+      <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -570,6 +605,7 @@
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
+      <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -601,6 +637,7 @@
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <ImportCPaths>third_party/npcap-sdk-1.15/Include/</ImportCPaths>
       <Warnings>None</Warnings>
+      <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -631,6 +668,7 @@
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
+      <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -664,6 +702,7 @@
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
+      <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -692,7 +731,8 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -719,9 +759,10 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Unittest>true</Unittest>
       <Main>true</Main>
+      <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -754,7 +795,8 @@
       <DebugInfo>Mago</DebugInfo>
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -783,7 +825,8 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -810,9 +853,10 @@
       <PreviewIn>true</PreviewIn>
       <CppStandard>fromCpp</CppStandard>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Unittest>true</Unittest>
       <Main>true</Main>
+      <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -845,7 +889,8 @@
       <DebugInfo>Mago</DebugInfo>
       <BoundsCheck>Off</BoundsCheck>
       <EnableDebugMixin>true</EnableDebugMixin>
-      <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
+      <DRuntimeLibrary>None</DRuntimeLibrary>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>

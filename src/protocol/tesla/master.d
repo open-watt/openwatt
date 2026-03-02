@@ -9,11 +9,11 @@ import urt.time;
 import urt.util;
 
 import protocol.tesla;
+import protocol.tesla.iface;
 import protocol.tesla.twc;
 
 import router.iface;
 import router.iface.packet;
-import router.iface.tesla;
 
 import manager;
 
@@ -149,7 +149,7 @@ nothrow @nogc:
 
         iface.subscribe(&incoming_packet, PacketFilter(ether_type: EtherType.ow, ow_subtype: OW_SubType.tesla_twc));
 
-        get_module!TeslaInterfaceModule.add_server(name[], iface, id);
+        get_module!TeslaProtocolModule.add_server(name[], iface, id);
     }
 
     ~this()
@@ -217,7 +217,7 @@ nothrow @nogc:
             message[0..2] = ushort(round_robin_index++ < -5 ? 0xFCE1 : 0xFBE2).nativeToBigEndian;
             message[2..4] = id.nativeToBigEndian;
             message[4] = sig;
-            iface.send(MACAddress.broadcast, message[], EtherType.ow, OW_SubType.tesla_twc);
+            send_twc_message(MACAddress.broadcast, message[]);
             return;
         }
 
@@ -327,7 +327,18 @@ nothrow @nogc:
         }
 
         // send request
-        iface.send(c.mac, message[], EtherType.ow, OW_SubType.tesla_twc);
+        send_twc_message(c.mac, message[]);
+    }
+
+    void send_twc_message(MACAddress dst, const(void)[] message)
+    {
+        Packet p;
+        ref Ethernet hdr = p.init!Ethernet(message[]);
+        hdr.src = iface.mac;
+        hdr.dst = dst;
+        hdr.ether_type = EtherType.ow;
+        hdr.ow_sub_type = OW_SubType.tesla_twc;
+        iface.forward(p);
     }
 
     void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void* user_data) nothrow @nogc

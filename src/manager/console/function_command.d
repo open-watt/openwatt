@@ -301,11 +301,16 @@ auto make_arg_tuple(alias F)(const Variant[] args, const NamedArgument[] paramet
                 static if (ParamNames[i] != "args" && ParamNames[i] != "named-args")
                 {
                     case ParamNames[i]:
-                        error = from_variant(param.value, params[i]);
-                        if (error)
+                        static if (is(const(Variant) : typeof(params[i])))
+                            params[i] = param.value;
+                        else
                         {
-                            error = tconcat("Argument '", param.name, "' error: ", error);
-                            break outer;
+                            error = from_variant(param.value, params[i]);
+                            if (error)
+                            {
+                                error = tconcat("Argument '", param.name, "' error: ", error);
+                                break outer;
+                            }
                         }
                         got_arg[i] = true;
                         break param_switch;

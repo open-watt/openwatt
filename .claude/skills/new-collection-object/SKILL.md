@@ -1,3 +1,8 @@
+---
+name: new-collection-object
+description: Boilerplate and patterns for creating new Collection-managed runtime objects (Streams, Interfaces, Protocol components). Use when adding a new managed object type.
+---
+
 # new-collection-object
 
 Create a new Collection-managed runtime object in the OpenWatt codebase. This skill generates the boilerplate for objects managed by the Collection system (Streams, Interfaces, Protocol components, etc.).

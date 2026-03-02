@@ -59,6 +59,11 @@ nothrow @nogc:
 
     // API...
 
+    void set_message_handler(WSMessageHandler handler)
+    {
+        _msg_handler = handler;
+    }
+
     ptrdiff_t send_text(const(char)[] text)
     {
         // TODO: confirm valid utf8, fail if not
@@ -316,7 +321,7 @@ class WebSocketServer : BaseObject
                                          Property.create!("uri", uri)() ];
 nothrow @nogc:
 
-    enum type_name = "websocket-server";
+    enum type_name = "ws-server";
 
     alias NewConnection = void delegate(WebSocket client, void* user_data) nothrow @nogc;
 

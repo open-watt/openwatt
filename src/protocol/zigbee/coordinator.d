@@ -182,7 +182,7 @@ class ZigbeeCoordinator : ZigbeeRouter
                 {
                     if (ezsp.stack_type != EZSPStackType.coordinator && !_already_complained)
                     {
-                        writeError("Zigbee: EZSP client device is not running cordinator firmware. To use this device, flash with the proper coordinator firmware.");
+                        log.error("EZSP client device is not running cordinator firmware. To use this device, flash with the proper coordinator firmware.");
                         _already_complained = true;
                         // TODO: maybe we should have a sort of non-recoverable error, where it won't automatically try and restart?
                         return CompletionStatus.error;
@@ -226,16 +226,7 @@ class ZigbeeCoordinator : ZigbeeRouter
             _init_promise = null;
         }
 
-        if (_interface)
-        {
-            _interface.unsubscribe(&state_change);
-            _interface.unsubscribe(&incoming_packet);
-            zigbee_iface.attach_coordiantor(null);
-            if (auto ezsp = get_ezsp())
-                subscribe_client(ezsp, false);
-            _interface = null;
-        }
-
+        _previous_extended_pan_id = _network_params.extended_pan_id;
         _network_params = NetworkParams();
         _already_complained = false;
         _ready = false;
@@ -258,7 +249,7 @@ class ZigbeeCoordinator : ZigbeeRouter
         // TODO: any administrative activities for the coordinator?
         if (_pan_eui != EUI64.broadcast && _pan_eui != _network_params.extended_pan_id)
         {
-            writeInfo("Zigbee coordinator: PAN EUI changed - re-forming network");
+            log.notice("PAN EUI changed - re-forming network");
             assert(false, "TODO");
             // TODO: we must re-form the network to change the EUI...
             //       we should also clear all records about device presence...
@@ -266,14 +257,14 @@ class ZigbeeCoordinator : ZigbeeRouter
         }
         if (_pan_id != 0xFFFF && _pan_id != _network_params.pan_id)
         {
-            writeInfo("Zigbee coordinator: PAN ID changed - updating network...");
+            log.notice("PAN ID changed - updating network...");
             assert(false, "TODO");
             // TODO: we can change pan_id without re-forming the network...
             //       ZDO Mgmt_NWK_Update_req (cluster 0x0036) with ScanDuration=0xFE and a one-bit channel mask (new channel).
         }
         if (_channel != 0xFF && _channel != _network_params.radio_channel)
         {
-            writeInfo("Zigbee coordinator: CHANNEL changed - updating network...");
+            log.notice("CHANNEL changed - updating network...");
             assert(false, "TODO");
             // TODO: we can change channel without re-forming the network...
             //       ZDO Mgmt_NWK_Update_req with ScanDuration=0xFF (PAN ID update).
@@ -297,6 +288,7 @@ private:
     ubyte[16] _network_key;
     ubyte _channel = 0xFF;
 
+    EUI64 _previous_extended_pan_id;
     MonoTime _last_action;
     bool _already_complained; // suppress repeat complaining about the same errors
     bool _ready;
@@ -315,9 +307,10 @@ private:
             switch (network_status) with(EmberNetworkStatus)
             {
                 case JOINED_NETWORK:
-                    writeInfo("Zigbee coordinator: NETWORK JOINED");
-                    done = true;
-                    break;
+                    // ASH RST resets the NCP, so this shouldn't happen.
+                    // if it does, the stack is already running — just sync bookkeeping!
+                    log.warning("unexpected JOINED_NETWORK at init — syncing state");
+                    return sync_network_state(ezsp);
 
                 case NO_NETWORK:
                     return init_network(ezsp);
@@ -325,18 +318,18 @@ private:
                 case JOINED_NETWORK_NO_PARENT:
                     assert(false, "TODO: what is this case?");
 //                    ezsp.send_command!EZSP_PermitJoining(0xFF, (EmberStatus status) {
-//                        writeInfo("Zigbee coordinator: permit joining status: ", status);
+//                        log.info("permit joining status: ", status);
 //                    });
                 break;
 
                 case JOINING_NETWORK:
                 case LEAVING_NETWORK:
-                    writeInfo("Zigbee coordinator: JOINING/LEAVING NETWORK");
+                    log.debug_("JOINING/LEAVING NETWORK");
                     sleep(1.seconds);
                     break;
 
                 default:
-                    writeError("Zigbee coordinator: invalid network state: ", cast(ubyte)network_status);
+                    log.error("invalid network state: ", cast(ubyte)network_status);
                     ezsp.restart();
                     return false;
             }
@@ -354,61 +347,61 @@ private:
 
 //        ezsp.request!EZSP_SetManufacturerCode(0xFFFF); // "not specified"
 
-        ezsp.set_configuration(EzspConfigId.SUPPORTED_NETWORKS, 1);
-        ezsp.set_configuration(EzspConfigId.STACK_PROFILE, 2);
-        ezsp.set_configuration(EzspConfigId.SECURITY_LEVEL, 5);
-        ezsp.set_configuration(EzspConfigId.TRUST_CENTER_ADDRESS_CACHE_SIZE, 2);
+        set_configuration(ezsp, EzspConfigId.SUPPORTED_NETWORKS, 1);
+        set_configuration(ezsp, EzspConfigId.STACK_PROFILE, 2);
+        set_configuration(ezsp, EzspConfigId.SECURITY_LEVEL, 5);
+        set_configuration(ezsp, EzspConfigId.TRUST_CENTER_ADDRESS_CACHE_SIZE, 2);
 
         // Enable MAC passthrough for beacons and join requests
         // TODO: do we want to handle APP_HANDLES_ZDO_ENDPOINT_REQUESTS and APP_HANDLES_ZDO_BINDING_REQUESTS ourself? add them here...
-        ezsp.set_configuration(EzspConfigId.APPLICATION_ZDO_FLAGS, cast(EmberZdoConfigurationFlags)(EmberZdoConfigurationFlags.APP_HANDLES_UNSUPPORTED_ZDO_REQUESTS | EmberZdoConfigurationFlags.APP_RECEIVES_SUPPORTED_ZDO_REQUESTS));
+        set_configuration(ezsp, EzspConfigId.APPLICATION_ZDO_FLAGS, cast(EmberZdoConfigurationFlags)(EmberZdoConfigurationFlags.APP_HANDLES_UNSUPPORTED_ZDO_REQUESTS | EmberZdoConfigurationFlags.APP_RECEIVES_SUPPORTED_ZDO_REQUESTS));
 
         // TODO: do we need/want any of these?
-        ezsp.set_configuration(EzspConfigId.INDIRECT_TRANSMISSION_TIMEOUT, 300); // >= 300
-        ezsp.set_configuration(EzspConfigId.MAX_END_DEVICE_CHILDREN, 32); // >= 16
-        ezsp.set_configuration(EzspConfigId.KEY_TABLE_SIZE, 8);
-        ezsp.set_configuration(EzspConfigId.ADDRESS_TABLE_SIZE, 16);
-        ezsp.set_configuration(EzspConfigId.SOURCE_ROUTE_TABLE_SIZE, 32);
-//        ezsp.set_configuration(EzspConfigId.APS_ACK_TIMEOUT, 0x2000);
+        set_configuration(ezsp, EzspConfigId.INDIRECT_TRANSMISSION_TIMEOUT, 300); // >= 300
+        set_configuration(ezsp, EzspConfigId.MAX_END_DEVICE_CHILDREN, 32); // >= 16
+        set_configuration(ezsp, EzspConfigId.KEY_TABLE_SIZE, 8);
+        set_configuration(ezsp, EzspConfigId.ADDRESS_TABLE_SIZE, 16);
+        set_configuration(ezsp, EzspConfigId.SOURCE_ROUTE_TABLE_SIZE, 32);
+//        set_configuration(ezsp, EzspConfigId.APS_ACK_TIMEOUT, 0x2000);
 
-        ezsp.set_policy(EzspPolicyId.TRUST_CENTER, cast(EzspDecisionId)(EzspDecisionBitmask.ALLOW_JOINS | EzspDecisionBitmask.ALLOW_UNSECURED_REJOINS));
-//        ezsp.set_policy(EzspPolicyId.TC_KEY_REQUEST, EzspDecisionId.DENY_TC_KEY_REQUESTS);
-        ezsp.set_policy(EzspPolicyId.TC_KEY_REQUEST, EzspDecisionId.ALLOW_TC_KEY_REQUESTS_AND_SEND_CURRENT_KEY);
-        ezsp.set_policy(EzspPolicyId.APP_KEY_REQUEST, EzspDecisionId.DENY_APP_KEY_REQUESTS);
-//        ezsp.set_policy(EzspPolicyId.APP_KEY_REQUEST, EzspDecisionId.ALLOW_APP_KEY_REQUESTS);
-        ezsp.set_policy(EzspPolicyId.BINDING_MODIFICATION, EzspDecisionId.ALLOW_BINDING_MODIFICATION);
-        ezsp.set_policy(EzspPolicyId.MESSAGE_CONTENTS_IN_CALLBACK, EzspDecisionId.MESSAGE_TAG_AND_CONTENTS_IN_CALLBACK);
-//        ezsp.set_policy(EzspPolicyId.UNICAST_REPLIES, EzspDecisionId.HOST_WILL_SUPPLY_REPLY);
-        ezsp.set_policy(EzspPolicyId.UNICAST_REPLIES, EzspDecisionId.HOST_WILL_NOT_SUPPLY_REPLY);
+        set_policy(ezsp, EzspPolicyId.TRUST_CENTER, cast(EzspDecisionId)(EzspDecisionBitmask.ALLOW_JOINS | EzspDecisionBitmask.ALLOW_UNSECURED_REJOINS));
+//        set_policy(ezsp, EzspPolicyId.TC_KEY_REQUEST, EzspDecisionId.DENY_TC_KEY_REQUESTS);
+        set_policy(ezsp, EzspPolicyId.TC_KEY_REQUEST, EzspDecisionId.ALLOW_TC_KEY_REQUESTS_AND_SEND_CURRENT_KEY);
+        set_policy(ezsp, EzspPolicyId.APP_KEY_REQUEST, EzspDecisionId.DENY_APP_KEY_REQUESTS);
+//        set_policy(ezsp, EzspPolicyId.APP_KEY_REQUEST, EzspDecisionId.ALLOW_APP_KEY_REQUESTS);
+        set_policy(ezsp, EzspPolicyId.BINDING_MODIFICATION, EzspDecisionId.ALLOW_BINDING_MODIFICATION);
+        set_policy(ezsp, EzspPolicyId.MESSAGE_CONTENTS_IN_CALLBACK, EzspDecisionId.MESSAGE_TAG_AND_CONTENTS_IN_CALLBACK);
+//        set_policy(ezsp, EzspPolicyId.UNICAST_REPLIES, EzspDecisionId.HOST_WILL_SUPPLY_REPLY);
+        set_policy(ezsp, EzspPolicyId.UNICAST_REPLIES, EzspDecisionId.HOST_WILL_NOT_SUPPLY_REPLY);
 
         // Set MAC passthrough flags for beacon requests
         ubyte flags = 0xF;
         EzspStatus r = ezsp.request!EZSP_SetValue(EzspValueId.MAC_PASSTHROUGH_FLAGS, (&flags)[0..1]);//EzspValueId.MAC_PASSTHROUGH_FLAGS, EmberMacPassthroughType.EMBER_MAC_PASSTHROUGH_BEACON | EmberMacPassthroughType.EMBERMGMT | EmberMacPassthroughType.EMBER_MAC_PASSTHROUGH_MAC_COMMAND);
         if (r != EzspStatus.SUCCESS)
-            writeInfo("Zigbee coordinator: MAC_PASSTHROUGH_FLAGS failed: ", r);
+            log.warning("MAC_PASSTHROUGH_FLAGS failed: ", r);
 
         // update the EUI for this interface; since it's determined by the NCP...
         _eui.b = ezsp.request!EZSP_GetEui64();
 
         auto security_state = ezsp.request!EZSP_GetCurrentSecurityState();
         if (security_state.status != EmberStatus.SUCCESS)
-            writeWarning("Zigbee coordinator: GetCurrentSecurityState failed: ", security_state.status);
+            log.warning("GetCurrentSecurityState failed: ", security_state.status);
         else
-            writeDebugf("Zigbee coordinator: GetCurrentSecurityState bitmask = {0,04x}", security_state.state.bitmask);
+            log.debugf("GetCurrentSecurityState bitmask = {0,04x}", security_state.state.bitmask);
 
         // register local endpoints
         foreach (ref e; _endpoints)
         {
             r = ezsp.request!EZSP_AddEndpoint(e.id, e.endpoint.profile_id, e.endpoint.device, ubyte(0), e.endpoint.in_clusters[], e.endpoint.out_clusters[]);
             if (r != EzspStatus.SUCCESS)
-                writeInfo("Zigbee coordinator: AddEndpoint failed: ", r);
+                log.warning("AddEndpoint failed: ", r);
         }
 
         // try and raise the network...
         EmberStatus status = ezsp.request!EZSP_NetworkInit(EmberNetworkInitStruct(bitmask: EmberNetworkInitBitmask.NO_OPTIONS));
         if (status == EmberStatus.NOT_JOINED)
         {
-            writeInfo("Zigbee coordinator: network init failed: ", status);
+            log.info("network init failed: ", status);
 
             // TODO: better keygen?
             // TODO: also, allow user to supply one
@@ -447,7 +440,7 @@ private:
 
             EmberStatus sec_status = ezsp.request!EZSP_SetInitialSecurityState(sec);
             if (sec_status != EmberStatus.SUCCESS)
-                writeInfo("Zigbee coordinator: SetInitialSecurityState failed: ", sec_status);
+                log.warning("SetInitialSecurityState failed: ", sec_status);
 
             // we should form a network here...
             uint[2] id = [ rand(), rand() ];
@@ -465,11 +458,11 @@ private:
             params.nwkUpdateId = 0x00;
             params.channels = 1 << params.radioChannel;
 
-            writeInfof("Zigbee coordinator: form network - pan-id={0} ({1, 04x}) channel={2}...", EUI64(params.extendedPanId), params.panId, params.radioChannel);
+            log.infof("form network - pan-id={0} ({1, 04x}) channel={2}...", EUI64(params.extendedPanId), params.panId, params.radioChannel);
             status = ezsp.request!EZSP_FormNetwork(params);
             if (status != EmberStatus.SUCCESS)
             {
-                writeInfo("Zigbee coordinator: form network FAILED: ", status);
+                log.error("form network FAILED: ", status);
                 return false;
             }
         }
@@ -477,6 +470,11 @@ private:
         while (zigbee_iface._network_status != EmberStatus.NETWORK_UP)
             sleep(100.msecs);
 
+        return sync_network_state(ezsp);
+    }
+
+    bool sync_network_state(EZSPClient ezsp)
+    {
         auto nwk_params = ezsp.request!EZSP_GetNetworkParameters();
         _network_params.extended_pan_id.b = nwk_params.parameters.extendedPanId;
         _network_params.pan_id = nwk_params.parameters.panId;
@@ -486,17 +484,26 @@ private:
         _node_id = ezsp.request!EZSP_GetNodeId();
         assert(_node_id == nwk_params.parameters.nwkManagerId && _node_id == 0x0000, "We are the coordinator, so shouldn't we have id 0?");
 
-        writeInfof("Zigbee coordinator: NETWORK UP: node-id={0} type={1} pan-id={2} ({3, 04x}) channel={4}", _node_id, nwk_params.nodeType, _network_params.extended_pan_id, _network_params.pan_id, _network_params.radio_channel);
+        log.noticef("NETWORK UP: node-id={0} type={1} pan-id={2} ({3, 04x}) channel={4}", _node_id, nwk_params.nodeType, _network_params.extended_pan_id, _network_params.pan_id, _network_params.radio_channel);
 
-        // create the node for this coordinator...
         ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
-        NodeMap* nm = mod_zb.find_node(pan_id, _node_id);
-        if (nm)
+
+        // if the network identity changed, purge old node data
+        if (_previous_extended_pan_id != EUI64() && _previous_extended_pan_id != _network_params.extended_pan_id)
         {
-            writeErrorf("Zigbee coordinator: node id {0, 04x} already exists in node table - something went wrong?", _node_id);
+            log.notice("network identity changed, clearing old node data");
+            mod_zb.remove_all_nodes(_interface);
+        }
+
+        // create or reuse the node for this coordinator...
+        NodeMap* nm = mod_zb.find_node(pan_id, _node_id);
+        if (nm && nm.eui != _eui)
+        {
+            log.errorf("node id {0, 04x} already exists with different EUI - something went wrong?", _node_id);
             return false;
         }
-        nm = mod_zb.attach_node(_eui, pan_id, _node_id);
+        if (!nm)
+            nm = mod_zb.attach_node(_eui, pan_id, _node_id);
         nm.name = name;
         nm.desc.type = NodeType.coordinator;
         nm.node = this;
@@ -518,17 +525,28 @@ private:
             }
         }
 
+        // mark all non-coordinator nodes as offline; short addresses may be stale after NCP restart
+        // pre-population below will re-attach nodes the NCP confirms; remaining nodes recover when they next communicate
+        foreach (ref n; mod_zb.nodes_by_eui)
+        {
+            if (n.value.pan_id == pan_id && n.value.id != _node_id)
+            {
+                mod_zb.detach_node(n.value.pan_id, n.value.id);
+                n.value.scan_in_progress = false;
+            }
+        }
+
         // TODO: are we supposed to permit joining for a little while after network-up?
         //       is this for all the clients to re-sync, or will they all join anyway?
         //       if this is for new clients to join, then we don't need to do this here...
-        status = ezsp.request!EZSP_PermitJoining(0xFF);
+        EmberStatus status = ezsp.request!EZSP_PermitJoining(0xFF);
         if (status != EmberStatus.SUCCESS)
-            writeInfo("Zigbee coordinator: PermitJoining failed - ", status);
+            log.warning("PermitJoining failed - ", status);
 
         // pre-populate the node table as best we can...
         auto conf = ezsp.request!EZSP_GetConfigurationValue(EzspConfigId.MAX_END_DEVICE_CHILDREN);
         if (conf.status != EzspStatus.SUCCESS)
-            writeInfo("Zigbee coordinator: GetConfigurationValue failed - ", conf.status);
+            log.warning("GetConfigurationValue failed - ", conf.status);
         else
         {
             foreach (ubyte i; 0 .. cast(ubyte)conf.value)
@@ -548,7 +566,7 @@ private:
 
         conf = ezsp.request!EZSP_GetConfigurationValue(EzspConfigId.ADDRESS_TABLE_SIZE);
         if (conf.status != EzspStatus.SUCCESS)
-            writeInfo("Zigbee coordinator: GetConfigurationValue failed - ", conf.status);
+            log.warning("GetConfigurationValue failed - ", conf.status);
         else
         {
             foreach (ubyte i; 0 .. cast(ubyte)conf.value)
@@ -564,15 +582,29 @@ private:
         return true;
     }
 
+    void set_configuration(EZSPClient ezsp, EzspConfigId id, ushort value)
+    {
+        EzspStatus r = ezsp.request!EZSP_SetConfigurationValue(id, value);
+        if (r != EzspStatus.SUCCESS)
+            log.warning("SetConfigurationValue(", id, ", ", value, ") failed: ", r);
+    }
+
+    void set_policy(EZSPClient ezsp, EzspPolicyId id, EzspDecisionId decision)
+    {
+        EzspStatus r = ezsp.request!EZSP_SetPolicy(id, decision);
+        if (r != EzspStatus.SUCCESS)
+            log.warning("SetPolicy(", id, ", ", decision, ") failed: ", r);
+    }
+
     bool do_destroy_network()
     {
         auto ezsp = get_ezsp();
 
         EmberStatus status = ezsp.request!EZSP_LeaveNetwork();
-        writeDebug("Zigbee coordinator: leave network - status: ", status);
+        log.debug_("leave network - status: ", status);
 
         status = ezsp.request!EZSP_ClearKeyTable();
-        writeDebug("Zigbee coordinator: clear key table - status: ", status);
+        log.debug_("clear key table - status: ", status);
 
         ezsp.request!EZSP_ClearTransientLinkKeys();
         ezsp.request!EZSP_TokenFactoryReset(false, true);
@@ -592,12 +624,12 @@ nothrow:
 
         if (policy_decision == EmberJoinDecision.DENY_JOIN)
         {
-            writeInfof("Zigbee coordinator: join denied - {0, 04x} {1}", new_node_id, eui);
+            log.noticef("join denied - {0, 04x} {1}", new_node_id, eui);
             return;
         }
         if (status == EmberDeviceUpdate.DEVICE_LEFT)
         {
-            writeDebugf("Zigbee coordinator: TC left - {0, 04x} {1}", new_node_id, eui);
+            log.debugf("TC left - {0, 04x} {1}", new_node_id, eui);
             mod_zb.detach_node(pan_id, new_node_id);
             return;
         }
@@ -607,7 +639,7 @@ nothrow:
         n.last_seen = getSysTime();
 //        n.via = _interface; // TODO: should we set `via` for a local node?
 
-        writeDebugf("Zigbee coordinator: TC join - {0,04x} [{1}] (parent: {2,04x}) {3}", new_node_id, eui, parent_of_new_node_id, status);
+        log.debugf("TC join - {0,04x} [{1}] (parent: {2,04x}) {3}", new_node_id, eui, parent_of_new_node_id, status);
 
         if (status == EmberDeviceUpdate.STANDARD_SECURITY_UNSECURED_JOIN)
         {
@@ -627,21 +659,21 @@ nothrow:
             ubyte[3] req_buffer = void;
             req_buffer[0] = 0;
             req_buffer[1..3] = new_node_id.nativeToLittleEndian;
-            send_zdo_message(new_node_id, ZDOCluster.node_desc_req, req_buffer[], MessagePriority.immediate, &get_node_desc, cast(void*)size_t(new_node_id));
+            send_zdo_message(new_node_id, ZDOCluster.node_desc_req, req_buffer[], PCP.vo, &get_node_desc, cast(void*)size_t(new_node_id));
         }
     }
 
     void unicast_network_key_result(EmberStatus status)
     {
         if (status != EmberStatus.SUCCESS)
-            writeDebugf("Zigbee coordinator: UnicastCurrentNetworkKey FAILED");
+            log.warning("UnicastCurrentNetworkKey FAILED");
     }
 
     void get_child_index(ubyte childIndex)
     {
         if (childIndex == 0xFF)
         {
-            writeDebugf("Zigbee coordinator: not my child...");
+            log.debugf("not my child...");
             return;
         }
         get_ezsp.send_command!EZSP_GetChildData(&get_child_date, childIndex);
@@ -650,7 +682,7 @@ nothrow:
     void get_child_date(EmberStatus status, EmberChildData childData)
     {
         if (status == EmberStatus.SUCCESS)
-            writeDebugf("Zigbee coordinator: child {0, 04x} [{1}] {2}", childData.id, EUI64(childData.eui64), childData.type);
+            log.debugf("child {0, 04x} [{1}] {2}", childData.id, EUI64(childData.eui64), childData.type);
 
         auto n = get_module!ZigbeeProtocolModule.attach_node(EUI64(childData.eui64), pan_id, childData.id);
         n.parent_id = _node_id;
@@ -687,12 +719,12 @@ nothrow:
         if (joining)
         {
             n.parent_id = _node_id;
-            writeDebugf("Zigbee coordinator: child join - {0, 04x} [{1}] {2}", child_id, eui, child_type);
+            log.debugf("child join - {0, 04x} [{1}] {2}", child_id, eui, child_type);
         }
         else
         {
             n.parent_id = 0xFFFE; // TODO: who is its parent now?
-            writeDebugf("Zigbee coordinator: child left - {0, 04x} [{1}]", child_id, eui);
+            log.debugf("child left - {0, 04x} [{1}]", child_id, eui);
 
             // TODO: is there a way to know if the child left the network completely?
         }
@@ -701,7 +733,7 @@ nothrow:
     void key_establishment(EmberEUI64 partner, EmberKeyStatus status)
     {
         const eui = EUI64(partner[]);
-        writeDebugf("Zigbee coordinator: key establishment - partner: {0}, status: {1}", eui, status);
+        log.debugf("key establishment - partner: {0}, status: {1}", eui, status);
     }
 
     void remote_set_binding(EmberBindingTableEntry entry, ubyte index, EmberStatus policy_decision)
@@ -730,19 +762,4 @@ protected:
 
         return super.handle_zdo_frame(aps, p);
     }
-}
-
-
-void set_configuration(EZSPClient ezsp, EzspConfigId id, ushort value)
-{
-    EzspStatus r = ezsp.request!EZSP_SetConfigurationValue(id, value);
-    if (r != EzspStatus.SUCCESS)
-        writeInfo("Zigbee coordinator: SetConfigurationValue(", id, ", ", value, ") failed: ", r);
-}
-
-void set_policy(EZSPClient ezsp, EzspPolicyId id, EzspDecisionId decision)
-{
-    EzspStatus r = ezsp.request!EZSP_SetPolicy(id, decision);
-    if (r != EzspStatus.SUCCESS)
-        writeInfo("Zigbee coordinator: SetPolicy(", id, ", ", decision, ") failed: ", r);
 }

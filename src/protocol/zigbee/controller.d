@@ -30,7 +30,7 @@ import protocol.zigbee.zcl;
 import protocol.zigbee.zdo;
 
 import router.iface.mac;
-import router.iface.zigbee : MessagePriority;
+import router.iface.packet : PCP;
 
 version = DebugZigbeeController;
 
@@ -45,7 +45,7 @@ class ZigbeeController : BaseObject, Subscriber
                                          Property.create!("auto-create", auto_create)() ];
 @nogc:
 
-    enum type_name = "zigbee-controller";
+    enum type_name = "zb-controller";
 
     this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
     {
@@ -113,9 +113,7 @@ protected:
 
     override CompletionStatus shutdown() nothrow
     {
-        // abort any outstanding interviews
-        // TODO: there is a CRITICAL problem where in-flight requests have callbacks into fibre-local yield objects!
-        //       maybe we need an API to abort requests...?
+        // abort any outstanding interviews (scope(failure) in zdo/zcl_request cleans up in-flight requests)
         while (!_promises.empty)
         {
             Promise!bool* p = _promises.popBack();
@@ -167,11 +165,20 @@ protected:
                 ++i;
         }
 
+        if (!_endpoint.node.is_network_up)
+            return;
+
         // update all the nodes...
         foreach (ref NodeMap nm; zb.nodes_by_eui.values)
         {
+            if (!nm.available)
+                continue;
+
             if (nm.initialised < 0xFF && !nm.scan_in_progress && _promises.length < MaxFibers)
             {
+                if (nm.retry_after != MonoTime() && now < nm.retry_after)
+                    continue;
+
                 nm.scan_in_progress = true;
                 _promises.pushBack(async(&do_node_interview, &nm));
             }
@@ -189,7 +196,7 @@ protected:
             if (!unk.scanning)
             {
                 unk.scanning = true;
-                send_ieee_request(unk.id, MessagePriority.priority, &probe_response, cast(void*)cast(size_t)unk.id);
+                send_ieee_request(unk.id, PCP.ca, &probe_response, cast(void*)cast(size_t)unk.id);
             }
         }
 
@@ -216,7 +223,7 @@ protected:
                     if (message[8..10].littleEndianToNative!ushort != unk.id)
                     {
                         version (DebugZigbeeController)
-                            writeWarningf("ZigbeeController: probe_response id mismatch for unknown node {0,04x}", unk.id);
+                            log.warningf("probe_response id mismatch for unknown node {0,04x}", unk.id);
                         return;
                     }
 
@@ -224,7 +231,7 @@ protected:
                     NodeMap* n = zb_mod.attach_node(eui, unk.pan_id, unk.id);
                     n.via = unk.via;
                     version (DebugZigbeeController)
-                        writeInfof("ZigbeeController: discovered unknown node {0,04x} with EUI {1}", unk.id, eui);
+                        log.debugf("discovered unknown node {0,04x} with EUI {1}", unk.id, eui);
 
                     zb_mod.unknown_nodes.remove(i);
                 }
@@ -312,7 +319,7 @@ private:
     ulong[2] make_sample_key_tuya(EUI64 eui, ubyte endpoint, ubyte dp) nothrow
         => make_sample_key(eui, endpoint, 0xEF00, dp);
 
-    ZigbeeResult ieee_request(ushort dst, out EUI64 eui, MessagePriority priority = MessagePriority.normal)
+    ZigbeeResult ieee_request(ushort dst, out EUI64 eui, PCP pcp = PCP.be)
     {
         ubyte[5] addr_req_msg = void;
         addr_req_msg[0] = 0;
@@ -321,26 +328,26 @@ private:
         addr_req_msg[4] = 0; // start index
 
         ZDOResponse response;
-        ZigbeeResult r = _endpoint.zdo_request(dst, ZDOCluster.ieee_addr_req, addr_req_msg[], response, priority);
+        ZigbeeResult r = _endpoint.zdo_request(dst, ZDOCluster.ieee_addr_req, addr_req_msg[], response, pcp);
         if (r == ZigbeeResult.success && response.status == ZDOStatus.success && response.message.length >= 8)
             eui.b[] = response.message[0..8];
         return r;
     }
 
-    int send_default_response(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ref const ZCLHeader req, ubyte cmd, ubyte status, MessagePriority priority = MessagePriority.normal) nothrow
+    int send_default_response(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ref const ZCLHeader req, ubyte cmd, ubyte status, PCP pcp = PCP.be) nothrow
     {
         const ubyte[2] msg = [ cmd, status ];
-        return _endpoint.send_zcl_response(dst, endpoint, profile, cluster, ZCLCommand.default_response, req, msg[], priority);
+        return _endpoint.send_zcl_response(dst, endpoint, profile, cluster, ZCLCommand.default_response, req, msg[], pcp);
     }
 
-    int send_ieee_request(ushort dst, MessagePriority priority = MessagePriority.normal, ZDOResponseHandler response_hander = null, void* user_data = null) nothrow
+    int send_ieee_request(ushort dst, PCP pcp = PCP.be, ZDOResponseHandler response_hander = null, void* user_data = null) nothrow
     {
         ubyte[5] addr_req_msg = void;
         addr_req_msg[0] = 0;
         addr_req_msg[1..3] = dst.nativeToLittleEndian;
         addr_req_msg[3] = 0; // request type: single device response
         addr_req_msg[4] = 0; // start index
-        return _endpoint.send_zdo_message(dst, ZDOCluster.ieee_addr_req, addr_req_msg[], priority, response_hander, user_data);
+        return _endpoint.send_zdo_message(dst, ZDOCluster.ieee_addr_req, addr_req_msg[], pcp, response_hander, user_data);
     }
 
     void message_handler(ref const APSFrame aps, const(void)[] message, SysTime timestamp) nothrow
@@ -359,7 +366,7 @@ private:
         if (!nm)
         {
             version (DebugZigbeeController)
-                writeWarningf("ZigbeeController: Received ZCL message from unknown device {0,04x}", aps.src);
+                log.warningf("Received ZCL message from unknown device {0,04x}", aps.src);
         }
 
         ZCLStatus status = ZCLStatus.success;
@@ -457,7 +464,7 @@ private:
                                 response[offset] = ZCLStatus.unsupported_attribute;
                                 offset += 1;
                                 version (DebugZigbeeController)
-                                    writeDebugf("ZigbeeController: {0,04x}:{1,02x} read unknown attribute {2}:{3,04x}:{4,04x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id, attr_id);
+                                    log.debugf("{0,04x}:{1,02x} read unknown attribute {2}:{3,04x}:{4,04x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id, attr_id);
                                 break;
                         }
                     }
@@ -510,7 +517,8 @@ private:
 
                 case read_attributes_response:
                     // my request for attributes returned...
-                    assert(false, "TODO");
+                    version (DebugZigbeeController)
+                        log.debugf("{0,04x}:{1,02x} UNEXPECTED read_attributes_response {2}:{3,04x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id);
                     return;
 
                 case write_attributes_response:
@@ -521,13 +529,13 @@ private:
                 case discover_attributes_response:
                     // my request to discover attributes returned...
                     version (DebugZigbeeController)
-                        writeDebugf("ZigbeeController: {0,04x}:{1,02x} UNEXPECTED discover_attributes_response {2}:{3,04x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id);
+                        log.debugf("{0,04x}:{1,02x} UNEXPECTED discover_attributes_response {2}:{3,04x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id);
                     return;
 
                 case discover_attributes_extended_response:
                     // my request to discover attributes returned...
                     version (DebugZigbeeController)
-                        writeDebugf("ZigbeeController: {0,04x}:{1,02x} UNEXPECTED discover_attributes_extended_response {2}:{3,04x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id);
+                        log.debugf("{0,04x}:{1,02x} UNEXPECTED discover_attributes_extended_response {2}:{3,04x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id);
                     return;
 
                 case configure_reporting_response:
@@ -576,7 +584,7 @@ private:
                         payload = payload[3 + taken .. $];
 
                         version (DebugZigbeeController)
-                            writeInfof("ZigbeeController: {0,04x}:{1,02x} report {2}:{3,04x}:{4,04x} = {5}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id, attr_id, attr.value);
+                            log.debugf("{0,04x}:{1,02x} report {2}:{3,04x}:{4,04x} = {5}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id, attr_id, attr.value);
                     }
 
                     // we don't respond to report
@@ -589,7 +597,7 @@ private:
 
                 default:
                     version (DebugZigbeeController)
-                        writeDebugf("ZigbeeController: {0,04x}:{1,02x} sent unsupported command {2}:{3,04x} cmd: {4,02x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id, zcl.command);
+                        log.debugf("{0,04x}:{1,02x} sent unsupported command {2}:{3,04x} cmd: {4,02x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id, zcl.command);
                     break;
             }
         }
@@ -602,7 +610,7 @@ private:
                     if (zcl.command == 0)
                     {
                         // factory reset!
-                        writeDebugf("ZigbeeController: {0,04x}:{1,02x} sent UNSUPPORTED factory reset command...", aps.src, aps.src_endpoint);
+                        log.debugf("{0,04x}:{1,02x} sent UNSUPPORTED factory reset command...", aps.src, aps.src_endpoint);
                     }
                     break;
 
@@ -658,7 +666,7 @@ private:
                         }
 
                         version (DebugZigbeeController)
-                            writeDebugf("ZigbeeController: {0,04x}:{1,02x} sent IAS zone: status={2,04x} ext={3,02x} zone={4} delay={5}", aps.src, aps.src_endpoint, zone_status, extended_status, zone_id, delay);
+                            log.debugf("{0,04x}:{1,02x} sent IAS zone: status={2,04x} ext={3,02x} zone={4} delay={5}", aps.src, aps.src_endpoint, zone_status, extended_status, zone_id, delay);
                         return;
                     }
                     else
@@ -671,7 +679,7 @@ private:
                         status = ZCLStatus.malformed_command;
 
                         version (DebugZigbeeController)
-                            writeDebugf("ZigbeeController: {0,04x}:{1,02x} sent malformed Tuya command {2,02x}", aps.src, aps.src_endpoint, cast(ubyte)zcl.command);
+                            log.debugf("{0,04x}:{1,02x} sent malformed Tuya command {2,02x}", aps.src, aps.src_endpoint, cast(ubyte)zcl.command);
                         break;
                     }
                     ushort tuya_seq = payload[0..2].bigEndianToNative!ushort;
@@ -704,7 +712,7 @@ private:
                             TuyaDP dp = parse_dp(payload[2 .. $]);
                             Variant v = decode_dp(dp);
                             version (DebugZigbeeController)
-                                writeDebugf("ZigbeeController: {0,04x}:{1,02x} Tuya report dp{2} = {3} ({4})", aps.src, aps.src_endpoint, dp.dp_id, v, dp.dp_type);
+                                log.debugf("{0,04x}:{1,02x} Tuya report dp{2} = {3} ({4})", aps.src, aps.src_endpoint, dp.dp_id, v, dp.dp_type);
                             if (nm)
                             {
                                 nm.tuya_datapoints[dp.dp_id] = v;
@@ -721,8 +729,8 @@ private:
                             return;
 
                         case tuya_mcu_version_rsp:
-                            writeInfof("ZigbeeController: {0,04x}:{1,02x} Tuya MCU version {2}.{3}.{4}", aps.src, aps.src_endpoint, payload[0], payload[1], payload[2]);
-                            writeWarning("TODO: record the version into a synthetic attribute!!"); // ie, EF00:FC00?
+                            log.infof("{0,04x}:{1,02x} Tuya MCU version {2}.{3}.{4}", aps.src, aps.src_endpoint, payload[0], payload[1], payload[2]);
+                            log.warning("TODO: record the version into a synthetic attribute!!"); // ie, EF00:FC00?
                             return;
 
                         case tuya_mcu_sync_time:
@@ -735,7 +743,7 @@ private:
 
                         default:
                             version (DebugZigbeeController)
-                                writeDebugf("ZigbeeController: {0,04x}:{1,02x} sent unsupported Tuya command {2,02x}", aps.src, aps.src_endpoint, cast(ubyte)zcl.command);
+                                log.debugf("{0,04x}:{1,02x} sent unsupported Tuya command {2,02x}", aps.src, aps.src_endpoint, cast(ubyte)zcl.command);
                             return;
                     }
                     break;
@@ -745,7 +753,7 @@ private:
             }
 
             version (DebugZigbeeController)
-                writeDebugf("ZigbeeController: {0,04x}:{1,02x} sent unsupported cluster command {2}:{3,04x} cmd: {4,02x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id, zcl.command);
+                log.debugf("{0,04x}:{1,02x} sent unsupported cluster command {2}:{3,04x} cmd: {4,02x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id, zcl.command);
         }
 
         // send default response
@@ -770,7 +778,7 @@ private:
 
                     // TODO: we should request an ACK!!!
 
-                    _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0x0006, cmd, APSFlags.none, null, MessagePriority.immediate);
+                    _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0x0006, cmd, APSFlags.none, null, PCP.vo);
                     break;
                 }
                 goto default;
@@ -789,7 +797,7 @@ private:
 
                 // TODO: we should request an ACK!!!
 
-                _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0xEF00, ZCLCommand.tuya_data_request, APSFlags.none, buffer[0..2+len], MessagePriority.immediate);
+                _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0xEF00, ZCLCommand.tuya_data_request, APSFlags.none, buffer[0..2+len], PCP.vo);
                 break;
 
             default:
@@ -858,7 +866,7 @@ private:
 
                 if (!device)
                 {
-                    writeWarning("Failed to create device for zigbee node ", node.eui, " with fingerprint: ", fingerprint[]);
+                    log.warning("failed to create device for node ", node.eui, " with fingerprint: ", fingerprint[]);
                     return;
                 }
                 node.device = device;
@@ -890,7 +898,7 @@ private:
         // otherwise, interrogate and create something
         // TODO: ...?
 
-        writeWarning("Couldn't create device for zigbee node ", node.eui, ", no fingerprint match");
+        log.warning("no fingerprint match for node ", node.eui);
     }
 
     // a little helper to try a request up to 3 times with a delay
@@ -910,7 +918,7 @@ private:
     bool do_node_interview(NodeMap* node)
     {
         version (DebugZigbeeController)
-            writeInfof("ZigbeeController: beginning interview for device {0,04x}...", node.id);
+            log.debugf("{0} device {1,04x}...", node.device_created ? "re-initialising" : "beginning interview for", node.id);
 
         ZigbeeResult r;
         ZDOResponse zdo_res;
@@ -920,9 +928,13 @@ private:
 
         bool fail(const(char)[] reason = "failed")
         {
+            import urt.util : min;
             node.scan_in_progress = false;
+            node.interview_failures = cast(ubyte)min(node.interview_failures + 1, 5);
+            uint backoff_secs = 2u << node.interview_failures;
+            node.retry_after = getTime() + backoff_secs.seconds;
             version (DebugZigbeeController)
-                writeWarningf("ZigbeeController: interview FAILED for device {0,04x}! result = {1} - {2}", node.id, r, reason);
+                log.warningf("interview FAILED for device {0,04x}! result = {1} - {2} (retry in {3}s)", node.id, r, reason, backoff_secs);
             return false;
         }
 
@@ -933,7 +945,7 @@ private:
         {
             req_buffer[0] = 0;
             req_buffer[1..3] = node.id.nativeToLittleEndian;
-            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.node_desc_req, req_buffer[0..3], zdo_res, MessagePriority.immediate));
+            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.node_desc_req, req_buffer[0..3], zdo_res, PCP.vo));
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("node_desc_req failed");
 
@@ -948,7 +960,7 @@ private:
             req_buffer[0..2] = ushort(0x0010).nativeToLittleEndian;
             req_buffer[2] = 0xF0;
             req_buffer[3..11] = _endpoint.node.eui.b[];
-            int tag = _endpoint.send_zcl_message(node.id, 1, 0x0104, 0x0500, ZCLCommand.write_attributes_no_response, ZCLControlFlags.disable_default_response, req_buffer[0..11], MessagePriority.priority);
+            int tag = _endpoint.send_zcl_message(node.id, 1, 0x0104, 0x0500, ZCLCommand.write_attributes_no_response, ZCLControlFlags.disable_default_response, req_buffer[0..11], PCP.ca);
             if (tag < 0)
                 return fail("IAS subscribe failed");
         }
@@ -973,7 +985,8 @@ private:
                     result = read_basic_info(node.id, ep, node.basic_info);
                     if (result.succeeded)
                     {
-                        writeInfof("ZigbeeController: interviewing device {0,04x}: {1} \"{2}\" {3} {4}", node.id, node.desc.type, node.get_fingerprint()[], node.basic_info.product_code[], node.basic_info.product_url[]);
+                        if (!node.device_created)
+                            log.infof("interviewing device {0,04x}: {1} \"{2}\" {3} {4}", node.id, node.desc.type, node.get_fingerprint()[], node.basic_info.product_code[], node.basic_info.product_url[]);
 
                         ep.dynamic = false;
                         cluster.dynamic = false;
@@ -996,7 +1009,7 @@ private:
         // request power descriptor
         if (!(node.initialised & 0x02))
         {
-            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.power_desc_req, req_buffer[0..3], zdo_res, MessagePriority.background));
+            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.power_desc_req, req_buffer[0..3], zdo_res, PCP.bk));
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("power_desc_req failed");
 
@@ -1017,7 +1030,7 @@ private:
         // request active endpoints
         if (!(node.initialised & 0x04))
         {
-            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.active_ep_req, req_buffer[0..3], zdo_res, MessagePriority.background));
+            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.active_ep_req, req_buffer[0..3], zdo_res, PCP.bk));
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("active_ep_req failed");
 
@@ -1053,7 +1066,7 @@ private:
                 req_buffer[1..3] = node.id.nativeToLittleEndian;
                 req_buffer[3] = ep.endpoint;
             try_again:
-                r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.simple_desc_req, req_buffer[0..4], zdo_res, MessagePriority.background));
+                r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.simple_desc_req, req_buffer[0..4], zdo_res, PCP.bk));
                 if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                     return fail("simple_desc_req failed");
 
@@ -1130,7 +1143,7 @@ private:
                         // try request extended attributes first, then normal if that fails
                         if (support_extended_attributes)
                         {
-                            r = try_thrice(() => _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes_extended, 0, req_buffer[0..3], zcl_res, MessagePriority.background));
+                            r = try_thrice(() => _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes_extended, 0, req_buffer[0..3], zcl_res, PCP.bk));
                             if (r != ZigbeeResult.success)
                                 return fail("discover_attributes_extended failed");
                             if (zcl_res.hdr.command == ZCLCommand.default_response)
@@ -1142,7 +1155,7 @@ private:
                         }
                         if (!support_extended_attributes)
                         {
-                            r = try_thrice(() => _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes, 0, req_buffer[0..3], zcl_res, MessagePriority.background));
+                            r = try_thrice(() => _endpoint.zcl_request(node.id, ep.endpoint, ep.profile_id, c.cluster_id, ZCLCommand.discover_attributes, 0, req_buffer[0..3], zcl_res, PCP.bk));
                             if (r != ZigbeeResult.success)
                                 return fail("discover_attributes failed");
                         }
@@ -1214,11 +1227,16 @@ private:
                     info ~= "\n";
                 }
             }
-            writeInfof("ZigbeeController: completed interview for device {0,04x} ({1}) {2} {3}\n{4}", node.id, node.get_fingerprint()[], node.basic_info.product_code[], node.basic_info.product_url[], info[]);
+            if (node.device_created)
+                log.debugf("re-initialised device {0,04x} ({1})", node.id, node.get_fingerprint()[]);
+            else
+                log.debugf("completed interview for device {0,04x} ({1}) {2} {3}\n{4}", node.id, node.get_fingerprint()[], node.basic_info.product_code[], node.basic_info.product_url[], info[]);
         }
 
         node.initialised = 0xFF; // fully initialised
         node.scan_in_progress = false;
+        node.interview_failures = 0;
+        node.retry_after = MonoTime();
 
         return true;
     }
@@ -1235,12 +1253,12 @@ private:
         ref NodeMap.Cluster basic = ep.clusters[0];
 
         // read from the basic cluster
-        enum ushort[10] basic_attributes = [ 0, 1, 2, 3, 4, 5, 7, 10, 11, 0x4000 ];
+        enum ushort[11] basic_attributes = [ 0, 1, 2, 3, 4, 5, 7, 10, 11, 0x4000, 0xFFFE ];
         for (size_t i = 0; i < basic_attributes.length; ++i)
             req_buffer[i*2..i*2 + 2][0..2] = basic_attributes[i].nativeToLittleEndian;
 
         // read basic attributes
-        ZigbeeResult r = try_thrice(() => _endpoint.zcl_request(node_id, ep.endpoint, 0x0104, 0, ZCLCommand.read_attributes, 0, req_buffer[0 .. basic_attributes.length*2], zcl_res, MessagePriority.background));
+        ZigbeeResult r = try_thrice(() => _endpoint.zcl_request(node_id, ep.endpoint, 0x0104, 0, ZCLCommand.read_attributes, 0, req_buffer[0 .. basic_attributes.length*2], zcl_res, PCP.bk));
         if (r != ZigbeeResult.success)
             return StringResult("request failed");
         if (zcl_res.hdr.command == ZCLCommand.default_response)
@@ -1277,7 +1295,7 @@ private:
             version (DebugZigbeeController)
             {
                 if (attr.data_type != data_type)
-                    writeWarningf("ZigbeeController: basic attribute {0,04x} data type mismatch (expected {1}, got {2})", attr_id, attr.data_type, data_type);
+                    log.warningf("basic attribute {0,04x} data type mismatch (expected {1}, got {2})", attr_id, attr.data_type, data_type);
             }
             attr.data_type = data_type;
 

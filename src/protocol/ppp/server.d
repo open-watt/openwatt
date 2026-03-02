@@ -85,7 +85,7 @@ nothrow @nogc:
     }
 
 protected:
-    override bool transmit(ref const Packet packet)
+    override int transmit(ref const Packet packet, MessageCallback)
     {
         assert(false, "TODO: frame and transmit");
     }

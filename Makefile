@@ -272,6 +272,20 @@ ifeq ($(CONFIG),unittest)
     TARGETNAME := $(TARGETNAME)_test
 endif
 
+# Strip druntime/phobos — use URT's own object.d and runtime support.
+# LDC: ldc2.conf in the project root is auto-discovered and sets -defaultlib=.
+# DMD: uses its own default config for import/lib paths; on Windows we add
+#      third_party/dmd first so our self-contained __importc_builtins.di
+#      shadows druntime's (which has MSVC-specific va_list issues). On Linux
+#      the system __importc_builtins.di already handles GCC builtins correctly.
+ifeq ($(COMPILER),dmd)
+    ifeq ($(OS),windows)
+        DFLAGS := -I=third_party/dmd $(DFLAGS) -defaultlib=
+    else
+        DFLAGS := $(DFLAGS) -defaultlib=
+    endif
+endif
+
 # Note: LDC's -deps format is not compatible with Make (it's a custom D module dependency format)
 # so we don't use -include here. The build will rebuild everything when any file changes.
 
