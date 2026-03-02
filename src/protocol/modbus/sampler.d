@@ -278,11 +278,9 @@ private:
             return;
         }
 
-        if ((kind < 2 && responseBytes * 8 != count.align_up(8)) ||
-            (kind > 2 && responseBytes / 2 != count))
+        if ((kind < 2 && responseBytes * 8 != count.align_up(8)) || (kind > 2 && responseBytes / 2 != count))
         {
-            client.log.warning("response length mismatch from ", server,
-                " bytes=", responseBytes, " expected=", count * 2);
+            client.log.warning("response length mismatch from ", server, " bytes=", responseBytes, " expected=", count * 2);
             release_in_flight(kind, first, count);
             return;
         }
