@@ -7,6 +7,7 @@ import urt.time;
 
 import manager;
 import manager.console.session;
+import manager.log : format_log_line;
 
 nothrow @nogc:
 
@@ -37,7 +38,7 @@ int main(string[] args)
         // check if stdout is redirected
         version (Windows)
         {
-            import core.sys.windows.windows : GetStdHandle, GetConsoleMode, STD_OUTPUT_HANDLE, DWORD;
+            import urt.internal.sys.windows : GetStdHandle, GetConsoleMode, STD_OUTPUT_HANDLE, DWORD;
             auto h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
 
             DWORD mode;
@@ -45,7 +46,7 @@ int main(string[] args)
             if (!is_console)
             {
                 // piped output - log to stderr so stdout stays clean for command output
-                register_log_sink(&stderr_log_sink);
+                register_log_sink(&stderr_log_sink, null);
             }
         }
         else version (Posix)
@@ -54,12 +55,12 @@ int main(string[] args)
             if (!isatty(STDOUT_FILENO))
             {
                 // piped - log to stderr
-                register_log_sink(&stderr_log_sink);
+                register_log_sink(&stderr_log_sink, null);
             }
         }
     }
     else
-        register_log_sink(&default_log_sink);
+        register_log_sink(&default_log_sink, null);
 
     Application app = create_application();
     Session active_session = null;
@@ -70,7 +71,7 @@ int main(string[] args)
     if (!conf)
     {
         import urt.string.format;
-        writeError("Failed to load startup configuration file: ", config_path);
+        log_error("system", "Failed to load startup configuration file: ", config_path);
         if (!interactive_mode)
             return -1;
     }
@@ -132,14 +133,15 @@ int main(string[] args)
 
 private:
 
-void default_log_sink(Level level, const(char)[] message) nothrow @nogc
+void default_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
 {
     import urt.io;
-    writeln(message);
+    writeln(format_log_line(msg));
 }
 
-void stderr_log_sink(Level level, const(char)[] message) nothrow @nogc
+void stderr_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
 {
-    import core.stdc.stdio : fprintf, stderr;
-    fprintf(stderr, "%.*s\n", cast(int)message.length, message.ptr);
+    import urt.internal.stdc : fprintf, stderr;
+    auto line = format_log_line(msg);
+    fprintf(stderr, "%.*s\n", cast(int)line.length, line.ptr);
 }

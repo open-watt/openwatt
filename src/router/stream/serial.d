@@ -17,7 +17,7 @@ public import router.stream;
 
 version (Windows)
 {
-    import core.sys.windows.windows;
+    import urt.internal.sys.windows;
 }
 else version(Posix)
 {
@@ -175,7 +175,7 @@ nothrow @nogc:
             if (_h_com == INVALID_HANDLE_VALUE)
                 return CompletionStatus.error;
 
-            DCB dcb;
+            DCB dcb = void;
             ZeroMemory(&dcb, DCB.sizeof);
             dcb.DCBlength = DCB.sizeof;
             if (!GetCommState(_h_com, &dcb))
@@ -432,7 +432,7 @@ nothrow @nogc:
                     iov[i].iov_base = cast(void*)d.ptr;
                     iov[i].iov_len = d.length;
                 }
-                bytes_written = writev(_fd, iov.ptr, cast(int)data.length);
+                bytes_written = core.sys.posix.unistd.writev(_fd, iov.ptr, cast(int)data.length);
             }
             else
                 bytes_written = core.sys.posix.unistd.write(_fd, data[0].ptr, data[0].length);

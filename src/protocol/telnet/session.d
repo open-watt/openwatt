@@ -92,10 +92,12 @@ nothrow @nogc:
             input.reserve(input.length + bytes);
 
             size_t i = 0;
-            for (; i < bytes; ++i)
+            parse_loop: for (; i < bytes; ++i)
             {
                 if (recvbuf[i] == NVT.IAC)
                 {
+                    size_t iac_start = i;
+
                     // NVT command
                     if (i >= bytes - 1)
                         break;
@@ -158,12 +160,13 @@ nothrow @nogc:
 
                         case NVT.SB:
                             size_t subNvt = i + 1;
-                            while (subNvt < bytes - 2 && recvbuf[subNvt] != NVT.IAC && recvbuf[subNvt + 1] != NVT.SE)
+                            while (subNvt < bytes - 1 && !(recvbuf[subNvt] == NVT.IAC && recvbuf[subNvt + 1] == NVT.SE))
                                 ++subNvt;
                             if (subNvt >= bytes - 1)
                             {
-                                // this subnegotiation wasn't closed. we must have an incomplete stream...
-                                break;
+                                // incomplete subnegotiation - save for next read
+                                i = iac_start;
+                                break parse_loop;
                             }
 
                             const(ubyte)[] sub = recvbuf[i + 1 .. subNvt];
@@ -175,8 +178,8 @@ nothrow @nogc:
                                 switch (sub[0])
                                 {
                                     case TelnetOptions.TERMINAL_TYPE:
-                                        if (sub.length < 1)
-                                            break; // TODO: this is a broken request; drop it I guess?
+                                        if (sub.length < 2)
+                                            break;
                                         if (sub[1] == 0x00)
                                         {
                                             // got remote terminal type...
@@ -209,7 +212,10 @@ nothrow @nogc:
                         case NVT.DO:
                         case NVT.DONT:
                             if (i >= bytes - 1)
-                                break;
+                            {
+                                i = iac_start;
+                                break parse_loop;
+                            }
                             TelnetOptions opt = cast(TelnetOptions)recvbuf[++i];
 
                             NVT response;
@@ -623,14 +629,6 @@ private:
         import urt.string.format;
 
         enum Clear = ANSI_ERASE_LINE ~ "\x1b[80D"; // clear and move left 80
-
-        if (_position < _buffer.length)
-        {
-            import urt.dbg;
-            breakpoint;
-            // CHECK THAT THE INDIRECT FORMAT STRING WORKS...
-            // then delete this code block...
-        }
 
         char[] prompt = tformat("{0, ?1}{2}{3}{@5, ?4}", Clear, withErase, _prompt, _buffer, _position < _buffer.length, "\x1b[{6}D", _buffer.length - _position);
         ptrdiff_t sent = _stream.write(prompt);

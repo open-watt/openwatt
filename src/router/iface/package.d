@@ -5,6 +5,8 @@ import urt.map;
 import urt.lifetime;
 import urt.mem.ring;
 import urt.mem.string;
+import urt.si.unit;
+import urt.si.quantity;
 import urt.string;
 import urt.string.format;
 import urt.time;
@@ -21,15 +23,13 @@ public import router.status;
 
 // package modules...
 public static import router.iface.bridge;
-public static import router.iface.can;
 public static import router.iface.ethernet;
-public static import router.iface.modbus;
-public static import router.iface.tesla;
 public static import router.iface.vlan;
 public static import router.iface.zigbee;
 
 nothrow @nogc:
 
+alias Milliseconds = Quantity!(float, ScaledUnit(Second, -3));
 
 enum BufferOverflowBehaviour : byte
 {
@@ -43,6 +43,21 @@ enum PacketDirection : ubyte
     incoming = 1,
     outgoing = 2
 }
+
+enum MessageState
+{
+    queued,
+    in_flight,
+    complete,
+    failed,
+    aborted,
+    timeout,
+    expired,
+    dropped
+}
+
+alias MessageCallback = void delegate(int msg_handle, MessageState state) nothrow @nogc;
+
 
 struct PacketFilter
 {
@@ -115,23 +130,30 @@ struct InterfaceSubscriber
 
 class BaseInterface : BaseObject
 {
-    __gshared Property[17] Properties = [ Property.create!("mtu", mtu)(),
-                                          Property.create!("actual-mtu", actual_mtu)(),
+    __gshared Property[24] Properties = [ Property.create!("actual-mtu", actual_mtu, null, "d")(),
+                                          Property.create!("mtu", mtu, null, "d")(),
                                           Property.create!("l2mtu", l2mtu)(),
-                                          Property.create!("max-l2mtu", max_l2mtu)(),
+                                          Property.create!("max-l2mtu", max_l2mtu, null, "d")(),
                                           Property.create!("pcap", pcap)(),
                                           Property.create!("last_status_change_time", last_status_change_time, "status")(),
-                                          Property.create!("connected", connected, "status")(),
-                                          Property.create!("link_status", link_status, "status")(),
+                                          Property.create!("connected", connected, "status", "d")(),
+                                          Property.create!("link_status", link_status, "status", "d")(),
                                           Property.create!("link_downs", link_downs, "status")(),
                                           Property.create!("tx_link_speed", tx_link_speed, "status")(),
                                           Property.create!("rx_link_speed", rx_link_speed, "status")(),
-                                          Property.create!("send_bytes", send_bytes, "traffic")(),
-                                          Property.create!("recv_bytes", recv_bytes, "traffic")(),
-                                          Property.create!("send_packets", send_packets, "traffic")(),
-                                          Property.create!("recv_packets", recv_packets, "traffic")(),
-                                          Property.create!("send_dropped", send_dropped, "traffic")(),
-                                          Property.create!("recv_dropped", recv_dropped, "traffic")() ];
+                                          Property.create!("send_bytes", send_bytes, "traffic", "d")(),
+                                          Property.create!("recv_bytes", recv_bytes, "traffic", "d")(),
+                                          Property.create!("send_packets", send_packets, "traffic", "d")(),
+                                          Property.create!("recv_packets", recv_packets, "traffic", "d")(),
+                                          Property.create!("send_dropped", send_dropped, "traffic", "d")(),
+                                          Property.create!("recv_dropped", recv_dropped, "traffic", "d")(),
+                                          Property.create!("tx_rate", tx_rate, "traffic", "d")(),
+                                          Property.create!("rx_rate", rx_rate, "traffic", "d")(),
+                                          Property.create!("tx_rate_max", tx_rate_max, "traffic")(),
+                                          Property.create!("rx_rate_max", rx_rate_max, "traffic")(),
+                                          Property.create!("avg_queue_time", avg_queue_time, "traffic")(),
+                                          Property.create!("avg_service_time", avg_service_time, "traffic")(),
+                                          Property.create!("max_service_time", max_service_time, "traffic")() ];
 nothrow @nogc:
 
     enum type_name = "interface";
@@ -214,13 +236,23 @@ nothrow @nogc:
     ulong recv_packets() const => _status.recv_packets;
     ulong send_dropped() const => _status.send_dropped;
     ulong recv_dropped() const => _status.recv_dropped;
+    ulong rx_rate() const => _status.rx_rate;
+    ulong tx_rate() const => _status.tx_rate;
+    ulong tx_rate_max() const => _status.tx_rate_max;
+    ulong rx_rate_max() const => _status.rx_rate_max;
+//    Milliseconds avg_wait() const => Milliseconds(float(_status.avg_wait_us) / 1000);
+//    Milliseconds avg_service() const => Milliseconds(float(_status.avg_service_us) / 1000);
+//    Milliseconds max_service() const => Milliseconds(float(_status.max_service_us) / 1000);
+    float avg_queue_time() const => float(_status.avg_queue_us) / 1000;
+    float avg_service_time() const => float(_status.avg_service_us) / 1000;
+    float max_service_time() const => float(_status.max_service_us) / 1000;
 
     // API...
 
     ref const(Status) status() const pure
         => _status;
 
-    final void reset_counters() pure
+    final void reset_counters()
     {
         _status.link_downs = 0;
         _status.send_bytes = 0;
@@ -229,6 +261,16 @@ nothrow @nogc:
         _status.recv_packets = 0;
         _status.send_dropped = 0;
         _status.recv_dropped = 0;
+        _status.tx_rate = 0;
+        _status.rx_rate = 0;
+        _status.tx_rate_max = 0;
+        _status.rx_rate_max = 0;
+        _status.avg_queue_us = 0;
+        _status.avg_service_us = 0;
+        _status.max_service_us = 0;
+        _last_send_bytes = 0;
+        _last_recv_bytes = 0;
+        _last_bitrate_sample = getTime();
     }
 
     override const(char)[] status_message() const
@@ -266,24 +308,24 @@ nothrow @nogc:
         }
     }
 
-    bool send(MACAddress dest, const(void)[] message, EtherType type, OW_SubType subtype = OW_SubType.unspecified)
+    int send(MACAddress dest, const(void)[] message, EtherType type, MessageCallback callback = null)
     {
-        if (!running)
-            return false;
-
         Packet p;
         ref eth = p.init!Ethernet(message);
         eth.src = mac;
         eth.dst = dest;
         eth.ether_type = type;
-        eth.ow_sub_type = subtype;
-        return forward(p);
+        return forward(p, callback);
     }
 
-    final bool forward(ref Packet packet)
+    final int forward(ref Packet packet, MessageCallback callback = null)
     {
         if (!running)
-            return false;
+        {
+            if (callback)
+                callback(-1, MessageState.failed);
+            return -1;
+        }
 
         foreach (ref subscriber; _subscribers[0.._num_subscribers])
         {
@@ -291,7 +333,21 @@ nothrow @nogc:
                 subscriber.recv_packet(packet, this, PacketDirection.outgoing, subscriber.user_data);
         }
 
-        return transmit(packet);
+        int result = transmit(packet, callback);
+        if (result <= 0 && callback)
+            callback(result, result == 0 ? MessageState.complete : MessageState.failed);
+        return result;
+    }
+
+    void abort(int msg_handle, MessageState reason = MessageState.aborted)
+    {
+        assert(false, "Interface does not support message cancellation");
+    }
+
+    MessageState msg_state(int msg_handle) const
+    {
+        assert(msg_handle == 0, "Invalid message handle");
+        return MessageState.complete;
     }
 
     final void add_address(MACAddress mac, BaseInterface iface)
@@ -367,15 +423,39 @@ protected:
     BufferOverflowBehaviour _send_behaviour;
     BufferOverflowBehaviour _recv_behaviour;
 
+    MonoTime _last_bitrate_sample;
+    ulong _last_send_bytes;
+    ulong _last_recv_bytes;
+
     override void update()
     {
         assert(_status.link_status == LinkStatus.up, "Interface is not online, it shouldn't be in Running state!");
+
+        MonoTime now = getTime();
+        if ((now - _last_bitrate_sample) >= 1.seconds)
+        {
+            ulong elapsed_us = (now - _last_bitrate_sample).as!"usecs";
+            _status.tx_rate = (_status.send_bytes - _last_send_bytes) * 1_000_000 / elapsed_us;
+            _status.rx_rate = (_status.recv_bytes - _last_recv_bytes) * 1_000_000 / elapsed_us;
+
+            if (_status.tx_rate > _status.tx_rate_max)
+                _status.tx_rate_max = _status.tx_rate;
+            if (_status.rx_rate > _status.rx_rate_max)
+                _status.rx_rate_max = _status.rx_rate;
+
+            _last_send_bytes = _status.send_bytes;
+            _last_recv_bytes = _status.recv_bytes;
+            _last_bitrate_sample = now;
+        }
     }
 
     override void set_online()
     {
         _status.link_status = LinkStatus.up;
         _status.link_status_change_time = getSysTime();
+        _last_bitrate_sample = getTime();
+        _last_send_bytes = _status.send_bytes;
+        _last_recv_bytes = _status.recv_bytes;
         super.set_online();
     }
 
@@ -387,7 +467,7 @@ protected:
         ++_status.link_downs;
     }
 
-    abstract bool transmit(ref Packet packet);
+    abstract int transmit(ref Packet packet, MessageCallback callback = null);
 
     final void dispatch(ref Packet packet)
     {
@@ -423,14 +503,7 @@ protected:
         return false;
     }
 
-    // TODO: this package section should be refactored out of existence!
-package:
-    BaseInterface _master;
-    byte _slave_id;
-
-    Packet[] _send_queue;
-
-    MACAddress generate_mac_address() pure
+    final MACAddress generate_mac_address() pure
     {
         import urt.crc;
         alias crc_fun = calculate_crc!(Algorithm.crc32_iso_hdlc);
@@ -443,6 +516,13 @@ package:
             addr.b[5] ^= 0x80;
         return addr;
     }
+
+    // TODO: this package section should be refactored out of existence!
+package:
+    BaseInterface _master;
+    byte _slave_id;
+
+    Packet[] _send_queue;
 
 //private:
 protected: // TODO: should probably be private?

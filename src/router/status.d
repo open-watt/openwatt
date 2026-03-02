@@ -36,4 +36,13 @@ nothrow @nogc:
 
     ulong tx_link_speed;
     ulong rx_link_speed;
+
+    ulong tx_rate;         // bytes-per-second
+    ulong rx_rate;
+    ulong tx_rate_max;
+    ulong rx_rate_max;
+
+    uint avg_queue_us;    // the average amount of time packets spend in the transmit queue
+    uint avg_service_us;  // the average amount of time the router takes to process/deliver (excluding queue time)
+    uint max_service_us;  // the maximum amount of time the router takes to process/deliver (excluding queue time)
 }

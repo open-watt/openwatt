@@ -279,13 +279,13 @@ nothrow:
         version(DebugMessageFlow)
         {
             CommandData* cmdName = cmd in commandNames;
-            writeDebugf("EZSP: --> [{0}] - {1}(x{2, 04x}) - {3,?5}{4,!5}", _sequence_number, cmdName ? cmdName.name : "UNKNOWN", cmd, cmdName ? cmdName.reqFmt(buffer[5..i]) : null, cast(void[])buffer[0..i], cmdName !is null);
+            log.tracef("--> [{0}] - {1}(x{2, 04x}) - {3,?5}{4,!5}", _sequence_number, cmdName ? cmdName.name : "UNKNOWN", cmd, cmdName ? cmdName.reqFmt(buffer[5..i]) : null, cast(void[])buffer[0..i], cmdName !is null);
         }
 
-        if (!ash_send(buffer[0..i]))
+        if (ash_send(buffer[0..i]) < 0)
         {
             version(DebugMessageFlow)
-                writeDebug("EZSP: send failed!");
+                log.trace("send failed!");
 
             // error?!
             return -1;
@@ -335,7 +335,7 @@ nothrow:
         {
             if (_requested_version == 0)
             {
-                writeDebug("EZSP: connecting...");
+                log.debug_("connecting...");
 
                 _requested_version = PREFERRED_VERSION;
                 immutable ubyte[4] version_msg = [ _sequence_number++, 0x00, 0x00, _requested_version ];
@@ -375,7 +375,7 @@ nothrow:
         MonoTime now = getTime();
         if (_queued_requests.length > 0 && now - _queued_requests[0].ts > 200.msecs)
         {
-            writeWarningf("EZSP: request {0,02x} timed out", _queued_requests[0].sequence_number);
+            log.warningf("request {0,02x} timed out", _queued_requests[0].sequence_number);
             _queued_requests.popFront();
 
             send_queued_message();
@@ -441,7 +441,7 @@ private:
         Map!(ushort, CommandData) commandNames;
     }
 
-    bool ash_send(const(ubyte)[] data)
+    int ash_send(const(ubyte)[] data)
     {
         Packet p;
         p.init!ASHFrame(data);
@@ -473,7 +473,7 @@ private:
         {
             if (msg.length < 5)
             {
-                writeWarning("EZSP: [!!!] invalid frame; frame is too short!");
+                log.warning("invalid frame; frame is too short!");
                 return;
             }
 
@@ -486,7 +486,7 @@ private:
         {
             if (msg.length < 3)
             {
-                writeWarning("EZSP: [!!!] invalid frame; frame is too short!");
+                log.warning("invalid frame; frame is too short!");
                 return;
             }
 
@@ -499,7 +499,7 @@ private:
 
                 if (msg.length < 5)
                 {
-                    writeWarning("EZSP: [!!!] invalid frame; frame is too short!");
+                    log.warning("invalid frame; frame is too short!");
                     return;
                 }
 
@@ -555,19 +555,19 @@ private:
                 _known_version = _requested_version;
                 _requested_version = 0;
 
-                writeInfof("EZSP: connected: {0} V{1} - protocol version {2}", r.stackType == 1 ? "ROUTER" : r.stackType == 2 ? "COORDINATOR" : "UNKNOWN", _stack_version, _known_version);
+                log.noticef("connected: {0} V{1} - protocol version {2}", r.stackType == 1 ? "ROUTER" : r.stackType == 2 ? "COORDINATOR" : "UNKNOWN", _stack_version, _known_version);
                 break;
 
             case 0x0058: // invalid command
                 EzspStatus reason = cast(EzspStatus)msg[0];
-                writeWarning("EZSP: invalid command: ", reason);
+                log.warning("invalid command: ", reason);
                 break;
 
             default:
                 version(DebugMessageFlow)
                 {
                     CommandData* cmdName = command in commandNames;
-                    writeDebugf("EZSP: <-- [{0,!2}{1,?2}] - {3}(x{4,04x}) - {5,?7}{6,!7}", seq, "CB", cb_type != 0, cmdName ? cmdName.name : "UNKNOWN", command, cmdName ? cmdName.resFmt(msg) : null, cast(void[])msg, cmdName !is null);
+                    log.tracef("<-- [{0,!2}{1,?2}] - {3}(x{4,04x}) - {5,?7}{6,!7}", seq, "CB", cb_type != 0, cmdName ? cmdName.name : "UNKNOWN", command, cmdName ? cmdName.resFmt(msg) : null, cast(void[])msg, cmdName !is null);
                 }
 
                 if (cb_type == 1)
@@ -583,19 +583,19 @@ private:
                     if (_queued_requests.length == 0 || seq < _queued_requests[0].sequence_number)
                     {
                         // stale response?
-                        writeWarning("EZSP: received stale response - seq: ", seq);
+                        log.debug_("received stale response - seq: ", seq);
                         return;
                     }
                     if (seq > _queued_requests[0].sequence_number)
                     {
                         // out-of-order response? (this could be because the seq counter wrapped?)
-                        writeWarning("EZSP: received unsolicited or out-of-order response - seq: ", seq);
+                        log.warning("received unsolicited or out-of-order response - seq: ", seq);
                         return;
                     }
                     if (command != _queued_requests[0].cmd)
                     {
                         // mismatched response?
-                        writeWarningf("EZSP: received mismatched response - expected cmd x{0,04x} but got x{1,04x}", _queued_requests[0].cmd, command);
+                        log.warningf("received mismatched response - expected cmd x{0,04x} but got x{1,04x}", _queued_requests[0].cmd, command);
                         return;
                     }
 
@@ -677,7 +677,7 @@ void response_shim(bool withUserdata, Args...)(const(ubyte)[] response, void* cb
         size_t taken = response.ezsp_deserialise(args);
         if (taken == 0 || taken > response.length)
         {
-            writeWarning("EZSP: error deserialising response");
+            log_warning("ezsp", "error deserialising response");
             return;
         }
         if (taken < response.length)
@@ -685,7 +685,7 @@ void response_shim(bool withUserdata, Args...)(const(ubyte)[] response, void* cb
             // TODO: WE SEE THIS WEIRD 02 TAIL BYTE ALL THE TIME IN NORMAL COMMUNICATION!
             //       WTF IS IT? WHY DO WE SEE IT?
             if (taken != response.length - 1 || response[$ - 1] != 0x02)
-                writeWarning("EZSP: response buffer contains more bytes than expected! tail bytes: ", cast(void[])response[taken .. $]);
+                log_warning("ezsp", "response buffer contains more bytes than expected! tail bytes: ", cast(void[])response[taken .. $]);
         }
     }
 

@@ -82,7 +82,7 @@ nothrow @nogc:
         // periodically send RST until we get RSTACK
         if (!_connected && now - _last_event > T_RSTACK_MAX.msecs)
         {
-            writeDebug("ASHv2: connecting on '", _stream.name, "'...");
+            log.debug_("connecting on '", _stream.name, "'...");
 
             immutable ubyte[5] RST = [ ASH_CANCEL_BYTE, 0xC0, 0x38, 0xBC, ASH_FLAG_BYTE ];
             if (_stream.write(RST) != 5)
@@ -158,15 +158,16 @@ nothrow @nogc:
     }
 
 protected:
-    override bool transmit(ref Packet packet)
+    override int transmit(ref Packet packet, MessageCallback)
     {
         if (packet.type != PacketType.ash)
-            return false;
+            return -1;
         const(ubyte)[] message = cast(ubyte[])packet.data();
         if (message.length > ASH_MAX_MSG_LENGTH)
-            return false;
+            return -1;
 
         Message* msg = alloc_message();
+        msg.queue_time = getTime();
         msg.length = cast(ubyte)message.length;
         msg.buffer[0 .. message.length] = message[];
         if (tx_ahead() >= _max_in_flight || !send_msg(msg))
@@ -185,7 +186,7 @@ protected:
 
         ++_status.send_packets;
         _status.send_bytes += message.length;
-        return true;
+        return 0;
     }
 
     void stream_state_change(BaseObject, StateSignal signal)
@@ -211,6 +212,7 @@ private:
     struct Message
     {
         Message* next;
+        MonoTime queue_time;
         MonoTime send_time;
         ubyte seq;
         ubyte length;
@@ -248,6 +250,7 @@ private:
     {
         do
         {
+            MonoTime now = getTime();
             ptrdiff_t r = _stream.read(_rx_buffer[_rx_offset..$]);
             if (r <= 0)
                 break;
@@ -326,7 +329,7 @@ private:
                 }
 
                 ++_status.recv_packets;
-                process_frame(frame);
+                process_frame(frame, now);
             }
 
             // shuffle any tail bytes (incomplete frames) to the start of the buffer...
@@ -340,7 +343,7 @@ private:
         while(true);
     }
 
-    void process_frame(ubyte[] frame)
+    void process_frame(ubyte[] frame, MonoTime timestamp)
     {
         ubyte control = frame.popFront;
 
@@ -355,7 +358,10 @@ private:
                 if (_ash_version == 2)
                     _connected = true;
 
-                writeDebug(_connected ? "ASHv2: connected! code=" : "ASHv2: connection failed; unsupported version! code=", code);
+                if (_connected)
+                    log.info("connected, code=", code);
+                else
+                    log.warning("connection failed; unsupported ASH version, code=", code);
                 return;
             }
         }
@@ -369,7 +375,7 @@ private:
             {
                 ubyte ver = frame[0];
                 ubyte code = frame[1];
-                writeDebug("ASHv2: <-- ERROR. code=", code);
+                log.warning("received ERROR frame, code=", code);
             }
             restart();
             return;
@@ -387,14 +393,14 @@ private:
             {
                 // ACK
                 version (DebugASHMessageFlow)
-                    writeDebugf("ASHv2: <-- ACK [{0,02x}]", control);
-                ack_in_flight(ack_num);
+                    log.tracef("<-- ACK [{0,02x}]", control);
+                ack_in_flight(ack_num, timestamp);
             }
             else if ((control & 0x60) == 0x20)
             {
                 // NAK
                 version (DebugASHMessageFlow)
-                    writeDebugf("ASHv2: <-- NAK [{0,02x}]", control);
+                    log.tracef("<-- NAK [{0,02x}]", control);
             }
             else
             {
@@ -420,7 +426,7 @@ private:
         randomise(frame, data);
 
         version (DebugASHMessageFlow)
-            writeDebugf("ASHv2: <-- [x{0, 02x}]: {1}", control, cast(void[])data);
+            log.tracef("<-- [x{0, 02x}]: {1}", control, cast(void[])data);
 
         _rx_seq = (_rx_seq + 1) & 7;
         ash_ack(_rx_seq, false);
@@ -428,14 +434,14 @@ private:
         if (data.length > 0)
         {
             Packet p;
-            p.init!ASHFrame(data);
+            p.init!ASHFrame(data, cast(SysTime)timestamp);
             dispatch(p);
         }
 
-        ack_in_flight(ack_num);
+        ack_in_flight(ack_num, timestamp);
     }
 
-    void ack_in_flight(ubyte ack_num)
+    void ack_in_flight(ubyte ack_num, MonoTime timestamp)
     {
         while (_tx_ack != ack_num)
         {
@@ -445,6 +451,7 @@ private:
             }
 
             Message* msg = _tx_in_flight;
+            update_time_stats(msg, timestamp);
             _tx_in_flight = _tx_in_flight.next;
             free_message(msg);
 
@@ -483,6 +490,18 @@ private:
         _free_list = message;
     }
 
+    void update_time_stats(Message* msg, MonoTime now)
+    {
+        uint wait_us = cast(uint)(msg.send_time - msg.queue_time).as!"usecs";
+        uint service_us = cast(uint)(now - msg.send_time).as!"usecs";
+
+        _status.avg_queue_us = (_status.avg_queue_us * 7 + wait_us) / 8;
+        _status.avg_service_us = (_status.avg_service_us * 7 + service_us) / 8;
+
+        if (service_us > _status.max_service_us)
+            _status.max_service_us = service_us;
+    }
+
     bool send_msg(Message* msg)
     {
         if (!_connected || !ash_send(msg.payload(), _tx_seq, _rx_seq, false))
@@ -510,7 +529,7 @@ private:
         ubyte control = 0x80 | (nak ? 0x20 : 0) | (ready << 3) | (ack & 7);
 
         version (DebugASHMessageFlow)
-            writeDebugf("ASHv2: --> {0} [x{1, 02x}]", nak ? "NAK" : "ACK", control);
+            log.tracef("--> {0} [x{1, 02x}]", nak ? "NAK" : "ACK", control);
 
         ubyte[4] ack_msg = [ control, 0, 0, ASH_FLAG_BYTE ];
         ack_msg[1..3] = ack_msg[0..1].ezsp_crc().nativeToBigEndian;
@@ -556,13 +575,13 @@ private:
         stuffed[len++] = 0x7E;
 
         version (DebugASHMessageFlow)
-            writeDebugf("ASHv2: --> [x{0, 02x}]: {1}", control, cast(void[])msg);
+            log.tracef("--> [x{0, 02x}]: {1}", control, cast(void[])msg);
 
         ptrdiff_t r = _stream.write(stuffed[0..len]);
         if (r != len)
         {
             version (DebugASHMessageFlow)
-                writeDebug("ASHv2: stream write failed!");
+                log.warning("stream write failed!");
             ++_status.send_dropped;
             return false;
         }

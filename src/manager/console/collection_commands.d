@@ -95,7 +95,7 @@ nothrow @nogc:
 
         // TODO: maybe something better? perhaps a virtual on the object which lets it supply a creation message?
         //       how do we know what properties are relevant for the create logs?
-        writeInfo("Create ", item.type, ": '", item.name, "'");
+        item.log.info("created");
 
         return null;
     }
@@ -403,13 +403,68 @@ nothrow @nogc:
     {
         const(Property*)[] properties = _collection.type_info.properties;
 
-        auto items = Array!Variant(Reserve, _collection.item_count);
+        // Check for --json flag
+        foreach (ref arg; args)
+        {
+            if (arg == "--json")
+            {
+                auto items = Array!Variant(Reserve, _collection.item_count);
+                foreach (item; _collection.values)
+                    items ~= item.gather();
+                result = Variant(items.move);
+                return null;
+            }
+        }
+
+        // Parse proplist=a,b,c if provided
+        const(char)[] proplist;
+        foreach (ref na; namedArgs)
+        {
+            if (na.name == "proplist")
+            {
+                proplist = na.value.asString;
+                break;
+            }
+        }
+
+        Table table;
+
+        // Flags column is always first, no header, shows single-letter flags
+        table.add_column("");
+
+        foreach (p; properties)
+        {
+            if (!p.get)
+                continue;
+            if (p.name[] == "flags")
+                continue;
+            if (!prop_visible(p.flags, proplist, p.name[]))
+                continue;
+            auto alignment = is_numeric_prop(p.type[0][]) ? Table.TextAlign.right : Table.TextAlign.left;
+            table.add_column(p.name[], alignment);
+        }
+
         foreach (item; _collection.values)
         {
-            // filter items?
-            items ~= item.gather();
+            table.add_row();
+
+            // Render flags as single-letter string
+            table.cell(format_flags(item.flags));
+
+            foreach (p; properties)
+            {
+                if (!p.get)
+                    continue;
+                if (p.name[] == "flags")
+                    continue;
+                if (!prop_visible(p.flags, proplist, p.name[]))
+                    continue;
+                Variant val = p.get(item);
+                table.cell(val);
+            }
         }
-        result = Variant(items.move);
+
+        table.render(session);
         return null;
     }
 
@@ -431,6 +486,56 @@ private:
 }
 
 private:
+
+const(char)[] format_flags(ObjectFlags f)
+{
+    // D=dynamic T=temporary X=disabled I=invalid R=running S=slave L=link H=hardware
+    immutable char[8] letters = "DTXIRSLH";
+    static char[8] buf;
+    size_t n = 0;
+    ubyte bits = cast(ubyte)f;
+    foreach (i; 0 .. 8)
+    {
+        if (bits & (1 << i))
+            buf[n++] = letters[i];
+    }
+    return buf[0 .. n];
+}
+
+// Property flag bits: 1=always visible, 2=show by default, 4=always hidden
+bool prop_visible(ubyte flags, const(char)[] proplist, const(char)[] name)
+{
+    if (flags & 4)
+        return false;
+    if (proplist.length > 0)
+        return in_comma_list(proplist, name);
+    return (flags & (1 | 2)) != 0;
+}
+
+bool in_comma_list(const(char)[] list, const(char)[] name)
+{
+    while (list.length > 0)
+    {
+        size_t comma = 0;
+        while (comma < list.length && list[comma] != ',')
+            ++comma;
+        if (list[0 .. comma] == name)
+            return true;
+        list = comma < list.length ? list[comma + 1 .. $] : null;
+    }
+    return false;
+}
+
+bool is_numeric_prop(const(char)[] type)
+{
+    if (type.length == 0)
+        return false;
+    if (type == "int" || type == "uint" || type == "byte" || type == "num")
+        return true;
+    if (type.length >= 2 && type[0] == 'q' && type[1] == '_')
+        return true;
+    return false;
+}
 
 enum SuggestFlags : uint
 {

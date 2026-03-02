@@ -1,4 +1,4 @@
-module router.iface.modbus;
+module protocol.modbus.iface;
 
 import urt.array;
 import urt.conv;
@@ -18,13 +18,13 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
+import protocol.modbus;
 import protocol.modbus.message;
 
 import router.iface;
 import router.iface.packet;
+import router.iface.priority_queue;
 import router.stream;
-
-//version = DebugModbusMessageFlow;
 
 alias modbus_crc = calculate_crc!(Algorithm.crc16_modbus);
 alias modbus_crc_2 = calculate_crc_2!(Algorithm.crc16_modbus);
@@ -47,32 +47,6 @@ enum ModbusFrameType : ubyte
     response
 }
 
-struct ServerMap
-{
-    String name;
-    MACAddress mac;
-    ubyte local_address;
-    ubyte universal_address;
-    ModbusInterface iface;
-    String profile;
-    String model;
-}
-
-struct ModbusRequest
-{
-    ~this() nothrow @nogc
-    {
-        if (buffered_packet)
-            defaultAllocator().free((cast(void*)buffered_packet)[0 .. Packet.sizeof + buffered_packet.length]);
-    }
-
-    SysTime request_time;
-    MACAddress request_from;
-    ushort sequence_number;
-    ubyte local_server_address;
-    bool in_flight;
-    Packet* buffered_packet;
-}
 
 class ModbusInterface : BaseInterface
 {
@@ -150,6 +124,21 @@ nothrow @nogc:
         }
     }
 
+    uint baud() const pure
+        => _user_baud;
+    void baud(uint value)
+    {
+        _user_baud = value;
+        restart();
+    }
+
+    bool estimate_baud() const pure
+        => _estimate_baud;
+    void estimate_baud(bool value)
+    {
+        _estimate_baud = value;
+    }
+
     inout(Stream) stream() inout pure
         => _stream;
     const(char)[] stream(Stream value)
@@ -211,6 +200,28 @@ nothrow @nogc:
         {
             _local_to_uni.insert(ubyte(0), ubyte(0));
             _uni_to_local.insert(ubyte(0), ubyte(0));
+
+            // compute timing parameters from baud rate
+            if (!_support_simultaneous_requests)
+            {
+                import router.stream.serial : SerialStream;
+                if (auto serial = cast(SerialStream)_stream)
+                {
+                    compute_timing(serial.baud_rate);
+                    _baud_estimated = true;
+                }
+                else
+                {
+                    uint baud = _user_baud != 0 ? _user_baud : _estimated_baud != 0 ? _estimated_baud : 9_600;
+                    compute_timing(baud);
+                    _gap_time_us = 0;
+                    _baud_estimated = _user_baud != 0 || _estimated_baud != 0;
+                }
+            }
+
+            _queue.init(_support_simultaneous_requests ? 8 : 1, 0, PCP.be, &_status);
+            _queue.set_queue_timeout(_queue_timeout.msecs);
+            _queue.set_transport_timeout(_request_timeout.msecs);
             return CompletionStatus.complete;
         }
         return CompletionStatus.continue_;
@@ -221,9 +232,15 @@ nothrow @nogc:
         _sequence_number = 0;
         _expect_message_type = ModbusFrameType.unknown;
         _last_receive_event = SysTime();
+        _baud_estimated = false;
 
-        _status.send_dropped += _pending_requests.length;
-        _pending_requests.clear();
+        foreach (kvp; _pending[])
+        {
+            if (kvp.value.callback)
+                kvp.value.callback(kvp.key, MessageState.aborted);
+        }
+        _pending.clear();
+        _queue.abort_all();
 
         _local_to_uni.clear();
         _uni_to_local.clear();
@@ -240,36 +257,13 @@ nothrow @nogc:
 
         SysTime now = getSysTime();
 
-        // check for timeouts
-        for (size_t i = 0; i < _pending_requests.length; )
-        {
-            auto req = &_pending_requests[i];
-            Duration elapsed = now - req.request_time;
-            if (elapsed > (req.in_flight ? _request_timeout.msecs : _queue_timeout.msecs))
-            {
-                _pending_requests.remove(i);
-                if (!req.in_flight)
-                    ++_status.send_dropped;
-            }
-            else
-                ++i;
-        }
+        _queue.timeout_stale(getTime());
 
-        // check for latent transmit
-        while (!_pending_requests.empty && !_pending_requests[0].in_flight && now - _last_receive_event >= _gap_time.msecs)
-        {
-            if (forward(*_pending_requests[0].buffered_packet))
-            {
-                // we'll reset the request time so it doesn't timeout straight away
-                _pending_requests[0].request_time = now;
-                _pending_requests[0].in_flight = true;
-            }
-            else
-            {
-                // if send failed we won't try again
-                _pending_requests.remove(0);
-            }
-        }
+        // estimate remote baud rate for TCP bridges after collecting stats
+        if (_estimate_baud && !_baud_estimated && !_support_simultaneous_requests && _status.send_packets >= 20)
+            estimate_remote_baud();
+
+        send_queued_messages();
 
         // check for data
         ubyte[1024] buffer = void;
@@ -349,81 +343,71 @@ nothrow @nogc:
         }
     }
 
-    protected override bool transmit(ref const Packet packet) nothrow @nogc
+    protected override int transmit(ref const Packet packet, MessageCallback callback = null) nothrow @nogc
     {
         // can only handle modbus packets
         if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.modbus || packet.data.length < 5)
         {
+            log.debug_("tx-drop: not a modbus packet");
             ++_status.send_dropped;
-            return false;
+            return -1;
         }
 
-        auto mod_mb = get_module!ModbusInterfaceModule();
+        auto mod_mb = get_module!ModbusProtocolModule();
 
-        ushort _sequence_number = (cast(ubyte[])packet.data)[0..2].bigEndianToNative!ushort;
+        ushort seq = (cast(ubyte[])packet.data)[0..2].bigEndianToNative!ushort;
         ModbusFrameType packetType = *cast(ModbusFrameType*)&packet.data[2];
         ubyte packetAddress = *cast(ubyte*)&packet.data[3];
-
-        ushort length = 0;
-        ubyte address = 0;
 
         if (_is_bus_master)
         {
             assert(packetType == ModbusFrameType.request);
 
+            ubyte local_address = 0;
             if (!packet.eth.dst.isBroadcast)
             {
                 ServerMap* map = mod_mb.find_server_by_mac(packet.eth.dst);
-                if (!map)
+                if (!map || map.iface !is this)
                 {
+                    log.debug_("tx-drop: unknown server MAC");
                     ++_status.send_dropped;
-                    return false; // we don't know who this server is!
+                    return -1;
                 }
-                if (map.iface !is this)
-                {
-                    // this server belongs to a different interface, but this interface received it...
-                    // this probably happened because a bridge didn't know where to direct the packet.
-                    // we have 2 options; just forward it, or drop it... since we know it should be directed somewhere else...?
-                    ++_status.send_dropped;
-                    return false; // this server belongs to a different interface...
-                }
-                debug assert(packetAddress == map.universal_address, "Packet address does not match dest address?!");
-                // TODO: we could use uni -> local lookup
-                address = map.local_address;
+                local_address = map.local_address;
             }
 
-            // we can transmit immediately if simultaneous requests are accepted
-            // or if there are no messages currently queued, and we satisfied the message gap time
-            SysTime now = getSysTime();
-            bool transmitImmediately = _support_simultaneous_requests || (_pending_requests.empty ? (now - _last_receive_event >= _gap_time.msecs) : (&packet == _pending_requests[0].buffered_packet));
+            Packet p = packet;
+            int tag = _queue.enqueue(p, &on_frame_complete);
+            if (tag < 0)
+            {
+                log.debug_("tx-drop: queue full");
+                ++_status.send_dropped;
+                return -1;
+            }
 
-            // we need to queue the request so we can return the response to the sender...
-            // but check that it's not a re-send attempt of the head queued packet
-            if (_pending_requests.empty || &packet != _pending_requests[0].buffered_packet)
-                _pending_requests ~= ModbusRequest(now, packet.eth.src, _sequence_number, address, transmitImmediately, packet.clone());
+            _pending[cast(ubyte)tag] = PendingModbus(packet.eth.src, seq, local_address, callback);
 
-            if (!transmitImmediately)
-                return true;
+            send_queued_messages();
+            return tag;
         }
         else
         {
             assert(packetType == ModbusFrameType.response);
 
-            // if we're not a bus master, we can only send response packets destined for the master
             if (packet.eth.dst != _master_mac)
             {
+                log.debug_("tx-drop: response dst != master MAC");
                 ++_status.send_dropped;
-                return false;
+                return -1;
             }
 
-            address = packetAddress;
-
-            // the packet is a response to the master; just frame it and send it...
+            ubyte address = packetAddress;
             ServerMap* map = mod_mb.find_server_by_universal_address(packetAddress);
             if (!map)
             {
+                log.debug_("tx-drop: unknown universal address ", packetAddress);
                 ++_status.send_dropped;
-                return false; // how did we even get a response if we don't know who the server is?
+                return -1;
             }
 
             if (map.iface is this)
@@ -436,58 +420,10 @@ nothrow @nogc:
                 debug assert(packetAddress == map.universal_address, "Packet address does not match dest address?!");
                 address = map.universal_address;
             }
+
+            const(ubyte)[] pdu = cast(ubyte[])packet.data[4 .. $];
+            return frame_and_send(address, pdu);
         }
-
-        // frame it up and send...
-        const(ubyte)[] pdu = cast(ubyte[])packet.data[4 .. $]; // PDU data
-        ubyte[520] buffer = void;
-
-        final switch (protocol)
-        {
-            case ModbusProtocol.unknown:
-                assert(false, "Modbus protocol not specified");
-            case ModbusProtocol.rtu:
-                // frame the packet
-                length = cast(ushort)(1 + pdu.length);
-                buffer[0] = address;
-                buffer[1 .. length] = pdu[];
-                buffer[length .. length + 2][0 .. 2] = buffer[0 .. length].modbus_crc().nativeToLittleEndian;
-                length += 2;
-                break;
-            case ModbusProtocol.tcp:
-                assert(false);
-            case ModbusProtocol.ascii:
-                // calculate the LRC
-                ubyte lrc = address;
-                foreach (b; cast(ubyte[])pdu[])
-                    lrc += cast(ubyte)b;
-                lrc = cast(ubyte)-lrc;
-
-                // format the packet
-                buffer[0] = ':';
-                format_int(address, cast(char[])buffer[1..3], 16, 2, '0');
-                length = cast(ushort)(3 + toHexString(pdu[], cast(char[])buffer[3..$]).length);
-                format_int(lrc, cast(char[])buffer[length .. length + 2], 16, 2, '0');
-                (cast(char[])buffer)[length + 2 .. length + 4] = "\r\n";
-                length += 4;
-        }
-
-        ptrdiff_t written = stream.write(buffer[0 .. length]);
-        if (written <= 0)
-        {
-            // what could have gone wrong here?
-            // TODO: proper error handling?
-
-            // if the stream disconnected, maybe we should buffer the message incase it reconnects promptly?
-
-            // just drop it for now...
-            ++_status.send_dropped;
-            return false;
-        }
-
-        ++_status.send_packets;
-        _status.send_bytes += length;
-        return true;
     }
 
     override ushort pcap_type() const
@@ -503,39 +439,229 @@ nothrow @nogc:
         sink(crc.nativeToLittleEndian());
     }
 
+    final override void abort(int msg_handle, MessageState reason = MessageState.aborted)
+    {
+        debug assert(msg_handle >= 0 && msg_handle <= 0xFF, "invalid msg_handle");
+
+        ubyte t = cast(ubyte)msg_handle;
+        if (auto pm = t in _pending)
+        {
+            if (pm.callback)
+                pm.callback(msg_handle, reason);
+            _pending.remove(t);
+        }
+        _queue.abort(t);
+    }
+
+    final override MessageState msg_state(int msg_handle) const
+    {
+        if (cast(ubyte)msg_handle in _pending)
+            return MessageState.in_flight;
+        if (_queue.is_queued(cast(ubyte)msg_handle))
+            return MessageState.queued;
+        return MessageState.complete;
+    }
+
+package:
+    final MACAddress generate_mac_address() pure
+        => super.generate_mac_address();
+
 private:
+
+    struct PendingModbus
+    {
+        MACAddress request_from;
+        ushort sequence_number;
+        ubyte local_server_address;
+        MessageCallback callback;
+    }
+
     ObjectRef!Stream _stream;
 
     ModbusProtocol _protocol;
     bool _is_bus_master;
     bool _support_simultaneous_requests = false;
-    ushort _request_timeout = 500; // default 500ms? longer?
-    ushort _queue_timeout = 500;   // same as request timeout?
-    ushort _gap_time = 35;         // what's a reasonable RTU gap time?
+    uint _request_timeout = 800;   // ms — computed from baud rate in startup()
+    uint _queue_timeout = 2500;    // ms — computed from baud rate in startup()
+    uint _gap_time_us = 4000;      // microseconds — computed from baud rate in startup()
+    uint _user_baud;               // explicit remote baud rate (0 = not set)
+    uint _estimated_baud;          // estimated remote baud rate for TCP bridges
+    bool _estimate_baud;           // enable auto-estimation of remote baud rate
+    bool _baud_estimated;
     SysTime _last_receive_event;
 
-    // if we are the bus master
-    Array!ModbusRequest _pending_requests;
+    // bus master: message queue and pending metadata
+    PriorityPacketQueue _queue;
+    Map!(ubyte, PendingModbus) _pending;
 
     // if we are not the bus master
-    package MACAddress _master_mac; // TODO: `package` because bridge interface backdoors this... rethink?
+    package(router.iface) MACAddress _master_mac; // TODO: `package` because bridge interface backdoors this!... rethink?
     ushort _sequence_number;
     ModbusFrameType _expect_message_type = ModbusFrameType.unknown;
 
-    Map!(ubyte, ubyte) _local_to_uni;
-    Map!(ubyte, ubyte) _uni_to_local;
+    package Map!(ubyte, ubyte) _local_to_uni;
+    package Map!(ubyte, ubyte) _uni_to_local;
 
     ubyte[260] _tail;
     ushort _tail_bytes;
 
+    int frame_and_send(ubyte address, const(ubyte)[] pdu)
+    {
+        ushort length = 0;
+        ubyte[520] buffer = void;
+
+        final switch (protocol)
+        {
+            case ModbusProtocol.unknown:
+                assert(false, "Modbus protocol not specified");
+            case ModbusProtocol.rtu:
+                length = cast(ushort)(1 + pdu.length);
+                buffer[0] = address;
+                buffer[1 .. length] = pdu[];
+                buffer[length .. length + 2][0 .. 2] = buffer[0 .. length].modbus_crc().nativeToLittleEndian;
+                length += 2;
+                break;
+            case ModbusProtocol.tcp:
+                assert(false);
+            case ModbusProtocol.ascii:
+                ubyte lrc = address;
+                foreach (b; cast(ubyte[])pdu[])
+                    lrc += cast(ubyte)b;
+                lrc = cast(ubyte)-lrc;
+
+                buffer[0] = ':';
+                format_int(address, cast(char[])buffer[1..3], 16, 2, '0');
+                length = cast(ushort)(3 + toHexString(pdu[], cast(char[])buffer[3..$]).length);
+                format_int(lrc, cast(char[])buffer[length .. length + 2], 16, 2, '0');
+                (cast(char[])buffer)[length + 2 .. length + 4] = "\r\n";
+                length += 4;
+        }
+
+        ptrdiff_t written = stream.write(buffer[0 .. length]);
+        if (written != length)
+        {
+            log.debug_("tx-drop: write failed (wrote ", written, " of ", length, ")");
+            ++_status.send_dropped;
+            return -1;
+        }
+
+        ++_status.send_packets;
+        _status.send_bytes += length;
+        return 0;
+    }
+
+    void send_queued_messages()
+    {
+        if (!_support_simultaneous_requests && getSysTime() - _last_receive_event < _gap_time_us.usecs)
+            return;
+
+        for (QueuedFrame* frame = _queue.dequeue(); frame !is null; frame = _queue.dequeue())
+        {
+            ubyte tag = frame.tag;
+            auto pm = tag in _pending;
+            if (!pm)
+            {
+                log.debug_("dispatch: no pending entry for tag ", tag);
+                _queue.complete(tag, MessageState.failed);
+                continue;
+            }
+
+            const(ubyte)[] pdu = cast(ubyte[])frame.packet.data[4 .. $];
+
+            if (frame_and_send(pm.local_server_address, pdu) < 0)
+            {
+                log.debug_("dispatch: frame_and_send failed for addr ", pm.local_server_address);
+                _queue.complete(tag, MessageState.failed);
+                continue;
+            }
+
+            if (pm.callback)
+                pm.callback(tag, MessageState.in_flight);
+        }
+    }
+
+    void on_frame_complete(int tag, MessageState state)
+    {
+        if (state != MessageState.complete && state != MessageState.in_flight)
+            log.debug_("queue event: tag=", tag, " state=", cast(int)state);
+
+        ubyte t = cast(ubyte)tag;
+        if (auto pm = t in _pending)
+        {
+            if (pm.callback)
+                pm.callback(tag, state);
+            _pending.remove(t);
+        }
+    }
+
+    // Compute inter-frame gap, transport timeout, and queue timeout from baud rate.
+    // Modbus RTU spec section 2.5.1.1:
+    //   baud <= 19200: t3.5 = 3.5 character times (11 bits/char)
+    //   baud > 19200: t3.5 = 1.75ms fixed
+    void compute_timing(uint baud)
+    {
+        if (baud == 0)
+            return;
+
+        // inter-frame gap in microseconds: 3.5 × 11 × 1_000_000 / baud
+        _gap_time_us = baud <= 19_200 ? 38_500_000 / baud : 1_750;
+
+        // transport timeout: 2× max frame time + 200ms processing margin
+        // max RTU frame = 256 bytes × 11 bits/char
+        uint max_frame_us = 256 * 11 * (1_000_000 / baud);
+        _request_timeout = max_frame_us * 2 / 1000 + 200;
+
+        // queue timeout: full queue drain time + 1s safety margin
+        uint single_tx_us = max_frame_us + _gap_time_us;
+        _queue_timeout = 32 * (single_tx_us / 1000) + 1000;
+    }
+
+    void estimate_remote_baud()
+    {
+        if (_status.send_packets < 20 || _status.avg_service_us == 0)
+            return;
+
+        uint avg_bytes = cast(uint)((_status.send_bytes + _status.recv_bytes) / _status.send_packets);
+        if (avg_bytes == 0)
+            return;
+
+        // subtract estimated device processing overhead (5ms)
+        uint serial_time_us = _status.avg_service_us > 5000 ? _status.avg_service_us - 5000 : _status.avg_service_us;
+        if (serial_time_us == 0)
+            return;
+
+        uint estimated = avg_bytes * 11 * (1_000_000 / serial_time_us);
+
+        // snap to nearest standard baud rate
+        static immutable uint[8] standard_bauds = [1_200, 2_400, 4_800, 9_600, 19_200, 38_400, 57_600, 115_200];
+        uint closest = standard_bauds[0];
+        uint min_diff = uint.max;
+        foreach (baud; standard_bauds)
+        {
+            uint diff = estimated > baud ? estimated - baud : baud - estimated;
+            if (diff < min_diff)
+            {
+                min_diff = diff;
+                closest = baud;
+            }
+        }
+
+        _estimated_baud = closest;
+        _baud_estimated = true;
+
+        // recompute timeouts from estimated baud (but keep gap=0 for TCP)
+        compute_timing(closest);
+        _gap_time_us = 0;
+
+        _queue.set_queue_timeout(_queue_timeout.msecs);
+        _queue.set_transport_timeout(_request_timeout.msecs);
+
+        writeInfo("Modbus interface '", name[], "': estimated remote baud rate ", closest);
+    }
+
     final void incoming_packet(const(void)[] message, SysTime recvTime, ref ModbusFrameInfo frame_info)
     {
         debug assert(running, "Shouldn't receive packets while not running...?");
-
-        // TODO: some debug logging of the incoming packet stream?
-        version (DebugModbusMessageFlow) {
-            writeDebug("Modbus packet received from interface: '", name, "' (", message.length, ")[ ", message[], " ]");
-        }
 
         // if we are the bus master, then we can only receive responses...
         ModbusFrameType type = _is_bus_master ? ModbusFrameType.response : frame_info.frame_type;
@@ -557,7 +683,7 @@ private:
             frame_mac = MACAddress.broadcast;
         else
         {
-            auto mod_mb = get_module!ModbusInterfaceModule();
+            auto mod_mb = get_module!ModbusProtocolModule();
 
             // we probably need to find a way to cache these lookups.
             // doing this every packet feels kinda bad...
@@ -581,6 +707,7 @@ private:
                     // if we are the bus-master, it should have been impossible to receive a packet from an unknown guy
                     // it's possibly a false packet from a corrupt bitstream, or there's another master on the bus!
                     // we'll drop this packet to be safe...
+                    log.debug_("rx-drop: unknown local address ", frame_info.address);
                     ++_status.recv_dropped;
                     return;
                 }
@@ -605,75 +732,82 @@ private:
 
         if (_is_bus_master)
         {
-            // if we are the bus master, we expect to receive packets in response to queued requests
             if (!_support_simultaneous_requests)
             {
-                // if there are no pending requests, then we probably received a late reply to something we timed out...
-                if (_pending_requests.empty)
+                // find the single in-flight entry (RTU: max_in_flight=1)
+                ubyte matched_tag = 0;
+                bool found = false;
+                foreach (kvp; _pending[])
                 {
+                    if (!_queue.is_queued(kvp.key))
+                    {
+                        matched_tag = kvp.key;
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found)
+                {
+                    log.debug_("rx-drop: response but no in-flight request");
                     ++_status.recv_dropped;
                     return;
                 }
 
-                // expect incoming messages are a response to the front message
-                if (_pending_requests[0].local_server_address == frame_info.address)
+                auto pm = matched_tag in _pending;
+                if (pm.local_server_address == frame_info.address)
                 {
                     p.eth.src = frame_mac;
-                    p.eth.dst = _pending_requests[0].request_from;
-                    buffer[0..2] = nativeToBigEndian(_pending_requests[0].sequence_number);
+                    p.eth.dst = pm.request_from;
+                    buffer[0..2] = nativeToBigEndian(pm.sequence_number);
                     dispatch(p);
+                    _queue.complete(matched_tag, MessageState.complete);
                 }
                 else
                 {
-                    // what if we get a message we don't expect?
-                    // one possible case is a delayed response from a server to a message we dismissed as a timeout...
-                    // this is a wonky case; we have choices
-                    //  1. don't dismiss the pending request, we may expect the response to come next
-                    //  2. dismiss the pending request, we have no good reason to believe it's still in flight
-                    //  3. dismiss ALL pending requests, because we may be out of cadence so drop everything to start over?
-
-                    // we'll do 2 for now...
+                    log.debug_("rx-drop: address mismatch (got ", frame_info.address,
+                        " expected ", pm.local_server_address, ")");
                     ++_status.recv_dropped;
+                    _queue.complete(matched_tag, MessageState.failed);
                 }
 
-                _pending_requests.remove(0);
+                send_queued_messages();
             }
             else
             {
                 if (!frame_info.has_sequence_number)
-                {
-                    // how can we _support_simultaneous_requests and not have a sequence number?
-                    // we must be using modbus TCP to _support_simultaneous_requests, no?
                     assert(false);
-                }
+
                 ushort seq = frame_info.sequence_number;
-                bool dispatched = false;
+                ubyte matched_tag = 0;
+                bool found = false;
 
-                foreach (i, ref req; _pending_requests)
+                foreach (kvp; _pending[])
                 {
-                    if (req.local_server_address != frame_info.address || req.sequence_number != seq)
-                        continue;
-
-                    p.eth.src = frame_mac;
-                    p.eth.dst = req.request_from;
-
-                    buffer[0..2] = nativeToBigEndian(seq);
-
-                    dispatch(p);
-                    dispatched = true;
-
-                    // remove the request from the queue
-                    _pending_requests.remove(i);
-                    break;
+                    if (kvp.value.local_server_address == frame_info.address && kvp.value.sequence_number == seq)
+                    {
+                        matched_tag = kvp.key;
+                        found = true;
+                        break;
+                    }
                 }
 
-                if (!dispatched)
+                if (found)
                 {
-                    // we received a packet with no pending request...
-                    // maybe it was a late response to a message that we already dismissed as timeout?
-                    // ...or something else?
+                    auto pm = matched_tag in _pending;
+                    p.eth.src = frame_mac;
+                    p.eth.dst = pm.request_from;
+                    buffer[0..2] = nativeToBigEndian(seq);
+                    dispatch(p);
+                    _queue.complete(matched_tag, MessageState.complete);
+                }
+                else
+                {
+                    log.debug_("rx-drop: no pending match for addr=", frame_info.address, " seq=", seq);
                     ++_status.recv_dropped;
                 }
+
+                send_queued_messages();
             }
         }
         else
@@ -689,6 +823,7 @@ private:
                 {
                     // we can't dispatch this message if we don't know if its a request or a response...
                     // we'll need to discard messages until we get one that we know, and then we can predict future messages from there
+                    log.debug_("rx-drop: unknown frame type, can't dispatch");
                     ++_status.recv_dropped;
                     return;
                 }
@@ -710,144 +845,6 @@ private:
 
             _expect_message_type = type == ModbusFrameType.request ? ModbusFrameType.response : ModbusFrameType.request;
         }
-    }
-}
-
-
-class ModbusInterfaceModule : Module
-{
-    mixin DeclareModule!"interface.modbus";
-nothrow @nogc:
-
-    Collection!ModbusInterface modbus_interfaces;
-    Map!(ubyte, ServerMap) remote_servers;
-
-    override void init()
-    {
-        g_app.console.register_collection("/interface/modbus", modbus_interfaces);
-        g_app.console.register_command!remote_server_add("/interface/modbus/remote-server", this, "add");
-    }
-
-    override void update()
-    {
-        modbus_interfaces.update_all();
-    }
-
-    final ServerMap* find_server_by_name(const(char)[] name)
-    {
-        foreach (ref map; remote_servers.values)
-        {
-            if (map.name[] == name)
-                return &map;
-        }
-        return null;
-    }
-
-    final ServerMap* find_server_by_mac(MACAddress mac)
-    {
-        foreach (ref map; remote_servers.values)
-        {
-            if (map.mac == mac)
-                return &map;
-        }
-        return null;
-    }
-
-    final ServerMap* find_server_by_local_address(ubyte local_address, BaseInterface iface)
-    {
-        foreach (ref map; remote_servers.values)
-        {
-            if (map.local_address == local_address && map.iface is iface)
-                return &map;
-        }
-        return null;
-    }
-
-    final ServerMap* find_server_by_universal_address(ubyte universal_address)
-    {
-        return universal_address in remote_servers;
-    }
-
-    final ServerMap* add_remote_server(const(char)[] name, ModbusInterface iface, ubyte address, const(char)[] profile, const(char)[] model, ubyte universal_address = 0)
-    {
-        if (!name)
-            name = tconcat(iface.name[], '.', address);
-
-        ServerMap map;
-        map.name = name.makeString(defaultAllocator());
-        map.mac = iface.generate_mac_address();
-        map.mac.b[5] = address;
-
-        if (!universal_address)
-        {
-            const ubyte initialAddress = universal_address = map.mac.b[4] ^ address;
-            while (true)
-            {
-                if (universal_address == 0 || universal_address == 0xFF)
-                    universal_address += 2;
-                if (universal_address !in remote_servers)
-                    break;
-                ++universal_address;
-                assert(universal_address != initialAddress, "No available universal addresses!");
-            }
-        }
-        else
-            assert(universal_address !in remote_servers, "Universal address already in use.");
-
-        iface._local_to_uni[address] = universal_address;
-        iface._uni_to_local[universal_address] = address;
-
-        map.local_address = address;
-        map.universal_address = universal_address;
-        map.iface = iface;
-        map.profile = profile.makeString(defaultAllocator());
-        map.model = model.makeString(defaultAllocator());
-
-        remote_servers[universal_address] = map;
-        iface.add_address(map.mac, iface);
-
-        writeInfof("Create modbus server '{0}' - mac: {1}  uid: {2}  at-interface: {3}({4})", map.name, map.mac, map.universal_address, iface.name, map.local_address);
-
-        return universal_address in remote_servers;
-    }
-
-    final void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, const(char)[] profile, Nullable!(const(char)[]) model, Nullable!ubyte universal_address)
-    {
-        if (!_interface)
-        {
-            session.write_line("Interface must be specified.");
-            return;
-        }
-        if (!address)
-        {
-            session.write_line("Local address must be specified.");
-            return;
-        }
-
-        BaseInterface iface = get_module!InterfaceModule.interfaces.get(_interface);
-        if (!iface)
-        {
-            session.write_line("Interface '", _interface, "' not found.");
-            return;
-        }
-        ModbusInterface modbusInterface = cast(ModbusInterface)iface;
-        if (!modbusInterface)
-        {
-            session.write_line("Interface '", _interface, "' is not a modbus interface.");
-            return;
-        }
-
-        if (universal_address)
-        {
-            ServerMap* t = universal_address.value in remote_servers;
-            if (t)
-            {
-                session.write_line("Universal address '", universal_address.value, "' already in use by '", t.name, "'.");
-                return;
-            }
-        }
-
-        add_remote_server(name, modbusInterface, address, profile, model ? model.value : null, universal_address ? universal_address.value : 0);
     }
 }
 

@@ -123,6 +123,20 @@ nothrow @nogc:
 
     // API...
 
+    const(ubyte)[] get_salt() const pure
+        => _salt[];
+
+    bool validate_challenge_response(const(ubyte)[] response_hash, const(ubyte)[] challenge_salt, HashFunction challenge_algorithm) const
+    {
+        if (_function == HashFunction.plain_text)
+        {
+            Array!ubyte expected = hash_password(_hash[], challenge_salt, challenge_algorithm);
+            return expected[] == response_hash[];
+        }
+        else
+            return _hash[] == response_hash[];
+    }
+
     bool allow_service(const(char)[] service, String* profile = null) const
     {
         bool get_profile(const(Service)* service)
