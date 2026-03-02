@@ -18,6 +18,7 @@ import router.iface.mac;
 import router.iface.packet : PCP, pcp_priority_map;
 
 version = DebugModbusSampler;
+//version = DebugModbusSamplerRegs;
 
 nothrow @nogc:
 
@@ -318,7 +319,7 @@ private:
             else
                 e.element.value(sample_value(data.ptr + byteOffset, e.desc), response_time);
 
-            version (DebugModbusSampler)
+            version (DebugModbusSamplerRegs)
                 client.log.tracef("Got reg {0,04x}: {1} = {2}", e.register, e.element.id, e.element.value);
         }
     }

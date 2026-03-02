@@ -81,6 +81,16 @@ nothrow @nogc:
         return false;
     }
 
+    const(QueuedFrame)* find_in_flight(ubyte tag) const pure
+    {
+        foreach (frame; _in_flight[])
+        {
+            if (frame.tag == tag)
+                return frame;
+        }
+        return null;
+    }
+
     int enqueue(ref Packet packet, MessageCallback callback = null)
     {
         PCP pcp = packet.pcp;
@@ -100,7 +110,15 @@ nothrow @nogc:
         frame.packet = packet.clone();
         frame.callback = callback;
         frame.enqueue_time = getTime();
-        frame.tag = next_tag();
+        int tag = alloc_tag();
+        if (tag < 0)
+        {
+            size_t alloc_size = Packet.sizeof + frame.packet.length;
+            defaultAllocator().free((cast(void*)frame.packet)[0 .. alloc_size]);
+            _pool.free(frame);
+            return -1;
+        }
+        frame.tag = cast(ubyte)tag;
         frame.pcp = pcp;
         frame.dei = dei;
         frame.in_flight = false;
@@ -278,9 +296,12 @@ private:
     ubyte _max_in_flight;
     ubyte _in_flight_count;
     ubyte _queued_count;
-    ubyte _next_tag;
     ubyte _reserved_slots;
     ubyte _reserved_min_rank;
+
+    ubyte _next_tag;
+    enum _tag_bits = size_t.sizeof * 8;
+    size_t[256 / _tag_bits] _tags_in_use;
     Duration _queue_timeout;
     Duration _transport_timeout;
 
@@ -300,12 +321,25 @@ private:
             _status.max_service_us = service_us;
     }
 
-    ubyte next_tag() pure
+    int alloc_tag() pure
     {
-        ubyte tag = _next_tag++;
-        if (_next_tag == 0)
-            _next_tag = 1;
-        return tag;
+        foreach (_; 0 .. 255)
+        {
+            ++_next_tag;
+            if (_next_tag == 0)
+                _next_tag = 1;
+            if (!(_tags_in_use[_next_tag / _tag_bits] & (size_t(1) << (_next_tag % _tag_bits))))
+            {
+                _tags_in_use[_next_tag / _tag_bits] |= size_t(1) << (_next_tag % _tag_bits);
+                return _next_tag;
+            }
+        }
+        return -1;
+    }
+
+    void free_tag(ubyte tag) pure
+    {
+        _tags_in_use[tag / _tag_bits] &= ~(size_t(1) << (tag % _tag_bits));
     }
 
     bool drop_lowest_dei()
@@ -332,6 +366,7 @@ private:
 
     void free_frame(QueuedFrame* frame)
     {
+        free_tag(frame.tag);
         if (frame.packet)
         {
             size_t alloc_size = Packet.sizeof + frame.packet.length;

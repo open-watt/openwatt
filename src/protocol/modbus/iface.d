@@ -594,6 +594,51 @@ private:
         }
     }
 
+    // Validate that a response PDU's byte count is consistent with the request.
+    // Returns false if the response is clearly for a different request (e.g. late
+    // response arriving after the original request timed out).
+    bool validate_response_length(ubyte tag, const(void)[] response_message) const
+    {
+        auto frame = _queue.find_in_flight(tag);
+        if (!frame)
+            return true; // can't validate without the request
+
+        const(ubyte)[] request_pdu = cast(const(ubyte)[])frame.packet.data[4 .. $];
+        const(ubyte)[] response_pdu = cast(const(ubyte)[])response_message;
+
+        if (request_pdu.length < 5 || response_pdu.length < 2)
+            return true; // too short to validate
+
+        ubyte req_fc = request_pdu[0];
+        ubyte rsp_fc = response_pdu[0];
+
+        // error responses (function code | 0x80) are always valid
+        if (rsp_fc & 0x80)
+            return true;
+
+        // function code must match
+        if (rsp_fc != req_fc)
+            return false;
+
+        // for read register/coil responses, validate byte count
+        ushort count = request_pdu[3 .. 5].bigEndianToNative!ushort;
+        ubyte response_bytes = response_pdu[1];
+
+        switch (req_fc)
+        {
+            case FunctionCode.read_holding_registers:
+            case FunctionCode.read_input_registers:
+                return response_bytes == count * 2;
+
+            case FunctionCode.read_coils:
+            case FunctionCode.read_discrete_inputs:
+                return response_bytes == (count + 7) / 8;
+
+            default:
+                return true; // can't validate other function codes
+        }
+    }
+
     // Compute inter-frame gap, transport timeout, and queue timeout from baud rate.
     // Modbus RTU spec section 2.5.1.1:
     //   baud <= 19200: t3.5 = 3.5 character times (11 bits/char)
@@ -652,6 +697,10 @@ private:
         // recompute timeouts from estimated baud (but keep gap=0 for TCP)
         compute_timing(closest);
         _gap_time_us = 0;
+
+        // TCP bridges add network latency on top of serial time;
+        // increase transport timeout to avoid premature eviction
+        _request_timeout = _request_timeout * 3 / 2;
 
         _queue.set_queue_timeout(_queue_timeout.msecs);
         _queue.set_transport_timeout(_request_timeout.msecs);
@@ -755,20 +804,27 @@ private:
                 }
 
                 auto pm = matched_tag in _pending;
-                if (pm.local_server_address == frame_info.address)
+                if (pm.local_server_address != frame_info.address)
+                {
+                    log.debug_("rx-drop: address mismatch (got ", frame_info.address,
+                        " expected ", pm.local_server_address, ")");
+                    ++_status.recv_dropped;
+                    _queue.complete(matched_tag, MessageState.failed);
+                }
+                else if (!validate_response_length(matched_tag, message))
+                {
+                    // response length doesn't match request — likely a late response
+                    // to a previously timed-out request; drop it and keep waiting
+                    log.debug_("rx-drop: response length mismatch (late response after timeout?)");
+                    ++_status.recv_dropped;
+                }
+                else
                 {
                     p.eth.src = frame_mac;
                     p.eth.dst = pm.request_from;
                     buffer[0..2] = nativeToBigEndian(pm.sequence_number);
                     dispatch(p);
                     _queue.complete(matched_tag, MessageState.complete);
-                }
-                else
-                {
-                    log.debug_("rx-drop: address mismatch (got ", frame_info.address,
-                        " expected ", pm.local_server_address, ")");
-                    ++_status.recv_dropped;
-                    _queue.complete(matched_tag, MessageState.failed);
                 }
 
                 send_queued_messages();

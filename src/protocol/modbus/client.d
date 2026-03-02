@@ -18,6 +18,8 @@ import protocol.modbus.message;
 import router.iface;
 import router.iface.packet : PCP;
 
+version = TrackLateResponses;
+
 nothrow @nogc:
 
 
@@ -185,6 +187,9 @@ protected:
             {
                 if (req.num_retries > 0)
                 {
+                    _iface.abort(req.tag);
+                    version (TrackLateResponses)
+                        record_abandoned(*req);
                     req.retry_time = now;
                     int new_tag = send_packet(req.server, req.sequence_number, req.request, ModbusFrameType.request);
                     if (new_tag >= 0)
@@ -197,6 +202,9 @@ protected:
                 }
                 else
                 {
+                    _iface.abort(req.tag);
+                    version (TrackLateResponses)
+                        record_abandoned(*req);
                     if (req.error_handler)
                         req.error_handler(ModbusErrorType.Timeout, req.request, req.request_time);
                     pending.remove(i);
@@ -228,6 +236,23 @@ private:
     bool _subscribed;
     ushort _sequence_number = 0;
     Array!PendingRequest pending;
+
+    version (TrackLateResponses)
+    {
+        struct AbandonedRequest
+        {
+            ushort sequence_number;
+            SysTime abandon_time;
+        }
+
+        AbandonedRequest[8] _abandoned;
+        ubyte _abandoned_pos;
+
+        void record_abandoned(ref const PendingRequest req)
+        {
+            _abandoned[_abandoned_pos++ & 7] = AbandonedRequest(req.sequence_number, getSysTime());
+        }
+    }
 
     void iface_state_change(BaseObject, StateSignal signal)
     {
@@ -272,6 +297,19 @@ private:
                 pending.remove(i);
                 return;
             }
+
+            version (TrackLateResponses)
+            {
+                foreach (ref ab; _abandoned)
+                {
+                    if (ab.sequence_number == seq)
+                    {
+                        long late_ms = (p.creation_time - ab.abandon_time).as!"msecs";
+                        log.debug_("late response from ", p.eth.src, " seq=", seq, " late=", late_ms, "ms");
+                        return;
+                    }
+                }
+            }
         }
         else if (snoop_handler)
         {
@@ -312,6 +350,8 @@ private:
             if (req.tag != tag)
                 continue;
 
+            version (TrackLateResponses)
+                record_abandoned(req);
             if (req.error_handler)
                 req.error_handler(ModbusErrorType.Failed, req.request, req.request_time);
             pending.remove(i);
