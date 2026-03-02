@@ -15,8 +15,9 @@ import protocol.modbus.client;
 import protocol.modbus.message;
 
 import router.iface.mac;
+import router.iface.packet : PCP, pcp_priority_map;
 
-//version = DebugModbusSampler;
+version = DebugModbusSampler;
 
 nothrow @nogc:
 
@@ -85,17 +86,12 @@ nothrow @nogc:
 
         if (needsSort)
         {
-            import urt.lifetime : move;
+            import urt.algorithm : qsort;
 
-            // TODO: D lib has sort, we don't have this in urt...
-            import std.algorithm : copy;
-            import std.algorithm.sorting;
-            import std.algorithm.mutation : SwapStrategy;
-
-            Array!SampleElement sorted;
-            sorted.resize(elements.length);
-            elements[].multiSort!("a.regKind < b.regKind", "a.register < b.register", SwapStrategy.unstable).copy(sorted[]);
-            elements = sorted.move;
+            qsort!((ref a, ref b) => a.regKind != b.regKind
+                ? (a.regKind < b.regKind ? -1 : 1)
+                : (a.register < b.register ? -1 : a.register > b.register ? 1 : 0)
+            )(elements[]);
             needsSort = false;
         }
 
@@ -125,18 +121,20 @@ nothrow @nogc:
             // flag in-flight
             elements[i].flags |= 1;
 
+            // batch priority: highest PCP in the batch, DEI=false if any element is non-droppable
+            PCP batch_pcp = elements[i].pcp;
+            bool batch_dei = elements[i].dei;
+            ubyte batch_rank = pcp_priority_map[batch_pcp];
+
             // scan for a stripe of registers to sample
             size_t j = i + 1;
             for (; j < elements.length; ++j)
             {
                 // skip any registers that shouldn't be sampled
                 if ((elements[j].flags & 3) || // if it's in flight or a constant has alrady been sampled
-                    elements[i].sampleTimeMs == ushort.max || // strictly on-demand
+                    elements[j].sampleTimeMs == ushort.max || // strictly on-demand
                     now - elements[j].lastUpdate < msecs(elements[j].sampleTimeMs)) // if it's not yet time to sample again
-                {
-                    ++j;
                     continue;
-                }
 
                 ushort nextReg = elements[j].register;
                 int last = nextReg + elements[j].seqLen;
@@ -152,18 +150,52 @@ nothrow @nogc:
 
                 count = cast(ushort)(last - firstReg);
 
+                // promote batch priority if this element is more critical
+                ubyte j_rank = pcp_priority_map[elements[j].pcp];
+                if (j_rank > batch_rank)
+                {
+                    batch_rank = j_rank;
+                    batch_pcp = elements[j].pcp;
+                }
+                if (!elements[j].dei)
+                    batch_dei = false;
+
                 // flag in-flight
                 elements[j].flags |= 1;
             }
 
             // send request
             ModbusPDU pdu = createMessage_Read(cast(RegisterType)elements[i].regKind, firstReg, count);
-            client.sendRequest(server, pdu, &response_handler, &error_handler, 0, retryTime);
+            if (!client.sendRequest(server, pdu, &response_handler, &error_handler, 0, retryTime, batch_pcp, batch_dei))
+            {
+                // queue rejected — release in-flight flags for this batch
+                // continue scanning: later batches (possibly higher priority) may still be accepted
+                for (size_t k = i; k < j; ++k)
+                    elements[k].flags &= 0xFE;
+                i = j;
+                continue;
+            }
 
             version (DebugModbusSampler)
-                writeDebugf("Request: {0} [{1}{2,04x}:{3}]", server, elements[i].regKind, firstReg, count);
+                client.log.tracef("Request: {0} [{1}{2,04x}:{3}]", server, elements[i].regKind, firstReg, count);
 
             i = j;
+        }
+
+        version (DebugModbusSampler)
+        {
+            if (++_diag_counter >= 100)
+            {
+                _diag_counter = 0;
+                uint n_in_flight, n_const;
+                foreach (ref e; elements)
+                {
+                    if (e.flags & 2) ++n_const;
+                    else if (e.flags & 1) ++n_in_flight;
+                }
+                client.log.debugf("Sampler {0}: {1} elements, {2} in-flight, {3} const-done",
+                    server, elements.length, n_in_flight, n_const);
+            }
         }
     }
 
@@ -176,13 +208,13 @@ nothrow @nogc:
         e.desc = reg_info.value_desc;
         switch (desc.update_frequency)
         {
-            case Frequency.realtime:       e.sampleTimeMs = 400;         break; // as fast as possible
-            case Frequency.high:           e.sampleTimeMs = 1_000;       break; // seconds
-            case Frequency.medium:         e.sampleTimeMs = 10_000;      break; // 10s seconds
-            case Frequency.low:            e.sampleTimeMs = 60_000;      break; // minutes
-            case Frequency.constant:       e.sampleTimeMs = 0;           break; // just once
-            case Frequency.configuration:  e.sampleTimeMs = 0;           break; // HACK: sample config items once
-            case Frequency.on_demand:      e.sampleTimeMs = ushort.max;  break; // only explicit
+            case Frequency.realtime:       e.sampleTimeMs = 1;           e.pcp = PCP.bk; e.dei = true;  break;
+            case Frequency.high:           e.sampleTimeMs = 1_000;       e.pcp = PCP.bk; e.dei = false; break;
+            case Frequency.medium:         e.sampleTimeMs = 10_000;      e.pcp = PCP.be; e.dei = false; break;
+            case Frequency.low:            e.sampleTimeMs = 60_000;      e.pcp = PCP.ee; e.dei = false; break;
+            case Frequency.constant:       e.sampleTimeMs = 0;           e.pcp = PCP.ca; e.dei = false; break;
+            case Frequency.configuration:  e.sampleTimeMs = 0;           e.pcp = PCP.ca; e.dei = false; break;
+            case Frequency.on_demand:      e.sampleTimeMs = ushort.max;  e.pcp = PCP.ca; e.dei = false; break;
             default: assert(false);
         }
 
@@ -203,6 +235,8 @@ private:
     ushort retryTime = 500;
     bool needsSort = true;
     bool snooping;
+    version (DebugModbusSampler)
+        ubyte _diag_counter;
 
     struct SampleElement
     {
@@ -211,6 +245,8 @@ private:
         ubyte regKind;
         ubyte flags; // 1 - in-flight, 2 - constant-sampled, 4 - ...
         ushort sampleTimeMs;
+        PCP pcp;
+        bool dei;
         Element* element;
         ValueDesc desc;
         ubyte seqLen() const pure nothrow @nogc
@@ -230,24 +266,29 @@ private:
         ushort responseBytes = response.data[0];
         if (responseBytes + 1 > response.data.length)
         {
-            writeWarning("Incomplete or corrupt modbus response from ", server);
+            client.log.warning("incomplete response from ", server);
+            release_in_flight(kind, first, count);
             return;
         }
         if (response.function_code != request.function_code)
         {
-            // should be an exception? ...or some other corruption.
+            client.log.warning("function code mismatch from ", server,
+                " expected=", cast(ubyte)request.function_code, " got=", cast(ubyte)response.function_code);
+            release_in_flight(kind, first, count);
             return;
         }
 
-        // I don't think it's valid for a response length to not match the request?
-        // if this happens, it must be a response to a different request
-        if (kind < 2 && responseBytes * 8 != count.align_up(8))
+        if ((kind < 2 && responseBytes * 8 != count.align_up(8)) ||
+            (kind > 2 && responseBytes / 2 != count))
+        {
+            client.log.warning("response length mismatch from ", server,
+                " bytes=", responseBytes, " expected=", count * 2);
+            release_in_flight(kind, first, count);
             return;
-        else if (kind > 2 && responseBytes / 2 != count)
-            return;
+        }
 
         version (DebugModbusSampler)
-            writeDebugf("Response: {0}, [{1}{2,04x}:{3}] - {4}", server, kind, first, count, response_time - request_time);
+            client.log.tracef("Response: {0}, [{1}{2,04x}:{3}] - {4}", server, kind, first, count, response_time - request_time);
 
         ubyte[] data = response.data[1 .. 1 + responseBytes];
 
@@ -280,7 +321,7 @@ private:
                 e.element.value(sample_value(data.ptr + byteOffset, e.desc), response_time);
 
             version (DebugModbusSampler)
-                writeDebugf("Got reg {0, 04x}: {1} = {2}", e.register, e.element.id, e.element.value);
+                client.log.tracef("Got reg {0,04x}: {1} = {2}", e.register, e.element.id, e.element.value);
         }
     }
 
@@ -294,21 +335,20 @@ private:
         ushort count = request.data[2..4].bigEndianToNative!ushort;
 
         version (DebugModbusSampler)
-            writeDebugf("Timeout: [{0}{1,04x}:{2}] - {3}", kind, first, count, getTime()-request_time);
+            client.log.debugf("Timeout: [{0}{1,04x}:{2}] - {3}", kind, first, count, getTime()-request_time);
 
-        // release all the in-flight flags...
+        release_in_flight(kind, first, count);
+    }
+
+    void release_in_flight(ubyte kind, ushort first, ushort count)
+    {
+        if (snooping)
+            return;
         foreach (ref e; elements)
         {
             if (e.regKind != kind || e.register < first || e.register >= first + count)
                 continue;
-
-//            assert(e.flags & 1, "How did we get a response for a register not marked as in-flight?");
             e.flags &= 0xFE;
-        }
-
-        if (errorType == ModbusErrorType.Timeout)
-        {
-            // TODO: we might adjust the timeout threshold so that actual data failures happen sooner and don't block up the queue...
         }
     }
 
