@@ -185,16 +185,26 @@ protected:
 
             if (req.retry_time + msecs(req.timeout * 2) < now)
             {
+                long elapsed_ms = (now - req.request_time).as!"msecs";
+                writeDebug(name[], ": backstop timeout seq=", req.sequence_number, " tag=", req.tag, " server=", req.server,
+                    " elapsed=", elapsed_ms, "ms timeout=", req.timeout * 2, "ms", " retries=", req.num_retries);
+
+                if (req.tag > 0)
+                {
+                    auto old_tag = req.tag;
+                    req.tag = 0; // clear before abort so send_status won't remove this entry
+                    _iface.abort(old_tag);
+                }
+                version (TrackLateResponses)
+                    record_abandoned(*req);
+
                 if (req.num_retries > 0)
                 {
-                    _iface.abort(req.tag);
-                    version (TrackLateResponses)
-                        record_abandoned(*req);
                     req.retry_time = now;
                     int new_tag = send_packet(req.server, req.sequence_number, req.request, ModbusFrameType.request);
                     if (new_tag >= 0)
                     {
-                        req.tag = cast(ubyte) new_tag;
+                        req.tag = cast(ubyte)new_tag;
                         req.num_retries--;
                         if (req.error_handler)
                             req.error_handler(ModbusErrorType.Retrying, req.request, req.retry_time);
@@ -202,9 +212,6 @@ protected:
                 }
                 else
                 {
-                    _iface.abort(req.tag);
-                    version (TrackLateResponses)
-                        record_abandoned(*req);
                     if (req.error_handler)
                         req.error_handler(ModbusErrorType.Timeout, req.request, req.request_time);
                     pending.remove(i);
