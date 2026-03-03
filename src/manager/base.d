@@ -193,10 +193,15 @@ nothrow @nogc:
         => _state & _disabled;
     final void disabled(bool value)
     {
-        _state |= _disabled;
-        _state &= ~_start;
-        if (_state & _valid)
-            _state |= _stop;
+        if (value)
+        {
+            _state |= _disabled;
+            _state &= ~_start;
+            if (_state & _valid)
+                _state |= _stop;
+        }
+        else
+            _state &= ~_disabled;
     }
 
     // TODO: PUT FINAL BACK WHEN EVERYTHING PORTED!
