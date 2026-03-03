@@ -354,6 +354,8 @@ nothrow @nogc:
             // TODO
             assert(false, "TODO: test to see if the port is live...");
         }
+
+        super.update();
     }
 
     override ptrdiff_t read(void[] buffer)

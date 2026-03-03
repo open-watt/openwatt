@@ -91,6 +91,8 @@ nothrow @nogc:
             }
             while (bytes < buf.sizeof);
         }
+
+        super.update();
     }
 
     override const(char)[] remote_name()

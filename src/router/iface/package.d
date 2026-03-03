@@ -173,12 +173,12 @@ class BaseInterface : BaseObject
                                           Property.create!("link_downs", link_downs, "status")(),
                                           Property.create!("tx_link_speed", tx_link_speed, "status")(),
                                           Property.create!("rx_link_speed", rx_link_speed, "status")(),
-                                          Property.create!("send_bytes", send_bytes, "traffic", "d")(),
-                                          Property.create!("recv_bytes", recv_bytes, "traffic", "d")(),
-                                          Property.create!("send_packets", send_packets, "traffic", "d")(),
-                                          Property.create!("recv_packets", recv_packets, "traffic", "d")(),
-                                          Property.create!("send_dropped", send_dropped, "traffic", "d")(),
-                                          Property.create!("recv_dropped", recv_dropped, "traffic", "d")(),
+                                          Property.create!("tx_bytes", tx_bytes, "traffic", "d")(),
+                                          Property.create!("rx_bytes", rx_bytes, "traffic", "d")(),
+                                          Property.create!("tx_packets", tx_packets, "traffic", "d")(),
+                                          Property.create!("rx_packets", rx_packets, "traffic", "d")(),
+                                          Property.create!("tx_dropped", tx_dropped, "traffic", "d")(),
+                                          Property.create!("rx_dropped", rx_dropped, "traffic", "d")(),
                                           Property.create!("tx_rate", tx_rate, "traffic", "d")(),
                                           Property.create!("rx_rate", rx_rate, "traffic", "d")(),
                                           Property.create!("tx_rate_max", tx_rate_max, "traffic")(),
@@ -262,37 +262,34 @@ nothrow @nogc:
     ulong link_downs() const => _status.link_downs;
     ulong tx_link_speed() const => _status.tx_link_speed;
     ulong rx_link_speed() const => _status.rx_link_speed;
-    ulong send_bytes() const => _status.send_bytes;
-    ulong recv_bytes() const => _status.recv_bytes;
-    ulong send_packets() const => _status.send_packets;
-    ulong recv_packets() const => _status.recv_packets;
-    ulong send_dropped() const => _status.send_dropped;
-    ulong recv_dropped() const => _status.recv_dropped;
+    ulong tx_bytes() const => _status.tx_bytes;
+    ulong rx_bytes() const => _status.rx_bytes;
+    ulong tx_packets() const => _status.tx_packets;
+    ulong rx_packets() const => _status.rx_packets;
+    ulong tx_dropped() const => _status.tx_dropped;
+    ulong rx_dropped() const => _status.rx_dropped;
     ulong rx_rate() const => _status.rx_rate;
     ulong tx_rate() const => _status.tx_rate;
     ulong tx_rate_max() const => _status.tx_rate_max;
     ulong rx_rate_max() const => _status.rx_rate_max;
-//    Milliseconds avg_wait() const => Milliseconds(float(_status.avg_wait_us) / 1000);
-//    Milliseconds avg_service() const => Milliseconds(float(_status.avg_service_us) / 1000);
-//    Milliseconds max_service() const => Milliseconds(float(_status.max_service_us) / 1000);
-    float avg_queue_time() const => float(_status.avg_queue_us) / 1000;
-    float avg_service_time() const => float(_status.avg_service_us) / 1000;
-    float max_service_time() const => float(_status.max_service_us) / 1000;
+    Milliseconds avg_queue_time() const => Milliseconds(float(_status.avg_queue_us) / 1000);
+    Milliseconds avg_service_time() const => Milliseconds(float(_status.avg_service_us) / 1000);
+    Milliseconds max_service_time() const => Milliseconds(float(_status.max_service_us) / 1000);
 
     // API...
 
-    ref const(Status) status() const pure
+    ref const(IfStatus) status() const pure
         => _status;
 
     final void reset_counters()
     {
         _status.link_downs = 0;
-        _status.send_bytes = 0;
-        _status.recv_bytes = 0;
-        _status.send_packets = 0;
-        _status.recv_packets = 0;
-        _status.send_dropped = 0;
-        _status.recv_dropped = 0;
+        _status.tx_bytes = 0;
+        _status.rx_bytes = 0;
+        _status.tx_packets = 0;
+        _status.rx_packets = 0;
+        _status.tx_dropped = 0;
+        _status.rx_dropped = 0;
         _status.tx_rate = 0;
         _status.rx_rate = 0;
         _status.tx_rate_max = 0;
@@ -300,8 +297,8 @@ nothrow @nogc:
         _status.avg_queue_us = 0;
         _status.avg_service_us = 0;
         _status.max_service_us = 0;
-        _last_send_bytes = 0;
-        _last_recv_bytes = 0;
+        _last_tx_bytes = 0;
+        _last_rx_bytes = 0;
         _last_bitrate_sample = getTime();
     }
 
@@ -448,7 +445,7 @@ nothrow @nogc:
     }
 
 protected:
-    Status _status;
+    IfStatus _status;
     ushort _pvid;
     ushort _mtu;        // 0 = auto
     ushort _l2mtu;
@@ -458,8 +455,8 @@ protected:
     BufferOverflowBehaviour _recv_behaviour;
 
     MonoTime _last_bitrate_sample;
-    ulong _last_send_bytes;
-    ulong _last_recv_bytes;
+    ulong _last_tx_bytes;
+    ulong _last_rx_bytes;
 
     override void update()
     {
@@ -469,16 +466,16 @@ protected:
         if ((now - _last_bitrate_sample) >= 1.seconds)
         {
             ulong elapsed_us = (now - _last_bitrate_sample).as!"usecs";
-            _status.tx_rate = (_status.send_bytes - _last_send_bytes) * 1_000_000 / elapsed_us;
-            _status.rx_rate = (_status.recv_bytes - _last_recv_bytes) * 1_000_000 / elapsed_us;
+            _status.tx_rate = (_status.tx_bytes - _last_tx_bytes) * 1_000_000 / elapsed_us;
+            _status.rx_rate = (_status.rx_bytes - _last_rx_bytes) * 1_000_000 / elapsed_us;
 
             if (_status.tx_rate > _status.tx_rate_max)
                 _status.tx_rate_max = _status.tx_rate;
             if (_status.rx_rate > _status.rx_rate_max)
                 _status.rx_rate_max = _status.rx_rate;
 
-            _last_send_bytes = _status.send_bytes;
-            _last_recv_bytes = _status.recv_bytes;
+            _last_tx_bytes = _status.tx_bytes;
+            _last_rx_bytes = _status.rx_bytes;
             _last_bitrate_sample = now;
         }
     }
@@ -488,8 +485,8 @@ protected:
         _status.link_status = LinkStatus.up;
         _status.link_status_change_time = getSysTime();
         _last_bitrate_sample = getTime();
-        _last_send_bytes = _status.send_bytes;
-        _last_recv_bytes = _status.recv_bytes;
+        _last_tx_bytes = _status.tx_bytes;
+        _last_rx_bytes = _status.rx_bytes;
         super.set_online();
     }
 
@@ -499,14 +496,19 @@ protected:
         _status.link_status = LinkStatus.down;
         _status.link_status_change_time = getSysTime();
         ++_status.link_downs;
+        _status.tx_rate = 0;
+        _status.rx_rate = 0;
+        _status.avg_queue_us = 0;
+        _status.avg_service_us = 0;
+        _status.max_service_us = 0;
     }
 
     abstract int transmit(ref Packet packet, MessageCallback callback = null);
 
     final void dispatch(ref Packet packet)
     {
-        ++_status.recv_packets;
-        _status.recv_bytes += packet.length;
+        ++_status.rx_packets;
+        _status.rx_bytes += packet.length;
 
         if (packet.type == PacketType.ethernet && !packet.eth.src.is_multicast)
         {
@@ -637,12 +639,12 @@ nothrow @nogc:
 
             foreach (iface; interfaces.values)
             {
-                rx_len = max(rx_len, iface.status.recv_bytes.format_int(null));
-                tx_len = max(tx_len, iface.status.send_bytes.format_int(null));
-                rp_len = max(rp_len, iface.status.recv_packets.format_int(null));
-                tp_len = max(tp_len, iface.status.send_packets.format_int(null));
-                rd_len = max(rd_len, iface.status.recv_dropped.format_int(null));
-                td_len = max(td_len, iface.status.send_dropped.format_int(null));
+                rx_len = max(rx_len, iface.status.rx_bytes.format_int(null));
+                tx_len = max(tx_len, iface.status.tx_bytes.format_int(null));
+                rp_len = max(rp_len, iface.status.rx_packets.format_int(null));
+                tp_len = max(tp_len, iface.status.tx_packets.format_int(null));
+                rd_len = max(rd_len, iface.status.rx_dropped.format_int(null));
+                td_len = max(td_len, iface.status.tx_dropped.format_int(null));
             }
 
             session.writef(" ID     {0, -*1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",
@@ -657,9 +659,9 @@ nothrow @nogc:
                 session.writef("{0, 3} {1}{2}  {3, -*4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
                                 i, iface.status.link_status ? 'R' : ' ', iface._master ? 'S' : ' ',
                                 iface.name, name_len,
-                                iface.status.recv_bytes, rx_len, iface.status.send_bytes, tx_len,
-                                iface.status.recv_packets, rp_len, iface.status.send_packets, tp_len,
-                                iface.status.recv_dropped, rd_len, iface.status.send_dropped, td_len);
+                                iface.status.rx_bytes, rx_len, iface.status.tx_bytes, tx_len,
+                                iface.status.rx_packets, rp_len, iface.status.tx_packets, tp_len,
+                                iface.status.rx_dropped, rd_len, iface.status.tx_dropped, td_len);
                 ++i;
             }
         }

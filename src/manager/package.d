@@ -309,12 +309,12 @@ nothrow @nogc:
 
             foreach (i, iface; interfaces)
             {
-                rxLen = max(rxLen, iface.getStatus.recv_bytes.format_int(null));
-                txLen = max(txLen, iface.getStatus.send_bytes.format_int(null));
-                rpLen = max(rpLen, iface.getStatus.recv_packets.format_int(null));
-                tpLen = max(tpLen, iface.getStatus.send_packets.format_int(null));
-                rdLen = max(rdLen, iface.getStatus.recv_dropped.format_int(null));
-                tdLen = max(tdLen, iface.getStatus.send_dropped.format_int(null));
+                rxLen = max(rxLen, iface.getStatus.rx_bytes.format_int(null));
+                txLen = max(txLen, iface.getStatus.tx_bytes.format_int(null));
+                rpLen = max(rpLen, iface.getStatus.rx_packets.format_int(null));
+                tpLen = max(tpLen, iface.getStatus.tx_packets.format_int(null));
+                rdLen = max(rdLen, iface.getStatus.rx_dropped.format_int(null));
+                tdLen = max(tdLen, iface.getStatus.tx_dropped.format_int(null));
             }
 
             session.writef(" ID    {0, *1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",
@@ -329,9 +329,9 @@ nothrow @nogc:
                 session.writef("{0, 3} {1}{2} {3, *4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
                                i, iface.getStatus.link_status ? 'R' : ' ', iface.master ? 'S' : ' ',
                                iface.name, nameLen,
-                               iface.getStatus.recv_bytes, rxLen, iface.getStatus.send_bytes, txLen,
-                               iface.getStatus.recv_packets, rpLen, iface.getStatus.send_packets, tpLen,
-                               iface.getStatus.recv_dropped, rdLen, iface.getStatus.send_dropped, tdLen);
+                               iface.getStatus.rx_bytes, rxLen, iface.getStatus.tx_bytes, txLen,
+                               iface.getStatus.rx_packets, rpLen, iface.getStatus.tx_packets, tpLen,
+                               iface.getStatus.rx_dropped, rdLen, iface.getStatus.tx_dropped, tdLen);
                 ++i;
             }
         }

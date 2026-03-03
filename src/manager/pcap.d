@@ -706,8 +706,8 @@ private:
         void handle_stats()
         {
             RpcapStats stats = {
-                ifrecv: opened_iface ? cast(uint)opened_iface.status.recv_packets : 0,
-                ifdrop: opened_iface ? cast(uint)opened_iface.status.recv_dropped : 0,
+                ifrecv: opened_iface ? cast(uint)opened_iface.status.rx_packets : 0,
+                ifdrop: opened_iface ? cast(uint)opened_iface.status.rx_dropped : 0,
                 krnldrop: 0,
                 svrcapt: packet_ordinal,
             };

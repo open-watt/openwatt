@@ -7,7 +7,7 @@ import urt.time;
 
 import router.iface : MessageCallback, MessageState, TagAllocator;
 import router.iface.packet;
-import router.status : Status;
+import router.status : IfStatus;
 
 nothrow @nogc:
 
@@ -28,7 +28,7 @@ struct PriorityPacketQueue
 {
 nothrow @nogc:
 
-    void init(ubyte max_in_flight, ubyte reserved_slots = 0, PCP reserved_min_pcp = PCP.vo, Status* status = null)
+    void init(ubyte max_in_flight, ubyte reserved_slots = 0, PCP reserved_min_pcp = PCP.vo, IfStatus* status = null)
     {
         assert(max_in_flight > 0, "max_in_flight must be greater than 0");
         assert(reserved_slots < max_in_flight, "Reserved slots cannot exceed total capacity");
@@ -291,7 +291,7 @@ private:
     Array!(QueuedFrame*) _in_flight;
     FreeList!QueuedFrame _pool;
 
-    Status* _status;
+    IfStatus* _status;
 
     ubyte _max_in_flight;
     ubyte _in_flight_count;

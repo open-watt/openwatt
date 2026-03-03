@@ -291,7 +291,7 @@ protected:
                 assert(false, "TODO: handle NWK frame... or de-frame APS message and goto ZigbeeAPS?");
 
             default:
-                ++_status.send_dropped;
+                ++_status.tx_dropped;
                 return ZigbeeResult.unsupported;
         }
 
@@ -299,7 +299,7 @@ protected:
         int tag = _queue.enqueue(p, &on_frame_complete);
         if (tag < 0)
         {
-            ++_status.send_dropped;
+            ++_status.tx_dropped;
             return -1;
         }
 
@@ -408,7 +408,7 @@ private:
             ZigbeeResult result = send_message(frame.tag, frame.packet.hdr!APSFrame, data);
             if (result != ZigbeeResult.success)
             {
-                ++_status.send_dropped;
+                ++_status.tx_dropped;
                 _queue.complete(frame.tag, MessageState.failed);
             }
         }
@@ -486,7 +486,7 @@ private:
 
         if (status != EmberStatus.SUCCESS)
         {
-            ++_status.send_dropped;
+            ++_status.tx_dropped;
 
             if (status == EmberStatus.NETWORK_DOWN)
                 _network_status = EmberStatus.NETWORK_DOWN;
@@ -502,7 +502,7 @@ private:
         if (auto pm = tag in _pending)
         {
             pm.aps.counter = aps_sequence;
-            _status.send_bytes += pm.message_length;
+            _status.tx_bytes += pm.message_length;
 
             version (DebugZigbeeMessageFlow)
                 writeDebugf("Zigbee: APS       sent ({0,03}) {1,4}ms - {2, 04x}:{3, 02x}->{4, 04x}:{5, 02x} [{6}:{7, 04x}]", tag, (getTime() - pm.send_time).as!"msecs", pm.aps.src, pm.aps.src_endpoint, pm.aps.dst, pm.aps.dst_endpoint, profile_name(pm.aps.profile_id), pm.aps.cluster_id);
@@ -733,11 +733,11 @@ private:
     void counter_response_handler(ushort[EmberCounterType.TYPE_COUNT] counters) nothrow
     {
         // TODO: consider; should we count MAC_TX/RX_XXX or APS_DATA_TX/RX_XXX?
-        _status.recv_packets += counters[EmberCounterType.MAC_RX_BROADCAST];
-        _status.send_packets += counters[EmberCounterType.MAC_TX_BROADCAST];
-        _status.recv_packets += counters[EmberCounterType.MAC_RX_UNICAST];
-        _status.send_packets += counters[EmberCounterType.MAC_TX_UNICAST_SUCCESS];
-        _status.send_dropped += counters[EmberCounterType.MAC_TX_UNICAST_FAILED];
+        _status.rx_packets += counters[EmberCounterType.MAC_RX_BROADCAST];
+        _status.tx_packets += counters[EmberCounterType.MAC_TX_BROADCAST];
+        _status.rx_packets += counters[EmberCounterType.MAC_RX_UNICAST];
+        _status.tx_packets += counters[EmberCounterType.MAC_TX_UNICAST_SUCCESS];
+        _status.tx_dropped += counters[EmberCounterType.MAC_TX_UNICAST_FAILED];
 
         // TODO: is there any other statistics we want to collect or log?
         //       useful debug information?
@@ -748,15 +748,15 @@ private:
         switch (type)
         {
             case EmberCounterType.MAC_RX_BROADCAST:
-                _status.recv_packets += 0x10000; break;
+                _status.rx_packets += 0x10000; break;
             case EmberCounterType.MAC_TX_BROADCAST:
-                _status.send_packets += 0x10000; break;
+                _status.tx_packets += 0x10000; break;
             case EmberCounterType.MAC_RX_UNICAST:
-                _status.recv_packets += 0x10000; break;
+                _status.rx_packets += 0x10000; break;
             case EmberCounterType.MAC_TX_UNICAST_SUCCESS:
-                _status.send_packets += 0x10000; break;
+                _status.tx_packets += 0x10000; break;
             case EmberCounterType.MAC_TX_UNICAST_FAILED:
-                _status.send_dropped += 0x10000; break;
+                _status.tx_dropped += 0x10000; break;
             default:
                 // should we log this? is it interesting?
                 writeWarning("Zigbee: EZSP counter rollover - ", type);

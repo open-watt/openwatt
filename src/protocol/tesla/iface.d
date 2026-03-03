@@ -149,7 +149,7 @@ nothrow @nogc:
     {
         if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.tesla_twc)
         {
-            ++_status.send_dropped;
+            ++_status.tx_dropped;
             return -1;
         }
 
@@ -187,7 +187,7 @@ nothrow @nogc:
         if (written != offset)
         {
             debug writeDebug("Failed to write to stream '", _stream.name, "'");
-            ++_status.send_dropped;
+            ++_status.tx_dropped;
             return -1;
         }
 
@@ -196,8 +196,8 @@ nothrow @nogc:
             writef("{4} - {0}: TWC packet sent {1}-->{2} [{3}]\n", name, packet.src, packet.dst, packet.data, packet.creation_time);
         }
 
-        ++_status.send_packets;
-        _status.send_bytes += packet.data.length;
+        ++_status.tx_packets;
+        _status.tx_bytes += packet.data.length;
         // TODO: but should we record the ACTUAL protocol packet?
         return 0;
     }

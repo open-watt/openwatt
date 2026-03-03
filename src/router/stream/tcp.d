@@ -224,7 +224,10 @@ nothrow @nogc:
         {
             // something happened... we should try and reconnect I guess?
             restart();
+            return;
         }
+
+        super.update();
     }
 
     override bool connect()
@@ -276,7 +279,7 @@ nothrow @nogc:
         }
         if (_logging)
             write_to_log(true, buffer[0 .. bytes]);
-        _status.recv_bytes += bytes;
+        _status.rx_bytes += bytes;
         return bytes;
     }
 
@@ -580,7 +583,7 @@ protected:
         // assign the socket to the stream and bypass the startup process
         stream._socket = conn;
         conn.get_peer_name(stream._remote);
-        stream._state = State.running;
+        stream.set_state(State.running);
         get_module!TCPStreamModule.tcp_streams.add(stream);
         return stream;
     }

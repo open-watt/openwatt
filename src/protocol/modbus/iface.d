@@ -260,7 +260,7 @@ nothrow @nogc:
         _queue.timeout_stale(getTime());
 
         // estimate remote baud rate for TCP bridges after collecting stats
-        if (_estimate_baud && !_baud_estimated && !_support_simultaneous_requests && _status.send_packets >= 20)
+        if (_estimate_baud && !_baud_estimated && !_support_simultaneous_requests && _status.tx_packets >= 20)
             estimate_remote_baud();
 
         send_queued_messages();
@@ -349,7 +349,7 @@ nothrow @nogc:
         if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.modbus || packet.data.length < 5)
         {
             log.debug_("tx-drop: not a modbus packet");
-            ++_status.send_dropped;
+            ++_status.tx_dropped;
             return -1;
         }
 
@@ -370,7 +370,7 @@ nothrow @nogc:
                 if (!map || map.iface !is this)
                 {
                     log.debug_("tx-drop: unknown server MAC");
-                    ++_status.send_dropped;
+                    ++_status.tx_dropped;
                     return -1;
                 }
                 local_address = map.local_address;
@@ -381,7 +381,7 @@ nothrow @nogc:
             if (tag < 0)
             {
                 log.debug_("tx-drop: queue full");
-                ++_status.send_dropped;
+                ++_status.tx_dropped;
                 return -1;
             }
 
@@ -396,8 +396,8 @@ nothrow @nogc:
 
             if (packet.eth.dst != _master_mac)
             {
-                log.debug_("tx-drop: response dst != master MAC");
-                ++_status.send_dropped;
+                log.debug_("tx-drop: response dst != master address");
+                ++_status.tx_dropped;
                 return -1;
             }
 
@@ -406,7 +406,7 @@ nothrow @nogc:
             if (!map)
             {
                 log.debug_("tx-drop: unknown universal address ", packetAddress);
-                ++_status.send_dropped;
+                ++_status.tx_dropped;
                 return -1;
             }
 
@@ -541,12 +541,12 @@ private:
         if (written != length)
         {
             log.debug_("tx-drop: write failed (wrote ", written, " of ", length, ")");
-            ++_status.send_dropped;
+            ++_status.tx_dropped;
             return -1;
         }
 
-        ++_status.send_packets;
-        _status.send_bytes += length;
+        ++_status.tx_packets;
+        _status.tx_bytes += length;
         return 0;
     }
 
@@ -663,10 +663,10 @@ private:
 
     void estimate_remote_baud()
     {
-        if (_status.send_packets < 20 || _status.avg_service_us == 0)
+        if (_status.tx_packets < 20 || _status.avg_service_us == 0)
             return;
 
-        uint avg_bytes = cast(uint)((_status.send_bytes + _status.recv_bytes) / _status.send_packets);
+        uint avg_bytes = cast(uint)((_status.tx_bytes + _status.rx_bytes) / _status.tx_packets);
         if (avg_bytes == 0)
             return;
 
@@ -757,7 +757,7 @@ private:
                     // it's possibly a false packet from a corrupt bitstream, or there's another master on the bus!
                     // we'll drop this packet to be safe...
                     log.debug_("rx-drop: unknown local address ", frame_info.address);
-                    ++_status.recv_dropped;
+                    ++_status.rx_dropped;
                     return;
                 }
 
@@ -799,7 +799,7 @@ private:
                 if (!found)
                 {
                     log.debug_("rx-drop: response but no in-flight request");
-                    ++_status.recv_dropped;
+                    ++_status.rx_dropped;
                     return;
                 }
 
@@ -808,15 +808,13 @@ private:
                 {
                     log.debug_("rx-drop: address mismatch (got ", frame_info.address,
                         " expected ", pm.local_server_address, ")");
-                    ++_status.recv_dropped;
+                    ++_status.rx_dropped;
                     _queue.complete(matched_tag, MessageState.failed);
                 }
                 else if (!validate_response_length(matched_tag, message))
                 {
-                    // response length doesn't match request — likely a late response
-                    // to a previously timed-out request; drop it and keep waiting
                     log.debug_("rx-drop: response length mismatch (late response after timeout?)");
-                    ++_status.recv_dropped;
+                    ++_status.rx_dropped;
                 }
                 else
                 {
@@ -860,7 +858,7 @@ private:
                 else
                 {
                     log.debug_("rx-drop: no pending match for addr=", frame_info.address, " seq=", seq);
-                    ++_status.recv_dropped;
+                    ++_status.rx_dropped;
                 }
 
                 send_queued_messages();
@@ -880,7 +878,7 @@ private:
                     // we can't dispatch this message if we don't know if its a request or a response...
                     // we'll need to discard messages until we get one that we know, and then we can predict future messages from there
                     log.debug_("rx-drop: unknown frame type, can't dispatch");
-                    ++_status.recv_dropped;
+                    ++_status.rx_dropped;
                     return;
                 }
             }

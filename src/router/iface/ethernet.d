@@ -117,7 +117,7 @@ nothrow @nogc:
 
                 if (header.caplen < header.len || header.caplen < 14)
                 {
-                    ++_status.recv_dropped;
+                    ++_status.rx_dropped;
                     continue;
                 }
 
@@ -134,7 +134,7 @@ nothrow @nogc:
                 if (eth.ether_type == 0x88E5) // MACsec
                 {
                     // TODO: handle MACsec frames?
-                    ++_status.recv_dropped;
+                    ++_status.rx_dropped;
                     continue;
                 }
 
@@ -150,7 +150,7 @@ nothrow @nogc:
                 {
                     if (header.caplen < 18)
                     {
-                        ++_status.recv_dropped;
+                        ++_status.rx_dropped;
                         continue;
                     }
 
@@ -173,7 +173,7 @@ nothrow @nogc:
                     }
 
                     // no vlan sub-interface captured this frame, and it's not for us
-                    _status.recv_dropped++;
+                    _status.rx_dropped++;
                     continue;
                 }
 
@@ -194,7 +194,7 @@ nothrow @nogc:
 
                     default:
                         // dispatch ethernet packet
-                        _status.recv_bytes += header.caplen - packet.length; // adjust the recv counter since dispatch only counts payload length
+                        _status.rx_bytes += header.caplen - packet.length; // adjust the recv counter since dispatch only counts payload length
                         dispatch(packet);
                         break;
                 }
@@ -238,7 +238,7 @@ protected:
                     if (packet.data.length > buffer.sizeof - (payload - buffer.ptr))
                     {
                         // packet is too big! (TODO: but what about jumbos?)
-                        _status.send_dropped++;
+                        _status.tx_dropped++;
                         return;
                     }
                     payload[0 .. packet.data.length] = cast(ubyte[])packet.data[];
@@ -250,7 +250,7 @@ protected:
 
                 default:
                     assert(false, "TODO: reframe other protocols as open-watt ethernet...");
-                    ++_status.send_dropped;
+                    ++_status.tx_dropped;
                     return;
             }
 
@@ -258,11 +258,11 @@ protected:
             {
                 writeError("pcap_sendpacket failed: ", pcap_geterr(_pcap_handle));
                 // TODO: any specific error handling? restart interface?
-                _status.send_dropped++;
+                _status.tx_dropped++;
             }
 
-            ++_status.send_packets;
-            _status.send_bytes += packet_len;
+            ++_status.tx_packets;
+            _status.tx_bytes += packet_len;
         }
     }
 
