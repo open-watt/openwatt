@@ -243,6 +243,9 @@
     <DCompile Include="src\manager\console\builtin_commands.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
+    <DCompile Include="src\router\iface\address_table.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
     <DCompile Include="src\router\iface\bridge.d">
       <Filter>src\router\iface</Filter>
     </DCompile>

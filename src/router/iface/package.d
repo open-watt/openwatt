@@ -314,6 +314,7 @@ nothrow @nogc:
             return _master;
         _master = master;
         _slave_id = slave_id;
+        _flags |= ObjectFlags.slave;
         return null;
     }
 

@@ -15,6 +15,7 @@ import manager.console;
 import manager.plugin;
 
 import router.iface;
+import router.iface.address_table;
 import router.iface.vlan;
 
 nothrow @nogc:
@@ -33,7 +34,7 @@ nothrow @nogc:
     this(String name, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!BridgeInterface, name.move, flags);
-        _mac_table = MACTable(16, 256, 60);
+        _address_table = AddressTable(32);
     }
 
     ~this()
@@ -112,6 +113,7 @@ nothrow @nogc:
     {
         assert(iface !is this, "Cannot add a bridge to itself!");
         assert(_members.length < 256, "Too many _members in the bridge!");
+        assert(!(iface.flags & ObjectFlags.slave), "Interface is already slaved!");
 
         ubyte port = cast(ubyte)_members.length;
         if (iface.set_master(this, port) !is null)
@@ -128,13 +130,13 @@ nothrow @nogc:
             ushort vlan = 0;
 
             if (!mb.master)
-                _mac_table.insert(mb._master_mac, vlan, port);
+                _address_table.insert(mb._master_mac.ul | (ulong(vlan) << 48) | (ulong(PacketType.modbus) << 60), port);
 
             auto mod_mb = get_module!ModbusProtocolModule;
             foreach (ref map; mod_mb.remote_servers.values)
             {
                 if (map.iface is iface)
-                    _mac_table.insert(map.mac, vlan, port);
+                    _address_table.insert(map.mac.ul | (ulong(vlan) << 48) | (ulong(PacketType.modbus) << 60), port);
             }
         }
 
@@ -291,7 +293,8 @@ protected:
 
     override void update()
     {
-        _mac_table.update();
+        // TODO: AddressTable needs TTL mechanism...
+//        _address_table.update();
     }
 
     final override bool bind_vlan(BaseInterface vlan_interface, bool remove)
@@ -316,6 +319,7 @@ protected:
 
         ubyte src_port = cast(ubyte)child_id;
         ref const BridgePort port = _members[src_port];
+        ulong src_address, dst_address;
         ushort src_vlan = 0;
 
         // check for link-local frames (bridges must not forward link-local frames)
@@ -371,9 +375,12 @@ protected:
             packet.vlan = src_vlan;
         }
 
-        if (!packet.eth.src.is_multicast)
-            _mac_table.insert(packet.eth.src, src_vlan, src_port);
+        src_address = get_network_src_address(packet);
+        if (!src_address.is_multicast_address)
+            _address_table.insert(src_address, src_port);
 
+        dst_address = get_network_dst_address(packet);
+        // TODO: need a way to get this interfaces switching address...
         if (packet.eth.dst == mac)
         {
             // we're the destination!
@@ -429,8 +436,8 @@ protected:
 
             debug
             {
-                byte dst_port;
-                if (_mac_table.get(packet.eth.dst, packet.vlan & 0xFFF, dst_port))
+                int dst_port = _address_table.get(dst_address);
+                if (dst_port >= 0)
                 {
                     if (dst_port != src_port)
                         writeDebug(name, ": forward: ", packet.eth.src, " -> ", _members[dst_port].iface.name, "(", packet.eth.dst, ") [", packet.data, "]");
@@ -523,7 +530,7 @@ private:
     BridgePort _bridge_port;
     Array!BridgePort _members;
     Map!(ushort, VLANInterface) _vlans;
-    MACTable _mac_table;
+    AddressTable _address_table;
 
     TagTracking* _tracking_free;
     TagTracking* _tracking_active;
@@ -534,10 +541,11 @@ private:
         if (!running)
             return;
 
-        if (!packet.eth.dst.is_multicast)
+        ulong address = get_network_dst_address(packet);
+        if (!address.is_multicast_address)
         {
-            byte dst_port;
-            if (_mac_table.get(packet.eth.dst, packet.vlan, dst_port))
+            int dst_port = _address_table.get(address);
+            if (dst_port >= 0)
             {
                 // we don't send it back the way it came...
                 if (dst_port == src_port)
@@ -655,10 +663,11 @@ private:
         TagTracking* tracking = alloc_tracking();
         bool any_succeeded = false;
 
-        if (!packet.eth.dst.is_multicast)
+        ulong address = get_network_dst_address(packet);
+        if (!address.is_multicast_address)
         {
-            byte dst_port;
-            if (_mac_table.get(packet.eth.dst, packet.vlan, dst_port))
+            int dst_port = _address_table.get(address);
+            if (dst_port >= 0)
             {
                 // unicast to known port
                 if (!_members[dst_port].iface.running)

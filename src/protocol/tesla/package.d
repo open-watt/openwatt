@@ -43,6 +43,8 @@ nothrow @nogc:
 
     override void init()
     {
+        register_address_extractor(PacketType.tesla_twc, &extract_twc_src_address, &extract_twc_dst_address);
+
         g_app.console.register_collection("/interface/tesla-twc", twc_interfaces);
         g_app.console.register_command!twc_add("/protocol/tesla/twc", this, "add");
         g_app.console.register_command!twc_set("/protocol/tesla/twc", this, "set");
@@ -315,4 +317,22 @@ nothrow @nogc:
 
         g_app.devices.insert(device.id[], device);
     }
+}
+
+ulong extract_twc_src_address(ref const Packet p) pure
+{
+    ulong addr = p.hdr!TWCFrame().src;
+    addr |= ulong(addr == 0xFFFF) << 63; // is FFFF the broadcast, or 0000?
+    addr |= ulong(p.vlan & 0xFFF) << 48;
+    addr |= ulong(PacketType.tesla_twc) << 60;
+    return addr;
+}
+
+ulong extract_twc_dst_address(ref const Packet p) pure
+{
+    ulong addr = p.hdr!TWCFrame().dst;
+    addr |= ulong(addr == 0xFFFF) << 63; // is FFFF the broadcast, or 0000?
+    addr |= ulong(p.vlan & 0xFFF) << 48;
+    addr |= ulong(PacketType.tesla_twc) << 60;
+    return addr;
 }

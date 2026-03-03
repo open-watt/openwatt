@@ -289,6 +289,11 @@ nothrow @nogc:
 
     override void init()
     {
+        import protocol.zigbee.aps : extract_aps_src_address, extract_aps_dst_address;
+
+//        register_address_extractor(PacketType.zigbee_nwk, &extract_nwk_src_address, &extract_nwk_dst_address);
+        register_address_extractor(PacketType.zigbee_aps, &extract_aps_src_address, &extract_aps_dst_address);
+
         g_app.console.register_collection("/interface/zigbee", zigbee_interfaces);
         g_app.console.register_collection("/protocol/zigbee/node", nodes);
         g_app.console.register_collection("/protocol/zigbee/router", routers);

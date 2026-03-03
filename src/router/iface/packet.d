@@ -67,6 +67,22 @@ enum PCP : ubyte
 immutable ubyte[8] pcp_priority_map = [1, 0, 2, 3, 4, 5, 6, 7];
 
 
+alias AddressExtract = ulong function(ref const Packet) pure nothrow @nogc;
+
+void register_address_extractor(PacketType type, AddressExtract src_extract, AddressExtract dst_extract)
+{
+    assert(type <= PacketType.max);
+    g_address_extractors[type].src = src_extract;
+    g_address_extractors[type].dst = dst_extract;
+}
+
+ulong get_network_src_address(ref const Packet p)
+    => g_address_extractors[p.type].src(p);
+
+ulong get_network_dst_address(ref const Packet p)
+    => g_address_extractors[p.type].dst(p);
+
+
 struct Packet
 {
 nothrow @nogc:
@@ -170,4 +186,40 @@ struct Ethernet
     MACAddress src;
     ushort ether_type;
     ushort ow_sub_type; // TODO: REMOVE ME!!
+}
+
+
+private:
+
+struct AddressExtractors
+{
+    AddressExtract src;
+    AddressExtract dst;
+}
+__gshared AddressExtractors[PacketType.max + 1] g_address_extractors = [ AddressExtractors(), AddressExtractors(&extract_ethernet_src_address, &extract_ethernet_dst_address) ];
+
+ulong extract_ethernet_src_address(ref const Packet p) pure
+{
+    ulong addr = p.hdr!Ethernet().src.ul;
+    addr |= ulong(p.vlan & 0xFFF) << 48;
+    addr |= ulong(PacketType.ethernet) << 60;
+    version (LittleEndian)
+        ulong multicast = addr & 1;
+    else
+        ulong multicast = (addr >> 40) & 1;
+    addr |= multicast << 63;
+    return addr;
+}
+
+ulong extract_ethernet_dst_address(ref const Packet p) pure
+{
+    ulong addr = p.hdr!Ethernet().dst.ul;
+    addr |= ulong(p.vlan & 0xFFF) << 48;
+    addr |= ulong(PacketType.ethernet) << 60;
+    version (LittleEndian)
+        ulong multicast = addr & 1;
+    else
+        ulong multicast = (addr >> 40) & 1;
+    addr |= multicast << 63;
+    return addr;
 }
