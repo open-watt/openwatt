@@ -131,13 +131,13 @@ nothrow @nogc:
             ushort vlan = 0;
 
             if (!mb.master)
-                _address_table.insert(mb._master_mac.ul | (ulong(vlan) << 48) | (ulong(PacketType.modbus) << 60), port);
+                _address_table.insert(ulong(mb._master_address) | (ulong(vlan) << 48) | (ulong(PacketType.modbus) << 60), port);
 
             auto mod_mb = get_module!ModbusProtocolModule;
             foreach (ref map; mod_mb.remote_servers.values)
             {
                 if (map.iface is iface)
-                    _address_table.insert(map.mac.ul | (ulong(vlan) << 48) | (ulong(PacketType.modbus) << 60), port);
+                    _address_table.insert(ulong(map.universal_address) | (ulong(vlan) << 48) | (ulong(PacketType.modbus) << 60), port);
             }
         }
 
@@ -660,7 +660,10 @@ private:
 
                 // unicast to known port
                 if (!_members[dst_port].iface.running)
+                {
+                    recycle_tracking(tracking);
                     return -1;
+                }
 
                 if (_vlan_filtering)
                 {
