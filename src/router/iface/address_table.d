@@ -70,6 +70,15 @@ nothrow @nogc:
         cache_insert(key, port);
     }
 
+    void remove(ulong key)
+    {
+        auto idx = cache_scan(key);
+        if (idx < _len)
+            cache_remove(idx);
+        else
+            _backing.remove(key);
+    }
+
     void remove_port(ubyte port_index)
     {
         ulong[64] remove_buf = void;

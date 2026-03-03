@@ -203,13 +203,10 @@ nothrow @nogc:
 
     auto __debugOverview()
     {
-        debug {
-            char[] buffer = new char[StringLen];
-            ptrdiff_t len = toString(buffer, null, null);
-            return buffer[0 .. len];
-        }
-        else
-            return b;
+        import urt.mem;
+        char[] buffer = cast(char[])tempAllocator.alloc(StringLen);
+        ptrdiff_t len = toString(buffer, null, null);
+        return buffer[0 .. len];
     }
     auto __debugExpanded() => b[];
 }

@@ -77,17 +77,47 @@ nothrow @nogc:
         return super.validating();
     }
 
-    protected override int transmit(ref Packet packet, MessageCallback)
+    protected final override int transmit(ref Packet packet, MessageCallback)
     {
+        assert(false, "unreachable — we override forward() instead");
+    }
+
+    // override forward() instead of transmit() to avoid double callback firing
+    final override int forward(ref Packet packet, MessageCallback callback = null)
+    {
+        if (!running)
+        {
+            if (callback)
+                callback(-1, MessageState.failed);
+            return -1;
+        }
+
         assert((packet.vlan & 0xFFF) == 0, "packet already has a vlan tag");
         packet.vlan = _vlan;
-        int result = _interface.forward(packet);
+
+        foreach (ref sub; _subscribers[0 .. _num_subscribers])
+        {
+            if ((sub.filter.direction & PacketDirection.outgoing) && sub.filter.match(packet))
+                sub.recv_packet(packet, this, PacketDirection.outgoing, sub.user_data);
+        }
+
+        int result = _interface.forward(packet, callback);
         if (result >= 0)
         {
             ++_status.send_packets;
             _status.send_bytes += packet.data.length;
         }
         return result;
+    }
+
+    override void abort(int msg_handle, MessageState reason = MessageState.aborted)
+    {
+        _interface.abort(msg_handle, reason);
+    }
+
+    override MessageState msg_state(int msg_handle) const
+    {
+        return _interface.msg_state(msg_handle);
     }
 
 package:
