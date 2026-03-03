@@ -14,7 +14,6 @@ import manager.sampler;
 import protocol.modbus.client;
 import protocol.modbus.message;
 
-import router.iface.mac;
 import router.iface.packet : PCP, pcp_priority_map;
 
 version = DebugModbusSampler;
@@ -71,10 +70,10 @@ class ModbusSampler : Sampler
 {
 nothrow @nogc:
 
-    this(ModbusClient client, ref MACAddress server)
+    this(ModbusClient client, ubyte server_address)
     {
         this.client = client;
-        this.server = server;
+        this.server_address = server_address;
 
         snooping = client.isSnooping;
         if (snooping)
@@ -167,7 +166,7 @@ nothrow @nogc:
 
             // send request
             ModbusPDU pdu = createMessage_Read(cast(RegisterType)elements[i].regKind, firstReg, count);
-            if (!client.sendRequest(server, pdu, &response_handler, &error_handler, 0, retryTime, batch_pcp, batch_dei))
+            if (!client.sendRequest(server_address, pdu, &response_handler, &error_handler, 0, retryTime, batch_pcp, batch_dei))
             {
                 // queue rejected — release in-flight flags for this batch
                 // continue scanning: later batches (possibly higher priority) may still be accepted
@@ -178,7 +177,7 @@ nothrow @nogc:
             }
 
             version (DebugModbusSampler)
-                client.log.tracef("Request: {0} [{1}{2,04x}:{3}]", server, elements[i].regKind, firstReg, count);
+                client.log.tracef("Request: {0} [{1}{2,04x}:{3}]", server_address, elements[i].regKind, firstReg, count);
 
             i = j;
         }
@@ -195,7 +194,7 @@ nothrow @nogc:
                     else if (e.flags & 1) ++n_in_flight;
                 }
                 client.log.debugf("Sampler {0}: {1} elements, {2} in-flight, {3} const-done",
-                    server, elements.length, n_in_flight, n_const);
+                    server_address, elements.length, n_in_flight, n_const);
             }
         }
     }
@@ -231,7 +230,7 @@ nothrow @nogc:
 private:
 
     ModbusClient client;
-    MACAddress server;
+    ubyte server_address;
     Array!SampleElement elements;
     ushort retryTime = 500;
     bool needsSort = true;
@@ -267,13 +266,13 @@ private:
         ushort responseBytes = response.data[0];
         if (responseBytes + 1 > response.data.length)
         {
-            client.log.warning("incomplete response from ", server);
+            client.log.warning("incomplete response from ", server_address);
             release_in_flight(kind, first, count);
             return;
         }
         if (response.function_code != request.function_code)
         {
-            client.log.warning("function code mismatch from ", server,
+            client.log.warning("function code mismatch from ", server_address,
                 " expected=", cast(ubyte)request.function_code, " got=", cast(ubyte)response.function_code);
             release_in_flight(kind, first, count);
             return;
@@ -281,13 +280,13 @@ private:
 
         if ((kind < 2 && responseBytes * 8 != count.align_up(8)) || (kind > 2 && responseBytes / 2 != count))
         {
-            client.log.warning("response length mismatch from ", server, " bytes=", responseBytes, " expected=", count * 2);
+            client.log.warning("response length mismatch from ", server_address, " bytes=", responseBytes, " expected=", count * 2);
             release_in_flight(kind, first, count);
             return;
         }
 
         version (DebugModbusSampler)
-            client.log.tracef("Response: {0}, [{1}{2,04x}:{3}] - {4}", server, kind, first, count, response_time - request_time);
+            client.log.tracef("Response: {0}, [{1}{2,04x}:{3}] - {4}", server_address, kind, first, count, response_time - request_time);
 
         ubyte[] data = response.data[1 .. 1 + responseBytes];
 
@@ -334,7 +333,11 @@ private:
         ushort count = request.data[2..4].bigEndianToNative!ushort;
 
         version (DebugModbusSampler)
-            client.log.debugf("Timeout: [{0}{1,04x}:{2}] - {3}", kind, first, count, getTime()-request_time);
+        {
+            const(char)[] label = errorType == ModbusErrorType.Retrying ? "Retrying" :
+                                  errorType == ModbusErrorType.Timeout ? "Timeout" : "Failed";
+            client.log.debugf("{4}: [{0}{1,04x}:{2}] - {3}", kind, first, count, getTime()-request_time, label);
+        }
 
         release_in_flight(kind, first, count);
     }
@@ -351,10 +354,9 @@ private:
         }
     }
 
-    void snoop_handler(ref const MACAddress server, ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time)
+    void snoop_handler(ubyte server_addr, ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time)
     {
-        // check it's a response from the server we're interested in
-        if (server != this.server)
+        if (server_addr != server_address)
             return;
 
         response_handler(request, response, request_time, response_time);

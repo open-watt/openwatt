@@ -1,7 +1,6 @@
 module protocol.modbus.client;
 
 import urt.array;
-import urt.endian;
 import urt.lifetime;
 import urt.log;
 import urt.string;
@@ -12,11 +11,11 @@ import manager.base;
 import manager.collection;
 
 import protocol.modbus;
-import protocol.modbus.iface : ModbusFrameType; // TODO: move this?
+import protocol.modbus.iface : ModbusFrame, ModbusFrameType;
 import protocol.modbus.message;
 
 import router.iface;
-import router.iface.packet : PCP;
+import router.iface.packet : PacketType, PCP;
 
 version = TrackLateResponses;
 
@@ -30,10 +29,10 @@ enum ModbusErrorType
     Failed,
 }
 
-alias ModbusRequestHandler = void delegate(ref const MACAddress client, ushort sequence_number, ref const ModbusPDU request, SysTime request_time) nothrow @nogc;
+alias ModbusRequestHandler = void delegate(ubyte client_address, ushort sequence_number, ref const ModbusPDU request, SysTime request_time) nothrow @nogc;
 alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time) nothrow @nogc;
 alias ModbusErrorHandler = void delegate(ModbusErrorType errorType, ref const ModbusPDU request, SysTime request_time) nothrow @nogc;
-alias ModbusSnoopHandler = void delegate(ref const MACAddress server, ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time) nothrow @nogc;
+alias ModbusSnoopHandler = void delegate(ubyte server_address, ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time) nothrow @nogc;
 
 class ModbusClient : BaseObject
 {
@@ -59,7 +58,7 @@ nothrow @nogc:
         if (_subscribed)
         {
             _iface.unsubscribe(&incoming_packet);
-            (cast(BaseObject) _iface.get()).unsubscribe(&iface_state_change);
+            _iface.unsubscribe(&iface_state_change);
             _subscribed = false;
         }
         _iface = value;
@@ -94,7 +93,7 @@ nothrow @nogc:
     bool isSnooping() const
         => _snooping;
 
-    bool sendRequest(ref const MACAddress server, ref const ModbusPDU request, ModbusResponseHandler response_handler, ModbusErrorHandler error_handler = null, ubyte num_retries = 0, ushort timeout = 500, PCP pcp = PCP.be, bool dei = false) nothrow @nogc
+    bool sendRequest(ubyte server_address, ref const ModbusPDU request, ModbusResponseHandler response_handler, ModbusErrorHandler error_handler = null, ubyte num_retries = 0, ushort timeout = 500, PCP pcp = PCP.be, bool dei = false) nothrow @nogc
     {
         if (_snooping)
         {
@@ -104,7 +103,7 @@ nothrow @nogc:
 
         SysTime now = getSysTime();
         ushort seq = ++_sequence_number;
-        int tag = send_packet(server, seq, request, ModbusFrameType.request, pcp, dei);
+        int tag = send_packet(server_address, seq, request, ModbusFrameType.request, pcp, dei);
         if (tag < 0)
         {
             // queue rejected immediately — notify caller
@@ -113,13 +112,13 @@ nothrow @nogc:
             return false;
         }
 
-        pending.pushBack(PendingRequest(now, now, request, seq, num_retries, timeout, server, response_handler, error_handler, cast(ubyte) tag));
+        pending.pushBack(PendingRequest(now, now, request, seq, num_retries, timeout, server_address, response_handler, error_handler, cast(ubyte) tag));
         return true;
     }
 
-    void sendResponse(ref const MACAddress client, ushort sequence_number, ref const ModbusPDU response) nothrow @nogc
+    void sendResponse(ubyte client_address, ushort sequence_number, ref const ModbusPDU response) nothrow @nogc
     {
-        send_packet(client, sequence_number, response, ModbusFrameType.response);
+        send_packet(client_address, sequence_number, response, ModbusFrameType.response);
     }
 
 protected:
@@ -140,11 +139,14 @@ protected:
         if (!_iface.running)
             return CompletionStatus.continue_;
 
+        if (_client_address == 0)
+            _client_address = get_module!ModbusProtocolModule().allocate_universal_address(ephemeral: true);
+
         if (_snooping)
             pending.pushBack(); // temp storage for snooped requests
 
-        _iface.subscribe(&incoming_packet, PacketFilter(ether_type: EtherType.ow, ow_subtype: OW_SubType.modbus));
-        (cast(BaseObject) _iface.get()).subscribe(&iface_state_change);
+        _iface.subscribe(&incoming_packet, PacketFilter(type: PacketType.modbus));
+        _iface.subscribe(&iface_state_change);
         _subscribed = true;
 
         return CompletionStatus.complete;
@@ -155,8 +157,14 @@ protected:
         if (_subscribed)
         {
             _iface.unsubscribe(&incoming_packet);
-            (cast(BaseObject) _iface.get()).unsubscribe(&iface_state_change);
+            _iface.unsubscribe(&iface_state_change);
             _subscribed = false;
+        }
+
+        if (_client_address != 0)
+        {
+            get_module!ModbusProtocolModule().release_universal_address(_client_address);
+            _client_address = 0;
         }
 
         // fail all pending requests
@@ -186,7 +194,7 @@ protected:
             if (req.retry_time + msecs(req.timeout * 2) < now)
             {
                 long elapsed_ms = (now - req.request_time).as!"msecs";
-                writeDebug(name[], ": backstop timeout seq=", req.sequence_number, " tag=", req.tag, " server=", req.server,
+                writeDebug(name[], ": backstop timeout seq=", req.sequence_number, " tag=", req.tag, " server=", req.server_address,
                     " elapsed=", elapsed_ms, "ms timeout=", req.timeout * 2, "ms", " retries=", req.num_retries);
 
                 if (req.tag > 0)
@@ -201,7 +209,7 @@ protected:
                 if (req.num_retries > 0)
                 {
                     req.retry_time = now;
-                    int new_tag = send_packet(req.server, req.sequence_number, req.request, ModbusFrameType.request);
+                    int new_tag = send_packet(req.server_address, req.sequence_number, req.request, ModbusFrameType.request);
                     if (new_tag >= 0)
                     {
                         req.tag = cast(ubyte)new_tag;
@@ -232,7 +240,7 @@ private:
         ushort sequence_number;
         ubyte num_retries;
         ushort timeout;
-        MACAddress server;
+        ubyte server_address;
         ModbusResponseHandler response_handler;
         ModbusErrorHandler error_handler;
         ubyte tag;
@@ -241,6 +249,7 @@ private:
     ObjectRef!BaseInterface _iface;
     bool _snooping;
     bool _subscribed;
+    ubyte _client_address;
     ushort _sequence_number = 0;
     Array!PendingRequest pending;
 
@@ -269,36 +278,30 @@ private:
 
     void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void* user_data) nothrow @nogc
     {
-        // we can't even identify what request a message belongs to if it's been truncated
-        auto message = cast(const(ubyte)[])p.data;
-        if (message.length < 5)
+        auto pdu = cast(const(ubyte)[])p.data;
+        if (pdu.length < 1)
             return;
 
-        ushort seq = message[0 .. 2].bigEndianToNative!ushort;
-        ModbusFrameType type = cast(ModbusFrameType) message[2];
-        ubyte address = message[3];
+        ref const ModbusFrame hdr = p.hdr!ModbusFrame();
 
-        if (type == ModbusFrameType.request && (p.eth.dst == iface.mac || p.eth.dst.isBroadcast))
+        if (hdr.type == ModbusFrameType.request && hdr.dst_address == _client_address)
         {
-            // check that we're accepting requests...
             if (!requestHandler)
                 return;
 
-            // it's a request for us...
-            ModbusPDU request = ModbusPDU(cast(FunctionCode) message[4], message[5 .. $]);
-            requestHandler(p.eth.src, seq, request, p.creation_time);
+            ModbusPDU request = ModbusPDU(cast(FunctionCode)pdu[0], pdu[1 .. $]);
+            requestHandler(hdr.src_address, hdr.sequence_number, request, p.creation_time);
         }
         else if (!_snooping)
         {
             foreach (i, ref PendingRequest req; pending)
             {
-                if (p.eth.src != req.server)
+                if (hdr.src_address != req.server_address)
                     continue;
-                if (seq != req.sequence_number)
+                if (hdr.sequence_number != req.sequence_number)
                     continue;
 
-                // this appears to be the message we're waiting for!
-                ModbusPDU response = ModbusPDU(cast(FunctionCode) message[4], message[5 .. $]);
+                ModbusPDU response = ModbusPDU(cast(FunctionCode)pdu[0], pdu[1 .. $]);
                 req.response_handler(req.request, response, req.request_time, p.creation_time);
 
                 pending.remove(i);
@@ -309,10 +312,10 @@ private:
             {
                 foreach (ref ab; _abandoned)
                 {
-                    if (ab.sequence_number == seq)
+                    if (ab.sequence_number == hdr.sequence_number)
                     {
                         long late_ms = (p.creation_time - ab.abandon_time).as!"msecs";
-                        log.debug_("late response from ", p.eth.src, " seq=", seq, " late=", late_ms, "ms");
+                        log.debug_("late response from addr=", hdr.src_address, " seq=", hdr.sequence_number, " late=", late_ms, "ms");
                         return;
                     }
                 }
@@ -321,23 +324,23 @@ private:
         else if (snoop_handler)
         {
             // if the sequence number changes, it must be a new transaction
-            if (pending[0].sequence_number != seq)
+            if (pending[0].sequence_number != hdr.sequence_number)
             {
-                if (type != ModbusFrameType.request)
+                if (hdr.type != ModbusFrameType.request)
                     return;
 
                 pending[0].request_time = p.creation_time;
-                pending[0].request = ModbusPDU(cast(FunctionCode) message[4], message[5 .. $]);
-                pending[0].sequence_number = seq;
-                pending[0].server = p.eth.dst;
+                pending[0].request = ModbusPDU(cast(FunctionCode)pdu[0], pdu[1 .. $]);
+                pending[0].sequence_number = hdr.sequence_number;
+                pending[0].server_address = hdr.dst_address;
             }
             else
             {
-                if (type != ModbusFrameType.response || pending[0].request_time == SysTime())
+                if (hdr.type != ModbusFrameType.response || pending[0].request_time == SysTime())
                     return;
 
-                ModbusPDU response = ModbusPDU(cast(FunctionCode) message[4], message[5 .. $]);
-                snoop_handler(p.eth.src, pending[0].request, response, pending[0].request_time, p.creation_time);
+                ModbusPDU response = ModbusPDU(cast(FunctionCode)pdu[0], pdu[1 .. $]);
+                snoop_handler(hdr.src_address, pending[0].request, response, pending[0].request_time, p.creation_time);
             }
         }
     }
@@ -366,29 +369,22 @@ private:
         }
     }
 
-    int send_packet(ref const MACAddress server, ushort sequence_number, ref const ModbusPDU message, ModbusFrameType type, PCP pcp = PCP.be, bool dei = false) nothrow @nogc
+    int send_packet(ubyte dst_address, ushort sequence_number, ref const ModbusPDU message, ModbusFrameType type, PCP pcp = PCP.be, bool dei = false) nothrow @nogc
     {
-        ServerMap* map = get_module!ModbusProtocolModule().find_server_by_mac(server);
-        if (!map)
-            return -1;
-
-        ubyte[4 + ModbusMessageDataMaxLength] buffer = void;
-        buffer[0 .. 2] = sequence_number.nativeToBigEndian;
-        buffer[2] = type;
-        buffer[3] = map.universal_address;
-        buffer[4] = message.function_code;
-        buffer[5 .. 5 + message.data.length] = message.data[];
+        ubyte[1 + ModbusMessageDataMaxLength] buffer = void;
+        buffer[0] = message.function_code;
+        buffer[1 .. 1 + message.data.length] = message.data[];
 
         Packet p;
-        ref Ethernet hdr = p.init!Ethernet(buffer[0 .. 5 + message.data.length]);
-        hdr.src = _iface.mac;
-        hdr.dst = server;
-        hdr.ether_type = EtherType.ow;
-        hdr.ow_sub_type = OW_SubType.modbus;
+        ref ModbusFrame hdr = p.init!ModbusFrame(buffer[0 .. 1 + message.data.length]);
+        hdr.sequence_number = sequence_number;
+        hdr.type = type;
+        hdr.function_code = message.function_code;
+        hdr.src_address = _client_address;
+        hdr.dst_address = dst_address;
         p.pcp = pcp;
         p.dei = dei;
 
-        // only attach lifecycle callback for requests (not slave responses)
         MessageCallback cb = type == ModbusFrameType.request ? &send_status : null;
         return _iface.forward(p, cb);
     }

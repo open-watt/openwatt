@@ -30,12 +30,29 @@ nothrow @nogc:
 struct ServerMap
 {
     String name;
-    MACAddress mac;
     ubyte local_address;
     ubyte universal_address;
     ModbusInterface iface;
     String profile;
     String model;
+}
+
+ulong extract_modbus_src_address(ref const Packet p) pure
+{
+    ulong addr = p.hdr!ModbusFrame().src_address;
+    addr |= ulong(addr == 0) << 63;
+    addr |= ulong(p.vlan & 0xFFF) << 48;
+    addr |= ulong(PacketType.modbus) << 60;
+    return addr;
+}
+
+ulong extract_modbus_dst_address(ref const Packet p) pure
+{
+    ulong addr = p.hdr!ModbusFrame().dst_address;
+    addr |= ulong(addr == 0) << 63;
+    addr |= ulong(p.vlan & 0xFFF) << 48;
+    addr |= ulong(PacketType.modbus) << 60;
+    return addr;
 }
 
 class ModbusProtocolModule : Module
@@ -46,9 +63,12 @@ nothrow @nogc:
     Collection!ModbusInterface modbus_interfaces;
     Collection!ModbusClient clients;
     Map!(ubyte, ServerMap) remote_servers;
+    ubyte[32] _address_in_use;
 
     override void init()
     {
+        register_address_extractor(PacketType.modbus, &extract_modbus_src_address, &extract_modbus_dst_address);
+
         g_app.register_enum!ModbusProtocol();
 
         g_app.console.register_collection("/interface/modbus", modbus_interfaces);
@@ -80,16 +100,6 @@ nothrow @nogc:
         return null;
     }
 
-    final ServerMap* find_server_by_mac(MACAddress mac)
-    {
-        foreach (ref map; remote_servers.values)
-        {
-            if (map.mac == mac)
-                return &map;
-        }
-        return null;
-    }
-
     final ServerMap* find_server_by_local_address(ubyte local_address, BaseInterface iface)
     {
         foreach (ref map; remote_servers.values)
@@ -105,6 +115,49 @@ nothrow @nogc:
         return universal_address in remote_servers;
     }
 
+    // Address space layout:
+    //   1-199:   device addresses, allocated low-to-high (stable across restarts via startup.conf replay order)
+    //   200-239: ephemeral addresses (clients, master proxies), allocated high-to-low
+    //   240-247: reserved for factory-assigned high addresses on end-devices
+
+    final ubyte allocate_universal_address(ubyte preferred = 0, bool ephemeral = false)
+    {
+        if (ephemeral)
+        {
+            for (uint candidate = 239; candidate >= 200; --candidate)
+            {
+                if (_try_claim(cast(ubyte)candidate))
+                    return cast(ubyte)candidate;
+            }
+            assert(false, "No available ephemeral addresses!");
+        }
+
+        // device allocation: try the preferred address first (typically the bus-local address)
+        if (preferred >= 1 && preferred <= 247 && _try_claim(preferred))
+            return preferred;
+
+        // fall back to scanning the device range
+        for (uint candidate = 1; candidate < 200; ++candidate)
+        {
+            if (_try_claim(cast(ubyte)candidate))
+                return cast(ubyte)candidate;
+        }
+        assert(false, "No available device addresses!");
+    }
+
+    final void release_universal_address(ubyte addr)
+    {
+        _address_in_use[addr / 8] &= ~cast(ubyte)(1 << (addr % 8));
+    }
+
+    private bool _try_claim(ubyte addr)
+    {
+        if (addr in remote_servers || (_address_in_use[addr / 8] & (1 << (addr % 8))))
+            return false;
+        _address_in_use[addr / 8] |= cast(ubyte)(1 << (addr % 8));
+        return true;
+    }
+
     final ServerMap* add_remote_server(const(char)[] name, ModbusInterface iface, ubyte address, const(char)[] profile, const(char)[] model, ubyte universal_address = 0)
     {
         import urt.mem.temp : tconcat;
@@ -112,30 +165,19 @@ nothrow @nogc:
         if (!name)
             name = tconcat(iface.name[], '.', address);
 
-        ServerMap map;
-        map.name = name.makeString(defaultAllocator());
-        map.mac = iface.generate_mac_address();
-        map.mac.b[5] = address;
-
         if (!universal_address)
-        {
-            const ubyte initialAddress = universal_address = map.mac.b[4] ^ address;
-            while (true)
-            {
-                if (universal_address == 0 || universal_address == 0xFF)
-                    universal_address += 2;
-                if (universal_address !in remote_servers)
-                    break;
-                ++universal_address;
-                assert(universal_address != initialAddress, "No available universal addresses!");
-            }
-        }
+            universal_address = allocate_universal_address(address);
         else
+        {
             assert(universal_address !in remote_servers, "Universal address already in use.");
+            _address_in_use[universal_address / 8] |= cast(ubyte)(1 << (universal_address % 8));
+        }
 
         iface._local_to_uni[address] = universal_address;
         iface._uni_to_local[universal_address] = address;
 
+        ServerMap map;
+        map.name = name.makeString(defaultAllocator());
         map.local_address = address;
         map.universal_address = universal_address;
         map.iface = iface;
@@ -143,10 +185,9 @@ nothrow @nogc:
         map.model = model.makeString(defaultAllocator());
 
         remote_servers[universal_address] = map;
-        iface.add_address(map.mac, iface);
 
         import urt.log;
-        writeInfof("Create modbus server '{0}' - mac: {1}  uid: {2}  at-interface: {3}({4})", map.name, map.mac, map.universal_address, iface.name, map.local_address);
+        writeInfof("Create modbus server '{0}' uid: {1}  at-interface: {2}({3})", map.name, map.universal_address, iface.name, map.local_address);
 
         return universal_address in remote_servers;
     }
@@ -204,7 +245,7 @@ nothrow @nogc:
         if (!client)
             return;
 
-        MACAddress target;
+        ubyte server_address;
         const(char)[] profileName;
         if (map)
         {
@@ -213,16 +254,20 @@ nothrow @nogc:
                 session.write_line("Slave '", slave, "' doesn't have a profile specified");
                 return;
             }
-            target = map.mac;
+            server_address = map.universal_address;
             profileName = map.profile[];
         }
         else
         {
-            if (target.fromString(slave) != slave.length)
+            import urt.conv : parse_int;
+            size_t taken;
+            long result = parse_int(slave, &taken);
+            if (taken == 0 || taken != slave.length || result < 1 || result > 247)
             {
                 session.write_line("Invalid slave identifier or address '", slave, "'");
                 return;
             }
+            server_address = cast(ubyte)result;
             if (!_profile)
             {
                 session.write_line("No profile specified");
@@ -235,7 +280,7 @@ nothrow @nogc:
         Profile* profile = parse_profile(cast(char[])file, g_app.allocator);
 
         // create a sampler for this modbus server...
-        ModbusSampler sampler = g_app.allocator.allocT!ModbusSampler(client, target);
+        ModbusSampler sampler = g_app.allocator.allocT!ModbusSampler(client, server_address);
 
         Device device = create_device_from_profile(*profile, map.model[], id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
             assert(desc.type == ElementType.modbus);
@@ -260,8 +305,8 @@ nothrow @nogc:
 
     ModbusRequestState sendRequest(Session session, const(char)[] client, const(char)[] slave, ref ModbusPDU msg)
     {
-        MACAddress addr;
-        ModbusClient c = lookupClientAndMAC(session, client, slave, addr);
+        ubyte addr;
+        ModbusClient c = lookupClientAndAddress(session, client, slave, addr);
         if (!c)
             return null;
 
@@ -316,8 +361,8 @@ nothrow @nogc:
 
     ModbusRequestState request_read_device_id(Session session, const(char)[] client, const(char)[] slave)
     {
-        MACAddress addr;
-        ModbusClient c = lookupClientAndMAC(session, client, slave, addr);
+        ubyte addr;
+        ModbusClient c = lookupClientAndAddress(session, client, slave, addr);
         if (!c)
             return null;
 
@@ -338,30 +383,38 @@ nothrow @nogc:
             return null;
         }
 
-        // TODO: this should be a global MAC->name table, not a modbus specific table...
-        map = get_module!ModbusProtocolModule.find_server_by_name(slave);
+        map = find_server_by_name(slave);
         if (!map)
         {
-            MACAddress addr;
-            if (addr.fromString(slave))
-                map = get_module!ModbusProtocolModule.find_server_by_mac(addr);
+            import urt.conv : parse_int;
+            size_t taken;
+            long result = parse_int(slave, &taken);
+            if (taken == slave.length && result >= 1 && result <= 247)
+                map = find_server_by_universal_address(cast(ubyte)result);
         }
 
         return c;
     }
 
-    ModbusClient lookupClientAndMAC(Session session, const(char)[] client, const(char)[] slave, out MACAddress addr)
+    ModbusClient lookupClientAndAddress(Session session, const(char)[] client, const(char)[] slave, out ubyte addr)
     {
         ServerMap* map;
         ModbusClient c = lookupClientAndSlave(session, client, slave, map);
         if (c)
         {
             if (map)
-                addr = map.mac;
-            else if (addr.fromString(slave) != slave.length)
+                addr = map.universal_address;
+            else
             {
-                session.write_line("Invalid slave identifier or address '", slave, "'");
-                return null;
+                import urt.conv : parse_int;
+                size_t taken;
+                long result = parse_int(slave, &taken);
+                if (taken == 0 || taken != slave.length || result < 1 || result > 247)
+                {
+                    session.write_line("Invalid slave identifier or address '", slave, "'");
+                    return null;
+                }
+                addr = cast(ubyte)result;
             }
         }
         return c;

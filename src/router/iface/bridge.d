@@ -393,15 +393,18 @@ protected:
 
         debug
         {
-            ulong dst_address = get_network_dst_address(packet);
-            int dst_port = _address_table.get(dst_address);
-            if (dst_port >= 0)
+            if (packet.type == PacketType.ethernet)
             {
-                if (dst_port != src_port && dst_port != _local_port)
-                    writeDebug(name, ": forward: ", packet.eth.src, " -> ", _members[dst_port].iface.name, "(", packet.eth.dst, ") [", packet.data, "]");
+                ulong dst_address = get_network_dst_address(packet);
+                int dst_port = _address_table.get(dst_address);
+                if (dst_port >= 0)
+                {
+                    if (dst_port != src_port && dst_port != _local_port)
+                        writeDebug(name, ": forward: ", packet.eth.src, " -> ", _members[dst_port].iface.name, "(", packet.eth.dst, ") [", packet.data, "]");
+                }
+                else
+                    writeDebug(name, ": broadcast: ", packet.eth.src, " -> * [", packet.data, "]");
             }
-            else
-                writeDebug(name, ": broadcast: ", packet.eth.src, " -> * [", packet.data, "]");
         }
         return;
 

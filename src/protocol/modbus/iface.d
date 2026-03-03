@@ -44,7 +44,19 @@ enum ModbusFrameType : ubyte
 {
     unknown,
     request,
-    response
+    response,
+    probe       // modbus arp?
+}
+
+struct ModbusFrame
+{
+    enum Type = PacketType.modbus;
+
+    ushort sequence_number;
+    ModbusFrameType type;
+    ubyte src_address;
+    ubyte dst_address;
+    ubyte function_code;
 }
 
 
@@ -68,11 +80,6 @@ nothrow @nogc:
         // this would be 253 for the RS485 bus, or larger if another carrier...?
         _max_l2mtu = _mtu;
         _l2mtu = _max_l2mtu;
-
-        // master defaults to false, so we'll generate a mac for the remote bus master...
-        _master_mac = generate_mac_address();
-        _master_mac.b[5] = 0xFF;
-        add_address(_master_mac, this);
 
         // TODO: warn the user if they configure an interface to use modbus tcp over a serial line
         //       user should be warned that data corruption may occur!
@@ -110,18 +117,8 @@ nothrow @nogc:
 
         _is_bus_master = value;
         if (value)
-        {
-            remove_address(_master_mac);
-            _master_mac = MACAddress();
-            if (_protocol == ModbusProtocol.unknown)
-                restart();
-        }
-        else
-        {
-            _master_mac = generate_mac_address();
-            _master_mac.b[5] = 0xFF;
-            add_address(_master_mac, this);
-        }
+            _master_address = 0;
+        restart();
     }
 
     uint baud() const pure
@@ -201,6 +198,10 @@ nothrow @nogc:
             _local_to_uni.insert(ubyte(0), ubyte(0));
             _uni_to_local.insert(ubyte(0), ubyte(0));
 
+            // allocate a universal address for the remote bus master on non-master interfaces
+            if (!_is_bus_master && _master_address == 0)
+                _master_address = get_module!ModbusProtocolModule().allocate_universal_address(ephemeral: true);
+
             // compute timing parameters from baud rate
             if (!_support_simultaneous_requests)
             {
@@ -241,6 +242,12 @@ nothrow @nogc:
         }
         _pending.clear();
         _queue.abort_all();
+
+        if (_master_address != 0)
+        {
+            get_module!ModbusProtocolModule().release_universal_address(_master_address);
+            _master_address = 0;
+        }
 
         _local_to_uni.clear();
         _uni_to_local.clear();
@@ -345,8 +352,7 @@ nothrow @nogc:
 
     protected override int transmit(ref const Packet packet, MessageCallback callback = null) nothrow @nogc
     {
-        // can only handle modbus packets
-        if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.modbus || packet.data.length < 5)
+        if (packet.type != PacketType.modbus)
         {
             log.debug_("tx-drop: not a modbus packet");
             ++_status.tx_dropped;
@@ -354,22 +360,19 @@ nothrow @nogc:
         }
 
         auto mod_mb = get_module!ModbusProtocolModule();
-
-        ushort seq = (cast(ubyte[])packet.data)[0..2].bigEndianToNative!ushort;
-        ModbusFrameType packetType = *cast(ModbusFrameType*)&packet.data[2];
-        ubyte packetAddress = *cast(ubyte*)&packet.data[3];
+        ref const ModbusFrame hdr = packet.hdr!ModbusFrame();
 
         if (_is_bus_master)
         {
-            assert(packetType == ModbusFrameType.request);
+            assert(hdr.type == ModbusFrameType.request);
 
             ubyte local_address = 0;
-            if (!packet.eth.dst.isBroadcast)
+            if (hdr.dst_address != 0)
             {
-                ServerMap* map = mod_mb.find_server_by_mac(packet.eth.dst);
+                ServerMap* map = mod_mb.find_server_by_universal_address(hdr.dst_address);
                 if (!map || map.iface !is this)
                 {
-                    log.debug_("tx-drop: unknown server MAC");
+                    log.debug_("tx-drop: unknown server address ", hdr.dst_address);
                     ++_status.tx_dropped;
                     return -1;
                 }
@@ -385,44 +388,33 @@ nothrow @nogc:
                 return -1;
             }
 
-            _pending[cast(ubyte)tag] = PendingModbus(packet.eth.src, seq, local_address, callback);
+            _pending[cast(ubyte)tag] = PendingModbus(hdr.src_address, hdr.sequence_number, local_address, callback);
 
             send_queued_messages();
             return tag;
         }
         else
         {
-            assert(packetType == ModbusFrameType.response);
+            assert(hdr.type == ModbusFrameType.response);
 
-            if (packet.eth.dst != _master_mac)
+            if (hdr.dst_address != _master_address)
             {
                 log.debug_("tx-drop: response dst != master address");
                 ++_status.tx_dropped;
                 return -1;
             }
 
-            ubyte address = packetAddress;
-            ServerMap* map = mod_mb.find_server_by_universal_address(packetAddress);
+            ServerMap* map = mod_mb.find_server_by_universal_address(hdr.src_address);
             if (!map)
             {
-                log.debug_("tx-drop: unknown universal address ", packetAddress);
+                log.debug_("tx-drop: unknown universal address ", hdr.src_address);
                 ++_status.tx_dropped;
                 return -1;
             }
 
-            if (map.iface is this)
-            {
-                assert(false, "This should be impossible; it should have served its own response...?");
-                address = map.local_address;
-            }
-            else
-            {
-                debug assert(packetAddress == map.universal_address, "Packet address does not match dest address?!");
-                address = map.universal_address;
-            }
-
-            const(ubyte)[] pdu = cast(ubyte[])packet.data[4 .. $];
-            return frame_and_send(address, pdu);
+            ubyte wire_address = map.iface is this ? map.local_address : map.universal_address;
+            const(ubyte)[] pdu = cast(ubyte[])packet.data;
+            return frame_and_send(wire_address, pdu);
         }
     }
 
@@ -431,17 +423,22 @@ nothrow @nogc:
 
     override void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(const void[] packetData) nothrow @nogc sink) const
     {
-        // write the address and pdu
-        sink(packet.data[3..$]);
-
-        // calculate and write the crc
-        ushort crc = packet.data[3 .. $].modbus_crc();
+        ref const ModbusFrame hdr = packet.hdr!ModbusFrame();
+        // synthesize RTU frame: [address, function_code, data..., crc16]
+        ubyte address = hdr.type == ModbusFrameType.request ? hdr.dst_address : hdr.src_address;
+        sink((&address)[0 .. 1]);
+        sink(packet.data);
+        // CRC over address + pdu
+        ubyte[256] tmp = void;
+        tmp[0] = address;
+        tmp[1 .. 1 + packet.data.length] = cast(ubyte[])packet.data[];
+        ushort crc = tmp[0 .. 1 + packet.data.length].modbus_crc();
         sink(crc.nativeToLittleEndian());
     }
 
     final override void abort(int msg_handle, MessageState reason = MessageState.aborted)
     {
-        debug assert(msg_handle >= 0 && msg_handle <= 0xFF, "invalid msg_handle");
+        debug assert(msg_handle > 0, "Invalid message handle");
 
         ubyte t = cast(ubyte)msg_handle;
         if (auto pm = t in _pending)
@@ -462,15 +459,11 @@ nothrow @nogc:
         return MessageState.complete;
     }
 
-package:
-    final MACAddress generate_mac_address() pure
-        => super.generate_mac_address();
-
 private:
 
     struct PendingModbus
     {
-        MACAddress request_from;
+        ubyte request_from_address;
         ushort sequence_number;
         ubyte local_server_address;
         MessageCallback callback;
@@ -495,7 +488,7 @@ private:
     Map!(ubyte, PendingModbus) _pending;
 
     // if we are not the bus master
-    package(router.iface) MACAddress _master_mac; // TODO: `package` because bridge interface backdoors this!... rethink?
+    package(router.iface) ubyte _master_address;
     ushort _sequence_number;
     ModbusFrameType _expect_message_type = ModbusFrameType.unknown;
 
@@ -566,7 +559,7 @@ private:
                 continue;
             }
 
-            const(ubyte)[] pdu = cast(ubyte[])frame.packet.data[4 .. $];
+            const(ubyte)[] pdu = cast(ubyte[])frame.packet.data;
 
             if (frame_and_send(pm.local_server_address, pdu) < 0)
             {
@@ -603,7 +596,7 @@ private:
         if (!frame)
             return true; // can't validate without the request
 
-        const(ubyte)[] request_pdu = cast(const(ubyte)[])frame.packet.data[4 .. $];
+        const(ubyte)[] request_pdu = cast(const(ubyte)[])frame.packet.data;
         const(ubyte)[] response_pdu = cast(const(ubyte)[])response_message;
 
         if (request_pdu.length < 5 || response_pdu.length < 2)
@@ -725,17 +718,11 @@ private:
 
         _last_receive_event = recvTime;
 
-        MACAddress frame_mac = void;
         ubyte address = 0;
 
-        if (frame_info.address == 0)
-            frame_mac = MACAddress.broadcast;
-        else
+        if (frame_info.address != 0)
         {
             auto mod_mb = get_module!ModbusProtocolModule();
-
-            // we probably need to find a way to cache these lookups.
-            // doing this every packet feels kinda bad...
 
             // if we are the bus master, then incoming packets are responses from slaves
             //    ...so the address must be their local bus address
@@ -746,16 +733,8 @@ private:
                 map = mod_mb.find_server_by_universal_address(frame_info.address);
             if (!map)
             {
-                // apparently this is the first time we've seen this guy...
-                // this should be impossible if we're the bus master, because we must know anyone we sent a request to...
-                // so, it must be a communication from a local master with a local slave we don't know...
-
-                // let's confirm and then record their existence...
                 if (_is_bus_master)
                 {
-                    // if we are the bus-master, it should have been impossible to receive a packet from an unknown guy
-                    // it's possibly a false packet from a corrupt bitstream, or there's another master on the bus!
-                    // we'll drop this packet to be safe...
                     log.debug_("rx-drop: unknown local address ", frame_info.address);
                     ++_status.rx_dropped;
                     return;
@@ -764,20 +743,14 @@ private:
                 map = mod_mb.add_remote_server(null, this, frame_info.address, null, null);
             }
             address = map.universal_address;
-            frame_mac = map.mac;
         }
 
-        ubyte[255] buffer = void;
-        buffer[3] = address;
-        buffer[2] = type;
-        buffer[4 .. 4 + message.length] = cast(ubyte[])message[];
-
+        // message = [function_code, pdu_data...]; payload is the full PDU
         Packet p;
-        p.init!Ethernet(buffer[0 .. 4 + message.length]);
-        p.creation_time = recvTime;
+        ref ModbusFrame hdr = p.init!ModbusFrame(message, recvTime);
         p.vlan = _pvid;
-        p.eth.ether_type = EtherType.ow;
-        p.eth.ow_sub_type = OW_SubType.modbus;
+        hdr.type = type;
+        hdr.function_code = cast(ubyte)frame_info.function_code;
 
         if (_is_bus_master)
         {
@@ -818,9 +791,9 @@ private:
                 }
                 else
                 {
-                    p.eth.src = frame_mac;
-                    p.eth.dst = pm.request_from;
-                    buffer[0..2] = nativeToBigEndian(pm.sequence_number);
+                    hdr.src_address = address;
+                    hdr.dst_address = pm.request_from_address;
+                    hdr.sequence_number = pm.sequence_number;
                     dispatch(p);
                     _queue.complete(matched_tag, MessageState.complete);
                 }
@@ -849,9 +822,9 @@ private:
                 if (found)
                 {
                     auto pm = matched_tag in _pending;
-                    p.eth.src = frame_mac;
-                    p.eth.dst = pm.request_from;
-                    buffer[0..2] = nativeToBigEndian(seq);
+                    hdr.src_address = address;
+                    hdr.dst_address = pm.request_from_address;
+                    hdr.sequence_number = seq;
                     dispatch(p);
                     _queue.complete(matched_tag, MessageState.complete);
                 }
@@ -868,23 +841,16 @@ private:
         {
             if (type != ModbusFrameType.request)
             {
-                if (frame_mac == mac)
+                if (type == ModbusFrameType.unknown)
                 {
-                    debug assert(type != ModbusFrameType.response, "This seems like a request, but the FrameInfo disagrees!");
-                    buffer[2] = type = ModbusFrameType.request;
-                }
-                else if (type == ModbusFrameType.unknown)
-                {
-                    // we can't dispatch this message if we don't know if its a request or a response...
-                    // we'll need to discard messages until we get one that we know, and then we can predict future messages from there
                     log.debug_("rx-drop: unknown frame type, can't dispatch");
                     ++_status.rx_dropped;
                     return;
                 }
             }
 
-            p.eth.src = type == ModbusFrameType.request ? _master_mac : frame_mac;
-            p.eth.dst = type == ModbusFrameType.request ? frame_mac : _master_mac;
+            hdr.src_address = type == ModbusFrameType.request ? _master_address : address;
+            hdr.dst_address = type == ModbusFrameType.request ? address : _master_address;
 
             ushort seq = frame_info.sequence_number;
             if (!frame_info.has_sequence_number)
@@ -893,7 +859,7 @@ private:
                     ++_sequence_number;
                 seq = _sequence_number;
             }
-            buffer[0..2] = nativeToBigEndian(seq);
+            hdr.sequence_number = seq;
 
             dispatch(p);
 
