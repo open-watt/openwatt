@@ -15,6 +15,7 @@ import manager.console;
 import manager.plugin;
 
 import router.iface;
+import router.iface.address_table;
 import router.iface.vlan;
 
 nothrow @nogc:
@@ -33,7 +34,8 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!BridgeInterface, id, flags);
-        _mac_table = MACTable(16, 256, 60);
+        _address_table = AddressTable(32);
+        _address_table.insert(mac.ul | (ulong(PacketType.ethernet) << 60), _local_port);
     }
 
     ~this()
@@ -112,6 +114,7 @@ nothrow @nogc:
     {
         assert(iface !is this, "Cannot add a bridge to itself!");
         assert(_members.length < 256, "Too many _members in the bridge!");
+        assert(!(iface.flags & ObjectFlags.slave), "Interface is already slaved!");
 
         ubyte port = cast(ubyte)_members.length;
         if (iface.set_master(this, port) !is null)
@@ -127,14 +130,11 @@ nothrow @nogc:
         {
             ushort vlan = 0;
 
-            if (!mb.master)
-                _mac_table.insert(mb._master_mac, vlan, port);
-
             auto mod_mb = get_module!ModbusProtocolModule;
             foreach (ref map; mod_mb.remote_servers.values)
             {
                 if (map.iface is iface)
-                    _mac_table.insert(map.mac, vlan, port);
+                    _address_table.insert(ulong(map.universal_address) | (ulong(vlan) << 48) | (ulong(PacketType.modbus) << 60), port);
             }
         }
 
@@ -216,10 +216,14 @@ nothrow @nogc:
             }
         }
 
+        ulong src = get_network_src_address(packet);
+        if (!src.is_multicast_address)
+            _address_table.insert(src, _local_port);
+
         if (callback)
             return send_tracked(packet, callback);
 
-        send(packet);
+        send(packet, _local_port);
 
         ++_status.send_packets;
         _status.send_bytes += packet.data.length;
@@ -291,7 +295,8 @@ protected:
 
     override void update()
     {
-        _mac_table.update();
+        // TODO: AddressTable needs TTL mechanism...
+//        _address_table.update();
     }
 
     final override bool bind_vlan(BaseInterface vlan_interface, bool remove)
@@ -299,13 +304,18 @@ protected:
         VLANInterface vif = cast(VLANInterface)vlan_interface;
         assert(vif, "Not a vlan interface!");
 
-        // add to the vlan table...
+        ulong key = vif.mac.ul | (ulong(vif.vlan) << 48) | (ulong(PacketType.ethernet) << 60);
+
         if (remove)
+        {
             _vlans.remove(vif.vlan);
+            _address_table.remove(key);
+        }
         else
         {
-            debug assert (!_vlans.exists(vif.vlan), "VLAN already bound!" );
+            debug assert(!_vlans.exists(vif.vlan), "VLAN already bound!");
             _vlans.insert(vif.vlan, vif);
+            _address_table.insert(key, _local_port);
         }
         return true;
     }
@@ -316,6 +326,7 @@ protected:
 
         ubyte src_port = cast(ubyte)child_id;
         ref const BridgePort port = _members[src_port];
+        ulong src_address;
         ushort src_vlan = 0;
 
         // check for link-local frames (bridges must not forward link-local frames)
@@ -371,73 +382,23 @@ protected:
             packet.vlan = src_vlan;
         }
 
-        if (!packet.eth.src.is_multicast)
-            _mac_table.insert(packet.eth.src, src_vlan, src_port);
+        src_address = get_network_src_address(packet);
+        if (!src_address.is_multicast_address)
+            _address_table.insert(src_address, src_port);
 
-        if (packet.eth.dst == mac)
+        send(packet, src_port);
+
+        debug
         {
-            // we're the destination!
-            // we don't need to forward it, just deliver it to the upper layer...
-
-            ushort vlan = packet.vlan & 0x0FFF;
-            if (vlan > 1)
+            ulong dst_address = get_network_dst_address(packet);
+            int dst_port = _address_table.get(dst_address);
+            if (dst_port >= 0)
             {
-                if (VLANInterface* vif = _vlans.get(vlan))
-                {
-                    vif.vlan_incoming(packet);
-                    return;
-                }
+                if (dst_port != src_port && dst_port != _local_port)
+                    writeDebug(name, ": forward: ", packet.eth.src, " -> ", _members[dst_port].iface.name, "(", packet.eth.dst, ") [", packet.data, "]");
             }
-
-            if (_vlan_filtering)
-            {
-                if (vlan == _bridge_port.pvid)
-                {
-                    if (_bridge_port.untagged_egress)
-                        packet.vlan &= 0xF000; // should we leave the pcp bits in-tact?
-                }
-                else
-                {
-                    // check if bridge port is a vlan member?
-                    assert(false, "TODO");
-                }
-            }
-
-            dispatch(packet);
-        }
-        else
-        {
-            // check if the dest mac matches any of our vlan interfaces...
-            // TODO: this loop is horrible; we should make this better!
-            //       maybe keep a list of vlan interfaces where the MAC was overridden (not equal to bridge MAC)?
-            foreach (vlan; _vlans)
-            {
-                if (packet.eth.dst == vlan.value.mac)
-                {
-                    if (packet.vlan == vlan.key)
-                    {
-                        vlan.value.vlan_incoming(packet);
-                        return;
-                    }
-                    // destined for a vlan, but wrong tag!
-                    debug assert(false, "TODO: try and repro this case; or see if we ever catch one in the wild...");
-                    goto drop_packet;
-                }
-            }
-
-            send(packet, src_port);
-
-            debug
-            {
-                byte dst_port;
-                if (_mac_table.get(packet.eth.dst, packet.vlan & 0xFFF, dst_port))
-                {
-                    if (dst_port != src_port)
-                        writeDebug(name, ": forward: ", packet.eth.src, " -> ", _members[dst_port].iface.name, "(", packet.eth.dst, ") [", packet.data, "]");
-                }
-                else
-                    writeDebug(name, ": broadcast: ", packet.eth.src, " -> * [", packet.data, "]");
-            }
+            else
+                writeDebug(name, ": broadcast: ", packet.eth.src, " -> * [", packet.data, "]");
         }
         return;
 
@@ -446,6 +407,10 @@ protected:
     }
 
 private:
+
+    enum ubyte _local_port = 0xFE;
+    enum _tracking_batch_size = 4;
+
     struct BridgePort
     {
         struct VLANMember
@@ -517,34 +482,55 @@ private:
         }
     }
 
-    enum _tracking_batch_size = 4;
-
     bool _vlan_filtering;
     BridgePort _bridge_port;
     Array!BridgePort _members;
     Map!(ushort, VLANInterface) _vlans;
-    MACTable _mac_table;
+    AddressTable _address_table;
 
     TagTracking* _tracking_free;
     TagTracking* _tracking_active;
     TagAllocator _bridge_tags;
 
-    void send(ref Packet packet, int src_port = -1) nothrow @nogc
+    void local_dispatch(ref Packet packet)
+    {
+        if (!_vlan_filtering)
+        {
+            dispatch(packet);
+            return;
+        }
+
+        ushort vlan = packet.vlan & 0x0FFF;
+        if (vlan == _bridge_port.pvid)
+        {
+            if (_bridge_port.untagged_egress)
+                packet.vlan &= 0xF000;
+            dispatch(packet);
+        }
+        else if (VLANInterface* vif = _vlans.get(vlan))
+            vif.vlan_incoming(packet);
+        // else: not a member of this vlan, drop
+    }
+
+    void send(ref Packet packet, ubyte src_port) nothrow @nogc
     {
         if (!running)
             return;
 
-        if (!packet.eth.dst.is_multicast)
+        ulong address = get_network_dst_address(packet);
+        if (!address.is_multicast_address)
         {
-            byte dst_port;
-            if (_mac_table.get(packet.eth.dst, packet.vlan, dst_port))
+            int dst_port = _address_table.get(address);
+            if (dst_port >= 0)
             {
-                // we don't send it back the way it came...
                 if (dst_port == src_port)
                     return;
 
-                // forward the message
-                if (_members[dst_port].iface.running)
+                if (dst_port == _local_port)
+                {
+                    local_dispatch(packet);
+                }
+                else if (_members[dst_port].iface.running)
                 {
                     if (_vlan_filtering)
                     {
@@ -555,7 +541,7 @@ private:
                         }
                         else
                         {
-                            // check if bridge port is a vlan member?
+                            // TODO: check if bridge port is a vlan member?
                             assert(false);
                         }
                     }
@@ -567,8 +553,7 @@ private:
             }
         }
 
-        // we don't know who it belongs to!
-        // we just broadcast it, and maybe we'll catch the dst mac when the remote replies...
+        // broadcast, or unknown sender...
         foreach (i, ref member; _members)
         {
             if (i != src_port && member.iface.running)
@@ -591,6 +576,8 @@ private:
                     ++_status.send_dropped;
             }
         }
+        if (src_port != _local_port)
+            local_dispatch(packet);
     }
 
     TagTracking* alloc_tracking()
@@ -655,14 +642,25 @@ private:
         TagTracking* tracking = alloc_tracking();
         bool any_succeeded = false;
 
-        if (!packet.eth.dst.is_multicast)
+        ulong address = get_network_dst_address(packet);
+        if (!address.is_multicast_address)
         {
-            byte dst_port;
-            if (_mac_table.get(packet.eth.dst, packet.vlan, dst_port))
+            int dst_port = _address_table.get(address);
+            if (dst_port >= 0)
             {
+                if (dst_port == _local_port)
+                {
+                    recycle_tracking(tracking);
+                    local_dispatch(packet);
+                    return 0;
+                }
+
                 // unicast to known port
                 if (!_members[dst_port].iface.running)
+                {
+                    recycle_tracking(tracking);
                     return -1;
+                }
 
                 if (_vlan_filtering)
                 {
