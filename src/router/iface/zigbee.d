@@ -114,7 +114,7 @@ nothrow @nogc:
 
     final override void abort(int msg_handle, MessageState reason = MessageState.aborted)
     {
-        debug assert(msg_handle >= 0 && msg_handle <= 0xFF, "invalid msg_handle");
+        debug assert(msg_handle > 0, "Invalid message handle");
 
         ubyte t = cast(ubyte)msg_handle;
         if (auto pm = t in _pending)

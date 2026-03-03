@@ -5,6 +5,7 @@ import urt.endian;
 import urt.log;
 import urt.map;
 import urt.mem;
+import urt.mem.allocator;
 import urt.meta.nullable;
 import urt.string;
 import urt.time;
@@ -33,6 +34,40 @@ nothrow @nogc:
     {
         super(collection_type_info!BridgeInterface, name.move, flags);
         _mac_table = MACTable(16, 256, 60);
+    }
+
+    ~this()
+    {
+        assert(_tracking_active is null, "Should be clear from shutdown()");
+
+        while (_tracking_free)
+        {
+            // find batch base by scanning for ptr - 1 in the list
+            TagTracking* base = _tracking_free;
+            scan: while (true)
+            {
+                for (TagTracking* p = _tracking_free; p; p = p.next)
+                {
+                    if (p is base - 1)
+                    {
+                        --base;
+                        continue scan;
+                    }
+                }
+                break;
+            }
+
+            // unlink batch
+            TagTracking** pp = &_tracking_free;
+            while (*pp)
+            {
+                if (*pp >= base && *pp < base + _tracking_batch_size)
+                    *pp = (*pp).next;
+                else
+                    pp = &(*pp).next;
+            }
+            defaultAllocator().freeArray(base[0 .. _tracking_batch_size]);
+        }
     }
 
     // Properties...
@@ -121,6 +156,10 @@ nothrow @nogc:
         //       we need to unsubscribe and resubscribe all the _members...
         assert(false);
 
+        // TODO: scan active TagTracking entries and remove PortTags for the removed
+        //       interface, decrementing n_pending for each. If n_pending reaches 0,
+        //       fire the upstream callback and recycle the entry.
+
         return true;
     }
 
@@ -134,12 +173,7 @@ nothrow @nogc:
         return false;
     }
 
-    override void update()
-    {
-        _mac_table.update();
-    }
-
-    protected override int transmit(ref Packet packet, MessageCallback)
+    protected override int transmit(ref Packet packet, MessageCallback callback)
     {
         // this is a packet entering the bridge from the bridge interface...
 
@@ -182,6 +216,9 @@ nothrow @nogc:
             }
         }
 
+        if (callback)
+            return send_tracked(packet, callback);
+
         send(packet);
 
         ++_status.send_packets;
@@ -190,24 +227,72 @@ nothrow @nogc:
         return 0;
     }
 
-protected:
-    struct BridgePort
+    final override void abort(int msg_handle, MessageState reason = MessageState.aborted)
     {
-        struct VLANMember
+        debug assert(msg_handle > 0, "Invalid message handle");
+
+        TagTracking* entry = _tracking_active;
+        while (entry)
         {
-            short first, count;
+            if (entry.bridge_tag == msg_handle)
+            {
+                auto cb = entry.upstream_cb;
+                entry.upstream_cb = null; // suppress on_port_callback firing upstream during abort
+                foreach (ref pt; entry.port_tags[])
+                {
+                    if (pt.tag > 0)
+                        pt.iface.abort(pt.tag, reason);
+                }
+                if (cb)
+                    cb(msg_handle, reason);
+                recycle_tracking(entry);
+                return;
+            }
+            entry = entry.next;
         }
-        BaseInterface iface;
-        ushort pvid = 1;
-        bool ingress_filtering = false;
-        bool untagged_egress = true;
     }
 
-    bool _vlan_filtering;
-    BridgePort _bridge_port;
-    Array!BridgePort _members;
-    Map!(ushort, VLANInterface) _vlans;
-    MACTable _mac_table;
+    final override MessageState msg_state(int msg_handle) const
+    {
+        const(TagTracking)* entry = _tracking_active;
+        while (entry)
+        {
+            if (entry.bridge_tag == msg_handle)
+            {
+                if (entry.port_tags.length == 1)
+                    return entry.port_tags[0].iface.msg_state(entry.port_tags[0].tag);
+                return MessageState.in_flight;
+            }
+            entry = entry.next;
+        }
+        return MessageState.complete;
+    }
+
+protected:
+
+    override CompletionStatus shutdown()
+    {
+        while (_tracking_active)
+        {
+            TagTracking* entry = _tracking_active;
+            auto cb = entry.upstream_cb;
+            entry.upstream_cb = null;
+            foreach (ref pt; entry.port_tags[])
+            {
+                if (pt.tag > 0)
+                    pt.iface.abort(pt.tag);
+            }
+            if (cb)
+                cb(entry.bridge_tag, MessageState.aborted);
+            recycle_tracking(entry);
+        }
+        return CompletionStatus.complete;
+    }
+
+    override void update()
+    {
+        _mac_table.update();
+    }
 
     final override bool bind_vlan(BaseInterface vlan_interface, bool remove)
     {
@@ -360,6 +445,90 @@ protected:
         ++_status.recv_dropped;
     }
 
+private:
+    struct BridgePort
+    {
+        struct VLANMember
+        {
+            short first, count;
+        }
+        BaseInterface iface;
+        ushort pvid = 1;
+        bool ingress_filtering = false;
+        bool untagged_egress = true;
+    }
+
+    struct PortTag
+    {
+        BaseInterface iface;
+        int tag;
+    }
+
+    struct TagTracking
+    {
+        nothrow @nogc:
+        TagTracking* next;
+        BridgeInterface bridge;
+        MessageCallback upstream_cb;
+        Array!PortTag port_tags;
+        ubyte bridge_tag;
+        ubyte pending;
+        bool any_succeeded;
+
+        void on_port_callback(int port_tag, MessageState state) nothrow @nogc
+        {
+            if (port_tag <= 0)
+                return;
+
+            // handle unicast with higher fidelity
+            if (port_tags.length == 1)
+            {
+                if (upstream_cb)
+                {
+                    upstream_cb(bridge_tag, state);
+                    if (state >= MessageState.complete)
+                        bridge.recycle_tracking(&this);
+                }
+                return;
+            }
+
+            if (state < MessageState.complete)
+                return;
+            if (state == MessageState.complete)
+                any_succeeded = true;
+
+            if (--pending == 0)
+            {
+                if (upstream_cb)
+                {
+                    upstream_cb(bridge_tag, any_succeeded ? MessageState.complete : MessageState.failed);
+                    bridge.recycle_tracking(&this);
+                }
+                return;
+            }
+
+            foreach (ref pt; port_tags[])
+            {
+                if (pt.tag != port_tag)
+                    continue;
+                pt.tag = 0;
+                break;
+            }
+        }
+    }
+
+    enum _tracking_batch_size = 4;
+
+    bool _vlan_filtering;
+    BridgePort _bridge_port;
+    Array!BridgePort _members;
+    Map!(ushort, VLANInterface) _vlans;
+    MACTable _mac_table;
+
+    TagTracking* _tracking_free;
+    TagTracking* _tracking_active;
+    TagAllocator _bridge_tags;
+
     void send(ref Packet packet, int src_port = -1) nothrow @nogc
     {
         if (!running)
@@ -422,6 +591,165 @@ protected:
                     ++_status.send_dropped;
             }
         }
+    }
+
+    TagTracking* alloc_tracking()
+    {
+        if (_tracking_free)
+        {
+            TagTracking* entry = _tracking_free;
+            _tracking_free = entry.next;
+            entry.next = null;
+            return entry;
+        }
+
+        // batch-allocate
+        TagTracking[] batch = defaultAllocator().allocArray!TagTracking(_tracking_batch_size);
+        assert(batch.ptr, "Out of memory");
+        foreach (i; 0 .. _tracking_batch_size)
+        {
+            if (i == 0)
+                continue;
+            batch[i].next = _tracking_free;
+            _tracking_free = &batch[i];
+        }
+        return &batch[0];
+    }
+
+    void recycle_tracking(TagTracking* entry)
+    {
+        _bridge_tags.free(entry.bridge_tag);
+
+        TagTracking** pp = &_tracking_active;
+        while (*pp)
+        {
+            if (*pp is entry)
+            {
+                *pp = entry.next;
+                break;
+            }
+            pp = &(*pp).next;
+        }
+
+        entry.upstream_cb = null;
+        entry.port_tags.clear();
+        entry.bridge_tag = 0;
+        entry.pending = 0;
+        entry.any_succeeded = false;
+        entry.next = _tracking_free;
+        _tracking_free = entry;
+    }
+
+    void link_active(TagTracking* entry)
+    {
+        entry.bridge = this;
+        entry.next = _tracking_active;
+        _tracking_active = entry;
+    }
+
+    int send_tracked(ref Packet packet, MessageCallback callback)
+    {
+        if (!running)
+            return -1;
+
+        TagTracking* tracking = alloc_tracking();
+        bool any_succeeded = false;
+
+        if (!packet.eth.dst.is_multicast)
+        {
+            byte dst_port;
+            if (_mac_table.get(packet.eth.dst, packet.vlan, dst_port))
+            {
+                // unicast to known port
+                if (!_members[dst_port].iface.running)
+                    return -1;
+
+                if (_vlan_filtering)
+                {
+                    if (packet.vlan == _members[dst_port].pvid)
+                    {
+                        if (_members[dst_port].untagged_egress)
+                            packet.vlan &= 0xF000;
+                    }
+                    else
+                        assert(false, "TODO");
+                }
+
+                int tag = _members[dst_port].iface.forward(packet, &tracking.on_port_callback);
+                if (tag <= 0)
+                {
+                    recycle_tracking(tracking);
+
+                    if (tag == 0)
+                    {
+                        ++_status.send_packets;
+                        _status.send_bytes += packet.data.length;
+                    }
+                    return tag;
+                }
+                tracking.port_tags.pushBack(PortTag(_members[dst_port].iface, tag));
+                tracking.pending = 1;
+                goto finalize;
+            }
+        }
+
+        // broadcast / unknown destination
+        foreach (i, ref member; _members)
+        {
+            if (!member.iface.running)
+                continue;
+
+            if (_vlan_filtering)
+            {
+                if (packet.vlan == member.pvid)
+                {
+                    if (member.untagged_egress)
+                        packet.vlan &= 0xF000;
+                }
+                else
+                    assert(false, "TODO");
+            }
+
+            int tag = member.iface.forward(packet, &tracking.on_port_callback);
+            if (tag > 0)
+            {
+                tracking.port_tags.pushBack(PortTag(member.iface, tag));
+                ++tracking.pending;
+            }
+            else if (tag == 0)
+                any_succeeded = true;
+        }
+
+        if (tracking.pending == 0)
+        {
+            recycle_tracking(tracking);
+
+            if (any_succeeded)
+            {
+                ++_status.send_packets;
+                _status.send_bytes += packet.data.length;
+            }
+            return any_succeeded ? 0 : -1;
+        }
+
+        tracking.any_succeeded = any_succeeded;
+
+    finalize:
+        int btag = _bridge_tags.alloc();
+        if (btag < 0)
+        {
+            foreach (ref pt; tracking.port_tags[])
+                pt.iface.abort(pt.tag);
+            recycle_tracking(tracking);
+            return -1;
+        }
+        tracking.bridge_tag = cast(ubyte)btag;
+        tracking.upstream_cb = callback;
+        link_active(tracking);
+
+        ++_status.send_packets;
+        _status.send_bytes += packet.data.length;
+        return btag;
     }
 }
 

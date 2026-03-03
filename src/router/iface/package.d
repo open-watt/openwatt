@@ -59,6 +59,38 @@ enum MessageState
 alias MessageCallback = void delegate(int msg_handle, MessageState state) nothrow @nogc;
 
 
+struct TagAllocator
+{
+nothrow @nogc pure:
+    int alloc()
+    {
+        foreach (_; 0 .. 255)
+        {
+            ++_next;
+            if (_next == 0)
+                _next = 1;
+            if (!(_in_use[_next / _tag_bits] & (size_t(1) << (_next % _tag_bits))))
+            {
+                _in_use[_next / _tag_bits] |= size_t(1) << (_next % _tag_bits);
+                return _next;
+            }
+        }
+        return -1;
+    }
+
+    void free(ubyte tag)
+    {
+        _in_use[tag / _tag_bits] &= ~(size_t(1) << (tag % _tag_bits));
+    }
+
+private:
+    enum _tag_bits = size_t.sizeof * 8;
+
+    ubyte _next;
+    size_t[256 / _tag_bits] _in_use;
+}
+
+
 struct PacketFilter
 {
 nothrow @nogc:
@@ -341,6 +373,7 @@ nothrow @nogc:
 
     void abort(int msg_handle, MessageState reason = MessageState.aborted)
     {
+        debug assert(msg_handle > 0, "Invalid message handle");
         assert(false, "Interface does not support message cancellation");
     }
 

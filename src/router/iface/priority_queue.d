@@ -5,7 +5,7 @@ import urt.mem.allocator;
 import urt.mem.freelist;
 import urt.time;
 
-import router.iface : MessageCallback, MessageState;
+import router.iface : MessageCallback, MessageState, TagAllocator;
 import router.iface.packet;
 import router.status : Status;
 
@@ -110,7 +110,7 @@ nothrow @nogc:
         frame.packet = packet.clone();
         frame.callback = callback;
         frame.enqueue_time = getTime();
-        int tag = alloc_tag();
+        int tag = _tags.alloc();
         if (tag < 0)
         {
             size_t alloc_size = Packet.sizeof + frame.packet.length;
@@ -299,9 +299,7 @@ private:
     ubyte _reserved_slots;
     ubyte _reserved_min_rank;
 
-    ubyte _next_tag;
-    enum _tag_bits = size_t.sizeof * 8;
-    size_t[256 / _tag_bits] _tags_in_use;
+    TagAllocator _tags;
     Duration _queue_timeout;
     Duration _transport_timeout;
 
@@ -319,27 +317,6 @@ private:
 
         if (service_us > _status.max_service_us)
             _status.max_service_us = service_us;
-    }
-
-    int alloc_tag() pure
-    {
-        foreach (_; 0 .. 255)
-        {
-            ++_next_tag;
-            if (_next_tag == 0)
-                _next_tag = 1;
-            if (!(_tags_in_use[_next_tag / _tag_bits] & (size_t(1) << (_next_tag % _tag_bits))))
-            {
-                _tags_in_use[_next_tag / _tag_bits] |= size_t(1) << (_next_tag % _tag_bits);
-                return _next_tag;
-            }
-        }
-        return -1;
-    }
-
-    void free_tag(ubyte tag) pure
-    {
-        _tags_in_use[tag / _tag_bits] &= ~(size_t(1) << (tag % _tag_bits));
     }
 
     bool drop_lowest_dei()
@@ -366,7 +343,7 @@ private:
 
     void free_frame(QueuedFrame* frame)
     {
-        free_tag(frame.tag);
+        _tags.free(frame.tag);
         if (frame.packet)
         {
             size_t alloc_size = Packet.sizeof + frame.packet.length;
