@@ -424,15 +424,13 @@ nothrow @nogc:
     override void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(const void[] packetData) nothrow @nogc sink) const
     {
         ref const ModbusFrame hdr = packet.hdr!ModbusFrame();
-        // synthesize RTU frame: [address, function_code, data..., crc16]
         ubyte address = hdr.type == ModbusFrameType.request ? hdr.dst_address : hdr.src_address;
+        ushort crc = modbus_crc((&address)[0 .. 1]);
+        crc = modbus_crc(packet.data, crc);
+
+        // synthesize RTU frame: [address, function_code, data..., crc16]
         sink((&address)[0 .. 1]);
         sink(packet.data);
-        // CRC over address + pdu
-        ubyte[256] tmp = void;
-        tmp[0] = address;
-        tmp[1 .. 1 + packet.data.length] = cast(ubyte[])packet.data[];
-        ushort crc = tmp[0 .. 1 + packet.data.length].modbus_crc();
         sink(crc.nativeToLittleEndian());
     }
 
