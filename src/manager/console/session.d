@@ -85,6 +85,18 @@ nothrow @nogc:
                 CommandState commandData = _current_command;
                 _current_command = null;
 
+                // echo the result (since it wasn't captured)
+                if (!commandData.result.isNull)
+                {
+                    ptrdiff_t l = commandData.result.toString(null, null, null);
+                    if (l > 0)
+                    {
+                        Array!char buffer;
+                        l = commandData.result.toString(buffer.extend(l), null, null);
+                        write_line(buffer[0..l]);
+                    }
+                }
+
                 command_finished(commandData, state);
                 allocator.freeT(commandData);
 
