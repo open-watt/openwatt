@@ -733,7 +733,7 @@ private:
             {
                 if (_is_bus_master)
                 {
-                    log.debug_("rx-drop: unknown local address ", frame_info.address);
+                    log.debug_("rx-drop: unknown local address ", frame_info.address, " on bus ", name[]);
                     ++_status.rx_dropped;
                     return;
                 }
@@ -756,25 +756,24 @@ private:
             {
                 // find the single in-flight entry (RTU: max_in_flight=1)
                 ubyte matched_tag = 0;
-                bool found = false;
+                PendingModbus* pm = null;
                 foreach (kvp; _pending[])
                 {
                     if (!_queue.is_queued(kvp.key))
                     {
                         matched_tag = kvp.key;
-                        found = true;
+                        pm = &kvp.value;
                         break;
                     }
                 }
 
-                if (!found)
+                if (pm is null)
                 {
                     log.debug_("rx-drop: response but no in-flight request");
                     ++_status.rx_dropped;
                     return;
                 }
 
-                auto pm = matched_tag in _pending;
                 if (pm.local_server_address != frame_info.address)
                 {
                     log.debug_("rx-drop: address mismatch (got ", frame_info.address,
@@ -805,21 +804,20 @@ private:
 
                 ushort seq = frame_info.sequence_number;
                 ubyte matched_tag = 0;
-                bool found = false;
+                PendingModbus* pm = null;
 
                 foreach (kvp; _pending[])
                 {
                     if (kvp.value.local_server_address == frame_info.address && kvp.value.sequence_number == seq)
                     {
                         matched_tag = kvp.key;
-                        found = true;
+                        pm = &kvp.value;
                         break;
                     }
                 }
 
-                if (found)
+                if (pm !is null)
                 {
-                    auto pm = matched_tag in _pending;
                     hdr.src_address = address;
                     hdr.dst_address = pm.request_from_address;
                     hdr.sequence_number = seq;
@@ -841,7 +839,7 @@ private:
             {
                 if (type == ModbusFrameType.unknown)
                 {
-                    log.debug_("rx-drop: unknown frame type, can't dispatch");
+                    log.debug_("rx-drop: unknown modbus frame type, can't dispatch");
                     ++_status.rx_dropped;
                     return;
                 }
