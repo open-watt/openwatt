@@ -910,7 +910,7 @@ private:
     bool do_node_interview(NodeMap* node)
     {
         version (DebugZigbeeController)
-            writeInfof("ZigbeeController: beginning interview for device {0,04x}...", node.id);
+            writeInfof("ZigbeeController: {0} device {1,04x}...", node.device_created ? "re-initialising" : "beginning interview for", node.id);
 
         ZigbeeResult r;
         ZDOResponse zdo_res;
@@ -973,7 +973,8 @@ private:
                     result = read_basic_info(node.id, ep, node.basic_info);
                     if (result.succeeded)
                     {
-                        writeInfof("ZigbeeController: interviewing device {0,04x}: {1} \"{2}\" {3} {4}", node.id, node.desc.type, node.get_fingerprint()[], node.basic_info.product_code[], node.basic_info.product_url[]);
+                        if (!node.device_created)
+                            writeInfof("ZigbeeController: interviewing device {0,04x}: {1} \"{2}\" {3} {4}", node.id, node.desc.type, node.get_fingerprint()[], node.basic_info.product_code[], node.basic_info.product_url[]);
 
                         ep.dynamic = false;
                         cluster.dynamic = false;
@@ -1214,7 +1215,10 @@ private:
                     info ~= "\n";
                 }
             }
-            writeInfof("ZigbeeController: completed interview for device {0,04x} ({1}) {2} {3}\n{4}", node.id, node.get_fingerprint()[], node.basic_info.product_code[], node.basic_info.product_url[], info[]);
+            if (node.device_created)
+                writeInfof("ZigbeeController: re-initialised device {0,04x} ({1})", node.id, node.get_fingerprint()[]);
+            else
+                writeInfof("ZigbeeController: completed interview for device {0,04x} ({1}) {2} {3}\n{4}", node.id, node.get_fingerprint()[], node.basic_info.product_code[], node.basic_info.product_url[], info[]);
         }
 
         node.initialised = 0xFF; // fully initialised
@@ -1235,7 +1239,7 @@ private:
         ref NodeMap.Cluster basic = ep.clusters[0];
 
         // read from the basic cluster
-        enum ushort[10] basic_attributes = [ 0, 1, 2, 3, 4, 5, 7, 10, 11, 0x4000 ];
+        enum ushort[11] basic_attributes = [ 0, 1, 2, 3, 4, 5, 7, 10, 11, 0x4000, 0xFFFE ];
         for (size_t i = 0; i < basic_attributes.length; ++i)
             req_buffer[i*2..i*2 + 2][0..2] = basic_attributes[i].nativeToLittleEndian;
 

@@ -198,6 +198,19 @@ protected:
                 else version (DebugZigbee)
                     writeInfof("Zigbee: device announce: {0, 04x} [{1}] - type={2}", id, eui, type);
                 n.desc.type = type;
+
+                // Tuya multi-endpoint devices need a basic cluster read on every
+                // rejoin to activate per-endpoint command routing. If the device
+                // is already fully interviewed and has attribute 0xFFFE on the
+                // basic cluster, clear the basic-info bits so the interview loop
+                // re-sends the batch read.
+                if (n.initialised == 0xFF)
+                {
+                    if (auto ep = 1 in n.endpoints)
+                        if (auto basic = 0 in ep.clusters)
+                            if (0xFFFE in basic.attributes)
+                                n.initialised &= ~0xC0;
+                }
                 break;
 
             default:
