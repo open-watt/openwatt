@@ -115,7 +115,7 @@ class ZigbeeNode : BaseObject
         return send_message(n.id, dst_endpoint, src_endpoint, profile_id, cluster, message, pcp);
     }
 
-    final int send_message(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, MessageProgressCallback progress_callback, PCP pcp = PCP.be, bool group = false) nothrow
+    final int send_message(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, MessageCallback progress_callback, PCP pcp = PCP.be, bool group = false) nothrow
     {
         if (!running)
             return ZigbeeResult.no_network;
@@ -140,7 +140,7 @@ class ZigbeeNode : BaseObject
 
         p.pcp = pcp;
 
-        return zigbee_iface.forward_async(p, progress_callback);
+        return _interface.forward(p, progress_callback);
     }
 
     final ZigbeeResult send_message_async(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, PCP pcp = PCP.be, bool group = false)
@@ -153,11 +153,13 @@ class ZigbeeNode : BaseObject
             YieldZB e;
             ZigbeeResult r;
 
-            void progress(ZigbeeResult status, ref const APSFrame frame) pure nothrow @nogc
+            void progress(int, MessageState state) nothrow @nogc
             {
-                r = status;
-                if (status == ZigbeeResult.pending)
-                    return; // this is the intermediate update when the message is received by EZSP
+                if (state <= MessageState.in_flight)
+                    return; // intermediate; keep waiting
+                r = state == MessageState.complete ? ZigbeeResult.success :
+                    state == MessageState.timeout ? ZigbeeResult.timeout :
+                    ZigbeeResult.failed;
                 e.finished = true;
             }
         }
@@ -171,14 +173,14 @@ class ZigbeeNode : BaseObject
         if (tag < 0)
             return ZigbeeResult.failed;
 
-        scope (failure)
-            zigbee_iface().abort_async(tag);
+        scope(failure)
+            _interface.abort(tag);
 
         yield(ev);
 
         if (!ev.finished)
         {
-            zigbee_iface().abort_async(tag);
+            _interface.abort(tag);
             return ZigbeeResult.timeout;
         }
         return data.r;
@@ -208,7 +210,7 @@ class ZigbeeNode : BaseObject
             msg[0] = _seq++;
 
         ZDORequest* req = null;
-        MessageProgressCallback progress = null;
+        MessageCallback progress = null;
         if (response_handler && (cluster & 0x8000) == 0)
         {
             req = _zdo_request_pool.alloc();
@@ -228,7 +230,7 @@ class ZigbeeNode : BaseObject
             else
             {
                 req.tag = tag;
-                req.iface = zigbee_iface();
+                req.iface = _interface;
             }
         }
         return tag;
@@ -250,11 +252,13 @@ class ZigbeeNode : BaseObject
             if (_zdo_requests[i].tag == tag)
             {
                 ZDORequest* req = _zdo_requests[i];
+                _aborted_zdo[_aborted_zdo_pos++ & 7] = AbortedZDOMsg(req.seq, req.cluster);
                 _zdo_requests.remove(i);
-                req.response_handler(reason, ZDOStatus.success, null, req.user_data);
+                if (req.response_handler)
+                    req.response_handler(reason, ZDOStatus.success, null, req.user_data);
                 req.response_handler = null;
-                if (req.iface)
-                    req.iface.abort_async(tag);
+                if (req.tag >= 0)
+                    req.iface.abort(tag);
                 _zdo_request_pool.free(req);
                 return;
             }
@@ -300,7 +304,7 @@ class ZigbeeNode : BaseObject
         if (tag < 0)
             return ZigbeeResult.failed;
 
-        scope (failure)
+        scope(failure)
             abort_zdo_request(tag);
 
         yield(ev);
@@ -350,7 +354,7 @@ class ZigbeeNode : BaseObject
         hdr.seq = _seq++;
 
         ZCLRequest* req = null;
-        MessageProgressCallback progress = null;
+        MessageCallback progress = null;
         if (response_handler && (hdr.control & ZCLControlFlags.response) == 0)
         {
             req = _zcl_request_pool.alloc();
@@ -378,7 +382,7 @@ class ZigbeeNode : BaseObject
             else
             {
                 req.tag = tag;
-                req.iface = zigbee_iface();
+                req.iface = _interface;
             }
         }
         return tag;
@@ -418,11 +422,13 @@ class ZigbeeNode : BaseObject
             if (_zcl_requests[i].tag == tag)
             {
                 ZCLRequest* req = _zcl_requests[i];
+                _aborted_zcl[_aborted_zcl_pos++ & 7] = AbortedZCLMsg(req.seq, req.endpoint, req.cluster);
                 _zcl_requests.remove(i);
-                req.response_handler(reason, null, null, req.user_data);
+                if (req.response_handler)
+                    req.response_handler(reason, null, null, req.user_data);
                 req.response_handler = null;
-                if (req.iface)
-                    req.iface.abort_async(tag);
+                if (req.tag >= 0)
+                    req.iface.abort(tag);
                 _zcl_request_pool.free(req);
                 return;
             }
@@ -469,7 +475,7 @@ class ZigbeeNode : BaseObject
         if (tag < 0)
             return ZigbeeResult.failed;
 
-        scope (failure)
+        scope(failure)
             abort_zcl_request(tag);
 
         yield(ev);
@@ -529,6 +535,8 @@ class ZigbeeNode : BaseObject
         return ZigbeeResult.success;
     }
 
+    final bool is_network_up() const pure nothrow
+        => zigbee_iface()._network_status == EmberStatus.NETWORK_UP;
 
 protected:
 
@@ -579,12 +587,7 @@ protected:
         for (size_t i = 0; i < _zdo_requests.length; )
         {
             ZDORequest* req = _zdo_requests[i];
-            if (req.tag == -1)
-            {
-                _zdo_requests.remove(i);
-                _zdo_request_pool.free(req);
-            }
-            else if (req.tag == -1 || getTime() - req.request_time > 2.seconds)
+            if (getTime() - req.request_time > 2.seconds)
             {
                 version (DebugZigbee)
                     writeWarningf("Zigbee: ZDO request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
@@ -598,12 +601,7 @@ protected:
         for (size_t i = 0; i < _zcl_requests.length; )
         {
             ZCLRequest* req = _zcl_requests[i];
-            if (req.tag == -1)
-            {
-                _zcl_requests.remove(i);
-                _zcl_request_pool.free(req);
-            }
-            else if (getTime() - req.request_time > 2.seconds)
+            if (getTime() - req.request_time > 2.seconds)
             {
                 version (DebugZigbee)
                     writeWarningf("Zigbee: ZCL request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
@@ -639,11 +637,24 @@ protected:
                     {
                         ZDORequest* req = _zdo_requests[i];
                         _zdo_requests.remove(i);
-                        req.response_handler(ZigbeeResult.success, cast(ZDOStatus)data[1], data[2..$], req.user_data);
+                        if (req.response_handler)
+                            req.response_handler(ZigbeeResult.success, cast(ZDOStatus)data[1], data[2..$], req.user_data);
+                        req.response_handler = null;
+                        if (req.tag >= 0)
+                            req.iface.abort(req.tag);
                         _zdo_request_pool.free(req);
                         return;
                     }
                 }
+                foreach (ref ak; _aborted_zdo)
+                {
+                    if (ak.seq == seq && ak.cluster == (aps.cluster_id & 0x7FFF))
+                    {
+                        writeInfof("Zigbee: late ZDO response {0, 04x} from {1, 04x} seq {2} (aborted in-flight)", aps.cluster_id, aps.src, seq);
+                        return;
+                    }
+                }
+
                 version (DebugZigbee)
                     writeWarningf("Zigbee: received unexpected ZDO response {0, 04x} from {1, 04x} with seq {2}", aps.cluster_id, aps.src, seq);
                 return;
@@ -677,8 +688,21 @@ protected:
 
                         ZCLRequest* req = _zcl_requests[i];
                         _zcl_requests.remove(i);
-                        req.response_handler(ZigbeeResult.success, &zcl, data[hdr_len .. $], req.user_data);
+                        if (req.response_handler)
+                            req.response_handler(ZigbeeResult.success, &zcl, data[hdr_len .. $], req.user_data);
+                        req.response_handler = null;
+                        if (req.tag >= 0)
+                            req.iface.abort(req.tag);
                         _zcl_request_pool.free(req);
+                        return;
+                    }
+                }
+
+                foreach (ref ak; _aborted_zcl)
+                {
+                    if (ak.seq == seq && ak.endpoint == aps.src_endpoint && ak.cluster == aps.cluster_id)
+                    {
+                        writeInfof("Zigbee: late ZCL response from {0, 04x}:{1} [:{2, 04x}] seq {3} (aborted in-flight)", aps.src, aps.src_endpoint, aps.cluster_id, seq);
                         return;
                     }
                 }
@@ -812,19 +836,24 @@ private:
         MonoTime request_time;
         ZDOResponseHandler response_handler;
         void* user_data;
-        ZigbeeInterface iface;
+        BaseInterface iface;
 
     private:
-        void progress_callback(ZigbeeResult status, ref const APSFrame frame) nothrow @nogc
+        void progress_callback(int, MessageState state) nothrow @nogc
         {
-            if (status != ZigbeeResult.pending)
-                iface = null;
-            if (status != ZigbeeResult.success)
+            if (state <= MessageState.in_flight)
+                return;
+            tag = -1;
+            if (state != MessageState.complete)
             {
                 if (response_handler)
-                    response_handler(status, ZDOStatus.success, null, user_data);
-                if (status != ZigbeeResult.pending)
-                    tag = -1;
+                {
+                    ZigbeeResult r = state == MessageState.timeout ? ZigbeeResult.timeout :
+                                     state == MessageState.aborted ? ZigbeeResult.aborted :
+                                     ZigbeeResult.failed;
+                    response_handler(r, ZDOStatus.success, null, user_data);
+                }
+                response_handler = null;
             }
         }
     }
@@ -838,19 +867,24 @@ private:
         MonoTime request_time;
         ZCLResponseHandler response_handler;
         void* user_data;
-        ZigbeeInterface iface;
+        BaseInterface iface;
 
     private:
-        void progress_callback(ZigbeeResult status, ref const APSFrame frame) nothrow @nogc
+        void progress_callback(int, MessageState state) nothrow @nogc
         {
-            if (status != ZigbeeResult.pending)
-                iface = null;
-            if (status != ZigbeeResult.success)
+            if (state <= MessageState.in_flight)
+                return;
+            tag = -1;
+            if (state != MessageState.complete)
             {
                 if (response_handler)
-                    response_handler(status, null, null, user_data);
-                if (status != ZigbeeResult.pending)
-                    tag = -1;
+                {
+                    ZigbeeResult r = state == MessageState.timeout ? ZigbeeResult.timeout :
+                                     state == MessageState.aborted ? ZigbeeResult.aborted :
+                                     ZigbeeResult.failed;
+                    response_handler(r, null, null, user_data);
+                }
+                response_handler = null;
             }
         }
     }
@@ -868,6 +902,14 @@ private:
 
     FreeList!ZCLRequest _zcl_request_pool;
     Array!(ZCLRequest*) _zcl_requests;
+
+    // ring-buffer of aborted requests to detect late responses
+    struct AbortedZDOMsg { ubyte seq; ushort cluster; }
+    struct AbortedZCLMsg { ubyte seq; ubyte endpoint; ushort cluster; }
+    AbortedZDOMsg[8] _aborted_zdo;
+    AbortedZCLMsg[8] _aborted_zcl;
+    ubyte _aborted_zdo_pos;
+    ubyte _aborted_zcl_pos;
 
     size_t find_endpoint(ZigbeeEndpoint endpoint) nothrow
     {

@@ -5,18 +5,17 @@ import urt.mem.allocator;
 import urt.mem.freelist;
 import urt.time;
 
+import router.iface : MessageCallback, MessageState;
 import router.iface.packet;
 import router.status : Status;
 
 nothrow @nogc:
 
 
-alias FrameProgressCallback = void delegate(bool success, ubyte tag) nothrow @nogc;
-
 struct QueuedFrame
 {
     Packet* packet;
-    FrameProgressCallback callback;
+    MessageCallback callback;
     MonoTime enqueue_time;
     MonoTime dispatch_time;
     ubyte tag;
@@ -29,16 +28,28 @@ struct PriorityPacketQueue
 {
 nothrow @nogc:
 
-    void init(Duration timeout, ubyte max_in_flight, ubyte reserved_slots = 0, PCP reserved_min_pcp = PCP.vo, Status* status = null)
+    void init(ubyte max_in_flight, ubyte reserved_slots = 0, PCP reserved_min_pcp = PCP.vo, Status* status = null)
     {
         assert(max_in_flight > 0, "max_in_flight must be greater than 0");
         assert(reserved_slots < max_in_flight, "Reserved slots cannot exceed total capacity");
 
         _max_in_flight = max_in_flight;
-        _timeout = timeout;
         _status = status;
         _reserved_slots = reserved_slots;
         _reserved_min_rank = pcp_priority_map[reserved_min_pcp];
+    }
+
+    // Duration(0) = no expiry (frames wait indefinitely for a slot)
+    void set_queue_timeout(Duration timeout)
+    {
+        _queue_timeout = timeout;
+    }
+
+    // evict in-flight frames after this duration
+    // Duration(0) = never evict frames
+    void set_transport_timeout(Duration timeout)
+    {
+        _transport_timeout = timeout;
     }
 
     size_t queue_depth(PCP pcp) const pure
@@ -57,7 +68,20 @@ nothrow @nogc:
         return _in_flight_count < limit;
     }
 
-    int enqueue(ref Packet packet, FrameProgressCallback callback = null)
+    bool is_queued(ubyte tag) const pure
+    {
+        foreach (ref bucket; _buckets)
+        {
+            foreach (frame; bucket[])
+            {
+                if (frame.tag == tag)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    int enqueue(ref Packet packet, MessageCallback callback = null)
     {
         PCP pcp = packet.pcp;
         bool dei = packet.dei;
@@ -111,7 +135,7 @@ nothrow @nogc:
         return null;
     }
 
-    void complete(ubyte tag, bool success, MonoTime timestamp = getTime())
+    void complete(ubyte tag, MessageState state = MessageState.complete, MonoTime timestamp = getTime())
     {
         foreach (i, frame; _in_flight[])
         {
@@ -119,7 +143,7 @@ nothrow @nogc:
             {
                 update_time_stats(frame, timestamp);
                 if (frame.callback)
-                    frame.callback(success, tag);
+                    frame.callback(tag, state);
                 free_frame(frame);
                 _in_flight.remove(i);
                 --_in_flight_count;
@@ -128,14 +152,14 @@ nothrow @nogc:
         }
     }
 
-    bool abort(ubyte tag)
+    bool abort(ubyte tag, MessageState reason = MessageState.aborted)
     {
         foreach (i, frame; _in_flight[])
         {
             if (frame.tag == tag)
             {
                 if (frame.callback)
-                    frame.callback(false, tag);
+                    frame.callback(tag, reason);
                 free_frame(frame);
                 _in_flight.remove(i);
                 --_in_flight_count;
@@ -149,7 +173,7 @@ nothrow @nogc:
                 if (frame.tag == tag)
                 {
                     if (frame.callback)
-                        frame.callback(false, tag);
+                        frame.callback(tag, reason);
                     free_frame(frame);
                     bucket.remove(i);
                     --_queued_count;
@@ -160,14 +184,14 @@ nothrow @nogc:
         return false;
     }
 
-    void abort_all()
+    void abort_all(MessageState reason = MessageState.aborted)
     {
         foreach (ref bucket; _buckets)
         {
             foreach (frame; bucket[])
             {
                 if (frame.callback)
-                    frame.callback(false, frame.tag);
+                    frame.callback(frame.tag, reason);
                 free_frame(frame);
             }
             bucket.clear();
@@ -177,19 +201,19 @@ nothrow @nogc:
         foreach (frame; _in_flight[])
         {
             if (frame.callback)
-                frame.callback(false, frame.tag);
+                frame.callback(frame.tag, reason);
             free_frame(frame);
         }
         _in_flight.clear();
         _in_flight_count = 0;
     }
 
-    void abort_all_in_flight()
+    void abort_all_in_flight(MessageState reason = MessageState.aborted)
     {
         foreach (frame; _in_flight[])
         {
             if (frame.callback)
-                frame.callback(false, frame.tag);
+                frame.callback(frame.tag, reason);
             free_frame(frame);
         }
         _in_flight.clear();
@@ -198,20 +222,45 @@ nothrow @nogc:
 
     void timeout_stale(MonoTime now)
     {
-        size_t i = 0;
-        while (i < _in_flight.length)
+        if (_queue_timeout != Duration())
         {
-            QueuedFrame* frame = _in_flight[i];
-            if ((now - frame.enqueue_time) > _timeout)
+            foreach (ref bucket; _buckets)
             {
-                if (frame.callback)
-                    frame.callback(false, frame.tag);
-                free_frame(frame);
-                _in_flight.remove(i);
-                --_in_flight_count;
+                size_t i = 0;
+                while (i < bucket.length)
+                {
+                    QueuedFrame* frame = bucket[i];
+                    if ((now - frame.enqueue_time) > _queue_timeout)
+                    {
+                        if (frame.callback)
+                            frame.callback(frame.tag, MessageState.expired);
+                        free_frame(frame);
+                        bucket.remove(i);
+                        --_queued_count;
+                    }
+                    else
+                        ++i;
+                }
             }
-            else
-                ++i;
+        }
+
+        if (_transport_timeout != Duration())
+        {
+            size_t i = 0;
+            while (i < _in_flight.length)
+            {
+                QueuedFrame* frame = _in_flight[i];
+                if ((now - frame.dispatch_time) > _transport_timeout)
+                {
+                    if (frame.callback)
+                        frame.callback(frame.tag, MessageState.timeout);
+                    free_frame(frame);
+                    _in_flight.remove(i);
+                    --_in_flight_count;
+                }
+                else
+                    ++i;
+            }
         }
     }
 
@@ -232,7 +281,8 @@ private:
     ubyte _next_tag;
     ubyte _reserved_slots;
     ubyte _reserved_min_rank;
-    Duration _timeout;
+    Duration _queue_timeout;
+    Duration _transport_timeout;
 
     void update_time_stats(QueuedFrame* frame, MonoTime timestamp)
     {
@@ -269,7 +319,7 @@ private:
                 if (frame.dei)
                 {
                     if (frame.callback)
-                        frame.callback(false, frame.tag);
+                        frame.callback(frame.tag, MessageState.dropped);
                     free_frame(frame);
                     _buckets[rank].remove(i);
                     --_queued_count;

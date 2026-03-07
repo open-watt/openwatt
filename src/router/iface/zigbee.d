@@ -50,10 +50,8 @@ EUI64 zigbee_multicast_addr(ushort group)
     => EUI64(0x3, 0, 0, 0, 0, 0, group >> 8, cast(ubyte)group);
 
 
-alias MessageProgressCallback = void delegate(ZigbeeResult status, ref const APSFrame frame) nothrow;
-
-
-enum uint queue_timeout = 4000; // milliseconds
+enum uint queue_timeout = 30_000; // milliseconds — safety net only; message_sent_handler is the real completion path
+enum uint ezsp_grace_period = 4000; // milliseconds — how long to wait for EZSP client to recover before restarting
 
 
 class ZigbeeInterface : BaseInterface
@@ -80,18 +78,16 @@ nothrow @nogc:
             return StringResult("ezsp-client cannot be null");
         if (_ezsp_client is value)
             return StringResult.success;
-        if (_ezsp_client)
+        if (_subscribed)
         {
-            subscribe_ezsp_client(false);
+            _ezsp_client.unsubscribe(&ezsp_state_change);
+            set_ezsp_callbacks(false);
             if (is_coordinator)
                 _coordinator.subscribe_client(_ezsp_client, false);
+            _subscribed = false;
         }
 
         _ezsp_client = value;
-        subscribe_ezsp_client(true);
-        if (is_coordinator)
-            _coordinator.subscribe_client(_ezsp_client, true);
-
         _network_status = EmberStatus.NETWORK_DOWN;
 
         restart();
@@ -116,32 +112,27 @@ nothrow @nogc:
 
     // API...
 
-    final int forward_async(ref Packet packet, MessageProgressCallback callback)
+    final override void abort(int msg_handle, MessageState reason = MessageState.aborted)
     {
-        if (!running)
-            return -1;
+        debug assert(msg_handle >= 0 && msg_handle <= 0xFF, "invalid msg_handle");
 
-        foreach (ref subscriber; _subscribers[0.._num_subscribers])
-        {
-            if ((subscriber.filter.direction & PacketDirection.outgoing) && subscriber.filter.match(packet))
-                subscriber.recv_packet(packet, this, PacketDirection.outgoing, subscriber.user_data);
-        }
-
-        return transmit_async(packet, callback);
-    }
-
-    final void abort_async(int tag, ZigbeeResult reason = ZigbeeResult.aborted)
-    {
-        debug assert(tag >= 0 && tag <= 0xFF, "invalid tag");
-
-        ubyte t = cast(ubyte)tag;
+        ubyte t = cast(ubyte)msg_handle;
         if (auto pm = t in _pending)
         {
             if (pm.callback)
-                pm.callback(reason, pm.aps);
+                pm.callback(msg_handle, reason);
             _pending.remove(t);
         }
         _queue.abort(t);
+    }
+
+    final override MessageState msg_state(int msg_handle) const
+    {
+        if (cast(ubyte)msg_handle in _pending)
+            return MessageState.in_flight;
+        if (_queue.is_queued(cast(ubyte)msg_handle))
+            return MessageState.queued;
+        return MessageState.complete;
     }
 
 //package: // TODO: should this be hidden in some way?
@@ -167,11 +158,18 @@ protected:
         if (!_ezsp_client.running)
             return CompletionStatus.continue_;
 
+        if (!_subscribed)
+            set_ezsp_callbacks(true);
+
         if (is_coordinator)
         {
             if (_coordinator.ready)
             {
-                _queue.init(queue_timeout.msecs, _max_in_flight, 1, PCP.ca, &_status);
+                _ezsp_client.subscribe(&ezsp_state_change);
+                _coordinator.subscribe_client(_ezsp_client, true);
+                _subscribed = true;
+                _queue.init(_max_in_flight, 1, PCP.ca, &_status);
+                _queue.set_transport_timeout(queue_timeout.msecs);
                 return CompletionStatus.complete;
             }
         }
@@ -183,6 +181,9 @@ protected:
                 return CompletionStatus.error;
             }
 
+            _ezsp_client.subscribe(&ezsp_state_change);
+            _subscribed = true;
+
             // startup in router mode...
             assert(false, "TODO");
 
@@ -193,22 +194,41 @@ protected:
 
     override CompletionStatus shutdown()
     {
-        // TODO: assure that this code places the coordinator in a state where it will not receive any further messages...
-
-        // HACK: this was moved from coordinator; rethink this...!
-        get_module!ZigbeeProtocolModule.remove_all_nodes(this);
-
-        if (is_coordinator)
+        // if the network is still up, leave before tearing down context
+        if (_ezsp_client && _network_status == EmberStatus.NETWORK_UP)
         {
-            _coordinator.subscribe_client(_ezsp_client, false);
-            _coordinator = null;
+            if (_ezsp_client.running)
+            {
+                if (!_leave_sent)
+                {
+                    _ezsp_client.send_command!EZSP_LeaveNetwork(null);
+                    _leave_sent = true;
+                }
+                // wait for status_handler to confirm NETWORK_DOWN
+                return CompletionStatus.continue_;
+            }
+
+            _network_status = EmberStatus.NETWORK_DOWN;
+        }
+        _leave_sent = false;
+
+        set_ezsp_callbacks(false);
+
+        if (_subscribed)
+        {
+            _ezsp_client.unsubscribe(&ezsp_state_change);
+            if (is_coordinator)
+                _coordinator.subscribe_client(_ezsp_client, false);
+            _subscribed = false;
         }
 
+        get_module!ZigbeeProtocolModule.detach_all_nodes(this);
+
         // abort all pending messages
-        foreach (ref pm; _pending.values)
+        foreach (kvp; _pending[])
         {
-            if (pm.callback)
-                pm.callback(ZigbeeResult.aborted, pm.aps);
+            if (kvp.value.callback)
+                kvp.value.callback(kvp.key, MessageState.aborted);
         }
         _pending.clear();
         _queue.abort_all();
@@ -216,17 +236,8 @@ protected:
         _last_ping = MonoTime();
         _ezsp_offline_since = MonoTime();
 
-        // if we're based on an EZSP instance; clear the eui
         if (_ezsp_client)
-        {
-            if (_network_status == EmberStatus.NETWORK_UP)
-            {
-                // drop the network...
-                assert(false, "TODO");
-            }
-
             _network_status = EmberStatus.NETWORK_DOWN;
-        }
 
         return CompletionStatus.complete;
     }
@@ -238,7 +249,7 @@ protected:
         // delayed restart: give EZSP client a grace period to recover
         if (_ezsp_offline_since != MonoTime())
         {
-            if (now - _ezsp_offline_since > queue_timeout.msecs)
+            if (now - _ezsp_offline_since > ezsp_grace_period.msecs)
                 restart();
             return; // don't send while client is offline
         }
@@ -256,10 +267,47 @@ protected:
         }
 
         // TODO: should we poll EZSP_NetworkState? or expect the state change callback to inform us?
+
+        super.update();
     }
 
-    override bool transmit(ref const Packet packet) nothrow @nogc
-        => transmit_async(packet, null) < 0 ? false : true;
+    final override int transmit(ref const Packet packet, MessageCallback callback = null) nothrow @nogc
+    {
+        // can only handle zigbee packets
+        switch (packet.type)
+        {
+            case PacketType.zigbee_aps:
+                // the APS code follows this switch...
+                break;
+
+            case PacketType.zigbee_nwk:
+                if (_ezsp_client)
+                {
+                    writeWarning("Zigbee: cannot send raw NWK frames via EZSP");
+                    goto default;
+                }
+
+                // NWK frame; we need to implement the NWK protocol I guess?
+                assert(false, "TODO: handle NWK frame... or de-frame APS message and goto ZigbeeAPS?");
+
+            default:
+                ++_status.send_dropped;
+                return ZigbeeResult.unsupported;
+        }
+
+        Packet p = packet;
+        int tag = _queue.enqueue(p, &on_frame_complete);
+        if (tag < 0)
+        {
+            ++_status.send_dropped;
+            return -1;
+        }
+
+        _pending[cast(ubyte)tag] = PendingMessage(callback, packet.hdr!APSFrame, cast(ushort)packet.data.length, getTime());
+
+        send_queued_messages();
+        return tag;
+    }
 
     override ushort pcap_type() const
         => 283; // DLT_IEEE802_15_4_TAP
@@ -325,7 +373,7 @@ private:
 
     struct PendingMessage
     {
-        MessageProgressCallback callback;
+        MessageCallback callback;
         APSFrame aps;
         ushort message_length;
         MonoTime send_time;
@@ -338,6 +386,8 @@ private:
     package(protocol.zigbee) EmberStatus _network_status;
     ZigbeeCoordinator _coordinator;
 
+    bool _leave_sent;
+    bool _subscribed;
     ubyte _max_in_flight = 3;
 
     MonoTime _last_ping;
@@ -359,47 +409,9 @@ private:
             if (result != ZigbeeResult.success)
             {
                 ++_status.send_dropped;
-                _queue.complete(frame.tag, false);
+                _queue.complete(frame.tag, MessageState.failed);
             }
         }
-    }
-
-    final int transmit_async(ref const Packet packet, MessageProgressCallback callback) nothrow @nogc
-    {
-        // can only handle zigbee packets
-        switch (packet.type)
-        {
-            case PacketType.zigbee_aps:
-                // the APS code follows this switch...
-                break;
-
-            case PacketType.zigbee_nwk:
-                if (_ezsp_client)
-                {
-                    writeWarning("Zigbee: cannot send raw NWK frames via EZSP");
-                    goto default;
-                }
-
-                // NWK frame; we need to implement the NWK protocol I guess?
-                assert(false, "TODO: handle NWK frame... or de-frame APS message and goto ZigbeeAPS?");
-
-            default:
-                ++_status.send_dropped;
-                return ZigbeeResult.unsupported;
-        }
-
-        Packet p = packet;
-        int tag = _queue.enqueue(p, &on_frame_complete);
-        if (tag < 0)
-        {
-            ++_status.send_dropped;
-            return -1;
-        }
-
-        _pending[cast(ubyte)tag] = PendingMessage(callback, packet.hdr!APSFrame, cast(ushort)packet.data.length, getTime());
-
-        send_queued_messages();
-        return tag;
     }
 
     ZigbeeResult send_message(ubyte tag, ref const APSFrame hdr, const(ubyte)[] data)
@@ -476,10 +488,13 @@ private:
         {
             ++_status.send_dropped;
 
+            if (status == EmberStatus.NETWORK_DOWN)
+                _network_status = EmberStatus.NETWORK_DOWN;
+
             version (DebugZigbeeMessageFlow)
                 writeDebugf("Zigbee: APS send FAILED ({0,03}): EmberStatus {1, 02x}", tag, status);
 
-            _queue.complete(tag, false);
+            _queue.complete(tag, MessageState.failed);
             send_queued_messages();
             return;
         }
@@ -493,7 +508,7 @@ private:
                 writeDebugf("Zigbee: APS       sent ({0,03}) {1,4}ms - {2, 04x}:{3, 02x}->{4, 04x}:{5, 02x} [{6}:{7, 04x}]", tag, (getTime() - pm.send_time).as!"msecs", pm.aps.src, pm.aps.src_endpoint, pm.aps.dst, pm.aps.dst_endpoint, profile_name(pm.aps.profile_id), pm.aps.cluster_id);
 
             if (pm.callback)
-                pm.callback(ZigbeeResult.pending, pm.aps);
+                pm.callback(tag, MessageState.in_flight);
         }
     }
 
@@ -515,35 +530,31 @@ private:
                 writeDebugf("Zigbee: APS unsolicited message sent ({0,03}) - {1, 04x}:{2, 02x}->{3, 04x}:{4, 02x} [{5}:{6, 04x}] - [{7}]", message_tag, _coordinator.node_id, aps_frame.sourceEndpoint, index_or_destination, aps_frame.destinationEndpoint, profile_name(aps_frame.profileId), aps_frame.clusterId, cast(void[])message);
         }
 
-        _queue.complete(message_tag, status == EmberStatus.SUCCESS);
+        _queue.complete(message_tag, status == EmberStatus.SUCCESS ? MessageState.complete : MessageState.failed);
         send_queued_messages();
     }
 
-    void on_frame_complete(bool success, ubyte tag)
+    void on_frame_complete(int tag, MessageState state)
     {
-        if (auto pm = tag in _pending)
+        ubyte t = cast(ubyte)tag;
+        if (auto pm = t in _pending)
         {
             if (pm.callback)
-                pm.callback(success ? ZigbeeResult.success : ZigbeeResult.failed, pm.aps);
-            _pending.remove(tag);
+                pm.callback(tag, state);
+            _pending.remove(t);
         }
     }
 
-    void subscribe_ezsp_client(bool subscribe) nothrow
+    void set_ezsp_callbacks(bool enable) nothrow
     {
-        if (subscribe)
-            _ezsp_client.subscribe(&ezsp_state_change);
-        else
-            _ezsp_client.unsubscribe(&ezsp_state_change);
-
-        _ezsp_client.set_message_handler(subscribe ? &unhandled_message : null);
-        _ezsp_client.set_callback_handler!EZSP_StackStatusHandler(subscribe ? &status_handler : null);
-        _ezsp_client.set_callback_handler!EZSP_IncomingSenderEui64Handler(subscribe ? &incoming_message_sender : null);
-        _ezsp_client.set_callback_handler!EZSP_IncomingMessageHandler(subscribe ? &incoming_message_handler : null);
-        _ezsp_client.set_callback_handler!EZSP_MessageSentHandler(subscribe ? &message_sent_handler : null);
-        _ezsp_client.set_callback_handler!EZSP_MacPassthroughMessageHandler(subscribe ? &mac_passthrough_handler : null);
-        _ezsp_client.set_callback_handler!EZSP_CustomFrameHandler(subscribe ? &custom_frame_handler : null);
-        _ezsp_client.set_callback_handler!EZSP_CounterRolloverHandler(subscribe ? &counter_rollover_handler : null);
+        _ezsp_client.set_message_handler(enable ? &unhandled_message : null);
+        _ezsp_client.set_callback_handler!EZSP_StackStatusHandler(enable ? &status_handler : null);
+        _ezsp_client.set_callback_handler!EZSP_IncomingSenderEui64Handler(enable ? &incoming_message_sender : null);
+        _ezsp_client.set_callback_handler!EZSP_IncomingMessageHandler(enable ? &incoming_message_handler : null);
+        _ezsp_client.set_callback_handler!EZSP_MessageSentHandler(enable ? &message_sent_handler : null);
+        _ezsp_client.set_callback_handler!EZSP_MacPassthroughMessageHandler(enable ? &mac_passthrough_handler : null);
+        _ezsp_client.set_callback_handler!EZSP_CustomFrameHandler(enable ? &custom_frame_handler : null);
+        _ezsp_client.set_callback_handler!EZSP_CounterRolloverHandler(enable ? &counter_rollover_handler : null);
     }
 
     void ezsp_state_change(BaseObject, StateSignal signal) nothrow
@@ -551,7 +562,7 @@ private:
         if (signal == StateSignal.offline)
         {
             _ezsp_offline_since = getTime();
-            _queue.abort_all_in_flight();
+            _queue.abort_all_in_flight(MessageState.failed);
         }
         else if (signal == StateSignal.online)
             _ezsp_offline_since = MonoTime();

@@ -158,13 +158,13 @@ nothrow @nogc:
     }
 
 protected:
-    override bool transmit(ref Packet packet)
+    override int transmit(ref Packet packet, MessageCallback)
     {
         if (packet.type != PacketType.ash)
-            return false;
+            return -1;
         const(ubyte)[] message = cast(ubyte[])packet.data();
         if (message.length > ASH_MAX_MSG_LENGTH)
-            return false;
+            return -1;
 
         Message* msg = alloc_message();
         msg.queue_time = getTime();
@@ -186,7 +186,7 @@ protected:
 
         ++_status.send_packets;
         _status.send_bytes += message.length;
-        return true;
+        return 0;
     }
 
     void stream_state_change(BaseObject, StateSignal signal)
