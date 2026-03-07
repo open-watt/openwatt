@@ -132,13 +132,13 @@ int main(string[] args)
 
 private:
 
-void default_log_sink(Level level, const(char)[] message) nothrow @nogc
+void default_log_sink(Level level, scope const(char)[] message) nothrow @nogc
 {
     import urt.io;
     writeln(message);
 }
 
-void stderr_log_sink(Level level, const(char)[] message) nothrow @nogc
+void stderr_log_sink(Level level, scope const(char)[] message) nothrow @nogc
 {
     import core.stdc.stdio : fprintf, stderr;
     fprintf(stderr, "%.*s\n", cast(int)message.length, message.ptr);

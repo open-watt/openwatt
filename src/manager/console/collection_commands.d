@@ -403,13 +403,59 @@ nothrow @nogc:
     {
         const(Property*)[] properties = _collection.type_info.properties;
 
-        auto items = Array!Variant(Reserve, _collection.item_count);
+        foreach (ref arg; args)
+        {
+            if (arg == "--json")
+            {
+                auto items = Array!Variant(Reserve, _collection.item_count);
+                foreach (item; _collection.values)
+                    items ~= item.gather();
+                result = Variant(items.move);
+                return null;
+            }
+        }
+
+        // check for proplist=a,b,c
+        const(char)[][16] proplist;
+        foreach (ref na; namedArgs)
+        {
+            if (na.name == "proplist")
+            {
+                assert(false, "TODO: parse prop list into array...");
+//                proplist = na.value.asString;
+                break;
+            }
+        }
+
+        Table table;
+        table.add_column(""); // flags column has no header
+
+        foreach (p; properties)
+        {
+            if (!p.get || p.name[] == "flags")
+                continue;
+            if (!prop_visible(p.flags, proplist, p.name[]))
+                continue;
+            auto alignment = is_numeric_prop(p.type[0][]) ? Table.TextAlign.right : Table.TextAlign.left;
+            table.add_column(p.name[], alignment);
+        }
         foreach (item; _collection.values)
         {
-            // filter items?
-            items ~= item.gather();
+            table.add_row();
+
+            table.cell(format_flags(item.flags));
+
+            foreach (p; properties)
+            {
+                if (!p.get || p.name[] == "flags")
+                    continue;
+                if (!prop_visible(p.flags, proplist, p.name[]))
+                    continue;
+                table.cell(p.get(item));
+            }
         }
-        result = Variant(items.move);
+
+        table.render(session);
         return null;
     }
 
@@ -431,6 +477,39 @@ private:
 }
 
 private:
+
+const(char)[] format_flags(ObjectFlags f)
+{
+    static char[8] buf; // a static buffer!! ewoo!
+    size_t n = 0;
+    foreach (i; 0 .. 8)
+        if (f & (1 << i))
+            buf[n++] = "DTXIRSLH"[i];
+    return buf[0 .. n];
+}
+
+bool prop_visible(ubyte flags, const(char)[][] proplist, const(char)[] name)
+{
+    if (flags & 4)
+        return false;
+    if ((flags & (1 | 2)) != 0)
+        return true;
+    foreach (prop; proplist)
+        if (name[] == prop[])
+            return true;
+    return false;
+}
+
+bool is_numeric_prop(const(char)[] type)
+{
+    if (type.length == 0)
+        return false;
+    if (type == "int" || type == "uint" || type == "byte" || type == "num")
+        return true;
+    if (type.length > 2 && type[0..2] == "q_")
+        return true;
+    return false;
+}
 
 enum SuggestFlags : uint
 {
