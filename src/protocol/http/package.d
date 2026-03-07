@@ -59,6 +59,7 @@ nothrow @nogc:
     override void update()
     {
         tls_streams.update_all();
+        tls_servers.update_all();
         servers.update_all();
         clients.update_all();
         ws_servers.update_all();
