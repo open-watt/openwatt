@@ -19,6 +19,8 @@ import manager.value;
 
 public import manager.collection : collection_type_info, collection_for, CollectionTypeInfo;
 
+//version = TraceLifetimeSubscriptions;
+
 //version = DebugStateFlow;
 enum DebugType = null;
 
@@ -151,6 +153,10 @@ nothrow @nogc:
         assert((flags & ~(ObjectFlags.dynamic | ObjectFlags.temporary | ObjectFlags.disabled)) == 0,
                "`flags` may only contain Dynamic, Temporary, or Disabled flags");
 
+        debug foreach (i, p; type_info.properties)
+            foreach (j; 0 .. i)
+                assert(type_info.properties[j].name[] != p.name[], tconcat("Property '", p.name[], "' on ", type_info.type[], " shadows a base class property"));
+
         _typeInfo = type_info;
         _type = type_info.type[].addString();
         _name = name.move;
@@ -270,7 +276,7 @@ nothrow @nogc:
         log.info("destroyed");
 
         _state |= _disabled | _destroyed;
-        _state &= ~_start;
+        _state &= ~(_start | _fail);
         if (_state & _valid)
             _state |= _stop;
 
@@ -366,13 +372,15 @@ nothrow @nogc:
     final void subscribe(StateSignalHandler handler)
     {
         assert(!_subscribers[].contains(handler), "Already registered");
-        debug log.trace("new subscriber: ", handler.ptr);
+        version (TraceLifetimeSubscriptions)
+            debug log.trace("new subscriber: ", handler.ptr);
         _subscribers ~= handler;
     }
 
     final void unsubscribe(StateSignalHandler handler) pure
     {
-        debug log.trace("remove subscriber: ", handler.ptr);
+        version (TraceLifetimeSubscriptions)
+            debug log.trace("remove subscriber: ", handler.ptr);
         _subscribers.removeFirstSwapLast(handler);
     }
 
@@ -419,20 +427,30 @@ protected:
     {
         assert(_state != State.destroyed, "Cannot change state of a destroyed object!");
 
-        if (new_state == _state)
-            return;
-
         State old = _state;
-        _state = new_state;
+
+        // temporary objects self-destruct when they would shutdown
+        if ((_flags & ObjectFlags.temporary) && (new_state & _stop))
+        {
+            destroy();
+            if (_state == old)
+                return;
+        }
+        else
+        {
+            if (new_state == _state)
+                return;
+            _state = new_state;
+
+            if (old == State.running)
+                set_offline();
+        }
 
         debug version (DebugStateFlow)
             if (!DebugType || _type[] == DebugType)
-                debug log.trace("state change: ", old, " -> ", new_state);
+                debug log.trace("state change: ", old, " -> ", _state);
 
-        if (old == State.running)
-            set_offline();
-
-        switch (new_state)
+        switch (_state)
         {
             case State.init_failed:
                 debug version (DebugStateFlow)
@@ -483,16 +501,34 @@ protected:
     {
     }
 
-    void set_online()
+    final void set_online()
     {
-        log.info("online");
+        online();
         signal_state_change(StateSignal.online);
+
+        if (!(flags & (ObjectFlags.dynamic | ObjectFlags.temporary)))
+            log.notice("online");
+        else
+            log.trace("online");
     }
 
-    void set_offline()
+    final void set_offline()
     {
-        log.info("offline");
+        if (!(flags & (ObjectFlags.dynamic | ObjectFlags.temporary)))
+            log.notice("offline");
+        else
+            log.trace("offline");
+
         signal_state_change(StateSignal.offline);
+        offline();
+    }
+
+    void online()
+    {
+    }
+
+    void offline()
+    {
     }
 
     // sends a signal to all clients
@@ -728,6 +764,7 @@ auto all_properties_impl(Type, size_t allocCount)()
 
     static foreach (i; 0 .. PropCount)
         result[result.length - allocCount - PropCount + i] = &Type.Properties[i];
+
     return result;
 }
 
@@ -755,6 +792,8 @@ template IsSetter(alias Func)
 {
     static if (is(typeof(&Func) == R function(Args) nothrow @nogc, R, Args...))
         enum IsSetter = Args.length == 1;
+    else static if (is(typeof(&Func) == R function(Arg...) nothrow @nogc, R, Arg))
+        enum IsSetter = true;
     else
         enum IsSetter = false;
 }
