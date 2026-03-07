@@ -77,15 +77,17 @@ nothrow @nogc:
         return super.validating();
     }
 
-    protected override bool transmit(ref Packet packet)
+    protected override int transmit(ref Packet packet, MessageCallback)
     {
         assert((packet.vlan & 0xFFF) == 0, "packet already has a vlan tag");
         packet.vlan = _vlan;
-        _interface.forward(packet);
-
-        ++_status.send_packets;
-        _status.send_bytes += packet.data.length;
-        return true;
+        int result = _interface.forward(packet);
+        if (result >= 0)
+        {
+            ++_status.send_packets;
+            _status.send_bytes += packet.data.length;
+        }
+        return result;
     }
 
 package:
