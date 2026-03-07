@@ -63,6 +63,7 @@
     <DCompile Include="src\devices\goodwe\scanner.d" />
     <DCompile Include="src\main.d" />
     <DCompile Include="src\manager\base.d" />
+    <DCompile Include="src\manager\certificate.d" />
     <DCompile Include="src\manager\collection.d" />
     <DCompile Include="src\manager\component.d" />
     <DCompile Include="src\manager\config.d" />
@@ -173,6 +174,9 @@
     <DCompile Include="third_party\urt\src\urt\conv.d" />
     <DCompile Include="third_party\urt\src\urt\crc.d" />
     <DCompile Include="third_party\urt\src\urt\crypto\chacha.d" />
+    <DCompile Include="third_party\urt\src\urt\crypto\der.d" />
+    <DCompile Include="third_party\urt\src\urt\crypto\pem.d" />
+    <DCompile Include="third_party\urt\src\urt\crypto\pki.d" />
     <DCompile Include="third_party\urt\src\urt\dbg.d" />
     <DCompile Include="third_party\urt\src\urt\digest\md5.d" />
     <DCompile Include="third_party\urt\src\urt\digest\sha.d" />

@@ -218,6 +218,14 @@ nothrow @nogc:
         collections.insert(collection.type_info.type, RegisteredCollection(&collection, path));
     }
 
+    BaseObject find_object(const(char)[] name) nothrow @nogc
+    {
+        foreach (ref rc; collections.values)
+            if (BaseObject obj = rc.collection.get(name))
+                return obj;
+        return null;
+    }
+
     void register_enum(E)()
         if (is_enum!E)
     {

@@ -6,9 +6,11 @@ import urt.mem;
 import urt.mem.temp;
 import urt.socket;
 import urt.string;
+import urt.time;
 
 import manager;
 import manager.base;
+import manager.certificate : Certificate;
 import manager.collection;
 
 import protocol.http;
@@ -28,17 +30,18 @@ version (Windows)
     pragma(lib, "Secur32");
 }
 
-//version = DebugTLS;
+version = DebugTLS;
 
 nothrow @nogc:
 
 
 class TLSStream : Stream
 {
-    __gshared Property[4] Properties = [ Property.create!("stream", stream)(),
+    __gshared Property[5] Properties = [ Property.create!("stream", stream)(),
                                          Property.create!("remote", remote)(),
                                          Property.create!("keepalive", keepalive)(),
-                                         Property.create!("private_key", private_key)() ];
+                                         Property.create!("certificate", certificate)(),
+                                         Property.create!("certificates", certificates)() ];
 nothrow @nogc:
 
     enum type_name = "tls";
@@ -55,7 +58,7 @@ nothrow @nogc:
     {
         if (!value)
             return "stream cannot be null";
-        if (value == _stream)
+        if (value is _stream)
             return null;
         _stream = value;
         restart();
@@ -81,45 +84,137 @@ nothrow @nogc:
     {
         if (_keep_enable == value)
             return;
+        _keep_enable = value;
         if (TCPStream tcp = cast(TCPStream)_stream)
             tcp.keepalive = value;
     }
 
-    void private_key(ubyte[] value)
+    void certificate(BaseObject value)
     {
-        assert(false, "TODO: implement server mode");
+        _certificates.clear();
+        if (value)
+            _certificates.emplaceBack(value);
+        restart();
     }
-    void private_key(Array!ubyte value)
-        => private_key(value[]);
+
+    void certificates(BaseObject[] value...)
+    {
+        _certificates.clear();
+        _certificates.reserve(value.length);
+        foreach (c; value)
+            _certificates.emplaceBack(c);
+        restart();
+    }
 
     // API...
 
+    const(char)[] selected_cert_name() const pure
+        => _selected_cert ? _selected_cert.name[] : null;
+
     final override bool validate() const pure
     {
+        // Server mode: need a certificate. Client mode: need a remote host.
+        if (_certificates.length > 0)
+            return true;
         return !_host.empty;
+    }
+
+    override CompletionStatus validating()
+    {
+        foreach (ref c; _certificates)
+            c.try_reattach();
+        return super.validating();
     }
 
     final override CompletionStatus startup()
     {
+        bool is_server = _certificates.length > 0;
+
+        version (DebugTLS)
+            log.trace("startup, server=", is_server, " stream=", _stream !is null);
+
         if (!_stream)
         {
-            // prevent duplicate stream names...
+            if (is_server)
+            {
+                // Server-mode: stream must be pre-assigned (by TLSServer.create_stream).
+                // If it's null here, something went wrong.
+                log.error("no underlying stream for server connection");
+                return CompletionStatus.error;
+            }
+
+            // Client-mode: create a TCP stream to connect outward.
             const(char)[] new_name = get_module!StreamModule.streams.generate_name(name[]);
             _stream = get_module!TCPStreamModule.tcp_streams.create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("keepalive", _keep_enable), NamedArgument("remote", _host));
             if (!_stream)
             {
-                version (DebugTLS)
-                    writeErrorf("Failed to create underlying TCP stream");
+                log.error("failed to create underlying TCP stream");
                 return CompletionStatus.error;
             }
         }
         if (!_stream.running)
+        {
+            // Server-mode: the TCP stream was created already running.
+            // If it's no longer running, the peer disconnected.
+            if (is_server && _handshake_start != SysTime())
+                return CompletionStatus.error;
             return CompletionStatus.continue_;
+        }
+
+        // Start handshake timeout when the stream first becomes available.
+        if (_handshake_start == SysTime())
+            _handshake_start = getSysTime();
 
         version (Windows)
         {
             if (_handshake_state == HandshakeState.NotStarted)
-                init_context(false, null); // TODO: server mode?
+            {
+                if (is_server)
+                {
+                    // Buffer ClientHello for SNI extraction
+                    ubyte[8192] buf = void;
+                    ptrdiff_t n = _stream.read(buf[]);
+                    if (n > 0)
+                        _receive_buffer ~= buf[0 .. n];
+
+                    // Wait for full TLS record
+                    if (_receive_buffer.length < 5)
+                        return CompletionStatus.continue_;
+                    ushort rec_len = (_receive_buffer[3] << 8) | _receive_buffer[4];
+                    if (_receive_buffer.length < 5 + rec_len)
+                        return CompletionStatus.continue_;
+
+                    // Select certificate via SNI (or fallback)
+                    BaseObject selected = select_certificate();
+                    if (!selected)
+                    {
+                        version (DebugTLS)
+                        {
+                            const(char)[] sni = extract_sni_hostname(_receive_buffer[]);
+                            log.trace("no valid certificate available yet (sni='", sni, "' certs=", _certificates.length, ")");
+                            foreach (ref c; _certificates)
+                            {
+                                if (auto cert = cast(Certificate)c.get())
+                                    log.trace("  cert '", cert.name, "': valid=", cert.is_valid, " domain='", cert.domain, "'");
+                                else
+                                    log.trace("  cert: null ref");
+                            }
+                        }
+                        return CompletionStatus.continue_;
+                    }
+
+                    version (DebugTLS)
+                        log.trace("selected cert '", selected.name, "'");
+                    _selected_cert = selected;
+                    init_context(true, cast(const(CERT_CONTEXT)*)(cast(Certificate)selected).get_cert_context());
+
+                    // process the already-buffered ClientHello
+                    if (_handshake_state == HandshakeState.InProgress)
+                        advance_handshake(_host[], true);
+                }
+                else
+                    init_context(false, null);
+            }
 
             if (_handshake_state == HandshakeState.InProgress)
             {
@@ -135,13 +230,29 @@ nothrow @nogc:
                         return CompletionStatus.error;
                     }
                     _receive_buffer ~= read_buffer[0 .. bytes_received];
-                    advance_handshake(_host[], false);
+                    advance_handshake(_host[], is_server);
                 }
             }
             if (_handshake_state == HandshakeState.Completed)
+            {
+                if (_selected_cert)
+                    log.info("HTTPS session from ", _stream.remote_name, " cert='", _selected_cert.name, "'");
+                else
+                    log.info("connected to ", _stream.remote_name);
                 return CompletionStatus.complete;
+            }
             if (_handshake_state == HandshakeState.Failed)
+            {
+                log.warning("handshake failed");
                 return CompletionStatus.error;
+            }
+
+            // Server-mode: timeout stalled handshakes (abandoned connections).
+            if (is_server && getSysTime() - _handshake_start > seconds(15))
+            {
+                log.warning("handshake timeout");
+                return CompletionStatus.error;
+            }
         }
         return CompletionStatus.continue_;
     }
@@ -156,12 +267,16 @@ nothrow @nogc:
                 FreeCredentialsHandle(&_credentials);
         }
 
+        _app_buffer.clear();
+        _close_notify = false;
+        _selected_cert = null;
+        _handshake_start = SysTime();
+
         if (_stream)
             _stream.destroy();
         _stream = null;
 
-        _remote = InetAddress();
-        version(Windows)
+        version (Windows)
             _handshake_state = HandshakeState.NotStarted;
 
         return CompletionStatus.complete;
@@ -171,6 +286,20 @@ nothrow @nogc:
     {
         version (Windows)
         {
+            if (!_stream || !_stream.running || _handshake_state == HandshakeState.Failed)
+            {
+                restart();
+                return;
+            }
+
+            // After close_notify, just check if consumer drained _app_buffer
+            if (_close_notify)
+            {
+                if (_app_buffer.length == 0)
+                    restart();
+                return;
+            }
+
             ubyte[8192] read_buffer = void;
             ptrdiff_t bytes_received = _stream.read(read_buffer[]);
             if (bytes_received < 0)
@@ -201,8 +330,19 @@ nothrow @nogc:
                 if (status == SEC_I_RENEGOTIATE)
                 {
                     // TODO: Handle renegotiation by resetting state
-                    version (DebugTLS) writeInfo("TLS renegotiation requested");
-                    _handshake_state = HandshakeState.Failed; // Or handle properly
+                    log.warning("renegotiation requested (not supported)");
+                    _handshake_state = HandshakeState.Failed;
+                    return;
+                }
+                else if (status == SEC_I_CONTEXT_EXPIRED)
+                {
+                    // Server sent TLS close_notify — clean shutdown.
+                    // Don't restart yet — _app_buffer may contain the final response
+                    // that the consumer hasn't read yet.
+                    version (DebugTLS)
+                        log.trace("close_notify received");
+                    _receive_buffer.clear();
+                    _close_notify = true;
                     return;
                 }
                 else if (status == SEC_E_INCOMPLETE_MESSAGE)
@@ -213,7 +353,7 @@ nothrow @nogc:
 
                 if (status != SEC_E_OK)
                 {
-                    version(DebugTLS) writeErrorf("Decryption failed: %x", status);
+                    log.warningf("decryption failed, status={0,08x}", cast(uint)status);
                     _handshake_state = HandshakeState.Failed;
                     _receive_buffer.clear();
                     return;
@@ -254,26 +394,27 @@ nothrow @nogc:
                     _receive_buffer.clear();
                 }
             }
+
+            // close_notify drain check is at the top of update()
         }
     }
 
     override bool connect()
-    {
-        assert(false);
-    }
+        => false;
 
-    override void disconnect()
-    {
-        assert(false);
-    }
+    override void disconnect() {}
 
     override const(char)[] remote_name()
         => _stream ? _stream.remote_name : null;
 
     final override ptrdiff_t read(void[] buffer)
     {
-        assert(false);
-        return 0;
+        if (_app_buffer.length == 0)
+            return 0;
+        size_t n = buffer.length < _app_buffer.length ? buffer.length : _app_buffer.length;
+        buffer[0 .. n] = _app_buffer[0 .. n];
+        _app_buffer.remove(0, n);
+        return n;
     }
 
     final override ptrdiff_t write(const(void[])[] data...)
@@ -281,12 +422,19 @@ nothrow @nogc:
         version (Windows)
         {
             if (_handshake_state != HandshakeState.Completed)
+            {
+                version (DebugTLS)
+                    log.trace("write rejected, handshake state=", _handshake_state);
                 return -1;
+            }
 
             SecPkgContext_StreamSizes sizes;
             auto status = QueryContextAttributesA(&_context, SECPKG_ATTR_STREAM_SIZES, &sizes);
             if (status != SEC_E_OK)
+            {
+                log.errorf("QueryContextAttributes failed: {0,08x}", cast(uint)status);
                 return -1;
+            }
 
             SecBuffer[35] bufs = void;
             assert(data.length <= bufs.length - 3, "Too many buffers!");
@@ -321,7 +469,10 @@ nothrow @nogc:
 
             status = EncryptMessage(&_context, 0, &buf_desc, 0);
             if (status != SEC_E_OK)
+            {
+                log.errorf("EncryptMessage failed: {0,08x}", cast(uint)status);
                 return -1;
+            }
 
             ref SecBuffer hdr = bufs[0];
             ref SecBuffer tail = bufs[buf_desc.cBuffers - 2];
@@ -338,9 +489,12 @@ nothrow @nogc:
             }
             total_len += data_len;
 
-            ptrdiff_t bytes_sent = _stream.write(send_bufs);
+            ptrdiff_t bytes_sent = _stream.write(send_bufs[0 .. 2 + data.length]);
             if (bytes_sent != total_len)
+            {
+                log.warning("underlying write failed: sent=", bytes_sent, " expected=", total_len);
                 return -1;
+            }
 
             if (_logging)
             {
@@ -354,29 +508,66 @@ nothrow @nogc:
     }
 
     final override ptrdiff_t pending()
-    {
-        // pending TLS bytes?
-        assert(0);
-    }
+        => _app_buffer.length;
 
     final override ptrdiff_t flush()
     {
-        // TODO: read until can't read no more?
-        assert(0);
+        size_t n = _app_buffer.length;
+        _app_buffer.clear();
+        return n;
     }
 
 private:
     String _host;
-    InetAddress _remote;
     bool _keep_enable = false;
+    bool _close_notify = false;
 
+    Array!(ObjectRef!BaseObject) _certificates;
+    BaseObject _selected_cert;
     ObjectRef!Stream _stream;
     Array!ubyte _receive_buffer;
+    Array!ubyte _app_buffer;
+    SysTime _handshake_start;
 
     void incoming_message(const(void)[] message)
     {
-        // buffer these bytes for read()...
-        assert(false);
+        _app_buffer ~= cast(const(ubyte)[])message;
+    }
+
+    BaseObject select_certificate()
+    {
+        import manager.certificate : Certificate;
+
+        const(char)[] sni = extract_sni_hostname(_receive_buffer[]);
+
+        if (sni.length > 0)
+        {
+            // Exact domain match
+            foreach (ref c; _certificates)
+            {
+                if (auto cert = cast(Certificate)c.get())
+                    if (cert.is_valid && cert.domain[] == sni)
+                        return c.get();
+            }
+        }
+
+        // Fallback: first cert with no domain (self-signed)
+        foreach (ref c; _certificates)
+        {
+            if (auto cert = cast(Certificate)c.get())
+                if (cert.is_valid && cert.domain[].empty)
+                    return c.get();
+        }
+
+        // Last resort: first valid cert
+        foreach (ref c; _certificates)
+        {
+            if (auto cert = cast(Certificate)c.get())
+                if (cert.is_valid)
+                    return c.get();
+        }
+
+        return null;
     }
 
     version (Windows)
@@ -384,7 +575,6 @@ private:
         enum HandshakeState
         {
             NotStarted,
-            Initializing,
             InProgress,
             Completed,
             Failed,
@@ -403,7 +593,7 @@ private:
             {
                 creds.cCreds = 1;
                 creds.paCred = cast(const(CERT_CONTEXT)**)&pCertContext;
-                creds.dwFlags |= SCH_CRED_MANUAL_CRED_VALIDATION | SCH_CRED_NO_DEFAULT_CREDS;
+                creds.dwFlags |= SCH_CRED_NO_DEFAULT_CREDS;
             }
             else
             {
@@ -413,19 +603,16 @@ private:
             auto status = AcquireCredentialsHandleA(null, cast(char*)UNISP_NAME_A.ptr, is_server ? SECPKG_CRED_INBOUND : SECPKG_CRED_OUTBOUND, null, &creds, null, null, &_credentials, null);
             if (status != SEC_E_OK)
             {
-                version(DebugTLS) writeErrorf("AcquireCredentialsHandleA failed: %x", status);
+                log.errorf("AcquireCredentialsHandleA failed: {0,08x}", cast(uint)status);
                 _handshake_state = HandshakeState.Failed;
                 return;
             }
 
-            _handshake_state = HandshakeState.Initializing;
+            _handshake_state = HandshakeState.InProgress;
 
             // For a client, we kick off the handshake immediately.
             if (!is_server)
-            {
-                _handshake_state = HandshakeState.InProgress;
                 advance_handshake(_host[], false);
-            }
         }
 
         void advance_handshake(const(char)[] host, bool is_server)
@@ -445,7 +632,9 @@ private:
                 }
 
                 SECURITY_STATUS status;
-                DWORD sspi_flags = ISC_REQ_SEQUENCE_DETECT | ISC_REQ_REPLAY_DETECT | ISC_REQ_CONFIDENTIALITY | ISC_REQ_ALLOCATE_MEMORY | ISC_REQ_STREAM;
+                DWORD sspi_flags = is_server
+                    ? ASC_REQ_SEQUENCE_DETECT | ASC_REQ_REPLAY_DETECT | ASC_REQ_CONFIDENTIALITY | ASC_REQ_ALLOCATE_MEMORY | ASC_REQ_STREAM
+                    : ISC_REQ_SEQUENCE_DETECT | ISC_REQ_REPLAY_DETECT | ISC_REQ_CONFIDENTIALITY | ISC_REQ_ALLOCATE_MEMORY | ISC_REQ_STREAM;
                 SecBufferDesc out_buf_desc;
                 SecBuffer out_buf;
                 SecBufferDesc in_buf_desc;
@@ -472,7 +661,7 @@ private:
                 in_buf[1].BufferType = SECBUFFER_EMPTY;
 
                 if (is_server)
-                    status = AcceptSecurityContext(&_credentials, data.length ? &_context : null, &in_buf_desc, sspi_flags, 0, &_context, &out_buf_desc, &sspi_out_flags, null);
+                    status = AcceptSecurityContext(&_credentials, _context.dwLower == 0 && _context.dwUpper == 0 ? null : &_context, &in_buf_desc, sspi_flags, 0, &_context, &out_buf_desc, &sspi_out_flags, null);
                 else
                 {
                     host = host[0 .. host.findFirst(':')];
@@ -486,7 +675,7 @@ private:
                     FreeContextBuffer(out_buf.pvBuffer);
                     if (bytes_sent != out_buf.cbBuffer)
                     {
-                        version (DebugTLS) writeErrorf("Failed to send handshake token");
+                        log.error("failed to send handshake token");
                         _handshake_state = HandshakeState.Failed;
                         break; // Exit loop on error
                     }
@@ -506,13 +695,13 @@ private:
                     break; // Need more data, break the loop and wait for the next poll.
                 else if (status == SEC_I_RENEGOTIATE)
                 {
-                    version(DebugTLS) writeInfo("TLS renegotiation requested");
-                    _handshake_state = HandshakeState.Failed; // TODO: Handle renegotiation
+                    log.warning("renegotiation requested (not supported)");
+                    _handshake_state = HandshakeState.Failed;
                     break;
                 }
                 else
                 {
-                    version(DebugTLS) writeErrorf("Handshake failed with status: %x", status);
+                    log.warningf("handshake failed: {0,08x}", cast(uint)status);
                     _handshake_state = HandshakeState.Failed;
                     break;
                 }
@@ -528,6 +717,8 @@ private:
 
 class TLSServer : TCPServer
 {
+    __gshared Property[2] Properties = [ Property.create!("certificate", certificate)(),
+                                         Property.create!("certificates", certificates)() ];
 nothrow @nogc:
     enum type_name = "tls-server";
 
@@ -536,16 +727,172 @@ nothrow @nogc:
         super(collection_type_info!TLSServer, name.move, flags);
     }
 
+    void certificate(BaseObject value)
+    {
+        _certificates.clear();
+        if (value)
+            _certificates.emplaceBack(value);
+        restart();
+    }
+
+    void certificates(BaseObject[] value...)
+    {
+        _certificates.clear();
+        _certificates.reserve(value.length);
+        foreach (c; value)
+            _certificates.emplaceBack(c);
+        restart();
+    }
+
 protected:
+
+    final override bool validate() const pure
+        => super.validate() && _certificates.length > 0;
+
+    final override CompletionStatus startup()
+    {
+        foreach (ref cert; _certificates[])
+            if (cert && cert.running)
+                return super.startup();
+        return CompletionStatus.continue_;
+    }
+
     final override Stream create_stream(Socket conn)
     {
+        version (DebugTLS)
+        {
+            InetAddress addr;
+            Result r = conn.get_peer_name(addr);
+            log.trace("creating TLS stream for connection from ", r ? addr : InetAddress());
+        }
+
+        BaseObject[32] certs;
+        size_t num_certs = 0;
+        foreach (ref cert; _certificates[])
+            if (auto c = cert.get())
+                certs[num_certs++] = c;
+        if (num_certs == 0)
+        {
+            log.error("no valid certificates for new connection");
+            return null;
+        }
+
         Stream tcp = super.create_stream(conn);
-        return get_module!HTTPModule.tls_streams.create(tcp.name[], cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("stream", tcp));
+        const(char)[] stream_name = get_module!HTTPModule.tls_streams.generate_name(tconcat(name[], "_conn"));
+        auto tls = get_module!HTTPModule.tls_streams.create(stream_name[], cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
+            NamedArgument("stream", tcp), NamedArgument("certificates", certs[0 .. num_certs]));
+        if (!tls)
+        {
+            log.error("failed to create TLS stream '", stream_name, "'");
+            tcp.destroy();
+            return null;
+        }
+
+        version (DebugTLS)
+            log.trace("TLS stream created: ", stream_name);
+
+        return tls;
     }
+
+package:
+
+    void set_certificate_array(const(ObjectRef!BaseObject)[] certs)
+    {
+        _certificates.clear();
+        _certificates.reserve(certs.length);
+        foreach (ref c; certs)
+            if (c)
+                _certificates.emplaceBack(cast(BaseObject)c.get());
+    }
+
+private:
+
+    Array!(ObjectRef!BaseObject) _certificates;
 }
 
 
 private:
+
+// extract SNI hostname from a raw TLS ClientHello record
+const(char)[] extract_sni_hostname(const(ubyte)[] data) nothrow @nogc
+{
+    // Minimum: 5 (record hdr) + 4 (handshake hdr) + 2 (version) + 32 (random) = 43
+    if (data.length < 43)
+        return null;
+
+    // TLS record header: type=0x16 (handshake)
+    if (data[0] != 0x16)
+        return null;
+
+    size_t pos = 5; // skip record header
+
+    // Handshake header: type=0x01 (ClientHello), 3-byte length
+    if (data[pos] != 0x01)
+        return null;
+    pos += 4; // skip handshake header
+
+    // ClientHello: version (2) + random (32)
+    pos += 34;
+    if (pos >= data.length)
+        return null;
+
+    // Session ID: 1-byte length + variable
+    ubyte session_id_len = data[pos];
+    pos += 1 + session_id_len;
+    if (pos + 2 > data.length)
+        return null;
+
+    // Cipher suites: 2-byte length + variable
+    ushort cipher_suites_len = (data[pos] << 8) | data[pos + 1];
+    pos += 2 + cipher_suites_len;
+    if (pos + 1 > data.length)
+        return null;
+
+    // Compression methods: 1-byte length + variable
+    ubyte compression_len = data[pos];
+    pos += 1 + compression_len;
+    if (pos + 2 > data.length)
+        return null;
+
+    // Extensions: 2-byte total length
+    ushort extensions_len = (data[pos] << 8) | data[pos + 1];
+    pos += 2;
+    size_t extensions_end = pos + extensions_len;
+    if (extensions_end > data.length)
+        return null;
+
+    // Walk extensions looking for SNI (type 0x0000)
+    while (pos + 4 <= extensions_end)
+    {
+        ushort ext_type = (data[pos] << 8) | data[pos + 1];
+        ushort ext_len = (data[pos + 2] << 8) | data[pos + 3];
+        pos += 4;
+
+        if (pos + ext_len > extensions_end)
+            return null;
+
+        if (ext_type == 0x0000) // server_name
+        {
+            // SNI extension data: list_len(2), [name_type(1), name_len(2), name...]
+            if (ext_len < 5)
+                return null;
+            // ushort list_len = (data[pos] << 8) | data[pos + 1];
+            ubyte name_type = data[pos + 2];
+            ushort name_len = (data[pos + 3] << 8) | data[pos + 4];
+
+            if (name_type != 0x00) // host_name
+                return null;
+            if (pos + 5 + name_len > extensions_end)
+                return null;
+
+            return cast(const(char)[])data[pos + 5 .. pos + 5 + name_len];
+        }
+
+        pos += ext_len;
+    }
+
+    return null;
+}
 
 version (Windows)
 {
