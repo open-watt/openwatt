@@ -167,6 +167,7 @@ protected:
             return false;
 
         Message* msg = alloc_message();
+        msg.queue_time = getTime();
         msg.length = cast(ubyte)message.length;
         msg.buffer[0 .. message.length] = message[];
         if (tx_ahead() >= _max_in_flight || !send_msg(msg))
@@ -211,6 +212,7 @@ private:
     struct Message
     {
         Message* next;
+        MonoTime queue_time;
         MonoTime send_time;
         ubyte seq;
         ubyte length;
@@ -248,6 +250,7 @@ private:
     {
         do
         {
+            MonoTime now = getTime();
             ptrdiff_t r = _stream.read(_rx_buffer[_rx_offset..$]);
             if (r <= 0)
                 break;
@@ -326,7 +329,7 @@ private:
                 }
 
                 ++_status.recv_packets;
-                process_frame(frame);
+                process_frame(frame, now);
             }
 
             // shuffle any tail bytes (incomplete frames) to the start of the buffer...
@@ -340,7 +343,7 @@ private:
         while(true);
     }
 
-    void process_frame(ubyte[] frame)
+    void process_frame(ubyte[] frame, MonoTime timestamp)
     {
         ubyte control = frame.popFront;
 
@@ -388,7 +391,7 @@ private:
                 // ACK
                 version (DebugASHMessageFlow)
                     writeDebugf("ASHv2: <-- ACK [{0,02x}]", control);
-                ack_in_flight(ack_num);
+                ack_in_flight(ack_num, timestamp);
             }
             else if ((control & 0x60) == 0x20)
             {
@@ -428,14 +431,14 @@ private:
         if (data.length > 0)
         {
             Packet p;
-            p.init!ASHFrame(data);
+            p.init!ASHFrame(data, cast(SysTime)timestamp);
             dispatch(p);
         }
 
-        ack_in_flight(ack_num);
+        ack_in_flight(ack_num, timestamp);
     }
 
-    void ack_in_flight(ubyte ack_num)
+    void ack_in_flight(ubyte ack_num, MonoTime timestamp)
     {
         while (_tx_ack != ack_num)
         {
@@ -445,6 +448,7 @@ private:
             }
 
             Message* msg = _tx_in_flight;
+            update_time_stats(msg, timestamp);
             _tx_in_flight = _tx_in_flight.next;
             free_message(msg);
 
@@ -481,6 +485,18 @@ private:
     {
         message.next = _free_list;
         _free_list = message;
+    }
+
+    void update_time_stats(Message* msg, MonoTime now)
+    {
+        uint wait_us = cast(uint)(msg.send_time - msg.queue_time).as!"usecs";
+        uint service_us = cast(uint)(now - msg.send_time).as!"usecs";
+
+        _status.avg_queue_us = (_status.avg_queue_us * 7 + wait_us) / 8;
+        _status.avg_service_us = (_status.avg_service_us * 7 + service_us) / 8;
+
+        if (service_us > _status.max_service_us)
+            _status.max_service_us = service_us;
     }
 
     bool send_msg(Message* msg)
