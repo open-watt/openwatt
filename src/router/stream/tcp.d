@@ -250,7 +250,9 @@ nothrow @nogc:
 
     override const(char)[] remote_name()
     {
-        return tstring(remote);
+        if (!_host.empty)
+            return tstring(remote);
+        return tstring(_remote);
     }
 
     final void enable_keep_alive(bool enable, Duration keep_idle = seconds(10), Duration keep_interval = seconds(1), int keep_count = 10)
@@ -508,25 +510,13 @@ nothrow @nogc:
             Socket conn;
             InetAddress remote_addr;
             Result r = _ip4_listener.accept(conn, &remote_addr);
+            if (r.failed && r.socket_result == SocketResult.would_block && _ip6_listener)
+                r = _ip6_listener.accept(conn, &remote_addr);
+
             if (r.failed)
             {
                 if (r.socket_result != SocketResult.would_block)
-                {
-                    // do we want to know what went wrong??
                     restart();
-                }
-                if (_ip6_listener)
-                {
-                    r = _ip6_listener.accept(conn, &remote_addr);
-                    if (r.failed)
-                    {
-                        if (r.socket_result != SocketResult.would_block)
-                        {
-                            // do we want to know what went wrong??
-                            restart();
-                        }
-                    }
-                }
                 return;
             }
             assert(conn);
