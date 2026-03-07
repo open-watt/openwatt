@@ -138,9 +138,8 @@ nothrow @nogc:
         }
     }
 
-    override void set_online()
+    override void online()
     {
-        super.set_online();
         _status.link_status = LinkStatus.up;
         _status.link_status_change_time = getSysTime();
         _last_bitrate_sample = getTime();
@@ -148,9 +147,8 @@ nothrow @nogc:
         _last_rx_bytes = _status.rx_bytes;
     }
 
-    override void set_offline()
+    override void offline()
     {
-        super.set_offline();
         _status.link_status = LinkStatus.down;
         _status.link_status_change_time = getSysTime();
         ++_status.link_downs;

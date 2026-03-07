@@ -102,9 +102,6 @@ protected:
         if (_running_commands.length > 0)
             return CompletionStatus.continue_;
 
-        if (_flags & ObjectFlags.temporary)
-            destroy();
-
         return CompletionStatus.complete;
     }
 

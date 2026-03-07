@@ -480,19 +480,17 @@ protected:
         }
     }
 
-    override void set_online()
+    override void online()
     {
         _status.link_status = LinkStatus.up;
         _status.link_status_change_time = getSysTime();
         _last_bitrate_sample = getTime();
         _last_tx_bytes = _status.tx_bytes;
         _last_rx_bytes = _status.rx_bytes;
-        super.set_online();
     }
 
-    override void set_offline()
+    override void offline()
     {
-        super.set_offline();
         _status.link_status = LinkStatus.down;
         _status.link_status_change_time = getSysTime();
         ++_status.link_downs;

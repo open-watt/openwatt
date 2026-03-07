@@ -206,8 +206,6 @@ nothrow @nogc:
 
         close_socket();
 
-        if (_flags & ObjectFlags.temporary)
-            destroy();
 
         return CompletionStatus.complete;
     }
