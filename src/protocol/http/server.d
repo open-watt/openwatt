@@ -13,6 +13,7 @@ import urt.time;
 
 import manager;
 import manager.base;
+import manager.certificate : Certificate;
 import manager.collection;
 
 import protocol.http;
@@ -21,14 +22,17 @@ import protocol.http.message;
 import router.stream.tcp;
 import router.iface;
 
-//version = DebugHTTPMessageFlow;
+version = DebugHTTPServer;
 
 nothrow @nogc:
 
 
 class HTTPServer : BaseObject
 {
-    __gshared Property[1] Properties = [ Property.create!("port", port)() ];
+    __gshared Property[4] Properties = [ Property.create!("port", port)(),
+                                         Property.create!("tls-port", tls_port)(),
+                                         Property.create!("certificates", certificates)(),
+                                         Property.create!("https-redirect", https_redirect)() ];
 nothrow @nogc:
 
     enum type_name = "http-server";
@@ -48,13 +52,46 @@ nothrow @nogc:
     {
         if (_port == value)
             return null;
-        if (value == 0)
-            return "port must be non-zero";
         _port = value;
 
         if (_server)
             _server.port = _port;
         return null;
+    }
+
+    ushort tls_port() const pure
+        => _tls_port;
+    const(char)[] tls_port(ushort value)
+    {
+        if (_tls_port == value)
+            return null;
+        _tls_port = value;
+
+        if (_tls_server)
+            _tls_server.port = _tls_port;
+        return null;
+    }
+
+    void certificates(BaseObject[] value)
+    {
+        if (_cert_subscribed)
+        {
+            foreach (ref c; _certificates)
+                if (c) c.unsubscribe(&cert_state_change);
+            _cert_subscribed = false;
+        }
+        _certificates.clear();
+        _certificates.reserve(value.length);
+        foreach (c; value)
+            _certificates.emplaceBack(c);
+        restart();
+    }
+
+    bool https_redirect() const pure
+        => _https_redirect;
+    void https_redirect(bool value)
+    {
+        _https_redirect = value;
     }
 
     // API...
@@ -77,6 +114,23 @@ nothrow @nogc:
         return true;
     }
 
+    void remove_uri_handler(HTTPMethod method, RequestHandler request_handler)
+    {
+        for (size_t i = 0; i < _handlers.length; )
+        {
+            if ((_handlers[i].methods & (1 << method)) && _handlers[i].request_handler is request_handler)
+            {
+                _handlers[i].methods &= ~(1 << method);
+                if (_handlers[i].methods == 0)
+                    _handlers.remove(i);
+                else
+                    ++i;
+            }
+            else
+                ++i;
+        }
+    }
+
     RequestHandler hook_global_handler(RequestHandler request_handler)
     {
         RequestHandler old = _default_request_handler;
@@ -84,33 +138,77 @@ nothrow @nogc:
         return old;
     }
 
+    override bool validate() const pure
+    {
+        return _port != 0 || _tls_port != 0;
+    }
+
+    override CompletionStatus validating()
+    {
+        foreach (ref c; _certificates)
+            c.try_reattach();
+        return super.validating();
+    }
+
     override CompletionStatus startup()
     {
-        const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name(name[]);
-        _server = get_module!TCPStreamModule.tcp_servers.create(server_name, ObjectFlags.dynamic, NamedArgument("port", _port));
-        if (!_server)
-            return CompletionStatus.error;
+        version (DebugHTTPServer)
+            log.trace("startup, port=", _port, " tls-port=", _tls_port, " certs=", _certificates.length);
 
-        _server.set_connection_callback(&accept_connection, null);
+        if (_port != 0 && !_server)
+        {
+            if (!try_start_http())
+                return CompletionStatus.error;
+        }
 
-        writeInfo(type, ": '", name, "' listening on port ", _port, "...");
+        if (_tls_port != 0 && !_tls_server)
+            try_start_tls();
 
-        return CompletionStatus.complete;
+        if (!_cert_subscribed && _certificates.length > 0)
+        {
+            foreach (ref c; _certificates)
+                if (c) c.subscribe(&cert_state_change);
+            _cert_subscribed = true;
+
+            version (DebugHTTPServer)
+                log.trace("subscribed to ", _certificates.length, " certificate(s)");
+        }
+
+        if (_port != 0 || _tls_server)
+            return CompletionStatus.complete;
+        return CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()
     {
+        version (DebugHTTPServer)
+            log.trace("shutdown, sessions=", _sessions.length);
+
+        if (_cert_subscribed)
+        {
+            foreach (ref c; _certificates)
+                if (c) c.unsubscribe(&cert_state_change);
+            _cert_subscribed = false;
+        }
+
+        if (_tls_server)
+        {
+            _tls_server.unsubscribe(&server_state_change);
+            _tls_server.destroy();
+            _tls_server = null;
+        }
+        if (_server)
+        {
+            _server.unsubscribe(&server_state_change);
+            _server.destroy();
+            _server = null;
+        }
+
         while (!_sessions.empty)
         {
             Session* s = _sessions.popBack();
             s.close();
             defaultAllocator().freeT(s);
-        }
-
-        if (_server)
-        {
-            _server.destroy();
-            _server = null;
         }
 
         return CompletionStatus.complete;
@@ -139,26 +237,186 @@ private:
         RequestHandler request_handler;
     }
 
-    ushort _port = 80;
+    ushort _port;
+    ushort _tls_port;
+    bool _https_redirect;
+    bool _cert_subscribed;
     RequestHandler _default_request_handler;
 
     TCPServer _server;
+    TCPServer _tls_server;
+    Array!(ObjectRef!BaseObject) _certificates;
     Array!Handler _handlers;
     Array!(Session*) _sessions;
 
-    void accept_connection(Stream stream, void*)
+    void accept_http_connection(Stream stream, void*)
     {
-        _sessions.emplaceBack(defaultAllocator().allocT!Session(this, stream));
+        log.info("new HTTP session from ", stream.remote_name);
+        RequestHandler redirect = (_https_redirect && _tls_port != 0) ? &http_redirect_handler : null;
+        _sessions.emplaceBack(defaultAllocator().allocT!Session(this, stream, redirect));
+    }
+
+    void accept_tls_connection(Stream stream, void*)
+    {
+        _sessions.emplaceBack(defaultAllocator().allocT!Session(this, stream, null));
+    }
+
+    bool any_cert_valid()
+    {
+        foreach (ref c; _certificates)
+            if (auto cert = cast(Certificate)c.get())
+                if (cert.is_valid)
+                    return true;
+        return false;
+    }
+
+    void push_certs_to_tls()
+    {
+        import protocol.http.tls : TLSServer;
+        if (auto tls = cast(TLSServer)_tls_server)
+            tls.set_certificate_array(_certificates[]);
+    }
+
+    bool try_start_http()
+    {
+        const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name(tconcat(name[], "_tcp"));
+        _server = get_module!TCPStreamModule.tcp_servers.create(server_name, ObjectFlags.dynamic, NamedArgument("port", _port));
+        if (!_server)
+        {
+            log.error("failed to create HTTP listener");
+            return false;
+        }
+        _server.set_connection_callback(&accept_http_connection, null);
+        _server.subscribe(&server_state_change);
+        log.notice("listening on HTTP port ", _port);
+        return true;
+    }
+
+    void try_start_tls()
+    {
+        version (DebugHTTPServer)
+            log.trace("try_start_tls, any_cert_valid=", any_cert_valid());
+        if (!any_cert_valid())
+            return;
+
+        BaseObject[32] certs;
+        size_t num_certs = 0;
+        foreach (ref c; _certificates)
+            if (auto cert = c.get())
+                certs[num_certs++] = cert;
+
+        const(char)[] tls_name = get_module!HTTPModule.tls_servers.generate_name(tconcat(name[], "_tls"));
+        _tls_server = get_module!HTTPModule.tls_servers.create(tls_name, ObjectFlags.dynamic,
+            NamedArgument("port", _tls_port), NamedArgument("certificates", certs[0 .. num_certs]));
+        if (!_tls_server)
+        {
+            log.error("failed to create TLS listener");
+            return;
+        }
+        _tls_server.set_connection_callback(&accept_tls_connection, null);
+        _tls_server.subscribe(&server_state_change);
+        log.notice("listening on HTTPS port ", _tls_port);
+    }
+
+    void server_state_change(BaseObject obj, StateSignal signal)
+    {
+        if (signal == StateSignal.destroyed)
+        {
+            if (obj is _server)
+            {
+                log.warning("HTTP listener destroyed externally, recreating");
+                _server = null;
+                try_start_http();
+            }
+            else if (obj is _tls_server)
+            {
+                log.warning("TLS listener destroyed externally, recreating");
+                _tls_server = null;
+                try_start_tls();
+            }
+        }
+    }
+
+    void cert_state_change(BaseObject obj, StateSignal signal)
+    {
+        version (DebugHTTPServer)
+            log.trace("cert_state_change signal=", signal);
+
+        if (signal == StateSignal.online)
+        {
+            if (!_tls_server && _tls_port != 0)
+                try_start_tls();
+            else if (_tls_server)
+                push_certs_to_tls();
+        }
+        else if (signal == StateSignal.offline)
+        {
+            if (_tls_server)
+            {
+                if (!any_cert_valid())
+                {
+                    log.info("no valid certs remaining, shutting down TLS");
+                    _tls_server.unsubscribe(&server_state_change);
+                    _tls_server.destroy();
+                    _tls_server = null;
+                }
+                else
+                    push_certs_to_tls();
+            }
+        }
+    }
+
+    int http_redirect_handler(ref const HTTPMessage request, ref Stream stream)
+    {
+        // allow ACME challenge paths
+        if (request.request_target[].startsWith("/.well-known/acme-challenge/"))
+            return 0;
+
+        // build redirect location
+        const(char)[] host = request.header("Host")[];
+        if (host.empty)
+        {
+            foreach (ref c; _certificates)
+            {
+                if (auto cert = cast(Certificate)c.get())
+                {
+                    if (cert.is_valid && !cert.domain[].empty)
+                    {
+                        host = cert.domain[];
+                        break;
+                    }
+                }
+            }
+        }
+        if (host.empty)
+            return 0; // can't redirect without a host
+
+        const(char)[] target = request.request_target[];
+        const(char)[] location;
+        if (_tls_port == 443)
+            location = tconcat("https://", host, target);
+        else
+            location = tconcat("https://", host, ':', _tls_port, target);
+
+        HTTPMessage response;
+        response.http_version = request.http_version;
+        response.status_code = 301;
+        response.reason = StringLit!"Moved Permanently";
+        response.headers ~= HTTPParam(StringLit!"Location", location.makeString(defaultAllocator));
+        response.headers ~= HTTPParam(StringLit!"Content-Length", StringLit!"0");
+        stream.write(response.format_message()[]);
+        return 1;
     }
 
     struct Session
     {
     nothrow @nogc:
 
-        this(HTTPServer server, Stream stream)
+        this(HTTPServer server, Stream stream, RequestHandler redirect_handler)
         {
             this.server = server;
             this.stream = stream;
+            this.redirect_handler = redirect_handler;
             stream.subscribe(&signal_handler);
             parser = HTTPParser(&request_callback);
         }
@@ -185,6 +443,14 @@ private:
 
         int request_callback(ref const HTTPMessage request)
         {
+            // check redirect interceptor first
+            if (redirect_handler)
+            {
+                int result = redirect_handler(request, stream);
+                if (result != 0)
+                    return result;
+            }
+
             foreach (ref h; server._handlers)
             {
                 if (((1 << request.method) & h.methods) && request.request_target[].startsWith(h.uri_prefix[]))
@@ -204,6 +470,7 @@ private:
 
         HTTPServer server;
         Stream stream;
+        RequestHandler redirect_handler;
 
     private:
         HTTPParser parser;
