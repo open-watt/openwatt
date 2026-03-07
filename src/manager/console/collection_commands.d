@@ -95,7 +95,7 @@ nothrow @nogc:
 
         // TODO: maybe something better? perhaps a virtual on the object which lets it supply a creation message?
         //       how do we know what properties are relevant for the create logs?
-        writeInfo("Create ", item.type, ": '", item.name, "'");
+        item.log.info("created");
 
         return null;
     }
