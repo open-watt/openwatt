@@ -107,16 +107,14 @@ nothrow @nogc:
         assert(_status.link_status == LinkStatus.up, "Stream is not online, it shouldn't be in Running state!");
     }
 
-    override void set_online()
+    override void online()
     {
-        super.set_online();
         _status.link_status = LinkStatus.up;
         _status.link_status_change_time = getSysTime();
     }
 
-    override void set_offline()
+    override void offline()
     {
-        super.set_offline();
         _status.link_status = LinkStatus.down;
         _status.link_status_change_time = getSysTime();
         ++_status.link_downs;
