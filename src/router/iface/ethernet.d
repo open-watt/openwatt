@@ -19,7 +19,7 @@ import router.iface.vlan;
 
 version(Windows)
 {
-    import core.sys.windows.windows;
+    import urt.internal.sys.windows;
     import manager.os.npcap;
 }
 
