@@ -85,17 +85,11 @@ nothrow @nogc:
 
         if (needsSort)
         {
+            import urt.algorithm : qsort;
             import urt.lifetime : move;
 
-            // TODO: D lib has sort, we don't have this in urt...
-            import std.algorithm : copy;
-            import std.algorithm.sorting;
-            import std.algorithm.mutation : SwapStrategy;
-
-            Array!SampleElement sorted;
-            sorted.resize(elements.length);
-            elements[].multiSort!("a.regKind < b.regKind", "a.register < b.register", SwapStrategy.unstable).copy(sorted[]);
-            elements = sorted.move;
+            qsort!((ref a, ref b) => a.regKind != b.regKind ? (a.regKind < b.regKind ? -1 : 1)
+                                                            : (a.register < b.register ? -1 : a.register > b.register ? 1 : 0))(elements[]);
             needsSort = false;
         }
 
