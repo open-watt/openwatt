@@ -201,17 +201,21 @@ nothrow @nogc:
         return StringLen;
     }
 
-    auto __debugOverview()
+    version (Windows)
     {
-        debug {
-            char[] buffer = new char[StringLen];
-            ptrdiff_t len = toString(buffer, null, null);
-            return buffer[0 .. len];
+        auto __debugOverview()
+        {
+            debug {
+                import urt.mem;
+                char[] buffer = debug_alloc!char(StringLen);
+                ptrdiff_t len = toString(buffer, null, null);
+                return buffer[0 .. len];
+            }
+            else
+                return b;
         }
-        else
-            return b;
+        auto __debugExpanded() => b[];
     }
-    auto __debugExpanded() => b[];
 }
 
 

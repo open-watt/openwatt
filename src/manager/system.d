@@ -46,12 +46,15 @@ Array!String sysinfo_suggest(bool, const(char)[] arg_name, const(char)[]) nothro
 {
     import urt.string : startsWith;
 
-    __gshared const String[6] properties = [
+    __gshared const String[9] properties = [
         StringLit!"hostname",
         StringLit!"os",
         StringLit!"processor",
         StringLit!"total-memory",
-        StringLit!"available-memory",
+        StringLit!"used-memory",
+        StringLit!"reserved-memory",
+        StringLit!"avail-memory",
+        StringLit!"peak-memory",
         StringLit!"uptime"
     ];
 
@@ -73,12 +76,16 @@ void sysinfo(Session session, const(Variant)[] args)
 
     if (args.length == 0)
     {
-        session.write_line("Hostname:     ", hostname[]);
-        session.write_line("OS:           ", info.os_name);
-        session.write_line("Processor:    ", info.processor);
-        session.write_line("Total Memory: ", info.total_memory.format_bytes());
-        session.write_line("Available:    ", info.available_memory.format_bytes());
-        session.write_line("Uptime:       ", seconds(getAppTime().as!"seconds"));
+        session.write_line("Hostname:        ", hostname[]);
+        session.write_line("OS:              ", info.os_name);
+        session.write_line("Processor:       ", info.processor);
+        session.write_line("Total Memory:    ", info.total_memory.format_bytes());
+        session.write_line("Used Memory:     ", info.used_memory.format_bytes());
+        session.write_line("Reserved Memory: ", info.reserved_memory.format_bytes());
+        session.write_line("Avail Memory:     ", info.avail_memory.format_bytes());
+        if (info.peak_memory > 0)
+            session.write_line("Peak Memory:     ", info.peak_memory.format_bytes());
+        session.write_line("Uptime:          ", seconds(getAppTime().as!"seconds"));
     }
     else foreach (ref arg; args)
     {
@@ -97,8 +104,14 @@ void sysinfo(Session session, const(Variant)[] args)
             session.write_line(info.processor);
         else if (icmp(prop, "total-memory") == 0)
             session.write_line(info.total_memory.format_bytes());
-        else if (icmp(prop, "available-memory") == 0)
-            session.write_line(info.available_memory.format_bytes());
+        else if (icmp(prop, "used-memory") == 0)
+            session.write_line(info.used_memory.format_bytes());
+        else if (icmp(prop, "reserved-memory") == 0)
+            session.write_line(info.reserved_memory.format_bytes());
+        else if (icmp(prop, "avail-memory") == 0)
+            session.write_line(info.avail_memory.format_bytes());
+        else if (icmp(prop, "peak-memory") == 0)
+            session.write_line(info.peak_memory.format_bytes());
         else if (icmp(prop, "uptime") == 0)
             session.write_line(seconds(getAppTime().as!"seconds"));
         else

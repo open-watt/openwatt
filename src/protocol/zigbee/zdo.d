@@ -148,8 +148,10 @@ bool parse_node_desc(const(ubyte)[] message, NodeMap* node)
     }
     if (node.desc.type != NodeType.unknown && node.desc.type != new_type)
     {
-        import urt.log;
-        writeDebugf("Zigbee: node {0, 04x} type mismatch: old = {1}, new = {2}", node.id, node.desc.type, new_type);
+        debug {
+            import urt.log;
+            log_debugf("zigbee", "node {0, 04x} type mismatch: old = {1}, new = {2}", node.id, node.desc.type, new_type);
+        }
     }
     node.desc.type = new_type;
     node.desc.manufacturer_code = message[5..7].littleEndianToNative!ushort;

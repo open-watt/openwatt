@@ -27,6 +27,15 @@ else version(Posix)
     import core.sys.posix.fcntl;
     import core.sys.posix.sys.types;
 }
+else version (BL808)
+{
+    import urt.meta.enuminfo : enum_from_key;
+    import sys.bl808.uart;
+}
+else version (FreeStanding)
+{
+    static assert(false, "SerialStream: no UART driver for this FreeStanding target");
+}
 else
     static assert(false, "Unsupported platform!");
 
@@ -102,6 +111,13 @@ nothrow @nogc:
         if (_device == value)
             return StringResult.success;
         _device = value.move;
+        version(BL808)
+        {
+            auto id = enum_from_key!UartId(_device[]);
+            if (id is null)
+                return StringResult("invalid device: expected uart0–uart3");
+            _uart_id = *id;
+        }
         restart();
         return StringResult.success;
     }
@@ -165,7 +181,14 @@ nothrow @nogc:
     // API...
 
     final override bool validate() const
-        => !_device.empty;
+    {
+        if (_device.empty)
+            return false;
+        version(BL808)
+            return _uart_id <= UartId.max;
+        else
+            return true;
+    }
 
     override CompletionStatus startup()
     {
@@ -309,6 +332,34 @@ nothrow @nogc:
                 return CompletionStatus.error;
             }
         }
+        else version(BL808)
+        {
+            if (_uart_id > UartId.max)
+                return CompletionStatus.error;
+
+            UartConfig cfg;
+            cfg.baud_rate = _params.baud_rate;
+            cfg.data_bits = _params.data_bits;
+
+            final switch (_params.stop_bits)
+            {
+                case StopBits.one:            cfg.stop_bits = UartStopBits.one; break;
+                case StopBits.one_point_five: cfg.stop_bits = UartStopBits.one_point_five; break;
+                case StopBits.two:            cfg.stop_bits = UartStopBits.two; break;
+            }
+
+            final switch (_params.parity)
+            {
+                case Parity.none:  cfg.parity = UartParity.none; break;
+                case Parity.even:  cfg.parity = UartParity.even; break;
+                case Parity.odd:   cfg.parity = UartParity.odd; break;
+                case Parity.mark:  cfg.parity = UartParity.none; break; // not supported by hardware
+                case Parity.space: cfg.parity = UartParity.none; break; // not supported by hardware
+            }
+
+            if (!uart_open(_uart_id, cfg))
+                return CompletionStatus.error;
+        }
         return CompletionStatus.complete;
     }
 
@@ -327,6 +378,11 @@ nothrow @nogc:
                 core.sys.posix.unistd.close(_fd);
                 _fd = -1;
             }
+        }
+        else version (BL808)
+        {
+            if (_uart_id <= UartId.max)
+                uart_close(_uart_id);
         }
         return CompletionStatus.complete;
     }
@@ -349,10 +405,13 @@ nothrow @nogc:
             else
                 restart();
         }
-        else
+        else version(BL808)
         {
-            // TODO
-            assert(false, "TODO: test to see if the port is live...");
+            // UART0/1/2 have no D0 interrupt — poll hardware FIFOs manually.
+            // UART3 is interrupt-driven but polling is harmless.
+            uart_poll(_uart_id);
+            if (uart_check_errors(_uart_id))
+                restart();
         }
     }
 
@@ -377,10 +436,18 @@ nothrow @nogc:
                 write_to_log(true, buffer[0 .. bytes_read]);
             return bytes_read;
         }
+        else version(BL808)
+        {
+            ptrdiff_t bytes_read = uart_read(_uart_id, buffer);
+            if (_logging)
+                write_to_log(true, buffer[0 .. bytes_read]);
+            return bytes_read;
+        }
     }
 
     override ptrdiff_t write(const(void[])[] data...)
     {
+        ptrdiff_t bytes_written;
         version(Windows)
         {
             import urt.array;
@@ -410,19 +477,19 @@ nothrow @nogc:
             else
                 send_buffer = data[0];
 
-            DWORD bytes_written;
-            if (!WriteFile(_h_com, send_buffer.ptr, cast(DWORD)send_buffer.length, &bytes_written, null))
+            DWORD _bytes_written;
+            if (!WriteFile(_h_com, send_buffer.ptr, cast(DWORD)send_buffer.length, &_bytes_written, null))
             {
                 restart();
                 return -1;
             }
 
+            bytes_written = _bytes_written;
             if (_logging)
                 write_to_log(false, send_buffer[0 .. bytes_written]);
         }
         else version(Posix)
         {
-            ssize_t bytes_written;
             if (data.length > 1)
             {
                 iovec[32] iov = null;
@@ -449,6 +516,32 @@ nothrow @nogc:
                 }
             }
         }
+        else version(BL808)
+        {
+            // Gather scatter list into contiguous buffer, then write
+            const(void)[] send_buffer;
+            ubyte[1024] stack_buffer = void;
+            if (data.length > 1)
+            {
+                size_t total_length = 0;
+                foreach (d; data)
+                    total_length += d.length;
+                assert(total_length <= stack_buffer.length, "Serial write too large");
+                size_t offset = 0;
+                foreach (d; data)
+                {
+                    stack_buffer[offset .. offset + d.length] = cast(ubyte[])d;
+                    offset += d.length;
+                }
+                send_buffer = stack_buffer[0 .. total_length];
+            }
+            else
+                send_buffer = data[0];
+
+            bytes_written = uart_write(_uart_id, send_buffer);
+            if (_logging)
+                write_to_log(false, send_buffer[0 .. bytes_written]);
+        }
         return bytes_written;
     }
 
@@ -459,14 +552,18 @@ nothrow @nogc:
 
     override ptrdiff_t pending()
     {
-        // TODO:?
-        assert(0);
+        version(BL808)
+            return uart_rx_pending(_uart_id);
+        else
+            assert(0, "TODO: pending() not implemented");
     }
 
     override ptrdiff_t flush()
     {
-        // TODO: just read until can't read anymore?
-        assert(0);
+        version(BL808)
+            return uart_flush(_uart_id);
+        else
+            assert(0, "TODO: flush() not implemented");
     }
 
 private:
@@ -474,6 +571,8 @@ private:
         HANDLE _h_com = INVALID_HANDLE_VALUE;
     else version (Posix)
         int _fd = -1;
+    else version (BL808)
+        UartId _uart_id = cast(UartId)uint.max;
 
     String _device;
     SerialParams _params;

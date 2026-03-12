@@ -26,6 +26,10 @@ else version(Posix)
     import core.sys.posix.unistd;
     import core.sys.posix.fcntl;
 }
+else version (FreeStanding)
+{
+    // Bare-metal: no local terminal — console access via telnet/serial only
+}
 else
     static assert(false, "Unsupported platform!");
 
