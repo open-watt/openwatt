@@ -98,7 +98,7 @@ pure nothrow @nogc:
         => _element_index & 0x1FFF;
 
     const(char)[] get_description(ref const(Profile) profile) const
-        => profile.desc_strings ? as_dstring(profile.desc_strings.ptr + _description) : null;
+        => _description.cache_string(profile.desc_strings);
 
 private:
     ushort _element_index; // bits 0-12: index, bits 13-15: type
@@ -149,10 +149,10 @@ struct ElementDesc_MQTT
 
 pure nothrow @nogc:
     const(char)[] get_read_topic(ref const(Profile) profile) const
-        => profile.mqtt_strings ? as_dstring(profile.mqtt_strings.ptr + read_topic) : null;
+        => read_topic.cache_string(profile.mqtt_strings);
 
     const(char)[] get_write_topic(ref const(Profile) profile) const
-        => profile.mqtt_strings ? as_dstring(profile.mqtt_strings.ptr + write_topic) : null;
+        => write_topic.cache_string(profile.mqtt_strings);
 }
 
 struct ElementTemplate
@@ -174,18 +174,18 @@ pure nothrow @nogc:
     CacheString display_units;
 
     const(char)[] get_id(ref const(Profile) profile) const
-        => as_dstring(profile.id_strings.ptr + _id);
+        => _id.cache_string(profile.id_strings);
 
     const(char)[] get_name(ref const(Profile) profile) const
-        => profile.name_strings ? as_dstring(profile.name_strings.ptr + _name) : null;
+        => profile.name_strings ? _name.cache_string(profile.name_strings) : null;
 
     const(char)[] get_desc(ref const(Profile) profile) const
-        => profile.desc_strings ? as_dstring(profile.desc_strings.ptr + _description) : null;
+        => profile.desc_strings ? _description.cache_string(profile.desc_strings) : null;
 
     const(char)[] get_expression(ref const(Profile) profile) const
     {
         assert(type == Type.expression, "ElementTemplate is not of type `expression`");
-        return as_dstring(profile.expression_strings.ptr + _value);
+        return _value.cache_string(profile.expression_strings);
     }
 
     const(char*) get_source(ref const(Profile) profile) const
@@ -212,7 +212,7 @@ struct ComponentTemplate
 {
 pure nothrow @nogc:
     const(char)[] get_id(ref const(Profile) profile) const
-        => as_dstring(profile.id_strings.ptr + _id);
+        => _id.cache_string(profile.id_strings);
 
     const(char)[] get_template() const
         => _template[];
@@ -268,7 +268,7 @@ pure nothrow @nogc:
         => _models.length;
 
     const(char)[] get_model(size_t i, ref const(Profile) profile) const
-        => as_dstring(profile.id_strings.ptr + _models[i]);
+        => _models[i].cache_string(profile.id_strings);
 
     ref inout(ComponentTemplate) get_component(size_t i, ref inout(Profile) profile) inout
         => profile.get_component(this, i);
@@ -405,7 +405,7 @@ nothrow @nogc:
         {
             while (true)
             {
-                const(char)[] eid = as_dstring(lookup_strings.ptr + lookup_table[i].id);
+                const(char)[] eid = lookup_table[i].id.cache_string(lookup_strings);
                 if (eid[] == id[])
                     return lookup_table[i].index;
                 if (++i == lookup_table.length || lookup_table[i].hash != low_hash)
@@ -453,7 +453,7 @@ nothrow @nogc:
 
         foreach (ref l; lookup_table)
         {
-            auto id = as_dstring(lookup_strings.ptr + l.id);
+            auto id = l.id.cache_string(lookup_strings);
             uint hash = fnv1a(cast(ubyte[])id);
             l.id = hash >> 16;
         }
@@ -487,7 +487,7 @@ private:
         size_t length() const
             => list.length;
         const(char)[] front() const
-            => as_dstring(str_cache.ptr + list[0]);
+            => list[0].cache_string(str_cache);
         void popFront()
         {
             list = list[1 .. $];
@@ -1576,6 +1576,9 @@ private:
 
 size_t cache_len(size_t str_len) pure nothrow @nogc
     => str_len ? 2 + str_len + (str_len & 1) : 0;
+
+inout(char)[] cache_string(ushort offset, inout(char)[] cache) pure nothrow @nogc
+    => offset ? as_dstring(cache.ptr + offset) : null;
 
 int lookup_cmp(ref const Profile.Lookup a, ref const Profile.Lookup b) pure nothrow @nogc
     => a.hash - b.hash;
