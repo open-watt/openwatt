@@ -44,6 +44,20 @@ enum PacketDirection : ubyte
     outgoing = 2
 }
 
+enum MessageState
+{
+    queued,
+    in_flight,
+    complete,
+    failed,
+    aborted,
+    timeout,
+    dropped
+}
+
+alias MessageCallback = void delegate(int msg_handle, MessageState state) nothrow @nogc;
+
+
 struct PacketFilter
 {
 nothrow @nogc:
@@ -290,24 +304,24 @@ nothrow @nogc:
         }
     }
 
-    bool send(MACAddress dest, const(void)[] message, EtherType type, OW_SubType subtype = OW_SubType.unspecified)
+    int send(MACAddress dest, const(void)[] message, EtherType type, MessageCallback callback = null)
     {
-        if (!running)
-            return false;
-
         Packet p;
         ref eth = p.init!Ethernet(message);
         eth.src = mac;
         eth.dst = dest;
         eth.ether_type = type;
-        eth.ow_sub_type = subtype;
-        return forward(p);
+        return forward(p, callback);
     }
 
-    final bool forward(ref Packet packet)
+    final int forward(ref Packet packet, MessageCallback callback = null)
     {
         if (!running)
-            return false;
+        {
+            if (callback)
+                callback(-1, MessageState.failed);
+            return -1;
+        }
 
         foreach (ref subscriber; _subscribers[0.._num_subscribers])
         {
@@ -315,7 +329,21 @@ nothrow @nogc:
                 subscriber.recv_packet(packet, this, PacketDirection.outgoing, subscriber.user_data);
         }
 
-        return transmit(packet);
+        int result = transmit(packet, callback);
+        if (result <= 0 && callback)
+            callback(result, result == 0 ? MessageState.complete : MessageState.failed);
+        return result;
+    }
+
+    void abort(int msg_handle, MessageState reason = MessageState.aborted)
+    {
+        assert(false, "Interface does not support message cancellation");
+    }
+
+    MessageState msg_state(int msg_handle) const
+    {
+        assert(msg_handle == 0, "Invalid message handle");
+        return MessageState.complete;
     }
 
     final void add_address(MACAddress mac, BaseInterface iface)
@@ -435,7 +463,7 @@ protected:
         ++_status.link_downs;
     }
 
-    abstract bool transmit(ref Packet packet);
+    abstract int transmit(ref Packet packet, MessageCallback callback = null);
 
     final void dispatch(ref Packet packet)
     {
