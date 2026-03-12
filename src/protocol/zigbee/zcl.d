@@ -59,6 +59,15 @@ enum ZCLCommand : ushort
     onoff_on_with_recall_global_scene = 0x4041,
     onoff_on_with_timed_off = 0x4042,           // [ u8: on_off_control, u16: on_time, u16: off_wait_time ]
 
+    // Cluster 500: IAS Zone (server -> client)
+    ias_zone_enroll_response = 0x4000,
+    ias_zone_initiate_normal_operation = 0x4001,
+    ias_zone_initiate_test_mode = 0x4002,
+
+    // Cluster 500: IAS Zone (client -> server)
+    ias_zone_status_change = 0x4000,
+    ias_zone_enroll_request = 0x4001,
+
     // Cluster EF00: Tuya
     tuya_data_request = 0x4000,
     tuya_data_response = 0x4001,
@@ -517,5 +526,156 @@ ptrdiff_t get_zcl_value(ZCLDataType type, const(ubyte)[] data, out Variant r) no
         default:
             import urt.mem.temp : tformat;
             assert(false, tformat("Unsupported ZCL data type: {0, 02x}", type));
+    }
+}
+
+ptrdiff_t set_zcl_value(ZCLDataType type, Variant value, ubyte[] buffer) nothrow @nogc
+{
+    import urt.result;
+    import manager.value;
+
+    switch (type) with (ZCLDataType)
+    {
+        case no_data:
+            return 0;
+
+        case boolean:
+            if (buffer.length < 1)
+                return -1;
+            bool b;
+            if (auto r = value.from_variant(b))
+                return -1;
+            buffer[0] = b ? 1 : 0;
+            return 1;
+
+        case bitmap8,
+             uint8,
+             int8,
+             enum8:
+            if (buffer.length < 1)
+                return -1;
+            buffer[0] = cast(ubyte)value.as!uint;
+            return 1;
+
+        case bitmap16,
+             uint16,
+             int16,
+             enum16:
+            if (buffer.length < 2)
+                return -1;
+            buffer[0..2] = (cast(ushort)value.as!uint).nativeToLittleEndian;
+            return 2;
+
+        case bitmap24,
+             uint24,
+             int24:
+            if (buffer.length < 3)
+                return -1;
+            uint v = value.as!uint;
+            buffer[0..2] = (cast(ushort)v).nativeToLittleEndian;
+            buffer[2] = cast(ubyte)(v >> 16);
+            return 3;
+
+        case bitmap32,
+             uint32,
+             int32:
+            if (buffer.length < 4)
+                return -1;
+            buffer[0..4] = value.as!uint.nativeToLittleEndian;
+            return 4;
+
+        case bitmap40,
+             uint40,
+             int40:
+            if (buffer.length < 5)
+                return -1;
+            ulong v = value.as!ulong;
+            buffer[0..4] = (cast(uint)v).nativeToLittleEndian;
+            buffer[4] = cast(ubyte)(v >> 32);
+            return 5;
+
+        case bitmap48,
+             uint48,
+             int48:
+            if (buffer.length < 6)
+                return -1;
+            ulong v = value.as!ulong;
+            buffer[0..4] = (cast(uint)v).nativeToLittleEndian;
+            buffer[4..6] = (cast(ushort)(v >> 32)).nativeToLittleEndian;
+            return 6;
+
+        case bitmap56,
+             uint56,
+             int56:
+            if (buffer.length < 7)
+                return -1;
+            ulong v = value.as!ulong;
+            buffer[0..4] = (cast(uint)v).nativeToLittleEndian;
+            buffer[4..6] = (cast(ushort)(v >> 32)).nativeToLittleEndian;
+            buffer[6] = cast(ubyte)(v >> 48);
+            return 7;
+
+        case bitmap64,
+             uint64,
+             int64:
+            if (buffer.length < 8)
+                return -1;
+            buffer[0..8] = value.as!ulong.nativeToLittleEndian;
+            return 8;
+
+        case single_prec_float:
+            if (buffer.length < 4)
+                return -1;
+            float f = value.asFloat;
+            buffer[0..4] = (*cast(uint*)&f).nativeToLittleEndian;
+            return 4;
+
+        case double_prec_float:
+            if (buffer.length < 8)
+                return -1;
+            double d = value.asDouble;
+            buffer[0..8] = (*cast(ulong*)&d).nativeToLittleEndian;
+            return 8;
+
+        case char_string:
+            if (!value.isString)
+                return -1;
+            const(char)[] s = value.asString;
+            if (s.length > 0xFE || buffer.length < 1 + s.length)
+                return -1;
+            buffer[0] = cast(ubyte)s.length;
+            buffer[1 .. 1 + s.length] = cast(const(ubyte)[])s;
+            return cast(ptrdiff_t)(1 + s.length);
+
+        case long_char_string:
+            if (!value.isString)
+                return -1;
+            const(char)[] s = value.asString;
+            if (buffer.length < 2 + s.length) return -1;
+            buffer[0..2] = (cast(ushort)s.length).nativeToLittleEndian;
+            buffer[2 .. 2 + s.length] = cast(const(ubyte)[])s;
+            return cast(ptrdiff_t)(2 + s.length);
+
+        case octet_string:
+            if (!value.isString)
+                return -1;
+            const(void)[] s = value.asBuffer;
+            if (s.length > 0xFE || buffer.length < 1 + s.length)
+                return -1;
+            buffer[0] = cast(ubyte)s.length;
+            buffer[1 .. 1 + s.length] = cast(const(ubyte)[])s;
+            return cast(ptrdiff_t)(1 + s.length);
+
+        case long_octet_string:
+            if (!value.isString)
+                return -1;
+            const(void)[] s = value.asBuffer;
+            if (buffer.length < 2 + s.length) return -1;
+            buffer[0..2] = (cast(ushort)s.length).nativeToLittleEndian;
+            buffer[2 .. 2 + s.length] = cast(const(ubyte)[])s;
+            return cast(ptrdiff_t)(2 + s.length);
+
+        default:
+            return -1;
     }
 }
