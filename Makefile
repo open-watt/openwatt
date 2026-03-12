@@ -171,6 +171,7 @@ DFLAGS := $(DFLAGS) -preview=bitfields -preview=rvaluerefparam -preview=in #-pre
 
 SOURCES := $(shell find "$(SRCDIR)" -type f -name '*.d')
 SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)" -type f -name '*.d')
+SOURCES := $(SOURCES) $(RTSRCDIR)/urt/internal/mbedtls.c
 
 ifeq ($(OS),windows)
     TARGET = $(TARGETDIR)/$(TARGETNAME).exe
@@ -272,10 +273,11 @@ ifeq ($(CONFIG),unittest)
     TARGETNAME := $(TARGETNAME)_test
 endif
 
-# Note: LDC's -deps format is not compatible with Make (it's a custom D module dependency format)
-# so we don't use -include here. The build will rebuild everything when any file changes.
+# DMD's -makedeps generates dependency info but uses backslash paths on Windows,
+# which don't match $(TARGET)'s forward slashes. Since this is whole-program
+# compilation, $(SOURCES) as prerequisites is sufficient for incremental rebuilds.
 
-$(TARGET):
+$(TARGET): $(SOURCES)
 	mkdir -p $(OBJDIR) $(TARGETDIR)
 	$(COMPILE_CMD)
 ifeq ($(ROUTEROS_BUILD),1)
