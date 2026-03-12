@@ -45,7 +45,7 @@ class ZigbeeController : BaseObject, Subscriber
                                          Property.create!("auto-create", auto_create)() ];
 @nogc:
 
-    enum type_name = "zigbee-controller";
+    enum type_name = "zb-controller";
 
     this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
     {
@@ -113,9 +113,7 @@ protected:
 
     override CompletionStatus shutdown() nothrow
     {
-        // abort any outstanding interviews
-        // TODO: there is a CRITICAL problem where in-flight requests have callbacks into fibre-local yield objects!
-        //       maybe we need an API to abort requests...?
+        // abort any outstanding interviews (scope(failure) in zdo/zcl_request cleans up in-flight requests)
         while (!_promises.empty)
         {
             Promise!bool* p = _promises.popBack();
