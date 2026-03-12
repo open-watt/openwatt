@@ -58,6 +58,10 @@ template type_for(T, Extra...)
         static assert(is(V == Unqual!V), "TODO: what case is this qualified?");
         enum type_for = type_for!V ~ "[]";
     }
+    else static if (is(U == V[], V) && !is(U : const(char)[]))
+    {
+        enum type_for = type_for!(Unqual!V) ~ "[]";
+    }
     else static if (is(U == V[N], V, size_t N))
     {
         static assert(is(V == Unqual!V), "TODO: what case is this qualified?");
@@ -101,7 +105,10 @@ template type_for(T, Extra...)
     else static if (is(U == struct))
         enum type_for = struct_name_override!U;
     else
+    {
+        static assert(false, "Not supported?");
         enum type_for = null; // not supported
+    }
 }
 
 
