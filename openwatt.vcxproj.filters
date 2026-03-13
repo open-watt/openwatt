@@ -898,6 +898,9 @@
     <None Include="conf\ha_profiles\emporia.conf">
       <Filter>conf\ha_profiles</Filter>
     </None>
+    <None Include="conf\modbus_profiles\acrel.conf">
+      <Filter>conf\modbus_profiles</Filter>
+    </None>
     <None Include="conf\modbus_profiles\eastron_sdm120.conf">
       <Filter>conf\modbus_profiles</Filter>
     </None>

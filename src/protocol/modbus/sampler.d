@@ -31,16 +31,20 @@ template modbus_data_type(const(char)[] str)
 
 DataType parse_modbus_data_type(const(char)[] desc)
 {
-    if (desc.length == 3 && desc[1] == '8')
+    if ((desc.length == 3 && desc[1] == '8') ||
+        (desc.length == 6 && desc[0..4] == "enum" && desc[4] == '8'))
     {
-        uint flags;
-        if (desc[0] == 'i')
+        uint flags = DataType.u16;
+        if (desc.length == 6)
+            flags |= DataType.enumeration;
+        else if (desc[0] == 'i')
             flags |= DataType.signed;
         else if (desc[0] != 'u')
             return DataType.invalid;
-        if (desc[2] == 'h')
+        size_t n = 2 + desc.length - 3;
+        if (desc[n] == 'h')
             return make_data_type(flags, DataKind.high_byte);
-        else if (desc[2] == 'l')
+        else if (desc[n] == 'l')
             return make_data_type(flags, DataKind.low_byte);
         return DataType.invalid;
     }

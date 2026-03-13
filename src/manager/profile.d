@@ -361,11 +361,7 @@ nothrow @nogc:
 
     const(VoidEnumInfo)* find_enum_template(const(char)[] name)
     {
-        import manager;
-
         const(VoidEnumInfo)** enum_info = name in enum_templates;
-        if (!enum_info)
-            enum_info = name in g_app.enum_templates;
         if (!enum_info)
             return null;
         return *enum_info;
@@ -925,6 +921,12 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                     if ((type & DataType.enumeration) && units)
                     {
                         const(VoidEnumInfo)* enum_info = profile.find_enum_template(units);
+                        if (!enum_info)
+                        {
+                            import manager;
+                            if (const(VoidEnumInfo)** e = units in g_app.enum_templates)
+                                enum_info = *e;
+                        }
                         if (enum_info)
                             desc = ValueDesc(type, enum_info);
                         else
@@ -971,34 +973,45 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         import protocol.modbus.message : RegisterType;
                         import protocol.modbus.sampler : parse_modbus_data_type;
 
-                        size_t taken;
-                        ulong reg = register.parse_uint_with_base(&taken);
-                        if (taken != register.length || reg > 105535)
+                        uint base = 10;
+                        if (register.length >= 2 && register[0..2] == "0x")
                         {
-                            writeWarning("Invalid Modbus register: ", register);
+                            base = 16;
+                            register = register[2 .. $];
+                        }
+                        size_t taken;
+                        ulong reg = register.parse_uint(&taken, base);
+                        if (taken == 0 || taken != register.length)
+                        {
+                            writeWarning("Error parsing register: ", base == 16 ? "0x" : "", register);
                             break;
                         }
-                        if (reg < 10000)
+                        if (reg < (base == 10 ? 10000 : 0x10000))
                         {
                             mb.reg_type = RegisterType.coil;
                             mb.reg = cast(ushort)reg;
                         }
-                        else if (reg < 20000)
+                        else if (reg < (base == 10 ? 20000 : 0x20000))
                         {
                             mb.reg_type = RegisterType.discrete_input;
-                            mb.reg = cast(ushort)(reg - 10000);
+                            mb.reg = cast(ushort)(reg - (base == 10 ? 10000 : 0x10000));
                         }
-                        else if (reg < 30000)
+                        else if (reg < (base == 10 ? 30000 : 0x30000))
                             break;
-                        else if (reg < 40000)
+                        else if (reg < (base == 10 ? 40000 : 0x40000))
                         {
                             mb.reg_type = RegisterType.input_register;
-                            mb.reg = cast(ushort)(reg - 30000);
+                            mb.reg = cast(ushort)(reg - (base == 10 ? 30000 : 0x30000));
                         }
                         else
                         {
                             mb.reg_type = RegisterType.holding_register;
-                            mb.reg = cast(ushort)(reg - 40000);
+                            mb.reg = cast(ushort)(reg - (base == 10 ? 40000 : 0x40000));
+                        }
+                        if (mb.reg > ushort.max)
+                        {
+                            writeWarning("Invalid Modbus register: ", register);
+                            break;
                         }
 
                         DataType ty = type.split!('/', false).parse_modbus_data_type();
