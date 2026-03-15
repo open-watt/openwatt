@@ -6,6 +6,7 @@ import urt.encoding;
 import urt.inet;
 import urt.kvp;
 import urt.lifetime;
+import urt.log;
 import urt.mem.allocator;
 import urt.meta;
 import urt.string;
@@ -192,7 +193,7 @@ nothrow @nogc:
         int result = parser.update(stream);
         if (result != 0)
         {
-            stream.disconnect();
+            restart();
             return;
         }
 
@@ -225,6 +226,7 @@ nothrow @nogc:
         request.http_version = server_version;
         request.method = method;
         request.url = resource.makeString(defaultAllocator);
+        request.request_target = request.url;
         request.username = username.move;
         request.password = password.move;
         request.content = cast(ubyte[])content;
@@ -250,42 +252,60 @@ private:
     HTTPParser parser;
     Array!(HTTPMessage*) requests;
 
+    // Strip scheme:// prefix from _host for the HTTP Host header
+    const(char)[] host_for_header()
+    {
+        const(char)[] h = _host[];
+        size_t colon = h.findFirst(":");
+        if (colon != h.length)
+            h = h[colon + 1 .. $];
+        if (h.startsWith("//"))
+            h = h[2 .. $];
+        // Strip path
+        size_t slash = h.findFirst("/");
+        if (slash != h.length)
+            h = h[0 .. slash];
+        return h;
+    }
+
     void send_request(ref HTTPMessage request)
     {
-        Array!char message = request.format_message(_host[]);
+        Array!char message = request.format_message(host_for_header());
         if (message.empty)
             return;
         ptrdiff_t r = stream.write(message[]);
         if (r != message.length)
         {
-            assert(false, "TODO: handle error!");
+            writeWarning("HTTP client: write failed (", r, " of ", message.length, " bytes)");
+            restart();
+            return;
         }
 
-        version (DebugHTTPMessageFlow) {
-            import urt.log;
+        version (DebugHTTPMessageFlow)
             writeDebug("HTTP: request to ", _host, " - ", enum_key_from_value!HTTPMethod(request.method), " ", request.url, " (", request.content.length, " bytes)");
-        }
     }
 
     int dispatch_message(ref const HTTPMessage response)
     {
-        version (DebugHTTPMessageFlow) {
-            import urt.log;
+        version (DebugHTTPMessageFlow)
             writeDebug("HTTP: response from ", _host, " - ", response.status_code, " (", response.content.length, " bytes)");
-        }
 
         if (requests.empty)
             return -1;
 
-        // if we should close the connection
-        if (requests[0].http_version == HTTPVersion.V1_0 || requests[0].header("Connection") == "close")
-            stream.disconnect();
+        bool should_close = requests[0].http_version == HTTPVersion.V1_0 || requests[0].header("Connection") == "close";
 
         if (requests[0].response_handler)
             requests[0].response_handler(response);
 
         defaultAllocator().freeT(requests[0]);
         requests.popFront();
+
+        if (should_close)
+        {
+            restart();
+            return 0;
+        }
 
         if (requests.length > 0)
             send_request(*requests[0]);

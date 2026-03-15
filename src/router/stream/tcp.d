@@ -421,10 +421,10 @@ nothrow @nogc:
         _user_data = user_data;
     }
 
-    final override bool validate() const pure
+    override bool validate() const pure
         => _port != 0;
 
-    final override CompletionStatus startup()
+    override CompletionStatus startup()
     {
         assert(!_ip4_listener);
         assert(!_ip6_listener);
@@ -471,6 +471,7 @@ nothrow @nogc:
         if (!r)
         {
             // tolerate ipv6 failure... (do we want this?)
+            log.info("failed to create IPv6 listener: ", r.system_code);
 //            if (_ip4_listener)
 //            {
 //                _ip4_listener.close();
