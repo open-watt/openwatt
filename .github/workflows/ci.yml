@@ -44,10 +44,14 @@ jobs:
         with:
           compiler: ${{ matrix.compiler == 'dmd' && 'dmd-master' || matrix.compiler }}
 
+      # Linux needs mbedtls for TLS/crypto support
+      - name: Install mbedtls (Linux)
+        if: ${{ matrix.os == 'linux' }}
+        run: sudo apt-get update && sudo apt-get install -y libmbedtls-dev
       # 32-bit linux needs libs to link and run tests...
       - name: Install 32-bit Toolchains (Linux)
         if: ${{ matrix.os == 'linux' && matrix.arch == 'x86' }}
-        run: sudo apt-get update && sudo apt-get install -y gcc-multilib
+        run: sudo dpkg --add-architecture i386 && sudo apt-get update && sudo apt-get install -y gcc-multilib libmbedtls-dev:i386
       - name: Install 32-bit ARM Toolchains (Linux)
         if: ${{ matrix.os == 'linux' && matrix.arch == 'arm' }}
         run: sudo dpkg --add-architecture armhf && sudo apt-get update && sudo apt-get install -y libstdc++6:armhf
