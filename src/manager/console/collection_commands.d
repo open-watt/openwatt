@@ -493,10 +493,15 @@ nothrow @nogc:
     }
 
     override uint content_height()
-        => cast(uint)_collection.item_count + 1; // +1 for header
+        => cast(uint)_collection.item_count;
 
     override void render_content(uint offset, uint count, uint width)
     {
+        if (width != _prev_width)
+        {
+            _sticky_widths[] = 0;
+            _prev_width = width;
+        }
         const(char)[][16] proplist;
         auto properties = _collection.type_info.properties;
 
@@ -526,7 +531,8 @@ nothrow @nogc:
             }
         }
 
-        table.render_viewport(session, offset, count);
+        auto avail = count > 0 ? count - 1 : 0;  // reserve 1 row for table header
+        table.render_viewport(session, offset, avail, _sticky_widths[]);
     }
 
     override const(char)[] status_text()
@@ -537,6 +543,8 @@ nothrow @nogc:
 
 private:
     BaseCollection* _collection;
+    size_t[Table.max_cols] _sticky_widths;
+    uint _prev_width;
 }
 
 private:

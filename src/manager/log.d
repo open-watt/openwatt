@@ -6,6 +6,7 @@ import urt.mem : defaultAllocator;
 import urt.mem.temp : tconcat;
 import urt.meta.nullable;
 import urt.string;
+import urt.string.ansi : visible_width;
 import urt.variant;
 
 import manager;
@@ -165,7 +166,7 @@ nothrow @nogc:
         foreach (idx; _filtered[])
         {
             const(char)[] line = _log_module.get_log_line(idx);
-            uint visible = visible_length(line);
+            uint visible = cast(uint)visible_width(line);
             total += visible == 0 ? 1 : (visible + w - 1) / w;
         }
         return total;
@@ -182,7 +183,7 @@ nothrow @nogc:
         while (src < _filtered.length && phys < offset)
         {
             const(char)[] line = _log_module.get_log_line(_filtered[src]);
-            uint visible = visible_length(line);
+            uint visible = cast(uint)visible_width(line);
             uint rows = visible == 0 ? 1 : (visible + width - 1) / width;
             if (phys + rows > offset)
             {
@@ -201,7 +202,7 @@ nothrow @nogc:
             if (!line)
                 line = "";
 
-            uint visible = visible_length(line);
+            uint visible = cast(uint)visible_width(line);
             uint rows = visible == 0 ? 1 : (visible + width - 1) / width;
 
             // For wrapped lines, we need to emit full line and let terminal wrap,
@@ -223,7 +224,9 @@ nothrow @nogc:
                     remaining_rows = count - drawn;
 
                 session.write_output("\r", false);
-                const(char)[] segment = skip_ansi_chars(line, start_col);
+                import urt.string.ansi : visible_slice;
+                char[512] slice_buf = void;
+                const(char)[] segment = line.visible_slice(slice_buf, start_col, start_col + width);
                 session.write_output(segment, false);
                 session.write_output("\x1b[K\r\n", false);
                 drawn += remaining_rows;
@@ -252,50 +255,6 @@ private:
     LogFilter _filter;
     Array!uint _filtered;
     uint _last_log_count;
-
-    static uint visible_length(const(char)[] text)
-    {
-        uint visible = 0;
-        size_t i = 0;
-        while (i < text.length)
-        {
-            if (text[i] == '\x1b' && i + 1 < text.length && text[i + 1] == '[')
-            {
-                size_t j = i + 2;
-                while (j < text.length && text[j] != 'm')
-                    ++j;
-                i = (j < text.length) ? j + 1 : text.length;
-            }
-            else
-            {
-                ++visible;
-                ++i;
-            }
-        }
-        return visible;
-    }
-
-    static const(char)[] skip_ansi_chars(const(char)[] text, uint skip)
-    {
-        uint visible = 0;
-        size_t i = 0;
-        while (i < text.length && visible < skip)
-        {
-            if (text[i] == '\x1b' && i + 1 < text.length && text[i + 1] == '[')
-            {
-                size_t j = i + 2;
-                while (j < text.length && text[j] != 'm')
-                    ++j;
-                i = (j < text.length) ? j + 1 : text.length;
-            }
-            else
-            {
-                ++visible;
-                ++i;
-            }
-        }
-        return text[i .. $];
-    }
 
     void rebuild_filtered_indices()
     {

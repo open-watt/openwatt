@@ -5,6 +5,7 @@ import urt.map;
 import urt.mem;
 import urt.meta.nullable;
 import urt.string;
+import urt.variant;
 
 import apps.api : APIModule;
 import apps.energy.appliance;
@@ -22,7 +23,9 @@ import manager.component;
 import manager.device;
 import manager.console.command;
 import manager.console.function_command : FunctionCommandState;
+import manager.console.live_view;
 import manager.console.session;
+import manager.console.table;
 import manager.element;
 import manager.plugin;
 
@@ -254,147 +257,141 @@ nothrow @nogc:
         manager.add_appliance(appliance, c);
     }
 
-    // /apps/energy/print command
-    void circuit_print(Session session)
+    CommandState circuit_print(Session session, const(Variant)[] args)
+    {
+        bool watch;
+        foreach (a; args)
+        {
+            auto s = a.asString();
+            if (s == "-w" || s == "--watch")
+                watch = true;
+        }
+
+        if (watch)
+            return defaultAllocator.allocT!CircuitWatchState(session, this);
+
+        build_circuit_table(session).render(session);
+        return null;
+    }
+
+    Table build_circuit_table(Session)
     {
         import urt.conv : format_float;
-        import urt.util;
+        import urt.mem.temp : tconcat;
+        import manager.console.table;
 
-        import manager.element;
+        Table table;
+        table.add_column("name");
+        table.add_column("power", Table.TextAlign.right);
+        table.add_column("import", Table.TextAlign.right);
+        table.add_column("export", Table.TextAlign.right);
+        table.add_column("apparent", Table.TextAlign.right);
+        table.add_column("reactive", Table.TextAlign.right);
+        table.add_column("V", Table.TextAlign.right);
+        table.add_column("I", Table.TextAlign.right);
+        table.add_column("PF (ϕ)");
+        table.add_column("freq", Table.TextAlign.right);
 
-        struct Line
+        if (!this.manager.main)
+            return table;
+
+        enum tBranch = "├─ ";
+        enum tLast   = "└─ ";
+        enum tPipe   = "│  ";
+        enum tBlank  = "   ";
+
+        void add_meter_row(ref Table t, const(char)[] prefix, const(char)[] name, ref MeterData data)
         {
-            Appliance appliance;
-            ubyte indent;
-            const(char)[] id;
-            MeterData* data;
+            t.add_row();
+            t.cell(tconcat(prefix, name));
+            t.cell(tconcat(data.active[0]));
+            t.cell(tconcat(data.total_import_active[0] * 0.001f, "kWh"));
+            t.cell(tconcat(data.total_export_active[0] * 0.001f, "kWh"));
+            t.cell(tconcat(data.apparent[0], "VA"));
+            t.cell(tconcat(data.reactive[0], "var"));
+            t.cell(tconcat(data.voltage[0]));
+            t.cell(tconcat(data.current[0]));
+            t.cell(tconcat(data.pf[0], " (", data.phase[0] * 360, "°)"));
+            t.cell(tconcat(data.freq, "Hz"));
         }
 
-        Line[20] line_cache = void;
-        Line[] lines;
-        size_t num_lines = this.manager.circuits.length*2 + this.manager.appliances.length;
-        if (num_lines > 20)
-            lines = defaultAllocator().allocArray!Line(num_lines);
-        else
+        void add_span_row(ref Table t, const(char)[] prefix, const(char)[] name, const(char)[] detail)
         {
-            lines = line_cache[0 .. num_lines];
-            lines[] = Line();
+            t.add_row();
+            t.cell(tconcat(prefix, name));
+            t.cell_span(detail);
         }
 
-        size_t i = 0;
-        size_t name_len = 4;
-        size_t power_len = 5;
-        size_t import_len = 6;
-        size_t export_len = 6;
-        size_t apparent_len = 8;
-        size_t reactive_len = 8;
-        size_t current_len = 1;
-
-        void traverse(Circuit* c, uint indent)
+        void traverse(ref Table t, Circuit* c, const(char)[] prefix, bool is_last, bool is_root = false)
         {
-            Line* circuit = &lines[i++];
-            circuit.indent = cast(ubyte)indent;
-            circuit.id = c.id[];
-            circuit.data = &c.meter_data;
+            const(char)[] branch = is_root ? "" : (is_last ? tLast : tBranch);
+            const(char)[] child_prefix = is_root ? "" : tconcat(prefix, is_last ? tBlank : tPipe);
 
-            name_len = max(name_len, circuit.indent + c.id.length);
-            power_len = max(power_len, c.meter_data.active[0].value.format_float(null) + 1);
-            import_len = max(import_len, c.meter_data.total_import_active[0].format_float(null) + 3);
-            export_len = max(export_len, c.meter_data.total_export_active[0].format_float(null) + 3);
-            apparent_len = max(apparent_len, c.meter_data.apparent[0].format_float(null) + 2);
-            reactive_len = max(reactive_len, c.meter_data.reactive[0].format_float(null) + 3);
-            current_len = max(current_len, c.meter_data.current[0].value.format_float(null) + 1);
+            add_meter_row(t, tconcat(prefix, branch), c.id[], c.meter_data);
 
-            Line* unknown;
             bool has_leftover = c.meter && (c.appliances.length != 0 || c.sub_circuits.length != 0);
+            size_t total_children = (has_leftover ? 1 : 0) + c.appliances.length + c.sub_circuits.length;
+            size_t child_idx = 0;
+
             if (has_leftover)
             {
-                unknown = &lines[i++];
-                unknown.indent = cast(ubyte)(indent + 2);
-                unknown.id = "?";
-                unknown.data = &c.rogue;
+                ++child_idx;
+                bool last_child = child_idx == total_children;
+                add_meter_row(t, tconcat(child_prefix, last_child ? tLast : tBranch), "?", c.rogue);
             }
 
-            foreach (a; c.appliances)
+            foreach (ai, a; c.appliances)
             {
-                Line* line = &lines[i++];
-                line.appliance = a;
-                line.indent = cast(ubyte)(indent + 2);
-                line.id = a.id[];
-                line.data = &a.meter_data;
+                ++child_idx;
+                bool last_child = child_idx == total_children;
+                const(char)[] a_branch = last_child ? tLast : tBranch;
+                const(char)[] a_prefix = tconcat(child_prefix, last_child ? tBlank : tPipe);
 
-                name_len = max(name_len, line.indent + a.id.length);
-                power_len = max(power_len, a.meter_data.active[0].value.format_float(null) + 1);
-                import_len = max(import_len, a.meter_data.total_import_active[0].format_float(null) + 3);
-                export_len = max(export_len, a.meter_data.total_export_active[0].format_float(null) + 3);
-                apparent_len = max(apparent_len, a.meter_data.apparent[0].format_float(null) + 2);
-                reactive_len = max(reactive_len, a.meter_data.reactive[0].format_float(null) + 3);
-                current_len = max(current_len, a.meter_data.current[0].value.format_float(null) + 1);
-            }
+                add_meter_row(t, tconcat(child_prefix, a_branch), a.id[], a.meter_data);
 
-            foreach (sub; c.sub_circuits)
-                traverse(sub, indent + 2);
-        }
-
-        traverse(this.manager.main, 0);
-
-        session.writef("{0, -*1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {'V', 6}  {'I', *12}  {'PF (ϕ)', 12}  {'FREQ', 6}\n",
-                        "NAME", name_len,
-                        "POWER", power_len,
-                        "IMPORT", import_len, "EXPORT", export_len,
-                        "APPARENT", apparent_len, "REACTIVE", reactive_len,
-                        current_len);
-
-        foreach (ref l; lines[0..i])
-        {
-            session.writef("{'', *17}{0, -*1}  {2, *3}  {4, *5}kWh  {6, *7}kWh  {8, *9}VA  {10, *11}var  {12, 5.4}  {13, *14}  {@19, 12}  {16, 5.4}Hz\n",
-                            l.id, name_len - l.indent,
-                            l.data.active[0], power_len-1,
-                            l.data.total_import_active[0] * 0.001f, import_len-3, l.data.total_export_active[0] * 0.001f, export_len-3,
-                            l.data.apparent[0], apparent_len-2, l.data.reactive[0], reactive_len-3,
-                            l.data.voltage[0], l.data.current[0], current_len-2,
-                            l.data.pf[0], l.data.freq, l.indent, l.data.phase[0]*360, "{15, 4.2} ({18, .3}°)");
-            if (l.appliance)
-            {
-                if(Inverter inverter = l.appliance.as!Inverter)
+                if (Inverter inverter = a.as!Inverter)
                 {
-                    // show the MPPT's?
-                    foreach (mppt; inverter.mppt)
+                    foreach (mi, mppt; inverter.mppt)
                     {
                         Component meter = mppt.get_first_component_by_template("EnergyMeter");
                         if (meter)
                         {
                             MeterData mppt_data = get_meter_data(meter);
-                            float soc;
-                            bool has_soc = false;
-                            const(char)[] name = mppt.id[];
+                            bool last_mppt = mi == inverter.mppt.length - 1;
+                            MutableString!0 detail;
                             if (mppt.template_[] == "Battery")
                             {
                                 if (Element* soc_el = mppt.find_element("soc"))
                                 {
-                                    soc = soc_el.value.asFloat();
-                                    has_soc = true;
+                                    float soc = soc_el.value.asFloat();
+                                    detail ~= format_soc_bar(soc);
+                                    detail ~= "  ";
                                 }
                             }
-                            if (mppt.template_[] == "Solar")
-                            {
-                                // anything special?
-                            }
-                            session.writef("{'', *10}{0, -*1}  {@3,?2}{'    ',!2}  {5}  {6}  {7} ({8}kWh/{9}kWh)\n", name, name_len - l.indent - 7, has_soc, "{4, 3}%  ", soc, 
-                                            mppt_data.active[0], mppt_data.voltage[0], mppt_data.current[0], mppt_data.total_import_active[0] * 0.001f, mppt_data.total_export_active[0] * 0.001f, l.indent + 2);
+                            detail.append(mppt_data.active[0], "  ", mppt_data.voltage[0], "  ", mppt_data.current[0], "  (",
+                                mppt_data.total_import_active[0] * 0.001f, "/", mppt_data.total_export_active[0] * 0.001f, "kWh)");
+
+                            add_span_row(t, tconcat(a_prefix, last_mppt ? tLast : tBranch), mppt.id[], detail[]);
                         }
                     }
                 }
-                else if (EVSE evse = l.appliance.as!EVSE)
+                else if (EVSE evse = a.as!EVSE)
                 {
                     if (evse.connectedCar)
-                        session.writef("{'', *3}{0, -*1}  {2}\n", evse.connectedCar.id, name_len - l.indent - 4, evse.connectedCar.vin, l.indent + 2);
+                        add_span_row(t, tconcat(a_prefix, tLast), evse.connectedCar.id[], evse.connectedCar.vin[]);
                 }
+            }
+
+            foreach (si, sub; c.sub_circuits)
+            {
+                ++child_idx;
+                bool last_child = child_idx == total_children;
+                traverse(t, sub, child_prefix, last_child);
             }
         }
 
-        if (lines !is line_cache[])
-            defaultAllocator().freeArray(lines);
+        traverse(table, this.manager.main, "", true, true);
+        return table;
     }
 
     int energy_api(const(char)[] uri, ref const HTTPMessage request, ref Stream stream)
@@ -638,5 +635,113 @@ nothrow @nogc:
             append_element("frequency", (&data.freq)[0..4], false);
 
         json ~= '}';
+    }
+}
+
+const(char)[] format_soc_bar(float soc)
+{
+    import urt.mem.temp : tconcat;
+
+    enum bar_width = 10;
+    enum green_bg = "\x1b[42;97m";
+    enum grey_bg = "\x1b[100;97m";
+    enum reset = "\x1b[0m";
+
+    if (soc != soc)
+        soc = 0; // NaN guard
+    if (soc < 0)
+        soc = 0;
+    if (soc > 100)
+        soc = 100;
+
+    char[bar_width] bar = ' ';
+    int pct = cast(int)(soc + 0.5f);
+    const(char)[] label = tconcat(pct, '%');
+
+    // center the label
+    size_t label_start = (bar_width - label.length) / 2;
+    bar[label_start .. label_start + label.length] = label[];
+
+    // split point: how many chars get green bg
+    size_t split = cast(size_t)(soc * bar_width / 100.0f + 0.5f);
+    if (split > bar_width)
+        split = bar_width;
+
+    if (split == 0)
+        return tconcat(grey_bg, bar, reset);
+    if (split == bar_width)
+        return tconcat(green_bg, bar, reset);
+    return tconcat(green_bg, bar[0 .. split], grey_bg, bar[split .. $], reset);
+}
+
+class CircuitWatchState : LiveViewState
+{
+nothrow @nogc:
+
+    this(Session session, EnergyAppModule mod)
+    {
+        super(session, null);
+        _mod = mod;
+    }
+
+    override uint content_height()
+    {
+        if (!_mod.manager.main)
+            return 0;
+        return count_rows(_mod.manager.main);
+    }
+
+    override void render_content(uint offset, uint count, uint width)
+    {
+        if (width != _prev_width)
+        {
+            _sticky_widths[] = 0;
+            _prev_width = width;
+        }
+        auto avail = count > 0 ? count - 1 : 0;
+        _mod.build_circuit_table(session).render_viewport(session, offset, avail, _sticky_widths[]);
+    }
+
+    override const(char)[] status_text()
+    {
+        import urt.mem.temp : tconcat;
+        if (!_mod.manager.main)
+            return "no circuits";
+        return tconcat(count_rows(_mod.manager.main), " rows");
+    }
+
+private:
+    import manager.console.table : Table;
+
+    EnergyAppModule _mod;
+    size_t[Table.max_cols] _sticky_widths;
+    uint _prev_width;
+
+    static uint count_rows(Circuit* c)
+    {
+        uint rows = 1;
+        bool has_leftover = c.meter && (c.appliances.length != 0 || c.sub_circuits.length != 0);
+        if (has_leftover)
+            ++rows;
+        foreach (a; c.appliances)
+        {
+            ++rows;
+            if (Inverter inv = a.as!Inverter)
+            {
+                foreach (mppt; inv.mppt)
+                {
+                    if (mppt.get_first_component_by_template("EnergyMeter"))
+                        ++rows;
+                }
+            }
+            else if (EVSE evse = a.as!EVSE)
+            {
+                if (evse.connectedCar)
+                    ++rows;
+            }
+        }
+        foreach (sub; c.sub_circuits)
+            rows += count_rows(sub);
+        return rows;
     }
 }

@@ -159,7 +159,7 @@ private:
     {
         uint h = session.height();
         if (_mode == LiveViewMode.fullscreen)
-            return h > 2 ? h - 1 : 1;
+            return h > 2 ? h - 1 : 1;  // -1 status bar
         else
             return h > 2 ? h - 2 : 1;
     }
@@ -189,7 +189,7 @@ private:
         uint ch = content_height();
         clamp_scroll();
 
-        session.write_output("\x1b[?25l\x1b[1;1H", false);
+        session.write_output("\x1b[?2026h\x1b[?25l\x1b[1;1H", false);
         uint count = ch > vh ? vh : ch;
         render_content(_scroll_offset, count, w);
 
@@ -206,7 +206,7 @@ private:
         else
             session.write_output(tformat(" rows {0}-{1} of {2} | q=quit up/down=scroll",
                 _scroll_offset + 1, _scroll_offset + count, ch), false);
-        session.write_output("\x1b[0m\x1b[?25h", false);
+        session.write_output("\x1b[0m\x1b[?25h\x1b[?2026l", false);
     }
 
     void draw_inline()
@@ -217,6 +217,8 @@ private:
         uint vh = visible_height();
         uint ch = content_height();
         clamp_scroll();
+
+        session.write_output("\x1b[?2026h", false);
 
         if (_prev_inline_height > 0)
         {
@@ -234,6 +236,7 @@ private:
         }
 
         _prev_inline_height = count;
+        session.write_output("\x1b[?2026l", false);
     }
 
     void draw_dumb()
@@ -391,20 +394,15 @@ private:
 
     void draw_scrollable(uint offset, uint count, uint width)
     {
+        import urt.string.ansi : visible_slice;
+
         foreach (i; offset .. offset + count)
         {
             session.write_output("\x1b[2K", false);
             if (i < _lines.length)
             {
-                const(char)[] text = (*_lines)[i][];
-                if (_h_scroll < text.length)
-                {
-                    uint end = _h_scroll + width;
-                    if (end > text.length) end = cast(uint)text.length;
-                    session.write_output(text[_h_scroll .. end], true);
-                }
-                else
-                    session.write_output("", true);
+                char[512] slice_buf = void;
+                session.write_output((*_lines)[i][].visible_slice(slice_buf, _h_scroll, _h_scroll + width), true);
             }
             else
                 session.write_output("", true);
