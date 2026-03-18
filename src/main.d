@@ -1,7 +1,10 @@
 module main;
 
+import urt.file : load_file;
 import urt.log;
 import urt.mem.allocator;
+import urt.array;
+import urt.string.format : tconcat;
 import urt.system;
 import urt.time;
 
@@ -9,97 +12,132 @@ import manager;
 import manager.console.session;
 import manager.log : format_log_line;
 
+import router.stream : Stream;
+import router.stream.console : ConsoleStream, ConsoleStreamModule;
+
 nothrow @nogc:
 
 
 int main(string[] args)
 {
-    // TODO: prime the string cache with common strings, like unit names and common variable names
-    //       the idea is to make dedup lookups much faster...
-
+    // parse command line arguments
     bool interactive_mode = false;
     const(char)[] config_path = "conf/startup.conf";
-    foreach (i, arg; args[1 .. $])
+    for (size_t i = 1; i < args.length; ++i)
     {
-        if (arg == "--interactive" || arg == "-i")
+        if (args[i] == "--interactive" || args[i] == "-i")
             interactive_mode = true;
-        else if (arg == "--config" || arg == "-c")
+        else if (args[i] == "--config" || args[i] == "-c")
         {
-            if (i < args.length - 1)
-                config_path = args[i + 2]; // i+2 because we're indexing from args[1..$]
+            if (i + 1 < args.length)
+                config_path = args[++i];
         }
     }
 
-    if (interactive_mode)
+    // route log output
+    if (!interactive_mode)
     {
-        // check if stdout is redirected
-        version (Windows)
-        {
-            import urt.internal.sys.windows : GetStdHandle, GetConsoleMode, STD_OUTPUT_HANDLE, DWORD;
-            auto h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
-
-            DWORD mode;
-            bool is_console = GetConsoleMode(h_stdout, &mode) != 0;
-            if (!is_console)
-            {
-                // piped output - log to stderr so stdout stays clean for command output
-                register_log_sink(&stderr_log_sink, null);
-            }
-        }
-        else version (Posix)
-        {
-            import urt.internal.sys.posix : isatty, STDOUT_FILENO;
-            if (!isatty(STDOUT_FILENO))
-            {
-                // piped - log to stderr
-                register_log_sink(&stderr_log_sink, null);
-            }
-        }
+        register_log_sink(&default_log_sink, null);
     }
     else
-        register_log_sink(&default_log_sink, null);
+    {
+        // if stderr is piped away from the console output: register the sink so logs are captured
+        bool stderr_redirected = false;
+        version (Posix)
+        {
+            import urt.internal.sys.posix : isatty, STDERR_FILENO;
+            stderr_redirected = !isatty(STDERR_FILENO);
+        }
+        version (Windows)
+        {
+            import urt.internal.sys.windows : GetStdHandle, GetConsoleMode, STD_ERROR_HANDLE, DWORD;
+            DWORD mode;
+            stderr_redirected = GetConsoleMode(GetStdHandle(STD_ERROR_HANDLE), &mode) == 0;
+        }
+        if (stderr_redirected)
+            register_log_sink(&stderr_log_sink, null);
+    }
 
-    Application app = create_application();
-    Session active_session = null;
-    SimpleSession startup_session = null;
+    create_application();
 
-    // System config: baked-in platform defaults that run before user config.
-    // String-imported at compile time (no filesystem on bare-metal targets).
+    ConsoleStream console_stream;
+    version (BL808) {}
+    else if (interactive_mode)
+    {
+        version (Posix)
+        {
+            import urt.internal.sys.posix : isatty, STDIN_FILENO;
+            if (!isatty(STDIN_FILENO))
+                interactive_mode = false;
+        }
+        version (Windows)
+        {
+            import urt.internal.sys.windows : GetStdHandle, GetConsoleMode, STD_INPUT_HANDLE, DWORD;
+            DWORD mode;
+            if (GetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), &mode) == 0)
+                interactive_mode = false;
+        }
+
+        if (interactive_mode)
+            console_stream = get_module!ConsoleStreamModule.consoles.create("console-io");
+    }
+
+    Session session = g_app.console.createSession!Session(console_stream);
+
+    // Config layering:
+    //   1. system.conf  — system defaults (string-imported on embedded, disk on desktop)
+    //   2. startup.conf — regular configuration (--config overrides path)
+    //   3. user.conf    — personal overrides (not committed)
+
     version (BL808)
         static immutable system_conf = import("system.conf");
     else
         enum system_conf = "";
 
-    import urt.file : load_file;
-    char[] conf = cast(char[])load_file(config_path);
+    // combine all layers
+    Array!char combined_config;
 
-    if (system_conf.length > 0 || conf !is null)
+    static if (system_conf.length > 0)
+        combined_config ~= system_conf;
+    else
     {
-        startup_session = defaultAllocator().allocT!SimpleSession(g_app.console);
-
-        // Feed system config first, then user config
-        static if (system_conf.length > 0)
+        char[] sys_conf = cast(char[])load_file("conf/system.conf");
+        if (sys_conf !is null)
         {
-            if (conf !is null)
-            {
-                import urt.string.format : tconcat;
-                startup_session.set_input(tconcat(system_conf, "\n", conf));
-                defaultAllocator().free(conf);
-            }
-            else
-                startup_session.set_input(system_conf);
+            combined_config ~= sys_conf;
+            combined_config ~= '\n';
+            defaultAllocator().free(sys_conf);
         }
-        else
-        {
-            startup_session.set_input(conf);
-            defaultAllocator().free(conf);
-        }
+    }
 
-        active_session = startup_session;
+    char[] conf = cast(char[])load_file(config_path);
+    if (conf !is null)
+    {
+        combined_config ~= conf;
+        combined_config ~= '\n';
+        defaultAllocator().free(conf);
+    }
+
+    char[] user_conf = cast(char[])load_file("conf/user.conf");
+    if (user_conf is null)
+        user_conf = cast(char[])load_file("user.conf");
+    if (user_conf !is null)
+    {
+        combined_config ~= user_conf;
+        combined_config ~= '\n';
+        defaultAllocator().free(user_conf);
+    }
+
+    bool startup_pending = false;
+    if (combined_config.length > 0)
+    {
+        import urt.lifetime : move;
+        session.feed_input(combined_config.move);
+        startup_pending = true;
     }
     else
     {
-        log_error("system", "Failed to load startup configuration file: ", config_path);
+        log_error("system", "No configuration loaded (tried system.conf, ", config_path, ", user.conf)");
         if (!interactive_mode)
             return -1;
     }
@@ -109,49 +147,46 @@ int main(string[] args)
 
     while (true)
     {
-        // update the application
         MonoTime start = getTime();
         g_app.update();
 
-        // check to see if startup is finished...
-        if (startup_session)
+        if (startup_pending && session.is_idle())
         {
-            // SimpleSession is done when it has no active commands and no more buffered input
-            if (startup_session.is_idle())
+            startup_pending = false;
+
+            version (BL808)
             {
-                defaultAllocator().freeT(startup_session);
-                startup_session = null;
+                // rebind session to the serial console stream created by system.conf
+                // TODO: config can create the whole session and this one goes away
+                import manager : get_module;
+                import router.stream : StreamModule;
 
-                version (BL808)
+                if (auto stream = get_module!StreamModule.streams.get("console"))
                 {
-                    // Bind a SerialSession to the "console" stream created by system.conf
-                    import manager : get_module;
-                    import router.stream : StreamModule;
-
-                    if (auto stream = get_module!StreamModule.streams.get("console"))
-                        active_session = defaultAllocator().allocT!SerialSession(g_app.console, stream, ClientFeatures.ansi);
-                    else
-                        log_error("system", "No 'console' stream — serial console unavailable");
+                    session = g_app.console.createSession!Session(stream);
+                    session.set_features(ClientFeatures.ansi);
+                    session.show_prompt(true);
+                    session.load_history(".telnet_history");
                 }
-                else if (interactive_mode)
-                    active_session = defaultAllocator().allocT!ConsoleSession(g_app.console);
                 else
-                    active_session = null;
+                    log_error("system", "No 'console' stream — serial console unavailable");
+            }
+            else if (interactive_mode)
+            {
+                session.show_prompt(true);
+                session.load_history(".history");
             }
         }
-        else if (interactive_mode && !active_session.is_attached())
-            break; // exit if interactive session was closed
+        else if (!startup_pending && interactive_mode && !session.is_attached())
+            break;
 
-        // update the startup/interactive session
-        if (active_session && active_session.is_attached())
-            active_session.update();
+        if (session && session.is_attached())
+            session.update();
 
         Duration frame_time = getTime() - start;
 
-        // work out how long to sleep
         long sleep_usecs = 1000_000 / g_app.update_rate_hz;
         sleep_usecs -= frame_time.as!"usecs";
-        // only sleep if we need to sleep >20us or so...
         if (sleep_usecs > 20)
             sleep(sleep_usecs.usecs);
     }

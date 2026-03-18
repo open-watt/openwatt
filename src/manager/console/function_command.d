@@ -29,6 +29,8 @@ struct TabComplete
 // uses GC
 char[] transform_command_name(const(char)[] name)
 {
+    assert(__ctfe, "Should only be used at compile time");
+
     name = name.length > 0 && name[0] == '_' ? name[1 .. $] : name;
     char[] result = name.dup;
     foreach (i, c; result)
@@ -43,6 +45,7 @@ enum TransformCommandName(const(char)[] name) = transform_command_name(name);
 nothrow @nogc:
 
 
+// TODO: DELETE THIS!!!
 class FunctionCommandState : CommandState
 {
 nothrow @nogc:
@@ -56,7 +59,7 @@ class FunctionCommand : Command
 {
 nothrow @nogc:
 
-    alias GenericCall = const(char)[] function(Session, out FunctionCommandState, const Variant[], const NamedArgument[], void*) nothrow @nogc;
+    alias GenericCall = const(char)[] function(Session, out CommandState, const Variant[], const NamedArgument[], void*) nothrow @nogc;
 
     static FunctionCommand create(alias fun, Instance)(ref Console console, Instance i, const(char)[] commandName = null)
     {
@@ -64,7 +67,7 @@ nothrow @nogc:
 
         enum FunctionName = transform_command_name(__traits(identifier, fun));
 
-        static const(char)[] function_adapter(Session session, out FunctionCommandState state, const Variant[] arguments, const NamedArgument[] parameters, void* _instance)
+        static const(char)[] function_adapter(Session session, out CommandState state, const Variant[] arguments, const NamedArgument[] parameters, void* _instance)
         {
             const(char)[] error;
             auto _args = make_arg_tuple!fun(arguments, parameters, error, session._console.appInstance);
@@ -80,7 +83,7 @@ nothrow @nogc:
                     __traits(getMember, cast(__traits(parent, fun))_instance, __traits(identifier, fun))(session, _args.expand);
                     return null;
                 }
-                else static if (is(ReturnType!fun : FunctionCommandState))
+                else static if (is(ReturnType!fun : CommandState))
                 {
                     state = __traits(getMember, cast(__traits(parent, fun))_instance, __traits(identifier, fun))(session, _args.expand);
                     return null;
@@ -98,7 +101,7 @@ nothrow @nogc:
                     fun(session, _args.expand);
                     return null;
                 }
-                else static if (is(ReturnType!fun : FunctionCommandState))
+                else static if (is(ReturnType!fun : CommandState))
                 {
                     state = fun(session, _args.expand);
                     return null;
@@ -148,9 +151,9 @@ nothrow @nogc:
         this._fn = _fn;
     }
 
-    override FunctionCommandState execute(Session session, const Variant[] _args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, const Variant[] _args, const NamedArgument[] namedArgs, out Variant result)
     {
-        FunctionCommandState state;
+        CommandState state;
         const(char)[] r = _fn(session, state, _args, namedArgs, _instance);
 
         // TODO: when a function returns a token, it might be fed into the calling context?

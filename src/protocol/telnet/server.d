@@ -8,10 +8,15 @@ import urt.string;
 import manager;
 import manager.base;
 import manager.console;
+import manager.console.session;
+import manager.expression : NamedArgument;
+import manager.plugin;
 
-import protocol.telnet.session;
+import protocol.telnet;
+import protocol.telnet.stream;
 
 import router.iface;
+import router.stream;
 import router.stream.tcp;
 
 nothrow @nogc:
@@ -40,7 +45,7 @@ nothrow @nogc:
     {
         m_server.destroy();
 
-        foreach (TelnetSession s; m_sessions)
+        foreach (s; m_sessions)
             m_allocator.freeT(s);
         m_sessions.clear();
     }
@@ -55,24 +60,20 @@ nothrow @nogc:
     /// \param loginScript
     ///  A script to be executed on creation of new sessions connecting to this port.
     /// \returns Returns `true` if the new port was registered successfully.
-    bool addListenPort(Console* console, ushort listenPort, const(char)[] loginScript)
+    final bool addListenPort(Console* console, ushort listenPort, const(char)[] loginScript)
     {
-        // TODO: support multiple listening ports which direct to different console instasnces?
         return false;
     }
 
-    /// Update the telnet server. Should be called once per frame (or periodically) from a main thread.
-    void update()
+    final void update()
     {
         for (size_t i; i < m_sessions.length; )
         {
-            TelnetSession s = m_sessions[i];
+            Session s = m_sessions[i];
 
-            // update session
             if (s.is_attached)
                 s.update();
 
-            // clean up closed sessions
             if (!s.is_attached)
             {
                 m_allocator.freeT(s);
@@ -89,20 +90,23 @@ package:
     Console* _console;
     TCPServer m_server;
 
-    Array!TelnetSession m_sessions;
+    Array!Session m_sessions;
 
     void acceptConnection(Stream client, void* user_data)
     {
-        TelnetSession session = _console.createSession!TelnetSession(client);
-        m_sessions ~= session;
+        const(char)[] stream_name = get_module!StreamModule.streams.generate_name(this.name[]);
 
-        // TODO: we might implement a login script here...
-//        if (!listenPort.loginScript.IsEmpty())
-//        {
-//            // TODO: implement this in a better way that the prompt and command are not echoed to the session...
-//            bcString login = listenPort.loginScript;
-//            login.Append("\r\n");
-//            s.SetInput(login);
-//        }
+        TelnetStream telnet_stream = get_module!TelnetModule.telnet_streams.create(stream_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("transport", client));
+        if (telnet_stream is null)
+        {
+            client.destroy();
+            return;
+        }
+
+        Session session = _console.createSession!Session(cast(Stream)telnet_stream);
+        session.show_prompt(true);
+        session.load_history(".telnet_history");
+
+        m_sessions ~= session;
     }
 }

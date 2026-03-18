@@ -126,17 +126,16 @@ void show_time(Session session)
 
 auto sleep(Session session, Duration duration)
 {
-    import manager.console.command : CommandCompletionState;
-    import manager.console.function_command : FunctionCommandState;
+    import manager.console.command;
 
-    static class SleepCommandState : FunctionCommandState
+    static class SleepCommandState : CommandState
     {
     nothrow @nogc:
         MonoTime wake_time;
 
         this(Session session, Duration duration)
         {
-            super(session);
+            super(session, null);
             wake_time = getTime() + duration;
         }
 

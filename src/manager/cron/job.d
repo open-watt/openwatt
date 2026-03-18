@@ -138,7 +138,7 @@ private:
 
     struct RunningCommand
     {
-        ConsoleSession session;
+        Session session;
         CommandState command;
     }
 
@@ -175,7 +175,7 @@ private:
         writeInfo("CronJob '", name, "': Executing command: ", _command);
 
         Variant result;
-        ConsoleSession session = g_app.allocator.allocT!ConsoleSession(g_app.console);
+        Session session = g_app.allocator.allocT!Session(g_app.console);
         CommandState command = g_app.console.execute(session, _command[], result);
 
         if (command)

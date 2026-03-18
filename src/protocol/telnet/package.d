@@ -6,10 +6,12 @@ import urt.mem.allocator;
 import urt.string;
 
 import manager;
+import manager.collection;
 import manager.console.session;
 import manager.plugin;
 
 import protocol.telnet.server;
+import protocol.telnet.stream;
 
 import router.iface;
 import router.stream.tcp;
@@ -22,13 +24,13 @@ class TelnetModule : Module
     mixin DeclareModule!"protocol.telnet";
 nothrow @nogc:
 
+    Collection!TelnetStream telnet_streams;
     Map!(const(char)[], TelnetServer) servers;
 
     override void init()
     {
+        g_app.console.register_collection("/stream/telnet", telnet_streams);
         g_app.console.register_command!add_server("/protocol/telnet/server", this, "add");
-
-        // create telnet server
     }
 
     override void update()
@@ -36,8 +38,7 @@ nothrow @nogc:
         foreach (server; servers.values)
             server.update();
 
-//        for (auto i = servers.begin; i != servers.end; ++i)
-//            (*i).update();
+        telnet_streams.update_all();
     }
 
     void add_server(Session session, const(char)[] name, ushort port)

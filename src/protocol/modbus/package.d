@@ -10,7 +10,6 @@ import urt.variant;
 
 import manager;
 import manager.console.command;
-import manager.console.function_command : FunctionCommandState;
 import manager.console.session;
 import manager.plugin;
 import manager.profile;
@@ -258,7 +257,7 @@ nothrow @nogc:
 }
 
 
-class ModbusRequestState : FunctionCommandState
+class ModbusRequestState : CommandState
 {
 nothrow @nogc:
 
@@ -268,7 +267,7 @@ nothrow @nogc:
 
     this(Session session, const(char)[] slave)
     {
-        super(session);
+        super(session, null);
         this.slave = slave.makeString(defaultAllocator);
     }
 
