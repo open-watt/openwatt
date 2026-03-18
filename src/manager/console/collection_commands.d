@@ -6,12 +6,17 @@ import urt.log;
 import urt.mem;
 import urt.result;
 import urt.string;
+import urt.string.ansi;
+import urt.time;
 import urt.variant;
 
 import manager.base;
 import manager.collection;
 import manager.console;
 import manager.console.command;
+import manager.console.live_view;
+import manager.console.session : ClientFeatures;
+import manager.console.table;
 
 nothrow @nogc:
 
@@ -403,6 +408,8 @@ nothrow @nogc:
     {
         const(Property*)[] properties = _collection.type_info.properties;
 
+        bool watch_mode = false;
+
         foreach (ref arg; args)
         {
             if (arg == "--json")
@@ -413,22 +420,23 @@ nothrow @nogc:
                 result = Variant(items.move);
                 return null;
             }
+            if (arg == "--watch" || arg == "-w")
+                watch_mode = true;
         }
 
-        // check for proplist=a,b,c
+        if (watch_mode)
+            return allocator.allocT!CollectionWatchState(session, this, _collection);
+
+        print_table(session, properties);
+        return null;
+    }
+
+    final void print_table(Session session, const(Property*)[] properties)
+    {
         const(char)[][16] proplist;
-        foreach (ref na; namedArgs)
-        {
-            if (na.name == "proplist")
-            {
-                assert(false, "TODO: parse prop list into array...");
-//                proplist = na.value.asString;
-                break;
-            }
-        }
 
         Table table;
-        table.add_column(""); // flags column has no header
+        table.add_column("");
 
         foreach (p; properties)
         {
@@ -442,7 +450,6 @@ nothrow @nogc:
         foreach (item; _collection.values)
         {
             table.add_row();
-
             table.cell(format_flags(item.flags));
 
             foreach (p; properties)
@@ -456,7 +463,6 @@ nothrow @nogc:
         }
 
         table.render(session);
-        return null;
     }
 
     final override MutableString!0 complete(const(char)[] cmdLine)
@@ -470,6 +476,63 @@ nothrow @nogc:
     final override Array!String suggest(const(char)[] cmdLine)
     {
         return .suggest(cmdLine, *_collection, SuggestFlags.Reset);
+    }
+
+package:
+    BaseCollection* _collection;
+}
+
+class CollectionWatchState : LiveViewState
+{
+nothrow @nogc:
+
+    this(Session session, CollectionPrintCommand command, BaseCollection* collection)
+    {
+        super(session, command);
+        _collection = collection;
+    }
+
+    override uint content_height()
+        => cast(uint)_collection.item_count + 1; // +1 for header
+
+    override void render_content(uint offset, uint count, uint width)
+    {
+        const(char)[][16] proplist;
+        auto properties = _collection.type_info.properties;
+
+        Table table;
+        table.add_column("");
+        foreach (p; properties)
+        {
+            if (!p.get || p.name[] == "flags")
+                continue;
+            if (!prop_visible(p.flags, proplist, p.name[]))
+                continue;
+            auto alignment = is_numeric_prop(p.type[0][]) ? Table.TextAlign.right : Table.TextAlign.left;
+            table.add_column(p.name[], alignment);
+        }
+
+        foreach (item; _collection.values)
+        {
+            table.add_row();
+            table.cell(format_flags(item.flags));
+            foreach (p; properties)
+            {
+                if (!p.get || p.name[] == "flags")
+                    continue;
+                if (!prop_visible(p.flags, proplist, p.name[]))
+                    continue;
+                table.cell(p.get(item));
+            }
+        }
+
+        table.render_viewport(session, offset, count);
+    }
+
+    override const(char)[] status_text()
+    {
+        import urt.string.format : tformat;
+        return tformat("{0} items", _collection.item_count);
     }
 
 private:
