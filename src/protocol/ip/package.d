@@ -17,7 +17,7 @@ import router.iface.ethernet;
 
 version(Windows)
 {
-    import core.sys.windows.winsock2;
+    import urt.internal.sys.windows.winsock2;
     import manager.os.npcap;
 }
 
