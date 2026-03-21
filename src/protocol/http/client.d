@@ -226,8 +226,7 @@ nothrow @nogc:
         HTTPMessage* request = defaultAllocator().allocT!HTTPMessage();
         request.http_version = server_version;
         request.method = method;
-        request.url = resource.makeString(defaultAllocator);
-        request.request_target = request.url;
+        request.request_target = resource.makeString(defaultAllocator);
         request.username = username.move;
         request.password = password.move;
         request.content = cast(ubyte[])content;
@@ -283,7 +282,10 @@ private:
         }
 
         version (DebugHTTPMessageFlow)
-            writeDebug("HTTP: request to ", _host, " - ", enum_key_from_value!HTTPMethod(request.method), " ", request.url, " (", request.content.length, " bytes)");
+        {
+            import urt.meta.enuminfo;
+            writeDebug("HTTP: request to ", _host, " - ", enum_key_from_value!HTTPMethod(request.method), " ", request.request_target, " (", request.content.length, " bytes)");
+        }
     }
 
     int dispatch_message(ref const HTTPMessage response)

@@ -113,6 +113,7 @@
     <DCompile Include="src\protocol\http\client.d" />
     <DCompile Include="src\protocol\http\message.d" />
     <DCompile Include="src\protocol\http\package.d" />
+    <DCompile Include="src\protocol\http\sampler.d" />
     <DCompile Include="src\protocol\http\server.d" />
     <DCompile Include="src\protocol\http\tls.d" />
     <DCompile Include="src\protocol\http\websocket.d" />
@@ -443,6 +444,7 @@
     <DCompile Include="third_party\urt\src\urt\string\ascii.d" />
     <DCompile Include="third_party\urt\src\urt\string\format.d" />
     <DCompile Include="third_party\urt\src\urt\string\package.d" />
+    <DCompile Include="third_party\urt\src\urt\string\regex.d" />
     <DCompile Include="third_party\urt\src\urt\string\string.d" />
     <DCompile Include="third_party\urt\src\urt\string\tailstring.d" />
     <DCompile Include="third_party\urt\src\urt\string\uni.d" />
