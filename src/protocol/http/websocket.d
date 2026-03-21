@@ -154,7 +154,6 @@ protected:
             req.method = HTTPMethod.GET;
             req.flags = HTTPFlags.NoDefaults;
             req.request_target = (_resource.length ? _resource : "/").makeString(defaultAllocator);
-            req.url = req.request_target;
             req.headers ~= HTTPParam(StringLit!"User-Agent", StringLit!"OpenWatt");
             req.headers ~= HTTPParam(StringLit!"Upgrade", StringLit!"websocket");
             req.headers ~= HTTPParam(StringLit!"Connection", StringLit!"Upgrade");
@@ -731,7 +730,7 @@ private:
         {
             version (DebugWebSocket)
                 log.trace("upgrade request from ", stream.remote_name,
-                          " uri=", request.url[], " version=", request.header("Sec-WebSocket-Version")[],
+                          " uri=", request.request_target[], " version=", request.header("Sec-WebSocket-Version")[],
                           " protocol=", request.header("Sec-WebSocket-Protocol")[],
                           " extensions=", request.header("Sec-WebSocket-Extensions")[]);
 
