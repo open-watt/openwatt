@@ -13,6 +13,8 @@ import urt.string;
 import urt.string.format;
 
 import manager.component;
+
+import protocol.http.message : HTTPMethod;
 import manager.config;
 import manager.device;
 import manager.element;
@@ -130,8 +132,76 @@ struct ElementDesc_Zigbee
     ValueDesc value_desc;
 }
 
+struct RequestDesc
+{
+pure nothrow @nogc:
+
+    enum FormatType : ubyte
+    {
+        none,       // no body formatting (static URL or URL placeholders)
+        json,       // JSON body template with {key}/{value} expand-and-merge
+        form,       // key=val&key=val body template with {key}/{value}
+    }
+
+    enum ParseMode : ubyte
+    {
+        json,       // walk JSON response by element paths (default)
+        regex,      // element identifier is a regex capture pattern
+        none,       // don't parse response
+    }
+
+    const(char)[] get_name(ref const(Profile) profile) const
+        => _name.cache_string(profile.http_strings);
+
+    const(char)[] get_path(ref const(Profile) profile) const
+        => _path.cache_string(profile.http_strings);
+
+    const(char)[] get_body_template(ref const(Profile) profile) const
+        => _body_template.cache_string(profile.http_strings);
+
+    const(char)[] get_parse_template(ref const(Profile) profile) const
+        => _parse_template.cache_string(profile.http_strings);
+
+    const(char)[] get_root_path(ref const(Profile) profile) const
+        => _root_path.cache_string(profile.http_strings);
+
+    const(char)[] get_success_expr(ref const(Profile) profile) const
+        => _success_expr.cache_string(profile.http_strings);
+
+    FormatType format_type;
+    HTTPMethod method;
+    ParseMode parse_mode;
+
+private:
+    ushort _name;
+    ushort _path;
+    ushort _body_template;
+    ushort _parse_template;
+    ushort _root_path;
+    ushort _success_expr;
+}
+
 struct ElementDesc_HTTP
 {
+pure nothrow @nogc:
+    const(char)[] get_identifier(ref const(Profile) profile) const
+        => _identifier.cache_string(profile.http_strings);
+
+    const(char)[] get_write_key(ref const(Profile) profile) const
+        => _write_key.cache_string(profile.http_strings);
+
+    const(char)[] get_response_path(ref const(Profile) profile) const
+        => _response_path.cache_string(profile.http_strings);
+
+    ushort request_index;        // index into request_descs[]
+    ushort write_request_index;  // index for write, ushort.max if read-only
+    bool identifier_quoted;      // true = literal string key, false = walk path
+    TextValueDesc value_desc;
+
+private:
+    ushort _identifier;    // "evse.temp" or quoted literal
+    ushort _write_key;     // override key for write, 0 if same as identifier
+    ushort _response_path; // override parse path, 0 if same as identifier
 }
 
 struct ElementDesc_AA55
@@ -336,6 +406,12 @@ nothrow @nogc:
             defaultAllocator().freeArray(zb_elements);
         if(http_elements)
             defaultAllocator().freeArray(http_elements);
+        if(request_descs)
+            defaultAllocator().freeArray(request_descs);
+        if(http_strings)
+            defaultAllocator().freeArray(http_strings);
+        if(param_strings)
+            defaultAllocator().freeArray(param_strings);
         if(aa55_elements)
             defaultAllocator().freeArray(aa55_elements);
         if(mqtt_elements)
@@ -435,14 +511,20 @@ nothrow @nogc:
     ref const(ElementDesc_Zigbee) get_zb(size_t i) const pure
         => zb_elements[i];
 
+    ref const(ElementDesc_HTTP) get_http(size_t i) const pure
+        => http_elements[i];
+
+    ref const(RequestDesc) get_request(size_t i) const pure
+        => request_descs[i];
+
     ref const(ElementDesc_AA55) get_aa55(size_t i) const pure
         => aa55_elements[i];
 
     ref const(ElementDesc_MQTT) get_mqtt(size_t i) const pure
         => mqtt_elements[i];
 
-    auto get_mqtt_vars() const pure
-        => StringRange(mqtt_strings, indirections[_mqtt_vars .. _mqtt_vars + _mqtt_var_count]);
+    auto get_parameters() const pure
+        => StringRange(param_strings, indirections[_params .. _params + _param_count]);
 
     auto get_mqtt_subs() const pure
         => StringRange(mqtt_strings, indirections[_mqtt_subs .. _mqtt_subs + _mqtt_sub_count]);
@@ -506,6 +588,7 @@ private:
     ElementDesc_CAN[] can_elements;
     ElementDesc_Zigbee[] zb_elements;
     ElementDesc_HTTP[] http_elements;
+    RequestDesc[] request_descs;
     ElementDesc_AA55[] aa55_elements;
     ElementDesc_MQTT[] mqtt_elements;
     ushort[] indirections;
@@ -514,8 +597,10 @@ private:
     char[] lookup_strings;
     char[] expression_strings;
     char[] desc_strings;
-    char[] mqtt_strings;         // String table for MQTT topic patterns
-    ushort _mqtt_vars, _mqtt_var_count;
+    char[] param_strings;
+    char[] http_strings;
+    char[] mqtt_strings;
+    ushort _params, _param_count;
     ushort _mqtt_subs, _mqtt_sub_count;
 
     Map!(String, const(VoidEnumInfo)*) enum_templates;
@@ -550,6 +635,9 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     size_t expression_string_len = 0;
     size_t desc_string_len = 0;
     size_t mqtt_string_len = 0;
+    size_t http_string_len = 0;
+    size_t param_string_len = 0;
+    size_t request_count = 0;
     size_t num_device_templates = 0;
     size_t num_component_templates = 0;
     size_t num_element_templates = 0;
@@ -586,18 +674,78 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
             profile.enum_templates.insert(enum_name.makeString(allocator), enum_info);
             break;
 
+        case "parameters":
         case "mqtt-variables":
         case "mqtt-subscribe":
             const(char)[] tail = root_item.value;
-            bool is_variables = root_item.name[] == "mqtt-variables";
+            bool is_params = root_item.name[] == "parameters" || root_item.name[] == "mqtt-variables";
             while (!tail.empty)
             {
                 const(char)[] value = tail.split!','.unQuote;
                 if (value.empty)
                     continue;
 
-                mqtt_string_len += cache_len(value.length);
+                if (is_params)
+                    param_string_len += cache_len(value.length);
+                else
+                    mqtt_string_len += cache_len(value.length);
                 ++num_indirections;
+            }
+            break;
+
+        case "requests":
+            requests: foreach (ref req_item; root_item.sub_items)
+            {
+                if (req_item.name != "request")
+                {
+                    writeWarning("Expected 'request:' in requests block, got: ", req_item.name);
+                    continue;
+                }
+                const(char)[] tail = req_item.value;
+                const(char)[] req_name = tail.split!','.unQuote;
+
+                auto p_method = enum_from_key!HTTPMethod(tail.split!','.unQuote);
+                if (p_method == null)
+                {
+                    writeWarning("Unknown HTTP method in request '", req_name, "'");
+                    continue;
+                }
+
+                const(char)[] path = tail.split!','.unQuote;
+                size_t sub_string_len = 0;
+
+                foreach (ref sub; req_item.sub_items)
+                {
+                    switch (sub.name)
+                    {
+                        case "success":
+                            sub_string_len += cache_len(sub.value.length);
+                            break;
+                        case "root":
+                            sub_string_len += cache_len(sub.value.unQuote.length);
+                            break;
+                        case "parse":
+                            sub_string_len += cache_len(sub.value.unQuote.length);
+                            break;
+                        case "format":
+                            const(char)[] fmt_tail = sub.value;
+                            const(char)[] fmt_type = fmt_tail.split!','.unQuote;
+                            if (fmt_type == "json" || fmt_type == "form")
+                                sub_string_len += cache_len(fmt_tail.unQuote.length);
+                            else
+                            {
+                                writeWarning("Unknown format type '", fmt_type, "' in request '", req_name, "'");
+                                continue requests;
+                            }
+                            break;
+                        default:
+                            writeWarning("Unknown sub-item '", sub.name, "' in request '", req_name, "'");
+                            continue requests;
+                    }
+                }
+
+                ++request_count;
+                http_string_len += cache_len(req_name.length) + cache_len(path.length) + sub_string_len;
             }
             break;
 
@@ -638,7 +786,29 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                     case "mb", "reg": ++mb_count; break;
                     case "can": ++can_count; break;
                     case "zb": ++zb_count; break;
-                    case "http": ++http_count; break;
+                    case "http":
+                        ++http_count;
+                        {
+                            const(char)[] htail = reg_item.value;
+                            htail = htail.split_element_and_desc();
+                            const(char)[] req_name = htail.split!','.unQuote;
+                            const(char)[] identifier = htail.split!','.unQuote;
+                            http_string_len += cache_len(identifier.length);
+
+                            foreach (ref sub; reg_item.sub_items)
+                            {
+                                if (sub.name == "write")
+                                {
+                                    const(char)[] wt = sub.value;
+                                    const(char)[] w_req = wt.split!','.unQuote;
+                                    const(char)[] w_key = wt.split!','.unQuote;
+                                    http_string_len += cache_len(w_key.length);
+                                }
+                                else if (sub.name == "response")
+                                    http_string_len += cache_len(sub.value.unQuote.length);
+                            }
+                        }
+                        break;
                     case "aa55": ++aa55_count; break;
                     case "mqtt":
                         ++mqtt_count;
@@ -808,15 +978,18 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     profile.expression_strings = allocator.allocArray!char(2 + expression_string_len);
     profile.desc_strings = allocator.allocArray!char(2 + desc_string_len);
     profile.mqtt_strings = allocator.allocArray!char(2 + mqtt_string_len);
+    profile.http_strings = allocator.allocArray!char(2 + http_string_len);
+    profile.param_strings = allocator.allocArray!char(2 + param_string_len);
 
     profile.mb_elements = allocator.allocArray!ElementDesc_Modbus(mb_count);
     profile.can_elements = allocator.allocArray!ElementDesc_CAN(can_count);
     profile.zb_elements = allocator.allocArray!ElementDesc_Zigbee(zb_count);
     profile.http_elements = allocator.allocArray!ElementDesc_HTTP(http_count);
+    profile.request_descs = allocator.allocArray!RequestDesc(request_count);
     profile.aa55_elements = allocator.allocArray!ElementDesc_AA55(aa55_count);
     profile.mqtt_elements = allocator.allocArray!ElementDesc_MQTT(mqtt_count);
 
-    StringCacheBuilder id_cache, name_cache, lookup_cache, expr_cache, desc_cache, mqtt_string_cache;
+    StringCacheBuilder id_cache, name_cache, lookup_cache, expr_cache, desc_cache, mqtt_string_cache, http_string_cache, param_string_cache;
     if (profile.name_strings)
         id_cache = StringCacheBuilder(profile.id_strings);
     if (profile.name_strings)
@@ -829,6 +1002,10 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
         desc_cache = StringCacheBuilder(profile.desc_strings);
     if (profile.mqtt_strings)
         mqtt_string_cache = StringCacheBuilder(profile.mqtt_strings);
+    if (profile.http_strings)
+        http_string_cache = StringCacheBuilder(profile.http_strings);
+    if (profile.param_strings)
+        param_string_cache = StringCacheBuilder(profile.param_strings);
 
     num_device_templates = 0;
     num_component_templates = 0;
@@ -839,23 +1016,25 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     can_count = 0;
     zb_count = 0;
     http_count = 0;
+    request_count = 0;
     aa55_count = 0;
     mqtt_count = 0;
 
     // parse the elements
     foreach (ref root_item; conf.sub_items) switch (root_item.name)
     {
+        case "parameters":
         case "mqtt-variables":
         case "mqtt-subscribe":
-            bool is_variables = root_item.name == "mqtt-variables";
-            if (is_variables ? profile._mqtt_var_count : profile._mqtt_sub_count > 0)
+            bool is_params = root_item.name == "parameters" || root_item.name == "mqtt-variables";
+            if (is_params ? profile._param_count : profile._mqtt_sub_count > 0)
             {
-                writeWarning("Duplicate mqtt-", is_variables ? "variables" : "subscribe", " definition");
+                writeWarning("Duplicate ", root_item.name, " definition");
                 break;
             }
 
-            if (is_variables)
-                profile._mqtt_vars = cast(ushort)num_indirections;
+            if (is_params)
+                profile._params = cast(ushort)num_indirections;
             else
                 profile._mqtt_subs = cast(ushort)num_indirections;
 
@@ -866,11 +1045,97 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 if (value.empty)
                     continue;
 
-                profile.indirections[num_indirections++] = mqtt_string_cache.add_string(value);
-                if (is_variables)
-                    ++profile._mqtt_var_count;
+                if (is_params)
+                    profile.indirections[num_indirections++] = param_string_cache.add_string(value);
+                else
+                    profile.indirections[num_indirections++] = mqtt_string_cache.add_string(value);
+
+                if (is_params)
+                    ++profile._param_count;
                 else
                     ++profile._mqtt_sub_count;
+            }
+            break;
+
+        case "requests":
+            requests2: foreach (ref req_item; root_item.sub_items)
+            {
+                if (req_item.name != "request")
+                    continue;
+
+                const(char)[] tail = req_item.value;
+                const(char)[] req_name = tail.split!','.unQuote;
+
+                auto p_method = enum_from_key!HTTPMethod(tail.split!','.unQuote);
+                if (p_method == null)
+                    continue;
+
+                const(char)[] path = tail.split!','.unQuote;
+
+                const(char)[] success_expr, root_path, parse_template, body_template;
+                RequestDesc.FormatType format_type;
+                RequestDesc.ParseMode parse_mode;
+
+                foreach (ref sub; req_item.sub_items)
+                {
+                    switch (sub.name)
+                    {
+                        case "success":
+                            success_expr = sub.value;
+                            break;
+                        case "root":
+                            root_path = sub.value.unQuote;
+                            break;
+                        case "parse":
+                        {
+                            const(char)[] parse_val = sub.value.unQuote;
+                            if (parse_val == "regex")
+                                parse_mode = RequestDesc.ParseMode.regex;
+                            else if (parse_val == "none")
+                                parse_mode = RequestDesc.ParseMode.none;
+                            else
+                            {
+                                // "json" or "json, {key}.subpath"
+                                const(char)[] parse_tail = sub.value;
+                                const(char)[] first = parse_tail.split!','.unQuote;
+                                if (first == "json" && !parse_tail.empty)
+                                    parse_template = parse_tail.unQuote;
+                                else if (first != "json")
+                                    parse_template = sub.value.unQuote;
+                            }
+                            break;
+                        }
+                        case "format":
+                            const(char)[] fmt_tail = sub.value;
+                            const(char)[] fmt_type = fmt_tail.split!','.unQuote;
+                            if (fmt_type == "json")
+                            {
+                                format_type = RequestDesc.FormatType.json;
+                                body_template = fmt_tail.unQuote;
+                            }
+                            else if (fmt_type == "form")
+                            {
+                                format_type = RequestDesc.FormatType.form;
+                                body_template = fmt_tail.unQuote;
+                            }
+                            else
+                                continue requests2;
+                            break;
+                        default:
+                            continue requests2;
+                    }
+                }
+
+                ref RequestDesc req = profile.request_descs[request_count++];
+                req.method = *p_method;
+                req._name = http_string_cache.add_string(req_name);
+                req._path = http_string_cache.add_string(path);
+                req.format_type = format_type;
+                req.parse_mode = parse_mode;
+                req._success_expr = http_string_cache.add_string(success_expr);
+                req._root_path = http_string_cache.add_string(root_path);
+                req._parse_template = http_string_cache.add_string(parse_template);
+                req._body_template = http_string_cache.add_string(body_template);
             }
             break;
 
@@ -1123,6 +1388,69 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                     case "http":
                         e._element_index = cast(ushort)((ElementType.http << 13) | http_count);
                         ref ElementDesc_HTTP http = profile.http_elements[http_count++];
+
+                        const(char)[] htail = reg_item.value;
+                        htail = htail.split_element_and_desc();
+
+                        const(char)[] req_name = htail.split!','.unQuote;
+                        const(char)[] raw_identifier = htail.split!',';
+                        http.identifier_quoted = raw_identifier.length >= 2 && raw_identifier[0] == '"' && raw_identifier[$-1] == '"';
+                        const(char)[] identifier = raw_identifier.unQuote;
+                        const(char)[] type = htail.split!','.unQuote;
+                        const(char)[] units = htail.split!','.unQuote;
+
+                        http._identifier = http_string_cache.add_string(identifier);
+
+                        http.write_request_index = ushort.max;
+                        http.request_index = find_request_index(*profile, req_name);
+                        if (http.request_index == ushort.max && !req_name.empty)
+                            writeWarning("Unknown request '", req_name, "' for http element: ", id);
+
+                        TextType ty = type.parse_text_type();
+                        if (ty == TextType.enum_ || ty == TextType.bf)
+                        {
+                            const(VoidEnumInfo)* ei = profile.find_enum_template(units);
+                            if (ei)
+                                http.value_desc = TextValueDesc(ty, ei);
+                            else
+                                writeWarning("Unknown enum/bitfield type: ", units);
+                            units = htail.split!','.unQuote;
+                        }
+                        else
+                        {
+                            http.value_desc = TextValueDesc(ty);
+                            if (!http.value_desc.parse_units(units))
+                                writeWarning("Invalid units '", units, "' for http element: ", id);
+                        }
+
+                        foreach (ref sub; reg_item.sub_items)
+                        {
+                            if (sub.name == "write")
+                            {
+                                const(char)[] wt = sub.value;
+                                const(char)[] w_req = wt.split!','.unQuote;
+                                const(char)[] w_key = wt.split!','.unQuote;
+
+                                http.write_request_index = find_request_index(*profile, w_req);
+                                if (http.write_request_index == ushort.max)
+                                    writeWarning("Unknown write request '", w_req, "' for http element: ", id);
+
+                                if (!w_key.empty)
+                                    http._write_key = http_string_cache.add_string(w_key);
+
+                            }
+                            else if (sub.name == "response")
+                                http._response_path = http_string_cache.add_string(sub.value.unQuote);
+                        }
+
+                        bool has_read = http.request_index != ushort.max;
+                        bool has_write = http.write_request_index != ushort.max;
+                        if (has_read && has_write)
+                            e.access = Access.read_write;
+                        else if (has_write)
+                            e.access = Access.write;
+                        else
+                            e.access = Access.read;
                         break;
 
                     case "aa55":
@@ -1599,8 +1927,47 @@ const(KnownElementTemplate)* find_known_element(const(char)[] template_, const(c
     return null;
 }
 
+// substitute {parameter} placeholders in a string.
+MutableString!0 substitute_parameters(const(char)[] pattern, scope const(char)[] delegate(size_t offset, const(char)[] param) nothrow @nogc get_sub, ref bool unclosed_token)
+{
+    auto r = MutableString!0(Reserve, pattern.length);
+    size_t i;
+    outer: while (i < pattern.length)
+    {
+        if (pattern[i] != '{')
+        {
+            r ~= pattern[i++];
+            continue;
+        }
+
+        size_t tok_end = pattern[i .. $].findFirst('}');
+        if (tok_end == pattern.length - i)
+        {
+            unclosed_token = true;
+            return MutableString!0(); // unclosed token
+        }
+
+        const(char)[] sub = get_sub(r.length, pattern[i + 1 .. i + tok_end]);
+        r ~= sub;
+        i = i + tok_end + 1;
+    }
+    return r;
+}
+
 
 private:
+
+ushort find_request_index(ref const Profile profile, const(char)[] name) pure nothrow @nogc
+{
+    if (name.empty)
+        return ushort.max;
+    foreach (i, ref req; profile.request_descs)
+    {
+        if (req.get_name(profile) == name)
+            return cast(ushort)i;
+    }
+    return ushort.max;
+}
 
 size_t cache_len(size_t str_len) pure nothrow @nogc
     => str_len ? 2 + str_len + (str_len & 1) : 0;
@@ -1644,10 +2011,10 @@ Access parse_access(ref const(char)[] access)
     return Access.read;
 }
 
-template MakeElementTemplate(string id, string units, string name, string desc, Frequency update_frequency)
+template make_element_template(string id, string units, string name, string desc, Frequency update_frequency)
 {
     enum string text = id ~ units ~ name ~ desc;
-    enum MakeElementTemplate = KnownElementTemplate(text.ptr, ushort(id.length), ushort(name.length), ushort(desc.length), ubyte(units.length), update_frequency);
+    enum make_element_template = KnownElementTemplate(text.ptr, ushort(id.length), ushort(name.length), ushort(desc.length), ubyte(units.length), update_frequency);
 }
 
 // well-known element details for common Component types
@@ -1679,310 +2046,310 @@ __gshared immutable KnownElementTemplate[][string] g_well_known_elements = [
 ];
 
 __gshared immutable KnownElementTemplate[] g_DeviceInfo_elements = [
-    MakeElementTemplate!("type", null, "Device Type", "Device category", Frequency.constant),
-    MakeElementTemplate!("name", null, "Device Name", "Device display name", Frequency.constant),
-    MakeElementTemplate!("manufacturer_name", null, "Manufacturer", "Manufacturer display name", Frequency.constant),
-    MakeElementTemplate!("manufacturer_id", null, "Manufacturer ID", "Manufacturer identifier code", Frequency.constant),
-    MakeElementTemplate!("brand_name", null, "Brand", "Brand display name", Frequency.constant),
-    MakeElementTemplate!("brand_id", null, "Brand ID", "Brand idenitifier code", Frequency.constant),
-    MakeElementTemplate!("model_name", null, "Model", "Model display name", Frequency.constant),
-    MakeElementTemplate!("model_id", null, "Model ID", "Model identifier code", Frequency.constant),
-    MakeElementTemplate!("serial_number", null, "Serial Number", null, Frequency.constant),
-    MakeElementTemplate!("firmware_version", null, "Firmware Version", null, Frequency.constant),
-    MakeElementTemplate!("hardware_version", null, "Hardware Version", null, Frequency.constant),
-    MakeElementTemplate!("software_version", null, "Software Version", null, Frequency.constant),
-    MakeElementTemplate!("app_ver", null, "Application Version", "Zigbee application version", Frequency.constant),
-    MakeElementTemplate!("zcl_ver", null, "ZCL Version", "Zigbee ZCL version", Frequency.constant),
+    make_element_template!("type", null, "Device Type", "Device category", Frequency.constant),
+    make_element_template!("name", null, "Device Name", "Device display name", Frequency.constant),
+    make_element_template!("manufacturer_name", null, "Manufacturer", "Manufacturer display name", Frequency.constant),
+    make_element_template!("manufacturer_id", null, "Manufacturer ID", "Manufacturer identifier code", Frequency.constant),
+    make_element_template!("brand_name", null, "Brand", "Brand display name", Frequency.constant),
+    make_element_template!("brand_id", null, "Brand ID", "Brand idenitifier code", Frequency.constant),
+    make_element_template!("model_name", null, "Model", "Model display name", Frequency.constant),
+    make_element_template!("model_id", null, "Model ID", "Model identifier code", Frequency.constant),
+    make_element_template!("serial_number", null, "Serial Number", null, Frequency.constant),
+    make_element_template!("firmware_version", null, "Firmware Version", null, Frequency.constant),
+    make_element_template!("hardware_version", null, "Hardware Version", null, Frequency.constant),
+    make_element_template!("software_version", null, "Software Version", null, Frequency.constant),
+    make_element_template!("app_ver", null, "Application Version", "Zigbee application version", Frequency.constant),
+    make_element_template!("zcl_ver", null, "ZCL Version", "Zigbee ZCL version", Frequency.constant),
 ];
 
 __gshared immutable KnownElementTemplate[] g_DeviceStatus_elements = [
-    MakeElementTemplate!("time", "systime", "Current Time", null, Frequency.high),
-    MakeElementTemplate!("up_time", "s", "Uptime", null, Frequency.high),
-    MakeElementTemplate!("running_time", "s", "Running Time", "Total Running Time", Frequency.high),
-    MakeElementTemplate!("running_time_with_load", "s", "Running Time With Load", "Running time under load", Frequency.high),
+    make_element_template!("time", "systime", "Current Time", null, Frequency.high),
+    make_element_template!("up_time", "s", "Uptime", null, Frequency.high),
+    make_element_template!("running_time", "s", "Running Time", "Total Running Time", Frequency.high),
+    make_element_template!("running_time_with_load", "s", "Running Time With Load", "Running time under load", Frequency.high),
 ];
 
 __gshared immutable KnownElementTemplate[] g_Network_elements = [
-    MakeElementTemplate!("mode", null, "Network Mode", "Active network mode/type", Frequency.high),
+    make_element_template!("mode", null, "Network Mode", "Active network mode/type", Frequency.high),
 ];
 
 __gshared immutable KnownElementTemplate[] g_Modbus_elements = [
-    MakeElementTemplate!("status", null, "Connection Status", null, Frequency.high),
+    make_element_template!("status", null, "Connection Status", null, Frequency.high),
 ];
 
 __gshared immutable KnownElementTemplate[] g_Ethernet_elements = [
-    MakeElementTemplate!("status", null, "Connection Status", null, Frequency.high),
-    MakeElementTemplate!("link_speed", "Mbps", "Link Speed", null, Frequency.high),
-    MakeElementTemplate!("mac_address", null, "MAC Address", null, Frequency.low),
-    MakeElementTemplate!("ip_address", null, "IP Address", null, Frequency.medium),
-    MakeElementTemplate!("gateway", null, "Default Gateway", null, Frequency.medium),
+    make_element_template!("status", null, "Connection Status", null, Frequency.high),
+    make_element_template!("link_speed", "Mbps", "Link Speed", null, Frequency.high),
+    make_element_template!("mac_address", null, "MAC Address", null, Frequency.low),
+    make_element_template!("ip_address", null, "IP Address", null, Frequency.medium),
+    make_element_template!("gateway", null, "Default Gateway", null, Frequency.medium),
 ];
 
 __gshared immutable KnownElementTemplate[] g_Wifi_elements = [
-    MakeElementTemplate!("status", null, "Connection Status", null, Frequency.high),
-    MakeElementTemplate!("ssid", null, "SSID", "Connected network SSID", Frequency.high),
-    MakeElementTemplate!("rssi", "dBm", "Signal Strength", null, Frequency.high),
-    MakeElementTemplate!("bssid", null, "BSSID", "Connected AP MAC address", Frequency.high),
-    MakeElementTemplate!("channel", null, "Channel", "Wi-Fi channel", Frequency.high),
+    make_element_template!("status", null, "Connection Status", null, Frequency.high),
+    make_element_template!("ssid", null, "SSID", "Connected network SSID", Frequency.high),
+    make_element_template!("rssi", "dBm", "Signal Strength", null, Frequency.high),
+    make_element_template!("bssid", null, "BSSID", "Connected AP MAC address", Frequency.high),
+    make_element_template!("channel", null, "Channel", "Wi-Fi channel", Frequency.high),
 ];
 
 __gshared immutable KnownElementTemplate[] g_Cellular_elements = [
-    MakeElementTemplate!("status", null, "Connection Status", null, Frequency.high),
-    MakeElementTemplate!("signal_strength", "dBm", "Signal Strength", null, Frequency.realtime),
-    MakeElementTemplate!("operator", null, "Network Operator", null, Frequency.low),
-    MakeElementTemplate!("imei", null, "Device IMEI", null, Frequency.low),
-    MakeElementTemplate!("iccid", null, "SIM ICCID", "ID of GPRS/4G module", Frequency.low),
-    MakeElementTemplate!("ip_address", null, "IP Address", null, Frequency.medium),
+    make_element_template!("status", null, "Connection Status", null, Frequency.high),
+    make_element_template!("signal_strength", "dBm", "Signal Strength", null, Frequency.realtime),
+    make_element_template!("operator", null, "Network Operator", null, Frequency.low),
+    make_element_template!("imei", null, "Device IMEI", null, Frequency.low),
+    make_element_template!("iccid", null, "SIM ICCID", "ID of GPRS/4G module", Frequency.low),
+    make_element_template!("ip_address", null, "IP Address", null, Frequency.medium),
 ];
 
 __gshared immutable KnownElementTemplate[] g_Zigbee_elements = [
-    MakeElementTemplate!("status", null, "Connection Status", null, Frequency.high),
-    MakeElementTemplate!("rssi", "dBm", "Received Signal Power", null, Frequency.realtime),
-    MakeElementTemplate!("lqi", null, "Link Quality Index", null, Frequency.realtime),
-    MakeElementTemplate!("eui", null, "EUI64", "MAC address", Frequency.low),
-    MakeElementTemplate!("address", null, "Network Address", null, Frequency.medium),
+    make_element_template!("status", null, "Connection Status", null, Frequency.high),
+    make_element_template!("rssi", "dBm", "Received Signal Power", null, Frequency.realtime),
+    make_element_template!("lqi", null, "Link Quality Index", null, Frequency.realtime),
+    make_element_template!("eui", null, "EUI64", "MAC address", Frequency.low),
+    make_element_template!("address", null, "Network Address", null, Frequency.medium),
 ];
 
 __gshared immutable KnownElementTemplate[] g_EnergyMeter_elements = [
-    MakeElementTemplate!("type", "CircuitType", "Meter Type", "Circuit type of energy meter", Frequency.constant),
-    MakeElementTemplate!("voltage", "V", "Voltage", "Line voltage", Frequency.realtime),
-    MakeElementTemplate!("voltage1", "V", "Voltage 1", "Phase A Voltage", Frequency.realtime),
-    MakeElementTemplate!("voltage2", "V", "Voltage 2", "Phase B Voltage", Frequency.realtime),
-    MakeElementTemplate!("voltage3", "V", "Voltage 3", "Phase C Voltage", Frequency.realtime),
-    MakeElementTemplate!("ipv", "V", "Inter-Phase Voltage", "Line-to-line voltage average", Frequency.realtime),
-    MakeElementTemplate!("ipv1", "V", "Inter-Phase Voltage 1", "Line-to-line voltage AB", Frequency.realtime),
-    MakeElementTemplate!("ipv2", "V", "Inter-Phase Voltage 2", "Line-to-line voltage BC", Frequency.realtime),
-    MakeElementTemplate!("ipv3", "V", "Inter-Phase Voltage 3", "Line-to-line voltage CA", Frequency.realtime),
-    MakeElementTemplate!("current", "A", "Current", "Line current", Frequency.realtime),
-    MakeElementTemplate!("current1", "A", "Current 1", "Phase A Current", Frequency.realtime),
-    MakeElementTemplate!("current2", "A", "Current 2", "Phase B Current", Frequency.realtime),
-    MakeElementTemplate!("current3", "A", "Current 3", "Phase C Current", Frequency.realtime),
-    MakeElementTemplate!("power", "W", "Active Power", null, Frequency.realtime),
-    MakeElementTemplate!("power1", "W", "Active Power 1", "Phase A Active Power", Frequency.realtime),
-    MakeElementTemplate!("power2", "W", "Active Power 2", "Phase B Active Power", Frequency.realtime),
-    MakeElementTemplate!("power3", "W", "Active Power 3", "Phase C Active Power", Frequency.realtime),
-    MakeElementTemplate!("apparent", "VA", "Apparent Power", null, Frequency.realtime),
-    MakeElementTemplate!("apparent1", "VA", "Apparent Power 1", "Phase A Apparent Power", Frequency.realtime),
-    MakeElementTemplate!("apparent2", "VA", "Apparent Power 2", "Phase B Apparent Power", Frequency.realtime),
-    MakeElementTemplate!("apparent3", "VA", "Apparent Power 3", "Phase C Apparent Power", Frequency.realtime),
-    MakeElementTemplate!("reactive", "var", "Reactive Power", null, Frequency.realtime),
-    MakeElementTemplate!("reactive1", "var", "Reactive Power 1", "Phase A Reactive Power", Frequency.realtime),
-    MakeElementTemplate!("reactive2", "var", "Reactive Power 2", "Phase B Reactive Power", Frequency.realtime),
-    MakeElementTemplate!("reactive3", "var", "Reactive Power 3", "Phase C Reactive Power", Frequency.realtime),
-    MakeElementTemplate!("pf", "1", "Power Factor", null, Frequency.realtime),
-    MakeElementTemplate!("pf1", "1", "Power Factor 1", "Phase A Power Factor", Frequency.realtime),
-    MakeElementTemplate!("pf2", "1", "Power Factor 2", "Phase B Power Factor", Frequency.realtime),
-    MakeElementTemplate!("pf3", "1", "Power Factor 3", "Phase C Power Factor", Frequency.realtime),
-    MakeElementTemplate!("frequency", "Hz", "Frequency", "Line frequency", Frequency.realtime),
-    MakeElementTemplate!("phase", "deg", "Phase Angle", null, Frequency.realtime),
-//    MakeElementTemplate!("nature", "LoadNature", "Load Nature", "Load nature", Frequency.constant), // TODO: maybe move the LoadNature enum into core and make it 1st class?
+    make_element_template!("type", "CircuitType", "Meter Type", "Circuit type of energy meter", Frequency.constant),
+    make_element_template!("voltage", "V", "Voltage", "Line voltage", Frequency.realtime),
+    make_element_template!("voltage1", "V", "Voltage 1", "Phase A Voltage", Frequency.realtime),
+    make_element_template!("voltage2", "V", "Voltage 2", "Phase B Voltage", Frequency.realtime),
+    make_element_template!("voltage3", "V", "Voltage 3", "Phase C Voltage", Frequency.realtime),
+    make_element_template!("ipv", "V", "Inter-Phase Voltage", "Line-to-line voltage average", Frequency.realtime),
+    make_element_template!("ipv1", "V", "Inter-Phase Voltage 1", "Line-to-line voltage AB", Frequency.realtime),
+    make_element_template!("ipv2", "V", "Inter-Phase Voltage 2", "Line-to-line voltage BC", Frequency.realtime),
+    make_element_template!("ipv3", "V", "Inter-Phase Voltage 3", "Line-to-line voltage CA", Frequency.realtime),
+    make_element_template!("current", "A", "Current", "Line current", Frequency.realtime),
+    make_element_template!("current1", "A", "Current 1", "Phase A Current", Frequency.realtime),
+    make_element_template!("current2", "A", "Current 2", "Phase B Current", Frequency.realtime),
+    make_element_template!("current3", "A", "Current 3", "Phase C Current", Frequency.realtime),
+    make_element_template!("power", "W", "Active Power", null, Frequency.realtime),
+    make_element_template!("power1", "W", "Active Power 1", "Phase A Active Power", Frequency.realtime),
+    make_element_template!("power2", "W", "Active Power 2", "Phase B Active Power", Frequency.realtime),
+    make_element_template!("power3", "W", "Active Power 3", "Phase C Active Power", Frequency.realtime),
+    make_element_template!("apparent", "VA", "Apparent Power", null, Frequency.realtime),
+    make_element_template!("apparent1", "VA", "Apparent Power 1", "Phase A Apparent Power", Frequency.realtime),
+    make_element_template!("apparent2", "VA", "Apparent Power 2", "Phase B Apparent Power", Frequency.realtime),
+    make_element_template!("apparent3", "VA", "Apparent Power 3", "Phase C Apparent Power", Frequency.realtime),
+    make_element_template!("reactive", "var", "Reactive Power", null, Frequency.realtime),
+    make_element_template!("reactive1", "var", "Reactive Power 1", "Phase A Reactive Power", Frequency.realtime),
+    make_element_template!("reactive2", "var", "Reactive Power 2", "Phase B Reactive Power", Frequency.realtime),
+    make_element_template!("reactive3", "var", "Reactive Power 3", "Phase C Reactive Power", Frequency.realtime),
+    make_element_template!("pf", "1", "Power Factor", null, Frequency.realtime),
+    make_element_template!("pf1", "1", "Power Factor 1", "Phase A Power Factor", Frequency.realtime),
+    make_element_template!("pf2", "1", "Power Factor 2", "Phase B Power Factor", Frequency.realtime),
+    make_element_template!("pf3", "1", "Power Factor 3", "Phase C Power Factor", Frequency.realtime),
+    make_element_template!("frequency", "Hz", "Frequency", "Line frequency", Frequency.realtime),
+    make_element_template!("phase", "deg", "Phase Angle", null, Frequency.realtime),
+//    make_element_template!("nature", "LoadNature", "Load Nature", "Load nature", Frequency.constant), // TODO: maybe move the LoadNature enum into core and make it 1st class?
 
     // cumulative energy
-    MakeElementTemplate!("type", "CircuitType", "Meter Type", "Circuit type of energy meter", Frequency.constant),
-    MakeElementTemplate!("import", "kWh", "Total Import Energy", "Accumulated imported active energy", Frequency.medium),
-    MakeElementTemplate!("import1", "kWh", "Total Import Energy 1", "Phase A imported active energy", Frequency.medium),
-    MakeElementTemplate!("import2", "kWh", "Total Import Energy 2", "Phase B imported active energy", Frequency.medium),
-    MakeElementTemplate!("import3", "kWh", "Total Import Energy 3", "Phase C imported active energy", Frequency.medium),
-    MakeElementTemplate!("export", "kWh", "Total Export Energy", "Accumulated exported active energy", Frequency.medium),
-    MakeElementTemplate!("export1", "kWh", "Total Export Energy 1", "Phase A exported active energy", Frequency.medium),
-    MakeElementTemplate!("export2", "kWh", "Total Export Energy 2", "Phase B exported active energy", Frequency.medium),
-    MakeElementTemplate!("export3", "kWh", "Total Export Energy 3", "Phase C exported active energy", Frequency.medium),
-    MakeElementTemplate!("net", "kWh", "Total (Net) Active Energy", "Net accumulated active energy", Frequency.medium),
-    MakeElementTemplate!("net1", "kWh", "Total (Net) Active Energy 1", "Phase A net accumulated active energy", Frequency.medium),
-    MakeElementTemplate!("net2", "kWh", "Total (Net) Active Energy 2", "Phase B net accumulated active energy", Frequency.medium),
-    MakeElementTemplate!("net3", "kWh", "Total (Net) Active Energy 3", "Phase C net accumulated active energy", Frequency.medium),
-    MakeElementTemplate!("absolute", "kWh", "Gross (Absolute) Active Energy", "Absolute accumulated active energy", Frequency.medium),
-    MakeElementTemplate!("absolute1", "kWh", "Gross (Absolute) Active Energy 1", "Phase A absolute accumulated active energy", Frequency.medium),
-    MakeElementTemplate!("absolute2", "kWh", "Gross (Absolute) Active Energy 2", "Phase B absolute accumulated active energy", Frequency.medium),
-    MakeElementTemplate!("absolute3", "kWh", "Gross (Absolute) Active Energy 3", "Phase C absolute accumulated active energy", Frequency.medium),
-    MakeElementTemplate!("import_reactive", "kvarh", "Total Import Reactive Energy", "Accumulated imported reactive energy", Frequency.medium),
-    MakeElementTemplate!("import_reactive1", "kvarh", "Total Import Reactive Energy 1", "Phase A imported reactive energy", Frequency.medium),
-    MakeElementTemplate!("import_reactive2", "kvarh", "Total Import Reactive Energy 2", "Phase B imported reactive energy", Frequency.medium),
-    MakeElementTemplate!("import_reactive3", "kvarh", "Total Import Reactive Energy 3", "Phase C imported reactive energy", Frequency.medium),
-    MakeElementTemplate!("export_reactive", "kvarh", "Total Export Reactive Energy", "Accumulated exported reactive energy", Frequency.medium),
-    MakeElementTemplate!("export_reactive1", "kvarh", "Total Export Reactive Energy 1", "Phase A exported reactive energy", Frequency.medium),
-    MakeElementTemplate!("export_reactive2", "kvarh", "Total Export Reactive Energy 2", "Phase B exported reactive energy", Frequency.medium),
-    MakeElementTemplate!("export_reactive3", "kvarh", "Total Export Reactive Energy 3", "Phase C exported reactive energy", Frequency.medium),
-    MakeElementTemplate!("net_reactive", "kvarh", "Total (Net) Reactive Energy", "Net accumulated reactive energy", Frequency.medium),
-    MakeElementTemplate!("net_reactive1", "kvarh", "Total (Net) Reactive Energy 1", "Phase A net accumulated reactive energy", Frequency.medium),
-    MakeElementTemplate!("net_reactive2", "kvarh", "Total (Net) Reactive Energy 2", "Phase B net accumulated reactive energy", Frequency.medium),
-    MakeElementTemplate!("net_reactive3", "kvarh", "Total (Net) Reactive Energy 3", "Phase C net accumulated reactive energy", Frequency.medium),
-    MakeElementTemplate!("absolute_reactive", "kvarh", "Gross (Absolute) Reactive Energy", "Absolute accumulated reactive energy", Frequency.medium),
-    MakeElementTemplate!("absolute_reactive1", "kvarh", "Gross (Absolute) Reactive Energy 1", "Phase A absolute accumulated reactive energy", Frequency.medium),
-    MakeElementTemplate!("absolute_reactive2", "kvarh", "Gross (Absolute) Reactive Energy 2", "Phase B absolute accumulated reactive energy", Frequency.medium),
-    MakeElementTemplate!("absolute_reactive3", "kvarh", "Gross (Absolute) Reactive Energy 3", "Phase C absolute accumulated reactive energy", Frequency.medium),
-    MakeElementTemplate!("total_apparent", "kVAh", "Total Apparent Energy", "Accumulated apparent energy", Frequency.medium),
-    MakeElementTemplate!("total_apparent1", "kVAh", "Total Apparent Energy 1", "Phase A accumulated apparent energy", Frequency.medium),
-    MakeElementTemplate!("total_apparent2", "kVAh", "Total Apparent Energy 2", "Phase B accumulated apparent energy", Frequency.medium),
-    MakeElementTemplate!("total_apparent3", "kVAh", "Total Apparent Energy 3", "Phase C accumulated apparent energy", Frequency.medium),
+    make_element_template!("type", "CircuitType", "Meter Type", "Circuit type of energy meter", Frequency.constant),
+    make_element_template!("import", "kWh", "Total Import Energy", "Accumulated imported active energy", Frequency.medium),
+    make_element_template!("import1", "kWh", "Total Import Energy 1", "Phase A imported active energy", Frequency.medium),
+    make_element_template!("import2", "kWh", "Total Import Energy 2", "Phase B imported active energy", Frequency.medium),
+    make_element_template!("import3", "kWh", "Total Import Energy 3", "Phase C imported active energy", Frequency.medium),
+    make_element_template!("export", "kWh", "Total Export Energy", "Accumulated exported active energy", Frequency.medium),
+    make_element_template!("export1", "kWh", "Total Export Energy 1", "Phase A exported active energy", Frequency.medium),
+    make_element_template!("export2", "kWh", "Total Export Energy 2", "Phase B exported active energy", Frequency.medium),
+    make_element_template!("export3", "kWh", "Total Export Energy 3", "Phase C exported active energy", Frequency.medium),
+    make_element_template!("net", "kWh", "Total (Net) Active Energy", "Net accumulated active energy", Frequency.medium),
+    make_element_template!("net1", "kWh", "Total (Net) Active Energy 1", "Phase A net accumulated active energy", Frequency.medium),
+    make_element_template!("net2", "kWh", "Total (Net) Active Energy 2", "Phase B net accumulated active energy", Frequency.medium),
+    make_element_template!("net3", "kWh", "Total (Net) Active Energy 3", "Phase C net accumulated active energy", Frequency.medium),
+    make_element_template!("absolute", "kWh", "Gross (Absolute) Active Energy", "Absolute accumulated active energy", Frequency.medium),
+    make_element_template!("absolute1", "kWh", "Gross (Absolute) Active Energy 1", "Phase A absolute accumulated active energy", Frequency.medium),
+    make_element_template!("absolute2", "kWh", "Gross (Absolute) Active Energy 2", "Phase B absolute accumulated active energy", Frequency.medium),
+    make_element_template!("absolute3", "kWh", "Gross (Absolute) Active Energy 3", "Phase C absolute accumulated active energy", Frequency.medium),
+    make_element_template!("import_reactive", "kvarh", "Total Import Reactive Energy", "Accumulated imported reactive energy", Frequency.medium),
+    make_element_template!("import_reactive1", "kvarh", "Total Import Reactive Energy 1", "Phase A imported reactive energy", Frequency.medium),
+    make_element_template!("import_reactive2", "kvarh", "Total Import Reactive Energy 2", "Phase B imported reactive energy", Frequency.medium),
+    make_element_template!("import_reactive3", "kvarh", "Total Import Reactive Energy 3", "Phase C imported reactive energy", Frequency.medium),
+    make_element_template!("export_reactive", "kvarh", "Total Export Reactive Energy", "Accumulated exported reactive energy", Frequency.medium),
+    make_element_template!("export_reactive1", "kvarh", "Total Export Reactive Energy 1", "Phase A exported reactive energy", Frequency.medium),
+    make_element_template!("export_reactive2", "kvarh", "Total Export Reactive Energy 2", "Phase B exported reactive energy", Frequency.medium),
+    make_element_template!("export_reactive3", "kvarh", "Total Export Reactive Energy 3", "Phase C exported reactive energy", Frequency.medium),
+    make_element_template!("net_reactive", "kvarh", "Total (Net) Reactive Energy", "Net accumulated reactive energy", Frequency.medium),
+    make_element_template!("net_reactive1", "kvarh", "Total (Net) Reactive Energy 1", "Phase A net accumulated reactive energy", Frequency.medium),
+    make_element_template!("net_reactive2", "kvarh", "Total (Net) Reactive Energy 2", "Phase B net accumulated reactive energy", Frequency.medium),
+    make_element_template!("net_reactive3", "kvarh", "Total (Net) Reactive Energy 3", "Phase C net accumulated reactive energy", Frequency.medium),
+    make_element_template!("absolute_reactive", "kvarh", "Gross (Absolute) Reactive Energy", "Absolute accumulated reactive energy", Frequency.medium),
+    make_element_template!("absolute_reactive1", "kvarh", "Gross (Absolute) Reactive Energy 1", "Phase A absolute accumulated reactive energy", Frequency.medium),
+    make_element_template!("absolute_reactive2", "kvarh", "Gross (Absolute) Reactive Energy 2", "Phase B absolute accumulated reactive energy", Frequency.medium),
+    make_element_template!("absolute_reactive3", "kvarh", "Gross (Absolute) Reactive Energy 3", "Phase C absolute accumulated reactive energy", Frequency.medium),
+    make_element_template!("total_apparent", "kVAh", "Total Apparent Energy", "Accumulated apparent energy", Frequency.medium),
+    make_element_template!("total_apparent1", "kVAh", "Total Apparent Energy 1", "Phase A accumulated apparent energy", Frequency.medium),
+    make_element_template!("total_apparent2", "kVAh", "Total Apparent Energy 2", "Phase B accumulated apparent energy", Frequency.medium),
+    make_element_template!("total_apparent3", "kVAh", "Total Apparent Energy 3", "Phase C accumulated apparent energy", Frequency.medium),
 
     // demand
-    MakeElementTemplate!("demand", "W", "Active Demand", "Active power demand", Frequency.medium),
-    MakeElementTemplate!("demand1", "W", "Active Demand 1", "Phase A active power demand", Frequency.medium),
-    MakeElementTemplate!("demand2", "W", "Active Demand 2", "Phase B active power demand", Frequency.medium),
-    MakeElementTemplate!("demand3", "W", "Active Demand 3", "Phase C active power demand", Frequency.medium),
-    MakeElementTemplate!("reactive_demand", "var", "Reactive Demand", "Reactive power demand", Frequency.medium),
-    MakeElementTemplate!("reactive_demand1", "var", "Reactive Demand 1", "Phase A reactive power demand", Frequency.medium),
-    MakeElementTemplate!("reactive_demand2", "var", "Reactive Demand 2", "Phase B reactive power demand", Frequency.medium),
-    MakeElementTemplate!("reactive_demand3", "var", "Reactive Demand 3", "Phase C reactive power demand", Frequency.medium),
-    MakeElementTemplate!("apparent_demand", "VA", "Apparent Demand", "Apparent power demand", Frequency.medium),
-    MakeElementTemplate!("current_demand", "A", "Current Demand", "Line current demand", Frequency.medium),
-    MakeElementTemplate!("import_demand", "W", "Import Demand", "Import active power demand", Frequency.medium),
-    MakeElementTemplate!("export_demand", "W", "Export Demand", "Export active power demand", Frequency.medium),
-    MakeElementTemplate!("max_demand", "W", "Maximum Demand", "Maximum active power demand", Frequency.medium),
-    MakeElementTemplate!("max_reactive_demand", "var", "Maximum Reactive Demand", "Maximum reactive power demand", Frequency.medium),
-    MakeElementTemplate!("max_apparent_demand", "VA", "Maximum Apparent Demand", "Maximum apparent power demand", Frequency.medium),
-    MakeElementTemplate!("max_current_demand", "A", "Maximum Current Demand", "Maximum line current demand", Frequency.medium),
-    MakeElementTemplate!("max_import_demand", "W", "Maximum Import Demand", "Maximum import active power demand", Frequency.medium),
-    MakeElementTemplate!("max_export_demand", "W", "Maximum Export Demand", "Maximum export active power demand", Frequency.medium),
-    MakeElementTemplate!("min_demand", "W", "Minimum Demand", "Minimum active power demand", Frequency.medium),
+    make_element_template!("demand", "W", "Active Demand", "Active power demand", Frequency.medium),
+    make_element_template!("demand1", "W", "Active Demand 1", "Phase A active power demand", Frequency.medium),
+    make_element_template!("demand2", "W", "Active Demand 2", "Phase B active power demand", Frequency.medium),
+    make_element_template!("demand3", "W", "Active Demand 3", "Phase C active power demand", Frequency.medium),
+    make_element_template!("reactive_demand", "var", "Reactive Demand", "Reactive power demand", Frequency.medium),
+    make_element_template!("reactive_demand1", "var", "Reactive Demand 1", "Phase A reactive power demand", Frequency.medium),
+    make_element_template!("reactive_demand2", "var", "Reactive Demand 2", "Phase B reactive power demand", Frequency.medium),
+    make_element_template!("reactive_demand3", "var", "Reactive Demand 3", "Phase C reactive power demand", Frequency.medium),
+    make_element_template!("apparent_demand", "VA", "Apparent Demand", "Apparent power demand", Frequency.medium),
+    make_element_template!("current_demand", "A", "Current Demand", "Line current demand", Frequency.medium),
+    make_element_template!("import_demand", "W", "Import Demand", "Import active power demand", Frequency.medium),
+    make_element_template!("export_demand", "W", "Export Demand", "Export active power demand", Frequency.medium),
+    make_element_template!("max_demand", "W", "Maximum Demand", "Maximum active power demand", Frequency.medium),
+    make_element_template!("max_reactive_demand", "var", "Maximum Reactive Demand", "Maximum reactive power demand", Frequency.medium),
+    make_element_template!("max_apparent_demand", "VA", "Maximum Apparent Demand", "Maximum apparent power demand", Frequency.medium),
+    make_element_template!("max_current_demand", "A", "Maximum Current Demand", "Maximum line current demand", Frequency.medium),
+    make_element_template!("max_import_demand", "W", "Maximum Import Demand", "Maximum import active power demand", Frequency.medium),
+    make_element_template!("max_export_demand", "W", "Maximum Export Demand", "Maximum export active power demand", Frequency.medium),
+    make_element_template!("min_demand", "W", "Minimum Demand", "Minimum active power demand", Frequency.medium),
 ];
 
 __gshared immutable KnownElementTemplate[] g_Battery_elements = [
-    MakeElementTemplate!("soc", "%", "State of Charge", null, Frequency.high),
-    MakeElementTemplate!("soh", "%", "State of Health", null, Frequency.low),
-//    MakeElementTemplate!("mode", "BatteryMode", "Battery Mode", "Current battery operating mode", Frequency.high), // TODO: move enum and hook up
-    MakeElementTemplate!("temp", "°C", "Temperature", "Average/representative battery temperature", Frequency.low),
-    MakeElementTemplate!("low_battery", "Boolean", "Low Battery Warning", null, Frequency.medium),
-    MakeElementTemplate!("remain_capacity", "Ah", "Remaining Capacity", null, Frequency.realtime),
-    MakeElementTemplate!("full_capacity", "Ah", "Full Capacity", null, Frequency.low),
-    MakeElementTemplate!("cycle_count", "Count", "Charge Cycles", "Number of charge cycles completed", Frequency.low),
-    MakeElementTemplate!("max_charge_current", "A", "Max Charge Current", "Maximum realtime charge current", Frequency.realtime),
-    MakeElementTemplate!("max_discharge_current", "A", "Max Discharge Current", "Maximum realtime discharge current", Frequency.realtime),
-    MakeElementTemplate!("max_charge_power", "W", "Max Charge Power", "Maximum reltime charge power", Frequency.realtime),
-    MakeElementTemplate!("max_discharge_power", "W", "Max Discharge Power", "Maximum realtime discharge power", Frequency.realtime),
+    make_element_template!("soc", "%", "State of Charge", null, Frequency.high),
+    make_element_template!("soh", "%", "State of Health", null, Frequency.low),
+//    make_element_template!("mode", "BatteryMode", "Battery Mode", "Current battery operating mode", Frequency.high), // TODO: move enum and hook up
+    make_element_template!("temp", "°C", "Temperature", "Average/representative battery temperature", Frequency.low),
+    make_element_template!("low_battery", "Boolean", "Low Battery Warning", null, Frequency.medium),
+    make_element_template!("remain_capacity", "Ah", "Remaining Capacity", null, Frequency.realtime),
+    make_element_template!("full_capacity", "Ah", "Full Capacity", null, Frequency.low),
+    make_element_template!("cycle_count", "Count", "Charge Cycles", "Number of charge cycles completed", Frequency.low),
+    make_element_template!("max_charge_current", "A", "Max Charge Current", "Maximum realtime charge current", Frequency.realtime),
+    make_element_template!("max_discharge_current", "A", "Max Discharge Current", "Maximum realtime discharge current", Frequency.realtime),
+    make_element_template!("max_charge_power", "W", "Max Charge Power", "Maximum reltime charge power", Frequency.realtime),
+    make_element_template!("max_discharge_power", "W", "Max Discharge Power", "Maximum realtime discharge power", Frequency.realtime),
     // cell voltages/temps
-    MakeElementTemplate!("mosfet_temp", "°C", "MOSFET Temperature", null, Frequency.low),
-    MakeElementTemplate!("env_temp", "°C", "Environment Temperature", null, Frequency.low),
-//    MakeElementTemplate!("warning_flag", "Bitfield", "Warning Flags", "Battery warning flags", Frequency.high),
-//    MakeElementTemplate!("protection_flag", "Bitfield", "Protection Flags", "Battery protection flags", Frequency.high),
-//    MakeElementTemplate!("status_fault_flag", "Bitfield", "Status/Fault Flags", "Battery status/fault flags", Frequency.high),
-//    MakeElementTemplate!("balance_status", "Bitfield", "Cell Balance Status", "Battery cell balance status", Frequency.high),
+    make_element_template!("mosfet_temp", "°C", "MOSFET Temperature", null, Frequency.low),
+    make_element_template!("env_temp", "°C", "Environment Temperature", null, Frequency.low),
+//    make_element_template!("warning_flag", "Bitfield", "Warning Flags", "Battery warning flags", Frequency.high),
+//    make_element_template!("protection_flag", "Bitfield", "Protection Flags", "Battery protection flags", Frequency.high),
+//    make_element_template!("status_fault_flag", "Bitfield", "Status/Fault Flags", "Battery status/fault flags", Frequency.high),
+//    make_element_template!("balance_status", "Bitfield", "Cell Balance Status", "Battery cell balance status", Frequency.high),
 ];
 
 __gshared immutable KnownElementTemplate[] g_BatteryConfig_elements = [
-    MakeElementTemplate!("topology", null, "Battery Topology", "Battery arrangement description", Frequency.constant),
-    MakeElementTemplate!("pack_count", null, "Pack Count", "Number of battery packs/modules", Frequency.constant),
-    MakeElementTemplate!("packs_series", null, "Packs in Series", "Number of battery packs in series", Frequency.constant),
-    MakeElementTemplate!("packs_parallel", null, "Packs in Parallel", "Number of battery packs in parallel", Frequency.constant),
-    MakeElementTemplate!("cell_count", null, "Cell Count", "Total number of cells in the pack", Frequency.constant),
-    MakeElementTemplate!("cells_series", null, "Cells in Series", "Number of cells in series in the pack", Frequency.constant),
-    MakeElementTemplate!("cells_parallel", null, "Cells in Parallel", "Number of cells in parallel in the pack", Frequency.constant),
-    MakeElementTemplate!("cell_chemistry", null, "Cell Chemistry", "Battery cell chemistry type", Frequency.constant),
-    MakeElementTemplate!("voltage_min", "V", "Minimum Voltage", "Minimum allowable pack voltage", Frequency.constant),
-    MakeElementTemplate!("voltage_max", "V", "Maximum Voltage", "Maximum allowable pack voltage", Frequency.constant),
-    MakeElementTemplate!("cell_voltage_min", "V", "Minimum Cell Voltage", "Minimum allowable cell voltage", Frequency.constant),
-    MakeElementTemplate!("cell_voltage_max", "V", "Maximum Cell Voltage", "Maximum allowable cell voltage", Frequency.constant),
-    MakeElementTemplate!("design_capacity", "Ah", "Design Capacity", "Design/nominal battery capacity", Frequency.constant),
-    MakeElementTemplate!("rated_energy", "Wh", "Rated Energy Capacity", "Rated energy capacity of the battery pack", Frequency.constant),
-    MakeElementTemplate!("max_charge_current", "A", "Max Charge Current", "Maximum continuous charge current", Frequency.constant),
-    MakeElementTemplate!("max_discharge_current", "A", "Max Discharge Current", "Maximum continuous discharge current", Frequency.constant),
-    MakeElementTemplate!("peak_charge_current", "A", "Peak Charge Current", "Peak charge current (short duration)", Frequency.constant),
-    MakeElementTemplate!("peak_discharge_current", "A", "Peak Discharge Current", "Peak discharge current (short duration)", Frequency.constant),
-    MakeElementTemplate!("max_charge_power", "W", "Max Charge Power", null, Frequency.constant),
-    MakeElementTemplate!("max_discharge_power", "W", "Max Discharge Power", null, Frequency.constant),
-    MakeElementTemplate!("temp_min_charge", "°C", "Min Charging Temperature", "Minimum allowable charging temperature", Frequency.constant),
-    MakeElementTemplate!("temp_max_charge", "°C", "Max Charging Temperature", "Maximum allowable charging temperature", Frequency.constant),
-    MakeElementTemplate!("temp_min_discharge", "°C", "Min Discharging Temperature", "Minimum allowable discharging temperature", Frequency.constant),
-    MakeElementTemplate!("temp_max_discharge", "°C", "Max Discharging Temperature", "Maximum allowable discharging temperature", Frequency.constant),
+    make_element_template!("topology", null, "Battery Topology", "Battery arrangement description", Frequency.constant),
+    make_element_template!("pack_count", null, "Pack Count", "Number of battery packs/modules", Frequency.constant),
+    make_element_template!("packs_series", null, "Packs in Series", "Number of battery packs in series", Frequency.constant),
+    make_element_template!("packs_parallel", null, "Packs in Parallel", "Number of battery packs in parallel", Frequency.constant),
+    make_element_template!("cell_count", null, "Cell Count", "Total number of cells in the pack", Frequency.constant),
+    make_element_template!("cells_series", null, "Cells in Series", "Number of cells in series in the pack", Frequency.constant),
+    make_element_template!("cells_parallel", null, "Cells in Parallel", "Number of cells in parallel in the pack", Frequency.constant),
+    make_element_template!("cell_chemistry", null, "Cell Chemistry", "Battery cell chemistry type", Frequency.constant),
+    make_element_template!("voltage_min", "V", "Minimum Voltage", "Minimum allowable pack voltage", Frequency.constant),
+    make_element_template!("voltage_max", "V", "Maximum Voltage", "Maximum allowable pack voltage", Frequency.constant),
+    make_element_template!("cell_voltage_min", "V", "Minimum Cell Voltage", "Minimum allowable cell voltage", Frequency.constant),
+    make_element_template!("cell_voltage_max", "V", "Maximum Cell Voltage", "Maximum allowable cell voltage", Frequency.constant),
+    make_element_template!("design_capacity", "Ah", "Design Capacity", "Design/nominal battery capacity", Frequency.constant),
+    make_element_template!("rated_energy", "Wh", "Rated Energy Capacity", "Rated energy capacity of the battery pack", Frequency.constant),
+    make_element_template!("max_charge_current", "A", "Max Charge Current", "Maximum continuous charge current", Frequency.constant),
+    make_element_template!("max_discharge_current", "A", "Max Discharge Current", "Maximum continuous discharge current", Frequency.constant),
+    make_element_template!("peak_charge_current", "A", "Peak Charge Current", "Peak charge current (short duration)", Frequency.constant),
+    make_element_template!("peak_discharge_current", "A", "Peak Discharge Current", "Peak discharge current (short duration)", Frequency.constant),
+    make_element_template!("max_charge_power", "W", "Max Charge Power", null, Frequency.constant),
+    make_element_template!("max_discharge_power", "W", "Max Discharge Power", null, Frequency.constant),
+    make_element_template!("temp_min_charge", "°C", "Min Charging Temperature", "Minimum allowable charging temperature", Frequency.constant),
+    make_element_template!("temp_max_charge", "°C", "Max Charging Temperature", "Maximum allowable charging temperature", Frequency.constant),
+    make_element_template!("temp_min_discharge", "°C", "Min Discharging Temperature", "Minimum allowable discharging temperature", Frequency.constant),
+    make_element_template!("temp_max_discharge", "°C", "Max Discharging Temperature", "Maximum allowable discharging temperature", Frequency.constant),
 ];
 
 __gshared immutable KnownElementTemplate[] g_Solar_elements = [
-//    MakeElementTemplate!("state", "PVState", "PV State", "Current solar PV state", Frequency.high), // TODO: move enum and hook up
-//    MakeElementTemplate!("mode", "PVModes", "Operating Mode", "Current solar PV operating mode", Frequency.high), // TODO: move enum and hook up
-    MakeElementTemplate!("temp", "°C", "Temperature", "Panel/module temperature", Frequency.low),
-    MakeElementTemplate!("efficiency", "%", "Efficiency", "MPPT/conversion efficiency", Frequency.medium),
+//    make_element_template!("state", "PVState", "PV State", "Current solar PV state", Frequency.high), // TODO: move enum and hook up
+//    make_element_template!("mode", "PVModes", "Operating Mode", "Current solar PV operating mode", Frequency.high), // TODO: move enum and hook up
+    make_element_template!("temp", "°C", "Temperature", "Panel/module temperature", Frequency.low),
+    make_element_template!("efficiency", "%", "Efficiency", "MPPT/conversion efficiency", Frequency.medium),
 ];
 
 __gshared immutable KnownElementTemplate[] g_SolarConfig_elements = [
-    MakeElementTemplate!("panel_count", null, "Panel Count", "Total number of panels in the array", Frequency.constant),
-    MakeElementTemplate!("string_count", null, "String Count", "Number of strings in the array", Frequency.constant),
-    MakeElementTemplate!("topology", null, "Array Topology", "Array arrangement description", Frequency.constant),
-    MakeElementTemplate!("rated_power", "W", "Rated Power", "Panel rated power (Wp)", Frequency.constant),
-    MakeElementTemplate!("voltage_mpp", "V", "Voltage at MPP", "Voltage at maximum power point", Frequency.constant),
-    MakeElementTemplate!("current_mpp", "A", "Current at MPP", "Current at maximum power point", Frequency.constant),
-    MakeElementTemplate!("voltage_oc", "V", "Open Circuit Voltage", null, Frequency.constant),
-    MakeElementTemplate!("current_sc", "A", "Short Circuit Current", null, Frequency.constant),
-    MakeElementTemplate!("temp_coeff_power", "%/°C", "Temperature Coefficient of Power", null, Frequency.constant),
-    MakeElementTemplate!("temp_coeff_voltage", "V/°C", "Temperature Coefficient of Voltage", null, Frequency.constant),
+    make_element_template!("panel_count", null, "Panel Count", "Total number of panels in the array", Frequency.constant),
+    make_element_template!("string_count", null, "String Count", "Number of strings in the array", Frequency.constant),
+    make_element_template!("topology", null, "Array Topology", "Array arrangement description", Frequency.constant),
+    make_element_template!("rated_power", "W", "Rated Power", "Panel rated power (Wp)", Frequency.constant),
+    make_element_template!("voltage_mpp", "V", "Voltage at MPP", "Voltage at maximum power point", Frequency.constant),
+    make_element_template!("current_mpp", "A", "Current at MPP", "Current at maximum power point", Frequency.constant),
+    make_element_template!("voltage_oc", "V", "Open Circuit Voltage", null, Frequency.constant),
+    make_element_template!("current_sc", "A", "Short Circuit Current", null, Frequency.constant),
+    make_element_template!("temp_coeff_power", "%/°C", "Temperature Coefficient of Power", null, Frequency.constant),
+    make_element_template!("temp_coeff_voltage", "V/°C", "Temperature Coefficient of Voltage", null, Frequency.constant),
 ];
 
 __gshared immutable KnownElementTemplate[] g_Inverter_elements = [
-//    MakeElementTemplate!("state", "???", "Inverter State", "Current inverter operating state", Frequency.high), // TODO: standardise these enums
-//    MakeElementTemplate!("mode", "???", "Inverter Mode", "Current inverter operating mode", Frequency.high),
-    MakeElementTemplate!("temp", "°C", "Temperature", "Inverter temperature", Frequency.low),
-    MakeElementTemplate!("rated_power", "W", "Rated Power", "Inverter rated output power", Frequency.constant),
-    MakeElementTemplate!("efficiency", "%", "Efficiency", "Current conversion efficiency", Frequency.high),
-    MakeElementTemplate!("bus_voltage", "V", "DC Bus Voltage", null, Frequency.realtime),
+//    make_element_template!("state", "???", "Inverter State", "Current inverter operating state", Frequency.high), // TODO: standardise these enums
+//    make_element_template!("mode", "???", "Inverter Mode", "Current inverter operating mode", Frequency.high),
+    make_element_template!("temp", "°C", "Temperature", "Inverter temperature", Frequency.low),
+    make_element_template!("rated_power", "W", "Rated Power", "Inverter rated output power", Frequency.constant),
+    make_element_template!("efficiency", "%", "Efficiency", "Current conversion efficiency", Frequency.high),
+    make_element_template!("bus_voltage", "V", "DC Bus Voltage", null, Frequency.realtime),
 ];
 
 __gshared immutable KnownElementTemplate[] g_EVSE_elements = [
-//    MakeElementTemplate!("state", "J1772PilotState", "EVSE State", "Current J1772 pilot state", Frequency.high), // TODO: ...
-//    MakeElementTemplate!("error", "Bitfield", "Error Flags", "EVSE error flags", Frequency.high),
-    MakeElementTemplate!("connected", "Boolean", "Vehicle Connected", null, Frequency.medium),
-    MakeElementTemplate!("session_energy", "Wh", "Session Energy", "Energy delivered in current charging session", Frequency.low),
-    MakeElementTemplate!("lifetime_energy", "Wh", "Lifetime Energy", "Total energy delivered by the EVSE", Frequency.low),
+//    make_element_template!("state", "J1772PilotState", "EVSE State", "Current J1772 pilot state", Frequency.high), // TODO: ...
+//    make_element_template!("error", "Bitfield", "Error Flags", "EVSE error flags", Frequency.high),
+    make_element_template!("connected", "Boolean", "Vehicle Connected", null, Frequency.medium),
+    make_element_template!("session_energy", "Wh", "Session Energy", "Energy delivered in current charging session", Frequency.low),
+    make_element_template!("lifetime_energy", "Wh", "Lifetime Energy", "Total energy delivered by the EVSE", Frequency.low),
 ];
 
 __gshared immutable KnownElementTemplate[] g_Vehicle_elements = [
-    MakeElementTemplate!("vin", null, "Vehicle Identification Number", null, Frequency.constant),
-    MakeElementTemplate!("soc", "%", "State of Charge", null, Frequency.medium),
-    MakeElementTemplate!("range", "km", "Remaining Range", null, Frequency.medium),
-    MakeElementTemplate!("battery_capacity", "kWh", "Battery Capacity", null, Frequency.constant),
+    make_element_template!("vin", null, "Vehicle Identification Number", null, Frequency.constant),
+    make_element_template!("soc", "%", "State of Charge", null, Frequency.medium),
+    make_element_template!("range", "km", "Remaining Range", null, Frequency.medium),
+    make_element_template!("battery_capacity", "kWh", "Battery Capacity", null, Frequency.constant),
 ];
 
 __gshared immutable KnownElementTemplate[] g_ChargeControl_elements = [
-    MakeElementTemplate!("max_current", "A", "Max Charging Current", "Maximum charging current/limit", Frequency.constant),
-    MakeElementTemplate!("min_current", "A", "Min Charging Current", "Minimum charging current", Frequency.constant),
-    MakeElementTemplate!("target_current", "A", "Target Charging Current", "Target/commanded charging current", Frequency.realtime),
-    MakeElementTemplate!("actual_current", "A", "Actual Charging Current", "Actual charging current", Frequency.realtime), // TODO: should this be represented by a meter instead?
-    MakeElementTemplate!("max_power", "W", "Max Charging Power", "Maximum charging power", Frequency.constant),
-    MakeElementTemplate!("target_power", "W", "Target Charging Power", "Target/commanded charging power", Frequency.realtime),
-    MakeElementTemplate!("actual_power", "W", "Actual Charging Power", "Actual charging power", Frequency.realtime), // TODO: should this be represented by a meter instead?
+    make_element_template!("max_current", "A", "Max Charging Current", "Maximum charging current/limit", Frequency.constant),
+    make_element_template!("min_current", "A", "Min Charging Current", "Minimum charging current", Frequency.constant),
+    make_element_template!("target_current", "A", "Target Charging Current", "Target/commanded charging current", Frequency.realtime),
+    make_element_template!("actual_current", "A", "Actual Charging Current", "Actual charging current", Frequency.realtime), // TODO: should this be represented by a meter instead?
+    make_element_template!("max_power", "W", "Max Charging Power", "Maximum charging power", Frequency.constant),
+    make_element_template!("target_power", "W", "Target Charging Power", "Target/commanded charging power", Frequency.realtime),
+    make_element_template!("actual_power", "W", "Actual Charging Power", "Actual charging power", Frequency.realtime), // TODO: should this be represented by a meter instead?
 ];
 
 __gshared immutable KnownElementTemplate[] g_Switch_elements = [
-    MakeElementTemplate!("switch", "Boolean", "Switch State", null, Frequency.realtime),
-//    MakeElementTemplate!("mode", "SwitchMode", "Switch Mode", "Current switch mode", Frequency.high), // TODO: ...
-    MakeElementTemplate!("timer", "s", "Timer", "Timer value", Frequency.high),
+    make_element_template!("switch", "Boolean", "Switch State", null, Frequency.realtime),
+//    make_element_template!("mode", "SwitchMode", "Switch Mode", "Current switch mode", Frequency.high), // TODO: ...
+    make_element_template!("timer", "s", "Timer", "Timer value", Frequency.high),
 ];
 
 __gshared immutable KnownElementTemplate[] g_ContactSensor_elements = [
-    MakeElementTemplate!("open", "Boolean", "Open State", "Open/closed state of the sensor", Frequency.realtime),
-    MakeElementTemplate!("alarm", "Boolean", "Alarm Status", "Alarm status of the sensor", Frequency.realtime),
-    MakeElementTemplate!("tamper", "Boolean", "Tamper Detection", "Tamper detection status", Frequency.high),
+    make_element_template!("open", "Boolean", "Open State", "Open/closed state of the sensor", Frequency.realtime),
+    make_element_template!("alarm", "Boolean", "Alarm Status", "Alarm status of the sensor", Frequency.realtime),
+    make_element_template!("tamper", "Boolean", "Tamper Detection", "Tamper detection status", Frequency.high),
 ];
 
 __gshared immutable KnownElementTemplate[] g_ModbusConfig_elements = [
-    MakeElementTemplate!("address", null, "Modbus Address", "Modbus slave address (1-247)", Frequency.configuration),
-    MakeElementTemplate!("baud_rate", null, "Baud Rate", "Serial baud rate", Frequency.configuration),
-    MakeElementTemplate!("parity", null, "Parity", "Serial parity setting", Frequency.configuration),
-    MakeElementTemplate!("stop_bits", null, "Stop Bits", "Number of stop bits", Frequency.configuration),
+    make_element_template!("address", null, "Modbus Address", "Modbus slave address (1-247)", Frequency.configuration),
+    make_element_template!("baud_rate", null, "Baud Rate", "Serial baud rate", Frequency.configuration),
+    make_element_template!("parity", null, "Parity", "Serial parity setting", Frequency.configuration),
+    make_element_template!("stop_bits", null, "Stop Bits", "Number of stop bits", Frequency.configuration),
 ];
 
 __gshared immutable KnownElementTemplate[] g_EthernetConfig_elements = [
-    MakeElementTemplate!("dhcp_enabled", "Boolean", "DHCP Enabled", "DHCP enable/disable", Frequency.configuration),
-    MakeElementTemplate!("ip_address", null, "IP Address", "Static IPv4 address", Frequency.configuration),
-    MakeElementTemplate!("gateway", null, "Default Gateway", "Default gateway", Frequency.configuration),
-    MakeElementTemplate!("dns_primary", null, "Primary DNS Server", "Primary DNS server address", Frequency.configuration),
-    MakeElementTemplate!("dns_secondary", null, "Secondary DNS Server", "Secondary DNS server address", Frequency.configuration),
-    MakeElementTemplate!("hostname", null, "Hostname", "Device hostname", Frequency.configuration),
+    make_element_template!("dhcp_enabled", "Boolean", "DHCP Enabled", "DHCP enable/disable", Frequency.configuration),
+    make_element_template!("ip_address", null, "IP Address", "Static IPv4 address", Frequency.configuration),
+    make_element_template!("gateway", null, "Default Gateway", "Default gateway", Frequency.configuration),
+    make_element_template!("dns_primary", null, "Primary DNS Server", "Primary DNS server address", Frequency.configuration),
+    make_element_template!("dns_secondary", null, "Secondary DNS Server", "Secondary DNS server address", Frequency.configuration),
+    make_element_template!("hostname", null, "Hostname", "Device hostname", Frequency.configuration),
 ];
 
 __gshared immutable KnownElementTemplate[] g_WifiConfig_elements = [
-    MakeElementTemplate!("ssid", null, "SSID", "Target network SSID", Frequency.configuration),
-    MakeElementTemplate!("password", null, "Password", "Wi-Fi password/key", Frequency.configuration),
-    MakeElementTemplate!("security", null, "Security Mode", "Wi-Fi security mode", Frequency.configuration),
-    MakeElementTemplate!("dhcp_enabled", "Boolean", "DHCP Enabled", "DHCP enable/disable", Frequency.configuration),
-    MakeElementTemplate!("ip_address", null, "IP Address", "Static IPv4 address", Frequency.configuration),
-    MakeElementTemplate!("gateway", null, "Default Gateway", "Default gateway", Frequency.configuration),
+    make_element_template!("ssid", null, "SSID", "Target network SSID", Frequency.configuration),
+    make_element_template!("password", null, "Password", "Wi-Fi password/key", Frequency.configuration),
+    make_element_template!("security", null, "Security Mode", "Wi-Fi security mode", Frequency.configuration),
+    make_element_template!("dhcp_enabled", "Boolean", "DHCP Enabled", "DHCP enable/disable", Frequency.configuration),
+    make_element_template!("ip_address", null, "IP Address", "Static IPv4 address", Frequency.configuration),
+    make_element_template!("gateway", null, "Default Gateway", "Default gateway", Frequency.configuration),
 ];
 
 __gshared immutable KnownElementTemplate[] g_CellularConfig_elements = [
-    MakeElementTemplate!("apn", null, "APN", "Access point name", Frequency.configuration),
-    MakeElementTemplate!("username", null, "Username", "APN username", Frequency.configuration),
-    MakeElementTemplate!("password", null, "Password", "APN password", Frequency.configuration),
-    MakeElementTemplate!("pin", null, "SIM PIN", "SIM PIN code", Frequency.configuration),
+    make_element_template!("apn", null, "APN", "Access point name", Frequency.configuration),
+    make_element_template!("username", null, "Username", "APN username", Frequency.configuration),
+    make_element_template!("password", null, "Password", "APN password", Frequency.configuration),
+    make_element_template!("pin", null, "SIM PIN", "SIM PIN code", Frequency.configuration),
 ];
 
 __gshared immutable KnownElementTemplate[] g_ZigbeeConfig_elements = [
