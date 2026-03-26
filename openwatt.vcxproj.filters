@@ -58,6 +58,9 @@
     <Filter Include="src\protocol">
       <UniqueIdentifier>{e3d26653-740a-4de4-ad46-6df4e33023d0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\ble">
+      <UniqueIdentifier>{3d705481-44da-494c-bd80-6311f071aebc}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\protocol\can">
       <UniqueIdentifier>{9922e1c0-3780-4a00-9212-478d66443f98}</UniqueIdentifier>
     </Filter>
@@ -228,6 +231,9 @@
     <DCompile Include="src\manager\secret.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\manager\thread.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
     <DCompile Include="src\manager\value.d">
       <Filter>src\manager</Filter>
     </DCompile>
@@ -284,6 +290,21 @@
     </DCompile>
     <DCompile Include="src\router\port\package.d">
       <Filter>src\router\port</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ble\client.d">
+      <Filter>src\protocol\ble</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ble\device.d">
+      <Filter>src\protocol\ble</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ble\iface.d">
+      <Filter>src\protocol\ble</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ble\package.d">
+      <Filter>src\protocol\ble</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ble\winrt.d">
+      <Filter>src\protocol\ble</Filter>
     </DCompile>
     <DCompile Include="src\protocol\can\package.d">
       <Filter>src\protocol\can</Filter>
