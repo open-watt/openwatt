@@ -42,6 +42,7 @@ nothrow @nogc:
     String id;
     String name;
     String template_;
+    Component parent;
 
     Array!(Component) components;
     Array!(Element*) elements;
@@ -57,6 +58,7 @@ nothrow @nogc:
                 return;
             }
         }
+        component.parent = this;
         components.pushBack(component);
     }
 
@@ -105,6 +107,7 @@ nothrow @nogc:
             }
 
             Component c = g_app.allocator.allocT!Component(id.makeString(defaultAllocator()));
+            c.parent = this;
             components ~= c;
             return c.find_or_create_element(name);
         }
@@ -116,8 +119,10 @@ nothrow @nogc:
         }
 
         Element* e = g_app.allocator.allocT!Element();
+        e.parent = this;
         elements ~= e;
         e.id = id.makeString(defaultAllocator());
+        g_app.notify_element_created(e);
         return e;
     }
 
@@ -136,6 +141,21 @@ nothrow @nogc:
             if (c.template_[] == template_name[])
                 result ~= c;
         return result;
+    }
+
+    ptrdiff_t full_path(char[] buf) const nothrow @nogc
+    {
+        size_t pos;
+        if (parent)
+        {
+            pos = parent.full_path(buf);
+            if (pos < buf.length)
+                buf[pos] = '.';
+            ++pos;
+        }
+        if (pos + id.length <= buf.length)
+            buf[pos .. pos + id.length] = id[];
+        return pos + id.length;
     }
 
     import urt.string.format;

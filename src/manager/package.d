@@ -9,6 +9,7 @@ import urt.meta.enuminfo : VoidEnumInfo;
 import urt.si.quantity;
 import urt.si.unit;
 import urt.string;
+import urt.time;
 import urt.traits : is_enum, Unqual;
 import urt.variant;
 
@@ -36,6 +37,91 @@ enum AuthResult : ubyte
 alias AuthCallback = void delegate(AuthResult result, const(char)[] profile) nothrow @nogc;
 
 alias IntrinsicFunction = Variant function(Variant[] args) nothrow @nogc;
+
+struct ElementLink
+{
+nothrow @nogc:
+
+    bool resolved() const pure
+        => !a.dangling && a.elem !is null && !b.dangling && b.elem !is null;
+
+    void resolve()
+    {
+        a.elem.add_subscriber(&element_updated);
+        b.elem.add_subscriber(&element_updated);
+        if (a.elem.last_update > b.elem.last_update)
+            b.elem.value(a.elem.latest, a.elem.last_update);
+        else if (b.elem.last_update > a.elem.last_update)
+            a.elem.value(b.elem.latest, b.elem.last_update);
+    }
+
+    void unlink()
+    {
+        if (resolved)
+        {
+            a.elem.remove_subscriber(&element_updated);
+            b.elem.remove_subscriber(&element_updated);
+        }
+        a.release();
+        b.release();
+    }
+
+    void element_updated(ref Element changed, ref const Variant val, SysTime timestamp, ref const Variant, SysTime)
+    {
+        if (propagating)
+            return;
+        propagating = true;
+        Element* dest = (&changed is a.elem) ? b.elem : a.elem;
+        dest.value(val, timestamp);
+        propagating = false;
+    }
+
+private:
+    private struct Endpoint
+    {
+    nothrow @nogc:
+        union
+        {
+            Element* elem;
+            String _path;
+            size_t _ptr;
+        }
+
+        bool dangling() const pure
+            => (_ptr & 1) != 0;
+
+        void set_element(Element* e)
+        {
+            elem = e;
+        }
+
+        void set_path(String path)
+        {
+            _path = path;
+            assert((_ptr & 1) == 0);
+            _ptr |= 1;
+        }
+
+        String path() const pure
+        {
+            size_t p = _ptr ^ 1;
+            return *cast(String*)&p;
+        }
+
+        void release()
+        {
+            if (dangling)
+            {
+                _ptr ^= 1;
+                _path = null;
+            }
+        }
+    }
+
+    Endpoint a;
+    Endpoint b;
+    bool propagating;
+}
 
 __gshared Application g_app = null;
 
@@ -84,6 +170,7 @@ nothrow @nogc:
     uint update_rate_hz = 20;
 
     Collection!Secret secrets;
+    Array!(ElementLink*) links;
 
     Map!(String, RegisteredCollection) collections;
     Map!(String, const(VoidEnumInfo)*) enum_templates;
@@ -125,6 +212,8 @@ nothrow @nogc:
         console.register_command!sleep("/system", this);
 
         console.register_command!device_print("/device", this, "print");
+        console.register_command!link_add("/element/link", this, "add");
+        console.register_command!link_print("/element/link", this, "print");
 
         console.register_collection("/secret", secrets);
 
@@ -364,7 +453,113 @@ nothrow @nogc:
         }
 +/
     }
+
+    // element link API
+
+    ElementLink* create_link(Element* a, const(char)[] a_path, Element* b, const(char)[] b_path)
+    {
+        assert((a || a_path) && (b || b_path), "Must specify `a` and `b`");
+
+        ElementLink* link = allocator.allocT!ElementLink();
+
+        if (a)
+            link.a.set_element(a);
+        else
+            link.a.set_path(a_path.makeString(allocator));
+
+        if (b)
+            link.b.set_element(b);
+        else
+            link.b.set_path(b_path.makeString(allocator));
+
+        if (link.resolved)
+            link.resolve();
+
+        links ~= link;
+        return link;
+    }
+
+    void notify_element_created(Element* e)
+    {
+        char[256] buf = void;
+        ptrdiff_t len = e.full_path(buf);
+        if (len <= 0 || len > buf.length)
+            return;
+        const(char)[] path = buf[0 .. len];
+
+        foreach (link; links)
+        {
+            if (link.resolved)
+                continue;
+            if (link.a.dangling && link.a.path[] == path)
+            {
+                link.a.release();
+                link.a.set_element(e);
+            }
+            if (link.b.dangling && link.b.path[] == path)
+            {
+                link.b.release();
+                link.b.set_element(e);
+            }
+            if (link.resolved)
+                link.resolve();
+        }
+    }
+
+    void destroy_link(ElementLink* link)
+    {
+        link.unlink();
+        links.removeFirstSwapLast(link);
+        allocator.freeT(link);
+    }
+
+    // /element/link commands
+
+    void link_add(Session session, const(char)[] source, const(char)[] target)
+    {
+        Element* a = resolve_global_element(source);
+        Element* b = resolve_global_element(target);
+        create_link(a, source, b, target);
+    }
+
+    void link_print(Session session)
+    {
+        char[256] buf_a = void, buf_b = void;
+        foreach (link; links)
+        {
+            const(char)[] a, b;
+            if (link.a.dangling)
+                a = link.a.path[];
+            else
+            {
+                ptrdiff_t len = link.a.elem.full_path(buf_a);
+                a = buf_a[0 .. len];
+            }
+            if (link.b.dangling)
+                b = link.b.path[];
+            else
+            {
+                ptrdiff_t len = link.b.elem.full_path(buf_b);
+                b = buf_b[0 .. len];
+            }
+            const(char)[] status = link.resolved ? "linked" : "pending";
+            session.write_line(a, " <-> ", b, "  [", status, "]");
+        }
+    }
+
 }
+
+Element* resolve_global_element(const(char)[] path) nothrow @nogc
+{
+    const(char)[] rest = path;
+    const(char)[] device_id = rest.split!'.';
+    if (rest.empty)
+        return null;
+    if (Device* d = device_id in g_app.devices)
+        return (*d).find_element(rest);
+    return null;
+}
+
 
 
 private:
