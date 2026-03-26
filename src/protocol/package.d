@@ -1,6 +1,7 @@
 module protocol;
 
 // protocol packages
+public static import protocol.ble;
 public static import protocol.can;
 public static import protocol.dns;
 public static import protocol.esphome;

@@ -19,7 +19,9 @@ enum PacketType : ushort
     modbus,
     can,
     tesla_twc,
-    ash
+    ash,
+    ble_ll,
+    ble_att
 }
 
 enum EtherType : ushort
@@ -48,6 +50,8 @@ enum OW_SubType : ushort
     zigbee_nwk          = 0x0031,   // zigbee NWK frame
     zigbee_aps          = 0x0032,   // zigbee APS frame
     tesla_twc           = 0x0040,   // tesla-twc
+    ble_ll              = 0x0050,   // BLE Link Layer PDU
+    ble_att             = 0x0051,   // BLE ATT frame
 }
 
 // 802.1p PCP traffic classes
