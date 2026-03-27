@@ -57,6 +57,14 @@ enum StateSignal
 
 alias StateSignalHandler = void delegate(BaseObject object, StateSignal signal) nothrow @nogc;
 
+template Prop(string name, alias member, string category = null, string flags = null)
+{
+    enum n = name;
+    alias p = member;
+    enum c = category;
+    enum f = flags;
+}
+
 struct Property
 {
     alias GetFun = Variant function(BaseObject i) nothrow @nogc;
@@ -689,9 +697,38 @@ nothrow @nogc:
 
 const(Property*)[] all_properties(Type)()
 {
-    alias AllProps = all_properties_impl!(Type, 0);
-    enum Count = typeof(AllProps()).length;
-    __gshared const(Property*)[Count] props = AllProps();
+    static if (is(typeof(&Type.Properties) : Property[N]*, size_t N))
+    {
+        // old way
+        __gshared const props = all_properties_impl!(Type, 0)();
+    }
+    else
+    {
+        // new way
+        enum num_props = Type.Properties.length;
+
+        static if (is(Type S == super) && !is(S[0] == Object))
+            alias s_props = all_properties!(S[0]);
+        else
+            const(Property*)[0] s_props;
+
+        auto make_props()
+        {
+            assert(__ctfe);
+            Property[num_props] r;
+            static foreach (i; 0 .. num_props)
+                r[i] = Property.create!(Type.Properties[i].n, Type.Properties[i].p, Type.Properties[i].c, Type.Properties[i].f)();
+            return r;
+        }
+
+        __gshared const t_props = make_props();
+        __gshared const props = s_props ~ () {
+            const(Property)*[num_props] r;
+            static foreach (i; 0 .. num_props)
+                r[i] = &t_props[i];
+            return r;
+        }();
+    }
     return props[];
 }
 

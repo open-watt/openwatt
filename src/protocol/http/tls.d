@@ -41,11 +41,11 @@ nothrow @nogc:
 
 class TLSStream : Stream
 {
-    __gshared Property[5] Properties = [ Property.create!("stream", stream)(),
-                                         Property.create!("remote", remote)(),
-                                         Property.create!("keepalive", keepalive)(),
-                                         Property.create!("certificate", certificate)(),
-                                         Property.create!("certificates", certificates)() ];
+    alias Properties = AliasSeq!(Prop!("stream", stream),
+                                 Prop!("remote", remote),
+                                 Prop!("keepalive", keepalive),
+                                 Prop!("certificate", certificate),
+                                 Prop!("certificates", certificates));
 nothrow @nogc:
 
     enum type_name = "tls";
@@ -93,7 +93,7 @@ nothrow @nogc:
             tcp.keepalive = value;
     }
 
-    void certificate(BaseObject value)
+    void certificate(Certificate value)
     {
         _certificates.clear();
         if (value)
@@ -101,7 +101,7 @@ nothrow @nogc:
         restart();
     }
 
-    void certificates(BaseObject[] value...)
+    void certificates(Certificate[] value...)
     {
         _certificates.clear();
         _certificates.reserve(value.length);
@@ -587,7 +587,7 @@ private:
     bool _keep_enable = false;
     bool _close_notify = false;
 
-    Array!(ObjectRef!BaseObject) _certificates;
+    Array!(ObjectRef!Certificate) _certificates;
     BaseObject _selected_cert;
     ObjectRef!Stream _stream;
     Array!ubyte _receive_buffer;
@@ -599,10 +599,8 @@ private:
         _app_buffer ~= cast(const(ubyte)[])message;
     }
 
-    BaseObject select_certificate()
+    Certificate select_certificate()
     {
-        import manager.certificate : Certificate;
-
         const(char)[] sni = extract_sni_hostname(_receive_buffer[]);
 
         if (sni.length > 0)
@@ -993,13 +991,13 @@ protected:
 
 package:
 
-    void set_certificate_array(const(ObjectRef!BaseObject)[] certs)
+    void set_certificate_array(ObjectRef!Certificate[] certs)
     {
         _certificates.clear();
         _certificates.reserve(certs.length);
         foreach (ref c; certs)
             if (c)
-                _certificates.emplaceBack(cast(BaseObject)c.get());
+                _certificates.emplaceBack(c.get());
     }
 
 private:

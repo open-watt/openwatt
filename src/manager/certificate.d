@@ -50,15 +50,15 @@ enum CertStatus
 
 class Certificate : BaseObject
 {
-    __gshared Property[9] Properties = [ Property.create!("cert-type", cert_type)(),
-                                         Property.create!("domain", domain)(),
-                                         Property.create!("email", email)(),
-                                         Property.create!("certificate_file", certificate_file)(),
-                                         Property.create!("key_file", key_file)(),
-                                         Property.create!("http-server", http_server)(),
-                                         Property.create!("uri", uri)(),
-                                         Property.create!("cert-status", cert_status)(),
-                                         Property.create!("expiry", expiry)() ];
+    alias Properties = AliasSeq!(Prop!("cert-type", cert_type),
+                                 Prop!("domain", domain),
+                                 Prop!("email", email),
+                                 Prop!("certificate_file", certificate_file),
+                                 Prop!("key_file", key_file),
+                                 Prop!("http-server", http_server),
+                                 Prop!("uri", uri),
+                                 Prop!("cert-status", cert_status),
+                                 Prop!("expiry", expiry));
 nothrow @nogc:
 
     enum type_name = "certificate";

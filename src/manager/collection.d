@@ -136,11 +136,6 @@ struct BaseCollection
 nothrow @nogc:
     const CollectionTypeInfo* type_info;
 
-    this(const CollectionTypeInfo* type_info)
-    {
-        this.type_info = type_info;
-    }
-
     CID allocate_id(const(char)[] name)
         => item_table(type_info.collection_id).insert(name, type_info.collection_id, null);
 
@@ -304,7 +299,8 @@ struct Collection(Type)
 nothrow @nogc:
     static assert(is(Type : BaseObject), "Type must be a subclass of BaseObject");
 
-    BaseCollection _base = BaseCollection(collection_type_info!Type);
+    @property BaseCollection _base() const nothrow @nogc
+        => BaseCollection(collection_type_info!Type());
     alias _base this;
 
     Type create(const(char)[] name, ObjectFlags flags = ObjectFlags.none, in NamedArgument[] named_args...)

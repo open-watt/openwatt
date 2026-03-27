@@ -29,10 +29,10 @@ nothrow @nogc:
 
 class HTTPServer : BaseObject
 {
-    __gshared Property[4] Properties = [ Property.create!("port", port)(),
-                                         Property.create!("tls-port", tls_port)(),
-                                         Property.create!("certificates", certificates)(),
-                                         Property.create!("https-redirect", https_redirect)() ];
+    alias Properties = AliasSeq!(Prop!("port", port),
+                                 Prop!("tls-port", tls_port),
+                                 Prop!("certificates", certificates),
+                                 Prop!("https-redirect", https_redirect));
 nothrow @nogc:
 
     enum type_name = "http-server";
@@ -73,7 +73,7 @@ nothrow @nogc:
         return null;
     }
 
-    void certificates(BaseObject[] value)
+    void certificates(Certificate[] value)
     {
         if (_cert_subscribed)
         {
@@ -243,7 +243,7 @@ private:
 
     TCPServer _server;
     TCPServer _tls_server;
-    Array!(ObjectRef!BaseObject) _certificates;
+    Array!(ObjectRef!Certificate) _certificates;
     Array!Handler _handlers;
     Array!(Session*) _sessions;
 
