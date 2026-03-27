@@ -98,6 +98,7 @@
     <DCompile Include="src\protocol\ble\device.d" />
     <DCompile Include="src\protocol\ble\iface.d" />
     <DCompile Include="src\protocol\ble\package.d" />
+    <DCompile Include="src\protocol\ble\sampler.d" />
     <DCompile Include="src\protocol\ble\winrt.d" />
     <DCompile Include="src\protocol\can\package.d" />
     <DCompile Include="src\protocol\can\sampler.d" />
@@ -456,6 +457,7 @@
     <DCompile Include="third_party\urt\src\urt\time.d" />
     <DCompile Include="third_party\urt\src\urt\traits.d" />
     <DCompile Include="third_party\urt\src\urt\util.d" />
+    <DCompile Include="third_party\urt\src\urt\uuid.d" />
     <DCompile Include="third_party\urt\src\urt\variant.d" />
     <DCompile Include="third_party\urt\src\urt\zip.d" />
   </ItemGroup>
