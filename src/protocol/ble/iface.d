@@ -22,7 +22,7 @@ import protocol.ble.device : ADSection, ADType;
 version (Windows)
     import protocol.ble.winrt;
 
-import urt.internal.sys.windows.basetyps : GUID;
+import urt.uuid;
 
 version = DebugBLEInterface;
 version = SuppressAdvertisments;

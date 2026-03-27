@@ -329,6 +329,9 @@
     <DCompile Include="src\protocol\ble\package.d">
       <Filter>src\protocol\ble</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\ble\sampler.d">
+      <Filter>src\protocol\ble</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\ble\winrt.d">
       <Filter>src\protocol\ble</Filter>
     </DCompile>
@@ -1008,6 +1011,9 @@
       <Filter>third_party\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\util.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\uuid.d">
       <Filter>third_party\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\variant.d">

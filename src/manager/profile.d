@@ -13,6 +13,7 @@ import urt.string;
 import urt.string.format;
 
 import manager.component;
+import urt.uuid;
 import manager.config;
 import manager.device;
 import manager.element;
@@ -52,7 +53,8 @@ enum ElementType : ubyte
     zigbee,
     http,
     aa55,
-    mqtt
+    mqtt,
+    ble
 }
 
 enum SumType : ubyte
@@ -153,6 +155,14 @@ pure nothrow @nogc:
 
     const(char)[] get_write_topic(ref const(Profile) profile) const
         => write_topic.cache_string(profile.mqtt_strings);
+}
+
+struct ElementDesc_BLE
+{
+    GUID service_uuid;
+    GUID char_uuid;
+    ubyte offset;
+    ValueDesc value_desc;
 }
 
 struct ElementTemplate
@@ -340,6 +350,8 @@ nothrow @nogc:
             defaultAllocator().freeArray(aa55_elements);
         if(mqtt_elements)
             defaultAllocator().freeArray(mqtt_elements);
+        if(ble_elements)
+            defaultAllocator().freeArray(ble_elements);
     }
 
     inout(DeviceTemplate)* get_model_template(const(char)[] model) inout pure
@@ -441,6 +453,9 @@ nothrow @nogc:
     ref const(ElementDesc_MQTT) get_mqtt(size_t i) const pure
         => mqtt_elements[i];
 
+    ref const(ElementDesc_BLE) get_ble(size_t i) const pure
+        => ble_elements[i];
+
     auto get_mqtt_vars() const pure
         => StringRange(mqtt_strings, indirections[_mqtt_vars .. _mqtt_vars + _mqtt_var_count]);
 
@@ -508,6 +523,7 @@ private:
     ElementDesc_HTTP[] http_elements;
     ElementDesc_AA55[] aa55_elements;
     ElementDesc_MQTT[] mqtt_elements;
+    ElementDesc_BLE[] ble_elements;
     ushort[] indirections;
     char[] id_strings;
     char[] name_strings;
@@ -560,6 +576,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     size_t http_count = 0;
     size_t aa55_count = 0;
     size_t mqtt_count = 0;
+    size_t ble_count = 0;
 
     // we need to count the items and buffer lengths
     foreach (ref root_item; conf.sub_items) switch (root_item.name)
@@ -656,6 +673,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             break;
                         }
                         break;
+                    case "ble": ++ble_count; break;
                     default:
                         writeWarning("Unknown element type: ", reg_item.name);
                         break;
@@ -815,6 +833,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     profile.http_elements = allocator.allocArray!ElementDesc_HTTP(http_count);
     profile.aa55_elements = allocator.allocArray!ElementDesc_AA55(aa55_count);
     profile.mqtt_elements = allocator.allocArray!ElementDesc_MQTT(mqtt_count);
+    profile.ble_elements = allocator.allocArray!ElementDesc_BLE(ble_count);
 
     StringCacheBuilder id_cache, name_cache, lookup_cache, expr_cache, desc_cache, mqtt_string_cache;
     if (profile.name_strings)
@@ -1195,6 +1214,57 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             else
                                 e.access = Access.write;
                         }
+                        break;
+
+                    case "ble":
+                        const(char)[] tail = reg_item.value;
+                        tail = tail.split_element_and_desc();
+
+                        const(char)[] service = tail.split!',';
+                        const(char)[] char_field = tail.split!',';
+                        const(char)[] char_uuid_str = char_field.split!'(';
+                        const(char)[] type = tail.split!','.unQuote;
+                        const(char)[] units = tail.split!','.unQuote;
+
+                        e._element_index = cast(ushort)((ElementType.ble << 13) | ble_count);
+                        ref ElementDesc_BLE ble = profile.ble_elements[ble_count++];
+
+                        if (!parse_ble_uuid(service, ble.service_uuid))
+                        {
+                            writeWarning("Invalid BLE service UUID: ", service);
+                            break;
+                        }
+
+                        if (!parse_ble_uuid(char_uuid_str, ble.char_uuid))
+                        {
+                            writeWarning("Invalid BLE characteristic UUID: ", char_uuid_str);
+                            break;
+                        }
+
+                        if (char_field.length > 0)
+                        {
+                            if (char_field[$-1] != ')')
+                            {
+                                writeWarning("Invalid BLE characteristic offset: ", char_field);
+                                break;
+                            }
+                            char_field = char_field[0 .. $-1].trimBack;
+                            size_t taken;
+                            ulong ti = char_field.parse_uint_with_base(&taken);
+                            if (taken != char_field.length || ti >= 256)
+                            {
+                                writeWarning("Invalid BLE characteristic offset: ", char_field);
+                                break;
+                            }
+                            ble.offset = cast(ubyte)ti;
+                        }
+                        else
+                            ble.offset = 0;
+
+                        DataType ty = type.split!('/', false).parse_data_type(DataType.little_endian);
+                        e.access = type.parse_access();
+
+                        parse_value_desc(ble.value_desc, ty, units);
                         break;
 
                     default:
@@ -1602,16 +1672,16 @@ const(KnownElementTemplate)* find_known_element(const(char)[] template_, const(c
 
 private:
 
-size_t cache_len(size_t str_len) pure nothrow @nogc
+size_t cache_len(size_t str_len) pure
     => str_len ? 2 + str_len + (str_len & 1) : 0;
 
-inout(char)[] cache_string(ushort offset, inout(char)[] cache) pure nothrow @nogc
+inout(char)[] cache_string(ushort offset, inout(char)[] cache) pure
     => offset ? as_dstring(cache.ptr + offset) : null;
 
-int lookup_cmp(ref const Profile.Lookup a, ref const Profile.Lookup b) pure nothrow @nogc
+int lookup_cmp(ref const Profile.Lookup a, ref const Profile.Lookup b) pure
     => a.hash - b.hash;
 
-const(char)[] split_element_and_desc(ref const(char)[] line)
+const(char)[] split_element_and_desc(ref const(char)[] line) pure
 {
     import urt.util : swap;
 
@@ -1629,7 +1699,7 @@ const(char)[] split_element_and_desc(ref const(char)[] line)
     return element;
 }
 
-Access parse_access(ref const(char)[] access)
+Access parse_access(ref const(char)[] access) pure
 {
     if (access.length > 0)
     {
@@ -1642,6 +1712,30 @@ Access parse_access(ref const(char)[] access)
             return Access.write;
     }
     return Access.read;
+}
+
+bool parse_ble_uuid(const(char)[] str, out GUID guid) pure
+{
+    // full GUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    if (guid.fromString(str) == 36)
+        return str.length == 36;
+
+    // short GUID (2 or 4 hex bytes): embed in BLE base GUID
+    // strip optional 0x prefix
+    const(char)[] hex = str;
+    if (hex.length >= 2 && hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X'))
+        hex = hex[2 .. $];
+
+    size_t taken;
+    ulong val = parse_uint_with_base(hex, &taken);
+    if ((taken != 4 && taken != 8) || taken != hex.length)
+        return false;
+
+    guid.data1 = cast(uint)val;
+    guid.data2 = 0x0000;
+    guid.data3 = 0x1000;
+    guid.data4 = [0x80, 0x00, 0x00, 0x80, 0x5F, 0x9B, 0x34, 0xFB];
+    return true;
 }
 
 template MakeElementTemplate(string id, string units, string name, string desc, Frequency update_frequency)
