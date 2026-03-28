@@ -1,6 +1,7 @@
 module manager.console.table;
 
 import urt.array;
+import urt.string.ansi : visible_width, visible_slice;
 import urt.variant;
 
 import manager.console.session : Session;
@@ -14,6 +15,7 @@ nothrow @nogc:
 
     enum TextAlign : ubyte { left, right }
     enum gap = 2;
+    enum max_cols = 32;
 
     void add_column(const(char)[] header, TextAlign alignment = TextAlign.left)
     {
@@ -30,6 +32,15 @@ nothrow @nogc:
     {
         _text_buf ~= text;
         _cell_ends ~= cast(uint)_text_buf.length;
+        _cell_spans ~= cast(ubyte)1;
+    }
+
+    // span=0 means "rest of row"
+    void cell_span(const(char)[] text, ubyte span = 0)
+    {
+        _text_buf ~= text;
+        _cell_ends ~= cast(uint)_text_buf.length;
+        _cell_spans ~= span;
     }
 
     void cell(ref const Variant value)
@@ -37,6 +48,7 @@ nothrow @nogc:
         if (value.isNull)
         {
             _cell_ends ~= cast(uint)_text_buf.length;
+            _cell_spans ~= cast(ubyte)1;
             return;
         }
 
@@ -47,6 +59,7 @@ nothrow @nogc:
             {
                 _text_buf ~= name;
                 _cell_ends ~= cast(uint)_text_buf.length;
+                _cell_spans ~= cast(ubyte)1;
                 return;
             }
         }
@@ -54,12 +67,12 @@ nothrow @nogc:
         ptrdiff_t len;
         if (value.isArray || value.isObject)
         {
-            // HACK: use json formatter, but I think we want to expand arrays into plain comma separated lists?
             import urt.format.json : write_json;
             len = write_json(value, null, true);
             if (len <= 0)
             {
                 _cell_ends ~= cast(uint)_text_buf.length;
+                _cell_spans ~= cast(ubyte)1;
                 return;
             }
             auto buf = _text_buf.extend!false(len);
@@ -71,12 +84,14 @@ nothrow @nogc:
             if (len <= 0)
             {
                 _cell_ends ~= cast(uint)_text_buf.length;
+                _cell_spans ~= cast(ubyte)1;
                 return;
             }
             auto buf = _text_buf.extend!false(len);
             value.toString(buf, null, null);
         }
         _cell_ends ~= cast(uint)_text_buf.length;
+        _cell_spans ~= cast(ubyte)1;
     }
 
     void render(Session session)
@@ -90,36 +105,119 @@ nothrow @nogc:
         enum max_cols = 32;
         assert(num_cols <= max_cols);
 
+        size_t[max_cols] alloc = void;
+        compute_column_widths(session, alloc[0 .. num_cols]);
+
+        write_row(session, alloc[0 .. num_cols], uint.max);
+        foreach (row; 0 .. _num_rows)
+            write_row(session, alloc[0 .. num_cols], row);
+    }
+
+    // render a viewport: header + rows[offset .. offset+viewport_h]
+    // sticky_widths: if non-null, column widths only grow (never shrink between frames)
+    void render_viewport(Session session, uint offset, uint viewport_h, size_t[] sticky_widths = null)
+    {
+        immutable num_cols = _columns.length;
+        if (num_cols == 0 || session is null)
+            return;
+
+        pad_incomplete_row();
+
+        enum max_cols = 32;
+        assert(num_cols <= max_cols);
+
+        size_t[max_cols] alloc = void;
+        compute_column_widths(session, alloc[0 .. num_cols]);
+
+        if (sticky_widths.length >= num_cols)
+        {
+            foreach (col; 0 .. num_cols)
+            {
+                if (alloc[col] < sticky_widths[col])
+                    alloc[col] = sticky_widths[col];
+                sticky_widths[col] = alloc[col];
+            }
+        }
+
+        write_row(session, alloc[0 .. num_cols], uint.max);
+
+        uint end = offset + viewport_h;
+        if (end > _num_rows)
+            end = _num_rows;
+        foreach (row; offset .. end)
+        {
+            session.write_output("\x1b[2K", false);
+            write_row(session, alloc[0 .. num_cols], row);
+        }
+    }
+
+    void clear()
+    {
+        _columns.clear();
+        _text_buf.clear();
+        _cell_ends.clear();
+        _cell_spans.clear();
+        _num_rows = 0;
+    }
+
+private:
+
+    struct ColumnDef
+    {
+        const(char)[] header;
+        TextAlign alignment;
+    }
+
+    Array!ColumnDef _columns;
+    Array!char _text_buf;
+    Array!uint _cell_ends;
+    Array!ubyte _cell_spans;
+    uint _num_rows;
+
+    void compute_column_widths(Session session, size_t[] alloc)
+    {
+        immutable num_cols = _columns.length;
+        enum max_cols = 32;
+
         size_t[max_cols] natural = void;
         size_t[max_cols] col_total = void;
         size_t[max_cols] avg = void;
-        size_t[max_cols] alloc = void;
 
         foreach (col; 0 .. num_cols)
         {
-            natural[col] = _columns[col].header.length;
+            natural[col] = visible_width(_columns[col].header);
             col_total[col] = 0;
         }
         foreach (row; 0 .. _num_rows)
         {
-            foreach (col; 0 .. num_cols)
+            uint col = 0;
+            while (col < num_cols)
             {
-                size_t cell_len = get_cell_text(row, cast(uint)col).length;
-                if (cell_len > natural[col])
-                    natural[col] = cell_len;
-                col_total[col] += cell_len;
+                uint idx = row * cast(uint)num_cols + col;
+                ubyte span = _cell_spans[idx];
+                if (span == 1)
+                {
+                    size_t cell_w = visible_width(get_cell_text(row, col));
+                    if (cell_w > natural[col])
+                        natural[col] = cell_w;
+                    col_total[col] += cell_w;
+                    ++col;
+                }
+                else
+                {
+                    uint skip = (span == 0) ? cast(uint)num_cols - col : span;
+                    col += skip;
+                }
             }
         }
         foreach (col; 0 .. num_cols)
         {
-            // compute average widths (should this be median? biased?)
             if (_num_rows > 0)
                 avg[col] = (col_total[col] + _num_rows - 1) / _num_rows;
             else
                 avg[col] = 0;
         }
 
-        // figure the actual column widths
         foreach (col; 0 .. num_cols)
             alloc[col] = natural[col];
         immutable size_t gap_total = (num_cols > 1) ? (num_cols - 1) * gap : 0;
@@ -133,13 +231,12 @@ nothrow @nogc:
         {
             size_t excess = content_width - term_width;
 
-            // phase 1: shrink flexible columns (high variance: max - avg > 2)
             size_t flex_shrinkable = 0;
             foreach (col; 0 .. num_cols)
             {
                 if (natural[col] > avg[col] + 2)
                 {
-                    size_t floor = _columns[col].header.length;
+                    size_t floor = visible_width(_columns[col].header);
                     if (avg[col] > floor)
                         floor = avg[col];
                     if (alloc[col] > floor)
@@ -158,7 +255,7 @@ nothrow @nogc:
                 {
                     if (natural[col] > avg[col] + 2)
                     {
-                        size_t floor = _columns[col].header.length;
+                        size_t floor = visible_width(_columns[col].header);
                         if (avg[col] > floor)
                             floor = avg[col];
                         if (alloc[col] > floor)
@@ -171,7 +268,6 @@ nothrow @nogc:
                     }
                 }
 
-                // distribute integer division remainder
                 size_t remainder = to_shrink - shrunk;
                 foreach (col; 0 .. num_cols)
                 {
@@ -179,7 +275,7 @@ nothrow @nogc:
                         break;
                     if (natural[col] > avg[col] + 2)
                     {
-                        size_t floor = _columns[col].header.length;
+                        size_t floor = visible_width(_columns[col].header);
                         if (avg[col] > floor)
                             floor = avg[col];
                         if (alloc[col] > floor)
@@ -193,13 +289,12 @@ nothrow @nogc:
                 excess -= to_shrink;
             }
 
-            // phase 2: if still too wide, shrink all columns proportionally
             if (excess > 0)
             {
                 size_t total_shrinkable = 0;
                 foreach (col; 0 .. num_cols)
                 {
-                    size_t floor = _columns[col].header.length;
+                    size_t floor = visible_width(_columns[col].header);
                     if (floor == 0)
                         floor = 1;
                     if (alloc[col] > floor)
@@ -215,7 +310,7 @@ nothrow @nogc:
                     size_t shrunk = 0;
                     foreach (col; 0 .. num_cols)
                     {
-                        size_t floor = _columns[col].header.length;
+                        size_t floor = visible_width(_columns[col].header);
                         if (floor == 0)
                             floor = 1;
                         if (alloc[col] > floor)
@@ -232,7 +327,7 @@ nothrow @nogc:
                     {
                         if (remainder == 0)
                             break;
-                        size_t floor = _columns[col].header.length;
+                        size_t floor = visible_width(_columns[col].header);
                         if (floor == 0)
                             floor = 1;
                         if (alloc[col] > floor)
@@ -245,31 +340,32 @@ nothrow @nogc:
             }
         }
 
-        write_row(session, alloc[0 .. num_cols], uint.max);
-        foreach (row; 0 .. _num_rows)
-            write_row(session, alloc[0 .. num_cols], row);
+        // Final safety clamp: ensure total never exceeds terminal width
+        content_width = gap_total;
+        foreach (col; 0 .. num_cols)
+            content_width += alloc[col];
+        while (content_width > term_width)
+        {
+            // Remove 1 char from the widest column that's above floor
+            size_t widest = 0;
+            size_t widest_col = num_cols;
+            foreach (col; 0 .. num_cols)
+            {
+                size_t floor = visible_width(_columns[col].header);
+                if (floor == 0)
+                    floor = 1;
+                if (alloc[col] > floor && alloc[col] > widest)
+                {
+                    widest = alloc[col];
+                    widest_col = col;
+                }
+            }
+            if (widest_col >= num_cols)
+                break;
+            --alloc[widest_col];
+            --content_width;
+        }
     }
-
-    void clear()
-    {
-        _columns.clear();
-        _text_buf.clear();
-        _cell_ends.clear();
-        _num_rows = 0;
-    }
-
-private:
-
-    struct ColumnDef
-    {
-        const(char)[] header;
-        TextAlign alignment;
-    }
-
-    Array!ColumnDef _columns;
-    Array!char _text_buf;
-    Array!uint _cell_ends;
-    uint _num_rows;
 
     const(char)[] get_cell_text(uint row, uint col)
     {
@@ -285,7 +381,10 @@ private:
             return;
         size_t expected = _num_rows * _columns.length;
         while (_cell_ends.length < expected)
+        {
             _cell_ends ~= cast(uint)_text_buf.length;
+            _cell_spans ~= cast(ubyte)1;
+        }
     }
 
     void write_row(Session session, const size_t[] widths, int row)
@@ -296,36 +395,51 @@ private:
         char[512] buf = void;
         size_t pos;
 
-        foreach (col; 0 .. num_cols)
+        uint col = 0;
+        while (col < num_cols)
         {
             const is_header = row < 0;
-            const is_last = (col == num_cols - 1);
-            const w = widths[col];
+
+            ubyte span = 1;
+            if (!is_header)
+            {
+                uint idx = row * cast(uint)num_cols + col;
+                span = _cell_spans[idx];
+            }
+
+            // Compute total width for this cell (including spanned columns + gaps)
+            uint span_cols = (span == 0) ? cast(uint)num_cols - col : span;
+            size_t w = 0;
+            foreach (c; col .. col + span_cols)
+                w += widths[c];
+            if (span_cols > 1)
+                w += (span_cols - 1) * gap;
+
+            const is_last = (col + span_cols >= num_cols);
 
             const(char)[] text;
             if (is_header)
                 text = _columns[col].header[];
             else
-                text = get_cell_text(row, cast(uint)col);
+                text = get_cell_text(row, col);
 
-            size_t text_len = text.length;
+            size_t vis_w = visible_width(text);
             bool truncated = false;
 
-            if (text_len > w)
+            // TODO: truncation with visible_width needs byte-level truncation
+            // that respects UTF-8/ANSI boundaries. For now, only truncate if
+            // the visible width exceeds the column width.
+            if (vis_w > w && w >= 3)
             {
-                if (w >= 3)
-                {
-                    text_len = w - 2;
-                    truncated = true;
-                }
-                else
-                    text_len = w;
-                text = text[0 .. text_len];
+                vis_w = w - 2;
+                truncated = true;
+                char[256] slice_buf = void;
+                text = text.visible_slice(slice_buf, 0, vis_w);
             }
 
-            size_t pad = (w > text_len + (truncated ? 2 : 0)) ? w - text_len - (truncated ? 2 : 0) : 0;
+            size_t pad = (w > vis_w + (truncated ? 2 : 0)) ? w - vis_w - (truncated ? 2 : 0) : 0;
 
-            TextAlign alignment = _columns[col].alignment;
+            TextAlign alignment = (span == 1) ? _columns[col].alignment : TextAlign.left;
 
             if (alignment == TextAlign.right)
             {
@@ -334,10 +448,10 @@ private:
             }
 
             if (is_header)
-                to_upper(text[0 .. text_len], buf[pos .. pos + text_len]);
+                to_upper(text, buf[pos .. pos + text.length]);
             else
-                buf[pos .. pos + text_len] = text[0 .. text_len];
-            pos += text_len;
+                buf[pos .. pos + text.length] = text;
+            pos += text.length;
             if (truncated)
                 buf[pos++] = '.', buf[pos++] = '.';
 
@@ -347,8 +461,12 @@ private:
                 buf[pos .. pos + trail] = ' ';
                 pos += trail;
             }
+
+            col += span_cols;
         }
 
+        buf[pos .. pos + 3] = "\x1b[K";
+        pos += 3;
         session.write_output(buf[0 .. pos], true);
     }
 }
