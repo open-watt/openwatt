@@ -100,6 +100,8 @@ template type_for(T, Extra...)
         enum type_for = "#iface";
     else static if (is(U == Stream))
         enum type_for = "#stream";
+    else static if (is(U == BaseObject))
+        enum type_for = "#object";
     else static if (is(U : BaseObject))
         enum type_for = "#" ~ U.type_name;
     else static if (is(U == struct))
@@ -513,8 +515,22 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     return null;
 }
 
+const(char[]) from_variant(ref const Variant v, out BaseObject r) nothrow @nogc
+{
+    const(char)[] n;
+    if (v.isUser!BaseObject)
+        n = v.asUser!BaseObject.name[];
+    else if (v.isString)
+        n = v.asString;
+    else
+        return "Invalid value";
+
+    r = g_app.find_object(n);
+    return r ? null : tconcat("Item does not exist: ", n);
+}
+
 const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
-    if (ValidUserType!(Unqual!T) && is(T : const BaseObject) && !is(T : const BaseInterface) && !is(T : const Stream))
+    if (ValidUserType!(Unqual!T) && is(T : const BaseObject) && !is(T : const BaseInterface) && !is(T : const Stream) && !is(Unqual!T == BaseObject))
 {
     const(char)[] n;
     if (v.isUser!T)

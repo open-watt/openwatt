@@ -183,6 +183,9 @@
     <DCompile Include="src\db\stream.d">
       <Filter>src\db</Filter>
     </DCompile>
+    <DCompile Include="src\manager\certificate.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
     <DCompile Include="src\manager\component.d">
       <Filter>src\manager</Filter>
     </DCompile>
@@ -603,6 +606,9 @@
     <DCompile Include="third_party\urt\src\urt\internal\lifetime.d">
       <Filter>third_party\urt\internal</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\mbedtls.d">
+      <Filter>third_party\urt\internal</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\os.c">
       <Filter>third_party\urt\internal</Filter>
     </DCompile>
@@ -616,6 +622,15 @@
       <Filter>third_party\urt\digest</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\crypto\chacha.d">
+      <Filter>third_party\urt\crypto</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\der.d">
+      <Filter>third_party\urt\crypto</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\pem.d">
+      <Filter>third_party\urt\crypto</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\pki.d">
       <Filter>third_party\urt\crypto</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\algorithm.d">
