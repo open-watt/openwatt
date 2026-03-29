@@ -69,6 +69,9 @@ void register_modules(Application app)
     register_module!(manager.cron)(app);
     register_module!(manager.certificate)(app);
 
+    import router.port;
+    registerModule!(router.port)(app);
+
     import router.stream;
     register_module!(router.stream)(app);
     register_module!(router.stream.bridge)(app);
