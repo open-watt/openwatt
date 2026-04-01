@@ -8,16 +8,19 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem.allocator;
+import urt.meta.nullable;
 import urt.string;
 import urt.string.format : tstring;
 import urt.time;
 
 import manager.collection;
 import manager.console;
+import manager.expression : NamedArgument;
 import manager.plugin;
 
 import protocol.http.client;
 import protocol.http.message;
+import protocol.http.sampler;
 import protocol.http.server;
 import protocol.http.tls;
 import protocol.http.websocket;
@@ -49,6 +52,7 @@ nothrow @nogc:
         g_app.console.register_collection("/protocol/websocket", websockets);
 
         g_app.console.register_command!request("/protocol/http", this);
+        g_app.console.register_command!device_add("/protocol/http/device", this, "add");
     }
 
     override void pre_update()
@@ -63,6 +67,77 @@ nothrow @nogc:
         servers.update_all();
         clients.update_all();
         ws_servers.update_all();
+    }
+
+    void device_add(Session session, const(char)[] id, HTTPClient client, const(char)[] profile, Nullable!(const(char)[]) name, Nullable!(const(char)[]) model, const(NamedArgument)[] named_args)
+    {
+        import manager;
+        import manager.device;
+        import manager.element;
+        import manager.profile;
+        import urt.file;
+        import urt.mem.temp;
+
+        void[] file = load_file(tconcat("conf/rest_profiles/", profile, ".conf"), g_app.allocator);
+        if (!file)
+        {
+            session.write_line("Failed to load profile '", profile, "'");
+            return;
+        }
+        scope(exit) g_app.allocator.free(file);
+
+        Profile* p = parse_profile(cast(char[])file, g_app.allocator);
+        if (!p)
+        {
+            session.write_line("Failed to parse profile '", profile, "'");
+            return;
+        }
+
+        // Resolve profile parameters from named args
+        const(char)[][32] names = void, values = void;
+        auto profile_params = p.get_parameters;
+        if (profile_params.length > names.length)
+        {
+            session.write_line("Too many parameters for profile '", profile, "'");
+            g_app.allocator.freeT(p);
+            return;
+        }
+
+        size_t n;
+        outer: foreach (ref param; profile_params)
+        {
+            names[n] = param;
+            foreach (ref arg; named_args)
+            {
+                if (arg.name == param)
+                {
+                    values[n++] = arg.value.asString();
+                    continue outer;
+                }
+            }
+            session.write_line("Missing required parameter '", param, "' for profile '", profile, "'");
+            g_app.allocator.freeT(p);
+            return;
+        }
+
+        HTTPSampler sampler = g_app.allocator.allocT!HTTPSampler(client, p);
+
+        Device device = create_device_from_profile(*p, model ? model.value : null, id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
+            if (desc.type != ElementType.http)
+                return;
+            ref const ElementDesc_HTTP http = p.get_http(desc.element);
+            sampler.add_element(e, desc, http, names[0 .. n], values[0 .. n]);
+        });
+
+        if (!device)
+        {
+            session.write_line("Failed to create device '", id, "'");
+            g_app.allocator.freeT(sampler);
+            g_app.allocator.freeT(p);
+            return;
+        }
+
+        device.samplers ~= sampler;
     }
 
     static class HTTPRequestState : CommandState
