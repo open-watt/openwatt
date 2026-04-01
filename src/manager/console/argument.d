@@ -125,32 +125,8 @@ Array!String suggest_completion(T : const Device)(const(char)[] argument_text)
     return completions;
 }
 
-Array!String suggest_completion(I)(const(char)[] argument_text)
-    if (!is(I == typeof(null)) && is(const I == const BaseInterface))
-{
-    Array!String completions;
-    foreach (ref name; get_module!InterfaceModule.interfaces.keys)
-    {
-        if (name[].startsWith(argument_text))
-            completions ~= name;
-    }
-    return completions;
-}
-
-Array!String suggest_completion(S)(const(char)[] argument_text)
-    if (!is(S == typeof(null)) && is(const S == const Stream))
-{
-    Array!String completions;
-    foreach (ref name; get_module!StreamModule.streams.keys)
-    {
-        if (name[].startsWith(argument_text))
-            completions ~= name;
-    }
-    return completions;
-}
-
 Array!String suggest_completion(T)(const(char)[] argument_text)
-    if (!is(T == typeof(null)) && is(T : const BaseObject) && !is(const T == const BaseInterface) && !is(const T == const Stream))
+    if (!is(T == typeof(null)) && is(T : const BaseObject))
 {
     import manager.collection : collection_for;
 

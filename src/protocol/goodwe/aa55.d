@@ -352,10 +352,11 @@ class AA55Client : BaseObject
 nothrow @nogc:
 
     enum type_name = "aa55";
+    enum collection_id = CollectionType.aa55;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!AA55Client, name.move, flags);
+        super(collection_type_info!AA55Client, id, flags);
     }
 
     // Properties

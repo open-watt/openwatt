@@ -97,9 +97,7 @@ template type_for(T, Extra...)
     else static if (is(U : Element))
         enum type_for = "elem";
     else static if (is(U == BaseInterface))
-        enum type_for = "#iface";
-    else static if (is(U == Stream))
-        enum type_for = "#stream";
+        enum type_for = "#iface"; // HACK: this is a legacy name; we should update it and update the web/android apps...
     else static if (is(U == BaseObject))
         enum type_for = "#object";
     else static if (is(U : BaseObject))
@@ -155,24 +153,8 @@ Variant to_variant(T)(ref ObjectRef!T v) nothrow @nogc
 //        return Variant(v.get);
 }
 
-Variant to_variant(Stream stream) nothrow @nogc
-{
-    // TODO: remove this case and allow base collection type to cover it?
-    if (!stream)
-        return Variant();
-    return Variant(stream.name[]);
-}
-
-Variant to_variant(BaseInterface iface) nothrow @nogc
-{
-    // TODO: remove this case and allow base collection type to cover it?
-    if (!iface)
-        return Variant();
-    return Variant(iface.name[]);
-}
-
 Variant to_variant(T)(T v) nothrow @nogc
-    if (is(T : const BaseObject) && !is(T : const BaseInterface) && !is(T : const Stream))
+    if (is(T : const BaseObject))
 {
     // we would like to store collection types in variant, but we need a few things
     // 1. variant typeinfo needs to know the hierarchy for asUser!BaseType
@@ -183,7 +165,7 @@ Variant to_variant(T)(T v) nothrow @nogc
 }
 
 Variant to_variant(T)(auto ref T v) nothrow @nogc
-    if (is(T == struct) && ValidUserType!(Unqual!T))
+    if (is(T == struct) && ValidUserType!(Unqual!T) && !is(T == ObjectRef!U, U))
     => Variant(forward!v);
 
 Variant to_variant(T)(ref T v) nothrow @nogc
@@ -530,7 +512,7 @@ const(char[]) from_variant(ref const Variant v, out BaseObject r) nothrow @nogc
 }
 
 const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
-    if (ValidUserType!(Unqual!T) && is(T : const BaseObject) && !is(T : const BaseInterface) && !is(T : const Stream) && !is(Unqual!T == BaseObject))
+    if (ValidUserType!(Unqual!T) && is(T : const BaseObject) && !is(Unqual!T == BaseObject))
 {
     const(char)[] n;
     if (v.isUser!T)
@@ -544,10 +526,19 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     Collection!Type* collection = collection_for!Type();
     assert(collection !is null, "No collection for " ~ Type.stringof);
 
-    T* item = collection.exists(n);
-    if (item is null)
+    r = collection.get(n);
+    if (r is null)
+    {
+        // check if name exists in aggregate but is wrong subtype
+        alias Aggregate = CollectionRoot!Type;
+        static if (!is(Aggregate == Type))
+        {
+            if (auto base = collection_for!Aggregate())
+                if (auto item = base.get(n))
+                    return tconcat("expected " ~ Type.type_name ~ ", but '", n, "' is a ", item.type[]);
+        }
         return tconcat("Item does not exist: ", n);
-    r = *item;
+    }
     return null;
 }
 
@@ -567,45 +558,4 @@ const(char[]) from_variant(ref const Variant v, out Device r) nothrow @nogc
     const(char)[] s = v.asString;
     r = g_app.find_device(s);
     return r ? null : tconcat("No device '", s, '\'');
-}
-
-const(char[]) from_variant(I)(ref const Variant v, out I r) nothrow @nogc
-    if (is(I : const BaseInterface))
-{
-    // TODO: parse as mac address...?
-    const(char)[] n;
-    if (v.isUser!BaseInterface)
-        n = v.asUser!BaseInterface.name[];
-    else if (v.isString)
-        n = v.asString;
-    else
-        return "Invalid interface value";
-    if (BaseInterface i = get_module!InterfaceModule.interfaces.get(n))
-    {
-        r = cast(I)i;
-        static if (!is(Unqual!I == BaseInterface))
-            if (!r)
-                return tconcat("Requires " ~ I.type_name ~ " interface, but ", i.name[], " is ", i.type[]);
-    }
-    return r ? null : tconcat("Interface does not exist: ", n);
-}
-
-const(char[]) from_variant(S)(ref const Variant v, out S r) nothrow @nogc
-    if (is(S : const Stream))
-{
-    const(char)[] n;
-    if (v.isUser!Stream)
-        n = v.asUser!Stream.name[];
-    else if (v.isString)
-        n = v.asString;
-    else
-        return "Invalid stream value";
-    if (Stream stream = get_module!StreamModule.streams.get(n))
-    {
-        r = cast(S)stream;
-        static if (!is(Unqual!S == Stream))
-            if (!r)
-                return tconcat("Requires " ~ S.type_name ~ " stream, but ", n, " is ", stream.type[]);
-    }
-    return r ? null : tconcat("Stream does not exist: ", n);
 }

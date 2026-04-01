@@ -48,7 +48,7 @@ int main(string[] args)
         }
         else version (Posix)
         {
-            import core.sys.posix.unistd : isatty, STDOUT_FILENO;
+            import urt.internal.sys.posix : isatty, STDOUT_FILENO;
             if (!isatty(STDOUT_FILENO))
             {
                 // piped - log to stderr
@@ -177,7 +177,7 @@ void stderr_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
     {} // TODO: redirect to UART
     else
     {
-        import urt.internal.stdc : fprintf, stderr;
-        fprintf(stderr, "%.*s\n", cast(int)line.length, line.ptr);
+        import urt.io;
+        writeln_err(line);
     }
 }

@@ -50,9 +50,9 @@ nothrow @nogc:
 
     enum type_name = "tls";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
-        super(collection_type_info!TLSStream, name.move, flags, options);
+        super(collection_type_info!TLSStream, id, flags, options);
     }
 
     // Properties...
@@ -112,8 +112,8 @@ nothrow @nogc:
 
     // API...
 
-    const(char)[] selected_cert_name() const pure
-        => _selected_cert ? _selected_cert.name[] : null;
+    String selected_cert_name() const pure
+        => _selected_cert ? _selected_cert.name : String();
 
     final override bool validate() const pure
     {
@@ -924,10 +924,11 @@ class TLSServer : TCPServer
                                          Property.create!("certificates", certificates)() ];
 nothrow @nogc:
     enum type_name = "tls-server";
+    enum collection_id = CollectionType.tls_server;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!TLSServer, name.move, flags);
+        super(collection_type_info!TLSServer, id, flags);
     }
 
     void certificate(BaseObject value)

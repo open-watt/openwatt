@@ -156,34 +156,18 @@ class BaseInterface : BaseObject
 nothrow @nogc:
 
     enum type_name = "interface";
+    enum collection_id = CollectionType.interface_;
 
     MACAddress mac;
     Map!(MACAddress, BaseInterface) macTable;
 
-    this(const CollectionTypeInfo* type_info, String name, ObjectFlags flags = ObjectFlags.none)
+    this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(type_info, name.move, flags);
-
-        assert(!get_module!InterfaceModule.interfaces.exists(this.name[]), "HOW DID THIS HAPPEN?");
-        get_module!InterfaceModule.interfaces.add(this);
+        super(type_info, id, flags);
 
         mac = generate_mac_address();
         add_address(mac, this);
     }
-
-    ~this()
-    {
-        get_module!InterfaceModule.interfaces.remove(this);
-    }
-
-    static const(char)[] validate_name(const(char)[] name)
-    {
-        import urt.mem.temp;
-        if (get_module!InterfaceModule.interfaces.exists(name))
-            return tconcat("Interface with name '", name[], "' already exists");
-        return null;
-    }
-
 
     // Properties...
 
@@ -533,21 +517,17 @@ nothrow @nogc:
     Collection!BaseInterface interfaces;
     Collection!VLANInterface vlan_interfaces;
 
-    override void init()
+    override void pre_init()
     {
         g_app.register_enum!ConnectionStatus();
         g_app.register_enum!LinkStatus();
 
-//        // HACK: BaseInterface collection is not a natural collection, so we'll init it here...
-//        ref Collection!BaseInterface* c = collection_for!BaseInterface();
-//        assert(c is null, "Collection has been registered before!");
-//        c = &interfaces;
-//
-//        g_app.register_collection(interfaces, "/interface");
-
         g_app.console.register_collection("/interface", interfaces);
+    }
+
+    override void init()
+    {
         g_app.console.register_collection("/interface/vlan", vlan_interfaces);
-//        g_app.console.register_command!print("/interface", this);
     }
 
     override void update()
@@ -559,7 +539,7 @@ nothrow @nogc:
     {
         if (name.empty)
             name = interfaces.generate_name(default_name_prefix);
-        else if (interfaces.exists(name))
+        else if (interfaces.get(name))
         {
             session.write_line("Interface '", name, " already exists");
             return String();
@@ -570,6 +550,7 @@ nothrow @nogc:
 
     import urt.meta.nullable;
 
+/+ // TODO: generic print does this now, but we need to improve generic print to show the right columns!!
     // /interface/print command
     void print(Session session, Nullable!bool stats)
     {
@@ -634,6 +615,7 @@ nothrow @nogc:
             }
         }
     }
++/
 }
 
 

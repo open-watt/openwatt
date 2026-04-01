@@ -33,9 +33,9 @@ nothrow @nogc:
 
     enum type_name = "ether";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        this(collection_type_info!EthernetInterface, name.move, flags);
+        this(collection_type_info!EthernetInterface, id, flags);
     }
 
     // Properties...
@@ -283,9 +283,9 @@ protected:
     }
 
 private:
-    this(const CollectionTypeInfo* typeInfo, String name, ObjectFlags flags = ObjectFlags.none)
+    this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(typeInfo, name.move, flags);
+        super(typeInfo, id, flags);
 
         // TODO: proper values?
 //        _mtu = 1500;
@@ -309,9 +309,9 @@ nothrow @nogc:
 
     enum type_name = "wifi";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!WiFiInterface, name.move, flags);
+        super(collection_type_info!WiFiInterface, id, flags);
     }
 
     // Properties...
@@ -354,6 +354,9 @@ nothrow @nogc:
                 return;
             }
             scope(exit) pcap_freealldevs(interfaces);
+
+            g_app.console.register_collection("/interface/ethernet", ethernet_interfaces);
+            g_app.console.register_collection("/interface/wifi", wifi_interfaces);
 
             int num_ether_interfaces = 0;
             int num_wifi_interfaces = 0;
@@ -405,9 +408,6 @@ nothrow @nogc:
                 // TODO: we need to set the MAC for the interface to the NIC MAC address...
             }
         }
-
-        g_app.console.register_collection("/interface/ethernet", ethernet_interfaces);
-        g_app.console.register_collection("/interface/wifi", wifi_interfaces);
     }
 
     override void update()

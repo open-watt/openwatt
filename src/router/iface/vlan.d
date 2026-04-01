@@ -20,9 +20,9 @@ nothrow @nogc:
 
     enum type_name = "vlan";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!VLANInterface, name.move, flags);
+        super(collection_type_info!VLANInterface, id, flags);
 
         // the super made a mac address, but we don't actually want one...
         remove_address(mac);

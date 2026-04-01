@@ -29,15 +29,14 @@ import protocol.zigbee.zdo;
 
 class ZigbeeCoordinator : ZigbeeRouter
 {
-    __gshared Property[2] Properties = [ Property.create!("interface", iface)(),
-                                         Property.create!("channel", channel)() ];
+    __gshared Property[1] Properties = [ Property.create!("channel", channel)() ];
 @nogc:
 
     enum type_name = "zb-coordinator";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
+    this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
     {
-        super(collection_type_info!ZigbeeCoordinator, name.move, flags);
+        super(collection_type_info!ZigbeeCoordinator, id, flags);
 
         get_module!ZigbeeProtocolModule.routers.add(this);
     }

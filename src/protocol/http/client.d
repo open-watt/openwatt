@@ -35,10 +35,11 @@ class HTTPClient : BaseObject
 nothrow @nogc:
 
     enum type_name = "http-client";
+    enum collection_id = CollectionType.http_client;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!HTTPClient, name.move, flags);
+        super(collection_type_info!HTTPClient, id, flags);
         parser = HTTPParser(&dispatch_message);
     }
 

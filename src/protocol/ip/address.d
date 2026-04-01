@@ -18,10 +18,11 @@ class IPAddress : BaseObject
 nothrow @nogc:
 
     enum type_name = "ip-address";
+    enum collection_id = CollectionType.ip_address;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!IPAddress, name.move, flags);
+        super(collection_type_info!IPAddress, id, flags);
     }
 
     // Properties

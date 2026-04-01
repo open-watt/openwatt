@@ -257,10 +257,11 @@ class PCAPServer : BaseObject
 nothrow @nogc:
 
     enum type_name = "pcap-server";
+    enum collection_id = CollectionType.pcap_server;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!PCAPServer, name.move, flags);
+        super(collection_type_info!PCAPServer, id, flags);
     }
 
     // Properties...

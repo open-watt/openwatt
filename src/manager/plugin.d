@@ -15,6 +15,10 @@ nothrow @nogc:
     String module_name;
     size_t module_id = -1;
 
+    void pre_init()
+    {
+    }
+
     void init()
     {
     }

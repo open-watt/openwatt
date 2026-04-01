@@ -22,10 +22,11 @@ class IPRoute : BaseObject
 nothrow @nogc:
 
     enum type_name = "ip-route";
+    enum collection_id = CollectionType.ip_route;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!IPRoute, name.move, flags);
+        super(collection_type_info!IPRoute, id, flags);
     }
 
     // Properties

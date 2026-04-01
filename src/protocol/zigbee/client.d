@@ -59,10 +59,11 @@ class ZigbeeNode : BaseObject
 @nogc:
 
     enum type_name = "zb-node";
+    enum collection_id = CollectionType.zigbee;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
+    this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
     {
-        this(collection_type_info!ZigbeeNode, name.move, flags);
+        this(collection_type_info!ZigbeeNode, id, flags);
     }
 
     // Properties...
@@ -547,9 +548,9 @@ protected:
     ushort _node_id = 0xFFFE;
     ubyte _seq = 8;
 
-    this(const(CollectionTypeInfo)* type_info, String name, ObjectFlags flags) nothrow
+    this(const(CollectionTypeInfo)* type_info, CID id, ObjectFlags flags) nothrow
     {
-        super(type_info, name.move, flags);
+        super(type_info, id, flags);
     }
 
     final inout(ZigbeeInterface) zigbee_iface() inout pure nothrow
@@ -869,7 +870,7 @@ private:
 
     static class YieldZB : AwakenEvent
     {
-        nothrow @nogc:
+    nothrow @nogc:
         Timer timeout;
         bool finished;
         override bool ready() { return finished || timeout.expired(); }
@@ -918,11 +919,12 @@ class ZigbeeEndpoint : BaseObject
                                          Property.create!("out-clusters", out_clusters)() ];
 @nogc:
 
+    enum collection_id = CollectionType.zb_endpoint;
     enum type_name = "zb-endpoint";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
+    this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
     {
-        super(collection_type_info!ZigbeeEndpoint, name.move, flags);
+        super(collection_type_info!ZigbeeEndpoint, id, flags);
     }
 
     ~this() nothrow

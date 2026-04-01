@@ -23,9 +23,9 @@ nothrow @nogc:
 
     enum type_name = "ppp";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!PPPClient, name.move, flags);
+        super(collection_type_info!PPPClient, id, flags);
 
         // Default protocol is PPP
         mtu = 1500;
@@ -188,9 +188,9 @@ nothrow @nogc:
 
     enum type_name = "pppoe";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!PPPoEClient, name.move, flags);
+        super(collection_type_info!PPPoEClient, id, flags);
 
         // Default protocol is PPPoE
         mtu = 1492; // TODO: what about 'baby jumbo' (RFC 4638) which supports 1500 inside pppoe?

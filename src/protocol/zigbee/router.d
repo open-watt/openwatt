@@ -30,9 +30,9 @@ nothrow @nogc:
 
     enum type_name = "zb-router";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        this(collection_type_info!ZigbeeRouter, name.move, flags);
+        super(collection_type_info!ZigbeeRouter, id, flags);
     }
 
     ~this()
@@ -79,9 +79,9 @@ protected:
     EUI64 _pan_eui = EUI64.broadcast;
     ushort _pan_id = 0xFFFF;
 
-    this(const(CollectionTypeInfo)* type_info, String name, ObjectFlags flags)
+    this(const(CollectionTypeInfo)* type_info, CID id, ObjectFlags flags)
     {
-        super(type_info, name.move, flags);
+        super(type_info, id, flags);
 
         get_module!ZigbeeProtocolModule.nodes.add(this);
     }

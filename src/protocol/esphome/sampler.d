@@ -31,7 +31,7 @@ nothrow @nogc:
 
 class ESPHomeSampler : Sampler
 {
-    nothrow @nogc:
+nothrow @nogc:
 
     this(Device device, ESPHomeClient client)
     {

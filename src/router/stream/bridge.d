@@ -23,9 +23,9 @@ nothrow @nogc:
 
     enum type_name = "bridge-stream";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
-        super(collection_type_info!BridgeStream, name.move, flags, options);
+        super(collection_type_info!BridgeStream, id, flags, options);
     }
 
     // Properties

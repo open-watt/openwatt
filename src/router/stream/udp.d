@@ -6,62 +6,114 @@ import urt.socket;
 import urt.string;
 import urt.string.format;
 
+import manager;
+import manager.collection;
 import manager.plugin;
 
 public import router.stream;
 
+nothrow @nogc:
+
 
 class UDPStream : Stream
 {
+    __gshared Property[4] Properties = [ Property.create!("local-host", local_host)(),
+                                         Property.create!("local-port", local_port)(),
+                                         Property.create!("remote-host", remote_host)(),
+                                         Property.create!("remote-port", remote_port)() ];
 nothrow @nogc:
 
     enum type_name = "udp";
 
-    this(String name, ushort remote_port, const char[] remote_host = "255.255.255.255", ushort local_port = 0, const char[] local_host = "0.0.0.0", StreamOptions options = StreamOptions.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(name.move, type_name, options);
+        super(collection_type_info!UDPStream, id, flags, StreamOptions.none);
+    }
 
-        // TODO: if remote_host is a broadcast address and options doesn't have `allow_broadcast`, make a warning...
+    // Properties
 
-        _local_host = local_host.makeString(defaultAllocator());
-        _local_port = local_port;
-        _remote_host = remote_host.makeString(defaultAllocator());
-        _remote_port = remote_port;
+    final ref const(String) local_host() const pure => _local_host;
+    final void local_host(String value)
+    {
+        if (value == _local_host)
+            return;
+        _local_host = value.move;
+        restart();
+    }
 
+    final ushort local_port() const pure => _local_port;
+    final void local_port(ushort value)
+    {
+        if (value == _local_port)
+            return;
+        _local_port = value;
+        restart();
+    }
+
+    final ref const(String) remote_host() const pure => _remote_host;
+    final void remote_host(String value)
+    {
+        if (value == _remote_host)
+            return;
+        _remote_host = value.move;
+        restart();
+    }
+
+    final ushort remote_port() const pure => _remote_port;
+    final void remote_port(ushort value)
+    {
+        if (value == _remote_port)
+            return;
+        _remote_port = value;
+        restart();
+    }
+
+protected:
+    override bool validate() const pure
+        => _remote_port != 0;
+
+    override CompletionStatus startup()
+    {
         AddressInfoResolver resolve;
-        Result r = local_host.get_address_info(tconcat(local_port), null, resolve);
-        assert(r, "What do we even do about fails like this?");
+        Result r = _local_host[].get_address_info(tconcat(_local_port), null, resolve);
+        if (!r) return CompletionStatus.error;
 
         AddressInfo addr;
         while (resolve.next_address(addr))
         {
             _local = addr.address;
-            break; // TODO: what do we even do with multiple addresses?
+            break;
         }
 
-        r = remote_host.get_address_info(tconcat(remote_port), null, resolve);
-        assert(r, "What do we even do about fails like this?");
+        r = _remote_host[].get_address_info(tconcat(_remote_port), null, resolve);
+        if (!r) return CompletionStatus.error;
 
         while (resolve.next_address(addr))
         {
             _remote = addr.address;
-            break; // TODO: what do we even do with multiple addresses?
+            break;
         }
 
         _status.link_status = LinkStatus.up;
+        return CompletionStatus.complete;
     }
 
-    override bool running() const pure
-        => status.link_status == LinkStatus.up;
+    override CompletionStatus shutdown()
+    {
+        if (_socket)
+        {
+            _socket.close();
+            _socket = Socket.init;
+        }
+        _status.link_status = LinkStatus.down;
+        return CompletionStatus.complete;
+    }
 
     override const(char)[] remote_name()
-    {
-        return _remote_host[];
-    }
+        => _remote_host[];
 
     override ptrdiff_t read(void[] buffer) nothrow @nogc
     {
-        // TODO: if a packet doesn't fill buffer, we should loop...
         size_t bytes;
         Result r = _socket.recvfrom(buffer, MsgFlags.none, null, &bytes);
         if (!r)
@@ -77,7 +129,6 @@ nothrow @nogc:
 
     override ptrdiff_t write(const(void[])[] data...) nothrow @nogc
     {
-        // TODO: fragment on MTU...?
         size_t bytes;
         Result r = _socket.sendto(&_remote, &bytes, data);
         if (!r)
@@ -101,10 +152,7 @@ nothrow @nogc:
         size_t bytes;
         Result r = _socket.recvfrom(msg_buffer, MsgFlags.none, &src_addr, &bytes);
         if (!r)
-        {
-            // TODO?
             assert(0);
-        }
         return bytes;
     }
 
@@ -113,40 +161,16 @@ nothrow @nogc:
         size_t sent;
         Result r = _socket.sendto(data, MsgFlags.none, &dest_addr, &sent);
         if (!r)
-        {
-            // TODO?
             assert(0);
-        }
         return sent;
     }
 
     override ptrdiff_t pending()
-    {
-//        if (!connected())
-//        {
-//            if (options & StreamOptions.KeepAlive)
-//            {
-//                connect();
-//                return 0;
-//            }
-//            else
-//                return -1;
-//        }
-//
-//        long r = socket.receive(null, SocketFlags.PEEK);
-//        if (r == 0 || r == Socket.ERROR)
-//        {
-//            socket.close();
-//            socket = null;
-//        }
-//        return cast(size_t) r;
-        return 0;
-    }
+        => 0;
 
     override ptrdiff_t flush()
     {
-        // TODO: read until can't read no more?
-        assert(0);
+        assert(0, "TODO");
     }
 
 private:
@@ -163,16 +187,17 @@ private:
 class UDPStreamModule : Module
 {
     mixin DeclareModule!"stream.udp";
+nothrow @nogc:
 
-//    Collection!UDPStream udp_streams;
-//
-//    override void init()
-//    {
-//        g_app.console.register_collection("/stream/udp-client", udp_streams);
-//    }
-//
-//    override void pre_update()
-//    {
-//        udp_streams.update_all();
-//    }
+    Collection!UDPStream udp_streams;
+
+    override void init()
+    {
+        g_app.console.register_collection("/stream/udp", udp_streams);
+    }
+
+    override void pre_update()
+    {
+        udp_streams.update_all();
+    }
 }

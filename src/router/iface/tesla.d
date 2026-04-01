@@ -39,9 +39,9 @@ nothrow @nogc:
 
     enum type_name = "tesla-twc";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!TeslaInterface, name.move, flags);
+        super(collection_type_info!TeslaInterface, id, flags);
     }
 
     // Properties...

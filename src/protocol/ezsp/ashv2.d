@@ -39,9 +39,9 @@ nothrow @nogc:
 
     enum type_name = "ash";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!ASHInterface, name.move, flags);
+        super(collection_type_info!ASHInterface, id, flags);
     }
 
     // Properties...

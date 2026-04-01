@@ -22,9 +22,8 @@ version (Windows)
 }
 else version(Posix)
 {
-    import core.sys.posix.termios;
-    import core.sys.posix.unistd;
-    import core.sys.posix.fcntl;
+    import urt.internal.sys.posix;
+    import urt.internal.sys.posix.termios;
 }
 else version (FreeStanding)
 {
@@ -722,7 +721,7 @@ nothrow @nogc:
 
 class ConsoleSession : Session
 {
-    nothrow @nogc:
+nothrow @nogc:
 
     this(ref Console console)
     {
@@ -960,9 +959,9 @@ class ConsoleSession : Session
         }
         else version(Posix)
         {
-            core.sys.posix.unistd.write(STDOUT_FILENO, text.ptr, text.length);
+            urt.internal.sys.posix.write(STDOUT_FILENO, text.ptr, text.length);
             if (newline)
-                core.sys.posix.unistd.write(STDOUT_FILENO, "\n".ptr, 1);
+                urt.internal.sys.posix.write(STDOUT_FILENO, "\n".ptr, 1);
         }
     }
 

@@ -26,11 +26,12 @@ class MQTTBroker : BaseObject
                                          Property.create!("client-timeout", _client_timeout)() ];
 nothrow @nogc:
 
-    enum type_name = "mqqt-broker";
+    enum type_name = "mqtt-broker";
+    enum collection_id = CollectionType.mqtt_broker;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!MQTTBroker, name.move, flags);
+        super(collection_type_info!MQTTBroker, id, flags);
     }
 
     // Properties...
