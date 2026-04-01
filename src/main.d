@@ -63,26 +63,49 @@ int main(string[] args)
     Session active_session = null;
     SimpleSession startup_session = null;
 
+    // System config: baked-in platform defaults that run before user config.
+    // String-imported at compile time (no filesystem on bare-metal targets).
+    version (BL808)
+        static immutable system_conf = import("system.conf");
+    else
+        enum system_conf = "";
+
     import urt.file : load_file;
     char[] conf = cast(char[])load_file(config_path);
-    if (!conf)
+
+    if (system_conf.length > 0 || conf !is null)
     {
-        import urt.string.format;
+        startup_session = defaultAllocator().allocT!SimpleSession(g_app.console);
+
+        // Feed system config first, then user config
+        static if (system_conf.length > 0)
+        {
+            if (conf !is null)
+            {
+                import urt.string.format : tconcat;
+                startup_session.set_input(tconcat(system_conf, "\n", conf));
+                defaultAllocator().free(conf);
+            }
+            else
+                startup_session.set_input(system_conf);
+        }
+        else
+        {
+            startup_session.set_input(conf);
+            defaultAllocator().free(conf);
+        }
+
+        active_session = startup_session;
+    }
+    else
+    {
         log_error("system", "Failed to load startup configuration file: ", config_path);
         if (!interactive_mode)
             return -1;
     }
-    else
-    {
-        startup_session = defaultAllocator().allocT!SimpleSession(g_app.console);
-        startup_session.set_input(conf);
-        active_session = startup_session;
-
-        defaultAllocator().free(conf);
-    }
 
     // stop the computer from sleeping while this application is running...
-    set_system_idle_params(IdleParams.SystemRequired);
+    set_system_idle_params(IdleParams.system_required);
 
     while (true)
     {
@@ -99,7 +122,18 @@ int main(string[] args)
                 defaultAllocator().freeT(startup_session);
                 startup_session = null;
 
-                if (interactive_mode)
+                version (BL808)
+                {
+                    // Bind a SerialSession to the "console" stream created by system.conf
+                    import manager : get_module;
+                    import router.stream : StreamModule;
+
+                    if (auto stream = get_module!StreamModule.streams.get("console"))
+                        active_session = defaultAllocator().allocT!SerialSession(g_app.console, stream, ClientFeatures.ansi);
+                    else
+                        log_error("system", "No 'console' stream — serial console unavailable");
+                }
+                else if (interactive_mode)
                     active_session = defaultAllocator().allocT!ConsoleSession(g_app.console);
                 else
                     active_session = null;
@@ -138,7 +172,12 @@ void default_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
 
 void stderr_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
 {
-    import urt.internal.stdc : fprintf, stderr;
     auto line = format_log_line(msg);
-    fprintf(stderr, "%.*s\n", cast(int)line.length, line.ptr);
+    version (FreeStanding)
+    {} // TODO: redirect to UART
+    else
+    {
+        import urt.internal.stdc : fprintf, stderr;
+        fprintf(stderr, "%.*s\n", cast(int)line.length, line.ptr);
+    }
 }

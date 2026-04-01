@@ -72,3 +72,33 @@ jobs:
         with:
           name: openwatt_${{ matrix.os }}_${{ matrix.arch }}
           path: ./bin/${{ matrix.arch }}_${{ matrix.os }}_release/openwatt
+
+  baremetal:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        platform: [bl808]
+        include:
+          - platform: bl808
+            toolchain: riscv64-unknown-elf
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+#      # Only fetch the uRT runtime (platforms/ is in-repo for now)
+#      - name: Fetch submodules
+#        run: git submodule update --init --depth 1 third_party/urt
+
+      - name: Setup LDC
+        uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ldc
+
+      - name: Install cross toolchain
+        run: sudo apt-get update && sudo apt-get install -y gcc-${{ matrix.toolchain }} picolibc-${{ matrix.toolchain }}
+
+      - name: Build
+        run: make PLATFORM=${{ matrix.platform }} CONFIG=release

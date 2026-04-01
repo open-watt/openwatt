@@ -121,6 +121,12 @@
     <Filter Include="third_party\std">
       <UniqueIdentifier>{3e8cc76a-0495-4334-982d-0dad03c153f7}</UniqueIdentifier>
     </Filter>
+    <Filter Include="third_party\sys">
+      <UniqueIdentifier>{1b209419-c85a-4668-9e21-0eed3a171624}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\sys\bl808">
+      <UniqueIdentifier>{feecb6a6-0ef0-45f9-93c1-6132c66b633c}</UniqueIdentifier>
+    </Filter>
     <Filter Include="third_party\urt">
       <UniqueIdentifier>{116edccd-0839-4b40-bea5-164a59529949}</UniqueIdentifier>
     </Filter>
@@ -519,6 +525,42 @@
     <DCompile Include="third_party\urt\src\std\math.d">
       <Filter>third_party\std</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bl808\crash.d">
+      <Filter>third_party\sys\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bl808\gpio.d">
+      <Filter>third_party\sys\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bl808\i2c.d">
+      <Filter>third_party\sys\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bl808\ipc.d">
+      <Filter>third_party\sys\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bl808\irq.d">
+      <Filter>third_party\sys\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bl808\package.d">
+      <Filter>third_party\sys\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bl808\spi.d">
+      <Filter>third_party\sys\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bl808\syscalls.d">
+      <Filter>third_party\sys\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bl808\timer.d">
+      <Filter>third_party\sys\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bl808\uart.d">
+      <Filter>third_party\sys\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bl808\wifi.d">
+      <Filter>third_party\sys\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bl808\xram.d">
+      <Filter>third_party\sys\bl808</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\string\ansi.d">
       <Filter>third_party\urt\string</Filter>
     </DCompile>
@@ -875,6 +917,9 @@
     <None Include="src\protocol\esphome\api.proto">
       <Filter>src\protocol\esphome</Filter>
     </None>
+    <None Include="third_party\urt\src\sys\bl808\start.S">
+      <Filter>third_party\sys\bl808</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="third_party\npcap-sdk-1.15\Include\npcap-bpf.h">
@@ -947,6 +992,9 @@
     </ClCompile>
     <ClCompile Include="third_party\urt\src\urt\internal\stdc.c">
       <Filter>third_party\urt\internal</Filter>
+    </ClCompile>
+    <ClCompile Include="third_party\urt\src\sys\bl808\hbn_ram.c">
+      <Filter>third_party\sys\bl808</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>
