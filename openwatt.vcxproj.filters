@@ -231,6 +231,9 @@
     <DCompile Include="src\manager\value.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\router\stream\console.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
     <DCompile Include="src\router\stream\package.d">
       <Filter>src\router\stream</Filter>
     </DCompile>
@@ -258,13 +261,13 @@
     <DCompile Include="src\manager\os\npcap.d">
       <Filter>src\manager\os</Filter>
     </DCompile>
+    <DCompile Include="src\manager\console\builtin_commands.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
     <DCompile Include="src\manager\console\command.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
     <DCompile Include="src\manager\console\package.d">
-      <Filter>src\manager\console</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\console\builtin_commands.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
     <DCompile Include="src\router\iface\bridge.d">
@@ -381,7 +384,7 @@
     <DCompile Include="src\protocol\telnet\server.d">
       <Filter>src\protocol\telnet</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\telnet\session.d">
+    <DCompile Include="src\protocol\telnet\stream.d">
       <Filter>src\protocol\telnet</Filter>
     </DCompile>
     <DCompile Include="src\manager\console\session.d">

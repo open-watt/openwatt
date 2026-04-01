@@ -9,7 +9,6 @@ import urt.time;
 
 import manager;
 import manager.console.command;
-import manager.console.function_command : FunctionCommandState;
 import manager.console.session;
 import manager.plugin;
 

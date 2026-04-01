@@ -65,7 +65,7 @@ nothrow @nogc:
         ws_servers.update_all();
     }
 
-    static class HTTPRequestState : FunctionCommandState
+    static class HTTPRequestState : CommandState
     {
     nothrow @nogc:
 
@@ -75,7 +75,7 @@ nothrow @nogc:
 
         this(Session session)
         {
-            super(session);
+            super(session, null);
         }
 
         ~this()

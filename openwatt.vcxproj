@@ -135,7 +135,7 @@
     <DCompile Include="src\protocol\snmp\package.d" />
     <DCompile Include="src\protocol\telnet\package.d" />
     <DCompile Include="src\protocol\telnet\server.d" />
-    <DCompile Include="src\protocol\telnet\session.d" />
+    <DCompile Include="src\protocol\telnet\stream.d" />
     <DCompile Include="src\protocol\tesla\master.d" />
     <DCompile Include="src\protocol\tesla\package.d" />
     <DCompile Include="src\protocol\tesla\sampler.d" />
@@ -162,6 +162,7 @@
     <DCompile Include="src\router\port\package.d" />
     <DCompile Include="src\router\status.d" />
     <DCompile Include="src\router\stream\bridge.d" />
+    <DCompile Include="src\router\stream\console.d" />
     <DCompile Include="src\router\stream\package.d" />
     <DCompile Include="src\router\stream\serial.d" />
     <DCompile Include="src\router\stream\tcp.d" />

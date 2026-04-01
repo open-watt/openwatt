@@ -9,7 +9,6 @@ import urt.string;
 import manager;
 import manager.collection;
 import manager.console.command;
-import manager.console.function_command : FunctionCommandState;
 import manager.console.session;
 import manager.plugin;
 
@@ -47,7 +46,7 @@ nothrow @nogc:
     }
 
 
-    static class DNSRequestState : FunctionCommandState
+    static class DNSRequestState : CommandState
     {
     nothrow @nogc:
 
@@ -55,7 +54,7 @@ nothrow @nogc:
 
         this(Session session)
         {
-            super(session);
+            super(session, null);
         }
 
         ~this()

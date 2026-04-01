@@ -62,7 +62,7 @@ nothrow @nogc:
 
     ~this()
     {
-        assert(false);
+        // TODO: proper cleanup
 //        for (dcConsoleSession* session : _sessions)
 //            _allocator.Delete(session);
 //
@@ -365,8 +365,6 @@ package:
     String _identifier;
     String _prompt;
 
-    Map!(String, Command) _commands;
-//    HashSet!Session _sessions;
     Array!Session _sessions;
 
     Console* _next_console_instance = null;

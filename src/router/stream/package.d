@@ -13,12 +13,14 @@ import urt.time;
 import manager.base;
 import manager.collection;
 import manager.console;
+import manager.console.session;
 import manager.plugin;
 
 public import router.status;
 
 // package modules...
 public static import router.stream.bridge;
+public static import router.stream.console;
 public static import router.stream.serial;
 public static import router.stream.tcp;
 public static import router.stream.udp;
@@ -122,6 +124,10 @@ nothrow @nogc:
 
     // Flush the receive buffer (return number of bytes destroyed)
     abstract ptrdiff_t flush();
+
+    // Optional terminal side-channel for streams that support terminal semantics
+    // (TelnetStream, ConsoleStream, etc.). Returns null for non-terminal streams.
+    TerminalChannel* terminal_channel() { return null; }
 
     void set_log_file(const(char)[] base_filename)
     {

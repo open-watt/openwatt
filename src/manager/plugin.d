@@ -76,6 +76,7 @@ void register_modules(Application app)
     import router.stream;
     register_module!(router.stream)(app);
     register_module!(router.stream.bridge)(app);
+    register_module!(router.stream.console)(app);
     register_module!(router.stream.serial)(app);
     register_module!(router.stream.tcp)(app);
     register_module!(router.stream.udp)(app);
