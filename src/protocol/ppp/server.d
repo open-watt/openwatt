@@ -18,11 +18,13 @@ class PPPServer : BaseInterface
     __gshared Property[2] Properties = [ Property.create!("stream", stream)(),
                                          Property.create!("protocol", protocol)() ];
 nothrow @nogc:
-    enum type_name = "ppp-server";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    enum type_name = "ppp-server";
+    enum collection_id = CollectionType.ppp_server;
+
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!PPPServer, name.move, flags);
+        super(collection_type_info!PPPServer, id, flags);
 
         // Default protocol is PPP
         mtu = 1500;
@@ -103,10 +105,11 @@ class PPPoEServer : BaseObject
 nothrow @nogc:
 
     enum type_name = "pppoe-server";
+    enum collection_id = CollectionType.pppoe_server;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!PPPoEServer, name.move, flags);
+        super(collection_type_info!PPPoEServer, id, flags);
     }
 
     ~this()

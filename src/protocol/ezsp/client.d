@@ -68,10 +68,11 @@ class EZSPClient : BaseObject
 @nogc:
 
     enum type_name = "ezsp";
+    enum collection_id = CollectionType.ezsp;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
+    this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
     {
-        super(collection_type_info!EZSPClient, name.move, flags);
+        super(collection_type_info!EZSPClient, id, flags);
     }
 
     // Properties...

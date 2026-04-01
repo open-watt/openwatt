@@ -41,21 +41,12 @@ abstract class Stream : BaseObject
 {
 nothrow @nogc:
 
-    this(const CollectionTypeInfo* type_info, String name, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
+    enum type_name = "stream";
+    enum collection_id = CollectionType.stream;
+
+    this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
-        super(type_info, name.move, flags);
-
-        assert(!get_module!StreamModule.streams.exists(this.name[]), "HOW DID THIS HAPPEN?");
-        get_module!StreamModule.streams.add(this);
-
-        this._options = options;
-    }
-
-    this(String name, const(char)[] type, StreamOptions options)
-    {
-        super(name.move, type);
-
-        get_module!StreamModule.streams.add(this);
+        super(type_info, id, flags);
 
         this._options = options;
     }
@@ -66,18 +57,7 @@ nothrow @nogc:
         disconnect();
 
         set_log_file(null);
-
-        get_module!StreamModule.streams.remove(this);
     }
-
-    static const(char)[] validate_name(const(char)[] name)
-    {
-        import urt.mem.temp;
-        if (get_module!StreamModule.streams.exists(name))
-            return tconcat("Stream with name '", name[], "' already exists");
-        return null;
-    }
-
 
     // Properties...
 
@@ -206,12 +186,9 @@ nothrow @nogc:
 
     Collection!Stream streams;
 
-    override void init()
+    override void pre_init()
     {
-        // HACK: Stream collection is not a natural collection, so we'll init it here...
-        ref Collection!Stream* c = collection_for!Stream();
-        assert(c is null, "Collection has been registered before!");
-        c = &streams;
+        g_app.console.register_collection("/stream", streams);
     }
 }
 

@@ -46,10 +46,11 @@ class ZigbeeController : BaseObject, Subscriber
 @nogc:
 
     enum type_name = "zb-controller";
+    enum collection_id = CollectionType.zb_controller;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none) nothrow
+    this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
     {
-        super(collection_type_info!ZigbeeController, name.move, flags);
+        super(collection_type_info!ZigbeeController, id, flags);
 
         _promises.reserve(MaxFibers);
     }

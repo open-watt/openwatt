@@ -230,8 +230,6 @@ nothrow @nogc:
 
     void register_collection(Type)(string _scope, ref Collection!Type collection)
     {
-        pragma(inline, true);
-
         ref Collection!Type* c = collection_for!Type();
         debug assert(c is null, "Collection has been registered before!");
         c = &collection;

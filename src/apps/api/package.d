@@ -33,26 +33,27 @@ nothrow @nogc:
 alias APIHandler = int delegate(const(char)[] uri, ref const HTTPMessage request, ref Stream stream) nothrow @nogc;
 
 
-class APIManager: BaseObject
+class APIManager : BaseObject
 {
     __gshared Property[2] Properties = [ Property.create!("http-server", http_server)(),
                                          Property.create!("uri", uri)() ];
 nothrow @nogc:
 
     enum type_name = "api";
+    enum collection_id = CollectionType.api;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!APIManager, name.move, flags);
+        super(collection_type_info!APIManager, id, flags);
     }
 
     // Properties
 
-    inout(HTTPServer) http_server() inout pure
-        => _server;
-    void http_server(HTTPServer value)
+    HTTPServer http_server() const
+        => _server_id.get_item!HTTPServer;
+    void http_server(HTTPServer value) pure
     {
-        _server = value;
+        _server_id = value.id;
     }
 
     const(char)[] uri() const pure
@@ -63,23 +64,15 @@ nothrow @nogc:
     }
 
     // BaseObject overrides
+protected:
+    mixin RekeyHandler;
 
     override bool validate() const pure
-        => _server !is null;
-
-    override CompletionStatus validating()
-    {
-        if (_server.detached)
-        {
-            import protocol.http;
-            if (HTTPServer s = get_module!HTTPModule.servers.get(_server.name[]))
-                _server = s;
-        }
-        return super.validating();
-    }
+        => _server_id.get_item!HTTPServer !is null;
 
     override CompletionStatus startup()
     {
+        HTTPServer _server = _server_id.get_item!HTTPServer;
         if (_uri)
         {
             _server.add_uri_handler(HTTPMethod.GET, _uri[], &handle_request);
@@ -104,7 +97,7 @@ nothrow @nogc:
     }
 
 private:
-    ObjectRef!HTTPServer _server;
+    CID _server_id;
     String _uri;
 
     HTTPServer.RequestHandler _default_handler;

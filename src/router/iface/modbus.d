@@ -83,9 +83,9 @@ nothrow @nogc:
 
     enum type_name = "modbus";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!ModbusInterface, name.move, flags);
+        super(collection_type_info!ModbusInterface, id, flags);
 
         // this is the proper value for modbus, irrespective of the L2 MTU
         // modbus jumbo's are theoretically possible if all hops support it... (fragmentation is not possible)

@@ -62,10 +62,11 @@ class Certificate : BaseObject
 nothrow @nogc:
 
     enum type_name = "certificate";
+    enum collection_id = CollectionType.certificate;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!Certificate, name.move, flags);
+        super(collection_type_info!Certificate, id, flags);
     }
 
     // Properties...

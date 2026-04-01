@@ -28,10 +28,11 @@ class Secret : BaseObject
 nothrow @nogc:
 
     enum type_name = "secret";
+    enum collection_id = CollectionType.secret;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!Secret, name.move, flags);
+        super(collection_type_info!Secret, id, flags);
     }
 
     // Properties...

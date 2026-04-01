@@ -62,10 +62,11 @@ class DNSServer : BaseObject
 nothrow @nogc:
 
     enum type_name = "dns-server";
+    enum collection_id = CollectionType.dns_server;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!DNSServer, name.move, flags);
+        super(collection_type_info!DNSServer, id, flags);
     }
 
     // Properties...

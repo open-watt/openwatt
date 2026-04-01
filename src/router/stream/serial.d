@@ -22,10 +22,8 @@ version (Windows)
 else version(Posix)
 {
 //    import urt.internal.os;
-    import core.sys.linux.termios;
-    import core.sys.posix.unistd;
-    import core.sys.posix.fcntl;
-    import core.sys.posix.sys.types;
+    import urt.internal.sys.posix;
+    import urt.internal.sys.posix.termios;
 }
 else version (BL808)
 {
@@ -95,9 +93,9 @@ nothrow @nogc:
 
     enum type_name = "serial";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
-        super(collection_type_info!SerialStream, name.move, flags, options);
+        super(collection_type_info!SerialStream, id, flags, options);
     }
 
     // Properties...
@@ -292,7 +290,7 @@ nothrow @nogc:
         }
         else version(Posix)
         {
-            _fd = core.sys.posix.fcntl.open(device[].tstringz, O_RDWR | O_NOCTTY | O_NDELAY);
+            _fd = urt.internal.sys.posix.open(device[].tstringz, O_RDWR | O_NOCTTY | O_NDELAY);
             if (_fd == -1)
             {
                 writeln("Failed to open device ", this.device);
@@ -375,7 +373,7 @@ nothrow @nogc:
         {
             if (_fd != -1)
             {
-                core.sys.posix.unistd.close(_fd);
+                urt.internal.sys.posix.close(_fd);
                 _fd = -1;
             }
         }
@@ -431,7 +429,7 @@ nothrow @nogc:
         }
         else version(Posix)
         {
-            ssize_t bytes_read = core.sys.posix.unistd.read(_fd, buffer.ptr, buffer.length);
+            ssize_t bytes_read = urt.internal.sys.posix.read(_fd, buffer.ptr, buffer.length);
             if (_logging)
                 write_to_log(true, buffer[0 .. bytes_read]);
             return bytes_read;
@@ -502,7 +500,7 @@ nothrow @nogc:
                 bytes_written = writev(_fd, iov.ptr, cast(int)data.length);
             }
             else
-                bytes_written = core.sys.posix.unistd.write(_fd, data[0].ptr, data[0].length);
+                bytes_written = urt.internal.sys.posix.write(_fd, data[0].ptr, data[0].length);
 
             if (_logging)
             {

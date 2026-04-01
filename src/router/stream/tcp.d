@@ -28,9 +28,9 @@ nothrow @nogc:
 
     enum type_name = "tcp";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
-        super(collection_type_info!TCPStream, name.move, flags, options);
+        super(collection_type_info!TCPStream, id, flags, options);
     }
 
     // Properties...
@@ -394,12 +394,13 @@ class TCPServer : BaseObject
 nothrow @nogc:
 
     enum type_name = "tcp-server";
+    enum collection_id = CollectionType.tcp_server;
 
     alias NewConnection = void delegate(Stream client, void* user_data) nothrow @nogc;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!TCPServer, name.move, flags);
+        super(collection_type_info!TCPServer, id, flags);
     }
 
     // Properties
@@ -554,9 +555,9 @@ protected:
     Socket _ip4_listener;
     Socket _ip6_listener;
 
-    this(const CollectionTypeInfo* type_info, String name, ObjectFlags flags)
+    this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags)
     {
-        super(type_info, name.move, flags);
+        super(type_info, id, flags);
     }
 
     Stream create_stream(Socket conn)

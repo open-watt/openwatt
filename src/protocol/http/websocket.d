@@ -49,10 +49,11 @@ class WebSocket : BaseObject
 nothrow @nogc:
 
     enum type_name = "websocket";
+    enum collection_id = CollectionType.websocket;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!WebSocket, name.move, flags);
+        super(collection_type_info!WebSocket, id, flags);
     }
 
     // Properties...
@@ -317,12 +318,13 @@ class WebSocketServer : BaseObject
 nothrow @nogc:
 
     enum type_name = "ws-server";
+    enum collection_id = CollectionType.ws_server;
 
     alias NewConnection = void delegate(WebSocket client, void* user_data) nothrow @nogc;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!WebSocketServer, name.move, flags);
+        super(collection_type_info!WebSocketServer, id, flags);
     }
 
     // Properties...

@@ -26,10 +26,11 @@ class CronJob : BaseObject
 @nogc nothrow:
 
     enum type_name = "cron-job";
+    enum collection_id = CollectionType.cron_job;
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!CronJob, name.move, flags);
+        super(collection_type_info!CronJob, id, flags);
     }
 
     Duration schedule() const { return _schedule; }

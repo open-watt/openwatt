@@ -38,3 +38,7 @@
 .vs
 build
 bin
+obj
+Win32
+
+charge_car

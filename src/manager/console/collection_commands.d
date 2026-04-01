@@ -58,18 +58,10 @@ nothrow @nogc:
             {
                 assert(arg.value.isString, "TODO: what if it's not a string?!");
                 name = arg.value.asString();
-                if (_collection.exists(name))
+                if (_collection.get(name))
                 {
                     session.write_line("Item with name '", name, "' already exists");
                     return null;
-                }
-                if (_collection.type_info.validate_name)
-                {
-                    if (const(char)[] error = _collection.type_info.validate_name(name))
-                    {
-                        session.write_line(error);
-                        return null;
-                    }
                 }
                 break;
             }

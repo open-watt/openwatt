@@ -29,9 +29,9 @@ nothrow @nogc:
 
     enum type_name = "bridge";
 
-    this(String name, ObjectFlags flags = ObjectFlags.none)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!BridgeInterface, name.move, flags);
+        super(collection_type_info!BridgeInterface, id, flags);
         _mac_table = MACTable(16, 256, 60);
     }
 

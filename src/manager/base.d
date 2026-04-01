@@ -15,9 +15,10 @@ import urt.traits : Parameters, ReturnType;
 import urt.util : min;
 
 import manager.console.argument;
+import manager.id;
 import manager.value;
 
-public import manager.collection : collection_type_info, collection_for, CollectionTypeInfo;
+public import manager.collection : CID, CollectionType, collection_type_info, collection_for, CollectionTypeInfo;
 
 //version = TraceLifetimeSubscriptions;
 
@@ -138,20 +139,10 @@ class BaseObject
                                          Property.create!("status", status_message)() ];
 nothrow @nogc:
 
-    // TODO: delete this constructor!!!
-    this(String name, const(char)[] type)
+    this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        assert(!name.empty, "`name` must not be empty");
-
-        _typeInfo = null;
-        _type = type.addString();
-        _name = name.move;
-    }
-
-    this(const CollectionTypeInfo* type_info, String name, ObjectFlags flags = ObjectFlags.none)
-    {
-        assert((flags & ~(ObjectFlags.dynamic | ObjectFlags.temporary | ObjectFlags.disabled)) == 0,
-               "`flags` may only contain Dynamic, Temporary, or Disabled flags");
+        assert(id, "must have a valid CID");
+        assert((flags & ~(ObjectFlags.dynamic | ObjectFlags.temporary | ObjectFlags.disabled)) == 0, "`flags` may only contain Dynamic, Temporary, or Disabled flags");
 
         debug foreach (i, p; type_info.properties)
             foreach (j; 0 .. i)
@@ -159,7 +150,7 @@ nothrow @nogc:
 
         _typeInfo = type_info;
         _type = type_info.type[].addString();
-        _name = name.move;
+        _id = id;
         _flags = flags;
 
         if (_flags & ObjectFlags.disabled)
@@ -172,19 +163,42 @@ nothrow @nogc:
 
     // Properties...
 
+    final CID id() const pure
+        => _id;
+
     final const(char)[] type() const pure
         => _type;
 
-    final ref const(String) name() const pure
-        => _name;
-    final const(char)[] name(ref String value)
+    final String name() const pure
     {
+        static String _get_id(CID id)
+        {
+            import manager.collection : get_id;
+            return get_id(id);
+        }
+        return (cast(String function(CID) pure nothrow @nogc)&_get_id)(_id);
+    }
+    final const(char)[] name(const(char)[] value)
+    {
+        import manager.collection : item_table, broadcast_rekey;
+
         if (value.empty)
             return "`name` must not be empty";
 
-        assert(false, "TODO: check name is not already in use...");
+        ubyte ti = _typeInfo.collection_id;
+        ref t = item_table(ti);
+        if (t.get_by_name(value, ti) !is null)
+            return "name already in use";
 
-        _name = value.move;
+        CID old_id = _id;
+        CID new_id = t.insert(value, ti, this);
+        assert(cast(bool)new_id);
+
+        t.remove(old_id);
+
+        _id = new_id;
+        broadcast_rekey(old_id, new_id);
+
         return null;
     }
 
@@ -385,16 +399,10 @@ nothrow @nogc:
     }
 
     int opCmp(const BaseObject rhs) const pure
-    {
-        import urt.algorithm : compare;
-        auto r = compare(_type[], rhs._type[]);
-        if (r != 0)
-            return r;
-        return compare(_name, rhs._name);
-    }
+        => cast(int)(cast(long)_id.raw - cast(long)rhs._id.raw);
 
     bool opEquals(const BaseObject rhs) const pure
-        => _name[] == rhs._name[] && type[] == rhs.type[];
+        => _id == rhs._id;
 
 protected:
     enum ubyte _disabled   = 1 << 0;
@@ -418,7 +426,7 @@ protected:
         destroying  = _disabled | _destroyed | _stop | _valid,
     }
 
-    const CollectionTypeInfo* _typeInfo;
+    package const CollectionTypeInfo* _typeInfo;
     size_t _props_set;
     State _state = State.validate;
     ObjectFlags _flags;
@@ -501,6 +509,11 @@ protected:
     {
     }
 
+    void rekey(CID old_id, CID new_id)
+    {
+        // nothing at this level
+    }
+
     final void set_online()
     {
         online();
@@ -531,33 +544,13 @@ protected:
     {
     }
 
-    // sends a signal to all clients
-    final void signal_state_change(StateSignal signal)
+package:
+    final void do_rekey(CID old_id, CID new_id)
     {
-        // TODO: there's a potential (yet unlikely) issue here...
-        //       if a handler unsubscribes a handler *other than itself* during the callback, and
-        //       that handler is before the current index, then some other handler(/s) may be skipped!
-
-        for (size_t i = 0; i < _subscribers.length; )
-        {
-            auto handler = _subscribers[i];
-            handler(this, signal);
-
-            // handlers often un-subscribe during the callback, so check if it's still there before we increment
-            if (i < _subscribers.length && _subscribers[i] is handler)
-                i++;
-        }
+        rekey(old_id, new_id);
     }
 
-private:
-    const CacheString _type; // TODO: DELETE THIS MEMBER!!!
-    String _name;
-    String _comment;
-    Array!StateSignalHandler _subscribers;
-    MonoTime _last_init_attempt;
-    ushort _backoff_ms = 0;
-
-    package bool do_update()
+    final bool do_update()
     {
         switch (_state)
         {
@@ -609,6 +602,35 @@ private:
                 assert(false, "Invalid state!");
         }
         return _state == State.destroyed;
+    }
+
+private:
+    const CacheString _type; // TODO: DELETE THIS MEMBER!!!
+    package CID _id;
+    String _comment;
+
+    // redirect for legacy code that references _name directly DELETEME!!
+    String _name() const => name();
+    Array!StateSignalHandler _subscribers;
+    MonoTime _last_init_attempt;
+    ushort _backoff_ms = 0;
+
+    // sends a signal to all clients
+    void signal_state_change(StateSignal signal)
+    {
+        // TODO: there's a potential (yet unlikely) issue here...
+        //       if a handler unsubscribes a handler *other than itself* during the callback, and
+        //       that handler is before the current index, then some other handler(/s) may be skipped!
+
+        for (size_t i = 0; i < _subscribers.length; )
+        {
+            auto handler = _subscribers[i];
+            handler(this, signal);
+
+            // handlers often un-subscribe during the callback, so check if it's still there before we increment
+            if (i < _subscribers.length && _subscribers[i] is handler)
+                i++;
+        }
     }
 }
 

@@ -17,6 +17,7 @@ import manager.component;
 import manager.console;
 import manager.device;
 import manager.element;
+import manager.id;
 import manager.plugin;
 import manager.secret;
 import manager.system;
@@ -99,6 +100,10 @@ nothrow @nogc:
         assert(!g_app, "Application already created!");
         g_app = this;
 
+        id_init();
+        init_collections();
+        init_elements();
+
         register_enum!Boolean();
         register_enum!ObjectFlags();
         register_enum!HashFunction();
@@ -126,6 +131,12 @@ nothrow @nogc:
         register_modules(this);
 
         foreach (m; modules)
+            m.pre_init();
+
+        foreach (m; modules)
+            m.init();
+
+        foreach (m; modules)
             m.post_init();
     }
 
@@ -148,8 +159,6 @@ nothrow @nogc:
 
         mod.module_id = modules.length;
         modules ~= mod;
-
-        mod.init();
     }
 
     Module module_instance(const(char)[] name) pure
@@ -166,9 +175,9 @@ nothrow @nogc:
         return cast(Mod)module_instance(Mod.ModuleName);
     }
 
-    bool validate_login(const(char)[] username, const(char)[] password, const(char)[] service, scope AuthCallback callback) const
+    bool validate_login(const(char)[] username, const(char)[] password, const(char)[] service, scope AuthCallback callback)
     {
-        if (const Secret* secret = secrets.exists(username[]))
+        if (auto secret = secrets.get(username[]))
         {
             if (secret.validate_password(password))
             {
