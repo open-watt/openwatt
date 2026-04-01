@@ -1,4 +1,4 @@
-module router.iface.can;
+module protocol.can.iface;
 
 import urt.endian;
 import urt.log;
@@ -338,24 +338,10 @@ private:
 }
 
 
-class CANInterfaceModule : Module
-{
-    mixin DeclareModule!"interface.can";
-nothrow @nogc:
+private:
 
-    Collection!CANInterface can_interfaces;
-
-    override void init()
-    {
-        g_app.console.register_collection("/interface/can", can_interfaces);
-    }
-
-    override void update()
-    {
-        can_interfaces.update_all();
-    }
-}
-
+enum EbyteFrameSize = 13;
+enum LargestProtocolFrame = EbyteFrameSize;
 
 version (DebugCANInterface)
 {
@@ -370,9 +356,3 @@ version (DebugCANInterface)
         return t;
     }
 }
-
-
-private:
-
-enum EbyteFrameSize = 13;
-enum LargestProtocolFrame = EbyteFrameSize;

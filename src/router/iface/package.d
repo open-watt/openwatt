@@ -21,10 +21,7 @@ public import router.status;
 
 // package modules...
 public static import router.iface.bridge;
-public static import router.iface.can;
 public static import router.iface.ethernet;
-public static import router.iface.modbus;
-public static import router.iface.tesla;
 public static import router.iface.vlan;
 public static import router.iface.zigbee;
 
@@ -52,6 +49,7 @@ enum MessageState
     failed,
     aborted,
     timeout,
+    expired,
     dropped
 }
 
@@ -481,14 +479,7 @@ protected:
         return false;
     }
 
-    // TODO: this package section should be refactored out of existence!
-package:
-    BaseInterface _master;
-    byte _slave_id;
-
-    Packet[] _send_queue;
-
-    MACAddress generate_mac_address() pure
+    final MACAddress generate_mac_address() pure
     {
         import urt.crc;
         alias crc_fun = calculate_crc!(Algorithm.crc32_iso_hdlc);
@@ -501,6 +492,13 @@ package:
             addr.b[5] ^= 0x80;
         return addr;
     }
+
+    // TODO: this package section should be refactored out of existence!
+package:
+    BaseInterface _master;
+    byte _slave_id;
+
+    Packet[] _send_queue;
 
 //private:
 protected: // TODO: should probably be private?
