@@ -162,7 +162,8 @@ pure nothrow @nogc:
     {
         expression,
         map,
-        sum
+        sum,
+        alias_
     }
 
     Type type;
@@ -190,7 +191,7 @@ pure nothrow @nogc:
 
     const(char*) get_source(ref const(Profile) profile) const
     {
-        assert(type == Type.sum, "ElementTemplate is not of type `sum`");
+        assert(type == Type.sum || type == Type.alias_, "ElementTemplate is not of type `sum` or `alias`");
         return profile.id_strings.ptr + _value;
     }
 
@@ -683,6 +684,9 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             // add template string to string cache...
                             break;
 
+                        case "element-alias":
+                            ty = ElementTemplate.Type.alias_;
+                            goto case "element";
                         case "element-sum":
                             ty = ElementTemplate.Type.sum;
                             goto case "element";
@@ -706,6 +710,16 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
 
                             if (ty == ElementTemplate.Type.expression)
                                 expression_string_len += cache_len(tail.length);
+                            else if (ty == ElementTemplate.Type.alias_)
+                            {
+                                const(char)[] target = tail.split!','.unQuote;
+                                if (target.length < 2 || target[0] != '@')
+                                {
+                                    writeWarning("Invalid element-alias target: ", target);
+                                    continue;
+                                }
+                                id_string_length += cache_len(target.length);
+                            }
                             else if (ty == ElementTemplate.Type.sum)
                             {
                                 const(char)[] alg = tail.split!',';
@@ -1199,6 +1213,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
 
                 foreach (ref cItem; conf.sub_items) switch (cItem.name)
                 {
+                    case "element-alias":
                     case "element-sum":
                     case "element-map":
                     case "element":
@@ -1305,6 +1320,9 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                     ElementTemplate.Type ty = ElementTemplate.Type.expression;
                     switch (cItem.name)
                     {
+                        case "element-alias":
+                            ty = ElementTemplate.Type.alias_;
+                            goto case "element";
                         case "element-sum":
                             ty = ElementTemplate.Type.sum;
                             goto case "element";
@@ -1334,6 +1352,16 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             {
                                 // element value is the expression
                                 e._value = expr_cache.add_string(tail);
+                            }
+                            else if (ty == ElementTemplate.Type.alias_)
+                            {
+                                const(char)[] target = tail.split!','.unQuote;
+                                if (target.length < 2 || target[0] != '@')
+                                {
+                                    writeWarning("Invalid element-alias target: ", target);
+                                    continue;
+                                }
+                                e._value = id_cache.add_string(target[1 .. $]);
                             }
                             else if (ty == ElementTemplate.Type.sum)
                             {

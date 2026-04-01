@@ -80,6 +80,8 @@ nothrow @nogc:
     Array!OnChangeCallback subscribers_2;
     ushort subscribers_dirty;
 
+    Component parent;
+
     Access access;
     SamplingMode sampling_mode;
 
@@ -159,6 +161,21 @@ nothrow @nogc:
         last_update = timestamp;
         prev = latest;
         signal(latest, timestamp, prev, prev_update, null); // TODO: who made the change? so we can break cycles...
+    }
+
+    ptrdiff_t full_path(char[] buf) const nothrow @nogc
+    {
+        size_t pos;
+        if (parent)
+        {
+            pos = parent.full_path(buf);
+            if (pos < buf.length)
+                buf[pos] = '.';
+            ++pos;
+        }
+        if (pos + id.length <= buf.length)
+            buf[pos .. pos + id.length] = id[];
+        return pos + id.length;
     }
 }
 

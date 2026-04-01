@@ -33,6 +33,9 @@ nothrow @nogc:
     ~this()
     {
         clear_expression_elements();
+        foreach (link; owned_links)
+            g_app.destroy_link(link);
+        owned_links.clear();
         if (profile)
             g_app.allocator.freeT(profile);
     }
@@ -40,6 +43,7 @@ nothrow @nogc:
     Profile* profile;
     Array!ExpressionElement expressions;
     Array!SumElement sums;
+    Array!(ElementLink*) owned_links;
     Array!Sampler samplers;
 
     bool finalise()
@@ -217,6 +221,7 @@ private:
                 element.value(Variant(value.asQuantity + sample), timestamp);
         }
     }
+
 }
 
 Device create_device_from_profile(ref Profile profile, const(char)[] model, const(char)[] id, const(char)[] name, scope CreateElementHandler create_element_handler)
@@ -268,6 +273,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                 continue;
 
             Component child_component = create_component(child);
+            child_component.parent = c;
             c.components ~= child_component;
         }
 
@@ -277,6 +283,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                 continue;
 
             Element* e = g_app.allocator.allocT!Element();
+            e.parent = c;
             e.id = el.get_id(profile).makeString(defaultAllocator());
             e.name = el.get_name(profile).makeString(defaultAllocator());
             e.desc = el.get_desc(profile).makeString(defaultAllocator());
@@ -342,6 +349,14 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     device.sums ~= Device.SumElement(device, e, cast(Element*)src, cast(SumType)el.index);
                     e.sampling_mode = SamplingMode.dependent;
                     break;
+
+                case alias_:
+                    import urt.mem.temp : tconcat;
+                    const(char)[] target_path = as_dstring(el.get_source(profile));
+                    Element* target = device.find_element(target_path);
+                    device.owned_links ~= g_app.create_link(e, null, target, tconcat(device.id, ".", target_path));
+                    e.sampling_mode = SamplingMode.dependent;
+                    break;
             }
 
             c.elements ~= e;
@@ -361,6 +376,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
             continue;
 
         Component c = create_component(ct);
+        c.parent = device;
         device.components ~= c;
     }
 

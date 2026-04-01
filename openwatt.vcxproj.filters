@@ -7,6 +7,9 @@
     <Filter Include="conf\goodwe_profiles">
       <UniqueIdentifier>{a5e82299-0fc3-4ab5-be5b-974362653f16}</UniqueIdentifier>
     </Filter>
+    <Filter Include="conf\ha_profiles">
+      <UniqueIdentifier>{70705f6a-320d-456c-bb7e-04d00818d619}</UniqueIdentifier>
+    </Filter>
     <Filter Include="conf\modbus_profiles">
       <UniqueIdentifier>{44799e0d-95be-4f50-83d3-bb8473558560}</UniqueIdentifier>
     </Filter>
@@ -879,6 +882,9 @@
     </None>
     <None Include="conf\goodwe_profiles\gwxx48es.conf">
       <Filter>conf\goodwe_profiles</Filter>
+    </None>
+    <None Include="conf\ha_profiles\emporia.conf">
+      <Filter>conf\ha_profiles</Filter>
     </None>
     <None Include="conf\modbus_profiles\eastron_sdm120.conf">
       <Filter>conf\modbus_profiles</Filter>
