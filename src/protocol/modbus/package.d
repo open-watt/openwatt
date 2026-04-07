@@ -48,7 +48,7 @@ nothrow @nogc:
             client.update();
     }
 
-    void client_add(Session session, const(char)[] name, BaseInterface _interface, Nullable!bool snoop)
+    void client_add(Session session, const(char)[] name, ModbusInterface _interface, Nullable!bool snoop)
     {
         // TODO: generate name if not supplied
         String n = name.makeString(g_app.allocator);
