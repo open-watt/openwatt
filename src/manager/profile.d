@@ -1286,6 +1286,11 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         }
 
                         DataType ty = type.split!('/', false).parse_modbus_data_type();
+                        if (ty == DataType.invalid)
+                        {
+                            writeWarning("Invalid Modbus data type '", type, "' for element: ", id);
+                            break;
+                        }
                         e.access = type.parse_access();
 
                         parse_value_desc(mb.value_desc, ty, units);

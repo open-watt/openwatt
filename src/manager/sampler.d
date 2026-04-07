@@ -78,8 +78,7 @@ enum DataKind : ubyte
     floating = 3,
     low_byte = 4,
     high_byte = 5,
-    string_z = 6,
-    string_sp = 7,
+    string_ = 6,
 }
 
 enum DateFormat : ubyte
@@ -253,7 +252,10 @@ nothrow @nogc:
         => _type.data_kind == DataKind.bitfield;
 
     bool is_string() const pure
-        => _type.data_kind == DataKind.string_z || _type.data_kind == DataKind.string_sp;
+        => _type.data_kind == DataKind.string_;
+
+    bool is_space_padded() const pure
+        => is_string && (_type & DataType.signed) != 0;
 
     bool is_custom() const pure
         => (_type & 0xFFFF) == 0xFFFE;
@@ -418,14 +420,30 @@ Variant sample_value(const void* data, ref const ValueDesc desc)
             raw_value = (desc._type & DataType.signed) ? long(bptr[index]) : ubptr[index];
             break;
 
-        case string_z, string_sp:
+        case string_:
             const(char)[] str_buffer = (cast(char*)data)[0 .. desc._type.data_length];
 
-            size_t len = str_buffer.strlen_s();
-            if (kind == string_sp)
+            char[256] swapped = void;
+            if (desc._type & DataType.little_endian)
             {
-                // space-padded string
-                while (len > 0 && ubptr[len - 1] == ' ')
+                size_t n = str_buffer.length;
+                assert(n <= swapped.length, "string longer than swap buffer");
+                size_t i = 0;
+                for (; i + 1 < n; i += 2)
+                {
+                    swapped[i]     = str_buffer[i + 1];
+                    swapped[i + 1] = str_buffer[i];
+                }
+                if (i < n)
+                    swapped[i] = str_buffer[i];
+                str_buffer = swapped[0 .. n];
+            }
+
+            size_t len = str_buffer.strlen_s();
+            // signed bit on a string == space-padded
+            if (desc._type & DataType.signed)
+            {
+                while (len > 0 && str_buffer[len - 1] == ' ')
                     --len;
             }
             return Variant(str_buffer[0..len]);
@@ -483,8 +501,7 @@ Variant sample_value(const void* data, ref const ValueDesc desc)
             return Variant(dt);
 
         case bitfield:
-        case string_z:
-        case string_sp:
+        case string_:
             assert(false, "should have been captured by an earlier case");
     }
     r.set_unit(desc._unit);
@@ -730,8 +747,7 @@ ptrdiff_t write_value(ubyte[] buffer, ref const Variant value, ref const ValueDe
             }
             break;
 
-        case string_z:
-        case string_sp:
+        case string_:
             assert(false, "TODO...");
     }
 
@@ -844,16 +860,26 @@ DataType parse_data_type(const(char)[] desc, ubyte default_flags = 0) pure
         int len = desc.parse_int_fast(success);
         if (!success || len <= 0)
             return DataType.invalid;
+        kind = DataKind.string_;
+        if (desc.length >= 2 && desc[0 .. 2] == "le")
+        {
+            flags |= DataType.little_endian;
+            desc = desc[2 .. $];
+        }
+        else if (desc.length >= 2 && desc[0 .. 2] == "be")
+        {
+            flags |= DataType.big_endian;
+            desc = desc[2 .. $];
+        }
+        // signed bit means string is space-padded
         if (desc.length >= 3 && desc[0 .. 3] == "_sp")
         {
-            kind = DataKind.string_sp;
+            flags |= DataType.signed;
             desc = desc[3 .. $];
         }
-        else
-            kind = DataKind.string_z;
         if (desc.length > 0)
             return DataType.invalid;
-        return cast(DataType)(DataType.array | (kind << 12) | len << 16);
+        return cast(DataType)(flags | DataType.array | (kind << 12) | len << 16);
     }
     else
         return DataType.invalid;

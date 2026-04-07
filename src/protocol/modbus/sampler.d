@@ -50,6 +50,13 @@ DataType parse_modbus_data_type(const(char)[] desc)
     if (r == DataType.invalid)
         return DataType.invalid;
 
+    // modbus strings are (normally?) space-padded (sign bit), and the length is in words
+    if (r.data_kind == DataKind.string_)
+    {
+        DataType keep = (r & DataType.little_endian) | DataType.signed;
+        return make_data_type(DataType.u16 | DataType.array | keep, DataKind.string_, r.data_count);
+    }
+
     if ((r & DataType.little_endian) != 0)
     {
         r &= ~DataType.little_endian;
@@ -57,10 +64,6 @@ DataType parse_modbus_data_type(const(char)[] desc)
     }
     else
         r |= DataType.big_endian;
-
-    // modbus strings are (normally?) space-padded, and the length is in words
-    if (r.data_kind == DataKind.string_z || r.data_kind == DataKind.string_sp)
-        r = make_data_type(DataType.u16 | DataType.array, DataKind.string_sp, r.data_count);
 
     return r;
 }
@@ -260,25 +263,44 @@ private:
         ushort first = request.data[0..2].bigEndianToNative!ushort;
         ushort count = request.data[2..4].bigEndianToNative!ushort;
 
-        // do some integrity validation...
-        ushort responseBytes = response.data[0];
-        if (responseBytes + 1 > response.data.length)
+        // Modbus exception (FC high bit set): server rejected the request.
+        if (response.function_code & 0x80)
         {
-            client.log.warning("incomplete response from ", server_address);
+            const ubyte ex = response.data.length >= 1 ? response.data[0] : 0;
+            const ex_name = get_exception_code_string(cast(ExceptionCode)ex);
+            client.log.warningf("exception from {0} for fc={1} reg={2} count={3}: {4} ({5})",
+                server_address, cast(ubyte)request.function_code, first, count, ex_name ? ex_name : "unknown", ex);
             release_in_flight(kind, first, count);
             return;
         }
         if (response.function_code != request.function_code)
         {
-            client.log.warning("function code mismatch from ", server_address,
-                " expected=", cast(ubyte)request.function_code, " got=", cast(ubyte)response.function_code);
+            client.log.warningf("function code mismatch from {0} expected={1} got={2}",
+                server_address, cast(ubyte)request.function_code, cast(ubyte)response.function_code);
             release_in_flight(kind, first, count);
             return;
         }
-
-        if ((kind < 2 && responseBytes * 8 != count.align_up(8)) || (kind > 2 && responseBytes / 2 != count))
+        if (response.data.length == 0)
         {
-            client.log.warning("response length mismatch from ", server_address, " bytes=", responseBytes, " expected=", count * 2);
+            client.log.warningf("empty response from {0} for fc={1} reg={2} count={3}",
+                server_address, cast(ubyte)request.function_code, first, count);
+            release_in_flight(kind, first, count);
+            return;
+        }
+        ushort response_bytes = response.data[0];
+        // PDU byte_count claims more data than the frame actually carries.
+        if (response_bytes + 1 > response.data.length)
+        {
+            client.log.warningf("truncated response from {0} for fc={1} reg={2} count={3}: PDU byte_count={4} but only {5} data bytes in frame",
+                server_address, cast(ubyte)request.function_code, first, count, response_bytes, response.data.length - 1);
+            release_in_flight(kind, first, count);
+            return;
+        }
+        // Well-formed PDU but with fewer registers/coils than requested.
+        if ((kind < 2 && response_bytes * 8 != count.align_up(8)) || (kind > 2 && response_bytes / 2 != count))
+        {
+            client.log.warningf("short response from {0} for fc={1} reg={2} count={3}: got {4} bytes (expected {5})",
+                server_address, cast(ubyte)request.function_code, first, count, response_bytes, count*2);
             release_in_flight(kind, first, count);
             return;
         }
@@ -286,7 +308,7 @@ private:
         version (DebugModbusSampler)
             client.log.tracef("Response: {0}, [{1}{2,04x}:{3}] - {4}", server_address, kind, first, count, response_time - request_time);
 
-        ubyte[] data = response.data[1 .. 1 + responseBytes];
+        ubyte[] data = response.data[1 .. 1 + response_bytes];
 
         foreach (ref e; elements)
         {
@@ -307,14 +329,14 @@ private:
 
             // parse value from the response...
             ushort offset = cast(ushort)(e.register - first);
-            uint byteOffset = offset*2;
+            uint byte_offset = offset*2;
             if (kind <= 1)
             {
                 bool value = ((data[offset >> 3] >> (offset & 7)) & 1) != 0;
                 assert(false, "TODO: test this and store the value...");
             }
             else
-                e.element.value(sample_value(data.ptr + byteOffset, e.desc), response_time);
+                e.element.value(sample_value(data.ptr + byte_offset, e.desc), response_time);
 
             version (DebugModbusSamplerRegs)
                 client.log.tracef("Got reg {0,04x}: {1} = {2}", e.register, e.element.id, e.element.value);

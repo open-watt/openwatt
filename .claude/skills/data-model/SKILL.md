@@ -374,11 +374,13 @@ struct ValueDesc {
 
 **DataType flags** (uint):
 - Bits 0-2: byte count minus 1 (0=1byte, 1=2bytes, 3=4bytes, 7=8bytes)
-- Bit 3: `signed`
+- Bit 3: `signed` (on `string_`: encodes space-padding)
 - Bit 4: `word_reverse` (swap 16-bit words)
-- Bit 5: `little_endian`, Bit 6: `big_endian`
+- Bit 5: `little_endian`
+- Bit 6: `big_endian`
 - Bit 7: `enumeration`
-- Bits 12-15: DataKind (`integer`, `bitfield`, `date_time`, `floating`, `low_byte`, `high_byte`, `string_z`, `string_sp`)
+- Bit 8: `array`
+- Bits 12-15: DataKind (`integer`, `bitfield`, `date_time`, `floating`, `low_byte`, `high_byte`, `string_`)
 
 **Decoding:** `Variant sample_value(const void* data, ref const ValueDesc desc)`
 
