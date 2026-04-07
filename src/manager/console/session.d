@@ -193,7 +193,31 @@ nothrow @nogc:
         if (_stream)
         {
             if (text.length > 0)
-                _stream.write(text);
+            {
+                if (_features & ClientFeatures.crlf)
+                {
+                    // convert bare \n (not preceded by \r) to \r\n for NVT clients
+                    size_t written = 0, search = 0;
+                    while (search < text.length)
+                    {
+                        size_t pos = text[search .. $].findFirst('\n');
+                        if (pos == text.length - search)
+                            break;
+                        pos += search;
+                        if (pos == 0 || text[pos - 1] != '\r')
+                        {
+                            _stream.write(text[written .. pos]);
+                            _stream.write("\r\n");
+                            written = pos + 1;
+                        }
+                        search = pos + 1;
+                    }
+                    if (written < text.length)
+                        _stream.write(text[written .. $]);
+                }
+                else
+                    _stream.write(text);
+            }
             if (newline)
                 _stream.write((_features & ClientFeatures.crlf) ? "\r\n" : "\n");
         }
@@ -412,7 +436,7 @@ protected:
     void enter_command(const(char)[])
     {
         if (_features & ClientFeatures.escape)
-            write_output("\n", false);
+            write_output("", true);
     }
 
     void command_finished(CommandState, CommandCompletionState)
@@ -424,7 +448,7 @@ protected:
     void show_suggestions(const(String)[] suggestions)
     {
         if (_features & ClientFeatures.escape)
-            write_output("\n", false);
+            write_output("", true);
 
         size_t max = 0;
         foreach (ref s; suggestions)
