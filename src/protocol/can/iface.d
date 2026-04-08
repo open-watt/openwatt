@@ -320,7 +320,7 @@ nothrow @nogc:
                 {
                     version (DebugCANInterface)
                         writeDebug("CAN packet dropped on interface '", name, "': invalid frame - bad ID");
-                    ++_status.recv_dropped;
+                    ++_status.rx_dropped;
                     continue;
                 }
 
@@ -347,7 +347,7 @@ nothrow @nogc:
                 // de-frame CANoE...
                 assert(false, "TODO");
             }
-            ++_status.send_dropped;
+            ++_status.tx_dropped;
             return -1;
         }
 
@@ -355,7 +355,7 @@ nothrow @nogc:
         {
             version (DebugCANInterface)
                 writeDebug("CAN packet dropped on interface '", name, "': invalid frame - data too long");
-            ++_status.send_dropped;
+            ++_status.tx_dropped;
             return false;
         }
 
@@ -408,12 +408,12 @@ nothrow @nogc:
 
         if (written <= 0)
         {
-            ++_status.send_dropped;
+            ++_status.tx_dropped;
             return -1;
         }
 
-        ++_status.send_packets;
-        _status.send_bytes += length;
+        ++_status.tx_packets;
+        _status.tx_bytes += length;
         return 0;
     }
 

@@ -296,7 +296,7 @@ protected:
     override int transmit(ref const Packet packet, MessageCallback)
     {
         // can't sent raw 802.11 frames! (maybe some exotic wifi adapter can do it?)
-        ++_status.send_dropped;
+        ++_status.tx_dropped;
         return -1;
     }
 

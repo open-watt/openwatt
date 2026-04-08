@@ -104,8 +104,8 @@ nothrow @nogc:
         int result = _interface.forward(packet, callback);
         if (result >= 0)
         {
-            ++_status.send_packets;
-            _status.send_bytes += packet.data.length;
+            ++_status.tx_packets;
+            _status.tx_bytes += packet.data.length;
         }
         return result;
     }
