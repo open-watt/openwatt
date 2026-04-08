@@ -3,6 +3,7 @@ module router.iface.can;
 import urt.endian;
 import urt.log;
 import urt.mem;
+import urt.mem.string;
 import urt.meta.nullable;
 import urt.string;
 import urt.time;
@@ -13,6 +14,19 @@ import manager.plugin;
 
 import router.iface;
 import router.stream;
+
+version(Espressif)
+{
+    version = HasGPIO;
+
+    extern(C) nothrow @nogc
+    {
+        int ow_twai_init(uint baud_rate, int tx_gpio, int rx_gpio);
+        void ow_twai_deinit();
+        int ow_twai_transmit(uint id, int extended, int rtr, const(ubyte)* data, ubyte len);
+        int ow_twai_receive(uint* id, int* extended, int* rtr, ubyte* data, ubyte* len);
+    }
+}
 
 //version = DebugCANInterface;
 
@@ -37,8 +51,22 @@ struct CANFrame
 
 class CANInterface : BaseInterface
 {
-    __gshared Property[2] Properties = [ Property.create!("stream", stream)(),
-                                         Property.create!("protocol", protocol)() ];
+    version(HasGPIO)
+        __gshared Property[6] Properties = [
+            Property.create!("stream", stream)(),
+            Property.create!("protocol", protocol)(),
+            Property.create!("device", device)(),
+            Property.create!("baud-rate", baud_rate)(),
+            Property.create!("tx-gpio", tx_gpio)(),
+            Property.create!("rx-gpio", rx_gpio)(),
+        ];
+    else
+        __gshared Property[4] Properties = [
+            Property.create!("stream", stream)(),
+            Property.create!("protocol", protocol)(),
+            Property.create!("device", device)(),
+            Property.create!("baud-rate", baud_rate)(),
+        ];
 
 nothrow @nogc:
 
@@ -83,14 +111,55 @@ nothrow @nogc:
         if (value != CANInterfaceProtocol.ebyte)
             return tconcat("Invalid CAN protocol '", protocol, "': expect 'ebyte|??'.");
         _protocol = value;
+        _device = String();
         return null;
+    }
+
+    final const(char)[] device() const pure
+        => _device[];
+    final void device(const(char)[] value)
+    {
+        _device = value.makeString(defaultAllocator);
+        if (!value.empty)
+        {
+            _stream = null;
+            _protocol = CANInterfaceProtocol.unknown;
+        }
+    }
+
+    final uint baud_rate() const pure
+        => _baud_rate;
+    final void baud_rate(uint value)
+    {
+        _baud_rate = value;
+    }
+
+    version(HasGPIO)
+    {
+        final ubyte tx_gpio() const pure
+            => _tx_gpio;
+        final void tx_gpio(ubyte value)
+        {
+            _tx_gpio = value;
+        }
+
+        final ubyte rx_gpio() const pure
+            => _rx_gpio;
+        final void rx_gpio(ubyte value)
+        {
+            _rx_gpio = value;
+        }
     }
 
 
     // API...
 
     override bool validate() const
-        => _stream !is null && _protocol == CANInterfaceProtocol.ebyte;
+    {
+        if (!_device.empty)
+            return _baud_rate > 0;
+        return _stream !is null && _protocol == CANInterfaceProtocol.ebyte;
+    }
 
     override CompletionStatus validating()
     {
@@ -100,6 +169,20 @@ nothrow @nogc:
 
     override CompletionStatus startup()
     {
+        if (!_device.empty)
+        {
+            version(Espressif)
+            {
+                if (!ow_twai_init(_baud_rate, _tx_gpio, _rx_gpio))
+                {
+                    writeError("TWAI init failed for '", name, "'");
+                    return CompletionStatus.error;
+                }
+                _native_can = true;
+            }
+            return CompletionStatus.complete;
+        }
+
         if (!_stream)
             return CompletionStatus.error;
         if (_stream.running)
@@ -109,6 +192,16 @@ nothrow @nogc:
 
     override void update()
     {
+        version(Espressif)
+        {
+            if (_native_can)
+            {
+                super.update();
+                poll_twai();
+                return;
+            }
+        }
+
         if (!_stream || !_stream.running)
             return restart();
 
@@ -252,7 +345,23 @@ nothrow @nogc:
 
         ref can = packet.hdr!CANFrame;
 
-        // frame it up and send...
+        version(Espressif)
+        {
+            if (_native_can)
+            {
+                if (!ow_twai_transmit(can.id, can.extended, can.remote_transmission_request,
+                        cast(const(ubyte)*)packet.data.ptr, cast(ubyte)packet.data.length))
+                {
+                    ++_status.send_dropped;
+                    return -1;
+                }
+                ++_status.send_packets;
+                _status.send_bytes += packet.data.length;
+                return 0;
+            }
+        }
+
+        // frame it up and send via stream...
         ubyte[LargestProtocolFrame] buffer = void;
         size_t length = 0;
 
@@ -283,19 +392,12 @@ nothrow @nogc:
 
         if (written <= 0)
         {
-            // what could have gone wrong here?
-            // TODO: proper error handling?
-
-            // if the stream disconnected, maybe we should buffer the message incase it reconnects promptly?
-
-            // just drop it for now...
             ++_status.send_dropped;
             return -1;
         }
 
         ++_status.send_packets;
         _status.send_bytes += length;
-        // TODO: or should we record `length`? payload bytes, or full protocol bytes?
         return 0;
     }
 
@@ -330,11 +432,57 @@ nothrow @nogc:
         sink((cast(ubyte*)&f)[0 .. socket_can.sizeof]);
     }
 
+    version(Espressif)
+    {
+        override CompletionStatus shutdown()
+        {
+            if (_native_can)
+            {
+                ow_twai_deinit();
+                _native_can = false;
+            }
+            return CompletionStatus.complete;
+        }
+    }
+
 private:
     ObjectRef!Stream _stream;
     CANInterfaceProtocol _protocol;
+    String _device;
+    uint _baud_rate = 500_000;
     ubyte[LargestProtocolFrame] _tail;
     ushort _tail_bytes;
+
+    version(HasGPIO)
+    {
+        ubyte _tx_gpio;
+        ubyte _rx_gpio;
+    }
+
+    version(Espressif)
+    {
+        bool _native_can;
+
+        void poll_twai()
+        {
+            SysTime now = getSysTime();
+            uint id;
+            int extended, rtr;
+            ubyte[8] data = void;
+            ubyte len;
+
+            while (ow_twai_receive(&id, &extended, &rtr, data.ptr, &len))
+            {
+                Packet packet;
+                ref CANFrame can = packet.init!CANFrame(data[0 .. len], now);
+                can.id = id;
+                can.extended = extended != 0;
+                can.remote_transmission_request = rtr != 0;
+                packet.vlan = _pvid;
+                dispatch(packet);
+            }
+        }
+    }
 }
 
 

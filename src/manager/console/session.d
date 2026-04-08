@@ -197,6 +197,11 @@ nothrow @nogc:
             if (newline)
                 _stream.write((_features & ClientFeatures.crlf) ? "\r\n" : "\n");
         }
+        else if (text.length > 0)
+        {
+            import urt.log : writeInfo;
+            writeInfo("session: ", text);
+        }
     }
 
     pragma(inline, true) void write(Args...)(ref Args args)
