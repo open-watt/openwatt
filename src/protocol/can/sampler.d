@@ -12,9 +12,9 @@ import manager.profile;
 import manager.sampler;
 
 import protocol.can;
+import protocol.can.iface;
 
 import router.iface;
-import router.iface.can;
 
 //version = DebugCANSampler;
 

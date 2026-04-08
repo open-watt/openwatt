@@ -110,12 +110,12 @@ class SerialStream : Stream
                                              Property.create!("tx-gpio", tx_gpio)(),
                                              Property.create!("rx-gpio", rx_gpio)() ];
     else
-        __gshared Property[6] Properties = [ Property.create!("device", device)(),
-                                             Property.create!("baud-rate", baud_rate)(),
-                                             Property.create!("data-bits", data_bits)(),
-                                             Property.create!("parity", parity)(),
-                                             Property.create!("stop-bits", stop_bits)(),
-                                             Property.create!("flow-control", flow_control)() ];
+    __gshared Property[6] Properties = [ Property.create!("device", device)(),
+                                         Property.create!("baud-rate", baud_rate)(),
+                                         Property.create!("data-bits", data_bits)(),
+                                         Property.create!("parity", parity)(),
+                                         Property.create!("stop-bits", stop_bits)(),
+                                         Property.create!("flow-control", flow_control)() ];
 nothrow @nogc:
 
     enum type_name = "serial";
@@ -144,7 +144,7 @@ nothrow @nogc:
                 if (port < NUM_UARTS)
                 {
                     _uart_port = cast(byte)port;
-                    _device = value.move;
+        _device = value.move;
                     restart();
                     return StringResult.success;
                 }
@@ -155,9 +155,9 @@ nothrow @nogc:
         else
         {
             _device = value.move;
-            restart();
-            return StringResult.success;
-        }
+        restart();
+        return StringResult.success;
+    }
     }
 
     uint baud_rate() const pure
@@ -240,10 +240,10 @@ nothrow @nogc:
         final byte rx_gpio() const pure
             => _rx_gpio;
         final void rx_gpio(byte value)
-        {
+    {
             _rx_gpio = value;
             restart();
-        }
+    }
     }
 
     // API...
@@ -406,9 +406,9 @@ nothrow @nogc:
 
             if (!uart_open(_uart_port, cfg))
                 return CompletionStatus.error;
-        }
+            }
         else version (Espressif)
-        {
+            {
             if (!ow_uart_open(_uart_port, _params.baud_rate, _params.data_bits, _params.stop_bits, _params.parity, _tx_gpio, _rx_gpio))
                 return CompletionStatus.error;
         }
@@ -471,7 +471,7 @@ nothrow @nogc:
         else version (Espressif)
         {
             // UART HAL is polled via read/pending -- no separate poll needed
-        }
+    }
     }
 
     override ptrdiff_t read(void[] buffer)
@@ -508,7 +508,7 @@ nothrow @nogc:
             if (_logging)
                 write_to_log(true, buffer[0 .. bytes_read]);
             return bytes_read;
-        }
+    }
     }
 
     override ptrdiff_t write(const(void[])[] data...)
