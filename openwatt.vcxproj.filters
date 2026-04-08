@@ -285,6 +285,9 @@
     <DCompile Include="src\router\iface\vlan.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
+    <DCompile Include="src\router\iface\wifi.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
     <DCompile Include="src\router\port\package.d">
       <Filter>src\router\port</Filter>
     </DCompile>
@@ -746,6 +749,9 @@
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\mbedtls.c">
       <Filter>third_party\urt\internal</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\stdc\errno.d">
+      <Filter>third_party\urt\internal\stdc</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\stdc\stdio.d">
       <Filter>third_party\urt\internal\stdc</Filter>

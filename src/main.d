@@ -15,6 +15,12 @@ import manager.log : format_log_line;
 import router.stream : Stream;
 import router.stream.console : ConsoleStream, ConsoleStreamModule;
 
+version (BL808)     version = ImportSystemConf;
+version (ESP32_S3)  version = ImportSystemConf;
+
+version (ESP32_S3)
+    private extern(C) void ow_watchdog_feed() nothrow @nogc;
+
 nothrow @nogc:
 
 
@@ -89,7 +95,7 @@ int main(string[] args)
     //   2. startup.conf — regular configuration (--config overrides path)
     //   3. user.conf    — personal overrides (not committed)
 
-    version (BL808)
+    version (ImportSystemConf)
         static immutable system_conf = import("system.conf");
     else
         enum system_conf = "";
@@ -145,10 +151,28 @@ int main(string[] args)
     // stop the computer from sleeping while this application is running...
     set_system_idle_params(IdleParams.system_required);
 
+    version (FreeStanding)
+    {
+        log_info("system", "Entering main loop");
+        MonoTime last_heartbeat = getTime();
+    }
+
     while (true)
     {
         MonoTime start = getTime();
         g_app.update();
+
+        version (ESP32_S3)
+            ow_watchdog_feed();
+
+        version (FreeStanding)
+        {
+            if ((start - last_heartbeat).as!"seconds" >= 10)
+            {
+                log_info("system", "Heartbeat");
+                last_heartbeat = start;
+            }
+        }
 
         if (startup_pending && session.is_idle())
         {

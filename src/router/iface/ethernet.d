@@ -282,7 +282,7 @@ protected:
         return true;
     }
 
-private:
+protected:
     this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(typeInfo, id, flags);
@@ -302,39 +302,12 @@ private:
     }
 }
 
-class WiFiInterface : EthernetInterface
-{
-    __gshared Property[1] Properties = [ Property.create!("ssid", ssid)() ];
-nothrow @nogc:
-
-    enum type_name = "wifi";
-
-    this(CID id, ObjectFlags flags = ObjectFlags.none)
-    {
-        super(collection_type_info!WiFiInterface, id, flags);
-    }
-
-    // Properties...
-
-    const(char)[] ssid() pure
-        => null;
-    void ssid(const(char)[] value)
-    {
-        assert(false);
-    }
-
-protected:
-    // TODO: wifi details...
-    // ssid, signal details, security.
-}
-
 class EthernetInterfaceModule : Module
 {
     mixin DeclareModule!"interface.ethernet";
 nothrow @nogc:
 
     Collection!EthernetInterface ethernet_interfaces;
-    Collection!WiFiInterface wifi_interfaces;
 
     override void init()
     {
@@ -356,10 +329,8 @@ nothrow @nogc:
             scope(exit) pcap_freealldevs(interfaces);
 
             g_app.console.register_collection("/interface/ethernet", ethernet_interfaces);
-            g_app.console.register_collection("/interface/wifi", wifi_interfaces);
 
             int num_ether_interfaces = 0;
-            int num_wifi_interfaces = 0;
             for (auto dev = interfaces; dev; dev = dev.next)
             {
                 // Skip loopback interfaces
@@ -378,32 +349,15 @@ nothrow @nogc:
                     description.contains_i("virtualbox") ||
                     description.contains_i("tunnel") ||
                     description.contains_i("offload") ||
-                    description.contains_i("tap"))
+                    description.contains_i("tap") ||
+                    description.contains_i("wireless") ||
+                    description.contains_i("wi-fi") ||
+                    description.contains_i("wifi"))
                     continue;
 
-                // Check if it's a Wi-Fi interface
-                bool is_wifi = (dev.flags & 0x00000008) != 0; // PCAP_IF_WIRELESS
-                if (!is_wifi)
-                {
-                    // Also check description for wireless keywords as a fallback
-                    if (description.contains_i("wireless") ||
-                        description.contains_i("wi-fi") ||
-                        description.contains_i("wifi"))
-                        is_wifi = true;
-                }
-
-                if (is_wifi)
-                {
-                    writeInfo("Found wifi interface: \"", description, "\" (", name[], ")");
-                    auto iface = wifi_interfaces.create(tconcat("wifi", ++num_wifi_interfaces));
-                    iface.adapter = name;
-                }
-                else
-                {
-                    writeInfo("Found ethernet interface: \"", description, "\" (", name[], ")");
-                    auto iface = ethernet_interfaces.create(tconcat("ether", ++num_ether_interfaces));
-                    iface.adapter = name;
-                }
+                writeInfo("Found ethernet interface: \"", description, "\" (", name[], ")");
+                auto iface = ethernet_interfaces.create(tconcat("ether", ++num_ether_interfaces));
+                iface.adapter = name;
 
                 // TODO: we need to set the MAC for the interface to the NIC MAC address...
             }
@@ -413,6 +367,5 @@ nothrow @nogc:
     override void update()
     {
         ethernet_interfaces.update_all();
-        wifi_interfaces.update_all();
     }
 }

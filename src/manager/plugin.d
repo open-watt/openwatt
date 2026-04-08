@@ -88,6 +88,7 @@ void register_modules(Application app)
     register_module!(router.iface.ethernet)(app);
     register_module!(router.iface.modbus)(app);
     register_module!(router.iface.tesla)(app);
+    register_module!(router.iface.wifi)(app);
 
     import protocol;
     register_module!(protocol.can)(app);

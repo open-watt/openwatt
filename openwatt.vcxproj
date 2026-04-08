@@ -158,6 +158,7 @@
     <DCompile Include="src\router\iface\priority_queue.d" />
     <DCompile Include="src\router\iface\tesla.d" />
     <DCompile Include="src\router\iface\vlan.d" />
+    <DCompile Include="src\router\iface\wifi.d" />
     <DCompile Include="src\router\iface\zigbee.d" />
     <DCompile Include="src\router\port\package.d" />
     <DCompile Include="src\router\status.d" />
@@ -381,6 +382,7 @@
       <FileType>CppCode</FileType>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\os.c" />
+    <DCompile Include="third_party\urt\src\urt\internal\stdc\errno.d" />
     <DCompile Include="third_party\urt\src\urt\internal\stdc\stdio.d" />
     <DCompile Include="third_party\urt\src\urt\internal\stdc\stdlib.d" />
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\basetsd.d" />

@@ -1,0 +1,49 @@
+# Minimal ESP-IDF config for OpenWatt on ESP32-S3
+# Strip everything we don't need -- OpenWatt manages its own I/O, networking, and logging.
+
+# Enable C++ exception unwinding (required for D exception mechanism)
+CONFIG_COMPILER_CXX_EXCEPTIONS=y
+
+# Console over native USB Serial/JTAG (the USB port, not UART pins)
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+
+# No ESP-IDF logging -- OpenWatt has its own log system
+CONFIG_LOG_DEFAULT_LEVEL_NONE=y
+
+# No VFS layer (virtual filesystem for stdio redirection)
+CONFIG_VFS_SUPPORT_IO=n
+CONFIG_VFS_SUPPORT_DIR=n
+CONFIG_VFS_SUPPORT_SELECT=n
+
+# FreeRTOS tuning
+CONFIG_FREERTOS_HZ=1000
+CONFIG_FREERTOS_TASK_STACK_SIZE_IN_BYTES=y
+CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=2048
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=16384
+
+# No watchdog on idle tasks (we run a tight main loop)
+CONFIG_ESP_TASK_WDT_INIT=n
+
+# Single-core mode (saves ~4KB IRAM, simplifies FreeRTOS)
+CONFIG_FREERTOS_UNICORE=y
+
+# Heap: use all available SRAM regions
+CONFIG_HEAP_POISONING_DISABLED=y
+
+# PSRAM (external SPI RAM) -- 8MB octal on this module
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# WiFi: allow buffers in PSRAM to save internal SRAM
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# No Bluetooth
+CONFIG_BT_ENABLED=n
+
+# Flash: 16MB SPI flash
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+
+# Custom partition table: two 3MB OTA slots + ~10MB storage
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"

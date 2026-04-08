@@ -26,6 +26,7 @@ public static import router.iface.ethernet;
 public static import router.iface.modbus;
 public static import router.iface.tesla;
 public static import router.iface.vlan;
+public static import router.iface.wifi;
 public static import router.iface.zigbee;
 
 nothrow @nogc:

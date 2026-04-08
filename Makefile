@@ -1,6 +1,10 @@
 CONFIG ?= debug
 COMPILER ?= dmd
 
+# =============================================================================
+# Platform resolution: PLATFORM -> PROCESSOR / ARCH / OS
+# =============================================================================
+
 ifeq ($(PLATFORM),esp8266)
     # ESP8266 has no FPU!
     BUILDNAME := esp8266
@@ -168,7 +172,10 @@ ifdef PROCESSOR
   endif
 endif
 
-# cross-compilers use LDC
+# =============================================================================
+# Compiler auto-selection: cross-compilation targets use LDC
+# =============================================================================
+
 ifeq ($(COMPILER),dmd)
 ifdef ARCH
 ifneq ($(ARCH),x86_64)
@@ -178,6 +185,22 @@ endif
 endif
 endif
 endif
+
+# =============================================================================
+# Toolchain discovery
+# =============================================================================
+
+# Espressif toolchain path — set to override auto-detection
+# e.g.: make PLATFORM=esp32-s3 ESPRESSIF_PATH=~/.espressif
+ESPRESSIF_PATH ?= $(wildcard $(HOME)/.espressif)
+ifdef ESPRESSIF_PATH
+    ESPRESSIF_XTENSA_BIN := $(lastword $(sort $(wildcard $(ESPRESSIF_PATH)/tools/xtensa-esp-elf/*/xtensa-esp-elf/bin)))
+    ESPRESSIF_RISCV32_BIN := $(lastword $(sort $(wildcard $(ESPRESSIF_PATH)/tools/riscv32-esp-elf/*/riscv32-esp-elf/bin)))
+endif
+
+# =============================================================================
+# Paths and names
+# =============================================================================
 
 RTSRCDIR := third_party/urt/src
 SRCDIR := src
@@ -191,7 +214,15 @@ OBJDIR := obj/$(BUILDNAME)_$(CONFIG)
 TARGETDIR := bin/$(BUILDNAME)_$(CONFIG)
 DEPFILE = $(OBJDIR)/$(TARGETNAME).d
 
-DFLAGS := $(DFLAGS) -preview=bitfields -preview=rvaluerefparam -preview=in #-preview=nosharedaccess <- TODO: fix this
+ifeq ($(OS),windows)
+    TARGET = $(TARGETDIR)/$(TARGETNAME).exe
+else
+    TARGET = $(TARGETDIR)/$(TARGETNAME)
+endif
+
+# =============================================================================
+# Sources
+# =============================================================================
 
 SOURCES := $(shell find "$(SRCDIR)" -type f -name '*.d')
 SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)" -type f -name '*.d' -not -path '*/sys/bl808/*')
@@ -201,22 +232,70 @@ ifeq ($(filter freertos baremetal,$(OS)),)
 endif
 ifeq ($(PLATFORM),bl808)
     SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/bl808" -type f -name '*.d')
-    DFLAGS := $(DFLAGS) -d-version=BL808 -J platforms/bl808
 endif
 
-ifeq ($(OS),windows)
-    TARGET = $(TARGETDIR)/$(TARGETNAME).exe
-else
-    TARGET = $(TARGETDIR)/$(TARGETNAME)
+# =============================================================================
+# Platform-independent DFLAGS
+# =============================================================================
+# Version flags use -d-version (LDC syntax) but all guarded platforms force LDC
+# via compiler auto-selection above, so these are never reached by DMD builds.
+
+DFLAGS := $(DFLAGS) -preview=bitfields -preview=rvaluerefparam -preview=in #-preview=nosharedaccess <- TODO: fix this
+
+# OS and C runtime versions
+ifeq ($(OS),freertos)
+    DFLAGS := $(DFLAGS) -d-version=FreeRTOS
 endif
+ifneq ($(filter esp%,$(PLATFORM)),)
+    # ESP-IDF toolchain uses picolibc (a newlib fork, since IDF v6.0)
+    DFLAGS := $(DFLAGS) -d-version=Espressif -d-version=lwIP -d-version=CRuntime_Picolibc -J platforms/esp32s3
+endif
+ifeq ($(PLATFORM),bl808)
+    DFLAGS := $(DFLAGS) -d-version=BL808 -d-version=CRuntime_Picolibc -J platforms/bl808
+endif
+
+# Chip-specific versions
+ifeq ($(PLATFORM),esp8266)
+    DFLAGS := $(DFLAGS) -d-version=ESP8266
+else ifeq ($(PLATFORM),esp32)
+    DFLAGS := $(DFLAGS) -d-version=ESP32
+else ifeq ($(PLATFORM),esp32-s2)
+    DFLAGS := $(DFLAGS) -d-version=ESP32_S2
+else ifeq ($(PLATFORM),esp32-s3)
+    DFLAGS := $(DFLAGS) -d-version=ESP32_S3
+else ifeq ($(PLATFORM),esp32-c2)
+    DFLAGS := $(DFLAGS) -d-version=ESP32_C2
+else ifeq ($(PLATFORM),esp32-c3)
+    DFLAGS := $(DFLAGS) -d-version=ESP32_C3
+else ifeq ($(PLATFORM),esp32-c5)
+    DFLAGS := $(DFLAGS) -d-version=ESP32_C5
+else ifeq ($(PLATFORM),esp32-c6)
+    DFLAGS := $(DFLAGS) -d-version=ESP32_C6
+else ifeq ($(PLATFORM),esp32-h2)
+    DFLAGS := $(DFLAGS) -d-version=ESP32_H2
+else ifeq ($(PLATFORM),esp32-p4)
+    DFLAGS := $(DFLAGS) -d-version=ESP32_P4
+endif
+
+ifeq ($(CONFIG),unittest)
+    DFLAGS := $(DFLAGS) -unittest
+    TARGETNAME := $(TARGETNAME)_test
+endif
+
+# =============================================================================
+# Compiler-specific flags
+# =============================================================================
 
 ifeq ($(COMPILER),ldc)
     # Prefer dlang-installer LDC (avoids system package conflicts with cross-compile)
     DC ?= $(or $(wildcard $(HOME)/dlang/ldc-*/bin/ldc2),ldc2)
     DC := $(lastword $(sort $(wildcard $(HOME)/dlang/ldc-*/bin/ldc2)))
     DC := $(if $(DC),$(DC),ldc2)
+
+    # Strip druntime/phobos - ldc2.conf in the project root is auto-discovered and sets -defaultlib=
     DFLAGS := $(DFLAGS) -I $(RTSRCDIR) -I $(SRCDIR) -J $(SRCDIR)
 
+    # Architecture-specific target triples and machine flags
     ifeq ($(ARCH),x86_64)
 #        DFLAGS := $(DFLAGS) -mtriple=x86_64-linux-gnu
     else ifeq ($(ARCH),x86)
@@ -267,7 +346,8 @@ ifeq ($(COMPILER),ldc)
             DFLAGS := $(DFLAGS) -mattr=+m,+a,+f,+d,+c,+zicsr,+zifencei
         endif
     else ifeq ($(ARCH),riscv)
-        DFLAGS := $(DFLAGS) -mtriple=riscv32-unknown-elf -gcc=riscv64-unknown-elf-gcc
+        RISCV32_GCC ?= $(or $(if $(ESPRESSIF_RISCV32_BIN),$(ESPRESSIF_RISCV32_BIN)/riscv32-esp-elf-gcc),$(shell which riscv32-esp-elf-gcc 2>/dev/null),riscv64-unknown-elf-gcc)
+        DFLAGS := $(DFLAGS) -mtriple=riscv32-unknown-elf -gcc=$(RISCV32_GCC)
         ifeq ($(PROCESSOR),esp32p4)
             # ESP32-P4: RV32IMAFDCV, 400MHz
             DFLAGS := $(DFLAGS) -mattr=+m,+a,+f,+d,+c,+v
@@ -283,16 +363,23 @@ ifeq ($(COMPILER),ldc)
         endif
     else ifeq ($(ARCH),xtensa)
         # Xtensa targets — requires Espressif toolchain (chip-specific GCC wrappers)
-        XTENSA_GCC_DIR ?= $(dir $(shell which xtensa-esp-elf-gcc 2>/dev/null))
+        XTENSA_GCC_DIR ?= $(or $(if $(ESPRESSIF_XTENSA_BIN),$(ESPRESSIF_XTENSA_BIN)/),$(dir $(shell which xtensa-esp-elf-gcc 2>/dev/null)))
         # Features common to all ESP32 Xtensa cores (LX6, S2 LX7, S3 LX7)
         # Note: +fp and +loop are NOT universal — S2 lacks both
-        XTENSA_COMMON := -mtriple=xtensa-none-elf \
-            -mattr=+density,+mul16,+mul32,+mul32high,+div32 \
+        # Xtensa generic CPU has no atomic instructions — use single-thread model
+        # so LLVM lowers atomics (e.g. shared static this() gates) to plain loads/stores
+        # LLVM Xtensa workarounds:
+        # - emulated TLS: @TPOFF symbol suffixes incompatible with GNU ld
+        # - align-all-functions=2: ensures 4-byte alignment for l32r literal targets
+        XTENSA_MATTR := -mattr=+density,+mul16,+mul32,+mul32high,+div32 \
             -mattr=+sext,+nsa,+clamps,+minmax,+bool \
             -mattr=+windowed,+threadptr \
             -mattr=+exception,+interrupt,+highpriinterrupts,+debug
+        XTENSA_COMMON := -mtriple=xtensa-none-elf --thread-model=single -emulated-tls \
+            --align-all-functions=2 $(XTENSA_MATTR)
         ifeq ($(PROCESSOR),lx6)
             # ESP32: dual-core LX6, 240MHz — FPU, loops, MAC16, DFP acceleration
+            XTENSA_MATTR := $(XTENSA_MATTR) -mattr=+fp,+loop,+mac16,+dfpaccel
             DFLAGS := $(DFLAGS) $(XTENSA_COMMON) \
                 -mattr=+fp,+loop,+mac16,+dfpaccel \
                 -gcc=$(XTENSA_GCC_DIR)xtensa-esp32-elf-gcc
@@ -301,6 +388,7 @@ ifeq ($(COMPILER),ldc)
                 # ESP32-S3: dual-core LX7, 240MHz, 512KB SRAM — FPU, loops
                 # Has PIE (SIMD) — not yet exposed in LLVM Xtensa backend
                 # S3 supports unaligned load/store in hardware
+                XTENSA_MATTR := $(XTENSA_MATTR) -mattr=+fp,+loop
                 DFLAGS := $(DFLAGS) $(XTENSA_COMMON) \
                     -mattr=+fp,+loop \
                     -d-version=SupportUnaligned \
@@ -337,11 +425,26 @@ ifeq ($(COMPILER),ldc)
       endif
     endif
 
+    # Xtensa two-stage build: LDC emits bitcode, then Espressif's llc does codegen.
+    # Upstream LLVM's Xtensa backend crashes on invoke+landingpad at -O1+
+    # (LiveVariables segfault) and has l32r literal alignment bugs.
+    ifeq ($(ARCH),xtensa)
+        ESPRESSIF_LLC := $(lastword $(sort $(wildcard $(HOME)/.espressif/tools/esp-clang/*/esp-clang/bin/llc)))
+        XTENSA_TWO_STAGE := 1
+    endif
+
     ifeq ($(CONFIG),release)
+      ifeq ($(ARCH),xtensa)
+        DFLAGS := $(DFLAGS) -release --enable-asserts -Oz -enable-inlining --output-bc
+      else
         DFLAGS := $(DFLAGS) -release --enable-asserts -O3 -enable-inlining
+      endif
     else ifdef BAREMETAL_DIR
         # Embedded: optimize even for debug/unittest to fit in firmware partition
         DFLAGS := $(DFLAGS) --enable-asserts -O2 -enable-inlining
+    else ifeq ($(ARCH),xtensa)
+        # Xtensa embedded: optimize to fit in flash, emit bitcode for two-stage
+        DFLAGS := $(DFLAGS) --enable-asserts -Oz -enable-inlining --output-bc -d-debug
     else
         DFLAGS := $(DFLAGS) -g -d-debug
     endif
@@ -349,6 +452,18 @@ ifeq ($(COMPILER),ldc)
     COMPILE_CMD = "$(DC)" $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -deps=$(DEPFILE) $(BAREMETAL_OBJS) $(SOURCES)
 else ifeq ($(COMPILER),dmd)
     DC ?= dmd
+
+    # Strip druntime/phobos, use URT's own object.d and runtime support.
+    # DMD uses its own default config for import/lib paths; on Windows we add
+    # third_party/dmd first so our self-contained __importc_builtins.di
+    # shadows druntime's (which has MSVC-specific va_list issues). On Linux
+    # the system __importc_builtins.di already handles GCC builtins correctly.
+    ifeq ($(OS),windows)
+        DFLAGS := -I=third_party/dmd $(DFLAGS) -defaultlib=
+    else
+        DFLAGS := $(DFLAGS) -defaultlib=
+    endif
+
     DFLAGS := $(DFLAGS) -I=$(RTSRCDIR) -I=$(SRCDIR) -J=$(SRCDIR)
 
     ifeq ($(ARCH),x86_64)
@@ -370,29 +485,13 @@ else
     $(error "Unknown D compiler: $(COMPILER)")
 endif
 
-ifeq ($(CONFIG),unittest)
-    DFLAGS := $(DFLAGS) -unittest
-    TARGETNAME := $(TARGETNAME)_test
-endif
-
-# Strip druntime/phobos, use URT's own object.d and runtime support
-# LDC: ldc2.conf in the project root is auto-discovered and sets -defaultlib=
-# DMD: uses its own default config for import/lib paths; on Windows we add
-#      third_party/dmd first so our self-contained __importc_builtins.di
-#      shadows druntime's (which has MSVC-specific va_list issues). On Linux
-#      the system __importc_builtins.di already handles GCC builtins correctly
-ifeq ($(COMPILER),dmd)
-    ifeq ($(OS),windows)
-        DFLAGS := -I=third_party/dmd $(DFLAGS) -defaultlib=
-    else
-        DFLAGS := $(DFLAGS) -defaultlib=
-    endif
-endif
-
 # Note: LDC's -deps format is not compatible with Make (it's a custom D module dependency format)
 # so we don't use -include here. The build will rebuild everything when any file changes.
 
+# =============================================================================
 # Bare-metal support files (startup, stubs) — compiled with cross-GCC
+# =============================================================================
+
 ifdef BAREMETAL_DIR
 BAREMETAL_OBJS := $(patsubst %.S,$(OBJDIR)/%.o,$(patsubst %.c,$(OBJDIR)/%.o,$(BAREMETAL_SRCS)))
 BAREMETAL_CFLAGS := -march=$(BAREMETAL_MARCH) -mabi=$(BAREMETAL_MABI) -ffreestanding -O2
@@ -406,18 +505,35 @@ $(OBJDIR)/%.o: $(BAREMETAL_DIR)/%.c
 	$(BAREMETAL_GCC) $(BAREMETAL_CFLAGS) -c -o $@ $<
 endif
 
+# =============================================================================
+# Build
+# =============================================================================
+
 $(TARGET): $(SOURCES) $(BAREMETAL_OBJS)
 	mkdir -p $(OBJDIR) $(TARGETDIR)
 	$(COMPILE_CMD)
-ifeq ($(ROUTEROS_BUILD),1)
-	@$(MAKE) --no-print-directory routeros-container
-	@$(MAKE) --no-print-directory routeros-tar
+ifeq ($(XTENSA_TWO_STAGE),1)
+	"$(ESPRESSIF_LLC)" -O2 -mtriple=xtensa-none-elf --emulated-tls --mtext-section-literals --function-sections --data-sections --emit-dwarf-unwind=always --exception-model=dwarf $(XTENSA_MATTR) --filetype=obj $(TARGET) -o $(TARGET).o
+	mv $(TARGET).o $(TARGET)
 endif
 ifeq ($(PLATFORM),bl808)
 	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/d0fw.bin
 endif
+ifneq ($(filter esp%,$(PLATFORM)),)
+	@echo ""
+	@echo "=== D object ready: $(TARGET) ==="
+	@echo "To build flashable firmware:  make esp-idf-build PLATFORM=$(PLATFORM) CONFIG=$(CONFIG)"
+	@echo "To flash:                     make esp-flash PLATFORM=$(PLATFORM)"
+endif
+ifeq ($(ROUTEROS_BUILD),1)
+	@$(MAKE) --no-print-directory routeros-container
+	@$(MAKE) --no-print-directory routeros-tar
+endif
 
-# MikroTik RouterOS container packaging
+# =============================================================================
+# Platform packaging: RouterOS container
+# =============================================================================
+
 .PHONY: routeros-container routeros-tar routeros-clean
 
 # Detect container engine (podman or docker)
@@ -471,6 +587,60 @@ else
 	-@$(CONTAINER_ENGINE) rmi openwatt:latest openwatt:routeros 2>/dev/null || true
 	@rm -f openwatt.tar
 endif
+
+# =============================================================================
+# Platform packaging: ESP-IDF firmware
+# =============================================================================
+
+.PHONY: esp-idf-build esp-flash esp-monitor
+
+# Map platform name to ESP-IDF project directory and IDF target
+ESP_IDF_PATH ?= $(lastword $(sort $(wildcard $(HOME)/.espressif/*/esp-idf)))
+ifeq ($(PLATFORM),esp32-s3)
+    ESP_PROJECT_DIR := platforms/esp32s3
+    ESP_IDF_TARGET  := esp32s3
+endif
+
+esp-idf-build:
+ifndef ESP_PROJECT_DIR
+	@echo "Error: No ESP-IDF project directory for PLATFORM=$(PLATFORM)"
+	@exit 1
+endif
+	@echo "Building ESP-IDF firmware ($(ESP_IDF_TARGET))..."
+	bash -c '. "$(ESP_IDF_PATH)/export.sh" > /dev/null 2>&1 && \
+		cd "$(ESP_PROJECT_DIR)" && \
+		if [ ! -f build/CMakeCache.txt ]; then idf.py set-target $(ESP_IDF_TARGET); fi && \
+		idf.py -DOPENWATT_OBJ=$(abspath $(TARGET)) reconfigure build'
+	cp "$(ESP_PROJECT_DIR)/build/openwatt.bin" "$(TARGETDIR)/openwatt.bin"
+	cp "$(ESP_PROJECT_DIR)/build/bootloader/bootloader.bin" "$(TARGETDIR)/bootloader.bin"
+	cp "$(ESP_PROJECT_DIR)/build/partition_table/partition-table.bin" "$(TARGETDIR)/partition-table.bin"
+	cp -f "$(ESP_PROJECT_DIR)/build/ota_data_initial.bin" "$(TARGETDIR)/ota_data_initial.bin" 2>/dev/null || true
+	@echo ""
+	@echo "=== Firmware ready: $(TARGETDIR)/ ==="
+	@echo "  openwatt.bin       $$(du -h $(TARGETDIR)/openwatt.bin | cut -f1)"
+	@echo "  bootloader.bin     $$(du -h $(TARGETDIR)/bootloader.bin | cut -f1)"
+	@echo "  partition-table.bin"
+	@echo ""
+	@echo "Flash from Windows:"
+	@echo "  python -m esptool --chip $(ESP_IDF_TARGET) -p COM5 -b 460800 write_flash \\"
+	@echo "    0x0 $(TARGETDIR)/bootloader.bin \\"
+	@echo "    0x8000 $(TARGETDIR)/partition-table.bin \\"
+	@echo "    0xf000 $(TARGETDIR)/ota_data_initial.bin \\"
+	@echo "    0x20000 $(TARGETDIR)/openwatt.bin"
+
+esp-flash:
+	. "$(ESP_IDF_PATH)/export.sh" > /dev/null 2>&1 && \
+		cd "$(ESP_PROJECT_DIR)" && \
+		idf.py flash
+
+esp-monitor:
+	. "$(ESP_IDF_PATH)/export.sh" > /dev/null 2>&1 && \
+		cd "$(ESP_PROJECT_DIR)" && \
+		idf.py monitor
+
+# =============================================================================
+# Clean
+# =============================================================================
 
 clean:
 	rm -rf $(OBJDIR) $(TARGETDIR)
