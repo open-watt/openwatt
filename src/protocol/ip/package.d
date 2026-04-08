@@ -43,7 +43,6 @@ nothrow @nogc:
         version(Windows)
         {
             import urt.endian : loadBigEndian;
-            import urt.socket : make_InetAddress;
             import urt.util : clz;
 
             if (!npcap_loaded())
@@ -73,9 +72,18 @@ nothrow @nogc:
                     {
                         if (addr.addr.sa_family == AF_INET)
                         {
+                            const sockaddr_in* ain = cast(const(sockaddr_in)*)&addr.addr;
+                            const sockaddr_in* nmin = cast(const(sockaddr_in)*)&addr.netmask;
+
                             IPNetworkAddress net_addr;
-                            net_addr.addr = make_InetAddress(addr.addr)._a.ipv4.addr;
-                            net_addr.mask = make_InetAddress(addr.netmask)._a.ipv4.addr;
+                            net_addr.addr.b[0] = ain.sin_addr.S_un.S_un_b.s_b1;
+                            net_addr.addr.b[1] = ain.sin_addr.S_un.S_un_b.s_b2;
+                            net_addr.addr.b[2] = ain.sin_addr.S_un.S_un_b.s_b3;
+                            net_addr.addr.b[3] = ain.sin_addr.S_un.S_un_b.s_b4;
+                            net_addr.mask.b[0] = nmin.sin_addr.S_un.S_un_b.s_b1;
+                            net_addr.mask.b[1] = nmin.sin_addr.S_un.S_un_b.s_b2;
+                            net_addr.mask.b[2] = nmin.sin_addr.S_un.S_un_b.s_b3;
+                            net_addr.mask.b[3] = nmin.sin_addr.S_un.S_un_b.s_b4;
 
                             IPAddress ip = addresses.create(tconcat(e.name, ".addr"));
                             ip.address = net_addr;
