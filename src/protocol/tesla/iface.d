@@ -25,6 +25,14 @@ import router.stream;
 nothrow @nogc:
 
 
+struct TWCFrame
+{
+    enum Type = PacketType.tesla_twc;
+
+    ushort src;
+    ushort dst;
+}
+
 class TeslaInterface : BaseInterface
 {
     __gshared Property[1] Properties = [ Property.create!("stream", stream)() ];

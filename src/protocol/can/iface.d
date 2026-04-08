@@ -46,6 +46,22 @@ struct CANFrame
     uint id;
     bool remote_transmission_request;
     bool extended;
+
+    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    {
+        ulong addr = p.hdr!CANFrame().id;
+        addr |= ulong(p.vlan & 0xFFF) << 48;
+        addr |= ulong(PacketType.can) << 60;
+        return addr; // TODO: should we set the broadcast bit?
+    }
+
+    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    {
+        ulong addr = ulong(p.vlan & 0xFFF) << 48;
+        addr |= ulong(PacketType.can) << 60;
+        addr |= ulong(1) << 63; // CAN is always broadcast
+        return addr;
+    }
 }
 
 

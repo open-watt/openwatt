@@ -151,6 +151,7 @@
     <DCompile Include="src\protocol\zigbee\router.d" />
     <DCompile Include="src\protocol\zigbee\zcl.d" />
     <DCompile Include="src\protocol\zigbee\zdo.d" />
+    <DCompile Include="src\router\iface\address_table.d" />
     <DCompile Include="src\router\iface\bridge.d" />
     <DCompile Include="src\router\iface\ethernet.d" />
     <DCompile Include="src\router\iface\mac.d" />

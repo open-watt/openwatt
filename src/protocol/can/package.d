@@ -21,6 +21,9 @@ import protocol.can.iface;
 import protocol.can.sampler;
 
 import router.iface;
+import router.iface.packet;
+
+nothrow @nogc:
 
 
 class CANProtocolModule : Module
@@ -32,6 +35,8 @@ nothrow @nogc:
 
     override void init()
     {
+        register_address_extractor(PacketType.can, &CANFrame.extract_src, &CANFrame.extract_dst);
+
         g_app.register_enum!CANInterfaceProtocol();
 
         g_app.console.register_collection("/interface/can", can_interfaces);

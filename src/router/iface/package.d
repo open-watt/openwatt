@@ -293,6 +293,7 @@ nothrow @nogc:
             return _master;
         _master = master;
         _slave_id = slave_id;
+        _flags |= ObjectFlags.slave;
         return null;
     }
 
@@ -329,7 +330,7 @@ nothrow @nogc:
         return forward(p, callback);
     }
 
-    final int forward(ref Packet packet, MessageCallback callback = null)
+    int forward(ref Packet packet, MessageCallback callback = null)
     {
         if (!running)
         {
