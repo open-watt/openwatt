@@ -24,9 +24,10 @@ else version(Posix)
     import urt.internal.sys.posix;
     import urt.internal.sys.posix.termios;
 }
-else version (BL808)
+else version (Bouffalo)
 {
-    import sys.bl808.uart;
+    version (BL808) import sys.bl808.uart;
+    else            import sys.bl618.uart;
 
     version = HasGPIO;
 }
@@ -192,10 +193,10 @@ nothrow @nogc:
             if (value > Parity.odd)
                 return "ESP32 only supports none, even, or odd parity";
         }
-        else version(BL808)
+        else version(Bouffalo)
         {
             if (value > Parity.odd)
-                return "BL808 only supports none, even, or odd parity";
+                return "Bouffalo UART only supports none, even, or odd parity";
         }
         if (_params.parity == value)
             return null;
@@ -390,7 +391,7 @@ nothrow @nogc:
                 return CompletionStatus.error;
             }
         }
-        else version(BL808)
+        else version(Bouffalo)
         {
             __gshared immutable UartStopBits[3] stop_bits_map = [ UartStopBits.one, UartStopBits.one_point_five, UartStopBits.two ];
             __gshared immutable UartParity[5] parity_map = [ UartParity.none, UartParity.even, UartParity.odd, UartParity.none, UartParity.none ];
@@ -428,7 +429,7 @@ nothrow @nogc:
                 _fd = -1;
             }
         }
-        else version (BL808)
+        else version (Bouffalo)
         {
             uart_close(_uart_port);
         }
@@ -457,10 +458,8 @@ nothrow @nogc:
             else
                 restart();
         }
-        else version(BL808)
+        else version(Bouffalo)
         {
-            // UART0/1/2 have no D0 interrupt — poll hardware FIFOs manually.
-            // UART3 is interrupt-driven but polling is harmless.
             uart_poll(_uart_port);
             if (uart_check_errors(_uart_port))
                 restart();
@@ -494,7 +493,7 @@ nothrow @nogc:
                 write_to_log(true, buffer[0 .. bytes_read]);
             return bytes_read;
         }
-        else version(BL808)
+        else version(Bouffalo)
         {
             ptrdiff_t bytes_read = uart_read(_uart_port, buffer);
             if (_logging)
@@ -581,7 +580,7 @@ nothrow @nogc:
                 }
             }
         }
-        else version(BL808)
+        else version(Bouffalo)
         {
             // Gather scatter list into contiguous buffer, then write
             const(void)[] send_buffer;
@@ -642,7 +641,7 @@ nothrow @nogc:
 
     override ptrdiff_t pending()
     {
-        version(BL808)
+        version(Bouffalo)
             return uart_rx_pending(_uart_port);
         else version(Espressif)
             return ow_uart_rx_pending(_uart_port);
@@ -652,7 +651,7 @@ nothrow @nogc:
 
     override ptrdiff_t flush()
     {
-        version(BL808)
+        version(Bouffalo)
             return uart_flush(_uart_port);
         else version(Espressif)
             return ow_uart_flush(_uart_port);

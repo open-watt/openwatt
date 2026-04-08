@@ -1,27 +1,39 @@
 CONFIG ?= debug
 COMPILER ?= dmd
 
-# =============================================================================
-# Platform resolution: PLATFORM -> PROCESSOR / ARCH / OS
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
+# PLATFORM — SoC/board identity
+#
+# Sets: BUILDNAME, PROCESSOR (default), OS, vendor version flags,
+#       platform source paths, linker scripts, string imports,
+#       vendor-specific GCC wrappers (Xtensa).
+# ═══════════════════════════════════════════════════════════════════════
 
 ifeq ($(PLATFORM),esp8266)
     # ESP8266 has no FPU!
     BUILDNAME := esp8266
     PROCESSOR := l106
     OS = freertos
+    XTENSA_GCC := xtensa-lx106-elf-gcc
 else ifeq ($(PLATFORM),esp32)
     BUILDNAME := esp32
     PROCESSOR := lx6
     OS = freertos
+    XTENSA_GCC := xtensa-esp32-elf-gcc
 else ifeq ($(PLATFORM),esp32-s2)
+    # Single-core LX7, 240MHz — NO FPU, NO loops
     BUILDNAME := esp32-s2
     PROCESSOR := lx7
     OS = freertos
+    XTENSA_GCC := xtensa-esp32s2-elf-gcc
 else ifeq ($(PLATFORM),esp32-s3)
+    # Dual-core LX7, 240MHz — FPU, loops, hardware unaligned access
     BUILDNAME := esp32-s3
     PROCESSOR := lx7
     OS = freertos
+    XTENSA_GCC := xtensa-esp32s3-elf-gcc
+    MATTR = +fp,+loop
+    DFLAGS := $(DFLAGS) -d-version=SupportUnaligned
 else ifeq ($(PLATFORM),esp32-h2)
     BUILDNAME := esp32-h2
     PROCESSOR := e906
@@ -50,8 +62,21 @@ else ifeq ($(PLATFORM),esp32-p4)
     PROCESSOR := esp32p4
     OS = freertos
 else ifeq ($(PLATFORM),bl808)
-    BUILDNAME := bl808
-    PROCESSOR := c906
+    # BL808 multi-core SoC — default to D0 (C906 RV64GC)
+    # Override with PROCESSOR=e907 for M0 core (E907 RV32IMAFC)
+    PROCESSOR ?= c906
+    OS = baremetal
+    ifeq ($(PROCESSOR),c906)
+        BUILDNAME := bl808-d0
+    else ifeq ($(PROCESSOR),e907)
+        BUILDNAME := bl808-m0
+    else
+        $(error "BL808: unsupported PROCESSOR=$(PROCESSOR) (expected c906 or e907)")
+    endif
+else ifeq ($(PLATFORM),bl618)
+    # Sipeed M0P — Bouffalo BL618, single-core T-Head E907 RV32IMAFC, 320MHz
+    BUILDNAME := bl618
+    PROCESSOR := e907
     OS = baremetal
 else ifeq ($(PLATFORM),stm7xx)
     BUILDNAME := stm7xx
@@ -64,7 +89,7 @@ else ifeq ($(PLATFORM),stm4xx)
 else ifeq ($(PLATFORM),routeros)
     # MikroTik RouterOS container (ARM64 Linux)
     BUILDNAME := routeros
-    ARCH = arm64
+    PROCESSOR := aarch64-generic
     OS := linux
     ROUTEROS_BUILD = 1
 else
@@ -113,68 +138,89 @@ else
             ARCH := riscv64
         endif
     endif
-  else
-    # Unrecognized PLATFORM value (e.g., e902) — treat as bare processor name
-    PROCESSOR := $(PLATFORM)
   endif
 endif
 
-# Allow bare processor names as PLATFORM (e.g., make PLATFORM=e906)
+# Bare-processor fallback: if PLATFORM was set but didn't match any known
+# platform above, treat it as a raw processor name (e.g., make PLATFORM=e906).
+# The PROCESSOR block below will set ARCH/OS defaults.
 ifndef PROCESSOR
   ifdef PLATFORM
-    PROCESSOR := $(PLATFORM)
+    ifneq ($(PLATFORM),$(OS))
+      PROCESSOR := $(PLATFORM)
+    endif
   endif
 endif
+
+# ═══════════════════════════════════════════════════════════════════════
+# PROCESSOR — CPU core identity
+#
+# Sets: ARCH, MARCH, MABI.  Pure ISA/compiler-target config.
+# OS is set with ?= only as a fallback for bare-processor builds;
+# PLATFORM always takes precedence.
+# ═══════════════════════════════════════════════════════════════════════
 
 ifdef PROCESSOR
-  ifeq ($(PROCESSOR),cortex-a7)
-      BUILDNAME ?= cortex-a7
+  ifeq ($(PROCESSOR),aarch64-generic)
+      ARCH = arm64
+  else ifeq ($(PROCESSOR),cortex-a7)
       ARCH = arm
+      MARCH = cortex-a7
   else ifeq ($(PROCESSOR),cortex-m4)
-      BUILDNAME ?= cortex-m4
       ARCH = thumb
+      MARCH = cortex-m4
   else ifeq ($(PROCESSOR),cortex-m7)
-      BUILDNAME ?= cortex-m7
       ARCH = thumb
+      MARCH = cortex-m7
   else ifeq ($(PROCESSOR),l106)
-      BUILDNAME ?= l106
-      ARCH = xtensa
+      ARCH  = xtensa
   else ifeq ($(PROCESSOR),lx6)
-      BUILDNAME ?= lx6
-      ARCH = xtensa
+      ARCH  = xtensa
+      MATTR = +fp,+loop,+mac16,+dfpaccel
   else ifeq ($(PROCESSOR),lx7)
-      BUILDNAME ?= lx7
-      ARCH = xtensa
+      ARCH  = xtensa
   else ifeq ($(PROCESSOR),k210)
-      BUILDNAME ?= k210
-      ARCH = riscv64
-      OS = baremetal
+      ARCH  = riscv64
+      MARCH = rv64imafdc
+      MATTR = +m,+a,+f,+d,+c,+zicsr,+zifencei
+      MABI  = lp64d
+      OS ?= baremetal
   else ifeq ($(PROCESSOR),c906)
-      BUILDNAME ?= c906
-      ARCH = riscv64
-      OS = baremetal
+      ARCH  = riscv64
+      MARCH = rv64imafdc
+      MATTR = +m,+a,+f,+d,+c,+unaligned-scalar-mem,+xtheadba,+xtheadbb,+xtheadbs,+xtheadcmo,+xtheadcondmov,+xtheadfmemidx,+xtheadmac,+xtheadmemidx,+xtheadsync
+      MABI  = lp64d
+      OS ?= baremetal
   else ifeq ($(PROCESSOR),e902)
-      BUILDNAME ?= e902
-      ARCH = riscv
-      OS = baremetal
+      ARCH  = riscv
+      MARCH = rv32emc
+      MATTR = +e,+m,+c
+      MABI  = ilp32e
+      OS ?= baremetal
   else ifeq ($(PROCESSOR),e906)
-      BUILDNAME ?= e906
-      ARCH = riscv
-      OS = freertos
+      ARCH  = riscv
+      MARCH = rv32imc
+      MATTR = +m,+c
+      MABI  = ilp32
+      OS ?= freertos
   else ifeq ($(PROCESSOR),e907)
-      BUILDNAME ?= e907
-      ARCH = riscv
-      OS = freertos
+      ARCH  = riscv
+      MARCH = rv32imafc
+      MATTR = +m,+a,+f,+c
+      MABI  = ilp32f
+      OS ?= freertos
   else ifeq ($(PROCESSOR),esp32p4)
-      BUILDNAME ?= esp32-p4
-      ARCH = riscv
-      OS = freertos
+      ARCH  = riscv
+      MARCH = rv32imafdcv
+      MATTR = +m,+a,+f,+d,+c,+v
+      MABI  = ilp32f
+      OS ?= freertos
   endif
 endif
 
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
 # Compiler auto-selection: cross-compilation targets use LDC
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
 
 ifeq ($(COMPILER),dmd)
 ifdef ARCH
@@ -186,9 +232,9 @@ endif
 endif
 endif
 
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
 # Toolchain discovery
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
 
 # Espressif toolchain path — set to override auto-detection
 # e.g.: make PLATFORM=esp32-s3 ESPRESSIF_PATH=~/.espressif
@@ -198,16 +244,20 @@ ifdef ESPRESSIF_PATH
     ESPRESSIF_RISCV32_BIN := $(lastword $(sort $(wildcard $(ESPRESSIF_PATH)/tools/riscv32-esp-elf/*/riscv32-esp-elf/bin)))
 endif
 
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
 # Paths and names
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
 
 RTSRCDIR := third_party/urt/src
 SRCDIR := src
 TARGETNAME := openwatt
 
 ifndef BUILDNAME
-    BUILDNAME := $(ARCH)_$(OS)
+    ifdef PROCESSOR
+        BUILDNAME := $(PROCESSOR)
+    else
+        BUILDNAME := $(ARCH)_$(OS)
+    endif
 endif
 
 OBJDIR := obj/$(BUILDNAME)_$(CONFIG)
@@ -220,23 +270,32 @@ else
     TARGET = $(TARGETDIR)/$(TARGETNAME)
 endif
 
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
 # Sources
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
 
 SOURCES := $(shell find "$(SRCDIR)" -type f -name '*.d')
-SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)" -type f -name '*.d' -not -path '*/sys/bl808/*')
+SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)" -type f -name '*.d' -not -path '*/sys/bl808/*' -not -path '*/sys/bl618/*')
 # mbedtls C glue needs host mbedtls headers — exclude for embedded targets
 ifeq ($(filter freertos baremetal,$(OS)),)
     SOURCES := $(SOURCES) $(RTSRCDIR)/urt/internal/mbedtls.c
 endif
 ifeq ($(PLATFORM),bl808)
+  ifeq ($(PROCESSOR),c906)
     SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/bl808" -type f -name '*.d')
+  else ifeq ($(PROCESSOR),e907)
+    # BL808 M0 core — E907 uses same peripheral drivers as BL618
+    SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/bl618" -type f -name '*.d')
+  endif
+endif
+ifeq ($(PLATFORM),bl618)
+    SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/bl618" -type f -name '*.d')
 endif
 
-# =============================================================================
-# Platform-independent DFLAGS
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
+# PLATFORM post-config: version flags, string imports
+# (runs after PROCESSOR is resolved so we can branch on sub-cores)
+# ═══════════════════════════════════════════════════════════════════════
 # Version flags use -d-version (LDC syntax) but all guarded platforms force LDC
 # via compiler auto-selection above, so these are never reached by DMD builds.
 
@@ -251,7 +310,14 @@ ifneq ($(filter esp%,$(PLATFORM)),)
     DFLAGS := $(DFLAGS) -d-version=Espressif -d-version=lwIP -d-version=CRuntime_Picolibc -J platforms/esp32s3
 endif
 ifeq ($(PLATFORM),bl808)
-    DFLAGS := $(DFLAGS) -d-version=BL808 -d-version=CRuntime_Picolibc -J platforms/bl808
+  ifeq ($(PROCESSOR),c906)
+    DFLAGS := $(DFLAGS) -d-version=BL808 -d-version=Bouffalo -d-version=CRuntime_Picolibc -J platforms/bl808
+  else ifeq ($(PROCESSOR),e907)
+    DFLAGS := $(DFLAGS) -d-version=BL808 -d-version=BL808_M0 -d-version=Bouffalo -d-version=CRuntime_Picolibc -J platforms/bl808_m0
+  endif
+endif
+ifeq ($(PLATFORM),bl618)
+    DFLAGS := $(DFLAGS) -d-version=BL618 -d-version=Bouffalo -d-version=CRuntime_Picolibc -J platforms/bl618
 endif
 
 # Chip-specific versions
@@ -282,9 +348,9 @@ ifeq ($(CONFIG),unittest)
     TARGETNAME := $(TARGETNAME)_test
 endif
 
-# =============================================================================
-# Compiler-specific flags
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
+# Compiler configuration
+# ═══════════════════════════════════════════════════════════════════════
 
 ifeq ($(COMPILER),ldc)
     # Prefer dlang-installer LDC (avoids system package conflicts with cross-compile)
@@ -317,8 +383,8 @@ ifeq ($(COMPILER),ldc)
         endif
     else ifeq ($(ARCH),thumb)
         DFLAGS := $(DFLAGS) -mtriple=thumbv7em-none-eabihf -gcc=arm-none-eabi-gcc
-        ifdef PROCESSOR
-            DFLAGS := $(DFLAGS) -mcpu=$(PROCESSOR)
+        ifdef MARCH
+            DFLAGS := $(DFLAGS) -mcpu=$(MARCH)
         endif
     else ifeq ($(ARCH),arm)
         ifeq ($(OS),freertos)
@@ -328,38 +394,21 @@ ifeq ($(COMPILER),ldc)
         else
             DFLAGS := $(DFLAGS) -mtriple=armv7-linux-gnueabihf
         endif
-        ifeq ($(PROCESSOR),cortex-a7)
-            DFLAGS := $(DFLAGS) -mcpu=cortex-a7
+        ifdef MARCH
+            DFLAGS := $(DFLAGS) -mcpu=$(MARCH)
         endif
     else ifeq ($(ARCH),riscv64)
         DFLAGS := $(DFLAGS) -mtriple=riscv64-unknown-elf -gcc=riscv64-unknown-elf-gcc -code-model=medium
+        DFLAGS := $(DFLAGS) -mattr=$(MATTR)
         # ImportC needs picolibc headers for C imports (stdio.h etc.)
         PICOLIBC_INCLUDE := $(firstword $(wildcard /usr/riscv64-unknown-elf/include /usr/lib/picolibc/riscv64-unknown-elf/include))
         DFLAGS := $(DFLAGS) $(if $(PICOLIBC_INCLUDE),-P=-isystem -P=$(PICOLIBC_INCLUDE))
-        ifeq ($(PROCESSOR),c906)
-            # C906: RV64GC + T-Head extensions (vector is draft v0.7.1, not RVV 1.0)
-            DFLAGS := $(DFLAGS) -mattr=+m,+a,+f,+d,+c,+unaligned-scalar-mem \
-                -mattr=+xtheadba,+xtheadbb,+xtheadbs,+xtheadcmo,+xtheadcondmov \
-                -mattr=+xtheadfmemidx,+xtheadmac,+xtheadmemidx,+xtheadsync
-        else ifeq ($(PROCESSOR),k210)
-            # K210: RV64GC, no vector
-            DFLAGS := $(DFLAGS) -mattr=+m,+a,+f,+d,+c,+zicsr,+zifencei
-        endif
     else ifeq ($(ARCH),riscv)
         RISCV32_GCC ?= $(or $(if $(ESPRESSIF_RISCV32_BIN),$(ESPRESSIF_RISCV32_BIN)/riscv32-esp-elf-gcc),$(shell which riscv32-esp-elf-gcc 2>/dev/null),riscv64-unknown-elf-gcc)
         DFLAGS := $(DFLAGS) -mtriple=riscv32-unknown-elf -gcc=$(RISCV32_GCC)
-        ifeq ($(PROCESSOR),esp32p4)
-            # ESP32-P4: RV32IMAFDCV, 400MHz
-            DFLAGS := $(DFLAGS) -mattr=+m,+a,+f,+d,+c,+v
-        else ifeq ($(PROCESSOR),e902)
-            # E902: RV32EMC — 16 registers only, no FPU
-            DFLAGS := $(DFLAGS) -mattr=+e,+m,+c -mabi=ilp32e -d-version=RISCV32E
-        else ifeq ($(PROCESSOR),e906)
-            # E906: RV32IMC — no atomic, no FPU
-            DFLAGS := $(DFLAGS) -mattr=+m,+c -mabi=ilp32
-        else ifeq ($(PROCESSOR),e907)
-            # E907: RV32IMAFC — atomics + single-precision FP
-            DFLAGS := $(DFLAGS) -mattr=+m,+a,+f,+c -mabi=ilp32f
+        DFLAGS := $(DFLAGS) -mattr=$(MATTR) -mabi=$(MABI)
+        ifeq ($(PROCESSOR),e902)
+            DFLAGS := $(DFLAGS) -d-version=RISCV32E
         endif
     else ifeq ($(ARCH),xtensa)
         # Xtensa targets — requires Espressif toolchain (chip-specific GCC wrappers)
@@ -371,51 +420,53 @@ ifeq ($(COMPILER),ldc)
         # LLVM Xtensa workarounds:
         # - emulated TLS: @TPOFF symbol suffixes incompatible with GNU ld
         # - align-all-functions=2: ensures 4-byte alignment for l32r literal targets
+        # Base features common to all ESP32 Xtensa cores
         XTENSA_MATTR := -mattr=+density,+mul16,+mul32,+mul32high,+div32 \
             -mattr=+sext,+nsa,+clamps,+minmax,+bool \
             -mattr=+windowed,+threadptr \
             -mattr=+exception,+interrupt,+highpriinterrupts,+debug
-        XTENSA_COMMON := -mtriple=xtensa-none-elf --thread-model=single -emulated-tls \
-            --align-all-functions=2 $(XTENSA_MATTR)
-        ifeq ($(PROCESSOR),lx6)
-            # ESP32: dual-core LX6, 240MHz — FPU, loops, MAC16, DFP acceleration
-            XTENSA_MATTR := $(XTENSA_MATTR) -mattr=+fp,+loop,+mac16,+dfpaccel
-            DFLAGS := $(DFLAGS) $(XTENSA_COMMON) \
-                -mattr=+fp,+loop,+mac16,+dfpaccel \
-                -gcc=$(XTENSA_GCC_DIR)xtensa-esp32-elf-gcc
-        else ifeq ($(PROCESSOR),lx7)
-            ifeq ($(PLATFORM),esp32-s3)
-                # ESP32-S3: dual-core LX7, 240MHz, 512KB SRAM — FPU, loops
-                # Has PIE (SIMD) — not yet exposed in LLVM Xtensa backend
-                # S3 supports unaligned load/store in hardware
-                XTENSA_MATTR := $(XTENSA_MATTR) -mattr=+fp,+loop
-                DFLAGS := $(DFLAGS) $(XTENSA_COMMON) \
-                    -mattr=+fp,+loop \
-                    -d-version=SupportUnaligned \
-                    -gcc=$(XTENSA_GCC_DIR)xtensa-esp32s3-elf-gcc
-            else
-                # ESP32-S2: single-core LX7, 240MHz, 320KB SRAM — NO FPU, NO loops
-                # All float math is software-emulated
-                DFLAGS := $(DFLAGS) $(XTENSA_COMMON) \
-                    -gcc=$(XTENSA_GCC_DIR)xtensa-esp32s2-elf-gcc
-            endif
+        # Add processor features (MATTR from PROCESSOR block)
+        # and SoC features (XTENSA_FEATURES from PLATFORM block, for lx7)
+        ifdef MATTR
+            XTENSA_MATTR := $(XTENSA_MATTR) -mattr=$(MATTR)
         endif
+        # Xtensa workarounds:
+        # - single-thread model: no atomic instructions, LLVM lowers to plain loads/stores
+        # - emulated TLS: @TPOFF symbol suffixes incompatible with GNU ld
+        # - align-all-functions=2: ensures 4-byte alignment for l32r literal targets
+        DFLAGS := $(DFLAGS) -mtriple=xtensa-none-elf --thread-model=single -emulated-tls \
+            --align-all-functions=2 $(XTENSA_MATTR) \
+            -gcc=$(XTENSA_GCC_DIR)$(XTENSA_GCC)
     else
         $(error "Unsupported ARCH: $(ARCH)")
     endif
 
     # Embedded targets: per-platform link support or compile-only fallback
     ifneq ($(filter freertos baremetal,$(OS)),)
+      # Bouffalo baremetal — per-target dirs/srcs, common linking below
       ifeq ($(PLATFORM),bl808)
-        # BL808 D0 core (C906 RV64GC) — use LLD internally to avoid picolibc.ld injection
-        BAREMETAL_DIR   := third_party/urt/src/sys/bl808
-        BAREMETAL_SRCS  := start.S hbn_ram.c
-        BAREMETAL_LD    := platforms/bl808/ld/openwatt.ld
+        ifeq ($(PROCESSOR),c906)
+          BAREMETAL_DIR  := third_party/urt/src/sys/bl808
+          BAREMETAL_SRCS := start.S hbn_ram.c
+          BAREMETAL_LD   := platforms/bl808/ld/openwatt.ld
+        else ifeq ($(PROCESSOR),e907)
+          BAREMETAL_DIR  := third_party/urt/src/sys/bl618
+          BAREMETAL_SRCS := start.S
+          BAREMETAL_LD   := platforms/bl808_m0/ld/openwatt.ld
+        endif
+      else ifeq ($(PLATFORM),bl618)
+        BAREMETAL_DIR  := third_party/urt/src/sys/bl618
+        BAREMETAL_SRCS := start.S
+        BAREMETAL_LD   := platforms/bl618/ld/openwatt.ld
+      endif
+
+      ifdef BAREMETAL_DIR
+        # Common baremetal link config — MARCH/MABI come from PROCESSOR block
         BAREMETAL_GCC   := riscv64-unknown-elf-gcc
-        BAREMETAL_MARCH := rv64imafdc
-        BAREMETAL_MABI  := lp64d
+        BAREMETAL_MARCH := $(MARCH)
+        BAREMETAL_MABI  := $(MABI)
         BAREMETAL_LIBGCC := $(shell $(BAREMETAL_GCC) -march=$(BAREMETAL_MARCH) -mabi=$(BAREMETAL_MABI) --print-libgcc-file-name)
-        # Find picolibc libs: try --specs=picolibc.specs (Ubuntu), then native (Debian --with-picolibc), then search /usr/lib/picolibc
+        # Find picolibc libs: try --specs=picolibc.specs (Ubuntu), then native (Debian), then search /usr/lib/picolibc
         BAREMETAL_LIBC   := $(or $(filter /%,$(shell $(BAREMETAL_GCC) --specs=picolibc.specs -march=$(BAREMETAL_MARCH) -mabi=$(BAREMETAL_MABI) --print-file-name=libc.a 2>/dev/null)),$(filter /%,$(shell $(BAREMETAL_GCC) -march=$(BAREMETAL_MARCH) -mabi=$(BAREMETAL_MABI) --print-file-name=libc.a 2>/dev/null)),$(wildcard /usr/lib/picolibc/riscv64-unknown-elf/lib/libc.a))
         BAREMETAL_LIBM   := $(or $(filter /%,$(shell $(BAREMETAL_GCC) --specs=picolibc.specs -march=$(BAREMETAL_MARCH) -mabi=$(BAREMETAL_MABI) --print-file-name=libm.a 2>/dev/null)),$(filter /%,$(shell $(BAREMETAL_GCC) -march=$(BAREMETAL_MARCH) -mabi=$(BAREMETAL_MABI) --print-file-name=libm.a 2>/dev/null)),$(wildcard /usr/lib/picolibc/riscv64-unknown-elf/lib/libm.a))
         DFLAGS := $(DFLAGS) -L-T$(BAREMETAL_LD) -L--gc-sections --link-internally -frame-pointer=all -L-z -Lnorelro -L$(BAREMETAL_LIBC) -L$(BAREMETAL_LIBM) -L$(BAREMETAL_LIBGCC)
@@ -488,9 +539,11 @@ endif
 # Note: LDC's -deps format is not compatible with Make (it's a custom D module dependency format)
 # so we don't use -include here. The build will rebuild everything when any file changes.
 
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
+# Build rules
+# ═══════════════════════════════════════════════════════════════════════
+
 # Bare-metal support files (startup, stubs) — compiled with cross-GCC
-# =============================================================================
 
 ifdef BAREMETAL_DIR
 BAREMETAL_OBJS := $(patsubst %.S,$(OBJDIR)/%.o,$(patsubst %.c,$(OBJDIR)/%.o,$(BAREMETAL_SRCS)))
@@ -505,9 +558,7 @@ $(OBJDIR)/%.o: $(BAREMETAL_DIR)/%.c
 	$(BAREMETAL_GCC) $(BAREMETAL_CFLAGS) -c -o $@ $<
 endif
 
-# =============================================================================
-# Build
-# =============================================================================
+# ── Main target ───────────────────────────────────────────────────────
 
 $(TARGET): $(SOURCES) $(BAREMETAL_OBJS)
 	mkdir -p $(OBJDIR) $(TARGETDIR)
@@ -517,7 +568,14 @@ ifeq ($(XTENSA_TWO_STAGE),1)
 	mv $(TARGET).o $(TARGET)
 endif
 ifeq ($(PLATFORM),bl808)
+  ifeq ($(PROCESSOR),c906)
 	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/d0fw.bin
+  else ifeq ($(PROCESSOR),e907)
+	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/m0fw.bin
+  endif
+endif
+ifeq ($(PLATFORM),bl618)
+	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/fw.bin
 endif
 ifneq ($(filter esp%,$(PLATFORM)),)
 	@echo ""
@@ -530,9 +588,9 @@ ifeq ($(ROUTEROS_BUILD),1)
 	@$(MAKE) --no-print-directory routeros-tar
 endif
 
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
 # Platform packaging: RouterOS container
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
 
 .PHONY: routeros-container routeros-tar routeros-clean
 
@@ -588,9 +646,9 @@ else
 	@rm -f openwatt.tar
 endif
 
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
 # Platform packaging: ESP-IDF firmware
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
 
 .PHONY: esp-idf-build esp-flash esp-monitor
 
@@ -638,9 +696,9 @@ esp-monitor:
 		cd "$(ESP_PROJECT_DIR)" && \
 		idf.py monitor
 
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
 # Clean
-# =============================================================================
+# ═══════════════════════════════════════════════════════════════════════
 
 clean:
 	rm -rf $(OBJDIR) $(TARGETDIR)
