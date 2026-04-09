@@ -15,10 +15,7 @@ import manager.log : format_log_line;
 import router.stream : Stream;
 import router.stream.console : ConsoleStream, ConsoleStreamModule;
 
-version (Bouffalo)  version = Embedded;
-version (Espressif) version = Embedded;
-
-version (Embedded)  version = ImportSystemConf;
+version (Embedded) version = ImportSystemConf;
 
 version (ESP32_S3)
     private extern(C) void ow_watchdog_feed() nothrow @nogc;
@@ -153,7 +150,7 @@ int main(string[] args)
     // stop the computer from sleeping while this application is running...
     set_system_idle_params(IdleParams.system_required);
 
-    version (FreeStanding)
+    version (Embedded)
     {
         log_info("system", "Entering main loop");
         MonoTime last_heartbeat = getTime();
@@ -167,7 +164,7 @@ int main(string[] args)
         version (ESP32_S3)
             ow_watchdog_feed();
 
-        version (FreeStanding)
+        version (Embedded)
         {
             if ((start - last_heartbeat).as!"seconds" >= 10)
             {
@@ -234,7 +231,7 @@ void default_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
 void stderr_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
 {
     auto line = format_log_line(msg);
-    version (FreeStanding)
+    version (Embedded)
     {} // TODO: redirect to UART
     else
     {

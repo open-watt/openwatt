@@ -407,6 +407,11 @@ Follow these conventions (from [CONTRIBUTING.md](CONTRIBUTING.md)):
 - Public API (properties, overrides) at top of class
 - `private:` section at bottom for private members and helper methods
 
+**Platform/version conditionals:**
+- Keep one definition of each function and struct. Put `version` blocks *inside* at the exact point of divergence -- never duplicate the entire function or struct across version blocks.
+- When a version flag is needed in multiple places within a function, compute it once as an `enum` at the top (e.g. `version (X) enum hw = true; else enum hw = false;`) and branch with `static if`.
+- Declare local `version` identifiers (e.g. `version = Foo;`) at the top of a `version` block to create derived flags that simplify downstream conditionals.
+
 **Property patterns:**
 - **Mutually exclusive properties**: Later-set properties overwrite state of earlier ones. Don't validate mutual exclusion; instead, have each property setter update internal state to indicate which option is active.
   ```d

@@ -9,6 +9,12 @@ COMPILER ?= dmd
 #       vendor-specific GCC wrappers (Xtensa).
 # ═══════════════════════════════════════════════════════════════════════
 
+# Normalize CI-friendly platform aliases before platform detection
+ifeq ($(PLATFORM),bl808_m0)
+    override PLATFORM := bl808
+    PROCESSOR := e907
+endif
+
 ifeq ($(PLATFORM),esp8266)
     # ESP8266 has no FPU!
     BUILDNAME := esp8266
@@ -78,14 +84,31 @@ else ifeq ($(PLATFORM),bl618)
     BUILDNAME := bl618
     PROCESSOR := e907
     OS = baremetal
+else ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
+    # Beken BK7231 family — ARM968E-S (ARMv5TE), 120MHz, 256KB SRAM, 2MB SPI flash
+    # BK7231N adds BLE 5.0; BK7231T is Wi-Fi only. Same MCU peripherals.
+    # Platform directory: platforms/bk7231/ with n/ and t/ variant subdirs.
+    BUILDNAME := $(PLATFORM)
+    PROCESSOR := arm968e-s
+    OS = baremetal
+    BK_PLATFORM_DIR := platforms/bk7231
+else ifeq ($(PLATFORM),rp2350)
+    # Raspberry Pi RP2350 — dual Cortex-M33, 150MHz, 520KB SRAM, XIP QSPI flash
+    BUILDNAME := rp2350
+    PROCESSOR := cortex-m33
+    OS = baremetal
 else ifeq ($(PLATFORM),stm7xx)
     BUILDNAME := stm7xx
     PROCESSOR := cortex-m7
-    OS = freertos
+    OS = baremetal
+    STM32_VARIANT = f7
+    MFPU = fpv5-d16
 else ifeq ($(PLATFORM),stm4xx)
     BUILDNAME := stm4xx
     PROCESSOR := cortex-m4
-    OS = freertos
+    OS = baremetal
+    STM32_VARIANT = f4
+    MFPU = fpv4-sp-d16
 else ifeq ($(PLATFORM),routeros)
     # MikroTik RouterOS container (ARM64 Linux)
     BUILDNAME := routeros
@@ -169,6 +192,14 @@ ifdef PROCESSOR
   else ifeq ($(PROCESSOR),cortex-m4)
       ARCH = thumb
       MARCH = cortex-m4
+  else ifeq ($(PROCESSOR),arm968e-s)
+      ARCH = arm
+      MARCH = arm968e-s
+      MABI = soft
+      OS ?= baremetal
+  else ifeq ($(PROCESSOR),cortex-m33)
+      ARCH = thumb
+      MARCH = cortex-m33
   else ifeq ($(PROCESSOR),cortex-m7)
       ARCH = thumb
       MARCH = cortex-m7
@@ -275,7 +306,8 @@ endif
 # ═══════════════════════════════════════════════════════════════════════
 
 SOURCES := $(shell find "$(SRCDIR)" -type f -name '*.d')
-SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)" -type f -name '*.d' -not -path '*/sys/bl808/*' -not -path '*/sys/bl618/*')
+SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)" -type f -name '*.d' -not -path '$(RTSRCDIR)/sys/*')
+SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/baremetal" -type f -name '*.d')
 # mbedtls C glue needs host mbedtls headers — exclude for embedded targets
 ifeq ($(filter freertos baremetal,$(OS)),)
     SOURCES := $(SOURCES) $(RTSRCDIR)/urt/internal/mbedtls.c
@@ -291,6 +323,15 @@ endif
 ifeq ($(PLATFORM),bl618)
     SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/bl618" -type f -name '*.d')
 endif
+ifeq ($(PLATFORM),rp2350)
+    SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/rp2350" -type f -name '*.d')
+endif
+ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
+    SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/bk7231" -type f -name '*.d' 2>/dev/null)
+endif
+ifneq ($(filter esp%,$(PLATFORM)),)
+    SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/esp32" -type f -name '*.d')
+endif
 
 # ═══════════════════════════════════════════════════════════════════════
 # PLATFORM post-config: version flags, string imports
@@ -301,13 +342,38 @@ endif
 
 DFLAGS := $(DFLAGS) -preview=bitfields -preview=rvaluerefparam -preview=in #-preview=nosharedaccess <- TODO: fix this
 
-# OS and C runtime versions
+# OS-level versions
 ifeq ($(OS),freertos)
     DFLAGS := $(DFLAGS) -d-version=FreeRTOS
 endif
+ifeq ($(OS),baremetal)
+    DFLAGS := $(DFLAGS) -d-version=BareMetal
+endif
+ifneq ($(filter freertos baremetal,$(OS)),)
+    DFLAGS := $(DFLAGS) -d-version=Embedded
+endif
 ifneq ($(filter esp%,$(PLATFORM)),)
     # ESP-IDF toolchain uses picolibc (a newlib fork, since IDF v6.0)
-    DFLAGS := $(DFLAGS) -d-version=Espressif -d-version=lwIP -d-version=CRuntime_Picolibc -J platforms/esp32s3
+    DFLAGS := $(DFLAGS) -d-version=Espressif -d-version=lwIP -d-version=CRuntime_Picolibc
+endif
+ifeq ($(PLATFORM),esp32)
+    DFLAGS := $(DFLAGS) -J platforms/esp32
+else ifeq ($(PLATFORM),esp32-s2)
+    DFLAGS := $(DFLAGS) -J platforms/esp32s2
+else ifeq ($(PLATFORM),esp32-s3)
+    DFLAGS := $(DFLAGS) -J platforms/esp32s3
+else ifeq ($(PLATFORM),esp32-c2)
+    DFLAGS := $(DFLAGS) -J platforms/esp32c2
+else ifeq ($(PLATFORM),esp32-c3)
+    DFLAGS := $(DFLAGS) -J platforms/esp32c3
+else ifeq ($(PLATFORM),esp32-c5)
+    DFLAGS := $(DFLAGS) -J platforms/esp32c5
+else ifeq ($(PLATFORM),esp32-c6)
+    DFLAGS := $(DFLAGS) -J platforms/esp32c6
+else ifeq ($(PLATFORM),esp32-h2)
+    DFLAGS := $(DFLAGS) -J platforms/esp32h2
+else ifeq ($(PLATFORM),esp32-p4)
+    DFLAGS := $(DFLAGS) -J platforms/esp32p4
 endif
 ifeq ($(PLATFORM),bl808)
   ifeq ($(PROCESSOR),c906)
@@ -318,6 +384,25 @@ ifeq ($(PLATFORM),bl808)
 endif
 ifeq ($(PLATFORM),bl618)
     DFLAGS := $(DFLAGS) -d-version=BL618 -d-version=Bouffalo -d-version=CRuntime_Picolibc -J platforms/bl618
+endif
+ifeq ($(PLATFORM),rp2350)
+    DFLAGS := $(DFLAGS) -d-version=RP2350 -d-version=CRuntime_Picolibc -J platforms/rp2350
+endif
+ifneq ($(STM32_VARIANT),)
+    DFLAGS := $(DFLAGS) -d-version=STM32 -d-version=CRuntime_Picolibc -J platforms/stm32
+    ifeq ($(STM32_VARIANT),f4)
+        DFLAGS := $(DFLAGS) -d-version=STM32F4
+    else ifeq ($(STM32_VARIANT),f7)
+        DFLAGS := $(DFLAGS) -d-version=STM32F7
+    endif
+endif
+ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
+    DFLAGS := $(DFLAGS) -d-version=Beken -d-version=CRuntime_Picolibc -J $(BK_PLATFORM_DIR)/$(PLATFORM)
+    ifeq ($(PLATFORM),bk7231n)
+        DFLAGS := $(DFLAGS) -d-version=BK7231N
+    else
+        DFLAGS := $(DFLAGS) -d-version=BK7231T
+    endif
 endif
 
 # Chip-specific versions
@@ -382,18 +467,29 @@ ifeq ($(COMPILER),ldc)
             DFLAGS := $(DFLAGS) -gcc=aarch64-linux-gnu-gcc -static -L-static
         endif
     else ifeq ($(ARCH),thumb)
-        DFLAGS := $(DFLAGS) -mtriple=thumbv7em-none-eabihf -gcc=arm-none-eabi-gcc
+        ifeq ($(MARCH),cortex-m33)
+            DFLAGS := $(DFLAGS) -mtriple=thumbv8m.main-none-eabihf -gcc=arm-none-eabi-gcc
+        else
+            DFLAGS := $(DFLAGS) -mtriple=thumbv7em-none-eabihf -gcc=arm-none-eabi-gcc
+        endif
         ifdef MARCH
             DFLAGS := $(DFLAGS) -mcpu=$(MARCH)
         endif
     else ifeq ($(ARCH),arm)
-        ifeq ($(OS),freertos)
+        ifeq ($(OS),baremetal)
+          ifeq ($(MABI),soft)
+            DFLAGS := $(DFLAGS) -mtriple=armv5te-none-eabi -float-abi=soft
+          else
+            DFLAGS := $(DFLAGS) -mtriple=arm-none-eabihf
+          endif
+        else ifeq ($(OS),freertos)
             DFLAGS := $(DFLAGS) -mtriple=arm-none-eabihf
         else ifeq ($(OS),windows)
             DFLAGS := $(DFLAGS) -mtriple=armv7-windows-msvc
         else
             DFLAGS := $(DFLAGS) -mtriple=armv7-linux-gnueabihf
         endif
+        DFLAGS := $(DFLAGS) -gcc=arm-none-eabi-gcc
         ifdef MARCH
             DFLAGS := $(DFLAGS) -mcpu=$(MARCH)
         endif
@@ -458,18 +554,52 @@ ifeq ($(COMPILER),ldc)
         BAREMETAL_DIR  := third_party/urt/src/sys/bl618
         BAREMETAL_SRCS := start.S
         BAREMETAL_LD   := platforms/bl618/ld/openwatt.ld
+      else ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
+        BAREMETAL_DIR  := third_party/urt/src/sys/bk7231
+        BAREMETAL_SRCS := start.S
+        BAREMETAL_LD   := $(BK_PLATFORM_DIR)/$(PLATFORM)/openwatt.ld
+      else ifeq ($(PLATFORM),rp2350)
+        BAREMETAL_DIR  := third_party/urt/src/sys/rp2350
+        BAREMETAL_SRCS := start.S boot2.S
+        BAREMETAL_LD   := platforms/rp2350/openwatt.ld
+      else ifneq ($(STM32_VARIANT),)
+        BAREMETAL_DIR  := third_party/urt/src/sys/stm32
+        BAREMETAL_SRCS := start.S
+        BAREMETAL_LD   := platforms/stm32/$(STM32_VARIANT)/openwatt.ld
       endif
 
       ifdef BAREMETAL_DIR
-        # Common baremetal link config — MARCH/MABI come from PROCESSOR block
-        BAREMETAL_GCC   := riscv64-unknown-elf-gcc
-        BAREMETAL_MARCH := $(MARCH)
-        BAREMETAL_MABI  := $(MABI)
-        BAREMETAL_LIBGCC := $(shell $(BAREMETAL_GCC) -march=$(BAREMETAL_MARCH) -mabi=$(BAREMETAL_MABI) --print-libgcc-file-name)
-        # Find picolibc libs: try --specs=picolibc.specs (Ubuntu), then native (Debian), then search /usr/lib/picolibc
-        BAREMETAL_LIBC   := $(or $(filter /%,$(shell $(BAREMETAL_GCC) --specs=picolibc.specs -march=$(BAREMETAL_MARCH) -mabi=$(BAREMETAL_MABI) --print-file-name=libc.a 2>/dev/null)),$(filter /%,$(shell $(BAREMETAL_GCC) -march=$(BAREMETAL_MARCH) -mabi=$(BAREMETAL_MABI) --print-file-name=libc.a 2>/dev/null)),$(wildcard /usr/lib/picolibc/riscv64-unknown-elf/lib/libc.a))
-        BAREMETAL_LIBM   := $(or $(filter /%,$(shell $(BAREMETAL_GCC) --specs=picolibc.specs -march=$(BAREMETAL_MARCH) -mabi=$(BAREMETAL_MABI) --print-file-name=libm.a 2>/dev/null)),$(filter /%,$(shell $(BAREMETAL_GCC) -march=$(BAREMETAL_MARCH) -mabi=$(BAREMETAL_MABI) --print-file-name=libm.a 2>/dev/null)),$(wildcard /usr/lib/picolibc/riscv64-unknown-elf/lib/libm.a))
+        # Common baremetal link config
+        ifeq ($(ARCH),arm)
+          BAREMETAL_GCC    := arm-none-eabi-gcc
+          BAREMETAL_CFLAGS := -mcpu=$(MARCH) -marm -mfloat-abi=$(MABI)
+        else ifeq ($(ARCH),thumb)
+          BAREMETAL_GCC    := arm-none-eabi-gcc
+          MFPU ?= fpv5-sp-d16
+          BAREMETAL_CFLAGS := -mcpu=$(MARCH) -mthumb -mfloat-abi=hard -mfpu=$(MFPU)
+        else
+          BAREMETAL_GCC    := riscv64-unknown-elf-gcc
+          BAREMETAL_CFLAGS := -march=$(MARCH) -mabi=$(MABI)
+        endif
+        BAREMETAL_LIBGCC := $(shell $(BAREMETAL_GCC) $(BAREMETAL_CFLAGS) --print-libgcc-file-name)
+        # Find picolibc/newlib libs from cross-toolchain
+        # Try gcc --specs=picolibc.specs first, then plain gcc, then multilib-aware fallback
+        PICOLIBC_MULTIDIR := $(shell $(BAREMETAL_GCC) $(BAREMETAL_CFLAGS) --print-multi-directory 2>/dev/null)
+        BAREMETAL_LIBC   := $(or $(filter /%,$(shell $(BAREMETAL_GCC) --specs=picolibc.specs $(BAREMETAL_CFLAGS) --print-file-name=libc.a 2>/dev/null)),$(filter /%,$(shell $(BAREMETAL_GCC) $(BAREMETAL_CFLAGS) --print-file-name=libc.a 2>/dev/null)),$(wildcard /usr/lib/picolibc/riscv64-unknown-elf/lib/$(PICOLIBC_MULTIDIR)/libc.a))
+        BAREMETAL_LIBM   := $(or $(filter /%,$(shell $(BAREMETAL_GCC) --specs=picolibc.specs $(BAREMETAL_CFLAGS) --print-file-name=libm.a 2>/dev/null)),$(filter /%,$(shell $(BAREMETAL_GCC) $(BAREMETAL_CFLAGS) --print-file-name=libm.a 2>/dev/null)),$(wildcard /usr/lib/picolibc/riscv64-unknown-elf/lib/$(PICOLIBC_MULTIDIR)/libm.a))
         DFLAGS := $(DFLAGS) -L-T$(BAREMETAL_LD) -L--gc-sections --link-internally -frame-pointer=all -L-z -Lnorelro -L$(BAREMETAL_LIBC) -L$(BAREMETAL_LIBM) -L$(BAREMETAL_LIBGCC)
+
+        # BK7231: link SDK (FreeRTOS + drivers + lwIP) + WiFi/BLE blobs
+        ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
+          BK_SDK_ROOT   ?= ../OpenBK7231T_App
+          BK_BEKEN_LIB  := $(BK_PLATFORM_DIR)/build/$(PLATFORM)/libbeken.a
+          ifeq ($(PLATFORM),bk7231n)
+            BK_BLOB_DIR := $(BK_SDK_ROOT)/sdk/OpenBK7231N/platforms/bk7231n/bk7231n_os/beken378/lib
+          else
+            BK_BLOB_DIR := $(BK_SDK_ROOT)/sdk/OpenBK7231T/platforms/bk7231t/bk7231t_os/beken378/lib
+          endif
+          DFLAGS := $(DFLAGS) -L$(BK_BEKEN_LIB) -L$(BK_BLOB_DIR)/librwnx.a -L$(BK_BLOB_DIR)/libble.a
+        endif
       else
         # No linker script yet — compile only
         DFLAGS := $(DFLAGS) -c
@@ -547,7 +677,7 @@ endif
 
 ifdef BAREMETAL_DIR
 BAREMETAL_OBJS := $(patsubst %.S,$(OBJDIR)/%.o,$(patsubst %.c,$(OBJDIR)/%.o,$(BAREMETAL_SRCS)))
-BAREMETAL_CFLAGS := -march=$(BAREMETAL_MARCH) -mabi=$(BAREMETAL_MABI) -ffreestanding -O2
+BAREMETAL_CFLAGS := $(BAREMETAL_CFLAGS) -ffreestanding -O2
 
 $(OBJDIR)/%.o: $(BAREMETAL_DIR)/%.S
 	@mkdir -p $(OBJDIR)
@@ -560,7 +690,23 @@ endif
 
 # ── Main target ───────────────────────────────────────────────────────
 
-$(TARGET): $(SOURCES) $(BAREMETAL_OBJS)
+$(TARGET): $(SOURCES) $(BAREMETAL_OBJS) $(BK_BEKEN_LIB)
+
+# ── BK7231 FreeRTOS build (must come after $(TARGET) to avoid becoming default goal)
+
+ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
+.PHONY: bk7231-freertos bk7231-freertos-clean
+
+bk7231-sdk:
+	$(MAKE) -C $(BK_PLATFORM_DIR) PLATFORM=$(PLATFORM) $(if $(BK_SDK_ROOT),BK_SDK_ROOT=$(BK_SDK_ROOT))
+
+bk7231-clean:
+	$(MAKE) -C $(BK_PLATFORM_DIR) clean
+
+$(BK_BEKEN_LIB): bk7231-sdk
+endif
+
+$(TARGET):
 	mkdir -p $(OBJDIR) $(TARGETDIR)
 	$(COMPILE_CMD)
 ifeq ($(XTENSA_TWO_STAGE),1)
@@ -576,6 +722,12 @@ ifeq ($(PLATFORM),bl808)
 endif
 ifeq ($(PLATFORM),bl618)
 	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/fw.bin
+endif
+ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
+	arm-none-eabi-objcopy -O binary -R .bss -R .tbss -R '.tbss.*' -R .ARM.attributes -R '.debug*' $(TARGET) $(TARGETDIR)/fw.bin
+endif
+ifeq ($(PLATFORM),rp2350)
+	arm-none-eabi-objcopy -O binary -R .bss -R .tbss -R '.tbss.*' -R .ARM.attributes -R '.debug*' $(TARGET) $(TARGETDIR)/fw.bin
 endif
 ifneq ($(filter esp%,$(PLATFORM)),)
 	@echo ""
@@ -654,9 +806,33 @@ endif
 
 # Map platform name to ESP-IDF project directory and IDF target
 ESP_IDF_PATH ?= $(lastword $(sort $(wildcard $(HOME)/.espressif/*/esp-idf)))
-ifeq ($(PLATFORM),esp32-s3)
+ifeq ($(PLATFORM),esp32)
+    ESP_PROJECT_DIR := platforms/esp32
+    ESP_IDF_TARGET  := esp32
+else ifeq ($(PLATFORM),esp32-s2)
+    ESP_PROJECT_DIR := platforms/esp32s2
+    ESP_IDF_TARGET  := esp32s2
+else ifeq ($(PLATFORM),esp32-s3)
     ESP_PROJECT_DIR := platforms/esp32s3
     ESP_IDF_TARGET  := esp32s3
+else ifeq ($(PLATFORM),esp32-c2)
+    ESP_PROJECT_DIR := platforms/esp32c2
+    ESP_IDF_TARGET  := esp32c2
+else ifeq ($(PLATFORM),esp32-c3)
+    ESP_PROJECT_DIR := platforms/esp32c3
+    ESP_IDF_TARGET  := esp32c3
+else ifeq ($(PLATFORM),esp32-c5)
+    ESP_PROJECT_DIR := platforms/esp32c5
+    ESP_IDF_TARGET  := esp32c5
+else ifeq ($(PLATFORM),esp32-c6)
+    ESP_PROJECT_DIR := platforms/esp32c6
+    ESP_IDF_TARGET  := esp32c6
+else ifeq ($(PLATFORM),esp32-h2)
+    ESP_PROJECT_DIR := platforms/esp32h2
+    ESP_IDF_TARGET  := esp32h2
+else ifeq ($(PLATFORM),esp32-p4)
+    ESP_PROJECT_DIR := platforms/esp32p4
+    ESP_IDF_TARGET  := esp32p4
 endif
 
 esp-idf-build:
