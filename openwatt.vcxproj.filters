@@ -287,6 +287,9 @@
     <DCompile Include="src\manager\console\command.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
+    <DCompile Include="src\manager\console\live_view.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
     <DCompile Include="src\manager\console\package.d">
       <Filter>src\manager\console</Filter>
     </DCompile>

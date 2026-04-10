@@ -73,6 +73,7 @@
     <DCompile Include="src\manager\console\command.d" />
     <DCompile Include="src\manager\console\console.d" />
     <DCompile Include="src\manager\console\function_command.d" />
+    <DCompile Include="src\manager\console\live_view.d" />
     <DCompile Include="src\manager\console\package.d" />
     <DCompile Include="src\manager\console\session.d" />
     <DCompile Include="src\manager\console\table.d" />
