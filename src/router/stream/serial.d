@@ -24,25 +24,9 @@ else version(Posix)
     import urt.internal.sys.posix;
     import urt.internal.sys.posix.termios;
 }
-else version (BL808)
+else version (Embedded)
 {
-    import sys.bl808.uart;
-
-    version = HasGPIO;
-}
-else version (Espressif)
-{
-    version = HasGPIO;
-
-    enum NUM_UARTS = 3;
-
-    extern(C) int ow_uart_open(int port, uint baud_rate, ubyte data_bits, StopBits stop_bits, Parity parity, byte tx_gpio, byte rx_gpio) nothrow @nogc;
-    extern(C) void ow_uart_close(int port) nothrow @nogc;
-    extern(C) int ow_uart_read(int port, ubyte* buf, int len) nothrow @nogc;
-    extern(C) int ow_uart_write(int port, const(ubyte)* buf, int len) nothrow @nogc;
-    extern(C) int ow_uart_rx_pending(int port) nothrow @nogc;
-    extern(C) int ow_uart_tx_idle(int port) nothrow @nogc;
-    extern(C) int ow_uart_flush(int port) nothrow @nogc;
+    import sys.baremetal.uart;
 }
 else version (FreeStanding)
 {
@@ -97,15 +81,18 @@ struct SerialParams
 
 class SerialStream : Stream
 {
-    version(HasGPIO)
-        __gshared Property[8] Properties = [ Property.create!("device", device)(),
-                                             Property.create!("baud-rate", baud_rate)(),
-                                             Property.create!("data-bits", data_bits)(),
-                                             Property.create!("parity", parity)(),
-                                             Property.create!("stop-bits", stop_bits)(),
-                                             Property.create!("flow-control", flow_control)(),
-                                             Property.create!("tx-gpio", tx_gpio)(),
-                                             Property.create!("rx-gpio", rx_gpio)() ];
+    version (Embedded)
+        __gshared Property[11] Properties = [ Property.create!("device", device)(),
+                                              Property.create!("baud-rate", baud_rate)(),
+                                              Property.create!("data-bits", data_bits)(),
+                                              Property.create!("parity", parity)(),
+                                              Property.create!("stop-bits", stop_bits)(),
+                                              Property.create!("flow-control", flow_control)(),
+                                              Property.create!("tx-gpio", tx_gpio)(),
+                                              Property.create!("rx-gpio", rx_gpio)(),
+                                              Property.create!("rts-gpio", rts_gpio)(),
+                                              Property.create!("cts-gpio", cts_gpio)(),
+                                              Property.create!("de-gpio", de_gpio)() ];
     else
         __gshared Property[6] Properties = [ Property.create!("device", device)(),
                                              Property.create!("baud-rate", baud_rate)(),
@@ -133,12 +120,12 @@ nothrow @nogc:
         if (_device == value)
             return StringResult.success;
 
-        version (FreeStanding)
+        version (Embedded)
         {
             if (value.length == 5 && value[][0 .. 4] == "uart")
             {
                 uint port = value[][4] - '0';
-                if (port < NUM_UARTS)
+                if (port < num_uarts)
                 {
                     _uart_port = cast(byte)port;
                     _device = value.move;
@@ -147,7 +134,7 @@ nothrow @nogc:
                 }
             }
             _device = String();
-            return StringResult("invalid device: expected uart0-uart" ~ cast(char)('0' + NUM_UARTS - 1));
+            return StringResult("invalid device: expected uart0-uart" ~ cast(char)('0' + num_uarts - 1));
         }
         else
         {
@@ -187,15 +174,10 @@ nothrow @nogc:
         => _params.parity;
     const(char)[] parity(Parity value)
     {
-        version(Espressif)
+        version (Embedded)
         {
             if (value > Parity.odd)
-                return "ESP32 only supports none, even, or odd parity";
-        }
-        else version(BL808)
-        {
-            if (value > Parity.odd)
-                return "BL808 only supports none, even, or odd parity";
+                return "UART only supports none, even, or odd parity";
         }
         if (_params.parity == value)
             return null;
@@ -224,7 +206,7 @@ nothrow @nogc:
         restart();
     }
 
-    version(HasGPIO)
+    version (Embedded)
     {
         final byte tx_gpio() const pure
             => _tx_gpio;
@@ -238,8 +220,32 @@ nothrow @nogc:
             => _rx_gpio;
         final void rx_gpio(byte value)
         {
-                _rx_gpio = value;
-                restart();
+            _rx_gpio = value;
+            restart();
+        }
+
+        final byte rts_gpio() const pure
+            => _rts_gpio;
+        final void rts_gpio(byte value)
+        {
+            _rts_gpio = value;
+            restart();
+        }
+
+        final byte cts_gpio() const pure
+            => _cts_gpio;
+        final void cts_gpio(byte value)
+        {
+            _cts_gpio = value;
+            restart();
+        }
+
+        final byte de_gpio() const pure
+            => _de_gpio;
+        final void de_gpio(byte value)
+        {
+            _de_gpio = value;
+            restart();
         }
     }
 
@@ -390,23 +396,32 @@ nothrow @nogc:
                 return CompletionStatus.error;
             }
         }
-        else version(BL808)
+        else version (Embedded)
         {
-            __gshared immutable UartStopBits[3] stop_bits_map = [ UartStopBits.one, UartStopBits.one_point_five, UartStopBits.two ];
-            __gshared immutable UartParity[5] parity_map = [ UartParity.none, UartParity.even, UartParity.odd, UartParity.none, UartParity.none ];
+            static import bm = sys.baremetal.uart;
+            __gshared immutable bm.StopBits[3] stop_bits_map = [ bm.StopBits.one, bm.StopBits.one_point_five, bm.StopBits.two ];
+            __gshared immutable bm.Parity[5] parity_map = [ bm.Parity.none, bm.Parity.even, bm.Parity.odd, bm.Parity.none, bm.Parity.none ];
 
-            UartConfig cfg;
+            bm.UartConfig cfg;
             cfg.baud_rate = _params.baud_rate;
             cfg.data_bits = _params.data_bits;
             cfg.stop_bits = stop_bits_map[_params.stop_bits];
             cfg.parity = parity_map[_params.parity];
+            if (_tx_gpio >= 0)
+                cfg.tx_gpio = cast(ubyte)_tx_gpio;
+            if (_rx_gpio >= 0)
+                cfg.rx_gpio = cast(ubyte)_rx_gpio;
+            if (_rts_gpio >= 0)
+                cfg.rts_gpio = cast(ubyte)_rts_gpio;
+            if (_cts_gpio >= 0)
+                cfg.cts_gpio = cast(ubyte)_cts_gpio;
+            if (_de_gpio >= 0)
+            {
+                cfg.rs485.enabled = true;
+                cfg.rs485.de_gpio = cast(ubyte)_de_gpio;
+            }
 
-            if (!uart_open(_uart_port, cfg))
-                return CompletionStatus.error;
-        }
-        else version (Espressif)
-        {
-            if (!ow_uart_open(_uart_port, _params.baud_rate, _params.data_bits, _params.stop_bits, _params.parity, _tx_gpio, _rx_gpio))
+            if (!uart_open(_uart, cast(ubyte)_uart_port, cfg))
                 return CompletionStatus.error;
         }
         return CompletionStatus.complete;
@@ -428,13 +443,9 @@ nothrow @nogc:
                 _fd = -1;
             }
         }
-        else version (BL808)
+        else version (Embedded)
         {
-            uart_close(_uart_port);
-        }
-        else version (Espressif)
-        {
-            ow_uart_close(_uart_port);
+            uart_close(_uart);
         }
         return CompletionStatus.complete;
     }
@@ -457,17 +468,11 @@ nothrow @nogc:
             else
                 restart();
         }
-        else version(BL808)
+        else version (Embedded)
         {
-            // UART0/1/2 have no D0 interrupt — poll hardware FIFOs manually.
-            // UART3 is interrupt-driven but polling is harmless.
-            uart_poll(_uart_port);
-            if (uart_check_errors(_uart_port))
+            uart_poll(_uart);
+            if (uart_check_errors(_uart) != UartError.none)
                 restart();
-        }
-        else version (Espressif)
-        {
-            // UART HAL is polled via read/pending -- no separate poll needed
         }
 
         super.update();
@@ -494,20 +499,13 @@ nothrow @nogc:
                 write_to_log(true, buffer[0 .. bytes_read]);
             return bytes_read;
         }
-        else version(BL808)
+        else version (Embedded)
         {
-            ptrdiff_t bytes_read = uart_read(_uart_port, buffer);
+            ptrdiff_t bytes_read = uart_read(_uart, buffer);
             if (_logging)
                 write_to_log(true, buffer[0 .. bytes_read]);
             return bytes_read;
         }
-        else version (Espressif)
-        {
-            ptrdiff_t bytes_read = ow_uart_read(_uart_port, cast(ubyte*)buffer.ptr, cast(int)buffer.length);
-            if (_logging)
-                write_to_log(true, buffer[0 .. bytes_read]);
-            return bytes_read;
-    }
     }
 
     override ptrdiff_t write(const(void[])[] data...)
@@ -581,56 +579,20 @@ nothrow @nogc:
                 }
             }
         }
-        else version(BL808)
+        else version (Embedded)
         {
-            // Gather scatter list into contiguous buffer, then write
-            const(void)[] send_buffer;
-            ubyte[1024] stack_buffer = void;
-            if (data.length > 1)
+            bytes_written = uart_writev(_uart, data);
+            if (_logging && bytes_written > 0)
             {
-                size_t total_length = 0;
-                foreach (d; data)
-                    total_length += d.length;
-                assert(total_length <= stack_buffer.length, "Serial write too large");
-                size_t offset = 0;
-                foreach (d; data)
+                import urt.util : min;
+                size_t remain = bytes_written;
+                for (size_t i = 0; remain > 0; ++i)
                 {
-                    stack_buffer[offset .. offset + d.length] = cast(ubyte[])d;
-                    offset += d.length;
+                    size_t len = min(data[i].length, remain);
+                    write_to_log(false, data[i][0 .. len]);
+                    remain -= len;
                 }
-                send_buffer = stack_buffer[0 .. total_length];
             }
-            else
-                send_buffer = data[0];
-
-            bytes_written = uart_write(_uart_port, send_buffer);
-            if (_logging)
-                write_to_log(false, send_buffer[0 .. bytes_written]);
-        }
-        else version (Espressif)
-        {
-            const(void)[] send_buffer;
-            ubyte[1024] stack_buffer = void;
-            if (data.length > 1)
-            {
-                size_t total_length = 0;
-                foreach (d; data)
-                    total_length += d.length;
-                assert(total_length <= stack_buffer.length, "Serial write too large");
-                size_t offset = 0;
-                foreach (d; data)
-                {
-                    stack_buffer[offset .. offset + d.length] = cast(ubyte[])d;
-                    offset += d.length;
-                }
-                send_buffer = stack_buffer[0 .. total_length];
-            }
-            else
-                send_buffer = data[0];
-
-            bytes_written = ow_uart_write(_uart_port, cast(const(ubyte)*)send_buffer.ptr, cast(int)send_buffer.length);
-            if (_logging)
-                write_to_log(false, send_buffer[0 .. bytes_written]);
         }
         return bytes_written;
     }
@@ -642,20 +604,19 @@ nothrow @nogc:
 
     override ptrdiff_t pending()
     {
-        version(BL808)
-            return uart_rx_pending(_uart_port);
-        else version(Espressif)
-            return ow_uart_rx_pending(_uart_port);
+        version (Embedded)
+            return cast(ptrdiff_t)uart_rx_available(_uart);
         else
             assert(0, "TODO: pending() not implemented");
     }
 
     override ptrdiff_t flush()
     {
-        version(BL808)
-            return uart_flush(_uart_port);
-        else version(Espressif)
-            return ow_uart_flush(_uart_port);
+        version (Embedded)
+        {
+            uart_tx_flush(_uart);
+            return 0;
+        }
         else
             assert(0, "TODO: flush() not implemented");
     }
@@ -665,15 +626,21 @@ private:
         HANDLE _h_com = INVALID_HANDLE_VALUE;
     else version (Posix)
         int _fd = -1;
-    else version (FreeStanding)
+    else version (Embedded)
+    {
+        Uart _uart;
         byte _uart_port = -1;
+    }
 
     String _device;
     SerialParams _params;
-    version(HasGPIO)
+    version (Embedded)
     {
         byte _tx_gpio = -1;
         byte _rx_gpio = -1;
+        byte _rts_gpio = -1;
+        byte _cts_gpio = -1;
+        byte _de_gpio = -1;
     }
 }
 

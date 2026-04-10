@@ -15,18 +15,10 @@ import manager.plugin;
 import router.iface;
 import router.stream;
 
-version(Espressif)
-{
-    version = HasGPIO;
+import sys.baremetal.can;
 
-    extern(C) nothrow @nogc
-    {
-        int ow_twai_init(uint baud_rate, int tx_gpio, int rx_gpio);
-        void ow_twai_deinit();
-        int ow_twai_transmit(uint id, int extended, int rtr, const(ubyte)* data, ubyte len);
-        int ow_twai_receive(uint* id, int* extended, int* rtr, ubyte* data, ubyte* len);
-    }
-}
+version(Espressif)
+    version = HasGPIO;
 
 //version = DebugCANInterface;
 
@@ -173,7 +165,12 @@ nothrow @nogc:
     override bool validate() const
     {
         if (!_device.empty)
-            return _baud_rate > 0;
+        {
+            static if (num_can > 0)
+                return _baud_rate > 0;
+            else
+                return false;
+        }
         return _stream !is null && _protocol == CANInterfaceProtocol.ebyte;
     }
 
@@ -187,14 +184,23 @@ nothrow @nogc:
     {
         if (!_device.empty)
         {
-            version(Espressif)
+            static if (num_can > 0)
             {
-                if (!ow_twai_init(_baud_rate, _tx_gpio, _rx_gpio))
+                can_init();
+                CanConfig cfg;
+                cfg.bitrate = _baud_rate;
+                version(HasGPIO)
                 {
-                    writeError("TWAI init failed for '", name, "'");
+                    cfg.tx_gpio = _tx_gpio;
+                    cfg.rx_gpio = _rx_gpio;
+                }
+                auto result = can_open(_can, 0, cfg);
+                if (!result)
+                {
+                    can_deinit();
+                    writeError("CAN init failed for '", name, "'");
                     return CompletionStatus.error;
                 }
-                _native_can = true;
             }
             return CompletionStatus.complete;
         }
@@ -208,14 +214,11 @@ nothrow @nogc:
 
     override void update()
     {
-        version(Espressif)
+        if (_can.is_open)
         {
-            if (_native_can)
-            {
-                super.update();
-                poll_twai();
-                return;
-            }
+            super.update();
+            poll_native();
+            return;
         }
 
         if (!_stream || !_stream.running)
@@ -361,20 +364,22 @@ nothrow @nogc:
 
         ref can = packet.hdr!CANFrame;
 
-        version(Espressif)
+        if (_can.is_open)
         {
-            if (_native_can)
+            CanFrame hw = void;
+            hw.id = can.id;
+            hw.extended = can.extended;
+            hw.rtr = can.remote_transmission_request;
+            hw.dlc = cast(ubyte)packet.data.length;
+            hw.data[0 .. hw.dlc] = cast(const ubyte[])packet.data[];
+            if (can_transmit(_can, hw) < 0)
             {
-                if (!ow_twai_transmit(can.id, can.extended, can.remote_transmission_request,
-                        cast(const(ubyte)*)packet.data.ptr, cast(ubyte)packet.data.length))
-                {
-                    ++_status.send_dropped;
-                    return -1;
-                }
-                ++_status.send_packets;
-                _status.send_bytes += packet.data.length;
-                return 0;
+                ++_status.tx_dropped;
+                return -1;
             }
+            ++_status.tx_packets;
+            _status.tx_bytes += packet.data.length;
+            return 0;
         }
 
         // frame it up and send via stream...
@@ -448,17 +453,14 @@ nothrow @nogc:
         sink((cast(ubyte*)&f)[0 .. socket_can.sizeof]);
     }
 
-    version(Espressif)
+    override CompletionStatus shutdown()
     {
-        override CompletionStatus shutdown()
+        if (_can.is_open)
         {
-            if (_native_can)
-            {
-                ow_twai_deinit();
-                _native_can = false;
-            }
-            return CompletionStatus.complete;
+            can_close(_can);
+            can_deinit();
         }
+        return CompletionStatus.complete;
     }
 
 private:
@@ -475,28 +477,22 @@ private:
         ubyte _rx_gpio;
     }
 
-    version(Espressif)
+    Can _can;
+
+    void poll_native()
     {
-        bool _native_can;
+        SysTime now = getSysTime();
+        CanFrame hw = void;
 
-        void poll_twai()
+        while (can_receive(_can, hw))
         {
-            SysTime now = getSysTime();
-            uint id;
-            int extended, rtr;
-            ubyte[8] data = void;
-            ubyte len;
-
-            while (ow_twai_receive(&id, &extended, &rtr, data.ptr, &len))
-            {
-                Packet packet;
-                ref CANFrame can = packet.init!CANFrame(data[0 .. len], now);
-                can.id = id;
-                can.extended = extended != 0;
-                can.remote_transmission_request = rtr != 0;
-                packet.vlan = _pvid;
-                dispatch(packet);
-            }
+            Packet packet;
+            ref CANFrame can = packet.init!CANFrame(hw.data[0 .. hw.dlc], now);
+            can.id = hw.id;
+            can.extended = hw.extended;
+            can.remote_transmission_request = hw.rtr;
+            packet.vlan = _pvid;
+            dispatch(packet);
         }
     }
 }

@@ -54,7 +54,7 @@ nothrow @nogc:
             return read_console_input(buffer);
         else version (Posix)
             return urt.internal.sys.posix.read(STDIN_FILENO, buffer.ptr, buffer.length);
-        else version (FreeStanding)
+        else version (Embedded)
             return 0;
         else
             static assert(false, "Unsupported platform");

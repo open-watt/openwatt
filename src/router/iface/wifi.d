@@ -17,95 +17,17 @@ import manager.secret;
 import router.iface;
 import router.iface.ethernet;
 
-version(Windows)
+import sys.baremetal.wifi;
+
+version (Windows)
 {
     import manager.os.npcap;
 }
-else version(Espressif)
+
+static if (num_wifi > 0)
 {
     import urt.endian : loadBigEndian;
     import urt.time : getSysTime;
-
-    extern(C) nothrow @nogc
-    {
-        int ow_wifi_init();
-        void ow_wifi_deinit();
-        int ow_wifi_set_mode(int mode);
-        int ow_wifi_start();
-        int ow_wifi_stop();
-        int ow_wifi_sta_config(const(char)* ssid, const(char)* password, const(ubyte)* bssid);
-        int ow_wifi_sta_connect();
-        int ow_wifi_sta_disconnect();
-        int ow_wifi_ap_config(const(char)* ssid, const(char)* password, ubyte channel, ubyte max_conn, ubyte hidden);
-        int ow_wifi_set_tx_power(byte power);
-        int ow_wifi_get_channel(ubyte* channel);
-        int ow_wifi_get_mac(int iface, ubyte* mac);
-        int ow_wifi_set_rx_callback(void function(const(ubyte)*, int, int) nothrow @nogc cb);
-        int ow_wifi_tx(int iface, const(ubyte)* data, int len);
-        void ow_wifi_set_sta_callback(void function(int, void*, int) nothrow @nogc);
-        void ow_wifi_set_ap_callback(void function(int, void*, int) nothrow @nogc);
-    }
-
-    // ESP-IDF wifi event IDs (from esp_wifi_types.h)
-    enum : int
-    {
-        WIFI_EVENT_STA_START = 2,
-        WIFI_EVENT_STA_STOP = 3,
-        WIFI_EVENT_STA_CONNECTED = 4,
-        WIFI_EVENT_STA_DISCONNECTED = 5,
-        WIFI_EVENT_AP_START = 12,
-        WIFI_EVENT_AP_STOP = 13,
-        WIFI_EVENT_AP_STACONNECTED = 14,
-        WIFI_EVENT_AP_STADISCONNECTED = 15,
-    }
-
-    // active interfaces for RX dispatch (ESP32 supports one STA + one AP)
-    __gshared WLANInterface esp_active_sta;
-    __gshared APInterface esp_active_ap;
-
-    // event flags set from ESP event task, polled from main loop
-    __gshared bool esp_sta_connected;
-    __gshared bool esp_sta_disconnected;
-    __gshared bool esp_ap_started;
-    __gshared bool esp_ap_stopped;
-
-    extern(C) void esp_sta_event(int event_id, void*, int) nothrow @nogc
-    {
-        if (event_id == WIFI_EVENT_STA_CONNECTED)
-            esp_sta_connected = true;
-        else if (event_id == WIFI_EVENT_STA_DISCONNECTED)
-            esp_sta_disconnected = true;
-    }
-
-    extern(C) void esp_ap_event(int event_id, void*, int) nothrow @nogc
-    {
-        if (event_id == WIFI_EVENT_AP_START)
-            esp_ap_started = true;
-        else if (event_id == WIFI_EVENT_AP_STOP)
-            esp_ap_stopped = true;
-    }
-
-    extern(C) void esp_wifi_rx(const(ubyte)* data, int len, int iface) nothrow @nogc
-    {
-        WLANBaseInterface target;
-        if (iface == 0)
-            target = esp_active_sta;
-        else
-            target = esp_active_ap;
-
-        if (!target || !target.running || len < 14)
-            return;
-
-        Packet packet;
-        ref eth = packet.init!Ethernet(data[0 .. len], getSysTime());
-        auto mac_hdr = cast(const Ethernet*)data;
-        eth.dst = mac_hdr.dst;
-        eth.src = mac_hdr.src;
-        eth.ether_type = loadBigEndian(&mac_hdr.ether_type);
-        packet._offset = 14;
-
-        target.incoming_packet(packet);
-    }
 }
 
 nothrow @nogc:
@@ -161,14 +83,10 @@ nothrow @nogc:
 
     final ubyte channel() const
     {
-        version(Espressif)
+        static if (num_wifi > 0)
         {
-            if (running)
-            {
-                ubyte actual = void;
-                if (ow_wifi_get_channel(&actual))
-                    return actual;
-            }
+            if (running && _wifi.is_open)
+                return wifi_get_channel(_wifi);
         }
         return _channel;
     }
@@ -203,33 +121,63 @@ nothrow @nogc:
         if (remove)
         {
             if (is_ap)
+            {
                 --_num_ap;
+                _bound_ap = null;
+            }
             else
+            {
                 --_num_client;
+                _bound_sta = null;
+            }
         }
         else
         {
             if (is_ap)
+            {
                 ++_num_ap;
+                _bound_ap = wlan;
+            }
             else
+            {
                 ++_num_client;
+                _bound_sta = wlan;
+            }
         }
 
-        version(Espressif)
+        static if (num_wifi > 0)
         {
-            if (_num_ap > 1 || _num_client > 1)
-                restart();
-            else if (_esp_started)
-                update_esp_mode();
+            if (_wifi.is_open)
+                update_drv_mode();
         }
+    }
+
+    static if (num_wifi > 0)
+    {
+        final int drv_transmit(WifiVif vif, const(ubyte)[] data)
+        {
+            return wifi_tx(_wifi, vif, data);
+        }
+
+        final bool drv_get_mac(WifiVif vif, ref ubyte[6] mac)
+        {
+            return wifi_get_mac(_wifi, vif, mac);
+        }
+
+        // Event flags, set from driver callback, polled from update
+        bool evt_sta_connected;
+        bool evt_sta_disconnected;
+        bool evt_ap_started;
+        bool evt_ap_stopped;
     }
 
 protected:
 
     override bool validate() const
     {
-        version(Espressif)
+        static if (num_wifi > 0)
         {
+            // ESP32 supports one STA + one AP per radio
             if (_num_ap > 1 || _num_client > 1)
                 return false;
         }
@@ -238,56 +186,66 @@ protected:
 
     override const(char)[] status_message() const
     {
-        version(Espressif)
+        static if (num_wifi > 0)
         {
             if (_num_ap > 1)
-                return "ESP32 supports only one AP per radio";
+                return "only one AP per radio supported";
             if (_num_client > 1)
-                return "ESP32 supports only one STA per radio";
+                return "only one STA per radio supported";
         }
         return super.status_message();
     }
 
     override CompletionStatus startup()
     {
-        version(Espressif)
+        static if (num_wifi > 0)
         {
-            if (auto err = ow_wifi_init())
+            WifiConfig cfg;
+            cfg.tx_power = _tx_power;
+            cfg.channel = _channel;
+
+            auto r = wifi_open(_wifi, 0, cfg);
+            if (!r)
             {
-                writeError("WiFi radio init failed: esp_err=", err);
+                writeError("WiFi radio init failed");
                 return CompletionStatus.error;
             }
 
-            if (_tx_power > 0)
-                ow_wifi_set_tx_power(_tx_power);
+            wifi_set_event_callback(_wifi, &wifi_event_dispatch);
+            wifi_set_rx_callback(_wifi, &wifi_rx_dispatch);
 
-            ow_wifi_set_rx_callback(&esp_wifi_rx);
-            ow_wifi_set_sta_callback(&esp_sta_event);
-            ow_wifi_set_ap_callback(&esp_ap_event);
-
-            if (!ow_wifi_start())
-            {
-                writeError("WiFi radio start failed");
-                return CompletionStatus.error;
-            }
-            _esp_started = true;
-            update_esp_mode();
+            _active_radios[0] = this;
+            update_drv_mode();
         }
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
-        version(Espressif)
+        static if (num_wifi > 0)
         {
-            _esp_started = false;
-            ow_wifi_set_rx_callback(null);
-            ow_wifi_set_sta_callback(null);
-            ow_wifi_set_ap_callback(null);
-            ow_wifi_stop();
-            ow_wifi_deinit();
+            if (_wifi.is_open)
+            {
+                wifi_set_rx_callback(_wifi, null);
+                wifi_set_event_callback(_wifi, null);
+                _active_radios[_wifi.port] = null;
+                wifi_close(_wifi);
+            }
+            evt_sta_connected = false;
+            evt_sta_disconnected = false;
+            evt_ap_started = false;
+            evt_ap_stopped = false;
         }
         return CompletionStatus.complete;
+    }
+
+    override void update()
+    {
+        static if (num_wifi > 0)
+        {
+            if (_wifi.is_open)
+                wifi_poll(_wifi);
+        }
     }
 
     override ushort pcap_type() const
@@ -295,7 +253,6 @@ protected:
 
     override int transmit(ref const Packet packet, MessageCallback)
     {
-        // can't sent raw 802.11 frames! (maybe some exotic wifi adapter can do it?)
         ++_status.tx_dropped;
         return -1;
     }
@@ -307,21 +264,72 @@ private:
     byte _tx_power;
     String _adapter;
     String _country;
+    WLANBaseInterface _bound_sta;
+    WLANBaseInterface _bound_ap;
 
-    version(Espressif)
+    static if (num_wifi > 0)
     {
-        bool _esp_started;
+        Wifi _wifi;
 
-        void update_esp_mode()
+        void update_drv_mode()
         {
-            int esp_mode = 0; // WIFI_MODE_NULL
+            WifiMode m = WifiMode.none;
             if (_num_client > 0 && _num_ap > 0)
-                esp_mode = 3; // WIFI_MODE_APSTA
+                m = WifiMode.apsta;
             else if (_num_client > 0)
-                esp_mode = 1; // WIFI_MODE_STA
+                m = WifiMode.sta;
             else if (_num_ap > 0)
-                esp_mode = 2; // WIFI_MODE_AP
-            ow_wifi_set_mode(esp_mode);
+                m = WifiMode.ap;
+            wifi_set_mode(_wifi, m);
+        }
+
+        // Module-level dispatch targets (function pointers, not delegates)
+
+        __gshared WiFiInterface[num_wifi] _active_radios;
+
+        static void wifi_event_dispatch(Wifi wifi, WifiEvent event, const(void)*) nothrow @nogc
+        {
+            if (wifi.port < num_wifi)
+                if (auto radio = _active_radios[wifi.port])
+                    radio.on_wifi_event(event);
+        }
+
+        static void wifi_rx_dispatch(Wifi wifi, WifiVif vif, const(ubyte)[] data) nothrow @nogc
+        {
+            if (wifi.port < num_wifi)
+                if (auto radio = _active_radios[wifi.port])
+                    radio.on_wifi_rx(vif, data);
+        }
+
+        final void on_wifi_event(WifiEvent event)
+        {
+            final switch (event)
+            {
+                case WifiEvent.sta_connected:       evt_sta_connected = true; break;
+                case WifiEvent.sta_disconnected:    evt_sta_disconnected = true; break;
+                case WifiEvent.ap_started:          evt_ap_started = true; break;
+                case WifiEvent.ap_stopped:          evt_ap_stopped = true; break;
+                case WifiEvent.ap_sta_connected:    break;
+                case WifiEvent.ap_sta_disconnected: break;
+                case WifiEvent.scan_done:           break;
+            }
+        }
+
+        final void on_wifi_rx(WifiVif vif, const(ubyte)[] data)
+        {
+            auto target = vif == WifiVif.ap ? _bound_ap : _bound_sta;
+            if (target is null || !target.running || data.length < 14)
+                return;
+
+            Packet packet;
+            ref eth = packet.init!Ethernet(data, getSysTime());
+            auto mac_hdr = cast(const Ethernet*)data.ptr;
+            eth.dst = mac_hdr.dst;
+            eth.src = mac_hdr.src;
+            eth.ether_type = loadBigEndian(&mac_hdr.ether_type);
+            packet._offset = 14;
+
+            target.dispatch(packet);
         }
     }
 }
@@ -458,6 +466,27 @@ nothrow @nogc:
         return result;
     }
 
+    static if (num_wifi > 0)
+    {
+        override int transmit(ref const Packet packet, MessageCallback)
+        {
+            if (!_radio || !_radio.running || packet.data.length == 0)
+            {
+                ++_status.tx_dropped;
+                return -1;
+            }
+            WifiVif vif = cast(APInterface)this !is null ? WifiVif.ap : WifiVif.sta;
+            if (_radio.drv_transmit(vif, cast(const(ubyte)[])packet.data) != 0)
+            {
+                ++_status.tx_dropped;
+                return -1;
+            }
+            ++_status.tx_packets;
+            _status.tx_bytes += packet.data.length;
+            return 0;
+        }
+    }
+
 protected:
     this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -475,25 +504,6 @@ protected:
         return null;
     }
 
-    version(Espressif)
-    {
-        override int transmit(ref const Packet packet, MessageCallback)
-        {
-            int iface = cast(APInterface)this !is null ? 1 : 0;
-            if (packet.data.length > 0)
-            {
-                if (!ow_wifi_tx(iface, cast(const(ubyte)*)packet.data.ptr, cast(int)packet.data.length))
-                {
-                    ++_status.send_dropped;
-                    return -1;
-                }
-                ++_status.send_packets;
-                _status.send_bytes += packet.data.length;
-            }
-            return 0;
-        }
-    }
-
 private:
     ObjectRef!WiFiInterface _radio;
     ObjectRef!Secret _secret;
@@ -505,14 +515,6 @@ private:
     {
         if (signal == StateSignal.offline && running)
             restart();
-    }
-
-    version(Espressif)
-    {
-        void incoming_packet(ref Packet packet)
-        {
-            dispatch(packet);
-        }
     }
 }
 
@@ -547,13 +549,13 @@ nothrow @nogc:
         return super.status_message();
     }
 
-    version(Espressif)
+    static if (num_wifi > 0)
     {
         override void update()
         {
-            if (esp_sta_disconnected)
+            if (_radio && _radio.evt_sta_disconnected)
             {
-                esp_sta_disconnected = false;
+                _radio.evt_sta_disconnected = false;
                 _status_detail = "Disconnected";
                 log.warning("disconnected from '", _ssid[], "'");
                 restart();
@@ -567,19 +569,22 @@ nothrow @nogc:
         if (result != CompletionStatus.complete)
             return result;
 
-        version(Espressif)
+        static if (num_wifi > 0)
         {
+            if (!_radio)
+                return CompletionStatus.error;
+
             if (_connect_initiated)
             {
-                if (esp_sta_connected)
+                if (_radio.evt_sta_connected)
                 {
-                    esp_sta_connected = false;
+                    _radio.evt_sta_connected = false;
                     _status_detail = null;
                     return CompletionStatus.complete;
                 }
-                if (esp_sta_disconnected)
+                if (_radio.evt_sta_disconnected)
                 {
-                    esp_sta_disconnected = false;
+                    _radio.evt_sta_disconnected = false;
                     _status_detail = "Association failed";
                     log.warning("failed to connect to '", _ssid[], "'");
                     _connect_initiated = false;
@@ -588,11 +593,13 @@ nothrow @nogc:
                 return CompletionStatus.continue_;
             }
 
-            const(char)[] pw = get_password();
-            if (!ow_wifi_sta_config(
-                    ssid.length > 0 ? ssid[].tstringz : null,
-                    pw.length > 0 ? pw[].tstringz : null,
-                    _bssid_filter != MACAddress.init ? _bssid_filter.b.ptr : null))
+            WifiStaConfig sta_cfg;
+            sta_cfg.ssid = _ssid[];
+            sta_cfg.password = get_password();
+            if (_bssid_filter != MACAddress.init)
+                sta_cfg.bssid = _bssid_filter.b;
+
+            if (!wifi_sta_configure(_radio._wifi, sta_cfg))
             {
                 _status_detail = "STA config rejected by driver";
                 writeError("WiFi STA config failed for '", name, "'");
@@ -600,17 +607,17 @@ nothrow @nogc:
             }
 
             ubyte[6] mac_buf = void;
-            if (ow_wifi_get_mac(0, mac_buf.ptr))
+            if (_radio.drv_get_mac(WifiVif.sta, mac_buf))
             {
                 remove_address(mac);
                 mac = MACAddress(mac_buf);
                 add_address(mac, this);
             }
 
-            esp_sta_connected = false;
-            esp_sta_disconnected = false;
+            _radio.evt_sta_connected = false;
+            _radio.evt_sta_disconnected = false;
 
-            if (!ow_wifi_sta_connect())
+            if (!wifi_sta_connect(_radio._wifi))
             {
                 _status_detail = "Connect request rejected by driver";
                 writeError("WiFi STA connect failed for '", name, "'");
@@ -620,7 +627,6 @@ nothrow @nogc:
             _connect_initiated = true;
             _status_detail = "Connecting";
             log.info("connecting to '", _ssid[], "'");
-            esp_active_sta = this;
         }
 
         return CompletionStatus.continue_;
@@ -628,12 +634,11 @@ nothrow @nogc:
 
     override CompletionStatus shutdown()
     {
-        version(Espressif)
+        static if (num_wifi > 0)
         {
-            if (esp_active_sta is this)
-                esp_active_sta = null;
+            if (_connect_initiated && _radio)
+                wifi_sta_disconnect(_radio._wifi);
             _connect_initiated = false;
-            ow_wifi_sta_disconnect();
         }
         _status_detail = null;
         return super.shutdown();
@@ -706,19 +711,22 @@ nothrow @nogc:
         if (result != CompletionStatus.complete)
             return result;
 
-        version(Espressif)
+        static if (num_wifi > 0)
         {
+            if (!_radio)
+                return CompletionStatus.error;
+
             if (_ap_config_sent)
             {
-                if (esp_ap_started)
+                if (_radio.evt_ap_started)
                 {
-                    esp_ap_started = false;
+                    _radio.evt_ap_started = false;
                     _status_detail = null;
                     return CompletionStatus.complete;
                 }
-                if (esp_ap_stopped)
+                if (_radio.evt_ap_stopped)
                 {
-                    esp_ap_stopped = false;
+                    _radio.evt_ap_stopped = false;
                     _status_detail = "AP failed to start";
                     log.warning("AP '", _ssid[], "' failed to start");
                     _ap_config_sent = false;
@@ -727,13 +735,14 @@ nothrow @nogc:
                 return CompletionStatus.continue_;
             }
 
-            const(char)[] pw = get_password();
-            if (!ow_wifi_ap_config(
-                    ssid.length > 0 ? ssid[].tstringz : null,
-                    pw.length > 0 ? pw[].tstringz : null,
-                    _radio ? _radio.channel : cast(ubyte)0,
-                    _max_clients,
-                    _hidden ? 1 : 0))
+            WifiApConfig ap_cfg;
+            ap_cfg.ssid = _ssid[];
+            ap_cfg.password = get_password();
+            ap_cfg.channel = _radio ? _radio.channel : cast(ubyte)0;
+            ap_cfg.max_clients = _max_clients;
+            ap_cfg.hidden = _hidden;
+
+            if (!wifi_ap_configure(_radio._wifi, ap_cfg))
             {
                 _status_detail = "AP config rejected by driver";
                 writeError("WiFi AP config failed for '", name, "'");
@@ -741,34 +750,29 @@ nothrow @nogc:
             }
 
             ubyte[6] mac_buf = void;
-            if (ow_wifi_get_mac(1, mac_buf.ptr))
+            if (_radio.drv_get_mac(WifiVif.ap, mac_buf))
             {
                 remove_address(mac);
                 mac = MACAddress(mac_buf);
                 add_address(mac, this);
             }
 
-            esp_ap_started = false;
-            esp_ap_stopped = false;
+            _radio.evt_ap_started = false;
+            _radio.evt_ap_stopped = false;
             _ap_config_sent = true;
             _status_detail = "Starting AP";
             log.info("starting AP '", _ssid[], "'");
-            esp_active_ap = this;
         }
 
         return CompletionStatus.continue_;
     }
 
-    version(Espressif)
+    override CompletionStatus shutdown()
     {
-        override CompletionStatus shutdown()
-        {
-            if (esp_active_ap is this)
-                esp_active_ap = null;
+        static if (num_wifi > 0)
             _ap_config_sent = false;
-            _status_detail = null;
-            return super.shutdown();
-        }
+        _status_detail = null;
+        return super.shutdown();
     }
 
 private:
@@ -796,7 +800,7 @@ nothrow @nogc:
         g_app.console.register_collection("/interface/wlan", wlan_interfaces);
         g_app.console.register_collection("/interface/ap", ap_interfaces);
 
-        version(Windows)
+        version (Windows)
         {
             if (!npcap_loaded())
                 return;
@@ -816,7 +820,7 @@ nothrow @nogc:
                 const(char)[] name = dev.name[0..dev.name.strlen];
                 const(char)[] description = dev.description[0..dev.description.strlen];
 
-                bool is_wifi = (dev.flags & 0x00000008) != 0; // PCAP_IF_WIRELESS
+                bool is_wifi = (dev.flags & 0x00000008) != 0;
                 if (!is_wifi)
                 {
                     if (description.contains_i("wireless") ||

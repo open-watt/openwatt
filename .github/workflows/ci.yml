@@ -77,20 +77,27 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        platform: [bl808]
+        platform: [bl808, bl808_m0, bl618, rp2350]  # stm4xx, stm7xx -- no linker script yet
         include:
           - platform: bl808
             toolchain: riscv64-unknown-elf
+          - platform: bl808_m0
+            toolchain: riscv64-unknown-elf
+            make_args: PROCESSOR=e907
+          - platform: bl618
+            toolchain: riscv64-unknown-elf
+          - platform: rp2350
+            toolchain: arm-none-eabi
+          # - platform: stm4xx
+          #   toolchain: arm-none-eabi
+          # - platform: stm7xx
+          #   toolchain: arm-none-eabi
       fail-fast: false
     steps:
       - uses: actions/checkout@v5
         with:
           submodules: recursive
           fetch-depth: 1
-
-#      # Only fetch the uRT runtime (platforms/ is in-repo for now)
-#      - name: Fetch submodules
-#        run: git submodule update --init --depth 1 third_party/urt
 
       - name: Setup LDC
         uses: dlang-community/setup-dlang@v2
@@ -101,4 +108,4 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y gcc-${{ matrix.toolchain }} picolibc-${{ matrix.toolchain }}
 
       - name: Build
-        run: make PLATFORM=${{ matrix.platform }} CONFIG=release
+        run: timeout 180 make PLATFORM=${{ matrix.platform }} CONFIG=release ${{ matrix.make_args || '' }}
