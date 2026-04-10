@@ -305,33 +305,38 @@ endif
 # Sources
 # ═══════════════════════════════════════════════════════════════════════
 
-SOURCES := $(shell find "$(SRCDIR)" -type f -name '*.d')
-SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)" -type f -name '*.d' -not -path '$(RTSRCDIR)/sys/*')
-SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/baremetal" -type f -name '*.d')
+# Split sources into two groups so that response-file writes stay under
+# Windows' 8191-char command-line limit.
+APP_SOURCES := $(shell find "$(SRCDIR)" -type f -name '*.d')
+
+URT_SOURCES := $(shell find "$(RTSRCDIR)" -type f -name '*.d' -not -path '$(RTSRCDIR)/sys/*')
+URT_SOURCES := $(URT_SOURCES) $(shell find "$(RTSRCDIR)/sys/baremetal" -type f -name '*.d')
 # mbedtls C glue needs host mbedtls headers — exclude for embedded targets
 ifeq ($(filter freertos baremetal,$(OS)),)
-    SOURCES := $(SOURCES) $(RTSRCDIR)/urt/internal/mbedtls.c
+    URT_SOURCES := $(URT_SOURCES) $(RTSRCDIR)/urt/internal/mbedtls.c
 endif
 ifeq ($(PLATFORM),bl808)
   ifeq ($(PROCESSOR),c906)
-    SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/bl808" -type f -name '*.d')
+    URT_SOURCES := $(URT_SOURCES) $(shell find "$(RTSRCDIR)/sys/bl808" -type f -name '*.d')
   else ifeq ($(PROCESSOR),e907)
     # BL808 M0 core — E907 uses same peripheral drivers as BL618
-    SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/bl618" -type f -name '*.d')
+    URT_SOURCES := $(URT_SOURCES) $(shell find "$(RTSRCDIR)/sys/bl618" -type f -name '*.d')
   endif
 endif
 ifeq ($(PLATFORM),bl618)
-    SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/bl618" -type f -name '*.d')
+    URT_SOURCES := $(URT_SOURCES) $(shell find "$(RTSRCDIR)/sys/bl618" -type f -name '*.d')
 endif
 ifeq ($(PLATFORM),rp2350)
-    SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/rp2350" -type f -name '*.d')
+    URT_SOURCES := $(URT_SOURCES) $(shell find "$(RTSRCDIR)/sys/rp2350" -type f -name '*.d')
 endif
 ifneq ($(filter bk7231n bk7231t,$(PLATFORM)),)
-    SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/bk7231" -type f -name '*.d' 2>/dev/null)
+    URT_SOURCES := $(URT_SOURCES) $(shell find "$(RTSRCDIR)/sys/bk7231" -type f -name '*.d' 2>/dev/null)
 endif
 ifneq ($(filter esp%,$(PLATFORM)),)
-    SOURCES := $(SOURCES) $(shell find "$(RTSRCDIR)/sys/esp32" -type f -name '*.d')
+    URT_SOURCES := $(URT_SOURCES) $(shell find "$(RTSRCDIR)/sys/esp32" -type f -name '*.d')
 endif
+
+SOURCES := $(APP_SOURCES) $(URT_SOURCES)
 
 # ═══════════════════════════════════════════════════════════════════════
 # PLATFORM post-config: version flags, string imports
@@ -630,7 +635,7 @@ ifeq ($(COMPILER),ldc)
         DFLAGS := $(DFLAGS) -g -d-debug
     endif
 
-    COMPILE_CMD = "$(DC)" $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -deps=$(DEPFILE) $(BAREMETAL_OBJS) $(SOURCES)
+    COMPILE_CMD = "$(DC)" $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -deps=$(DEPFILE) $(BAREMETAL_OBJS) @$(RSPFILE)
 else ifeq ($(COMPILER),dmd)
     DC ?= dmd
 
@@ -661,7 +666,7 @@ else ifeq ($(COMPILER),dmd)
         DFLAGS := $(DFLAGS) -g -debug
     endif
 
-    COMPILE_CMD = "$(DC)" $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -makedeps $(SOURCES) > $(DEPFILE)
+    COMPILE_CMD = "$(DC)" $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -makedeps @$(RSPFILE) > $(DEPFILE)
 else
     $(error "Unknown D compiler: $(COMPILER)")
 endif
@@ -706,8 +711,13 @@ bk7231-clean:
 $(BK_BEKEN_LIB): bk7231-sdk
 endif
 
+RSPFILE := $(OBJDIR)/sources.rsp
+
+# Write sources to a response file to avoid Windows command-line length limits.
 $(TARGET):
 	mkdir -p $(OBJDIR) $(TARGETDIR)
+	echo $(APP_SOURCES) > $(RSPFILE)
+	echo $(URT_SOURCES) >> $(RSPFILE)
 	$(COMPILE_CMD)
 ifeq ($(XTENSA_TWO_STAGE),1)
 	"$(ESPRESSIF_LLC)" -O2 -mtriple=xtensa-none-elf --emulated-tls --mtext-section-literals --function-sections --data-sections --emit-dwarf-unwind=always --exception-model=dwarf $(XTENSA_MATTR) --filetype=obj $(TARGET) -o $(TARGET).o
