@@ -372,7 +372,7 @@ nothrow @nogc:
             hw.rtr = can.remote_transmission_request;
             hw.dlc = cast(ubyte)packet.data.length;
             hw.data[0 .. hw.dlc] = cast(const ubyte[])packet.data[];
-            if (can_transmit(_can, hw) < 0)
+            if (!can_transmit(_can, hw))
             {
                 ++_status.tx_dropped;
                 return -1;

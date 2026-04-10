@@ -21,7 +21,6 @@ import protocol.ble.client;
 import protocol.ble.device;
 import protocol.ble.iface;
 import protocol.ble.sampler;
-public static import protocol.ble.winrt;
 
 nothrow @nogc:
 

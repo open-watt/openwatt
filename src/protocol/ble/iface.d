@@ -1,7 +1,6 @@
 module protocol.ble.iface;
 
 import urt.array;
-import urt.atomic;
 import urt.endian;
 import urt.lifetime;
 import urt.log;
@@ -19,8 +18,7 @@ import router.iface.priority_queue;
 
 import protocol.ble.device : ADSection, ADType;
 
-version (Windows)
-    import protocol.ble.winrt;
+import sys.baremetal.ble;
 
 import urt.uuid;
 
@@ -29,21 +27,6 @@ version = SuppressAdvertisments;
 
 nothrow @nogc:
 
-
-enum MACAddressType : ubyte
-{
-    public_       = 0x00,
-    random_static = 0x01,
-    rpa_public    = 0x02,  // resolvable private, public identity
-    rpa_random    = 0x03,  // resolvable private, random identity
-}
-
-enum BLEPhy : ubyte
-{
-    phy_1m    = 0x01,
-    phy_2m    = 0x02,
-    phy_coded = 0x03,
-}
 
 enum BLELLType : ubyte
 {
@@ -195,36 +178,51 @@ protected:
     {
         _queue.init(_max_in_flight, 0, PCP.be, &_status);
 
-        version (Windows)
+        static if (num_ble > 0)
         {
-            if (!_backend.init_scanner(mac))
+            BLEConfig cfg;
+            auto r = ble_open(_ble, 0, cfg);
+            if (!r)
+            {
+                log.error("BLE radio init failed");
                 return CompletionStatus.error;
-            log.info("scanner started on interface '", name, "'");
+            }
+
+            ble_set_scan_callback(_ble, &scan_dispatch);
+            ble_set_conn_callback(_ble, &conn_dispatch);
+            ble_set_discover_callback(_ble, &discover_dispatch);
+            ble_set_read_callback(_ble, &read_dispatch);
+            ble_set_write_callback(_ble, &write_dispatch);
+            ble_set_notify_callback(_ble, &notify_dispatch);
+
+            _active_radios[0] = this;
+
+            BLEScanConfig scan_cfg;
+            ble_scan_start(_ble, scan_cfg);
+
+            log.info("BLE started on interface '", name, "'");
         }
+        else
+            return CompletionStatus.error;
 
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
-        version (Windows)
+        static if (num_ble > 0)
         {
-            _backend.shutdown_scanner();
-
-            foreach (ref e; _adv_table[0 .. _num_adv_entries])
+            if (_ble.is_open)
             {
-                if (e.publisher !is null)
-                {
-                    e.publisher.Stop();
-                    e.publisher.Release();
-                    e.publisher = null;
-                }
+                ble_close(_ble);
+                _active_radios[_ble.port] = null;
             }
-            _num_adv_entries = 0;
-
-            while (_sessions.length > 0)
-                destroy_session(_sessions[0]);
         }
+
+        _num_adv_entries = 0;
+
+        while (_sessions.length > 0)
+            destroy_session(_sessions[0]);
 
         foreach (kvp; _pending[])
         {
@@ -233,6 +231,10 @@ protected:
         }
         _pending.clear();
         _queue.abort_all();
+
+        _num_pending_ops = 0;
+        _pending_connect_tag = -1;
+
         return CompletionStatus.complete;
     }
 
@@ -240,17 +242,10 @@ protected:
     {
         super.update();
 
-        version (Windows)
+        static if (num_ble > 0)
         {
-            _backend.poll(this);
-            while (true)
-            {
-                auto p = _backend.dequeue_rx();
-                if (p is null)
-                    break;
-                on_incoming(*p);
-                defaultAllocator().free((cast(void*)p)[0 .. Packet.sizeof + p.length]);
-            }
+            if (_ble.is_open)
+                ble_poll(_ble);
         }
 
         cleanup_dead_sessions();
@@ -295,13 +290,20 @@ package:
         MonoTime send_time;
     }
 
-    // advertisement table: maps advertised identity → source MAC (who sent the advert)
     struct AdvEntry
     {
-        MACAddress advertiser;   // the address being advertised (our identity on the air)
-        MACAddress source;       // the internal source that sent the advertisement
-        version (Windows)
-            IBluetoothLEAdvertisementPublisher publisher;
+        MACAddress advertiser;
+        MACAddress source;
+        BLEAdv adv_handle;
+    }
+
+    // pending GATT op — correlates driver callback to queue tag
+    struct PendingGattOp
+    {
+        ubyte tag;
+        ubyte conn_id;
+        ushort handle;
+        bool is_read; // true = read, false = write
     }
 
     ubyte _max_in_flight = 4;
@@ -315,8 +317,18 @@ package:
     AdvEntry[max_adv_entries] _adv_table;
     ubyte _num_adv_entries;
 
-    version (Windows)
-        WinRTBackend _backend;
+    // pending connect state
+    int _pending_connect_tag = -1;
+    MACAddress _pending_connect_client;
+    MACAddress _pending_connect_peer;
+
+    // pending GATT operations
+    enum max_pending_ops = 8;
+    PendingGattOp[max_pending_ops] _pending_ops;
+    ubyte _num_pending_ops;
+
+    static if (num_ble > 0)
+        BLE _ble;
 
     MACAddress find_adv_source(MACAddress advertiser)
     {
@@ -328,18 +340,24 @@ package:
         return MACAddress.init;
     }
 
-    void register_adv_source(MACAddress advertiser, MACAddress source)
+    void register_adv_source(MACAddress advertiser, MACAddress source, BLEAdv adv_handle)
     {
         foreach (ref e; _adv_table[0 .. _num_adv_entries])
         {
             if (e.advertiser == advertiser)
             {
                 e.source = source;
+                static if (num_ble > 0)
+                {
+                    if (e.adv_handle.is_valid)
+                        ble_adv_stop(_ble, e.adv_handle);
+                }
+                e.adv_handle = adv_handle;
                 return;
             }
         }
         if (_num_adv_entries < max_adv_entries)
-            _adv_table[_num_adv_entries++] = AdvEntry(advertiser, source);
+            _adv_table[_num_adv_entries++] = AdvEntry(advertiser, source, adv_handle);
     }
 
     BLESession* find_session_by_peer(MACAddress peer)
@@ -357,6 +375,16 @@ package:
         foreach (s; _sessions[])
         {
             if (s.client == client)
+                return s;
+        }
+        return null;
+    }
+
+    BLESession* find_session_by_conn(ubyte conn_id)
+    {
+        foreach (s; _sessions[])
+        {
+            if (s.conn.id == conn_id)
                 return s;
         }
         return null;
@@ -413,9 +441,7 @@ package:
                 log_att_packet(att, cast(const(ubyte)[])p.data, PacketDirection.incoming);
         }
 
-        // add BLE protocol overhead to rx_bytes (dispatch counts payload only)
         _status.rx_bytes += 14;
-
         dispatch(p);
     }
 
@@ -435,8 +461,11 @@ package:
 
     void destroy_session(BLESession* session)
     {
-        version (Windows)
-            _backend.release_session(session);
+        static if (num_ble > 0)
+        {
+            if (_ble.is_open && session.conn.is_valid)
+                ble_disconnect(_ble, session.conn);
+        }
 
         foreach (i, s; _sessions[])
         {
@@ -448,6 +477,33 @@ package:
         }
 
         defaultAllocator().freeT(session);
+    }
+
+    // --- pending GATT op tracking ---
+
+    bool push_pending_op(ubyte tag, ubyte conn_id, ushort handle, bool is_read)
+    {
+        if (_num_pending_ops >= max_pending_ops)
+            return false;
+        _pending_ops[_num_pending_ops++] = PendingGattOp(tag, conn_id, handle, is_read);
+        return true;
+    }
+
+    int pop_pending_op(ubyte conn_id, ushort handle, bool is_read)
+    {
+        foreach (i; 0 .. _num_pending_ops)
+        {
+            ref op = _pending_ops[i];
+            if (op.conn_id == conn_id && op.handle == handle && op.is_read == is_read)
+            {
+                ubyte tag = op.tag;
+                --_num_pending_ops;
+                if (i < _num_pending_ops)
+                    _pending_ops[i] = _pending_ops[_num_pending_ops];
+                return tag;
+            }
+        }
+        return -1;
     }
 
     // --- submit helpers ---
@@ -462,41 +518,45 @@ package:
             case BLELLType.adv_nonconn_ind:
             case BLELLType.adv_scan_ind:
             case BLELLType.adv_direct_ind:
-                version (Windows)
+                static if (num_ble > 0)
                 {
-                    auto publisher = _backend.start_advertising(cast(const(ubyte)[])frame.packet.data);
-                    if (publisher is null)
-                        return false;
-
-                    foreach (ref e; _adv_table[0 .. _num_adv_entries])
+                    BLEAdvConfig cfg;
+                    cfg.adv_data = cast(const(ubyte)[])frame.packet.data;
+                    auto adv = ble_adv_start(_ble, cfg);
+                    if (adv.is_valid)
                     {
-                        if (e.advertiser == ll.src)
-                        {
-                            if (e.publisher !is null)
-                            {
-                                e.publisher.Stop();
-                                e.publisher.Release();
-                            }
-                            e.publisher = publisher;
-                            break;
-                        }
+                        register_adv_source(ll.src, ll.src, adv);
+                        _queue.complete(frame.tag, MessageState.complete);
+                        return true;
                     }
+                    return false;
                 }
                 else
-                    assert(false, "BLE advertising not implemented on this platform");
-
-                register_adv_source(ll.src, ll.src);
-                _queue.complete(frame.tag, MessageState.complete);
-                return true;
+                    return false;
 
             case BLELLType.connect_ind:
-                version (Windows)
-                    return _backend.start_connect(ll.src, ll.dst, frame.tag);
+                static if (num_ble > 0)
+                {
+                    if (_pending_connect_tag >= 0)
+                    {
+                        log.warning("connection already in progress");
+                        return false;
+                    }
+
+                    BLEConnConfig conn_cfg;
+                    auto r = ble_connect(_ble, ll.dst.b, BLEAddrType.public_, conn_cfg);
+                    if (!r)
+                        return false;
+
+                    _pending_connect_tag = frame.tag;
+                    _pending_connect_client = ll.src;
+                    _pending_connect_peer = ll.dst;
+                    return true;
+                }
                 else
-                    assert(false, "BLE connect not implemented on this platform");
+                    return false;
 
             case BLELLType.disconnect_ind:
-                // client requesting disconnect — tear down session
                 auto session = find_session_by_client(ll.src);
                 if (session !is null)
                 {
@@ -508,8 +568,6 @@ package:
 
             case BLELLType.data_start:
             case BLELLType.data_continue:
-                // LL data PDUs need defragmentation + L2CAP decapsulation before
-                // they can be handled by a high-level backend like WinRT.
                 assert(false, "TODO: LL data PDU defragmentation not implemented");
 
             default:
@@ -543,36 +601,58 @@ package:
             return false;
         }
 
-        switch (att.opcode)
+        static if (num_ble > 0)
         {
-            case ATTOpcode.read_req:
-                version (Windows)
-                    return _backend.submit_read(session, handle, frame.tag);
-                else
-                    assert(false, "BLE read not implemented on this platform");
+            switch (att.opcode)
+            {
+                case ATTOpcode.read_req:
+                    if (!push_pending_op(frame.tag, session.conn.id, handle, true))
+                        return false;
+                    auto r = ble_gatt_read(_ble, session.conn, handle);
+                    if (!r)
+                    {
+                        pop_pending_op(session.conn.id, handle, true);
+                        return false;
+                    }
+                    return true;
 
-            case ATTOpcode.write_req:
-            case ATTOpcode.write_cmd:
-                // write payload is [handle(2)][value...] — skip handle for the data
-                version (Windows)
-                    return _backend.submit_write(session, handle, payload.length > 2 ? payload[2 .. $] : null, att.opcode == ATTOpcode.write_cmd, frame.tag);
-                else
-                    assert(false, "BLE write not implemented on this platform");
+                case ATTOpcode.write_req:
+                case ATTOpcode.write_cmd:
+                    bool with_response = att.opcode == ATTOpcode.write_req;
+                    const(ubyte)[] data = payload.length > 2 ? payload[2 .. $] : null;
 
-            default:
-                return false;
+                    if (with_response)
+                    {
+                        if (!push_pending_op(frame.tag, session.conn.id, handle, false))
+                            return false;
+                    }
+
+                    auto r = ble_gatt_write(_ble, session.conn, handle, data, with_response);
+                    if (!r)
+                    {
+                        if (with_response)
+                            pop_pending_op(session.conn.id, handle, false);
+                        return false;
+                    }
+
+                    if (!with_response)
+                        _queue.complete(frame.tag, MessageState.complete);
+                    return true;
+
+                default:
+                    return false;
+            }
         }
+        else
+            return false;
     }
 
     void send_queued_messages()
     {
         for (QueuedFrame* frame = _queue.dequeue(); frame !is null; frame = _queue.dequeue())
         {
-            version (Windows)
-            {
-                if (_backend.num_pending_gatt >= WinRTBackend.max_gatt_ops)
-                    return;
-            }
+            if (_num_pending_ops >= max_pending_ops)
+                return;
 
             version (DebugBLEInterface)
             {
@@ -610,10 +690,6 @@ package:
             if (state == MessageState.complete)
             {
                 ++_status.tx_packets;
-                // approximate on-air bytes: payload + BLE protocol overhead
-                // LL: preamble(1) + access_addr(4) + header(2) + CRC(3) = 10
-                // L2CAP header(4) for ATT data = 14 total overhead for ATT
-                // advertising PDU: 10 + addr(6) = 16 overhead
                 _status.tx_bytes += pm.message_length + 14;
             }
             else if (state != MessageState.in_flight)
@@ -623,6 +699,248 @@ package:
                 pm.callback(tag, state);
             _pending.remove(t);
         }
+    }
+
+    // --- driver callback handlers ---
+
+    static if (num_ble > 0)
+    {
+        __gshared BLEInterface[num_ble] _active_radios;
+
+        // scan result → advertisement packet
+        static void scan_dispatch(BLE ble, ref const BLEAdvReport report) nothrow @nogc
+        {
+            if (ble.port < num_ble)
+                if (auto iface = _active_radios[ble.port])
+                    iface.on_scan_report(report);
+        }
+
+        // connection state change
+        static void conn_dispatch(BLE ble, BLEConn conn, bool connected, BLEError error) nothrow @nogc
+        {
+            if (ble.port < num_ble)
+                if (auto iface = _active_radios[ble.port])
+                    iface.on_conn_event(conn, connected, error);
+        }
+
+        // GATT discovery complete
+        static void discover_dispatch(BLE ble, BLEConn conn, const(BLEGattChar)[] chars, BLEError error) nothrow @nogc
+        {
+            if (ble.port < num_ble)
+                if (auto iface = _active_radios[ble.port])
+                    iface.on_discover_complete(conn, chars, error);
+        }
+
+        // GATT read complete
+        static void read_dispatch(BLE ble, BLEConn conn, ushort handle, const(ubyte)[] data, BLEError error) nothrow @nogc
+        {
+            if (ble.port < num_ble)
+                if (auto iface = _active_radios[ble.port])
+                    iface.on_read_complete(conn, handle, data, error);
+        }
+
+        // GATT write complete
+        static void write_dispatch(BLE ble, BLEConn conn, ushort handle, BLEError error) nothrow @nogc
+        {
+            if (ble.port < num_ble)
+                if (auto iface = _active_radios[ble.port])
+                    iface.on_write_complete(conn, handle, error);
+        }
+
+        // notification/indication received
+        static void notify_dispatch(BLE ble, BLEConn conn, ushort handle, const(ubyte)[] data) nothrow @nogc
+        {
+            if (ble.port < num_ble)
+                if (auto iface = _active_radios[ble.port])
+                    iface.on_notification(conn, handle, data);
+        }
+    }
+
+    void on_scan_report(ref const BLEAdvReport report)
+    {
+        MACAddress addr = MACAddress(report.addr);
+
+        Packet p;
+        ref ll = p.init!BLELLFrame(report.data);
+        ll.src = addr;
+        ll.dst = MACAddress.broadcast;
+        ll.pdu_type = report.adv_type == BLEAdvType.connectable ? BLELLType.adv_ind : BLELLType.adv_nonconn_ind;
+        ll.rssi = report.rssi;
+
+        on_incoming(p);
+    }
+
+    void on_conn_event(BLEConn conn, bool connected, BLEError error)
+    {
+        if (connected)
+        {
+            auto session = defaultAllocator().allocT!BLESession;
+            session.client = _pending_connect_client;
+            session.peer = _pending_connect_peer;
+            session.conn = conn;
+            session.active = true;
+
+            _sessions ~= session;
+            log.info("connected to ", session.peer);
+
+            // complete the connect request
+            if (_pending_connect_tag >= 0)
+            {
+                _queue.complete(cast(ubyte)_pending_connect_tag, MessageState.complete);
+                _pending_connect_tag = -1;
+                _pending_connect_client = MACAddress.init;
+                _pending_connect_peer = MACAddress.init;
+            }
+
+            // start GATT discovery
+            static if (num_ble > 0)
+                ble_gatt_discover(_ble, conn);
+        }
+        else
+        {
+            // connection failed or disconnected
+            if (_pending_connect_tag >= 0 && !conn.is_valid)
+            {
+                // connect attempt failed
+                log.error("connection failed");
+                _queue.complete(cast(ubyte)_pending_connect_tag, MessageState.failed);
+                _pending_connect_tag = -1;
+                _pending_connect_client = MACAddress.init;
+                return;
+            }
+
+            // existing connection lost
+            auto session = find_session_by_conn(conn.id);
+            if (session !is null)
+            {
+                log.info("disconnected from ", session.peer);
+
+                // notify subscribers via disconnect packet
+                Packet p;
+                ref ll = p.init!BLELLFrame(null);
+                ll.src = mac;
+                ll.dst = session.client;
+                ll.pdu_type = BLELLType.disconnect_ind;
+                on_incoming(p);
+
+                session.active = false;
+            }
+        }
+    }
+
+    void on_discover_complete(BLEConn conn, const(BLEGattChar)[] chars, BLEError error)
+    {
+        auto session = find_session_by_conn(conn.id);
+        if (session is null)
+            return;
+
+        if (error != BLEError.none)
+        {
+            log.error("GATT discovery failed");
+            return;
+        }
+
+        session.num_chars = 0;
+        foreach (ref c; chars)
+        {
+            if (session.num_chars >= session.chars.length)
+                break;
+            auto gc = &session.chars[session.num_chars++];
+            gc.handle = c.handle;
+            gc.service_uuid = c.service_uuid;
+            gc.char_uuid = c.char_uuid;
+            gc.properties = c.properties;
+        }
+
+        log.info("GATT discovery complete: ", session.num_chars, " characteristics");
+
+        // auto-subscribe to notifications/indications
+        static if (num_ble > 0)
+        {
+            foreach (ref gc; session.chars[0 .. session.num_chars])
+            {
+                if (gc.properties & (GattCharProps.notify | GattCharProps.indicate))
+                    ble_gatt_subscribe(_ble, conn, gc.handle, true);
+            }
+        }
+    }
+
+    void on_read_complete(BLEConn conn, ushort handle, const(ubyte)[] data, BLEError error)
+    {
+        int tag = pop_pending_op(conn.id, handle, true);
+
+        auto session = find_session_by_conn(conn.id);
+        MACAddress client, peer;
+        if (session !is null)
+        {
+            client = session.client;
+            peer = session.peer;
+        }
+
+        if (error == BLEError.none)
+        {
+            Packet p;
+            ref att = p.init!BLEATTFrame(data);
+            att.src = peer;
+            att.dst = client;
+            att.opcode = ATTOpcode.read_rsp;
+            on_incoming(p);
+        }
+
+        if (tag >= 0)
+            _queue.complete(cast(ubyte)tag, error == BLEError.none ? MessageState.complete : MessageState.failed);
+
+        send_queued_messages();
+    }
+
+    void on_write_complete(BLEConn conn, ushort handle, BLEError error)
+    {
+        int tag = pop_pending_op(conn.id, handle, false);
+
+        auto session = find_session_by_conn(conn.id);
+        MACAddress client, peer;
+        if (session !is null)
+        {
+            client = session.client;
+            peer = session.peer;
+        }
+
+        if (error == BLEError.none)
+        {
+            Packet p;
+            ref att = p.init!BLEATTFrame(null);
+            att.src = peer;
+            att.dst = client;
+            att.opcode = ATTOpcode.write_rsp;
+            on_incoming(p);
+        }
+
+        if (tag >= 0)
+            _queue.complete(cast(ubyte)tag, error == BLEError.none ? MessageState.complete : MessageState.failed);
+
+        send_queued_messages();
+    }
+
+    void on_notification(BLEConn conn, ushort handle, const(ubyte)[] data)
+    {
+        auto session = find_session_by_conn(conn.id);
+        if (session is null)
+            return;
+
+        // notification payload is [handle(2)][value...]
+        ubyte[249] buf = void;
+        if (2 + data.length > buf.length)
+            return;
+        buf[0 .. 2] = handle.nativeToLittleEndian;
+        buf[2 .. 2 + data.length] = cast(const(ubyte)[])data[];
+
+        Packet p;
+        ref att = p.init!BLEATTFrame(buf[0 .. 2 + data.length]);
+        att.src = session.peer;
+        att.dst = session.client;
+        att.opcode = ATTOpcode.notification;
+
+        on_incoming(p);
     }
 
     version (DebugBLEInterface)
@@ -663,7 +981,6 @@ package:
         {
             const(char)[] dir_str = dir == PacketDirection.incoming ? "<--" : "-->";
 
-            // only some opcodes have a handle in the first 2 bytes of the payload
             bool has_handle = false;
             switch (att.opcode)
             {
@@ -696,27 +1013,17 @@ struct GattCharacteristic
     ushort handle;
     GUID service_uuid;
     GUID char_uuid;
-    version (Windows)
-    {
-        GattCharacteristicProperties properties;
-        IGattCharacteristic characteristic;
-    }
+    GattCharProps properties;
 }
 
 struct BLESession
 {
     MACAddress client;       // the internal endpoint that owns this connection
     MACAddress peer;         // the BLE device address
+    BLEConn conn;            // driver connection handle
     GattCharacteristic[32] chars;
     ubyte num_chars;
     bool active;
-    version (Windows)
-    {
-        IBluetoothLEDevice device;
-        IBluetoothLEDevice3 device3;
-        ConnectionStatusHandler conn_handler;
-        EventRegistrationToken conn_status_token;
-    }
 
     GattCharacteristic* find_char(ushort handle) nothrow @nogc
     {
