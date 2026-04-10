@@ -53,26 +53,25 @@ nothrow @nogc:
         void[] file = load_file(tconcat("conf/mqtt_profiles/", _profile, ".conf"), g_app.allocator);
         Profile* profile = parse_profile(cast(char[])file, g_app.allocator);
 
-        // gather and match the variables with the given values...
-        const(char)[][64] variables;
-        size_t num_vars = profile.get_mqtt_vars.length;
-        if (num_vars > variables.length / 2)
+        // Resolve profile parameters from named args
+        const(char)[][32] names = void, values = void;
+        auto profile_params = profile.get_parameters;
+        if (profile_params.length > names.length)
         {
             session.write_line("Too many variables for profile '", _profile, "'");
             g_app.allocator.freeT(profile);
             return;
         }
 
-        size_t offset = 0;
-        foreach (var; profile.get_mqtt_vars)
-            variables[offset++] = var;
-        outer: foreach (var; profile.get_mqtt_vars)
+        size_t n;
+        outer: foreach (ref var; profile_params)
         {
+            names[n] = var;
             foreach (ref arg; named_args)
             {
                 if (arg.name == var)
                 {
-                    variables[offset++] = arg.value.asString();
+                    values[n++] = arg.value.asString();
                     continue outer;
                 }
             }
@@ -80,14 +79,27 @@ nothrow @nogc:
             g_app.allocator.freeT(profile);
             return;
         }
-        const(char)[][] var_names = variables[0 .. offset / 2];
-        const(char)[][] var_values = variables[offset / 2 .. offset];
+        const(char)[][] var_names = names[0 .. n];
+        const(char)[][] var_values = values[0 .. n];
+
+        bool sub_failed = false;
+        const(char)[] get_substitute(size_t, const(char)[] param)
+        {
+            foreach (i, v; var_names)
+            {
+                if (v[] != param[])
+                    continue;
+                return var_values[i];
+            }
+            sub_failed = true;
+            return null;
+        }
 
         auto subs = Array!String(Reserve, profile.get_mqtt_subs.length);
         foreach (s; profile.get_mqtt_subs)
         {
-            String sub = s.substitute_variables(var_names, var_values);
-            if (!sub)
+            String sub = s.substitute_parameters(&get_substitute, sub_failed);
+            if (sub_failed || !sub)
             {
                 session.write_line("Failed to substitute variables in subscription '", s, '\'');
                 g_app.allocator.freeT(profile);
@@ -109,8 +121,8 @@ nothrow @nogc:
             const(char)[] raw_topic = mqtt.get_read_topic(*profile);
             if (raw_topic.length > 0)
             {
-                read_topic = raw_topic.substitute_variables(var_names, var_values);
-                if (!read_topic)
+                read_topic = String(raw_topic.substitute_parameters(&get_substitute, sub_failed));
+                if (sub_failed || !read_topic)
                 {
                     session.write_line("Failed to substitute variables in topic '", raw_topic, '\'');
                     return;
@@ -120,8 +132,8 @@ nothrow @nogc:
             raw_topic = mqtt.get_write_topic(*profile);
             if (raw_topic.length > 0)
             {
-                write_topic = raw_topic.substitute_variables(var_names, var_values);
-                if (!write_topic)
+                write_topic = String(raw_topic.substitute_parameters(&get_substitute, sub_failed));
+                if (sub_failed || !write_topic)
                 {
                     session.write_line("Failed to substitute variables in topic '", raw_topic, '\'');
                     return;
@@ -147,45 +159,4 @@ nothrow @nogc:
 
         device.samplers ~= sampler;
     }
-}
-
-
-private:
-
-static String substitute_variables(const(char)[] pattern, const(char)[][] var_names, const(char)[][] var_values)
-{
-    char[256] buffer;
-    size_t i, j;
-    outer: while (i < pattern.length)
-    {
-        if (pattern[i] != '{')
-        {
-            if (j >= buffer.length)
-                return String();
-            buffer[j++] = pattern[i++];
-            continue;
-        }
-
-        size_t tok_end = pattern[i .. $].findFirst('}');
-        if (tok_end == pattern.length - i)
-            return String(); // unclosed token
-        const(char)[] var = pattern[i + 1 .. tok_end - i];
-
-        // find var
-        foreach (k, v; var_names)
-        {
-            if (v != var)
-                continue;
-
-            const(char)[] value = var_values[k];
-            if (j + value.length >= buffer.length)
-                return String(); // overflow
-            buffer[j .. j + value.length] = value;
-            i = tok_end + 1;
-            j += value.length;
-            continue outer;
-        }
-        return String(); // var not found
-    }
-    return buffer[0 .. j].makeString(defaultAllocator());
 }
