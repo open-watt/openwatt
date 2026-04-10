@@ -145,12 +145,19 @@
     <Filter Include="third_party\sys\esp32">
       <UniqueIdentifier>{e0ec80f2-b958-404d-85ff-fb26952715fa}</UniqueIdentifier>
     </Filter>
+    <Filter Include="third_party\sys\posix">
+      <UniqueIdentifier>{84233c23-1801-4982-82ef-0fcf4ec05ea3}</UniqueIdentifier>
+    </Filter>
     <Filter Include="third_party\sys\rp2350">
       <UniqueIdentifier>{b3b1b47c-dd8f-4f38-93b0-440e2d6d3692}</UniqueIdentifier>
     </Filter>
     <Filter Include="third_party\sys\stm32">
       <UniqueIdentifier>{395bc433-cda0-406e-ac4c-6a9fa8236138}</UniqueIdentifier>
-    </Filter>    <Filter Include="third_party\urt">
+    </Filter>
+    <Filter Include="third_party\sys\windows">
+      <UniqueIdentifier>{a7c3f1d2-8b4e-4f9a-b6d1-e2f4a5c8d7b3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt">
       <UniqueIdentifier>{116edccd-0839-4b40-bea5-164a59529949}</UniqueIdentifier>
     </Filter>
     <Filter Include="third_party\urt\crypto">
@@ -251,9 +258,6 @@
     <DCompile Include="src\manager\secret.d">
       <Filter>src\manager</Filter>
     </DCompile>
-    <DCompile Include="src\manager\thread.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
     <DCompile Include="src\manager\value.d">
       <Filter>src\manager</Filter>
     </DCompile>
@@ -330,9 +334,6 @@
       <Filter>src\protocol\ble</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ble\sampler.d">
-      <Filter>src\protocol\ble</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\ble\winrt.d">
       <Filter>src\protocol\ble</Filter>
     </DCompile>
     <DCompile Include="src\protocol\can\iface.d">
@@ -587,6 +588,9 @@
     <DCompile Include="third_party\urt\src\std\math.d">
       <Filter>third_party\std</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\sys\baremetal\ble.d">
+      <Filter>third_party\sys\baremetal</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\sys\baremetal\can.d">
       <Filter>third_party\sys\baremetal</Filter>
     </DCompile>
@@ -668,6 +672,12 @@
     <DCompile Include="third_party\urt\src\sys\bl808\xram.d">
       <Filter>third_party\sys\bl808</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\sys\esp32\alloc.d">
+      <Filter>third_party\sys\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\esp32\ble.d">
+      <Filter>third_party\sys\esp32</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\sys\esp32\can.d">
       <Filter>third_party\sys\esp32</Filter>
     </DCompile>
@@ -682,6 +692,9 @@
     </DCompile>
     <DCompile Include="third_party\urt\src\sys\esp32\wifi.d">
       <Filter>third_party\sys\esp32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\posix\alloc.d">
+      <Filter>third_party\sys\posix</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\sys\rp2350\irq.d">
       <Filter>third_party\sys\rp2350</Filter>
@@ -712,6 +725,12 @@
     </DCompile>
     <DCompile Include="third_party\urt\src\sys\stm32\uart.d">
       <Filter>third_party\sys\stm32</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\windows\alloc.d">
+      <Filter>third_party\sys\windows</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\windows\ble.d">
+      <Filter>third_party\sys\windows</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\string\ansi.d">
       <Filter>third_party\urt\string</Filter>
@@ -1002,6 +1021,9 @@
       <Filter>third_party\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\system.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\thread.d">
       <Filter>third_party\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\time.d">

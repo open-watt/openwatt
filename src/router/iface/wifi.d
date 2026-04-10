@@ -3,6 +3,7 @@ module router.iface.wifi;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
+import urt.result : Result;
 import urt.mem.string;
 import urt.mem.temp;
 import urt.string;
@@ -154,12 +155,12 @@ nothrow @nogc:
 
     static if (num_wifi > 0)
     {
-        final int drv_transmit(WifiVif vif, const(ubyte)[] data)
+        final Result drv_transmit(WifiVif vif, const(ubyte)[] data)
         {
             return wifi_tx(_wifi, vif, data);
         }
 
-        final bool drv_get_mac(WifiVif vif, ref ubyte[6] mac)
+        final Result drv_get_mac(WifiVif vif, ref ubyte[6] mac)
         {
             return wifi_get_mac(_wifi, vif, mac);
         }
@@ -476,7 +477,7 @@ nothrow @nogc:
                 return -1;
             }
             WifiVif vif = cast(APInterface)this !is null ? WifiVif.ap : WifiVif.sta;
-            if (_radio.drv_transmit(vif, cast(const(ubyte)[])packet.data) != 0)
+            if (!_radio.drv_transmit(vif, cast(const(ubyte)[])packet.data))
             {
                 ++_status.tx_dropped;
                 return -1;

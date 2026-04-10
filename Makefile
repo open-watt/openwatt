@@ -335,6 +335,15 @@ endif
 ifneq ($(filter esp%,$(PLATFORM)),)
     URT_SOURCES := $(URT_SOURCES) $(shell find "$(RTSRCDIR)/sys/esp32" -type f -name '*.d')
 endif
+ifneq ($(filter stm32%,$(PLATFORM)),)
+    URT_SOURCES := $(URT_SOURCES) $(shell find "$(RTSRCDIR)/sys/stm32" -type f -name '*.d')
+endif
+ifeq ($(OS),windows)
+    URT_SOURCES := $(URT_SOURCES) $(shell find "$(RTSRCDIR)/sys/windows" -type f -name '*.d')
+endif
+ifneq ($(filter linux ubuntu freebsd,$(OS)),)
+    URT_SOURCES := $(URT_SOURCES) $(shell find "$(RTSRCDIR)/sys/posix" -type f -name '*.d')
+endif
 
 SOURCES := $(APP_SOURCES) $(URT_SOURCES)
 
