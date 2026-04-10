@@ -316,9 +316,9 @@ nothrow:
                 _ash = _ash_ext;
             else
             {
-                ref ash_coll = get_module!EZSPProtocolModule.ash_connections;
+                auto ash_coll = Collection!ASHInterface();
                 const(char)[] ash_name = ash_coll.generate_name(name[]);
-                _ash = ash_coll.create(ash_name, ObjectFlags.dynamic, NamedArgument("stream", cast(Stream)_stream));
+                _ash = cast(ASHInterface)ash_coll.create(ash_name, ObjectFlags.dynamic, NamedArgument("stream", cast(Stream)_stream));
                 if (!_ash)
                     return CompletionStatus.error;
             }

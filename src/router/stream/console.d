@@ -312,15 +312,8 @@ class ConsoleStreamModule : Module
     mixin DeclareModule!"stream.console";
 nothrow @nogc:
 
-    Collection!ConsoleStream consoles;
-
     override void init()
     {
-        g_app.console.register_collection("/stream/console", consoles);
-    }
-
-    override void update()
-    {
-        consoles.update_all();
+        g_app.console.register_collection!ConsoleStream("/stream/console");
     }
 }

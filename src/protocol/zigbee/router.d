@@ -37,7 +37,7 @@ nothrow @nogc:
 
     ~this()
     {
-        get_module!ZigbeeProtocolModule.nodes.remove(this);
+        Collection!ZigbeeNode().remove(this);
     }
 
     // Properties...
@@ -83,7 +83,7 @@ protected:
     {
         super(type_info, id, flags);
 
-        get_module!ZigbeeProtocolModule.nodes.add(this);
+        Collection!ZigbeeNode().add(this);
     }
 
     override bool validate() const pure

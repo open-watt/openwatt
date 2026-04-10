@@ -31,21 +31,14 @@ class CANProtocolModule : Module
     mixin DeclareModule!"protocol.can";
 nothrow @nogc:
 
-    Collection!CANInterface can_interfaces;
-
     override void init()
     {
         register_address_extractor(PacketType.can, &CANFrame.extract_src, &CANFrame.extract_dst);
 
         g_app.register_enum!CANInterfaceProtocol();
 
-        g_app.console.register_collection("/interface/can", can_interfaces);
+        g_app.console.register_collection!CANInterface("/interface/can");
         g_app.console.register_command!device_add("/protocol/can/device", this, "add");
-    }
-
-    override void update()
-    {
-        can_interfaces.update_all();
     }
 
     void device_add(Session session, const(char)[] id, BaseInterface _interface, Nullable!(const(char)[]) name, Nullable!(const(char)[]) _profile, Nullable!(const(char)[]) model)

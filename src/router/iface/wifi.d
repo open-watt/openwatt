@@ -790,15 +790,11 @@ class WiFiInterfaceModule : Module
     mixin DeclareModule!"interface.wifi";
 nothrow @nogc:
 
-    Collection!WiFiInterface wifi_radios;
-    Collection!WLANInterface wlan_interfaces;
-    Collection!APInterface ap_interfaces;
-
     override void init()
     {
-        g_app.console.register_collection("/interface/wifi", wifi_radios);
-        g_app.console.register_collection("/interface/wlan", wlan_interfaces);
-        g_app.console.register_collection("/interface/ap", ap_interfaces);
+        g_app.console.register_collection!WiFiInterface("/interface/wifi");
+        g_app.console.register_collection!WLANInterface("/interface/wlan");
+        g_app.console.register_collection!APInterface("/interface/ap");
 
         version (Windows)
         {
@@ -834,16 +830,9 @@ nothrow @nogc:
 
                 writeInfo("Found wifi interface: \"", description, "\" (", name[], ")");
 
-                auto wlan = wlan_interfaces.create(tconcat("wlan", ++num_radios));
+                auto wlan = cast(WLANInterface)Collection!WLANInterface().create(tconcat("wlan", ++num_radios));
                 wlan.adapter = name;
             }
         }
-    }
-
-    override void update()
-    {
-        wifi_radios.update_all();
-        wlan_interfaces.update_all();
-        ap_interfaces.update_all();
     }
 }

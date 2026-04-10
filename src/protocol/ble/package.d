@@ -33,14 +33,12 @@ class BLEModule : Module
     mixin DeclareModule!"protocol.ble";
 nothrow @nogc:
 
-    Collection!BLEInterface ble_interfaces;
-    Collection!BLEClient ble_clients;
     Map!(MACAddress, BLEAdvEntry*) devices;
 
     override void init()
     {
-        g_app.console.register_collection("/interface/ble", ble_interfaces);
-        g_app.console.register_collection("/protocol/ble/client", ble_clients);
+        g_app.console.register_collection!BLEInterface("/interface/ble");
+        g_app.console.register_collection!BLEClient("/protocol/ble/client");
         g_app.console.register_command!device_add("/protocol/ble/device", this, "add");
         g_app.console.register_command!print_devices("/protocol/ble/device", this, "print");
         g_app.console.register_command!cmd_read("/protocol/ble/client", this, "read");
@@ -48,8 +46,7 @@ nothrow @nogc:
 
     override void update()
     {
-        ble_interfaces.update_all();
-        ble_clients.update_all();
+        Collection!BLEClient().update_all();
         expire_devices();
     }
 

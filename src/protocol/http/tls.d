@@ -148,8 +148,8 @@ nothrow @nogc:
             }
 
             // Client-mode: create a TCP stream to connect outward.
-            const(char)[] new_name = get_module!StreamModule.streams.generate_name(name[]);
-            _stream = get_module!TCPStreamModule.tcp_streams.create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("keepalive", _keep_enable), NamedArgument("remote", _host));
+            const(char)[] new_name = Collection!Stream().generate_name(name[]);
+            _stream = cast(Stream)Collection!TCPStream().create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("keepalive", _keep_enable), NamedArgument("remote", _host));
             if (!_stream)
             {
                 log.error("failed to create underlying TCP stream");
@@ -982,8 +982,8 @@ protected:
         }
 
         Stream tcp = super.create_stream(conn);
-        const(char)[] stream_name = get_module!HTTPModule.tls_streams.generate_name(tconcat(name[], "_conn"));
-        auto tls = get_module!HTTPModule.tls_streams.create(stream_name[], cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
+        const(char)[] stream_name = Collection!TLSStream().generate_name(tconcat(name[], "_conn"));
+        auto tls = cast(TLSStream)Collection!TLSStream().create(stream_name[], cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
             NamedArgument("stream", tcp), NamedArgument("certificates", certs[0 .. num_certs]));
         if (!tls)
         {

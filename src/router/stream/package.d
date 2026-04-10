@@ -230,11 +230,14 @@ class StreamModule : Module
     mixin DeclareModule!"stream";
 nothrow @nogc:
 
-    Collection!Stream streams;
-
     override void pre_init()
     {
-        g_app.console.register_collection("/stream", streams);
+        g_app.console.register_collection!Stream("/stream");
+    }
+
+    override void pre_update()
+    {
+        Collection!Stream().update_all();
     }
 }
 

@@ -18,6 +18,8 @@ import manager.collection;
 import manager.system;
 
 import protocol.dns.message;
+import protocol.http.server : HTTPServer;
+import protocol.http.tls : TLSServer;
 import protocol.http;
 import protocol.http.message;
 import protocol.http.server;
@@ -180,8 +182,8 @@ nothrow @nogc:
             _udp4_socket = create_listener(AddressFamily.ipv4, DNSPort);
             _udp6_socket = create_listener(AddressFamily.ipv6, DNSPort);
 
-            const(char)[] new_name = get_module!TCPStreamModule.tcp_servers.generate_name(name[]);
-            _tcp_server = get_module!TCPStreamModule.tcp_servers.create(new_name, ObjectFlags.dynamic, NamedArgument("port", DNSPort));
+            const(char)[] new_name = Collection!TCPServer().generate_name(name[]);
+            _tcp_server = Collection!TCPServer().create(new_name, ObjectFlags.dynamic, NamedArgument("port", DNSPort));
             _tcp_server.set_connection_callback(&new_client, null);
 
             if (_udp4_socket && _tcp_server) // we can tolerate no ipv6 listener (?)
@@ -237,8 +239,8 @@ nothrow @nogc:
         // DoT
         if (_protocols & (1 << NSProtocol.dot) && !((_active | _failed) & (1 << NSProtocol.dot)))
         {
-            const(char)[] new_name = get_module!HTTPModule.tls_servers.generate_name(name[]);
-            _dot_server = get_module!HTTPModule.tls_servers.create(new_name, ObjectFlags.dynamic, NamedArgument("port", DoTPort));
+            const(char)[] new_name = Collection!TLSServer().generate_name(name[]);
+            _dot_server = Collection!TLSServer().create(new_name, ObjectFlags.dynamic, NamedArgument("port", DoTPort));
             _dot_server.set_connection_callback(&new_client, null);
             if (_dot_server)
                 _active |= 1 << NSProtocol.dot;
@@ -375,7 +377,7 @@ nothrow @nogc:
         // check and reattach HTTP server
         if (_doh_server.detached)
         {
-            if (HTTPServer srv = get_module!HTTPModule.servers.get(_doh_server.name[]))
+            if (HTTPServer srv = Collection!HTTPServer().get(_doh_server.name[]))
             {
                 _doh_server = srv;
                 doh_subscribe(null, _doh_server);

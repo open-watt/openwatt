@@ -25,21 +25,17 @@ class EZSPProtocolModule : Module
     mixin DeclareModule!"protocol.ezsp";
 nothrow @nogc:
 
-    Collection!ASHInterface ash_connections;
-    Collection!EZSPClient clients;
-
     override void init()
     {
         g_app.register_enum!EZSPStackType();
 
-        g_app.console.register_collection("/protocol/ezsp/ash", ash_connections);
-        g_app.console.register_collection("/protocol/ezsp/client", clients);
+        g_app.console.register_collection!ASHInterface("/protocol/ezsp/ash");
+        g_app.console.register_collection!EZSPClient("/protocol/ezsp/client");
     }
 
     override void update()
     {
-        ash_connections.update_all();
-        clients.update_all();
+        Collection!EZSPClient().update_all();
     }
 }
 

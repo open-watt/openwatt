@@ -523,19 +523,15 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
         return "Invalid value";
 
     alias Type = Unqual!T;
-    Collection!Type* collection = collection_for!Type();
-    assert(collection !is null, "No collection for " ~ Type.stringof);
-
-    r = collection.get(n);
+    r = Collection!Type().get(n);
     if (r is null)
     {
-        // check if name exists in aggregate but is wrong subtype
-        alias Aggregate = CollectionRoot!Type;
-        static if (!is(Aggregate == Type))
+        // check if name exists in root collection but is wrong subtype
+        alias Root = CollectionRoot!Type;
+        static if (!is(Type == Root))
         {
-            if (auto base = collection_for!Aggregate())
-                if (auto item = base.get(n))
-                    return tconcat("expected " ~ Type.type_name ~ ", but '", n, "' is a ", item.type[]);
+            if (auto item = Collection!Root().get(n))
+                return tconcat("expected " ~ Type.type_name ~ ", but '", n, "' is a ", item.type[]);
         }
         return tconcat("Item does not exist: ", n);
     }

@@ -760,17 +760,10 @@ class BridgeInterfaceModule : Module
     mixin DeclareModule!"interface.bridge";
 nothrow @nogc:
 
-    Collection!BridgeInterface bridges;
-
     override void init()
     {
-        g_app.console.register_collection("/interface/bridge", bridges);
+        g_app.console.register_collection!BridgeInterface("/interface/bridge");
         g_app.console.register_command!port_add("/interface/bridge/port", this, "add");
-    }
-
-    override void update()
-    {
-        bridges.update_all();
     }
 
     void port_add(Session session, BridgeInterface bridge, BaseInterface _interface, Nullable!ushort pvid, Nullable!bool ingress_filtering, Nullable!bool untagged_egress)

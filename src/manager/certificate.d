@@ -180,7 +180,7 @@ protected:
     {
         if (_http_server.detached)
         {
-            if (HTTPServer s = get_module!HTTPModule.servers.get(_http_server.name[]))
+            if (HTTPServer s = Collection!HTTPServer().get(_http_server.name[]))
                 _http_server = s;
         }
         return super.validating();
@@ -449,8 +449,8 @@ private:
         {
             version (DebugCertificate)
                 writeDebug("Certificate '", name, "': creating temporary HTTP server on port 80");
-            const(char)[] server_name = get_module!HTTPModule.servers.generate_name(name[]);
-            _http_server = get_module!HTTPModule.servers.create(
+            const(char)[] server_name = Collection!HTTPServer().generate_name(name[]);
+            _http_server = Collection!HTTPServer().create(
                 server_name, ObjectFlags.dynamic,
                 NamedArgument("port", cast(ushort)80));
             _owns_http_server = true;
@@ -508,8 +508,8 @@ private:
         register_challenge_endpoint();
 
         // Create HTTP client for ACME API requests
-        const(char)[] client_name = get_module!HTTPModule.clients.generate_name(name[]);
-        _acme_client = get_module!HTTPModule.clients.create(
+        const(char)[] client_name = Collection!HTTPClient().generate_name(name[]);
+        _acme_client = Collection!HTTPClient().create(
             client_name, ObjectFlags.dynamic,
             NamedArgument("remote", "https://acme-v02.api.letsencrypt.org"));
 
@@ -553,8 +553,8 @@ private:
             register_challenge_endpoint();
 
             // Create HTTP client for ACME API requests
-            const(char)[] client_name = get_module!HTTPModule.clients.generate_name(name[]);
-            _acme_client = get_module!HTTPModule.clients.create(
+            const(char)[] client_name = Collection!HTTPClient().generate_name(name[]);
+            _acme_client = Collection!HTTPClient().create(
                 client_name, ObjectFlags.dynamic,
                 NamedArgument("remote", "https://acme-v02.api.letsencrypt.org"));
 
@@ -1590,15 +1590,13 @@ class CertificateModule : Module
     mixin DeclareModule!"certificate";
 nothrow @nogc:
 
-    Collection!Certificate certificates;
-
     override void init()
     {
-        g_app.console.register_collection("/certificate", certificates);
+        g_app.console.register_collection!Certificate("/certificate");
     }
 
     override void update()
     {
-        certificates.update_all();
+        Collection!Certificate().update_all();
     }
 }

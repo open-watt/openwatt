@@ -284,8 +284,8 @@ private:
 
     bool try_start_http()
     {
-        const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name(tconcat(name[], "_tcp"));
-        _server = get_module!TCPStreamModule.tcp_servers.create(server_name, ObjectFlags.dynamic, NamedArgument("port", _port));
+        const(char)[] server_name = Collection!TCPServer().generate_name(tconcat(name[], "_tcp"));
+        _server = Collection!TCPServer().create(server_name, ObjectFlags.dynamic, NamedArgument("port", _port));
         if (!_server)
         {
             log.error("failed to create HTTP listener");
@@ -299,6 +299,7 @@ private:
 
     void try_start_tls()
     {
+        import protocol.http.tls : TLSServer;
         version (DebugHTTPServer)
             log.trace("try_start_tls, any_cert_valid=", any_cert_valid());
         if (!any_cert_valid())
@@ -310,8 +311,8 @@ private:
             if (auto cert = c.get())
                 certs[num_certs++] = cert;
 
-        const(char)[] tls_name = get_module!HTTPModule.tls_servers.generate_name(tconcat(name[], "_tls"));
-        _tls_server = get_module!HTTPModule.tls_servers.create(tls_name, ObjectFlags.dynamic,
+        const(char)[] tls_name = Collection!TLSServer().generate_name(tconcat(name[], "_tls"));
+        _tls_server = Collection!TLSServer().create(tls_name, ObjectFlags.dynamic,
             NamedArgument("port", _tls_port), NamedArgument("certificates", certs[0 .. num_certs]));
         if (!_tls_server)
         {

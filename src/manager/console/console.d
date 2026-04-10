@@ -228,22 +228,12 @@ nothrow @nogc:
         return register_command(_scope, FunctionCommand.create!method(this, instance, commandName));
     }
 
-    void register_collection(Type)(string _scope, ref Collection!Type collection)
+    void register_collection(Type)(string _scope)
     {
-        ref Collection!Type* c = collection_for!Type();
-        debug assert(c is null, "Collection has been registered before!");
-        c = &collection;
+        import manager.collection : CollectionRoot;
+        alias Root = CollectionRoot!Type;
 
-        g_app.register_collection(*c, _scope);
-
-        register_collection_impl(_scope, collection);
-    }
-    private void register_collection_impl(string _scope, ref BaseCollection collection)
-    {
-        import manager.console.collection_commands;
-
-        Scope s = create_scope(_scope);
-        s.add_collection_commands(collection);
+        register_collection(collection_type_info!Type, !is(Type == Root), _scope);
     }
 
     void unregister_command(const(char)[] _scope, const(char)[] command)
@@ -266,9 +256,6 @@ nothrow @nogc:
             // TODO
         }
     }
-
-
-
 
     void add_command(Command command, Scope parent)
     {
@@ -368,6 +355,16 @@ package:
     Array!Session _sessions;
 
     Console* _next_console_instance = null;
+
+    void register_collection(const(CollectionTypeInfo)* type_info, bool is_derived, string _scope)
+    {
+        if (is_derived)
+            g_app.register_collection(type_info, _scope);
+
+        import manager.console.collection_commands;
+        Scope s = create_scope(_scope);
+        s.add_collection_commands(BaseCollection(type_info));
+    }
 }
 
 

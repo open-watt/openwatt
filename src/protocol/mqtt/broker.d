@@ -10,6 +10,7 @@ import urt.time;
 
 import manager;
 import manager.base;
+import manager.collection;
 
 import protocol.mqtt.client;
 
@@ -289,7 +290,7 @@ private:
     {
         import manager.expression : NamedArgument;
 
-        TCPServer s = get_module!TCPStreamModule.tcp_servers.create(name[], ObjectFlags.dynamic, NamedArgument("port", _port ? _port : 1883));
+        TCPServer s = Collection!TCPServer().create(name[], ObjectFlags.dynamic, NamedArgument("port", _port ? _port : 1883));
         s.subscribe(&server_signal);
         s.set_connection_callback(&new_connection, null);
         return s;

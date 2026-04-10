@@ -26,12 +26,11 @@ class GoodWeModule : Module
     mixin DeclareModule!"protocol.goodwe";
 nothrow @nogc:
 
-    Collection!AA55Client clients;
     Socket aa55_socket;
 
     override void init()
     {
-        g_app.console.register_collection("/protocol/goodwe/aa55", clients);
+        g_app.console.register_collection!AA55Client("/protocol/goodwe/aa55");
         g_app.console.register_command!device_add("/protocol/goodwe/device", this, "add");
 
         // Create socket for AA55 clients
@@ -67,7 +66,7 @@ nothrow @nogc:
     {
         poll_aa55();
 
-        clients.update_all();
+        Collection!AA55Client().update_all();
     }
 
     void poll_aa55()
@@ -96,7 +95,7 @@ nothrow @nogc:
             if (bytes == 0)
                 continue; // degenerate zero-length packet?
 
-            foreach (ref c; clients.values)
+            foreach (c; Collection!AA55Client().values)
             {
                 if (c.match_server(sender))
                 {

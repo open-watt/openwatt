@@ -189,15 +189,8 @@ class UDPStreamModule : Module
     mixin DeclareModule!"stream.udp";
 nothrow @nogc:
 
-    Collection!UDPStream udp_streams;
-
     override void init()
     {
-        g_app.console.register_collection("/stream/udp", udp_streams);
-    }
-
-    override void pre_update()
-    {
-        udp_streams.update_all();
+        g_app.console.register_collection!UDPStream("/stream/udp");
     }
 }

@@ -36,7 +36,6 @@ class TeslaProtocolModule : Module
     mixin DeclareModule!"protocol.tesla";
 nothrow @nogc:
 
-    Collection!TeslaInterface twc_interfaces;
     Map!(const(char)[], TeslaTWCMaster) twc_masters;
     Map!(ushort, DeviceMap) devices;
 
@@ -44,7 +43,7 @@ nothrow @nogc:
     {
         register_address_extractor(PacketType.tesla_twc, &extract_twc_src_address, &extract_twc_dst_address);
 
-        g_app.console.register_collection("/interface/tesla-twc", twc_interfaces);
+        g_app.console.register_collection!TeslaInterface("/interface/tesla-twc");
         g_app.console.register_command!twc_add("/protocol/tesla/twc", this, "add");
         g_app.console.register_command!twc_set("/protocol/tesla/twc", this, "set");
         g_app.console.register_command!device_add("/protocol/tesla/twc/device", this, "add");
@@ -52,7 +51,7 @@ nothrow @nogc:
 
     override void update()
     {
-        twc_interfaces.update_all();
+        // TeslaInterface update handled by base interface collection
         foreach(m; twc_masters.values)
             m.update();
     }
@@ -113,9 +112,7 @@ nothrow @nogc:
 
     void twc_add(Session session, const(char)[] name, const(char)[] _interface, ushort id, float max_current)
     {
-        auto mod_if = get_module!InterfaceModule;
-
-        BaseInterface i = mod_if.interfaces.get(_interface);
+        BaseInterface i = Collection!BaseInterface().get(_interface);
         if(i is null)
         {
             session.write_line("Interface '", _interface, "' not found");

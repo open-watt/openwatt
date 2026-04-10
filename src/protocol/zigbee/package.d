@@ -279,13 +279,6 @@ nothrow @nogc:
     Map!(uint, NodeMap*) nodes_by_pan;
     Array!UnknownNode unknown_nodes;
 
-    Collection!ZigbeeInterface zigbee_interfaces;
-    Collection!ZigbeeNode nodes;
-    Collection!ZigbeeRouter routers;
-    Collection!ZigbeeCoordinator coordinators;
-    Collection!ZigbeeEndpoint endpoints;
-    Collection!ZigbeeController controllers;
-
     override void init()
     {
         import protocol.zigbee.aps : extract_aps_src_address, extract_aps_dst_address;
@@ -293,12 +286,12 @@ nothrow @nogc:
 //        register_address_extractor(PacketType.zigbee_nwk, &extract_nwk_src_address, &extract_nwk_dst_address);
         register_address_extractor(PacketType.zigbee_aps, &extract_aps_src_address, &extract_aps_dst_address);
 
-        g_app.console.register_collection("/interface/zigbee", zigbee_interfaces);
-        g_app.console.register_collection("/protocol/zigbee/node", nodes);
-        g_app.console.register_collection("/protocol/zigbee/router", routers);
-        g_app.console.register_collection("/protocol/zigbee/coordinator", coordinators);
-        g_app.console.register_collection("/protocol/zigbee/endpoint", endpoints);
-        g_app.console.register_collection("/protocol/zigbee/controller", controllers);
+        g_app.console.register_collection!ZigbeeInterface("/interface/zigbee");
+        g_app.console.register_collection!ZigbeeNode("/protocol/zigbee/node");
+        g_app.console.register_collection!ZigbeeRouter("/protocol/zigbee/router");
+        g_app.console.register_collection!ZigbeeCoordinator("/protocol/zigbee/coordinator");
+        g_app.console.register_collection!ZigbeeEndpoint("/protocol/zigbee/endpoint");
+        g_app.console.register_collection!ZigbeeController("/protocol/zigbee/controller");
 
         g_app.console.register_command!scan("/protocol/zigbee", this);
         g_app.console.register_command!zcl_read("/protocol/zigbee", this, "read");
@@ -309,11 +302,10 @@ nothrow @nogc:
     {
         // TODO: check; should coordinators or interfaces come first?
         //       does one produce changes which will be consumed by the other?
-        zigbee_interfaces.update_all();
-        coordinators.update_all();
+        Collection!ZigbeeNode().update_all();
         // TODO: routers? nodes? should they be updated together? shoud routers populate the node pool?
-        endpoints.update_all();
-        controllers.update_all();
+        Collection!ZigbeeEndpoint().update_all();
+        Collection!ZigbeeController().update_all();
     }
 
     NodeMap* add_node(EUI64 eui, BaseInterface via = null)
@@ -424,7 +416,7 @@ nothrow @nogc:
     // /protocol/zigbee/scan command
     EnergyScanState scan(Session session, const(char)[] ezsp_client, Nullable!bool energy_scan)
     {
-        EZSPClient c = get_module!EZSPProtocolModule.clients.get(ezsp_client);
+        EZSPClient c = Collection!EZSPClient().get(ezsp_client);
         if (!c)
         {
             session.write_line("EZSP client does not exist: ", ezsp_client);

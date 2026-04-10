@@ -338,7 +338,7 @@ private:
                 if (sub[1] == 0x00)
                 {
                     _terminal.terminal_type = cast(const(char)[])sub[2 .. $];
-                    _terminal.features = map_terminal_features(_terminal.terminal_type);
+                    _terminal.features = cast(ClientFeatures)(map_terminal_features(_terminal.terminal_type) | ClientFeatures.crlf);
                     _terminal.pending_events |= TerminalEvents.features_changed;
 
                     version (TelnetDebug)

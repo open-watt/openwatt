@@ -307,10 +307,10 @@ class EthernetInterfaceModule : Module
     mixin DeclareModule!"interface.ethernet";
 nothrow @nogc:
 
-    Collection!EthernetInterface ethernet_interfaces;
-
     override void init()
     {
+        g_app.console.register_collection!EthernetInterface("/interface/ethernet");
+
         version(Windows)
         {
             if (!npcap_loaded())
@@ -327,8 +327,6 @@ nothrow @nogc:
                 return;
             }
             scope(exit) pcap_freealldevs(interfaces);
-
-            g_app.console.register_collection("/interface/ethernet", ethernet_interfaces);
 
             int num_ether_interfaces = 0;
             for (auto dev = interfaces; dev; dev = dev.next)
@@ -356,16 +354,11 @@ nothrow @nogc:
                     continue;
 
                 writeInfo("Found ethernet interface: \"", description, "\" (", name[], ")");
-                auto iface = ethernet_interfaces.create(tconcat("ether", ++num_ether_interfaces));
+                auto iface = cast(EthernetInterface)Collection!EthernetInterface().create(tconcat("ether", ++num_ether_interfaces));
                 iface.adapter = name;
 
                 // TODO: we need to set the MAC for the interface to the NIC MAC address...
             }
         }
-    }
-
-    override void update()
-    {
-        ethernet_interfaces.update_all();
     }
 }

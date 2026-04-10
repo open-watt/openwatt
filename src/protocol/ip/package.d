@@ -28,13 +28,10 @@ class IPModule : Module
     mixin DeclareModule!"protocol.ip";
 nothrow @nogc:
 
-    Collection!IPAddress addresses;
-    Collection!IPRoute routes;
-
     override void init()
     {
-        g_app.console.register_collection("/protocol/ip/address", addresses);
-        g_app.console.register_collection("/protocol/ip/route", routes);
+        g_app.console.register_collection!IPAddress("/protocol/ip/address");
+        g_app.console.register_collection!IPRoute("/protocol/ip/route");
     }
 
     override void post_init()
@@ -62,7 +59,7 @@ nothrow @nogc:
 
             for (auto dev = interfaces; dev; dev = dev.next)
             {
-                foreach (i; get_module!InterfaceModule.interfaces.values)
+                foreach (i; Collection!BaseInterface().values)
                 {
                     EthernetInterface e = cast(EthernetInterface)i;
                     if (!e || e.adapter != dev.name[0..dev.name.strlen])
@@ -85,7 +82,7 @@ nothrow @nogc:
                             net_addr.mask.b[2] = nmin.sin_addr.S_un.S_un_b.s_b3;
                             net_addr.mask.b[3] = nmin.sin_addr.S_un.S_un_b.s_b4;
 
-                            IPAddress ip = addresses.create(tconcat(e.name, ".addr"));
+                            IPAddress ip = Collection!IPAddress().create(tconcat(e.name, ".addr"));
                             ip.address = net_addr;
                             ip.iface = e;
                         }
@@ -97,7 +94,7 @@ nothrow @nogc:
 
     override void update()
     {
-        addresses.update_all();
-        routes.update_all();
+        Collection!IPAddress().update_all();
+        Collection!IPRoute().update_all();
     }
 }
