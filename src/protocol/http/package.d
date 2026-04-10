@@ -32,37 +32,29 @@ class HTTPModule : Module
     mixin DeclareModule!"http";
 nothrow @nogc:
 
-    Collection!TLSStream tls_streams;
-    Collection!TLSServer tls_servers;
-    Collection!HTTPServer servers;
-    Collection!HTTPClient clients;
-    Collection!WebSocketServer ws_servers;
-    Collection!WebSocket websockets;
-
     override void init()
     {
-        g_app.console.register_collection("/stream/tls", tls_streams);
-        g_app.console.register_collection("/protocol/tls/server", tls_servers);
-        g_app.console.register_collection("/protocol/http/client", clients);
-        g_app.console.register_collection("/protocol/http/server", servers);
-        g_app.console.register_collection("/protocol/websocket/server", ws_servers);
-        g_app.console.register_collection("/protocol/websocket", websockets);
+        g_app.console.register_collection!TLSStream("/stream/tls");
+        g_app.console.register_collection!TLSServer("/protocol/tls/server");
+        g_app.console.register_collection!HTTPClient("/protocol/http/client");
+        g_app.console.register_collection!HTTPServer("/protocol/http/server");
+        g_app.console.register_collection!WebSocketServer("/protocol/websocket/server");
+        g_app.console.register_collection!WebSocket("/protocol/websocket");
 
         g_app.console.register_command!request("/protocol/http", this);
     }
 
     override void pre_update()
     {
-        websockets.update_all();
+        Collection!WebSocket().update_all();
     }
 
     override void update()
     {
-        tls_streams.update_all();
-        tls_servers.update_all();
-        servers.update_all();
-        clients.update_all();
-        ws_servers.update_all();
+        Collection!TLSServer().update_all();
+        Collection!HTTPServer().update_all();
+        Collection!HTTPClient().update_all();
+        Collection!WebSocketServer().update_all();
     }
 
     static class HTTPRequestState : CommandState
@@ -116,7 +108,7 @@ nothrow @nogc:
 
     HTTPRequestState request(Session session, const(char)[] client, const(char)[] uri = "/", HTTPMethod method = HTTPMethod.GET)
     {
-        HTTPClient c = clients.get(client);
+        HTTPClient c = Collection!HTTPClient().get(client);
         if (!c)
         {
             session.writef("No HTTP client: '{0}'", client);

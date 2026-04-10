@@ -566,15 +566,15 @@ protected:
     Stream create_stream(Socket conn)
     {
         // prevent duplicate stream names...
-        const(char)[] newName = get_module!StreamModule.streams.generate_name(name[]);
+        const(char)[] newName = Collection!Stream().generate_name(name[]);
 
-        TCPStream stream = get_module!TCPStreamModule.tcp_streams.alloc(newName, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
+        TCPStream stream = cast(TCPStream)Collection!TCPStream().alloc(newName, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
 
         // assign the socket to the stream and bypass the startup process
         stream._socket = conn;
         conn.get_peer_name(stream._remote);
         stream.set_state(State.running);
-        get_module!TCPStreamModule.tcp_streams.add(stream);
+        Collection!TCPStream().add(stream);
         return stream;
     }
 }
@@ -585,22 +585,14 @@ class TCPStreamModule : Module
     mixin DeclareModule!"stream.tcp";
 nothrow @nogc:
 
-    Collection!TCPStream tcp_streams;
-    Collection!TCPServer tcp_servers;
-
     override void init()
     {
-        g_app.console.register_collection("/stream/tcp-client", tcp_streams);
-        g_app.console.register_collection("/stream/tcp-server", tcp_servers);
-    }
-
-    override void pre_update()
-    {
-        tcp_streams.update_all();
+        g_app.console.register_collection!TCPStream("/stream/tcp-client");
+        g_app.console.register_collection!TCPServer("/stream/tcp-server");
     }
 
     override void update()
     {
-        tcp_servers.update_all();
+        Collection!TCPServer().update_all();
     }
 }

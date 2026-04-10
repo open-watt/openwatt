@@ -24,12 +24,11 @@ class TelnetModule : Module
     mixin DeclareModule!"protocol.telnet";
 nothrow @nogc:
 
-    Collection!TelnetStream telnet_streams;
     Map!(const(char)[], TelnetServer) servers;
 
     override void init()
     {
-        g_app.console.register_collection("/stream/telnet", telnet_streams);
+        g_app.console.register_collection!TelnetStream("/stream/telnet");
         g_app.console.register_command!add_server("/protocol/telnet/server", this, "add");
     }
 
@@ -37,8 +36,6 @@ nothrow @nogc:
     {
         foreach (server; servers.values)
             server.update();
-
-        telnet_streams.update_all();
     }
 
     void add_server(Session session, const(char)[] name, ushort port)

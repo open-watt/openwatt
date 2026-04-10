@@ -21,7 +21,7 @@ import manager.console.table;
 nothrow @nogc:
 
 
-void add_collection_commands(Scope s, ref BaseCollection collection)
+void add_collection_commands(Scope s, BaseCollection collection)
 {
     if (collection.type_info)
     {
@@ -41,10 +41,10 @@ class CollectionAddCommand : Command
 {
 nothrow @nogc:
 
-    this(ref Console console, ref BaseCollection collection)
+    this(ref Console console, BaseCollection collection)
     {
         super(console, StringLit!"add");
-        _collection = &collection;
+        _collection = collection;
     }
 
     override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
@@ -84,6 +84,7 @@ nothrow @nogc:
             if (!r)
             {
                 session.write_line("Invalid value for property: ", arg.name, "=", arg.value, " - ", r.message);
+                _collection.remove(item);
                 defaultAllocator.freeT(item);
                 return null;
             }
@@ -102,26 +103,26 @@ nothrow @nogc:
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, *_collection, SuggestFlags.Add);
+            return .complete(cmdLine, _collection, SuggestFlags.Add);
     }
 
     final override Array!String suggest(const(char)[] cmdLine)
     {
-        return .suggest(cmdLine, *_collection, SuggestFlags.Add);
+        return .suggest(cmdLine, _collection, SuggestFlags.Add);
     }
 
 private:
-    BaseCollection* _collection;
+    BaseCollection _collection;
 }
 
 class CollectionRemoveCommand : Command
 {
 nothrow @nogc:
 
-    this(ref Console console, ref BaseCollection collection)
+    this(ref Console console, BaseCollection collection)
     {
         super(console, StringLit!"remove");
-        _collection = &collection;
+        _collection = collection;
     }
 
     override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
@@ -142,26 +143,26 @@ nothrow @nogc:
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, *_collection, SuggestFlags.Remove);
+            return .complete(cmdLine, _collection, SuggestFlags.Remove);
     }
 
     final override Array!String suggest(const(char)[] cmdLine)
     {
-        return .suggest(cmdLine, *_collection, SuggestFlags.Remove);
+        return .suggest(cmdLine, _collection, SuggestFlags.Remove);
     }
 
 private:
-    BaseCollection* _collection;
+    BaseCollection _collection;
 }
 
 class CollectionGetCommand : Command
 {
 nothrow @nogc:
 
-    this(ref Console console, ref BaseCollection collection)
+    this(ref Console console, BaseCollection collection)
     {
         super(console, StringLit!"get");
-        _collection = &collection;
+        _collection = collection;
     }
 
     override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
@@ -199,26 +200,26 @@ nothrow @nogc:
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, *_collection, SuggestFlags.Get);
+            return .complete(cmdLine, _collection, SuggestFlags.Get);
     }
 
     final override Array!String suggest(const(char)[] cmdLine)
     {
-        return .suggest(cmdLine, *_collection, SuggestFlags.Get);
+        return .suggest(cmdLine, _collection, SuggestFlags.Get);
     }
 
 private:
-    BaseCollection* _collection;
+    BaseCollection _collection;
 }
 
 class CollectionSetCommand : Command
 {
 nothrow @nogc:
 
-    this(ref Console console, ref BaseCollection collection)
+    this(ref Console console, BaseCollection collection)
     {
         super(console, StringLit!"set");
-        _collection = &collection;
+        _collection = collection;
     }
 
     override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
@@ -259,26 +260,26 @@ nothrow @nogc:
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, *_collection, SuggestFlags.Set);
+            return .complete(cmdLine, _collection, SuggestFlags.Set);
     }
 
     final override Array!String suggest(const(char)[] cmdLine)
     {
-        return .suggest(cmdLine, *_collection, SuggestFlags.Set);
+        return .suggest(cmdLine, _collection, SuggestFlags.Set);
     }
 
 private:
-    BaseCollection* _collection;
+    BaseCollection _collection;
 }
 
 class CollectionResetCommand : Command
 {
 nothrow @nogc:
 
-    this(ref Console console, ref BaseCollection collection)
+    this(ref Console console, BaseCollection collection)
     {
         super(console, StringLit!"reset");
-        _collection = &collection;
+        _collection = collection;
     }
 
     override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
@@ -328,16 +329,16 @@ nothrow @nogc:
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, *_collection, SuggestFlags.Reset);
+            return .complete(cmdLine, _collection, SuggestFlags.Reset);
     }
 
     final override Array!String suggest(const(char)[] cmdLine)
     {
-        return .suggest(cmdLine, *_collection, SuggestFlags.Reset);
+        return .suggest(cmdLine, _collection, SuggestFlags.Reset);
     }
 
 private:
-    BaseCollection* _collection;
+    BaseCollection _collection;
 }
 
 // TODO: enable/disable commands, which act on multiple items...
@@ -348,10 +349,10 @@ class CollectionListCommand : Command
 {
 nothrow @nogc:
 
-    this(ref Console console, ref BaseCollection collection)
+    this(ref Console console, BaseCollection collection)
     {
         super(console, StringLit!"list");
-        _collection = &collection;
+        _collection = collection;
     }
 
     override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
@@ -374,26 +375,26 @@ nothrow @nogc:
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, *_collection, SuggestFlags.Reset);
+            return .complete(cmdLine, _collection, SuggestFlags.Reset);
     }
 
     final override Array!String suggest(const(char)[] cmdLine)
     {
-        return .suggest(cmdLine, *_collection, SuggestFlags.Reset);
+        return .suggest(cmdLine, _collection, SuggestFlags.Reset);
     }
 
 private:
-    BaseCollection* _collection;
+    BaseCollection _collection;
 }
 
 class CollectionPrintCommand : Command
 {
 nothrow @nogc:
 
-    this(ref Console console, ref BaseCollection collection)
+    this(ref Console console, BaseCollection collection)
     {
         super(console, StringLit!"print");
-        _collection = &collection;
+        _collection = collection;
     }
 
     override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
@@ -462,23 +463,23 @@ nothrow @nogc:
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, *_collection, SuggestFlags.Reset);
+            return .complete(cmdLine, _collection, SuggestFlags.Reset);
     }
 
     final override Array!String suggest(const(char)[] cmdLine)
     {
-        return .suggest(cmdLine, *_collection, SuggestFlags.Reset);
+        return .suggest(cmdLine, _collection, SuggestFlags.Reset);
     }
 
 package:
-    BaseCollection* _collection;
+    BaseCollection _collection;
 }
 
 class CollectionWatchState : LiveViewState
 {
 nothrow @nogc:
 
-    this(Session session, CollectionPrintCommand command, BaseCollection* collection)
+    this(Session session, CollectionPrintCommand command, BaseCollection collection)
     {
         super(session, command);
         _collection = collection;
@@ -534,7 +535,7 @@ nothrow @nogc:
     }
 
 private:
-    BaseCollection* _collection;
+    BaseCollection _collection;
     size_t[Table.max_cols] _sticky_widths;
     uint _prev_width;
 }
@@ -595,7 +596,7 @@ enum SuggestFlags : uint
     Export = OptItem | MultiItem | NoProps,
 }
 
-MutableString!0 complete(const(char)[] cmdLine, ref BaseCollection collection, SuggestFlags flags)
+MutableString!0 complete(const(char)[] cmdLine, BaseCollection collection, SuggestFlags flags)
 {
     MutableString!0 result = cmdLine;
     Array!String tokens;
@@ -706,7 +707,7 @@ MutableString!0 complete(const(char)[] cmdLine, ref BaseCollection collection, S
     return result;
 }
 
-Array!String suggest(const(char)[] cmdLine, ref BaseCollection collection, SuggestFlags flags)
+Array!String suggest(const(char)[] cmdLine, BaseCollection collection, SuggestFlags flags)
 {
     cmdLine = cmdLine.trimFront();
 

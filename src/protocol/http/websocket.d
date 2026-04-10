@@ -11,6 +11,7 @@ import urt.string;
 
 import manager;
 import manager.base;
+import manager.collection;
 
 import protocol.http;
 import protocol.http.message;
@@ -362,7 +363,7 @@ nothrow @nogc:
         // TODO: change to try_reattach()
         if (_server.detached)
         {
-            if (HTTPServer s = get_module!HTTPModule.servers.get(_server.name[]))
+            if (HTTPServer s = Collection!HTTPServer().get(_server.name[]))
                 _server = s;
         }
         return super.validating();
@@ -418,7 +419,7 @@ private:
             import urt.mem.temp;
             const(char)[] n = tconcat(name, ++_num_connections);
 
-            WebSocket ws = get_module!HTTPModule.websockets.create(n, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
+            WebSocket ws = Collection!WebSocket().create(n, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
             ws._stream = stream;
             ws._is_server = true;
             stream = null; // TODO: better strategy to notify the caller that we claimed the stream!?

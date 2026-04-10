@@ -555,32 +555,29 @@ class InterfaceModule : Module
     mixin DeclareModule!"interface";
 nothrow @nogc:
 
-    Collection!BaseInterface interfaces;
-    Collection!VLANInterface vlan_interfaces;
-
     override void pre_init()
     {
         g_app.register_enum!ConnectionStatus();
         g_app.register_enum!LinkStatus();
 
-        g_app.console.register_collection("/interface", interfaces);
+        g_app.console.register_collection!BaseInterface("/interface");
     }
 
     override void init()
     {
-        g_app.console.register_collection("/interface/vlan", vlan_interfaces);
+        g_app.console.register_collection!VLANInterface("/interface/vlan");
     }
 
     override void update()
     {
-        vlan_interfaces.update_all();
+        Collection!BaseInterface().update_all();
     }
 
     final String add_interface_name(Session session, const(char)[] name, const(char)[] default_name_prefix)
     {
         if (name.empty)
-            name = interfaces.generate_name(default_name_prefix);
-        else if (interfaces.get(name))
+            name = Collection!BaseInterface().generate_name(default_name_prefix);
+        else if (Collection!BaseInterface().get(name))
         {
             session.write_line("Interface '", name, " already exists");
             return String();

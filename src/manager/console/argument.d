@@ -128,10 +128,10 @@ Array!String suggest_completion(T : const Device)(const(char)[] argument_text)
 Array!String suggest_completion(T)(const(char)[] argument_text)
     if (!is(T == typeof(null)) && is(T : const BaseObject))
 {
-    import manager.collection : collection_for;
+    import manager.collection : Collection;
 
     alias Type = Unqual!T;
-    const collection = collection_for!Type();
+    const collection = Collection!Type();
     if (collection is null)
         return Array!String();
 

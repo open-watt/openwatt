@@ -82,6 +82,9 @@ Item get_item_by_name(Item : BaseObject)(const(char)[] id) pure
     return cast(Item)item; // TODO: this is a D dynamic cast, but we could check our own typeinfo
 }
 
+private const(CollectionTypeInfo)* collection_super_getter(Type)() nothrow @nogc
+    => collection_type_info!Type();
+
 const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
 {
     static if (!is(typeof(Type.type_name)))
@@ -101,28 +104,31 @@ const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
             enum create_instance = &create;
         }
 
+        alias Root = CollectionRoot!Type;
+        static if (!is(Type == Root))
+            enum CollectionTypeInfo.GetSuperFn get_super_fn = &collection_super_getter!(CollectionSuper!Type);
+        else
+            enum CollectionTypeInfo.GetSuperFn get_super_fn = null;
+
         __gshared const CollectionTypeInfo ti = CollectionTypeInfo(StringLit!(Type.type_name),
                                                                    Type.collection_id,
                                                                    all_properties!Type(),
-                                                                   create_instance);
+                                                                   create_instance,
+                                                                   get_super_fn);
         return &ti;
     }
-}
-
-ref Collection!Type* collection_for(Type)() nothrow @nogc
-{
-    __gshared Collection!Type* collection;
-    return collection;
 }
 
 struct CollectionTypeInfo
 {
     alias CreateFun = BaseObject function(ref BaseCollection collection, CID id, ObjectFlags flags = ObjectFlags.none) nothrow @nogc;
+    alias GetSuperFn = const(CollectionTypeInfo)* function() nothrow @nogc;
 
     String type;
     CollectionType collection_id;
     const(Property*)[] properties;
     CreateFun create;
+    GetSuperFn get_super;
 }
 
 struct BaseCollection
@@ -174,17 +180,19 @@ nothrow @nogc:
     {
         uint n = 0;
         foreach (ref e; table._entries)
-            if (e.value !is null && e.value._typeInfo is type_info)
+            if (e.value !is null && type_matches(type_info, e.value._typeInfo))
                 ++n;
         return n;
     }
 
     void update_all()
     {
+        assert(type_info.get_super is null, "update_all should only be called on root collections");
+
         Array!BaseObject doomed;
         foreach (ref e; table._entries)
         {
-            if (e.value !is null && e.value._typeInfo is type_info && e.value.do_update())
+            if (e.value !is null && e.value.do_update())
                 doomed ~= e.value;
         }
         foreach (item; doomed)
@@ -222,8 +230,13 @@ nothrow @nogc:
         return item;
     }
 
-    BaseObject get(const(char)[] name) pure
-        => table.get_by_name(name, type_info.collection_id);
+    BaseObject get(const(char)[] name)
+    {
+        BaseObject obj = table.get_by_name(name, type_info.collection_id);
+        if (obj !is null && !type_matches(type_info, obj._typeInfo))
+            return null;
+        return obj;
+    }
 
     auto keys()
     {
@@ -237,7 +250,7 @@ nothrow @nogc:
             void popFront() { entries = entries[1 .. $]; advance(); }
             private void advance()
             {
-                while (entries.length > 0 && (entries[0].value is null || entries[0].value._typeInfo !is filter))
+                while (entries.length > 0 && (entries[0].value is null || !type_matches(filter, entries[0].value._typeInfo)))
                     entries = entries[1 .. $];
             }
         }
@@ -258,7 +271,7 @@ nothrow @nogc:
             void popFront() { entries = entries[1 .. $]; advance(); }
             private void advance()
             {
-                while (entries.length > 0 && (entries[0].value is null || entries[0].value._typeInfo !is filter))
+                while (entries.length > 0 && (entries[0].value is null || !type_matches(filter, entries[0].value._typeInfo)))
                     entries = entries[1 .. $];
             }
         }
@@ -310,10 +323,7 @@ nothrow @nogc:
     Type get(const(char)[] name)
         => cast(Type)_base.get(name);
 
-    uint item_count()
-        => _base.item_count;
-
-    // iterate live objects of this type
+    // iterate live objects of Type and all derived types
     auto values()
     {
         struct Range
@@ -336,8 +346,7 @@ nothrow @nogc:
 
             void advance()
             {
-                while (entries.length > 0 &&
-                       (entries[0].value is null || entries[0].value._typeInfo !is filter))
+                while (entries.length > 0 && (entries[0].value is null || !type_matches(filter, entries[0].value._typeInfo)))
                     entries = entries[1 .. $];
             }
         }
@@ -348,17 +357,40 @@ nothrow @nogc:
     }
 }
 
+// Returns true if filter is an ancestor-or-self of element_type in the collection RTTI chain
+private bool type_matches(const(CollectionTypeInfo)* filter, const(CollectionTypeInfo)* element_type) nothrow @nogc
+{
+    for (const(CollectionTypeInfo)* ti = element_type; ti !is null; ti = ti.get_super ? ti.get_super() : null)
+        if (ti is filter)
+            return true;
+    return false;
+}
+
+private template BaseClassOf(T)
+{
+    static if (is(T Bases == super))
+        alias BaseClassOf = Bases[0];
+    else
+        alias BaseClassOf = void;
+}
+
 template CollectionRoot(T)
 {
-    static if (is(T Super == super))
-    {
-        static if (!is(Super == BaseObject) && is(typeof(Super.collection_id)) && Super.collection_id == T.collection_id)
-            alias CollectionRoot = CollectionRoot!Super;
-        else
-            alias CollectionRoot = T;
-    }
+    alias Super = BaseClassOf!T;
+    static if (!is(Super == BaseObject) && !is(Super == void) && is(typeof(Super.collection_id)) && Super.collection_id == T.collection_id)
+        alias CollectionRoot = CollectionRoot!Super;
     else
         alias CollectionRoot = T;
+}
+
+// Immediate parent in the collection type hierarchy (one level up).
+template CollectionSuper(T)
+{
+    alias Super = BaseClassOf!T;
+    static if (!is(Super == BaseObject) && !is(Super == void) && is(typeof(Super.collection_id)) && Super.collection_id == T.collection_id)
+        alias CollectionSuper = Super;
+    else
+        static assert(false, T.stringof ~ " has no collection super type");
 }
 
 

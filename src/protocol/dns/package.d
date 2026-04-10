@@ -31,18 +31,16 @@ nothrow @nogc:
 
     // TODO - DNS/name cache
 
-    Collection!DNSServer servers;
-
     override void init()
     {
-        g_app.console.register_collection("/protocol/dns/server", servers);
+        g_app.console.register_collection!DNSServer("/protocol/dns/server");
 
         g_app.console.register_command!request("/protocol/dns", this, "lookup");
     }
 
     override void update()
     {
-        servers.update_all();
+        Collection!DNSServer().update_all();
     }
 
 

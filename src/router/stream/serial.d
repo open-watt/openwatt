@@ -650,20 +650,13 @@ class SerialStreamModule : Module
     mixin DeclareModule!"stream.serial";
 nothrow @nogc:
 
-    Collection!SerialStream serial_streams;
-
     override void init()
     {
         g_app.register_enum!StopBits();
         g_app.register_enum!Parity();
         g_app.register_enum!FlowControl();
 
-        g_app.console.register_collection("/stream/serial", serial_streams);
-    }
-
-    override void pre_update()
-    {
-        serial_streams.update_all();
+        g_app.console.register_collection!SerialStream("/stream/serial");
     }
 }
 

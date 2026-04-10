@@ -48,26 +48,19 @@ class PPPModule : Module
     mixin DeclareModule!"protocol.ppp";
 nothrow @nogc:
 
-    Collection!PPPClient ppp_clients;
-    Collection!PPPoEClient pppoe_clients;
-    Collection!PPPServer ppp_servers;
-    Collection!PPPoEServer pppoe_servers;
-
     override void init()
     {
         g_app.register_enum!TunnelProtocol();
 
-        g_app.console.register_collection("/protocol/ppp/client", ppp_clients);
-        g_app.console.register_collection("/protocol/pppoe/client", pppoe_clients);
-        g_app.console.register_collection("/protocol/ppp/server", ppp_servers);
-        g_app.console.register_collection("/protocol/pppoe/server", pppoe_servers);
+        g_app.console.register_collection!PPPClient("/protocol/ppp/client");
+        g_app.console.register_collection!PPPoEClient("/protocol/pppoe/client");
+        g_app.console.register_collection!PPPServer("/protocol/ppp/server");
+        g_app.console.register_collection!PPPoEServer("/protocol/pppoe/server");
     }
 
     override void update()
     {
-        ppp_servers.update_all();
-        pppoe_servers.update_all();
-        ppp_clients.update_all();
-        pppoe_clients.update_all();
+        Collection!PPPServer().update_all();
+        Collection!PPPoEServer().update_all();
     }
 }

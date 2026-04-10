@@ -6,6 +6,7 @@ import urt.string;
 
 import manager;
 import manager.base;
+import manager.collection;
 
 import router.iface;
 
@@ -57,7 +58,7 @@ nothrow @nogc:
     {
         if (_iface.detached)
         {
-            if (BaseInterface s = get_module!InterfaceModule.interfaces.get(_iface.name[]))
+            if (BaseInterface s = Collection!BaseInterface().get(_iface.name[]))
                 _iface = s;
         }
         return super.validating();

@@ -151,7 +151,7 @@ nothrow @nogc:
 
     struct RegisteredCollection
     {
-        BaseCollection* collection;
+        const(CollectionTypeInfo)* type_info;
         string path;
     }
 
@@ -169,7 +169,6 @@ nothrow @nogc:
 
     uint update_rate_hz = 20;
 
-    Collection!Secret secrets;
     Array!(ElementLink*) links;
 
     Map!(String, RegisteredCollection) collections;
@@ -215,7 +214,7 @@ nothrow @nogc:
         console.register_command!link_add("/element/link", this, "add");
         console.register_command!link_print("/element/link", this, "print");
 
-        console.register_collection("/secret", secrets);
+        console.register_collection!Secret("/secret");
 
         register_modules(this);
 
@@ -266,7 +265,7 @@ nothrow @nogc:
 
     bool validate_login(const(char)[] username, const(char)[] password, const(char)[] service, scope AuthCallback callback)
     {
-        if (auto secret = secrets.get(username[]))
+        if (auto secret = Collection!Secret().get(username[]))
         {
             if (secret.validate_password(password))
             {
@@ -310,16 +309,16 @@ nothrow @nogc:
         return null;
     }
 
-    void register_collection(ref BaseCollection collection, string path)
+    void register_collection(const(CollectionTypeInfo)* type_info, string path)
     {
-        assert(collection.type_info.type !in collections, "Collection type already registered!");
-        collections.insert(collection.type_info.type, RegisteredCollection(&collection, path));
+        assert(type_info.type !in collections, "Collection type already registered!");
+        collections.insert(type_info.type, RegisteredCollection(type_info, path));
     }
 
     BaseObject find_object(const(char)[] name) nothrow @nogc
     {
         foreach (ref rc; collections.values)
-            if (BaseObject obj = rc.collection.get(name))
+            if (BaseObject obj = BaseCollection(rc.type_info).get(name))
                 return obj;
         return null;
     }

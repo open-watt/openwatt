@@ -9,11 +9,12 @@ import urt.system;
 import urt.time;
 
 import manager;
+import manager.collection;
 import manager.console.session;
 import manager.log : format_log_line;
 
 import router.stream : Stream;
-import router.stream.console : ConsoleStream, ConsoleStreamModule;
+import router.stream.console : ConsoleStream;
 
 version (Embedded) version = ImportSystemConf;
 
@@ -84,7 +85,7 @@ int main(string[] args)
         }
 
         if (interactive_mode)
-            console_stream = get_module!ConsoleStreamModule.consoles.create("console-io");
+            console_stream = Collection!ConsoleStream().create("console-io");
     }
 
     Session session = g_app.console.createSession!Session(console_stream);
@@ -184,7 +185,7 @@ int main(string[] args)
                 import manager : get_module;
                 import router.stream : StreamModule;
 
-                if (auto stream = get_module!StreamModule.streams.get("console"))
+                if (auto stream = Collection!Stream().get("console"))
                 {
                     session = g_app.console.createSession!Session(stream);
                     session.set_features(ClientFeatures.ansi);

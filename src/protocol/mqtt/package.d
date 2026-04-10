@@ -22,17 +22,15 @@ class MQTTModule : Module
     mixin DeclareModule!"protocol.mqtt";
 nothrow @nogc:
 
-    Collection!MQTTBroker brokers;
-
     override void init()
     {
-        g_app.console.register_collection("/protocol/mqtt/broker", brokers);
+        g_app.console.register_collection!MQTTBroker("/protocol/mqtt/broker");
         g_app.console.register_command!device_add("/protocol/mqtt/device", this, "add");
     }
 
     override void update()
     {
-        brokers.update_all();
+        Collection!MQTTBroker().update_all();
     }
 
     void device_add(Session session, const(char)[] id, MQTTBroker broker, const(char)[] _profile, Nullable!(const(char)[]) name, Nullable!(const(char)[]) model, const(NamedArgument)[] named_args)

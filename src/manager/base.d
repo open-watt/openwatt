@@ -18,7 +18,7 @@ import manager.console.argument;
 import manager.id;
 import manager.value;
 
-public import manager.collection : CID, CollectionType, collection_type_info, collection_for, CollectionTypeInfo;
+public import manager.collection : CID, Collection, CollectionType, collection_type_info, CollectionTypeInfo;
 
 //version = TraceLifetimeSubscriptions;
 
@@ -690,7 +690,7 @@ nothrow @nogc:
     {
         if (!detached)
             return true;
-        if (Type obj = collection_for!Type.get(name[]))
+        if (Type obj = Collection!Type().get(name[]))
         {
             this = obj;
             return true;

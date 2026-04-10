@@ -261,10 +261,10 @@ private:
                 json ~= ',';
             first_col = false;
 
-            json.append('\"', col.collection.type_info.type[], "\":{\"path\":\"", col.path[], "\",\"properties\":{");
+            json.append('\"', col.type_info.type[], "\":{\"path\":\"", col.path[], "\",\"properties\":{");
 
             bool first_prop = true;
-            foreach (prop; col.collection.type_info.properties)
+            foreach (prop; col.type_info.properties)
             {
                 if (!first_prop)
                     json ~= ',';
@@ -825,18 +825,16 @@ class APIModule : Module
     mixin DeclareModule!"apps.api";
 nothrow @nogc:
 
-    Collection!APIManager _managers;
-
     Map!(String, APIHandler) _custom_handlers;
 
     override void init()
     {
-        g_app.console.register_collection("/apps/api", _managers);
+        g_app.console.register_collection!APIManager("/apps/api");
     }
 
     override void update()
     {
-        _managers.update_all();
+        Collection!APIManager().update_all();
     }
 
     void register_api_handler(const(char)[] uri, APIHandler handler)

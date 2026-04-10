@@ -59,8 +59,6 @@ class ModbusProtocolModule : Module
     mixin DeclareModule!"protocol.modbus";
 nothrow @nogc:
 
-    Collection!ModbusInterface modbus_interfaces;
-    Collection!ModbusClient clients;
     Map!(ubyte, ServerMap) remote_servers;
     ubyte[32] _address_in_use;
 
@@ -70,8 +68,8 @@ nothrow @nogc:
 
         g_app.register_enum!ModbusProtocol();
 
-        g_app.console.register_collection("/interface/modbus", modbus_interfaces);
-        g_app.console.register_collection("/protocol/modbus/client", clients);
+        g_app.console.register_collection!ModbusInterface("/interface/modbus");
+        g_app.console.register_collection!ModbusClient("/protocol/modbus/client");
 
         // TODO: should we relocate this command?
         g_app.console.register_command!remote_server_add("/interface/modbus/remote-server", this, "add");
@@ -85,8 +83,7 @@ nothrow @nogc:
 
     override void update()
     {
-        modbus_interfaces.update_all();
-        clients.update_all();
+        Collection!ModbusClient().update_all();
     }
 
         final ServerMap* find_server_by_name(const(char)[] name)
@@ -204,7 +201,7 @@ nothrow @nogc:
             return;
         }
 
-        BaseInterface iface = get_module!InterfaceModule.interfaces.get(_interface);
+        BaseInterface iface = Collection!BaseInterface().get(_interface);
         if (!iface)
         {
             session.write_line("Interface '", _interface, "' not found.");
@@ -375,7 +372,7 @@ nothrow @nogc:
 
     ModbusClient lookupClientAndSlave(Session session, const(char)[] client, const(char)[] slave, out ServerMap* map)
     {
-        ModbusClient c = clients.get(client);
+        ModbusClient c = Collection!ModbusClient().get(client);
         if (c is null)
         {
             session.write_line("Client '", client, "' doesn't exist");

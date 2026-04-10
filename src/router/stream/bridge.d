@@ -165,15 +165,8 @@ class BridgeStreamModule : Module
     mixin DeclareModule!"stream.bridge";
 nothrow @nogc:
 
-    Collection!BridgeStream bridges;
-
     override void init()
     {
-        g_app.console.register_collection("/stream/bridge", bridges);
-    }
-
-    override void pre_update()
-    {
-        bridges.update_all();
+        g_app.console.register_collection!BridgeStream("/stream/bridge");
     }
 }

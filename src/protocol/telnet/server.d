@@ -7,6 +7,7 @@ import urt.string;
 
 import manager;
 import manager.base;
+import manager.collection;
 import manager.console;
 import manager.console.session;
 import manager.expression : NamedArgument;
@@ -34,9 +35,9 @@ nothrow @nogc:
         m_allocator = allocator;
         _console = console;
 
-        const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name(this.name[]);
+        const(char)[] server_name = Collection!TCPServer().generate_name(this.name[]);
 
-        m_server = get_module!TCPStreamModule.tcp_servers.create(server_name, ObjectFlags.dynamic);
+        m_server = Collection!TCPServer().create(server_name, ObjectFlags.dynamic);
         m_server.port = port;
         m_server.set_connection_callback(&acceptConnection, null);
     }
@@ -94,9 +95,9 @@ package:
 
     void acceptConnection(Stream client, void* user_data)
     {
-        const(char)[] stream_name = get_module!StreamModule.streams.generate_name(this.name[]);
+        const(char)[] stream_name = Collection!Stream().generate_name(this.name[]);
 
-        TelnetStream telnet_stream = get_module!TelnetModule.telnet_streams.create(stream_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("transport", client));
+        TelnetStream telnet_stream = cast(TelnetStream)Collection!TelnetStream().create(stream_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("transport", client));
         if (telnet_stream is null)
         {
             client.destroy();

@@ -38,12 +38,12 @@ class ZigbeeCoordinator : ZigbeeRouter
     {
         super(collection_type_info!ZigbeeCoordinator, id, flags);
 
-        get_module!ZigbeeProtocolModule.routers.add(this);
+        Collection!ZigbeeRouter().add(this);
     }
 
     ~this()
     {
-        get_module!ZigbeeProtocolModule.routers.remove(this);
+        Collection!ZigbeeRouter().remove(this);
     }
 
     // Properties...

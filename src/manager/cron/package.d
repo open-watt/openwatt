@@ -14,15 +14,13 @@ class CronModule : Module
     mixin DeclareModule!"cron";
 nothrow @nogc:
 
-    Collection!CronJob jobs;
-
     override void init()
     {
-        g_app.console.register_collection("/system/cron", jobs);
+        g_app.console.register_collection!CronJob("/system/cron");
     }
 
     override void update()
     {
-        jobs.update_all();
+        Collection!CronJob().update_all();
     }
 }

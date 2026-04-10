@@ -23,17 +23,15 @@ class ESPHomeModule : Module
     mixin DeclareModule!"protocol.esphome";
 nothrow @nogc:
 
-    Collection!ESPHomeClient clients;
-
     override void init()
     {
-        g_app.console.register_collection("/protocol/esphome/client", clients);
+        g_app.console.register_collection!ESPHomeClient("/protocol/esphome/client");
         g_app.console.register_command!device_add("/protocol/esphome/device", this, "add");
     }
 
     override void update()
     {
-        clients.update_all();
+        Collection!ESPHomeClient().update_all();
     }
 
     void device_add(Session session, const(char)[] id, ESPHomeClient client, Nullable!(const(char)[]) _profile, Nullable!(const(char)[]) name)

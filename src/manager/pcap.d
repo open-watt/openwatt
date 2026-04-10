@@ -294,8 +294,8 @@ protected:
 
     override CompletionStatus startup()
     {
-        const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name(name[]);
-        _server = get_module!TCPStreamModule.tcp_servers.create(server_name, ObjectFlags.dynamic, NamedArgument("port", _port));
+        const(char)[] server_name = Collection!TCPServer().generate_name(name[]);
+        _server = Collection!TCPServer().create(server_name, ObjectFlags.dynamic, NamedArgument("port", _port));
         if (!_server)
             return CompletionStatus.error;
 
@@ -544,7 +544,7 @@ private:
                 return;
             }
 
-            ref ifaces = get_module!InterfaceModule.interfaces;
+            auto ifaces = Collection!BaseInterface();
             uint iface_count = ifaces.item_count;
 
             ubyte[2048] buffer = void;
@@ -587,7 +587,7 @@ private:
             }
 
             const(char)[] iface_name = cast(const(char)[])payload;
-            opened_iface = get_module!InterfaceModule.interfaces.get(iface_name);
+            opened_iface = Collection!BaseInterface().get(iface_name);
             if (!opened_iface)
             {
                 send_error("Interface not found");
@@ -642,8 +642,8 @@ private:
                 if (data_port == 0)
                     data_port = cast(ushort)(server._port + 1);  // HACK: we should use a proper ephemeral port allocator here!
 
-                const(char)[] server_name = get_module!TCPStreamModule.tcp_servers.generate_name("rpcap-data");
-                data_server = get_module!TCPStreamModule.tcp_servers.alloc(server_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
+                const(char)[] server_name = Collection!TCPServer().generate_name("rpcap-data");
+                data_server = Collection!TCPServer().alloc(server_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
                 if (!data_server)
                 {
                     send_error("Failed to create data server");
@@ -652,7 +652,7 @@ private:
 
                 data_server.port = data_port;
                 data_server.set_connection_callback(&data_connection_callback, null);
-                get_module!TCPStreamModule.tcp_servers.add(data_server);
+                Collection!TCPServer().add(data_server);
 
                 writeInfo("RPCAP: listening for data connection on port ", data_port);
             }
@@ -833,7 +833,6 @@ class PcapModule : Module
     mixin DeclareModule!"manager.pcap";
 nothrow @nogc:
 
-    Collection!PCAPServer servers;
     Array!(PcapInterface*) interfaces;
 
     PcapInterface* findInterface(const(char)[] name)
@@ -847,12 +846,12 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_command!add("/tools/pcap", this);
-        g_app.console.register_collection("/tools/pcap/server", servers);
+        g_app.console.register_collection!PCAPServer("/tools/pcap/server");
     }
 
     override void update()
     {
-        servers.update_all();
+        Collection!PCAPServer().update_all();
     }
 
     override void post_update()
