@@ -2,6 +2,7 @@ module manager.element;
 
 import urt.array;
 import urt.lifetime;
+import urt.mem.alloc;
 import urt.mem.string;
 import urt.si.unit : ScaledUnit;
 import urt.string;
@@ -209,7 +210,7 @@ nothrow @nogc:
     void init()
     {
         // TODO: THIS SHOULD BE ALLOCATED IN FAST MEMORY!
-        _slots = cast(Entry*)malloc(16 * Entry.sizeof);
+        _slots = cast(Entry*)alloc(16 * Entry.sizeof).ptr;
         _slots[0] = Entry(EID(0), 2, null);
         _slots[1 .. 16] = Entry.init;
         _mask = 15;
@@ -393,7 +394,7 @@ private:
     {
         auto old = _slots;
         uint old_size = _mask + 1;
-        _slots = cast(Entry*)malloc(new_size * Entry.sizeof);
+        _slots = cast(Entry*)alloc(new_size * Entry.sizeof).ptr;
         _slots[0 .. new_size] = Entry.init;
         _mask = new_size - 1;
         _count = 0;
@@ -409,6 +410,6 @@ private:
                 ++_count;
             }
         }
-        free(old);
+        free(old[0..old_size]);
     }
 }

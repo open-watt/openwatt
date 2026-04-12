@@ -3,7 +3,7 @@ module manager.id;
 import urt.algorithm : binary_search;
 import urt.array;
 import urt.hash : fnv1a;
-import urt.mem : malloc, free;
+import urt.mem.alloc : alloc, free;
 import urt.string.string;
 
 import manager.base;
@@ -97,7 +97,7 @@ nothrow @nogc:
 
     void init()
     {
-        auto page = cast(char*)malloc(page_size);
+        auto page = cast(char*)alloc(page_size);
         assert(page !is null);
         _pages ~= page;
         _pages[0][0..2] = 0;
@@ -114,7 +114,7 @@ nothrow @nogc:
 
         if (_fill + needed > page_size)
         {
-            auto page = cast(char*)malloc(page_size);
+            auto page = cast(char*)alloc(page_size);
             assert(page !is null);
             _pages ~= page;
             _fill = 0;
@@ -144,7 +144,7 @@ nothrow @nogc:
     void free_all()
     {
         foreach (page; _pages[])
-            free(page);
+            free(page[0..page_size]);
         _pages.clear();
         _fill = 0;
     }

@@ -606,6 +606,9 @@
     <DCompile Include="third_party\urt\src\sys\baremetal\wifi.d">
       <Filter>third_party\sys\baremetal</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bk7231\alloc.d">
+      <Filter>third_party\sys\bk7231</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\sys\bk7231\irq.d">
       <Filter>third_party\sys\bk7231</Filter>
     </DCompile>
@@ -621,6 +624,9 @@
     <DCompile Include="third_party\urt\src\sys\bk7231\uart.d">
       <Filter>third_party\sys\bk7231</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bl618\alloc.d">
+      <Filter>third_party\sys\bl618</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\sys\bl618\irq.d">
       <Filter>third_party\sys\bl618</Filter>
     </DCompile>
@@ -635,6 +641,9 @@
     </DCompile>
     <DCompile Include="third_party\urt\src\sys\bl618\uart.d">
       <Filter>third_party\sys\bl618</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\bl808\alloc.d">
+      <Filter>third_party\sys\bl808</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\sys\bl808\crash.d">
       <Filter>third_party\sys\bl808</Filter>
@@ -696,6 +705,9 @@
     <DCompile Include="third_party\urt\src\sys\posix\alloc.d">
       <Filter>third_party\sys\posix</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\sys\rp2350\alloc.d">
+      <Filter>third_party\sys\rp2350</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\sys\rp2350\irq.d">
       <Filter>third_party\sys\rp2350</Filter>
     </DCompile>
@@ -710,6 +722,9 @@
     </DCompile>
     <DCompile Include="third_party\urt\src\sys\rp2350\uart.d">
       <Filter>third_party\sys\rp2350</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\sys\stm32\alloc.d">
+      <Filter>third_party\sys\stm32</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\sys\stm32\irq.d">
       <Filter>third_party\sys\stm32</Filter>
