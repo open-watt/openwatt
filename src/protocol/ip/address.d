@@ -54,16 +54,6 @@ nothrow @nogc:
     override bool validate() const pure nothrow @nogc
         => _iface !is null;
 
-    protected override CompletionStatus validating() nothrow @nogc
-    {
-        if (_iface.detached)
-        {
-            if (BaseInterface s = Collection!BaseInterface().get(_iface.name[]))
-                _iface = s;
-        }
-        return super.validating();
-    }
-
 private:
     IPNetworkAddress _address;
     ObjectRef!BaseInterface _iface;

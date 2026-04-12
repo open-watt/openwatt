@@ -498,9 +498,6 @@ protected:
     bool validate() const
         => true;
 
-    CompletionStatus validating()
-        => validate() ? CompletionStatus.complete : CompletionStatus.error;
-
     CompletionStatus startup()
         => CompletionStatus.complete;
 
@@ -572,9 +569,7 @@ package:
                 break;
 
             case State.validate:
-                CompletionStatus s = validating();
-                debug assert(s != CompletionStatus.continue_, "validating() should return Success or Failure");
-                if (s == CompletionStatus.complete)
+                if (validate())
                     set_state(State.starting);
                 break;
 
@@ -639,6 +634,7 @@ private:
 
 struct ObjectRef(Type)
 {
+    import manager.collection : get_id, get_item;
 nothrow @nogc:
     static assert (is(Type : BaseObject), "Type must be a subclass of BaseObject");
 
@@ -646,90 +642,25 @@ nothrow @nogc:
 
     this(Type object)
     {
-        _object = object;
-        _object.subscribe(&destroy_handler);
-    }
-
-    ~this()
-    {
-        release();
+        _id = object ? object.id : CID();
     }
 
     void opAssign(Type object)
     {
-        if (_object is object)
-            return;
-        if (_object !is null)
-            release(); // release the old object
-        _object = object; // assign the new one
-        if (_object !is null)
-            _object.subscribe(&destroy_handler);
+        _id = object ? object.id : CID();
     }
 
     inout(Type) get() inout pure
-    {
-        if (_ptr & 1)
-            return null; // object has been destroyed, so return null
-        return _object;
-    }
+        => cast(inout(Type))cast(void*)get_item(_id); // void* makes it into a static cast, since we're already confident of the type
 
     String name() const pure
-    {
-        if (_ptr & 1)
-        {
-            size_t t = _ptr ^ 1;
-            return *cast(String*)&t;
-        }
-        return _object ? _object.name : String();
-    }
+        => get_id(_id);
 
     bool detached() const pure
-        => _ptr & 1;
-
-    bool try_reattach()
-    {
-        if (!detached)
-            return true;
-        if (Type obj = Collection!Type().get(name[]))
-        {
-            this = obj;
-            return true;
-        }
-        return false;
-    }
-
-    void release()
-    {
-        // if we hold a string, we must destroy it...
-        if (_ptr & 1)
-        {
-            _ptr ^= 1;
-            _name = null;
-        }
-        else if (_object !is null)
-        {
-            _object.unsubscribe(&destroy_handler);
-            _object = null;
-        }
-    }
+        => get_item(_id) is null;
 
 private:
-    union
-    {
-        Type _object;
-        String _name;
-        size_t _ptr;
-    }
-
-    void destroy_handler(BaseObject object, StateSignal signal)
-    {
-        assert(object is _object, "Object reference mismatch!");
-        if (signal != StateSignal.destroyed)
-            return;
-        _name = _object.name;
-        assert((_ptr & 1) == 0, "Objects and strings should never have the 1-bit of their pointers set!?");
-        _ptr |= 1;
-    }
+    CID _id;
 }
 
 template ObjectLog(alias tag, alias name)

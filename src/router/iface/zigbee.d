@@ -147,12 +147,6 @@ protected:
     override bool validate() const
         => _ezsp_client !is null;
 
-    override CompletionStatus validating()
-    {
-        _ezsp_client.try_reattach();
-        return super.validating();
-    }
-
     override CompletionStatus startup()
     {
         if (!_ezsp_client.running)

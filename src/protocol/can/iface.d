@@ -174,12 +174,6 @@ nothrow @nogc:
         return _stream !is null && _protocol == CANInterfaceProtocol.ebyte;
     }
 
-    override CompletionStatus validating()
-    {
-        _stream.try_reattach();
-        return super.validating();
-    }
-
     override CompletionStatus startup()
     {
         if (!_device.empty)

@@ -123,13 +123,6 @@ nothrow @nogc:
         return !_host.empty;
     }
 
-    override CompletionStatus validating()
-    {
-        foreach (ref c; _certificates)
-            c.try_reattach();
-        return super.validating();
-    }
-
     final override CompletionStatus startup()
     {
         bool is_server = _certificates.length > 0;

@@ -83,16 +83,6 @@ nothrow @nogc:
     override bool validate() const pure nothrow @nogc
         => _blackhole || _iface !is null || _gateway != IPAddr.any;
 
-    protected override CompletionStatus validating() nothrow @nogc
-    {
-        if (_iface.detached)
-        {
-            if (BaseInterface s = Collection!BaseInterface().get(_iface.name[]))
-                _iface = s;
-        }
-        return super.validating();
-    }
-
 private:
     IPNetworkAddress _destination;
     IPAddr _gateway;

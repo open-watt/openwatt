@@ -267,12 +267,6 @@ protected:
     override bool validate() const pure
         => _inner !is null;
 
-    override CompletionStatus validating()
-    {
-        _inner.try_reattach();
-        return super.validating();
-    }
-
     override CompletionStatus startup()
     {
         if (!_inner.running)

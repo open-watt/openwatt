@@ -298,13 +298,6 @@ nothrow:
     final override bool validate() const pure
         => (_stream !is null) != (_ash_ext !is null);
 
-    override CompletionStatus validating()
-    {
-        _stream.try_reattach();
-        _ash_ext.try_reattach();
-        return super.validating();
-    }
-
     override CompletionStatus startup()
     {
         import manager : get_module;

@@ -65,18 +65,19 @@ nothrow @nogc:
     override bool validate() const
         => _interface !is null;
 
-    override CompletionStatus validating()
-    {
-        if (_interface.detached)
-        {
-            if (BaseInterface s = Collection!BaseInterface().get(_interface.name[]))
-            {
-                _interface = s;
-                mac = _interface.mac;
-            }
-        }
-        return super.validating();
-    }
+    // TODO: this needs to be a startup action, and we need to subscribe for restart() events...
+//    override CompletionStatus validating()
+//    {
+//        if (_interface.detached)
+//        {
+//            if (BaseInterface s = Collection!BaseInterface().get(_interface.name[]))
+//            {
+//                _interface = s;
+//                mac = _interface.mac;
+//            }
+//        }
+//        return super.validating();
+//    }
 
     protected final override int transmit(ref Packet packet, MessageCallback)
     {

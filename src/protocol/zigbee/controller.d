@@ -98,12 +98,6 @@ protected:
     override bool validate() const nothrow
         => _endpoint !is null;
 
-    override CompletionStatus validating() nothrow
-    {
-        _endpoint.try_reattach();
-        return super.validating();
-    }
-
     override CompletionStatus startup() nothrow
     {
         if (!_zigbee_profile)

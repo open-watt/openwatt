@@ -176,16 +176,6 @@ nothrow @nogc:
         => _status == CertStatus.issued && running;
 
 protected:
-    override CompletionStatus validating()
-    {
-        if (_http_server.detached)
-        {
-            if (HTTPServer s = Collection!HTTPServer().get(_http_server.name[]))
-                _http_server = s;
-        }
-        return super.validating();
-    }
-
     override bool validate() const
     {
         final switch (_type)
@@ -259,14 +249,16 @@ protected:
 
 private:
     CertType _type;
+    CertStatus _status;
+
+    ObjectRef!HTTPServer _http_server;
+
     String _domain;
     String _email;
     String _cert_file;
     String _key_file;
-    ObjectRef!HTTPServer _http_server;
     String _uri;
 
-    CertStatus _status;
     MutableString!0 _status_msg;
     SysTime _expiry;
 

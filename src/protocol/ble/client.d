@@ -83,12 +83,6 @@ protected:
     override bool validate() const
         => _iface !is null && cast(bool)_peer;
 
-    override CompletionStatus validating()
-    {
-        _iface.try_reattach();
-        return super.validating();
-    }
-
     override CompletionStatus startup()
     {
         if (!_iface || !_iface.running)

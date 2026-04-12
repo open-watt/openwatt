@@ -127,12 +127,6 @@ protected:
     override bool validate() const pure
         => _iface !is null;
 
-    override CompletionStatus validating()
-    {
-        _iface.try_reattach();
-        return super.validating();
-    }
-
     override CompletionStatus startup()
     {
         if (!_iface)

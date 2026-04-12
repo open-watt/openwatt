@@ -88,12 +88,6 @@ nothrow @nogc:
     override bool validate() const pure
         => (!_host.empty || _remote != InetAddress()) != !!_stream; // TODO: validate URL??
 
-    override CompletionStatus validating()
-    {
-        _stream.try_reattach();
-        return super.validating();
-    }
-
     override CompletionStatus startup()
     {
         if (!_stream)

@@ -66,12 +66,6 @@ nothrow @nogc:
     override bool validate() const pure
         => _stream !is null;
 
-    override CompletionStatus validating()
-    {
-        _stream.try_reattach();
-        return super.validating();
-    }
-
     override CompletionStatus startup()
     {
         if (!_stream || !_stream.running)

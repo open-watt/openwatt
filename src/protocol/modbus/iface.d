@@ -177,12 +177,6 @@ nothrow @nogc:
     override bool validate() const
         => _stream !is null && (!master || _protocol != ModbusProtocol.unknown);
 
-    override CompletionStatus validating()
-    {
-        _stream.try_reattach();
-        return super.validating();
-    }
-
     override CompletionStatus startup()
     {
         if (!_stream)

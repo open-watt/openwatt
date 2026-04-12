@@ -358,17 +358,6 @@ nothrow @nogc:
     override bool validate() const pure
         => _server !is null;
 
-    override CompletionStatus validating()
-    {
-        // TODO: change to try_reattach()
-        if (_server.detached)
-        {
-            if (HTTPServer s = Collection!HTTPServer().get(_server.name[]))
-                _server = s;
-        }
-        return super.validating();
-    }
-
     override CompletionStatus startup()
     {
         if (_uri)

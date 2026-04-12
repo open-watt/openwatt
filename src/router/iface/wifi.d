@@ -412,12 +412,6 @@ nothrow @nogc:
         return _radio !is null && !_ssid.empty;
     }
 
-    override CompletionStatus validating()
-    {
-        _radio.try_reattach();
-        return super.validating();
-    }
-
     override const(char)[] status_message() const pure
     {
         if (_state == State.starting || _state == State.restarting)

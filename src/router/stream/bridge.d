@@ -61,7 +61,7 @@ nothrow @nogc:
         {
             if (!m_streams[i])
             {
-                if (!m_streams[i].try_reattach() || !m_streams[i].running)
+                if (m_streams[i].detached || !m_streams[i].running)
                     continue;
             }
 

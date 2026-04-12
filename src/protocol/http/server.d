@@ -148,13 +148,6 @@ protected:
         return _port != 0 || _tls_port != 0;
     }
 
-    override CompletionStatus validating()
-    {
-        foreach (ref c; _certificates)
-            c.try_reattach();
-        return super.validating();
-    }
-
     override CompletionStatus startup()
     {
         version (DebugHTTPServer)

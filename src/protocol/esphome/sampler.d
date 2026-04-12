@@ -44,10 +44,7 @@ nothrow @nogc:
     final override void update()
     {
         if (_client.detached)
-        {
-            if (!_client.try_reattach())
-                return;
-        }
+            return;
         if (!_client.running)
             return;
 
