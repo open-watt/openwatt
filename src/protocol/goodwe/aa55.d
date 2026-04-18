@@ -344,7 +344,7 @@ private:
 }
 
 
-class AA55Client : BaseObject
+class AA55Client : ActiveObject
 {
     __gshared Property[3] Properties = [ Property.create!("remote", remote)(),
                                          Property.create!("profile", profile)(),
@@ -352,6 +352,7 @@ class AA55Client : BaseObject
 nothrow @nogc:
 
     enum type_name = "aa55";
+    enum path = "/protocol/goodwe/aa55";
     enum collection_id = CollectionType.aa55;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)

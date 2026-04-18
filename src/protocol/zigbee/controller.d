@@ -39,7 +39,7 @@ nothrow @nogc:
 enum MaxFibers = 2;
 
 
-class ZigbeeController : BaseObject, Subscriber
+class ZigbeeController : ActiveObject, Subscriber
 {
     __gshared Property[2] Properties = [ Property.create!("endpoint", endpoint)(),
                                          Property.create!("auto-create", auto_create)() ];

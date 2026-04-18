@@ -98,7 +98,7 @@ template type_for(T, Extra...)
         enum type_for = "elem";
     else static if (is(U == BaseInterface))
         enum type_for = "#iface"; // HACK: this is a legacy name; we should update it and update the web/android apps...
-    else static if (is(U == BaseObject))
+    else static if (is(U == BaseObject) || is(U == ActiveObject))
         enum type_for = "#object";
     else static if (is(U : BaseObject))
         enum type_for = "#" ~ U.type_name;
@@ -345,7 +345,9 @@ const(char[]) from_variant(ref const Variant v, out Duration r) nothrow @nogc
 const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     if (is(const(char)[] : T))
 {
-    if (v.isString)
+    if (v.isNull)
+        r = null;
+    else if (v.isString)
         r = v.asString;
     else
     {
@@ -357,7 +359,9 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
 
 const(char[]) from_variant(ref const Variant v, out String r) nothrow @nogc
 {
-    if (v.isString)
+    if (v.isNull)
+        r = null;
+    else if (v.isString)
         r = v.asString.makeString(defaultAllocator);
     else
     {
@@ -497,45 +501,74 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     return null;
 }
 
-const(char[]) from_variant(ref const Variant v, out BaseObject r) nothrow @nogc
-{
-    const(char)[] n;
-    if (v.isUser!BaseObject)
-        n = v.asUser!BaseObject.name[];
-    else if (v.isString)
-        n = v.asString;
-    else
-        return "Invalid value";
-
-    r = g_app.find_object(n);
-    return r ? null : tconcat("Item does not exist: ", n);
-}
-
 const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
-    if (ValidUserType!(Unqual!T) && is(T : const BaseObject) && !is(Unqual!T == BaseObject))
+    if (ValidUserType!(Unqual!T) && is(T : const BaseObject))
 {
-    const(char)[] n;
-    if (v.isUser!T)
-        n = v.asUser!T.name[];
-    else if (v.isString)
-        n = v.asString;
-    else
+    alias Type = Unqual!T;
+
+    if (v.isNull)
+    {
+        r = null;
+        return null;
+    }
+    if (v.isUser!Type)
+    {
+        r = cast(Type)v.asUser!Type;
+        return null;
+    }
+    if (!v.isString)
         return "Invalid value";
 
-    alias Type = Unqual!T;
-    r = Collection!Type().get(n);
-    if (r is null)
+    const(char)[] name = v.asString;
+    const(char)[] tail = name;
+    const(char)[] type = tail.split!':';
+
+    static if (is(typeof(Type.type_name)))
     {
-        // check if name exists in root collection but is wrong subtype
-        alias Root = CollectionRoot!Type;
-        static if (!is(Type == Root))
+        // concrete collection type — `type:` prefix is optional; if given, must be T or a descendant
+        if (!tail.empty)
         {
-            if (auto item = Collection!Root().get(n))
-                return tconcat("expected " ~ Type.type_name ~ ", but '", n, "' is a ", item.type[]);
+            auto rt = type in g_app.types;
+            if (!rt)
+                return tconcat("Unknown type: ", type);
+            if (!type_matches(collection_type_info!Type(), rt.type_info))
+                return tconcat("expected " ~ Type.type_name ~ " (or descendant), got ", type);
+            name = tail;
         }
-        return tconcat("Item does not exist: ", n);
+
+        r = Collection!Type().get(name);
+        if (r is null)
+        {
+            // check if name exists in root collection but is wrong subtype
+            alias Root = CollectionRoot!Type;
+            static if (!is(Type == Root))
+            {
+                if (auto item = Collection!Root().get(name))
+                    return tconcat("expected " ~ Type.type_name ~ ", but '", name, "' is a ", item.type[]);
+            }
+            return tconcat("Item does not exist: ", name);
+        }
+        return null;
     }
-    return null;
+    else
+    {
+        // abstract (BaseObject, ActiveObject, ...) — `type:` prefix is required
+        if (type.empty || tail.empty)
+            return "Expected `type:name`";
+
+        auto rt = type in g_app.types;
+        if (!rt)
+            return tconcat("Unknown type: ", type);
+
+        ubyte cid = rt.type_info.collection_id;
+        BaseObject obj = item_table(cid).get_by_name(tail, cid);
+        if (!obj)
+            return tconcat("Item does not exist: ", type, ":", tail);
+        r = cast(Type)obj;
+        if (!r)
+            return tconcat("expected " ~ Type.stringof ~ ", got ", type);
+        return null;
+    }
 }
 
 const(char[]) from_variant(ref const Variant v, out Component r) nothrow @nogc

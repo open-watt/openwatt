@@ -39,6 +39,7 @@ class TeslaInterface : BaseInterface
 nothrow @nogc:
 
     enum type_name = "tesla-twc";
+    enum path = "/interface/tesla-twc";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -77,6 +78,8 @@ nothrow @nogc:
 
     override void update()
     {
+        super.update();
+
         if (!_stream || !_stream.running)
             return restart();
 
@@ -143,7 +146,7 @@ nothrow @nogc:
     {
         if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.tesla_twc)
         {
-            ++_status.tx_dropped;
+            add_tx_drop();
             return -1;
         }
 
@@ -181,7 +184,7 @@ nothrow @nogc:
         if (written != offset)
         {
             debug writeDebug("Failed to write to stream '", _stream.name, "'");
-            ++_status.tx_dropped;
+            add_tx_drop();
             return -1;
         }
 
@@ -190,9 +193,7 @@ nothrow @nogc:
             writef("{4} - {0}: TWC packet sent {1}-->{2} [{3}]\n", name, packet.src, packet.dst, packet.data, packet.creation_time);
         }
 
-        ++_status.tx_packets;
-        _status.tx_bytes += packet.data.length;
-        // TODO: but should we record the ACTUAL protocol packet?
+        add_tx_frame(packet.data.length); // TODO: but should we record the ACTUAL protocol packet?
         return 0;
     }
 

@@ -906,7 +906,7 @@ nothrow @nogc:
         return true;
     }
 
-    final void stream_signal(BaseObject object, StateSignal signal)
+    final void stream_signal(ActiveObject object, StateSignal signal)
     {
         debug assert(object is stream);
 

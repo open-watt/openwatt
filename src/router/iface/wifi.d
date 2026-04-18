@@ -56,6 +56,7 @@ class WiFiInterface : BaseInterface
 nothrow @nogc:
 
     enum type_name = "wifi";
+    enum path = "/interface/wifi";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -242,6 +243,8 @@ protected:
 
     override void update()
     {
+        super.update();
+
         static if (num_wifi > 0)
         {
             if (_wifi.is_open)
@@ -254,7 +257,7 @@ protected:
 
     override int transmit(ref const Packet packet, MessageCallback)
     {
-        ++_status.tx_dropped;
+        add_tx_drop();
         return -1;
     }
 
@@ -467,17 +470,16 @@ nothrow @nogc:
         {
             if (!_radio || !_radio.running || packet.data.length == 0)
             {
-                ++_status.tx_dropped;
+                add_tx_drop();
                 return -1;
             }
             WifiVif vif = cast(APInterface)this !is null ? WifiVif.ap : WifiVif.sta;
             if (!_radio.drv_transmit(vif, cast(const(ubyte)[])packet.data))
             {
-                ++_status.tx_dropped;
+                add_tx_drop();
                 return -1;
             }
-            ++_status.tx_packets;
-            _status.tx_bytes += packet.data.length;
+            add_tx_frame(packet.data.length);
             return 0;
         }
     }
@@ -506,7 +508,7 @@ private:
     bool _bound;
     String _ssid;
 
-    void radio_state_change(BaseObject, StateSignal signal)
+    void radio_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline && running)
             restart();
@@ -522,6 +524,7 @@ class WLANInterface : WLANBaseInterface
 nothrow @nogc:
 
     enum type_name = "wlan";
+    enum path = "/interface/wlan";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -548,6 +551,8 @@ nothrow @nogc:
     {
         override void update()
         {
+            super.update();
+
             if (_radio && _radio.evt_sta_disconnected)
             {
                 _radio.evt_sta_disconnected = false;
@@ -657,6 +662,7 @@ class APInterface : WLANBaseInterface
 nothrow @nogc:
 
     enum type_name = "wifi-ap";
+    enum path = "/interface/ap";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -787,9 +793,11 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!WiFiInterface("/interface/wifi");
-        g_app.console.register_collection!WLANInterface("/interface/wlan");
-        g_app.console.register_collection!APInterface("/interface/ap");
+        g_app.register_enum!WifiAuth();
+
+        g_app.console.register_collection!WiFiInterface();
+        g_app.console.register_collection!WLANInterface();
+        g_app.console.register_collection!APInterface();
 
         version (Windows)
         {

@@ -250,7 +250,7 @@ private:
     }
 }
 
-class PCAPServer : BaseObject
+class PCAPServer : ActiveObject
 {
     __gshared Property[2] Properties = [ Property.create!("port", port)(),
                                          Property.create!("allow-anonymous", allow_anonymous)() ];
@@ -798,7 +798,7 @@ private:
             stream.write(RpcapHeader(ver: ver, type: type, value: value, plen: cast(uint)plen).nativeToBigEndian);
         }
 
-        void stream_destroyed(BaseObject object, StateSignal signal)
+        void stream_destroyed(ActiveObject object, StateSignal signal)
         {
             if (signal == StateSignal.destroyed)
             {

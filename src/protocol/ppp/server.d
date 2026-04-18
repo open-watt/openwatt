@@ -79,6 +79,8 @@ nothrow @nogc:
 
     override void update()
     {
+        super.update();
+
         if (!_stream)
             restart();
 
@@ -98,7 +100,7 @@ private:
 }
 
 
-class PPPoEServer : BaseObject
+class PPPoEServer : ActiveObject
 {
     __gshared Property[2] Properties = [ Property.create!("interface", iface)(),
                                          Property.create!("protocol", protocol)() ];

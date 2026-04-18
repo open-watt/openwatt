@@ -20,6 +20,7 @@ class VLANInterface : BaseInterface
 nothrow @nogc:
 
     enum type_name = "vlan";
+    enum path = "/interface/vlan";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -105,10 +106,7 @@ nothrow @nogc:
 
         int result = _interface.forward(packet, callback);
         if (result >= 0)
-        {
-            ++_status.tx_packets;
-            _status.tx_bytes += packet.data.length;
-        }
+            add_tx_frame(packet.data.length);
         return result;
     }
 

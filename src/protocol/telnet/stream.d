@@ -316,7 +316,7 @@ private:
     ulong _client_state;
     ulong _client_state_req;
 
-    void inner_state_change(BaseObject, StateSignal signal)
+    void inner_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
             restart();

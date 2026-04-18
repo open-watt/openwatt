@@ -28,7 +28,7 @@ import router.stream.tcp;
 
 nothrow @nogc:
 
-class HTTPClient : BaseObject
+class HTTPClient : ActiveObject
 {
     __gshared Property[2] Properties = [ Property.create!("remote", remote)(),
                                          Property.create!("stream", stream)() ];

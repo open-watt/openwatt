@@ -82,27 +82,28 @@ struct SerialParams
 class SerialStream : Stream
 {
     version (Embedded)
-        __gshared Property[11] Properties = [ Property.create!("device", device)(),
-                                              Property.create!("baud-rate", baud_rate)(),
-                                              Property.create!("data-bits", data_bits)(),
-                                              Property.create!("parity", parity)(),
-                                              Property.create!("stop-bits", stop_bits)(),
-                                              Property.create!("flow-control", flow_control)(),
-                                              Property.create!("tx-gpio", tx_gpio)(),
-                                              Property.create!("rx-gpio", rx_gpio)(),
-                                              Property.create!("rts-gpio", rts_gpio)(),
-                                              Property.create!("cts-gpio", cts_gpio)(),
-                                              Property.create!("de-gpio", de_gpio)() ];
+        alias Properties = AliasSeq!(Prop!("device", device),
+                                     Prop!("baud-rate", baud_rate),
+                                     Prop!("data-bits", data_bits),
+                                     Prop!("parity", parity),
+                                     Prop!("stop-bits", stop_bits),
+                                     Prop!("flow-control", flow_control),
+                                     Prop!("tx-gpio", tx_gpio),
+                                     Prop!("rx-gpio", rx_gpio),
+                                     Prop!("rts-gpio", rts_gpio),
+                                     Prop!("cts-gpio", cts_gpio),
+                                     Prop!("de-gpio", de_gpio));
     else
-        __gshared Property[6] Properties = [ Property.create!("device", device)(),
-                                             Property.create!("baud-rate", baud_rate)(),
-                                             Property.create!("data-bits", data_bits)(),
-                                             Property.create!("parity", parity)(),
-                                             Property.create!("stop-bits", stop_bits)(),
-                                             Property.create!("flow-control", flow_control)() ];
+        alias Properties = AliasSeq!(Prop!("device", device),
+                                     Prop!("baud-rate", baud_rate),
+                                     Prop!("data-bits", data_bits),
+                                     Prop!("parity", parity),
+                                     Prop!("stop-bits", stop_bits),
+                                     Prop!("flow-control", flow_control));
 nothrow @nogc:
 
     enum type_name = "serial";
+    enum path = "/stream/serial";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
@@ -111,15 +112,14 @@ nothrow @nogc:
 
     // Properties...
 
-    String device() const pure
+    final String device() const pure
         => _device;
-    StringResult device(String value)
+    final StringResult device(String value)
     {
         if (!value)
             return StringResult("device cannot be empty");
         if (_device == value)
             return StringResult.success;
-
         version (Embedded)
         {
             if (value.length == 5 && value[][0 .. 4] == "uart")
@@ -129,6 +129,7 @@ nothrow @nogc:
                 {
                     _uart_port = cast(byte)port;
                     _device = value.move;
+                    mark_set!(typeof(this), "device");
                     restart();
                     return StringResult.success;
                 }
@@ -139,20 +140,22 @@ nothrow @nogc:
         else
         {
             _device = value.move;
+            mark_set!(typeof(this), "device");
             restart();
             return StringResult.success;
         }
     }
 
-    uint baud_rate() const pure
+    final uint baud_rate() const pure
         => _params.baud_rate;
-    StringResult baud_rate(uint value)
+    final StringResult baud_rate(uint value)
     {
         if (value == 0)
             return StringResult("baud rate must be greater than 0");
         if (_params.baud_rate == value)
             return StringResult.success;
         _params.baud_rate = value;
+        mark_set!(typeof(this), "baud-rate");
         restart();
         return StringResult.success;
     }
@@ -166,6 +169,7 @@ nothrow @nogc:
         if (_params.data_bits == cast(ubyte)value)
             return StringResult.success;
         _params.data_bits = cast(ubyte)value;
+        mark_set!(typeof(this), "data-bits");
         restart();
         return StringResult.success;
     }
@@ -182,6 +186,7 @@ nothrow @nogc:
         if (_params.parity == value)
             return null;
         _params.parity = value;
+        mark_set!(typeof(this), "parity");
         restart();
         return null;
     }
@@ -193,6 +198,7 @@ nothrow @nogc:
         if (_params.stop_bits == value)
             return;
         _params.stop_bits = value;
+        mark_set!(typeof(this), "stop-bits");
         restart();
     }
 
@@ -203,6 +209,7 @@ nothrow @nogc:
         if (_params.flow_control == value)
             return;
         _params.flow_control = value;
+        mark_set!(typeof(this), "flow-control");
         restart();
     }
 
@@ -213,6 +220,7 @@ nothrow @nogc:
         final void tx_gpio(byte value)
         {
             _tx_gpio = value;
+            mark_set!(typeof(this), "tx-gpio");
             restart();
         }
 
@@ -221,6 +229,7 @@ nothrow @nogc:
         final void rx_gpio(byte value)
         {
             _rx_gpio = value;
+            mark_set!(typeof(this), "rx-gpio");
             restart();
         }
 
@@ -229,6 +238,7 @@ nothrow @nogc:
         final void rts_gpio(byte value)
         {
             _rts_gpio = value;
+            mark_set!(typeof(this), "rts-gpio");
             restart();
         }
 
@@ -237,6 +247,7 @@ nothrow @nogc:
         final void cts_gpio(byte value)
         {
             _cts_gpio = value;
+            mark_set!(typeof(this), "cts-gpio");
             restart();
         }
 
@@ -245,6 +256,7 @@ nothrow @nogc:
         final void de_gpio(byte value)
         {
             _de_gpio = value;
+            mark_set!(typeof(this), "de-gpio");
             restart();
         }
     }
@@ -488,24 +500,16 @@ nothrow @nogc:
                 restart();
                 return -1;
             }
-            if (_logging)
-                write_to_log(true, buffer[0 .. bytes_read]);
-            return bytes_read;
         }
         else version(Posix)
-        {
             ssize_t bytes_read = urt.internal.sys.posix.read(_fd, buffer.ptr, buffer.length);
-            if (_logging)
-                write_to_log(true, buffer[0 .. bytes_read]);
-            return bytes_read;
-        }
         else version (Embedded)
-        {
             ptrdiff_t bytes_read = uart_read(_uart, buffer);
-            if (_logging)
-                write_to_log(true, buffer[0 .. bytes_read]);
-            return bytes_read;
-        }
+
+        add_rx_bytes(bytes_read);
+        if (_logging)
+            write_to_log(true, buffer[0 .. bytes_read]);
+        return bytes_read;
     }
 
     override ptrdiff_t write(const(void[])[] data...)
@@ -594,6 +598,7 @@ nothrow @nogc:
                 }
             }
         }
+        add_tx_bytes(bytes_written);
         return bytes_written;
     }
 
@@ -656,7 +661,7 @@ nothrow @nogc:
         g_app.register_enum!Parity();
         g_app.register_enum!FlowControl();
 
-        g_app.console.register_collection!SerialStream("/stream/serial");
+        g_app.console.register_collection!SerialStream();
     }
 }
 

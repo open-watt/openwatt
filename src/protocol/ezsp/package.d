@@ -29,8 +29,8 @@ nothrow @nogc:
     {
         g_app.register_enum!EZSPStackType();
 
-        g_app.console.register_collection!ASHInterface("/protocol/ezsp/ash");
-        g_app.console.register_collection!EZSPClient("/protocol/ezsp/client");
+        g_app.console.register_collection!ASHInterface();
+        g_app.console.register_collection!EZSPClient();
     }
 
     override void update()

@@ -79,7 +79,7 @@ private:
 
     ubyte _init_state = 0;
 
-    void client_state_handler(BaseObject object, StateSignal signal)
+    void client_state_handler(ActiveObject object, StateSignal signal)
     {
         if (signal == StateSignal.online)
         {

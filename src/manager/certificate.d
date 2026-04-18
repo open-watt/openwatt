@@ -48,7 +48,7 @@ enum CertStatus
     error,
 }
 
-class Certificate : BaseObject
+class Certificate : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("cert-type", cert_type),
                                  Prop!("domain", domain),
@@ -416,7 +416,7 @@ private:
 
     CompletionStatus start_acme()
     {
-        // ACME error occurred asynchronously — trigger BaseObject backoff
+        // ACME error occurred asynchronously — trigger ActiveObject backoff
         if (_status == CertStatus.error)
             return CompletionStatus.error;
 
@@ -1327,7 +1327,7 @@ private:
         return buf[];
     }
 
-    int handle_acme_challenge(ref const HTTPMessage request, ref Stream stream)
+    int handle_acme_challenge(ref const HTTPMessage request, ref Stream stream, const(ubyte)[] leftover)
     {
         version (DebugCertificate)
             writeDebug("Certificate '", name, "': challenge request path='", request.request_target, "'");

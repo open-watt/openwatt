@@ -70,6 +70,7 @@ class ModbusInterface : BaseInterface
 nothrow @nogc:
 
     enum type_name = "modbus";
+    enum path = "/interface/modbus";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -82,6 +83,8 @@ nothrow @nogc:
         // this would be 253 for the RS485 bus, or larger if another carrier...?
         _max_l2mtu = _mtu;
         _l2mtu = _max_l2mtu;
+
+        mark_set!(typeof(this), "max-l2mtu")();
 
         // TODO: warn the user if they configure an interface to use modbus tcp over a serial line
         //       user should be warned that data corruption may occur!
@@ -216,7 +219,7 @@ nothrow @nogc:
                 }
             }
 
-            _queue.init(_support_simultaneous_requests ? 8 : 1, 0, PCP.be, &_status);
+            _queue.init(_support_simultaneous_requests ? 8 : 1, 0, PCP.be, this);
             _queue.set_queue_timeout(_queue_timeout.msecs);
             _queue.set_transport_timeout(_request_timeout.msecs);
             return CompletionStatus.complete;
@@ -351,7 +354,7 @@ nothrow @nogc:
         if (packet.type != PacketType.modbus)
         {
             log.debug_("tx-drop: not a modbus packet");
-            ++_status.tx_dropped;
+            add_tx_drop();
             return -1;
         }
 
@@ -369,7 +372,7 @@ nothrow @nogc:
                 if (!map || map.iface !is this)
                 {
                     log.debug_("tx-drop: unknown server address ", hdr.dst_address);
-                    ++_status.tx_dropped;
+                    add_tx_drop();
                     return -1;
                 }
                 local_address = map.local_address;
@@ -380,7 +383,7 @@ nothrow @nogc:
             if (tag < 0)
             {
                 log.debug_("tx-drop: queue full");
-                ++_status.tx_dropped;
+                add_tx_drop();
                 return -1;
             }
 
@@ -396,7 +399,7 @@ nothrow @nogc:
             if (hdr.dst_address != _master_address)
             {
                 log.debug_("tx-drop: response dst != master address");
-                ++_status.tx_dropped;
+                add_tx_drop();
                 return -1;
             }
 
@@ -404,7 +407,7 @@ nothrow @nogc:
             if (!map)
             {
                 log.debug_("tx-drop: unknown universal address ", hdr.src_address);
-                ++_status.tx_dropped;
+                add_tx_drop();
                 return -1;
             }
 
@@ -528,12 +531,11 @@ private:
         if (written != length)
         {
             log.debug_("tx-drop: write failed (wrote ", written, " of ", length, ")");
-            ++_status.tx_dropped;
+            add_tx_drop();
             return -1;
         }
 
-        ++_status.tx_packets;
-        _status.tx_bytes += length;
+        add_tx_frame(length);
         return 0;
     }
 
@@ -731,7 +733,7 @@ private:
                 if (_is_bus_master)
                 {
                     log.debug_("rx-drop: unknown local address ", frame_info.address, " on bus ", name[]);
-                    ++_status.rx_dropped;
+                    add_rx_drop();
                     return;
                 }
 
@@ -767,20 +769,20 @@ private:
                 if (pm is null)
                 {
                     log.debug_("rx-drop: response but no in-flight request");
-                    ++_status.rx_dropped;
+                    add_rx_drop();
                     return;
                 }
 
                 if (pm.local_server_address != frame_info.address)
                 {
                     log.debug_("rx-drop: address mismatch (got ", frame_info.address, " expected ", pm.local_server_address, ")");
-                    ++_status.rx_dropped;
+                    add_rx_drop();
                     _queue.complete(matched_tag, MessageState.failed);
                 }
                 else if (!validate_response_length(matched_tag, message))
                 {
                     log.debug_("rx-drop: response length mismatch (late response after timeout?)");
-                    ++_status.rx_dropped;
+                    add_rx_drop();
                 }
                 else
                 {
@@ -823,7 +825,7 @@ private:
                 else
                 {
                     log.debug_("rx-drop: no pending match for addr=", frame_info.address, " seq=", seq);
-                    ++_status.rx_dropped;
+                    add_rx_drop();
                 }
 
                 send_queued_messages();
@@ -836,7 +838,7 @@ private:
                 if (type == ModbusFrameType.unknown)
                 {
                     log.debug_("rx-drop: unknown modbus frame type, can't dispatch");
-                    ++_status.rx_dropped;
+                    add_rx_drop();
                     return;
                 }
             }

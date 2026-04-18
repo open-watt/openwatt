@@ -22,6 +22,7 @@ class BridgeStream : Stream
 nothrow @nogc:
 
     enum type_name = "bridge-stream";
+    enum path = "/stream/bridge";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
@@ -113,6 +114,7 @@ nothrow @nogc:
             buffer[0 .. read] = m_inputBuffer[];
             m_inputBuffer.clear();
         }
+        add_rx_bytes(read);
         if (_logging)
             write_to_log(true, buffer[0 .. read]);
         return read;
@@ -120,6 +122,7 @@ nothrow @nogc:
 
     override ptrdiff_t write(const(void[])[] data...)
     {
+
         foreach (i; 0 .. m_streams.length)
         {
             foreach (j; 0 .. data.length)
@@ -132,12 +135,16 @@ nothrow @nogc:
                 }
             }
         }
-        if (_logging)
+
+        size_t total = 0;
+        foreach (ref d; data)
         {
-            foreach (ref d; data)
+            total += d.length;
+            if (_logging)
                 write_to_log(false, d[]);
         }
-        return 0;
+        add_tx_bytes(total);
+        return total;
     }
 
     override ptrdiff_t pending()
@@ -167,6 +174,6 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!BridgeStream("/stream/bridge");
+        g_app.console.register_collection!BridgeStream();
     }
 }

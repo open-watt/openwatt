@@ -62,6 +62,7 @@ class ZigbeeInterface : BaseInterface
 nothrow @nogc:
 
     enum type_name = "zigbee";
+    enum path = "/interface/zigbee";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -162,7 +163,7 @@ protected:
                 _ezsp_client.subscribe(&ezsp_state_change);
                 _coordinator.subscribe_client(_ezsp_client, true);
                 _subscribed = true;
-                _queue.init(_max_in_flight, 1, PCP.ca, &_status);
+                _queue.init(_max_in_flight, 1, PCP.ca, this);
                 _queue.set_transport_timeout(queue_timeout.msecs);
                 return CompletionStatus.complete;
             }
@@ -285,7 +286,7 @@ protected:
                 assert(false, "TODO: handle NWK frame... or de-frame APS message and goto ZigbeeAPS?");
 
             default:
-                ++_status.tx_dropped;
+                add_tx_drop();
                 return ZigbeeResult.unsupported;
         }
 
@@ -293,7 +294,7 @@ protected:
         int tag = _queue.enqueue(p, &on_frame_complete);
         if (tag < 0)
         {
-            ++_status.tx_dropped;
+            add_tx_drop();
             return -1;
         }
 
@@ -402,7 +403,7 @@ private:
             ZigbeeResult result = send_message(frame.tag, frame.packet.hdr!APSFrame, data);
             if (result != ZigbeeResult.success)
             {
-                ++_status.tx_dropped;
+                add_tx_drop();
                 _queue.complete(frame.tag, MessageState.failed);
             }
         }
@@ -480,7 +481,7 @@ private:
 
         if (status != EmberStatus.SUCCESS)
         {
-            ++_status.tx_dropped;
+            add_tx_drop();
 
             if (status == EmberStatus.NETWORK_DOWN)
                 _network_status = EmberStatus.NETWORK_DOWN;
@@ -496,7 +497,7 @@ private:
         if (auto pm = tag in _pending)
         {
             pm.aps.counter = aps_sequence;
-            _status.tx_bytes += pm.message_length;
+            _status.tx_bytes += pm.message_length; // packet counter is adjusted by counter_response_handler()
 
             version (DebugZigbeeMessageFlow)
                 writeDebugf("Zigbee: APS       sent ({0,03}) {1,4}ms - {2, 04x}:{3, 02x}->{4, 04x}:{5, 02x} [{6}:{7, 04x}]", tag, (getTime() - pm.send_time).as!"msecs", pm.aps.src, pm.aps.src_endpoint, pm.aps.dst, pm.aps.dst_endpoint, profile_name(pm.aps.profile_id), pm.aps.cluster_id);
@@ -551,7 +552,7 @@ private:
         _ezsp_client.set_callback_handler!EZSP_CounterRolloverHandler(enable ? &counter_rollover_handler : null);
     }
 
-    void ezsp_state_change(BaseObject, StateSignal signal) nothrow
+    void ezsp_state_change(ActiveObject, StateSignal signal) nothrow
     {
         if (signal == StateSignal.offline)
         {

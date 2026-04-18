@@ -149,10 +149,10 @@ class Application
 {
 nothrow @nogc:
 
-    struct RegisteredCollection
+    struct RegisteredType
     {
         const(CollectionTypeInfo)* type_info;
-        string path;
+        const(char)[] path;
     }
 
     String name;
@@ -171,7 +171,7 @@ nothrow @nogc:
 
     Array!(ElementLink*) links;
 
-    Map!(String, RegisteredCollection) collections;
+    Map!(String, RegisteredType) types;
     Map!(String, const(VoidEnumInfo)*) enum_templates;
 
     // database...
@@ -309,18 +309,10 @@ nothrow @nogc:
         return null;
     }
 
-    void register_collection(const(CollectionTypeInfo)* type_info, string path)
+    void register_type(const(CollectionTypeInfo)* type_info, const(char)[] path)
     {
-        assert(type_info.type !in collections, "Collection type already registered!");
-        collections.insert(type_info.type, RegisteredCollection(type_info, path));
-    }
-
-    BaseObject find_object(const(char)[] name) nothrow @nogc
-    {
-        foreach (ref rc; collections.values)
-            if (BaseObject obj = BaseCollection(rc.type_info).get(name))
-                return obj;
-        return null;
+        assert(type_info.type !in types, "Type already registered!");
+        types.insert(type_info.type, RegisteredType(type_info, path));
     }
 
     void register_enum(E)()

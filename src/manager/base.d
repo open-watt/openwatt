@@ -11,7 +11,7 @@ import urt.variant;
 import urt.result;
 import urt.string;
 import urt.time;
-import urt.traits : Parameters, ReturnType;
+import urt.traits : Parameters, ReturnType, Unqual;
 import urt.util : min;
 
 import manager.console.argument;
@@ -39,6 +39,8 @@ enum ObjectFlags : ubyte
     slave        = 1 << 5, // S
     link_present = 1 << 6, // L
     hardware     = 1 << 7, // H
+
+    remote       = 1 << 4, // HACK for construction
 }
 
 enum CompletionStatus
@@ -55,7 +57,10 @@ enum StateSignal
     destroyed
 }
 
-alias StateSignalHandler = void delegate(BaseObject object, StateSignal signal) nothrow @nogc;
+alias StateSignalHandler = void delegate(ActiveObject object, StateSignal signal) nothrow @nogc;
+
+enum ushort sync_slot_none = ushort.max;
+
 
 template Prop(string name, alias member, string category = null, string flags = null)
 {
@@ -70,6 +75,7 @@ struct Property
     alias GetFun = Variant function(BaseObject i) nothrow @nogc;
     alias SetFun = StringResult function(ref const Variant value, BaseObject i) nothrow @nogc;
     alias ResetFun = void function(BaseObject i) nothrow @nogc;
+    alias DefaultFun = Variant function() nothrow @nogc;
     alias SuggestFun = Array!String function(const(char)[] arg) nothrow @nogc;
 
     String name;
@@ -77,7 +83,7 @@ struct Property
     String category;
     GetFun get;
     SetFun set;
-    ResetFun reset;
+    DefaultFun init_val;
     SuggestFun suggest;
     ubyte flags;
 
@@ -109,6 +115,10 @@ struct Property
                 static if (type)
                     prop.type[0] = StringLit!type;
             }}
+
+            // default value reflects what get() returns on a freshly-constructed
+            // object, derived from the getter's return type's init value.
+            prop.init_val = &SynthDefault!(Getters[0]);
         }
 
         // synthesise setter
@@ -125,9 +135,6 @@ struct Property
                     prop.type[num_types++] = StringLit!type;
             }}
             debug assert(num_types != 0, "Couldn't determine type for setter overloads of property '" ~ name ~ "'; please specify the type(s) manually");
-
-            // synthesise resetter
-            prop.reset = &SynthResetter!Setters;
         }
 
         // synthesise suggest
@@ -138,21 +145,28 @@ struct Property
     }
 }
 
+struct SyncState
+{
+    BaseObject channel;
+    ulong props_dirty;
+    ushort next;
+}
+
+
 class BaseObject
 {
-    __gshared Property[7] Properties = [ Property.create!("name", name, null, "*")(),
-                                         Property.create!("type", type, null, "*")(),
-                                         Property.create!("disabled", disabled, null, "h")(),
-                                         Property.create!("comment", comment, null, "h")(),
-                                         Property.create!("running", running, null, "h")(),
-                                         Property.create!("flags", flags, null, "*")(),
-                                         Property.create!("status", status_message, null, "d")() ];
+    alias Properties = AliasSeq!(Prop!("name", name, null, "*"),
+                                 Prop!("type", type, null, "*"),
+                                 Prop!("disabled", disabled, null, "h"),
+                                 Prop!("comment", comment, null, "h"),
+                                 Prop!("flags", flags, null, "*"));
 nothrow @nogc:
 
     this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         assert(id, "must have a valid CID");
-        assert((flags & ~(ObjectFlags.dynamic | ObjectFlags.temporary | ObjectFlags.disabled)) == 0, "`flags` may only contain Dynamic, Temporary, or Disabled flags");
+        assert((flags & ~(ObjectFlags.dynamic | ObjectFlags.temporary | ObjectFlags.disabled | ObjectFlags.remote)) == 0,
+               "`flags` may only contain Dynamic, Temporary, Disabled, or Remote");
 
         debug foreach (i, p; type_info.properties)
             foreach (j; 0 .. i)
@@ -161,15 +175,18 @@ nothrow @nogc:
         _typeInfo = type_info;
         _type = type_info.type[].addString();
         _id = id;
+
+        if (flags & ObjectFlags.remote)
+        {
+            flags ^= ObjectFlags.remote;
+            _is_remote = true;
+        }
         _flags = flags;
 
-        if (_flags & ObjectFlags.disabled)
-        {
-            _flags ^= ObjectFlags.disabled;
-            _state = State.disabled;
-        }
+        _props_set |= ulong(1) << prop_index!(typeof(this), "name");
+        _props_set |= ulong(1) << prop_index!(typeof(this), "type");
+        _props_set |= ulong(1) << prop_index!(typeof(this), "flags");
     }
-
 
     // Properties...
 
@@ -209,6 +226,8 @@ nothrow @nogc:
         _id = new_id;
         broadcast_rekey(old_id, new_id);
 
+        // TODO: dirtry the name and/or propagate a re-key if it happened!
+
         return null;
     }
 
@@ -217,96 +236,30 @@ nothrow @nogc:
     final void comment(ref String value)
     {
         _comment = value.move;
+        mark_set!(typeof(this), "comment")();
     }
 
-    final bool disabled() const pure
-        => _state & _disabled;
-    final void disabled(bool value)
+    bool disabled() const pure
+        => (_flags & ObjectFlags.disabled) != 0;
+    void disabled(bool value)
     {
         if (value)
-        {
-            _state |= _disabled;
-            _state &= ~_start;
-            if (_state & _valid)
-                _state |= _stop;
-        }
+            _flags |= ObjectFlags.disabled;
         else
-            _state &= ~_disabled;
+            _flags &= ~ObjectFlags.disabled;
+        mark_set!(typeof(this), "disabled")();
+        mark_set!(typeof(this), "flags")();
     }
-
-    // TODO: PUT FINAL BACK WHEN EVERYTHING PORTED!
-    /+final+/ bool running() const pure
-        => _state == State.running;
 
     ObjectFlags flags() const
-    {
-        return cast(ObjectFlags)(_flags |
-                                 ((_state & _valid) || validate() ? ObjectFlags.none : ObjectFlags.invalid) |
-                                 ((_state & _disabled) ? ObjectFlags.disabled :
-                                 _state == State.running ? ObjectFlags.running : ObjectFlags.none));
-    }
-
-    // give a helpful status string, e.g. "Ready", "Disabled", "Error: <message>"
-    const(char)[] status_message() const pure
-    {
-        switch (_state)
-        {
-            case State.disabled:
-            case State.stopping:
-                return "Disabled";
-            case State.destroying:
-            case State.destroyed:
-                return "Destroyed";
-            case State.init_failed:
-            case State.failure:
-                return "Failed";
-            case State.validate:
-                return "Invalid";
-            case State.starting:
-                return "Starting";
-            case State.restarting:
-                return "Restarting";
-            case State.running:
-                return "Running";
-            default:
-                assert(false, "Invalid state!");
-        }
-    }
-
+        => cast(ObjectFlags)(_flags | (validate() ? ObjectFlags.none : ObjectFlags.invalid));
 
     // Object API...
 
     alias log = ObjectLog!(_type, _name);
 
-    final void restart()
-    {
-        assert(!(_state & _destroyed), "Cannot restart a destroyed object!");
-
-        if (_state & _valid)
-        {
-            State new_state = cast(State)((_state & ~_start) | _stop);
-            set_state(new_state);
-        }
-    }
-
-    final void destroy()
-    {
-        if (_state & _destroyed)
-            return; // destroy was already called
-
-        if (_state == State.running)
-            set_offline();
-
-        log.info("destroyed");
-
-        _state |= _disabled | _destroyed;
-        _state &= ~(_start | _fail);
-        if (_state & _valid)
-            _state |= _stop;
-
-        signal_state_change(StateSignal.destroyed);
-        _subscribers.clear();
-    }
+    final bool is_remote() const pure nothrow @nogc
+        => _is_remote;
 
     // return a list of properties that can be set on this object
     final const(Property*)[] properties() const
@@ -337,10 +290,23 @@ nothrow @nogc:
             {
                 if (!p.set)
                     return StringResult(tconcat("Property '", property, "' is read-only"));
-                return p.set(value, this);
+                auto r = p.set(value, this);
+                if (r)
+                {
+                    // safety-net tracking for old-style classes; for new-style
+                    // the wrapper already did the same mark (idempotent OR).
+                    _props_set |= ulong(1) << i;
+                    mark_dirty(i);
+                }
+                return r;
             }
         }
         return StringResult(tconcat("No property '", property, "' for ", name[]));
+    }
+
+    final package StringResult sync_apply(scope const(char)[] property, ref const Variant value)
+    {
+        return set(property, value);
     }
 
     final void reset(scope const(char)[] property)
@@ -349,12 +315,26 @@ nothrow @nogc:
         {
             if (p.name[] == property)
             {
-                _props_set &= ~(1 << i);
-                if (p.reset)
-                    p.reset(this);
+                if (p.set && p.init_val)
+                    p.set(p.init_val(), this);
+                _props_set &= ~(ulong(1) << i);
+                mark_dirty(i);
                 return;
             }
         }
+    }
+
+    final package StringResult sync_reset(scope const(char)[] property)
+    {
+        foreach (p; properties())
+        {
+            if (p.name[] == property)
+            {
+                reset(property);
+                return StringResult.success;
+            }
+        }
+        return StringResult(tconcat("No property '", property, "' for ", name[]));
     }
 
     final Variant gather(scope const(char)[][] patterns...)
@@ -393,6 +373,224 @@ nothrow @nogc:
         return MutableString!0();
     }
 
+    final int opCmp(const BaseObject rhs) const pure
+        => cast(int)(cast(long)_id.raw - cast(long)rhs._id.raw);
+
+    final bool opEquals(const BaseObject rhs) const pure
+        => _id == rhs._id;
+
+protected:
+    package const CollectionTypeInfo* _typeInfo;
+    ulong _props_set;   // TODO: I wonder if this should move the sync state? trouble is, this needs to be known for initial sync :/
+    ObjectFlags _flags;
+    bool _is_remote;
+    ushort _sync_slot = sync_slot_none;
+
+    // validate configuration is in an operable state
+    bool validate() const
+        => true;
+
+    void rekey(CID old_id, CID new_id)
+    {
+        // nothing at this level
+    }
+
+    void mark_set(T, string[] props)() nothrow @nogc
+    {
+        enum mask = () {
+            ulong m = 0;
+            static foreach (p; props)
+            {{
+                enum i = prop_index!(T, p);
+                static assert(i >= 0, "Invalid property name '" ~ p ~ "' in mark_set!() for type " ~ T.stringof);
+                m |= ulong(1) << i;
+            }}
+            return m;
+        }();
+        _props_set |= mask;
+        _mark_dirty(mask);
+    }
+
+    void mark_set(T, string prop)() nothrow @nogc
+    {
+        mark_set!(T, [ prop ])();
+    }
+
+    final void mark_dirty(size_t prop_index) nothrow @nogc
+    {
+        _mark_dirty(ulong(1) << prop_index);
+    }
+
+    final void _mark_dirty(ulong mask) nothrow @nogc
+    {
+        for (ushort slot = _sync_slot; slot != sync_slot_none; )
+        {
+            ref ss = sync_state(slot);
+            ss.props_dirty |= mask;
+            slot = ss.next;
+        }
+    }
+
+package:
+    final void do_rekey(CID old_id, CID new_id)
+    {
+        rekey(old_id, new_id);
+    }
+
+private:
+    const CacheString _type; // TODO: DELETE THIS MEMBER!!!
+    package CID _id;
+    String _comment;
+
+    // redirect for legacy code that references _name directly DELETEME!!
+    String _name() const => name();
+
+}
+
+class ActiveObject : BaseObject
+{
+    alias Properties = AliasSeq!(Prop!("running", running, null, "h"),
+                                 Prop!("status", status_message, null, "d"));
+nothrow @nogc:
+
+    this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
+    {
+        super(type_info, id, flags);
+
+        if (flags & ObjectFlags.disabled)
+        {
+            _flags ^= ObjectFlags.disabled;
+            _state = State.disabled;
+        }
+
+        _props_set |= (ulong(1) << prop_index!(typeof(this), "running")) |
+                      (ulong(1) << prop_index!(typeof(this), "status"));
+    }
+
+
+    // Properties...
+
+    final override bool disabled() const pure
+        => _state & _disabled;
+    final override void disabled(bool value)
+    {
+        if (value)
+        {
+            _state |= _disabled;
+            _state &= ~_start;
+            if (_state & _valid)
+                _state |= _stop;
+        }
+        else
+            _state &= ~_disabled;
+        mark_set!(typeof(this), "disabled")();
+        mark_set!(typeof(this), "flags")();
+        mark_set!(typeof(this), "status")();
+    }
+
+    // TODO: PUT FINAL BACK WHEN EVERYTHING PORTED!
+    /+final+/ bool running() const pure
+        => _state == State.running;
+
+    final override ObjectFlags flags() const
+    {
+        return cast(ObjectFlags)(_flags |
+                                 ((_state & _valid) || validate() ? ObjectFlags.none : ObjectFlags.invalid) |
+                                 ((_state & _disabled) ? ObjectFlags.disabled :
+                                 _state == State.running ? ObjectFlags.running : ObjectFlags.none));
+    }
+
+    // give a helpful status string, e.g. "Ready", "Disabled", "Error: <message>"
+    const(char)[] status_message() const pure
+    {
+        switch (_state)
+        {
+            case State.disabled:
+            case State.stopping:
+                return "Disabled";
+            case State.destroying:
+            case State.destroyed:
+                return "Destroyed";
+            case State.init_failed:
+            case State.failure:
+                return "Failed";
+            case State.validate:
+                return "Invalid";
+            case State.starting:
+                return "Starting";
+            case State.restarting:
+                return "Restarting";
+            case State.running:
+                return "Running";
+            default:
+                assert(false, "Invalid state!");
+        }
+    }
+
+
+    // Object API...
+
+    final void restart()
+    {
+        assert(!(_state & _destroyed), "Cannot restart a destroyed object!");
+
+        if (is_remote)
+            return;
+
+        if (_state & _valid)
+        {
+            State new_state = cast(State)((_state & ~_start) | _stop);
+            set_state(new_state);
+        }
+    }
+
+    final void destroy()
+    {
+        if (_state & _destroyed)
+            return; // destroy was already called
+
+        if (_state == State.running)
+            set_offline();
+
+        log.info("destroyed");
+
+        _state |= _disabled | _destroyed;
+        _state &= ~(_start | _fail);
+        if (_state & _valid)
+            _state |= _stop;
+
+        signal_state_change(StateSignal.destroyed);
+        _subscribers.clear();
+    }
+
+    final package void set_remote_state(StateSignal signal)
+    {
+        final switch (signal)
+        {
+            case StateSignal.online:
+                if (_state == State.running)
+                    return;
+                _state = State.running;
+                set_online();
+                break;
+            case StateSignal.offline:
+                if (_state != State.running)
+                    return;
+                set_offline();
+                _state = State.disabled;
+                break;
+            case StateSignal.destroyed:
+                if (_state & _destroyed)
+                    return;
+                if (_state == State.running)
+                    set_offline();
+                _state = State.destroyed;
+                signal_state_change(StateSignal.destroyed);
+                _subscribers.clear();
+                break;
+        }
+    }
+
     final void subscribe(StateSignalHandler handler)
     {
         assert(!_subscribers[].contains(handler), "Already registered");
@@ -407,12 +605,6 @@ nothrow @nogc:
             debug log.trace("remove subscriber: ", handler.ptr);
         _subscribers.removeFirstSwapLast(handler);
     }
-
-    int opCmp(const BaseObject rhs) const pure
-        => cast(int)(cast(long)_id.raw - cast(long)rhs._id.raw);
-
-    bool opEquals(const BaseObject rhs) const pure
-        => _id == rhs._id;
 
 protected:
     enum ubyte _disabled   = 1 << 0;
@@ -436,16 +628,16 @@ protected:
         destroying  = _disabled | _destroyed | _stop | _valid,
     }
 
-    package const CollectionTypeInfo* _typeInfo;
-    size_t _props_set;
     State _state = State.validate;
-    ObjectFlags _flags;
 
     final void set_state(State new_state)
     {
         assert(_state != State.destroyed, "Cannot change state of a destroyed object!");
 
         State old = _state;
+
+        // HACK: probably over-dirty's the property, but when changing the state there's a good chance the status changed too!
+        mark_set!(typeof(this), "status")();
 
         // temporary objects self-destruct when they would shutdown
         if ((_flags & ObjectFlags.temporary) && (new_state & _stop))
@@ -502,10 +694,6 @@ protected:
         }
     }
 
-    // validate configuration is in an operable state
-    bool validate() const
-        => true;
-
     CompletionStatus startup()
         => CompletionStatus.complete;
 
@@ -514,11 +702,6 @@ protected:
 
     void update()
     {
-    }
-
-    void rekey(CID old_id, CID new_id)
-    {
-        // nothing at this level
     }
 
     final void set_online()
@@ -530,6 +713,9 @@ protected:
             log.notice("online");
         else
             log.trace("online");
+
+        mark_set!(typeof(this), "running")();
+        mark_set!(typeof(this), "flags")();
     }
 
     final void set_offline()
@@ -541,6 +727,9 @@ protected:
 
         signal_state_change(StateSignal.offline);
         offline();
+
+        mark_set!(typeof(this), "running")();
+        mark_set!(typeof(this), "flags")();
     }
 
     void online()
@@ -551,14 +740,13 @@ protected:
     {
     }
 
-package:
-    final void do_rekey(CID old_id, CID new_id)
-    {
-        rekey(old_id, new_id);
-    }
 
+package:
     final bool do_update()
     {
+        if (is_remote)
+            return _state == State.destroyed;
+
         switch (_state)
         {
             case State.destroyed:
@@ -610,12 +798,7 @@ package:
     }
 
 private:
-    const CacheString _type; // TODO: DELETE THIS MEMBER!!!
-    package CID _id;
-    String _comment;
 
-    // redirect for legacy code that references _name directly DELETEME!!
-    String _name() const => name();
     Array!StateSignalHandler _subscribers;
     MonoTime _last_init_attempt;
     ushort _backoff_ms = 0;
@@ -695,45 +878,122 @@ nothrow @nogc:
     void tracef(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.trace, tag[], name[], fmt, args); }
 }
 
-const(Property*)[] all_properties(Type)()
+
+template total_prop_count(T)
 {
-    static if (is(typeof(&Type.Properties) : Property[N]*, size_t N))
-    {
-        // old way
-        __gshared const props = all_properties_impl!(Type, 0)();
-    }
+    static if (!is_old_style_properties!T)
+        enum num_props = T.Properties.length;
+    else
+        enum num_props = 0;
+    static if (is(T S == super) && !is(S[0] == Object))
+        enum total_prop_count = total_prop_count!S + num_props;
+    else
+        enum total_prop_count = num_props;
+}
+
+template prop_index(T, string prop)
+{
+    static if (is(T S == super) && !is(S[0] == Object))
+        enum _parent_index = prop_index!(S[0], prop);
+    else
+        enum _parent_index = -2;
+    static if (_parent_index >= 0)
+        enum prop_index = _parent_index;
     else
     {
-        // new way
-        enum num_props = Type.Properties.length;
-
-        static if (is(Type S == super) && !is(S[0] == Object))
-            alias s_props = all_properties!(S[0]);
-        else
-            const(Property*)[0] s_props;
-
-        auto make_props()
+        static foreach (i, p; T.Properties)
         {
-            assert(__ctfe);
-            Property[num_props] r;
-            static foreach (i; 0 .. num_props)
-                r[i] = Property.create!(Type.Properties[i].n, Type.Properties[i].p, Type.Properties[i].c, Type.Properties[i].f)();
-            return r;
+            static if (p.n[] == prop[])
+                enum index = i;
         }
-
-        __gshared const t_props = make_props();
-        __gshared const props = s_props ~ () {
-            const(Property)*[num_props] r;
-            static foreach (i; 0 .. num_props)
-                r[i] = &t_props[i];
-            return r;
-        }();
+        static if (is(typeof(index)))
+        {
+            static if (_parent_index != -2)
+                enum prop_index = total_prop_count!(S[0]) + index;
+            else
+                enum prop_index = index;
+        }
+        else
+            enum prop_index = -1;
     }
+}
+
+
+const(Property*)[] all_properties(Type)()
+{
+    __gshared const props = all_properties_impl!(Type, 0)();
     return props[];
 }
 
 
+ushort sync_state_alloc(BaseObject channel) nothrow @nogc
+{
+    ushort slot;
+    if (_free_sync_slots.length > 0)
+    {
+        slot = _free_sync_slots[$ - 1];
+        _free_sync_slots.popBack();
+    }
+    else
+    {
+        assert(_sync_states.length < sync_slot_none, "too many sync slots");
+        slot = cast(ushort)_sync_states.length;
+        _sync_states ~= SyncState();
+    }
+    ref ss = _sync_states[slot];
+    ss.channel = channel;
+    ss.props_dirty = 0;
+    ss.next = sync_slot_none;
+    return slot;
+}
+
+void sync_state_free(ushort slot) nothrow @nogc
+{
+    assert(slot < _sync_states.length);
+    ref ss = _sync_states[slot];
+    ss.channel = null;
+    ss.props_dirty = 0;
+    ss.next = sync_slot_none;
+    _free_sync_slots ~= slot;
+}
+
+ref SyncState sync_state(ushort slot) nothrow @nogc
+{
+    return _sync_states[slot];
+}
+
+
 private:
+
+enum is_old_style_properties(Type) = is(typeof(&Type.Properties) : Property[N]*, size_t N);
+
+template declares_own_properties(Type)
+{
+    static bool _check()
+    {
+        static foreach (m; __traits(derivedMembers, Type))
+            if (m == "Properties") return true;
+        return false;
+    }
+    enum declares_own_properties = _check();
+}
+
+__gshared Array!SyncState _sync_states;
+__gshared Array!ushort _free_sync_slots;
+
+template MaterializedProperties(Type)
+{
+    enum Count = Type.Properties.length;
+    auto _make()
+    {
+        assert(__ctfe);
+        Property[Count] r;
+        static foreach (i; 0 .. Count)
+            r[i] = Property.create!(Type.Properties[i].n, Type.Properties[i].p, Type.Properties[i].c, Type.Properties[i].f)();
+        return r;
+    }
+    __gshared const _storage = _make();
+}
 
 auto all_properties_impl(Type, size_t allocCount)()
 {
@@ -742,7 +1002,10 @@ auto all_properties_impl(Type, size_t allocCount)()
     static if (is(Type S == super) && !is(Unqual!S == Object))
     {
         alias Super = Unqual!(S[0]);
-        static if (!is(typeof(Type.Properties) == typeof(Super.Properties)) || &Type.Properties !is &Super.Properties)
+        static if (is_old_style_properties!Type
+            && (!is_old_style_properties!Super || !is(typeof(Type.Properties) == typeof(Super.Properties)) || &Type.Properties !is &Super.Properties))
+            enum PropCount = Type.Properties.length;
+        else static if (!is_old_style_properties!Type && declares_own_properties!Type)
             enum PropCount = Type.Properties.length;
         else
             enum PropCount = 0;
@@ -754,8 +1017,12 @@ auto all_properties_impl(Type, size_t allocCount)()
         const(Property)*[PropCount + allocCount] result;
     }
 
-    static foreach (i; 0 .. PropCount)
-        result[result.length - allocCount - PropCount + i] = &Type.Properties[i];
+    static if (is_old_style_properties!Type)
+        static foreach (i; 0 .. PropCount)
+            result[result.length - allocCount - PropCount + i] = &Type.Properties[i];
+    else
+        static foreach (i; 0 .. PropCount)
+            result[result.length - allocCount - PropCount + i] = &MaterializedProperties!Type._storage[i];
 
     return result;
 }
@@ -845,15 +1112,15 @@ StringResult SynthSetter(Setters...)(ref const Variant value, BaseObject item) n
     return StringResult(tconcat("Couldn't set property '" ~ __traits(identifier, Setters[0]) ~ "' with value: ", value));
 }
 
-void SynthResetter(Setters...)(BaseObject item) nothrow @nogc
+Variant SynthDefault(alias Getter)() nothrow @nogc
 {
-    alias Type = __traits(parent, Setters[0]);
-    Type instance = cast(Type)item;
-
-    // reset will write the init value to the first setter
-    alias Setter = Setters[0];
-    alias PropType = Parameters!Setter[0];
-    __traits(child, instance, Setter)(PropType.init);
+    alias U = Unqual!(ReturnType!Getter);
+    static if (is(U == Variant))
+        return Variant();
+    else static if (__traits(compiles, { U v = U.init; return to_variant(v); }))
+        return to_variant(U.init);
+    else
+        return Variant();   // unsupported; schema reports null
 }
 
 template SynthSuggest(Setters...)

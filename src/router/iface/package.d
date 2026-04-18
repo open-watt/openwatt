@@ -161,35 +161,36 @@ struct InterfaceSubscriber
 //      02:FE:ED:xx:xx:yy
 //      02:B0:0B:xx:xx:yy
 
-class BaseInterface : BaseObject
+class BaseInterface : ActiveObject
 {
-    __gshared Property[24] Properties = [ Property.create!("actual-mtu", actual_mtu, null, "d")(),
-                                          Property.create!("mtu", mtu, null, "d")(),
-                                          Property.create!("l2mtu", l2mtu)(),
-                                          Property.create!("max-l2mtu", max_l2mtu, null, "d")(),
-                                          Property.create!("pcap", pcap)(),
-                                          Property.create!("last_status_change_time", last_status_change_time, "status")(),
-                                          Property.create!("connected", connected, "status", "d")(),
-                                          Property.create!("link_status", link_status, "status", "d")(),
-                                          Property.create!("link_downs", link_downs, "status")(),
-                                          Property.create!("tx_link_speed", tx_link_speed, "status")(),
-                                          Property.create!("rx_link_speed", rx_link_speed, "status")(),
-                                          Property.create!("tx_bytes", tx_bytes, "traffic", "d")(),
-                                          Property.create!("rx_bytes", rx_bytes, "traffic", "d")(),
-                                          Property.create!("tx_packets", tx_packets, "traffic", "d")(),
-                                          Property.create!("rx_packets", rx_packets, "traffic", "d")(),
-                                          Property.create!("tx_dropped", tx_dropped, "traffic", "d")(),
-                                          Property.create!("rx_dropped", rx_dropped, "traffic", "d")(),
-                                          Property.create!("tx_rate", tx_rate, "traffic", "d")(),
-                                          Property.create!("rx_rate", rx_rate, "traffic", "d")(),
-                                          Property.create!("tx_rate_max", tx_rate_max, "traffic")(),
-                                          Property.create!("rx_rate_max", rx_rate_max, "traffic")(),
-                                          Property.create!("avg_queue_time", avg_queue_time, "traffic")(),
-                                          Property.create!("avg_service_time", avg_service_time, "traffic")(),
-                                          Property.create!("max_service_time", max_service_time, "traffic")() ];
+    alias Properties = AliasSeq!(Prop!("actual-mtu", actual_mtu, null, "d"),
+                                 Prop!("mtu", mtu, null, "d"),
+                                 Prop!("l2mtu", l2mtu),
+                                 Prop!("max-l2mtu", max_l2mtu, null, "d"),
+                                 Prop!("pcap", pcap),
+                                 Prop!("last-status-change-time", last_status_change_time, "status"),
+                                 Prop!("connected", connected, "status", "d"),
+                                 Prop!("link-status", link_status, "status", "d"),
+                                 Prop!("link-downs", link_downs, "status"),
+                                 Prop!("tx-link-speed", tx_link_speed, "status"),
+                                 Prop!("rx-link-speed", rx_link_speed, "status"),
+                                 Prop!("tx-bytes", tx_bytes, "traffic", "d"),
+                                 Prop!("rx-bytes", rx_bytes, "traffic", "d"),
+                                 Prop!("tx-packets", tx_packets, "traffic", "d"),
+                                 Prop!("rx-packets", rx_packets, "traffic", "d"),
+                                 Prop!("tx-dropped", tx_dropped, "traffic", "d"),
+                                 Prop!("rx-dropped", rx_dropped, "traffic", "d"),
+                                 Prop!("tx-rate", tx_rate, "traffic", "d"),
+                                 Prop!("rx-rate", rx_rate, "traffic", "d"),
+                                 Prop!("tx-rate-max", tx_rate_max, "traffic"),
+                                 Prop!("rx-rate-max", rx_rate_max, "traffic"),
+                                 Prop!("avg-queue-time", avg_queue_time, "traffic"),
+                                 Prop!("avg-service-time", avg_service_time, "traffic"),
+                                 Prop!("max-service-time", max_service_time, "traffic"));
 nothrow @nogc:
 
     enum type_name = "interface";
+    enum path = "/interface";
     enum collection_id = CollectionType.interface_;
 
     MACAddress mac;
@@ -207,9 +208,11 @@ nothrow @nogc:
 
     final ushort mtu() const pure
         => _mtu;
-    final void mtu(ushort value) pure
+    final void mtu(ushort value)
     {
         _mtu = value;
+        mark_set!(typeof(this), "mtu")();
+        mark_set!(typeof(this), "actual-mtu")();
     }
     ushort actual_mtu() const pure
         => _mtu == 0 ? _l2mtu : _mtu;
@@ -217,9 +220,11 @@ nothrow @nogc:
     // TODO: the L2MTU properties should be available only to actual L2 interfaces...
     final ushort l2mtu() const pure
         => _l2mtu;
-    void l2mtu(ushort value) pure
+    final void l2mtu(ushort value)
     {
         _l2mtu = value;
+        mark_set!(typeof(this), "l2mtu")();
+        mark_set!(typeof(this), "actual-mtu")();
     }
     final ushort max_l2mtu() const pure
         => _max_l2mtu;
@@ -238,6 +243,7 @@ nothrow @nogc:
             return tconcat("Failed to attach pcap interface '", value, "' to '", name, "'; doesn't exist");
         else
             cap.subscribe_interface(this);
+        mark_set!(typeof(this), "pcap")();
         return null;
     }
 
@@ -285,6 +291,9 @@ nothrow @nogc:
         _last_tx_bytes = 0;
         _last_rx_bytes = 0;
         _last_bitrate_sample = getTime();
+
+        mark_set!(typeof(this), [ "link-downs", "tx-bytes", "rx-bytes", "tx-packets", "rx-packets", "tx-dropped", "rx-dropped",
+                                    "tx-rate", "rx-rate", "tx-rate-max", "rx-rate-max", "avg-queue-time", "avg-service-time", "max-service-time" ]);
     }
 
     override const(char)[] status_message() const
@@ -451,17 +460,37 @@ protected:
         if ((now - _last_bitrate_sample) >= 1.seconds)
         {
             ulong elapsed_us = (now - _last_bitrate_sample).as!"usecs";
+
+            ulong last_tx = _status.tx_rate, last_rx = _status.rx_rate;
             _status.tx_rate = (_status.tx_bytes - _last_tx_bytes) * 1_000_000 / elapsed_us;
             _status.rx_rate = (_status.rx_bytes - _last_rx_bytes) * 1_000_000 / elapsed_us;
 
+            ulong dirty = 0;
+            if (_status.tx_rate != last_tx)
+                dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate");
+            if (_status.rx_rate != last_rx)
+                dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate");
+
             if (_status.tx_rate > _status.tx_rate_max)
+            {
                 _status.tx_rate_max = _status.tx_rate;
+                dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate-max");
+            }
             if (_status.rx_rate > _status.rx_rate_max)
+            {
                 _status.rx_rate_max = _status.rx_rate;
+                dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate-max");
+            }
 
             _last_tx_bytes = _status.tx_bytes;
             _last_rx_bytes = _status.rx_bytes;
             _last_bitrate_sample = now;
+
+            if (dirty)
+            {
+                _props_set |= dirty;
+                _mark_dirty(dirty);
+            }
         }
     }
 
@@ -472,6 +501,7 @@ protected:
         _last_bitrate_sample = getTime();
         _last_tx_bytes = _status.tx_bytes;
         _last_rx_bytes = _status.rx_bytes;
+        mark_set!(typeof(this), [ "link-status", "last-status-change-time" ])();
     }
 
     override void offline()
@@ -484,14 +514,15 @@ protected:
         _status.avg_queue_us = 0;
         _status.avg_service_us = 0;
         _status.max_service_us = 0;
+        mark_set!(typeof(this), [ "link-status", "last-status-change-time", "link-downs", "tx-rate", "rx-rate",
+                                    "avg-queue-time", "avg-service-time", "max-service-time" ])();
     }
 
     abstract int transmit(ref Packet packet, MessageCallback callback = null);
 
     final void dispatch(ref Packet packet)
     {
-        ++_status.rx_packets;
-        _status.rx_bytes += packet.length;
+        add_rx_frame(packet.length);
 
         if (packet.type == PacketType.ethernet && !packet.eth.src.is_multicast)
         {
@@ -536,12 +567,62 @@ protected:
         return addr;
     }
 
+    final void update_service_times(uint wait_us, uint service_us)
+    {
+        // EWMA: 7/8 * old + 1/8 * new
+        _status.avg_queue_us = (_status.avg_queue_us*7 + wait_us) / 8;
+        _status.avg_service_us = (_status.avg_service_us*7 + service_us) / 8;
+
+        ulong dirty = ulong(1) << prop_index!(typeof(this), "avg-queue-time") |
+                      ulong(1) << prop_index!(typeof(this), "avg-service-time");
+
+        if (service_us > _status.max_service_us)
+        {
+            _status.max_service_us = service_us;
+            dirty |= ulong(1) << prop_index!(typeof(this), "max-service-time");
+        }
+
+        _props_set |= dirty;
+        _mark_dirty(dirty);
+    }
+
+    final void add_tx_frame(size_t bytes)
+    {
+        ++_status.tx_packets;
+        _status.tx_bytes += bytes;
+        mark_set!(typeof(this), [ "tx-bytes", "tx-packets" ])();
+    }
+
+    final void add_rx_frame(size_t bytes)
+    {
+        ++_status.rx_packets;
+        _status.rx_bytes += bytes;
+        mark_set!(typeof(this), [ "rx-bytes", "rx-packets" ])();
+    }
+
+    final void add_tx_drop()
+    {
+        ++_status.tx_dropped;
+        mark_set!(typeof(this), [ "tx-dropped" ])();
+    }
+
+    final void add_rx_drop()
+    {
+        ++_status.rx_dropped;
+        mark_set!(typeof(this), [ "rx-dropped" ])();
+    }
+
     // TODO: this package section should be refactored out of existence!
 package:
     BaseInterface _master;
     byte _slave_id;
 
     Packet[] _send_queue;
+
+    void queue_update_service_times(uint wait_us, uint service_us)
+    {
+        update_service_times(wait_us, service_us);
+    }
 
 //private:
 protected: // TODO: should probably be private?
@@ -560,12 +641,12 @@ nothrow @nogc:
         g_app.register_enum!ConnectionStatus();
         g_app.register_enum!LinkStatus();
 
-        g_app.console.register_collection!BaseInterface("/interface");
+        g_app.console.register_collection!BaseInterface();
     }
 
     override void init()
     {
-        g_app.console.register_collection!VLANInterface("/interface/vlan");
+        g_app.console.register_collection!VLANInterface();
     }
 
     override void update()

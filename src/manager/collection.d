@@ -38,6 +38,8 @@ enum CollectionType : ubyte
     pppoe_server,
     secret,
     stream, // all streams
+    sync_channel,
+    sync_ws_server,
     tcp_server,
     tls_server,
     websocket,
@@ -110,11 +112,23 @@ const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
         else
             enum CollectionTypeInfo.GetSuperFn get_super_fn = null;
 
+        static if (is(typeof(Type.path) : const(char)[]))
+            enum _path = Type.path;
+        else
+            enum _path = null;
+
+        static if (is(typeof(Type.syncable) : bool))
+            enum bool _syncable = Type.syncable;
+        else
+            enum bool _syncable = true;
+
         __gshared const CollectionTypeInfo ti = CollectionTypeInfo(StringLit!(Type.type_name),
+                                                                   StringLit!_path,
                                                                    Type.collection_id,
                                                                    all_properties!Type(),
                                                                    create_instance,
-                                                                   get_super_fn);
+                                                                   get_super_fn,
+                                                                   _syncable);
         return &ti;
     }
 }
@@ -125,10 +139,15 @@ struct CollectionTypeInfo
     alias GetSuperFn = const(CollectionTypeInfo)* function() nothrow @nogc;
 
     String type;
+    String path;
     CollectionType collection_id;
     const(Property*)[] properties;
     CreateFun create;
     GetSuperFn get_super;
+    bool syncable = true;
+
+    bool is_abstract() const pure nothrow @nogc
+        => create is null;
 }
 
 struct BaseCollection
@@ -184,11 +203,12 @@ nothrow @nogc:
     {
         assert(type_info.get_super is null, "update_all should only be called on root collections");
 
-        Array!BaseObject doomed;
+        Array!ActiveObject doomed;
         foreach (ref e; table._entries)
         {
-            if (e.value !is null && e.value.do_update())
-                doomed ~= e.value;
+            ActiveObject item = cast(ActiveObject)e.value; // TODO: maybe not dynamic cast?
+            if (item !is null && item.do_update())
+                doomed ~= item;
         }
         foreach (item; doomed)
         {
@@ -204,6 +224,7 @@ nothrow @nogc:
         auto entry = table.find_entry(item._id);
         assert(entry !is null, "CID not in table");
         entry.value = item;
+        signal_object_created(item);
     }
 
     void remove(BaseObject item)
@@ -353,8 +374,7 @@ nothrow @nogc:
     }
 }
 
-// Returns true if filter is an ancestor-or-self of element_type in the collection RTTI chain
-private bool type_matches(const(CollectionTypeInfo)* filter, const(CollectionTypeInfo)* element_type) nothrow @nogc
+bool type_matches(const(CollectionTypeInfo)* filter, const(CollectionTypeInfo)* element_type) nothrow @nogc
 {
     for (const(CollectionTypeInfo)* ti = element_type; ti !is null; ti = ti.get_super ? ti.get_super() : null)
         if (ti is filter)
@@ -379,7 +399,6 @@ template CollectionRoot(T)
         alias CollectionRoot = T;
 }
 
-// Immediate parent in the collection type hierarchy (one level up).
 template CollectionSuper(T)
 {
     alias Super = BaseClassOf!T;
@@ -396,6 +415,21 @@ void broadcast_rekey(CID old_id, CID new_id)
         foreach (ref e; table._entries)
             if (e.value !is null)
                 e.value.do_rekey(old_id, new_id);
+}
+
+alias ObjectLifecycleHandler = void delegate(BaseObject obj) nothrow @nogc;
+
+void register_object_created_handler(ObjectLifecycleHandler handler) nothrow @nogc
+{
+    _on_object_created ~= handler;
+}
+
+void foreach_object(scope void delegate(BaseObject obj) nothrow @nogc fn)
+{
+    foreach (ref table; g_item_tables)
+        foreach (ref e; table._entries)
+            if (e.value !is null)
+                fn(e.value);
 }
 
 
@@ -470,12 +504,21 @@ void rekey_field(T)(ref T field, CID old_id, CID new_id)
 
 private:
 
+// HACK: is this satisfactory?
+__gshared Array!ObjectLifecycleHandler _on_object_created;
+
 __gshared CollectionTable[CollectionType.count] g_item_tables;
 
 package void init_collections()
 {
     foreach (ref t; g_item_tables)
         t.init();
+}
+
+void signal_object_created(BaseObject obj) nothrow @nogc
+{
+    foreach (h; _on_object_created[])
+        h(obj);
 }
 
 package ref CollectionTable item_table(uint collection) pure

@@ -15,7 +15,7 @@ import manager.console.session;
 nothrow @nogc:
 
 
-class CronJob : BaseObject
+class CronJob : ActiveObject
 {
     __gshared Property[6] Properties = [ Property.create!("schedule", schedule)(),
                                          Property.create!("repeat", repeat)(),

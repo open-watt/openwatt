@@ -18,13 +18,14 @@ import protocol.ble.iface;
 nothrow @nogc:
 
 
-class BLEClient : BaseObject
+class BLEClient : ActiveObject
 {
     __gshared Property[2] Properties = [ Property.create!("interface", iface)(),
                                          Property.create!("peer", peer)() ];
 nothrow @nogc:
 
     enum type_name = "ble-client";
+    enum path = "/protocol/ble/client";
     enum collection_id = CollectionType.ble_client;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -240,7 +241,7 @@ private:
     }
 
 
-    void iface_state_change(BaseObject, StateSignal signal)
+    void iface_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
             restart();

@@ -82,6 +82,8 @@ nothrow @nogc:
 
     override void update()
     {
+        super.update();
+
         ubyte[2048] buffer = void;
         SysTime now = getSysTime();
 
@@ -254,6 +256,8 @@ nothrow @nogc:
 
     override void update()
     {
+        super.update();
+
         if (!_interface)
             restart();
     }

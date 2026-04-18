@@ -30,7 +30,7 @@ nothrow @nogc:
 alias ESPHomeMessageHandler = void delegate(uint msg_type, const(ubyte)[] payload);
 
 
-class ESPHomeClient : BaseObject
+class ESPHomeClient : ActiveObject
 {
     __gshared Property[4] Properties = [ Property.create!("remote", remote)(),
                                          Property.create!("port", port)(),
@@ -407,7 +407,7 @@ private:
         }
     }
 
-    void stream_state_handler(BaseObject object, StateSignal signal)
+    void stream_state_handler(ActiveObject object, StateSignal signal)
     {
         if (signal == StateSignal.offline)
         {

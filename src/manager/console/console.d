@@ -228,12 +228,9 @@ nothrow @nogc:
         return register_command(_scope, FunctionCommand.create!method(this, instance, commandName));
     }
 
-    void register_collection(Type)(string _scope)
+    void register_collection(Type)(string _scope = null)
     {
-        import manager.collection : CollectionRoot;
-        alias Root = CollectionRoot!Type;
-
-        register_collection(collection_type_info!Type, !is(Type == Root), _scope);
+        register_collection(collection_type_info!Type, _scope);
     }
 
     void unregister_command(const(char)[] _scope, const(char)[] command)
@@ -356,10 +353,12 @@ package:
 
     Console* _next_console_instance = null;
 
-    void register_collection(const(CollectionTypeInfo)* type_info, bool is_derived, string _scope)
+    void register_collection(const(CollectionTypeInfo)* type_info, string scope_ = null)
     {
-        if (is_derived)
-            g_app.register_collection(type_info, _scope);
+        const(char)[] _scope = scope_ ? scope_ : type_info.path[];
+        debug assert(_scope !is null);
+
+        g_app.register_type(type_info, _scope);
 
         import manager.console.collection_commands;
         Scope s = create_scope(_scope);

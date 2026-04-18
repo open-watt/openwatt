@@ -15,14 +15,15 @@ nothrow @nogc:
 
 class IPRoute : BaseObject
 {
-    __gshared Property[5] Properties = [ Property.create!("destination", destination)(),
-                                         Property.create!("gateway", gateway)(),
-                                         Property.create!("out-interface", out_interface)(),
-                                         Property.create!("blackhole", blackhole)(),
-                                         Property.create!("distance", distance)()];
+    alias Properties = AliasSeq!(Prop!("destination", destination),
+                                 Prop!("gateway", gateway),
+                                 Prop!("out-interface", out_interface),
+                                 Prop!("blackhole", blackhole),
+                                 Prop!("distance", distance));
 nothrow @nogc:
 
     enum type_name = "ip-route";
+    enum path = "/protocol/ip/route";
     enum collection_id = CollectionType.ip_route;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -36,6 +37,7 @@ nothrow @nogc:
     void destination(IPNetworkAddress value)
     {
         _destination = IPNetworkAddress(value.get_network, value.prefix_len);
+        mark_set!(typeof(this), "destination")();
     }
 
     IPAddr gateway() const pure
@@ -47,6 +49,9 @@ nothrow @nogc:
         _iface = null;
         _gateway = value;
         _blackhole = false;
+        mark_set!(typeof(this), "gateway")();
+        mark_set!(typeof(this), "out-interface")();
+        mark_set!(typeof(this), "blackhole")();
         return null;
     }
 
@@ -61,6 +66,9 @@ nothrow @nogc:
         _gateway = IPAddr();
         _iface = value;
         _blackhole = false;
+        mark_set!(typeof(this), "gateway")();
+        mark_set!(typeof(this), "out-interface")();
+        mark_set!(typeof(this), "blackhole")();
         return null;
     }
 
@@ -69,6 +77,7 @@ nothrow @nogc:
     void blackhole(bool value)
     {
         _blackhole = value;
+        mark_set!(typeof(this), "blackhole")();
     }
 
     ubyte distance() const pure
@@ -78,6 +87,7 @@ nothrow @nogc:
     void distance(bool value)
     {
         _distance = value;
+        mark_set!(typeof(this), "distance")();
     }
 
     override bool validate() const pure nothrow @nogc

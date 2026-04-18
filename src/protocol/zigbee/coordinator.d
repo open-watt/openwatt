@@ -745,7 +745,7 @@ nothrow:
         assert(false, "TODO");
     }
 
-    void state_change(BaseObject object, StateSignal signal)
+    void state_change(ActiveObject object, StateSignal signal)
     {
         // if the interface goes offline, we should restart the coordinator...
         if (object is _interface && signal == StateSignal.offline)

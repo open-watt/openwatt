@@ -34,7 +34,7 @@ alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref Mod
 alias ModbusErrorHandler = void delegate(ModbusErrorType errorType, ref const ModbusPDU request, SysTime request_time) nothrow @nogc;
 alias ModbusSnoopHandler = void delegate(ubyte server_address, ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time) nothrow @nogc;
 
-class ModbusClient : BaseObject
+class ModbusClient : ActiveObject
 {
     __gshared Property[2] Properties = [ Property.create!("interface", iface)(),
                                          Property.create!("snoop", snoop)() ];
@@ -265,7 +265,7 @@ private:
         }
     }
 
-    void iface_state_change(BaseObject, StateSignal signal)
+    void iface_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
             restart();

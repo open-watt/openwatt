@@ -20,7 +20,7 @@ nothrow @nogc:
 
 alias PublishCallback = void delegate(const(char)[] sender, const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp) nothrow @nogc;
 
-class MQTTBroker : BaseObject
+class MQTTBroker : ActiveObject
 {
     __gshared Property[3] Properties = [ Property.create!("port", port)(),
                                          Property.create!("allow-anonymous", allow_anonymous)(),
@@ -296,7 +296,7 @@ private:
         return s;
     }
 
-    final void server_signal(BaseObject object, StateSignal signal)
+    final void server_signal(ActiveObject object, StateSignal signal)
     {
         final switch (signal)
         {

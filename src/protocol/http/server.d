@@ -27,7 +27,7 @@ version = DebugHTTPServer;
 nothrow @nogc:
 
 
-class HTTPServer : BaseObject
+class HTTPServer : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("port", port),
                                  Prop!("tls-port", tls_port),
@@ -38,7 +38,13 @@ nothrow @nogc:
     enum type_name = "http-server";
     enum collection_id = CollectionType.http_server;
 
-    alias RequestHandler = int delegate(ref const HTTPMessage, ref Stream stream) nothrow @nogc;
+    // Handlers may return:
+    //   0 = handled, keep the connection open for the next request
+    //   1 = handler claimed the stream (e.g. protocol upgrade); `stream` has been set to null.
+    //       `leftover` holds any bytes the HTTP parser already read past this request -
+    //       the claimer owns them and must process them before the first stream.read().
+    //  <0 = error, drop the session
+    alias RequestHandler = int delegate(ref const HTTPMessage, ref Stream stream, const(ubyte)[] leftover) nothrow @nogc;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -317,7 +323,7 @@ private:
         log.notice("listening on HTTPS port ", _tls_port);
     }
 
-    void server_state_change(BaseObject obj, StateSignal signal)
+    void server_state_change(ActiveObject obj, StateSignal signal)
     {
         if (signal == StateSignal.destroyed)
         {
@@ -336,7 +342,7 @@ private:
         }
     }
 
-    void cert_state_change(BaseObject obj, StateSignal signal)
+    void cert_state_change(ActiveObject obj, StateSignal signal)
     {
         version (DebugHTTPServer)
             log.trace("cert_state_change signal=", signal);
@@ -365,7 +371,7 @@ private:
         }
     }
 
-    int http_redirect_handler(ref const HTTPMessage request, ref Stream stream)
+    int http_redirect_handler(ref const HTTPMessage request, ref Stream stream, const(ubyte)[] leftover)
     {
         // allow ACME challenge paths
         if (request.request_target[].startsWith("/.well-known/acme-challenge/"))
@@ -432,20 +438,32 @@ private:
         {
             if (!stream)
                 return -1;
-            if (int result = parser.update(stream))
+            // `stream` may be nulled out by signal_handler or by a request handler
+            // that claims the stream, so pin the reference for the final unsubscribe.
+            Stream s = stream;
+            int result = parser.update(s);
+            if (result < 0)
             {
                 close();
                 return result;
+            }
+            if (!stream)
+            {
+                if (!_signal_unsubscribed)
+                    s.unsubscribe(&signal_handler);
+                return -1;
             }
             return 0;
         }
 
         int request_callback(ref const HTTPMessage request)
         {
+            const(ubyte)[] leftover = parser.current_leftover;
+
             // check redirect interceptor first
             if (redirect_handler)
             {
-                int result = redirect_handler(request, stream);
+                int result = redirect_handler(request, stream, leftover);
                 if (result != 0)
                     return result;
             }
@@ -453,11 +471,21 @@ private:
             foreach (ref h; server._handlers)
             {
                 if (((1 << request.method) & h.methods) && request.request_target[].startsWith(h.uri_prefix[]))
-                    return h.request_handler(request, stream);
+                {
+                    int result = h.request_handler(request, stream, leftover);
+                    if (!stream)
+                        return 1; // handler claimed the stream (upgrade)
+                    return result;
+                }
             }
 
             if (server._default_request_handler)
-                return server._default_request_handler(request, stream);
+            {
+                int result = server._default_request_handler(request, stream, leftover);
+                if (!stream)
+                    return 1;
+                return result;
+            }
 
             // implement default response...
             enum message_body = "OpenWatt Webserver";
@@ -473,12 +501,14 @@ private:
 
     private:
         HTTPParser parser;
+        bool _signal_unsubscribed;
 
-        void signal_handler(BaseObject object, StateSignal signal)
+        void signal_handler(ActiveObject object, StateSignal signal)
         {
             if (signal != StateSignal.online)
             {
                 stream.unsubscribe(&signal_handler);
+                _signal_unsubscribed = true;
                 stream = null;
             }
         }

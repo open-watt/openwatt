@@ -922,7 +922,7 @@ nothrow @nogc:
         super(collection_type_info!TLSServer, id, flags);
     }
 
-    void certificate(BaseObject value)
+    void certificate(ActiveObject value)
     {
         _certificates.clear();
         if (value)
@@ -930,7 +930,7 @@ nothrow @nogc:
         restart();
     }
 
-    void certificates(BaseObject[] value...)
+    void certificates(ActiveObject[] value...)
     {
         _certificates.clear();
         _certificates.reserve(value.length);
@@ -1002,7 +1002,7 @@ package:
 
 private:
 
-    Array!(ObjectRef!BaseObject) _certificates;
+    Array!(ObjectRef!ActiveObject) _certificates;
 }
 
 

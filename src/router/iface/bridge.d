@@ -30,6 +30,7 @@ class BridgeInterface : BaseInterface
 nothrow @nogc:
 
     enum type_name = "bridge";
+    enum path = "/interface/bridge";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -202,7 +203,7 @@ nothrow @nogc:
                 if (_bridge_port.pvid == 0)
                 {
                     // don't admit untagged
-                    ++_status.tx_dropped;
+                    add_tx_drop();
                     return -1;
                 }
                 packet.vlan |= _bridge_port.pvid;
@@ -225,8 +226,7 @@ nothrow @nogc:
 
         send(packet, _local_port);
 
-        ++_status.tx_packets;
-        _status.tx_bytes += packet.data.length;
+        add_tx_frame(packet.data.length);
 
         return 0;
     }
@@ -295,6 +295,7 @@ protected:
 
     override void update()
     {
+        super.update();
         // TODO: AddressTable needs TTL mechanism...
 //        _address_table.update();
     }
@@ -406,7 +407,7 @@ protected:
         return;
 
     drop_packet:
-        ++_status.rx_dropped;
+        add_rx_drop();
     }
 
 private:
@@ -550,7 +551,7 @@ private:
                     }
 
                     if (_members[dst_port].iface.forward(packet) < 0)
-                        ++_status.tx_dropped;
+                        add_tx_drop();
                 }
                 return;
             }
@@ -576,7 +577,7 @@ private:
                 }
 
                 if (member.iface.forward(packet) < 0)
-                    ++_status.tx_dropped;
+                    add_tx_drop();
             }
         }
         if (src_port != _local_port)
@@ -682,10 +683,7 @@ private:
                     recycle_tracking(tracking);
 
                     if (tag == 0)
-                    {
-                        ++_status.tx_packets;
-                        _status.tx_bytes += packet.data.length;
-                    }
+                        add_tx_frame(packet.data.length);
                     return tag;
                 }
                 tracking.port_tags.pushBack(PortTag(_members[dst_port].iface, tag));
@@ -726,10 +724,7 @@ private:
             recycle_tracking(tracking);
 
             if (any_succeeded)
-            {
-                ++_status.tx_packets;
-                _status.tx_bytes += packet.data.length;
-            }
+                add_tx_frame(packet.data.length);
             return any_succeeded ? 0 : -1;
         }
 
@@ -748,8 +743,7 @@ private:
         tracking.upstream_cb = callback;
         link_active(tracking);
 
-        ++_status.tx_packets;
-        _status.tx_bytes += packet.data.length;
+        add_tx_frame(packet.data.length);
         return btag;
     }
 }
@@ -762,7 +756,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!BridgeInterface("/interface/bridge");
+        g_app.console.register_collection!BridgeInterface();
         g_app.console.register_command!port_add("/interface/bridge/port", this, "add");
     }
 

@@ -258,6 +258,12 @@
     <DCompile Include="src\manager\secret.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\manager\sync.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sync_ws.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
     <DCompile Include="src\manager\value.d">
       <Filter>src\manager</Filter>
     </DCompile>

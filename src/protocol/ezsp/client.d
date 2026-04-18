@@ -58,7 +58,7 @@ template EZSPResult(T)
         alias EZSPResult = T.Response;
 }
 
-class EZSPClient : BaseObject
+class EZSPClient : ActiveObject
 {
     __gshared Property[5] Properties = [ Property.create!("ash_stream", ash_stream)(),
                                          Property.create!("ash_interface", ash_interface)(),
@@ -68,6 +68,7 @@ class EZSPClient : BaseObject
 @nogc:
 
     enum type_name = "ezsp";
+    enum path = "/protocol/ezsp/client";
     enum collection_id = CollectionType.ezsp;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
@@ -442,7 +443,7 @@ private:
         return _ash.forward(p);
     }
 
-    void ash_state_change(BaseObject, StateSignal signal)
+    void ash_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
             restart();

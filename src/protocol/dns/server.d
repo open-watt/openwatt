@@ -55,7 +55,7 @@ enum NSProtocol : ubyte
     wins, //       ""
 }
 
-class DNSServer : BaseObject
+class DNSServer : ActiveObject
 {
     __gshared Property[4] Properties = [ Property.create!("interface", iface)(),
                                          Property.create!("protocols", protocols)(),
@@ -645,7 +645,7 @@ private:
         }
     }
 
-    int doh_request_handler(ref const HTTPMessage, ref Stream stream)
+    int doh_request_handler(ref const HTTPMessage, ref Stream stream, const(ubyte)[] leftover)
     {
         assert(false, "TODO: incoming DoH request...");
         // TODO: handle requests with `Content-Type: application/dns-message` as a DNS request...

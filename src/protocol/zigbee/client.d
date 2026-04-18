@@ -49,7 +49,7 @@ struct ZCLResponse
 }
 
 
-class ZigbeeNode : BaseObject
+class ZigbeeNode : ActiveObject
 {
     __gshared Property[5] Properties = [ Property.create!("interface", iface)(),
                                          Property.create!("is-router", is_router)(),
@@ -944,7 +944,7 @@ private:
 }
 
 
-class ZigbeeEndpoint : BaseObject
+class ZigbeeEndpoint : ActiveObject
 {
     __gshared Property[7] Properties = [ Property.create!("node", node)(),
                                          Property.create!("endpoint-id", endpoint)(),
