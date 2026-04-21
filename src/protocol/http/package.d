@@ -9,9 +9,10 @@ import urt.log;
 import urt.map;
 import urt.mem.allocator;
 import urt.string;
-import urt.string.format : tstring;
+import urt.string.format : tconcat, tstring;
 import urt.time;
 
+import manager.base;
 import manager.collection;
 import manager.console;
 import manager.plugin;
@@ -22,9 +23,91 @@ import protocol.http.server;
 import protocol.http.tls;
 import protocol.http.websocket;
 
+import router.stream;
 import router.stream.tcp;
 
 nothrow @nogc:
+
+
+Stream create_http_stream(const(char)[] stream_name, const(char)[] host_str, InetAddress remote, out const(char)[] resource)
+{
+    if (host_str.length)
+    {
+        const(char)[] host = host_str;
+        const(char)[] protocol = "http";
+
+        size_t prefix = host.findFirst(":");
+        if (prefix != host.length)
+        {
+            protocol = host[0 .. prefix];
+            host = host[prefix + 1 .. $];
+        }
+        if (host.startsWith("//"))
+            host = host[2 .. $];
+
+        size_t res_offset = host.findFirst("/");
+        if (res_offset != host.length)
+        {
+            resource = host[res_offset .. $];
+            host = host[0 .. res_offset];
+        }
+
+        ushort port;
+        size_t colon = host.findFirst(":");
+        if (colon != host.length)
+        {
+            size_t taken;
+            long i = host[colon + 1 .. $].parse_int(&taken);
+            if (i > ushort.max || taken != host.length - colon - 1)
+                return null;
+            port = cast(ushort)i;
+        }
+
+        bool plain = protocol.icmp("http") == 0 || protocol.icmp("ws") == 0;
+        bool secure = protocol.icmp("https") == 0 || protocol.icmp("wss") == 0;
+
+        if (plain)
+        {
+            if (port == 0)
+                port = 80;
+            return cast(Stream)Collection!TCPStream().create(stream_name, ObjectFlags.dynamic, NamedArgument("port", port), NamedArgument("remote", host));
+        }
+        if (secure)
+        {
+            import protocol.http.tls : TLSStream;
+            if (port == 0)
+                host = tconcat(host, ":443");
+            return cast(Stream)Collection!TLSStream().create(stream_name, ObjectFlags.dynamic, NamedArgument("remote", host));
+        }
+        return null;
+    }
+
+    if (remote != InetAddress())
+    {
+        InetAddress addr = remote;
+        if (addr.family == AddressFamily.ipv6 && addr._a.ipv6.port == 0)
+            addr._a.ipv6.port = 80;
+        else if (addr.family == AddressFamily.ipv4 && addr._a.ipv4.port == 0)
+            addr._a.ipv4.port = 80;
+        return cast(Stream)Collection!TCPStream().create(stream_name, ObjectFlags.dynamic, NamedArgument("remote", addr));
+    }
+
+    return null;
+}
+
+const(char)[] http_host_header(const(char)[] url) pure
+{
+    const(char)[] h = url;
+    size_t colon = h.findFirst(":");
+    if (colon != h.length)
+        h = h[colon + 1 .. $];
+    if (h.startsWith("//"))
+        h = h[2 .. $];
+    size_t slash = h.findFirst("/");
+    if (slash != h.length)
+        h = h[0 .. slash];
+    return h;
+}
 
 
 class HTTPModule : Module
