@@ -20,6 +20,8 @@ import manager.sync;
 import protocol.http.server;
 import protocol.http.websocket;
 
+import router.iface;
+
 //version = DebugSyncWS;
 
 nothrow @nogc:
@@ -40,7 +42,10 @@ nothrow @nogc:
     void bind(WebSocket ws)
     {
         _ws = ws;
-        ws.set_message_handler(&on_ws_message);
+        PacketFilter filter;
+        filter.type = PacketType.raw;
+        filter.direction = PacketDirection.incoming;
+        ws.subscribe(&on_ws_packet, filter);
         ws.subscribe(&on_ws_state_change);
     }
 
@@ -48,13 +53,14 @@ nothrow @nogc:
     {
         if (_ws)
         {
+            _ws.unsubscribe(&on_ws_packet);
             _ws.unsubscribe(&on_ws_state_change);
             _ws = null;
         }
     }
 
     bool ws_alive() const pure
-        => _ws !is null && _ws.running;
+        => _ws !is null;
 
     override void send(ref const SyncMessage msg)
     {
@@ -68,7 +74,10 @@ nothrow @nogc:
         debug version (DebugSyncWS)
             log.trace("send: ", buf[]);
 
-        _ws.send_text(buf[]);
+        Packet p;
+        ref hdr = p.init!RawFrame(cast(const(ubyte)[])buf[]);
+        hdr.is_text = true;
+        _ws.forward(p);
     }
 
 private:
@@ -77,22 +86,22 @@ private:
     void on_ws_state_change(ActiveObject, StateSignal signal)
     {
         if (signal != StateSignal.online)
-        {
-            _ws.unsubscribe(&on_ws_state_change);
-            _ws = null;
-        }
+            unbind();
     }
 
-    void on_ws_message(const(ubyte)[] message, WSMessageType message_type)
+    void on_ws_packet(ref const Packet p, BaseInterface, PacketDirection, void*)
     {
-        if (message_type != WSMessageType.text)
+        ref const hdr = p.hdr!RawFrame();
+        if (!hdr.is_text)
             return;
 
+        const(char)[] message = cast(const(char)[])p.data;
+
         debug version (DebugSyncWS)
-            log.trace("recv: ", cast(const(char)[])message);
+            log.trace("recv: ", message);
 
         SyncMessage msg;
-        if (!decode(cast(const(char)[])message, msg))
+        if (!decode(message, msg))
             return;
 
         apply_inbound(msg);

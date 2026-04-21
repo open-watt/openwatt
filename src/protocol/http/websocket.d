@@ -9,6 +9,7 @@ import urt.log;
 import urt.mem : memmove;
 import urt.mem.allocator;
 import urt.string;
+import urt.time;
 
 import manager;
 import manager.base;
@@ -18,6 +19,7 @@ import protocol.http;
 import protocol.http.message;
 import protocol.http.server;
 
+import router.iface;
 import router.stream;
 
 //version = DebugWebSocket;
@@ -39,22 +41,14 @@ enum WSExtensions : ubyte
 //    ChannelIdClientServer = "channel-id-client-server"
 }
 
-enum WSMessageType
-{
-    unknown,
-    text,
-    binary
-}
 
-alias WSMessageHandler = void delegate(const(ubyte)[] message, WSMessageType message_type) nothrow @nogc;
-
-class WebSocket : ActiveObject
+class WebSocket : BaseInterface
 {
+    alias Properties = AliasSeq!(Prop!("stream", stream));
 nothrow @nogc:
 
     enum type_name = "websocket";
-    enum path = "/protocol/websocket";
-    enum collection_id = CollectionType.websocket;
+    enum path = "/interface/websocket";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -63,22 +57,49 @@ nothrow @nogc:
 
     // Properties...
 
+    final inout(Stream) stream() inout pure
+        => _stream;
+    final void stream(Stream stream)
+    {
+        if (_stream is stream)
+            return;
+        if (_subscribed)
+        {
+            _stream.unsubscribe(&stream_state_change);
+            _subscribed = false;
+        }
+        _stream = stream;
+        restart();
+    }
+
     // API...
 
-    void set_message_handler(WSMessageHandler handler) pure
+protected:
+    mixin RekeyHandler;
+
+    override bool validate() const pure
+        => _stream !is null;
+
+    override CompletionStatus startup()
     {
-        _msg_handler = handler;
+        if (!_stream || !_stream.running)
+            return CompletionStatus.continue_;
+        _stream.subscribe(&stream_state_change);
+        _subscribed = true;
+        return CompletionStatus.complete;
     }
 
-    ptrdiff_t send_text(const(char)[] text)
+    override CompletionStatus shutdown()
     {
-        // TODO: confirm valid utf8, fail if not
-        return send(text, WSMessageType.text);
-    }
-
-    ptrdiff_t send_binary(const(void)[] data)
-    {
-        return send(data, WSMessageType.binary);
+        if (_subscribed)
+        {
+            _stream.unsubscribe(&stream_state_change);
+            _subscribed = false;
+        }
+        _message.clear();
+        _decoded_bytes = 0;
+        _pending_message_type = WSMessageType.unknown;
+        return CompletionStatus.complete;
     }
 
     final override void update()
@@ -89,6 +110,11 @@ nothrow @nogc:
         ubyte[] buf = _message.empty ? tmp[] : _message[];
         size_t read = _message.empty ? 0 : _message.length;
         size_t frame_start = _decoded_bytes;
+
+        // sample now for any tail bytes left in _message from the previous update;
+        // re-sampled immediately after each stream read so freshly-arrived bytes
+        // get a timestamp closer to the actual wire-arrival time.
+        MonoTime timestamp = getTime();
 
         while (true)
         {
@@ -202,9 +228,19 @@ nothrow @nogc:
                     {
                         // shortcus for whole, self-contained frames.
                         version (DebugWebSocket)
+                        {
+                            size_t plen = msg_len - offset;
                             log.trace("dispatch ", _pending_message_type == WSMessageType.text ? "text" : "binary",
-                                      " (", msg_len - offset, " bytes): ", cast(void[])msg[offset .. msg_len]);
-                        _msg_handler(msg[offset .. msg_len], _pending_message_type);
+                                      " (", plen, " bytes): ",
+                                      cast(void[])msg[offset .. offset + (plen <= 200 ? plen : 200)],
+                                      plen > 200 ? ", ..." : "");
+                        }
+
+                        Packet p;
+                        ref hdr = p.init!RawFrame(msg[offset .. msg_len], cast(SysTime)timestamp);
+                        hdr.is_text = _pending_message_type == WSMessageType.text;
+                        dispatch(p);
+
                         frame_start += msg_len;
                         _pending_message_type = WSMessageType.unknown;
                         continue;
@@ -219,8 +255,15 @@ nothrow @nogc:
                 {
                     version (DebugWebSocket)
                         log.trace("dispatch ", _pending_message_type == WSMessageType.text ? "text" : "binary",
-                                  " (", _decoded_bytes, " bytes, reassembled): ", cast(void[])buf[0 .. _decoded_bytes]);
-                    _msg_handler(buf[0 .. _decoded_bytes], _pending_message_type);
+                                  " (", _decoded_bytes, " bytes, reassembled): ",
+                                  cast(void[])buf[0 .. _decoded_bytes <= 200 ? _decoded_bytes : 200],
+                                  _decoded_bytes > 200 ? ", ..." : "");
+
+                    Packet p;
+                    ref hdr = p.init!RawFrame(buf[0 .. _decoded_bytes], cast(SysTime)timestamp);
+                    hdr.is_text = _pending_message_type == WSMessageType.text;
+                    dispatch(p);
+
                     _pending_message_type = WSMessageType.unknown;
                     _decoded_bytes = 0;
                 }
@@ -244,9 +287,9 @@ nothrow @nogc:
                 assert(false, "TODO: handle errors?");
                 return;
             }
-            assert(r == available);
+            timestamp = getTime();
             version (DebugWebSocket)
-                log.trace("recv: (", r, ")[ ", cast(void[])buf[read .. read + (r <= 200 ? r : 200)], r > 200 ? ", ..." : "",  " ]");
+                log.trace("recv: (", r, ")[ ", cast(void[])buf[read .. read + (r <= 200 ? r : 200)], r > 200 ? ", ... ]" : " ]");
             read += r;
         }
 
@@ -267,23 +310,19 @@ nothrow @nogc:
             _message[] = tmp[0 .. read];
     }
 
-private:
-    Stream _stream;
-    WSExtensions _extensions;
-    String _protocol;
-    bool _is_server;
-
-    WSMessageHandler _msg_handler;
-
-    Array!ubyte _message;
-    size_t _decoded_bytes; // _message begins with decoded bytes, and the tail is pending bytes from incomplete transmission
-    WSMessageType _pending_message_type;
-
-    ptrdiff_t send(const(void)[] data, WSMessageType type)
+    override int transmit(ref Packet packet, MessageCallback)
     {
+        if (packet.type != PacketType.raw)
+            return -1;
+
+        ref hdr = packet.hdr!RawFrame();
+        const(void)[] data = packet.data;
+
+        // TODO: if hdr.is_text, confirm valid utf8 and fail if not
+
         ubyte[16] header; // max header size
         size_t header_len = 2;
-        header[0] = 0x80 | (type == WSMessageType.text ? 1 : 2); // FIN + opcode
+        header[0] = 0x80 | (hdr.is_text ? 1 : 2); // FIN + opcode
         header[1] = _is_server ? 0 : 0x80; // MASK bit
 
         size_t payload_len = data.length;
@@ -315,7 +354,8 @@ private:
         }
 
         version (DebugWebSocket)
-            log.trace("send ", type == WSMessageType.text ? "text" : "binary", " (", data.length, " bytes): ", cast(void[])data);
+            log.trace("send ", hdr.is_text ? "text" : "binary", " (", data.length, ")[ ",
+                      cast(void[])data[0 .. data.length <= 200 ? data.length : 200], data.length > 200 ? ", ... ]" : " ]");
 
         // write the header
         if (_stream.write(header[0 .. header_len]) != header_len)
@@ -340,7 +380,24 @@ private:
             }
             written += r;
         }
-        return written;
+        return 0;
+    }
+
+private:
+    ObjectRef!Stream _stream;
+    WSExtensions _extensions;
+    String _protocol;
+    bool _is_server;
+    bool _subscribed;
+
+    Array!ubyte _message;
+    size_t _decoded_bytes; // _message begins with decoded bytes, and the tail is pending bytes from incomplete transmission
+    WSMessageType _pending_message_type;
+
+    void stream_state_change(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
     }
 }
 
@@ -456,7 +513,7 @@ private:
             // any bytes the HTTP parser read past the upgrade request are the start of
             // the first websocket frame; seed them into the rx buffer before the first read.
             if (leftover.length)
-                ws._message ~= leftover;
+                ws._message = leftover[];
             stream = null;
 
             if (String proto = request.header("Sec-WebSocket-Protocol"))
@@ -519,6 +576,13 @@ private:
 
 
 private:
+
+enum WSMessageType
+{
+    unknown,
+    text,
+    binary
+}
 
 __gshared immutable string[__traits(allMembers, WSExtensions).length] g_webSocketExtensions = [
     null,

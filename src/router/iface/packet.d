@@ -11,6 +11,7 @@ nothrow @nogc:
 enum PacketType : ushort
 {
     unknown,
+    raw,
     ethernet,
     wpan,
     _6lowpan,
@@ -19,7 +20,6 @@ enum PacketType : ushort
     modbus,
     can,
     tesla_twc,
-    ash,
     ble_ll,
     ble_att
 }
@@ -180,6 +180,13 @@ package:
     ubyte _offset;
     ushort _length;
     const(void)* _ptr;
+}
+
+struct RawFrame
+{
+    enum Type = PacketType.raw;
+
+    bool is_text; // payload is text, which can be verified for validity, or drive WebSocket text flag for instance
 }
 
 struct Ethernet

@@ -42,7 +42,6 @@ enum CollectionType : ubyte
     sync_ws_server,
     tcp_server,
     tls_server,
-    websocket,
     ws_server,
     zb_controller,
     zb_endpoint,

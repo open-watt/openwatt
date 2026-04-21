@@ -27,11 +27,6 @@ nothrow @nogc:
 // https://www.silabs.com/documents/public/user-guides/ug101-uart-gateway-protocol-reference.pdf
 //
 
-struct ASHFrame
-{
-    enum Type = PacketType.ash;
-}
-
 class ASHInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("stream", stream));
@@ -152,7 +147,7 @@ protected:
 
     override int transmit(ref Packet packet, MessageCallback)
     {
-        if (packet.type != PacketType.ash)
+        if (packet.type != PacketType.raw)
             return -1;
         const(ubyte)[] message = cast(ubyte[])packet.data();
         if (message.length > ASH_MAX_MSG_LENGTH)
@@ -178,12 +173,6 @@ protected:
 
         add_tx_frame(message.length);
         return 0;
-    }
-
-    void stream_state_change(ActiveObject, StateSignal signal)
-    {
-        if (signal == StateSignal.offline)
-            restart();
     }
 
 private:
@@ -236,6 +225,12 @@ private:
 
     ubyte _rx_offset;
     ubyte[128] _rx_buffer;
+
+    void stream_state_change(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
+    }
 
     void service_stream()
     {
@@ -427,7 +422,7 @@ private:
         if (data.length > 0)
         {
             Packet p;
-            p.init!ASHFrame(data, cast(SysTime)timestamp);
+            p.init!RawFrame(data, cast(SysTime)timestamp);
             dispatch(p);
         }
 

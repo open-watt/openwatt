@@ -44,11 +44,6 @@ nothrow @nogc:
         g_app.console.register_command!request("/protocol/http", this);
     }
 
-    override void pre_update()
-    {
-        Collection!WebSocket().update_all();
-    }
-
     override void update()
     {
         Collection!TLSServer().update_all();
