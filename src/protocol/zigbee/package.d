@@ -287,11 +287,11 @@ nothrow @nogc:
         register_address_extractor(PacketType.zigbee_aps, &extract_aps_src_address, &extract_aps_dst_address);
 
         g_app.console.register_collection!ZigbeeInterface("/interface/zigbee");
-        g_app.console.register_collection!ZigbeeNode("/protocol/zigbee/node");
-        g_app.console.register_collection!ZigbeeRouter("/protocol/zigbee/router");
-        g_app.console.register_collection!ZigbeeCoordinator("/protocol/zigbee/coordinator");
-        g_app.console.register_collection!ZigbeeEndpoint("/protocol/zigbee/endpoint");
-        g_app.console.register_collection!ZigbeeController("/protocol/zigbee/controller");
+        g_app.console.register_collection!ZigbeeNode();
+        g_app.console.register_collection!ZigbeeRouter();
+        g_app.console.register_collection!ZigbeeCoordinator();
+        g_app.console.register_collection!ZigbeeEndpoint();
+        g_app.console.register_collection!ZigbeeController();
 
         g_app.console.register_command!scan("/protocol/zigbee", this);
         g_app.console.register_command!zcl_read("/protocol/zigbee", this, "read");

@@ -60,21 +60,17 @@ struct CANFrame
 class CANInterface : BaseInterface
 {
     version(HasGPIO)
-        __gshared Property[6] Properties = [
-            Property.create!("stream", stream)(),
-            Property.create!("protocol", protocol)(),
-            Property.create!("device", device)(),
-            Property.create!("baud-rate", baud_rate)(),
-            Property.create!("tx-gpio", tx_gpio)(),
-            Property.create!("rx-gpio", rx_gpio)(),
-        ];
+        alias Properties = AliasSeq!(Prop!("stream", stream),
+                                     Prop!("protocol", protocol),
+                                     Prop!("device", device),
+                                     Prop!("baud-rate", baud_rate),
+                                     Prop!("tx-gpio", tx_gpio),
+                                     Prop!("rx-gpio", rx_gpio));
     else
-        __gshared Property[4] Properties = [
-            Property.create!("stream", stream)(),
-            Property.create!("protocol", protocol)(),
-            Property.create!("device", device)(),
-            Property.create!("baud-rate", baud_rate)(),
-        ];
+        alias Properties = AliasSeq!(Prop!("stream", stream),
+                                     Prop!("protocol", protocol),
+                                     Prop!("device", device),
+                                     Prop!("baud-rate", baud_rate));
 
 nothrow @nogc:
 

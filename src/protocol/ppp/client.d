@@ -17,11 +17,12 @@ nothrow @nogc:
 
 class PPPClient : BaseInterface
 {
-    __gshared Property[3] Properties = [ Property.create!("stream", stream)(),
-                                         Property.create!("protocol", protocol)() ];
+    alias Properties = AliasSeq!(Prop!("stream", stream),
+                                 Prop!("protocol", protocol));
 nothrow @nogc:
 
     enum type_name = "ppp";
+    enum path = "/protocol/ppp/client";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -182,11 +183,12 @@ private:
 
 class PPPoEClient : BaseInterface
 {
-    __gshared Property[3] Properties = [ Property.create!("interface", iface)(),
-                                         Property.create!("protocol", protocol)() ];
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("protocol", protocol));
 nothrow @nogc:
 
     enum type_name = "pppoe";
+    enum path = "/protocol/pppoe/client";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {

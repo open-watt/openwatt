@@ -22,12 +22,13 @@ alias PublishCallback = void delegate(const(char)[] sender, const(char)[] topic,
 
 class MQTTBroker : BaseObject
 {
-    __gshared Property[3] Properties = [ Property.create!("port", port)(),
-                                         Property.create!("allow-anonymous", allow_anonymous)(),
-                                         Property.create!("client-timeout", _client_timeout)() ];
+    alias Properties = AliasSeq!(Prop!("port", port),
+                                 Prop!("allow-anonymous", allow_anonymous),
+                                 Prop!("client-timeout", _client_timeout));
 nothrow @nogc:
 
     enum type_name = "mqtt-broker";
+    enum path = "/protocol/mqtt/broker";
     enum collection_id = CollectionType.mqtt_broker;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)

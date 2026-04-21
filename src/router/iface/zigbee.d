@@ -56,9 +56,9 @@ enum uint ezsp_grace_period = 4000; // milliseconds — how long to wait for EZS
 
 class ZigbeeInterface : BaseInterface
 {
-    __gshared Property[3] Properties = [ Property.create!("ezsp-client", ezsp_client)(),
-                                         Property.create!("max-in-flight", max_in_flight)(),
-                                         Property.create!("pan-id", pan_id)() ];
+    alias Properties = AliasSeq!(Prop!("ezsp-client", ezsp_client),
+                                 Prop!("max-in-flight", max_in_flight),
+                                 Prop!("pan-id", pan_id));
 nothrow @nogc:
 
     enum type_name = "zigbee";

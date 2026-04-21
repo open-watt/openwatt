@@ -15,11 +15,12 @@ nothrow @nogc:
 
 class PPPServer : BaseInterface
 {
-    __gshared Property[2] Properties = [ Property.create!("stream", stream)(),
-                                         Property.create!("protocol", protocol)() ];
+    alias Properties = AliasSeq!(Prop!("stream", stream),
+                                 Prop!("protocol", protocol));
 nothrow @nogc:
 
     enum type_name = "ppp-server";
+    enum path = "/protocol/ppp/server";
     enum collection_id = CollectionType.ppp_server;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -100,11 +101,12 @@ private:
 
 class PPPoEServer : BaseObject
 {
-    __gshared Property[2] Properties = [ Property.create!("interface", iface)(),
-                                         Property.create!("protocol", protocol)() ];
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("protocol", protocol));
 nothrow @nogc:
 
     enum type_name = "pppoe-server";
+    enum path = "/protocol/pppoe/server";
     enum collection_id = CollectionType.pppoe_server;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)

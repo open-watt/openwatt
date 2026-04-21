@@ -34,7 +34,7 @@ struct ASHFrame
 
 class ASHInterface : BaseInterface
 {
-    __gshared Property[1] Properties = [ Property.create!("stream", stream)() ];
+    alias Properties = AliasSeq!(Prop!("stream", stream));
 nothrow @nogc:
 
     enum type_name = "ash";

@@ -57,13 +57,14 @@ enum NSProtocol : ubyte
 
 class DNSServer : BaseObject
 {
-    __gshared Property[4] Properties = [ Property.create!("interface", iface)(),
-                                         Property.create!("protocols", protocols)(),
-                                         Property.create!("doh-server", doh_server)(),
-                                         Property.create!("doh-uri", doh_uri)() ];
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("protocols", protocols),
+                                 Prop!("doh-server", doh_server),
+                                 Prop!("doh-uri", doh_uri));
 nothrow @nogc:
 
     enum type_name = "dns-server";
+    enum path = "/protocol/dns/server";
     enum collection_id = CollectionType.dns_server;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)

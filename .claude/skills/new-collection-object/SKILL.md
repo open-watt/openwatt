@@ -595,7 +595,7 @@ When creating a new Collection-managed object, ensure:
 - [ ] Module declaration at top: `module [layer].[category].[module];`
 - [ ] All required imports included
 - [ ] `nothrow @nogc:` attribute block after imports
-- [ ] `__gshared Property[N]` array with exact count
+- [ ] `alias Properties = AliasSeq!(Prop!(...), ...);` declared
 - [ ] `alias TypeName = StringLit!"name";` defined
 - [ ] Constructor calls `super(collection_type_info!ThisType, name.move, flags, ...)`
 - [ ] All properties have getter/setter implementations
@@ -632,8 +632,8 @@ nothrow @nogc:
 
 class ExampleStream : Stream
 {
-    __gshared Property[2] Properties = [ Property.create!("host", host)(),
-                                         Property.create!("timeout", timeout)() ];
+    alias Properties = AliasSeq!(Prop!("host", host),
+                                 Prop!("timeout", timeout));
 nothrow @nogc:
 
     alias TypeName = StringLit!"example";
@@ -751,7 +751,7 @@ nothrow @nogc:
 
 class ExampleInterface : BaseInterface
 {
-    __gshared Property[1] Properties = [ Property.create!("stream", stream)() ];
+    alias Properties = AliasSeq!(Prop!("stream", stream));
 nothrow @nogc:
 
     alias TypeName = StringLit!"example";
@@ -840,8 +840,8 @@ nothrow @nogc:
 
 class ExampleBroker : BaseObject
 {
-    __gshared Property[2] Properties = [ Property.create!("stream", stream)(),
-                                         Property.create!("max-clients", max_clients)() ];
+    alias Properties = AliasSeq!(Prop!("stream", stream),
+                                 Prop!("max-clients", max_clients));
 nothrow @nogc:
 
     alias TypeName = StringLit!"example-broker";
@@ -930,16 +930,7 @@ After creating a new Collection-managed object:
 
 ## Common Mistakes
 
-1. **Wrong Property count**: Array size must match exactly
-   ```d
-   // WRONG - says 2 but has 3 properties
-   __gshared Property[2] Properties = [ ..., ..., ... ];
-
-   // CORRECT
-   __gshared Property[3] Properties = [ ..., ..., ... ];
-   ```
-
-2. **Missing TypeName**: Required for Collection objects
+1. **Missing TypeName**: Required for Collection objects
    ```d
    // MISSING - won't compile
    class MyStream : Stream { }
@@ -951,7 +942,7 @@ After creating a new Collection-managed object:
    }
    ```
 
-3. **Not calling restart()**: Properties that aren't practical to apply at runtime should restart
+2. **Not calling restart()**: Properties that aren't practical to apply at runtime should restart
    ```d
    // WRONG - change won't take effect
    void port(ushort value)
@@ -967,7 +958,7 @@ After creating a new Collection-managed object:
    }
    ```
 
-4. **shutdown() can fail**: Must always succeed
+3. **shutdown() can fail**: Must always succeed
    ```d
    // WRONG - might return Error
    override CompletionStatus shutdown()
@@ -986,7 +977,7 @@ After creating a new Collection-managed object:
    }
    ```
 
-5. **Forgetting module registration**: Must register in plugin.d
+4. **Forgetting module registration**: Must register in plugin.d
    ```d
    // Add to src/manager/plugin.d:
    import your.new.module;

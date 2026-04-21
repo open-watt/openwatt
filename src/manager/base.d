@@ -695,45 +695,92 @@ nothrow @nogc:
     void tracef(T...)(const(char)[] fmt, ref T args) { write_logf(Severity.trace, tag[], name[], fmt, args); }
 }
 
-const(Property*)[] all_properties(Type)()
+
+template total_prop_count(T)
 {
-    static if (is(typeof(&Type.Properties) : Property[N]*, size_t N))
-    {
-        // old way
-        __gshared const props = all_properties_impl!(Type, 0)();
-    }
+    static if (has_local_properties!T)
+        enum num_props = T.Properties.length;
+    else
+        enum num_props = 0;
+    static if (is(T S == super) && !is(S[0] == Object))
+        enum total_prop_count = total_prop_count!S + num_props;
+    else
+        enum total_prop_count = num_props;
+}
+
+template prop_index(T, string prop)
+{
+    static if (is(T S == super) && !is(S[0] == Object))
+        enum _parent_index = prop_index!(S[0], prop);
+    else
+        enum _parent_index = -2;
+    static if (_parent_index >= 0)
+        enum prop_index = _parent_index;
     else
     {
-        // new way
-        enum num_props = Type.Properties.length;
-
-        static if (is(Type S == super) && !is(S[0] == Object))
-            alias s_props = all_properties!(S[0]);
-        else
-            const(Property*)[0] s_props;
-
-        auto make_props()
+        static foreach (i, p; T.Properties)
         {
-            assert(__ctfe);
-            Property[num_props] r;
-            static foreach (i; 0 .. num_props)
-                r[i] = Property.create!(Type.Properties[i].n, Type.Properties[i].p, Type.Properties[i].c, Type.Properties[i].f)();
-            return r;
+            static if (p.n[] == prop[])
+                enum index = i;
         }
-
-        __gshared const t_props = make_props();
-        __gshared const props = s_props ~ () {
-            const(Property)*[num_props] r;
-            static foreach (i; 0 .. num_props)
-                r[i] = &t_props[i];
-            return r;
-        }();
+        static if (is(typeof(index)))
+        {
+            static if (_parent_index != -2)
+                enum prop_index = total_prop_count!(S[0]) + index;
+            else
+                enum prop_index = index;
+        }
+        else
+            enum prop_index = -1;
     }
-    return props[];
+}
+
+const(Property*)[] all_properties(Type)()
+{
+    enum num_props = Type.Properties.length;
+
+    static if (is(Type S == super) && !is(S[0] == Object))
+        alias s_props = all_properties!(S[0]);
+    else
+        const(Property*)[0] s_props;
+
+    auto make_props()
+    {
+        assert(__ctfe);
+        Property[num_props] r;
+        static foreach (i; 0 .. num_props)
+            r[i] = Property.create!(Type.Properties[i].n, Type.Properties[i].p, Type.Properties[i].c, Type.Properties[i].f)();
+        return r;
+    }
 }
 
 
 private:
+
+enum has_local_properties(Type) = Alias!(_check([__traits(derivedMembers, Type)]));
+
+bool _check(scope string[] members)
+{
+    assert(__ctfe);
+    foreach (m; members)
+        if (m == "Properties")
+            return true;
+    return false;
+}
+
+template MaterialProperties(Type)
+{
+    enum Count = Type.Properties.length;
+    auto _make()
+    {
+        assert(__ctfe);
+        Property[Count] r;
+        static foreach (i; 0 .. Count)
+            r[i] = Property.create!(Type.Properties[i].n, Type.Properties[i].p, Type.Properties[i].c, Type.Properties[i].f)();
+        return r;
+    }
+    __gshared const MaterialProperties = _make();
+}
 
 auto all_properties_impl(Type, size_t allocCount)()
 {
@@ -742,7 +789,7 @@ auto all_properties_impl(Type, size_t allocCount)()
     static if (is(Type S == super) && !is(Unqual!S == Object))
     {
         alias Super = Unqual!(S[0]);
-        static if (!is(typeof(Type.Properties) == typeof(Super.Properties)) || &Type.Properties !is &Super.Properties)
+        static if (has_local_properties!Type)
             enum PropCount = Type.Properties.length;
         else
             enum PropCount = 0;
@@ -755,7 +802,7 @@ auto all_properties_impl(Type, size_t allocCount)()
     }
 
     static foreach (i; 0 .. PropCount)
-        result[result.length - allocCount - PropCount + i] = &Type.Properties[i];
+        result[result.length - allocCount - PropCount + i] = &MaterialProperties!Type[i];
 
     return result;
 }

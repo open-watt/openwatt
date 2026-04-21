@@ -28,7 +28,7 @@ nothrow @nogc:
 
 class EthernetInterface : BaseInterface
 {
-    __gshared Property[1] Properties = [ Property.create!("adapter", adapter)() ];
+    alias Properties = AliasSeq!(Prop!("adapter", adapter));
 nothrow @nogc:
 
     enum type_name = "ether";

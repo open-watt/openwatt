@@ -24,7 +24,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!MQTTBroker("/protocol/mqtt/broker");
+        g_app.console.register_collection!MQTTBroker();
         g_app.console.register_command!device_add("/protocol/mqtt/device", this, "add");
     }
 

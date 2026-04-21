@@ -50,6 +50,7 @@ class WebSocket : BaseObject
 nothrow @nogc:
 
     enum type_name = "websocket";
+    enum path = "/protocol/websocket";
     enum collection_id = CollectionType.websocket;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -314,11 +315,12 @@ private:
 
 class WebSocketServer : BaseObject
 {
-    __gshared Property[2] Properties = [ Property.create!("http-server", http_server)(),
-                                         Property.create!("uri", uri)() ];
+    alias Properties = AliasSeq!(Prop!("http-server", http_server),
+                                 Prop!("uri", uri));
 nothrow @nogc:
 
     enum type_name = "ws-server";
+    enum path = "/protocol/websocket/server";
     enum collection_id = CollectionType.ws_server;
 
     alias NewConnection = void delegate(WebSocket client, void* user_data) nothrow @nogc;

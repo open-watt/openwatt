@@ -36,6 +36,7 @@ class HTTPServer : BaseObject
 nothrow @nogc:
 
     enum type_name = "http-server";
+    enum path = "/protocol/http/server";
     enum collection_id = CollectionType.http_server;
 
     alias RequestHandler = int delegate(ref const HTTPMessage, ref Stream stream) nothrow @nogc;

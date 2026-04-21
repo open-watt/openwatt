@@ -33,7 +33,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!DNSServer("/protocol/dns/server");
+        g_app.console.register_collection!DNSServer();
 
         g_app.console.register_command!request("/protocol/dns", this, "lookup");
     }

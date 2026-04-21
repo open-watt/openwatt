@@ -51,14 +51,15 @@ struct ZCLResponse
 
 class ZigbeeNode : BaseObject
 {
-    __gshared Property[5] Properties = [ Property.create!("interface", iface)(),
-                                         Property.create!("is-router", is_router)(),
-                                         Property.create!("is-coordinator", is_coordinator)(),
-                                         Property.create!("eui", eui)(),
-                                         Property.create!("node-id", node_id)() ];
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("is-router", is_router),
+                                 Prop!("is-coordinator", is_coordinator),
+                                 Prop!("eui", eui),
+                                 Prop!("node-id", node_id));
 @nogc:
 
     enum type_name = "zb-node";
+    enum path = "/protocol/zigbee/node";
     enum collection_id = CollectionType.zigbee;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
@@ -946,17 +947,18 @@ private:
 
 class ZigbeeEndpoint : BaseObject
 {
-    __gshared Property[7] Properties = [ Property.create!("node", node)(),
-                                         Property.create!("endpoint-id", endpoint)(),
-                                         Property.create!("profile", profile)(),
-                                         Property.create!("profile-id", profile_id)(),
-                                         Property.create!("device", device)(),
-                                         Property.create!("in-clusters", in_clusters)(),
-                                         Property.create!("out-clusters", out_clusters)() ];
+    alias Properties = AliasSeq!(Prop!("node", node),
+                                 Prop!("endpoint-id", endpoint),
+                                 Prop!("profile", profile),
+                                 Prop!("profile-id", profile_id),
+                                 Prop!("device", device),
+                                 Prop!("in-clusters", in_clusters),
+                                 Prop!("out-clusters", out_clusters));
 @nogc:
 
     enum collection_id = CollectionType.zb_endpoint;
     enum type_name = "zb-endpoint";
+    enum path = "/protocol/zigbee/endpoint";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
     {

@@ -15,8 +15,8 @@ nothrow @nogc:
 
 class VLANInterface : BaseInterface
 {
-    __gshared Property[2] Properties = [ Property.create!("interface", iface)(),
-                                         Property.create!("vlan", vlan)() ];
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("vlan", vlan));
 nothrow @nogc:
 
     enum type_name = "vlan";

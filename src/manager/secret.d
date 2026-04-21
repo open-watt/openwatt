@@ -22,12 +22,13 @@ enum HashFunction
 
 class Secret : BaseObject
 {
-    __gshared Property[3] Properties = [ Property.create!("password", password)(),
-                                         Property.create!("algorithm", algorithm)(),
-                                         Property.create!("services", services)() ];
+    alias Properties = AliasSeq!(Prop!("password", password),
+                                 Prop!("algorithm", algorithm),
+                                 Prop!("services", services));
 nothrow @nogc:
 
     enum type_name = "secret";
+    enum path = "/secret";
     enum collection_id = CollectionType.secret;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)

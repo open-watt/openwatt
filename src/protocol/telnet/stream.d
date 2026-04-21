@@ -37,10 +37,11 @@ enum TelnetOptions : ubyte
 
 class TelnetStream : Stream
 {
-    __gshared Property[1] Properties = [ Property.create!("transport", transport)() ];
+    alias Properties = AliasSeq!(Prop!("transport", transport));
 nothrow @nogc:
 
     enum type_name = "telnet";
+    enum path = "/stream/telnet";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {

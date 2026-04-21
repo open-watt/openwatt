@@ -64,9 +64,9 @@ struct ModbusFrame
 
 class ModbusInterface : BaseInterface
 {
-    __gshared Property[3] Properties = [ Property.create!("stream", stream)(),
-                                         Property.create!("protocol", protocol)(),
-                                         Property.create!("master", master)() ];
+    alias Properties = AliasSeq!(Prop!("stream", stream),
+                                 Prop!("protocol", protocol),
+                                 Prop!("master", master));
 nothrow @nogc:
 
     enum type_name = "modbus";

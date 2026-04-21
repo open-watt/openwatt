@@ -35,11 +35,12 @@ alias APIHandler = int delegate(const(char)[] uri, ref const HTTPMessage request
 
 class APIManager : BaseObject
 {
-    __gshared Property[2] Properties = [ Property.create!("http-server", http_server)(),
-                                         Property.create!("uri", uri)() ];
+    alias Properties = AliasSeq!(Prop!("http-server", http_server),
+                                 Prop!("uri", uri));
 nothrow @nogc:
 
     enum type_name = "api";
+    enum path = "/apps/api";
     enum collection_id = CollectionType.api;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -829,7 +830,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!APIManager("/apps/api");
+        g_app.console.register_collection!APIManager();
     }
 
     override void update()

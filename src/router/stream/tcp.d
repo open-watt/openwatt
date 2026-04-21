@@ -20,10 +20,10 @@ public import router.stream;
 
 class TCPStream : Stream
 {
-    __gshared Property[4] Properties = [ Property.create!("remote", remote)(),
-                                         Property.create!("remote_address", remote_address)(),
-                                         Property.create!("port", port)(),
-                                         Property.create!("keepalive", keepalive)() ];
+    alias Properties = AliasSeq!(Prop!("remote", remote),
+                                 Prop!("remote_address", remote_address),
+                                 Prop!("port", port),
+                                 Prop!("keepalive", keepalive));
 nothrow @nogc:
 
     enum type_name = "tcp";
@@ -392,7 +392,7 @@ enum ServerOptions
 
 class TCPServer : BaseObject
 {
-    __gshared Property[1] Properties = [ Property.create!("port", port)() ];
+    alias Properties = AliasSeq!(Prop!("port", port));
 
 nothrow @nogc:
 

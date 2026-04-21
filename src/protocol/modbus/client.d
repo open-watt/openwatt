@@ -36,11 +36,12 @@ alias ModbusSnoopHandler = void delegate(ubyte server_address, ref const ModbusP
 
 class ModbusClient : BaseObject
 {
-    __gshared Property[2] Properties = [ Property.create!("interface", iface)(),
-                                         Property.create!("snoop", snoop)() ];
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("snoop", snoop));
 nothrow @nogc:
 
     enum type_name = "mb-client";
+    enum path = "/protocol/modbus/client";
     enum collection_id = CollectionType.mb_client;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
