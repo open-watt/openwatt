@@ -63,6 +63,19 @@ nothrow @nogc:
 
     // API...
 
+    override void abort(int msg_handle, MessageState reason = MessageState.aborted)
+    {
+        _interface.abort(msg_handle, reason);
+    }
+
+    override MessageState msg_state(int msg_handle) const
+    {
+        return _interface.msg_state(msg_handle);
+    }
+
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const
         => _interface !is null;
 
@@ -80,7 +93,7 @@ nothrow @nogc:
 //        return super.validating();
 //    }
 
-    protected final override int transmit(ref Packet packet, MessageCallback)
+    final override int transmit(ref Packet packet, MessageCallback)
     {
         assert(false, "unreachable — we override forward() instead");
     }
@@ -108,16 +121,6 @@ nothrow @nogc:
         if (result >= 0)
             add_tx_frame(packet.data.length);
         return result;
-    }
-
-    override void abort(int msg_handle, MessageState reason = MessageState.aborted)
-    {
-        _interface.abort(msg_handle, reason);
-    }
-
-    override MessageState msg_state(int msg_handle) const
-    {
-        return _interface.msg_state(msg_handle);
     }
 
 package:

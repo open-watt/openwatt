@@ -388,6 +388,9 @@ nothrow @nogc:
         _user_data = user_data;
     }
 
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const pure
         => _server !is null;
 

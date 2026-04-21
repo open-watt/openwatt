@@ -583,6 +583,9 @@ nothrow @nogc:
         return n;
     }
 
+protected:
+    mixin RekeyHandler;
+
 private:
     String _host;
     bool _keep_enable = false;
@@ -942,6 +945,7 @@ nothrow @nogc:
     }
 
 protected:
+    mixin RekeyHandler;
 
     final override bool validate() const pure
         => super.validate() && _certificates.length > 0;

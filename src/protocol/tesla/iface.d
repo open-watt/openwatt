@@ -64,6 +64,9 @@ nothrow @nogc:
 
     // API...
 
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const
         => _stream !is null;
 
@@ -142,7 +145,7 @@ nothrow @nogc:
         }
     }
 
-    protected override int transmit(ref const Packet packet, MessageCallback) nothrow @nogc
+    override int transmit(ref const Packet packet, MessageCallback) nothrow @nogc
     {
         if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.tesla_twc)
         {

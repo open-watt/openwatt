@@ -146,9 +146,9 @@ nothrow @nogc:
         return old;
     }
 
-    // BaseObject overrides
+
 protected:
-//    mixin RekeyHandler;
+    mixin RekeyHandler;
 
     override bool validate() const pure
     {

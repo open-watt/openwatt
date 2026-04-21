@@ -86,6 +86,35 @@ nothrow @nogc:
 
     // API...
 
+    HTTPMessage* request(HTTPMethod method, const(char)[] resource, HTTPMessageHandler response_handler, const void[] content = null, HTTPParam[] params = null, HTTPParam[] additional_headers = null, String username = null, String password = null)
+    {
+        if (!running)
+            return null;
+
+        HTTPMessage* request = defaultAllocator().allocT!HTTPMessage();
+        request.http_version = server_version;
+        request.method = method;
+        request.url = resource.makeString(defaultAllocator);
+        request.request_target = request.url;
+        request.username = username.move;
+        request.password = password.move;
+        request.content = cast(ubyte[])content;
+        request.headers = additional_headers.move;
+        request.query_params = params.move;
+        request.response_handler = response_handler;
+        request.timestamp = getSysTime();
+
+        if (requests.length == 0) // OR CONCURRENT REQUESTS...
+            send_request(*request);
+
+        requests ~= request;
+        return request;
+    }
+
+
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const pure
         => (!_host.empty || _remote != InetAddress()) != !!_stream; // TODO: validate URL??
 
@@ -211,31 +240,6 @@ nothrow @nogc:
 
         if (sendNext && requests.length > 0)
             send_request(*requests[0]);
-    }
-
-    HTTPMessage* request(HTTPMethod method, const(char)[] resource, HTTPMessageHandler response_handler, const void[] content = null, HTTPParam[] params = null, HTTPParam[] additional_headers = null, String username = null, String password = null)
-    {
-        if (!running)
-            return null;
-
-        HTTPMessage* request = defaultAllocator().allocT!HTTPMessage();
-        request.http_version = server_version;
-        request.method = method;
-        request.url = resource.makeString(defaultAllocator);
-        request.request_target = request.url;
-        request.username = username.move;
-        request.password = password.move;
-        request.content = cast(ubyte[])content;
-        request.headers = additional_headers.move;
-        request.query_params = params.move;
-        request.response_handler = response_handler;
-        request.timestamp = getSysTime();
-
-        if (requests.length == 0) // OR CONCURRENT REQUESTS...
-            send_request(*request);
-
-        requests ~= request;
-        return request;
     }
 
 private:

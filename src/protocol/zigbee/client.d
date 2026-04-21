@@ -547,6 +547,7 @@ class ZigbeeNode : ActiveObject
         => zigbee_iface()._network_status == EmberStatus.NETWORK_UP;
 
 protected:
+    mixin RekeyHandler;
 
     struct Endpoint
     {

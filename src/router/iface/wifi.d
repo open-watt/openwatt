@@ -404,6 +404,9 @@ nothrow @nogc:
 
     // API
 
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const
     {
         if (super.validate())
@@ -480,13 +483,12 @@ nothrow @nogc:
         }
     }
 
-protected:
     this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(typeInfo, id, flags);
     }
 
-    const(char)[] get_password() const
+    final const(char)[] get_password() const
     {
         if (_secret)
         {

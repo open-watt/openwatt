@@ -62,7 +62,8 @@ nothrow @nogc:
         restart();
     }
 
-    // BaseInterface overrides...
+protected:
+    mixin RekeyHandler;
 
     override bool validate() const pure
         => _stream !is null;
@@ -149,7 +150,6 @@ nothrow @nogc:
         }
     }
 
-protected:
     override int transmit(ref Packet packet, MessageCallback)
     {
         if (packet.type != PacketType.ash)

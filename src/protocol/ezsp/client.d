@@ -12,6 +12,7 @@ import urt.time;
 import urt.traits;
 
 import manager.base;
+import manager.collection : RekeyHandler;
 import manager.plugin;
 
 import router.iface;
@@ -296,7 +297,10 @@ nothrow:
         return _sequence_number++;
     }
 
-    final override bool validate() const pure
+protected:
+    mixin RekeyHandler;
+
+    override bool validate() const pure
         => (_stream !is null) != (_ash_ext !is null);
 
     override CompletionStatus startup()
@@ -365,7 +369,7 @@ nothrow:
         return CompletionStatus.complete;
     }
 
-    final override void update()
+    override void update()
     {
         MonoTime now = getTime();
         if (_queued_requests.length > 0 && now - _queued_requests[0].ts > 200.msecs)

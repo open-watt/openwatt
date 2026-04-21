@@ -90,6 +90,9 @@ nothrow @nogc:
         mark_set!(typeof(this), "distance")();
     }
 
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const pure nothrow @nogc
         => _blackhole || _iface !is null || _gateway != IPAddr.any;
 

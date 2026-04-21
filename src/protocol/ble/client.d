@@ -80,6 +80,7 @@ nothrow @nogc:
     }
 
 protected:
+    mixin RekeyHandler;
 
     override bool validate() const
         => _iface !is null && cast(bool)_peer;

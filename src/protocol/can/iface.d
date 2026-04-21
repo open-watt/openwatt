@@ -161,6 +161,9 @@ nothrow @nogc:
 
     // API...
 
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const
     {
         if (!_device.empty)
@@ -203,6 +206,16 @@ nothrow @nogc:
         if (_stream.running)
             return CompletionStatus.complete;
         return CompletionStatus.continue_;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        if (_can.is_open)
+        {
+            can_close(_can);
+            can_deinit();
+        }
+        return CompletionStatus.complete;
     }
 
     override void update()
@@ -333,7 +346,7 @@ nothrow @nogc:
         }
     }
 
-    protected override int transmit(ref const Packet packet, MessageCallback)
+    override int transmit(ref const Packet packet, MessageCallback)
     {
         // can only handle can packets
         if (packet.type != PacketType.can)
@@ -442,16 +455,6 @@ nothrow @nogc:
         // TODO: what's the go with the error bit (bit 29 of ID)???
 
         sink((cast(ubyte*)&f)[0 .. socket_can.sizeof]);
-    }
-
-    override CompletionStatus shutdown()
-    {
-        if (_can.is_open)
-        {
-            can_close(_can);
-            can_deinit();
-        }
-        return CompletionStatus.complete;
     }
 
 private:

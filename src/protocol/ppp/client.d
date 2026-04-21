@@ -6,6 +6,7 @@ import urt.string;
 import urt.time;
 
 import manager.base;
+import manager.collection : RekeyHandler;
 
 import protocol.ppp;
 
@@ -61,6 +62,9 @@ nothrow @nogc:
     }
 
     // API...
+
+protected:
+    mixin RekeyHandler;
 
     override bool validate() const pure
         => (_protocol < TunnelProtocol.PPPoE && _stream !is null);
@@ -170,7 +174,6 @@ nothrow @nogc:
         }
     }
 
-protected:
     override int transmit(ref const Packet packet, MessageCallback)
     {
         assert(false, "TODO: frame and transmit");
@@ -265,6 +268,8 @@ nothrow @nogc:
     }
 
 protected:
+    mixin RekeyHandler;
+
     override int transmit(ref const Packet packet, MessageCallback)
     {
         assert(false, "TODO: frame and transmit");

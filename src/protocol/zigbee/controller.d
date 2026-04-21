@@ -95,6 +95,7 @@ class ZigbeeController : ActiveObject, Subscriber
     // API...
 
 protected:
+    mixin RekeyHandler;
 
     override bool validate() const nothrow
         => _endpoint !is null;

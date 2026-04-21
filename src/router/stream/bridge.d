@@ -52,49 +52,7 @@ nothrow @nogc:
         m_remoteName ~= ']';
     }
 
-    override void update()
-    {
-        // TODO: this is shit; polling periodically sucks, and will result in sync issues!
-        //       ideally, sleeping threads blocking on a read, fill an input buffer...
-
-        // read all streams, echo to other streams, accumulate input buffer
-        foreach (i; 0 .. m_streams.length)
-        {
-            if (!m_streams[i])
-            {
-                if (m_streams[i].detached || !m_streams[i].running)
-                    continue;
-            }
-
-            ubyte[1024] buf;
-            size_t bytes;
-            do
-            {
-                bytes = m_streams[i].read(buf);
-
-//                debug
-//                {
-//                    if (bytes)
-//                        writeDebugf("From {0}:\n{1}\n", i, cast(void[])buf[0..bytes]);
-//                }
-
-                if (bytes == 0)
-                    break;
-
-                foreach (j; 0 .. m_streams.length)
-                {
-                    if (j == i)
-                        continue;
-                    m_streams[j].write(buf[0..bytes]);
-                }
-
-                m_inputBuffer ~= buf[0..bytes];
-            }
-            while (bytes < buf.sizeof);
-        }
-
-        super.update();
-    }
+    // API...
 
     override const(char)[] remote_name()
         => m_remoteName[];
@@ -158,6 +116,53 @@ nothrow @nogc:
             stream.flush();
         m_inputBuffer.clear();
         return 0;
+    }
+
+protected:
+    mixin RekeyHandler;
+
+    override void update()
+    {
+        // TODO: this is shit; polling periodically sucks, and will result in sync issues!
+        //       ideally, sleeping threads blocking on a read, fill an input buffer...
+
+        // read all streams, echo to other streams, accumulate input buffer
+        foreach (i; 0 .. m_streams.length)
+        {
+            if (!m_streams[i])
+            {
+                if (m_streams[i].detached || !m_streams[i].running)
+                    continue;
+            }
+
+            ubyte[1024] buf;
+            size_t bytes;
+            do
+            {
+                bytes = m_streams[i].read(buf);
+
+//                debug
+//                {
+//                    if (bytes)
+//                        writeDebugf("From {0}:\n{1}\n", i, cast(void[])buf[0..bytes]);
+//                }
+
+                if (bytes == 0)
+                    break;
+
+                foreach (j; 0 .. m_streams.length)
+                {
+                    if (j == i)
+                        continue;
+                    m_streams[j].write(buf[0..bytes]);
+                }
+
+                m_inputBuffer ~= buf[0..bytes];
+            }
+            while (bytes < buf.sizeof);
+        }
+
+        super.update();
     }
 
 private:

@@ -264,7 +264,10 @@ nothrow @nogc:
         return _inner ? _inner.flush() : 0;
     }
 
+
 protected:
+    mixin RekeyHandler;
+
     override bool validate() const pure
         => _inner !is null;
 

@@ -177,6 +177,32 @@ nothrow @nogc:
 
     // API...
 
+    final override void abort(int msg_handle, MessageState reason = MessageState.aborted)
+    {
+        debug assert(msg_handle > 0, "Invalid message handle");
+
+        ubyte t = cast(ubyte)msg_handle;
+        if (auto pm = t in _pending)
+        {
+            if (pm.callback)
+                pm.callback(msg_handle, reason);
+            _pending.remove(t);
+        }
+        _queue.abort(t);
+    }
+
+    final override MessageState msg_state(int msg_handle) const
+    {
+        if (cast(ubyte)msg_handle in _pending)
+            return MessageState.in_flight;
+        if (_queue.is_queued(cast(ubyte)msg_handle))
+            return MessageState.queued;
+        return MessageState.complete;
+    }
+
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const
         => _stream !is null && (!master || _protocol != ModbusProtocol.unknown);
 
@@ -349,7 +375,7 @@ nothrow @nogc:
         }
     }
 
-    protected override int transmit(ref const Packet packet, MessageCallback callback = null) nothrow @nogc
+    override int transmit(ref const Packet packet, MessageCallback callback = null) nothrow @nogc
     {
         if (packet.type != PacketType.modbus)
         {
@@ -431,29 +457,6 @@ nothrow @nogc:
         sink((&address)[0 .. 1]);
         sink(packet.data);
         sink(crc.nativeToLittleEndian());
-    }
-
-    final override void abort(int msg_handle, MessageState reason = MessageState.aborted)
-    {
-        debug assert(msg_handle > 0, "Invalid message handle");
-
-        ubyte t = cast(ubyte)msg_handle;
-        if (auto pm = t in _pending)
-        {
-            if (pm.callback)
-                pm.callback(msg_handle, reason);
-            _pending.remove(t);
-        }
-        _queue.abort(t);
-    }
-
-    final override MessageState msg_state(int msg_handle) const
-    {
-        if (cast(ubyte)msg_handle in _pending)
-            return MessageState.in_flight;
-        if (_queue.is_queued(cast(ubyte)msg_handle))
-            return MessageState.queued;
-        return MessageState.complete;
     }
 
 private:

@@ -55,6 +55,9 @@ nothrow @nogc:
         return null;
     }
 
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const pure nothrow @nogc
         => _iface !is null;
 

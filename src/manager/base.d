@@ -700,7 +700,7 @@ protected:
     CompletionStatus shutdown()
         => CompletionStatus.complete;
 
-    void update()
+    abstract void update()
     {
     }
 

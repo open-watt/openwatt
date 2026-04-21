@@ -148,6 +148,9 @@ nothrow @nogc:
 
     // API...
 
+protected:
+    mixin RekeyHandler;
+
     override CompletionStatus startup()
     {
         static Socket create_listener(AddressFamily af, ushort port, IPAddr ipv4_group = IPAddr.any, IPv6Addr ipv6_group = IPv6Addr.any)
@@ -532,7 +535,6 @@ nothrow @nogc:
             ++i;
         }
     }
-
 
 private:
     enum nbns_and_wins = (1 << NSProtocol.nbns) |  (1 << NSProtocol.wins);

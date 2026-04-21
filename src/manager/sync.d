@@ -1088,6 +1088,9 @@ nothrow @nogc:
         _outbound.clear();
     }
 
+protected:
+    mixin RekeyHandler;
+
 private:
     Array!SyncMessage _outbound;
 }

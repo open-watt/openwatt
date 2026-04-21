@@ -177,6 +177,8 @@ nothrow @nogc:
         => _status == CertStatus.issued && running;
 
 protected:
+    mixin RekeyHandler;
+
     override bool validate() const
     {
         final switch (_type)
@@ -215,6 +217,19 @@ protected:
         }
     }
 
+    override CompletionStatus shutdown()
+    {
+        version (DebugCertificate)
+            writeDebug("Certificate '", name, "': shutdown");
+
+        unregister_challenge_endpoint();
+        unload_cert();
+        _acme_state = AcmeState.idle;
+        _renewing = false;
+        _status = CertStatus.none;
+        return CompletionStatus.complete;
+    }
+
     override void update()
     {
         if (_type != CertType.acme)
@@ -233,19 +248,6 @@ protected:
         {
             start_renewal();
         }
-    }
-
-    override CompletionStatus shutdown()
-    {
-        version (DebugCertificate)
-            writeDebug("Certificate '", name, "': shutdown");
-
-        unregister_challenge_endpoint();
-        unload_cert();
-        _acme_state = AcmeState.idle;
-        _renewing = false;
-        _status = CertStatus.none;
-        return CompletionStatus.complete;
     }
 
 private:
