@@ -23,10 +23,10 @@ nothrow @nogc:
 
 class BridgeInterface : BaseInterface
 {
-    __gshared Property[4] Properties = [ Property.create!("vlan-filtering", vlan_filtering)(),
-                                         Property.create!("pvid", pvid)(),
-                                         Property.create!("ingress-filtering", ingress_filtering)(),
-                                         Property.create!("untagged-egress", untagged_egress)() ];
+    alias Properties = AliasSeq!(Prop!("vlan-filtering", vlan_filtering),
+                                 Prop!("pvid", pvid),
+                                 Prop!("ingress-filtering", ingress_filtering),
+                                 Prop!("untagged-egress", untagged_egress));
 nothrow @nogc:
 
     enum type_name = "bridge";

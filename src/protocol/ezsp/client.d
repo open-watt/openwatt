@@ -60,11 +60,11 @@ template EZSPResult(T)
 
 class EZSPClient : ActiveObject
 {
-    __gshared Property[5] Properties = [ Property.create!("ash_stream", ash_stream)(),
-                                         Property.create!("ash_interface", ash_interface)(),
-                                         Property.create!("stack-type", stack_type)(),
-                                         Property.create!("stack-version", stack_version)(),
-                                         Property.create!("protocol-version", protocol_version)() ];
+    alias Properties = AliasSeq!(Prop!("ash_stream", ash_stream),
+                                 Prop!("ash_interface", ash_interface),
+                                 Prop!("stack-type", stack_type),
+                                 Prop!("stack-version", stack_version),
+                                 Prop!("protocol-version", protocol_version));
 @nogc:
 
     enum type_name = "ezsp";

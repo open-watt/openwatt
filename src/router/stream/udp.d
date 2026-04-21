@@ -17,10 +17,10 @@ nothrow @nogc:
 
 class UDPStream : Stream
 {
-    __gshared Property[4] Properties = [ Property.create!("local-host", local_host)(),
-                                         Property.create!("local-port", local_port)(),
-                                         Property.create!("remote-host", remote_host)(),
-                                         Property.create!("remote-port", remote_port)() ];
+    alias Properties = AliasSeq!(Prop!("local-host", local_host),
+                                 Prop!("local-port", local_port),
+                                 Prop!("remote-host", remote_host),
+                                 Prop!("remote-port", remote_port));
 nothrow @nogc:
 
     enum type_name = "udp";

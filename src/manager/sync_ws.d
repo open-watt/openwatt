@@ -314,11 +314,12 @@ private:
 
 class WebSocketSyncServer : ActiveObject
 {
-    __gshared Property[2] Properties = [ Property.create!("http-server", http_server)(),
-                                         Property.create!("uri", uri)() ];
+    alias Properties = AliasSeq!(Prop!("http-server", http_server),
+                                 Prop!("uri", uri));
 nothrow @nogc:
 
     enum type_name = "ws-sync";
+    enum path = "/sync/channel/websocket";
     enum collection_id = CollectionType.sync_ws_server;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -433,7 +434,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!WebSocketSyncServer("/sync/channel/websocket");
+        g_app.console.register_collection!WebSocketSyncServer();
     }
 
     override void update()

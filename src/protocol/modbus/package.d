@@ -68,8 +68,8 @@ nothrow @nogc:
 
         g_app.register_enum!ModbusProtocol();
 
-        g_app.console.register_collection!ModbusInterface("/interface/modbus");
-        g_app.console.register_collection!ModbusClient("/protocol/modbus/client");
+        g_app.console.register_collection!ModbusInterface();
+        g_app.console.register_collection!ModbusClient();
 
         // TODO: should we relocate this command?
         g_app.console.register_command!remote_server_add("/interface/modbus/remote-server", this, "add");

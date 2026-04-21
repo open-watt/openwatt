@@ -18,7 +18,7 @@ nothrow @nogc:
 
 class BridgeStream : Stream
 {
-    __gshared Property[1] Properties = [ Property.create!("streams", streams)() ];
+    alias Properties = AliasSeq!(Prop!("streams", streams));
 nothrow @nogc:
 
     enum type_name = "bridge-stream";

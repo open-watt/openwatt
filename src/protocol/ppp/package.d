@@ -52,10 +52,10 @@ nothrow @nogc:
     {
         g_app.register_enum!TunnelProtocol();
 
-        g_app.console.register_collection!PPPClient("/protocol/ppp/client");
-        g_app.console.register_collection!PPPoEClient("/protocol/pppoe/client");
-        g_app.console.register_collection!PPPServer("/protocol/ppp/server");
-        g_app.console.register_collection!PPPoEServer("/protocol/pppoe/server");
+        g_app.console.register_collection!PPPClient();
+        g_app.console.register_collection!PPPoEClient();
+        g_app.console.register_collection!PPPServer();
+        g_app.console.register_collection!PPPoEServer();
     }
 
     override void update()

@@ -30,11 +30,12 @@ nothrow @nogc:
 
 class HTTPClient : ActiveObject
 {
-    __gshared Property[2] Properties = [ Property.create!("remote", remote)(),
-                                         Property.create!("stream", stream)() ];
+    alias Properties = AliasSeq!(Prop!("remote", remote),
+                                 Prop!("stream", stream));
 nothrow @nogc:
 
     enum type_name = "http-client";
+    enum path = "/protocol/http/client";
     enum collection_id = CollectionType.http_client;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)

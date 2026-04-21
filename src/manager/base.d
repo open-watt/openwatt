@@ -881,7 +881,7 @@ nothrow @nogc:
 
 template total_prop_count(T)
 {
-    static if (!is_old_style_properties!T)
+    static if (has_local_properties!T)
         enum num_props = T.Properties.length;
     else
         enum num_props = 0;
@@ -965,23 +965,21 @@ ref SyncState sync_state(ushort slot) nothrow @nogc
 
 private:
 
-enum is_old_style_properties(Type) = is(typeof(&Type.Properties) : Property[N]*, size_t N);
-
-template declares_own_properties(Type)
-{
-    static bool _check()
-    {
-        static foreach (m; __traits(derivedMembers, Type))
-            if (m == "Properties") return true;
-        return false;
-    }
-    enum declares_own_properties = _check();
-}
-
 __gshared Array!SyncState _sync_states;
 __gshared Array!ushort _free_sync_slots;
 
-template MaterializedProperties(Type)
+enum has_local_properties(Type) = Alias!(_check([__traits(derivedMembers, Type)]));
+
+bool _check(scope string[] members)
+{
+    assert(__ctfe);
+    foreach (m; members)
+        if (m == "Properties")
+            return true;
+    return false;
+}
+
+template MaterialProperties(Type)
 {
     enum Count = Type.Properties.length;
     auto _make()
@@ -992,7 +990,7 @@ template MaterializedProperties(Type)
             r[i] = Property.create!(Type.Properties[i].n, Type.Properties[i].p, Type.Properties[i].c, Type.Properties[i].f)();
         return r;
     }
-    __gshared const _storage = _make();
+    __gshared const MaterialProperties = _make();
 }
 
 auto all_properties_impl(Type, size_t allocCount)()
@@ -1002,10 +1000,7 @@ auto all_properties_impl(Type, size_t allocCount)()
     static if (is(Type S == super) && !is(Unqual!S == Object))
     {
         alias Super = Unqual!(S[0]);
-        static if (is_old_style_properties!Type
-            && (!is_old_style_properties!Super || !is(typeof(Type.Properties) == typeof(Super.Properties)) || &Type.Properties !is &Super.Properties))
-            enum PropCount = Type.Properties.length;
-        else static if (!is_old_style_properties!Type && declares_own_properties!Type)
+        static if (has_local_properties!Type)
             enum PropCount = Type.Properties.length;
         else
             enum PropCount = 0;
@@ -1017,12 +1012,8 @@ auto all_properties_impl(Type, size_t allocCount)()
         const(Property)*[PropCount + allocCount] result;
     }
 
-    static if (is_old_style_properties!Type)
-        static foreach (i; 0 .. PropCount)
-            result[result.length - allocCount - PropCount + i] = &Type.Properties[i];
-    else
-        static foreach (i; 0 .. PropCount)
-            result[result.length - allocCount - PropCount + i] = &MaterializedProperties!Type._storage[i];
+    static foreach (i; 0 .. PropCount)
+        result[result.length - allocCount - PropCount + i] = &MaterialProperties!Type[i];
 
     return result;
 }

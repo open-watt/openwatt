@@ -214,7 +214,7 @@ nothrow @nogc:
         console.register_command!link_add("/element/link", this, "add");
         console.register_command!link_print("/element/link", this, "print");
 
-        console.register_collection!Secret("/secret");
+        console.register_collection!Secret();
 
         register_modules(this);
 

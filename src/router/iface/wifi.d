@@ -46,13 +46,11 @@ enum WifiAuth : byte
 
 class WiFiInterface : BaseInterface
 {
-    __gshared Property[5] Properties = [
-        Property.create!("adapter", adapter)(),
-        Property.create!("mode", mode)(),
-        Property.create!("channel", channel)(),
-        Property.create!("tx-power", tx_power)(),
-        Property.create!("country", country)(),
-    ];
+    alias Properties = AliasSeq!(Prop!("adapter", adapter),
+                                 Prop!("mode", mode),
+                                 Prop!("channel", channel),
+                                 Prop!("tx-power", tx_power),
+                                 Prop!("country", country));
 nothrow @nogc:
 
     enum type_name = "wifi";
@@ -341,11 +339,9 @@ private:
 
 abstract class WLANBaseInterface : EthernetInterface
 {
-    __gshared Property[3] Properties = [
-        Property.create!("radio", radio)(),
-        Property.create!("ssid", ssid)(),
-        Property.create!("secret", secret)(),
-    ];
+    alias Properties = AliasSeq!(Prop!("radio", radio),
+                                 Prop!("ssid", ssid),
+                                 Prop!("secret", secret));
 nothrow @nogc:
 
     // Properties
@@ -518,9 +514,7 @@ private:
 
 class WLANInterface : WLANBaseInterface
 {
-    __gshared Property[1] Properties = [
-        Property.create!("bssid-filter", bssid_filter)(),
-    ];
+    alias Properties = AliasSeq!(Prop!("bssid-filter", bssid_filter));
 nothrow @nogc:
 
     enum type_name = "wlan";
@@ -653,12 +647,10 @@ private:
 
 class APInterface : WLANBaseInterface
 {
-    __gshared Property[4] Properties = [
-        Property.create!("auth", auth)(),
-        Property.create!("client-isolation", client_isolation)(),
-        Property.create!("max-clients", max_clients)(),
-        Property.create!("hidden", hidden)(),
-    ];
+    alias Properties = AliasSeq!(Prop!("auth", auth),
+                                 Prop!("client-isolation", client_isolation),
+                                 Prop!("max-clients", max_clients),
+                                 Prop!("hidden", hidden));
 nothrow @nogc:
 
     enum type_name = "wifi-ap";

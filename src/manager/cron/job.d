@@ -17,15 +17,16 @@ nothrow @nogc:
 
 class CronJob : ActiveObject
 {
-    __gshared Property[6] Properties = [ Property.create!("schedule", schedule)(),
-                                         Property.create!("repeat", repeat)(),
-                                         Property.create!("command", command)(),
-                                         Property.create!("last_run", last_run)(),
-                                         Property.create!("next_run", next_run)(),
-                                         Property.create!("run_count", run_count)() ];
+    alias Properties = AliasSeq!(Prop!("schedule", schedule),
+                                 Prop!("repeat", repeat),
+                                 Prop!("command", command),
+                                 Prop!("last_run", last_run),
+                                 Prop!("next_run", next_run),
+                                 Prop!("run_count", run_count));
 @nogc nothrow:
 
     enum type_name = "cron-job";
+    enum path = "/system/cron";
     enum collection_id = CollectionType.cron_job;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)

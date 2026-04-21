@@ -117,7 +117,7 @@ enum uint ble_queue_timeout = 5000; // milliseconds
 
 class BLEInterface : BaseInterface
 {
-    __gshared Property[1] Properties = [ Property.create!("max-in-flight", max_in_flight)() ];
+    alias Properties = AliasSeq!(Prop!("max-in-flight", max_in_flight));
 nothrow @nogc:
 
     enum type_name = "ble";

@@ -36,6 +36,7 @@ class HTTPServer : ActiveObject
 nothrow @nogc:
 
     enum type_name = "http-server";
+    enum path = "/protocol/http/server";
     enum collection_id = CollectionType.http_server;
 
     // Handlers may return:

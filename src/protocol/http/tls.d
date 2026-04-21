@@ -49,6 +49,7 @@ class TLSStream : Stream
 nothrow @nogc:
 
     enum type_name = "tls";
+    enum path = "/stream/tls";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
@@ -911,10 +912,11 @@ private:
 
 class TLSServer : TCPServer
 {
-    __gshared Property[2] Properties = [ Property.create!("certificate", certificate)(),
-                                         Property.create!("certificates", certificates)() ];
+    alias Properties = AliasSeq!(Prop!("certificate", certificate),
+                                 Prop!("certificates", certificates));
 nothrow @nogc:
     enum type_name = "tls-server";
+    enum path = "/protocol/tls/server";
     enum collection_id = CollectionType.tls_server;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)

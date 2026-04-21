@@ -444,7 +444,7 @@ mixin template RekeyHandler()
         alias Self = typeof(this);
         static foreach (field; __traits(derivedMembers, Self))
         {
-            static if (is(typeof(__traits(getMember, this, field))))
+            static if (__traits(compiles, &__traits(getMember, this, field)))
             {{
                 alias Ty = typeof(__traits(getMember, this, field));
                 static if (has_cid!Ty)

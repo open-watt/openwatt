@@ -62,6 +62,7 @@ class Certificate : ActiveObject
 nothrow @nogc:
 
     enum type_name = "certificate";
+    enum path = "/certificate";
     enum collection_id = CollectionType.certificate;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -1584,7 +1585,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!Certificate("/certificate");
+        g_app.console.register_collection!Certificate();
     }
 
     override void update()

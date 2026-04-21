@@ -988,6 +988,7 @@ class LoopbackSyncChannel : SyncChannel
 nothrow @nogc:
 
     enum type_name = "loopback";
+    enum path = "/sync/channel/loopback";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -1103,7 +1104,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!LoopbackSyncChannel("/sync/channel/loopback");
+        g_app.console.register_collection!LoopbackSyncChannel();
         g_app.console.register_command!attach_cmd("/sync/channel/loopback", this, "attach");
         g_app.console.register_command!attach_all_cmd("/sync/channel/loopback", this, "attach-all");
         g_app.console.register_command!detach_cmd("/sync/channel/loopback", this, "detach");

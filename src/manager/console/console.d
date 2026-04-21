@@ -228,9 +228,9 @@ nothrow @nogc:
         return register_command(_scope, FunctionCommand.create!method(this, instance, commandName));
     }
 
-    void register_collection(Type)(string _scope = null)
+    void register_collection(Type)()
     {
-        register_collection(collection_type_info!Type, _scope);
+        register_collection(collection_type_info!Type);
     }
 
     void unregister_command(const(char)[] _scope, const(char)[] command)
@@ -353,10 +353,10 @@ package:
 
     Console* _next_console_instance = null;
 
-    void register_collection(const(CollectionTypeInfo)* type_info, string scope_ = null)
+    void register_collection(const(CollectionTypeInfo)* type_info)
     {
-        const(char)[] _scope = scope_ ? scope_ : type_info.path[];
-        debug assert(_scope !is null);
+        const(char)[] _scope = type_info.path[];
+        debug assert(_scope !is null, "collection type must declare `enum path = \"...\";`");
 
         g_app.register_type(type_info, _scope);
 

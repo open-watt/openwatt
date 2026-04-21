@@ -41,11 +41,12 @@ enum MaxFibers = 2;
 
 class ZigbeeController : ActiveObject, Subscriber
 {
-    __gshared Property[2] Properties = [ Property.create!("endpoint", endpoint)(),
-                                         Property.create!("auto-create", auto_create)() ];
+    alias Properties = AliasSeq!(Prop!("endpoint", endpoint),
+                                 Prop!("auto-create", auto_create));
 @nogc:
 
     enum type_name = "zb-controller";
+    enum path = "/protocol/zigbee/controller";
     enum collection_id = CollectionType.zb_controller;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow

@@ -29,10 +29,11 @@ import protocol.zigbee.zdo;
 
 class ZigbeeCoordinator : ZigbeeRouter
 {
-    __gshared Property[1] Properties = [ Property.create!("channel", channel)() ];
+    alias Properties = AliasSeq!(Prop!("channel", channel));
 @nogc:
 
     enum type_name = "zb-coordinator";
+    enum path = "/protocol/zigbee/coordinator";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
     {

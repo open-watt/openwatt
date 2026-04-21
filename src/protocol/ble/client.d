@@ -20,8 +20,8 @@ nothrow @nogc:
 
 class BLEClient : ActiveObject
 {
-    __gshared Property[2] Properties = [ Property.create!("interface", iface)(),
-                                         Property.create!("peer", peer)() ];
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("peer", peer));
 nothrow @nogc:
 
     enum type_name = "ble-client";

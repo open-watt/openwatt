@@ -24,11 +24,12 @@ nothrow @nogc:
 
 class ZigbeeRouter : ZigbeeNode
 {
-    __gshared Property[2] Properties = [ Property.create!("pan-eui", _pan_eui)(),
-                                         Property.create!("pan-id", _pan_id)() ];
+    alias Properties = AliasSeq!(Prop!("pan-eui", _pan_eui),
+                                 Prop!("pan-id", _pan_id));
 nothrow @nogc:
 
     enum type_name = "zb-router";
+    enum path = "/protocol/zigbee/router";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {

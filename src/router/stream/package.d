@@ -275,7 +275,7 @@ nothrow @nogc:
 
     override void pre_init()
     {
-        g_app.console.register_collection!Stream("/stream");
+        g_app.console.register_collection!Stream();
     }
 
     override void pre_update()
