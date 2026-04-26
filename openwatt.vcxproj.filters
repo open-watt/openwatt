@@ -864,6 +864,9 @@
     <DCompile Include="third_party\urt\src\urt\mem\temp.d">
       <Filter>third_party\urt\mem</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\mem\tracking.d">
+      <Filter>third_party\urt\mem</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\intrinsic\package.d">
       <Filter>third_party\urt\intrinsic</Filter>
     </DCompile>

@@ -1019,6 +1019,7 @@
     <DCompile Include="third_party\urt\src\urt\mem\scratchpad.d" />
     <DCompile Include="third_party\urt\src\urt\mem\string.d" />
     <DCompile Include="third_party\urt\src\urt\mem\temp.d" />
+    <DCompile Include="third_party\urt\src\urt\mem\tracking.d" />
     <DCompile Include="third_party\urt\src\urt\meta\enuminfo.d" />
     <DCompile Include="third_party\urt\src\urt\meta\nullable.d" />
     <DCompile Include="third_party\urt\src\urt\meta\package.d" />
@@ -1443,6 +1444,7 @@
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1474,6 +1476,7 @@
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1540,6 +1543,7 @@
       <ImportCPaths>third_party/npcap-sdk-1.15/Include/</ImportCPaths>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1571,6 +1575,7 @@
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1635,6 +1640,7 @@
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1665,6 +1671,7 @@
       <Unittest>true</Unittest>
       <Main>true</Main>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1729,6 +1736,7 @@
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1759,6 +1767,7 @@
       <Unittest>true</Unittest>
       <Main>true</Main>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>

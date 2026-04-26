@@ -124,6 +124,27 @@ void show_time(Session session)
     session.write_line(getDateTime());
 }
 
+version (AllocTracking)
+{
+    import urt.mem.tracking;
+
+    void alloc_stats_cmd(Session session)
+    {
+        alloc_print_stats((const(char)[] line) { session.write_line(line); });
+    }
+
+    void alloc_mark_cmd(Session session)
+    {
+        alloc_mark_baseline();
+        session.write_line("alloc baseline marked at serial ", alloc_baseline());
+    }
+
+    void alloc_leaks_cmd(Session session, Duration age = seconds(60))
+    {
+        alloc_print_leaks(age, (const(char)[] line) { session.write_line(line); });
+    }
+}
+
 auto sleep(Session session, Duration duration)
 {
     import manager.console.command;
