@@ -91,9 +91,9 @@ int main(string[] args)
     Session session = g_app.console.createSession!Session(console_stream);
 
     // Config layering:
-    //   1. system.conf  — system defaults (string-imported on embedded, disk on desktop)
-    //   2. startup.conf — regular configuration (--config overrides path)
-    //   3. user.conf    — personal overrides (not committed)
+    //   1. system.conf  - system defaults (string-imported on embedded, disk on desktop)
+    //   2. startup.conf - regular configuration (--config overrides path)
+    //   3. user.conf    - personal overrides (not committed)
 
     version (ImportSystemConf)
         static immutable system_conf = import("system.conf");
@@ -193,7 +193,7 @@ int main(string[] args)
                     session.load_history(".telnet_history");
                 }
                 else
-                    log_error("system", "No 'console' stream — serial console unavailable");
+                    log_error("system", "No 'console' stream - serial console unavailable");
             }
             else if (interactive_mode)
             {

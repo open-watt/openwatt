@@ -36,11 +36,6 @@ nothrow @nogc:
         super(collection_type_info!ZigbeeRouter, id, flags);
     }
 
-    ~this()
-    {
-        Collection!ZigbeeNode().remove(this);
-    }
-
     // Properties...
 
     EUI64 pan_eui() const pure
@@ -83,8 +78,6 @@ protected:
     this(const(CollectionTypeInfo)* type_info, CID id, ObjectFlags flags)
     {
         super(type_info, id, flags);
-
-        Collection!ZigbeeNode().add(this);
     }
 
     override bool validate() const pure

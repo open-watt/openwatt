@@ -59,7 +59,7 @@ enum HTTPFlags : ubyte
 {
     None = 0,
     ForceBody = 1,   // include body data, even if it's empty (ie: Content-Length: 0)
-    NoDefaults = 2,  // skip User-Agent, Accept-Encoding and Connection: keep-alive — caller-supplied headers only
+    NoDefaults = 2,  // skip User-Agent, Accept-Encoding and Connection: keep-alive - caller-supplied headers only
 }
 
 struct HTTPMessage

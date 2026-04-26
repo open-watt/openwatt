@@ -106,7 +106,7 @@ template type_for(T, Extra...)
         enum type_for = struct_name_override!U;
     else
     {
-        static assert(false, "Not supported?");
+        static assert(false, "type_for!(" ~ T.stringof ~ ") not supported!");
         enum type_for = null; // not supported
     }
 }
@@ -525,7 +525,7 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
 
     static if (is(typeof(Type.type_name)))
     {
-        // concrete collection type — `type:` prefix is optional; if given, must be T or a descendant
+        // concrete collection type - `type:` prefix is optional; if given, must be T or a descendant
         if (!tail.empty)
         {
             auto rt = type in g_app.types;
@@ -552,7 +552,7 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
     }
     else
     {
-        // abstract (BaseObject, ActiveObject, ...) — `type:` prefix is required
+        // abstract (BaseObject, ActiveObject, ...) - `type:` prefix is required
         if (type.empty || tail.empty)
             return "Expected `type:name`";
 

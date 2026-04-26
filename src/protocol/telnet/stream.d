@@ -118,7 +118,7 @@ nothrow @nogc:
                 size_t iac_start = i;
 
                 if (i >= raw_len - 1)
-                    break; // incomplete — save for next read
+                    break; // incomplete - save for next read
 
                 NVT cmd = cast(NVT)rawbuf[++i];
                 switch (cmd)
@@ -149,7 +149,7 @@ nothrow @nogc:
 
                     case NVT.EL:
                         if (out_pos < buffer.length)
-                            out_buf[out_pos++] = '\x15'; // Ctrl+U — kill line
+                            out_buf[out_pos++] = '\x15'; // Ctrl+U - kill line
                         break;
 
                     case NVT.GA:
@@ -161,7 +161,7 @@ nothrow @nogc:
                             ++sub_start;
                         if (sub_start >= raw_len - 1)
                         {
-                            // Incomplete subnegotiation — save from IAC start
+                            // Incomplete subnegotiation - save from IAC start
                             i = iac_start;
                             break parse_loop;
                         }
@@ -555,7 +555,7 @@ ClientFeatures map_terminal_features(const(char)[] terminal_type)
     if (term.length >= 4 && term[0..4] == "dumb")
         return ClientFeatures.none;
 
-    // Unknown — assume basic ANSI
+    // Unknown - assume basic ANSI
     return ClientFeatures.ansi;
 }
 

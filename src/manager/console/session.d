@@ -378,7 +378,7 @@ nothrow @nogc:
                         continue;
                     }
                 }
-                else if (t[i] == '\x15') // Ctrl+U — kill line
+                else if (t[i] == '\x15') // Ctrl+U - kill line
                 {
                     _buffer.clear();
                     _position = 0;

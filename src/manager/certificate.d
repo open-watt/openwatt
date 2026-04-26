@@ -419,11 +419,11 @@ private:
 
     CompletionStatus start_acme()
     {
-        // ACME error occurred asynchronously — trigger ActiveObject backoff
+        // ACME error occurred asynchronously - trigger ActiveObject backoff
         if (_status == CertStatus.error)
             return CompletionStatus.error;
 
-        // Drive existing ACME workflow — don't re-initialize
+        // Drive existing ACME workflow - don't re-initialize
         if (_acme_state != AcmeState.idle)
         {
             update_acme();
@@ -564,7 +564,7 @@ private:
             return;
         }
 
-        // No account key — fall back to full start_acme via restart
+        // No account key - fall back to full start_acme via restart
         // (shouldn't happen if account was persisted, but be safe)
         writeWarning("Certificate '", name, "': no ACME account key for renewal, restarting");
         _renewing = false;
@@ -880,7 +880,7 @@ private:
         version (DebugCertificate)
             writeDebug("Certificate '", name, "': order status='", order_status, "'");
 
-        // Existing valid order — certificate already issued, just download it
+        // Existing valid order - certificate already issued, just download it
         if (order_status == "valid")
         {
             _acme_cert_url = json["certificate"].asString().makeString(defaultAllocator());
@@ -911,7 +911,7 @@ private:
             writeDebug("Certificate '", name, "':   finalize=", _acme_finalize_url);
         }
 
-        // Order is "ready" (authorizations already valid) — skip to finalize
+        // Order is "ready" (authorizations already valid) - skip to finalize
         if (order_status == "ready")
         {
             writeInfo("Certificate '", name, "': ACME order ready, finalizing");
@@ -1039,7 +1039,7 @@ private:
             writeWarning("Certificate '", name, "': ACME validation response: ", cast(const(char)[])response.content[]);
             acme_error("challenge validation failed");
         }
-        // else still "pending" — will poll again next update cycle
+        // else still "pending" - will poll again next update cycle
 
         return 0;
     }

@@ -108,7 +108,7 @@ nothrow @nogc:
         int tag = send_packet(server_address, seq, request, ModbusFrameType.request, pcp, dei);
         if (tag < 0)
         {
-            // queue rejected immediately — notify caller
+            // queue rejected immediately - notify caller
             if (error_handler)
                 error_handler(ModbusErrorType.Failed, request, now);
             return false;

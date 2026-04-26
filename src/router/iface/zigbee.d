@@ -50,8 +50,8 @@ EUI64 zigbee_multicast_addr(ushort group)
     => EUI64(0x3, 0, 0, 0, 0, 0, group >> 8, cast(ubyte)group);
 
 
-enum uint queue_timeout = 30_000; // milliseconds — safety net only; message_sent_handler is the real completion path
-enum uint ezsp_grace_period = 4000; // milliseconds — how long to wait for EZSP client to recover before restarting
+enum uint queue_timeout = 30_000; // milliseconds - safety net only; message_sent_handler is the real completion path
+enum uint ezsp_grace_period = 4000; // milliseconds - how long to wait for EZSP client to recover before restarting
 
 
 class ZigbeeInterface : BaseInterface
@@ -254,7 +254,7 @@ protected:
 
         send_queued_messages();
 
-        // Counter polling — 200ms when idle, 2s hard maximum
+        // Counter polling - 200ms when idle, 2s hard maximum
         long ping_elapsed = (now - _last_ping).as!"msecs";
         if (ping_elapsed >= 2000 || (ping_elapsed >= 200 && !_queue.has_pending() && _queue.in_flight_count() == 0))
         {

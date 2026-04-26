@@ -237,7 +237,7 @@ protected:
                 frame_start = _decoded_bytes;
             }
 
-            // parse any complete frames already in the buffer — important on the
+            // parse any complete frames already in the buffer - important on the
             // first iteration after an HTTP→WS upgrade, where _message was seeded
             // with leftover bytes from the HTTP parser before any stream.read.
             while (frame_start + 2 < read)
@@ -287,7 +287,7 @@ protected:
                     offset += 4;
                 }
 
-                // incomplete frame — break out; the outer loop reads more and the
+                // incomplete frame - break out; the outer loop reads more and the
                 // end-of-function stash persists buf into _message across update calls.
                 size_t msg_len = offset + payload_len;
                 if (read < frame_start + msg_len)
@@ -440,7 +440,7 @@ protected:
             read += r;
         }
 
-        // shuffle any undispatched tail back down before stashing — the outer loop
+        // shuffle any undispatched tail back down before stashing - the outer loop
         // may have exited via `pending == 0` right after parsing, before the top-of-loop
         // shuffle reclaims the gap between _decoded_bytes and frame_start.
         if (frame_start > _decoded_bytes)
