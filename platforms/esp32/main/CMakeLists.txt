@@ -1,4 +1,4 @@
-set(ESP32_SYS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/urt/src/sys/esp32")
+set(ESP32_SYS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/urt/src/urt/driver/esp32")
 
 idf_component_register(SRCS "${ESP32_SYS_DIR}/main.c" "${ESP32_SYS_DIR}/ow_shim.c"
                        INCLUDE_DIRS ""

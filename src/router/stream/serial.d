@@ -26,7 +26,7 @@ else version(Posix)
 }
 else version (Embedded)
 {
-    import sys.baremetal.uart;
+    import urt.driver.uart;
 }
 else version (FreeStanding)
 {
@@ -410,7 +410,7 @@ nothrow @nogc:
         }
         else version (Embedded)
         {
-            static import bm = sys.baremetal.uart;
+            static import bm = urt.driver.uart;
             __gshared immutable bm.StopBits[3] stop_bits_map = [ bm.StopBits.one, bm.StopBits.one_point_five, bm.StopBits.two ];
             __gshared immutable bm.Parity[5] parity_map = [ bm.Parity.none, bm.Parity.even, bm.Parity.odd, bm.Parity.none, bm.Parity.none ];
 

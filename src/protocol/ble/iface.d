@@ -18,7 +18,7 @@ import router.iface.priority_queue;
 
 import protocol.ble.device : ADSection, ADType;
 
-import sys.baremetal.ble;
+import urt.driver.ble;
 
 import urt.uuid;
 
@@ -300,7 +300,7 @@ package:
         BLEAdv adv_handle;
     }
 
-    // pending GATT op — correlates driver callback to queue tag
+    // pending GATT op - correlates driver callback to queue tag
     struct PendingGattOp
     {
         ubyte tag;
@@ -393,7 +393,7 @@ package:
         return null;
     }
 
-    // incoming packet handler — NAT rewriting and dispatch
+    // incoming packet handler - NAT rewriting and dispatch
     void on_incoming(ref Packet p)
     {
         if (p.type == PacketType.ble_ll)
