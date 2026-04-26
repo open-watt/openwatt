@@ -15,7 +15,7 @@ import manager.plugin;
 import router.iface;
 import router.stream;
 
-import sys.baremetal.can;
+import urt.driver.can;
 
 version(Espressif)
     version = HasGPIO;

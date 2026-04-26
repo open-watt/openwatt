@@ -18,7 +18,7 @@ import manager.secret;
 import router.iface;
 import router.iface.ethernet;
 
-import sys.baremetal.wifi;
+import urt.driver.wifi;
 
 version (Windows)
 {
