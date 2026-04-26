@@ -133,6 +133,14 @@ Application create_application()
 void shutdown_application()
 {
     defaultAllocator().freeT(g_app);
+
+    version (AllocTracking)
+    {
+        import urt.log : writeDebug;
+        import urt.mem.tracking : alloc_print_live;
+        writeDebug("Allocation tracker: leak dump after application teardown");
+        alloc_print_live((const(char)[] line) { writeDebug(line); });
+    }
 }
 
 Mod get_module(Mod)()
@@ -209,6 +217,13 @@ nothrow @nogc:
         console.register_command!sysinfo("/system", this);
         console.register_command!show_time("/system", this, "time");
         console.register_command!sleep("/system", this);
+
+        version (AllocTracking)
+        {
+            console.register_command!alloc_stats_cmd("/system/alloc", this, "stats");
+            console.register_command!alloc_mark_cmd("/system/alloc", this, "mark");
+            console.register_command!alloc_leaks_cmd("/system/alloc", this, "leaks");
+        }
 
         console.register_command!device_print("/device", this, "print");
         console.register_command!link_add("/element/link", this, "add");
