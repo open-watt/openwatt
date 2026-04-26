@@ -60,25 +60,22 @@ struct CANFrame
 class CANInterface : BaseInterface
 {
     version(HasGPIO)
-        __gshared Property[6] Properties = [
-            Property.create!("stream", stream)(),
-            Property.create!("protocol", protocol)(),
-            Property.create!("device", device)(),
-            Property.create!("baud-rate", baud_rate)(),
-            Property.create!("tx-gpio", tx_gpio)(),
-            Property.create!("rx-gpio", rx_gpio)(),
-        ];
+        alias Properties = AliasSeq!(Prop!("stream", stream),
+                                     Prop!("protocol", protocol),
+                                     Prop!("device", device),
+                                     Prop!("baud-rate", baud_rate),
+                                     Prop!("tx-gpio", tx_gpio),
+                                     Prop!("rx-gpio", rx_gpio));
     else
-        __gshared Property[4] Properties = [
-            Property.create!("stream", stream)(),
-            Property.create!("protocol", protocol)(),
-            Property.create!("device", device)(),
-            Property.create!("baud-rate", baud_rate)(),
-        ];
+        alias Properties = AliasSeq!(Prop!("stream", stream),
+                                     Prop!("protocol", protocol),
+                                     Prop!("device", device),
+                                     Prop!("baud-rate", baud_rate));
 
 nothrow @nogc:
 
     enum type_name = "can";
+    enum path = "/interface/can";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -86,11 +83,13 @@ nothrow @nogc:
 
         // this is the proper value for canbus, irrespective of the L2 MTU
         // can jumbo's are theoretically possible if all hops support it... (fragmentation is not possible (?))
-        _mtu = 8; // or 64 for FD-CAN...
+        mtu = 8; // or 64 for FD-CAN...
 
         // this would be 8 or 64 for physical canbus, or larger if another carrier...?
-        _max_l2mtu = _mtu;
-        _l2mtu = _max_l2mtu;
+        _max_l2mtu = mtu;
+        l2mtu = _max_l2mtu;
+
+        mark_set!(typeof(this), "max-l2mtu")();
     }
 
 
@@ -162,6 +161,9 @@ nothrow @nogc:
 
     // API...
 
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const
     {
         if (!_device.empty)
@@ -172,12 +174,6 @@ nothrow @nogc:
                 return false;
         }
         return _stream !is null && _protocol == CANInterfaceProtocol.ebyte;
-    }
-
-    override CompletionStatus validating()
-    {
-        _stream.try_reattach();
-        return super.validating();
     }
 
     override CompletionStatus startup()
@@ -210,6 +206,16 @@ nothrow @nogc:
         if (_stream.running)
             return CompletionStatus.complete;
         return CompletionStatus.continue_;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        if (_can.is_open)
+        {
+            can_close(_can);
+            can_deinit();
+        }
+        return CompletionStatus.complete;
     }
 
     override void update()
@@ -323,7 +329,7 @@ nothrow @nogc:
                 {
                     version (DebugCANInterface)
                         writeDebug("CAN packet dropped on interface '", name, "': invalid frame - bad ID");
-                    ++_status.rx_dropped;
+                    add_rx_drop();
                     continue;
                 }
 
@@ -340,7 +346,7 @@ nothrow @nogc:
         }
     }
 
-    protected override int transmit(ref const Packet packet, MessageCallback)
+    override int transmit(ref const Packet packet, MessageCallback)
     {
         // can only handle can packets
         if (packet.type != PacketType.can)
@@ -350,7 +356,7 @@ nothrow @nogc:
                 // de-frame CANoE...
                 assert(false, "TODO");
             }
-            ++_status.tx_dropped;
+            add_tx_drop();
             return -1;
         }
 
@@ -358,7 +364,7 @@ nothrow @nogc:
         {
             version (DebugCANInterface)
                 writeDebug("CAN packet dropped on interface '", name, "': invalid frame - data too long");
-            ++_status.tx_dropped;
+            add_tx_drop();
             return false;
         }
 
@@ -374,11 +380,10 @@ nothrow @nogc:
             hw.data[0 .. hw.dlc] = cast(const ubyte[])packet.data[];
             if (!can_transmit(_can, hw))
             {
-                ++_status.tx_dropped;
+                add_tx_drop();
                 return -1;
             }
-            ++_status.tx_packets;
-            _status.tx_bytes += packet.data.length;
+            add_tx_frame(packet.data.length);
             return 0;
         }
 
@@ -413,12 +418,11 @@ nothrow @nogc:
 
         if (written <= 0)
         {
-            ++_status.tx_dropped;
+            add_tx_drop();
             return -1;
         }
 
-        ++_status.tx_packets;
-        _status.tx_bytes += length;
+        add_tx_frame(length);
         return 0;
     }
 
@@ -451,16 +455,6 @@ nothrow @nogc:
         // TODO: what's the go with the error bit (bit 29 of ID)???
 
         sink((cast(ubyte*)&f)[0 .. socket_can.sizeof]);
-    }
-
-    override CompletionStatus shutdown()
-    {
-        if (_can.is_open)
-        {
-            can_close(_can);
-            can_deinit();
-        }
-        return CompletionStatus.complete;
     }
 
 private:

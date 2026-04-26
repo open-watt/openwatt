@@ -18,10 +18,11 @@ nothrow @nogc:
 
 class BridgeStream : Stream
 {
-    __gshared Property[1] Properties = [ Property.create!("streams", streams)() ];
+    alias Properties = AliasSeq!(Prop!("streams", streams));
 nothrow @nogc:
 
     enum type_name = "bridge-stream";
+    enum path = "/stream/bridge";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
@@ -51,6 +52,75 @@ nothrow @nogc:
         m_remoteName ~= ']';
     }
 
+    // API...
+
+    override const(char)[] remote_name()
+        => m_remoteName[];
+
+    override ptrdiff_t read(void[] buffer)
+    {
+        size_t read;
+        if (buffer.length < m_inputBuffer.length)
+        {
+            read = buffer.length;
+            buffer[] = m_inputBuffer[0 .. read];
+            m_inputBuffer = m_inputBuffer[read .. $];
+        }
+        else
+        {
+            read = m_inputBuffer.length;
+            buffer[0 .. read] = m_inputBuffer[];
+            m_inputBuffer.clear();
+        }
+        add_rx_bytes(read);
+        if (_logging)
+            write_to_log(true, buffer[0 .. read]);
+        return read;
+    }
+
+    override ptrdiff_t write(const(void[])[] data...)
+    {
+
+        foreach (i; 0 .. m_streams.length)
+        {
+            foreach (j; 0 .. data.length)
+            {
+                ptrdiff_t written = 0;
+                while (written < data[j].length)
+                {
+                    if (m_streams[i] && m_streams[i].running)
+                        written += m_streams[i].write(data[j][written .. $]);
+                }
+            }
+        }
+
+        size_t total = 0;
+        foreach (ref d; data)
+        {
+            total += d.length;
+            if (_logging)
+                write_to_log(false, d[]);
+        }
+        add_tx_bytes(total);
+        return total;
+    }
+
+    override ptrdiff_t pending()
+        =>m_inputBuffer.length;
+
+    override ptrdiff_t flush()
+    {
+        // what this even?
+        assert(0);
+        foreach (stream; m_streams)
+            stream.flush();
+        m_inputBuffer.clear();
+        return 0;
+    }
+
+protected:
+    mixin RekeyHandler;
+
     override void update()
     {
         // TODO: this is shit; polling periodically sucks, and will result in sync issues!
@@ -61,7 +131,7 @@ nothrow @nogc:
         {
             if (!m_streams[i])
             {
-                if (!m_streams[i].try_reattach() || !m_streams[i].running)
+                if (m_streams[i].detached || !m_streams[i].running)
                     continue;
             }
 
@@ -95,64 +165,6 @@ nothrow @nogc:
         super.update();
     }
 
-    override const(char)[] remote_name()
-        => m_remoteName[];
-
-    override ptrdiff_t read(void[] buffer)
-    {
-        size_t read;
-        if (buffer.length < m_inputBuffer.length)
-        {
-            read = buffer.length;
-            buffer[] = m_inputBuffer[0 .. read];
-            m_inputBuffer = m_inputBuffer[read .. $];
-        }
-        else
-        {
-            read = m_inputBuffer.length;
-            buffer[0 .. read] = m_inputBuffer[];
-            m_inputBuffer.clear();
-        }
-        if (_logging)
-            write_to_log(true, buffer[0 .. read]);
-        return read;
-    }
-
-    override ptrdiff_t write(const(void[])[] data...)
-    {
-        foreach (i; 0 .. m_streams.length)
-        {
-            foreach (j; 0 .. data.length)
-            {
-                ptrdiff_t written = 0;
-                while (written < data[j].length)
-                {
-                    if (m_streams[i] && m_streams[i].running)
-                        written += m_streams[i].write(data[j][written .. $]);
-                }
-            }
-        }
-        if (_logging)
-        {
-            foreach (ref d; data)
-                write_to_log(false, d[]);
-        }
-        return 0;
-    }
-
-    override ptrdiff_t pending()
-        =>m_inputBuffer.length;
-
-    override ptrdiff_t flush()
-    {
-        // what this even?
-        assert(0);
-        foreach (stream; m_streams)
-            stream.flush();
-        m_inputBuffer.clear();
-        return 0;
-    }
-
 private:
     Array!(ObjectRef!Stream) m_streams;
     Array!ubyte m_inputBuffer;
@@ -167,6 +179,6 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!BridgeStream("/stream/bridge");
+        g_app.console.register_collection!BridgeStream();
     }
 }

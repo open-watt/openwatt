@@ -34,12 +34,12 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!TLSStream("/stream/tls");
-        g_app.console.register_collection!TLSServer("/protocol/tls/server");
-        g_app.console.register_collection!HTTPClient("/protocol/http/client");
-        g_app.console.register_collection!HTTPServer("/protocol/http/server");
-        g_app.console.register_collection!WebSocketServer("/protocol/websocket/server");
-        g_app.console.register_collection!WebSocket("/protocol/websocket");
+        g_app.console.register_collection!TLSStream();
+        g_app.console.register_collection!TLSServer();
+        g_app.console.register_collection!HTTPClient();
+        g_app.console.register_collection!HTTPServer();
+        g_app.console.register_collection!WebSocketServer();
+        g_app.console.register_collection!WebSocket();
 
         g_app.console.register_command!request("/protocol/http", this);
     }

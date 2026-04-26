@@ -36,8 +36,8 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!BLEInterface("/interface/ble");
-        g_app.console.register_collection!BLEClient("/protocol/ble/client");
+        g_app.console.register_collection!BLEInterface();
+        g_app.console.register_collection!BLEClient();
         g_app.console.register_command!device_add("/protocol/ble/device", this, "add");
         g_app.console.register_command!print_devices("/protocol/ble/device", this, "print");
         g_app.console.register_command!cmd_read("/protocol/ble/client", this, "read");

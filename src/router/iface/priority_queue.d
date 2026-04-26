@@ -5,9 +5,8 @@ import urt.mem.allocator;
 import urt.mem.freelist;
 import urt.time;
 
-import router.iface : MessageCallback, MessageState, TagAllocator;
+import router.iface : BaseInterface, MessageCallback, MessageState, TagAllocator;
 import router.iface.packet;
-import router.status : IfStatus;
 
 nothrow @nogc:
 
@@ -28,13 +27,13 @@ struct PriorityPacketQueue
 {
 nothrow @nogc:
 
-    void init(ubyte max_in_flight, ubyte reserved_slots = 0, PCP reserved_min_pcp = PCP.vo, IfStatus* status = null)
+    void init(ubyte max_in_flight, ubyte reserved_slots = 0, PCP reserved_min_pcp = PCP.vo, BaseInterface iface = null)
     {
         assert(max_in_flight > 0, "max_in_flight must be greater than 0");
         assert(reserved_slots < max_in_flight, "Reserved slots cannot exceed total capacity");
 
         _max_in_flight = max_in_flight;
-        _status = status;
+        _if = iface;
         _reserved_slots = reserved_slots;
         _reserved_min_rank = pcp_priority_map[reserved_min_pcp];
     }
@@ -291,7 +290,7 @@ private:
     Array!(QueuedFrame*) _in_flight;
     FreeList!QueuedFrame _pool;
 
-    IfStatus* _status;
+    BaseInterface _if;
 
     ubyte _max_in_flight;
     ubyte _in_flight_count;
@@ -307,18 +306,13 @@ private:
 
     void update_time_stats(QueuedFrame* frame, MonoTime timestamp)
     {
-        if (!_status)
+        if (!_if)
             return;
 
         uint wait_us = cast(uint)(frame.dispatch_time - frame.enqueue_time).as!"usecs";
         uint service_us = cast(uint)(timestamp - frame.dispatch_time).as!"usecs";
 
-        // EWMA: 7/8 * old + 1/8 * new
-        _status.avg_queue_us = (_status.avg_queue_us*7 + wait_us) / 8;
-        _status.avg_service_us = (_status.avg_service_us*7 + service_us) / 8;
-
-        if (service_us > _status.max_service_us)
-            _status.max_service_us = service_us;
+        _if.queue_update_service_times(wait_us, service_us);
     }
 
     bool drop_lowest_dei()

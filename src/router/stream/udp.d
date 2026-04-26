@@ -17,13 +17,14 @@ nothrow @nogc:
 
 class UDPStream : Stream
 {
-    __gshared Property[4] Properties = [ Property.create!("local-host", local_host)(),
-                                         Property.create!("local-port", local_port)(),
-                                         Property.create!("remote-host", remote_host)(),
-                                         Property.create!("remote-port", remote_port)() ];
+    alias Properties = AliasSeq!(Prop!("local-host", local_host),
+                                 Prop!("local-port", local_port),
+                                 Prop!("remote-host", remote_host),
+                                 Prop!("remote-port", remote_port));
 nothrow @nogc:
 
     enum type_name = "udp";
+    enum path = "/stream/udp";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -93,8 +94,6 @@ protected:
             _remote = addr.address;
             break;
         }
-
-        _status.link_status = LinkStatus.up;
         return CompletionStatus.complete;
     }
 
@@ -105,7 +104,6 @@ protected:
             _socket.close();
             _socket = Socket.init;
         }
-        _status.link_status = LinkStatus.down;
         return CompletionStatus.complete;
     }
 
@@ -122,6 +120,7 @@ protected:
                 return 0;
             assert(0);
         }
+        add_rx_bytes(bytes);
         if (_logging)
             write_to_log(true, buffer[0 .. bytes]);
         return bytes;
@@ -133,6 +132,7 @@ protected:
         Result r = _socket.sendto(&_remote, &bytes, data);
         if (!r)
             assert(0);
+        add_tx_bytes(bytes);
         if (_logging)
         {
             import urt.util : min;
@@ -191,6 +191,6 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!UDPStream("/stream/udp");
+        g_app.console.register_collection!UDPStream();
     }
 }

@@ -6,6 +6,7 @@ import urt.string;
 import urt.time;
 
 import manager.base;
+import manager.collection : RekeyHandler;
 
 import protocol.ppp;
 
@@ -17,11 +18,12 @@ nothrow @nogc:
 
 class PPPClient : BaseInterface
 {
-    __gshared Property[3] Properties = [ Property.create!("stream", stream)(),
-                                         Property.create!("protocol", protocol)() ];
+    alias Properties = AliasSeq!(Prop!("stream", stream),
+                                 Prop!("protocol", protocol));
 nothrow @nogc:
 
     enum type_name = "ppp";
+    enum path = "/protocol/ppp/client";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -61,6 +63,9 @@ nothrow @nogc:
 
     // API...
 
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const pure
         => (_protocol < TunnelProtocol.PPPoE && _stream !is null);
 
@@ -82,6 +87,8 @@ nothrow @nogc:
 
     override void update()
     {
+        super.update();
+
         ubyte[2048] buffer = void;
         SysTime now = getSysTime();
 
@@ -167,7 +174,6 @@ nothrow @nogc:
         }
     }
 
-protected:
     override int transmit(ref const Packet packet, MessageCallback)
     {
         assert(false, "TODO: frame and transmit");
@@ -182,11 +188,12 @@ private:
 
 class PPPoEClient : BaseInterface
 {
-    __gshared Property[3] Properties = [ Property.create!("interface", iface)(),
-                                         Property.create!("protocol", protocol)() ];
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("protocol", protocol));
 nothrow @nogc:
 
     enum type_name = "pppoe";
+    enum path = "/protocol/pppoe/client";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -254,11 +261,15 @@ nothrow @nogc:
 
     override void update()
     {
+        super.update();
+
         if (!_interface)
             restart();
     }
 
 protected:
+    mixin RekeyHandler;
+
     override int transmit(ref const Packet packet, MessageCallback)
     {
         assert(false, "TODO: frame and transmit");

@@ -55,15 +55,16 @@ enum NSProtocol : ubyte
     wins, //       ""
 }
 
-class DNSServer : BaseObject
+class DNSServer : ActiveObject
 {
-    __gshared Property[4] Properties = [ Property.create!("interface", iface)(),
-                                         Property.create!("protocols", protocols)(),
-                                         Property.create!("doh-server", doh_server)(),
-                                         Property.create!("doh-uri", doh_uri)() ];
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("protocols", protocols),
+                                 Prop!("doh-server", doh_server),
+                                 Prop!("doh-uri", doh_uri));
 nothrow @nogc:
 
     enum type_name = "dns-server";
+    enum path = "/protocol/dns/server";
     enum collection_id = CollectionType.dns_server;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -146,6 +147,9 @@ nothrow @nogc:
     }
 
     // API...
+
+protected:
+    mixin RekeyHandler;
 
     override CompletionStatus startup()
     {
@@ -532,7 +536,6 @@ nothrow @nogc:
         }
     }
 
-
 private:
     enum nbns_and_wins = (1 << NSProtocol.nbns) |  (1 << NSProtocol.wins);
 
@@ -645,7 +648,7 @@ private:
         }
     }
 
-    int doh_request_handler(ref const HTTPMessage, ref Stream stream)
+    int doh_request_handler(ref const HTTPMessage, ref Stream stream, const(ubyte)[] leftover)
     {
         assert(false, "TODO: incoming DoH request...");
         // TODO: handle requests with `Content-Type: application/dns-message` as a DNS request...

@@ -117,10 +117,11 @@ enum uint ble_queue_timeout = 5000; // milliseconds
 
 class BLEInterface : BaseInterface
 {
-    __gshared Property[1] Properties = [ Property.create!("max-in-flight", max_in_flight)() ];
+    alias Properties = AliasSeq!(Prop!("max-in-flight", max_in_flight));
 nothrow @nogc:
 
     enum type_name = "ble";
+    enum path = "/interface/ble";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -128,6 +129,8 @@ nothrow @nogc:
         _mtu = 247; // BLE 5.x max ATT payload (251 - 4 byte L2CAP header)
         _max_l2mtu = 251;
         _l2mtu = _max_l2mtu;
+
+        mark_set!(typeof(this), "max-l2mtu")();
     }
 
 
@@ -176,7 +179,7 @@ protected:
 
     override CompletionStatus startup()
     {
-        _queue.init(_max_in_flight, 0, PCP.be, &_status);
+        _queue.init(_max_in_flight, 0, PCP.be, this);
 
         static if (num_ble > 0)
         {
@@ -214,8 +217,8 @@ protected:
         {
             if (_ble.is_open)
             {
-                ble_close(_ble);
                 _active_radios[_ble.port] = null;
+                ble_close(_ble);
             }
         }
 
@@ -257,7 +260,7 @@ protected:
     {
         if (packet.type != PacketType.ble_ll && packet.type != PacketType.ble_att)
         {
-            ++_status.tx_dropped;
+            add_tx_drop();
             return -1;
         }
 
@@ -265,7 +268,7 @@ protected:
         int tag = _queue.enqueue(p, &on_frame_complete);
         if (tag < 0)
         {
-            ++_status.tx_dropped;
+            add_tx_drop();
             return -1;
         }
 
@@ -688,12 +691,9 @@ package:
         if (auto pm = t in _pending)
         {
             if (state == MessageState.complete)
-            {
-                ++_status.tx_packets;
-                _status.tx_bytes += pm.message_length + 14;
-            }
+                add_tx_frame(pm.message_length + 14);
             else if (state != MessageState.in_flight)
-                ++_status.tx_dropped;
+                add_tx_drop();
 
             if (pm.callback)
                 pm.callback(tag, state);

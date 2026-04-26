@@ -344,14 +344,15 @@ private:
 }
 
 
-class AA55Client : BaseObject
+class AA55Client : ActiveObject
 {
-    __gshared Property[3] Properties = [ Property.create!("remote", remote)(),
-                                         Property.create!("profile", profile)(),
-                                         Property.create!("model", model)() ];
+    alias Properties = AliasSeq!(Prop!("remote", remote),
+                                 Prop!("profile", profile),
+                                 Prop!("model", model));
 nothrow @nogc:
 
     enum type_name = "aa55";
+    enum path = "/protocol/goodwe/aa55";
     enum collection_id = CollectionType.aa55;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)

@@ -30,8 +30,8 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!IPAddress("/protocol/ip/address");
-        g_app.console.register_collection!IPRoute("/protocol/ip/route");
+        g_app.console.register_collection!IPAddress();
+        g_app.console.register_collection!IPRoute();
     }
 
     override void post_init()

@@ -30,7 +30,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!AA55Client("/protocol/goodwe/aa55");
+        g_app.console.register_collection!AA55Client();
         g_app.console.register_command!device_add("/protocol/goodwe/device", this, "add");
 
         // Create socket for AA55 clients

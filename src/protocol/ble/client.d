@@ -18,13 +18,14 @@ import protocol.ble.iface;
 nothrow @nogc:
 
 
-class BLEClient : BaseObject
+class BLEClient : ActiveObject
 {
-    __gshared Property[2] Properties = [ Property.create!("interface", iface)(),
-                                         Property.create!("peer", peer)() ];
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("peer", peer));
 nothrow @nogc:
 
     enum type_name = "ble-client";
+    enum path = "/protocol/ble/client";
     enum collection_id = CollectionType.ble_client;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -79,15 +80,10 @@ nothrow @nogc:
     }
 
 protected:
+    mixin RekeyHandler;
 
     override bool validate() const
         => _iface !is null && cast(bool)_peer;
-
-    override CompletionStatus validating()
-    {
-        _iface.try_reattach();
-        return super.validating();
-    }
 
     override CompletionStatus startup()
     {
@@ -246,7 +242,7 @@ private:
     }
 
 
-    void iface_state_change(BaseObject, StateSignal signal)
+    void iface_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
             restart();

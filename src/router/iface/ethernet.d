@@ -28,10 +28,11 @@ nothrow @nogc:
 
 class EthernetInterface : BaseInterface
 {
-    __gshared Property[1] Properties = [ Property.create!("adapter", adapter)() ];
+    alias Properties = AliasSeq!(Prop!("adapter", adapter));
 nothrow @nogc:
 
     enum type_name = "ether";
+    enum path = "/interface/ethernet";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -94,6 +95,8 @@ nothrow @nogc:
 
     override void update()
     {
+        super.update();
+
         version(Windows)
         {
             pcap_pkthdr* header;
@@ -117,7 +120,7 @@ nothrow @nogc:
 
                 if (header.caplen < header.len || header.caplen < 14)
                 {
-                    ++_status.rx_dropped;
+                    add_rx_drop();
                     continue;
                 }
 
@@ -134,7 +137,7 @@ nothrow @nogc:
                 if (eth.ether_type == 0x88E5) // MACsec
                 {
                     // TODO: handle MACsec frames?
-                    ++_status.rx_dropped;
+                    add_rx_drop();
                     continue;
                 }
 
@@ -150,7 +153,7 @@ nothrow @nogc:
                 {
                     if (header.caplen < 18)
                     {
-                        ++_status.rx_dropped;
+                        add_rx_drop();
                         continue;
                     }
 
@@ -173,7 +176,7 @@ nothrow @nogc:
                     }
 
                     // no vlan sub-interface captured this frame, and it's not for us
-                    _status.rx_dropped++;
+                    add_rx_drop();
                     continue;
                 }
 
@@ -238,7 +241,7 @@ protected:
                     if (packet.data.length > buffer.sizeof - (payload - buffer.ptr))
                     {
                         // packet is too big! (TODO: but what about jumbos?)
-                        _status.tx_dropped++;
+                        add_tx_drop();
                         return;
                     }
                     payload[0 .. packet.data.length] = cast(ubyte[])packet.data[];
@@ -250,7 +253,7 @@ protected:
 
                 default:
                     assert(false, "TODO: reframe other protocols as open-watt ethernet...");
-                    ++_status.tx_dropped;
+                    add_tx_drop();
                     return;
             }
 
@@ -258,11 +261,10 @@ protected:
             {
                 writeError("pcap_sendpacket failed: ", pcap_geterr(_pcap_handle));
                 // TODO: any specific error handling? restart interface?
-                _status.tx_dropped++;
+                add_tx_drop();
             }
 
-            ++_status.tx_packets;
-            _status.tx_bytes += packet_len;
+            add_tx_frame(packet_len);
         }
     }
 
@@ -291,6 +293,8 @@ protected:
 //        _mtu = 1500;
 //        _max_l2mtu = _mtu;
 //        _l2mtu = 1500;
+
+//        mark_set!(typeof(this), "max-l2mtu")();
     }
 
     String _adapter;
@@ -309,7 +313,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!EthernetInterface("/interface/ethernet");
+        g_app.console.register_collection!EthernetInterface();
 
         version(Windows)
         {

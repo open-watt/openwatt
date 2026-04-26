@@ -28,7 +28,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!TelnetStream("/stream/telnet");
+        g_app.console.register_collection!TelnetStream();
         g_app.console.register_command!add_server("/protocol/telnet/server", this, "add");
     }
 

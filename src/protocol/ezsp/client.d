@@ -12,6 +12,7 @@ import urt.time;
 import urt.traits;
 
 import manager.base;
+import manager.collection : RekeyHandler;
 import manager.plugin;
 
 import router.iface;
@@ -58,16 +59,17 @@ template EZSPResult(T)
         alias EZSPResult = T.Response;
 }
 
-class EZSPClient : BaseObject
+class EZSPClient : ActiveObject
 {
-    __gshared Property[5] Properties = [ Property.create!("ash_stream", ash_stream)(),
-                                         Property.create!("ash_interface", ash_interface)(),
-                                         Property.create!("stack-type", stack_type)(),
-                                         Property.create!("stack-version", stack_version)(),
-                                         Property.create!("protocol-version", protocol_version)() ];
+    alias Properties = AliasSeq!(Prop!("ash_stream", ash_stream),
+                                 Prop!("ash_interface", ash_interface),
+                                 Prop!("stack-type", stack_type),
+                                 Prop!("stack-version", stack_version),
+                                 Prop!("protocol-version", protocol_version));
 @nogc:
 
     enum type_name = "ezsp";
+    enum path = "/protocol/ezsp/client";
     enum collection_id = CollectionType.ezsp;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
@@ -295,15 +297,11 @@ nothrow:
         return _sequence_number++;
     }
 
-    final override bool validate() const pure
-        => (_stream !is null) != (_ash_ext !is null);
+protected:
+    mixin RekeyHandler;
 
-    override CompletionStatus validating()
-    {
-        _stream.try_reattach();
-        _ash_ext.try_reattach();
-        return super.validating();
-    }
+    override bool validate() const pure
+        => (_stream !is null) != (_ash_ext !is null);
 
     override CompletionStatus startup()
     {
@@ -371,7 +369,7 @@ nothrow:
         return CompletionStatus.complete;
     }
 
-    final override void update()
+    override void update()
     {
         MonoTime now = getTime();
         if (_queued_requests.length > 0 && now - _queued_requests[0].ts > 200.msecs)
@@ -449,7 +447,7 @@ private:
         return _ash.forward(p);
     }
 
-    void ash_state_change(BaseObject, StateSignal signal)
+    void ash_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
             restart();

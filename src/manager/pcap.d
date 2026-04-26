@@ -250,13 +250,14 @@ private:
     }
 }
 
-class PCAPServer : BaseObject
+class PCAPServer : ActiveObject
 {
-    __gshared Property[2] Properties = [ Property.create!("port", port)(),
-                                         Property.create!("allow-anonymous", allow_anonymous)() ];
+    alias Properties = AliasSeq!(Prop!("port", port),
+                                 Prop!("allow-anonymous", allow_anonymous));
 nothrow @nogc:
 
     enum type_name = "pcap-server";
+    enum path = "/tools/pcap/server";
     enum collection_id = CollectionType.pcap_server;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -798,7 +799,7 @@ private:
             stream.write(RpcapHeader(ver: ver, type: type, value: value, plen: cast(uint)plen).nativeToBigEndian);
         }
 
-        void stream_destroyed(BaseObject object, StateSignal signal)
+        void stream_destroyed(ActiveObject object, StateSignal signal)
         {
             if (signal == StateSignal.destroyed)
             {
@@ -846,7 +847,7 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_command!add("/tools/pcap", this);
-        g_app.console.register_collection!PCAPServer("/tools/pcap/server");
+        g_app.console.register_collection!PCAPServer();
     }
 
     override void update()

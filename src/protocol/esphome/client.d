@@ -30,15 +30,16 @@ nothrow @nogc:
 alias ESPHomeMessageHandler = void delegate(uint msg_type, const(ubyte)[] payload);
 
 
-class ESPHomeClient : BaseObject
+class ESPHomeClient : ActiveObject
 {
-    __gshared Property[4] Properties = [ Property.create!("remote", remote)(),
-                                         Property.create!("port", port)(),
-                                         Property.create!("server_name", server_name)(),
-                                         Property.create!("server_info", server_info)() ];
+    alias Properties = AliasSeq!(Prop!("remote", remote),
+                                 Prop!("port", port),
+                                 Prop!("server_name", server_name),
+                                 Prop!("server_info", server_info));
 nothrow @nogc:
 
     enum type_name = "esphome";
+    enum path = "/protocol/esphome/client";
     enum collection_id = CollectionType.esphome;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -407,7 +408,7 @@ private:
         }
     }
 
-    void stream_state_handler(BaseObject object, StateSignal signal)
+    void stream_state_handler(ActiveObject object, StateSignal signal)
     {
         if (signal == StateSignal.offline)
         {

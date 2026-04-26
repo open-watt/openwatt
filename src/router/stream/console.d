@@ -36,6 +36,7 @@ class ConsoleStream : Stream
 nothrow @nogc:
 
     enum type_name = "console";
+    enum path = "/stream/console";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -51,13 +52,16 @@ nothrow @nogc:
     override ptrdiff_t read(void[] buffer)
     {
         version (Windows)
-            return read_console_input(buffer);
+            auto bytes = read_console_input(buffer);
         else version (Posix)
-            return urt.internal.sys.posix.read(STDIN_FILENO, buffer.ptr, buffer.length);
+            auto bytes = urt.internal.sys.posix.read(STDIN_FILENO, buffer.ptr, buffer.length);
         else version (Embedded)
-            return 0;
+            auto bytes = 0;
         else
             static assert(false, "Unsupported platform");
+        version (Embedded) {} else
+            add_rx_bytes(bytes);
+        return bytes;
     }
 
     override ptrdiff_t write(const(void[])[] data...)
@@ -68,6 +72,7 @@ nothrow @nogc:
             auto n = write_console(cast(const(char)[])d);
             if (n < 0)
                 return -1;
+            add_tx_bytes(n);
             total += n;
         }
         return total;
@@ -314,6 +319,6 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!ConsoleStream("/stream/console");
+        g_app.console.register_collection!ConsoleStream();
     }
 }

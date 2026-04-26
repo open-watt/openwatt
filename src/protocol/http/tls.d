@@ -41,14 +41,15 @@ nothrow @nogc:
 
 class TLSStream : Stream
 {
-    __gshared Property[5] Properties = [ Property.create!("stream", stream)(),
-                                         Property.create!("remote", remote)(),
-                                         Property.create!("keepalive", keepalive)(),
-                                         Property.create!("certificate", certificate)(),
-                                         Property.create!("certificates", certificates)() ];
+    alias Properties = AliasSeq!(Prop!("stream", stream),
+                                 Prop!("remote", remote),
+                                 Prop!("keepalive", keepalive),
+                                 Prop!("certificate", certificate),
+                                 Prop!("certificates", certificates));
 nothrow @nogc:
 
     enum type_name = "tls";
+    enum path = "/stream/tls";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
@@ -93,7 +94,7 @@ nothrow @nogc:
             tcp.keepalive = value;
     }
 
-    void certificate(BaseObject value)
+    void certificate(Certificate value)
     {
         _certificates.clear();
         if (value)
@@ -101,7 +102,7 @@ nothrow @nogc:
         restart();
     }
 
-    void certificates(BaseObject[] value...)
+    void certificates(Certificate[] value...)
     {
         _certificates.clear();
         _certificates.reserve(value.length);
@@ -121,13 +122,6 @@ nothrow @nogc:
         if (_certificates.length > 0)
             return true;
         return !_host.empty;
-    }
-
-    override CompletionStatus validating()
-    {
-        foreach (ref c; _certificates)
-            c.try_reattach();
-        return super.validating();
     }
 
     final override CompletionStatus startup()
@@ -589,12 +583,15 @@ nothrow @nogc:
         return n;
     }
 
+protected:
+    mixin RekeyHandler;
+
 private:
     String _host;
     bool _keep_enable = false;
     bool _close_notify = false;
 
-    Array!(ObjectRef!BaseObject) _certificates;
+    Array!(ObjectRef!Certificate) _certificates;
     BaseObject _selected_cert;
     ObjectRef!Stream _stream;
     Array!ubyte _receive_buffer;
@@ -606,10 +603,8 @@ private:
         _app_buffer ~= cast(const(ubyte)[])message;
     }
 
-    BaseObject select_certificate()
+    Certificate select_certificate()
     {
-        import manager.certificate : Certificate;
-
         const(char)[] sni = extract_sni_hostname(_receive_buffer[]);
 
         if (sni.length > 0)
@@ -920,10 +915,11 @@ private:
 
 class TLSServer : TCPServer
 {
-    __gshared Property[2] Properties = [ Property.create!("certificate", certificate)(),
-                                         Property.create!("certificates", certificates)() ];
+    alias Properties = AliasSeq!(Prop!("certificate", certificate),
+                                 Prop!("certificates", certificates));
 nothrow @nogc:
     enum type_name = "tls-server";
+    enum path = "/protocol/tls/server";
     enum collection_id = CollectionType.tls_server;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -931,7 +927,7 @@ nothrow @nogc:
         super(collection_type_info!TLSServer, id, flags);
     }
 
-    void certificate(BaseObject value)
+    void certificate(ActiveObject value)
     {
         _certificates.clear();
         if (value)
@@ -939,7 +935,7 @@ nothrow @nogc:
         restart();
     }
 
-    void certificates(BaseObject[] value...)
+    void certificates(ActiveObject[] value...)
     {
         _certificates.clear();
         _certificates.reserve(value.length);
@@ -949,6 +945,7 @@ nothrow @nogc:
     }
 
 protected:
+    mixin RekeyHandler;
 
     final override bool validate() const pure
         => super.validate() && _certificates.length > 0;
@@ -1000,18 +997,18 @@ protected:
 
 package:
 
-    void set_certificate_array(const(ObjectRef!BaseObject)[] certs)
+    void set_certificate_array(ObjectRef!Certificate[] certs)
     {
         _certificates.clear();
         _certificates.reserve(certs.length);
         foreach (ref c; certs)
             if (c)
-                _certificates.emplaceBack(cast(BaseObject)c.get());
+                _certificates.emplaceBack(c.get());
     }
 
 private:
 
-    Array!(ObjectRef!BaseObject) _certificates;
+    Array!(ObjectRef!ActiveObject) _certificates;
 }
 
 

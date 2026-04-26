@@ -20,14 +20,15 @@ nothrow @nogc:
 
 alias PublishCallback = void delegate(const(char)[] sender, const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp) nothrow @nogc;
 
-class MQTTBroker : BaseObject
+class MQTTBroker : ActiveObject
 {
-    __gshared Property[3] Properties = [ Property.create!("port", port)(),
-                                         Property.create!("allow-anonymous", allow_anonymous)(),
-                                         Property.create!("client-timeout", _client_timeout)() ];
+    alias Properties = AliasSeq!(Prop!("port", port),
+                                 Prop!("allow-anonymous", allow_anonymous),
+                                 Prop!("client-timeout", _client_timeout));
 nothrow @nogc:
 
     enum type_name = "mqtt-broker";
+    enum path = "/protocol/mqtt/broker";
     enum collection_id = CollectionType.mqtt_broker;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -296,7 +297,7 @@ private:
         return s;
     }
 
-    final void server_signal(BaseObject object, StateSignal signal)
+    final void server_signal(ActiveObject object, StateSignal signal)
     {
         final switch (signal)
         {

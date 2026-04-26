@@ -43,7 +43,7 @@ nothrow @nogc:
     {
         register_address_extractor(PacketType.tesla_twc, &extract_twc_src_address, &extract_twc_dst_address);
 
-        g_app.console.register_collection!TeslaInterface("/interface/tesla-twc");
+        g_app.console.register_collection!TeslaInterface();
         g_app.console.register_command!twc_add("/protocol/tesla/twc", this, "add");
         g_app.console.register_command!twc_set("/protocol/tesla/twc", this, "set");
         g_app.console.register_command!device_add("/protocol/tesla/twc/device", this, "add");

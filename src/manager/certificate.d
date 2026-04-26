@@ -48,20 +48,21 @@ enum CertStatus
     error,
 }
 
-class Certificate : BaseObject
+class Certificate : ActiveObject
 {
-    __gshared Property[9] Properties = [ Property.create!("cert-type", cert_type)(),
-                                         Property.create!("domain", domain)(),
-                                         Property.create!("email", email)(),
-                                         Property.create!("certificate_file", certificate_file)(),
-                                         Property.create!("key_file", key_file)(),
-                                         Property.create!("http-server", http_server)(),
-                                         Property.create!("uri", uri)(),
-                                         Property.create!("cert-status", cert_status)(),
-                                         Property.create!("expiry", expiry)() ];
+    alias Properties = AliasSeq!(Prop!("cert-type", cert_type),
+                                 Prop!("domain", domain),
+                                 Prop!("email", email),
+                                 Prop!("certificate_file", certificate_file),
+                                 Prop!("key_file", key_file),
+                                 Prop!("http-server", http_server),
+                                 Prop!("uri", uri),
+                                 Prop!("cert-status", cert_status),
+                                 Prop!("expiry", expiry));
 nothrow @nogc:
 
     enum type_name = "certificate";
+    enum path = "/certificate";
     enum collection_id = CollectionType.certificate;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -176,15 +177,7 @@ nothrow @nogc:
         => _status == CertStatus.issued && running;
 
 protected:
-    override CompletionStatus validating()
-    {
-        if (_http_server.detached)
-        {
-            if (HTTPServer s = Collection!HTTPServer().get(_http_server.name[]))
-                _http_server = s;
-        }
-        return super.validating();
-    }
+    mixin RekeyHandler;
 
     override bool validate() const
     {
@@ -224,6 +217,19 @@ protected:
         }
     }
 
+    override CompletionStatus shutdown()
+    {
+        version (DebugCertificate)
+            writeDebug("Certificate '", name, "': shutdown");
+
+        unregister_challenge_endpoint();
+        unload_cert();
+        _acme_state = AcmeState.idle;
+        _renewing = false;
+        _status = CertStatus.none;
+        return CompletionStatus.complete;
+    }
+
     override void update()
     {
         if (_type != CertType.acme)
@@ -244,29 +250,18 @@ protected:
         }
     }
 
-    override CompletionStatus shutdown()
-    {
-        version (DebugCertificate)
-            writeDebug("Certificate '", name, "': shutdown");
-
-        unregister_challenge_endpoint();
-        unload_cert();
-        _acme_state = AcmeState.idle;
-        _renewing = false;
-        _status = CertStatus.none;
-        return CompletionStatus.complete;
-    }
-
 private:
     CertType _type;
+    CertStatus _status;
+
+    ObjectRef!HTTPServer _http_server;
+
     String _domain;
     String _email;
     String _cert_file;
     String _key_file;
-    ObjectRef!HTTPServer _http_server;
     String _uri;
 
-    CertStatus _status;
     MutableString!0 _status_msg;
     SysTime _expiry;
 
@@ -424,7 +419,7 @@ private:
 
     CompletionStatus start_acme()
     {
-        // ACME error occurred asynchronously — trigger BaseObject backoff
+        // ACME error occurred asynchronously — trigger ActiveObject backoff
         if (_status == CertStatus.error)
             return CompletionStatus.error;
 
@@ -1335,7 +1330,7 @@ private:
         return buf[];
     }
 
-    int handle_acme_challenge(ref const HTTPMessage request, ref Stream stream)
+    int handle_acme_challenge(ref const HTTPMessage request, ref Stream stream, const(ubyte)[] leftover)
     {
         version (DebugCertificate)
             writeDebug("Certificate '", name, "': challenge request path='", request.request_target, "'");
@@ -1592,7 +1587,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!Certificate("/certificate");
+        g_app.console.register_collection!Certificate();
     }
 
     override void update()

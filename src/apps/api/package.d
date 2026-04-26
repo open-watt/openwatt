@@ -33,13 +33,14 @@ nothrow @nogc:
 alias APIHandler = int delegate(const(char)[] uri, ref const HTTPMessage request, ref Stream stream) nothrow @nogc;
 
 
-class APIManager : BaseObject
+class APIManager : ActiveObject
 {
-    __gshared Property[2] Properties = [ Property.create!("http-server", http_server)(),
-                                         Property.create!("uri", uri)() ];
+    alias Properties = AliasSeq!(Prop!("http-server", http_server),
+                                 Prop!("uri", uri));
 nothrow @nogc:
 
     enum type_name = "api";
+    enum path = "/apps/api";
     enum collection_id = CollectionType.api;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -63,7 +64,6 @@ nothrow @nogc:
         _uri = value.makeString(g_app.allocator);
     }
 
-    // BaseObject overrides
 protected:
     mixin RekeyHandler;
 
@@ -111,7 +111,7 @@ private:
     }
     Array!PendingRequest _pending_requests;
 
-    int handle_request(ref const HTTPMessage request, ref Stream stream)
+    int handle_request(ref const HTTPMessage request, ref Stream stream, const(ubyte)[] leftover)
     {
         const(char)[] tail = request.request_target[_uri.length .. $];
 
@@ -144,7 +144,7 @@ private:
         }
 
         if (_default_handler)
-            _default_handler(request, stream);
+            _default_handler(request, stream, leftover);
         else if (_uri)
         {
             HTTPMessage response = create_response(request.http_version, 404, StringLit!"Not Found", StringLit!"application/json", "{\"error\":\"Not Found\"}");
@@ -255,13 +255,19 @@ private:
         json ~= '{';
 
         bool first_col = true;
-        foreach (col; g_app.collections.values)
+        foreach (col; g_app.types.values)
         {
             if (!first_col)
                 json ~= ',';
             first_col = false;
 
-            json.append('\"', col.type_info.type[], "\":{\"path\":\"", col.path[], "\",\"properties\":{");
+            bool is_collection = col.type_info.get_super is null;
+            json.append('\"', col.type_info.type[], "\":{\"collection_id\":", cast(uint)col.type_info.collection_id, ",\"path\":\"", col.path[], '\"');
+            if (col.type_info.is_abstract)
+                json ~= ",\"abstract\":true";
+            if (is_collection)
+                json ~= ",\"collection\":true";
+            json ~= ",\"properties\":{";
 
             bool first_prop = true;
             foreach (prop; col.type_info.properties)
@@ -292,7 +298,21 @@ private:
                     json.append(",\"category\":\"", prop.category[], '\"');
 
                 if (prop.flags)
-                    json.append(",\"flags\":\"", (prop.flags & 1) ? "H" : "", '\"');
+                {
+                    json ~= ",\"flags\":\"";
+                    if (prop.flags & 1) json ~= 'A';
+                    if (prop.flags & 2) json ~= 'D';
+                    if (prop.flags & 4) json ~= 'H';
+                    json ~= '\"';
+                }
+
+                if (prop.init_val)
+                {
+                    Variant def = prop.init_val();
+                    json ~= ",\"default\":";
+                    size_t n = def.write_json(null);
+                    def.write_json(json.extend(n));
+                }
 
                 json ~= '}';
             }
@@ -829,7 +849,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!APIManager("/apps/api");
+        g_app.console.register_collection!APIManager();
     }
 
     override void update()

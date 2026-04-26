@@ -144,6 +144,12 @@ nothrow @nogc:
 
     HTTPMessageHandler message_handler;
 
+    // Bytes from the current read buffer that follow the message currently being
+    // dispatched to message_handler. Only valid during the handler call itself.
+    // Request handlers that claim the stream (e.g. WebSocket upgrade) read this
+    // to take ownership of any bytes already read past the upgrade request.
+    const(ubyte)[] current_leftover;
+
     Array!ubyte tail;
     size_t pending_chunk_len;
     Flags flags;
@@ -297,8 +303,13 @@ nothrow @nogc:
                         message.timestamp = getSysTime();
 
                     // message complete
-                    if (message_handler(message) < 0)
+                    current_leftover = cast(const(ubyte)[])msg;
+                    int handler_result = message_handler(message);
+                    current_leftover = null;
+                    if (handler_result < 0)
                         return -1;
+                    if (handler_result > 0)
+                        return 1; // connection upgraded, handler owns any leftover bytes
 
                     if (!stream.running)
                         msg = null;

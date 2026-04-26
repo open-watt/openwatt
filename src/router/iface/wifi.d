@@ -46,16 +46,15 @@ enum WifiAuth : byte
 
 class WiFiInterface : BaseInterface
 {
-    __gshared Property[5] Properties = [
-        Property.create!("adapter", adapter)(),
-        Property.create!("mode", mode)(),
-        Property.create!("channel", channel)(),
-        Property.create!("tx-power", tx_power)(),
-        Property.create!("country", country)(),
-    ];
+    alias Properties = AliasSeq!(Prop!("adapter", adapter),
+                                 Prop!("mode", mode),
+                                 Prop!("channel", channel),
+                                 Prop!("tx-power", tx_power),
+                                 Prop!("country", country));
 nothrow @nogc:
 
     enum type_name = "wifi";
+    enum path = "/interface/wifi";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -242,6 +241,8 @@ protected:
 
     override void update()
     {
+        super.update();
+
         static if (num_wifi > 0)
         {
             if (_wifi.is_open)
@@ -254,7 +255,7 @@ protected:
 
     override int transmit(ref const Packet packet, MessageCallback)
     {
-        ++_status.tx_dropped;
+        add_tx_drop();
         return -1;
     }
 
@@ -338,11 +339,9 @@ private:
 
 abstract class WLANBaseInterface : EthernetInterface
 {
-    __gshared Property[3] Properties = [
-        Property.create!("radio", radio)(),
-        Property.create!("ssid", ssid)(),
-        Property.create!("secret", secret)(),
-    ];
+    alias Properties = AliasSeq!(Prop!("radio", radio),
+                                 Prop!("ssid", ssid),
+                                 Prop!("secret", secret));
 nothrow @nogc:
 
     // Properties
@@ -405,17 +404,14 @@ nothrow @nogc:
 
     // API
 
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const
     {
         if (super.validate())
             return true;
         return _radio !is null && !_ssid.empty;
-    }
-
-    override CompletionStatus validating()
-    {
-        _radio.try_reattach();
-        return super.validating();
     }
 
     override const(char)[] status_message() const pure
@@ -473,28 +469,26 @@ nothrow @nogc:
         {
             if (!_radio || !_radio.running || packet.data.length == 0)
             {
-                ++_status.tx_dropped;
+                add_tx_drop();
                 return -1;
             }
             WifiVif vif = cast(APInterface)this !is null ? WifiVif.ap : WifiVif.sta;
             if (!_radio.drv_transmit(vif, cast(const(ubyte)[])packet.data))
             {
-                ++_status.tx_dropped;
+                add_tx_drop();
                 return -1;
             }
-            ++_status.tx_packets;
-            _status.tx_bytes += packet.data.length;
+            add_tx_frame(packet.data.length);
             return 0;
         }
     }
 
-protected:
     this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(typeInfo, id, flags);
     }
 
-    const(char)[] get_password() const
+    final const(char)[] get_password() const
     {
         if (_secret)
         {
@@ -512,7 +506,7 @@ private:
     bool _bound;
     String _ssid;
 
-    void radio_state_change(BaseObject, StateSignal signal)
+    void radio_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline && running)
             restart();
@@ -522,12 +516,11 @@ private:
 
 class WLANInterface : WLANBaseInterface
 {
-    __gshared Property[1] Properties = [
-        Property.create!("bssid-filter", bssid_filter)(),
-    ];
+    alias Properties = AliasSeq!(Prop!("bssid-filter", bssid_filter));
 nothrow @nogc:
 
     enum type_name = "wlan";
+    enum path = "/interface/wlan";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -554,6 +547,8 @@ nothrow @nogc:
     {
         override void update()
         {
+            super.update();
+
             if (_radio && _radio.evt_sta_disconnected)
             {
                 _radio.evt_sta_disconnected = false;
@@ -654,15 +649,14 @@ private:
 
 class APInterface : WLANBaseInterface
 {
-    __gshared Property[4] Properties = [
-        Property.create!("auth", auth)(),
-        Property.create!("client-isolation", client_isolation)(),
-        Property.create!("max-clients", max_clients)(),
-        Property.create!("hidden", hidden)(),
-    ];
+    alias Properties = AliasSeq!(Prop!("auth", auth),
+                                 Prop!("client-isolation", client_isolation),
+                                 Prop!("max-clients", max_clients),
+                                 Prop!("hidden", hidden));
 nothrow @nogc:
 
     enum type_name = "wifi-ap";
+    enum path = "/interface/ap";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -793,9 +787,11 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!WiFiInterface("/interface/wifi");
-        g_app.console.register_collection!WLANInterface("/interface/wlan");
-        g_app.console.register_collection!APInterface("/interface/ap");
+        g_app.register_enum!WifiAuth();
+
+        g_app.console.register_collection!WiFiInterface();
+        g_app.console.register_collection!WLANInterface();
+        g_app.console.register_collection!APInterface();
 
         version (Windows)
         {

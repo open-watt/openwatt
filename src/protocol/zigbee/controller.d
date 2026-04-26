@@ -39,13 +39,14 @@ nothrow @nogc:
 enum MaxFibers = 2;
 
 
-class ZigbeeController : BaseObject, Subscriber
+class ZigbeeController : ActiveObject, Subscriber
 {
-    __gshared Property[2] Properties = [ Property.create!("endpoint", endpoint)(),
-                                         Property.create!("auto-create", auto_create)() ];
+    alias Properties = AliasSeq!(Prop!("endpoint", endpoint),
+                                 Prop!("auto-create", auto_create));
 @nogc:
 
     enum type_name = "zb-controller";
+    enum path = "/protocol/zigbee/controller";
     enum collection_id = CollectionType.zb_controller;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
@@ -94,15 +95,10 @@ class ZigbeeController : BaseObject, Subscriber
     // API...
 
 protected:
+    mixin RekeyHandler;
 
     override bool validate() const nothrow
         => _endpoint !is null;
-
-    override CompletionStatus validating() nothrow
-    {
-        _endpoint.try_reattach();
-        return super.validating();
-    }
 
     override CompletionStatus startup() nothrow
     {

@@ -1,5 +1,6 @@
 module router.stream;
 
+import urt.array;
 import urt.conv;
 import urt.file;
 import urt.lifetime;
@@ -39,20 +40,21 @@ enum StreamOptions : ubyte
     allow_broadcast = 1 << 2, // Allow broadcast messages
 }
 
-abstract class Stream : BaseObject
+abstract class Stream : ActiveObject
 {
-    __gshared Property[9] Properties = [ Property.create!("last_status_change_time", last_status_change_time, "status")(),
-                                         Property.create!("link_status", link_status, "status", "d")(),
-                                         Property.create!("link_downs", link_downs, "status")(),
-                                         Property.create!("tx_bytes", tx_bytes, "traffic", "d")(),
-                                         Property.create!("rx_bytes", rx_bytes, "traffic", "d")(),
-                                         Property.create!("tx_rate", tx_rate, "traffic", "d")(),
-                                         Property.create!("rx_rate", rx_rate, "traffic", "d")(),
-                                         Property.create!("tx_rate_max", tx_rate_max, "traffic")(),
-                                         Property.create!("rx_rate_max", rx_rate_max, "traffic")() ];
+    alias Properties = AliasSeq!(Prop!("last-status-change-time", last_status_change_time, "status"),
+                                 Prop!("link-status", link_status, "status", "d"),
+                                 Prop!("link-downs", link_downs, "status"),
+                                 Prop!("tx-bytes", tx_bytes, "traffic", "d"),
+                                 Prop!("rx-bytes", rx_bytes, "traffic", "d"),
+                                 Prop!("tx-rate", tx_rate, "traffic", "d"),
+                                 Prop!("rx-rate", rx_rate, "traffic", "d"),
+                                 Prop!("tx-rate-max", tx_rate_max, "traffic"),
+                                 Prop!("rx-rate-max", rx_rate_max, "traffic"));
 nothrow @nogc:
 
     enum type_name = "stream";
+    enum path = "/stream";
     enum collection_id = CollectionType.stream;
 
     this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
@@ -88,11 +90,18 @@ nothrow @nogc:
     ref const(StreamStatus) status() const pure
         => _status;
 
-    final void reset_counters() pure
+    final void reset_counters()
     {
         _status.link_downs = 0;
         _status.tx_bytes = 0;
         _status.rx_bytes = 0;
+        _status.tx_rate = 0;
+        _status.rx_rate = 0;
+        _status.tx_rate_max = 0;
+        _status.rx_rate_max = 0;
+
+        mark_set!(typeof(this), [ "link-downs", "tx-bytes", "rx-bytes",
+                                    "tx-rate", "rx-rate", "tx-rate-max", "rx-rate-max" ])();
     }
 
     override const(char)[] status_message() const
@@ -106,17 +115,37 @@ nothrow @nogc:
         if ((now - _last_bitrate_sample) >= 1.seconds)
         {
             ulong elapsed_us = (now - _last_bitrate_sample).as!"usecs";
+
+            ulong last_tx = _status.tx_rate, last_rx = _status.rx_rate;
             _status.tx_rate = (_status.tx_bytes - _last_tx_bytes) * 1_000_000 / elapsed_us;
             _status.rx_rate = (_status.rx_bytes - _last_rx_bytes) * 1_000_000 / elapsed_us;
 
+            ulong dirty = 0;
+            if (_status.tx_rate != last_tx)
+                dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate");
+            if (_status.rx_rate != last_rx)
+                dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate");
+
             if (_status.tx_rate > _status.tx_rate_max)
+            {
                 _status.tx_rate_max = _status.tx_rate;
+                dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate-max");
+            }
             if (_status.rx_rate > _status.rx_rate_max)
+            {
                 _status.rx_rate_max = _status.rx_rate;
+                dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate-max");
+            }
 
             _last_tx_bytes = _status.tx_bytes;
             _last_rx_bytes = _status.rx_bytes;
             _last_bitrate_sample = now;
+
+            if (dirty)
+            {
+                _props_set |= dirty;
+                _mark_dirty(dirty);
+            }
         }
     }
 
@@ -127,6 +156,7 @@ nothrow @nogc:
         _last_bitrate_sample = getTime();
         _last_tx_bytes = _status.tx_bytes;
         _last_rx_bytes = _status.rx_bytes;
+        mark_set!(typeof(this), [ "link-status", "last-status-change-time" ])();
     }
 
     override void offline()
@@ -136,6 +166,7 @@ nothrow @nogc:
         ++_status.link_downs;
         _status.tx_rate = 0;
         _status.rx_rate = 0;
+        mark_set!(typeof(this), [ "link-status", "last-status-change-time", "link-downs", "tx-rate", "rx-rate" ])();
     }
 
     // Initiate an on-demand connection
@@ -211,6 +242,18 @@ protected:
     uint _buffer_len = 0;
     void[] _send_buffer;
 
+    final void add_tx_bytes(size_t bytes)
+    {
+        _status.tx_bytes += bytes;
+        mark_set!(typeof(this), [ "tx-bytes" ])();
+    }
+
+    final void add_rx_bytes(size_t bytes)
+    {
+        _status.rx_bytes += bytes;
+        mark_set!(typeof(this), [ "rx-bytes" ])();
+    }
+
     final void write_to_log(bool rx, const void[] buffer)
     {
         version (SupportLogging)
@@ -232,7 +275,7 @@ nothrow @nogc:
 
     override void pre_init()
     {
-        g_app.console.register_collection!Stream("/stream");
+        g_app.console.register_collection!Stream();
     }
 
     override void pre_update()

@@ -15,11 +15,12 @@ nothrow @nogc:
 
 class VLANInterface : BaseInterface
 {
-    __gshared Property[2] Properties = [ Property.create!("interface", iface)(),
-                                         Property.create!("vlan", vlan)() ];
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("vlan", vlan));
 nothrow @nogc:
 
     enum type_name = "vlan";
+    enum path = "/interface/vlan";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -62,23 +63,37 @@ nothrow @nogc:
 
     // API...
 
+    override void abort(int msg_handle, MessageState reason = MessageState.aborted)
+    {
+        _interface.abort(msg_handle, reason);
+    }
+
+    override MessageState msg_state(int msg_handle) const
+    {
+        return _interface.msg_state(msg_handle);
+    }
+
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const
         => _interface !is null;
 
-    override CompletionStatus validating()
-    {
-        if (_interface.detached)
-        {
-            if (BaseInterface s = Collection!BaseInterface().get(_interface.name[]))
-            {
-                _interface = s;
-                mac = _interface.mac;
-            }
-        }
-        return super.validating();
-    }
+    // TODO: this needs to be a startup action, and we need to subscribe for restart() events...
+//    override CompletionStatus validating()
+//    {
+//        if (_interface.detached)
+//        {
+//            if (BaseInterface s = Collection!BaseInterface().get(_interface.name[]))
+//            {
+//                _interface = s;
+//                mac = _interface.mac;
+//            }
+//        }
+//        return super.validating();
+//    }
 
-    protected final override int transmit(ref Packet packet, MessageCallback)
+    final override int transmit(ref Packet packet, MessageCallback)
     {
         assert(false, "unreachable — we override forward() instead");
     }
@@ -104,21 +119,8 @@ nothrow @nogc:
 
         int result = _interface.forward(packet, callback);
         if (result >= 0)
-        {
-            ++_status.tx_packets;
-            _status.tx_bytes += packet.data.length;
-        }
+            add_tx_frame(packet.data.length);
         return result;
-    }
-
-    override void abort(int msg_handle, MessageState reason = MessageState.aborted)
-    {
-        _interface.abort(msg_handle, reason);
-    }
-
-    override MessageState msg_state(int msg_handle) const
-    {
-        return _interface.msg_state(msg_handle);
     }
 
 package:

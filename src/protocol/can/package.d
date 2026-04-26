@@ -37,7 +37,7 @@ nothrow @nogc:
 
         g_app.register_enum!CANInterfaceProtocol();
 
-        g_app.console.register_collection!CANInterface("/interface/can");
+        g_app.console.register_collection!CANInterface();
         g_app.console.register_command!device_add("/protocol/can/device", this, "add");
     }
 

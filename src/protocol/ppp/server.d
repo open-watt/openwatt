@@ -4,6 +4,7 @@ import urt.lifetime;
 import urt.string;
 
 import manager.base;
+import manager.collection : RekeyHandler;
 
 import protocol.ppp;
 
@@ -15,11 +16,12 @@ nothrow @nogc:
 
 class PPPServer : BaseInterface
 {
-    __gshared Property[2] Properties = [ Property.create!("stream", stream)(),
-                                         Property.create!("protocol", protocol)() ];
+    alias Properties = AliasSeq!(Prop!("stream", stream),
+                                 Prop!("protocol", protocol));
 nothrow @nogc:
 
     enum type_name = "ppp-server";
+    enum path = "/protocol/ppp/server";
     enum collection_id = CollectionType.ppp_server;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -62,6 +64,9 @@ nothrow @nogc:
 
     // API...
 
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const pure
         => _stream !is null;
 
@@ -79,6 +84,8 @@ nothrow @nogc:
 
     override void update()
     {
+        super.update();
+
         if (!_stream)
             restart();
 
@@ -86,7 +93,6 @@ nothrow @nogc:
         assert(false, "TODO");
     }
 
-protected:
     override int transmit(ref const Packet packet, MessageCallback)
     {
         assert(false, "TODO: frame and transmit");
@@ -98,13 +104,14 @@ private:
 }
 
 
-class PPPoEServer : BaseObject
+class PPPoEServer : ActiveObject
 {
-    __gshared Property[2] Properties = [ Property.create!("interface", iface)(),
-                                         Property.create!("protocol", protocol)() ];
+    alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("protocol", protocol));
 nothrow @nogc:
 
     enum type_name = "pppoe-server";
+    enum path = "/protocol/pppoe/server";
     enum collection_id = CollectionType.pppoe_server;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -174,6 +181,9 @@ nothrow @nogc:
         if (!_interface)
             restart();
     }
+
+protected:
+    mixin RekeyHandler;
 
 private:
     ObjectRef!BaseInterface _interface;

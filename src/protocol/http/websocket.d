@@ -5,6 +5,7 @@ import urt.digest.sha;
 import urt.encoding;
 import urt.endian;
 import urt.lifetime;
+import urt.log;
 import urt.mem : memmove;
 import urt.mem.allocator;
 import urt.string;
@@ -18,6 +19,8 @@ import protocol.http.message;
 import protocol.http.server;
 
 import router.stream;
+
+//version = DebugWebSocket;
 
 nothrow @nogc:
 
@@ -45,11 +48,12 @@ enum WSMessageType
 
 alias WSMessageHandler = void delegate(const(ubyte)[] message, WSMessageType message_type) nothrow @nogc;
 
-class WebSocket : BaseObject
+class WebSocket : ActiveObject
 {
 nothrow @nogc:
 
     enum type_name = "websocket";
+    enum path = "/protocol/websocket";
     enum collection_id = CollectionType.websocket;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -60,6 +64,11 @@ nothrow @nogc:
     // Properties...
 
     // API...
+
+    void set_message_handler(WSMessageHandler handler) pure
+    {
+        _msg_handler = handler;
+    }
 
     ptrdiff_t send_text(const(char)[] text)
     {
@@ -76,7 +85,7 @@ nothrow @nogc:
     {
         // how much stack space can we spare for buffering?
         // this should always be high on the callstack...
-        ubyte[16] tmp = void; // TODO: increase this buffer len; it's really short to test the various overflow paths...
+        ubyte[1024] tmp = void;
         ubyte[] buf = _message.empty ? tmp[] : _message[];
         size_t read = _message.empty ? 0 : _message.length;
         size_t frame_start = _decoded_bytes;
@@ -92,27 +101,9 @@ nothrow @nogc:
                 frame_start = _decoded_bytes;
             }
 
-            // fail-over to an allocated buffer if necessary
-            size_t available = _stream.pending();
-            if (available == 0)
-                break; // nothing more to read
-            if (available > buf.length - read)
-            {
-                _message.resize(read + available);
-                if (buf.ptr is tmp.ptr)
-                    _message[0 .. read] = tmp[0 .. read]; // HACK: why the extra brackets?
-                buf = _message[];
-            }
-
-            ptrdiff_t r = _stream.read(buf[read .. read + available]);
-            if (r < 0)
-            {
-                assert(false, "TODO: handle errors?");
-                return;
-            }
-            assert(r == available);
-            read += r;
-
+            // parse any complete frames already in the buffer — important on the
+            // first iteration after an HTTP→WS upgrade, where _message was seeded
+            // with leftover bytes from the HTTP parser before any stream.read.
             while (frame_start + 2 < read)
             {
                 ubyte[] msg = buf[frame_start .. read];
@@ -160,9 +151,10 @@ nothrow @nogc:
                     offset += 4;
                 }
 
-                // check if we have a full-frame
+                // incomplete frame — break out; the outer loop reads more and the
+                // end-of-function stash persists buf into _message across update calls.
                 size_t msg_len = offset + payload_len;
-                if (read > frame_start + msg_len)
+                if (read < frame_start + msg_len)
                     break;
 
                 switch (opcode)
@@ -209,6 +201,9 @@ nothrow @nogc:
                     if (_decoded_bytes == 0)
                     {
                         // shortcus for whole, self-contained frames.
+                        version (DebugWebSocket)
+                            log.trace("dispatch ", _pending_message_type == WSMessageType.text ? "text" : "binary",
+                                      " (", msg_len - offset, " bytes): ", cast(void[])msg[offset .. msg_len]);
                         _msg_handler(msg[offset .. msg_len], _pending_message_type);
                         frame_start += msg_len;
                         _pending_message_type = WSMessageType.unknown;
@@ -222,20 +217,54 @@ nothrow @nogc:
 
                 if (fin)
                 {
+                    version (DebugWebSocket)
+                        log.trace("dispatch ", _pending_message_type == WSMessageType.text ? "text" : "binary",
+                                  " (", _decoded_bytes, " bytes, reassembled): ", cast(void[])buf[0 .. _decoded_bytes]);
                     _msg_handler(buf[0 .. _decoded_bytes], _pending_message_type);
                     _pending_message_type = WSMessageType.unknown;
                     _decoded_bytes = 0;
                 }
             }
+
+            // fetch more data from the stream
+            size_t available = _stream.pending();
+            if (available == 0)
+                break;
+            if (available > buf.length - read)
+            {
+                _message.resize(read + available);
+                if (buf.ptr is tmp.ptr)
+                    _message[0 .. read] = tmp[0 .. read];
+                buf = _message[];
+            }
+
+            ptrdiff_t r = _stream.read(buf[read .. read + available]);
+            if (r < 0)
+            {
+                assert(false, "TODO: handle errors?");
+                return;
+            }
+            assert(r == available);
+            version (DebugWebSocket)
+                log.trace("recv: (", r, ")[ ", cast(void[])buf[read .. read + (r <= 200 ? r : 200)], r > 200 ? ", ..." : "",  " ]");
+            read += r;
+        }
+
+        // shuffle any undispatched tail back down before stashing — the outer loop
+        // may have exited via `pending == 0` right after parsing, before the top-of-loop
+        // shuffle reclaims the gap between _decoded_bytes and frame_start.
+        if (frame_start > _decoded_bytes)
+        {
+            size_t tail = read - frame_start;
+            memmove(buf.ptr + _decoded_bytes, buf.ptr + frame_start, tail);
+            read = _decoded_bytes + tail;
+            frame_start = _decoded_bytes;
         }
 
         // stash any remaining bytes...
         _message.resize(read);
         if (read > 0 && buf.ptr is tmp.ptr)
-        {
-            assert(frame_start == _decoded_bytes); // the code above should have shuffled tail bytes back to start
             _message[] = tmp[0 .. read];
-        }
     }
 
 private:
@@ -285,6 +314,9 @@ private:
             header_len += 4;
         }
 
+        version (DebugWebSocket)
+            log.trace("send ", type == WSMessageType.text ? "text" : "binary", " (", data.length, " bytes): ", cast(void[])data);
+
         // write the header
         if (_stream.write(header[0 .. header_len]) != header_len)
         {
@@ -312,13 +344,14 @@ private:
     }
 }
 
-class WebSocketServer : BaseObject
+class WebSocketServer : ActiveObject
 {
-    __gshared Property[2] Properties = [ Property.create!("http-server", http_server)(),
-                                         Property.create!("uri", uri)() ];
+    alias Properties = AliasSeq!(Prop!("http-server", http_server),
+                                 Prop!("uri", uri));
 nothrow @nogc:
 
     enum type_name = "ws-server";
+    enum path = "/protocol/websocket/server";
     enum collection_id = CollectionType.ws_server;
 
     alias NewConnection = void delegate(WebSocket client, void* user_data) nothrow @nogc;
@@ -355,19 +388,11 @@ nothrow @nogc:
         _user_data = user_data;
     }
 
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const pure
         => _server !is null;
-
-    override CompletionStatus validating()
-    {
-        // TODO: change to try_reattach()
-        if (_server.detached)
-        {
-            if (HTTPServer s = Collection!HTTPServer().get(_server.name[]))
-                _server = s;
-        }
-        return super.validating();
-    }
 
     override CompletionStatus startup()
     {
@@ -400,10 +425,16 @@ private:
     HTTPServer.RequestHandler _default_handler;
     int _num_connections;
 
-    int handle_request(ref const HTTPMessage request, ref Stream stream)
+    int handle_request(ref const HTTPMessage request, ref Stream stream, const(ubyte)[] leftover)
     {
         if (request.header("Upgrade") == "websocket")
         {
+            version (DebugWebSocket)
+                log.trace("upgrade request from ", stream.remote_name,
+                          " uri=", request.url[], " version=", request.header("Sec-WebSocket-Version")[],
+                          " protocol=", request.header("Sec-WebSocket-Protocol")[],
+                          " extensions=", request.header("Sec-WebSocket-Extensions")[]);
+
             // validate version (just 13?)
             // else, reply "426 Upgrade Required" with header `Sec-WebSocket-Version` set to an accepted version
 
@@ -422,7 +453,11 @@ private:
             WebSocket ws = Collection!WebSocket().create(n, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
             ws._stream = stream;
             ws._is_server = true;
-            stream = null; // TODO: better strategy to notify the caller that we claimed the stream!?
+            // any bytes the HTTP parser read past the upgrade request are the start of
+            // the first websocket frame; seed them into the rx buffer before the first read.
+            if (leftover.length)
+                ws._message ~= leftover;
+            stream = null;
 
             if (String proto = request.header("Sec-WebSocket-Protocol"))
                 ws._protocol = proto.move;
@@ -468,13 +503,16 @@ private:
                         "\r\n";
             ws._stream.write(response[]);
 
+            version (DebugWebSocket)
+                log.trace("handshake complete, created '", ws.name, "'", ws._protocol.length ? " protocol=" : "", ws._protocol[]);
+
             if (_connection_callback)
                 _connection_callback(ws, _user_data);
             return 0;
         }
 
         if (_default_handler)
-            return _default_handler(request, stream);
+            return _default_handler(request, stream, leftover);
         return -1;
     }
 }

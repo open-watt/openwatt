@@ -34,10 +34,11 @@ struct ASHFrame
 
 class ASHInterface : BaseInterface
 {
-    __gshared Property[1] Properties = [ Property.create!("stream", stream)() ];
+    alias Properties = AliasSeq!(Prop!("stream", stream));
 nothrow @nogc:
 
     enum type_name = "ash";
+    enum path = "/interface/ezsp/ash";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -61,16 +62,11 @@ nothrow @nogc:
         restart();
     }
 
-    // BaseInterface overrides...
+protected:
+    mixin RekeyHandler;
 
     override bool validate() const pure
         => _stream !is null;
-
-    override CompletionStatus validating()
-    {
-        _stream.try_reattach();
-        return super.validating();
-    }
 
     override CompletionStatus startup()
     {
@@ -86,12 +82,9 @@ nothrow @nogc:
 
             immutable ubyte[5] RST = [ ASH_CANCEL_BYTE, 0xC0, 0x38, 0xBC, ASH_FLAG_BYTE ];
             if (_stream.write(RST) != 5)
-                ++_status.tx_dropped;
+                add_tx_drop();
             else
-            {
-                ++_status.tx_packets;
-                _status.tx_bytes += 5;
-            }
+                add_tx_frame(5);
 
             _last_event = now;
         }
@@ -157,7 +150,6 @@ nothrow @nogc:
         }
     }
 
-protected:
     override int transmit(ref Packet packet, MessageCallback)
     {
         if (packet.type != PacketType.ash)
@@ -184,12 +176,11 @@ protected:
             }
         }
 
-        ++_status.tx_packets;
-        _status.tx_bytes += message.length;
+        add_tx_frame(message.length);
         return 0;
     }
 
-    void stream_state_change(BaseObject, StateSignal signal)
+    void stream_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
             restart();
@@ -248,6 +239,7 @@ private:
 
     void service_stream()
     {
+        size_t rx_bytes = 0;
         do
         {
             MonoTime now = getTime();
@@ -255,7 +247,7 @@ private:
             if (r <= 0)
                 break;
 
-            _status.rx_bytes += r;
+            rx_bytes += r;
 
             // skip any XON/XOFF bytes
             ubyte rxLen = _rx_offset;
@@ -284,7 +276,7 @@ private:
                 {
                     inputError = false;
                     start = cast(ubyte)(end + 1);
-                    ++_status.rx_dropped;
+                    add_rx_drop();
                     continue;
                 }
 
@@ -312,7 +304,7 @@ private:
                 if (frameLen < 2)
                 {
                     if (frameLen != 0)
-                        ++_status.rx_dropped;
+                        add_rx_drop();
                     continue;
                 }
 
@@ -324,11 +316,12 @@ private:
                 const ushort crc = frame.ezsp_crc();
                 if (_rx_buffer[frameEnd .. frameEnd + 2][0..2].bigEndianToNative!ushort != crc)
                 {
-                    ++_status.rx_dropped;
+                    add_rx_drop();
                     continue;
                 }
 
-                ++_status.rx_packets;
+                add_rx_frame(rx_bytes);
+                rx_bytes = 0;
                 process_frame(frame, now);
             }
 
@@ -495,11 +488,7 @@ private:
         uint wait_us = cast(uint)(msg.send_time - msg.queue_time).as!"usecs";
         uint service_us = cast(uint)(now - msg.send_time).as!"usecs";
 
-        _status.avg_queue_us = (_status.avg_queue_us * 7 + wait_us) / 8;
-        _status.avg_service_us = (_status.avg_service_us * 7 + service_us) / 8;
-
-        if (service_us > _status.max_service_us)
-            _status.max_service_us = service_us;
+        update_service_times(wait_us, service_us);
     }
 
     bool send_msg(Message* msg)
@@ -535,11 +524,10 @@ private:
         ack_msg[1..3] = ack_msg[0..1].ezsp_crc().nativeToBigEndian;
         if (_stream.write(ack_msg) != 4)
         {
-            ++_status.tx_dropped;
+            add_tx_drop();
             return false;
         }
-        ++_status.tx_packets;
-        _status.tx_bytes += 4;
+        add_tx_frame(4);
         return true;
     }
 
@@ -582,12 +570,11 @@ private:
         {
             version (DebugASHMessageFlow)
                 log.warning("stream write failed!");
-            ++_status.tx_dropped;
+            add_tx_drop();
             return false;
         }
 
-        ++_status.tx_packets;
-        _status.tx_bytes += r;
+        add_tx_frame(r);
         return true;
     }
 

@@ -44,10 +44,7 @@ nothrow @nogc:
     final override void update()
     {
         if (_client.detached)
-        {
-            if (!_client.try_reattach())
-                return;
-        }
+            return;
         if (!_client.running)
             return;
 
@@ -82,7 +79,7 @@ private:
 
     ubyte _init_state = 0;
 
-    void client_state_handler(BaseObject object, StateSignal signal)
+    void client_state_handler(ActiveObject object, StateSignal signal)
     {
         if (signal == StateSignal.online)
         {

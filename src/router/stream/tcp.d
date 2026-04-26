@@ -20,13 +20,14 @@ public import router.stream;
 
 class TCPStream : Stream
 {
-    __gshared Property[4] Properties = [ Property.create!("remote", remote)(),
-                                         Property.create!("remote_address", remote_address)(),
-                                         Property.create!("port", port)(),
-                                         Property.create!("keepalive", keepalive)() ];
+    alias Properties = AliasSeq!(Prop!("remote", remote),
+                                 Prop!("remote_address", remote_address),
+                                 Prop!("port", port),
+                                 Prop!("keepalive", keepalive));
 nothrow @nogc:
 
     enum type_name = "tcp";
+    enum path = "/stream/tcp-client";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none, StreamOptions options = StreamOptions.none)
     {
@@ -279,7 +280,7 @@ nothrow @nogc:
         }
         if (_logging)
             write_to_log(true, buffer[0 .. bytes]);
-        _status.rx_bytes += bytes;
+        add_rx_bytes(bytes);
         return bytes;
     }
 
@@ -294,11 +295,13 @@ nothrow @nogc:
         {
             SocketResult sr = r.socket_result;
             if (sr == SocketResult.would_block)
-            return 0;
+                return 0;
             restart();
         }
         else
         {
+            add_tx_bytes(bytes);
+
             if (_logging)
             {
                 import urt.util : min;
@@ -328,12 +331,10 @@ nothrow @nogc:
             return 0;
 
         size_t bytes;
-        Result r = _socket.recv(null, MsgFlags.peek, &bytes);
+        Result r = .pending(_socket, bytes);
         if (r != Result.success)
         {
-            SocketResult sr = r.socket_result;
-            if (sr != SocketResult.would_block)
-                restart();
+            restart();
             return 0;
         }
         return bytes;
@@ -390,13 +391,14 @@ enum ServerOptions
     JustOne = 1 << 0, // Only accept one connection then terminate the server
 }
 
-class TCPServer : BaseObject
+class TCPServer : ActiveObject
 {
-    __gshared Property[1] Properties = [ Property.create!("port", port)() ];
+    alias Properties = AliasSeq!(Prop!("port", port));
 
 nothrow @nogc:
 
     enum type_name = "tcp-server";
+    enum path = "/stream/tcp-server";
     enum collection_id = CollectionType.tcp_server;
 
     alias NewConnection = void delegate(Stream client, void* user_data) nothrow @nogc;
@@ -587,8 +589,8 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!TCPStream("/stream/tcp-client");
-        g_app.console.register_collection!TCPServer("/stream/tcp-server");
+        g_app.console.register_collection!TCPStream();
+        g_app.console.register_collection!TCPServer();
     }
 
     override void update()

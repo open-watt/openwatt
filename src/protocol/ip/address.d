@@ -14,11 +14,12 @@ nothrow @nogc:
 
 class IPAddress : BaseObject
 {
-    __gshared Property[2] Properties = [ Property.create!("address", address)(),
-                                         Property.create!("interface", iface)() ];
+    alias Properties = AliasSeq!(Prop!("address", address),
+                                 Prop!("interface", iface));
 nothrow @nogc:
 
     enum type_name = "ip-address";
+    enum path = "/protocol/ip/address";
     enum collection_id = CollectionType.ip_address;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -34,6 +35,7 @@ nothrow @nogc:
     const(char)[] address(IPNetworkAddress value)
     {
         _address = value;
+        mark_set!(typeof(this), "address")();
         return null;
     }
 
@@ -48,21 +50,16 @@ nothrow @nogc:
         if (_iface is value)
             return null;
         _iface = value;
+        mark_set!(typeof(this), "interface")();
+        mark_set!(typeof(this), [ "flags" ])();
         return null;
     }
 
+protected:
+    mixin RekeyHandler;
+
     override bool validate() const pure nothrow @nogc
         => _iface !is null;
-
-    protected override CompletionStatus validating() nothrow @nogc
-    {
-        if (_iface.detached)
-        {
-            if (BaseInterface s = Collection!BaseInterface().get(_iface.name[]))
-                _iface = s;
-        }
-        return super.validating();
-    }
 
 private:
     IPNetworkAddress _address;

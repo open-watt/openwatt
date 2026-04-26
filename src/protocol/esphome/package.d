@@ -25,7 +25,7 @@ nothrow @nogc:
 
     override void init()
     {
-        g_app.console.register_collection!ESPHomeClient("/protocol/esphome/client");
+        g_app.console.register_collection!ESPHomeClient();
         g_app.console.register_command!device_add("/protocol/esphome/device", this, "add");
     }
 

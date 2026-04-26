@@ -37,10 +37,11 @@ enum TelnetOptions : ubyte
 
 class TelnetStream : Stream
 {
-    __gshared Property[1] Properties = [ Property.create!("transport", transport)() ];
+    alias Properties = AliasSeq!(Prop!("transport", transport));
 nothrow @nogc:
 
     enum type_name = "telnet";
+    enum path = "/stream/telnet";
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -263,15 +264,12 @@ nothrow @nogc:
         return _inner ? _inner.flush() : 0;
     }
 
+
 protected:
+    mixin RekeyHandler;
+
     override bool validate() const pure
         => _inner !is null;
-
-    override CompletionStatus validating()
-    {
-        _inner.try_reattach();
-        return super.validating();
-    }
 
     override CompletionStatus startup()
     {
@@ -322,7 +320,7 @@ private:
     ulong _client_state;
     ulong _client_state_req;
 
-    void inner_state_change(BaseObject, StateSignal signal)
+    void inner_state_change(ActiveObject, StateSignal signal)
     {
         if (signal == StateSignal.offline)
             restart();

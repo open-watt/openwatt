@@ -6,7 +6,7 @@ import urt.traits;
 import urt.variant;
 
 // these are used by the conversion functions...
-import manager.base : BaseObject;
+import manager.base : ActiveObject;
 import manager.component : Component;
 import manager.device : Device;
 
@@ -131,8 +131,8 @@ Array!String suggest_completion(T)(const(char)[] argument_text)
     import manager.collection : Collection;
 
     alias Type = Unqual!T;
-    const collection = Collection!Type();
-    if (collection is null)
+    auto collection = Collection!Type();
+    if (collection.type_info is null)
         return Array!String();
 
     Array!String completions;
