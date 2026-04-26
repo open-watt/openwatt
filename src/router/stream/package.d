@@ -22,6 +22,9 @@ public import router.status;
 // package modules...
 public static import router.stream.bridge;
 public static import router.stream.console;
+public static import router.stream.duplex;
+public static import router.stream.file;
+public static import router.stream.memory;
 public static import router.stream.serial;
 public static import router.stream.tcp;
 public static import router.stream.udp;

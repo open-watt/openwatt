@@ -173,6 +173,9 @@
     <DCompile Include="src\router\status.d" />
     <DCompile Include="src\router\stream\bridge.d" />
     <DCompile Include="src\router\stream\console.d" />
+    <DCompile Include="src\router\stream\duplex.d" />
+    <DCompile Include="src\router\stream\file.d" />
+    <DCompile Include="src\router\stream\memory.d" />
     <DCompile Include="src\router\stream\package.d" />
     <DCompile Include="src\router\stream\serial.d" />
     <DCompile Include="src\router\stream\tcp.d" />
