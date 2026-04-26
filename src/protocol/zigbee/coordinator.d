@@ -38,13 +38,6 @@ class ZigbeeCoordinator : ZigbeeRouter
     this(CID id, ObjectFlags flags = ObjectFlags.none) nothrow
     {
         super(collection_type_info!ZigbeeCoordinator, id, flags);
-
-        Collection!ZigbeeRouter().add(this);
-    }
-
-    ~this()
-    {
-        Collection!ZigbeeRouter().remove(this);
     }
 
     // Properties...
@@ -308,8 +301,8 @@ private:
             {
                 case JOINED_NETWORK:
                     // ASH RST resets the NCP, so this shouldn't happen.
-                    // if it does, the stack is already running — just sync bookkeeping!
-                    log.warning("unexpected JOINED_NETWORK at init — syncing state");
+                    // if it does, the stack is already running - just sync bookkeeping!
+                    log.warning("unexpected JOINED_NETWORK at init - syncing state");
                     return sync_network_state(ezsp);
 
                 case NO_NETWORK:

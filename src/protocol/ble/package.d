@@ -71,7 +71,7 @@ nothrow @nogc:
         if (connectable)
             dev.connectable = true;
 
-        // always parse — ADV_IND and SCAN_RSP carry different data
+        // always parse - ADV_IND and SCAN_RSP carry different data
         dev.parse_ad_payload(payload);
 
         if (is_new)

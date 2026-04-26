@@ -321,7 +321,7 @@ protected:
                     return CompletionStatus.error;
             }
             PacketFilter filter;
-            filter.type = PacketType.ash;
+            filter.type = PacketType.raw;
             filter.direction = PacketDirection.incoming;
             _ash.subscribe(&incoming_packet, filter);
             _ash.subscribe(&ash_state_change);
@@ -443,7 +443,7 @@ private:
     int ash_send(const(ubyte)[] data)
     {
         Packet p;
-        p.init!ASHFrame(data);
+        p.init!RawFrame(data);
         return _ash.forward(p);
     }
 

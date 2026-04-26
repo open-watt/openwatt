@@ -92,8 +92,11 @@
     <DCompile Include="src\manager\sampler.d" />
     <DCompile Include="src\manager\secret.d" />
     <DCompile Include="src\manager\subscriber.d" />
-    <DCompile Include="src\manager\sync.d" />
-    <DCompile Include="src\manager\sync_ws.d" />
+    <DCompile Include="src\manager\sync\encoder.d" />
+    <DCompile Include="src\manager\sync\json_encoder.d" />
+    <DCompile Include="src\manager\sync\package.d" />
+    <DCompile Include="src\manager\sync\peer.d" />
+    <DCompile Include="src\manager\sync\ws_server.d" />
     <DCompile Include="src\manager\system.d" />
     <DCompile Include="src\manager\value.d" />
     <DCompile Include="src\protocol\ble\client.d" />

@@ -84,7 +84,6 @@ nothrow @nogc:
             if (!r)
             {
                 session.write_line("Invalid value for property: ", arg.name, "=", arg.value, " - ", r.message);
-                _collection.remove(item);
                 defaultAllocator.freeT(item);
                 return null;
             }

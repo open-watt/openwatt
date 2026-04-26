@@ -474,9 +474,9 @@ private:
     ModbusProtocol _protocol;
     bool _is_bus_master;
     bool _support_simultaneous_requests = false;
-    uint _request_timeout = 800;   // ms — computed from baud rate in startup()
-    uint _queue_timeout = 2500;    // ms — computed from baud rate in startup()
-    uint _gap_time_us = 4000;      // microseconds — computed from baud rate in startup()
+    uint _request_timeout = 800;   // ms - computed from baud rate in startup()
+    uint _queue_timeout = 2500;    // ms - computed from baud rate in startup()
+    uint _gap_time_us = 4000;      // microseconds - computed from baud rate in startup()
     uint _user_baud;               // explicit remote baud rate (0 = not set)
     uint _estimated_baud;          // estimated remote baud rate for TCP bridges
     bool _estimate_baud;           // enable auto-estimation of remote baud rate

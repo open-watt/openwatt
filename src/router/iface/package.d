@@ -293,7 +293,7 @@ nothrow @nogc:
         _last_bitrate_sample = getTime();
 
         mark_set!(typeof(this), [ "link-downs", "tx-bytes", "rx-bytes", "tx-packets", "rx-packets", "tx-dropped", "rx-dropped",
-                                    "tx-rate", "rx-rate", "tx-rate-max", "rx-rate-max", "avg-queue-time", "avg-service-time", "max-service-time" ]);
+                                  "tx-rate", "rx-rate", "tx-rate-max", "rx-rate-max", "avg-queue-time", "avg-service-time", "max-service-time" ]);
     }
 
     override const(char)[] status_message() const
@@ -515,7 +515,7 @@ protected:
         _status.avg_service_us = 0;
         _status.max_service_us = 0;
         mark_set!(typeof(this), [ "link-status", "last-status-change-time", "link-downs", "tx-rate", "rx-rate",
-                                    "avg-queue-time", "avg-service-time", "max-service-time" ])();
+                                  "avg-queue-time", "avg-service-time", "max-service-time" ])();
     }
 
     abstract int transmit(ref Packet packet, MessageCallback callback = null);

@@ -256,7 +256,7 @@ nothrow @nogc:
 
     // Object API...
 
-    alias log = ObjectLog!(_type, _name);
+    alias log = ObjectLog!(_type, name);
 
     final bool is_remote() const pure nothrow @nogc
         => _is_remote;
@@ -383,8 +383,10 @@ protected:
     package const CollectionTypeInfo* _typeInfo;
     ulong _props_set;   // TODO: I wonder if this should move the sync state? trouble is, this needs to be known for initial sync :/
     ObjectFlags _flags;
-    bool _is_remote;
-    ushort _sync_slot = sync_slot_none;
+    package bool _is_remote;
+    package ushort _sync_slot = sync_slot_none;
+    package ulong props_set() const pure
+        => _props_set;
 
     // validate configuration is in an operable state
     bool validate() const
@@ -441,10 +443,6 @@ private:
     const CacheString _type; // TODO: DELETE THIS MEMBER!!!
     package CID _id;
     String _comment;
-
-    // redirect for legacy code that references _name directly DELETEME!!
-    String _name() const => name();
-
 }
 
 class ActiveObject : BaseObject
@@ -465,6 +463,11 @@ nothrow @nogc:
 
         _props_set |= (ulong(1) << prop_index!(typeof(this), "running")) |
                       (ulong(1) << prop_index!(typeof(this), "status"));
+    }
+
+    ~this()
+    {
+        assert(_state & _destroyed, "ActiveObject was not destroyed before destruction!");
     }
 
 
@@ -546,18 +549,19 @@ nothrow @nogc:
 
     final void destroy()
     {
-        if (_state & _destroyed)
-            return; // destroy was already called
+        assert(!(_state & _destroyed), "destroy() called twice - bookkeeping bug");
 
-        if (_state == State.running)
-            set_offline();
-
-        log.info("destroyed");
+        bool was_running = _state == State.running;
 
         _state |= _disabled | _destroyed;
         _state &= ~(_start | _fail);
         if (_state & _valid)
             _state |= _stop;
+
+        if (was_running)
+            set_offline();
+
+        log.info("destroyed");
 
         signal_state_change(StateSignal.destroyed);
         _subscribers.clear();
@@ -639,21 +643,16 @@ protected:
         // HACK: probably over-dirty's the property, but when changing the state there's a good chance the status changed too!
         mark_set!(typeof(this), "status")();
 
-        // temporary objects self-destruct when they would shutdown
-        if ((_flags & ObjectFlags.temporary) && (new_state & _stop))
-        {
-            destroy();
-            if (_state == old)
-                return;
-        }
-        else
-        {
-            if (new_state == _state)
-                return;
-            _state = new_state;
+        if (new_state == _state)
+            return;
+        _state = new_state;
 
-            if (old == State.running)
-                set_offline();
+        if (old == State.running)
+        {
+            set_offline();
+
+            if (_flags & ObjectFlags.temporary)
+                destroy();
         }
 
         debug version (DebugStateFlow)
@@ -700,7 +699,7 @@ protected:
     CompletionStatus shutdown()
         => CompletionStatus.complete;
 
-    abstract void update()
+    void update()
     {
     }
 
@@ -798,12 +797,10 @@ package:
     }
 
 private:
-
     Array!StateSignalHandler _subscribers;
     MonoTime _last_init_attempt;
     ushort _backoff_ms = 0;
 
-    // sends a signal to all clients
     void signal_state_change(StateSignal signal)
     {
         // TODO: there's a potential (yet unlikely) issue here...
@@ -819,6 +816,9 @@ private:
             if (i < _subscribers.length && _subscribers[i] is handler)
                 i++;
         }
+
+        foreach (h; _on_object_state[])
+            h(this, signal);
     }
 }
 
@@ -925,6 +925,10 @@ const(Property*)[] all_properties(Type)()
     return props[];
 }
 
+void register_object_state_handler(StateSignalHandler handler) nothrow @nogc
+{
+    _on_object_state ~= handler;
+}
 
 ushort sync_state_alloc(BaseObject channel) nothrow @nogc
 {
@@ -964,6 +968,8 @@ ref SyncState sync_state(ushort slot) nothrow @nogc
 
 
 private:
+
+__gshared Array!StateSignalHandler _on_object_state;
 
 __gshared Array!SyncState _sync_states;
 __gshared Array!ushort _free_sync_slots;

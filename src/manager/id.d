@@ -26,8 +26,13 @@ struct ID(uint _type_bits)
     bool opEquals(This rhs) const pure
         => raw == rhs.raw;
 
-    long opCmp(This rhs) const pure
-        => cast(long)raw - cast(long)rhs.raw;
+    ptrdiff_t opCmp(This rhs) const pure
+    {
+        static if (ptrdiff_t.sizeof > 4)
+            return cast(ptrdiff_t)raw - cast(ptrdiff_t)rhs.raw;
+        else
+            return (raw > rhs.raw) - (raw < rhs.raw);
+    }
 
     size_t toHash() const pure
         => raw;

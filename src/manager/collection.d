@@ -39,10 +39,10 @@ enum CollectionType : ubyte
     secret,
     stream, // all streams
     sync_channel,
+    sync_peer,
     sync_ws_server,
     tcp_server,
     tls_server,
-    websocket,
     ws_server,
     zb_controller,
     zb_endpoint,
@@ -160,30 +160,22 @@ nothrow @nogc:
 
     BaseObject create(const(char)[] name, ObjectFlags flags = ObjectFlags.none, in NamedArgument[] named_args...)
     {
-        assert(type_info, "Can't create into a base collection!");
-
-        if (!name)
-            name = generate_name(type_info.type[]);
-
-        // allocate CID - fails if name already in use
-        CID id = allocate_id(name);
-        if (!id)
+        BaseObject item = alloc(name, flags);
+        if (!item)
             return null;
-
-        BaseObject item = type_info.create(this, id, flags);
 
         foreach (ref arg; named_args)
         {
+            debug assert(arg.name[] != "name", "Can't set name via named argument");
             StringResult result = item.set(arg.name, arg.value);
             if (!result)
             {
-                cast(void)item_table(id.type_index).remove(id);
                 defaultAllocator.freeT(item);
                 return null;
             }
         }
+        add(item);
 
-        item_table(id.type_index).find_entry(id).value = item;
         return item;
     }
 
@@ -218,21 +210,6 @@ nothrow @nogc:
         }
     }
 
-    void add(BaseObject item)
-    {
-        assert(cast(bool)item._id, "item must have a valid CID");
-        auto entry = table.find_entry(item._id);
-        assert(entry !is null, "CID not in table");
-        entry.value = item;
-        signal_object_created(item);
-    }
-
-    void remove(BaseObject item)
-    {
-        if (item._id)
-            cast(void)table.remove(item._id);
-    }
-
     BaseObject alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.none)
     {
         assert(type_info, "Can't create into a base collection!");
@@ -241,9 +218,24 @@ nothrow @nogc:
         CID id = allocate_id(name);
         if (!id)
             return null;
-        BaseObject item = type_info.create(this, id, flags);
-        item_table(id.type_index).find_entry(id).value = item;
-        return item;
+        // Note: entry.value stays null until add() installs and announces.
+        return type_info.create(this, id, flags);
+    }
+
+    void add(BaseObject item)
+    {
+        assert(cast(bool)item._id, "item must have a valid CID");
+        auto entry = table.find_entry(item._id);
+        assert(entry !is null, "CID not in table");
+        debug assert(entry.value is null, "add() called twice!");
+        entry.value = item;
+        signal_object_created(item);
+    }
+
+    void remove(BaseObject item)
+    {
+        if (item._id)
+            cast(void)table.remove(item._id);
     }
 
     BaseObject get(const(char)[] name)

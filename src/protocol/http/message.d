@@ -58,7 +58,8 @@ enum HTTPVersion : ubyte
 enum HTTPFlags : ubyte
 {
     None = 0,
-    ForceBody = 1,  // include body data, even if it's empty (ie: Content-Length: 0)
+    ForceBody = 1,   // include body data, even if it's empty (ie: Content-Length: 0)
+    NoDefaults = 2,  // skip User-Agent, Accept-Encoding and Connection: keep-alive - caller-supplied headers only
 }
 
 struct HTTPMessage
@@ -659,9 +660,12 @@ Array!char format_message(ref HTTPMessage message, const(char)[] host = null)
         msg.append("\r\n");
         if (host)
             msg.append("Host: ", host, "\r\n");
-        msg.append("User-Agent: OpenWatt\r\nAccept-Encoding: gzip, deflate\r\n");
-        if (message.http_version == HTTPVersion.V1_1)
-            msg.append("Connection: keep-alive\r\n");
+        if (!(message.flags & HTTPFlags.NoDefaults))
+        {
+            msg.append("User-Agent: OpenWatt\r\nAccept-Encoding: gzip, deflate\r\n");
+            if (message.http_version == HTTPVersion.V1_1)
+                msg.append("Connection: keep-alive\r\n");
+        }
 
         if (message.username || message.password)
         {

@@ -95,7 +95,7 @@ protected:
 
     final override int transmit(ref Packet packet, MessageCallback)
     {
-        assert(false, "unreachable — we override forward() instead");
+        assert(false, "unreachable - we override forward() instead");
     }
 
     // override forward() instead of transmit() to avoid double callback firing
