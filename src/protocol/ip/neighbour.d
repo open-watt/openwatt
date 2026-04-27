@@ -19,40 +19,68 @@ enum NeighbourState : ubyte
 }
 
 
-struct NeighbourEntry
+struct NeighbourEntry(IP)
 {
-    IPAddr ip;
-    ubyte[16] link_addr;        // MAC (6) or 802.15.4 EUI64 (8) etc.
-    ubyte link_addr_len;
+    IP ip;
     BaseInterface iface;
+    ubyte[16] link_addr;        // MAC (6) or EUI-64 (8) etc.
+    ubyte link_addr_len;
     NeighbourState state;
     SysTime last_confirmed;
     // TODO: small queue of packets pending resolution
 }
 
 
-struct NeighbourCache
+struct NeighbourCache(IP)
 {
 nothrow @nogc:
 
-    // Lookup or kick off resolution. Returns null while pending.
-    const(ubyte)[] resolve(IPAddr ip, BaseInterface iface, ref Packet pending)
+    // Insert or refresh an entry from observed traffic (ARP reply, ND NA, gratuitous, etc).
+    void learn(IP ip, BaseInterface iface, const(ubyte)[] link_addr)
     {
-        // TODO: hash lookup; if reachable -> return link_addr
-        // TODO: if missing -> create incomplete entry, queue pending, send_request
-        // TODO: if incomplete -> just queue pending
+        if (link_addr.length == 0 || link_addr.length > 16)
+            return;
+
+        SysTime now = getSysTime();
+
+        foreach (ref e; _entries[])
+        {
+            if (e.iface is iface && e.ip == ip)
+            {
+                e.link_addr[0 .. link_addr.length] = link_addr[];
+                e.link_addr_len  = cast(ubyte)link_addr.length;
+                e.state          = NeighbourState.reachable;
+                e.last_confirmed = now;
+                return;
+            }
+        }
+
+        NeighbourEntry!IP n;
+        n.ip                       = ip;
+        n.iface                    = iface;
+        n.link_addr[0..link_addr.length] = link_addr[];
+        n.link_addr_len            = cast(ubyte)link_addr.length;
+        n.state                    = NeighbourState.reachable;
+        n.last_confirmed           = now;
+        _entries ~= n;
+    }
+
+    NeighbourEntry!IP* find(IP ip, BaseInterface iface)
+    {
+        foreach (ref e; _entries[])
+            if (e.iface is iface && e.ip == ip)
+                return &e;
         return null;
     }
 
-    void on_arp(ref const Packet pkt, BaseInterface iface)
+    // Lookup; returns link_addr if reachable, null if missing/incomplete.
+    const(ubyte)[] resolve(IP ip, BaseInterface iface, ref Packet pending)
     {
-        // TODO: parse ARP; respond to who-has for our IPs; update cache from replies
-        // TODO: drain pending packets for any newly-reachable entry
-    }
-
-    void on_neighbour_advert(ref const Packet pkt, BaseInterface iface)
-    {
-        // TODO: IPv6 ND NA handling
+        auto e = find(ip, iface);
+        if (e && e.state == NeighbourState.reachable)
+            return e.link_addr[0 .. e.link_addr_len];
+        // TODO: kick off active resolution, queue `pending`, send request
+        return null;
     }
 
     void tick(SysTime now)
@@ -60,16 +88,9 @@ nothrow @nogc:
         // TODO: age entries, retry incompletes (max ~3), expire stale -> failed
     }
 
+    auto entries() inout pure
+        => _entries[];
+
 private:
-    void send_arp_request(IPAddr target, BaseInterface iface)
-    {
-        // TODO: build + send ARP who-has via iface
-    }
-
-    void send_neighbour_solicit(IPAddr target, BaseInterface iface)
-    {
-        // TODO: build + send ICMPv6 NS via iface
-    }
-
-    Array!NeighbourEntry _entries;
+    Array!(NeighbourEntry!IP) _entries;
 }

@@ -12,6 +12,7 @@ import router.iface;
 import router.iface.packet;
 
 import protocol.ip.address;
+import protocol.ip.arp;
 import protocol.ip.firewall;
 import protocol.ip.neighbour;
 import protocol.ip.route;
@@ -135,7 +136,9 @@ nothrow @nogc:
 
     void update()
     {
-        neighbour.tick(getSysTime());
+        SysTime now = getSysTime();
+        neighbour_v4.tick(now);
+        neighbour_v6.tick(now);
     }
 
 private:
@@ -179,7 +182,7 @@ private:
         switch (eth.ether_type)
         {
             case EtherType.arp:
-                neighbour.on_arp(pkt, iface);
+                on_arp(pkt, iface, neighbour_v4);
                 break;
             case EtherType.ip4:
                 ingress_v4(pkt, iface);
@@ -353,7 +356,8 @@ private:
     void udp_input(ref Packet pkt)  { /* TODO: stub - hand to udp module when it exists */ }
 
     Array!BoundInterface _bound;
-    NeighbourCache neighbour;
+    NeighbourCache!IPAddr   neighbour_v4;
+    NeighbourCache!IPv6Addr neighbour_v6;
     FirewallChains firewall_v4;
     FirewallChains firewall_v6;
     // TODO: ReassemblyTable reasm;

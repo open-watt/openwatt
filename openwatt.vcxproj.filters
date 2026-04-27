@@ -594,6 +594,9 @@
     <DCompile Include="src\protocol\ip\address.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\ip\arp.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\ip\firewall.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
