@@ -61,7 +61,8 @@ nothrow @nogc:
             {
                 foreach (i; Collection!BaseInterface().values)
                 {
-                    EthernetInterface e = cast(EthernetInterface)i;
+                    import driver.windows.ethernet : WindowsPcapEthernet;
+                    WindowsPcapEthernet e = cast(WindowsPcapEthernet)i;
                     if (!e || e.adapter != dev.name[0..dev.name.strlen])
                         continue;
 
