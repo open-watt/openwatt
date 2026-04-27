@@ -321,11 +321,11 @@ protected:
         return true;
     }
 
-    final override void slave_incoming(ref Packet packet, byte child_id)
+    final override void slave_incoming(ref Packet packet, BaseInterface child_if)
     {
         debug assert(running, "Shouldn't receive packets while not running...?");
 
-        ubyte src_port = cast(ubyte)child_id;
+        ubyte src_port = cast(ubyte)child_if._slave_id;
         ref const BridgePort port = _members[src_port];
         ulong src_address;
         ushort src_vlan = 0;
@@ -767,9 +767,9 @@ nothrow @nogc:
             session.write_line("Can't add a bridge to itself.");
             return;
         }
-        if (_interface._master)
+        if (_interface.flags & ObjectFlags.slave)
         {
-            session.write_line("Interface '", _interface.name[], "' is already a slave to '", _interface._master.name[], "'.");
+            session.write_line("Interface '", _interface.name[], "' is already a slave to '", (cast(BaseObject)_interface._primary.ptr).name[], "'.");
             return;
         }
 

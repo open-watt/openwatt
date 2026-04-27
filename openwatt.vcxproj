@@ -137,8 +137,11 @@
     <DCompile Include="src\protocol\http\tls.d" />
     <DCompile Include="src\protocol\http\websocket.d" />
     <DCompile Include="src\protocol\ip\address.d" />
+    <DCompile Include="src\protocol\ip\firewall.d" />
+    <DCompile Include="src\protocol\ip\neighbour.d" />
     <DCompile Include="src\protocol\ip\package.d" />
     <DCompile Include="src\protocol\ip\route.d" />
+    <DCompile Include="src\protocol\ip\stack.d" />
     <DCompile Include="src\protocol\modbus\client.d" />
     <DCompile Include="src\protocol\modbus\iface.d" />
     <DCompile Include="src\protocol\modbus\message.d" />

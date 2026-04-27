@@ -58,6 +58,7 @@ enum MessageState
 }
 
 alias MessageCallback = void delegate(int msg_handle, MessageState state) nothrow @nogc;
+alias IncomingPacketHandler = void delegate(ref Packet p, BaseInterface i) nothrow @nogc;
 
 
 struct TagAllocator
@@ -299,11 +300,19 @@ nothrow @nogc:
     override const(char)[] status_message() const
         => running ? "Running" : super.status_message();
 
-    BaseInterface set_master(BaseInterface master, byte slave_id) pure
+    bool set_primary_dispatch(IncomingPacketHandler handler) pure
     {
-        if (_master)
-            return _master;
-        _master = master;
+        if (_primary !is null)
+            return false;
+        _primary = handler;
+        return true;
+    }
+
+    IncomingPacketHandler set_master(BaseInterface master, byte slave_id) pure
+    {
+        if (_primary)
+            return _primary;
+        _primary = &master.slave_incoming;
         _slave_id = slave_id;
         _flags |= ObjectFlags.slave;
         return null;
@@ -500,9 +509,7 @@ protected:
                 add_address(packet.eth.src, this);
         }
 
-        if (_master)
-            _master.slave_incoming(packet, _slave_id);
-        else
+        if (_num_subscribers)
         {
             foreach (ref subscriber; _subscribers[0.._num_subscribers])
             {
@@ -510,9 +517,11 @@ protected:
                     subscriber.recv_packet(packet, this, PacketDirection.incoming, subscriber.user_data);
             }
         }
+        if (_primary)
+            _primary(packet, this);
     }
 
-    void slave_incoming(ref Packet packet, byte child_id)
+    void slave_incoming(ref Packet packet, BaseInterface iface)
     {
         assert(false, "Override this method to implement a _master interface");
     }
@@ -584,7 +593,7 @@ protected:
 
     // TODO: this package section should be refactored out of existence!
 package:
-    BaseInterface _master;
+    IncomingPacketHandler _primary;
     byte _slave_id;
 
     Packet[] _send_queue;
