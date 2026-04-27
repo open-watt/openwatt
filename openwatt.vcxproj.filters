@@ -40,6 +40,15 @@
     <Filter Include="src\db">
       <UniqueIdentifier>{5d186ff6-592c-44bc-99a8-f871c74d47b3}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\driver">
+      <UniqueIdentifier>{cc240544-3e97-4f75-a128-521410a70930}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\baremetal">
+      <UniqueIdentifier>{99e012a6-c993-4c2a-ae7e-aae2a0786162}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\windows">
+      <UniqueIdentifier>{417eeecb-0fc8-4b57-88c7-db9299ca521b}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\manager">
       <UniqueIdentifier>{a7edf0a4-cbca-4a75-bf4f-548fe4b7764d}</UniqueIdentifier>
     </Filter>
@@ -225,6 +234,27 @@
     <DCompile Include="src\db\stream.d">
       <Filter>src\db</Filter>
     </DCompile>
+    <DCompile Include="src\driver\baremetal\wifi.d">
+      <Filter>src\driver\baremetal</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\ethernet.d">
+      <Filter>src\driver</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\wifi.d">
+      <Filter>src\driver</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\windows\ethernet.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\windows\pcap.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\windows\wifi.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\windows\wlanapi.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
     <DCompile Include="src\manager\certificate.d">
       <Filter>src\manager</Filter>
     </DCompile>
@@ -305,6 +335,9 @@
     </DCompile>
     <DCompile Include="src\manager\log.d">
       <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\os\iphlpapi.d">
+      <Filter>src\manager\os</Filter>
     </DCompile>
     <DCompile Include="src\manager\os\npcap.d">
       <Filter>src\manager\os</Filter>

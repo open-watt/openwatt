@@ -1,5 +1,6 @@
 module router.stream.tcp;
 
+import urt.array;
 import urt.conv;
 import urt.io;
 import urt.log;
@@ -16,6 +17,10 @@ import manager.console;
 import manager.plugin;
 
 public import router.stream;
+
+//version = DebugTCPStream;       // TCPStream write/queue/drain activity
+
+nothrow @nogc:
 
 
 class TCPStream : Stream
@@ -161,6 +166,11 @@ nothrow @nogc:
             r = _socket.connect(_remote);
             if (!r.succeeded && r.socket_result != SocketResult.would_block)
             {
+                if (r.socket_result == SocketResult.network_unreachable || r.socket_result == SocketResult.host_unreachable)
+                {
+                    close_socket();
+                    return CompletionStatus.continue_;
+                }
                 debug writeWarning(type, " '", name, "' - connect() failed with error: ", r.socket_result);
                 return CompletionStatus.error;
             }
@@ -226,6 +236,9 @@ nothrow @nogc:
             return;
         }
 
+        if (_pending.length > 0)
+            drain_pending();
+
         super.update();
     }
 
@@ -289,19 +302,43 @@ nothrow @nogc:
         if (!running)
             return 0;
 
+        if (_pending.length > 0 && !drain_pending())
+            return 0;
+
+        size_t total = 0;
+        foreach (b; data)
+            total += b.length;
+        if (total == 0)
+            return 0;
+
+        if (_pending.length > 0)
+        {
+            if (_pending.length + total > MaxPendingBytes)
+            {
+                version (DebugTCPStream)
+                    log.warning("write ", total, "B refused: pending=", _pending.length, " cap=", MaxPendingBytes);
+                return 0;
+            }
+            foreach (b; data)
+                _pending ~= cast(const(ubyte)[])b;
+            version (DebugTCPStream)
+                log.trace("write ", total, "B fully queued (socket still full); pending=", _pending.length);
+            return total;
+        }
+
         size_t bytes;
         Result r = _socket.send(MsgFlags.none, &bytes, data);
-        if (r != Result.success)
+        if (r.failed && r.socket_result != SocketResult.would_block)
         {
-            SocketResult sr = r.socket_result;
-            if (sr == SocketResult.would_block)
-                return 0;
+            version (DebugTCPStream)
+                log.warning("send failed: ", r.socket_result, "; restarting");
             restart();
+            return 0;
         }
-        else
+
+        if (bytes > 0)
         {
             add_tx_bytes(bytes);
-
             if (_logging)
             {
                 import urt.util : min;
@@ -313,16 +350,42 @@ nothrow @nogc:
                     remain -= len;
                 }
             }
-            return bytes;
         }
 
-        if (_options & StreamOptions.buffer_data)
+        size_t unaccepted = total - bytes;
+        if (unaccepted > 0)
         {
-            assert(false, "TODO: buffer data for when the stream becomes available again");
-            // how long should buffered data linger? how big is the buffer?
+            if (unaccepted > MaxPendingBytes)
+            {
+                version (DebugTCPStream)
+                    log.warning("write ", total, "B partial: accepted=", bytes, " unaccepted=", unaccepted, " exceeds cap=", MaxPendingBytes);
+                return bytes;
+            }
+            size_t skipped = 0;
+            foreach (b; data)
+            {
+                if (skipped + b.length <= bytes)
+                {
+                    skipped += b.length;
+                    continue;
+                }
+                size_t off = bytes > skipped ? bytes - skipped : 0;
+                _pending ~= (cast(const(ubyte)[])b)[off .. $];
+                skipped += b.length;
+            }
+            version (DebugTCPStream)
+                log.trace("write ", total, "B: socket took ", bytes, ", queued tail ", unaccepted, "; pending=", _pending.length);
+        }
+        else
+        {
+            version (DebugTCPStream)
+            {
+                if (total > 0)
+                    log.trace("write ", total, "B accepted by socket");
+            }
         }
 
-        return 0;
+        return total;
     }
 
     override ptrdiff_t pending()
@@ -347,11 +410,14 @@ nothrow @nogc:
     }
 
 private:
+    enum size_t MaxPendingBytes = 256 * 1024;
+
     Socket _socket;
     InetAddress _remote;
     ushort _port;
     SysTime _last_retry;
     String _host;
+    Array!ubyte _pending;
 //    TCPServer _reverse_connect_server;
 
     bool _keep_enable = false;
@@ -359,8 +425,45 @@ private:
     Duration _keep_idle;
     Duration _keep_interval;
 
+    bool drain_pending()
+    {
+        version (DebugTCPStream)
+            size_t initial = _pending.length;
+
+        while (_pending.length > 0)
+        {
+            size_t sent;
+            Result r = _socket.send(MsgFlags.none, &sent, cast(const(void)[])_pending[]);
+            if (r.failed && r.socket_result != SocketResult.would_block)
+            {
+                version (DebugTCPStream)
+                    log.warning("drain failed: ", r.socket_result, "; restarting (pending=", _pending.length, ')');
+                restart();
+                return false;
+            }
+            if (sent == 0)
+            {
+                version (DebugTCPStream)
+                    log.trace("drain stalled: socket full, pending=", _pending.length);
+                return true;
+            }
+            add_tx_bytes(sent);
+            if (_logging)
+                write_to_log(false, _pending[0 .. sent]);
+            _pending.remove(0, sent);
+        }
+
+        version (DebugTCPStream)
+        {
+            if (initial > 0)
+                log.trace("drained ", initial, "B fully");
+        }
+        return true;
+    }
+
     void close_socket()
     {
+        _pending.clear();
         if (_socket == Socket.invalid)
             return;
         if (_state == State.stopping)

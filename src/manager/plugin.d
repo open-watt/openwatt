@@ -85,8 +85,11 @@ void register_modules(Application app)
     import router.iface;
     register_module!(router.iface)(app);
     register_module!(router.iface.bridge)(app);
-    register_module!(router.iface.ethernet)(app);
     register_module!(router.iface.wifi)(app);
+
+    import driver.ethernet, driver.wifi;
+    register_module!(driver.ethernet)(app);
+    register_module!(driver.wifi)(app);
 
     import protocol;
     register_module!(protocol.ble)(app);

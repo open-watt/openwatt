@@ -118,7 +118,7 @@ nothrow @nogc:
         assert(!(iface.flags & ObjectFlags.slave), "Interface is already slaved!");
 
         ubyte port = cast(ubyte)_members.length;
-        if (iface.set_master(this, port) !is null)
+        if (!iface.set_master(this, port))
             return false;
         _members ~= BridgePort(iface, pvid, ingress_filtering, untagged_egress);
 
@@ -300,32 +300,23 @@ protected:
 //        _address_table.update();
     }
 
-    final override bool bind_vlan(BaseInterface vlan_interface, bool remove)
+    final override bool bind_vlan(VLANInterface vlan_interface, bool remove)
     {
-        VLANInterface vif = cast(VLANInterface)vlan_interface;
-        assert(vif, "Not a vlan interface!");
-
-        ulong key = vif.mac.ul | (ulong(vif.vlan) << 48) | (ulong(PacketType.ethernet) << 60);
-
+        if (!super.bind_vlan(vlan_interface, remove))
+            return false;
+        ulong key = vlan_interface.mac.ul | (ulong(vlan_interface.vlan) << 48) | (ulong(PacketType.ethernet) << 60);
         if (remove)
-        {
-            _vlans.remove(vif.vlan);
             _address_table.remove(key);
-        }
         else
-        {
-            debug assert(!_vlans.exists(vif.vlan), "VLAN already bound!");
-            _vlans.insert(vif.vlan, vif);
             _address_table.insert(key, _local_port);
-        }
         return true;
     }
 
-    final override void slave_incoming(ref Packet packet, byte child_id)
+    final override void slave_incoming(ref Packet packet, byte slave_id)
     {
         debug assert(running, "Shouldn't receive packets while not running...?");
 
-        ubyte src_port = cast(ubyte)child_id;
+        ubyte src_port = cast(ubyte)slave_id;
         ref const BridgePort port = _members[src_port];
         ulong src_address;
         ushort src_vlan = 0;
@@ -340,8 +331,7 @@ protected:
 
         if (_vlan_filtering)
         {
-            // check and strip vlan tag...
-            if (packet.type == PacketType.ethernet && packet.eth.ether_type == EtherType.vlan)
+            if (packet.type == PacketType.ethernet && packet.eth.ether_type == VlanTag._8100)
             {
                 if (packet.data.length < 4)
                     goto drop_packet;
@@ -354,7 +344,7 @@ protected:
 
                 if ((src_vlan & 0x0FFF) == 0)
                 {
-                    // vlan 0 adopts PVID
+                    // VID=0 priority-tagged: adopt PVID for vid, preserve PCP
                     src_vlan = (src_vlan & 0xF000) | port.pvid;
                 }
                 else if (port.ingress_filtering)
@@ -372,10 +362,7 @@ protected:
                 }
             }
             else
-            {
-                // untagged packets adopt PVID
-                src_vlan = port.pvid;
-            }
+                src_vlan = (packet.vlan & 0xF000) | port.pvid;
 
             // port was configured to drop untagged frames (PVID = 0)
             if (src_vlan == 0)
@@ -489,7 +476,6 @@ private:
     bool _vlan_filtering;
     BridgePort _bridge_port;
     Array!BridgePort _members;
-    Map!(ushort, VLANInterface) _vlans;
     AddressTable _address_table;
 
     TagTracking* _tracking_free;
@@ -510,10 +496,18 @@ private:
             if (_bridge_port.untagged_egress)
                 packet.vlan &= 0xF000;
             dispatch(packet);
+            return;
         }
-        else if (VLANInterface* vif = _vlans.get(vlan))
-            vif.vlan_incoming(packet);
-        // else: not a member of this vlan, drop
+        // walk inherited _vlans Array for the matching sub-iface
+        foreach (vif; _vlans[])
+        {
+            if (vif.vlan == vlan)
+            {
+                vif.vlan_incoming(packet);
+                return;
+            }
+        }
+        // not a member of this vlan, drop
     }
 
     void send(ref Packet packet, ubyte src_port) nothrow @nogc
@@ -767,7 +761,7 @@ nothrow @nogc:
             session.write_line("Can't add a bridge to itself.");
             return;
         }
-        if (_interface._master)
+        if (_interface.flags & ObjectFlags.slave)
         {
             session.write_line("Interface '", _interface.name[], "' is already a slave to '", _interface._master.name[], "'.");
             return;

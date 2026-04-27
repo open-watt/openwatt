@@ -13,10 +13,21 @@ import router.iface;
 nothrow @nogc:
 
 
+enum VlanTag : ushort
+{
+    _8100 = 0x8100, // standard 802.1Q customer tag
+    _88a8 = 0x88a8, // 802.1ad provider/service tag
+    _9100 = 0x9100, // legacy Cisco-style Q-in-Q
+    _9200 = 0x9200, // alternate legacy Q-in-Q
+    _9300 = 0x9300, // another legacy Q-in-Q variant
+}
+
+
 class VLANInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
-                                 Prop!("vlan", vlan));
+                                 Prop!("vlan", vlan),
+                                 Prop!("tag", tag));
 nothrow @nogc:
 
     enum type_name = "vlan";
@@ -39,8 +50,23 @@ nothrow @nogc:
     {
         if (value < 2 || value > 4094)
             return "invalid vlan id";
+        if (value == _vlan)
+            return null;
+        if (_interface !is null && _vlan != 0)
+            _interface.bind_vlan(this, true);
         _vlan = value;
+        if (_interface !is null)
+            _interface.bind_vlan(this, false);
+        mark_set!(typeof(this), "vlan")();
         return null;
+    }
+
+    VlanTag tag() const
+        => _tag;
+    void tag(VlanTag value)
+    {
+        _tag = value;
+        mark_set!(typeof(this), "tag")();
     }
 
     inout(BaseInterface) iface() inout pure
@@ -51,12 +77,16 @@ nothrow @nogc:
             return "interface cannot be null";
         if (_interface is value)
             return null;
-        if (_interface !is null)
+        if (_interface !is null && _vlan != 0)
             _interface.bind_vlan(this, true);
-        if (!_interface.bind_vlan(this, false))
-            return tconcat("interface ", value.name, " of type ", value.type, " does not support vlans");
+        if (_vlan != 0)
+        {
+            if (!value.bind_vlan(this, false))
+                return tconcat("interface ", value.name, " of type ", value.type, " does not support vlans");
+        }
         _interface = value;
         mac = _interface.mac;
+        mark_set!(typeof(this), "interface")();
         return null;
     }
 
@@ -77,7 +107,7 @@ protected:
     mixin RekeyHandler;
 
     override bool validate() const
-        => _interface !is null;
+        => _interface !is null && _vlan != 0;
 
     // TODO: this needs to be a startup action, and we need to subscribe for restart() events...
 //    override CompletionStatus validating()
@@ -134,4 +164,5 @@ package:
 private:
     ObjectRef!BaseInterface _interface;
     ushort _vlan;
+    VlanTag _tag = VlanTag._8100;
 }
