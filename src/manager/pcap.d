@@ -103,11 +103,17 @@ nothrow @nogc:
         max_buffer_bytes = max_bytes;
     }
 
-    void subscribe_interface(BaseInterface iface)
+    bool subscribe_interface(BaseInterface iface)
     {
-        auto filter = PacketFilter(type: PacketType.unknown, direction: cast(PacketDirection)(PacketDirection.incoming | PacketDirection.outgoing));
+        if (iface.pcap_type() == 0)
+        {
+            writeWarning("PCAP: interface '", iface.name, "' does not support packet capture");
+            return false;
+        }
 
+        auto filter = PacketFilter(type: PacketType.unknown, direction: cast(PacketDirection)(PacketDirection.incoming | PacketDirection.outgoing));
         iface.subscribe(&packet_handler, filter);
+        return true;
     }
 
     void flush()
@@ -546,15 +552,19 @@ private:
             }
 
             auto ifaces = Collection!BaseInterface();
-            uint iface_count = ifaces.item_count;
+            uint iface_count = 0;
 
             ubyte[2048] buffer = void;
             size_t len = 0;
 
             foreach (iface; ifaces.values)
             {
+                if (iface.pcap_type() == 0)
+                    continue;
                 if (len + RpcapFindAllIfReply.sizeof + iface.name.length > buffer.length)
                     break;
+
+                ++iface_count;
 
                 RpcapFindAllIfReply if_reply = {
                     namelen: cast(ushort)iface.name.length,
@@ -592,6 +602,12 @@ private:
             if (!opened_iface)
             {
                 send_error("Interface not found");
+                return;
+            }
+            if (opened_iface.pcap_type() == 0)
+            {
+                opened_iface = null;
+                send_error("Interface does not support packet capture");
                 return;
             }
 

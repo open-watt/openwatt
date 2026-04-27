@@ -39,7 +39,14 @@ nothrow @nogc:
     {
         if (value < 2 || value > 4094)
             return "invalid vlan id";
+        if (value == _vlan)
+            return null;
+        if (_interface !is null && _vlan != 0)
+            _interface.bind_vlan(this, true);
         _vlan = value;
+        if (_interface !is null)
+            _interface.bind_vlan(this, false);
+        mark_set!(typeof(this), "vlan")();
         return null;
     }
 
@@ -51,12 +58,16 @@ nothrow @nogc:
             return "interface cannot be null";
         if (_interface is value)
             return null;
-        if (_interface !is null)
+        if (_interface !is null && _vlan != 0)
             _interface.bind_vlan(this, true);
-        if (!_interface.bind_vlan(this, false))
-            return tconcat("interface ", value.name, " of type ", value.type, " does not support vlans");
+        if (_vlan != 0)
+        {
+            if (!value.bind_vlan(this, false))
+                return tconcat("interface ", value.name, " of type ", value.type, " does not support vlans");
+        }
         _interface = value;
         mac = _interface.mac;
+        mark_set!(typeof(this), "interface")();
         return null;
     }
 
@@ -77,7 +88,7 @@ protected:
     mixin RekeyHandler;
 
     override bool validate() const
-        => _interface !is null;
+        => _interface !is null && _vlan != 0;
 
     // TODO: this needs to be a startup action, and we need to subscribe for restart() events...
 //    override CompletionStatus validating()

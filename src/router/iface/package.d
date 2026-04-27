@@ -395,40 +395,10 @@ nothrow @nogc:
     }
 
     ushort pcap_type() const
-        => 1; // LINKTYPE_ETHERNET
+        => 0;
 
     void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packet_data) nothrow @nogc sink) const
     {
-        import urt.endian;
-
-        bool is_ow = packet.eth.ether_type == EtherType.ow;
-
-        // write ethernet header...
-        struct Header
-        {
-            MACAddress dst;
-            MACAddress src;
-            ubyte[2] type;
-            ubyte[2] subtype;
-        }
-        Header h;
-        h.dst = packet.eth.dst;
-        h.src = packet.eth.src;
-        h.type = nativeToBigEndian(packet.eth.ether_type);
-        if (is_ow)
-            h.subtype = nativeToBigEndian(packet.eth.ow_sub_type);
-        sink((cast(ubyte*)&h)[0 .. (is_ow ? Header.sizeof : Header.subtype.offsetof)]);
-
-        // write packet data
-        sink(packet.data);
-
-        if (is_ow && packet.eth.ow_sub_type == OW_SubType.modbus)
-        {
-            // wireshark wants RTU packets for its decoder, so we need to append the crc...
-            import urt.crc;
-            ushort crc = packet.data[3..$].calculate_crc!(Algorithm.crc16_modbus)();
-            sink(crc.nativeToLittleEndian());
-        }
     }
 
     ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] format_args) const nothrow @nogc
