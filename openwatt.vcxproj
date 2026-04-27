@@ -139,10 +139,13 @@
     <DCompile Include="src\protocol\ip\address.d" />
     <DCompile Include="src\protocol\ip\arp.d" />
     <DCompile Include="src\protocol\ip\firewall.d" />
+    <DCompile Include="src\protocol\ip\icmp.d" />
     <DCompile Include="src\protocol\ip\neighbour.d" />
     <DCompile Include="src\protocol\ip\package.d" />
     <DCompile Include="src\protocol\ip\route.d" />
+    <DCompile Include="src\protocol\ip\socket.d" />
     <DCompile Include="src\protocol\ip\stack.d" />
+    <DCompile Include="src\protocol\ip\udp.d" />
     <DCompile Include="src\protocol\modbus\client.d" />
     <DCompile Include="src\protocol\modbus\iface.d" />
     <DCompile Include="src\protocol\modbus\message.d" />

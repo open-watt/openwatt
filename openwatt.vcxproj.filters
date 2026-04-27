@@ -600,6 +600,9 @@
     <DCompile Include="src\protocol\ip\firewall.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\ip\icmp.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\ip\neighbour.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
@@ -609,7 +612,13 @@
     <DCompile Include="src\protocol\ip\route.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\ip\socket.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\ip\stack.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\udp.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ppp\client.d">

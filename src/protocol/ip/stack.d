@@ -2,6 +2,7 @@ module protocol.ip.stack;
 
 import urt.array;
 import urt.endian;
+import urt.hash;
 import urt.inet;
 import urt.log;
 import urt.time;
@@ -9,13 +10,16 @@ import urt.time;
 import manager.collection;
 
 import router.iface;
+import router.iface.mac;
 import router.iface.packet;
 
 import protocol.ip.address;
 import protocol.ip.arp;
 import protocol.ip.firewall;
+import protocol.ip.icmp;
 import protocol.ip.neighbour;
 import protocol.ip.route;
+import protocol.ip.udp;
 
 version = DebugIP;            // bind / unbind, no-route, etc.
 //version = DebugIPIngress;     // every packet entering on_packet
@@ -63,6 +67,7 @@ struct BoundInterface
 
 struct IPv4Header
 {
+nothrow @nogc:
 align(1):
     ubyte ver_ihl;          // upper nibble = version, lower = IHL (32-bit words)
     ubyte tos;
@@ -75,8 +80,17 @@ align(1):
     IPAddr src;
     IPAddr dst;
 
-    ubyte version_() const pure => ver_ihl >> 4;
-    ubyte ihl() const pure => ver_ihl & 0x0F;
+    ubyte version_() const pure
+        => ver_ihl >> 4;
+    ubyte ihl() const pure
+        => ver_ihl & 0x0F;
+}
+
+enum IpProtocol : ubyte
+{
+    icmp = 1,
+    tcp  = 6,
+    udp  = 17,
 }
 
 
@@ -85,6 +99,13 @@ struct IPStack
 nothrow @nogc:
 
     alias log = Log!"ip";
+
+    void init_resolvers()
+    {
+        neighbour_v4.send_request = &v4_send_request;
+        neighbour_v4.drain        = &v4_drain;
+        // TODO: ND wiring once v6 lands
+    }
 
     void add_interface(BaseInterface iface, L3Capability cap)
     {
@@ -141,6 +162,20 @@ nothrow @nogc:
         neighbour_v6.tick(now);
     }
 
+    // Pick a local IPv4 source address to use when sending to `dst`.
+    // Walks IPAddress collection for a connected network containing dst,
+    // and returns one of our IPs on that interface. Returns IPAddr.any if none.
+    IPAddr select_source_v4(IPAddr dst)
+    {
+        BaseInterface egress = resolve_connected_iface(dst);
+        if (!egress)
+            return IPAddr.any;
+        foreach (a; Collection!IPAddress().values)
+            if (cast(BaseInterface)a.iface is egress)
+                return a.address.addr;
+        return IPAddr.any;
+    }
+
 private:
 
     L3Capability cap_for(BaseInterface iface)
@@ -151,7 +186,7 @@ private:
         return L3Capability.none;
     }
 
-    const(BoundInterface)* find_bound(BaseInterface iface)
+    BoundInterface* find_bound(BaseInterface iface)
     {
         foreach (ref b; _bound[])
             if (b.iface is iface)
@@ -197,7 +232,31 @@ private:
 
     void ingress_v4(ref Packet pkt, BaseInterface iface)
     {
-        // TODO: validate v4 header: version==4, IHL>=5, total_length, header checksum
+        if (pkt.data.length < IPv4Header.sizeof)
+            return;
+
+        const ip = cast(const IPv4Header*)pkt.data.ptr;
+        if (ip.version_ != 4)
+            return;
+        if (ip.ihl < 5)
+            return;
+        size_t hdr_len = ip.ihl * 4;
+        if (pkt.data.length < hdr_len)
+            return;
+        ushort total = (ushort(ip.total_length[0]) << 8) | ip.total_length[1];
+        if (total < hdr_len || total > pkt.data.length)
+            return;
+        if (internet_checksum(pkt.data.ptr[0 .. hdr_len]) != 0)
+            return;
+
+        // Learn (src_ip, l2_src_mac) from any unicast IPv4 frame.
+        if (pkt.type == PacketType.ethernet)
+        {
+            const Ethernet eth = pkt.hdr!Ethernet();
+            if (!eth.src.is_multicast())
+                neighbour_v4.learn(ip.src, iface, eth.src.b[]);
+        }
+
         // TODO: reassembly via ident/flags/frag_offset
         // TODO: conntrack lookup for stateful firewall
 
@@ -227,7 +286,8 @@ private:
             case RouteResult.Kind.none:
                 version (DebugIP)
                     log.trace("no route for packet");
-                // TODO: send ICMP destination unreachable back via reverse route
+                icmp_send_error(this, IcmpType.dest_unreachable,
+                                IcmpDestUnreachableCode.net, pkt);
                 return;
             case RouteResult.Kind.blackhole:
                 return;
@@ -323,37 +383,76 @@ private:
         version (DebugIPEgress)
             log.trace("egress iface=", out_iface.name, " next_hop=", next_hop, " len=", pkt.length);
 
-        const(BoundInterface)* bound = find_bound(out_iface);
+        BoundInterface* bound = find_bound(out_iface);
         if (!bound)
             return;  // egress to an unbound interface -> drop (shouldn't happen if route table is sane)
 
-        // TODO: const(ubyte)[] link_addr = neighbour.resolve(next_hop, out_iface, pkt);
-        // TODO: if (link_addr is null) return;  // queued, will fire when ARP/ND completes
-        // TODO: frame_and_send(pkt, *bound, link_addr);
+        const(ubyte)[] link_addr = neighbour_v4.resolve(next_hop, out_iface, pkt);
+        if (link_addr is null)
+        {
+            version (DebugIPEgress)
+                log.trace("egress drop: no neighbour for ", next_hop);
+            // TODO: queue pending packet, kick off ARP request
+            return;
+        }
+
+        frame_and_send(pkt, *bound, link_addr);
     }
 
-    void frame_and_send(ref Packet pkt, ref const BoundInterface bound, const(ubyte)[] link_addr)
+    void frame_and_send(ref Packet pkt, ref BoundInterface bound, const(ubyte)[] link_addr)
     {
-        // TODO: per-cap framing:
-        //   ethernet  -> prepend EthHdr{dst=link_addr, src=our_mac, type=ip4|ip6}; bound.iface.forward(pkt)
-        //   sixlowpan -> compress + 802.15.4 frame; bound.iface.forward(pkt)
-        //   ppp       -> PPP NCP frame; bound.iface.forward(pkt)
-        //   raw_ip    -> bound.iface.forward(pkt) as-is
+        if (bound.cap & L3Capability.ethernet)
+        {
+            if (link_addr.length != 6 || pkt.data.length < 1)
+                return;
+            MACAddress dst;
+            dst.b[] = link_addr[0 .. 6];
+            ubyte ver = (cast(const(ubyte)*)pkt.data.ptr)[0] >> 4;
+            EtherType etype = ver == 6 ? EtherType.ip6 : EtherType.ip4;
+            bound.iface.send(dst, pkt.data, etype);
+            return;
+        }
+        // TODO: sixlowpan / ppp / raw_ip
     }
 
     void deliver_local(ref Packet pkt)
     {
-        // TODO: switch on next-header / protocol:
-        //   1  (icmp)  -> icmp_input(pkt)
-        //   6  (tcp)   -> tcp_input(pkt)
-        //   17 (udp)   -> udp_input(pkt)
-        //   58 (icmp6) -> icmp6_input(pkt)
-        //   else       -> raw socket demux, or ICMP protocol-unreachable
+        if (pkt.data.length < IPv4Header.sizeof)
+            return;
+        const ip = cast(const IPv4Header*)pkt.data.ptr;
+        if (ip.version_ != 4)
+            return;     // v6 path not yet wired
+
+        switch (ip.protocol)
+        {
+            case IpProtocol.icmp:
+                .icmp_input(this, pkt);
+                break;
+            case IpProtocol.tcp:
+                tcp_input(pkt);
+                break;
+            case IpProtocol.udp:
+                .udp_input(this, pkt);
+                break;
+            default:
+                icmp_send_error(this, IcmpType.dest_unreachable,
+                                IcmpDestUnreachableCode.protocol, pkt);
+                break;
+        }
     }
 
-    void icmp_input(ref Packet pkt) { /* TODO: ping reply, error generation */ }
     void tcp_input(ref Packet pkt)  { /* TODO: stub - hand to tcp module when it exists */ }
-    void udp_input(ref Packet pkt)  { /* TODO: stub - hand to udp module when it exists */ }
+
+    void v4_send_request(IPAddr target, BaseInterface iface)
+    {
+        send_arp_request(target, iface);
+    }
+
+    void v4_drain(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr)
+    {
+        if (auto bound = find_bound(iface))
+            frame_and_send(pkt, *bound, link_addr);
+    }
 
     Array!BoundInterface _bound;
     NeighbourCache!IPAddr   neighbour_v4;

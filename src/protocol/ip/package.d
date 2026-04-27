@@ -39,6 +39,13 @@ nothrow @nogc:
     {
         g_app.console.register_collection!IPAddress();
         g_app.console.register_collection!IPRoute();
+        _stack.init_resolvers();
+
+        version (SocketCallbacks)
+        {
+            import protocol.ip.socket : install_socket_backend;
+            install_socket_backend(&_stack);
+        }
     }
 
     override void post_init()

@@ -142,12 +142,19 @@ nothrow @nogc:
 
     Packet* clone(NoGCAllocator allocator = defaultAllocator()) const
     {
-        Packet* r = cast(Packet*)allocator.alloc(Packet.sizeof + length);
+        Packet* r = cast(Packet*)allocator.alloc(Packet.sizeof + _length);
         *r = this;
         r._flags |= 0x01; // mutable
         r._ptr = &r[1];
         cast(void[])r._ptr[0 .. _length] = _ptr[0 .. _length];
         return r;
+    }
+
+    // Free a Packet returned by clone(). Caller must pass the same allocator
+    // that was used to clone(); defaults match.
+    void free_clone(NoGCAllocator allocator = defaultAllocator())
+    {
+        allocator.free((cast(void*)&this)[0 .. Packet.sizeof + _length]);
     }
 
     PCP pcp() const pure

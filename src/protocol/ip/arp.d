@@ -42,6 +42,35 @@ align(1):
 static assert(ArpV4Packet.sizeof == 28);
 
 
+// Send an ARP who-has request for `target` out `iface`.
+// Source IP is the first IPAddress we own on `iface`; if none, sent as 0.0.0.0 (probe-style).
+void send_arp_request(IPAddr target, BaseInterface iface)
+{
+    IPAddr our_ip;
+    foreach (a; Collection!IPAddress().values)
+    {
+        if (cast(BaseInterface)a.iface is iface)
+        {
+            our_ip = a.address.addr;
+            break;
+        }
+    }
+
+    ArpV4Packet req;
+    set_be_u16(req.htype, ArpHType.ethernet);
+    set_be_u16(req.ptype, EtherType.ip4);
+    req.hlen = 6;
+    req.plen = 4;
+    set_be_u16(req.op, ArpOp.request);
+    req.sha = iface.mac;
+    req.spa = our_ip;
+    // tha left zero (unknown)
+    req.tpa = target;
+
+    iface.send(MACAddress.broadcast, (cast(const(ubyte)*)&req)[0 .. ArpV4Packet.sizeof], EtherType.arp);
+}
+
+
 // Parse incoming ARP frame, learn from observed traffic, and reply to who-has-our-IP.
 void on_arp(ref const Packet pkt, BaseInterface iface, ref NeighbourCache!IPAddr cache)
 {
