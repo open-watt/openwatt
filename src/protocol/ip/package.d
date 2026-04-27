@@ -11,17 +11,24 @@ import manager.plugin;
 
 import protocol.ip.address;
 import protocol.ip.route;
+import protocol.ip.stack;
 
 import router.iface;
 import router.iface.ethernet;
 
+public import protocol.ip.stack : IPStack, L3Capability;
+
 version(Windows)
 {
-    import urt.internal.sys.windows.winsock2;
-    import manager.os.npcap;
+    import urt.array;
+    import urt.internal.sys.windows.winsock2 : AF_INET, sockaddr_in;
+    import manager.os.iphlpapi;
+    import driver.windows.ethernet : WindowsPcapEthernet;
+    import driver.windows.wifi : WindowsWifiRadio, WindowsWlan;
 }
 
 nothrow @nogc:
+
 
 class IPModule : Module
 {
@@ -36,65 +43,122 @@ nothrow @nogc:
 
     override void post_init()
     {
-        // pre-populate the address list from the operating system...
+        foreach (e; Collection!EthernetInterface().values)
+            _stack.add_interface(e, L3Capability.ethernet);
+        // TODO: Collection!ZigbeeInterface / BleInterface -> L3Capability.sixlowpan
+        // TODO: Collection!PppInterface -> L3Capability.ppp
+
         version(Windows)
-        {
-            import urt.endian : loadBigEndian;
-            import urt.util : clz;
+            seed_from_windows();
+    }
 
-            if (!npcap_loaded())
-            {
-                writeError("NPCap library not loaded, cannot enumerate ethernet interfaces.");
+    version(Windows)
+    void seed_from_windows()
+    {
+        if (!iphlpapi_loaded() || GetIpForwardTable2 is null)
+            return;
+
+        struct IfMapEntry { uint if_index; BaseInterface iface; }
+        Array!IfMapEntry if_map;
+
+        enumerate_os_adapters((IP_ADAPTER_ADDRESSES_LH* p) nothrow @nogc {
+            const(char)[] guid = adapter_guid(p);
+            if (guid.length == 0)
                 return;
-            }
 
-            pcap_if* interfaces;
-            char[PCAP_ERRBUF_SIZE] errbuf = void;
-            if (pcap_findalldevs(&interfaces, errbuf.ptr) == -1)
+            BaseInterface iface;
+            foreach (e; Collection!WindowsPcapEthernet().values)
             {
-                writeError("pcap_findalldevs failed: ", errbuf.ptr[0 .. strlen(errbuf.ptr)]);
-                return;
-            }
-            scope(exit) pcap_freealldevs(interfaces);
-
-            for (auto dev = interfaces; dev; dev = dev.next)
-            {
-                foreach (i; Collection!BaseInterface().values)
+                if (parse_npf_guid(e.adapter) == guid)
                 {
-                    EthernetInterface e = cast(EthernetInterface)i;
-                    if (!e || e.adapter != dev.name[0..dev.name.strlen])
-                        continue;
-
-                    for (auto addr = dev.addresses; addr; addr = addr.next)
+                    iface = cast(BaseInterface)e;
+                    break;
+                }
+            }
+            if (!iface)
+            {
+                foreach (w; Collection!WindowsWlan().values)
+                {
+                    auto r = cast(WindowsWifiRadio)w.radio;
+                    if (r && parse_npf_guid(r.adapter) == guid)
                     {
-                        if (addr.addr.sa_family == AF_INET)
-                        {
-                            const sockaddr_in* ain = cast(const(sockaddr_in)*)&addr.addr;
-                            const sockaddr_in* nmin = cast(const(sockaddr_in)*)&addr.netmask;
-
-                            IPNetworkAddress net_addr;
-                            net_addr.addr.b[0] = ain.sin_addr.S_un.S_un_b.s_b1;
-                            net_addr.addr.b[1] = ain.sin_addr.S_un.S_un_b.s_b2;
-                            net_addr.addr.b[2] = ain.sin_addr.S_un.S_un_b.s_b3;
-                            net_addr.addr.b[3] = ain.sin_addr.S_un.S_un_b.s_b4;
-                            net_addr.mask.b[0] = nmin.sin_addr.S_un.S_un_b.s_b1;
-                            net_addr.mask.b[1] = nmin.sin_addr.S_un.S_un_b.s_b2;
-                            net_addr.mask.b[2] = nmin.sin_addr.S_un.S_un_b.s_b3;
-                            net_addr.mask.b[3] = nmin.sin_addr.S_un.S_un_b.s_b4;
-
-                            IPAddress ip = Collection!IPAddress().create(tconcat(e.name, ".addr"));
-                            ip.address = net_addr;
-                            ip.iface = e;
-                        }
+                        iface = cast(BaseInterface)w;
+                        break;
                     }
                 }
             }
-        }
+            if (!iface)
+                return;
+
+            if_map ~= IfMapEntry(p.IfIndex, iface);
+
+            for (auto u = p.FirstUnicastAddress; u !is null; u = u.Next)
+            {
+                if (u.Address.lpSockaddr is null)
+                    continue;
+                ushort family = *cast(ushort*)u.Address.lpSockaddr;
+                if (family != AF_INET)
+                    continue;
+                const sockaddr_in* sin = cast(const sockaddr_in*)u.Address.lpSockaddr;
+
+                IPNetworkAddress net_addr;
+                net_addr.addr.address = sin.sin_addr.s_addr;
+                net_addr.prefix_len   = u.OnLinkPrefixLength;
+
+                IPAddress ip = Collection!IPAddress().create(tconcat(iface.name, ".addr"));
+                if (!ip)
+                    continue;
+                ip.address = net_addr;
+                ip.iface   = iface;
+            }
+        });
+
+        if (if_map.length == 0)
+            return;
+
+        enumerate_ipv4_routes((ref const IpForwardRowV4 r) nothrow @nogc {
+            if (r.is_loopback)
+                return;
+            if (IPNetworkAddress.loopback.contains(r.destination.addr))
+                return;
+            if (IPNetworkAddress.linklocal.contains(r.destination.addr))
+                return;
+            if (IPNetworkAddress.multicast.contains(r.destination.addr))
+                return;
+            if (r.destination.prefix_len == 32)
+                return;     // host routes (incl. 255.255.255.255) are stack-internal
+
+            BaseInterface iface = null;
+            foreach (ref m; if_map[])
+            {
+                if (m.if_index == r.if_index)
+                {
+                    iface = m.iface;
+                    break;
+                }
+            }
+            if (!iface)
+                return;
+
+            IPRoute rt = Collection!IPRoute().create(null);
+            if (!rt)
+                return;
+            rt.destination = r.destination;
+            if (r.gateway != IPAddr.any)
+                rt.gateway = r.gateway;
+            else
+                rt.out_interface = iface;
+            rt.distance = r.metric > 255 ? cast(ubyte)255 : cast(ubyte)r.metric;
+        });
     }
 
     override void update()
     {
         Collection!IPAddress().update_all();
         Collection!IPRoute().update_all();
+        _stack.update();
     }
+
+private:
+    IPStack _stack;
 }
