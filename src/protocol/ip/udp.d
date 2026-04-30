@@ -82,10 +82,11 @@ void udp_input(ref IPStack stack, ref Packet pkt)
 
     const ip = cast(const IPv4Header*)pkt.data.ptr;
     size_t ip_hdr_len = ip.ihl * 4;
-    if (pkt.data.length < ip_hdr_len + UdpHeader.sizeof)
+    size_t ip_total = (size_t(ip.total_length[0]) << 8) | ip.total_length[1];
+    if (ip_total < ip_hdr_len + UdpHeader.sizeof || ip_total > pkt.data.length)
         return;
 
-    const(ubyte)[] payload = (cast(const(ubyte)*)pkt.data.ptr)[ip_hdr_len .. pkt.data.length];
+    const(ubyte)[] payload = (cast(const(ubyte)*)pkt.data.ptr)[ip_hdr_len .. ip_total];
     const u = cast(const UdpHeader*)payload.ptr;
 
     ushort udp_len = (ushort(u.length[0]) << 8) | u.length[1];
@@ -96,8 +97,8 @@ void udp_input(ref IPStack stack, ref Packet pkt)
     ushort wire_csum = (ushort(u.checksum[0]) << 8) | u.checksum[1];
     if (wire_csum != 0)
     {
-        ushort calc = pseudo_header_checksum(ip.src, ip.dst, IpProtocol.udp, udp_len);
-        calc = internet_checksum(payload[0 .. udp_len], cast(ushort)~calc);
+        ushort pseudo = pseudo_header_checksum(ip.src, ip.dst, IpProtocol.udp, udp_len);
+        ushort calc = internet_checksum(payload[0 .. udp_len], pseudo);
         if (calc != 0)
             return;     // bad checksum
     }
@@ -134,18 +135,14 @@ void udp_input(ref IPStack stack, ref Packet pkt)
         return;
     }
 
-    icmp_send_error(stack, IcmpType.dest_unreachable,
-                    IcmpDestUnreachableCode.port, pkt);
+    icmp_send_error(stack, IcmpType.dest_unreachable, IcmpDestUnreachableCode.port, pkt);
 }
 
 
 // Build and emit a UDP datagram with IP header.
 // Caller supplies destination, source (typically 0.0.0.0 -> stack picks egress IP),
 // and the payload bytes. Returns true on success; false if no route, no source, etc.
-bool udp_output(ref IPStack stack,
-                IPAddr src_addr, ushort src_port,
-                IPAddr dst_addr, ushort dst_port,
-                const(ubyte)[] payload)
+bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_addr, ushort dst_port, const(ubyte)[] payload)
 {
     enum size_t max_size = 1500;
     size_t total = IPv4Header.sizeof + UdpHeader.sizeof + payload.length;
@@ -186,7 +183,7 @@ bool udp_output(ref IPStack stack,
         buf[IPv4Header.sizeof + UdpHeader.sizeof .. total] = payload[];
 
     ushort pseudo = pseudo_header_checksum(src_addr, dst_addr, IpProtocol.udp, udp_len);
-    ushort cc = internet_checksum(buf[IPv4Header.sizeof .. total], cast(ushort)~pseudo);
+    ushort cc = internet_checksum(buf[IPv4Header.sizeof .. total], pseudo);
     if (cc == 0)
         cc = 0xFFFF;    // RFC 768: zero means "no checksum"; use all-ones to mean "checksum is zero"
     u.checksum[0] = cast(ubyte)(cc >> 8);
@@ -223,8 +220,8 @@ void udp_free_datagram_data(ref UdpDatagram d)
 private:
 
 // IPv4 pseudo-header checksum: sum of src_addr, dst_addr, zero+protocol, transport_length.
-// Returned as the *one's-complement final* value; pass through `~` (cast(ushort)~x) to
-// re-use as `initial` for `internet_checksum` over the transport segment.
+// Returns the one's-complement-final value; pass it directly as `initial` to
+// internet_checksum() to chain over the transport segment.
 ushort pseudo_header_checksum(IPAddr src, IPAddr dst, ubyte protocol, ushort transport_length) pure
 {
     ubyte[12] ph = void;

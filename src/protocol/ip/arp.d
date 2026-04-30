@@ -1,6 +1,7 @@
 module protocol.ip.arp;
 
 import urt.inet;
+import urt.log;
 
 import manager.collection;
 
@@ -10,6 +11,8 @@ import router.iface.packet;
 
 import protocol.ip.address;
 import protocol.ip.neighbour;
+
+//version = DebugARP;
 
 nothrow @nogc:
 
@@ -49,7 +52,7 @@ void send_arp_request(IPAddr target, BaseInterface iface)
     IPAddr our_ip;
     foreach (a; Collection!IPAddress().values)
     {
-        if (cast(BaseInterface)a.iface is iface)
+        if (a.iface is iface)
         {
             our_ip = a.address.addr;
             break;
@@ -67,6 +70,9 @@ void send_arp_request(IPAddr target, BaseInterface iface)
     // tha left zero (unknown)
     req.tpa = target;
 
+    version (DebugARP)
+        write_log(Severity.debug_, "arp", null, "request who-has ", target, " on ", iface.name, " (sender=", our_ip, ")");
+
     iface.send(MACAddress.broadcast, (cast(const(ubyte)*)&req)[0 .. ArpV4Packet.sizeof], EtherType.arp);
 }
 
@@ -76,7 +82,11 @@ void on_arp(ref const Packet pkt, BaseInterface iface, ref NeighbourCache!IPAddr
 {
     const data = pkt.data;
     if (data.length < ArpV4Packet.sizeof)
+    {
+        version (DebugARP)
+            write_log(Severity.trace, "arp", null, "rx truncated frame on ", iface.name, " len=", data.length);
         return;
+    }
 
     const a = cast(const(ArpV4Packet)*)data.ptr;
     if (be_u16(a.htype) != ArpHType.ethernet) return;
@@ -85,10 +95,17 @@ void on_arp(ref const Packet pkt, BaseInterface iface, ref NeighbourCache!IPAddr
 
     ushort op = be_u16(a.op);
 
+    version (DebugARP)
+        write_log(Severity.trace, "arp", null, "rx ", op == ArpOp.request ? "request" : op == ArpOp.reply ? "reply" : "op?", " from ", a.sha, "/", a.spa, " for ", a.tpa, " on ", iface.name);
+
     // Learn from any frame carrying a sender pair (request, reply, gratuitous).
     // Skip ARP probes (spa == 0) and zero-MAC senders.
     if (a.spa != IPAddr.any && a.sha)
+    {
+        version (DebugARP)
+            write_log(Severity.debug_, "arp", null, "learn ", a.spa, " -> ", a.sha, " on ", iface.name);
         cache.learn(a.spa, iface, a.sha.b[]);
+    }
 
     if (op != ArpOp.request)
         return;
@@ -106,6 +123,9 @@ void on_arp(ref const Packet pkt, BaseInterface iface, ref NeighbourCache!IPAddr
     reply.spa = a.tpa;
     reply.tha = a.sha;
     reply.tpa = a.spa;
+
+    version (DebugARP)
+        write_log(Severity.debug_, "arp", null, "reply ", a.tpa, " is-at ", iface.mac, " to ", a.sha, "/", a.spa, " on ", iface.name);
 
     iface.send(a.sha, (cast(const(ubyte)*)&reply)[0 .. ArpV4Packet.sizeof], EtherType.arp);
 }

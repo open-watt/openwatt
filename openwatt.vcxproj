@@ -145,6 +145,7 @@
     <DCompile Include="src\protocol\ip\route.d" />
     <DCompile Include="src\protocol\ip\socket.d" />
     <DCompile Include="src\protocol\ip\stack.d" />
+    <DCompile Include="src\protocol\ip\tcp.d" />
     <DCompile Include="src\protocol\ip\udp.d" />
     <DCompile Include="src\protocol\modbus\client.d" />
     <DCompile Include="src\protocol\modbus\iface.d" />

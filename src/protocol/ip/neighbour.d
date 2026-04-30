@@ -18,7 +18,6 @@ enum NeighbourState : ubyte
     failed,         // resolution gave up -> drop queued packets
 }
 
-
 struct NeighbourEntry(IP)
 {
     IP ip;
@@ -26,12 +25,11 @@ struct NeighbourEntry(IP)
     ubyte[16] link_addr;        // MAC (6) or EUI-64 (8) etc.
     ubyte link_addr_len;
     NeighbourState state;
-    SysTime last_confirmed;
-    SysTime last_request;       // when we last sent a resolution request
+    MonoTime last_confirmed;
+    MonoTime last_request;      // when we last sent a resolution request
     ubyte retry_count;
     Packet* pending;            // single-slot queue; replaced on overflow
 }
-
 
 struct NeighbourCache(IP)
 {
@@ -53,7 +51,7 @@ nothrow @nogc:
         if (link_addr.length == 0 || link_addr.length > 16)
             return;
 
-        SysTime now = getSysTime();
+        MonoTime now = getTime();
 
         foreach (ref e; _entries[])
         {
@@ -111,7 +109,7 @@ nothrow @nogc:
         n.ip            = ip;
         n.iface         = iface;
         n.state         = NeighbourState.incomplete;
-        n.last_request  = getSysTime();
+        n.last_request  = getTime();
         n.retry_count   = 1;
         n.pending       = pending.clone();
         _entries ~= n;
@@ -122,7 +120,7 @@ nothrow @nogc:
         return null;
     }
 
-    void tick(SysTime now)
+    void tick(MonoTime now)
     {
         foreach (ref e; _entries[])
         {

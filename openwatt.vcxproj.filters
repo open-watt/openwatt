@@ -618,6 +618,9 @@
     <DCompile Include="src\protocol\ip\stack.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\ip\tcp.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\ip\udp.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>

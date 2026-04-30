@@ -8,6 +8,8 @@ import manager;
 import manager.base;
 import manager.collection;
 
+import protocol.ip.stack : bump_route_generation;
+
 import router.iface;
 
 nothrow @nogc:
@@ -27,6 +29,11 @@ nothrow @nogc:
         super(collection_type_info!IPAddress, id, flags);
     }
 
+    ~this()
+    {
+        bump_route_generation();
+    }
+
     // Properties
     IPNetworkAddress address() const pure
     {
@@ -36,6 +43,7 @@ nothrow @nogc:
     {
         _address = value;
         mark_set!(typeof(this), "address")();
+        bump_route_generation();
         return null;
     }
 
@@ -52,6 +60,7 @@ nothrow @nogc:
         _iface = value;
         mark_set!(typeof(this), "interface")();
         mark_set!(typeof(this), [ "flags" ])();
+        bump_route_generation();
         return null;
     }
 

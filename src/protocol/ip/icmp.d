@@ -2,10 +2,13 @@ module protocol.ip.icmp;
 
 import urt.hash;
 import urt.inet;
+import urt.log;
 
 import router.iface.packet;
 
 import protocol.ip.stack;
+
+//version = DebugICMP;
 
 nothrow @nogc:
 
@@ -49,8 +52,7 @@ static assert(IcmpHeader.sizeof == 4);
 //
 // Suppresses errors for: multicast/broadcast original dst, ICMP-error replies
 // (loop avoidance), non-zero fragment offsets.
-void icmp_send_error(ref IPStack stack, ubyte type, ubyte code,
-                     ref const Packet original, uint code_data = 0)
+void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, ref const Packet original, uint code_data = 0)
 {
     if (original.data.length < IPv4Header.sizeof)
         return;
@@ -58,7 +60,11 @@ void icmp_send_error(ref IPStack stack, ubyte type, ubyte code,
 
     // Don't reply to multicast/broadcast.
     if (is_multicast_v4(oip.dst) || oip.dst == IPAddr.broadcast)
+    {
+        version (DebugICMP)
+            write_log(Severity.debug_, "icmp", null, "suppress error type=", type, " code=", code, " (orig dst=", oip.dst, " is mcast/bcast)");
         return;
+    }
 
     // Don't reply to non-first fragments (errors are only sensible for full datagrams).
     ushort frag = (ushort(oip.flags_frag[0]) << 8) | oip.flags_frag[1];
@@ -80,7 +86,14 @@ void icmp_send_error(ref IPStack stack, ubyte type, ubyte code,
 
     IPAddr src = stack.select_source_v4(oip.src);
     if (src == IPAddr.any)
+    {
+        version (DebugICMP)
+            write_log(Severity.debug_, "icmp", null, "suppress error type=", type, " code=", code, " (no source addr for ", oip.src, ")");
         return;     // we have no IP that can reach the original sender; can't reply
+    }
+
+    version (DebugICMP)
+        write_log(Severity.debug_, "icmp", null, "tx error type=", type, " code=", code, " src=", src, " dst=", oip.src, " (orig proto=", oip.protocol, " orig dst=", oip.dst, ")");
 
     enum size_t max_size = 1500;
     size_t orig_quote = oip_hdr_len + 8;
@@ -140,13 +153,21 @@ void icmp_input(ref IPStack stack, ref Packet pkt)
 
     const ip = cast(const IPv4Header*)pkt.data.ptr;
     size_t ip_hdr_len = ip.ihl * 4;
-    if (pkt.data.length < ip_hdr_len + IcmpHeader.sizeof)
+    size_t ip_total = (size_t(ip.total_length[0]) << 8) | ip.total_length[1];
+    if (ip_total < ip_hdr_len + IcmpHeader.sizeof || ip_total > pkt.data.length)
         return;
 
-    const(ubyte)[] icmp = (cast(const(ubyte)*)pkt.data.ptr)[ip_hdr_len .. pkt.data.length];
+    const(ubyte)[] icmp = (cast(const(ubyte)*)pkt.data.ptr)[ip_hdr_len .. ip_total];
 
     if (internet_checksum(icmp) != 0)
-        return;     // bad ICMP checksum
+    {
+        version (DebugICMP)
+            write_log(Severity.trace, "icmp", null, "rx bad checksum from ", ip.src);
+        return;
+    }
+
+    version (DebugICMP)
+        write_log(Severity.trace, "icmp", null, "rx type=", icmp[0], " code=", icmp[1], " from ", ip.src, " to ", ip.dst);
 
     switch (icmp[0])
     {
@@ -179,6 +200,9 @@ void handle_echo_request(ref IPStack stack, ref const Packet pkt, size_t ip_hdr_
     IPAddr orig_dst = rip.dst;
     rip.dst = rip.src;
     rip.src = orig_dst;
+
+    version (DebugICMP)
+        write_log(Severity.debug_, "icmp", null, "tx echo-reply src=", rip.src, " dst=", rip.dst, " (", datagram.length, " bytes)");
     rip.ttl = 64;
     rip.checksum[] = 0;
     ushort ihc = internet_checksum(buf[0 .. ip_hdr_len]);

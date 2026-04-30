@@ -19,25 +19,27 @@ import protocol.ip.firewall;
 import protocol.ip.icmp;
 import protocol.ip.neighbour;
 import protocol.ip.route;
+import protocol.ip.tcp;
 import protocol.ip.udp;
 
-version = DebugIP;            // bind / unbind, no-route, etc.
-//version = DebugIPIngress;     // every packet entering on_packet
-version = DebugIPRoute;       // every route lookup result
-version = DebugIPEgress;      // every packet leaving via egress()
-version = DebugIPNeighbour;   // ARP / ND cache activity
+//version = DebugIP;            // bind / unbind, no-route, etc.
+//version = DebugRawIngress;    // every packet entering on_packet
+//version = DebugIPIngress;     // incoming ethernet packets
+//version = DebugIPRoute;       // every route lookup result
+//version = DebugIPEgress;      // every packet leaving via egress()
+//version = DebugIPNeighbour;   // ARP / ND cache activity
 
 nothrow @nogc:
 
 
-enum L3Capability : ubyte
+__gshared uint _route_gen = 1;
+
+void bump_route_generation()
 {
-    none      = 0,
-    ethernet  = 1 << 0,   // raw ip4/ip6/arp framed in Ethernet
-    sixlowpan = 1 << 1,   // RFC 6282 compressed IPv6 over 802.15.4 / BLE / etc.
-    ppp       = 1 << 2,   // PPP IPCP / IPV6CP framed link
-    raw_ip    = 1 << 3,   // tunnels: payload is already an IP datagram
+    ++_route_gen;
 }
+uint route_generation()
+    => _route_gen;
 
 
 struct RouteResult
@@ -54,14 +56,6 @@ struct RouteResult
     BaseInterface out_iface;
     IPAddr next_hop;        // == destination if directly attached
     ubyte ttl_decrement;
-}
-
-
-struct BoundInterface
-{
-    BaseInterface iface;
-    L3Capability cap;
-    // TODO: per-interface MTU, link-local addr, accept_ra flag, etc.
 }
 
 
@@ -107,44 +101,19 @@ nothrow @nogc:
         // TODO: ND wiring once v6 lands
     }
 
-    void add_interface(BaseInterface iface, L3Capability cap)
-    {
-        foreach (ref b; _bound[])
-            if (b.iface is iface)
-                return;
-
-        if (!iface.set_primary_dispatch(&on_packet))
-        {
-            log.warning("can't bind ", iface.name, " - already owned (bridged?)");
-            return;
-        }
-
-        version (DebugIP)
-            log.info("bind iface=", iface.name, " cap=", cast(uint)cap);
-
-        _bound ~= BoundInterface(iface, cap);
-    }
-
-    void remove_interface(BaseInterface iface)
-    {
-        foreach (i, ref b; _bound[])
-        {
-            if (b.iface is iface)
-            {
-                // TODO: clear_primary_dispatch() on iface once available
-                _bound.remove(i);
-                // TODO: drop neighbour entries / pending TX bound to this iface
-                return;
-            }
-        }
-    }
-
-    // Locally-originated v4 traffic enters here (TCP/UDP send, ping, etc.)
     void output_v4(ref Packet pkt)
     {
         if (firewall_v4.run(HookPoint.output, pkt) == Verdict.drop)
             return;
         RouteResult r = route_lookup_v4(pkt);
+        dispatch(pkt, r, firewall_v4);
+    }
+
+    void output_v4_routed(ref Packet pkt, BaseInterface egress, IPAddr next_hop)
+    {
+        if (firewall_v4.run(HookPoint.output, pkt) == Verdict.drop)
+            return;
+        RouteResult r = RouteResult(RouteResult.Kind.forward, egress, next_hop, 1);
         dispatch(pkt, r, firewall_v4);
     }
 
@@ -157,55 +126,104 @@ nothrow @nogc:
 
     void update()
     {
-        SysTime now = getSysTime();
+        MonoTime now = getTime();
         neighbour_v4.tick(now);
         neighbour_v6.tick(now);
+        tcp_tick(this, now);
     }
 
-    // Pick a local IPv4 source address to use when sending to `dst`.
-    // Walks IPAddress collection for a connected network containing dst,
-    // and returns one of our IPs on that interface. Returns IPAddr.any if none.
     IPAddr select_source_v4(IPAddr dst)
     {
-        BaseInterface egress = resolve_connected_iface(dst);
-        if (!egress)
+        RouteResult r = route_lookup_v4_dst(dst);
+        if (r.kind == RouteResult.Kind.local)
+            return dst;
+        if (r.kind != RouteResult.Kind.forward || !r.out_iface)
             return IPAddr.any;
         foreach (a; Collection!IPAddress().values)
-            if (cast(BaseInterface)a.iface is egress)
+            if (a.iface is r.out_iface)
                 return a.address.addr;
         return IPAddr.any;
     }
 
-private:
-
-    L3Capability cap_for(BaseInterface iface)
+    RouteResult route_lookup_v4_dst(IPAddr dst)
     {
-        foreach (ref b; _bound[])
-            if (b.iface is iface)
-                return b.cap;
-        return L3Capability.none;
+        foreach (a; Collection!IPAddress().values)
+        {
+            if (a.address.addr == dst)
+            {
+                version (DebugIPRoute)
+                    log.trace("route dst=", dst, " -> local on ", a.iface.name[]);
+                return RouteResult(RouteResult.Kind.local, a.iface, dst, 0);
+            }
+        }
+
+        IPRoute best_rt = null;
+        ubyte best_prefix = 0;
+        foreach (rt; Collection!IPRoute().values)
+        {
+            if (!rt.destination.contains(dst))
+                continue;
+            ubyte plen = rt.destination.prefix_len;
+            if (best_rt && plen <= best_prefix)
+                continue;
+            best_rt = rt;
+            best_prefix = plen;
+        }
+
+        RouteResult best = RouteResult(RouteResult.Kind.none);
+        if (best_rt)
+        {
+            if (best_rt.blackhole)
+                best = RouteResult(RouteResult.Kind.blackhole);
+            else
+            {
+                IPAddr next = best_rt.gateway != IPAddr.any ? best_rt.gateway : dst;
+                BaseInterface egress = best_rt.out_interface;
+                if (!egress && best_rt.gateway != IPAddr.any)
+                    egress = resolve_connected_iface(best_rt.gateway);
+                if (egress)
+                    best = RouteResult(RouteResult.Kind.forward, egress, next, 1);
+            }
+        }
+
+        // TODO: HACK - DO WE WANT THIS??? shoudl we expect the route table to be correct?
+        // Fallback: any IPAddress whose subnet contains dst is an implicit
+        // connected route. Lets configurations declare addresses without
+        // needing a corresponding /protocol/ip/route entry.
+        if (best.kind == RouteResult.Kind.none)
+        {
+            if (BaseInterface egress = resolve_connected_iface(dst))
+                best = RouteResult(RouteResult.Kind.forward, egress, dst, 1);
+        }
+
+        version (DebugIPRoute)
+        {
+            if (best.kind == RouteResult.Kind.none)
+                log.trace("route dst=", dst, " -> none");
+            else if (best.next_hop != IPAddr.any)
+                log.trace("route dst=", dst, " -> kind=", best.kind, " via=", best.next_hop, " (", best.out_iface ? best.out_iface.name[] : "<none>", ')');
+            else
+                log.trace("route dst=", dst, " -> kind=", best.kind, " via=", best.out_iface ? best.out_iface.name[] : "<none>");
+        }
+
+        return best;
     }
 
-    BoundInterface* find_bound(BaseInterface iface)
-    {
-        foreach (ref b; _bound[])
-            if (b.iface is iface)
-                return &b;
-        return null;
-    }
-
+    // Frame handler registered for PacketType.ethernet by the IP module at init.
+    // Ethernet-shaped frames (real Ethernet, VLAN sub-interfaces, Ethernet-bridge,
+    // and protocols normalised to Ethernet framing) all funnel here.
     void on_packet(ref Packet pkt, BaseInterface iface)
     {
-        version (DebugIPIngress)
-            log.trace("ingress iface=", iface.name, " ptype=", cast(uint)pkt.type, " len=", pkt.length);
+        version (DebugRawIngress)
+            log.trace("ingress if=", iface.name, " type=", pkt.type, " (", pkt.length, ") [ ", pkt.data[0 .. 24 < pkt.length ? 24 : pkt.length], 24 < pkt.length ? " ... ]" : " ]");
 
-        L3Capability cap = cap_for(iface);
-        if (cap & L3Capability.ethernet)
-            ethernet_ingress(pkt, iface);
-        // TODO: sixlowpan_decompress(pkt, iface) -> ingress_v6(pkt, iface)
-        // TODO: ppp_ingress(pkt, iface)
-        // TODO: raw_ip ingress -> peek IP version byte, call ingress() directly
+        ethernet_ingress(pkt, iface);
+        // TODO: sixlowpan handler -> register for PacketType._6lowpan
+        // TODO: ppp handler -> register for an appropriate PacketType
+        // TODO: raw_ip tunnel handler -> register for PacketType.raw (peek IP version byte)
     }
+
+private:
 
     void ethernet_ingress(ref Packet pkt, BaseInterface iface)
     {
@@ -213,7 +231,9 @@ private:
             return;
         const Ethernet eth = pkt.hdr!Ethernet();
         if (eth.dst != iface.mac && !eth.dst.is_multicast())
-            return;     // promiscuous capture; not addressed to us
+            return; // promiscuous capture; not addressed to us
+        version (DebugIPIngress)
+            log.trace("ingress if=", iface.name, ' ', pkt.hdr!Ethernet().src, " --> ", pkt.hdr!Ethernet().dst, " (", pkt.length, ") [ ", pkt.data[0 .. 24 < pkt.length ? 24 : pkt.length], 24 < pkt.length ? " ... ]" : " ]");
         switch (eth.ether_type)
         {
             case EtherType.arp:
@@ -286,8 +306,7 @@ private:
             case RouteResult.Kind.none:
                 version (DebugIP)
                     log.trace("no route for packet");
-                icmp_send_error(this, IcmpType.dest_unreachable,
-                                IcmpDestUnreachableCode.net, pkt);
+                icmp_send_error(this, IcmpType.dest_unreachable, IcmpDestUnreachableCode.net, pkt);
                 return;
             case RouteResult.Kind.blackhole:
                 return;
@@ -297,12 +316,30 @@ private:
                 deliver_local(pkt);
                 return;
             case RouteResult.Kind.forward:
-                // TODO: decrement TTL; if it hits 0, send ICMP time-exceeded
+            {
+                if (pkt.data.length < IPv4Header.sizeof)
+                    return;
+                auto ip = cast(IPv4Header*)pkt.data.ptr;
+                if (ip.ttl <= r.ttl_decrement)
+                {
+                    icmp_send_error(this, IcmpType.time_exceeded, 0, pkt);
+                    return;
+                }
+                ip.ttl -= r.ttl_decrement;
+                // Incremental checksum update (RFC 1624): TTL sits in the high
+                // byte of a 16-bit word, so reducing TTL by N reduces the data
+                // sum by N*256 and the 1's-complement checksum rises by N*256.
+                uint c = (uint(ip.checksum[0]) << 8) | ip.checksum[1];
+                c += uint(r.ttl_decrement) << 8;
+                c = (c & 0xFFFF) + (c >> 16);
+                ip.checksum[0] = cast(ubyte)(c >> 8);
+                ip.checksum[1] = cast(ubyte)(c & 0xFF);
                 // TODO: if pkt.length > out_iface.actual_mtu, fragment (v4) or send PTB (v6)
                 if (fw.run(HookPoint.forward, pkt) == Verdict.drop)
                     return;
                 egress(pkt, r.out_iface, r.next_hop, fw);
                 return;
+            }
         }
     }
 
@@ -310,7 +347,7 @@ private:
     {
         foreach (a; Collection!IPAddress().values)
             if (a.address.contains(ip))
-                return cast(BaseInterface)a.iface;
+                return a.iface;
         return null;
     }
 
@@ -318,58 +355,8 @@ private:
     {
         if (pkt.length < IPv4Header.sizeof)
             return RouteResult(RouteResult.Kind.none);
-
         const IPv4Header* h = cast(const(IPv4Header)*)pkt.data.ptr;
-        IPAddr dst = h.dst;
-
-        foreach (a; Collection!IPAddress().values)
-        {
-            if (a.address.addr == dst)
-            {
-                version (DebugIPRoute)
-                    log.trace("route dst=", dst, " -> local on ", a.iface.name[]);
-                return RouteResult(RouteResult.Kind.local, cast(BaseInterface)a.iface, dst, 0);
-            }
-        }
-
-        IPRoute best_rt = null;
-        ubyte best_prefix = 0;
-        foreach (rt; Collection!IPRoute().values)
-        {
-            if (!rt.destination.contains(dst))
-                continue;
-            ubyte plen = rt.destination.prefix_len;
-            if (best_rt && plen <= best_prefix)
-                continue;
-            best_rt = rt;
-            best_prefix = plen;
-        }
-
-        RouteResult best = RouteResult(RouteResult.Kind.none);
-        if (best_rt)
-        {
-            if (best_rt.blackhole)
-                best = RouteResult(RouteResult.Kind.blackhole);
-            else
-            {
-                IPAddr next = best_rt.gateway != IPAddr.any ? best_rt.gateway : dst;
-                BaseInterface egress = cast(BaseInterface)best_rt.out_interface;
-                if (!egress && best_rt.gateway != IPAddr.any)
-                    egress = resolve_connected_iface(best_rt.gateway);
-                if (egress)
-                    best = RouteResult(RouteResult.Kind.forward, egress, next, 1);
-            }
-        }
-
-        version (DebugIPRoute)
-        {
-            if (!best_rt)
-                log.trace("route dst=", dst, " -> none");
-            else
-                log.trace("route dst=", dst, " -> kind=", cast(uint)best.kind, " via=", best.out_iface ? best.out_iface.name[] : "<none>");
-        }
-
-        return best;
+        return route_lookup_v4_dst(h.dst);
     }
 
     void egress(ref Packet pkt, BaseInterface out_iface, IPAddr next_hop, ref FirewallChains fw)
@@ -381,11 +368,7 @@ private:
             return;
 
         version (DebugIPEgress)
-            log.trace("egress iface=", out_iface.name, " next_hop=", next_hop, " len=", pkt.length);
-
-        BoundInterface* bound = find_bound(out_iface);
-        if (!bound)
-            return;  // egress to an unbound interface -> drop (shouldn't happen if route table is sane)
+            log.trace("egress if=", out_iface.name, " next_hop=", next_hop, " (", pkt.length, ") [ ", pkt.data[0 .. 24 < pkt.length ? 24 : pkt.length], 24 < pkt.length ? " ... ]" : " ]");
 
         const(ubyte)[] link_addr = neighbour_v4.resolve(next_hop, out_iface, pkt);
         if (link_addr is null)
@@ -396,23 +379,20 @@ private:
             return;
         }
 
-        frame_and_send(pkt, *bound, link_addr);
+        frame_and_send(pkt, out_iface, link_addr);
     }
 
-    void frame_and_send(ref Packet pkt, ref BoundInterface bound, const(ubyte)[] link_addr)
+    // TODO: when sixlowpan / ppp / raw_ip are added, dispatch by iface type
+    //       (or by a virtual on BaseInterface) to choose the framing.
+    void frame_and_send(ref Packet pkt, BaseInterface out_iface, const(ubyte)[] link_addr)
     {
-        if (bound.cap & L3Capability.ethernet)
-        {
-            if (link_addr.length != 6 || pkt.data.length < 1)
-                return;
-            MACAddress dst;
-            dst.b[] = link_addr[0 .. 6];
-            ubyte ver = (cast(const(ubyte)*)pkt.data.ptr)[0] >> 4;
-            EtherType etype = ver == 6 ? EtherType.ip6 : EtherType.ip4;
-            bound.iface.send(dst, pkt.data, etype);
+        if (link_addr.length != 6 || pkt.data.length < 1)
             return;
-        }
-        // TODO: sixlowpan / ppp / raw_ip
+        MACAddress dst;
+        dst.b[] = link_addr[0 .. 6];
+        ubyte ver = (cast(const(ubyte)*)pkt.data.ptr)[0] >> 4;
+        EtherType etype = ver == 6 ? EtherType.ip6 : EtherType.ip4;
+        out_iface.send(dst, pkt.data, etype);
     }
 
     void deliver_local(ref Packet pkt)
@@ -429,19 +409,17 @@ private:
                 .icmp_input(this, pkt);
                 break;
             case IpProtocol.tcp:
-                tcp_input(pkt);
+                .tcp_input(this, pkt);
                 break;
             case IpProtocol.udp:
                 .udp_input(this, pkt);
                 break;
             default:
-                icmp_send_error(this, IcmpType.dest_unreachable,
-                                IcmpDestUnreachableCode.protocol, pkt);
+                icmp_send_error(this, IcmpType.dest_unreachable, IcmpDestUnreachableCode.protocol, pkt);
                 break;
         }
     }
 
-    void tcp_input(ref Packet pkt)  { /* TODO: stub - hand to tcp module when it exists */ }
 
     void v4_send_request(IPAddr target, BaseInterface iface)
     {
@@ -450,11 +428,9 @@ private:
 
     void v4_drain(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr)
     {
-        if (auto bound = find_bound(iface))
-            frame_and_send(pkt, *bound, link_addr);
+        frame_and_send(pkt, iface, link_addr);
     }
 
-    Array!BoundInterface _bound;
     NeighbourCache!IPAddr   neighbour_v4;
     NeighbourCache!IPv6Addr neighbour_v6;
     FirewallChains firewall_v4;

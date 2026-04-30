@@ -1,22 +1,21 @@
 module protocol.ip.socket;
 
-version (SocketCallbacks):
+version (UseInternalIPStack):
 
 import urt.array;
 import urt.inet;
 import urt.map;
-import urt.mem.alloc : defaultAllocator;
+import urt.mem : defaultAllocator;
 import urt.socket;
 import urt.time;
 
 import protocol.ip.stack;
+import protocol.ip.tcp;
 import protocol.ip.udp;
 
 nothrow @nogc:
 
 
-// Install our SocketBackend so urt.socket calls route through this stack.
-// `stack` is held by reference for the lifetime of the program.
 void install_socket_backend(IPStack* stack)
 {
     _stack = stack;
@@ -54,7 +53,7 @@ struct Slot
     AddressFamily family;
     bool          non_blocking;
     UdpPcb*       udp;
-    // TcpPcb*    tcp;     // future
+    TcpPcb*       tcp;
     // RawPcb*    raw;     // future
 }
 
@@ -67,8 +66,7 @@ __gshared IPStack* _stack;
 
 Slot* lookup(Socket s)
 {
-    int h = s.raw_handle;
-    if (auto p = h in _slots)
+    if (auto p = s.handle in _slots)
         return *p;
     return null;
 }
@@ -85,19 +83,31 @@ SocketResult c_create(AddressFamily af, SocketType type, Protocol proto, out Soc
 {
     if (af != AddressFamily.ipv4)
         return SocketResult.invalid_argument;     // v6 later
-    if (type != SocketType.datagram)
-        return SocketResult.invalid_argument;     // TCP / raw later
 
     Slot* s = defaultAllocator().allocT!Slot();
     s.sock_type = type;
     s.family    = af;
-    s.udp       = defaultAllocator().allocT!UdpPcb();
-    udp_register(s.udp);
 
     int h = _next_handle++;
-    s.udp.handle = h;
-    _slots[h] = s;
+    if (type == SocketType.datagram)
+    {
+        s.udp = defaultAllocator().allocT!UdpPcb();
+        s.udp.handle = h;
+        udp_register(s.udp);
+    }
+    else if (type == SocketType.stream)
+    {
+        s.tcp = defaultAllocator().allocT!TcpPcb();
+        s.tcp.handle = h;
+        tcp_register(s.tcp);
+    }
+    else
+    {
+        defaultAllocator().freeT(s);
+        return SocketResult.invalid_argument;     // raw later
+    }
 
+    _slots[h] = s;
     socket = Socket(h);
     return SocketResult.success;
 }
@@ -115,8 +125,24 @@ SocketResult c_close(Socket socket)
             udp_free_datagram_data(dgm);
         defaultAllocator().freeT(s.udp);
     }
-    int h = socket.raw_handle;
-    _slots.remove(h);
+    else if (s.tcp)
+    {
+        // Detach from socket layer; TCP may continue closing in background
+        // (FIN_WAIT/TIME_WAIT). Mark handle=0 so tcp_tick can free once closed.
+        s.tcp.handle = 0;
+        tcp_close(*_stack, s.tcp);
+        // If tcp_close drove us straight to closed (e.g. listen with no children,
+        // or syn_sent), the PCB has already been unregistered and we own it.
+        if (s.tcp.state == TcpState.closed)
+        {
+            s.tcp.send_buf.clear();
+            s.tcp.recv_buf.clear();
+            s.tcp.accept_queue.clear();
+            s.tcp.child_list.clear();
+            defaultAllocator().freeT(s.tcp);
+        }
+    }
+    _slots.remove(socket.handle);
     defaultAllocator().freeT(s);
     return SocketResult.success;
 }
@@ -126,9 +152,19 @@ SocketResult c_bind(Socket socket, ref const InetAddress address)
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
-    if (!s.udp)
-        return SocketResult.invalid_argument;
     if (address.family != AddressFamily.ipv4)
+        return SocketResult.invalid_argument;
+
+    if (s.tcp)
+    {
+        s.tcp.local_addr = address._a.ipv4.addr;
+        ushort port = address._a.ipv4.port;
+        if (port == 0)
+            port = allocate_ephemeral();
+        s.tcp.local_port = port;
+        return SocketResult.success;
+    }
+    if (!s.udp)
         return SocketResult.invalid_argument;
 
     s.udp.local_addr = address._a.ipv4.addr;
@@ -140,39 +176,123 @@ SocketResult c_bind(Socket socket, ref const InetAddress address)
 }
 
 SocketResult c_listen(Socket socket, uint backlog)
-    => SocketResult.invalid_argument;     // TCP-only
+{
+    auto s = lookup(socket);
+    if (!s)
+        return SocketResult.invalid_socket;
+    if (!s.tcp)
+        return SocketResult.invalid_argument;
+    if (s.tcp.local_port == 0)
+        s.tcp.local_port = allocate_ephemeral();
+    tcp_listen(s.tcp);
+    return SocketResult.success;
+}
 
 SocketResult c_connect(Socket socket, ref const InetAddress address)
 {
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
-    if (!s.udp)
-        return SocketResult.invalid_argument;
     if (address.family != AddressFamily.ipv4)
         return SocketResult.invalid_argument;
 
-    if (s.udp.local_port == 0)
-        s.udp.local_port = allocate_ephemeral();
-
-    s.udp.remote_addr = address._a.ipv4.addr;
-    s.udp.remote_port = address._a.ipv4.port;
-    s.udp.connected   = true;
-    return SocketResult.success;
+    if (s.tcp)
+    {
+        if (s.tcp.state != TcpState.closed)
+            return SocketResult.already_connected;
+        if (s.tcp.local_port == 0)
+            s.tcp.local_port = allocate_ephemeral();
+        s.tcp.remote_addr = address._a.ipv4.addr;
+        s.tcp.remote_port = address._a.ipv4.port;
+        if (s.tcp.local_addr == IPAddr.any)
+        {
+            s.tcp.local_addr = _stack.select_source_v4(s.tcp.remote_addr);
+            if (s.tcp.local_addr == IPAddr.any)
+                return SocketResult.network_unreachable;
+        }
+        if (!tcp_connect(*_stack, s.tcp))
+            return SocketResult.failure;
+        return SocketResult.would_block;
+    }
+    if (s.udp)
+    {
+        if (s.udp.local_port == 0)
+            s.udp.local_port = allocate_ephemeral();
+        s.udp.remote_addr = address._a.ipv4.addr;
+        s.udp.remote_port = address._a.ipv4.port;
+        s.udp.connected   = true;
+        return SocketResult.success;
+    }
+    return SocketResult.invalid_argument;
 }
 
 SocketResult c_accept(Socket socket, out Socket connection, InetAddress* remote)
-    => SocketResult.invalid_argument;     // TCP-only
-
-SocketResult c_shutdown(Socket socket, SocketShutdownMode how)
-    => SocketResult.success;              // no-op for UDP
-
-SocketResult c_sendmsg(Socket socket, const(InetAddress)* addr, MsgFlags flags,
-                       const(void[])[] buffers, size_t* bytes_sent)
 {
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
+    if (!s.tcp || !s.tcp.is_listener)
+        return SocketResult.invalid_argument;
+
+    TcpPcb* child;
+    if (!tcp_accept(s.tcp, child))
+        return SocketResult.would_block;
+
+    int h = _next_handle++;
+    Slot* cs = defaultAllocator().allocT!Slot();
+    cs.sock_type = SocketType.stream;
+    cs.family    = AddressFamily.ipv4;
+    cs.tcp       = child;
+    child.handle = h;
+    _slots[h] = cs;
+
+    connection = Socket(h);
+    if (remote)
+        *remote = InetAddress(child.remote_addr, child.remote_port);
+
+    s.tcp.accept_event = (s.tcp.accept_queue.length > 0);
+    return SocketResult.success;
+}
+
+SocketResult c_shutdown(Socket socket, SocketShutdownMode how)
+{
+    auto s = lookup(socket);
+    if (!s)
+        return SocketResult.invalid_socket;
+    if (s.tcp && (how == SocketShutdownMode.write || how == SocketShutdownMode.read_write))
+        tcp_shutdown_write(*_stack, s.tcp);
+    return SocketResult.success;
+}
+
+SocketResult c_sendmsg(Socket socket, const(InetAddress)* addr, MsgFlags flags, const(void[])[] buffers, size_t* bytes_sent)
+{
+    auto s = lookup(socket);
+    if (!s)
+        return SocketResult.invalid_socket;
+
+    if (s.tcp)
+    {
+        // Stream send. Gather buffers, push as much as the send buffer accepts.
+        size_t total_avail = 0;
+        foreach (b; buffers)
+            total_avail += b.length;
+
+        size_t total_sent = 0;
+        foreach (b; buffers)
+        {
+            if (b.length == 0) continue;
+            size_t n = tcp_send_data(*_stack, s.tcp, cast(const(ubyte)[])b);
+            total_sent += n;
+            if (n < b.length)
+                break;     // send buffer full; partial accept
+        }
+        if (bytes_sent)
+            *bytes_sent = total_sent;
+        if (total_sent == 0 && total_avail > 0)
+            return SocketResult.would_block;
+        return SocketResult.success;
+    }
+
     if (!s.udp)
         return SocketResult.invalid_argument;
 
@@ -207,8 +327,7 @@ SocketResult c_sendmsg(Socket socket, const(InetAddress)* addr, MsgFlags flags,
     if (s.udp.local_port == 0)
         s.udp.local_port = allocate_ephemeral();
 
-    if (!udp_output(*_stack, s.udp.local_addr, s.udp.local_port,
-                    dst_addr, dst_port, gather[0 .. total]))
+    if (!udp_output(*_stack, s.udp.local_addr, s.udp.local_port, dst_addr, dst_port, gather[0 .. total]))
         return SocketResult.failure;
 
     if (bytes_sent)
@@ -219,12 +338,32 @@ SocketResult c_sendmsg(Socket socket, const(InetAddress)* addr, MsgFlags flags,
 SocketResult c_recv(Socket socket, void[] buffer, MsgFlags flags, size_t* bytes_received)
     => c_recvfrom(socket, buffer, flags, null, bytes_received);
 
-SocketResult c_recvfrom(Socket socket, void[] buffer, MsgFlags flags,
-                        InetAddress* from, size_t* bytes_received)
+SocketResult c_recvfrom(Socket socket, void[] buffer, MsgFlags flags, InetAddress* from, size_t* bytes_received)
 {
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
+
+    if (s.tcp)
+    {
+        size_t n = tcp_recv_data(s.tcp, cast(ubyte[])buffer);
+        if (bytes_received)
+            *bytes_received = n;
+        if (from)
+            *from = InetAddress(s.tcp.remote_addr, s.tcp.remote_port);
+        if (n == 0)
+        {
+            // EOF on closed connection vs just-no-data-yet:
+            if (s.tcp.fin_seen ||
+                s.tcp.state == TcpState.close_wait ||
+                s.tcp.state == TcpState.last_ack ||
+                s.tcp.state == TcpState.closed)
+                return SocketResult.connection_closed;
+            return SocketResult.would_block;
+        }
+        return SocketResult.success;
+    }
+
     if (!s.udp)
         return SocketResult.invalid_argument;
 
@@ -253,7 +392,12 @@ SocketResult c_pending(Socket socket, out size_t bytes)
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
-    bytes = (s.udp && s.udp.recv_queue.length > 0) ? s.udp.recv_queue[0].data.length : 0;
+    if (s.tcp)
+        bytes = s.tcp.recv_buf.length;
+    else if (s.udp && s.udp.recv_queue.length > 0)
+        bytes = s.udp.recv_queue[0].data.length;
+    else
+        bytes = 0;
     return SocketResult.success;
 }
 
@@ -277,6 +421,27 @@ SocketResult c_poll(PollFd[] fds, Duration timeout, out uint num_ready)
             if (fd.request_events & PollEvents.write)
                 fd.return_events |= PollEvents.write;     // UDP is always writable
         }
+        else if (s.tcp)
+        {
+            if (fd.request_events & PollEvents.read)
+            {
+                bool readable = s.tcp.recv_buf.length > 0
+                              || (s.tcp.is_listener && s.tcp.accept_queue.length > 0)
+                              || s.tcp.fin_seen
+                              || s.tcp.state == TcpState.close_wait
+                              || s.tcp.state == TcpState.closed;
+                if (readable)
+                    fd.return_events |= PollEvents.read;
+            }
+            if (fd.request_events & PollEvents.write)
+            {
+                if (s.tcp.state == TcpState.established &&
+                    s.tcp.send_buf.length < TcpSendBufSize)
+                    fd.return_events |= PollEvents.write;
+            }
+            if (s.tcp.error_event || s.tcp.state == TcpState.closed)
+                fd.return_events |= PollEvents.hangup;
+        }
         if (fd.return_events != PollEvents.none)
             ++num_ready;
     }
@@ -292,12 +457,17 @@ SocketResult c_set_option(Socket socket, SocketOption opt, const(void)* value, s
         return SocketResult.invalid_socket;
     if (opt == SocketOption.non_blocking)
     {
-        if (size < 1)
+        if (size != 1)
             return SocketResult.invalid_argument;
-        s.non_blocking = *cast(const ubyte*)value != 0;
+        s.non_blocking = *cast(ubyte*)value != 0;
+        return SocketResult.success;
     }
-    // Most options not yet meaningful; treat as no-op rather than failing.
-    return SocketResult.success;
+    else
+    {
+        // Most options not yet meaningful; treat as no-op rather than failing.
+        return SocketResult.success;
+    }
+    return SocketResult.failure;
 }
 
 SocketResult c_get_option(Socket socket, SocketOption opt, void* value, size_t size)
@@ -319,6 +489,11 @@ SocketResult c_get_peer_name(Socket socket, out InetAddress addr)
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
+    if (s.tcp && s.tcp.remote_port != 0)
+    {
+        addr = InetAddress(s.tcp.remote_addr, s.tcp.remote_port);
+        return SocketResult.success;
+    }
     if (s.udp && s.udp.connected)
     {
         addr = InetAddress(s.udp.remote_addr, s.udp.remote_port);
@@ -332,6 +507,11 @@ SocketResult c_get_socket_name(Socket socket, out InetAddress addr)
     auto s = lookup(socket);
     if (!s)
         return SocketResult.invalid_socket;
+    if (s.tcp)
+    {
+        addr = InetAddress(s.tcp.local_addr, s.tcp.local_port);
+        return SocketResult.success;
+    }
     if (s.udp)
     {
         addr = InetAddress(s.udp.local_addr, s.udp.local_port);
@@ -351,11 +531,12 @@ SocketResult c_get_hostname(char* buffer, size_t size)
     return SocketResult.success;
 }
 
-SocketResult c_get_address_info(const(char)[] node, const(char)[] service,
-                                AddressInfo* info, AddressInfoResolver* resolver)
+SocketResult c_get_address_info(const(char)[] node, const(char)[] service, AddressInfo* info, AddressInfoResolver* resolver)
     => SocketResult.failure;     // TODO: hook into DNS module
 
 bool c_next_address(AddressInfoResolver* resolver, out AddressInfo info)
     => false;
 
-void c_free_address_info(AddressInfoResolver* resolver) {}
+void c_free_address_info(AddressInfoResolver* resolver)
+{
+}
