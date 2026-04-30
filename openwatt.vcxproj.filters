@@ -558,6 +558,9 @@
     <DCompile Include="src\router\iface\ethernet.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
+    <DCompile Include="src\router\iface\group.d">
+      <Filter>src\router\iface</Filter>
+    </DCompile>
     <DCompile Include="src\router\iface\zigbee.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
