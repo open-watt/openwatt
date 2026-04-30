@@ -10,3 +10,8 @@ version (Windows)
     import driver.windows.ethernet;
     alias EthernetModule = WindowsPcapEthernetModule;
 }
+else version (linux)
+{
+    import driver.linux.ethernet;
+    alias EthernetModule = LinuxRawEthernetModule;
+}
