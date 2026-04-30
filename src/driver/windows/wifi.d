@@ -183,13 +183,6 @@ nothrow @nogc:
     override const(char)[] mode() const pure
         => "sta";
 
-    override ubyte channel() const
-    {
-        if (running && _current_channel != 0)
-            return _current_channel;
-        return super.channel;
-    }
-
     // API
 
 protected:
@@ -246,7 +239,7 @@ protected:
             rx_dropped += sta.status.rx_dropped;
             tx_dropped += sta.status.tx_dropped;
         }
-        if (auto ap = bound_ap)
+        foreach (ap; bound_aps)
         {
             rx_bytes   += ap.status.rx_bytes;
             tx_bytes   += ap.status.tx_bytes;
@@ -294,19 +287,12 @@ private:
     GUID _guid;
 
     SysTime _last_refresh;
-    ubyte _current_channel;
 
     void refresh_state()
     {
-        uint channel;
-        ubyte new_channel;
-        if (_wlan.query_channel(_guid, channel))
-            new_channel = cast(ubyte)channel;
-        if (new_channel != _current_channel)
-        {
-            _current_channel = new_channel;
-            mark_set!(typeof(this), [ "channel" ]);
-        }
+        uint chan;
+        if (_wlan.query_channel(_guid, chan))
+            set_active_channel(cast(ubyte)chan);
 
         OSAdapterInfo info;
         if (!query_adapter(_adapter[], info))
@@ -520,16 +506,19 @@ private:
 
 class WindowsWlanModule : Module
 {
-    mixin DeclareModule!"interface.wifi.windows-wlan";
+    mixin DeclareModule!"interface.wifi.windows";
 nothrow @nogc:
+
+    override void pre_init()
+    {
+        on_devices_changed(&sync_radios);
+        sync_radios();
+    }
 
     override void init()
     {
         g_app.console.register_collection!WindowsWifiRadio();
         g_app.console.register_collection!WindowsWlan();
-
-        on_devices_changed(&sync_radios);
-        sync_radios();
     }
 
     override void update()

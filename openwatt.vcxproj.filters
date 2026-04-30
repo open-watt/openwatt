@@ -46,6 +46,9 @@
     <Filter Include="src\driver\baremetal">
       <UniqueIdentifier>{99e012a6-c993-4c2a-ae7e-aae2a0786162}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\driver\linux">
+      <UniqueIdentifier>{8391f7e5-f4d3-41c4-b7ae-16195ad3ccbd}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\driver\windows">
       <UniqueIdentifier>{417eeecb-0fc8-4b57-88c7-db9299ca521b}</UniqueIdentifier>
     </Filter>
@@ -243,6 +246,15 @@
     <DCompile Include="src\driver\ethernet.d">
       <Filter>src\driver</Filter>
     </DCompile>
+    <DCompile Include="src\driver\linux\ethernet.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\raw.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\wifi.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
     <DCompile Include="src\driver\wifi.d">
       <Filter>src\driver</Filter>
     </DCompile>
@@ -343,6 +355,9 @@
       <Filter>src\manager\os</Filter>
     </DCompile>
     <DCompile Include="src\manager\os\npcap.d">
+      <Filter>src\manager\os</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\os\sysfs.d">
       <Filter>src\manager\os</Filter>
     </DCompile>
     <DCompile Include="src\manager\console\builtin_commands.d">

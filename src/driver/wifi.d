@@ -17,6 +17,11 @@ version (Windows)
     import driver.windows.wifi;
     alias WifiModule = WindowsWlanModule;
 }
+else version (linux)
+{
+    import driver.linux.wifi;
+    alias WifiModule = LinuxWlanModule;
+}
 else static if (num_wifi > 0)
 {
     import driver.baremetal.wifi;
