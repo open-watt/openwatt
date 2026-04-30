@@ -627,29 +627,11 @@
     <DCompile Include="src\protocol\ezsp\client.d">
       <Filter>src\protocol\ezsp</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\zigbee\aps.d">
-      <Filter>src\protocol\zigbee</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\zigbee\client.d">
-      <Filter>src\protocol\zigbee</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\zigbee\coordinator.d">
-      <Filter>src\protocol\zigbee</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\zigbee\package.d">
-      <Filter>src\protocol\zigbee</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\zigbee\router.d">
-      <Filter>src\protocol\zigbee</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\zigbee\zcl.d">
-      <Filter>src\protocol\zigbee</Filter>
-    </DCompile>
     <DCompile Include="src\router\iface\ethernet.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\zigbee\iface.d">
-      <Filter>src\protocol\zigbee</Filter>
+    <DCompile Include="src\router\iface\group.d">
+      <Filter>src\router\iface</Filter>
     </DCompile>
     <DCompile Include="src\protocol\dhcp\client.d">
       <Filter>src\protocol\dhcp</Filter>
@@ -759,7 +741,28 @@
     <DCompile Include="src\protocol\ppp\server.d">
       <Filter>src\protocol\ppp</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\zigbee\aps.d">
+      <Filter>src\protocol\zigbee</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\zigbee\client.d">
+      <Filter>src\protocol\zigbee</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\zigbee\controller.d">
+      <Filter>src\protocol\zigbee</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\zigbee\coordinator.d">
+      <Filter>src\protocol\zigbee</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\zigbee\iface.d">
+      <Filter>src\protocol\zigbee</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\zigbee\package.d">
+      <Filter>src\protocol\zigbee</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\zigbee\router.d">
+      <Filter>src\protocol\zigbee</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\zigbee\zcl.d">
       <Filter>src\protocol\zigbee</Filter>
     </DCompile>
     <DCompile Include="src\protocol\zigbee\zdo.d">

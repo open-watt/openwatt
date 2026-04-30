@@ -34,6 +34,7 @@ enum CollectionType : ubyte
     http_client,
     http_server,
     interface_, // all interfaces
+    interface_group,
     ip_address,
     ip_pool,
     ip_pool6,
