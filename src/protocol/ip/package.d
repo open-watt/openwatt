@@ -10,6 +10,7 @@ import manager.console;
 import manager.plugin;
 
 import protocol.ip.address;
+import protocol.ip.pool;
 import protocol.ip.route;
 import protocol.ip.stack;
 
@@ -115,6 +116,8 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_collection!IPAddress();
+        g_app.console.register_collection!IPPool();
+        g_app.console.register_collection!IPv6Pool();
         g_app.console.register_collection!IPRoute();
 
         _stack.init_resolvers();
@@ -227,6 +230,8 @@ nothrow @nogc:
     override void update()
     {
         Collection!IPAddress().update_all();
+        Collection!IPPool().update_all();
+        Collection!IPv6Pool().update_all();
         Collection!IPRoute().update_all();
         _stack.update();
     }

@@ -3,6 +3,7 @@ module protocol;
 // protocol packages
 public static import protocol.ble;
 public static import protocol.can;
+public static import protocol.dhcp;
 public static import protocol.dns;
 public static import protocol.esphome;
 public static import protocol.ezsp;

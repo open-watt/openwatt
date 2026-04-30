@@ -115,6 +115,12 @@
     <DCompile Include="src\protocol\can\iface.d" />
     <DCompile Include="src\protocol\can\package.d" />
     <DCompile Include="src\protocol\can\sampler.d" />
+    <DCompile Include="src\protocol\dhcp\client.d" />
+    <DCompile Include="src\protocol\dhcp\lease.d" />
+    <DCompile Include="src\protocol\dhcp\message.d" />
+    <DCompile Include="src\protocol\dhcp\option.d" />
+    <DCompile Include="src\protocol\dhcp\package.d" />
+    <DCompile Include="src\protocol\dhcp\server.d" />
     <DCompile Include="src\protocol\dns\message.d" />
     <DCompile Include="src\protocol\dns\package.d" />
     <DCompile Include="src\protocol\dns\server.d" />
@@ -142,6 +148,7 @@
     <DCompile Include="src\protocol\ip\icmp.d" />
     <DCompile Include="src\protocol\ip\neighbour.d" />
     <DCompile Include="src\protocol\ip\package.d" />
+    <DCompile Include="src\protocol\ip\pool.d" />
     <DCompile Include="src\protocol\ip\route.d" />
     <DCompile Include="src\protocol\ip\socket.d" />
     <DCompile Include="src\protocol\ip\stack.d" />
