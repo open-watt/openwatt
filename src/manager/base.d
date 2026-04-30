@@ -261,6 +261,12 @@ nothrow @nogc:
     final bool is_remote() const pure nothrow @nogc
         => _is_remote;
 
+    void destroy()
+    {
+        import manager.collection : item_table;
+        item_table(_typeInfo.collection_id).defer_free(this);
+    }
+
     // return a list of properties that can be set on this object
     final const(Property*)[] properties() const
         => _typeInfo.properties;
@@ -547,16 +553,17 @@ nothrow @nogc:
         }
     }
 
-    final void destroy()
+    final override void destroy()
     {
         assert(!(_state & _destroyed), "destroy() called twice - bookkeeping bug");
 
         bool was_running = _state == State.running;
+        bool was_valid = (_state & _valid) != 0;
 
         _state |= _disabled | _destroyed;
         _state &= ~(_start | _fail);
-        if (_state & _valid)
-            _state |= _stop;
+        if (was_valid)
+            _state |= _stop;    // -> destroying; state machine will run shutdown then transition to destroyed
 
         if (was_running)
             set_offline();
@@ -565,6 +572,9 @@ nothrow @nogc:
 
         signal_state_change(StateSignal.destroyed);
         _subscribers.clear();
+
+        if (!was_valid)
+            super.destroy();    // no shutdown to run; detach and queue now
     }
 
     final package void set_remote_state(StateSignal signal)
@@ -591,6 +601,7 @@ nothrow @nogc:
                 _state = State.destroyed;
                 signal_state_change(StateSignal.destroyed);
                 _subscribers.clear();
+                super.destroy();
                 break;
         }
     }
@@ -667,7 +678,9 @@ protected:
                         debug log.trace("init fail - retry in ", _backoff_ms, "ms");
                 goto case;
             case State.disabled:
+                break;
             case State.destroyed:
+                super.destroy();
                 break;
 
             case State.running:
@@ -741,16 +754,13 @@ protected:
 
 
 package:
-    final bool do_update()
+    final void do_update()
     {
         if (is_remote)
-            return _state == State.destroyed;
+            return;
 
         switch (_state)
         {
-            case State.destroyed:
-                return true;
-
             case State.disabled:
                 // do nothing...
                 break;
@@ -793,7 +803,6 @@ package:
             default:
                 assert(false, "Invalid state!");
         }
-        return _state == State.destroyed;
     }
 
 private:
