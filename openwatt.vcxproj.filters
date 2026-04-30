@@ -109,6 +109,9 @@
     <Filter Include="src\protocol\zigbee">
       <UniqueIdentifier>{ba691bb2-9acf-4496-a2e1-134bf2130294}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\dhcp">
+      <UniqueIdentifier>{2a4b1e7e-1f0c-4a44-9c2b-37c3f0fb9b1d}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\protocol\dns">
       <UniqueIdentifier>{6b327823-23d1-49dc-a514-342b020a2613}</UniqueIdentifier>
     </Filter>
@@ -549,6 +552,24 @@
     <DCompile Include="src\router\iface\zigbee.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\dhcp\client.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dhcp\lease.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dhcp\message.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dhcp\option.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dhcp\package.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\dhcp\server.d">
+      <Filter>src\protocol\dhcp</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\dns\message.d">
       <Filter>src\protocol\dns</Filter>
     </DCompile>
@@ -607,6 +628,9 @@
       <Filter>src\protocol\ip</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\package.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\pool.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\route.d">
