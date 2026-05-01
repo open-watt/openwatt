@@ -195,19 +195,22 @@ nothrow @nogc:
     {
         assert(type_info.get_super is null, "update_all should only be called on root collections");
 
-        Array!ActiveObject doomed;
-        foreach (ref e; table._entries)
+        size_t i = 0;
+        outer: while (i < table._entries.length)
         {
-            ActiveObject item = cast(ActiveObject)e.value; // TODO: maybe not dynamic cast?
-            if (item !is null && item.do_update())
-                doomed ~= item;
+            CID just_processed = table._entries[i].id;
+            if (auto active = cast(ActiveObject)table._entries[i].value)
+                active.do_update();
+
+            // skip to the entry after the one we just did (array may have grown)
+            while (table._entries[i++].id != just_processed)
+            {
+                if (i >= table._entries.length)
+                    break outer;
+            }
         }
-        foreach (item; doomed)
-        {
-            import urt.mem;
-            remove(item);
-            defaultAllocator.freeT(item);
-        }
+
+        table.free_pending();
     }
 
     BaseObject alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.none)
@@ -235,7 +238,7 @@ nothrow @nogc:
     void remove(BaseObject item)
     {
         if (item._id)
-            cast(void)table.remove(item._id);
+            table.remove(item._id);
     }
 
     BaseObject get(const(char)[] name)
@@ -630,8 +633,24 @@ nothrow @nogc:
     uint count() const pure => cast(uint)_entries.length;
     uint max_depth() const pure => _max_depth;
 
+    package void defer_free(BaseObject item)
+    {
+        auto entry = find_entry(item._id);
+        assert(entry !is null && entry.value is item, "defer_free on stray or already-freed object");
+        entry.value = null;
+        _pending_free ~= item;
+    }
+
+    package void free_pending()
+    {
+        foreach (item; _pending_free)
+            defaultAllocator.freeT(item);
+        _pending_free.clear();
+    }
+
 private:
     Array!Entry _entries; // sorted by id
+    Array!BaseObject _pending_free;
     uint _max_depth;
 
     static long _cmp_id(ref const Entry e, CID id) pure
