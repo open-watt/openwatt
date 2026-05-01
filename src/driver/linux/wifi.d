@@ -3,17 +3,12 @@ module driver.linux.wifi;
 // =====================================================================
 // Linux wifi backend. Packet path: AF_PACKET on the wlan netdev (managed-
 // mode delivers de-encapsulated ethernet frames). State + STA control:
-// wpa_supplicant control socket (no direct nl80211 work). Monitor mode
-// and AP support are deferred -- see the parking lot below.
+// wpa_supplicant control socket; AP control: hostapd control socket; both
+// daemons supervised externally. No direct nl80211 work.
 //
 // Outstanding:
 //
-// 1. STA+AP coexistence: refused at LinuxAP.validate() today. Needs the
-//    channel-arbitration path (active-channel already plumbed) actually
-//    exercised, plus driver interface_combinations advertising { STA, AP }
-//    simultaneously on the target chipset.
-//
-// 2. Monitor mode / raw 802.11: a separate code path entirely. The radio
+// 1. Monitor mode / raw 802.11: a separate code path entirely. The radio
 //    holds the AF_PACKET socket on a monX VIF, frames are 802.11+radiotap
 //    not ethernet, so the EthernetInterface model doesn't fit -- needs the
 //    WiFi80211Interface base to grow an incoming_80211_frame() path and
@@ -39,6 +34,7 @@ import manager.console;
 import manager.plugin;
 
 import manager.os.netlink;
+import manager.os.nl80211;
 import manager.os.sysfs;
 
 import driver.linux.ctrl_iface;
@@ -88,23 +84,20 @@ nothrow @nogc:
     override const(char)[] mode() const pure
         => "sta";
 
-    // Public for LinuxWlan / LinuxAP validation. v1 disallows STA+AP
-    // coexistence; multi-AP is allowed via hostapd's bss= sections.
-    final bool has_sta_binding() const pure
-        => bound_sta !is null;
-    final bool has_ap_binding() const pure
-        => bound_aps.length > 0;
-
-    // VIF lookup for a bound AP. The primary (bound_aps[0]) lives on the
-    // radio's netdev; additional APs get a VIF named "<adapter>-<ap_name>".
-    // Returns empty if `target` isn't bound to this radio.
+    // VIF lookup for a bound AP.
+    //   no STA bound:     bound_aps[0] uses the radio's netdev; rest get VIFs.
+    //   STA bound:        STA owns the netdev; ALL APs get VIFs.
+    // Returns empty slice if `target` isn't bound to this radio.
     final const(char)[] vif_for(const(APInterface) target) const
     {
         auto aps = bound_aps;
         foreach (i, ap; aps)
         {
             if (ap is target)
-                return format_ap_vif_name(_adapter[], i, target.name[]);
+            {
+                bool primary = (i == 0 && bound_sta is null);
+                return primary ? _adapter[] : tconcat(_adapter[], "-", target.name[]);
+            }
         }
         return null;
     }
@@ -114,6 +107,42 @@ nothrow @nogc:
         set_active_channel(ch);
     }
 
+    // Binding policy gate. Called from LinuxAP.validate / LinuxWlan.validate;
+    // returns null when the proposed binding fits the chipset's advertised
+    // interface_combinations, or a human-readable reason when it doesn't.
+    // The candidate is the iface CONSIDERING binding (it's not in bound_sta /
+    // bound_aps yet at validate time).
+    final const(char)[] would_accept(const(WLANBaseInterface) candidate) const pure
+    {
+        if (!_caps.valid)
+            return null;  // chipset capabilities unknown -- be optimistic.
+
+        bool candidate_is_ap = cast(const(APInterface))candidate !is null;
+        bool candidate_is_sta = !candidate_is_ap && (cast(const(WLANInterface))candidate !is null);
+
+        if (candidate_is_ap && !_caps.supports_ap)
+            return "driver does not support AP mode";
+        if (candidate_is_sta && !_caps.supports_sta)
+            return "driver does not support STA mode";
+
+        // Counts after this binding takes effect (candidate isn't in
+        // bound_aps / bound_sta yet at validate time).
+        size_t ap_count = bound_aps.length + (candidate_is_ap ? 1 : 0);
+        bool has_sta = bound_sta !is null || candidate_is_sta;
+
+        if (has_sta && ap_count > 0 && !_caps.supports_sta_ap)
+            return "driver does not support simultaneous STA + AP";
+
+        if (ap_count > _caps.max_aps)
+        {
+            if (_caps.max_aps <= 1)
+                return "driver does not support multi-AP";
+            return "too many APs configured for this driver";
+        }
+
+        return null;
+    }
+
 protected:
 
     override bool validate() const
@@ -121,6 +150,17 @@ protected:
 
     override CompletionStatus startup()
     {
+        // Snapshot chipset capabilities once. Cheap (one nl80211 round-trip)
+        // and the answer doesn't change without a kernel module reload, so
+        // we don't bother re-querying after restarts.
+        if (!_caps_queried)
+        {
+            uint ifindex = read_ifindex(_adapter[]);
+            if (ifindex != 0)
+                query_phy_capabilities(ifindex, _caps);
+            _caps_queried = true;
+        }
+
         // ctrl_iface sockets are best-effort: each daemon may or may not
         // be running. Packet path keeps working regardless.
         if (!_wpa.valid)
@@ -149,8 +189,14 @@ protected:
 
     override void on_wlan_bind_changed()
     {
-        // Reconfigure hostapd whenever an AP is added or removed from us.
-        // STA bind/unbind also fires this hook but doesn't affect hostapd.
+        // Any change to the bound set may shift VIF allocation (e.g. binding
+        // a STA evicts the primary AP off the radio's netdev) so always sync.
+        sync_hostapd_config();
+    }
+
+    override void on_active_channel_changed(ubyte ch)
+    {
+        // STA-driven channel updates land here. APs follow via RELOAD.
         sync_hostapd_config();
     }
 
@@ -211,11 +257,65 @@ protected:
             restart();
             return;
         }
+
+        // Track STA online/offline transitions for the channel-revert grace
+        // period, and re-sync hostapd if the target channel has changed
+        // (covers grace expiry where no other event would otherwise fire).
+        track_sta_channel_authority(now);
+        if (target_channel() != _last_synced_channel)
+            sync_hostapd_config();
     }
 
 private:
+    enum channel_revert_grace = 30.seconds;
+
     String _adapter;
     SysTime _last_refresh;
+
+    PhyCapabilities _caps;
+    bool _caps_queried;
+
+    // Channel arbitration state. _last_synced_channel is the value last
+    // written to the hostapd config; sync_hostapd_config skips the RELOAD if
+    // it hasn't changed. _sta_offline_since holds the moment the bound STA
+    // last lost association so we can hold APs on its previous channel for
+    // a grace window before reverting to the radio's configured channel.
+    ubyte _last_synced_channel;
+    SysTime _sta_offline_since;
+    bool _sta_was_providing;
+
+    bool sta_providing_channel() const
+    {
+        auto wlan = cast(const(LinuxWlan))bound_sta;
+        return wlan !is null && wlan._wpa_state == WpaState.completed;
+    }
+
+    void track_sta_channel_authority(SysTime now)
+    {
+        bool providing = sta_providing_channel();
+        if (_sta_was_providing && !providing)
+            _sta_offline_since = now;
+        _sta_was_providing = providing;
+    }
+
+    // Decide which channel hostapd should be on right now.
+    //   no STA bound:                       configured `channel`.
+    //   STA associated:                     STA's active_channel.
+    //   STA bound, recently disassociated:  hold the last known channel
+    //                                       through the grace window so
+    //                                       quick reassociation doesn't
+    //                                       interrupt connected AP clients.
+    //   STA bound, long-disassociated:      configured `channel`.
+    ubyte target_channel() const
+    {
+        if (bound_sta is null)
+            return channel;
+        if (sta_providing_channel())
+            return active_channel != 0 ? active_channel : channel;
+        if (active_channel != 0 && getSysTime() - _sta_offline_since < channel_revert_grace)
+            return active_channel;
+        return channel;
+    }
 
     // wpa_supplicant + hostapd ctrl_iface sockets, one per radio (= per
     // netdev). Bound LinuxWlan / LinuxAP borrow these via cast access since
@@ -258,6 +358,7 @@ private:
         if (bound_aps.length == 0)
         {
             hostapd_disable(_hostapd);
+            _last_synced_channel = 0;
             return;
         }
 
@@ -278,12 +379,12 @@ private:
             auto ap = cast(LinuxAP)base;
             if (!ap)
                 return;
-            ap.fill_bss_config(bss_storage[i], this, i);
+            ap.fill_bss_config(bss_storage[i], this);
         }
 
         ApConfig cfg;
         cfg.country = country;
-        cfg.channel = channel;
+        cfg.channel = target_channel();
         cfg.bsses = bss_storage[0 .. bound_aps.length];
 
         if (!write_hostapd_config(cfg))
@@ -294,20 +395,8 @@ private:
         // bss= VIFs as part of RELOAD via its nl80211 driver.
         hostapd_enable(_hostapd);
         hostapd_reload(_hostapd);
+        _last_synced_channel = cfg.channel;
     }
-}
-
-
-// VIF naming for multi-AP. bound_aps[0] (the primary) uses the radio's netdev
-// directly; additional APs each get a virtual __ap-type interface named
-// "<adapter>-<ap_name>". hostapd creates the VIF when it parses the bss=
-// section. Truncation is the caller's problem -- IFNAMSIZ is 16, so ap names
-// have to be short.
-private const(char)[] format_ap_vif_name(const(char)[] adapter, size_t index, const(char)[] ap_name)
-{
-    if (index == 0)
-        return adapter;
-    return tconcat(adapter, "-", ap_name);
 }
 
 
@@ -342,8 +431,15 @@ nothrow @nogc:
     override const(char)[] status_message() const
     {
         auto r = cast(const(LinuxWifiRadio))radio;
-        bool wpa_valid = r !is null && r._wpa.valid;
-        if (!wpa_valid)
+        if (!r)
+            return "no radio configured";
+        if (ssid.empty)
+            return "SSID not set";
+        if (!r.running)
+            return "Waiting for radio";
+        if (auto reason = r.would_accept(this))
+            return reason;
+        if (!r._wpa.valid)
             return "wpa_supplicant unavailable";
         if (_wpa_state != WpaState.completed)
             return wpa_state_message(_wpa_state);
@@ -354,11 +450,12 @@ protected:
 
     override bool validate() const
     {
-        if (radio is null)
+        if (!super.validate())
             return false;
-        // STA+AP coexistence not supported in v1.
         auto r = cast(const(LinuxWifiRadio))radio;
-        if (r && r.has_ap_binding)
+        if (!r || !r.running)
+            return false;
+        if (r.would_accept(this) !is null)
             return false;
         return true;
     }
@@ -502,6 +599,7 @@ private:
         bool got_ssid;
         MACAddress new_bssid;
         bool got_bssid;
+        ubyte new_channel;
 
         foreach_kv(buf[0 .. n], (key, value) nothrow @nogc {
             if (key == "wpa_state")
@@ -520,7 +618,19 @@ private:
                     got_bssid = true;
                 }
             }
+            else if (key == "freq")
+            {
+                size_t consumed;
+                long freq_mhz = parse_int(value, &consumed);
+                if (consumed == value.length && consumed > 0 && freq_mhz > 0)
+                    new_channel = freq_to_channel(cast(uint)freq_mhz);
+            }
         });
+
+        // The STA dictates the radio's channel while associated; push it up
+        // so the radio can fan it out to bound APs.
+        if (new_state == WpaState.completed && new_channel != 0)
+            r.update_active_channel(new_channel);
 
         _wpa_state = new_state;
         if (got_ssid)
@@ -645,11 +755,10 @@ nothrow @nogc:
     }
 
     // Build the per-BSS slice of the radio's hostapd config. Called from
-    // sync_hostapd_config() once per bound AP, with `index` being our
-    // position in `bound_aps`.
-    void fill_bss_config(ref BssConfig bss, const(LinuxWifiRadio) r, size_t index) const
+    // sync_hostapd_config() once per bound AP.
+    void fill_bss_config(ref BssConfig bss, const(LinuxWifiRadio) r) const
     {
-        bss.iface = format_ap_vif_name(r.adapter, index, name[]);
+        bss.iface = r.vif_for(this);
         bss.ssid = ssid;
         bss.passphrase = get_password();
         bss.auth = auth;
@@ -665,12 +774,29 @@ protected:
         if (radio is null || ssid.empty)
             return false;
         auto r = cast(const(LinuxWifiRadio))radio;
-        if (!r)
+        if (!r || !r.running)
             return false;
-        // STA+AP coexistence is the next pass; refuse for now.
-        if (r.has_sta_binding)
+        if (r.would_accept(this) !is null)
             return false;
         return true;
+    }
+
+    override const(char)[] status_message() const
+    {
+        auto r = cast(const(LinuxWifiRadio))radio;
+        if (!r)
+            return "no radio configured";
+        if (ssid.empty)
+            return "SSID not set";
+        if (!r.running)
+            return "Waiting for radio";
+        if (auto reason = r.would_accept(this))
+            return reason;
+        if (!_hostapd.valid)
+            return "hostapd unavailable";
+        if (auto m = hostapd_state_message(_hostapd_state))
+            return m;
+        return super.status_message();
     }
 
     override CompletionStatus startup()
@@ -759,6 +885,7 @@ private:
 
     RawAdapter _raw;
     CtrlIface _hostapd;
+    HostapdHwState _hostapd_state;
     SysTime _last_refresh;
 
     // Returns empty slice if the radio isn't a LinuxWifiRadio or we aren't
@@ -772,12 +899,20 @@ private:
     void refresh_ap_state()
     {
         if (!_hostapd.valid)
+        {
+            _hostapd_state = HostapdHwState.unknown;
             return;
+        }
 
         char[2048] buf = void;
         HostapdStatus s;
         if (!hostapd_query_status(_hostapd, s, buf[]))
+        {
+            _hostapd_state = HostapdHwState.unknown;
             return;
+        }
+
+        _hostapd_state = s.hw_state;
 
         // All BSSes on a radio share the chip's channel; any one of them
         // reporting it is enough to drive active_channel.
@@ -785,6 +920,20 @@ private:
         if (r && s.channel != 0)
             r.update_active_channel(s.channel);
     }
+}
+
+
+// MHz -> 802.11 channel for the bands we support (2.4GHz + 5GHz). 6GHz uses
+// op_class-based numbering and a different hostapd config shape; punt for now.
+private ubyte freq_to_channel(uint freq_mhz) pure
+{
+    if (freq_mhz == 2484)
+        return 14;
+    if (freq_mhz >= 2412 && freq_mhz < 2484)
+        return cast(ubyte)((freq_mhz - 2407) / 5);
+    if (freq_mhz >= 5180 && freq_mhz <= 5905)
+        return cast(ubyte)((freq_mhz - 5000) / 5);
+    return 0;
 }
 
 

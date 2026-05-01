@@ -59,11 +59,60 @@ bool hostapd_enable(ref CtrlIface c)
 }
 
 
+// hostapd's hw_mode/iface state machine (defined in src/ap/hostapd.h). Values
+// match the STATUS line "state=<...>". HAPD_IFACE_ENABLED is the operational
+// terminal state; everything else is either startup-progress or trouble.
+enum HostapdHwState : ubyte
+{
+    unknown,
+    uninitialized,
+    disabled,
+    country_update,
+    acs,
+    ht_scan,
+    dfs,
+    no_ir,
+    enabled,
+}
+
+HostapdHwState parse_hostapd_state(const(char)[] s) pure
+{
+    if (s == "UNINITIALIZED")  return HostapdHwState.uninitialized;
+    if (s == "DISABLED")       return HostapdHwState.disabled;
+    if (s == "COUNTRY_UPDATE") return HostapdHwState.country_update;
+    if (s == "ACS")            return HostapdHwState.acs;
+    if (s == "HT_SCAN")        return HostapdHwState.ht_scan;
+    if (s == "DFS")            return HostapdHwState.dfs;
+    if (s == "NO_IR")          return HostapdHwState.no_ir;
+    if (s == "ENABLED")        return HostapdHwState.enabled;
+    return HostapdHwState.unknown;
+}
+
+// Returns null when the BSS is operational (ENABLED), otherwise a short
+// human-readable description of why it isn't.
+const(char)[] hostapd_state_message(HostapdHwState s) pure
+{
+    final switch (s)
+    {
+        case HostapdHwState.unknown:        return "hostapd: unknown state";
+        case HostapdHwState.uninitialized:  return "hostapd: not initialised (config rejected?)";
+        case HostapdHwState.disabled:       return "hostapd: disabled";
+        case HostapdHwState.country_update: return "hostapd: applying regulatory domain";
+        case HostapdHwState.acs:            return "hostapd: selecting channel (ACS)";
+        case HostapdHwState.ht_scan:        return "hostapd: scanning for clear channel";
+        case HostapdHwState.dfs:            return "hostapd: waiting for radar clearance (DFS)";
+        case HostapdHwState.no_ir:          return "hostapd: no initial radiation permitted";
+        case HostapdHwState.enabled:        return null;
+    }
+}
+
+
 // hostapd STATUS keys we care about today: "state", "channel", "ssid[0]"
 // (first BSS), "bssid[0]", "num_sta[0]". Multi-BSS reports "ssid[1]" etc.
 struct HostapdStatus
 {
-    const(char)[] state;        // ENABLED, DISABLED, COUNTRY_UPDATE, etc.
+    const(char)[] state;        // raw state string for callers that want it.
+    HostapdHwState hw_state;    // parsed; use this in preference to `state`.
     ubyte channel;
     const(char)[] ssid;         // first BSS only in v1
     const(char)[] bssid;
@@ -78,7 +127,10 @@ bool hostapd_query_status(ref CtrlIface c, ref HostapdStatus out_status, char[] 
     out_status = HostapdStatus.init;
     foreach_kv(buf[0 .. n], (key, value) nothrow @nogc {
         if (key == "state")
+        {
             out_status.state = value;
+            out_status.hw_state = parse_hostapd_state(value);
+        }
         else if (key == "channel")
         {
             size_t consumed;

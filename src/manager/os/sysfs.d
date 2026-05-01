@@ -79,6 +79,25 @@ struct OSAdapterInfo
 }
 
 
+// Reads /sys/class/net/<iface>/ifindex. Returns 0 on failure.
+uint read_ifindex(const(char)[] adapter_name)
+{
+    if (adapter_name.length == 0 || adapter_name.length > 32)
+        return 0;
+    char[32] buf = void;
+    auto p = build_path(adapter_name, "/ifindex");
+    auto data = read_file(p, buf[]);
+    if (data is null)
+        return 0;
+    auto s = data.trimBack;
+    size_t consumed;
+    ulong v = parse_uint(s, &consumed);
+    if (consumed != s.length || consumed == 0)
+        return 0;
+    return cast(uint)v;
+}
+
+
 bool query_adapter(const(char)[] adapter_name, out OSAdapterInfo info)
 {
     if (adapter_name.length == 0 || adapter_name.length > 32)
