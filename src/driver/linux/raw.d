@@ -90,7 +90,7 @@ extern(C) nothrow @nogc
     int socket(int domain, int type, int protocol);
     int bind(int fd, const(void)* addr, uint addrlen);
     int setsockopt(int fd, int level, int optname, const(void)* optval, uint optlen);
-    int ioctl(int fd, c_ulong request, void* arg);
+    int ioctl(int fd, c_ulong request, ...);
     ptrdiff_t recv(int fd, void* buf, size_t len, int flags);
     ptrdiff_t sendto(int fd, const(void)* buf, size_t len, int flags, const(void)* dest_addr, uint addrlen);
     int* __errno_location();
