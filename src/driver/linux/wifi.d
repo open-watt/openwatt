@@ -1,39 +1,33 @@
 module driver.linux.wifi;
 
 // =====================================================================
-// SKELETON. Mirrors driver/windows/wifi.d in shape, but the OS-state
-// queries (current SSID, BSSID, RSSI, signal quality, channel) are
-// stubbed pending nl80211 (generic netlink) bindings. The packet path
-// is fully wired via AF_PACKET on the wlan netdev -- managed-mode wifi
-// delivers de-encapsulated ethernet frames to the kernel netdev, so
-// the same RawAdapter that drives LinuxRawEthernet works here.
+// Linux wifi backend. Packet path: AF_PACKET on the wlan netdev (managed-
+// mode delivers de-encapsulated ethernet frames). State + STA control:
+// wpa_supplicant control socket (no direct nl80211 work). Monitor mode
+// and AP support are deferred -- see the parking lot below.
 //
-// Future work, in roughly increasing order of effort:
+// Outstanding:
 //
-// 1. nl80211/genl bindings in driver/linux/nl80211.d -- analogue of
-//    driver/windows/wlanapi.d. Implements WlanQueryInterface-equivalent
-//    queries (NL80211_CMD_GET_STATION for RSSI/BSSID, GET_INTERFACE for
-//    channel/iftype) and connect/disconnect (CMD_CONNECT, CMD_DISCONNECT
-//    via nl80211, OR plumb to a wpa_supplicant control socket).
+// 1. APInterface support: hostapd control socket. Linux's mac80211 multi-
+//    VIF supports STA + N*AP on a single radio (subject to channel-locking
+//    and chipset interface_combinations). One radio can host multiple
+//    SSIDs on the AP side via additional __ap-type VIFs created by hostapd
+//    (or `iw phy phyN interface add` ahead of time).
 //
-// 2. RTNetlink RTM_NEWLINK / RTM_DELLINK for async hotplug (same hook
-//    point as the ethernet driver -- see on_devices_changed).
-//
-// 3. APInterface support: hostapd integration for AP mode. Linux's
-//    multi-VIF mac80211 supports STA + N*AP on a single radio (subject
-//    to channel-locking and chipset interface_combinations). One radio
-//    can host multiple SSIDs on the AP side via additional __ap-type VIFs.
-//
-// 4. Monitor mode / raw 802.11: a separate code path entirely. The radio
+// 2. Monitor mode / raw 802.11: a separate code path entirely. The radio
 //    holds the AF_PACKET socket on a monX VIF, frames are 802.11+radiotap
-//    not ethernet, so the existing EthernetInterface model doesn't fit --
-//    needs a WiFi80211Interface variant. Worth doing only if a use case
-//    actually requires L2-promisc on the wireless side.
+//    not ethernet, so the EthernetInterface model doesn't fit -- needs the
+//    WiFi80211Interface base to grow an incoming_80211_frame() path and
+//    PacketType.wifi_80211. Worth doing only if a use case actually
+//    requires L2-promisc on the wireless side. Creating the monitor VIF
+//    needs a thin nl80211 binding (CMD_NEW_INTERFACE / SET_CHANNEL only --
+//    not the full surface).
 // =====================================================================
 
 version (linux):
 
 import urt.array;
+import urt.conv;
 import urt.log;
 import urt.mem;
 import urt.mem.temp;
@@ -45,9 +39,13 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
+import manager.os.netlink;
 import manager.os.sysfs;
 
+import driver.linux.ctrl_iface;
+import driver.linux.hostapd;
 import driver.linux.raw;
+import driver.linux.wpa_supplicant;
 
 import router.iface;
 import router.iface.ethernet;
@@ -56,20 +54,6 @@ import router.iface.packet;
 import router.iface.wifi;
 
 nothrow @nogc:
-
-
-alias DevicesChangedHandler = void delegate() nothrow @nogc;
-
-// Register a callback to be invoked when the OS reports a wifi adapter list change.
-// TODO: not yet wired -- callers should poll enumerate_wifi_adapters() as a fallback.
-//       Implementation: nl80211 multicast group via genl, or RTNetlink
-//       RTM_NEWLINK / RTM_DELLINK on NETLINK_ROUTE.
-void on_devices_changed(DevicesChangedHandler handler)
-{
-    g_devices_changed = handler;
-}
-
-private __gshared DevicesChangedHandler g_devices_changed;
 
 
 // ---------------------------------------------------------------------------
@@ -105,6 +89,25 @@ nothrow @nogc:
     override const(char)[] mode() const pure
         => "sta";
 
+    // Public for LinuxWlan / LinuxAP validation. v1 disallows STA+AP and
+    // multi-AP combinations; the AP/WLAN side checks these before bind.
+    final bool has_sta_binding() const pure
+        => bound_sta !is null;
+    final bool has_ap_binding() const pure
+        => bound_aps.length > 0;
+    final bool has_other_ap_binding(const(APInterface) self) const
+    {
+        foreach (ap; bound_aps)
+            if (ap !is self)
+                return true;
+        return false;
+    }
+
+    final void update_active_channel(ubyte ch)
+    {
+        set_active_channel(ch);
+    }
+
 protected:
 
     override bool validate() const
@@ -112,6 +115,13 @@ protected:
 
     override CompletionStatus startup()
     {
+        // ctrl_iface sockets are best-effort: each daemon may or may not
+        // be running. Packet path keeps working regardless.
+        if (!_wpa.valid)
+            wpa_open(_wpa, _adapter[]);
+        if (!_hostapd.valid)
+            hostapd_open(_hostapd, _adapter[]);
+
         SysTime now = getSysTime();
         if (now - _last_refresh >= 1.seconds)
         {
@@ -126,7 +136,16 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        _wpa.close();
+        _hostapd.close();
         return CompletionStatus.complete;
+    }
+
+    override void on_wlan_bind_changed()
+    {
+        // Reconfigure hostapd whenever an AP is added or removed from us.
+        // STA bind/unbind also fires this hook but doesn't affect hostapd.
+        sync_hostapd_config();
     }
 
     override void update()
@@ -192,6 +211,14 @@ private:
     String _adapter;
     SysTime _last_refresh;
 
+    // wpa_supplicant + hostapd ctrl_iface sockets, one per radio (= per
+    // netdev). Bound LinuxWlan / LinuxAP borrow these via cast access since
+    // they're in the same module. Matches the WindowsWifiRadio pattern (_wlan
+    // handle on the radio), and gives future radio-level uses (scan, channel
+    // queries) somewhere obvious to live.
+    CtrlIface _wpa;
+    CtrlIface _hostapd;
+
     void refresh_state()
     {
         // Channel query is an nl80211 job (NL80211_CMD_GET_INTERFACE,
@@ -199,6 +226,12 @@ private:
         // We still pull MAC/MTU/carrier/speed from sysfs -- carrier-up on a
         // wlan netdev means associated, which is the proxy for "STA online"
         // until nl80211 lands.
+
+        // Retry ctrl_iface connections -- daemons may have launched after us.
+        if (!_wpa.valid)
+            wpa_open(_wpa, _adapter[]);
+        if (!_hostapd.valid)
+            hostapd_open(_hostapd, _adapter[]);
 
         OSAdapterInfo info;
         if (!query_adapter(_adapter[], info))
@@ -209,6 +242,38 @@ private:
         if (c & AdapterChange.connected) mark_set!(typeof(this), "connected")();
         if (c & AdapterChange.tx_speed)  mark_set!(typeof(this), "tx-link-speed")();
         if (c & AdapterChange.rx_speed)  mark_set!(typeof(this), "rx-link-speed")();
+    }
+
+    void sync_hostapd_config()
+    {
+        if (!_hostapd.valid)
+            return;
+
+        if (bound_aps.length == 0)
+        {
+            hostapd_disable(_hostapd);
+            return;
+        }
+        if (bound_aps.length > 1)
+        {
+            writeError("LinuxWifiRadio: multi-AP not supported in v1; ignoring extra binding(s) on '", _adapter, "'");
+            return;
+        }
+
+        auto ap = cast(LinuxAP)bound_aps[0];
+        if (!ap)
+            return;
+
+        ApConfig cfg;
+        ap.fill_hostapd_config(cfg, this);
+
+        if (!write_hostapd_config(cfg))
+            return;
+
+        // ENABLE is idempotent if already enabled; RELOAD picks up the new
+        // config-on-disk for any subsequent change.
+        hostapd_enable(_hostapd);
+        hostapd_reload(_hostapd);
     }
 }
 
@@ -225,13 +290,45 @@ nothrow @nogc:
         super(collection_type_info!LinuxWlan, id, flags);
     }
 
-    // OS-state queries are stubbed pending nl80211. Until then the
-    // base-class defaults (empty SSID/BSSID, zero RSSI/quality) stand.
+    // Active state -- what wpa_supplicant says we're associated to right now.
+    // The configured SSID set via the ssid= property lives in the base under
+    // a different name; we kick off the connect flow with it on startup.
+
+    override const(char)[] ssid() const pure
+        => _current_ssid[];
+
+    override MACAddress bssid() const
+        => _current_bssid;
+
+    override int rssi() const
+        => _current_rssi;
+
+    override ubyte signal_quality() const
+        => _signal_quality;
+
+    override const(char)[] status_message() const
+    {
+        auto r = cast(const(LinuxWifiRadio))radio;
+        bool wpa_valid = r !is null && r._wpa.valid;
+        if (!wpa_valid)
+            return "wpa_supplicant unavailable";
+        if (_wpa_state != WpaState.completed)
+            return wpa_state_message(_wpa_state);
+        return super.status_message();
+    }
 
 protected:
 
     override bool validate() const
-        => radio !is null;
+    {
+        if (radio is null)
+            return false;
+        // STA+AP coexistence not supported in v1.
+        auto r = cast(const(LinuxWifiRadio))radio;
+        if (r && r.has_ap_binding)
+            return false;
+        return true;
+    }
 
     override CompletionStatus startup()
     {
@@ -243,12 +340,23 @@ protected:
         if (!_raw.valid && !_raw.open(r.adapter))
             return CompletionStatus.error;
 
-        // No nl80211 yet, so we can't tell associated-vs-not. carrier-up
-        // on the wlan netdev means associated; carrier-down means not
-        // associated (or admin-down). Use the same sysfs path as the
-        // ethernet driver and the radio.
-        OSAdapterInfo info;
-        if (query_adapter(r.adapter, info) && info.connection != ConnectionStatus.connected)
+        // wpa_supplicant lives on the radio (open in radio.startup, retried
+        // in radio.refresh_state). If it's available and we have a configured
+        // SSID, kick off association.
+        if (r._wpa.valid && super.ssid.length > 0)
+            connect_to_configured_network(r._wpa);
+
+        refresh_wpa_state();
+
+        // Without wpa_supplicant we have no association signal, so fall back
+        // to the kernel's carrier flag as the proxy for "ready to pass traffic".
+        if (!r._wpa.valid)
+        {
+            OSAdapterInfo info;
+            if (query_adapter(r.adapter, info) && info.connection != ConnectionStatus.connected)
+                return CompletionStatus.continue_;
+        }
+        else if (_wpa_state != WpaState.completed)
             return CompletionStatus.continue_;
 
         return CompletionStatus.complete;
@@ -256,7 +364,9 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        // _wpa belongs to the radio -- don't close it here.
         _raw.close();
+        clear_wpa_state();
         return super.shutdown();
     }
 
@@ -272,11 +382,23 @@ protected:
         if (now - _last_refresh >= 1.seconds)
         {
             _last_refresh = now;
-            OSAdapterInfo info;
-            if (query_adapter(r.adapter, info) && info.connection != ConnectionStatus.connected)
+            if (r._wpa.valid)
             {
-                restart();
-                return;
+                refresh_wpa_state();
+                if (_wpa_state != WpaState.completed)
+                {
+                    restart();
+                    return;
+                }
+            }
+            else
+            {
+                OSAdapterInfo info;
+                if (query_adapter(r.adapter, info) && info.connection != ConnectionStatus.connected)
+                {
+                    restart();
+                    return;
+                }
             }
         }
 
@@ -302,21 +424,341 @@ protected:
         }
     }
 
-    // TODO: ssid setter override that drives wpa_supplicant or nl80211 CMD_CONNECT.
-
     override int wire_send(const(ubyte)[] frame)
         => _raw.send(frame) ? 0 : -1;
 
 private:
     RawAdapter _raw;
     SysTime _last_refresh;
+
+    String _current_ssid;
+    MACAddress _current_bssid;
+    int _current_rssi;
+    ubyte _signal_quality;
+    WpaState _wpa_state = WpaState.unknown;
+
+    void clear_wpa_state()
+    {
+        _current_ssid = String.init;
+        _current_bssid = MACAddress();
+        _current_rssi = 0;
+        _signal_quality = 0;
+        _wpa_state = WpaState.unknown;
+    }
+
+    void refresh_wpa_state()
+    {
+        auto r = cast(LinuxWifiRadio)radio;
+        if (!r || !r._wpa.valid)
+        {
+            clear_wpa_state();
+            return;
+        }
+
+        char[2048] buf = void;
+        size_t n;
+        if (!r._wpa.send_command("STATUS", buf[], n))
+        {
+            clear_wpa_state();
+            mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality", "status" ])();
+            return;
+        }
+
+        WpaState new_state;
+        const(char)[] new_ssid_view;
+        bool got_ssid;
+        MACAddress new_bssid;
+        bool got_bssid;
+
+        foreach_kv(buf[0 .. n], (key, value) nothrow @nogc {
+            if (key == "wpa_state")
+                new_state = parse_wpa_state(value);
+            else if (key == "ssid")
+            {
+                new_ssid_view = value;
+                got_ssid = true;
+            }
+            else if (key == "bssid")
+            {
+                MACAddress mac;
+                if (mac.fromString(value) == MACAddress.StringLen)
+                {
+                    new_bssid = mac;
+                    got_bssid = true;
+                }
+            }
+        });
+
+        _wpa_state = new_state;
+        if (got_ssid)
+        {
+            if (_current_ssid[] != new_ssid_view)
+                _current_ssid = new_ssid_view.makeString(defaultAllocator);
+        }
+        else
+        {
+            _current_ssid = String.init;
+        }
+        _current_bssid = got_bssid ? new_bssid : MACAddress();
+
+        if (new_state == WpaState.completed && r._wpa.send_command("SIGNAL_POLL", buf[], n))
+        {
+            int rssi_dbm;
+            bool got_rssi;
+            foreach_kv(buf[0 .. n], (key, value) nothrow @nogc {
+                if (key == "RSSI")
+                {
+                    size_t consumed;
+                    long v = parse_int(value, &consumed);
+                    if (consumed == value.length && consumed > 0)
+                    {
+                        rssi_dbm = cast(int)v;
+                        got_rssi = true;
+                    }
+                }
+            });
+            if (got_rssi)
+            {
+                _current_rssi = rssi_dbm;
+                _signal_quality = rssi_to_quality(rssi_dbm);
+            }
+        }
+        else
+        {
+            _current_rssi = 0;
+            _signal_quality = 0;
+        }
+
+        mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality", "status" ])();
+    }
+
+    void connect_to_configured_network(ref CtrlIface wpa)
+    {
+        char[256] resp = void;
+        size_t n;
+
+        // Wipe any stale config from a previous run/restart so we don't
+        // accumulate duplicate networks across reconnect cycles.
+        wpa.send_command("REMOVE_NETWORK all", resp[], n);
+
+        if (!wpa.send_command("ADD_NETWORK", resp[], n) || n == 0)
+        {
+            writeError("wpa_supplicant: ADD_NETWORK failed");
+            return;
+        }
+        size_t end = 0;
+        while (end < n && resp[end] >= '0' && resp[end] <= '9')
+            ++end;
+        const(char)[] id = resp[0 .. end];
+        if (id.length == 0)
+        {
+            writeError("wpa_supplicant: ADD_NETWORK returned no id");
+            return;
+        }
+
+        char[512] cmd = void;
+        size_t l;
+
+        l = format_set_network(cmd[], id, "ssid", super.ssid, true);
+        if (l == 0 || !wpa.send_command(cmd[0 .. l], resp[], n))
+            return;
+
+        const(char)[] pwd = get_password();
+        if (pwd.length > 0)
+        {
+            l = format_set_network(cmd[], id, "psk", pwd, true);
+            if (l == 0 || !wpa.send_command(cmd[0 .. l], resp[], n))
+                return;
+        }
+        else
+        {
+            l = format_set_network(cmd[], id, "key_mgmt", "NONE", false);
+            if (l == 0 || !wpa.send_command(cmd[0 .. l], resp[], n))
+                return;
+        }
+
+        l = format_select_network(cmd[], id);
+        if (l > 0)
+            wpa.send_command(cmd[0 .. l], resp[], n);
+    }
 }
 
 
 // ---------------------------------------------------------------------------
-// Driver module: discovers wifi adapters from sysfs and creates a (Radio,
-// WLAN) pair for each. Subscribes the on_devices_changed hook for future
-// async hotplug; falls back to a 1Hz poll until netlink is wired.
+// AP, single-BSS only in v1. The radio's _hostapd ctrl_iface is the
+// configuration channel (see LinuxWifiRadio.sync_hostapd_config). LinuxAP
+// owns its packet path via RawAdapter on the radio's primary netdev (AP-only
+// mode -- no separate __ap-type VIF). Multi-AP and STA+AP coexistence will
+// add a VIF allocator in the second pass.
+// ---------------------------------------------------------------------------
+
+class LinuxAP : APInterface
+{
+nothrow @nogc:
+
+    enum type_name = "ap";
+    enum path = "/interface/ap";
+
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
+    {
+        super(collection_type_info!LinuxAP, id, flags);
+    }
+
+protected:
+
+    override bool validate() const
+    {
+        if (radio is null || ssid.empty)
+            return false;
+        auto r = cast(const(LinuxWifiRadio))radio;
+        if (!r)
+            return false;
+        // v1 limits: refuse second AP on the same radio, and refuse if any
+        // STA is already bound. Both lift in the multi-VIF pass.
+        if (r.has_sta_binding)
+            return false;
+        if (r.has_other_ap_binding(this))
+            return false;
+        return true;
+    }
+
+    override CompletionStatus startup()
+    {
+        auto result = super.startup();
+        if (result != CompletionStatus.complete)
+            return result;
+
+        auto r = cast(LinuxWifiRadio)radio;
+        if (!_raw.valid && !_raw.open(r.adapter))
+            return CompletionStatus.error;
+
+        // Hostapd reconfig already fired via on_wlan_bind_changed when our
+        // bind landed in super.startup. If hostapd isn't reachable we run
+        // anyway -- the BSS just isn't beaconing.
+        return CompletionStatus.complete;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        _raw.close();
+        return super.shutdown();
+    }
+
+    override void update()
+    {
+        super.update();
+
+        auto r = cast(LinuxWifiRadio)radio;
+        if (!r)
+            return;
+
+        SysTime now = getSysTime();
+        if (now - _last_refresh >= 1.seconds)
+        {
+            _last_refresh = now;
+            refresh_ap_state();
+        }
+
+        const(ubyte)[] data;
+        uint wire_len;
+        SysTime ts;
+
+        while (true)
+        {
+            int res = _raw.poll(data, wire_len, ts);
+            if (res == 0)
+                break;
+            if (res < 0)
+                break;
+
+            if (data.length < wire_len)
+            {
+                add_rx_drop();
+                continue;
+            }
+
+            incoming_ethernet_frame(data, ts);
+        }
+    }
+
+    override int wire_send(const(ubyte)[] frame)
+        => _raw.send(frame) ? 0 : -1;
+
+private:
+
+    RawAdapter _raw;
+    SysTime _last_refresh;
+
+    void refresh_ap_state()
+    {
+        auto r = cast(LinuxWifiRadio)radio;
+        if (!r || !r._hostapd.valid)
+            return;
+
+        char[2048] buf = void;
+        HostapdStatus s;
+        if (!hostapd_query_status(r._hostapd, s, buf[]))
+            return;
+
+        // Push hostapd-reported channel into the radio's active_channel.
+        // Radio is the canonical owner of the chip's tuned channel.
+        if (s.channel != 0)
+            r.update_active_channel(s.channel);
+    }
+
+    // Build the hostapd config from this AP's properties + the radio's
+    // shared properties. Called from the radio's sync_hostapd_config().
+    public void fill_hostapd_config(ref ApConfig cfg, const(LinuxWifiRadio) r) const
+    {
+        cfg.iface = r.adapter;
+        cfg.ssid = ssid;
+        cfg.passphrase = get_password();
+        cfg.country = r.country;
+        // hostapd has its own ACS path; pass the configured channel (which
+        // may be 0 for ACS) directly. active_channel is reported back via
+        // STATUS once the chip has tuned.
+        cfg.channel = r.channel;
+        cfg.auth = auth;
+        cfg.hidden = hidden;
+        cfg.client_isolation = client_isolation;
+        cfg.max_clients = max_clients;
+    }
+}
+
+
+private size_t format_set_network(char[] dst, const(char)[] id, const(char)[] key, const(char)[] value, bool quoted)
+{
+    enum prefix = "SET_NETWORK ";
+    size_t total = prefix.length + id.length + 1 + key.length + 1 + (quoted ? 2 : 0) + value.length;
+    if (total > dst.length)
+        return 0;
+    size_t i = 0;
+    dst[i .. i + prefix.length] = prefix;     i += prefix.length;
+    dst[i .. i + id.length]     = id;         i += id.length;
+    dst[i++] = ' ';
+    dst[i .. i + key.length]    = key;        i += key.length;
+    dst[i++] = ' ';
+    if (quoted) dst[i++] = '"';
+    dst[i .. i + value.length]  = value;      i += value.length;
+    if (quoted) dst[i++] = '"';
+    return i;
+}
+
+private size_t format_select_network(char[] dst, const(char)[] id)
+{
+    enum prefix = "SELECT_NETWORK ";
+    if (prefix.length + id.length > dst.length)
+        return 0;
+    size_t i = 0;
+    dst[i .. i + prefix.length] = prefix;  i += prefix.length;
+    dst[i .. i + id.length]     = id;      i += id.length;
+    return i;
+}
+
+// ---------------------------------------------------------------------------
+// Driver module: discovers wifi adapters at startup, then receives async
+// notifications from manager.os.netlink (RTM_NEWLINK / RTM_DELLINK) to keep
+// the (Radio, WLAN) pairs in sync with the kernel's wifi netdevs.
 // ---------------------------------------------------------------------------
 
 class LinuxWlanModule : Module
@@ -326,7 +768,7 @@ nothrow @nogc:
 
     override void pre_init()
     {
-        on_devices_changed(&sync_radios);
+        subscribe_link_changed(&on_link_changed);
         sync_radios();
     }
 
@@ -334,19 +776,15 @@ nothrow @nogc:
     {
         g_app.console.register_collection!LinuxWifiRadio();
         g_app.console.register_collection!LinuxWlan();
-    }
-
-    override void update()
-    {
-        SysTime now = getSysTime();
-        if (now - _last_scan < 1.seconds)
-            return;
-        _last_scan = now;
-        sync_radios();
+        g_app.console.register_collection!LinuxAP();
     }
 
 private:
-    SysTime _last_scan;
+
+    void on_link_changed(uint, const(char)[], bool, bool)
+    {
+        sync_radios();
+    }
 
     void sync_radios()
     {

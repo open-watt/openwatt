@@ -74,6 +74,12 @@ void register_modules(Application app)
     register_module!(manager.certificate)(app);
     register_module!(manager.sync)(app);
 
+    version (linux)
+    {
+        import manager.os.netlink;
+        register_module!(manager.os.netlink)(app);
+    }
+
     import router.stream;
     register_module!(router.stream)(app);
     register_module!(router.stream.bridge)(app);
