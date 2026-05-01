@@ -102,35 +102,56 @@ bool hostapd_query_status(ref CtrlIface c, ref HostapdStatus out_status, char[] 
 }
 
 
-// Single-BSS config-file generator. Writes to /var/run/openwatt/hostapd_<iface>.conf;
-// the operator's hostapd service must be configured to read from this path.
+// Multi-BSS config-file generator. Writes to /var/run/openwatt/hostapd_<iface>.conf
+// (where <iface> is the primary BSS netdev); the operator's hostapd service must
+// be configured to read from this path.
+//
+// Layout:
+//   bsses[0]    -> primary BSS, uses `interface=` (the radio's netdev).
+//   bsses[1..]  -> additional BSSes, each emitted as `bss=<vif>` followed by
+//                  per-BSS keys. hostapd creates the VIF via its nl80211 driver
+//                  on RELOAD if it doesn't already exist.
+// All BSSes share the radio block (channel, country, hw_mode) at the top.
 
-struct ApConfig
+struct BssConfig
 {
-    const(char)[] iface;        // the netdev hostapd binds to (radio.adapter for AP-only)
+    const(char)[] iface;        // primary uses the radio netdev; extras use a VIF (e.g. wlan0-guest)
     const(char)[] ssid;
     const(char)[] passphrase;   // empty -> open auth
-    const(char)[] country;      // ISO-3166 2-letter; empty -> hostapd default
-    ubyte channel;              // 0 -> ACS (auto channel selection)
     WifiAuth auth = WifiAuth.wpa2;
     bool hidden;
     bool client_isolation;
     ubyte max_clients;          // 0 -> hostapd default
 }
 
+struct ApConfig
+{
+    const(char)[] country;      // ISO-3166 2-letter; empty -> hostapd default
+    ubyte channel;              // 0 -> ACS (auto channel selection)
+    BssConfig[] bsses;          // bsses[0] is primary; must be non-empty
+}
+
 bool write_hostapd_config(ref const ApConfig cfg)
 {
-    if (cfg.iface.length == 0 || cfg.iface.length > 32)
+    if (cfg.bsses.length == 0)
     {
-        writeError("hostapd_config: bad iface name");
+        writeError("hostapd_config: no BSSes configured");
         return false;
+    }
+    foreach (ref bss; cfg.bsses)
+    {
+        if (bss.iface.length == 0 || bss.iface.length > 32)
+        {
+            writeError("hostapd_config: bad BSS iface name");
+            return false;
+        }
     }
 
     if (!ensure_dir(hostapd_config_dir))
         return false;
 
     char[256] path_buf = void;
-    size_t plen = format_config_path(path_buf[], cfg.iface);
+    size_t plen = format_config_path(path_buf[], cfg.bsses[0].iface);
     if (plen == 0)
     {
         writeError("hostapd_config: path overflow");
@@ -236,76 +257,89 @@ size_t format_config_body(char[] dst, ref const ApConfig cfg)
         return put(key) && put("=") && put(tmp[0 .. n]) && put("\n");
     }
 
-    if (!kv("interface", cfg.iface)) return 0;
+    bool emit_bss_keys(ref const BssConfig bss)
+    {
+        if (!kv("ssid", bss.ssid)) return false;
+
+        if (bss.max_clients > 0)
+            if (!kv_uint("max_num_sta", bss.max_clients)) return false;
+        if (bss.client_isolation)
+            if (!kv("ap_isolate", "1")) return false;
+        if (bss.hidden)
+            if (!kv("ignore_broadcast_ssid", "1")) return false;
+
+        // Auth. wpa= bitfield: 1=WPA, 2=WPA2/RSN, 3=mixed.
+        final switch (bss.auth) with (WifiAuth)
+        {
+            case open:
+                if (!kv("auth_algs", "1")) return false;
+                break;
+
+            case wpa2:
+                if (!kv("auth_algs", "1")) return false;
+                if (!kv("wpa", "2")) return false;
+                if (!kv("wpa_key_mgmt", "WPA-PSK")) return false;
+                if (!kv("rsn_pairwise", "CCMP")) return false;
+                if (bss.passphrase.length > 0)
+                    if (!kv("wpa_passphrase", bss.passphrase)) return false;
+                break;
+
+            case wpa3:
+                if (!kv("auth_algs", "1")) return false;
+                if (!kv("wpa", "2")) return false;
+                if (!kv("wpa_key_mgmt", "SAE")) return false;
+                if (!kv("rsn_pairwise", "CCMP")) return false;
+                if (!kv("ieee80211w", "2")) return false;  // PMF required for WPA3
+                if (bss.passphrase.length > 0)
+                    if (!kv("sae_password", bss.passphrase)) return false;
+                break;
+
+            case wpa2_wpa3:
+                if (!kv("auth_algs", "1")) return false;
+                if (!kv("wpa", "2")) return false;
+                if (!kv("wpa_key_mgmt", "WPA-PSK SAE")) return false;
+                if (!kv("rsn_pairwise", "CCMP")) return false;
+                if (!kv("ieee80211w", "1")) return false;  // PMF optional for transition
+                if (bss.passphrase.length > 0)
+                {
+                    if (!kv("wpa_passphrase", bss.passphrase)) return false;
+                    if (!kv("sae_password", bss.passphrase)) return false;
+                }
+                break;
+
+            case wpa2_enterprise:
+            case wpa3_enterprise:
+                // Enterprise auth (EAP) needs a RADIUS server config; not in v1.
+                // Caller should validate this isn't requested before generating.
+                writeError("hostapd_config: enterprise auth not supported in v1");
+                return false;
+        }
+        return true;
+    }
+
+    // Radio block: applies to all BSSes; must precede the first `bss=` line.
+    if (!kv("interface", cfg.bsses[0].iface)) return 0;
     if (!kv("driver", "nl80211")) return 0;
     if (!kv("ctrl_interface", hostapd_remote_dir)) return 0;
-    if (!kv("ssid", cfg.ssid)) return 0;
 
     // hw_mode: 'g' for 2.4GHz, 'a' for 5GHz/6GHz. Inferred from channel; 0
     // (ACS) defaults to 'g' which hostapd interprets correctly with an empty
     // channel list. 6GHz needs more attribute work; defer to follow-up.
     bool is_5g = (cfg.channel >= 36);
     if (!kv("hw_mode", is_5g ? "a" : "g")) return 0;
-
     if (!kv_uint("channel", cfg.channel)) return 0;
 
     if (cfg.country.length > 0)
         if (!kv("country_code", cfg.country)) return 0;
 
-    if (cfg.max_clients > 0)
-        if (!kv_uint("max_num_sta", cfg.max_clients)) return 0;
+    // Primary BSS keys (continuation of the interface= block).
+    if (!emit_bss_keys(cfg.bsses[0])) return 0;
 
-    if (cfg.client_isolation)
-        if (!kv("ap_isolate", "1")) return 0;
-
-    if (cfg.hidden)
-        if (!kv("ignore_broadcast_ssid", "1")) return 0;
-
-    // Auth. wpa= bitfield: 1=WPA, 2=WPA2/RSN, 3=mixed.
-    final switch (cfg.auth) with (WifiAuth)
+    // Additional BSSes.
+    foreach (ref bss; cfg.bsses[1 .. $])
     {
-        case open:
-            if (!kv("auth_algs", "1")) return 0;
-            break;
-
-        case wpa2:
-            if (!kv("auth_algs", "1")) return 0;
-            if (!kv("wpa", "2")) return 0;
-            if (!kv("wpa_key_mgmt", "WPA-PSK")) return 0;
-            if (!kv("rsn_pairwise", "CCMP")) return 0;
-            if (cfg.passphrase.length > 0)
-                if (!kv("wpa_passphrase", cfg.passphrase)) return 0;
-            break;
-
-        case wpa3:
-            if (!kv("auth_algs", "1")) return 0;
-            if (!kv("wpa", "2")) return 0;
-            if (!kv("wpa_key_mgmt", "SAE")) return 0;
-            if (!kv("rsn_pairwise", "CCMP")) return 0;
-            if (!kv("ieee80211w", "2")) return 0;  // PMF required for WPA3
-            if (cfg.passphrase.length > 0)
-                if (!kv("sae_password", cfg.passphrase)) return 0;
-            break;
-
-        case wpa2_wpa3:
-            if (!kv("auth_algs", "1")) return 0;
-            if (!kv("wpa", "2")) return 0;
-            if (!kv("wpa_key_mgmt", "WPA-PSK SAE")) return 0;
-            if (!kv("rsn_pairwise", "CCMP")) return 0;
-            if (!kv("ieee80211w", "1")) return 0;  // PMF optional for transition
-            if (cfg.passphrase.length > 0)
-            {
-                if (!kv("wpa_passphrase", cfg.passphrase)) return 0;
-                if (!kv("sae_password", cfg.passphrase)) return 0;
-            }
-            break;
-
-        case wpa2_enterprise:
-        case wpa3_enterprise:
-            // Enterprise auth (EAP) needs a RADIUS server config; not in v1.
-            // Caller should validate this isn't requested before generating.
-            writeError("hostapd_config: enterprise auth not supported in v1");
-            return 0;
+        if (!kv("bss", bss.iface)) return 0;
+        if (!emit_bss_keys(bss)) return 0;
     }
 
     return i;

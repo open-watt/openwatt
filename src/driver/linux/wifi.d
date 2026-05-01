@@ -8,11 +8,10 @@ module driver.linux.wifi;
 //
 // Outstanding:
 //
-// 1. APInterface support: hostapd control socket. Linux's mac80211 multi-
-//    VIF supports STA + N*AP on a single radio (subject to channel-locking
-//    and chipset interface_combinations). One radio can host multiple
-//    SSIDs on the AP side via additional __ap-type VIFs created by hostapd
-//    (or `iw phy phyN interface add` ahead of time).
+// 1. STA+AP coexistence: refused at LinuxAP.validate() today. Needs the
+//    channel-arbitration path (active-channel already plumbed) actually
+//    exercised, plus driver interface_combinations advertising { STA, AP }
+//    simultaneously on the target chipset.
 //
 // 2. Monitor mode / raw 802.11: a separate code path entirely. The radio
 //    holds the AF_PACKET socket on a monX VIF, frames are 802.11+radiotap
@@ -89,18 +88,25 @@ nothrow @nogc:
     override const(char)[] mode() const pure
         => "sta";
 
-    // Public for LinuxWlan / LinuxAP validation. v1 disallows STA+AP and
-    // multi-AP combinations; the AP/WLAN side checks these before bind.
+    // Public for LinuxWlan / LinuxAP validation. v1 disallows STA+AP
+    // coexistence; multi-AP is allowed via hostapd's bss= sections.
     final bool has_sta_binding() const pure
         => bound_sta !is null;
     final bool has_ap_binding() const pure
         => bound_aps.length > 0;
-    final bool has_other_ap_binding(const(APInterface) self) const
+
+    // VIF lookup for a bound AP. The primary (bound_aps[0]) lives on the
+    // radio's netdev; additional APs get a VIF named "<adapter>-<ap_name>".
+    // Returns empty if `target` isn't bound to this radio.
+    final const(char)[] vif_for(const(APInterface) target) const
     {
-        foreach (ap; bound_aps)
-            if (ap !is self)
-                return true;
-        return false;
+        auto aps = bound_aps;
+        foreach (i, ap; aps)
+        {
+            if (ap is target)
+                return format_ap_vif_name(_adapter[], i, target.name[]);
+        }
+        return null;
     }
 
     final void update_active_channel(ubyte ch)
@@ -254,27 +260,54 @@ private:
             hostapd_disable(_hostapd);
             return;
         }
-        if (bound_aps.length > 1)
+
+        // Cap is hostapd's typical compile-time MAX_BSS_PER_RADIO; keeping it
+        // local to v1 avoids a heap allocation. Bump alongside hostapd if a
+        // deployment ever needs more.
+        enum max_bsses = 8;
+        if (bound_aps.length > max_bsses)
         {
-            writeError("LinuxWifiRadio: multi-AP not supported in v1; ignoring extra binding(s) on '", _adapter, "'");
+            writeError("LinuxWifiRadio: too many APs bound to '", _adapter, "' (",
+                bound_aps.length, ", max ", max_bsses, ")");
             return;
         }
 
-        auto ap = cast(LinuxAP)bound_aps[0];
-        if (!ap)
-            return;
+        BssConfig[max_bsses] bss_storage;
+        foreach (i, base; bound_aps)
+        {
+            auto ap = cast(LinuxAP)base;
+            if (!ap)
+                return;
+            ap.fill_bss_config(bss_storage[i], this, i);
+        }
 
         ApConfig cfg;
-        ap.fill_hostapd_config(cfg, this);
+        cfg.country = country;
+        cfg.channel = channel;
+        cfg.bsses = bss_storage[0 .. bound_aps.length];
 
         if (!write_hostapd_config(cfg))
             return;
 
         // ENABLE is idempotent if already enabled; RELOAD picks up the new
-        // config-on-disk for any subsequent change.
+        // config-on-disk for any subsequent change. hostapd creates / destroys
+        // bss= VIFs as part of RELOAD via its nl80211 driver.
         hostapd_enable(_hostapd);
         hostapd_reload(_hostapd);
     }
+}
+
+
+// VIF naming for multi-AP. bound_aps[0] (the primary) uses the radio's netdev
+// directly; additional APs each get a virtual __ap-type interface named
+// "<adapter>-<ap_name>". hostapd creates the VIF when it parses the bss=
+// section. Truncation is the caller's problem -- IFNAMSIZ is 16, so ap names
+// have to be short.
+private const(char)[] format_ap_vif_name(const(char)[] adapter, size_t index, const(char)[] ap_name)
+{
+    if (index == 0)
+        return adapter;
+    return tconcat(adapter, "-", ap_name);
 }
 
 
@@ -585,11 +618,18 @@ private:
 
 
 // ---------------------------------------------------------------------------
-// AP, single-BSS only in v1. The radio's _hostapd ctrl_iface is the
-// configuration channel (see LinuxWifiRadio.sync_hostapd_config). LinuxAP
-// owns its packet path via RawAdapter on the radio's primary netdev (AP-only
-// mode -- no separate __ap-type VIF). Multi-AP and STA+AP coexistence will
-// add a VIF allocator in the second pass.
+// APInterface, multi-BSS aware.
+//
+// Each LinuxAP binds its packet path (RawAdapter) to its own netdev:
+//   bound_aps[0] (primary) -> radio's netdev (e.g. wlan0)
+//   bound_aps[N>0]         -> "<adapter>-<ap_name>" VIF created by hostapd
+//                             when it parses our bss= section on RELOAD.
+// VIFs for non-primary APs may not exist at startup() time -- we return
+// continue_ and retry on each update() until the kernel surfaces them.
+//
+// Each AP also opens its own hostapd ctrl_iface against /var/run/hostapd/<vif>;
+// per-BSS STATUS queries see themselves as ssid[0]/bssid[0]/num_sta[0], so no
+// across-BSS index parsing is needed.
 // ---------------------------------------------------------------------------
 
 class LinuxAP : APInterface
@@ -604,6 +644,20 @@ nothrow @nogc:
         super(collection_type_info!LinuxAP, id, flags);
     }
 
+    // Build the per-BSS slice of the radio's hostapd config. Called from
+    // sync_hostapd_config() once per bound AP, with `index` being our
+    // position in `bound_aps`.
+    void fill_bss_config(ref BssConfig bss, const(LinuxWifiRadio) r, size_t index) const
+    {
+        bss.iface = format_ap_vif_name(r.adapter, index, name[]);
+        bss.ssid = ssid;
+        bss.passphrase = get_password();
+        bss.auth = auth;
+        bss.hidden = hidden;
+        bss.client_isolation = client_isolation;
+        bss.max_clients = max_clients;
+    }
+
 protected:
 
     override bool validate() const
@@ -613,11 +667,8 @@ protected:
         auto r = cast(const(LinuxWifiRadio))radio;
         if (!r)
             return false;
-        // v1 limits: refuse second AP on the same radio, and refuse if any
-        // STA is already bound. Both lift in the multi-VIF pass.
+        // STA+AP coexistence is the next pass; refuse for now.
         if (r.has_sta_binding)
-            return false;
-        if (r.has_other_ap_binding(this))
             return false;
         return true;
     }
@@ -628,18 +679,25 @@ protected:
         if (result != CompletionStatus.complete)
             return result;
 
-        auto r = cast(LinuxWifiRadio)radio;
-        if (!_raw.valid && !_raw.open(r.adapter))
-            return CompletionStatus.error;
+        auto vif = current_vif();
+        if (vif.length == 0)
+            return CompletionStatus.continue_;
 
-        // Hostapd reconfig already fired via on_wlan_bind_changed when our
-        // bind landed in super.startup. If hostapd isn't reachable we run
-        // anyway -- the BSS just isn't beaconing.
+        // For non-primary APs the VIF is created by hostapd on RELOAD; if it
+        // isn't there yet, retry on the next tick.
+        if (!_raw.valid && !_raw.open(vif))
+            return CompletionStatus.continue_;
+
+        // Per-BSS hostapd ctrl socket; best-effort.
+        if (!_hostapd.valid)
+            hostapd_open(_hostapd, vif);
+
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
+        _hostapd.close();
         _raw.close();
         return super.shutdown();
     }
@@ -651,6 +709,19 @@ protected:
         auto r = cast(LinuxWifiRadio)radio;
         if (!r)
             return;
+
+        // Retry resources we couldn't grab at startup.
+        if (!_raw.valid || !_hostapd.valid)
+        {
+            auto vif = current_vif();
+            if (vif.length > 0)
+            {
+                if (!_raw.valid)
+                    _raw.open(vif);
+                if (!_hostapd.valid)
+                    hostapd_open(_hostapd, vif);
+            }
+        }
 
         SysTime now = getSysTime();
         if (now - _last_refresh >= 1.seconds)
@@ -687,41 +758,32 @@ protected:
 private:
 
     RawAdapter _raw;
+    CtrlIface _hostapd;
     SysTime _last_refresh;
+
+    // Returns empty slice if the radio isn't a LinuxWifiRadio or we aren't
+    // bound (transitional states; caller should retry).
+    const(char)[] current_vif() const
+    {
+        auto r = cast(const(LinuxWifiRadio))radio;
+        return r ? r.vif_for(this) : null;
+    }
 
     void refresh_ap_state()
     {
-        auto r = cast(LinuxWifiRadio)radio;
-        if (!r || !r._hostapd.valid)
+        if (!_hostapd.valid)
             return;
 
         char[2048] buf = void;
         HostapdStatus s;
-        if (!hostapd_query_status(r._hostapd, s, buf[]))
+        if (!hostapd_query_status(_hostapd, s, buf[]))
             return;
 
-        // Push hostapd-reported channel into the radio's active_channel.
-        // Radio is the canonical owner of the chip's tuned channel.
-        if (s.channel != 0)
+        // All BSSes on a radio share the chip's channel; any one of them
+        // reporting it is enough to drive active_channel.
+        auto r = cast(LinuxWifiRadio)radio;
+        if (r && s.channel != 0)
             r.update_active_channel(s.channel);
-    }
-
-    // Build the hostapd config from this AP's properties + the radio's
-    // shared properties. Called from the radio's sync_hostapd_config().
-    public void fill_hostapd_config(ref ApConfig cfg, const(LinuxWifiRadio) r) const
-    {
-        cfg.iface = r.adapter;
-        cfg.ssid = ssid;
-        cfg.passphrase = get_password();
-        cfg.country = r.country;
-        // hostapd has its own ACS path; pass the configured channel (which
-        // may be 0 for ACS) directly. active_channel is reported back via
-        // STATUS once the chip has tuned.
-        cfg.channel = r.channel;
-        cfg.auth = auth;
-        cfg.hidden = hidden;
-        cfg.client_isolation = client_isolation;
-        cfg.max_clients = max_clients;
     }
 }
 
