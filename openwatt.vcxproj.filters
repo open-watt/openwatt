@@ -279,10 +279,25 @@
     <DCompile Include="src\manager\value.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\router\stream\bridge.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
     <DCompile Include="src\router\stream\console.d">
       <Filter>src\router\stream</Filter>
     </DCompile>
+    <DCompile Include="src\router\stream\duplex.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
+    <DCompile Include="src\router\stream\file.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
+    <DCompile Include="src\router\stream\memory.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
     <DCompile Include="src\router\stream\package.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
+    <DCompile Include="src\router\stream\serial.d">
       <Filter>src\router\stream</Filter>
     </DCompile>
     <DCompile Include="src\router\stream\tcp.d">
@@ -291,14 +306,8 @@
     <DCompile Include="src\router\stream\udp.d">
       <Filter>src\router\stream</Filter>
     </DCompile>
-    <DCompile Include="src\router\stream\serial.d">
-      <Filter>src\router\stream</Filter>
-    </DCompile>
     <DCompile Include="src\devices\goodwe\scanner.d">
       <Filter>src\devices\goodwe</Filter>
-    </DCompile>
-    <DCompile Include="src\router\stream\bridge.d">
-      <Filter>src\router\stream</Filter>
     </DCompile>
     <DCompile Include="src\manager\subscriber.d">
       <Filter>src\manager</Filter>
