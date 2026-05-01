@@ -70,14 +70,13 @@ struct ifreq_addr
 struct ifreq
 {
     char[IFNAMSIZ] ifr_name = 0;
-    union ifr_ifru
+    union
     {
-        ifreq_addr   addr;
-        short        flags;
-        int          ivalue;
-        ubyte[24]    raw;
+        ifreq_addr   ifru_addr;
+        short        ifru_flags;
+        int          ifru_ivalue;
+        ubyte[24]    ifru_raw;
     }
-    ifr_ifru ifr_ifru;
 }
 
 // `ioctl` request is `unsigned long`, which is 64-bit on LP64 and 32-bit on ILP32.
@@ -138,7 +137,7 @@ nothrow @nogc:
             close_fd();
             return false;
         }
-        ifindex = req.ifr_ifru.ivalue;
+        ifindex = req.ifru_ivalue;
 
         sockaddr_ll sll;
         sll.sll_family   = AF_PACKET;

@@ -246,13 +246,22 @@
     <DCompile Include="src\driver\ethernet.d">
       <Filter>src\driver</Filter>
     </DCompile>
+    <DCompile Include="src\driver\linux\ctrl_iface.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
     <DCompile Include="src\driver\linux\ethernet.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\hostapd.d">
       <Filter>src\driver\linux</Filter>
     </DCompile>
     <DCompile Include="src\driver\linux\raw.d">
       <Filter>src\driver\linux</Filter>
     </DCompile>
     <DCompile Include="src\driver\linux\wifi.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\wpa_supplicant.d">
       <Filter>src\driver\linux</Filter>
     </DCompile>
     <DCompile Include="src\driver\wifi.d">
@@ -361,6 +370,9 @@
       <Filter>src\manager</Filter>
     </DCompile>
     <DCompile Include="src\manager\os\iphlpapi.d">
+      <Filter>src\manager\os</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\os\netlink.d">
       <Filter>src\manager\os</Filter>
     </DCompile>
     <DCompile Include="src\manager\os\npcap.d">

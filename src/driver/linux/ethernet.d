@@ -13,6 +13,7 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
+import manager.os.netlink;
 import manager.os.sysfs;
 
 import driver.linux.raw;
@@ -22,21 +23,6 @@ import router.iface.ethernet;
 import router.iface.mac;
 
 nothrow @nogc:
-
-
-alias DevicesChangedHandler = void delegate() nothrow @nogc;
-
-// Register a callback to be invoked when the OS reports an adapter list change.
-// TODO: not yet wired -- callers should poll enumerate_adapters() as a fallback.
-//       Implementation: RTNetlink RTM_NEWLINK / RTM_DELLINK on a NETLINK_ROUTE
-//       socket; trampoline must marshal onto the main update tick before
-//       invoking the registered handler so consumers don't need to be thread-safe.
-void on_devices_changed(DevicesChangedHandler handler)
-{
-    g_devices_changed = handler;
-}
-
-private __gshared DevicesChangedHandler g_devices_changed;
 
 
 // ---------------------------------------------------------------------------
@@ -160,9 +146,9 @@ private:
 
 
 // ---------------------------------------------------------------------------
-// Driver module: scans /sys/class/net/, syncs the LinuxRawEthernet collection
-// against it. Subscribes the (currently stub) on_devices_changed hook for
-// future async hotplug; falls back to a 1Hz poll until netlink is wired.
+// Driver module: scans /sys/class/net/ at startup, then receives async
+// notifications from manager.os.netlink (RTM_NEWLINK / RTM_DELLINK) to keep
+// the LinuxRawEthernet collection in sync with the kernel's netdev list.
 // ---------------------------------------------------------------------------
 
 class LinuxRawEthernetModule : Module
@@ -172,7 +158,7 @@ nothrow @nogc:
 
     override void pre_init()
     {
-        on_devices_changed(&sync_adapters);
+        subscribe_link_changed(&on_link_changed);
         sync_adapters();
     }
 
@@ -181,17 +167,14 @@ nothrow @nogc:
         g_app.console.register_collection!LinuxRawEthernet();
     }
 
-    override void update()
+private:
+
+    void on_link_changed(uint, const(char)[], bool, bool)
     {
-        SysTime now = getSysTime();
-        if (now - _last_scan < 1.seconds)
-            return;
-        _last_scan = now;
+        // Coarse: any link event triggers a full rescan. Cheap (sysfs walk +
+        // small Set diff) and easier to reason about than per-event mutation.
         sync_adapters();
     }
-
-private:
-    SysTime _last_scan;
 
     void sync_adapters()
     {
