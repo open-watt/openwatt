@@ -43,6 +43,8 @@ enum CollectionType : ubyte
     ppp_server,
     pppoe_server,
     secret,
+    snmp_agent,
+    snmp_client,
     stream, // all streams
     sync_channel,
     sync_peer,
