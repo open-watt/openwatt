@@ -414,7 +414,7 @@ nothrow @nogc:
         if (uri == "/appliances")
             return handle_appliances_api(request, stream);
 
-        HTTPMessage response = create_response(request.http_version, 404, StringLit!"Not Found", StringLit!"application/json", "{\"error\":\"Not Found\"}");
+        HTTPMessage response = create_response(request.http_version, 404, StringLit!"application/json", "{\"error\":\"Not Found\"}");
         add_cors_headers(response);
         stream.write(response.format_message()[]);
         return 0;
@@ -424,7 +424,7 @@ nothrow @nogc:
     {
         if (!manager.main)
         {
-            HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", "{}");
+            HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", "{}");
             add_cors_headers(response);
             stream.write(response.format_message()[]);
             return 0;
@@ -438,7 +438,7 @@ nothrow @nogc:
 
         json ~= '}';
 
-        HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", json[]);
+        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", json[]);
         add_cors_headers(response);
         stream.write(response.format_message()[]);
         return 0;
@@ -591,7 +591,7 @@ nothrow @nogc:
 
         json ~= '}';
 
-        HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", json[]);
+        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", json[]);
         add_cors_headers(response);
         stream.write(response.format_message()[]);
         return 0;
