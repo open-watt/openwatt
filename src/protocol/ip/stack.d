@@ -223,6 +223,12 @@ nothrow @nogc:
         // TODO: raw_ip tunnel handler -> register for PacketType.raw (peek IP version byte)
     }
 
+    // Diagnostics access to the neighbour caches (for /protocol/ip/neighbour print).
+    ref inout(NeighbourCache!IPAddr) neighbour_v4_cache() inout pure return
+        => neighbour_v4;
+    ref inout(NeighbourCache!IPv6Addr) neighbour_v6_cache() inout pure return
+        => neighbour_v6;
+
 private:
 
     void ethernet_ingress(ref Packet pkt, BaseInterface iface)
