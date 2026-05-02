@@ -2,6 +2,8 @@ module driver.linux.wpa_supplicant;
 
 version (linux):
 
+import urt.result;
+
 public import driver.linux.ctrl_iface;
 
 nothrow @nogc:
@@ -12,7 +14,7 @@ nothrow @nogc:
 enum wpa_remote_dir = "/var/run/wpa_supplicant";
 enum wpa_local_tag  = "wpa";
 
-bool wpa_open(ref CtrlIface c, const(char)[] iface)
+StringResult wpa_open(ref CtrlIface c, const(char)[] iface)
     => c.open(iface, wpa_remote_dir, wpa_local_tag);
 
 

@@ -2,7 +2,8 @@ module driver.linux.raw;
 
 version (linux):
 
-import urt.log;
+import urt.mem.temp;
+import urt.result;
 import urt.string;
 import urt.time;
 
@@ -93,10 +94,7 @@ extern(C) nothrow @nogc
     int ioctl(int fd, c_ulong request, ...);
     ptrdiff_t recv(int fd, void* buf, size_t len, int flags);
     ptrdiff_t sendto(int fd, const(void)* buf, size_t len, int flags, const(void)* dest_addr, uint addrlen);
-    int* __errno_location();
 }
-
-private int last_errno() => *__errno_location();
 
 private ushort htons(ushort v) pure
 {
@@ -112,30 +110,26 @@ struct RawAdapter
 {
 nothrow @nogc:
 
-    bool open(const(char)[] adapter_name)
+    StringResult open(const(char)[] adapter_name)
     {
         fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
         if (fd < 0)
-        {
-            writeError("socket(AF_PACKET, SOCK_RAW) failed: errno=", last_errno());
-            return false;
-        }
+            return StringResult(tconcat("socket(AF_PACKET, SOCK_RAW) failed: errno=", errno_result().system_code));
 
         ifreq req;
         if (adapter_name.length >= IFNAMSIZ)
         {
-            writeError("adapter name too long: ", adapter_name);
             close_fd();
-            return false;
+            return StringResult(tconcat("adapter name '", adapter_name, "' too long"));
         }
         req.ifr_name[0 .. adapter_name.length] = adapter_name[];
         req.ifr_name[adapter_name.length] = 0;
 
         if (ioctl(fd, SIOCGIFINDEX, &req) < 0)
         {
-            writeError("SIOCGIFINDEX failed for '", adapter_name, "': errno=", last_errno());
+            auto msg = tconcat("SIOCGIFINDEX('", adapter_name, "') failed: errno=", errno_result().system_code);
             close_fd();
-            return false;
+            return StringResult(msg);
         }
         ifindex = req.ifru_ivalue;
 
@@ -145,9 +139,9 @@ nothrow @nogc:
         sll.sll_ifindex  = ifindex;
         if (bind(fd, &sll, sockaddr_ll.sizeof) < 0)
         {
-            writeError("bind(AF_PACKET) failed for '", adapter_name, "': errno=", last_errno());
+            auto msg = tconcat("bind(AF_PACKET, '", adapter_name, "') failed: errno=", errno_result().system_code);
             close_fd();
-            return false;
+            return StringResult(msg);
         }
 
         // Promiscuous: kernel refcounts per-socket and auto-clears on close,
@@ -157,23 +151,23 @@ nothrow @nogc:
         mr.mr_type    = PACKET_MR_PROMISC;
         if (setsockopt(fd, SOL_PACKET, PACKET_ADD_MEMBERSHIP, &mr, packet_mreq.sizeof) < 0)
         {
-            writeError("PACKET_ADD_MEMBERSHIP(PROMISC) failed for '", adapter_name, "': errno=", last_errno());
+            auto msg = tconcat("PACKET_ADD_MEMBERSHIP(PROMISC, '", adapter_name, "') failed: errno=", errno_result().system_code);
             close_fd();
-            return false;
+            return StringResult(msg);
         }
 
         int flags_val = fcntl(fd, F_GETFL, 0);
         if (flags_val < 0 || fcntl(fd, F_SETFL, flags_val | O_NONBLOCK) < 0)
         {
-            writeError("fcntl(O_NONBLOCK) failed for '", adapter_name, "': errno=", last_errno());
+            auto msg = tconcat("fcntl(O_NONBLOCK, '", adapter_name, "') failed: errno=", errno_result().system_code);
             close_fd();
-            return false;
+            return StringResult(msg);
         }
 
         int rcvbuf = 4 * 1024 * 1024;
         setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, rcvbuf.sizeof);
 
-        return true;
+        return StringResult.success;
     }
 
     void close()
@@ -182,17 +176,17 @@ nothrow @nogc:
     }
 
     // returns:  1 = got a frame; data points into rx_buf, valid until next poll
-    //           0 = no frame ready
-    //          -1 = error (already logged)
+    //           0 = no frame ready (EAGAIN / EWOULDBLOCK / EINTR)
+    //          -1 = error -- caller can read last_recv_error.system_code for errno
     int poll(out const(ubyte)[] data, out uint wire_len, out SysTime timestamp)
     {
         ptrdiff_t n = recv(fd, rx_buf.ptr, rx_buf.length, 0);
         if (n < 0)
         {
-            int e = last_errno();
-            if (e == EAGAIN_ || e == EWOULDBLOCK_ || e == EINTR_)
+            Result e = errno_result();
+            if (e.system_code == EAGAIN_ || e.system_code == EWOULDBLOCK_ || e.system_code == EINTR_)
                 return 0;
-            writeError("recv(AF_PACKET) failed: errno=", e);
+            last_recv_error = e;
             return -1;
         }
         if (n == 0)
@@ -203,6 +197,8 @@ nothrow @nogc:
         return 1;
     }
 
+    // Caller is responsible for tracking tx_drop counters; failures are not
+    // logged here (per-packet spam). Inspect last_send_error for diagnostics.
     bool send(const(ubyte)[] frame)
     {
         sockaddr_ll sll;
@@ -214,11 +210,14 @@ nothrow @nogc:
         ptrdiff_t n = sendto(fd, frame.ptr, frame.length, 0, &sll, sockaddr_ll.sizeof);
         if (n != cast(ptrdiff_t)frame.length)
         {
-            writeError("sendto(AF_PACKET) failed: errno=", last_errno());
+            last_send_error = errno_result();
             return false;
         }
         return true;
     }
+
+    Result last_send_error;
+    Result last_recv_error;
 
     bool valid() const pure => fd >= 0;
 

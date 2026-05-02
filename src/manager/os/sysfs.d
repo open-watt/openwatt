@@ -183,7 +183,7 @@ private void walk_netdevs(scope void delegate(const(char)[] name, const(char)[] 
     DIR* dir = opendir("/sys/class/net".ptr);
     if (dir is null)
     {
-        writeError("Failed to open /sys/class/net");
+        log_error("os.sysfs", "Failed to open /sys/class/net");
         return;
     }
     scope(exit) closedir(dir);

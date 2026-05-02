@@ -43,7 +43,7 @@ bool query_phy_capabilities(uint ifindex, out PhyCapabilities caps)
     int fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
     if (fd < 0)
     {
-        writeWarning("nl80211: socket() failed: errno=", last_errno());
+        log_warning("os.nl80211", "socket() failed: errno=", last_errno());
         return false;
     }
     scope(exit) urt.internal.sys.posix.close(fd);
@@ -52,7 +52,7 @@ bool query_phy_capabilities(uint ifindex, out PhyCapabilities caps)
     addr.nl_family = AF_NETLINK;
     if (bind(fd, &addr, sockaddr_nl.sizeof) < 0)
     {
-        writeWarning("nl80211: bind() failed: errno=", last_errno());
+        log_warning("os.nl80211", "bind() failed: errno=", last_errno());
         return false;
     }
 
@@ -109,7 +109,7 @@ bool resolve_family(int fd, const(char)[] name, out ushort family_id)
 
     if (sendto(fd, buf.ptr, off, 0, &kernel, sockaddr_nl.sizeof) != cast(ptrdiff_t)off)
     {
-        writeWarning("nl80211: family-resolve sendto failed: errno=", last_errno());
+        log_warning("os.nl80211", "family-resolve sendto failed: errno=", last_errno());
         return false;
     }
 
@@ -117,7 +117,7 @@ bool resolve_family(int fd, const(char)[] name, out ushort family_id)
     ptrdiff_t n = recv(fd, reply.ptr, reply.length, 0);
     if (n < 0)
     {
-        writeWarning("nl80211: family-resolve recv failed: errno=", last_errno());
+        log_warning("os.nl80211", "family-resolve recv failed: errno=", last_errno());
         return false;
     }
 
@@ -194,7 +194,7 @@ bool get_wiphy(int fd, ushort family_id, uint ifindex, out PhyCapabilities caps)
 
     if (sendto(fd, buf.ptr, off, 0, &kernel, sockaddr_nl.sizeof) != cast(ptrdiff_t)off)
     {
-        writeWarning("nl80211: get-wiphy sendto failed: errno=", last_errno());
+        log_warning("os.nl80211", "get-wiphy sendto failed: errno=", last_errno());
         return false;
     }
 
@@ -205,7 +205,7 @@ bool get_wiphy(int fd, ushort family_id, uint ifindex, out PhyCapabilities caps)
         ptrdiff_t n = recv(fd, reply.ptr, reply.length, 0);
         if (n < 0)
         {
-            writeWarning("nl80211: get-wiphy recv failed: errno=", last_errno());
+            log_warning("os.nl80211", "get-wiphy recv failed: errno=", last_errno());
             return false;
         }
         if (n == 0)

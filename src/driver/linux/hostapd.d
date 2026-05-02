@@ -3,7 +3,8 @@ module driver.linux.hostapd;
 version (linux):
 
 import urt.conv;
-import urt.log;
+import urt.mem.temp;
+import urt.result;
 
 import urt.internal.sys.posix;
 
@@ -25,37 +26,31 @@ enum hostapd_remote_dir = "/var/run/hostapd";
 enum hostapd_local_tag  = "ha";
 enum hostapd_config_dir = "/var/run/openwatt";
 
-bool hostapd_open(ref CtrlIface c, const(char)[] iface)
+StringResult hostapd_open(ref CtrlIface c, const(char)[] iface)
     => c.open(iface, hostapd_remote_dir, hostapd_local_tag);
 
 
 // Tell hostapd to re-read its config from disk and apply changes to the
-// running BSSes. Returns true on "OK" response.
-bool hostapd_reload(ref CtrlIface c)
-{
-    char[64] resp = void;
-    size_t n;
-    if (!c.send_command("RELOAD", resp[], n))
-        return false;
-    return n >= 2 && resp[0 .. 2] == "OK";
-}
+// running BSSes. Returns success on "OK" response.
+StringResult hostapd_reload(ref CtrlIface c)
+    => simple_command(c, "RELOAD");
 
-bool hostapd_disable(ref CtrlIface c)
-{
-    char[64] resp = void;
-    size_t n;
-    if (!c.send_command("DISABLE", resp[], n))
-        return false;
-    return n >= 2 && resp[0 .. 2] == "OK";
-}
+StringResult hostapd_disable(ref CtrlIface c)
+    => simple_command(c, "DISABLE");
 
-bool hostapd_enable(ref CtrlIface c)
+StringResult hostapd_enable(ref CtrlIface c)
+    => simple_command(c, "ENABLE");
+
+private StringResult simple_command(ref CtrlIface c, const(char)[] cmd)
 {
     char[64] resp = void;
     size_t n;
-    if (!c.send_command("ENABLE", resp[], n))
-        return false;
-    return n >= 2 && resp[0 .. 2] == "OK";
+    auto r = c.send_command(cmd, resp[], n);
+    if (r.failed)
+        return r;
+    if (n < 2 || resp[0 .. 2] != "OK")
+        return StringResult(tconcat(cmd, " refused: ", resp[0 .. n]));
+    return StringResult.success;
 }
 
 
@@ -119,11 +114,12 @@ struct HostapdStatus
     uint num_sta;
 }
 
-bool hostapd_query_status(ref CtrlIface c, ref HostapdStatus out_status, char[] buf)
+StringResult hostapd_query_status(ref CtrlIface c, ref HostapdStatus out_status, char[] buf)
 {
     size_t n;
-    if (!c.send_command("STATUS", buf, n))
-        return false;
+    auto r = c.send_command("STATUS", buf, n);
+    if (r.failed)
+        return r;
     out_status = HostapdStatus.init;
     foreach_kv(buf[0 .. n], (key, value) nothrow @nogc {
         if (key == "state")
@@ -150,7 +146,7 @@ bool hostapd_query_status(ref CtrlIface c, ref HostapdStatus out_status, char[] 
                 out_status.num_sta = cast(uint)v;
         }
     });
-    return true;
+    return StringResult.success;
 }
 
 
@@ -183,56 +179,41 @@ struct ApConfig
     BssConfig[] bsses;          // bsses[0] is primary; must be non-empty
 }
 
-bool write_hostapd_config(ref const ApConfig cfg)
+StringResult write_hostapd_config(ref const ApConfig cfg)
 {
     if (cfg.bsses.length == 0)
-    {
-        writeError("hostapd_config: no BSSes configured");
-        return false;
-    }
+        return StringResult("no BSSes configured");
     foreach (ref bss; cfg.bsses)
     {
         if (bss.iface.length == 0 || bss.iface.length > 32)
-        {
-            writeError("hostapd_config: bad BSS iface name");
-            return false;
-        }
+            return StringResult(tconcat("bad BSS iface name '", bss.iface, "'"));
     }
 
-    if (!ensure_dir(hostapd_config_dir))
-        return false;
+    auto rd = ensure_dir(hostapd_config_dir);
+    if (rd.failed)
+        return rd;
 
     char[256] path_buf = void;
     size_t plen = format_config_path(path_buf[], cfg.bsses[0].iface);
     if (plen == 0)
-    {
-        writeError("hostapd_config: path overflow");
-        return false;
-    }
+        return StringResult("config path overflow");
 
     char[4096] body_buf = void;
     size_t blen = format_config_body(body_buf[], cfg);
     if (blen == 0)
-    {
-        writeError("hostapd_config: body overflow");
-        return false;
-    }
+        return StringResult("config body overflow");
 
     int fd = open(path_buf.ptr, O_WRONLY | O_CREAT | O_TRUNC, octal!"600");
     if (fd < 0)
-    {
-        writeError("hostapd_config: open('", path_buf.ptr[0 .. plen], "') failed: errno=", last_errno());
-        return false;
-    }
+        return StringResult(tconcat("open('", path_buf.ptr[0 .. plen], "') failed: errno=", errno_result().system_code));
     scope(exit) close(fd);
 
     ssize_t wn = write(fd, body_buf.ptr, blen);
-    if (wn < 0 || cast(size_t)wn != blen)
-    {
-        writeError("hostapd_config: write failed: errno=", last_errno());
-        return false;
-    }
-    return true;
+    if (wn < 0)
+        return StringResult(tconcat("write('", path_buf.ptr[0 .. plen], "') failed: errno=", errno_result().system_code));
+    if (cast(size_t)wn != blen)
+        return StringResult(tconcat("write('", path_buf.ptr[0 .. plen], "') short: ", wn, "/", blen));
+    return StringResult.success;
 }
 
 
@@ -240,27 +221,21 @@ private:
 
 enum uint octal(string s) = cast(uint)parse_uint(s, null, 8);
 
-extern(C) nothrow @nogc int* __errno_location();
-int last_errno() => *__errno_location();
-
-bool ensure_dir(const(char)[] path)
+StringResult ensure_dir(const(char)[] path)
 {
     char[256] tmp = void;
     if (path.length + 1 > tmp.length)
-        return false;
+        return StringResult("dir path overflow");
     tmp[0 .. path.length] = path;
     tmp[path.length] = 0;
 
     stat_t st;
     if (stat(tmp.ptr, &st) == 0)
-        return S_ISREG(st.st_mode) ? false : true;  // exists; treat dir-or-symlink-to-dir as ok
+        return S_ISREG(st.st_mode) ? StringResult(tconcat("'", path, "' exists and is a regular file")) : StringResult.success;
 
     if (mkdir(tmp.ptr, octal!"700") < 0)
-    {
-        writeError("hostapd_config: mkdir('", path, "') failed: errno=", last_errno());
-        return false;
-    }
-    return true;
+        return StringResult(tconcat("mkdir('", path, "') failed: errno=", errno_result().system_code));
+    return StringResult.success;
 }
 
 size_t format_config_path(char[] dst, const(char)[] iface)
@@ -363,7 +338,6 @@ size_t format_config_body(char[] dst, ref const ApConfig cfg)
             case wpa3_enterprise:
                 // Enterprise auth (EAP) needs a RADIUS server config; not in v1.
                 // Caller should validate this isn't requested before generating.
-                writeError("hostapd_config: enterprise auth not supported in v1");
                 return false;
         }
         return true;

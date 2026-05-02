@@ -3,7 +3,8 @@ module driver.linux.ctrl_iface;
 version (linux):
 
 import urt.conv;
-import urt.log;
+import urt.mem.temp;
+import urt.result;
 import urt.string;
 import urt.time;
 
@@ -23,6 +24,11 @@ nothrow @nogc:
 // We don't ATTACH for events -- callers poll STATUS / SIGNAL_POLL / STA from
 // their own update() loop. This keeps the model synchronous and avoids
 // kernel-level event queuing surprises.
+//
+// All operations return urt.result.StringResult; failures carry a composed
+// detail line (syscall, path, errno) in the temp string buffer. Callers log
+// with their own log.error() so the OpenWatt object type and name appear in
+// the log output.
 
 struct CtrlIface
 {
@@ -32,29 +38,22 @@ nothrow @nogc:
     // local_tag:  short tag used in /tmp/openwatt_<tag>_... so two clients
     //             (one for wpa_supplicant, one for hostapd) on the same
     //             iface don't collide on their bind paths.
-    bool open(const(char)[] iface, const(char)[] remote_dir, const(char)[] local_tag)
+    StringResult open(const(char)[] iface, const(char)[] remote_dir, const(char)[] local_tag)
     {
         if (iface.length == 0 || iface.length >= 64)
-        {
-            writeError("ctrl_iface: iface name invalid: '", iface, "'");
-            return false;
-        }
+            return StringResult(tconcat("invalid iface name '", iface, "'"));
 
         fd = socket(AF_UNIX, SOCK_DGRAM, 0);
         if (fd < 0)
-        {
-            writeError("ctrl_iface(", local_tag, "): socket() failed: errno=", last_errno());
-            return false;
-        }
+            return StringResult(tconcat("socket(AF_UNIX) failed: errno=", errno_result().system_code));
 
         sockaddr_un local;
         local.sun_family = AF_UNIX;
         size_t lp = format_local_path(local.sun_path[], local_tag, iface);
         if (lp == 0 || lp >= local.sun_path.length)
         {
-            writeError("ctrl_iface(", local_tag, "): local path overflow");
             close_fd();
-            return false;
+            return StringResult("local path overflow");
         }
         _local_path[0 .. lp] = local.sun_path[0 .. lp];
         _local_path_len = lp;
@@ -62,9 +61,9 @@ nothrow @nogc:
         unlink(local.sun_path.ptr);  // stale leftover from a previous run
         if (bind(fd, &local, cast(uint)(ushort.sizeof + lp + 1)) < 0)
         {
-            writeError("ctrl_iface(", local_tag, "): bind('", local.sun_path.ptr[0 .. lp], "') failed: errno=", last_errno());
+            auto msg = tconcat("bind('", local.sun_path.ptr[0 .. lp], "') failed: errno=", errno_result().system_code);
             close_fd();
-            return false;
+            return StringResult(msg);
         }
 
         sockaddr_un remote;
@@ -72,15 +71,14 @@ nothrow @nogc:
         size_t rp = format_remote_path(remote.sun_path[], remote_dir, iface);
         if (rp == 0 || rp >= remote.sun_path.length)
         {
-            writeError("ctrl_iface(", local_tag, "): remote path overflow");
             close_fd();
-            return false;
+            return StringResult("remote path overflow");
         }
         if (connect(fd, &remote, cast(uint)(ushort.sizeof + rp + 1)) < 0)
         {
-            writeError("ctrl_iface(", local_tag, "): connect('", remote.sun_path.ptr[0 .. rp], "') failed (is the daemon running on '", iface, "'?): errno=", last_errno());
+            auto msg = tconcat("connect('", remote.sun_path.ptr[0 .. rp], "') failed (is the daemon running on '", iface, "'?): errno=", errno_result().system_code);
             close_fd();
-            return false;
+            return StringResult(msg);
         }
 
         // Cap recv blocking. STATUS/SIGNAL_POLL respond instantly; CONNECT-
@@ -91,7 +89,7 @@ nothrow @nogc:
         tv.tv_usec = 200_000;
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, timeval.sizeof);
 
-        return true;
+        return StringResult.success;
     }
 
     void close()
@@ -105,38 +103,39 @@ nothrow @nogc:
     // Send `cmd`, read response into `buf`. Drops <N>-prefixed unsolicited
     // events that may have been queued (defensive -- we don't ATTACH, but
     // the kernel still buffers).
-    bool send_command(const(char)[] cmd, char[] buf, out size_t out_len)
+    //
+    // EAGAIN/EWOULDBLOCK come back as a normal failure with a "recv timed
+    // out" message -- the caller can decide whether to log it (most don't,
+    // since it just means the daemon hasn't replied yet within the 200ms
+    // recv timeout).
+    StringResult send_command(const(char)[] cmd, char[] buf, out size_t out_len)
     {
         if (fd < 0)
-            return false;
+            return StringResult("ctrl socket not open");
 
         if (send(fd, cmd.ptr, cmd.length, 0) != cast(ptrdiff_t)cmd.length)
-        {
-            writeError("ctrl_iface: send failed: errno=", last_errno());
-            return false;
-        }
+            return StringResult(tconcat("send('", cmd, "') failed: errno=", errno_result().system_code));
 
         for (uint tries = 0; tries < 4; ++tries)
         {
             ptrdiff_t n = recv(fd, buf.ptr, buf.length, 0);
             if (n < 0)
             {
-                int e = last_errno();
-                if (e == EAGAIN_ || e == EWOULDBLOCK_)
-                    return false;
+                uint e = errno_result().system_code;
                 if (e == EINTR_)
                     continue;
-                writeError("ctrl_iface: recv failed: errno=", e);
-                return false;
+                if (e == EAGAIN_ || e == EWOULDBLOCK_)
+                    return StringResult(tconcat("recv('", cmd, "') timed out"));
+                return StringResult(tconcat("recv('", cmd, "') failed: errno=", e));
             }
             if (n == 0)
                 continue;
             if (buf[0] == '<')
                 continue;
             out_len = cast(size_t)n;
-            return true;
+            return StringResult.success;
         }
-        return false;
+        return StringResult(tconcat("recv('", cmd, "') only saw events; no reply"));
     }
 
     int fd = -1;
@@ -233,10 +232,7 @@ extern(C) nothrow @nogc
     ptrdiff_t send(int fd, const(void)* buf, size_t len, int flags);
     ptrdiff_t recv(int fd, void* buf, size_t len, int flags);
     int getpid();
-    int* __errno_location();
 }
-
-int last_errno() => *__errno_location();
 
 __gshared uint g_local_counter;
 
@@ -298,4 +294,3 @@ size_t format_remote_path(char[] dst, const(char)[] dir, const(char)[] iface)
     }
     return i;
 }
-

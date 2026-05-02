@@ -163,10 +163,7 @@ protected:
 
         // ctrl_iface sockets are best-effort: each daemon may or may not
         // be running. Packet path keeps working regardless.
-        if (!_wpa.valid)
-            wpa_open(_wpa, _adapter[]);
-        if (!_hostapd.valid)
-            hostapd_open(_hostapd, _adapter[]);
+        try_open_daemons();
 
         SysTime now = getSysTime();
         if (now - _last_refresh >= 1.seconds)
@@ -324,6 +321,52 @@ private:
     // queries) somewhere obvious to live.
     CtrlIface _wpa;
     CtrlIface _hostapd;
+    bool _wpa_open_failure_logged;
+    bool _hostapd_open_failure_logged;
+
+    // Open whichever ctrl sockets aren't already open. Failures log once per
+    // failure cycle (transition into the failed state) and once on recovery,
+    // since startup() / refresh_state() retry every tick or every second.
+    void try_open_daemons()
+    {
+        if (!_wpa.valid)
+        {
+            auto r = wpa_open(_wpa, _adapter[]);
+            if (r.failed)
+            {
+                if (!_wpa_open_failure_logged)
+                {
+                    log.warning("wpa_supplicant: ", r.message);
+                    _wpa_open_failure_logged = true;
+                }
+            }
+            else
+            {
+                if (_wpa_open_failure_logged)
+                    log.info("wpa_supplicant: ctrl socket connected");
+                _wpa_open_failure_logged = false;
+            }
+        }
+
+        if (!_hostapd.valid)
+        {
+            auto r = hostapd_open(_hostapd, _adapter[]);
+            if (r.failed)
+            {
+                if (!_hostapd_open_failure_logged)
+                {
+                    log.warning("hostapd: ", r.message);
+                    _hostapd_open_failure_logged = true;
+                }
+            }
+            else
+            {
+                if (_hostapd_open_failure_logged)
+                    log.info("hostapd: ctrl socket connected");
+                _hostapd_open_failure_logged = false;
+            }
+        }
+    }
 
     void refresh_state()
     {
@@ -334,10 +377,7 @@ private:
         // until nl80211 lands.
 
         // Retry ctrl_iface connections -- daemons may have launched after us.
-        if (!_wpa.valid)
-            wpa_open(_wpa, _adapter[]);
-        if (!_hostapd.valid)
-            hostapd_open(_hostapd, _adapter[]);
+        try_open_daemons();
 
         OSAdapterInfo info;
         if (!query_adapter(_adapter[], info))
@@ -357,7 +397,9 @@ private:
 
         if (bound_aps.length == 0)
         {
-            hostapd_disable(_hostapd);
+            auto r = hostapd_disable(_hostapd);
+            if (r.failed)
+                log.warning("hostapd disable: ", r.message);
             _last_synced_channel = 0;
             return;
         }
@@ -368,8 +410,7 @@ private:
         enum max_bsses = 8;
         if (bound_aps.length > max_bsses)
         {
-            writeError("LinuxWifiRadio: too many APs bound to '", _adapter, "' (",
-                bound_aps.length, ", max ", max_bsses, ")");
+            log.error("too many APs bound (", bound_aps.length, ", max ", max_bsses, ")");
             return;
         }
 
@@ -387,14 +428,22 @@ private:
         cfg.channel = target_channel();
         cfg.bsses = bss_storage[0 .. bound_aps.length];
 
-        if (!write_hostapd_config(cfg))
+        auto rw = write_hostapd_config(cfg);
+        if (rw.failed)
+        {
+            log.error("hostapd config: ", rw.message);
             return;
+        }
 
         // ENABLE is idempotent if already enabled; RELOAD picks up the new
         // config-on-disk for any subsequent change. hostapd creates / destroys
         // bss= VIFs as part of RELOAD via its nl80211 driver.
-        hostapd_enable(_hostapd);
-        hostapd_reload(_hostapd);
+        auto re = hostapd_enable(_hostapd);
+        if (re.failed)
+            log.warning("hostapd enable: ", re.message);
+        auto rr = hostapd_reload(_hostapd);
+        if (rr.failed)
+            log.warning("hostapd reload: ", rr.message);
         _last_synced_channel = cfg.channel;
     }
 }
@@ -467,8 +516,15 @@ protected:
             return result;
 
         auto r = cast(LinuxWifiRadio)radio;
-        if (!_raw.valid && !_raw.open(r.adapter))
-            return CompletionStatus.error;
+        if (!_raw.valid)
+        {
+            auto rr = _raw.open(r.adapter);
+            if (rr.failed)
+            {
+                log.error(rr.message);
+                return CompletionStatus.error;
+            }
+        }
 
         // wpa_supplicant lives on the radio (open in radio.startup, retried
         // in radio.refresh_state). If it's available and we have a configured
@@ -566,6 +622,7 @@ private:
     int _current_rssi;
     ubyte _signal_quality;
     WpaState _wpa_state = WpaState.unknown;
+    bool _wpa_status_failure_logged;
 
     void clear_wpa_state()
     {
@@ -587,12 +644,19 @@ private:
 
         char[2048] buf = void;
         size_t n;
-        if (!r._wpa.send_command("STATUS", buf[], n))
+        auto rs = r._wpa.send_command("STATUS", buf[], n);
+        if (rs.failed)
         {
+            if (!_wpa_status_failure_logged)
+            {
+                log.warning("wpa STATUS: ", rs.message);
+                _wpa_status_failure_logged = true;
+            }
             clear_wpa_state();
             mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality", "status" ])();
             return;
         }
+        _wpa_status_failure_logged = false;
 
         WpaState new_state;
         const(char)[] new_ssid_view;
@@ -644,7 +708,7 @@ private:
         }
         _current_bssid = got_bssid ? new_bssid : MACAddress();
 
-        if (new_state == WpaState.completed && r._wpa.send_command("SIGNAL_POLL", buf[], n))
+        if (new_state == WpaState.completed && r._wpa.send_command("SIGNAL_POLL", buf[], n).succeeded)
         {
             int rssi_dbm;
             bool got_rssi;
@@ -684,9 +748,10 @@ private:
         // accumulate duplicate networks across reconnect cycles.
         wpa.send_command("REMOVE_NETWORK all", resp[], n);
 
-        if (!wpa.send_command("ADD_NETWORK", resp[], n) || n == 0)
+        auto ra = wpa.send_command("ADD_NETWORK", resp[], n);
+        if (ra.failed || n == 0)
         {
-            writeError("wpa_supplicant: ADD_NETWORK failed");
+            log.error("wpa ADD_NETWORK: ", ra.failed ? ra.message : "empty response");
             return;
         }
         size_t end = 0;
@@ -695,7 +760,7 @@ private:
         const(char)[] id = resp[0 .. end];
         if (id.length == 0)
         {
-            writeError("wpa_supplicant: ADD_NETWORK returned no id");
+            log.error("wpa ADD_NETWORK: returned no id");
             return;
         }
 
@@ -703,20 +768,20 @@ private:
         size_t l;
 
         l = format_set_network(cmd[], id, "ssid", super.ssid, true);
-        if (l == 0 || !wpa.send_command(cmd[0 .. l], resp[], n))
+        if (l == 0 || wpa.send_command(cmd[0 .. l], resp[], n).failed)
             return;
 
         const(char)[] pwd = get_password();
         if (pwd.length > 0)
         {
             l = format_set_network(cmd[], id, "psk", pwd, true);
-            if (l == 0 || !wpa.send_command(cmd[0 .. l], resp[], n))
+            if (l == 0 || wpa.send_command(cmd[0 .. l], resp[], n).failed)
                 return;
         }
         else
         {
             l = format_set_network(cmd[], id, "key_mgmt", "NONE", false);
-            if (l == 0 || !wpa.send_command(cmd[0 .. l], resp[], n))
+            if (l == 0 || wpa.send_command(cmd[0 .. l], resp[], n).failed)
                 return;
         }
 
@@ -811,12 +876,23 @@ protected:
 
         // For non-primary APs the VIF is created by hostapd on RELOAD; if it
         // isn't there yet, retry on the next tick.
-        if (!_raw.valid && !_raw.open(vif))
-            return CompletionStatus.continue_;
+        if (!_raw.valid)
+        {
+            auto rr = _raw.open(vif);
+            if (rr.failed)
+            {
+                if (!_raw_open_failure_logged)
+                {
+                    log.warning(rr.message);
+                    _raw_open_failure_logged = true;
+                }
+                return CompletionStatus.continue_;
+            }
+            _raw_open_failure_logged = false;
+        }
 
         // Per-BSS hostapd ctrl socket; best-effort.
-        if (!_hostapd.valid)
-            hostapd_open(_hostapd, vif);
+        try_open_hostapd(vif);
 
         return CompletionStatus.complete;
     }
@@ -843,9 +919,20 @@ protected:
             if (vif.length > 0)
             {
                 if (!_raw.valid)
-                    _raw.open(vif);
-                if (!_hostapd.valid)
-                    hostapd_open(_hostapd, vif);
+                {
+                    auto rr = _raw.open(vif);
+                    if (rr.failed)
+                    {
+                        if (!_raw_open_failure_logged)
+                        {
+                            log.warning(rr.message);
+                            _raw_open_failure_logged = true;
+                        }
+                    }
+                    else
+                        _raw_open_failure_logged = false;
+                }
+                try_open_hostapd(vif);
             }
         }
 
@@ -887,6 +974,9 @@ private:
     CtrlIface _hostapd;
     HostapdHwState _hostapd_state;
     SysTime _last_refresh;
+    bool _raw_open_failure_logged;
+    bool _hostapd_open_failure_logged;
+    bool _hostapd_status_failure_logged;
 
     // Returns empty slice if the radio isn't a LinuxWifiRadio or we aren't
     // bound (transitional states; caller should retry).
@@ -894,6 +984,27 @@ private:
     {
         auto r = cast(const(LinuxWifiRadio))radio;
         return r ? r.vif_for(this) : null;
+    }
+
+    void try_open_hostapd(const(char)[] vif)
+    {
+        if (_hostapd.valid)
+            return;
+        auto r = hostapd_open(_hostapd, vif);
+        if (r.failed)
+        {
+            if (!_hostapd_open_failure_logged)
+            {
+                log.warning("hostapd: ", r.message);
+                _hostapd_open_failure_logged = true;
+            }
+        }
+        else
+        {
+            if (_hostapd_open_failure_logged)
+                log.info("hostapd: ctrl socket connected");
+            _hostapd_open_failure_logged = false;
+        }
     }
 
     void refresh_ap_state()
@@ -906,11 +1017,18 @@ private:
 
         char[2048] buf = void;
         HostapdStatus s;
-        if (!hostapd_query_status(_hostapd, s, buf[]))
+        auto rs = hostapd_query_status(_hostapd, s, buf[]);
+        if (rs.failed)
         {
+            if (!_hostapd_status_failure_logged)
+            {
+                log.warning("hostapd STATUS: ", rs.message);
+                _hostapd_status_failure_logged = true;
+            }
             _hostapd_state = HostapdHwState.unknown;
             return;
         }
+        _hostapd_status_failure_logged = false;
 
         _hostapd_state = s.hw_state;
 
@@ -1016,7 +1134,7 @@ private:
             if (!present)
             {
                 auto base = next_radio_name();
-                writeInfo("Found wifi interface: \"", description, "\" (", name, ")");
+                log_info(ModuleName, "Found wifi interface: \"", description, "\" (", name, ")");
 
                 auto radio = Collection!LinuxWifiRadio().create(tconcat(base, "-radio"));
                 radio.adapter = name;
@@ -1047,7 +1165,7 @@ private:
         }
         foreach (r; gone[])
         {
-            writeInfo("Wifi adapter gone: ", r.adapter);
+            log_info(ModuleName, "Wifi adapter gone: ", r.adapter);
             Array!LinuxWlan paired;
             foreach (w; Collection!LinuxWlan().values)
                 if (cast(LinuxWifiRadio)w.radio is r)

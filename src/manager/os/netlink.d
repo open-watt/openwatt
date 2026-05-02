@@ -45,7 +45,7 @@ nothrow @nogc:
         _fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_ROUTE);
         if (_fd < 0)
         {
-            writeError("netlink socket() failed: errno=", last_errno());
+            log_error("os.netlink", "socket() failed: errno=", last_errno());
             return;
         }
 
@@ -54,7 +54,7 @@ nothrow @nogc:
         addr.nl_groups = (1 << (RTNLGRP_LINK - 1));
         if (bind(_fd, &addr, sockaddr_nl.sizeof) < 0)
         {
-            writeError("netlink bind() failed: errno=", last_errno());
+            log_error("os.netlink", "bind() failed: errno=", last_errno());
             close(_fd);
             _fd = -1;
             return;
@@ -63,7 +63,7 @@ nothrow @nogc:
         int flags = fcntl(_fd, F_GETFL, 0);
         if (flags < 0 || fcntl(_fd, F_SETFL, flags | O_NONBLOCK) < 0)
         {
-            writeError("netlink fcntl(O_NONBLOCK) failed: errno=", last_errno());
+            log_error("os.netlink", "fcntl(O_NONBLOCK) failed: errno=", last_errno());
             close(_fd);
             _fd = -1;
             return;
@@ -84,7 +84,7 @@ nothrow @nogc:
                 int e = last_errno();
                 if (e == EAGAIN_ || e == EWOULDBLOCK_ || e == EINTR_)
                     return;
-                writeError("netlink recv failed: errno=", e);
+                log_error("os.netlink", "recv failed: errno=", e);
                 return;
             }
             if (n == 0)
@@ -112,7 +112,7 @@ private:
             if (hdr.nlmsg_type == NLMSG_DONE)
                 return;
             if (hdr.nlmsg_type == NLMSG_ERROR)
-                writeWarning("netlink reported an error message");
+                log_warning("os.netlink", "kernel returned an error message");
             else if (hdr.nlmsg_type == RTM_NEWLINK || hdr.nlmsg_type == RTM_DELLINK)
                 handle_link(hdr.nlmsg_type == RTM_DELLINK, data[nlmsghdr.sizeof .. len]);
 

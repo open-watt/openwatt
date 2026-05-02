@@ -62,8 +62,15 @@ nothrow @nogc:
 
     override CompletionStatus startup()
     {
-        if (!_raw.valid && !_raw.open(_adapter[]))
-            return CompletionStatus.error;
+        if (!_raw.valid)
+        {
+            auto r = _raw.open(_adapter[]);
+            if (r.failed)
+            {
+                log.error(r.message);
+                return CompletionStatus.error;
+            }
+        }
 
         SysTime now = getSysTime();
         if (now - _last_refresh >= 1.seconds)
@@ -192,7 +199,7 @@ private:
             if (!present)
             {
                 auto iface_name = next_iface_name();
-                writeInfo("Found ethernet interface: \"", description, "\" (", name, ")");
+                log_info(ModuleName, "Found ethernet interface: \"", description, "\" (", name, ")");
                 auto iface = Collection!LinuxRawEthernet().create(iface_name);
                 iface.adapter = name;
                 if (description.length > 0)
@@ -219,7 +226,7 @@ private:
         }
         foreach (e; gone[])
         {
-            writeInfo("Ethernet adapter gone: ", e.adapter);
+            log_info(ModuleName, "Ethernet adapter gone: ", e.adapter);
             Collection!LinuxRawEthernet().remove(e);
         }
     }

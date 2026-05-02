@@ -158,7 +158,7 @@ void crt_bootup()
     _iphlpapi = LoadLibraryA("iphlpapi.dll");
     if (!_iphlpapi)
     {
-        writeWarning("Failed to load iphlpapi.dll; OS adapter info unavailable.");
+        log_warning("os.iphlpapi", "Failed to load iphlpapi.dll; OS adapter info unavailable.");
         return;
     }
     GetAdaptersAddresses = cast(typeof(GetAdaptersAddresses))GetProcAddress(_iphlpapi, "GetAdaptersAddresses");

@@ -72,14 +72,14 @@ HMODULE init_npcap()
     HMODULE lib = LoadLibraryA("wpcap.dll");
     if (lib is null)
     {
-        writeWarning("Failed to load npcap. Promiscuous access to ethernet interfaces will be unavailable.");
+        log_warning("os.npcap", "Failed to load npcap. Promiscuous access to ethernet interfaces will be unavailable.");
         return null;
     }
 
     pcap_findalldevs = cast(typeof(pcap_findalldevs))GetProcAddress(lib, "pcap_findalldevs");
     if (!pcap_findalldevs)
     {
-        writeWarning("Failed to load npcap. Promiscuous access to ethernet interfaces will be unavailable.");
+        log_warning("os.npcap", "Failed to load npcap. Promiscuous access to ethernet interfaces will be unavailable.");
         FreeLibrary(lib);
         return null;
     }
