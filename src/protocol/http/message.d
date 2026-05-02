@@ -655,6 +655,61 @@ HTTPMessage create_response(HTTPVersion http_version, ushort status_code, String
     return msg;
 }
 
+HTTPMessage create_response(HTTPVersion http_version, ushort status_code, String content_type, const(void)[] content)
+    => create_response(http_version, status_code, status_text(status_code), content_type.move, content);
+
+String status_text(ushort code)
+{
+    switch (code)
+    {
+        case 100: return StringLit!"Continue";
+        case 101: return StringLit!"Switching Protocols";
+        case 200: return StringLit!"OK";
+        case 201: return StringLit!"Created";
+        case 202: return StringLit!"Accepted";
+        case 204: return StringLit!"No Content";
+        case 205: return StringLit!"Reset Content";
+        case 206: return StringLit!"Partial Content";
+        case 301: return StringLit!"Moved Permanently";
+        case 302: return StringLit!"Found";
+        case 303: return StringLit!"See Other";
+        case 304: return StringLit!"Not Modified";
+        case 307: return StringLit!"Temporary Redirect";
+        case 308: return StringLit!"Permanent Redirect";
+        case 400: return StringLit!"Bad Request";
+        case 401: return StringLit!"Unauthorized";
+        case 403: return StringLit!"Forbidden";
+        case 404: return StringLit!"Not Found";
+        case 405: return StringLit!"Method Not Allowed";
+        case 406: return StringLit!"Not Acceptable";
+        case 408: return StringLit!"Request Timeout";
+        case 409: return StringLit!"Conflict";
+        case 410: return StringLit!"Gone";
+        case 411: return StringLit!"Length Required";
+        case 412: return StringLit!"Precondition Failed";
+        case 413: return StringLit!"Payload Too Large";
+        case 414: return StringLit!"URI Too Long";
+        case 415: return StringLit!"Unsupported Media Type";
+        case 416: return StringLit!"Range Not Satisfiable";
+        case 417: return StringLit!"Expectation Failed";
+        case 426: return StringLit!"Upgrade Required";
+        case 429: return StringLit!"Too Many Requests";
+        case 500: return StringLit!"Internal Server Error";
+        case 501: return StringLit!"Not Implemented";
+        case 502: return StringLit!"Bad Gateway";
+        case 503: return StringLit!"Service Unavailable";
+        case 504: return StringLit!"Gateway Timeout";
+        case 505: return StringLit!"HTTP Version Not Supported";
+        default:
+            if (code >= 100 && code < 200) return StringLit!"Informational";
+            if (code >= 200 && code < 300) return StringLit!"Success";
+            if (code >= 300 && code < 400) return StringLit!"Redirection";
+            if (code >= 400 && code < 500) return StringLit!"Bad Request";
+            if (code >= 500 && code < 600) return StringLit!"Internal Server Error";
+            return StringLit!"Error";
+    }
+}
+
 void add_cors_headers(ref HTTPMessage response)
 {
     response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Origin", StringLit!"*");

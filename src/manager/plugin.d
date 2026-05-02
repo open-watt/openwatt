@@ -123,6 +123,9 @@ void register_modules(Application app)
 
     import apps.energy;
     register_module!(apps.energy)(app);
+
+    import apps.ota;
+    register_module!(apps.ota)(app);
 }
 
 

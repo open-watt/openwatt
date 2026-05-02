@@ -561,7 +561,7 @@ private:
 
             // implement default response...
             enum message_body = "OpenWatt Webserver";
-            HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"text/plain", message_body);
+            HTTPMessage response = create_response(request.http_version, 200, StringLit!"text/plain", message_body);
             stream.write(response.format_message()[]);
 
             return 0;
