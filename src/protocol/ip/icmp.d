@@ -3,6 +3,7 @@ module protocol.ip.icmp;
 import urt.hash;
 import urt.inet;
 import urt.log;
+import urt.time;
 
 import router.iface.packet;
 
@@ -82,6 +83,17 @@ void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, ref const Packet
         ubyte oicmp_type = (cast(const(ubyte)*)original.data.ptr)[oip_hdr_len];
         if (is_icmp_error_type(oicmp_type))
             return;
+    }
+
+    // RFC 1812 §4.3.2.8: rate-limit error generation per type.
+    if (auto rl = rate_limiter_for(type))
+    {
+        if (!rl.consume(getTime()))
+        {
+            version (DebugICMP)
+                write_log(Severity.trace, "icmp", null, "rate-limit drop type=", type, " code=", code);
+            return;
+        }
     }
 
     IPAddr src = stack.select_source_v4(oip.src);
@@ -177,10 +189,48 @@ void icmp_input(ref IPStack stack, ref Packet pkt)
         case IcmpType.echo_reply:
             // TODO: notify ping client (we don't have one yet)
             break;
+        case IcmpType.dest_unreachable:
+            handle_dest_unreachable(stack, icmp);
+            break;
         default:
-            // TODO: dest_unreachable / time_exceeded -> notify upper layers
+            // TODO: time_exceeded -> notify upper layers
             break;
     }
+}
+
+
+void handle_dest_unreachable(ref IPStack stack, const(ubyte)[] icmp)
+{
+    import protocol.ip.tcp : tcp_handle_unreachable;
+
+    // ICMP body: 1B type, 1B code, 2B checksum, 4B rest-of-header,
+    // then quoted original IP header + first 8B of original payload.
+    if (icmp.length < IcmpHeader.sizeof + 4 + IPv4Header.sizeof)
+        return;
+
+    ubyte code = icmp[1];
+    uint code_data = (uint(icmp[4]) << 24) | (uint(icmp[5]) << 16)
+                   | (uint(icmp[6]) << 8)  |  uint(icmp[7]);
+
+    const(ubyte)[] inner = icmp[IcmpHeader.sizeof + 4 .. $];
+    auto inner_ip = cast(const IPv4Header*)inner.ptr;
+    if (inner_ip.version_ != 4)
+        return;
+    size_t inner_hdr_len = inner_ip.ihl * 4;
+    if (inner_hdr_len < IPv4Header.sizeof || inner.length < inner_hdr_len + 8)
+        return;
+
+    if (inner_ip.protocol == IpProtocol.tcp)
+    {
+        const(ubyte)[] tcp8 = inner[inner_hdr_len .. inner_hdr_len + 8];
+        ushort src_port = (ushort(tcp8[0]) << 8) | tcp8[1];
+        ushort dst_port = (ushort(tcp8[2]) << 8) | tcp8[3];
+        // inner_ip.src is *us* (the original sender), inner_ip.dst is the peer.
+        tcp_handle_unreachable(stack, code, code_data,
+                               inner_ip.src, src_port,
+                               inner_ip.dst, dst_port);
+    }
+    // TODO: UDP unreachables -> notify socket layer
 }
 
 
@@ -238,5 +288,55 @@ bool is_icmp_error_type(ubyte type) pure
             return true;
         default:
             return false;
+    }
+}
+
+// Token bucket: 1 token per second sustained, 6 token burst. Credit is held
+// in milliseconds (1 token = 1000 ms credit) to avoid floating-point.
+struct RateLimiter
+{
+nothrow @nogc:
+    enum uint burst_ms     = 6_000;
+    enum uint per_token_ms = 1_000;
+
+    uint     credit_ms;
+    MonoTime last_check;
+
+    bool consume(MonoTime now)
+    {
+        if (last_check.ticks == 0)
+        {
+            credit_ms = burst_ms;
+        }
+        else
+        {
+            long elapsed = (now - last_check).as!"msecs";
+            if (elapsed > 0)
+            {
+                ulong nc = ulong(credit_ms) + ulong(elapsed);
+                credit_ms = nc > burst_ms ? burst_ms : cast(uint)nc;
+            }
+        }
+        last_check = now;
+
+        if (credit_ms < per_token_ms)
+            return false;
+        credit_ms -= per_token_ms;
+        return true;
+    }
+}
+
+__gshared RateLimiter _rl_dest_unreachable;
+__gshared RateLimiter _rl_time_exceeded;
+__gshared RateLimiter _rl_parameter_problem;
+
+RateLimiter* rate_limiter_for(ubyte type)
+{
+    switch (type)
+    {
+        case IcmpType.dest_unreachable:  return &_rl_dest_unreachable;
+        case IcmpType.time_exceeded:     return &_rl_time_exceeded;
+        case IcmpType.parameter_problem: return &_rl_parameter_problem;
+        default:                         return null;
     }
 }
