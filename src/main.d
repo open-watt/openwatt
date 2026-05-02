@@ -26,6 +26,12 @@ nothrow @nogc:
 
 int main(string[] args)
 {
+    version (linux) debug
+    {
+        import urt.driver.posix.crash_handler : install_crash_handlers;
+        install_crash_handlers();
+    }
+
     // parse command line arguments
     bool interactive_mode = false;
     const(char)[] config_path = "conf/startup.conf";
