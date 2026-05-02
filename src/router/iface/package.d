@@ -17,6 +17,7 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
+import router.iface.group;
 import router.iface.vlan;
 
 public import router.iface.packet;
@@ -25,6 +26,7 @@ public import router.status;
 // package modules...
 public static import router.iface.bridge;
 public static import router.iface.ethernet;
+public static import router.iface.group;
 public static import router.iface.vlan;
 public static import router.iface.wifi;
 public static import router.iface.zigbee;
@@ -717,6 +719,7 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.console.register_collection!InterfaceGroup();
         g_app.console.register_collection!VLANInterface();
     }
 

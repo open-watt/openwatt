@@ -188,6 +188,7 @@
     <DCompile Include="src\router\iface\address_table.d" />
     <DCompile Include="src\router\iface\bridge.d" />
     <DCompile Include="src\router\iface\ethernet.d" />
+    <DCompile Include="src\router\iface\group.d" />
     <DCompile Include="src\router\iface\mac.d" />
     <DCompile Include="src\router\iface\package.d" />
     <DCompile Include="src\router\iface\packet.d" />
