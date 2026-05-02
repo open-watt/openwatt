@@ -220,7 +220,6 @@ private:
         Packet p;
         p.init!Ethernet(msg);
         p.creation_time = recv_time;
-        p.vlan = _pvid;
         p.eth.ether_type = EtherType.ow;
         p.eth.ow_sub_type = OW_SubType.tesla_twc;
 

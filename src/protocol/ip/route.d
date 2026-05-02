@@ -8,6 +8,8 @@ import manager;
 import manager.base;
 import manager.collection;
 
+import protocol.ip.stack : bump_route_generation;
+
 import router.iface;
 
 nothrow @nogc:
@@ -31,6 +33,11 @@ nothrow @nogc:
         super(collection_type_info!IPRoute, id, flags);
     }
 
+    ~this()
+    {
+        bump_route_generation();
+    }
+
     // Properties
     IPNetworkAddress destination() const pure
         => _destination;
@@ -38,20 +45,20 @@ nothrow @nogc:
     {
         _destination = IPNetworkAddress(value.get_network, value.prefix_len);
         mark_set!(typeof(this), "destination")();
+        bump_route_generation();
     }
 
     IPAddr gateway() const pure
         => _gateway;
     const(char)[] gateway(IPAddr value)
     {
-        if (value != IPAddr.any)
+        if (value == IPAddr.any)
             return "gateway cannot be 0.0.0.0";
-        _iface = null;
         _gateway = value;
         _blackhole = false;
         mark_set!(typeof(this), "gateway")();
-        mark_set!(typeof(this), "out-interface")();
         mark_set!(typeof(this), "blackhole")();
+        bump_route_generation();
         return null;
     }
 
@@ -63,12 +70,11 @@ nothrow @nogc:
             return "interface cannot be null";
         if (_iface is value)
             return null;
-        _gateway = IPAddr();
         _iface = value;
         _blackhole = false;
-        mark_set!(typeof(this), "gateway")();
         mark_set!(typeof(this), "out-interface")();
         mark_set!(typeof(this), "blackhole")();
+        bump_route_generation();
         return null;
     }
 
@@ -76,15 +82,21 @@ nothrow @nogc:
         => _blackhole;
     void blackhole(bool value)
     {
+        if (value)
+        {
+            _gateway = IPAddr();
+            _iface = null;
+        }
         _blackhole = value;
         mark_set!(typeof(this), "blackhole")();
+        bump_route_generation();
     }
 
     ubyte distance() const pure
     {
         return _distance;
     }
-    void distance(bool value)
+    void distance(ubyte value)
     {
         _distance = value;
         mark_set!(typeof(this), "distance")();

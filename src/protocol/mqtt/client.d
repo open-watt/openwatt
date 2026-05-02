@@ -132,7 +132,7 @@ nothrow @nogc:
     {
         assert(qos <= 2);
 
-        ubyte[258] buffer;
+        ubyte[258] buffer = void;
         buffer[0] = (MQTTPacketType.Publish << 4) | (dup ? 8 : 0) | cast(ubyte)(qos << 1) | (retain ? 1 : 0);
         ubyte[] msg = buffer[2..$];
         msg.put(topic);
@@ -155,7 +155,7 @@ nothrow @nogc:
     {
         assert(requested_qos <= 2);
 
-        ubyte[258] buffer;
+        ubyte[258] buffer = void;
         buffer[0] = (MQTTPacketType.Subscribe << 4) | 2; // always QoS 1
         ubyte[] msg = buffer[2..$];
         msg.put(session.packet_id); session.packet_id += 2;
@@ -180,7 +180,7 @@ nothrow @nogc:
         MonoTime now = getTime();
 
         // read data from the client stream
-        ubyte[1024] buffer;
+        ubyte[1024] buffer = void;
         ptrdiff_t bytes = stream.read(buffer);
         if (bytes < 0)
             return false; // connection error?

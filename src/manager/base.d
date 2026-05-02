@@ -183,9 +183,9 @@ nothrow @nogc:
         }
         _flags = flags;
 
-        _props_set |= ulong(1) << prop_index!(typeof(this), "name");
-        _props_set |= ulong(1) << prop_index!(typeof(this), "type");
-        _props_set |= ulong(1) << prop_index!(typeof(this), "flags");
+        _props_set |= ulong(1) << prop_index!(typeof(this), "name") |
+                      ulong(1) << prop_index!(typeof(this), "type") |
+                      ulong(1) << prop_index!(typeof(this), "flags");
     }
 
     // Properties...

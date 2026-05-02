@@ -61,6 +61,13 @@
     <DCompile Include="src\db\selfrefptr.d" />
     <DCompile Include="src\db\stream.d" />
     <DCompile Include="src\devices\goodwe\scanner.d" />
+    <DCompile Include="src\driver\baremetal\wifi.d" />
+    <DCompile Include="src\driver\ethernet.d" />
+    <DCompile Include="src\driver\wifi.d" />
+    <DCompile Include="src\driver\windows\ethernet.d" />
+    <DCompile Include="src\driver\windows\pcap.d" />
+    <DCompile Include="src\driver\windows\wifi.d" />
+    <DCompile Include="src\driver\windows\wlanapi.d" />
     <DCompile Include="src\main.d" />
     <DCompile Include="src\manager\base.d" />
     <DCompile Include="src\manager\certificate.d" />
@@ -84,6 +91,7 @@
     <DCompile Include="src\manager\expression.d" />
     <DCompile Include="src\manager\id.d" />
     <DCompile Include="src\manager\log.d" />
+    <DCompile Include="src\manager\os\iphlpapi.d" />
     <DCompile Include="src\manager\os\npcap.d" />
     <DCompile Include="src\manager\package.d" />
     <DCompile Include="src\manager\pcap.d" />
@@ -107,6 +115,12 @@
     <DCompile Include="src\protocol\can\iface.d" />
     <DCompile Include="src\protocol\can\package.d" />
     <DCompile Include="src\protocol\can\sampler.d" />
+    <DCompile Include="src\protocol\dhcp\client.d" />
+    <DCompile Include="src\protocol\dhcp\lease.d" />
+    <DCompile Include="src\protocol\dhcp\message.d" />
+    <DCompile Include="src\protocol\dhcp\option.d" />
+    <DCompile Include="src\protocol\dhcp\package.d" />
+    <DCompile Include="src\protocol\dhcp\server.d" />
     <DCompile Include="src\protocol\dns\message.d" />
     <DCompile Include="src\protocol\dns\package.d" />
     <DCompile Include="src\protocol\dns\server.d" />
@@ -129,8 +143,17 @@
     <DCompile Include="src\protocol\http\tls.d" />
     <DCompile Include="src\protocol\http\websocket.d" />
     <DCompile Include="src\protocol\ip\address.d" />
+    <DCompile Include="src\protocol\ip\arp.d" />
+    <DCompile Include="src\protocol\ip\firewall.d" />
+    <DCompile Include="src\protocol\ip\icmp.d" />
+    <DCompile Include="src\protocol\ip\neighbour.d" />
     <DCompile Include="src\protocol\ip\package.d" />
+    <DCompile Include="src\protocol\ip\pool.d" />
     <DCompile Include="src\protocol\ip\route.d" />
+    <DCompile Include="src\protocol\ip\socket.d" />
+    <DCompile Include="src\protocol\ip\stack.d" />
+    <DCompile Include="src\protocol\ip\tcp.d" />
+    <DCompile Include="src\protocol\ip\udp.d" />
     <DCompile Include="src\protocol\modbus\client.d" />
     <DCompile Include="src\protocol\modbus\iface.d" />
     <DCompile Include="src\protocol\modbus\message.d" />
@@ -965,7 +988,20 @@
     <DCompile Include="third_party\urt\src\urt\internal\bitop.d" />
     <DCompile Include="third_party\urt\src\urt\internal\exception.d" />
     <DCompile Include="third_party\urt\src\urt\internal\lifetime.d" />
-    <DCompile Include="third_party\urt\src\urt\internal\mbedtls.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\mbedtls.d">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest LDC|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='UnitTest|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release LDC|x64'">true</ExcludedFromBuild>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\mbedtls.c">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug LDC|Win32'">true</ExcludedFromBuild>

@@ -112,8 +112,7 @@ nothrow @nogc:
         int tag = _tags.alloc();
         if (tag < 0)
         {
-            size_t alloc_size = Packet.sizeof + frame.packet.length;
-            defaultAllocator().free((cast(void*)frame.packet)[0 .. alloc_size]);
+            frame.packet.free_clone();
             _pool.free(frame);
             return -1;
         }
@@ -342,8 +341,7 @@ private:
         _tags.free(frame.tag);
         if (frame.packet)
         {
-            size_t alloc_size = Packet.sizeof + frame.packet.length;
-            defaultAllocator().free((cast(void*)frame.packet)[0 .. alloc_size]);
+            frame.packet.free_clone();
             frame.packet = null;
         }
         frame.callback = null;

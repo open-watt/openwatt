@@ -1,5 +1,6 @@
 module router.iface;
 
+import urt.array;
 import urt.conv;
 import urt.map;
 import urt.lifetime;
@@ -58,6 +59,23 @@ enum MessageState
 }
 
 alias MessageCallback = void delegate(int msg_handle, MessageState state) nothrow @nogc;
+alias IncomingPacketHandler = void delegate(ref Packet p, BaseInterface i) nothrow @nogc;
+
+
+__gshared IncomingPacketHandler[PacketType.max + 1] _frame_handlers;
+
+bool register_frame_handler(PacketType type, IncomingPacketHandler handler)
+{
+    if (_frame_handlers[type] !is null)
+        return false;
+    _frame_handlers[type] = handler;
+    return true;
+}
+
+void unregister_frame_handler(PacketType type)
+{
+    _frame_handlers[type] = null;
+}
 
 
 struct TagAllocator
@@ -299,14 +317,21 @@ nothrow @nogc:
     override const(char)[] status_message() const
         => running ? "Running" : super.status_message();
 
-    BaseInterface set_master(BaseInterface master, byte slave_id) pure
+    bool set_master(BaseInterface master, byte slave_id) pure
     {
-        if (_master)
-            return _master;
+        if (master is null)
+        {
+            _master = null;
+            _slave_id = 0;
+            _flags &= ~ObjectFlags.slave;
+            return true;
+        }
+        if (_master !is null)
+            return false;
         _master = master;
         _slave_id = slave_id;
         _flags |= ObjectFlags.slave;
-        return null;
+        return true;
     }
 
     // alias the base functions into this scope to merge the overload sets
@@ -395,40 +420,10 @@ nothrow @nogc:
     }
 
     ushort pcap_type() const
-        => 1; // LINKTYPE_ETHERNET
+        => 0;
 
     void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packet_data) nothrow @nogc sink) const
     {
-        import urt.endian;
-
-        bool is_ow = packet.eth.ether_type == EtherType.ow;
-
-        // write ethernet header...
-        struct Header
-        {
-            MACAddress dst;
-            MACAddress src;
-            ubyte[2] type;
-            ubyte[2] subtype;
-        }
-        Header h;
-        h.dst = packet.eth.dst;
-        h.src = packet.eth.src;
-        h.type = nativeToBigEndian(packet.eth.ether_type);
-        if (is_ow)
-            h.subtype = nativeToBigEndian(packet.eth.ow_sub_type);
-        sink((cast(ubyte*)&h)[0 .. (is_ow ? Header.sizeof : Header.subtype.offsetof)]);
-
-        // write packet data
-        sink(packet.data);
-
-        if (is_ow && packet.eth.ow_sub_type == OW_SubType.modbus)
-        {
-            // wireshark wants RTU packets for its decoder, so we need to append the crc...
-            import urt.crc;
-            ushort crc = packet.data[3..$].calculate_crc!(Algorithm.crc16_modbus)();
-            sink(crc.nativeToLittleEndian());
-        }
     }
 
     ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] format_args) const nothrow @nogc
@@ -440,7 +435,6 @@ nothrow @nogc:
 
 protected:
     IfStatus _status;
-    ushort _pvid;
     ushort _mtu;        // 0 = auto
     ushort _l2mtu;
     ushort _max_l2mtu;  // 0 = unspecified/unknown
@@ -522,6 +516,8 @@ protected:
 
     final void dispatch(ref Packet packet)
     {
+        import urt.endian : loadBigEndian;
+
         add_rx_frame(packet.length);
 
         if (packet.type == PacketType.ethernet && !packet.eth.src.is_multicast)
@@ -530,9 +526,7 @@ protected:
                 add_address(packet.eth.src, this);
         }
 
-        if (_master)
-            _master.slave_incoming(packet, _slave_id);
-        else
+        if (_num_subscribers)
         {
             foreach (ref subscriber; _subscribers[0.._num_subscribers])
             {
@@ -540,17 +534,92 @@ protected:
                     subscriber.recv_packet(packet, this, PacketDirection.incoming, subscriber.user_data);
             }
         }
+
+        if (_master)
+        {
+            _master.slave_incoming(packet, _slave_id);
+            return;
+        }
+
+        // check for vlan tagged packets. fancy mask catches all possible vlan tags while rejecting all common ethertypes.
+        if (packet.type == PacketType.ethernet && (packet.eth.ether_type & 0xE457) == 0x8000)
+        {
+            if (packet.data.length < 4)
+            {
+                add_rx_drop();
+                return;
+            }
+
+            ushort tag = packet.eth.ether_type;
+            const tci_ptr = cast(ushort*)packet.data.ptr;
+            ushort tci = loadBigEndian(tci_ptr);
+            ushort vid = tci & 0xFFF;
+
+            if (vid != 0 && _vlans.length > 0)
+            {
+                auto v = _vlans[].ptr;
+                VLANInterface vif = v[0];
+                if (vif.vlan == vid && vif.tag == tag)
+                    goto got_vlan;
+                foreach (i; 1 .. _vlans.length)
+                {
+                    vif = v[i];
+                    if (vif.vlan == vid && vif.tag == tag)
+                    {
+                        v[i] = v[i-1];
+                        v[i-1] = vif;
+                        goto got_vlan;
+                    }
+                }
+                goto no_vlan;
+
+            got_vlan:
+                packet.eth.ether_type = loadBigEndian(tci_ptr + 1);
+                packet._offset += 4;
+                packet.vlan = vid | (tci & 0xF000);
+                vif.vlan_incoming(packet);
+                return;
+
+            no_vlan:
+            }
+            else if (vid == 0 && tag == VlanTag._8100)
+            {
+                packet.eth.ether_type = loadBigEndian(tci_ptr + 1);
+                packet._offset += 4;
+                packet.vlan = tci & 0xF000;
+            }
+        }
+
+        if (auto handler = _frame_handlers[packet.type])
+            handler(packet, this);
     }
 
-    void slave_incoming(ref Packet packet, byte child_id)
+    void slave_incoming(ref Packet packet, byte slave_id)
     {
         assert(false, "Override this method to implement a _master interface");
     }
 
-    bool bind_vlan(BaseInterface vlan_interface, bool remove)
+    bool bind_vlan(VLANInterface vlan_interface, bool remove)
     {
-        // Override this method for interfaces supporting vlan's, and return true to indicate that vlan sub-interfaces are accepted
-        return false;
+        if (remove)
+        {
+            foreach (i, v; _vlans[])
+            {
+                if (v is vlan_interface)
+                {
+                    _vlans.remove(i);
+                    return true;
+                }
+            }
+            return false;
+        }
+        debug
+        {
+            foreach (v; _vlans[])
+                assert(!(v.tag == vlan_interface.tag && v.vlan == vlan_interface.vlan), "VLAN already bound!");
+        }
+        _vlans ~= vlan_interface;
+        return true;
     }
 
     final MACAddress generate_mac_address() pure
@@ -628,6 +697,7 @@ package:
 protected: // TODO: should probably be private?
     InterfaceSubscriber[4] _subscribers;
     ubyte _num_subscribers;
+    Array!VLANInterface _vlans;
 }
 
 
@@ -640,6 +710,7 @@ nothrow @nogc:
     {
         g_app.register_enum!ConnectionStatus();
         g_app.register_enum!LinkStatus();
+        g_app.register_enum!VlanTag();
 
         g_app.console.register_collection!BaseInterface();
     }

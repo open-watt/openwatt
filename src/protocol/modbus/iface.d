@@ -748,7 +748,6 @@ private:
         // message = [function_code, pdu_data...]; payload is the full PDU
         Packet p;
         ref ModbusFrame hdr = p.init!ModbusFrame(message, recvTime);
-        p.vlan = _pvid;
         hdr.type = type;
         hdr.function_code = cast(ubyte)frame_info.function_code;
 

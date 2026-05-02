@@ -135,7 +135,7 @@ protected:
                     continue;
             }
 
-            ubyte[1024] buf;
+            ubyte[1024] buf = void;
             size_t bytes;
             do
             {
