@@ -107,7 +107,7 @@ nothrow @nogc:
     {
         if (iface.pcap_type() == 0)
         {
-            writeWarning("PCAP: interface '", iface.name, "' does not support packet capture");
+            iface.log.warning("interface does not support packet capture");
             return false;
         }
 
@@ -307,7 +307,7 @@ protected:
             return CompletionStatus.error;
 
         _server.set_connection_callback(&accept_connection, null);
-        writeInfo(type, ": '", name, "' listening on port ", _port, "...");
+        log.info("listening on port ", _port, "...");
 
         return CompletionStatus.complete;
     }
@@ -354,7 +354,7 @@ private:
 
     void accept_connection(Stream stream, void*)
     {
-        writeInfo("RPCAP: new connection from ", stream.remote_name);
+        log.info("new connection from ", stream.remote_name);
         _sessions.pushBack(defaultAllocator().allocT!Session(this, stream));
     }
 
@@ -382,7 +382,7 @@ private:
 
         void close()
         {
-            writeInfo("RPCAP: session closed");
+            server.log.info("session closed");
 
             if (capturing && opened_iface)
             {
@@ -496,7 +496,7 @@ private:
                     }
                     authenticated = true;
                     send_reply(RPCAP_MSG_AUTH_REQ, null);
-                    writeInfo("RPCAP: client authenticated (anonymous)");
+                    server.log.info("client authenticated (anonymous)");
                     return;
                 }
                 else if (auth.type == RPCAP_RMTAUTH_PWD)
@@ -521,7 +521,7 @@ private:
                         {
                             authenticated = true;
                             send_reply(RPCAP_MSG_AUTH_REQ, null);
-                            writeInfo("RPCAP: client '", username, "' authenticated");
+                            server.log.info("client '", username, "' authenticated");
                         }
                         else
                         {
@@ -617,7 +617,7 @@ private:
             };
             send_reply(RPCAP_MSG_OPEN_REQ, reply.nativeToBigEndian);
 
-            writeInfo("RPCAP: opened interface '", iface_name, "'");
+            server.log.info("opened interface '", iface_name, "'");
         }
 
         void handle_startcap(ubyte[] payload)
@@ -642,7 +642,7 @@ private:
 
             auto req = payload[0 .. RpcapStartCapReq.sizeof].bigEndianToNative!RpcapStartCapReq;
 
-            writeInfo("RPCAP: startcap flags=", req.flags, " portdata=", req.portdata, " snaplen=", req.snaplen);
+            server.log.info("startcap flags=", req.flags, " portdata=", req.portdata, " snaplen=", req.snaplen);
 
             ushort reply_portdata = 0;
 
@@ -671,7 +671,7 @@ private:
                 data_server.set_connection_callback(&data_connection_callback, null);
                 Collection!TCPServer().add(data_server);
 
-                writeInfo("RPCAP: listening for data connection on port ", data_port);
+                server.log.info("listening for data connection on port ", data_port);
             }
 
             opened_iface.subscribe(&packet_handler, PacketFilter(type: PacketType.unknown, direction: cast(PacketDirection)(PacketDirection.incoming | PacketDirection.outgoing)), &this);
@@ -686,7 +686,7 @@ private:
             };
             send_reply(RPCAP_MSG_STARTCAP_REQ, reply.nativeToBigEndian);
 
-            writeInfo("RPCAP: started capture on '", opened_iface.name, "'");
+            server.log.info("started capture on '", opened_iface.name, "'");
         }
 
         void handle_endcap()
@@ -695,7 +695,7 @@ private:
             {
                 opened_iface.unsubscribe(&packet_handler);
                 capturing = false;
-                writeInfo("RPCAP: stopped capture");
+                server.log.info("stopped capture");
             }
 
             if (data_stream)
@@ -716,7 +716,7 @@ private:
         void handle_close()
         {
             send_reply(RPCAP_MSG_CLOSE, null);
-            writeInfo("RPCAP: closed interface");
+            server.log.info("closed interface");
 
             close();
         }
@@ -740,7 +740,7 @@ private:
             data_server.destroy();
             data_server = null;
 
-            writeInfo("RPCAP: data connection established");
+            server.log.info("data connection established");
         }
 
         void packet_handler(ref const Packet p, BaseInterface iface, PacketDirection dir, void* user_data)
@@ -807,7 +807,7 @@ private:
             write_header(RPCAP_VERSION, RPCAP_MSG_ERROR, 0, message.length);
             stream.write(cast(const void[])message);
 
-            writeWarning("RPCAP error: ", message);
+            server.log.warning("error: ", message);
         }
 
         void write_header(ubyte ver, ubyte type, ushort value, size_t plen)
@@ -821,14 +821,14 @@ private:
             {
                 if (object is stream)
                 {
-                    writeInfo("RPCAP: control connection closed");
+                    server.log.info("control connection closed");
 
                     // terminate the session
                     close();
                 }
                 else if (object is data_stream)
                 {
-                    writeInfo("RPCAP: data connection closed");
+                    server.log.info("data connection closed");
 
                     data_stream = null;
 
@@ -902,14 +902,14 @@ nothrow @nogc:
 
         if (!pcap.open_file(file))
         {
-            writeInfo("Couldn't open PCAP file '", file, "'");
+            log_info(ModuleName, "couldn't open PCAP file '", file, "'");
             g_app.allocator.freeT(pcap);
             return;
         }
 
         interfaces ~= pcap;
 
-        writeInfo("Create PCAP interface '", name, "' to file: ", file);
+        log_info(ModuleName, "create PCAP interface '", name, "' to file: ", file);
     }
 }
 

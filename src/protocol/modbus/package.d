@@ -56,7 +56,7 @@ ulong extract_modbus_dst_address(ref const Packet p) pure
 
 class ModbusProtocolModule : Module
 {
-    mixin DeclareModule!"protocol.modbus";
+    mixin DeclareModule!"protocol.mb";
 nothrow @nogc:
 
     Map!(ubyte, ServerMap) remote_servers;
@@ -183,7 +183,7 @@ nothrow @nogc:
         remote_servers[universal_address] = map;
 
         import urt.log;
-        writeInfof("Create modbus server '{0}' uid: {1}  at-interface: {2}({3})", map.name, map.universal_address, iface.name, map.local_address);
+        log_infof(ModuleName, "create modbus server '{0}' uid: {1}  at-interface: {2}({3})", map.name, map.universal_address, iface.name, map.local_address);
 
         return universal_address in remote_servers;
     }

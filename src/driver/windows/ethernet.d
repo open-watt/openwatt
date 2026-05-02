@@ -219,7 +219,7 @@ private:
 
 class WindowsPcapEthernetModule : Module
 {
-    mixin DeclareModule!"interface.ethernet.pcap";
+    mixin DeclareModule!"ethernet.pcap";
 nothrow @nogc:
 
     override void pre_init()
@@ -264,7 +264,7 @@ private:
             if (!present)
             {
                 auto iface_name = next_iface_name();
-                writeInfo("Found ethernet interface: \"", description, "\" (", name, ")");
+                log_info(ModuleName, "Found ethernet interface: \"", description, "\" (", name, ")");
                 auto iface = Collection!WindowsPcapEthernet().create(iface_name);
                 iface.adapter = name;
                 auto desc = description.makeString(defaultAllocator);
