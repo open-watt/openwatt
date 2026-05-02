@@ -435,7 +435,16 @@
     <DCompile Include="src\protocol\http\client.d">
       <Filter>src\protocol\http</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\http\message.d">
+      <Filter>src\protocol\http</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\http\package.d">
+      <Filter>src\protocol\http</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\http\sampler.d">
+      <Filter>src\protocol\http</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\http\server.d">
       <Filter>src\protocol\http</Filter>
     </DCompile>
     <DCompile Include="src\protocol\http\tls.d">
@@ -614,12 +623,6 @@
     </DCompile>
     <DCompile Include="src\manager\expression.d">
       <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\http\message.d">
-      <Filter>src\protocol\http</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\http\server.d">
-      <Filter>src\protocol\http</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\address.d">
       <Filter>src\protocol\ip</Filter>
@@ -898,6 +901,9 @@
       <Filter>third_party\urt\string</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\string\package.d">
+      <Filter>third_party\urt\string</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\string\regex.d">
       <Filter>third_party\urt\string</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\string\string.d">
