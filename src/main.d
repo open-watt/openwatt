@@ -31,6 +31,12 @@ int main(string[] args)
 {
     version (linux)
     {
+        debug
+        {
+            import urt.driver.posix.crash_handler : install_crash_handlers;
+            install_crash_handlers();
+        }
+
         import driver.linux.system : ignore_sigpipe;
         ignore_sigpipe();
 
