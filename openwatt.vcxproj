@@ -168,7 +168,12 @@
     <DCompile Include="src\protocol\ppp\client.d" />
     <DCompile Include="src\protocol\ppp\package.d" />
     <DCompile Include="src\protocol\ppp\server.d" />
+    <DCompile Include="src\protocol\snmp\agent.d" />
+    <DCompile Include="src\protocol\snmp\asn1.d" />
+    <DCompile Include="src\protocol\snmp\client.d" />
+    <DCompile Include="src\protocol\snmp\oid.d" />
     <DCompile Include="src\protocol\snmp\package.d" />
+    <DCompile Include="src\protocol\snmp\pdu.d" />
     <DCompile Include="src\protocol\telnet\package.d" />
     <DCompile Include="src\protocol\telnet\server.d" />
     <DCompile Include="src\protocol\telnet\stream.d" />

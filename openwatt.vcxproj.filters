@@ -483,7 +483,22 @@
     <DCompile Include="src\manager\console\function_command.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\snmp\agent.d">
+      <Filter>src\protocol\snmp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\snmp\asn1.d">
+      <Filter>src\protocol\snmp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\snmp\client.d">
+      <Filter>src\protocol\snmp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\snmp\oid.d">
+      <Filter>src\protocol\snmp</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\snmp\package.d">
+      <Filter>src\protocol\snmp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\snmp\pdu.d">
       <Filter>src\protocol\snmp</Filter>
     </DCompile>
     <DCompile Include="src\protocol\tesla\iface.d">
