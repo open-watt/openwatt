@@ -35,6 +35,7 @@ class DHCPServer : ActiveObject
                                  Prop!("pool", pool),
                                  Prop!("lease-time", lease_time),
                                  Prop!("mac-limit", mac_limit),
+                                 Prop!("add-default-gateway", add_default_gateway),
                                  Prop!("options", options));
 nothrow @nogc:
 
@@ -91,6 +92,13 @@ nothrow @nogc:
     final void mac_limit(uint value)
     {
         _mac_limit = value;
+    }
+
+    final bool add_default_gateway() const pure
+        => _add_default_gateway;
+    final void add_default_gateway(bool value)
+    {
+        _add_default_gateway = value;
     }
 
     final inout(ObjectRef!DHCPOption)[] options() inout pure
@@ -199,6 +207,7 @@ private:
     Duration _lease_time;       // initialised in ctor; default = 1 day
     uint _mac_limit;        // 0 = unlimited
     bool _subscribed;
+    bool _add_default_gateway = true;
     Array!(ObjectRef!DHCPOption) _options;
 
     IPAddr _server_ip;
@@ -478,6 +487,17 @@ private:
         return count >= _mac_limit;
     }
 
+    bool user_option_set(DhcpOption code) const
+    {
+        foreach (ref opt_ref; _options[])
+        {
+            const DHCPOption opt = opt_ref.get();
+            if (opt && opt.code == cast(ubyte)code)
+                return true;
+        }
+        return false;
+    }
+
     // ---- reply build ----
 
     void send_reply(ref const DhcpHeader req, MACAddress client_mac, IPAddr yiaddr, DhcpMessageType type)
@@ -492,6 +512,10 @@ private:
         b.add_addr_option(DhcpOption.subnet_mask, _subnet_mask);
         if (type == DhcpMessageType.ack || type == DhcpMessageType.offer)
             b.add_uint_option(DhcpOption.lease_time, cast(uint)_lease_time.as!"seconds");
+
+        // Auto-advertise ourselves as the gateway unless the user supplied an explicit option 3.
+        if (_add_default_gateway && !user_option_set(DhcpOption.router))
+            b.add_addr_option(DhcpOption.router, _server_ip);
 
         // User-configured options (router, dns, domain, vendor-specific, ...).
         foreach (ref opt_ref; _options[])
