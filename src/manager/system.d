@@ -7,6 +7,8 @@ import urt.string;
 import urt.system;
 import urt.time;
 
+import driver.system : system_reboot;
+
 import manager.console.session;
 import manager.console.function_command : TabComplete;
 import urt.variant : Variant;
@@ -122,6 +124,12 @@ void sysinfo(Session session, const(Variant)[] args)
 void show_time(Session session)
 {
     session.write_line(getDateTime());
+}
+
+void reboot(Session session)
+{
+    session.write_line("reboot: rebooting...");
+    system_reboot();
 }
 
 version (AllocTracking)

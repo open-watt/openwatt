@@ -37,6 +37,9 @@
     <Filter Include="src\apps\energy">
       <UniqueIdentifier>{64b88f6a-915f-4210-b838-b7905c8455ad}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\apps\ota">
+      <UniqueIdentifier>{a1e8d4d6-5b3f-4fa0-9c2e-7d9b2c8e5f3a}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\db">
       <UniqueIdentifier>{5d186ff6-592c-44bc-99a8-f871c74d47b3}</UniqueIdentifier>
     </Filter>
@@ -45,6 +48,9 @@
     </Filter>
     <Filter Include="src\driver\baremetal">
       <UniqueIdentifier>{99e012a6-c993-4c2a-ae7e-aae2a0786162}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\driver\esp32">
+      <UniqueIdentifier>{2bf6c5e3-4b61-4d2c-9a5f-1e7d6c0ab9a8}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\driver\linux">
       <UniqueIdentifier>{8391f7e5-f4d3-41c4-b7ae-16195ad3ccbd}</UniqueIdentifier>
@@ -240,8 +246,14 @@
     <DCompile Include="src\db\stream.d">
       <Filter>src\db</Filter>
     </DCompile>
+    <DCompile Include="src\driver\baremetal\system.d">
+      <Filter>src\driver\baremetal</Filter>
+    </DCompile>
     <DCompile Include="src\driver\baremetal\wifi.d">
       <Filter>src\driver\baremetal</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\esp32\system.d">
+      <Filter>src\driver\esp32</Filter>
     </DCompile>
     <DCompile Include="src\driver\ethernet.d">
       <Filter>src\driver</Filter>
@@ -258,11 +270,17 @@
     <DCompile Include="src\driver\linux\raw.d">
       <Filter>src\driver\linux</Filter>
     </DCompile>
+    <DCompile Include="src\driver\linux\system.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
     <DCompile Include="src\driver\linux\wifi.d">
       <Filter>src\driver\linux</Filter>
     </DCompile>
     <DCompile Include="src\driver\linux\wpa_supplicant.d">
       <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\system.d">
+      <Filter>src\driver</Filter>
     </DCompile>
     <DCompile Include="src\driver\wifi.d">
       <Filter>src\driver</Filter>
@@ -271,6 +289,9 @@
       <Filter>src\driver\windows</Filter>
     </DCompile>
     <DCompile Include="src\driver\windows\pcap.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\windows\system.d">
       <Filter>src\driver\windows</Filter>
     </DCompile>
     <DCompile Include="src\driver\windows\wifi.d">
@@ -632,6 +653,9 @@
     </DCompile>
     <DCompile Include="src\apps\energy\package.d">
       <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\ota\package.d">
+      <Filter>src\apps\ota</Filter>
     </DCompile>
     <DCompile Include="src\manager\pcap.d">
       <Filter>src\manager</Filter>

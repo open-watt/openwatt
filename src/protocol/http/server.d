@@ -32,20 +32,16 @@ class HTTPServer : ActiveObject
     alias Properties = AliasSeq!(Prop!("port", port),
                                  Prop!("tls-port", tls_port),
                                  Prop!("certificates", certificates),
-                                 Prop!("https-redirect", https_redirect));
+                                 Prop!("https-redirect", https_redirect),
+                                 Prop!("max-request-body", max_request_body));
 nothrow @nogc:
 
     enum type_name = "http-server";
     enum path = "/protocol/http/server";
     enum collection_id = CollectionType.http_server;
 
-    // Handlers may return:
-    //   0 = handled, keep the connection open for the next request
-    //   1 = handler claimed the stream (e.g. protocol upgrade); `stream` has been set to null.
-    //       `leftover` holds any bytes the HTTP parser already read past this request -
-    //       the claimer owns them and must process them before the first stream.read().
-    //  <0 = error, drop the session
     alias RequestHandler = int delegate(ref const HTTPMessage, ref Stream stream, const(ubyte)[] leftover) nothrow @nogc;
+    alias StreamingRequestBegin = StreamingChunkHandler delegate(ref const HTTPMessage, ref Stream stream) nothrow @nogc;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -102,6 +98,15 @@ nothrow @nogc:
         _https_redirect = value;
     }
 
+    size_t max_request_body() const pure
+        => _max_request_body;
+    void max_request_body(size_t value)
+    {
+        _max_request_body = value;
+        foreach (s; _sessions)
+            s.parser.max_buffered_body = value;
+    }
+
     // API...
 
     void set_default_request_handler(RequestHandler default_request_handler)
@@ -113,12 +118,21 @@ nothrow @nogc:
     {
         foreach (ref h; _handlers)
         {
-            // if a higher level handler already exists, we can't add this handler
             if ((h.methods & (1 << method)) && uri_prefix[].startsWith(h.uri_prefix[]))
                 return false;
         }
-
         _handlers ~= Handler(1 << method, uri_prefix.makeString(defaultAllocator), request_handler);
+        return true;
+    }
+
+    bool add_uri_handler(HTTPMethod method, const(char)[] uri_prefix, StreamingRequestBegin begin_handler)
+    {
+        foreach (ref h; _handlers)
+        {
+            if ((h.methods & (1 << method)) && uri_prefix[].startsWith(h.uri_prefix[]))
+                return false;
+        }
+        _handlers ~= Handler(1 << method, uri_prefix.makeString(defaultAllocator), begin_handler);
         return true;
     }
 
@@ -126,7 +140,24 @@ nothrow @nogc:
     {
         for (size_t i = 0; i < _handlers.length; )
         {
-            if ((_handlers[i].methods & (1 << method)) && _handlers[i].request_handler is request_handler)
+            if ((_handlers[i].methods & (1 << method)) && !_handlers[i].is_streaming && _handlers[i].buffered is request_handler)
+            {
+                _handlers[i].methods &= ~(1 << method);
+                if (_handlers[i].methods == 0)
+                    _handlers.remove(i);
+                else
+                    ++i;
+            }
+            else
+                ++i;
+        }
+    }
+
+    void remove_uri_handler(HTTPMethod method, StreamingRequestBegin begin_handler)
+    {
+        for (size_t i = 0; i < _handlers.length; )
+        {
+            if ((_handlers[i].methods & (1 << method)) && _handlers[i].is_streaming && _handlers[i].streaming is begin_handler)
             {
                 _handlers[i].methods &= ~(1 << method);
                 if (_handlers[i].methods == 0)
@@ -237,15 +268,35 @@ protected:
 private:
     struct Handler
     {
+    nothrow @nogc:
         uint methods;
         String uri_prefix;
-        RequestHandler request_handler;
+        RequestHandler buffered;
+        StreamingRequestBegin streaming;
+
+        bool is_streaming() const pure
+            => streaming !is null;
+
+        this(uint methods, String uri_prefix, RequestHandler buffered)
+        {
+            this.methods = methods;
+            this.uri_prefix = uri_prefix.move;
+            this.buffered = buffered;
+        }
+
+        this(uint methods, String uri_prefix, StreamingRequestBegin streaming)
+        {
+            this.methods = methods;
+            this.uri_prefix = uri_prefix.move;
+            this.streaming = streaming;
+        }
     }
 
     ushort _port;
     ushort _tls_port;
     bool _https_redirect;
     bool _cert_subscribed;
+    size_t _max_request_body = 64 * 1024;
     RequestHandler _default_request_handler;
 
     TCPServer _server;
@@ -425,6 +476,8 @@ private:
             this.redirect_handler = redirect_handler;
             stream.subscribe(&signal_handler);
             parser = HTTPParser(&request_callback);
+            parser.headers_ready_handler = &headers_ready_callback;
+            parser.max_buffered_body = server._max_request_body;
         }
 
         void close()
@@ -457,11 +510,27 @@ private:
             return 0;
         }
 
+        int headers_ready_callback(ref const HTTPMessage request, out StreamingChunkHandler chunk_handler)
+        {
+            foreach (ref h; server._handlers)
+            {
+                if (!h.is_streaming)
+                    continue;
+                if (((1 << request.method) & h.methods) && request.request_target[].startsWith(h.uri_prefix[]))
+                {
+                    chunk_handler = h.streaming(request, stream);
+                    if (chunk_handler is null)
+                        return -1;
+                    return 0;
+                }
+            }
+            return 0;
+        }
+
         int request_callback(ref const HTTPMessage request)
         {
             const(ubyte)[] leftover = parser.current_leftover;
 
-            // check redirect interceptor first
             if (redirect_handler)
             {
                 int result = redirect_handler(request, stream, leftover);
@@ -471,11 +540,13 @@ private:
 
             foreach (ref h; server._handlers)
             {
+                if (h.is_streaming)
+                    continue;
                 if (((1 << request.method) & h.methods) && request.request_target[].startsWith(h.uri_prefix[]))
                 {
-                    int result = h.request_handler(request, stream, leftover);
+                    int result = h.buffered(request, stream, leftover);
                     if (!stream)
-                        return 1; // handler claimed the stream (upgrade)
+                        return 1;
                     return result;
                 }
             }
@@ -490,7 +561,7 @@ private:
 
             // implement default response...
             enum message_body = "OpenWatt Webserver";
-            HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"text/plain", message_body);
+            HTTPMessage response = create_response(request.http_version, 200, StringLit!"text/plain", message_body);
             stream.write(response.format_message()[]);
 
             return 0;

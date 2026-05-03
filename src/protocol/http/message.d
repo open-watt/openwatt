@@ -23,6 +23,9 @@ alias HTTPParam = KVP!(String, String);
 
 alias HTTPMessageHandler = int delegate(ref const HTTPMessage) nothrow @nogc;
 
+alias HeadersReadyHandler = int delegate(ref const HTTPMessage, out StreamingChunkHandler chunk_handler) nothrow @nogc;
+alias StreamingChunkHandler = int delegate(ref const HTTPMessage message, const(ubyte)[] chunk, bool final_chunk, ref Stream stream) nothrow @nogc;
+
 enum HTTPMethod : ubyte
 {
     GET,
@@ -144,16 +147,18 @@ nothrow @nogc:
     ParseState state;
 
     HTTPMessageHandler message_handler;
+    HeadersReadyHandler headers_ready_handler;
 
-    // Bytes from the current read buffer that follow the message currently being
-    // dispatched to message_handler. Only valid during the handler call itself.
-    // Request handlers that claim the stream (e.g. WebSocket upgrade) read this
-    // to take ownership of any bytes already read past the upgrade request.
     const(ubyte)[] current_leftover;
 
     Array!ubyte tail;
-    size_t pending_chunk_len;
+    size_t chunk_data_remaining;
+    ubyte chunk_trailer_remaining;
     Flags flags;
+
+    size_t max_buffered_body;
+
+    private StreamingChunkHandler _chunk_handler;
 
     this() @disable;
     this(this) @disable;
@@ -222,101 +227,145 @@ nothrow @nogc:
                             bool success;
                             size_t contentLen = val[].parse_int_fast(success);
                             if (!success)
-                                return -1; // bad content length
+                                return -1;
                             message.contentLength = contentLen;
-                            if (message.content.length < contentLen)
-                                pending_chunk_len = contentLen - message.content.length;
+                            chunk_data_remaining = contentLen;
                         }
 
-                        // TODO: what if there is no Content-Length??
-                        //       do we just read bytes until the remote closes the stream?
-                        // TODO: what if Content-Length is 0???
-                        //       go straight to message_done?
+                        // no Content-Length and not chunked -> no body.
+                        // per RFC 7230 §3.3.3, requests without either are treated as having no body
+                        // (responses would read-until-close, but the parser is request-oriented here).
                     }
+
+                    if (headers_ready_handler !is null)
+                    {
+                        int hr = headers_ready_handler(message, _chunk_handler);
+                        if (hr < 0)
+                            return -1;
+                    }
+
+                    if (_chunk_handler is null && max_buffered_body != 0
+                        && !(flags & Flags.Chunked) && chunk_data_remaining > max_buffered_body)
+                        return -1;
+
+                    if (chunk_data_remaining == 0 && !(flags & Flags.Chunked))
+                        goto message_done;
 
                     state = ParseState.ReadingBody;
                     goto case ParseState.ReadingBody;
 
                 case ParseState.ReadingBody:
-                    if (pending_chunk_len)
+                    if (chunk_data_remaining > 0)
                     {
-                        if (pending_chunk_len > msg.length)
+                        size_t take = chunk_data_remaining < msg.length ? chunk_data_remaining : msg.length;
+                        if (_chunk_handler !is null)
                         {
-                            pending_chunk_len -= msg.length;
-                            message.content ~= cast(ubyte[])msg;
+                            int cr = _chunk_handler(message, cast(const(ubyte)[])msg[0 .. take], false, stream);
+                            if (cr != 0)
+                                return -1;
+                        }
+                        else
+                            message.content ~= cast(ubyte[])msg[0 .. take];
+                        msg = msg[take .. $];
+                        chunk_data_remaining -= take;
+                        if (chunk_data_remaining > 0)
+                        {
+                            // ran out of input mid-data - wait for more
                             msg = null;
                             break;
                         }
-
-                        message.content ~= cast(ubyte[])msg[0 .. pending_chunk_len];
-                        msg = msg[pending_chunk_len .. $];
-                        pending_chunk_len = 0;
-
-                        if (flags & Flags.Chunked)
-                        {
-                            // trim the newline from the end of the chunk
-                            if (message.content.length < 2 || message.content[$-2] != '\r' || message.content[$-1] != '\n')
-                                return -1;
-                            message.content.resize(message.content.length - 2);
-                        }
                     }
 
-                    if (flags & Flags.Chunked)
+                    if (!(flags & Flags.Chunked))
+                        goto message_done;
+
+                    while (chunk_trailer_remaining > 0 && msg.length > 0)
                     {
-                        // get the length for the next chunk...
+                        char expected = chunk_trailer_remaining == 2 ? '\r' : '\n';
+                        if (msg[0] != expected)
+                            return -1;
+                        msg = msg[1 .. $];
+                        --chunk_trailer_remaining;
+                    }
+                    if (chunk_trailer_remaining > 0)
+                    {
+                        memmove(buffer.ptr, msg.ptr, msg.length);
+                        read_offset = msg.length;
+                        break;
+                    }
+
+                    {
                         size_t newline = msg.findFirst("\r\n");
-                        // TODO: there should be some upper-limit to the length of the line that it will wait on...
-                        //       it should just be an integer chunk length, so probably doesn't need to be too big!
                         if (newline == msg.length)
                         {
-                            // the buffer ended in the middle of the chunk-length line
-                            // we'll have to stash this bit of text and wait for more data...
+                            // partial chunk-size line; stash and wait
+                            if (msg.length >= 32)
+                                return -1;
                             memmove(buffer.ptr, msg.ptr, msg.length);
                             read_offset = msg.length;
-                            assert(false, "TODO: test this case somehow!");
                             break;
                         }
+                        if (newline > 32)
+                            return -1;
                         size_t taken;
-                        pending_chunk_len = cast(size_t)msg[0 .. newline].parse_int(&taken, 16);
+                        size_t chunk_size = cast(size_t)msg[0 .. newline].parse_int(&taken, 16);
                         if (taken != newline)
-                            return -1; // bad chunk length format!
+                            return -1; // chunk-extensions not supported
                         msg = msg[newline + 2 .. $];
 
-                        // a zero chunk informs the end of the data stream
-                        if (pending_chunk_len == 0)
+                        if (chunk_size == 0)
                         {
-                            // jump back to read more headers...
+                            // terminating chunk; read trailers, then finish
                             state = ParseState.ReadingTailHeaders;
                             goto case ParseState.ReadingTailHeaders;
                         }
-                        message.contentLength += pending_chunk_len;
-                        pending_chunk_len += 2; // expect `\r\n` to terminate the chunk
 
+                        if (_chunk_handler is null && max_buffered_body != 0
+                            && message.contentLength + chunk_size > max_buffered_body)
+                            return -1;
+
+                        chunk_data_remaining = chunk_size;
+                        chunk_trailer_remaining = 2;
+                        message.contentLength += chunk_size;
                         goto case ParseState.ReadingBody;
                     }
 
                 message_done:
-                    int result = handle_encoding();
-                    if (result != 0)
-                        return -1;
+                    int handler_result;
+                    if (_chunk_handler !is null)
+                    {
+                        handler_result = _chunk_handler(message, null, true, stream);
+                        _chunk_handler = null;
+                        if (handler_result < 0)
+                            return -1;
+                    }
+                    else
+                    {
+                        int result = handle_encoding();
+                        if (result != 0)
+                            return -1;
 
-                    if (message.is_request)
-                        message.timestamp = getSysTime();
+                        if (message.is_request)
+                            message.timestamp = getSysTime();
 
-                    // message complete
-                    current_leftover = cast(const(ubyte)[])msg;
-                    int handler_result = message_handler(message);
-                    current_leftover = null;
-                    if (handler_result < 0)
-                        return -1;
-                    if (handler_result > 0)
-                        return 1; // connection upgraded, handler owns any leftover bytes
+                        // message complete
+                        current_leftover = cast(const(ubyte)[])msg;
+                        handler_result = message_handler(message);
+                        current_leftover = null;
+                        if (handler_result < 0)
+                            return -1;
+                        if (handler_result > 0)
+                            return 1; // connection upgraded, handler owns any leftover bytes
+                    }
 
                     if (!stream.running)
                         msg = null;
 
                     message = HTTPMessage();
                     state = ParseState.Pending;
+                    flags = Flags.None;
+                    chunk_data_remaining = 0;
+                    chunk_trailer_remaining = 0;
 
                     if (!msg.empty)
                         goto case ParseState.Pending;
@@ -604,6 +653,61 @@ HTTPMessage create_response(HTTPVersion http_version, ushort status_code, String
     msg.content_type = content_type.move;
     msg.content = cast(ubyte[])content;
     return msg;
+}
+
+HTTPMessage create_response(HTTPVersion http_version, ushort status_code, String content_type, const(void)[] content)
+    => create_response(http_version, status_code, status_text(status_code), content_type.move, content);
+
+String status_text(ushort code)
+{
+    switch (code)
+    {
+        case 100: return StringLit!"Continue";
+        case 101: return StringLit!"Switching Protocols";
+        case 200: return StringLit!"OK";
+        case 201: return StringLit!"Created";
+        case 202: return StringLit!"Accepted";
+        case 204: return StringLit!"No Content";
+        case 205: return StringLit!"Reset Content";
+        case 206: return StringLit!"Partial Content";
+        case 301: return StringLit!"Moved Permanently";
+        case 302: return StringLit!"Found";
+        case 303: return StringLit!"See Other";
+        case 304: return StringLit!"Not Modified";
+        case 307: return StringLit!"Temporary Redirect";
+        case 308: return StringLit!"Permanent Redirect";
+        case 400: return StringLit!"Bad Request";
+        case 401: return StringLit!"Unauthorized";
+        case 403: return StringLit!"Forbidden";
+        case 404: return StringLit!"Not Found";
+        case 405: return StringLit!"Method Not Allowed";
+        case 406: return StringLit!"Not Acceptable";
+        case 408: return StringLit!"Request Timeout";
+        case 409: return StringLit!"Conflict";
+        case 410: return StringLit!"Gone";
+        case 411: return StringLit!"Length Required";
+        case 412: return StringLit!"Precondition Failed";
+        case 413: return StringLit!"Payload Too Large";
+        case 414: return StringLit!"URI Too Long";
+        case 415: return StringLit!"Unsupported Media Type";
+        case 416: return StringLit!"Range Not Satisfiable";
+        case 417: return StringLit!"Expectation Failed";
+        case 426: return StringLit!"Upgrade Required";
+        case 429: return StringLit!"Too Many Requests";
+        case 500: return StringLit!"Internal Server Error";
+        case 501: return StringLit!"Not Implemented";
+        case 502: return StringLit!"Bad Gateway";
+        case 503: return StringLit!"Service Unavailable";
+        case 504: return StringLit!"Gateway Timeout";
+        case 505: return StringLit!"HTTP Version Not Supported";
+        default:
+            if (code >= 100 && code < 200) return StringLit!"Informational";
+            if (code >= 200 && code < 300) return StringLit!"Success";
+            if (code >= 300 && code < 400) return StringLit!"Redirection";
+            if (code >= 400 && code < 500) return StringLit!"Bad Request";
+            if (code >= 500 && code < 600) return StringLit!"Internal Server Error";
+            return StringLit!"Error";
+    }
 }
 
 void add_cors_headers(ref HTTPMessage response)
