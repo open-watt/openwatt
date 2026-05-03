@@ -1,5 +1,6 @@
 module router.iface.wifi;
 
+import urt.array;
 import urt.lifetime;
 import urt.log;
 import urt.mem;
@@ -50,6 +51,7 @@ abstract class WiFiInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("mode", mode, "radio"),
                                  Prop!("channel", channel, "radio"),
+                                 Prop!("active-channel", active_channel, "radio"),
                                  Prop!("tx-power", tx_power, "radio"),
                                  Prop!("country", country, "radio"));
 nothrow @nogc:
@@ -65,7 +67,7 @@ nothrow @nogc:
 
     const(char)[] mode() const pure
     {
-        bool ap = _bound_ap !is null;
+        bool ap = _bound_aps.length > 0;
         bool sta = _bound_sta !is null;
         if (ap && sta)
             return "apsta";
@@ -76,7 +78,7 @@ nothrow @nogc:
         return "monitor";
     }
 
-    ubyte channel() const pure
+    final ubyte channel() const pure
         => _channel;
     final const(char)[] channel(ubyte value)
     {
@@ -86,6 +88,9 @@ nothrow @nogc:
         mark_set!(typeof(this), "channel")();
         return null;
     }
+
+    final ubyte active_channel() const pure
+        => _active_channel;
 
     final byte tx_power() const pure
         => _tx_power;
@@ -108,9 +113,13 @@ nothrow @nogc:
 
     void bind_wlan(WLANBaseInterface wlan, bool remove)
     {
-        bool is_ap = cast(APInterface)wlan !is null;
-        if (is_ap)
-            _bound_ap = remove ? null : wlan;
+        if (auto ap = cast(APInterface)wlan)
+        {
+            if (remove)
+                _bound_aps.removeFirst(ap);
+            else
+                _bound_aps ~= ap;
+        }
         else
             _bound_sta = remove ? null : wlan;
         on_wlan_bind_changed();
@@ -118,12 +127,25 @@ nothrow @nogc:
 
 protected:
 
-    // Subclass hook fired whenever a WLAN/AP gets bound or unbound. Default no-op;
-    // embedded backends override to retune the radio mode (sta/ap/apsta).
     void on_wlan_bind_changed() {}
 
-    final inout(WLANBaseInterface) bound_sta() inout pure => _bound_sta;
-    final inout(WLANBaseInterface) bound_ap() inout pure => _bound_ap;
+    final void set_active_channel(ubyte value)
+    {
+        if (_active_channel == value)
+            return;
+        _active_channel = value;
+        mark_set!(typeof(this), "active-channel")();
+        on_active_channel_changed(value);
+    }
+
+    void on_active_channel_changed(ubyte channel) {}
+
+    final inout(WLANBaseInterface) bound_sta() inout pure
+        => _bound_sta;
+    final inout(APInterface)[] bound_aps() inout pure
+        => _bound_aps[];
+    final inout(APInterface) bound_ap() inout pure
+        => _bound_aps.length > 0 ? _bound_aps[0] : null;
 
     override ushort pcap_type() const
         => 127; // LINKTYPE_IEEE802_11_RADIOTAP
@@ -136,10 +158,11 @@ protected:
 
 private:
     ubyte _channel;
+    ubyte _active_channel;
     byte _tx_power;
     String _country;
     WLANBaseInterface _bound_sta;
-    WLANBaseInterface _bound_ap;
+    Array!APInterface _bound_aps;
 }
 
 

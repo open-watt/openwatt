@@ -7,6 +7,7 @@ import urt.log;
 import urt.time;
 
 import router.iface : BaseInterface;
+import router.iface.mac : MACAddress;
 import router.status;
 
 import urt.internal.sys.windows;
@@ -157,7 +158,7 @@ void crt_bootup()
     _iphlpapi = LoadLibraryA("iphlpapi.dll");
     if (!_iphlpapi)
     {
-        writeWarning("Failed to load iphlpapi.dll; OS adapter info unavailable.");
+        log_warning("os.iphlpapi", "Failed to load iphlpapi.dll; OS adapter info unavailable.");
         return;
     }
     GetAdaptersAddresses = cast(typeof(GetAdaptersAddresses))GetProcAddress(_iphlpapi, "GetAdaptersAddresses");
@@ -171,8 +172,7 @@ bool iphlpapi_loaded()
 struct OSAdapterInfo
 {
     bool valid;
-    ubyte[6] mac;
-    ubyte mac_len;
+    MACAddress mac;
     uint mtu;
     ConnectionStatus connection = ConnectionStatus.unknown;
     ulong tx_link_speed;    // bps
@@ -224,10 +224,7 @@ bool query_adapter(const(char)[] adapter_name, out OSAdapterInfo info)
             continue;
 
         if (p.PhysicalAddressLength >= 6)
-        {
-            info.mac[] = p.PhysicalAddress[0 .. 6];
-            info.mac_len = 6;
-        }
+            info.mac.b[] = p.PhysicalAddress[0 .. 6];
         info.mtu            = p.Mtu;
         info.connection     = map_oper_status(p.OperStatus);
         // 0xFFFFFFFFFFFFFFFF is iphlpapi's "unknown link speed" sentinel.
@@ -333,19 +330,13 @@ enum AdapterChange : uint
 
 AdapterChange apply_os_adapter_info(BaseInterface iface, ref ushort l2mtu, ref ushort max_l2mtu, ref IfStatus status, ref const OSAdapterInfo info)
 {
-    import router.iface.mac : MACAddress;
-
     AdapterChange changed;
 
-//    if (info.mac_len == 6)
+//    if (info.mac != iface.mac)
 //    {
-//        MACAddress new_mac = MACAddress(info.mac);
-//        if (new_mac != iface.mac)
-//        {
-//            iface.remove_address(iface.mac);
-//            iface.mac = new_mac;
-//            iface.add_address(iface.mac, iface);
-//        }
+//        iface.remove_address(iface.mac);
+//        iface.mac = info.mac;
+//        iface.add_address(iface.mac, iface);
 //    }
 
     if (info.mtu != 0 && info.mtu != l2mtu)

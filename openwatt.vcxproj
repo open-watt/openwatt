@@ -63,6 +63,12 @@
     <DCompile Include="src\devices\goodwe\scanner.d" />
     <DCompile Include="src\driver\baremetal\wifi.d" />
     <DCompile Include="src\driver\ethernet.d" />
+    <DCompile Include="src\driver\linux\ctrl_iface.d" />
+    <DCompile Include="src\driver\linux\ethernet.d" />
+    <DCompile Include="src\driver\linux\hostapd.d" />
+    <DCompile Include="src\driver\linux\raw.d" />
+    <DCompile Include="src\driver\linux\wifi.d" />
+    <DCompile Include="src\driver\linux\wpa_supplicant.d" />
     <DCompile Include="src\driver\wifi.d" />
     <DCompile Include="src\driver\windows\ethernet.d" />
     <DCompile Include="src\driver\windows\pcap.d" />
@@ -92,7 +98,9 @@
     <DCompile Include="src\manager\id.d" />
     <DCompile Include="src\manager\log.d" />
     <DCompile Include="src\manager\os\iphlpapi.d" />
+    <DCompile Include="src\manager\os\netlink.d" />
     <DCompile Include="src\manager\os\npcap.d" />
+    <DCompile Include="src\manager\os\sysfs.d" />
     <DCompile Include="src\manager\package.d" />
     <DCompile Include="src\manager\pcap.d" />
     <DCompile Include="src\manager\plugin.d" />
