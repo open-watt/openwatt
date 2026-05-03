@@ -38,8 +38,12 @@ nothrow @nogc:
     alias SendRequestDg = void delegate(IP target, BaseInterface iface) nothrow @nogc;
     alias DrainDg       = void delegate(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr) nothrow @nogc;
 
-    enum uint  retry_interval_ms = 1000;
-    enum ubyte max_retries       = 3;
+    enum uint  retry_interval_ms       = 1000;
+    enum ubyte max_retries             = 3;
+    enum uint  reachable_time_ms       = 30_000;
+    enum uint  stale_probe_interval_ms = 5_000;
+    enum ubyte max_stale_probes        = 3;
+    enum uint  failed_lifetime_ms      = 60_000;
 
     SendRequestDg send_request;
     DrainDg       drain;
@@ -98,6 +102,13 @@ nothrow @nogc:
                 case stale:
                     return e.link_addr[0 .. e.link_addr_len];
                 case failed:
+                    // peer may have come back -- restart resolution
+                    e.state        = NeighbourState.incomplete;
+                    e.last_request = getTime();
+                    e.retry_count  = 1;
+                    queue_pending(*e, pending);
+                    if (send_request)
+                        send_request(ip, iface);
                     return null;
                 case incomplete:
                     queue_pending(*e, pending);
@@ -124,22 +135,64 @@ nothrow @nogc:
     {
         foreach (ref e; _entries[])
         {
-            if (e.state != NeighbourState.incomplete)
-                continue;
-            if (now - e.last_request < retry_interval_ms.msecs)
-                continue;
-
-            if (e.retry_count >= max_retries)
+            final switch (e.state) with (NeighbourState)
             {
-                e.state = NeighbourState.failed;
-                free_pending(e);
-                continue;
-            }
+                case incomplete:
+                    if (now - e.last_request < retry_interval_ms.msecs)
+                        break;
+                    if (e.retry_count >= max_retries)
+                    {
+                        e.state = NeighbourState.failed;
+                        e.last_confirmed = now;     // repurposed as failure timestamp
+                        free_pending(e);
+                        break;
+                    }
+                    ++e.retry_count;
+                    e.last_request = now;
+                    if (send_request)
+                        send_request(e.ip, e.iface);
+                    break;
 
-            ++e.retry_count;
-            e.last_request = now;
-            if (send_request)
-                send_request(e.ip, e.iface);
+                case reachable:
+                    if (now - e.last_confirmed >= reachable_time_ms.msecs)
+                    {
+                        e.state        = NeighbourState.stale;
+                        e.last_request = now;       // arm probe interval
+                        e.retry_count  = 0;
+                    }
+                    break;
+
+                case stale:
+                    if (now - e.last_request < stale_probe_interval_ms.msecs)
+                        break;
+                    if (e.retry_count >= max_stale_probes)
+                    {
+                        e.state          = NeighbourState.failed;
+                        e.last_confirmed = now;
+                        break;
+                    }
+                    ++e.retry_count;
+                    e.last_request = now;
+                    if (send_request)
+                        send_request(e.ip, e.iface);
+                    break;
+
+                case failed:
+                    break;
+            }
+        }
+
+        // GC failed entries past their lifetime; iterate in reverse for swap-remove safety
+        for (size_t i = _entries.length; i > 0; --i)
+        {
+            size_t idx = i - 1;
+            auto e = &_entries[idx];
+            if (e.state == NeighbourState.failed
+                && now - e.last_confirmed >= failed_lifetime_ms.msecs)
+            {
+                free_pending(*e);
+                _entries.removeSwapLast(idx);
+            }
         }
     }
 
