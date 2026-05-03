@@ -85,6 +85,7 @@ nothrow @nogc:
     size_t contentLength;           // Length of the body, if applicable
     Array!ubyte content;            // Optional body for POST/PUT requests
     String content_type;            // Content-Type of the body
+    String content_encoding;        // Content-Encoding of the body (e.g., "gzip", "deflate")
 
     Array!HTTPParam headers;        // Array of additional headers
     Array!HTTPParam query_params;   // Query parameters
@@ -613,16 +614,95 @@ void add_cors_headers(ref HTTPMessage response)
     response.headers ~= HTTPParam(StringLit!"Access-Control-Allow-Headers", StringLit!"Content-Type");
 }
 
-Array!char format_message(ref HTTPMessage message, const(char)[] host = null)
+enum CompressionEncoding : ubyte
+{
+    none,
+    deflate,    // RFC 7230 4.2.2: zlib-format
+    gzip,
+}
+
+CompressionEncoding negotiate_response_encoding(const(char)[] accept_encoding)
+{
+    bool gzip_ok = false;
+    bool deflate_ok = false;
+    while (accept_encoding.length > 0)
+    {
+        const(char)[] tok = accept_encoding.split!(',', false);
+        const(char)[] enc = tok.split!(';', false).trim;
+        if (enc == "gzip" || enc == "x-gzip")
+            gzip_ok = true;
+        else if (enc == "deflate")
+            deflate_ok = true;
+    }
+    if (gzip_ok)
+        return CompressionEncoding.gzip;
+    if (deflate_ok)
+        return CompressionEncoding.deflate;
+    return CompressionEncoding.none;
+}
+
+ptrdiff_t send_message(ref Stream stream, ref HTTPMessage message, const(HTTPMessage)* request = null, const(char)[] host = null)
+{
+    if (request !is null && !message.is_request)
+        apply_response_encoding(*request, message);
+
+    Array!char head = format_message_head(message, host);
+    if (head.length == 0)
+        return 0;
+
+    bool include = body_included(message) && message.content.length > 0;
+
+    if (include)
+        return stream.write(head[], message.content[]);
+    else
+        return stream.write(head[]);
+}
+
+bool apply_response_encoding(ref const HTTPMessage request, ref HTTPMessage response, size_t min_size = 256)
+{
+    if (response.content.length < min_size)
+        return false;
+    if (response.content_encoding)
+        return false;
+
+    CompressionEncoding enc = negotiate_response_encoding(request.header("Accept-Encoding")[]);
+    if (enc == CompressionEncoding.none)
+        return false;
+
+    enum quality = 5;
+    ubyte[] compressed = enc == CompressionEncoding.gzip
+        ? gzip_compress(response.content[], quality)
+        : zlib_compress(response.content[], quality);
+    if (compressed.length == 0)
+        return false;
+
+    response.content = compressed;
+    defaultAllocator().free(compressed);
+    response.contentLength = response.content.length;
+
+    if (enc == CompressionEncoding.gzip)
+        response.content_encoding = StringLit!"gzip";
+    else
+        response.content_encoding = StringLit!"deflate";
+    response.headers ~= HTTPParam(StringLit!"Vary", StringLit!"Accept-Encoding");
+
+    return true;
+}
+
+bool body_included(ref const HTTPMessage message)
+{
+    if (message.method == HTTPMethod.HEAD || message.method == HTTPMethod.TRACE || message.method == HTTPMethod.CONNECT)
+        return false;
+    if (message.content.length == 0 && !(message.flags & HTTPFlags.ForceBody))
+        return false;
+    return true;
+}
+
+Array!char format_message_head(ref HTTPMessage message, const(char)[] host = null)
 {
     import urt.mem.temp : tconcat;
 
-    bool include_body = true;
-    if (message.method == HTTPMethod.HEAD || message.method == HTTPMethod.TRACE || message.method == HTTPMethod.CONNECT)
-        include_body = false;
-    if (include_body && message.content.length == 0 && !(message.flags & HTTPFlags.ForceBody))
-        include_body = false;
-
+    bool include_body = body_included(message);
     Array!char msg;
 
     bool is_request = message.is_request;
@@ -692,11 +772,23 @@ Array!char format_message(ref HTTPMessage message, const(char)[] host = null)
     {
         if (message.content_type)
             msg.append("Content-Type: ", message.content_type, "\r\n");
+        if (message.content_encoding)
+            msg.append("Content-Encoding: ", message.content_encoding, "\r\n");
         msg.append("Content-Length: ", message.content.length, "\r\n\r\n");
-        msg ~= cast(char[])message.content[];
     }
     else
         msg ~= "\r\n";
 
+    return msg;
+}
+
+// TODO: delete this and migrate to send_message() to minimise buffer copying
+Array!char format_message(ref HTTPMessage message, const(char)[] host = null)
+{
+    Array!char msg = format_message_head(message, host);
+    if (msg.length == 0)
+        return msg;
+    if (body_included(message) && message.content.length > 0)
+        msg ~= cast(char[])message.content[];
     return msg;
 }

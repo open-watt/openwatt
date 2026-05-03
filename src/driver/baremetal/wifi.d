@@ -6,6 +6,7 @@ static if (num_wifi > 0) {
 
 import urt.endian : loadBigEndian;
 import urt.result : Result;
+import urt.thread : SPSCRing;
 import urt.time : SysTime, getSysTime;
 
 import manager.base;
@@ -133,6 +134,8 @@ protected:
             if (hw_ch != 0)
                 set_active_channel(hw_ch);
         }
+
+        drain_rx();
     }
 
     override void on_wlan_bind_changed()
@@ -170,10 +173,47 @@ private:
 
     static void wifi_rx_dispatch(Wifi wifi, WifiVif vif, const(ubyte)[] data) nothrow @nogc
     {
-        if (wifi.port < num_wifi)
-            if (auto radio = _active_radios[wifi.port])
-                radio.on_wifi_rx(vif, data);
+        if (wifi.port >= num_wifi)
+            return;
+        auto radio = _active_radios[wifi.port];
+        if (radio is null)
+            return;
+        if (data.length < 14 || data.length > RxFrameMax)
+            return;
+
+        auto slot = radio._rx_queue.reserve();
+        if (slot is null)
+            return;
+        slot.timestamp = getSysTime();
+        slot.vif = vif;
+        slot.length = cast(ushort)data.length;
+        slot.data[0 .. data.length] = data[];
+        radio._rx_queue.commit();
     }
+
+    void drain_rx()
+    {
+        while (true)
+        {
+            auto slot = _rx_queue.peek();
+            if (slot is null)
+                return;
+            WLANBaseInterface target = slot.vif == WifiVif.ap ? bound_ap : bound_sta;
+            if (target !is null && target.running)
+                target.on_radio_rx(slot.data[0 .. slot.length], slot.timestamp);
+            _rx_queue.pop(1);
+        }
+    }
+
+    enum size_t RxFrameMax = 1518;
+    struct RxSlot
+    {
+        SysTime timestamp;
+        WifiVif vif;
+        ushort length;
+        ubyte[RxFrameMax] data;
+    }
+    SPSCRing!(RxSlot, 8) _rx_queue;
 
     final void on_wifi_event(WifiEvent event, const(void)* data = null)
     {
@@ -199,13 +239,6 @@ private:
         }
     }
 
-    final void on_wifi_rx(WifiVif vif, const(ubyte)[] data)
-    {
-        WLANBaseInterface target = vif == WifiVif.ap ? bound_ap : bound_sta;
-        if (target is null || !target.running)
-            return;
-        target.on_radio_rx(data, getSysTime());
-    }
 }
 
 

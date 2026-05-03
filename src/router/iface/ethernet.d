@@ -75,6 +75,7 @@ protected:
     {
         if (data.length < 14)
         {
+            log.trace("drop degenerate ethernet frame: ", data.length, " < 14 bytes!");
             add_rx_drop();
             return;
         }
