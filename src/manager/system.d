@@ -46,15 +46,18 @@ Array!String sysinfo_suggest(bool, const(char)[] arg_name, const(char)[]) nothro
 {
     import urt.string : startsWith;
 
-    __gshared const String[9] properties = [
+    __gshared const String[12] properties = [
         StringLit!"hostname",
         StringLit!"os",
         StringLit!"processor",
-        StringLit!"total-memory",
-        StringLit!"used-memory",
-        StringLit!"reserved-memory",
-        StringLit!"avail-memory",
-        StringLit!"peak-memory",
+        StringLit!"total",
+        StringLit!"used",
+        StringLit!"peak",
+        StringLit!"largest",
+        StringLit!"ext-total",
+        StringLit!"ext-used",
+        StringLit!"ext-peak",
+        StringLit!"ext-largest",
         StringLit!"uptime"
     ];
 
@@ -67,6 +70,19 @@ Array!String sysinfo_suggest(bool, const(char)[] arg_name, const(char)[]) nothro
     return completions;
 }
 
+private void write_pool_line(Session session, const(char)[] label, ref const MemoryPool p) nothrow @nogc
+{
+    if (p.largest_free > 0)
+        session.write_line(label,
+            p.used.format_bytes(), " / ", p.total.format_bytes(),
+            " (peak ", p.peak_used.format_bytes(),
+            ", max ", p.largest_free.format_bytes(), ")");
+    else
+        session.write_line(label,
+            p.used.format_bytes(), " / ", p.total.format_bytes(),
+            " (peak ", p.peak_used.format_bytes(), ")");
+}
+
 @TabComplete(&sysinfo_suggest)
 void sysinfo(Session session, const(Variant)[] args)
 {
@@ -76,16 +92,13 @@ void sysinfo(Session session, const(Variant)[] args)
 
     if (args.length == 0)
     {
-        session.write_line("Hostname:        ", hostname[]);
-        session.write_line("OS:              ", info.os_name);
-        session.write_line("Processor:       ", info.processor);
-        session.write_line("Total Memory:    ", info.total_memory.format_bytes());
-        session.write_line("Used Memory:     ", info.used_memory.format_bytes());
-        session.write_line("Reserved Memory: ", info.reserved_memory.format_bytes());
-        session.write_line("Avail Memory:     ", info.avail_memory.format_bytes());
-        if (info.peak_memory > 0)
-            session.write_line("Peak Memory:     ", info.peak_memory.format_bytes());
-        session.write_line("Uptime:          ", seconds(getAppTime().as!"seconds"));
+        session.write_line("Hostname:  ", hostname[]);
+        session.write_line("OS:        ", info.os_name);
+        session.write_line("Processor: ", info.processor);
+        session. write_pool_line("RAM:      ", info.fast_ram);
+        if (info.ext_ram.total > 0)
+            session. write_pool_line("Ext RAM:  ", info.ext_ram);
+        session.write_line("Uptime:    ", seconds(getAppTime().as!"seconds"));
     }
     else foreach (ref arg; args)
     {
@@ -102,16 +115,22 @@ void sysinfo(Session session, const(Variant)[] args)
             session.write_line(info.os_name);
         else if (icmp(prop, "processor") == 0)
             session.write_line(info.processor);
-        else if (icmp(prop, "total-memory") == 0)
-            session.write_line(info.total_memory.format_bytes());
-        else if (icmp(prop, "used-memory") == 0)
-            session.write_line(info.used_memory.format_bytes());
-        else if (icmp(prop, "reserved-memory") == 0)
-            session.write_line(info.reserved_memory.format_bytes());
-        else if (icmp(prop, "avail-memory") == 0)
-            session.write_line(info.avail_memory.format_bytes());
-        else if (icmp(prop, "peak-memory") == 0)
-            session.write_line(info.peak_memory.format_bytes());
+        else if (icmp(prop, "total") == 0)
+            session.write_line(info.fast_ram.total.format_bytes());
+        else if (icmp(prop, "used") == 0)
+            session.write_line(info.fast_ram.used.format_bytes());
+        else if (icmp(prop, "peak") == 0)
+            session.write_line(info.fast_ram.peak_used.format_bytes());
+        else if (icmp(prop, "largest") == 0)
+            session.write_line(info.fast_ram.largest_free.format_bytes());
+        else if (icmp(prop, "ext-total") == 0)
+            session.write_line(info.ext_ram.total.format_bytes());
+        else if (icmp(prop, "ext-used") == 0)
+            session.write_line(info.ext_ram.used.format_bytes());
+        else if (icmp(prop, "ext-peak") == 0)
+            session.write_line(info.ext_ram.peak_used.format_bytes());
+        else if (icmp(prop, "ext-largest") == 0)
+            session.write_line(info.ext_ram.largest_free.format_bytes());
         else if (icmp(prop, "uptime") == 0)
             session.write_line(seconds(getAppTime().as!"seconds"));
         else
