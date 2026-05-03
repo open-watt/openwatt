@@ -111,12 +111,35 @@ protected:
     {
         if (!_iface)
             return false;
+
+        auto self = cast(DHCPServer)this;
+        auto reason = compute_config_reason();
+        if (reason !is _config_reason)
+        {
+            if (reason !is null)
+                self.log.warning(reason);
+            self._config_reason = reason;
+        }
+        return reason is null;
+    }
+
+    override const(char)[] status_message() const pure
+    {
+        if (_config_reason !is null)
+            return _config_reason;
+        return super.status_message();
+    }
+
+    private const(char)[] compute_config_reason() const
+    {
         if (!_pool)
-            return true;    // static-only mode
+            return null;    // static-only mode
         IPAddress addr = find_iface_address(cast(BaseInterface)_iface);
         if (!addr)
-            return true;    // defer: iface not yet bound
-        return addr.address.contains(_pool.start) && addr.address.contains(_pool.end);
+            return null;    // defer: iface not yet bound
+        if (!addr.address.contains(_pool.start) || !addr.address.contains(_pool.end))
+            return "pool addresses outside interface subnet";
+        return null;
     }
 
     override CompletionStatus startup()
@@ -128,7 +151,7 @@ protected:
         IPAddress server_addr = find_iface_address(_iface);
         if (!server_addr)
         {
-            log.warning("no IPAddress on ", _iface.name, "; cannot serve DHCP");
+            log.warning("interface ", _iface.name, " has no IP address; cannot serve");
             return CompletionStatus.continue_;
         }
         _server_ip = server_addr.address.addr;
@@ -152,9 +175,9 @@ protected:
             }
         }
 
-        log.info("serving on ", _iface.name, " ip=", _server_ip,
+        log.info("serving DHCP on ", _iface.name, " as ", _server_ip,
                  "/", server_addr.address.prefix_len,
-                 _pool ? tconcat(" pool=", _pool.name[]) : " (static-only)");
+                 _pool ? tconcat(" from pool ", _pool.name[]) : " (static leases only)");
 
         return CompletionStatus.complete;
     }
@@ -185,7 +208,7 @@ protected:
             if (_pool && _pool.contains(lease.address))
                 _pool.release(lease.address);
             version (DebugDHCP)
-                log.debug_("expired lease ", lease.name[], " (", lease.address, ")");
+                log.debug_("lease ", lease.address, " expired");
             lease.destroy();
         }
     }
@@ -203,6 +226,8 @@ private:
 
     IPAddr _server_ip;
     IPAddr _subnet_mask;
+
+    const(char)[] _config_reason;
 
     void iface_state_change(ActiveObject, StateSignal signal)
     {
@@ -262,7 +287,7 @@ private:
         client_mac.b[] = dh.chaddr[0 .. 6];
 
         version (DebugDHCP)
-            log.debug_("rx ", msg_type, " from ", client_mac);
+            log.debug_("received ", msg_type, " from ", client_mac);
 
         switch (msg_type)
         {
@@ -303,12 +328,12 @@ private:
             if (!_pool)
             {
                 version (DebugDHCP)
-                    log.debug_("no pool; ignoring DISCOVER from ", client_mac);
+                    log.debug_("no pool configured; ignoring discovery from ", client_mac);
                 return;
             }
             if (over_mac_limit(client_mac))
             {
-                log.info("DISCOVER from ", client_mac, " refused: over mac-limit (", _mac_limit, ")");
+                log.info("refused ", client_mac, ": at mac-limit of ", _mac_limit);
                 return;
             }
 
@@ -317,7 +342,7 @@ private:
             offer = _pool.allocate(requested);
             if (offer == IPAddr.any)
             {
-                log.warning("pool ", _pool.name[], " exhausted; cannot offer to ", client_mac);
+                log.warning("pool ", _pool.name[], " exhausted; cannot offer lease to ", client_mac);
                 return;
             }
 
@@ -331,7 +356,7 @@ private:
             if (!lease)
             {
                 _pool.release(offer);
-                log.error("failed to create dynamic lease for ", client_mac);
+                log.error("failed to create lease for ", client_mac);
                 return;
             }
         }
@@ -359,7 +384,7 @@ private:
         if (has_server_id && server_id != _server_ip)
         {
             version (DebugDHCP)
-                log.debug_("REQUEST from ", client_mac, " selected another server ", server_id);
+                log.debug_(client_mac, " chose another DHCP server (", server_id, "); ignoring");
             return;
         }
 
@@ -384,10 +409,9 @@ private:
         if (!lease.is_static_lease())
             lease.expires = getSysTime() + _lease_time;
 
-        log.info("ACK ", target, " to ", client_mac,
+        log.info("issued lease ", target, " to ", client_mac,
                  lease.hostname[].length ? tconcat(" (", lease.hostname[], ")") : "",
-                 " lease=",
-                 lease.is_static_lease() ? "static" : tconcat(_lease_time.as!"seconds", "s"));
+                 lease.is_static_lease() ? " (static)" : tconcat(" for ", _lease_time.as!"seconds", "s"));
 
         send_reply(req, client_mac, target, DhcpMessageType.ack);
     }
@@ -404,7 +428,7 @@ private:
         if (!lease)
             return;
 
-        log.warning("DECLINE from ", client_mac, " for ", declined, "; quarantining");
+        log.warning(client_mac, " declined ", declined, "; quarantining");
 
         // Leave the pool bit set as a cheap quarantine; destroy the lease record.
         // TODO: real quarantine list with timed release.
@@ -423,7 +447,7 @@ private:
         if (!lease || lease.is_static_lease())
             return;
 
-        log.info("RELEASE ", ciaddr, " from ", client_mac);
+        log.info(client_mac, " released ", ciaddr);
 
         if (_pool && _pool.contains(ciaddr))
             _pool.release(ciaddr);
