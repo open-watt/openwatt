@@ -520,7 +520,7 @@ private:
 
 class WindowsWlanModule : Module
 {
-    mixin DeclareModule!"interface.wifi.windows-wlan";
+    mixin DeclareModule!"wifi.windows";
 nothrow @nogc:
 
     override void init()
@@ -565,7 +565,7 @@ private:
             if (!present)
             {
                 auto base = next_radio_name();
-                writeInfo("Found wifi interface: \"", description, "\" (", name, ")");
+                log_info(ModuleName, "Found wifi interface: \"", description, "\" (", name, ")");
 
                 auto radio = Collection!WindowsWifiRadio().create(tconcat(base, "-radio"));
                 radio.adapter = name;

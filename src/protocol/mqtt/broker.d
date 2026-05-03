@@ -302,11 +302,11 @@ private:
         final switch (signal)
         {
             case StateSignal.online:
-                writeInfo(type, ": listening on port ", _server.port, "...");
+                log.info("listening on port ", _server.port, "...");
                 break;
 
             case StateSignal.offline:
-                writeInfo(type, ": stopped listening");
+                log.info("stopped listening");
                 break;
 
             case StateSignal.destroyed:
@@ -323,7 +323,7 @@ private:
     {
         _clients ~= MQTTClient(this, client);
 
-        writeInfo("MQTT client connected: ", client.remote_name());
+        log.info("MQTT client connected: ", client.remote_name());
     }
 }
 

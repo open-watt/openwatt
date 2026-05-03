@@ -158,7 +158,7 @@ nothrow @nogc:
             Result r = create_socket(AddressFamily.ipv4, SocketType.stream, Protocol.tcp, _socket);
             if (!r)
             {
-                debug writeError(type, " '", name, "' - create_socket() failed with error: ", r.socket_result);
+                debug log.error("create_socket() failed with error: ", r.socket_result);
                 return CompletionStatus.error;
             }
 
@@ -171,7 +171,7 @@ nothrow @nogc:
                     close_socket();
                     return CompletionStatus.continue_;
                 }
-                debug writeWarning(type, " '", name, "' - connect() failed with error: ", r.socket_result);
+                debug log.warning("connect() failed with error: ", r.socket_result);
                 return CompletionStatus.error;
             }
         }
@@ -185,7 +185,7 @@ nothrow @nogc:
         Result r = poll(fd, Duration.zero, num_events);
         if (r.failed)
         {
-            debug writeError(type, " '", name, "' - poll() failed with error: ", r.socket_result);
+            debug log.error("poll() failed with error: ", r.socket_result);
             return CompletionStatus.error;
         }
 
@@ -196,7 +196,7 @@ nothrow @nogc:
         // check error conditions
         if (fd.return_events & (PollEvents.error | PollEvents.hangup | PollEvents.invalid))
         {
-            debug writeError(type, " '", name, "' - connection failed to ", _remote);
+            debug log.error("connection failed to ", _remote);
             return CompletionStatus.error;
         }
 
@@ -571,7 +571,7 @@ nothrow @nogc:
         Result r = create(AddressFamily.ipv4, _ip4_listener);
         if (!r)
         {
-            debug writeError(type, " '", name, "' - failed to create listening socket. Error ", r.system_code);
+            debug log.error("failed to create listening socket. Error ", r.system_code);
             return CompletionStatus.error;
         }
 
@@ -589,7 +589,7 @@ nothrow @nogc:
 //            return CompletionStatus.error;
         }
 
-        debug writeInfo(type, " '", name, "' - listening on port ", _port);
+        debug log.info("listening on port ", _port);
         return CompletionStatus.complete;
     }
 
