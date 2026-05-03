@@ -6,7 +6,8 @@ static if (num_wifi > 0) {
 
 import urt.endian : loadBigEndian;
 import urt.result : Result;
-import urt.time : getSysTime;
+import urt.thread : SPSCRing;
+import urt.time : SysTime, getSysTime;
 
 import manager.base;
 import manager.collection;
@@ -57,13 +58,6 @@ nothrow @nogc:
 
     final ref Wifi wifi() pure { return _wifi; }
 
-    override ubyte channel() const
-    {
-        if (running && _wifi.is_open)
-            return wifi_get_channel(_wifi);
-        return super.channel;
-    }
-
     override void bind_wlan(WLANBaseInterface wlan, bool remove)
     {
         bool is_ap = cast(APInterface)wlan !is null;
@@ -101,7 +95,7 @@ protected:
         auto r = wifi_open(_wifi, 0, cfg);
         if (!r)
         {
-            writeError("WiFi radio init failed");
+            log.error("WiFi radio init failed");
             return CompletionStatus.error;
         }
 
@@ -134,20 +128,20 @@ protected:
         super.update();
 
         if (_wifi.is_open)
+        {
             wifi_poll(_wifi);
+            ubyte hw_ch = wifi_get_channel(_wifi);
+            if (hw_ch != 0)
+                set_active_channel(hw_ch);
+        }
+
+        drain_rx();
     }
 
     override void on_wlan_bind_changed()
     {
         if (_wifi.is_open)
             update_drv_mode();
-    }
-
-    override int wire_send(const(ubyte)[] frame)
-    {
-        // The radio itself doesn't transmit; WLAN/AP route through drv_transmit.
-        add_tx_drop();
-        return -1;
     }
 
 private:
@@ -170,21 +164,58 @@ private:
     // Module-level dispatch targets (function pointers, not delegates)
     __gshared BuiltinWiFi[num_wifi] _active_radios;
 
-    static void wifi_event_dispatch(Wifi wifi, WifiEvent event, const(void)*) nothrow @nogc
+    static void wifi_event_dispatch(Wifi wifi, WifiEvent event, const(void)* data) nothrow @nogc
     {
         if (wifi.port < num_wifi)
             if (auto radio = _active_radios[wifi.port])
-                radio.on_wifi_event(event);
+                radio.on_wifi_event(event, data);
     }
 
     static void wifi_rx_dispatch(Wifi wifi, WifiVif vif, const(ubyte)[] data) nothrow @nogc
     {
-        if (wifi.port < num_wifi)
-            if (auto radio = _active_radios[wifi.port])
-                radio.on_wifi_rx(vif, data);
+        if (wifi.port >= num_wifi)
+            return;
+        auto radio = _active_radios[wifi.port];
+        if (radio is null)
+            return;
+        if (data.length < 14 || data.length > RxFrameMax)
+            return;
+
+        auto slot = radio._rx_queue.reserve();
+        if (slot is null)
+            return;
+        slot.timestamp = getSysTime();
+        slot.vif = vif;
+        slot.length = cast(ushort)data.length;
+        slot.data[0 .. data.length] = data[];
+        radio._rx_queue.commit();
     }
 
-    final void on_wifi_event(WifiEvent event)
+    void drain_rx()
+    {
+        while (true)
+        {
+            auto slot = _rx_queue.peek();
+            if (slot is null)
+                return;
+            WLANBaseInterface target = slot.vif == WifiVif.ap ? bound_ap : bound_sta;
+            if (target !is null && target.running)
+                target.on_radio_rx(slot.data[0 .. slot.length], slot.timestamp);
+            _rx_queue.pop(1);
+        }
+    }
+
+    enum size_t RxFrameMax = 1518;
+    struct RxSlot
+    {
+        SysTime timestamp;
+        WifiVif vif;
+        ushort length;
+        ubyte[RxFrameMax] data;
+    }
+    SPSCRing!(RxSlot, 8) _rx_queue;
+
+    final void on_wifi_event(WifiEvent event, const(void)* data = null)
     {
         final switch (event)
         {
@@ -192,28 +223,22 @@ private:
             case WifiEvent.sta_disconnected:    evt_sta_disconnected = true; break;
             case WifiEvent.ap_started:          evt_ap_started = true; break;
             case WifiEvent.ap_stopped:          evt_ap_stopped = true; break;
-            case WifiEvent.ap_sta_connected:    break;
-            case WifiEvent.ap_sta_disconnected: break;
+            case WifiEvent.ap_sta_connected:
+                if (data !is null)
+                    log.info("STA ", MACAddress((cast(ubyte*)data)[0 .. 6]), " joined AP");
+                else
+                    log.info("STA joined AP");
+                break;
+            case WifiEvent.ap_sta_disconnected:
+                if (data !is null)
+                    log.info("STA ", MACAddress((cast(ubyte*)data)[0 .. 6]), " left AP");
+                else
+                    log.info("STA left AP");
+                break;
             case WifiEvent.scan_done:           break;
         }
     }
 
-    final void on_wifi_rx(WifiVif vif, const(ubyte)[] data)
-    {
-        auto target = vif == WifiVif.ap ? bound_ap : bound_sta;
-        if (target is null || !target.running || data.length < 14)
-            return;
-
-        Packet packet;
-        ref eth = packet.init!Ethernet(data, getSysTime());
-        auto mac_hdr = cast(const Ethernet*)data.ptr;
-        eth.dst = mac_hdr.dst;
-        eth.src = mac_hdr.src;
-        eth.ether_type = loadBigEndian(&mac_hdr.ether_type);
-        packet._offset = 14;
-
-        target.dispatch(packet);
-    }
 }
 
 
@@ -295,7 +320,7 @@ protected:
         if (!wifi_sta_configure(radio.wifi, sta_cfg))
         {
             _status_detail = "STA config rejected by driver";
-            writeError("WiFi STA config failed for '", name, "'");
+            log.error("STA config rejected by driver");
             return CompletionStatus.error;
         }
 
@@ -313,7 +338,7 @@ protected:
         if (!wifi_sta_connect(radio.wifi))
         {
             _status_detail = "Connect request rejected by driver";
-            writeError("WiFi STA connect failed for '", name, "'");
+            log.error("STA connect rejected by driver");
             return CompletionStatus.error;
         }
 
@@ -417,7 +442,7 @@ protected:
         if (!wifi_ap_configure(radio.wifi, ap_cfg))
         {
             _status_detail = "AP config rejected by driver";
-            writeError("WiFi AP config failed for '", name, "'");
+            log.error("AP config rejected by driver");
             return CompletionStatus.error;
         }
 
@@ -472,16 +497,18 @@ class BuiltinWifiModule : Module
     mixin DeclareModule!"interface.wifi.builtin";
 nothrow @nogc:
 
+    override void pre_init()
+    {
+        import urt.mem.temp : tconcat;
+        foreach (i; 0 .. num_wifi)
+            Collection!BuiltinWiFi().create(tconcat("wifi", i + 1));
+    }
+
     override void init()
     {
         g_app.console.register_collection!BuiltinWiFi();
         g_app.console.register_collection!BuiltinWlan();
         g_app.console.register_collection!BuiltinAp();
-
-        // pre-create one radio per compile-time port
-        import urt.mem.temp : tconcat;
-        foreach (i; 0 .. num_wifi)
-            Collection!BuiltinWiFi().create(tconcat("wifi", i + 1));
     }
 }
 

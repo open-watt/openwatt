@@ -14,6 +14,8 @@
 URT_DIR    := third_party/urt
 URT_SRCDIR := $(URT_DIR)/src
 
+USE_INTERNAL_IP_STACK := 1
+
 include $(URT_DIR)/platforms.mk
 
 # =======================================================================
@@ -214,10 +216,6 @@ $(TARGET):
 	echo $(APP_SOURCES) > $(RSPFILE)
 	echo $(URT_SOURCES) >> $(RSPFILE)
 	$(COMPILE_CMD)
-ifeq ($(XTENSA_TWO_STAGE),1)
-	"$(ESPRESSIF_LLC)" -O2 -mtriple=xtensa-none-elf --emulated-tls --mtext-section-literals --function-sections --data-sections --emit-dwarf-unwind=always --exception-model=dwarf $(XTENSA_MATTR) --filetype=obj $(TARGET) -o $(TARGET).o
-	mv $(TARGET).o $(TARGET)
-endif
 ifeq ($(PLATFORM),bl808)
   ifeq ($(PROCESSOR),c906)
 	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/d0fw.bin
@@ -338,7 +336,16 @@ else ifeq ($(PLATFORM),esp32-p4)
     ESP_IDF_TARGET  := esp32p4
 endif
 
-esp-idf-build:
+ifeq ($(XTENSA_TWO_STAGE),1)
+ESP_LINK_OBJ := $(TARGET).o
+$(ESP_LINK_OBJ): $(TARGET)
+	"$(ESPRESSIF_LLC)" -O2 -mtriple=xtensa-none-elf --emulated-tls --mtext-section-literals --function-sections --data-sections --emit-dwarf-unwind=always --exception-model=dwarf $(XTENSA_MATTR) --filetype=obj $< -o $@
+else
+ESP_LINK_OBJ := $(TARGET)
+endif
+
+.PHONY: esp-idf-build
+esp-idf-build: $(ESP_LINK_OBJ)
 ifndef ESP_PROJECT_DIR
 	@echo "Error: No ESP-IDF project directory for PLATFORM=$(PLATFORM)"
 	@exit 1
@@ -347,7 +354,7 @@ endif
 	bash -c '. "$(ESP_IDF_PATH)/export.sh" > /dev/null 2>&1 && \
 		cd "$(ESP_PROJECT_DIR)" && \
 		if [ ! -f build/CMakeCache.txt ]; then idf.py set-target $(ESP_IDF_TARGET); fi && \
-		idf.py -DOPENWATT_OBJ=$(abspath $(TARGET)) reconfigure build'
+		idf.py -DOPENWATT_OBJ=$(abspath $(ESP_LINK_OBJ)) -DUSE_LWIP=$(if $(filter 1,$(USE_INTERNAL_IP_STACK)),0,1) build'
 	cp "$(ESP_PROJECT_DIR)/build/openwatt.bin" "$(TARGETDIR)/openwatt.bin"
 	cp "$(ESP_PROJECT_DIR)/build/bootloader/bootloader.bin" "$(TARGETDIR)/bootloader.bin"
 	cp "$(ESP_PROJECT_DIR)/build/partition_table/partition-table.bin" "$(TARGETDIR)/partition-table.bin"
