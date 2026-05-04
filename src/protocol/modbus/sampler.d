@@ -16,7 +16,7 @@ import protocol.modbus.message;
 
 import router.iface.mac;
 
-//version = DebugModbusSampler;
+version = DebugModbusSampler;
 
 nothrow @nogc:
 

@@ -24,7 +24,7 @@ import router.iface;
 import router.iface.packet;
 import router.stream;
 
-//version = DebugModbusMessageFlow;
+version = DebugModbusMessageFlow;
 
 alias modbus_crc = calculate_crc!(Algorithm.crc16_modbus);
 alias modbus_crc_2 = calculate_crc_2!(Algorithm.crc16_modbus);
@@ -455,7 +455,13 @@ nothrow @nogc:
                 length += 2;
                 break;
             case ModbusProtocol.tcp:
-                assert(false);
+                buffer[0..2] = _sequence_number.nativeToBigEndian;
+                buffer[2..4] = 0; // protocol identifier
+                buffer[4..6] = nativeToBigEndian(cast(ushort)(1 + pdu.length));
+                buffer[6] = address;
+                buffer[7 .. 7 + pdu.length] = pdu[];
+                length = cast(ushort)(7 + pdu.length);
+                break;
             case ModbusProtocol.ascii:
                 // calculate the LRC
                 ubyte lrc = address;
@@ -818,11 +824,6 @@ nothrow @nogc:
             session.write_line("Interface must be specified.");
             return;
         }
-        if (!address)
-        {
-            session.write_line("Local address must be specified.");
-            return;
-        }
 
         BaseInterface iface = get_module!InterfaceModule.interfaces.get(_interface);
         if (!iface)
@@ -834,6 +835,12 @@ nothrow @nogc:
         if (!modbusInterface)
         {
             session.write_line("Interface '", _interface, "' is not a modbus interface.");
+            return;
+        }
+
+        if (modbusInterface.protocol() != ModbusProtocol.tcp && address)
+        {
+            session.write_line("Local address must be specified.");
             return;
         }
 
@@ -1040,8 +1047,37 @@ size_t parse_rtu(const(ubyte)[] data, out const(void)[] message, out ModbusFrame
 
 size_t parse_tcp(const(ubyte)[] data, out const(void)[] message, out ModbusFrameInfo frame_info)
 {
-    assert(false);
-    return 0;
+    // Modbus TCP ADU: [TxID:2][ProtocolID:2=0][Length:2][UnitID:1][PDU:N]
+    // Length field = bytes following the header = unit ID (1) + PDU length
+    if (data.length < 8) // 6 MBAP header + unit ID + function code (min)
+        return 0;
+
+    if (data[2..4].bigEndianToNative!ushort != 0) // protocol identifier must be 0x0000
+        return 0;
+
+    ushort len = data[4..6].bigEndianToNative!ushort;
+    if (len < 2) // must have at least unit ID + function code
+        return 0;
+
+    const size_t frame_length = 6 + len;
+
+    if (data.length < frame_length)
+        return 0; // incomplete frame, wait for more data
+
+
+    frame_info.has_sequence_number = true;
+    frame_info.sequence_number = data[0..2].bigEndianToNative!ushort;
+    frame_info.has_crc = false;
+    frame_info.address = data[6];
+    frame_info.frame_type = ModbusFrameType.response;
+
+    ubyte fn = data[7];
+    frame_info.function_code = cast(FunctionCode)(fn & 0x7F);
+    if ((fn & 0x80) && len >= 3)
+        frame_info.exception_code = cast(ExceptionCode)data[8];
+
+    message = data[7 .. frame_length]; // PDU only (skips unit ID)
+    return frame_length;
 }
 
 size_t parse_ascii(const(ubyte)[] data, out const(void)[] message, out ModbusFrameInfo frame_info)
