@@ -310,7 +310,10 @@ nothrow @nogc:
                 return Variant(null);
             case Type.elem:
                 const(char)[] id = get_str();
-                Element* e = ctx.root ? ctx.root.find_element(id) : g_app.find_element(id);
+                const bool absolute = id.length > 0 && id[0] == '.';
+                if (absolute)
+                    id = id[1 .. $];
+                Element* e = (!absolute && ctx.root) ? ctx.root.find_element(id) : g_app.find_element(id);
                 if (e)
                     return Variant(e.value);
                 return Variant(null);
@@ -936,7 +939,7 @@ Expression* parse_primary_exp(ref const(char)[] text)
             syntax_error("Invalid ", is_var ? "variable" : "element", " name");
     }
 
-    identifier = text[0].is_alpha || text[0] == '_' || text[0] == '/';
+    identifier = text[0].is_alpha || text[0] == '_' || text[0] == '/' || (is_element && text[0] == '.');
 
     string string_delimiters = "/$=,;\"\\{}[]()?'`";
     size_t len = identifier; // skip the first char; first char has some special cases

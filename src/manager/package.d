@@ -225,6 +225,7 @@ nothrow @nogc:
             console.register_command!alloc_leaks_cmd("/system/alloc", this, "leaks");
         }
 
+        console.register_command!device_add("/device", this, "add");
         console.register_command!device_print("/device", this, "print");
         console.register_command!link_add("/element/link", this, "add");
         console.register_command!link_print("/element/link", this, "print");
@@ -347,25 +348,117 @@ nothrow @nogc:
 
     void update()
     {
-        foreach (m; modules)
-            m.pre_update();
+        import urt.log : writeWarning;
+
+        enum SlowTickThresholdMs = 100;
+
+        MonoTime tick_start = getTime();
+        Duration worst_module_dur;
+        const(char)[] worst_module_name;
+        const(char)[] worst_module_phase;
 
         foreach (m; modules)
+        {
+            MonoTime t = getTime();
+            m.pre_update();
+            Duration d = getTime() - t;
+            if (d > worst_module_dur)
+            {
+                worst_module_dur = d;
+                worst_module_name = m.module_name[];
+                worst_module_phase = "pre_update";
+            }
+        }
+
+        foreach (m; modules)
+        {
+            MonoTime t = getTime();
             m.update();
+            Duration d = getTime() - t;
+            if (d > worst_module_dur)
+            {
+                worst_module_dur = d;
+                worst_module_name = m.module_name[];
+                worst_module_phase = "update";
+            }
+        }
 
         import urt.async : asyncUpdate;
+        MonoTime async_t = getTime();
         asyncUpdate();
+        Duration async_d = getTime() - async_t;
+        if (async_d > worst_module_dur)
+        {
+            worst_module_dur = async_d;
+            worst_module_name = "(async)";
+            worst_module_phase = "asyncUpdate";
+        }
 
+        MonoTime devices_t = getTime();
         foreach (device; devices.values)
             device.update();
+        Duration devices_d = getTime() - devices_t;
+        if (devices_d > worst_module_dur)
+        {
+            worst_module_dur = devices_d;
+            worst_module_name = "(devices)";
+            worst_module_phase = "device.update";
+        }
 
         foreach (m; modules)
+        {
+            MonoTime t = getTime();
             m.post_update();
+            Duration d = getTime() - t;
+            if (d > worst_module_dur)
+            {
+                worst_module_dur = d;
+                worst_module_name = m.module_name[];
+                worst_module_phase = "post_update";
+            }
+        }
+
+        Duration total = getTime() - tick_start;
+        if (total.as!"msecs" >= SlowTickThresholdMs)
+        {
+            writeWarning("slow-tick: ", total.as!"msecs", "ms (worst: ", worst_module_name,
+                         ".", worst_module_phase, " = ", worst_module_dur.as!"msecs", "ms)");
+        }
+    }
+
+
+    import urt.meta.nullable;
+
+    void device_add(Session session, const(char)[] id, const(char)[] _profile, Nullable!(const(char)[]) name, Nullable!(const(char)[]) model)
+    {
+        import urt.mem.temp : tconcat;
+        import manager.profile : Profile, ElementDesc, load_profile;
+        import manager.device : create_device_from_profile;
+        import manager.element : Element;
+
+        if (id in devices)
+        {
+            session.write_line("Device '", id, "' already exists");
+            return;
+        }
+
+        Profile* profile = load_profile(tconcat("conf/device_profiles/", _profile, ".conf"), allocator);
+        if (!profile)
+        {
+            session.write_line("Failed to load profile '", _profile, "'");
+            return;
+        }
+
+        Device device = create_device_from_profile(*profile, model ? model.value : null, id, name ? name.value : null,
+            (Device, Element* e, ref const ElementDesc desc, ubyte) {
+                session.write_line("Element '", e.id, "' is protocol-coupled (", desc.type, "); not allowed in a naked device profile");
+            });
+        if (!device)
+            session.write_line("Failed to create device '", id, "'");
     }
 
 
     // /device/print command
-    import urt.meta.nullable;
     void device_print(Session session, Nullable!(const(char)[]) _scope)
     {
         if (_scope)
@@ -506,6 +599,10 @@ nothrow @nogc:
             if (link.resolved)
                 link.resolve();
         }
+
+        // any device's pending refs may resolve to the new element via a leading-dot global path
+        foreach (device; devices.values)
+            device.try_bind_pending();
     }
 
     void destroy_link(ElementLink* link)
