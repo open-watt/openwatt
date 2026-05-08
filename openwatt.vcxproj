@@ -76,6 +76,7 @@
     <DCompile Include="src\driver\windows\wlanapi.d" />
     <DCompile Include="src\main.d" />
     <DCompile Include="src\manager\base.d" />
+    <DCompile Include="src\manager\binding.d" />
     <DCompile Include="src\manager\certificate.d" />
     <DCompile Include="src\manager\collection.d" />
     <DCompile Include="src\manager\component.d" />

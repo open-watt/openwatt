@@ -107,8 +107,7 @@ nothrow @nogc:
                 subs ~= sub;
         }
 
-        // create a sampler for this can interface...
-        MQTTSampler sampler = g_app.allocator.allocT!MQTTSampler(broker, subs.move);
+        MQTTBinding binding = g_app.allocator.allocT!MQTTBinding(broker, subs.move);
 
         Device device = create_device_from_profile(*profile, model ? model.value : null, id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
             assert(desc.type == ElementType.mqtt);
@@ -144,17 +143,17 @@ nothrow @nogc:
 //            e.value = sample_value(tmp.ptr, mqtt.value_desc);
 
             // record samper data...
-            sampler.add_element(e, desc, read_topic.move, write_topic.move, mqtt.value_desc);
+            binding.add_element(e, desc, read_topic.move, write_topic.move, mqtt.value_desc);
             device.sample_elements ~= e; // TODO: remove this?
         });
         if (!device)
         {
             session.write_line("Failed to create device '", id, "'");
             g_app.allocator.freeT(profile);
-            g_app.allocator.freeT(sampler);
+            g_app.allocator.freeT(binding);
             return;
         }
 
-        device.samplers ~= sampler;
+        device.bindings ~= binding;
     }
 }

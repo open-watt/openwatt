@@ -24,13 +24,13 @@ import protocol.ble.sampler;
 
 nothrow @nogc:
 
-alias log = Log!"ble";
-
 
 class BLEModule : Module
 {
     mixin DeclareModule!"protocol.ble";
 nothrow @nogc:
+
+    alias log = Log!"ble";
 
     Map!(MACAddress, BLEAdvEntry*) devices;
 
@@ -132,7 +132,7 @@ nothrow @nogc:
             return;
         }
 
-        BLESampler sampler = g_app.allocator.allocT!BLESampler(ble_iface, client);
+        BLECentralBinding binding = g_app.allocator.allocT!BLECentralBinding(ble_iface, client);
 
         Device device = create_device_from_profile(*profile, model ? model.value : null, id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
             assert(desc.type == ElementType.ble);
@@ -142,7 +142,7 @@ nothrow @nogc:
             tmp[0 .. ble.value_desc.data_length] = 0;
             e.value = sample_value(tmp.ptr, ble.value_desc);
 
-            sampler.add_element(e, desc, ble);
+            binding.add_element(e, desc, ble);
             device.sample_elements ~= e;
         });
         if (!device)
@@ -150,7 +150,7 @@ nothrow @nogc:
             session.write_line("Failed to create device '", id, "'");
             return;
         }
-        device.samplers ~= sampler;
+        device.bindings ~= binding;
     }
 
     void cmd_read(Session session, BLEClient client, ushort handle)

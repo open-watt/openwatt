@@ -8,11 +8,11 @@ import urt.time;
 import urt.variant;
 
 import manager;
+import manager.binding;
 import manager.component;
 import manager.element;
 import manager.expression;
 import manager.profile;
-import manager.sampler;
 
 nothrow @nogc:
 
@@ -44,7 +44,7 @@ nothrow @nogc:
     Array!ExpressionElement expressions;
     Array!SumElement sums;
     Array!(ElementLink*) owned_links;
-    Array!Sampler samplers;
+    Array!Binding bindings;
 
     bool finalise()
     {
@@ -92,8 +92,8 @@ nothrow @nogc:
 
     void update()
     {
-        foreach (s; samplers)
-            s.update();
+        foreach (b; bindings)
+            b.update();
 
         SysTime now = getSysTime();
         foreach (ref sum; sums)

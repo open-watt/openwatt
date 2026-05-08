@@ -5,6 +5,7 @@ import urt.endian;
 import urt.time;
 import urt.uuid;
 
+import manager.binding;
 import manager.element;
 import manager.profile;
 import manager.sampler;
@@ -18,7 +19,7 @@ import router.iface.packet;
 nothrow @nogc:
 
 
-class BLESampler : Sampler
+class BLECentralBinding : Binding
 {
 nothrow @nogc:
 

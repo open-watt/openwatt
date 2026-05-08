@@ -10,6 +10,7 @@ import urt.string;
 import urt.time;
 import urt.variant;
 
+import manager.binding;
 import manager.element;
 import manager.expression;
 import manager.profile;
@@ -19,7 +20,7 @@ import manager.subscriber;
 import protocol.http.client;
 import protocol.http.message : HTTPMessage, HTTPMethod, HTTPParam;
 
-//version = DebugHTTPSampler;
+//version = DebugHTTPClientBinding;
 
 nothrow @nogc:
 
@@ -58,7 +59,7 @@ pure nothrow @nogc:
     ref ushort body_val_offset() => sub_offsets[3];
 }
 
-class HTTPSampler : Sampler
+class HTTPClientBinding : Binding
 {
 nothrow @nogc:
 
@@ -468,7 +469,7 @@ private:
                 ct_header[0] = HTTPParam(StringLit!"Content-Type", StringLit!"text/plain");
         }
 
-        version (DebugHTTPSampler)
+        version (DebugHTTPClientBinding)
         {
             import urt.meta.enuminfo;
             writeDebug("HTTP request: ", enum_key_from_value!HTTPMethod(method), " ", path,
@@ -513,7 +514,7 @@ private:
         _in_flight_head = cast(ubyte)((_in_flight_head + 1) % _in_flight_queue.length);
         --_in_flight_count;
 
-        version (DebugHTTPSampler)
+        version (DebugHTTPClientBinding)
             writeDebug("HTTP response: status ", response.status_code, " (", response.content.length, " bytes)");
 
         RequestState* rs;
@@ -542,30 +543,30 @@ private:
 
             if (location.empty)
             {
-                writeWarning("HTTP sampler: redirect with no Location header");
+                writeWarning("HTTP binding: redirect with no Location header");
             }
             else if (location[0] == '/')
             {
-                // Relative path — same host, URI update
+                // Relative path --same host, URI update
                 // TODO: cache redirect and retry with new path
-                writeWarning("HTTP sampler: URI redirect to '", location, "' — not yet implemented");
+                writeWarning("HTTP binding: URI redirect to '", location, "' --not yet implemented");
             }
             else
             {
-                // Absolute URL — need to compare scheme and host against
+                // Absolute URL --need to compare scheme and host against
                 // client's current connection to classify as:
                 //   1. protocol upgrade/downgrade (scheme differs)
                 //   2. cross-host redirect (host differs)
                 //   3. URI update (same scheme+host, different path)
                 // TODO: parse Location URL, compare to client, handle case 3
-                writeWarning("HTTP sampler: redirect to '", location, "' — not yet implemented");
+                writeWarning("HTTP binding: redirect to '", location, "' --not yet implemented");
             }
             return 0;
         }
 
         if (response.status_code < 200 || response.status_code >= 300)
         {
-            writeWarning("HTTP sampler: request returned status ", response.status_code);
+            writeWarning("HTTP binding: request returned status ", response.status_code);
             return 0;
         }
 
@@ -609,7 +610,7 @@ private:
         {
             if (!evaluate_success(json, rs.success_expr))
             {
-                writeWarning("HTTP sampler: success check failed for request");
+                writeWarning("HTTP binding: success check failed for request");
                 return 0;
             }
         }
@@ -621,7 +622,7 @@ private:
             data = walk_json_path(json, root_path);
             if (data is null)
             {
-                writeWarning("HTTP sampler: root path '", root_path, "' not found in response");
+                writeWarning("HTTP binding: root path '", root_path, "' not found in response");
                 return 0;
             }
         }
@@ -661,7 +662,7 @@ private:
             se.last_sample = getTime();
             se.sampled = true;
 
-            version (DebugHTTPSampler)
+            version (DebugHTTPClientBinding)
                 writeDebug("HTTP sampled: ", se.element.id, " = ", se.element.value);
         }
 
@@ -956,7 +957,7 @@ unittest
 {
     import urt.format.json : parse_json;
 
-    // ── walk_json_path ──
+    // walk_json_path
 
     Variant json = parse_json(`{"a": {"b": {"c": 42}}, "arr": [10, 20, 30], "x": 1}`);
 
@@ -984,7 +985,7 @@ unittest
     // empty path returns root
     assert(walk_json_path(json, "") !is null);
 
-    // ── deep_merge ──
+    // deep_merge
 
     // object merge: non-overlapping keys
     Variant a = parse_json(`{"x": 1}`);
@@ -993,7 +994,7 @@ unittest
     assert(*a.getMember("x") == 1);
     assert(*a.getMember("y") == 2);
 
-    // object merge: overlapping scalar — source wins
+    // object merge: overlapping scalar --source wins
     Variant c = parse_json(`{"x": 1}`);
     Variant d = parse_json(`{"x": 99}`);
     deep_merge(c, d);
@@ -1014,7 +1015,7 @@ unittest
     deep_merge(g, h);
     assert(g == 42);
 
-    // array append — the API use case: {"paths": ["a"]} + {"paths": ["b"]} → {"paths": ["a", "b"]}
+    // array append -- the API use case: {"paths": ["a"]} + {"paths": ["b"]} -> {"paths": ["a", "b"]}
     Variant p1 = parse_json(`{"paths": ["inv.battery.voltage"]}`);
     Variant p2 = parse_json(`{"paths": ["inv.battery.current"]}`);
     deep_merge(p1, p2);
@@ -1025,14 +1026,14 @@ unittest
     assert((*paths)[0] == Variant("inv.battery.voltage"));
     assert((*paths)[1] == Variant("inv.battery.current"));
 
-    // ── evaluate_success ──
+    // evaluate_success
 
     Variant ok_json = parse_json(`{"result": "OK", "count": 5}`);
     Variant fail_json = parse_json(`{"result": "FAIL", "count": 0}`);
 
     try
     {
-        // null expression — defaults to true
+        // null expression --defaults to true
         assert(evaluate_success(ok_json, null));
 
         // string equality via $var
@@ -1054,7 +1055,7 @@ unittest
     catch (Exception)
         assert(false, "parse failed");
 
-    // non-object JSON — locals empty
+    // non-object JSON --locals empty
     Variant scalar = parse_json(`42`);
     assert(evaluate_success(scalar, null));
 }

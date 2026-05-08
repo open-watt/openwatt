@@ -173,9 +173,8 @@ nothrow @nogc:
         if (name)
             device.name = name.value.makeString(g_app.allocator);
 
-        // create a sampler for this modbus server...
-        TeslaTWCSampler sampler = g_app.allocator.allocT!TeslaTWCSampler(cast(ushort)(slave_id ? slave_id.value : 0), mac ? mac.value : MACAddress());
-        device.samplers ~= sampler;
+        TeslaTWCBinding binding = g_app.allocator.allocT!TeslaTWCBinding(cast(ushort)(slave_id ? slave_id.value : 0), mac ? mac.value : MACAddress());
+        device.bindings ~= binding;
 
         Component c;
         Element* e;
@@ -201,18 +200,18 @@ nothrow @nogc:
         e = g_app.allocator.allocT!Element();
         e.id = "serial_number".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "lifetime_energy".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         // HACK: remove this, move to car component...
         e = g_app.allocator.allocT!Element();
         e.id = "vin".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         device.components ~= c;
 
@@ -223,23 +222,23 @@ nothrow @nogc:
         e = g_app.allocator.allocT!Element();
         e.id = "state".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "twc_state".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "target_current".addString;
         e.access = Access.read_write;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "max_current".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         device.components ~= c;
 
@@ -250,7 +249,7 @@ nothrow @nogc:
 //        e = g_app.allocator.allocT!Element();
 //        e.id = "vin".addString;
 //        c.elements ~= e;
-//        sampler.add_element(e);
+//        binding.add_element(e);
 //
 //        device.components ~= c;
 
@@ -267,47 +266,47 @@ nothrow @nogc:
         e = g_app.allocator.allocT!Element();
         e.id = "voltage1".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "voltage2".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "voltage3".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "current".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "power1".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "power2".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "power3".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "power".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         e = g_app.allocator.allocT!Element();
         e.id = "import".addString;
         c.elements ~= e;
-        sampler.add_element(e);
+        binding.add_element(e);
 
         device.components ~= c;
 

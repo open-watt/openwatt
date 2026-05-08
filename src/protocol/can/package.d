@@ -60,8 +60,7 @@ nothrow @nogc:
         void[] file = load_file(tconcat("conf/can_profiles/", profile_name, ".conf"), g_app.allocator);
         Profile* profile = parse_profile(cast(char[])file, g_app.allocator);
 
-        // create a sampler for this can interface...
-        CANSampler sampler = g_app.allocator.allocT!CANSampler(_interface);
+        CANBinding binding = g_app.allocator.allocT!CANBinding(_interface);
 
         Device device = create_device_from_profile(*profile, model ? model.value : null, id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
             assert(desc.type == ElementType.can);
@@ -72,8 +71,7 @@ nothrow @nogc:
             tmp[0 .. can.value_desc.data_length] = 0;
             e.value = sample_value(tmp.ptr, can.value_desc);
 
-            // record samper data...
-            sampler.add_element(e, desc, can);
+            binding.add_element(e, desc, can);
             device.sample_elements ~= e; // TODO: remove this?
         });
         if (!device)
@@ -81,6 +79,6 @@ nothrow @nogc:
             session.write_line("Failed to create device '", id, "'");
             return;
         }
-        device.samplers ~= sampler;
+        device.bindings ~= binding;
     }
 }

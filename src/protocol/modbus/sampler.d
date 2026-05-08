@@ -7,6 +7,7 @@ import urt.si;
 import urt.time;
 import urt.util : align_up;
 
+import manager.binding;
 import manager.element;
 import manager.profile;
 import manager.sampler;
@@ -16,8 +17,8 @@ import protocol.modbus.message;
 
 import router.iface.packet : PCP, pcp_priority_map;
 
-//version = DebugModbusSampler;
-//version = DebugModbusSamplerRegs;
+//version = DebugModbusClientBinding;
+//version = DebugModbusClientBindingRegs;
 
 nothrow @nogc:
 
@@ -69,7 +70,7 @@ DataType parse_modbus_data_type(const(char)[] desc)
 }
 
 
-class ModbusSampler : Sampler
+class ModbusClientBinding : Binding
 {
 nothrow @nogc:
 
@@ -177,13 +178,13 @@ nothrow @nogc:
                 continue;
             }
 
-            version (DebugModbusSampler)
+            version (DebugModbusClientBinding)
                 client.log.tracef("Request: {0} [{1}{2,04x}:{3}]", server_address, elements[i].regKind, firstReg, count);
 
             i = j;
         }
 
-        version (DebugModbusSampler)
+        version (DebugModbusClientBinding)
         {
             if (++_diag_counter >= 100)
             {
@@ -194,7 +195,7 @@ nothrow @nogc:
                     if (e.flags & 2) ++n_const;
                     else if (e.flags & 1) ++n_in_flight;
                 }
-                client.log.debugf("Sampler {0}: {1} elements, {2} in-flight, {3} const-done",
+                client.log.debugf("Binding {0}: {1} elements, {2} in-flight, {3} const-done",
                     server_address, elements.length, n_in_flight, n_const);
             }
         }
@@ -236,7 +237,7 @@ private:
     ushort retryTime = 500;
     bool needsSort = true;
     bool snooping;
-    version (DebugModbusSampler)
+    version (DebugModbusClientBinding)
         ubyte _diag_counter;
 
     struct SampleElement
@@ -305,7 +306,7 @@ private:
             return;
         }
 
-        version (DebugModbusSampler)
+        version (DebugModbusClientBinding)
             client.log.tracef("Response: {0}, [{1}{2,04x}:{3}] - {4}", server_address, kind, first, count, response_time - request_time);
 
         ubyte[] data = response.data[1 .. 1 + response_bytes];
@@ -338,7 +339,7 @@ private:
             else
                 e.element.value(sample_value(data.ptr + byte_offset, e.desc), response_time);
 
-            version (DebugModbusSamplerRegs)
+            version (DebugModbusClientBindingRegs)
                 client.log.tracef("Got reg {0,04x}: {1} = {2}", e.register, e.element.id, e.element.value);
         }
     }
@@ -352,7 +353,7 @@ private:
         ushort first = request.data[0..2].bigEndianToNative!ushort;
         ushort count = request.data[2..4].bigEndianToNative!ushort;
 
-        version (DebugModbusSampler)
+        version (DebugModbusClientBinding)
         {
             const(char)[] label = errorType == ModbusErrorType.Retrying ? "Retrying" :
                                   errorType == ModbusErrorType.Timeout ? "Timeout" : "Failed";

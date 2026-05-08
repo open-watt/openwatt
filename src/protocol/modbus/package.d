@@ -275,8 +275,7 @@ nothrow @nogc:
         void[] file = load_file(tconcat("conf/modbus_profiles/", profileName, ".conf"), g_app.allocator);
         Profile* profile = parse_profile(cast(char[])file, g_app.allocator);
 
-        // create a sampler for this modbus server...
-        ModbusSampler sampler = g_app.allocator.allocT!ModbusSampler(client, server_address);
+        ModbusClientBinding binding = g_app.allocator.allocT!ModbusClientBinding(client, server_address);
 
         Device device = create_device_from_profile(*profile, map.model[], id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
             assert(desc.type == ElementType.modbus);
@@ -287,8 +286,7 @@ nothrow @nogc:
             tmp[0 .. mb.value_desc.data_length] = 0;
             e.value = sample_value(tmp.ptr, mb.value_desc);
 
-            // record samper data...
-            sampler.add_element(e, desc, mb);
+            binding.add_element(e, desc, mb);
             device.sample_elements ~= e; // TODO: remove this?
         });
         if (!device)
@@ -296,7 +294,7 @@ nothrow @nogc:
             session.write_line("Failed to create device '", id, "'");
             return;
         }
-        device.samplers ~= sampler;
+        device.bindings ~= binding;
     }
 
     ModbusRequestState sendRequest(Session session, const(char)[] client, const(char)[] slave, ref ModbusPDU msg)

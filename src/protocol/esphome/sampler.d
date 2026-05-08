@@ -12,6 +12,7 @@ import urt.time;
 import urt.variant;
 
 import manager.base;
+import manager.binding;
 import manager.component;
 import manager.device;
 import manager.element;
@@ -24,12 +25,12 @@ import protocol.esphome.protobuf;
 
 import router.iface.mac;
 
-//version = DebugESPHomeSampler;
+//version = DebugESPHomeBinding;
 
 nothrow @nogc:
 
 
-class ESPHomeSampler : Sampler
+class ESPHomeBinding : Binding
 {
 nothrow @nogc:
 
@@ -424,7 +425,7 @@ private:
                 if (SampleElement* el = res.key in _elements)
                 {
                     el.element.value = Quantity!float(res.state * el.pre_scale, el.unit);
-                    version (DebugESPHomeSampler)
+                    version (DebugESPHomeBinding)
                         writeDebug("esphome - sample: ", el.element.id, " = ", el.element.value);
                 }
                 break;

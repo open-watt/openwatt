@@ -131,8 +131,7 @@ nothrow @nogc:
             return;
         }
 
-        // create a sampler for this modbus server...
-        GoodWeSampler sampler = g_app.allocator.allocT!GoodWeSampler(aa55_client);
+        GoodWeBinding binding = g_app.allocator.allocT!GoodWeBinding(aa55_client);
 
         Device device = create_device_from_profile(*profile, aa55_client.model[], id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
             assert(desc.type == ElementType.aa55);
@@ -143,8 +142,7 @@ nothrow @nogc:
             tmp[0 .. aa55.value_desc.data_length] = 0;
             e.value = sample_value(tmp.ptr, aa55.value_desc);
 
-            // record samper data...
-            sampler.add_element(e, desc, aa55);
+            binding.add_element(e, desc, aa55);
             device.sample_elements ~= e; // TODO: remove this?
         });
         if (!device)
@@ -154,6 +152,6 @@ nothrow @nogc:
             return;
         }
         device.profile = profile;
-        device.samplers ~= sampler;
+        device.bindings ~= binding;
     }
 }

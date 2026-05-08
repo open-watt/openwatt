@@ -9,6 +9,7 @@ import urt.string;
 import urt.time;
 import urt.variant;
 
+import manager.binding;
 import manager.device;
 import manager.element;
 import manager.profile;
@@ -18,12 +19,12 @@ import manager.subscriber;
 import protocol.mqtt.broker;
 import protocol.mqtt.client;
 
-//version = DebugMQTTSampler;
+//version = DebugMQTTBinding;
 
 nothrow @nogc:
 
 
-class MQTTSampler : Sampler
+class MQTTBinding : Binding
 {
 nothrow @nogc:
 
@@ -104,7 +105,7 @@ nothrow @nogc:
             {
                 e.element.value(value, cast(SysTime)timestamp, this);
 
-                version (DebugMQTTSampler)
+                version (DebugMQTTBinding)
                     writeDebugf("mqtt: sample - topic: {0} value: {1} = {2} (raw: {3})", topic, e.element.id, e.element.value, cast(const(char)[])payload);
             }
             else

@@ -78,7 +78,7 @@ nothrow @nogc:
             g_app.devices.insert(device.id[], device);
         }
 
-        ESPHomeSampler sampler = g_app.allocator.allocT!ESPHomeSampler(device, client);
-        device.samplers ~= sampler;
+        ESPHomeBinding binding = g_app.allocator.allocT!ESPHomeBinding(device, client);
+        device.bindings ~= binding;
     }
 }

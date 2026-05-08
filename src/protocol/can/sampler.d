@@ -7,6 +7,7 @@ import urt.si;
 import urt.time;
 import urt.util : align_up;
 
+import manager.binding;
 import manager.element;
 import manager.profile;
 import manager.sampler;
@@ -16,12 +17,12 @@ import protocol.can.iface;
 
 import router.iface;
 
-//version = DebugCANSampler;
+//version = DebugCANBinding;
 
 nothrow @nogc:
 
 
-class CANSampler : Sampler
+class CANBinding : Binding
 {
 nothrow @nogc:
 
@@ -82,7 +83,7 @@ private:
 
             e.element.value(sample_value(p.data.ptr + e.offset, e.desc), p.creation_time);
 
-            version (DebugCANSampler)
+            version (DebugCANBinding)
             {
                 import urt.variant;
                 ValueDesc raw_desc = ValueDesc(e.desc.data_type);

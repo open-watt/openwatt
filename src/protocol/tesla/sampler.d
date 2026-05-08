@@ -6,6 +6,7 @@ import urt.time;
 import urt.variant;
 
 import manager;
+import manager.binding;
 import manager.element;
 import manager.sampler;
 import manager.subscriber;
@@ -18,7 +19,7 @@ import router.iface.mac;
 nothrow @nogc:
 
 
-class TeslaTWCSampler : Sampler
+class TeslaTWCBinding : Binding
 {
 nothrow @nogc:
 

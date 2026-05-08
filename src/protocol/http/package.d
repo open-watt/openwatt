@@ -190,24 +190,24 @@ nothrow @nogc:
             return;
         }
 
-        HTTPSampler sampler = g_app.allocator.allocT!HTTPSampler(client, p);
+        HTTPClientBinding binding = g_app.allocator.allocT!HTTPClientBinding(client, p);
 
         Device device = create_device_from_profile(*p, model ? model.value : null, id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
             if (desc.type != ElementType.http)
                 return;
             ref const ElementDesc_HTTP http = p.get_http(desc.element);
-            sampler.add_element(e, desc, http, names[0 .. n], values[0 .. n]);
+            binding.add_element(e, desc, http, names[0 .. n], values[0 .. n]);
         });
 
         if (!device)
         {
             session.write_line("Failed to create device '", id, "'");
-            g_app.allocator.freeT(sampler);
+            g_app.allocator.freeT(binding);
             g_app.allocator.freeT(p);
             return;
         }
 
-        device.samplers ~= sampler;
+        device.bindings ~= binding;
     }
 
     static class HTTPRequestState : CommandState

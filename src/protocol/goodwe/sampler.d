@@ -6,18 +6,19 @@ import urt.log;
 import urt.time;
 import urt.variant;
 
+import manager.binding;
 import manager.element;
 import manager.profile;
 import manager.sampler;
 
 import protocol.goodwe.aa55;
 
-//version = DebugGoodWeSampler;
+//version = DebugGoodWeBinding;
 
 nothrow @nogc:
 
 
-class GoodWeSampler : Sampler
+class GoodWeBinding : Binding
 {
 nothrow @nogc:
 
@@ -73,7 +74,7 @@ nothrow @nogc:
                 // TODO: add to pending requests; implement timeout, etc.
                 //...
 
-                version (DebugGoodWeSampler)
+                version (DebugGoodWeBinding)
                     writeDebug("aa55: request sample - '", client.name, "' fn: ", fn);
             }
         }
@@ -131,12 +132,12 @@ private:
         }
         if (!success)
         {
-            version (DebugGoodWeSampler)
+            version (DebugGoodWeBinding)
                 writeDebug("aa55: sample FAILED after ", (response_time - request.request_time).as!"msecs", "ms - ''", client.name, "' fn: ", request.function_code);
             return;
         }
 
-        version (DebugGoodWeSampler)
+        version (DebugGoodWeBinding)
             writeDebug("aa55: sample response after ", (response_time - request.request_time).as!"msecs", "ms - '", client.name, "' fn: ", request.function_code);
 
         // update all elements whose data is contained in this response
@@ -154,7 +155,7 @@ private:
             Variant sample = sample_value(response.ptr + e.offset, e.desc);
             e.element.value(sample.move, response_time);
 
-            version (DebugGoodWeSampler)
+            version (DebugGoodWeBinding)
             {
                 import urt.variant;
                 ValueDesc raw_desc = ValueDesc(e.desc.data_type);
