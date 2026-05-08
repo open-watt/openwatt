@@ -156,8 +156,9 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
     ip.tos      = 0;
     ip.total_length[0] = cast(ubyte)(total >> 8);
     ip.total_length[1] = cast(ubyte)total;
-    ip.ident[0] = 0;
-    ip.ident[1] = 0;
+    ushort ip_id = next_ip_id();
+    ip.ident[0] = cast(ubyte)(ip_id >> 8);
+    ip.ident[1] = cast(ubyte)ip_id;
     ip.flags_frag[0] = 0;
     ip.flags_frag[1] = 0;
     ip.ttl      = 64;

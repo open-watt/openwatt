@@ -2,10 +2,16 @@ module protocol.ip.neighbour;
 
 import urt.array;
 import urt.inet;
+import urt.log;
 import urt.time;
 
 import router.iface;
 import router.iface.packet;
+
+private alias log = Log!"neighbour";
+
+// TODO: replace fixed-slot pending queue with byte-budget buffer (cf. Linux unres_qlen_bytes).
+private enum pending_queue_depth = 3;
 
 nothrow @nogc:
 
@@ -28,7 +34,8 @@ struct NeighbourEntry(IP)
     MonoTime last_confirmed;
     MonoTime last_request;      // when we last sent a resolution request
     ubyte retry_count;
-    Packet* pending;            // single-slot queue; replaced on overflow
+    ubyte pending_count;
+    Packet*[pending_queue_depth] pending;
 }
 
 struct NeighbourCache(IP)
@@ -122,7 +129,7 @@ nothrow @nogc:
         n.state         = NeighbourState.incomplete;
         n.last_request  = getTime();
         n.retry_count   = 1;
-        n.pending       = pending.clone();
+        queue_pending(n, pending);
         _entries ~= n;
 
         if (send_request)
@@ -202,28 +209,46 @@ nothrow @nogc:
 private:
     void queue_pending(ref NeighbourEntry!IP e, ref Packet pkt)
     {
-        free_pending(e);
-        e.pending = pkt.clone();
+        if (e.pending_count == pending_queue_depth)
+        {
+            // evict oldest to make room for newest
+            e.pending[0].free_clone();
+            foreach (i; 1 .. pending_queue_depth)
+                e.pending[i - 1] = e.pending[i];
+            --e.pending_count;
+
+            ++_pending_overflow;
+            if (_pending_overflow == 1 || (_pending_overflow & 0xFF) == 0)
+                log.warning("pending-queue overflow #", _pending_overflow,
+                            ": dropping queued packet for ", e.ip,
+                            " on ", e.iface.name, " (state=", e.state, ")");
+        }
+        e.pending[e.pending_count] = pkt.clone();
+        ++e.pending_count;
     }
 
     void free_pending(ref NeighbourEntry!IP e)
     {
-        if (!e.pending)
-            return;
-        e.pending.free_clone();
-        e.pending = null;
+        foreach (i; 0 .. e.pending_count)
+            e.pending[i].free_clone();
+        e.pending_count = 0;
     }
 
     void drain_pending(ref NeighbourEntry!IP e)
     {
-        if (!e.pending || !drain)
+        if (!drain)
         {
             free_pending(e);
             return;
         }
-        drain(*e.pending, e.iface, e.link_addr[0 .. e.link_addr_len]);
-        free_pending(e);
+        foreach (i; 0 .. e.pending_count)
+        {
+            drain(*e.pending[i], e.iface, e.link_addr[0 .. e.link_addr_len]);
+            e.pending[i].free_clone();
+        }
+        e.pending_count = 0;
     }
 
     Array!(NeighbourEntry!IP) _entries;
+    ulong _pending_overflow;        // diagnostic: total packets dropped by single-slot pending queue
 }

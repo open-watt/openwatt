@@ -122,8 +122,9 @@ void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, ref const Packet
     rip.tos      = 0;
     rip.total_length[0] = cast(ubyte)(total >> 8);
     rip.total_length[1] = cast(ubyte)total;
-    rip.ident[0] = 0;
-    rip.ident[1] = 0;
+    ushort ip_id = next_ip_id();
+    rip.ident[0] = cast(ubyte)(ip_id >> 8);
+    rip.ident[1] = cast(ubyte)ip_id;
     rip.flags_frag[0] = 0;
     rip.flags_frag[1] = 0;
     rip.ttl      = 64;
