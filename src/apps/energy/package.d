@@ -143,10 +143,21 @@ nothrow @nogc:
         manager.add_circuit(name.makeString(g_app.allocator), p, max_current ? max_current.value : 0, meter ? meter.value : null, type, pphase, mphase);
     }
 
-    void appliance_add(Session session, const(char)[] id, Nullable!(Device) device, Nullable!(const(char)[]) _type, Nullable!(const(char)[]) name, Nullable!(const(char)[]) circuit, Nullable!(int) priority, Nullable!Component meter, Nullable!(const(char)[]) vin, Nullable!Component _info, Nullable!Component control, Nullable!(Component[]) mppt, Nullable!Component backup, Nullable!Component battery)
+    void appliance_add(Session session, const(char)[] id, Nullable!(Device) device, Nullable!(const(char)[]) _type, Nullable!(const(char)[]) name, Nullable!(const(char)[]) circuit, Nullable!(int) priority, Nullable!Component meter, Nullable!(uint) meter_phase, Nullable!(const(char)[]) vin, Nullable!Component _info, Nullable!Component control, Nullable!(Component[]) mppt, Nullable!Component backup, Nullable!Component battery)
     {
         const(char)[] type = _type ? _type.value : null;
         Component info = _info ? _info.value : null;
+
+        ubyte mphase = 0;
+        if (meter_phase)
+        {
+            if (meter_phase.value < 1 || meter_phase.value > 3)
+            {
+                session.write_line("Meter phase must be 1, 2, or 3");
+                return;
+            }
+            mphase = cast(ubyte)meter_phase.value;
+        }
 
         if (device && !info)
             info = device.value.get_first_component_by_template("DeviceInfo");
@@ -172,6 +183,7 @@ nothrow @nogc:
         appliance.name = name ? name.value.makeString(g_app.allocator) : String();
         appliance.info = info;
         appliance.meter = meter ? meter.value : null;
+        appliance.meter_phase = mphase;
         appliance.priority = priority ? priority.value : int.max;
 
         appliance.init(device ? device.value : null);
