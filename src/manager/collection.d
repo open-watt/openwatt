@@ -20,6 +20,7 @@ enum CollectionType : ubyte
 {
     aa55,
     api,
+    binding, // all protocol bindings
     ble_client,
     certificate,
     cron_job,
@@ -181,6 +182,12 @@ nothrow @nogc:
             }
         }
         add(item);
+
+        // HACK: advance the state machine synchronously so subsequent script lines
+        // have a chance to work when the early startup creates things.
+        // this should be removed, and replaced by a more comprehensive latent startup tolerance.
+        if (auto active = cast(ActiveObject)item)
+            active.do_update();
 
         return item;
     }

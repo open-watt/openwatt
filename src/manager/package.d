@@ -13,6 +13,7 @@ import urt.time;
 import urt.traits : is_enum, Unqual;
 import urt.variant;
 
+import manager.binding;
 import manager.collection;
 import manager.component;
 import manager.console;
@@ -403,6 +404,16 @@ nothrow @nogc:
             worst_module_dur = devices_d;
             worst_module_name = "(devices)";
             worst_module_phase = "device.update";
+        }
+
+        MonoTime bindings_t = getTime();
+        Collection!ProtocolBinding().update_all();
+        Duration bindings_d = getTime() - bindings_t;
+        if (bindings_d > worst_module_dur)
+        {
+            worst_module_dur = bindings_d;
+            worst_module_name = "(bindings)";
+            worst_module_phase = "binding.update";
         }
 
         foreach (m; modules)

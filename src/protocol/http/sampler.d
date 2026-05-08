@@ -5,17 +5,22 @@ import urt.conv;
 import urt.format.json;
 import urt.lifetime;
 import urt.log;
+import urt.mem;
 import urt.mem.temp;
+import urt.meta : AliasSeq;
 import urt.string;
 import urt.time;
 import urt.variant;
 
+import manager;
+import manager.base;
 import manager.binding;
+import manager.collection;
+import manager.device;
 import manager.element;
 import manager.expression;
 import manager.profile;
 import manager.sampler;
-import manager.subscriber;
 
 import protocol.http.client;
 import protocol.http.message : HTTPMessage, HTTPMethod, HTTPParam;
@@ -59,14 +64,122 @@ pure nothrow @nogc:
     ref ushort body_val_offset() => sub_offsets[3];
 }
 
-class HTTPClientBinding : Binding
+class HTTPClientBinding : ProfileBinding
 {
+    alias Properties = AliasSeq!(Prop!("client", client),
+                                 Prop!("profile", profile),
+                                 Prop!("model", model));
 nothrow @nogc:
 
-    this(HTTPClient client, Profile* profile)
+    enum type_name = "http-client-binding";
+    enum path = "/binding/http/client";
+
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        _client = client;
-        _profile = profile;
+        super(collection_type_info!HTTPClientBinding, id, flags);
+    }
+
+    final inout(HTTPClient) client() inout pure
+        => _client.get;
+    final void client(HTTPClient value)
+    {
+        if (_client.get is value)
+            return;
+        if (_subscribed)
+        {
+            _client.unsubscribe(&state_change);
+            _subscribed = false;
+        }
+        _client = value;
+        restart();
+    }
+
+    final ref const(String) profile() const pure
+        => _profile_name;
+    final void profile(String value)
+    {
+        if (value == _profile_name)
+            return;
+        _profile_name = value.move;
+        restart();
+    }
+
+    final ref const(String) model() const pure
+        => _model_name;
+    final void model(String value)
+    {
+        if (value == _model_name)
+            return;
+        _model_name = value.move;
+        restart();
+    }
+
+    final override bool validate() const pure
+    {
+        return _client.get !is null && !_profile_name.empty && !_device.empty;
+    }
+
+    override CompletionStatus startup()
+    {
+        if (!materialise())
+            return CompletionStatus.error;
+
+        HTTPClient c = _client.get;
+        if (!c || !c.running)
+            return CompletionStatus.continue_;
+
+        c.subscribe(&state_change);
+        _subscribed = true;
+        return CompletionStatus.complete;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        if (_subscribed)
+        {
+            _client.unsubscribe(&state_change);
+            _subscribed = false;
+        }
+        // Unsubscribe element write-back delegates before super.shutdown frees the profile
+        if (_profile_data)
+        {
+            foreach (ref se; _elements[])
+            {
+                ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
+                if (http.write_request_index != ushort.max)
+                    se.element.remove_subscriber(&on_element_change);
+            }
+        }
+        _elements.clear();
+        _request_states.clear();
+        return super.shutdown();
+    }
+
+protected:
+    final override const(char)[] profile_dir() const pure
+        => "conf/rest_profiles/";
+    final override const(char)[] profile_name() const pure
+        => _profile_name[];
+    final override const(char)[] model_name() const pure
+        => _model_name[];
+
+    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
+    {
+        if (desc.type != ElementType.http)
+            return;
+        ref const ElementDesc_HTTP http = _profile_data.get_http(desc.element);
+
+        const(char)[][32] names = void, values = void;
+        size_t n = 0;
+        foreach (kvp; _params)
+        {
+            if (n >= names.length)
+                break;
+            names[n] = kvp.key[];
+            values[n] = kvp.value[];
+            ++n;
+        }
+        add_element(e, desc, http, names[0 .. n], values[0 .. n]);
     }
 
     final void add_element(Element* element, ref const ElementDesc desc, ref const ElementDesc_HTTP http_desc, const(char)[][] param_names, const(char)[][] param_values)
@@ -92,33 +205,21 @@ nothrow @nogc:
         if (http_desc.write_request_index != ushort.max)
         {
             build_request_state(http_desc.write_request_index, ushort.max, param_names, param_values);
-            element.add_subscriber(this);
+            element.add_subscriber(&on_element_change);
         }
     }
 
-    override void remove_element(Element* element)
+    void on_element_change(ref Element e, ref const Variant val, SysTime ts, ref const Variant prev, SysTime prev_ts)
     {
-        foreach (i, ref e; _elements[])
-        {
-            if (e.element is element)
-            {
-                _elements.remove(i);
-                return;
-            }
-        }
-    }
-
-    override void on_change(Element* e, ref const Variant val, SysTime timestamp, Subscriber who)
-    {
-        if (who is this)
-            return; // don't write back values we just read
+        if (_self_write)
+            return; // don't write back values we just read from the response
 
         foreach (ref se; _elements[])
         {
-            if (se.element !is e)
+            if (se.element !is &e)
                 continue;
 
-            ref const ElementDesc_HTTP http = _profile.get_http(se.http_index);
+            ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
             if (http.write_request_index == ushort.max)
                 continue;
 
@@ -134,9 +235,10 @@ nothrow @nogc:
         }
     }
 
-    override void update()
+    final override void update()
     {
-        if (_client is null || !_client.running)
+        HTTPClient c = _client.get;
+        if (!c)
             return;
 
         MonoTime now = getTime();
@@ -164,10 +266,21 @@ nothrow @nogc:
     }
 
 private:
-    HTTPClient _client;
-    Profile* _profile;
+    ObjectRef!HTTPClient _client;
+    String _profile_name;
+    String _model_name;
+
+    bool _subscribed;
+    bool _self_write;
+
     Array!HTTPSampleElement _elements;
     Array!RequestState _request_states;
+
+    void state_change(ActiveObject obj, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
+    }
 
     // TODO: DELETE THIS QUEUE THING; IT'S A HACK, HTTPClient NEEDS TO RETURN A HANDLE
     ushort[16] _in_flight_queue;
@@ -187,7 +300,7 @@ private:
             }
         }
 
-        ref const RequestDesc req = _profile.get_request(req_idx);
+        ref const RequestDesc req = _profile_data.get_request(req_idx);
 
         RequestState* rs = &_request_states.pushBack();
         rs.request_index = req_idx;
@@ -225,7 +338,7 @@ private:
                 has_plural = true, is_val = 2;
             else
             {
-                writeWarning("HTTP profile: no parameter '", param, "' for substitution");
+                log.warning("no parameter '", param, "' for substitution");
                 return null;
             }
             ref ushort sub_offset = rs.sub_offsets[is_val | is_body];
@@ -244,22 +357,22 @@ private:
             return subbed;
         }
 
-        rs.resolved_path = String(do_sub(req.get_path(*_profile), &get_sub_with_kv));
+        rs.resolved_path = String(do_sub(req.get_path(*_profile_data), &get_sub_with_kv));
         is_body = 1;
-        rs.resolved_body_template = String(do_sub(req.get_body_template(*_profile), &get_sub_with_kv));
-        rs.resolved_root_path = String(do_sub(req.get_root_path(*_profile), &get_substitute));
-        rs.resolved_parse_template = String(do_sub(req.get_parse_template(*_profile), &get_substitute));
-        auto success_expr = substitute_parameters(req.get_success_expr(*_profile), &get_substitute, unclosed_token);
+        rs.resolved_body_template = String(do_sub(req.get_body_template(*_profile_data), &get_sub_with_kv));
+        rs.resolved_root_path = String(do_sub(req.get_root_path(*_profile_data), &get_substitute));
+        rs.resolved_parse_template = String(do_sub(req.get_parse_template(*_profile_data), &get_substitute));
+        auto success_expr = substitute_parameters(req.get_success_expr(*_profile_data), &get_substitute, unclosed_token);
 
         if (sub_failed || unclosed_token)
         {
             if (unclosed_token)
-                writeWarning("HTTP profile: un-closed placeholder token in request '", req.get_name(*_profile), '\'');
+                log.warning("un-closed placeholder token in request '", req.get_name(*_profile_data), '\'');
             _request_states.popBack();
         }
         else if (has_singular && has_plural)
         {
-            writeWarning("HTTP profile: request '", req.get_name(*_profile), "' mixes singular and plural placeholders");
+            log.warning("request '", req.get_name(*_profile_data), "' mixes singular and plural placeholders");
             _request_states.popBack();
         }
         else
@@ -270,7 +383,7 @@ private:
                 try
                     rs.success_expr = parse_expression(success_text);
                 catch (Exception)
-                    writeWarning("HTTP profile: failed to parse success expression '", success_text, "'");
+                    log.warning("failed to parse success expression '", success_text, "'");
             }
 
             rs.is_batch = has_plural;
@@ -290,7 +403,7 @@ private:
             // per-element request
             foreach (i, ref se; _elements[])
             {
-                ref const ElementDesc_HTTP http = _profile.get_http(se.http_index);
+                ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
                 ushort match_idx = is_write ? http.write_request_index : http.request_index;
                 if (match_idx != rs.request_index)
                     continue;
@@ -310,10 +423,10 @@ private:
 
     void send_batch(ref RequestState rs, MonoTime now, bool is_write, HTTPSampleElement[] elements)
     {
-        ref const RequestDesc req = _profile.get_request(rs.request_index);
+        ref const RequestDesc req = _profile_data.get_request(rs.request_index);
 
-        const(char)[] path_tmpl = rs.resolved_path ? rs.resolved_path[] : req.get_path(*_profile);
-        const(char)[] body_tmpl = rs.resolved_body_template ? rs.resolved_body_template[] : req.get_body_template(*_profile);
+        const(char)[] path_tmpl = rs.resolved_path ? rs.resolved_path[] : req.get_path(*_profile_data);
+        const(char)[] body_tmpl = rs.resolved_body_template ? rs.resolved_body_template[] : req.get_body_template(*_profile_data);
 
         Array!char merged_path;
         Array!char form_buf;
@@ -335,14 +448,14 @@ private:
 
         foreach (ref se; elements)
         {
-            ref const ElementDesc_HTTP http = _profile.get_http(se.http_index);
+            ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
             ushort match_idx = is_write ? http.write_request_index : http.request_index;
             if (match_idx != rs.request_index)
                 continue;
 
-            const(char)[] key = is_write ? http.get_write_key(*_profile) : null;
+            const(char)[] key = is_write ? http.get_write_key(*_profile_data) : null;
             if (key.empty)
-                key = http.get_identifier(*_profile);
+                key = http.get_identifier(*_profile_data);
             const(char)[] value_str;
 
             void url_append(ref Array!char target, ushort key_offset, ushort val_offset, const(char)[] tmpl)
@@ -472,7 +585,7 @@ private:
         version (DebugHTTPClientBinding)
         {
             import urt.meta.enuminfo;
-            writeDebug("HTTP request: ", enum_key_from_value!HTTPMethod(method), " ", path,
+            log.debug_("HTTP request: ", enum_key_from_value!HTTPMethod(method), " ", path,
                 body.length > 0 ? " [body: " : "", body.length > 0 ? body : "", body.length > 0 ? "]" : "");
         }
 
@@ -500,7 +613,7 @@ private:
 
     const(char)[] format_element_value(ref const HTTPSampleElement se)
     {
-        ref const ElementDesc_HTTP http = _profile.get_http(se.http_index);
+        ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
         const Variant v = se.element.value;
         return format_value(v, http.value_desc);
     }
@@ -510,12 +623,17 @@ private:
         if (_in_flight_count == 0)
             return 0;
 
+        // Guard against re-triggering write requests when the response handler
+        // writes the freshly-parsed value back into our subscribed elements.
+        _self_write = true;
+        scope(exit) _self_write = false;
+
         ushort req_idx = _in_flight_queue[_in_flight_head];
         _in_flight_head = cast(ubyte)((_in_flight_head + 1) % _in_flight_queue.length);
         --_in_flight_count;
 
         version (DebugHTTPClientBinding)
-            writeDebug("HTTP response: status ", response.status_code, " (", response.content.length, " bytes)");
+            log.debug_("HTTP response: status ", response.status_code, " (", response.content.length, " bytes)");
 
         RequestState* rs;
         foreach (ref req; _request_states[])
@@ -543,13 +661,13 @@ private:
 
             if (location.empty)
             {
-                writeWarning("HTTP binding: redirect with no Location header");
+                log.warning("redirect with no Location header");
             }
             else if (location[0] == '/')
             {
                 // Relative path --same host, URI update
                 // TODO: cache redirect and retry with new path
-                writeWarning("HTTP binding: URI redirect to '", location, "' --not yet implemented");
+                log.warning("URI redirect to '", location, "' --not yet implemented");
             }
             else
             {
@@ -559,21 +677,21 @@ private:
                 //   2. cross-host redirect (host differs)
                 //   3. URI update (same scheme+host, different path)
                 // TODO: parse Location URL, compare to client, handle case 3
-                writeWarning("HTTP binding: redirect to '", location, "' --not yet implemented");
+                log.warning("redirect to '", location, "' --not yet implemented");
             }
             return 0;
         }
 
         if (response.status_code < 200 || response.status_code >= 300)
         {
-            writeWarning("HTTP binding: request returned status ", response.status_code);
+            log.warning("request returned status ", response.status_code);
             return 0;
         }
 
         if (response.content.length == 0 || rs is null)
             return 0;
 
-        ref const RequestDesc req = _profile.get_request(req_idx);
+        ref const RequestDesc req = _profile_data.get_request(req_idx);
 
         if (req.parse_mode == RequestDesc.ParseMode.none)
             return 0;
@@ -582,11 +700,11 @@ private:
         {
             foreach (ref se; _elements[])
             {
-                ref const ElementDesc_HTTP http = _profile.get_http(se.http_index);
+                ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
                 if (http.request_index != req_idx)
                     continue;
 
-                const(char)[] pattern = http.get_identifier(*_profile);
+                const(char)[] pattern = http.get_identifier(*_profile_data);
                 if (pattern.empty)
                     continue;
 
@@ -610,36 +728,36 @@ private:
         {
             if (!evaluate_success(json, rs.success_expr))
             {
-                writeWarning("HTTP binding: success check failed for request");
+                log.warning("success check failed for request");
                 return 0;
             }
         }
 
         Variant* data = &json;
-        const(char)[] root_path = rs.resolved_root_path ? rs.resolved_root_path[] : req.get_root_path(*_profile);
+        const(char)[] root_path = rs.resolved_root_path ? rs.resolved_root_path[] : req.get_root_path(*_profile_data);
         if (!root_path.empty)
         {
             data = walk_json_path(json, root_path);
             if (data is null)
             {
-                writeWarning("HTTP binding: root path '", root_path, "' not found in response");
+                log.warning("root path '", root_path, "' not found in response");
                 return 0;
             }
         }
 
-        const(char)[] parse_tmpl = rs.resolved_parse_template ? rs.resolved_parse_template[] : req.get_parse_template(*_profile);
+        const(char)[] parse_tmpl = rs.resolved_parse_template ? rs.resolved_parse_template[] : req.get_parse_template(*_profile_data);
 
         foreach (ref se; _elements[])
         {
-            ref const ElementDesc_HTTP http = _profile.get_http(se.http_index);
+            ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
             if (http.request_index != req_idx)
                 continue;
 
-            const(char)[] identifier = http.get_identifier(*_profile);
+            const(char)[] identifier = http.get_identifier(*_profile_data);
             if (identifier.empty)
                 continue;
 
-            const(char)[] resp_path = http.get_response_path(*_profile);
+            const(char)[] resp_path = http.get_response_path(*_profile_data);
             if (!resp_path.empty)
                 identifier = resp_path;
 
@@ -663,7 +781,7 @@ private:
             se.sampled = true;
 
             version (DebugHTTPClientBinding)
-                writeDebug("HTTP sampled: ", se.element.id, " = ", se.element.value);
+                log.trace("HTTP sampled: ", se.element.id, " = ", se.element.value);
         }
 
         return 0;
@@ -729,11 +847,11 @@ bool evaluate_success(ref Variant json, Expression* expr)
     if (!expr)
         return true;
 
-    Map!(const(char)[], Variant) locals;
+    Map!(String, Variant) locals;
     if (json.isObject)
     {
         foreach (key, ref val; json)
-            locals[key] = val;
+            locals[makeString(key, defaultAllocator())] = val;
     }
 
     EvalContext ctx;

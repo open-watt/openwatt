@@ -8,7 +8,6 @@ import urt.time;
 import urt.variant;
 
 import manager;
-import manager.binding;
 import manager.component;
 import manager.element;
 import manager.expression;
@@ -129,7 +128,6 @@ nothrow @nogc:
 
     Profile* profile;
     Array!Computation computations;
-    Array!Binding bindings;
 
     bool finalise()
     {
@@ -192,9 +190,6 @@ nothrow @nogc:
 
     void update()
     {
-        foreach (b; bindings)
-            b.update();
-
         SysTime now = getSysTime();
         foreach (ref c; computations)
         {

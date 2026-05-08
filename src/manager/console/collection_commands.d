@@ -94,6 +94,12 @@ nothrow @nogc:
         //       how do we know what properties are relevant for the create logs?
         item.log.info("created");
 
+        // HACK: advance the state machine synchronously so subsequent script lines
+        // have a chance to work when the early startup creates things.
+        // this should be removed, and replaced by a more comprehensive latent startup tolerance.
+        if (auto active = cast(ActiveObject)item)
+            active.do_update();
+
         return null;
     }
 

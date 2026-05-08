@@ -346,9 +346,7 @@ private:
 
 class AA55Client : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("remote", remote),
-                                 Prop!("profile", profile),
-                                 Prop!("model", model));
+    alias Properties = AliasSeq!(Prop!("remote", remote));
 nothrow @nogc:
 
     enum type_name = "aa55";
@@ -385,30 +383,6 @@ nothrow @nogc:
 
         restart();
         return null;
-    }
-
-    ref const(String) profile() const pure
-        => _profile;
-    void profile(String value)
-    {
-        _host = null;
-        if (value == _profile)
-            return;
-        _profile = value.move;
-
-        restart();
-    }
-
-    ref const(String) model() const pure
-        => _model;
-    void model(String value)
-    {
-        _host = null;
-        if (value == _model)
-            return;
-        _model = value.move;
-
-        restart();
     }
 
     // API
@@ -685,8 +659,6 @@ package:
 
 private:
     String _host;
-    String _profile;
-    String _model;
     InetAddress _remote;
 
     bool _handshake_in_progress;

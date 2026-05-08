@@ -3,7 +3,6 @@ module protocol.ble;
 import urt.log;
 import urt.map;
 import urt.mem.allocator;
-import urt.meta.nullable;
 import urt.string;
 import urt.time;
 import urt.util;
@@ -49,7 +48,7 @@ nothrow @nogc:
     {
         g_app.console.register_collection!BLEInterface();
         g_app.console.register_collection!BLEClient();
-        g_app.console.register_command!device_add("/protocol/ble/device", this, "add");
+        g_app.console.register_collection!BLEClientBinding();
         g_app.console.register_command!print_devices("/protocol/ble/device", this, "print");
         g_app.console.register_command!cmd_read("/protocol/ble/client", this, "read");
     }
@@ -99,59 +98,6 @@ nothrow @nogc:
     }
 
     import manager.console.session : Session;
-    import manager.profile;
-
-    void device_add(Session session, const(char)[] id, BLEClient client, Nullable!(const(char)[]) name, Nullable!(const(char)[]) _profile, Nullable!(const(char)[]) model)
-    {
-        import manager.device;
-        import manager.element;
-        import manager.sampler;
-        import urt.file;
-        import urt.mem.allocator;
-        import urt.string.format;
-
-        if (!_profile)
-        {
-            session.write_line("No profile specified");
-            return;
-        }
-        const(char)[] profile_name = _profile.value;
-
-        void[] file = load_file(tconcat("conf/ble_profiles/", profile_name, ".conf"), g_app.allocator);
-        if (!file)
-        {
-            session.write_line("Failed to load profile '", profile_name, "'");
-            return;
-        }
-        Profile* profile = parse_profile(cast(char[])file, g_app.allocator);
-
-        auto ble_iface = cast(BLEInterface)client.iface;
-        if (ble_iface is null)
-        {
-            session.write_line("Client has no BLE interface");
-            return;
-        }
-
-        BLECentralBinding binding = g_app.allocator.allocT!BLECentralBinding(ble_iface, client);
-
-        Device device = create_device_from_profile(*profile, model ? model.value : null, id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
-            assert(desc.type == ElementType.ble);
-            ref const ElementDesc_BLE ble = profile.get_ble(desc.element);
-
-            ubyte[256] tmp = void;
-            tmp[0 .. ble.value_desc.data_length] = 0;
-            e.value = sample_value(tmp.ptr, ble.value_desc);
-
-            binding.add_element(e, desc, ble);
-            device.sample_elements ~= e;
-        });
-        if (!device)
-        {
-            session.write_line("Failed to create device '", id, "'");
-            return;
-        }
-        device.bindings ~= binding;
-    }
 
     void cmd_read(Session session, BLEClient client, ushort handle)
     {

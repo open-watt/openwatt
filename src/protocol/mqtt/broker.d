@@ -58,6 +58,28 @@ nothrow @nogc:
 
     // API...
 
+    // alias the base functions into this scope to merge the overload sets
+    alias subscribe = ActiveObject.subscribe;
+    alias unsubscribe = ActiveObject.unsubscribe;
+
+    void subscribe(String topic_filter, PublishCallback callback)
+    {
+        Subscription* sub = &_subs.pushBack();
+        sub.topic_filter = topic_filter;
+        sub.callback = callback;
+    }
+
+    void unsubscribe(PublishCallback callback)
+    {
+        for (size_t i = 0; i < _subs.length; )
+        {
+            if (_subs[i].callback == callback)
+                _subs.removeSwapLast(i);
+            else
+                ++i;
+        }
+    }
+
     void publish(const(char)[] client_id, ubyte flags, const(char)[] topic, const(ubyte)[] payload, const(ubyte)[] properties = null, MonoTime timestamp = getTime())
     {
         Value* get_record(Value* val, const(char)[] topic)
@@ -114,24 +136,6 @@ nothrow @nogc:
         {
             if (topic_matches_filter(topic, sub.topic_filter[]))
                 sub.callback(client_id, topic, payload, timestamp);
-        }
-    }
-
-    void subscribe(String topic_filter, PublishCallback callback)
-    {
-        Subscription* sub = &_subs.pushBack();
-        sub.topic_filter = topic_filter;
-        sub.callback = callback;
-    }
-
-    void unsubscribe(PublishCallback callback)
-    {
-        for (size_t i = 0; i < _subs.length; )
-        {
-            if (_subs[i].callback == callback)
-                _subs.removeSwapLast(i);
-            else
-                ++i;
         }
     }
 
