@@ -58,14 +58,14 @@ nothrow @nogc:
 
     // API
 
-    void transmit_frame(const(ubyte)[] frame, bool is_text = false)
+    int transmit_frame(const(ubyte)[] frame, bool is_text = false)
     {
         if (!_transport || !_transport.running)
-            return;
+            return -1;
         Packet p;
         ref hdr = p.init!RawFrame(frame);
         hdr.is_text = is_text;
-        _transport.forward(p);
+        return _transport.forward(p);
     }
 
 protected:

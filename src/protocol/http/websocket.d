@@ -211,12 +211,15 @@ protected:
         _decoded_bytes = 0;
         _rx_overhead = 0;
         _pending_message_type = WSMessageType.unknown;
+        _tx_pending.clear();
         return CompletionStatus.complete;
     }
 
     final override void update()
     {
         super.update();
+
+        drain_tx();
 
         ubyte[1024] tmp = void;
         ubyte[] buf = _message.empty ? tmp[] : _message[];
@@ -469,7 +472,7 @@ protected:
 
         // TODO: if hdr.is_text, confirm valid utf8 and fail if not
 
-        ubyte[16] header; // max header size
+        ubyte[14] header; // max header size: 2 + 8 (ext-len) + 4 (mask)
         size_t header_len = 2;
         header[0] = 0x80 | (hdr.is_text ? 1 : 2); // FIN + opcode
         header[1] = _is_server ? 0 : 0x80; // MASK bit
@@ -498,60 +501,32 @@ protected:
             header_len += 4;
         }
 
-        version (DebugWebSocket)
-            log.trace("send ", hdr.is_text ? "text" : "binary", " (", data.length, ")[ ",
-                      cast(void[])data[0 .. data.length <= 200 ? data.length : 200], data.length > 200 ? ", ... ]" : " ]");
-
-        if (_stream.write(header[0 .. header_len]) != header_len)
+        size_t frame_len = header_len + data.length;
+        // always accept at least one frame when empty
+        if (!_tx_pending.empty && _tx_pending.length + frame_len > MaxTxPending)
         {
+            log.warning("tx-drop: pending buffer would exceed cap (pending=", _tx_pending.length, " frame=", frame_len, " cap=", MaxTxPending, ")");
             add_tx_drop();
-            restart();
             return -1;
         }
 
-        if (_is_server)
+        version (DebugWebSocket)
         {
-            size_t written = 0;
-            while (written < data.length)
-            {
-                ptrdiff_t r = _stream.write(data[written .. $]);
-                if (r < 0)
-                {
-                    add_tx_drop();
-                    restart();
-                    return -1;
-                }
-                written += r;
-            }
+            log.trace("send ", hdr.is_text ? "text" : "binary", " (", data.length, ")[ ",
+                      cast(void[])data[0 .. data.length <= 200 ? data.length : 200], data.length > 200 ? ", ... ]" : " ]");
         }
-        else
+
+        _tx_pending ~= header[0 .. header_len];
+        size_t body_off = _tx_pending.length;
+        _tx_pending ~= cast(const(ubyte)[])data;
+        if (!_is_server)
         {
-            ubyte[1024] scratch = void;
-            const(ubyte)[] src = cast(const(ubyte)[])data;
-            size_t i = 0;
-            while (i < src.length)
-            {
-                size_t chunk = src.length - i;
-                if (chunk > scratch.length)
-                    chunk = scratch.length;
-                foreach (j; 0 .. chunk)
-                    scratch[j] = src[i + j] ^ mask_key[(i + j) & 3];
-                size_t w = 0;
-                while (w < chunk)
-                {
-                    ptrdiff_t r = _stream.write(scratch[w .. chunk]);
-                    if (r < 0)
-                    {
-                        add_tx_drop();
-                        restart();
-                        return -1;
-                    }
-                    w += r;
-                }
-                i += chunk;
-            }
+            foreach (i; 0 .. data.length)
+                _tx_pending[body_off + i] ^= mask_key[i & 3];
         }
-        add_tx_frame(header_len + data.length);
+
+        add_tx_frame(frame_len);
+        drain_tx();
         return 0;
     }
 
@@ -573,6 +548,9 @@ private:
     size_t _decoded_bytes; // _message begins with decoded bytes, and the tail is pending bytes from incomplete transmission
     size_t _rx_overhead; // framing bytes for fragments buffered but not yet dispatched
     WSMessageType _pending_message_type;
+
+    Array!ubyte _tx_pending;
+    enum size_t MaxTxPending = 4 * 1024 * 1024;
 
     void stream_state_change(ActiveObject, StateSignal signal)
     {
@@ -611,7 +589,25 @@ private:
             frame[len .. len + payload.length] = payload[];
         len += payload.length;
 
-        _stream.write(frame[0 .. len]);
+        _tx_pending ~= frame[0 .. len];
+        drain_tx();
+    }
+
+    void drain_tx()
+    {
+        while (_tx_pending.length > 0)
+        {
+            ptrdiff_t r = _stream.write(_tx_pending[]);
+            if (r < 0)
+            {
+                log.warning("tx stream error; resetting");
+                restart();
+                return;
+            }
+            if (r == 0)
+                return; // backpressure; pick up next tick
+            _tx_pending.remove(0, r);
+        }
     }
 
     void send_close(ushort code)
