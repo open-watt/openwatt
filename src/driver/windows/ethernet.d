@@ -16,6 +16,7 @@ import manager.plugin;
 import manager.os.iphlpapi;
 import manager.os.npcap;
 
+import driver.windows.adapter_watcher;
 import driver.windows.pcap;
 
 import router.iface;
@@ -23,70 +24,6 @@ import router.iface.ethernet;
 import router.iface.mac;
 
 nothrow @nogc:
-
-
-alias DevicesChangedHandler = void delegate() nothrow @nogc;
-
-// Register a callback to be invoked when the OS reports an adapter list change.
-// TODO: not yet wired -- callers should poll enumerate_adapters() as a fallback.
-//       Implementation: NotifyIpInterfaceChange (iphlpapi) fires on a system
-//       worker thread; the trampoline here should marshal back onto the main
-//       update tick (queue a flag, drain on next update) before invoking the
-//       registered handler so consumers don't need to be thread-safe.
-void on_devices_changed(DevicesChangedHandler handler)
-{
-    g_devices_changed = handler;
-}
-
-private __gshared DevicesChangedHandler g_devices_changed;
-
-
-// Walk the OS adapter list and call `on_adapter(name, description)` for each
-// non-loopback ethernet-looking adapter. Skips virtual / wifi / tunnel / etc.
-void enumerate_adapters(scope void delegate(const(char)[] name, const(char)[] description) nothrow @nogc on_adapter)
-{
-    if (!npcap_loaded())
-    {
-        writeError("NPCap library not loaded, cannot enumerate ethernet interfaces.");
-        return;
-    }
-
-    pcap_if* interfaces;
-    char[PCAP_ERRBUF_SIZE] errbuf = void;
-    if (pcap_findalldevs(&interfaces, errbuf.ptr) == -1)
-    {
-        writeError("pcap_findalldevs failed: ", errbuf.ptr[0 .. strlen(errbuf.ptr)]);
-        return;
-    }
-    scope(exit) pcap_freealldevs(interfaces);
-
-    for (auto dev = interfaces; dev; dev = dev.next)
-    {
-        // skip loopback interfaces
-        if ((dev.flags & 0x00000001) != 0)
-            continue;
-
-        const(char)[] name = dev.name[0..dev.name.strlen];
-        const(char)[] description = dev.description[0..dev.description.strlen];
-
-        // skip virtual / non-ethernet adapters
-        if (description.contains_i("virtual") ||
-            description.contains_i("miniport") ||
-            description.contains_i("hyper-v") ||
-            description.contains_i("bluetooth") ||
-            description.contains_i("wi-fi direct") ||
-            description.contains_i("virtualbox") ||
-            description.contains_i("tunnel") ||
-            description.contains_i("offload") ||
-            description.contains_i("tap") ||
-            description.contains_i("wireless") ||
-            description.contains_i("wi-fi") ||
-            description.contains_i("wifi"))
-            continue;
-
-        on_adapter(name, description);
-    }
-}
 
 
 // ---------------------------------------------------------------------------
@@ -194,6 +131,7 @@ private:
     PcapAdapter _pcap;
     String _adapter;
     SysTime _last_refresh;
+    ulong _loopback_count;
 
     void refresh_os_state()
     {
@@ -211,10 +149,10 @@ private:
 
 
 // ---------------------------------------------------------------------------
-// Driver module: registers the WindowsPcapEthernet collection, owns adapter
-// discovery + sync. Subscribes the (currently stub) on_devices_changed hook
-// for true async hotplug; falls back to a 1Hz poll until the OS notification
-// path is wired.
+// Driver module: registers the WindowsPcapEthernet collection. Adapter
+// discovery is delegated to a shared background watcher (driver.windows.
+// adapter_watcher) which calls pcap_findalldevs off the main tick and feeds
+// add/remove events through an SPSC ring; we just drain that ring each update.
 // ---------------------------------------------------------------------------
 
 class WindowsPcapEthernetModule : Module
@@ -224,76 +162,61 @@ nothrow @nogc:
 
     override void pre_init()
     {
-        on_devices_changed(&sync_adapters);
-        sync_adapters();
+        g_adapter_watcher.scan_sync();
+        drain_events();
     }
 
     override void init()
     {
         g_app.console.register_collection!WindowsPcapEthernet();
+        g_adapter_watcher.start();
     }
 
     override void update()
     {
-        SysTime now = getSysTime();
-        if (now - _last_scan < 1.seconds)
-            return;
-        _last_scan = now;
-        sync_adapters();
+        drain_events();
     }
 
 private:
-    SysTime _last_scan;
 
-    // Idempotent diff against the OS adapter list. Operates only on
-    // WindowsPcapEthernet instances so it doesn't disturb interfaces created
-    // by other sources (manual /add, USB manager, future TUN/TAP, ...).
-    void sync_adapters()
+    void drain_events()
     {
-        Array!String os_buf;
-        enumerate_adapters((const(char)[] name, const(char)[] description) nothrow @nogc {
-            bool present = false;
-            foreach (e; Collection!WindowsPcapEthernet().values)
-            {
-                if (e.adapter == name)
-                {
-                    present = true;
-                    break;
-                }
-            }
-            if (!present)
-            {
-                auto iface_name = next_iface_name();
-                log_info(ModuleName, "Found ethernet interface: \"", description, "\" (", name, ")");
-                auto iface = Collection!WindowsPcapEthernet().create(iface_name);
-                iface.adapter = name;
-                auto desc = description.makeString(defaultAllocator);
-                iface.comment = desc;
-                // TODO: we need to set the MAC for the interface to the NIC MAC address...
-            }
-
-            os_buf ~= name.makeString(defaultAllocator);
-        });
-
-        Array!WindowsPcapEthernet gone;
-        foreach (e; Collection!WindowsPcapEthernet().values)
+        // peek() returns a contiguous slice; if events wrap the ring boundary
+        // we get the head portion this iteration and the wrapped portion next.
+        while (true)
         {
-            bool still_there = false;
-            foreach (ref s; os_buf[])
-            {
-                if (e.adapter == s[])
-                {
-                    still_there = true;
-                    break;
-                }
-            }
-            if (!still_there)
-                gone ~= e;
+            AdapterEvent[] batch = g_adapter_watcher.ethernet_ring.peek(size_t.max);
+            if (batch.length == 0)
+                break;
+            foreach (ref ev; batch)
+                apply_event(ev);
+            g_adapter_watcher.ethernet_ring.pop(batch.length);
         }
-        foreach (e; gone[])
+    }
+
+    void apply_event(ref const AdapterEvent ev)
+    {
+        final switch (ev.kind) with (AdapterEventKind)
         {
-            writeInfo("Ethernet adapter gone: ", e.adapter);
-            Collection!WindowsPcapEthernet().remove(e);
+            case added:
+                auto iface_name = next_iface_name();
+                log_info(ModuleName, "Found ethernet interface: \"", ev.description, "\" (", ev.name, ")");
+                auto iface = Collection!WindowsPcapEthernet().create(iface_name);
+                iface.adapter = ev.name;
+                iface.comment = ev.description.makeString(defaultAllocator);
+                // TODO: we need to set the MAC for the interface to the NIC MAC address...
+                return;
+            case removed:
+                foreach (e; Collection!WindowsPcapEthernet().values)
+                {
+                    if (e.adapter == ev.name)
+                    {
+                        writeInfo("Ethernet adapter gone: ", e.adapter);
+                        Collection!WindowsPcapEthernet().remove(e);
+                        return;
+                    }
+                }
+                return;
         }
     }
 

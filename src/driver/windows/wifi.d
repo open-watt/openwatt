@@ -62,6 +62,7 @@ import manager.plugin;
 import manager.os.iphlpapi;
 import manager.os.npcap;
 
+import driver.windows.adapter_watcher;
 import driver.windows.pcap;
 import driver.windows.wlanapi;
 
@@ -72,71 +73,6 @@ import router.iface.packet;
 import router.iface.wifi;
 
 nothrow @nogc:
-
-
-alias DevicesChangedHandler = void delegate() nothrow @nogc;
-
-// Register a callback to be invoked when the OS reports a wifi adapter list change.
-// TODO: not yet wired -- callers should poll enumerate_wifi_adapters() as a fallback.
-//       Implementation: WlanRegisterNotification with WLAN_NOTIFICATION_SOURCE_ACM
-//       (filter on wlan_notification_acm_interface_arrival / _removal). Fires on a
-//       worker thread; trampoline must marshal onto the main update tick.
-void on_devices_changed(DevicesChangedHandler handler)
-{
-    g_devices_changed = handler;
-}
-
-private __gshared DevicesChangedHandler g_devices_changed;
-
-
-// Walk the OS adapter list and call `on_adapter(name, description)` for each
-// wifi-looking adapter. Skips virtual / non-wifi devices.
-void enumerate_wifi_adapters(scope void delegate(const(char)[] name, const(char)[] description) nothrow @nogc on_adapter)
-{
-    if (!npcap_loaded())
-        return;
-
-    pcap_if* interfaces;
-    char[PCAP_ERRBUF_SIZE] errbuf = void;
-    if (pcap_findalldevs(&interfaces, errbuf.ptr) == -1)
-        return;
-    scope(exit) pcap_freealldevs(interfaces);
-
-    for (auto dev = interfaces; dev; dev = dev.next)
-    {
-        if ((dev.flags & 0x00000001) != 0)
-            continue;
-
-        const(char)[] name = dev.name[0..dev.name.strlen];
-        const(char)[] description = dev.description[0..dev.description.strlen];
-
-        // skip virtual / wired adapters
-        if (description.contains_i("virtual") ||
-            description.contains_i("miniport") ||
-            description.contains_i("hyper-v") ||
-            description.contains_i("bluetooth") ||
-            description.contains_i("wi-fi direct") ||
-            description.contains_i("virtualbox") ||
-            description.contains_i("tunnel") ||
-            description.contains_i("offload") ||
-            description.contains_i("tap"))
-            continue;
-
-        bool is_wifi = (dev.flags & 0x00000008) != 0;
-        if (!is_wifi)
-        {
-            if (description.contains_i("wireless") ||
-                description.contains_i("wi-fi") ||
-                description.contains_i("wifi"))
-                is_wifi = true;
-        }
-
-        if (!is_wifi)
-            continue;
-
-        on_adapter(name, description);
-    }
-}
 
 
 // ---------------------------------------------------------------------------
@@ -499,9 +435,9 @@ private:
 
 
 // ---------------------------------------------------------------------------
-// Driver module: discovers wifi adapters and creates a (Radio, WLAN) pair
-// for each. Subscribes the on_devices_changed hook for true async hotplug;
-// falls back to a 1Hz poll until the OS notification path is wired.
+// Driver module: registers the WindowsWifiRadio + WindowsWlan collections.
+// Adapter discovery is delegated to driver.windows.adapter_watcher; we drain
+// its wifi event ring each update.
 // ---------------------------------------------------------------------------
 
 class WindowsWlanModule : Module
@@ -511,89 +447,75 @@ nothrow @nogc:
 
     override void pre_init()
     {
-        on_devices_changed(&sync_radios);
-        sync_radios();
+        g_adapter_watcher.scan_sync();
+        drain_events();
     }
 
     override void init()
     {
         g_app.console.register_collection!WindowsWifiRadio();
         g_app.console.register_collection!WindowsWlan();
+        g_adapter_watcher.start();
     }
 
     override void update()
     {
-        SysTime now = getSysTime();
-        if (now - _last_scan < 1.seconds)
-            return;
-        _last_scan = now;
-        sync_radios();
+        drain_events();
     }
 
 private:
-    SysTime _last_scan;
 
-    void sync_radios()
+    void drain_events()
+    {
+        // peek() returns a contiguous slice; if events wrap the ring boundary
+        // we get the head portion this iteration and the wrapped portion next.
+        while (true)
+        {
+            AdapterEvent[] batch = g_adapter_watcher.wifi_ring.peek(size_t.max);
+            if (batch.length == 0)
+                break;
+            foreach (ref ev; batch)
+                apply_event(ev);
+            g_adapter_watcher.wifi_ring.pop(batch.length);
+        }
+    }
+
+    void apply_event(ref const AdapterEvent ev)
     {
         import urt.log;
 
-        // Radio identity == OS adapter identity. The paired WLAN inherits its
-        // adapter via the radio at startup (don't set wlan.adapter directly --
-        // the WLANBaseInterface.radio setter clears adapter as a side-effect).
-        Array!String os_buf;
-        enumerate_wifi_adapters((const(char)[] name, const(char)[] description) nothrow @nogc {
-            bool present = false;
-            foreach (r; Collection!WindowsWifiRadio().values)
-            {
-                if (r.adapter == name)
-                {
-                    present = true;
-                    break;
-                }
-            }
-            if (!present)
-            {
+        final switch (ev.kind) with (AdapterEventKind)
+        {
+            case added:
+                // Radio identity == OS adapter identity. The paired WLAN inherits its
+                // adapter via the radio at startup (don't set wlan.adapter directly --
+                // the WLANBaseInterface.radio setter clears adapter as a side-effect).
                 auto base = next_radio_name();
-                log_info(ModuleName, "Found wifi interface: \"", description, "\" (", name, ")");
+                log_info(ModuleName, "Found wifi interface: \"", ev.description, "\" (", ev.name, ")");
 
                 auto radio = Collection!WindowsWifiRadio().create(tconcat(base, "-radio"));
-                radio.adapter = name;
-                radio.comment = description.makeString(defaultAllocator);
+                radio.adapter = ev.name;
+                radio.comment = ev.description.makeString(defaultAllocator);
 
                 auto wlan = Collection!WindowsWlan().create(base);
                 wlan.radio = radio;
-            }
-
-            os_buf ~= name.makeString(defaultAllocator);
-        });
-
-        // remove radios whose adapter is no longer in the OS list (and any paired wlan)
-        Array!WindowsWifiRadio gone;
-        foreach (r; Collection!WindowsWifiRadio().values)
-        {
-            bool still_there = false;
-            foreach (ref s; os_buf[])
-            {
-                if (r.adapter == s[])
+                return;
+            case removed:
+                foreach (r; Collection!WindowsWifiRadio().values)
                 {
-                    still_there = true;
-                    break;
+                    if (r.adapter != ev.name)
+                        continue;
+                    writeInfo("Wifi adapter gone: ", r.adapter);
+                    Array!WindowsWlan paired;
+                    foreach (w; Collection!WindowsWlan().values)
+                        if (cast(WindowsWifiRadio)w.radio is r)
+                            paired ~= w;
+                    foreach (w; paired[])
+                        Collection!WindowsWlan().remove(w);
+                    Collection!WindowsWifiRadio().remove(r);
+                    return;
                 }
-            }
-            if (!still_there)
-                gone ~= r;
-        }
-        foreach (r; gone[])
-        {
-            writeInfo("Wifi adapter gone: ", r.adapter);
-            // remove paired wlan(s) first
-            Array!WindowsWlan paired;
-            foreach (w; Collection!WindowsWlan().values)
-                if (cast(WindowsWifiRadio)w.radio is r)
-                    paired ~= w;
-            foreach (w; paired[])
-                Collection!WindowsWlan().remove(w);
-            Collection!WindowsWifiRadio().remove(r);
+                return;
         }
     }
 

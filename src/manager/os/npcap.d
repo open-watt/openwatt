@@ -32,7 +32,15 @@ SysTime timeval_to_systime(ref const timeval tv) pure nothrow @nogc
 
 enum PCAP_ERRBUF_SIZE = 256;
 
+enum PCAP_OPENFLAG_PROMISCUOUS     = 0x01;
+enum PCAP_OPENFLAG_DATATX_UDP      = 0x02;
+enum PCAP_OPENFLAG_NOCAPTURE_RPCAP = 0x04;
+enum PCAP_OPENFLAG_NOCAPTURE_LOCAL = 0x08; // don't loop our own pcap_sendpacket frames back as ingress
+enum PCAP_OPENFLAG_MAX_RESPONSIVENESS = 0x10;
+
 struct pcap_t {}
+
+struct pcap_rmtauth {}
 
 struct pcap_addr {
     pcap_addr* next;
@@ -60,6 +68,7 @@ struct pcap_pkthdr
 extern(Windows) int function(pcap_if**, char*) nothrow @nogc pcap_findalldevs;
 extern(Windows) void function(pcap_if* alldevs) nothrow @nogc pcap_freealldevs;
 extern(Windows) pcap_t* function(const(char)* device, int snaplen, int promisc, int to_ms, char* errbuf) nothrow @nogc pcap_open_live;
+extern(Windows) pcap_t* function(const(char)* source, int snaplen, int flags, int read_timeout, pcap_rmtauth* auth, char* errbuf) nothrow @nogc pcap_open;
 extern(Windows) void function(pcap_t* p) nothrow @nogc pcap_close;
 extern(Windows) int function(pcap_t *p, int nonblock, char *errbuf) pcap_setnonblock;
 extern(Windows) int function(pcap_t* p, const void* buf, int size) nothrow @nogc pcap_sendpacket;
@@ -86,6 +95,7 @@ HMODULE init_npcap()
 
     pcap_freealldevs = cast(typeof(pcap_freealldevs))GetProcAddress(lib, "pcap_freealldevs");
     pcap_open_live = cast(typeof(pcap_open_live))GetProcAddress(lib, "pcap_open_live");
+    pcap_open = cast(typeof(pcap_open))GetProcAddress(lib, "pcap_open");
     pcap_close = cast(typeof(pcap_close))GetProcAddress(lib, "pcap_close");
     pcap_setnonblock = cast(typeof(pcap_setnonblock))GetProcAddress(lib, "pcap_setnonblock");
     pcap_sendpacket = cast(typeof(pcap_sendpacket))GetProcAddress(lib, "pcap_sendpacket");
