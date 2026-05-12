@@ -103,7 +103,7 @@ nothrow @nogc:
         return null;
     }
 
-    final override MutableString!0 complete(const(char)[] cmdLine)
+    final override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
@@ -111,10 +111,16 @@ nothrow @nogc:
             return .complete(cmdLine, _collection, SuggestFlags.Add);
     }
 
-    final override Array!String suggest(const(char)[] cmdLine)
+    final override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
     {
         return .suggest(cmdLine, _collection, SuggestFlags.Add);
     }
+
+    version (ExcludeHelpText) {} else
+    override const(char)[] help(const(char)[] args) const
+        => "Create a new item in this collection, setting any given\n"
+         ~ "properties on it.\n"
+         ~ "Usage: add [name=<value>] [<property>=<value> ...]";
 
 private:
     BaseCollection _collection;
@@ -143,7 +149,7 @@ nothrow @nogc:
         assert(false, "TODO: lots of work to delete things!");
     }
 
-    final override MutableString!0 complete(const(char)[] cmdLine)
+    final override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
@@ -151,10 +157,14 @@ nothrow @nogc:
             return .complete(cmdLine, _collection, SuggestFlags.Remove);
     }
 
-    final override Array!String suggest(const(char)[] cmdLine)
+    final override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
     {
         return .suggest(cmdLine, _collection, SuggestFlags.Remove);
     }
+
+    version (ExcludeHelpText) {} else
+    override const(char)[] help(const(char)[] args) const
+        => "Remove the named item from this collection.\nUsage: remove <name>";
 
 private:
     BaseCollection _collection;
@@ -200,7 +210,7 @@ nothrow @nogc:
         return null;
     }
 
-    final override MutableString!0 complete(const(char)[] cmdLine)
+    final override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
@@ -208,10 +218,14 @@ nothrow @nogc:
             return .complete(cmdLine, _collection, SuggestFlags.Get);
     }
 
-    final override Array!String suggest(const(char)[] cmdLine)
+    final override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
     {
         return .suggest(cmdLine, _collection, SuggestFlags.Get);
     }
+
+    version (ExcludeHelpText) {} else
+    override const(char)[] help(const(char)[] args) const
+        => "Read the value of a property on a named item.\nUsage: get <name> <property>";
 
 private:
     BaseCollection _collection;
@@ -260,7 +274,7 @@ nothrow @nogc:
         return null;
     }
 
-    final override MutableString!0 complete(const(char)[] cmdLine)
+    final override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
@@ -268,10 +282,14 @@ nothrow @nogc:
             return .complete(cmdLine, _collection, SuggestFlags.Set);
     }
 
-    final override Array!String suggest(const(char)[] cmdLine)
+    final override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
     {
         return .suggest(cmdLine, _collection, SuggestFlags.Set);
     }
+
+    version (ExcludeHelpText) {} else
+    override const(char)[] help(const(char)[] args) const
+        => "Change one or more properties on an existing item.\nUsage: set <name> <property>=<value> [<property>=<value> ...]";
 
 private:
     BaseCollection _collection;
@@ -329,7 +347,7 @@ nothrow @nogc:
         return null;
     }
 
-    final override MutableString!0 complete(const(char)[] cmdLine)
+    final override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
@@ -337,10 +355,17 @@ nothrow @nogc:
             return .complete(cmdLine, _collection, SuggestFlags.Reset);
     }
 
-    final override Array!String suggest(const(char)[] cmdLine)
+    final override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
     {
         return .suggest(cmdLine, _collection, SuggestFlags.Reset);
     }
+
+    version (ExcludeHelpText) {} else
+    override const(char)[] help(const(char)[] args) const
+        => "Reset properties to their defaults. With no arguments, resets\n"
+         ~ "every property on every item. With a name, scopes to one item;\n"
+         ~ "with property names, scopes to those properties.\n"
+         ~ "Usage: reset [<name>] [<property> ...]";
 
 private:
     BaseCollection _collection;
@@ -375,7 +400,7 @@ nothrow @nogc:
         return null;
     }
 
-    final override MutableString!0 complete(const(char)[] cmdLine)
+    final override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
@@ -383,10 +408,14 @@ nothrow @nogc:
             return .complete(cmdLine, _collection, SuggestFlags.Reset);
     }
 
-    final override Array!String suggest(const(char)[] cmdLine)
+    final override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
     {
         return .suggest(cmdLine, _collection, SuggestFlags.Reset);
     }
+
+    version (ExcludeHelpText) {} else
+    override const(char)[] help(const(char)[] args) const
+        => "List the names of all items in this collection.\nUsage: list";
 
 private:
     BaseCollection _collection;
@@ -463,7 +492,7 @@ nothrow @nogc:
         table.render(session);
     }
 
-    final override MutableString!0 complete(const(char)[] cmdLine)
+    final override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
@@ -471,10 +500,17 @@ nothrow @nogc:
             return .complete(cmdLine, _collection, SuggestFlags.Reset);
     }
 
-    final override Array!String suggest(const(char)[] cmdLine)
+    final override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
     {
         return .suggest(cmdLine, _collection, SuggestFlags.Reset);
     }
+
+    version (ExcludeHelpText) {} else
+    override const(char)[] help(const(char)[] args) const
+        => "Show a table of all items in this collection and their\n"
+         ~ "properties. Use --watch for a live view; --json for machine\n"
+         ~ "output.\n"
+         ~ "Usage: print [--watch|-w] [--json]";
 
 package:
     BaseCollection _collection;

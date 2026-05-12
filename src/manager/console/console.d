@@ -1,6 +1,7 @@
 module manager.console.console;
 
 import urt.array;
+import urt.log;
 import urt.map;
 import urt.mem;
 import urt.string;
@@ -37,7 +38,8 @@ nothrow @nogc:
 
     Application appInstance;
 
-    Scope root;
+    Scope root;            // root of the `/`-prefixed configuration namespace
+    Scope script_scope;    // root of the `:`-prefixed scripting namespace
 //    Command[] commands;
 
     this() @disable;
@@ -57,6 +59,7 @@ nothrow @nogc:
         g_console_instances = &this;
 
         root = _allocator.allocT!Scope(this, String(null));
+        script_scope = _allocator.allocT!Scope(this, String(null));
         RegisterBuiltinCommands(this);
     }
 
@@ -137,28 +140,74 @@ nothrow @nogc:
     {
         assert(session.current_command is null, "TODO: gotta do something about concurrent command execution...");
 
-        Scope s = session._cur_scope;
+        Array!char source;
+        source ~= cmdLine;
 
-        // TODO: reorg this code to stash context and run script...
+        Array!ScriptCommand cmds;
         try
         {
-            Array!ScriptCommand cmds = parse_commands(cmdLine);
-            if (cmds.empty)
-                return null;
-
-            if(cmds[0].command.front_is('/'))
-                s = get_root();
-
-            Context ctx = Context(session, s, cmds.move);
-            // TODO: return context to caller...
-
-            return ctx.execute(session, s, result);
+            const(char)[] text = source[];
+            cmds = parse_commands(text);
         }
         catch (Exception e)
         {
-            // something went wrong
             return null;
         }
+        if (cmds.empty)
+            return null;
+
+        Context ctx = _allocator.allocT!Context(session, get_root(), script_scope, source.move, cmds.move);
+        auto state = ctx.update();
+        if (state >= CommandCompletionState.finished)
+        {
+            result = ctx.result.move;
+            _allocator.freeT(ctx);
+            return null;
+        }
+        return ctx;
+    }
+
+    // Parse and start a whole script (multi-statement, multi-line). On parse failure
+    // logs a line/col-located error and returns false. On success hands the running
+    // Context to the session so the existing main loop polls it via session.update().
+    bool execute_script(Session session, Array!char source)
+    {
+        assert(session.current_command is null, "TODO: gotta do something about concurrent command execution...");
+
+        Array!ScriptCommand cmds;
+        const(char)[] text = source[];
+        const(char)[] text_orig = text;
+        try
+        {
+            cmds = parse_commands(text);
+        }
+        catch (SyntaxError e)
+        {
+            size_t consumed = text_orig.length - text.length;
+            uint line = 1, col = 1;
+            foreach (i; 0 .. consumed)
+            {
+                if (text_orig[i] == '\n') { ++line; col = 1; }
+                else ++col;
+            }
+            log_error("config", "parse error at line ", line, ", col ", col, ": ", e.message);
+            return false;
+        }
+        catch (Exception e)
+            assert(false, "parse_commands should only throw SyntaxError");
+
+        if (cmds.empty)
+            return true;
+
+        Context ctx = _allocator.allocT!Context(session, get_root(), script_scope, source.move, cmds.move);
+        auto state = ctx.update();
+        if (state >= CommandCompletionState.finished)
+        {
+            _allocator.freeT(ctx);
+            return true;
+        }
+        session.current_command = ctx;
+        return true;
     }
 
 
@@ -175,9 +224,12 @@ nothrow @nogc:
             size_t i = 0;
             while (i < cmdLine.length && (cmdLine[i] == ' ' || cmdLine[i] == '\t'))
                  ++i;
+            Scope search = _cur_scope;
             if (i < cmdLine.length && cmdLine[i] == '/')
-                _cur_scope = root;
-            return _cur_scope.complete(cmdLine[i .. $]).insert(0, cmdLine[0 .. i]);
+                search = root;
+            else if (i < cmdLine.length && cmdLine[i] == ':')
+                search = script_scope;
+            return search.complete(cmdLine[i .. $], _cur_scope).insert(0, cmdLine[0 .. i]);
         }
     }
 
@@ -195,14 +247,15 @@ nothrow @nogc:
             size_t i = 0;
             while (i < cmdLine.length && (cmdLine[i] == ' ' || cmdLine[i] == '\t'))
                 ++i;
-            if (i < cmdLine.length && cmdLine[i] == '/')
+            Scope search = _cur_scope;
+            if (i < cmdLine.length && (cmdLine[i] == '/' || cmdLine[i] == ':'))
             {
-                _cur_scope = root;
+                search = (cmdLine[i] == '/') ? root : script_scope;
                 ++i;
                 while (i < cmdLine.length && (cmdLine[i] == ' ' || cmdLine[i] == '\t'))
                     ++i;
             }
-            return _cur_scope.suggest(cmdLine[i .. $]);
+            return search.suggest(cmdLine[i .. $], _cur_scope);
         }
     }
 

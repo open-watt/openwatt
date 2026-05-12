@@ -81,39 +81,6 @@ struct NamedArgument
     Variant value;
 }
 
-struct Context
-{
-nothrow @nogc:
-
-    Session session;
-    Scope root;
-
-    Array!ScriptCommand script;
-
-    // TODO: local variables...
-
-    int command; // which command are we currently working on? (TODO: and which sub-command? like `[ cmd ]` arguments)
-    CommandState state;
-
-    import manager.console;
-    CommandState execute(Session session, Scope scope_, out Variant result)
-    {
-        if (script.length == 0)
-            return null;
-
-        Array!Variant vars;
-        Array!NamedArgument named_vars;
-        EvalContext ctx;
-        // TODO: set locals to ctx...
-
-        vars ~= Variant(script[0].command);
-        foreach (ref arg; script[0].args)
-            vars ~= arg.evaluate(ctx);
-        foreach (ref arg; script[0].named_args)
-            named_vars ~= NamedArgument(arg.name.get_str(), arg.value.evaluate(ctx));
-        return scope_.execute(session, vars[], named_vars[], result);
-    }
-}
 
 struct ScriptCommand
 {
@@ -121,7 +88,6 @@ struct ScriptCommand
     Array!(Expression*) args;
     Array!Argument named_args;
 
-private:
     struct Argument
     {
         Expression* name;
@@ -135,6 +101,73 @@ struct EvalContext
 
     Component root;
     Map!(String, Variant)* locals;
+    Map!(const(Expression)*, Variant)* sub_results;
+}
+
+struct ScriptBody
+{
+nothrow @nogc:
+
+    this(ref const ScriptBody rhs) inout pure
+    {
+        p = cast(inout(Payload)*)rhs.p;
+        if (p)
+            ++(cast(Payload*)p).refcount;
+    }
+
+    ~this() pure
+    {
+        if (p && --p.refcount == 0)
+            defaultAllocator().freeT(p);
+    }
+
+    bool empty() const pure
+        => p is null;
+
+    const(ScriptCommand)[] commands() const pure
+        => p ? p.commands[] : null;
+
+    const(char)[] source() const pure
+        => p ? p.source[] : null;
+
+private:
+    static struct Payload
+    {
+        Array!char source;
+        Array!ScriptCommand commands;
+        uint refcount;
+    }
+    Payload* p;
+}
+
+ScriptBody make_script(const(char)[] source_text) nothrow @nogc
+{
+    ScriptBody b;
+    b.p = defaultAllocator().allocT!(ScriptBody.Payload)();
+    b.p.refcount = 1;
+    b.p.source ~= source_text;
+    const(char)[] cursor = b.p.source[];
+    try
+        b.p.commands = parse_commands(cursor);
+    catch (Exception)
+    {
+    }
+    return b;
+}
+
+bool is_truthy(ref const Variant v) nothrow @nogc
+{
+    if (v.isBool)
+        return v.asBool;
+    if (v.isNumber)
+    {
+        if (v.isLong)
+            return v.asLong != 0;
+        return v.asDouble != 0;
+    }
+    if (v.isString)
+        return v.asString.length != 0;
+    return false;
 }
 
 struct Expression
@@ -167,7 +200,7 @@ nothrow @nogc:
         else if (ty == Type.arr)
             arr.destroy!false();
         else if (ty == Type.cmd_list)
-            cmds.destroy!false();
+            cmds.list.destroy!false();
         else if (ty >= Type.neg)
         {
             left.free_expression();
@@ -205,6 +238,47 @@ nothrow @nogc:
 
     bool is_string() const
         => (ty == Type.str || ty == Type.var || ty == Type.elem) && s.length == 0 && s.ptr !is null;
+
+    bool is_command_eval() const
+        => ty == Type.cmd_list && (flags & Flags.command_eval) != 0;
+
+    const(ScriptCommand)[] cmd_list() const
+    {
+        assert(ty == Type.cmd_list);
+        return cmds.list[];
+    }
+
+    const(char)[] cmd_list_source() const
+    {
+        assert(ty == Type.cmd_list);
+        return cmds.source;
+    }
+
+    void gather_command_evals(ref Array!(const(Expression)*) subs) const
+    {
+        switch (ty)
+        {
+            case Type.cmd_list:
+                if (flags & Flags.command_eval)
+                    subs ~= &this;
+                break;
+            case Type.arr:
+                foreach (e; arr)
+                    e.gather_command_evals(subs);
+                break;
+            case Type.exp_list, Type.idx, Type.call, Type.cat,
+                 Type.or, Type.and, Type.eq, Type.ne, Type.lt, Type.le,
+                 Type.add, Type.sub, Type.mul, Type.div:
+                left.gather_command_evals(subs);
+                right.gather_command_evals(subs);
+                break;
+            case Type.neg, Type.not:
+                left.gather_command_evals(subs);
+                break;
+            default:
+                break;
+        }
+    }
 
     bool as_bool() const
     {
@@ -324,7 +398,14 @@ nothrow @nogc:
                     va ~= e.evaluate(ctx);
                 return r.move;
             case Type.cmd_list:
-                assert(false, "TODO: how do we shuttle this value into commands? in a variant? some other way?");
+                if (flags & Flags.command_eval)
+                {
+                    if (ctx.sub_results !is null)
+                        if (Variant* val = &this in *ctx.sub_results)
+                            return *val;
+                    return Variant(null);
+                }
+                return Variant(make_script(cmds.source));
             case Type.exp_list:
                 assert(false, "Only for function args");
             case Type.neg:
@@ -436,6 +517,12 @@ private:
     Type ty;
     ubyte flags;
 
+    struct CmdList
+    {
+        Array!ScriptCommand list;
+        const(char)[] source;       // original block body text, between { } or [ ]
+    }
+
     union
     {
         const(char)[] s = null;
@@ -450,7 +537,7 @@ private:
 
         MutableString!0 str;
         Array!(Expression*) arr;
-        Array!ScriptCommand cmds;
+        CmdList cmds;
     }
 
     void gather_elements(ref Array!(const(char)[]) elements, ref bool has_var_ref) const
@@ -510,7 +597,7 @@ void skip_whitespace(ref const(char)[] text) nothrow
         else
         {
             if (text[0] == '#')
-                while (text.length > 0 && (text[0] != '\n' || (text[0] != '\r' && text.length > 1 && text[1] != 'n')))
+                while (text.length > 0 && text[0] != '\n' && text[0] != '\r')
                     text = text[1..$];
             break;
         }
@@ -525,7 +612,7 @@ void skip_whitespace_and_newlines(ref const(char)[] text) nothrow
             text = text[1..$];
         else if (text[0] == '#')
         {
-            while (text.length > 0 && (text[0] != '\n' || (text[0] != '\r' && text.length > 1 && text[1] != 'n')))
+            while (text.length > 0 && text[0] != '\n' && text[0] != '\r')
                 text = text[1..$];
         }
         else
@@ -581,11 +668,15 @@ Array!ScriptCommand parse_commands(ref const(char)[] text)
         skip_whitespace(text);
         if (text.length > 0)
         {
-            if (text[0] == ';' ||  text[0].is_newline)
+            if (text[0] == ']' || text[0] == '}')
+                break;
+            if (text[0] == ';' || text[0].is_newline)
             {
-                if (text[0] == '\r' && text.length == 1 || text[1] != '\n')
-                    assert(false); // TODO: not actually a newline; need to continue looking for semicolon or newlines...
-                text = text[1 .. $];
+                // CRLF is one separator
+                if (text[0] == '\r' && text.length > 1 && text[1] == '\n')
+                    text = text[2 .. $];
+                else
+                    text = text[1 .. $];
             }
             else // if (test[0] == invalid characters...)
             {
@@ -873,13 +964,16 @@ Expression* parse_primary_exp(ref const(char)[] text)
     if (text.match('[') || text.match('{'))
     {
         bool eval = text.ptr[-1] == '[';
+        const(char)* body_start = text.ptr;
         Array!ScriptCommand commands = parse_commands(text);
+        const(char)[] body = body_start[0 .. text.ptr - body_start].trim;
         if (eval)
             text.expect(']');
         else
             text.expect('}');
         Expression* cmds = alloc_expression(Type.cmd_list);
-        commands.moveEmplace(cmds.cmds);
+        commands.moveEmplace(cmds.cmds.list);
+        cmds.cmds.source = body;
         if (eval)
             cmds.flags |= Flags.command_eval;
         return cmds;
@@ -939,7 +1033,7 @@ Expression* parse_primary_exp(ref const(char)[] text)
             syntax_error("Invalid ", is_var ? "variable" : "element", " name");
     }
 
-    identifier = text[0].is_alpha || text[0] == '_' || text[0] == '/' || (is_element && text[0] == '.');
+    identifier = text[0].is_alpha || text[0] == '_' || text[0] == '/' || text[0] == ':' || (is_element && text[0] == '.');
 
     string string_delimiters = "/$=,;\"\\{}[]()?'`";
     size_t len = identifier; // skip the first char; first char has some special cases
@@ -1172,4 +1266,36 @@ unittest
     Expression* e = parse_expression(text);
     assert(text.length == 0);
 
+    // {...} captures source and produces a Script Variant on evaluation
+    text = "{ /print hello }";
+    e = parse_primary_exp(text);
+    assert(e.ty == Type.cmd_list);
+    assert((e.flags & Flags.command_eval) == 0);
+    assert(e.cmd_list_source() == "/print hello");
+
+    EvalContext ctx;
+    Variant v = e.evaluate(ctx);
+    assert(v.isUser!ScriptBody);
+
+    ScriptBody sb = v.asUser!ScriptBody;
+    assert(!sb.empty);
+    assert(sb.commands.length == 1);
+    assert(sb.commands[0].command == "/print");
+
+    // [...] sets command_eval flag; eval returns null without sub_results stash
+    text = "[ /sys/sysinfo ]";
+    e = parse_primary_exp(text);
+    assert(e.ty == Type.cmd_list);
+    assert((e.flags & Flags.command_eval) != 0);
+
+    v = e.evaluate(ctx);
+    assert(v.isNull);
+
+    // `:`-prefixed identifiers parse as command names; named args use `key=value` (no spaces)
+    text = ":set x=5";
+    Array!ScriptCommand cmds = parse_commands(text);
+    assert(cmds.length == 1);
+    assert(cmds[0].command == ":set");
+    assert(cmds[0].named_args.length == 1);
+    assert(cmds[0].named_args[0].name.get_str() == "x");
 }

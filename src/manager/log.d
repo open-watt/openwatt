@@ -313,14 +313,14 @@ nothrow @nogc:
 
     version (ExcludeAutocomplete) {} else
     {
-        override MutableString!0 complete(const(char)[] cmdLine) const
+        override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null) const
         {
             assert(false);
             return MutableString!0();
         }
 
 
-        override Array!String suggest(const(char)[] cmdLine) const
+        override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null) const
         {
             return Array!String();
         }

@@ -63,6 +63,7 @@ struct TerminalChannel
 class Session
 {
     import router.stream;
+    import manager.base : ObjectFlags;
 nothrow @nogc:
 
     this(ref Console console, Stream stream = null)
@@ -96,6 +97,9 @@ nothrow @nogc:
             allocator.freeT(_current_command);
             _current_command = null;
         }
+        if (_stream && (_stream.flags & ObjectFlags.dynamic))
+            _stream.destroy();
+        _stream = null;
         _console = null;
     }
 
@@ -503,8 +507,10 @@ protected:
             }
             else if (taken < input.length)
             {
+                import manager.expression : skip_whitespace_and_newlines;
                 MutableString!0 cmdInput = take_input();
-                const(char)[] command = cmdInput[].trim_cmd_line;
+                const(char)[] command = cmdInput[];
+                skip_whitespace_and_newlines(command);
                 _buffer = input[taken + 1 .. $];
 
                 Variant result;
@@ -906,6 +912,10 @@ private:
 package:
     Console* _console;
     Scope _cur_scope = null;
+    Context _executing_context = null;
+    Map!(String, Variant) _session_locals;
+    Variant _return_value;
+    bool _returning = false;
 
     ref CommandState current_command() => _current_command;
 }
