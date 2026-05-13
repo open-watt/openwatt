@@ -243,6 +243,8 @@ nothrow @nogc:
 
         foreach (m; modules)
             m.post_init();
+
+        console.freeze();
     }
 
     ~this()

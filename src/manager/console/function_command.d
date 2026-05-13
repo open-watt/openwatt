@@ -160,7 +160,7 @@ nothrow @nogc:
         this._fn = _fn;
     }
 
-    override CommandState execute(Session session, const Variant[] _args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope*, const Variant[] _args, const NamedArgument[] namedArgs, out Variant result)
     {
         CommandState state;
         const(char)[] r = _fn(session, state, _args, namedArgs, _instance);
@@ -179,7 +179,7 @@ nothrow @nogc:
         return null;
     }
 
-    override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
+    override MutableString!0 complete(const(char)[] cmdLine, Scope*, Scope*)
     {
         version (ExcludeAutocomplete)
             return null;
@@ -216,7 +216,7 @@ nothrow @nogc:
         }
     }
 
-    override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
+    override Array!String suggest(const(char)[] cmdLine, Scope*, Scope*)
     {
         // get incomplete argument
         ptrdiff_t lastToken = cmdLine.length;

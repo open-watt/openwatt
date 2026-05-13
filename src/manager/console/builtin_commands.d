@@ -14,177 +14,6 @@ import manager.expression : NamedArgument, ScriptBody, is_truthy, make_script;
 nothrow @nogc:
 
 
-class Scope : Command
-{
-nothrow @nogc:
-
-    this(ref Console console, String scopeName, Command[] children...)
-    {
-        super(console, scopeName);
-        commands ~= children;
-    }
-
-    Array!Command commands;
-
-    bool add_command(Command cmd)
-    {
-        assert(get_command(cmd.name[]) is null, "Command already exists");
-        commands ~= cmd;
-        return true;
-    }
-
-    Command get_command(const(char)[] name)
-    {
-        foreach (Command cmd; commands)
-            if (cmd.name[] == name[])
-                return cmd;
-        return null;
-    }
-
-    override CommandState execute(Session session, const(Variant)[] args, const NamedArgument[] namedArgs, out Variant result)
-    {
-        // a lone `/` should only be possible for a root-scope command
-        if (args.length > 0 && args[0].isString && args[0].asString == "/")
-            args = args[1..$];
-
-        // move to scope...
-        if (args.length == 0)
-        {
-            session._cur_scope = this;
-            return null;
-        }
-
-        if (!args[0].isString)
-            assert(false, "TODO: the argument to a command must be an identifier? or are there other cases?");
-        const(char)[] cmd = args[0].asString;
-
-        // skip the path separator (both `/` for config paths and `:` for script verbs)...
-        if (cmd.front_is('/') || cmd.front_is(':'))
-            cmd = cmd[1..$];
-
-        // check for '..'
-        if (cmd.front_is(".."))
-        {
-            if (_parent is null)
-            {
-                session.write_output("Error: '..' used at top level", true);
-                return null;
-            }
-            return _parent.execute(session, args[1..$], namedArgs, result);
-        }
-
-        // see if the identifier is a child...
-        foreach (Command c; commands)
-        {
-            if (c.name[] == cmd[])
-                return c.execute(session, args[1..$], namedArgs, result);
-        }
-
-        session.write_output(tconcat("Error: no command `", cmd[], "`"), true);
-        return null;
-    }
-
-    override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
-    {
-        version (ExcludeAutocomplete)
-            return null;
-        else
-        {
-            size_t i = 0;
-            if (cmdLine.front_is('/') || cmdLine.front_is(':'))
-                ++i;
-            while (i < cmdLine.length && is_whitespace(cmdLine[i]))
-                ++i;
-            if (i < cmdLine.length && cmdLine[i] == '/')
-                return MutableString!0(cmdLine);
-
-            size_t j = i;
-            while (j < cmdLine.length && !is_whitespace(cmdLine[j]) && cmdLine[j] != '/')
-                ++j;
-
-            if (j < cmdLine.length)
-            {
-                // cmd line is for child-command
-                foreach (Command cmd; commands)
-                {
-                    if (cmd.name[] == cmdLine[i..j])
-                        return cmd.complete(cmdLine[j..$], user_scope).insert(0, cmdLine[0..j]);
-                }
-                return MutableString!0(cmdLine);
-            }
-
-            // complete command name
-            struct Cmd
-            {
-                const(char)[] name;
-                bool isScope;
-            }
-            Array!Cmd cmds; // TODO: some static buffer would be nice!
-//            if (this !is _console.root)
-//                cmds ~= Cmd("..", true);
-            foreach (Command cmd; commands)
-            {
-                if (cmd.name[].startsWith(cmdLine[i..j]))
-                    cmds ~= Cmd(cmd.name[], cast(Scope)cmd !is null);
-            }
-            if (cmds.length == 0)
-                return MutableString!0(cmdLine);
-            if (cmds.length == 1)
-                return complete(tconcat(cmdLine[0..i], cmds[0].name[], cmds[0].isScope && (i == 0 || cmdLine[0] == '/') ? '/' : ' '));
-            size_t k = j-i;
-            outer: for (; k < cmds[0].name.length; ++k)
-            {
-                for (size_t l = 1; l < cmds.length; ++l)
-                    if (k >= cmds[l].name.length || cmds[l].name[k] != cmds[0].name[k])
-                        break outer;
-            }
-            return MutableString!0().concat(cmdLine[0..i], cmds[0].name[0 .. k]);
-        }
-    }
-
-    override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
-    {
-        version (ExcludeAutocomplete)
-            return null;
-        else
-        {
-            size_t i = 0;
-            while (i < cmdLine.length && !is_whitespace(cmdLine[i]) && cmdLine[i] != '/')
-                ++i;
-
-            if (i < cmdLine.length)
-            {
-                // cmd line is for child-command
-                foreach (Command cmd; commands)
-                {
-                    if (cmd.name[] == cmdLine[0 .. i])
-                    {
-                        size_t j = i;
-                        if (cast(Scope)cmd && j < cmdLine.length && cmdLine[j] == '/')
-                            ++j;
-                        while (j < cmdLine.length && is_whitespace(cmdLine[j]))
-                            ++j;
-                        return cmd.suggest(cmdLine[j..$], user_scope);
-                    }
-                }
-                return Array!String();
-            }
-
-            Array!String r;
-//            if (this !is _console.root)
-//                r ~= MutableString!0("..");
-            foreach (Command cmd; commands)
-            {
-                if (cmd.name[].startsWith(cmdLine))
-                    r ~= cmd.name;
-            }
-            return r;
-        }
-    }
-}
-
-
-
 class ExitCommand : Command
 {
 nothrow @nogc:
@@ -194,7 +23,7 @@ nothrow @nogc:
         super(console, StringLit!"exit");
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         session.close_session();
         return null;
@@ -216,15 +45,13 @@ nothrow @nogc:
         super(console, StringLit!"help");
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         if (args.length == 0)
         {
             session.write_output("Available commands:", true);
-            foreach (Command c; _console.script_scope.commands)
-                session.write_output(tconcat("  :", c.name[]), true);
-            foreach (Command c; _console.root.commands)
-                session.write_output(tconcat("  /", c.name[]), true);
+            list_scope(session, _console.script_scope, ':');
+            list_scope(session, _console.root, '/');
             session.write_output("Type `:help <name>` for details on a specific command.", true);
             return null;
         }
@@ -238,17 +65,17 @@ nothrow @nogc:
         const(char)[] name = args[0].asString;
         Command cmd;
         if (name.front_is(':'))
-            cmd = _console.script_scope.get_command(name[1 .. $]);
+            cmd = _console.script_scope.find_command(name[1 .. $]);
         else if (name.front_is('/'))
-            cmd = _console.root.get_command(name[1 .. $]);
+            cmd = _console.root.find_command(name[1 .. $]);
         else
         {
             if (session._cur_scope !is null)
-                cmd = session._cur_scope.get_command(name);
+                cmd = session._cur_scope.find_command(name);
             if (cmd is null)
-                cmd = _console.script_scope.get_command(name);
+                cmd = _console.script_scope.find_command(name);
             if (cmd is null && session._cur_scope !is _console.root)
-                cmd = _console.root.get_command(name);
+                cmd = _console.root.find_command(name);
         }
         if (cmd is null)
         {
@@ -259,7 +86,7 @@ nothrow @nogc:
         return null;
     }
 
-    override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
+    override Array!String suggest(const(char)[] cmdLine, Scope*, Scope* user_scope = null)
     {
         size_t lastToken = cmdLine.length;
         while (lastToken > 0 && !is_separator(cmdLine[lastToken - 1]))
@@ -271,25 +98,11 @@ nothrow @nogc:
 
         Array!String r;
         if (arg.front_is(':'))
-        {
-            const(char)[] partial = arg[1 .. $];
-            foreach (Command c; _console.script_scope.commands)
-                if (c.name[].startsWith(partial))
-                    r ~= String(MutableString!0(Concat, ":", c.name));
-        }
+            list_matching(r, _console.script_scope, arg[1 .. $], ':');
         else if (arg.front_is('/'))
-        {
-            const(char)[] partial = arg[1 .. $];
-            foreach (Command c; _console.root.commands)
-                if (c.name[].startsWith(partial))
-                    r ~= String(MutableString!0(Concat, "/", c.name));
-        }
+            list_matching(r, _console.root, arg[1 .. $], '/');
         else if (user_scope !is null)
-        {
-            foreach (Command c; user_scope.commands)
-                if (c.name[].startsWith(arg))
-                    r ~= c.name;
-        }
+            list_matching(r, user_scope, arg, '\0');
         return r;
     }
 
@@ -297,6 +110,37 @@ nothrow @nogc:
         => "Print help text for console commands. With no argument, lists\n"
          ~ "all available commands.\n"
          ~ "Usage: :help [command]";
+
+private:
+    void list_scope(Session session, Scope* s, char prefix)
+    {
+        foreach (ref Scope sub; s.sub_scopes)
+            session.write_output(tconcat("  ", prefix, sub.name[]), true);
+        foreach (Command c; s.commands)
+            session.write_output(tconcat("  ", prefix, c.name[]), true);
+    }
+
+    static void list_matching(ref Array!String r, Scope* s, const(char)[] partial, char prefix)
+    {
+        foreach (ref Scope sub; s.sub_scopes)
+        {
+            if (!sub.name[].startsWith(partial))
+                continue;
+            if (prefix)
+                r ~= String(MutableString!0(Concat, prefix, sub.name));
+            else
+                r ~= sub.name;
+        }
+        foreach (Command c; s.commands)
+        {
+            if (!c.name[].startsWith(partial))
+                continue;
+            if (prefix)
+                r ~= String(MutableString!0(Concat, prefix, c.name));
+            else
+                r ~= c.name;
+        }
+    }
 }
 
 
@@ -309,7 +153,7 @@ nothrow @nogc:
         super(console, StringLit!"set");
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         Context ctx = session._executing_context;
         if (ctx is null)
@@ -347,7 +191,7 @@ nothrow @nogc:
         super(console, StringLit!"put");
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         Array!char buf;
         foreach (i, ref a; args)
@@ -384,7 +228,7 @@ nothrow @nogc:
         super(console, StringLit!"eval");
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         if (args.length > 0)
             result = Variant(args[0]);
@@ -408,7 +252,7 @@ nothrow @nogc:
         super(console, StringLit!"return");
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         if (args.length > 0)
             session._return_value = Variant(args[0]);
@@ -436,7 +280,7 @@ nothrow @nogc:
         super(console, StringLit!"run");
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         Context parent = session._executing_context;
         if (parent is null)
@@ -492,7 +336,7 @@ nothrow @nogc:
         super(console, StringLit!"if");
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         Context parent = session._executing_context;
         if (parent is null)
@@ -532,7 +376,7 @@ nothrow @nogc:
         super(console, StringLit!"while");
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         Context parent = session._executing_context;
         if (parent is null)
@@ -648,14 +492,15 @@ private ScriptBody find_script_named(const NamedArgument[] namedArgs, const(char
 
 void RegisterBuiltinCommands(ref Console console)
 {
-    console.script_scope.add_command(console._allocator.allocT!ExitCommand(console));
+    Scope* s = console.script_scope;
+    console.add_command(s, console._allocator.allocT!ExitCommand(console));
     version (ExcludeHelpText) {} else
-        console.script_scope.add_command(console._allocator.allocT!HelpCommand(console));
-    console.script_scope.add_command(console._allocator.allocT!SetCommand(console));
-    console.script_scope.add_command(console._allocator.allocT!PutCommand(console));
-    console.script_scope.add_command(console._allocator.allocT!EvalCommand(console));
-    console.script_scope.add_command(console._allocator.allocT!ReturnCommand(console));
-    console.script_scope.add_command(console._allocator.allocT!RunCommand(console));
-    console.script_scope.add_command(console._allocator.allocT!IfCommand(console));
-    console.script_scope.add_command(console._allocator.allocT!WhileCommand(console));
+        console.add_command(s, console._allocator.allocT!HelpCommand(console));
+    console.add_command(s, console._allocator.allocT!SetCommand(console));
+    console.add_command(s, console._allocator.allocT!PutCommand(console));
+    console.add_command(s, console._allocator.allocT!EvalCommand(console));
+    console.add_command(s, console._allocator.allocT!ReturnCommand(console));
+    console.add_command(s, console._allocator.allocT!RunCommand(console));
+    console.add_command(s, console._allocator.allocT!IfCommand(console));
+    console.add_command(s, console._allocator.allocT!WhileCommand(console));
 }

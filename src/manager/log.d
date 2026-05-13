@@ -299,7 +299,7 @@ nothrow @nogc:
         this.severity = severity;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         if (args.length == 0 || args.length > 1)
         {
@@ -313,14 +313,14 @@ nothrow @nogc:
 
     version (ExcludeAutocomplete) {} else
     {
-        override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null) const
+        override MutableString!0 complete(const(char)[] cmdLine, Scope*, Scope*) const
         {
             assert(false);
             return MutableString!0();
         }
 
 
-        override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null) const
+        override Array!String suggest(const(char)[] cmdLine, Scope*, Scope*) const
         {
             return Array!String();
         }

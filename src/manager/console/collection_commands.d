@@ -21,19 +21,35 @@ import manager.console.table;
 nothrow @nogc:
 
 
-void add_collection_commands(Scope s, BaseCollection collection)
+void add_collection_commands(ref Console console, Scope* n, BaseCollection collection)
 {
-    if (collection.type_info)
+    assert(n._cmd_len == 0, "scope already has commands");
+
+    n.collection_type = collection.type_info;
+
+    Command[12]* shared_ = shared_commands(console);
+
+    // Point at the appropriate shared strip in the side-array. Layouts:
+    //   [0..7)   full: add, get, list, print, remove, reset, set
+    //   [1..7)   no add: get, list, print, remove, reset, set
+    //   [7..12)  no add, no remove: get, list, print, reset, set
+    // If the scope later gets an extension command via register_command,
+    // Console.add_command will promote it into _commands.
+    if (collection.type_info && collection.type_info.create)
     {
-        if (collection.type_info.create)
-            s.add_command(defaultAllocator.allocT!CollectionAddCommand(s.console, collection));
-        s.add_command(defaultAllocator.allocT!CollectionRemoveCommand(s.console, collection));
+        n._cmd_ptr = shared_.ptr;
+        n._cmd_len = 7;
     }
-    s.add_command(defaultAllocator.allocT!CollectionGetCommand(s.console, collection));
-    s.add_command(defaultAllocator.allocT!CollectionSetCommand(s.console, collection));
-    s.add_command(defaultAllocator.allocT!CollectionResetCommand(s.console, collection));
-    s.add_command(defaultAllocator.allocT!CollectionListCommand(s.console, collection));
-    s.add_command(defaultAllocator.allocT!CollectionPrintCommand(s.console, collection));
+    else if (collection.type_info)
+    {
+        n._cmd_ptr = shared_.ptr + 1;
+        n._cmd_len = 6;
+    }
+    else
+    {
+        n._cmd_ptr = shared_.ptr + 7;
+        n._cmd_len = 5;
+    }
 }
 
 
@@ -41,14 +57,15 @@ class CollectionAddCommand : Command
 {
 nothrow @nogc:
 
-    this(ref Console console, BaseCollection collection)
+    this(ref Console console)
     {
         super(console, StringLit!"add");
-        _collection = collection;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
+        BaseCollection collection = _scope.collection;
+
         if (args.length != 0)
         {
             session.write_line("Usage: add [<property=value> [...]]");
@@ -63,7 +80,7 @@ nothrow @nogc:
             {
                 assert(arg.value.isString, "TODO: what if it's not a string?!");
                 name = arg.value.asString();
-                if (_collection.get(name))
+                if (collection.get(name))
                 {
                     session.write_line("Item with name '", name, "' already exists");
                     return null;
@@ -73,7 +90,7 @@ nothrow @nogc:
         }
 
         // create an instance
-        BaseObject item = _collection.alloc(name);
+        BaseObject item = collection.alloc(name);
 
         // set all the properties...
         foreach (ref arg; namedArgs)
@@ -88,7 +105,7 @@ nothrow @nogc:
                 return null;
             }
         }
-        _collection.add(item);
+        collection.add(item);
 
         // TODO: maybe something better? perhaps a virtual on the object which lets it supply a creation message?
         //       how do we know what properties are relevant for the create logs?
@@ -103,17 +120,17 @@ nothrow @nogc:
         return null;
     }
 
-    final override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
+    final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, _collection, SuggestFlags.Add);
+            return .complete(cmdLine, _scope.collection, SuggestFlags.Add);
     }
 
-    final override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
+    final override Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
-        return .suggest(cmdLine, _collection, SuggestFlags.Add);
+        return .suggest(cmdLine, _scope.collection, SuggestFlags.Add);
     }
 
     version (ExcludeHelpText) {} else
@@ -121,22 +138,18 @@ nothrow @nogc:
         => "Create a new item in this collection, setting any given\n"
          ~ "properties on it.\n"
          ~ "Usage: add [name=<value>] [<property>=<value> ...]";
-
-private:
-    BaseCollection _collection;
 }
 
 class CollectionRemoveCommand : Command
 {
 nothrow @nogc:
 
-    this(ref Console console, BaseCollection collection)
+    this(ref Console console)
     {
         super(console, StringLit!"remove");
-        _collection = collection;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         if (args.length != 1 || namedArgs.length != 0)
         {
@@ -149,39 +162,37 @@ nothrow @nogc:
         assert(false, "TODO: lots of work to delete things!");
     }
 
-    final override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
+    final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, _collection, SuggestFlags.Remove);
+            return .complete(cmdLine, _scope.collection, SuggestFlags.Remove);
     }
 
-    final override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
+    final override Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
-        return .suggest(cmdLine, _collection, SuggestFlags.Remove);
+        return .suggest(cmdLine, _scope.collection, SuggestFlags.Remove);
     }
 
     version (ExcludeHelpText) {} else
     override const(char)[] help(const(char)[] args) const
         => "Remove the named item from this collection.\nUsage: remove <name>";
-
-private:
-    BaseCollection _collection;
 }
 
 class CollectionGetCommand : Command
 {
 nothrow @nogc:
 
-    this(ref Console console, BaseCollection collection)
+    this(ref Console console)
     {
         super(console, StringLit!"get");
-        _collection = collection;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
+        BaseCollection collection = _scope.collection;
+
         if (args.length != 2 || namedArgs.length != 0)
         {
             session.write_line("Usage: get <name> <property>");
@@ -198,7 +209,7 @@ nothrow @nogc:
             return null;
         }
 
-        BaseObject item = _collection.get(args[0].asString());
+        BaseObject item = collection.get(args[0].asString());
         if (!item)
         {
             session.write_line("No item '", args[0].asString(), '\'');
@@ -210,39 +221,37 @@ nothrow @nogc:
         return null;
     }
 
-    final override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
+    final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, _collection, SuggestFlags.Get);
+            return .complete(cmdLine, _scope.collection, SuggestFlags.Get);
     }
 
-    final override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
+    final override Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
-        return .suggest(cmdLine, _collection, SuggestFlags.Get);
+        return .suggest(cmdLine, _scope.collection, SuggestFlags.Get);
     }
 
     version (ExcludeHelpText) {} else
     override const(char)[] help(const(char)[] args) const
         => "Read the value of a property on a named item.\nUsage: get <name> <property>";
-
-private:
-    BaseCollection _collection;
 }
 
 class CollectionSetCommand : Command
 {
 nothrow @nogc:
 
-    this(ref Console console, BaseCollection collection)
+    this(ref Console console)
     {
         super(console, StringLit!"set");
-        _collection = collection;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
+        BaseCollection collection = _scope.collection;
+
         if (args.length != 1 || namedArgs.length == 0)
         {
             session.write_line("Usage: set <name> <property=value> [<property=value> [...]]");
@@ -254,7 +263,7 @@ nothrow @nogc:
             return null;
         }
 
-        BaseObject item = _collection.get(args[0].asString());
+        BaseObject item = collection.get(args[0].asString());
         if (!item)
         {
             session.write_line("No item '", args[0].asString(), '\'');
@@ -274,39 +283,37 @@ nothrow @nogc:
         return null;
     }
 
-    final override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
+    final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, _collection, SuggestFlags.Set);
+            return .complete(cmdLine, _scope.collection, SuggestFlags.Set);
     }
 
-    final override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
+    final override Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
-        return .suggest(cmdLine, _collection, SuggestFlags.Set);
+        return .suggest(cmdLine, _scope.collection, SuggestFlags.Set);
     }
 
     version (ExcludeHelpText) {} else
     override const(char)[] help(const(char)[] args) const
         => "Change one or more properties on an existing item.\nUsage: set <name> <property>=<value> [<property>=<value> ...]";
-
-private:
-    BaseCollection _collection;
 }
 
 class CollectionResetCommand : Command
 {
 nothrow @nogc:
 
-    this(ref Console console, BaseCollection collection)
+    this(ref Console console)
     {
         super(console, StringLit!"reset");
-        _collection = collection;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
+        BaseCollection collection = _scope.collection;
+
         if (namedArgs.length != 0)
         {
             session.write_line("Usage: reset [<name>] [<property> [...]]");
@@ -336,28 +343,28 @@ nothrow @nogc:
         }
 
         // TODO: first arg may not be an item name; it may be a property name applied to all items...
-        BaseObject item = args.length > 0 ? _collection.get(args[0].asString()) : null;
+        BaseObject item = args.length > 0 ? collection.get(args[0].asString()) : null;
         if (item)
             reset_item(item, args[1 .. $]);
         else
         {
-            foreach (i; _collection.values)
+            foreach (i; collection.values)
                 reset_item(i, args[0 .. $]);
         }
         return null;
     }
 
-    final override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
+    final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, _collection, SuggestFlags.Reset);
+            return .complete(cmdLine, _scope.collection, SuggestFlags.Reset);
     }
 
-    final override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
+    final override Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
-        return .suggest(cmdLine, _collection, SuggestFlags.Reset);
+        return .suggest(cmdLine, _scope.collection, SuggestFlags.Reset);
     }
 
     version (ExcludeHelpText) {} else
@@ -366,9 +373,6 @@ nothrow @nogc:
          ~ "every property on every item. With a name, scopes to one item;\n"
          ~ "with property names, scopes to those properties.\n"
          ~ "Usage: reset [<name>] [<property> ...]";
-
-private:
-    BaseCollection _collection;
 }
 
 // TODO: enable/disable commands, which act on multiple items...
@@ -379,14 +383,15 @@ class CollectionListCommand : Command
 {
 nothrow @nogc:
 
-    this(ref Console console, BaseCollection collection)
+    this(ref Console console)
     {
         super(console, StringLit!"list");
-        _collection = collection;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
+        BaseCollection collection = _scope.collection;
+
         bool json_output;
         foreach (ref a; args)
         {
@@ -394,46 +399,42 @@ nothrow @nogc:
                 json_output = true;
         }
 
-        foreach (object; _collection.values)
+        foreach (object; collection.values)
             result.asArray ~= Variant(object.name[]);
 
         return null;
     }
 
-    final override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
+    final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, _collection, SuggestFlags.Reset);
+            return .complete(cmdLine, _scope.collection, SuggestFlags.Reset);
     }
 
-    final override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
+    final override Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
-        return .suggest(cmdLine, _collection, SuggestFlags.Reset);
+        return .suggest(cmdLine, _scope.collection, SuggestFlags.Reset);
     }
 
     version (ExcludeHelpText) {} else
     override const(char)[] help(const(char)[] args) const
         => "List the names of all items in this collection.\nUsage: list";
-
-private:
-    BaseCollection _collection;
 }
 
 class CollectionPrintCommand : Command
 {
 nothrow @nogc:
 
-    this(ref Console console, BaseCollection collection)
+    this(ref Console console)
     {
         super(console, StringLit!"print");
-        _collection = collection;
     }
 
-    override CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
-        const(Property*)[] properties = _collection.type_info.properties;
+        BaseCollection collection = _scope.collection;
 
         bool watch_mode = false;
 
@@ -441,8 +442,8 @@ nothrow @nogc:
         {
             if (arg == "--json")
             {
-                auto items = Array!Variant(Reserve, _collection.item_count);
-                foreach (item; _collection.values)
+                auto items = Array!Variant(Reserve, collection.item_count);
+                foreach (item; collection.values)
                     items ~= item.gather();
                 result = Variant(items.move);
                 return null;
@@ -452,57 +453,25 @@ nothrow @nogc:
         }
 
         if (watch_mode)
-            return allocator.allocT!CollectionWatchState(session, this, _collection);
+            return allocator.allocT!CollectionWatchState(session, this, collection);
 
-        print_table(session, properties);
+        Table table;
+        populate_collection_table(table, collection);
+        table.render(session);
         return null;
     }
 
-    final void print_table(Session session, const(Property*)[] properties)
-    {
-        const(char)[][16] proplist;
-
-        Table table;
-        table.add_column("");
-
-        foreach (p; properties)
-        {
-            if (!p.get || p.name[] == "flags")
-                continue;
-            if (!prop_visible(p.flags, proplist, p.name[]))
-                continue;
-            auto alignment = is_numeric_prop(p.type[0][]) ? Table.TextAlign.right : Table.TextAlign.left;
-            table.add_column(p.name[], alignment);
-        }
-        foreach (item; _collection.values)
-        {
-            table.add_row();
-            table.cell(format_flags(item.flags));
-
-            foreach (p; properties)
-            {
-                if (!p.get || p.name[] == "flags")
-                    continue;
-                if (!prop_visible(p.flags, proplist, p.name[]))
-                    continue;
-                table.cell(p.get(item));
-            }
-        }
-
-        table.render(session);
-    }
-
-    final override MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
+    final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
         else
-            return .complete(cmdLine, _collection, SuggestFlags.Reset);
+            return .complete(cmdLine, _scope.collection, SuggestFlags.Reset);
     }
 
-    final override Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
+    final override Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
-        return .suggest(cmdLine, _collection, SuggestFlags.Reset);
+        return .suggest(cmdLine, _scope.collection, SuggestFlags.Reset);
     }
 
     version (ExcludeHelpText) {} else
@@ -511,9 +480,6 @@ nothrow @nogc:
          ~ "properties. Use --watch for a live view; --json for machine\n"
          ~ "output.\n"
          ~ "Usage: print [--watch|-w] [--json]";
-
-package:
-    BaseCollection _collection;
 }
 
 class CollectionWatchState : LiveViewState
@@ -536,34 +502,9 @@ nothrow @nogc:
             _sticky_widths[] = 0;
             _prev_width = width;
         }
-        const(char)[][16] proplist;
-        auto properties = _collection.type_info.properties;
 
         Table table;
-        table.add_column("");
-        foreach (p; properties)
-        {
-            if (!p.get || p.name[] == "flags")
-                continue;
-            if (!prop_visible(p.flags, proplist, p.name[]))
-                continue;
-            auto alignment = is_numeric_prop(p.type[0][]) ? Table.TextAlign.right : Table.TextAlign.left;
-            table.add_column(p.name[], alignment);
-        }
-
-        foreach (item; _collection.values)
-        {
-            table.add_row();
-            table.cell(format_flags(item.flags));
-            foreach (p; properties)
-            {
-                if (!p.get || p.name[] == "flags")
-                    continue;
-                if (!prop_visible(p.flags, proplist, p.name[]))
-                    continue;
-                table.cell(p.get(item));
-            }
-        }
+        populate_collection_table(table, _collection);
 
         auto avail = count > 0 ? count - 1 : 0;  // reserve 1 row for table header
         table.render_viewport(session, offset, avail, _sticky_widths[]);
@@ -582,6 +523,66 @@ private:
 }
 
 private:
+
+void populate_collection_table(ref Table table, BaseCollection collection)
+{
+    const(char)[][16] proplist;
+    auto properties = collection.type_info.properties;
+
+    table.add_column("");
+    foreach (p; properties)
+    {
+        if (!p.get || p.name[] == "flags")
+            continue;
+        if (!prop_visible(p.flags, proplist, p.name[]))
+            continue;
+        auto alignment = is_numeric_prop(p.type[0][]) ? Table.TextAlign.right : Table.TextAlign.left;
+        table.add_column(p.name[], alignment);
+    }
+    foreach (item; collection.values)
+    {
+        table.add_row();
+        table.cell(format_flags(item.flags));
+        foreach (p; properties)
+        {
+            if (!p.get || p.name[] == "flags")
+                continue;
+            if (!prop_visible(p.flags, proplist, p.name[]))
+                continue;
+            table.cell(p.get(item));
+        }
+    }
+}
+
+Command[12]* shared_commands(ref Console console)
+{
+    if (console._coll_cmds[0] is null)
+    {
+        Command add    = defaultAllocator.allocT!CollectionAddCommand(console);
+        Command remove = defaultAllocator.allocT!CollectionRemoveCommand(console);
+        Command get    = defaultAllocator.allocT!CollectionGetCommand(console);
+        Command set_   = defaultAllocator.allocT!CollectionSetCommand(console);
+        Command reset  = defaultAllocator.allocT!CollectionResetCommand(console);
+        Command list   = defaultAllocator.allocT!CollectionListCommand(console);
+        Command print  = defaultAllocator.allocT!CollectionPrintCommand(console);
+
+        // [0..7) alphabetical
+        console._coll_cmds[0] = add;
+        console._coll_cmds[1] = get;
+        console._coll_cmds[2] = list;
+        console._coll_cmds[3] = print;
+        console._coll_cmds[4] = remove;
+        console._coll_cmds[5] = reset;
+        console._coll_cmds[6] = set_;
+        // [7..12) alphabetical, no add/remove
+        console._coll_cmds[7]  = get;
+        console._coll_cmds[8]  = list;
+        console._coll_cmds[9]  = print;
+        console._coll_cmds[10] = reset;
+        console._coll_cmds[11] = set_;
+    }
+    return &console._coll_cmds;
+}
 
 const(char)[] format_flags(ObjectFlags f)
 {

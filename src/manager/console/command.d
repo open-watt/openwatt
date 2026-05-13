@@ -11,6 +11,7 @@ import urt.map;
 import urt.mem;
 import urt.meta.nullable;
 import urt.string;
+import urt.string.format : tconcat;
 import urt.variant;
 
 
@@ -68,8 +69,8 @@ nothrow @nogc:
     Array!ScriptCommand owned_script;           // owned parsed commands (top-level only)
     ScriptBody held_script;                     // refcount holder for child contexts created from a Script value
     const(ScriptCommand)[] script;              // iterated view (owned_script[], held_script.commands, or borrowed from parent)
-    Scope root_scope;                           // root for /-prefixed commands
-    Scope script_scope;                         // root for :-prefixed scripting verbs
+    Scope* root_scope;                          // root for /-prefixed commands
+    Scope* script_scope;                        // root for :-prefixed scripting verbs
     Map!(String, Variant) owned_locals;         // backing for top-level locals
     Map!(String, Variant)* locals;              // active locals; points at own, session, or parent's
     FrameKind frame_kind = FrameKind.block;     // determines whether :return propagates or absorbs here
@@ -84,7 +85,7 @@ nothrow @nogc:
         done,
     }
 
-    this(Session session, Scope root_scope, Scope script_scope, Array!char source, Array!ScriptCommand script)
+    this(Session session, Scope* root_scope, Scope* script_scope, Array!char source, Array!ScriptCommand script)
     {
         super(session, null);
         this.root_scope = root_scope;
@@ -96,7 +97,7 @@ nothrow @nogc:
         this.frame_kind = FrameKind.function_;
     }
 
-    this(Session session, Scope root_scope, Scope script_scope, const(ScriptCommand)[] script, Map!(String, Variant)* locals, FrameKind frame_kind)
+    this(Session session, Scope* root_scope, Scope* script_scope, const(ScriptCommand)[] script, Map!(String, Variant)* locals, FrameKind frame_kind)
     {
         super(session, null);
         this.root_scope = root_scope;
@@ -106,7 +107,7 @@ nothrow @nogc:
         this.frame_kind = frame_kind;
     }
 
-    this(Session session, Scope root_scope, Scope script_scope, ref ScriptBody body_, Map!(String, Variant)* locals, FrameKind frame_kind)
+    this(Session session, Scope* root_scope, Scope* script_scope, ref ScriptBody body_, Map!(String, Variant)* locals, FrameKind frame_kind)
     {
         super(session, null);
         this.root_scope = root_scope;
@@ -220,13 +221,13 @@ private:
     {
         const(ScriptCommand)* cmd = &script[_stmt];
 
-        Scope target;
+        Scope* node;
         if (cmd.command.front_is('/'))
-            target = root_scope;
+            node = root_scope;
         else if (cmd.command.front_is(':'))
-            target = script_scope;
+            node = script_scope;
         else
-            target = session._cur_scope;
+            node = session._cur_scope;
 
         EvalContext ctx;
         ctx.locals = locals;
@@ -245,7 +246,54 @@ private:
         session._executing_context = this;
         scope(exit) session._executing_context = saved;
 
-        _waiting_on = target.execute(session, vars[], named_vars[], stmt_result);
+        // walk path segments. descend() checks sub-scopes; on miss we fall back
+        // to find_command at the current node to catch leaves. Run out of
+        // segments on a pure namespace = cd into it.
+        const(Variant)[] args = vars[];
+        Command leaf = null;
+        while (args.length > 0)
+        {
+            if (!args[0].isString)
+                assert(false, "path segment must be an identifier");
+            const(char)[] seg = args[0].asString;
+
+            Scope* next = node.descend(seg);
+            if (next is null)
+            {
+                const(char)[] core = seg;
+                if (core.front_is('/') || core.front_is(':'))
+                    core = core[1..$];
+
+                if (core != "..")
+                {
+                    if (Command found = node.find_command(core))
+                    {
+                        leaf = found;
+                        args = args[1..$];
+                        break;
+                    }
+                    session.write_output(tconcat("Error: no command `", core, "`"), true);
+                }
+                else
+                    session.write_output("Error: '..' used at top level", true);
+                result = stmt_result.move;
+                return true;
+            }
+
+            args = args[1..$];
+            if (next is node)
+                continue;       // lone '/' or ':' — stayed put
+            node = next;
+        }
+
+        if (leaf is null)
+        {
+            session._cur_scope = node;
+            result = stmt_result.move;
+            return true;
+        }
+
+        _waiting_on = leaf.execute(session, node, args, named_vars[], stmt_result);
         if (_waiting_on is null)
         {
             result = stmt_result.move;
@@ -278,16 +326,16 @@ nothrow @nogc:
     final Application app() pure nothrow @nogc => _console.appInstance;
     final ref Console console() pure nothrow @nogc => *_console;
 
-    abstract CommandState execute(Session session, const Variant[] args, const NamedArgument[] namedArgs, out Variant result);
+    abstract CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result);
 
-    MutableString!0 complete(const(char)[] cmdLine, Scope user_scope = null)
+    MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
     {
         version (ExcludeAutocomplete)
             return null;
         else
         {
             MutableString!0 result = cmdLine;
-            Array!String tokens = suggest(cmdLine, user_scope);
+            Array!String tokens = suggest(cmdLine, _scope, user_scope);
             if (tokens.empty)
                 return result;
             size_t lastToken = cmdLine.length;
@@ -298,7 +346,7 @@ nothrow @nogc:
         }
     }
 
-    Array!String suggest(const(char)[] cmdLine, Scope user_scope = null)
+    Array!String suggest(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
         => Array!String();
 
     version (ExcludeHelpText) {} else
@@ -311,7 +359,6 @@ package:
     final NoGCAllocator tempAllocator() => _console._tempAllocator;
 
     Console* _console;
-    Scope _parent = null;
 }
 
 

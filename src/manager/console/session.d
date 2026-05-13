@@ -73,7 +73,7 @@ nothrow @nogc:
         _console = &console;
         _stream = stream;
         _prompt = "> ";
-        _cur_scope = console.get_root;
+        _cur_scope = console.root;
         _nvt_input = cast(TelnetStream)stream !is null;
 
         if (_stream)
@@ -911,7 +911,7 @@ private:
 
 package:
     Console* _console;
-    Scope _cur_scope = null;
+    Scope* _cur_scope = null;
     Context _executing_context = null;
     Map!(String, Variant) _session_locals;
     Variant _return_value;
