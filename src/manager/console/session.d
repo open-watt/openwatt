@@ -72,9 +72,10 @@ nothrow @nogc:
 
         _console = &console;
         _stream = stream;
-        _prompt = "> ";
+        _prompt_suffix = "> ";
         _cur_scope = console.root;
         _nvt_input = cast(TelnetStream)stream !is null;
+        rebuild_prompt();
 
         if (_stream)
         {
@@ -285,10 +286,18 @@ nothrow @nogc:
 
     final const(char)[] set_prompt(const(char)[] prompt)
     {
-        const(char)[] old = _prompt.swap(prompt);
-        if ((_features & ClientFeatures.escape) && !_current_command && _show_prompt && prompt[] != old[])
-            send_prompt_and_buffer(true);
+        const(char)[] old = _prompt_suffix.swap(prompt);
+        if (prompt[] != old[])
+            rebuild_prompt();
         return old;
+    }
+
+    package final void set_scope(Scope* s)
+    {
+        if (_cur_scope is s)
+            return;
+        _cur_scope = s;
+        rebuild_prompt();
     }
 
     final ptrdiff_t read_input(char[] buffer)
@@ -676,7 +685,8 @@ private:
     bool _closing = false;
     bool _nvt_input = false;
 
-    const(char)[] _prompt;
+    const(char)[] _prompt_suffix;
+    MutableString!0 _prompt;
     MutableString!0 _buffer;
     uint _position = 0;
 
@@ -897,16 +907,51 @@ private:
 
         if (_features & ClientFeatures.escape)
         {
-            char[] prompt = tformat("{0, ?1}{2}{3}\x1b[K{@5, ?4}", "\r", with_clear, _prompt, _buffer, _position < _buffer.length, "\x1b[{6}D", _buffer.length - _position);
+            char[] prompt = tformat("{0, ?1}{2}{3}\x1b[K{@5, ?4}", "\r", with_clear, _prompt[], _buffer, _position < _buffer.length, "\x1b[{6}D", _buffer.length - _position);
             write_output(prompt, false);
         }
         else
         {
             if (with_clear)
                 write_output("\r", false);
-            char[] prompt = tformat("{0}{1}", _prompt, _buffer);
+            char[] prompt = tformat("{0}{1}", _prompt[], _buffer);
             write_output(prompt, false);
         }
+    }
+
+    void rebuild_prompt()
+    {
+        MutableString!0 buf;
+        buf ~= '[';
+        append_scope_path(buf, _cur_scope);
+        buf ~= ']';
+        buf ~= _prompt_suffix;
+
+        if (buf[] == _prompt[])
+            return;
+        _prompt = buf.move;
+
+        if ((_features & ClientFeatures.escape) && !_current_command && _executing_context is null && _show_prompt)
+            send_prompt_and_buffer(true);
+    }
+
+    static void append_scope_path(ref MutableString!0 buf, Scope* s)
+    {
+        if (s is null || s.parent is null)
+        {
+            buf ~= '/';
+            return;
+        }
+        walk_scope_path(buf, s);
+    }
+
+    static void walk_scope_path(ref MutableString!0 buf, Scope* s)
+    {
+        if (s.parent is null)
+            return;
+        walk_scope_path(buf, s.parent);
+        buf ~= '/';
+        buf ~= s.name[];
     }
 
 package:

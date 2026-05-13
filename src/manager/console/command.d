@@ -288,7 +288,7 @@ private:
 
         if (leaf is null)
         {
-            session._cur_scope = node;
+            session.set_scope(node);
             result = stmt_result.move;
             return true;
         }

@@ -208,7 +208,7 @@ nothrow @nogc:
 
         console = Console(this, String("console".addString), Mallocator.instance);
 
-        console.set_prompt(StringLit!"openwatt > ");
+        console.set_prompt(StringLit!"> ");
 
         console.register_command!log_level("/system", this);
         console.register_command!set_hostname("/system", this);
