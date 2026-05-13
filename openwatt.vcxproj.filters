@@ -483,7 +483,7 @@
     <DCompile Include="src\protocol\http\websocket.d">
       <Filter>src\protocol\http</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\modbus\client.d">
+    <DCompile Include="src\protocol\modbus\binding.d">
       <Filter>src\protocol\modbus</Filter>
     </DCompile>
     <DCompile Include="src\protocol\modbus\iface.d">
@@ -492,10 +492,10 @@
     <DCompile Include="src\protocol\modbus\message.d">
       <Filter>src\protocol\modbus</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\modbus\package.d">
+    <DCompile Include="src\protocol\modbus\node.d">
       <Filter>src\protocol\modbus</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\modbus\sampler.d">
+    <DCompile Include="src\protocol\modbus\package.d">
       <Filter>src\protocol\modbus</Filter>
     </DCompile>
     <DCompile Include="src\protocol\mqtt\broker.d">
@@ -1286,6 +1286,9 @@
       <Filter>conf\modbus_profiles</Filter>
     </None>
     <None Include="conf\modbus_profiles\se_meter.conf">
+      <Filter>conf\modbus_profiles</Filter>
+    </None>
+    <None Include="conf\modbus_profiles\shelly.conf">
       <Filter>conf\modbus_profiles</Filter>
     </None>
     <None Include="conf\modbus_profiles\smartevse.conf">

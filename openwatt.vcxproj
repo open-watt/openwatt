@@ -165,11 +165,11 @@
     <DCompile Include="src\protocol\ip\stack.d" />
     <DCompile Include="src\protocol\ip\tcp.d" />
     <DCompile Include="src\protocol\ip\udp.d" />
-    <DCompile Include="src\protocol\modbus\client.d" />
+    <DCompile Include="src\protocol\modbus\binding.d" />
     <DCompile Include="src\protocol\modbus\iface.d" />
     <DCompile Include="src\protocol\modbus\message.d" />
+    <DCompile Include="src\protocol\modbus\node.d" />
     <DCompile Include="src\protocol\modbus\package.d" />
-    <DCompile Include="src\protocol\modbus\sampler.d" />
     <DCompile Include="src\protocol\mqtt\broker.d" />
     <DCompile Include="src\protocol\mqtt\client.d" />
     <DCompile Include="src\protocol\mqtt\package.d" />
@@ -1122,6 +1122,7 @@
     <None Include="conf\modbus_profiles\goodwe_ems.conf" />
     <None Include="conf\modbus_profiles\pace_bms.conf" />
     <None Include="conf\modbus_profiles\se_meter.conf" />
+    <None Include="conf\modbus_profiles\shelly.conf" />
     <None Include="conf\modbus_profiles\smartevse.conf" />
     <None Include="conf\modbus_profiles\tac1100.conf" />
     <None Include="conf\mqtt_profiles\open_beken.conf" />

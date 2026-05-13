@@ -17,9 +17,9 @@ import manager.profile;
 import manager.sampler;
 
 import protocol.modbus.iface;
-import protocol.modbus.client;
+import protocol.modbus.node;
 import protocol.modbus.message;
-import protocol.modbus.sampler;
+import protocol.modbus.binding;
 
 import router.iface;
 
@@ -69,21 +69,21 @@ nothrow @nogc:
         g_app.register_enum!ModbusProtocol();
 
         g_app.console.register_collection!ModbusInterface();
-        g_app.console.register_collection!ModbusClient();
-        g_app.console.register_collection!ModbusClientBinding();
+        g_app.console.register_collection!ModbusNode();
+        g_app.console.register_collection!ModbusBinding();
 
         // TODO: should we relocate this command?
         g_app.console.register_command!remote_server_add("/interface/modbus/remote-server", this, "add");
 
-        g_app.console.register_command!request_raw("/protocol/modbus/client/request", this, "raw");
-        g_app.console.register_command!request_read("/protocol/modbus/client/request", this, "read");
-        g_app.console.register_command!request_write("/protocol/modbus/client/request", this, "write");
-        g_app.console.register_command!request_read_device_id("/protocol/modbus/client/request", this, "read-device-id");
+        g_app.console.register_command!request_raw("/protocol/modbus/node/request", this, "raw");
+        g_app.console.register_command!request_read("/protocol/modbus/node/request", this, "read");
+        g_app.console.register_command!request_write("/protocol/modbus/node/request", this, "write");
+        g_app.console.register_command!request_read_device_id("/protocol/modbus/node/request", this, "read-device-id");
     }
 
     override void update()
     {
-        Collection!ModbusClient().update_all();
+        Collection!ModbusNode().update_all();
     }
 
     final ServerMap* find_server_by_name(const(char)[] name)
@@ -146,6 +146,11 @@ nothrow @nogc:
         _address_in_use[addr / 8] &= ~cast(ubyte)(1 << (addr % 8));
     }
 
+    final bool try_claim_universal_address(ubyte addr)
+    {
+        return _try_claim(addr);
+    }
+
     private bool _try_claim(ubyte addr)
     {
         if (addr in remote_servers || (_address_in_use[addr / 8] & (1 << (addr % 8))))
@@ -168,9 +173,6 @@ nothrow @nogc:
             assert(universal_address !in remote_servers, "Universal address already in use.");
             _address_in_use[universal_address / 8] |= cast(ubyte)(1 << (universal_address % 8));
         }
-
-        iface._local_to_uni[address] = universal_address;
-        iface._uni_to_local[universal_address] = address;
 
         ServerMap map;
         map.name = name.makeString(defaultAllocator());
@@ -230,7 +232,7 @@ nothrow @nogc:
     ModbusRequestState sendRequest(Session session, const(char)[] client, const(char)[] slave, ref ModbusPDU msg)
     {
         ubyte addr;
-        ModbusClient c = lookupClientAndAddress(session, client, slave, addr);
+        ModbusNode c = lookupClientAndAddress(session, client, slave, addr);
         if (!c)
             return null;
 
@@ -286,7 +288,7 @@ nothrow @nogc:
     ModbusRequestState request_read_device_id(Session session, const(char)[] client, const(char)[] slave)
     {
         ubyte addr;
-        ModbusClient c = lookupClientAndAddress(session, client, slave, addr);
+        ModbusNode c = lookupClientAndAddress(session, client, slave, addr);
         if (!c)
             return null;
 
@@ -298,9 +300,9 @@ nothrow @nogc:
         return state;
     }
 
-    ModbusClient lookupClientAndSlave(Session session, const(char)[] client, const(char)[] slave, out ServerMap* map)
+    ModbusNode lookupClientAndSlave(Session session, const(char)[] client, const(char)[] slave, out ServerMap* map)
     {
-        ModbusClient c = Collection!ModbusClient().get(client);
+        ModbusNode c = Collection!ModbusNode().get(client);
         if (c is null)
         {
             session.write_line("Client '", client, "' doesn't exist");
@@ -320,10 +322,10 @@ nothrow @nogc:
         return c;
     }
 
-    ModbusClient lookupClientAndAddress(Session session, const(char)[] client, const(char)[] slave, out ubyte addr)
+    ModbusNode lookupClientAndAddress(Session session, const(char)[] client, const(char)[] slave, out ubyte addr)
     {
         ServerMap* map;
-        ModbusClient c = lookupClientAndSlave(session, client, slave, map);
+        ModbusNode c = lookupClientAndSlave(session, client, slave, map);
         if (c)
         {
             if (map)

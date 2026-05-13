@@ -220,9 +220,6 @@ protected:
         }
         if (_protocol != ModbusProtocol.unknown)
         {
-            _local_to_uni.insert(ubyte(0), ubyte(0));
-            _uni_to_local.insert(ubyte(0), ubyte(0));
-
             // allocate a universal address for the remote bus master on non-master interfaces
             if (!_is_bus_master && _master_address == 0)
                 _master_address = get_module!ModbusProtocolModule().allocate_universal_address(ephemeral: true);
@@ -273,9 +270,6 @@ protected:
             get_module!ModbusProtocolModule().release_universal_address(_master_address);
             _master_address = 0;
         }
-
-        _local_to_uni.clear();
-        _uni_to_local.clear();
 
         return CompletionStatus.complete;
     }
@@ -430,14 +424,11 @@ protected:
             }
 
             ServerMap* map = mod_mb.find_server_by_universal_address(hdr.src_address);
-            if (!map)
-            {
-                log.debug_("tx-drop: unknown universal address ", hdr.src_address);
-                add_tx_drop();
-                return -1;
-            }
-
-            ubyte wire_address = map.iface is this ? map.local_address : map.universal_address;
+            ubyte wire_address;
+            if (map)
+                wire_address = map.iface is this ? map.local_address : map.universal_address;
+            else
+                wire_address = hdr.src_address; // hosted-local node: universal == bus, no NAT
             const(ubyte)[] pdu = cast(ubyte[])packet.data;
             return frame_and_send(wire_address, pdu, hdr.sequence_number);
         }
@@ -492,8 +483,6 @@ private:
     ushort _sequence_number;
     ModbusFrameType _expect_message_type = ModbusFrameType.unknown;
 
-    package Map!(ubyte, ubyte) _local_to_uni;
-    package Map!(ubyte, ubyte) _uni_to_local;
 
     ubyte[260] _tail;
     ushort _tail_bytes;
@@ -729,26 +718,29 @@ private:
         if (frame_info.address != 0)
         {
             auto mod_mb = get_module!ModbusProtocolModule();
-
-            // if we are the bus master, then incoming packets are responses from slaves
-            //    ...so the address must be their local bus address
-            // if we are not the bus master, then it could be a request from a master to a local or remote slave, or a response from a local slave
-            //    ...the response is local, so it can only be a universal address if it's a request!
             ServerMap* map = mod_mb.find_server_by_local_address(frame_info.address, this);
-            if (!map && type == ModbusFrameType.request)
-                map = mod_mb.find_server_by_universal_address(frame_info.address);
-            if (!map)
+
+            if (_is_bus_master)
             {
-                if (_is_bus_master)
+                // master iface: incoming = response from a slave we polled
+                if (!map)
                 {
                     log.debug_("rx-drop: unknown local address ", frame_info.address, " on bus ", name[]);
                     add_rx_drop();
                     return;
                 }
-
-                map = mod_mb.add_remote_server(null, this, frame_info.address, null, null);
+                address = map.universal_address;
             }
-            address = map.universal_address;
+            else
+            {
+                // non-master iface (request from foreign master, or response we're snooping):
+                // - known foreign-server on this bus: use the NAT'd universal
+                // - no known node: treat the wire address as the universal directly, no auto-create
+                if (map)
+                    address = map.universal_address;
+                else
+                    address = frame_info.address;
+            }
         }
 
         // message = [function_code, pdu_data...]; payload is the full PDU

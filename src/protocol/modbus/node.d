@@ -1,4 +1,4 @@
-module protocol.modbus.client;
+module protocol.modbus.node;
 
 import urt.array;
 import urt.lifetime;
@@ -34,19 +34,20 @@ alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref Mod
 alias ModbusErrorHandler = void delegate(ModbusErrorType errorType, ref const ModbusPDU request, SysTime request_time) nothrow @nogc;
 alias ModbusSnoopHandler = void delegate(ubyte server_address, ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time) nothrow @nogc;
 
-class ModbusClient : ActiveObject
+class ModbusNode : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
+                                 Prop!("address", address),
                                  Prop!("snoop", snoop));
 nothrow @nogc:
 
-    enum type_name = "mb-client";
-    enum path = "/protocol/modbus/client";
-    enum collection_id = CollectionType.mb_client;
+    enum type_name = "mb-node";
+    enum path = "/protocol/modbus/node";
+    enum collection_id = CollectionType.mb_node;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        super(collection_type_info!ModbusClient, id, flags);
+        super(collection_type_info!ModbusNode, id, flags);
     }
 
     // Properties
@@ -64,6 +65,16 @@ nothrow @nogc:
             _subscribed = false;
         }
         _iface = value;
+        restart();
+    }
+
+    ubyte address() const pure
+        => _requested_address != 0 ? _requested_address : _address;
+    void address(ubyte value)
+    {
+        if (_requested_address == value)
+            return;
+        _requested_address = value;
         restart();
     }
 
@@ -99,7 +110,7 @@ nothrow @nogc:
     {
         if (_snooping)
         {
-            writeWarning("Modbus client '", name[], "' can't send requests while snooping bus: ", _iface.name[]);
+            log.warning("can't send requests while snooping bus: ", _iface.name[]);
             return false;
         }
 
@@ -136,8 +147,21 @@ protected:
         if (!_iface.running)
             return CompletionStatus.continue_;
 
-        if (_client_address == 0)
-            _client_address = get_module!ModbusProtocolModule().allocate_universal_address(ephemeral: true);
+        if (_address == 0)
+        {
+            auto mod = get_module!ModbusProtocolModule();
+            if (_requested_address != 0)
+            {
+                if (!mod.try_claim_universal_address(_requested_address))
+                {
+                    log.warning("universal address ", _requested_address, " already in use");
+                    return CompletionStatus.error;
+                }
+                _address = _requested_address;
+            }
+            else
+                _address = mod.allocate_universal_address(0, true);
+        }
 
         if (_snooping)
             _pending.pushBack(); // temp storage for snooped requests
@@ -158,10 +182,10 @@ protected:
             _subscribed = false;
         }
 
-        if (_client_address != 0)
+        if (_address != 0)
         {
-            get_module!ModbusProtocolModule().release_universal_address(_client_address);
-            _client_address = 0;
+            get_module!ModbusProtocolModule().release_universal_address(_address);
+            _address = 0;
         }
 
         // fail all pending requests
@@ -191,7 +215,7 @@ protected:
             if (req.retry_time + msecs(req.timeout * 2) < now)
             {
                 long elapsed_ms = (now - req.request_time).as!"msecs";
-                writeDebug(name[], ": backstop timeout seq=", req.sequence_number, " tag=", req.tag, " server=", req.server_address,
+                log.debug_("backstop timeout seq=", req.sequence_number, " tag=", req.tag, " server=", req.server_address,
                     " elapsed=", elapsed_ms, "ms timeout=", req.timeout * 2, "ms", " retries=", req.num_retries);
 
                 if (req.tag > 0)
@@ -246,7 +270,8 @@ private:
     ObjectRef!BaseInterface _iface;
     bool _snooping;
     bool _subscribed;
-    ubyte _client_address;
+    ubyte _address;
+    ubyte _requested_address;
     ushort _sequence_number = 0;
     Array!PendingRequest _pending;
 
@@ -281,7 +306,7 @@ private:
 
         ref const ModbusFrame hdr = p.hdr!ModbusFrame();
 
-        if (hdr.type == ModbusFrameType.request && hdr.dst_address == _client_address)
+        if (hdr.type == ModbusFrameType.request && hdr.dst_address == _address)
         {
             if (!requestHandler)
                 return;
@@ -377,7 +402,7 @@ private:
         hdr.sequence_number = sequence_number;
         hdr.type = type;
         hdr.function_code = message.function_code;
-        hdr.src_address = _client_address;
+        hdr.src_address = _address;
         hdr.dst_address = dst_address;
         p.pcp = pcp;
         p.dei = dei;

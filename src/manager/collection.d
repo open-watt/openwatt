@@ -38,7 +38,7 @@ enum CollectionType : ubyte
     ip_pool,
     ip_pool6,
     ip_route,
-    mb_client,
+    mb_node,
     mqtt_broker,
     pcap_server,
     ppp_server,
