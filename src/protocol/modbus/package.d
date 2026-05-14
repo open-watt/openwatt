@@ -20,6 +20,7 @@ import protocol.modbus.iface;
 import protocol.modbus.node;
 import protocol.modbus.message;
 import protocol.modbus.binding;
+import protocol.modbus.sunspec;
 
 import router.iface;
 
@@ -67,10 +68,13 @@ nothrow @nogc:
         register_address_extractor(PacketType.modbus, &extract_modbus_src_address, &extract_modbus_dst_address);
 
         g_app.register_enum!ModbusProtocol();
+        g_app.register_enum!SunSpecInverterState();
+        g_app.register_enum!SunSpecInverterEvent();
 
         g_app.console.register_collection!ModbusInterface();
         g_app.console.register_collection!ModbusNode();
         g_app.console.register_collection!ModbusBinding();
+        g_app.console.register_collection!SunspecBinding();
 
         // TODO: should we relocate this command?
         g_app.console.register_command!remote_server_add("/interface/modbus/remote-server", this, "add");
@@ -167,7 +171,7 @@ nothrow @nogc:
             name = tconcat(iface.name[], '.', address);
 
         if (!universal_address)
-            universal_address = allocate_universal_address(address);
+            universal_address = allocate_universal_address(0, true);
         else
         {
             assert(universal_address !in remote_servers, "Universal address already in use.");
@@ -179,7 +183,7 @@ nothrow @nogc:
         map.local_address = address;
         map.universal_address = universal_address;
         map.iface = iface;
-        map.profile = profile.makeString(defaultAllocator());
+        map.profile = profile ? profile.makeString(defaultAllocator()) : String();
         map.model = model.makeString(defaultAllocator());
 
         remote_servers[universal_address] = map;
@@ -190,7 +194,7 @@ nothrow @nogc:
         return universal_address in remote_servers;
     }
 
-    final void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, const(char)[] profile, Nullable!(const(char)[]) model, Nullable!ubyte universal_address)
+    final void remote_server_add(Session session, const(char)[] name, const(char)[] _interface, ubyte address, Nullable!(const(char)[]) profile, Nullable!(const(char)[]) model, Nullable!ubyte universal_address)
     {
         if (!_interface)
         {
@@ -226,7 +230,7 @@ nothrow @nogc:
             }
         }
 
-        add_remote_server(name, modbusInterface, address, profile, model ? model.value : null, universal_address ? universal_address.value : 0);
+        add_remote_server(name, modbusInterface, address, profile ? profile.value : null, model ? model.value : null, universal_address ? universal_address.value : 0);
     }
 
     ModbusRequestState sendRequest(Session session, const(char)[] client, const(char)[] slave, ref ModbusPDU msg)

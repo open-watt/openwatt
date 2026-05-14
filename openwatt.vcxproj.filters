@@ -522,6 +522,9 @@
     <DCompile Include="src\protocol\modbus\package.d">
       <Filter>src\protocol\modbus</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\modbus\sunspec.d">
+      <Filter>src\protocol\modbus</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\mqtt\binding.d">
       <Filter>src\protocol\mqtt</Filter>
     </DCompile>

@@ -2132,6 +2132,7 @@ __gshared immutable KnownElementTemplate[][string] g_well_known_elements = [
     "Solar": g_Solar_elements,
     "SolarConfig": g_SolarConfig_elements,
     "Inverter": g_Inverter_elements,
+    "InverterConfig": g_InverterConfig_elements,
     "EVSE": g_EVSE_elements,
     "Vehicle": g_Vehicle_elements,
     "ChargeControl": g_ChargeControl_elements,
@@ -2174,6 +2175,8 @@ __gshared immutable KnownElementTemplate[] g_Network_elements = [
 
 __gshared immutable KnownElementTemplate[] g_Modbus_elements = [
     make_element_template!("status", null, "Connection Status", null, Frequency.high),
+    make_element_template!("variant", null, "Protocol Variant", "rtu, tcp, or ascii", Frequency.constant),
+    make_element_template!("address", null, "Device Address", "Modbus slave/unit address", Frequency.constant),
 ];
 
 __gshared immutable KnownElementTemplate[] g_Ethernet_elements = [
@@ -2261,14 +2264,18 @@ __gshared immutable KnownElementTemplate[] g_EnergyMeter_elements = [
     make_element_template!("absolute1", "kWh", "Gross (Absolute) Active Energy 1", "Phase A absolute accumulated active energy", Frequency.medium),
     make_element_template!("absolute2", "kWh", "Gross (Absolute) Active Energy 2", "Phase B absolute accumulated active energy", Frequency.medium),
     make_element_template!("absolute3", "kWh", "Gross (Absolute) Active Energy 3", "Phase C absolute accumulated active energy", Frequency.medium),
-    make_element_template!("import_reactive", "kvarh", "Total Import Reactive Energy", "Accumulated imported reactive energy", Frequency.medium),
-    make_element_template!("import_reactive1", "kvarh", "Total Import Reactive Energy 1", "Phase A imported reactive energy", Frequency.medium),
-    make_element_template!("import_reactive2", "kvarh", "Total Import Reactive Energy 2", "Phase B imported reactive energy", Frequency.medium),
-    make_element_template!("import_reactive3", "kvarh", "Total Import Reactive Energy 3", "Phase C imported reactive energy", Frequency.medium),
-    make_element_template!("export_reactive", "kvarh", "Total Export Reactive Energy", "Accumulated exported reactive energy", Frequency.medium),
-    make_element_template!("export_reactive1", "kvarh", "Total Export Reactive Energy 1", "Phase A exported reactive energy", Frequency.medium),
-    make_element_template!("export_reactive2", "kvarh", "Total Export Reactive Energy 2", "Phase B exported reactive energy", Frequency.medium),
-    make_element_template!("export_reactive3", "kvarh", "Total Export Reactive Energy 3", "Phase C exported reactive energy", Frequency.medium),
+    make_element_template!("q1", "kvarh", "Reactive Energy Q1", "Quadrant 1 reactive energy (active import, inductive)", Frequency.medium),
+    make_element_template!("q2", "kvarh", "Reactive Energy Q2", "Quadrant 2 reactive energy (active export, inductive)", Frequency.medium),
+    make_element_template!("q3", "kvarh", "Reactive Energy Q3", "Quadrant 3 reactive energy (active export, capacitive)", Frequency.medium),
+    make_element_template!("q4", "kvarh", "Reactive Energy Q4", "Quadrant 4 reactive energy (active import, capacitive)", Frequency.medium),
+    make_element_template!("inductive", "kvarh", "Inductive Reactive Energy", "Total inductive reactive energy (= q1 + q2)", Frequency.medium),
+    make_element_template!("inductive1", "kvarh", "Inductive Reactive Energy 1", "Phase A inductive reactive energy", Frequency.medium),
+    make_element_template!("inductive2", "kvarh", "Inductive Reactive Energy 2", "Phase B inductive reactive energy", Frequency.medium),
+    make_element_template!("inductive3", "kvarh", "Inductive Reactive Energy 3", "Phase C inductive reactive energy", Frequency.medium),
+    make_element_template!("capacitive", "kvarh", "Capacitive Reactive Energy", "Total capacitive reactive energy (= q3 + q4)", Frequency.medium),
+    make_element_template!("capacitive1", "kvarh", "Capacitive Reactive Energy 1", "Phase A capacitive reactive energy", Frequency.medium),
+    make_element_template!("capacitive2", "kvarh", "Capacitive Reactive Energy 2", "Phase B capacitive reactive energy", Frequency.medium),
+    make_element_template!("capacitive3", "kvarh", "Capacitive Reactive Energy 3", "Phase C capacitive reactive energy", Frequency.medium),
     make_element_template!("net_reactive", "kvarh", "Total (Net) Reactive Energy", "Net accumulated reactive energy", Frequency.medium),
     make_element_template!("net_reactive1", "kvarh", "Total (Net) Reactive Energy 1", "Phase A net accumulated reactive energy", Frequency.medium),
     make_element_template!("net_reactive2", "kvarh", "Total (Net) Reactive Energy 2", "Phase B net accumulated reactive energy", Frequency.medium),
@@ -2277,6 +2284,26 @@ __gshared immutable KnownElementTemplate[] g_EnergyMeter_elements = [
     make_element_template!("absolute_reactive1", "kvarh", "Gross (Absolute) Reactive Energy 1", "Phase A absolute accumulated reactive energy", Frequency.medium),
     make_element_template!("absolute_reactive2", "kvarh", "Gross (Absolute) Reactive Energy 2", "Phase B absolute accumulated reactive energy", Frequency.medium),
     make_element_template!("absolute_reactive3", "kvarh", "Gross (Absolute) Reactive Energy 3", "Phase C absolute accumulated reactive energy", Frequency.medium),
+    // reactive energy split by ACTIVE power direction (orthogonal to inductive/capacitive Q-sign split)
+    make_element_template!("reactive_import", "kvarh", "Reactive Energy (Active Import)", "Reactive energy accumulated while active power was imported (= q1 + q4)", Frequency.medium),
+    make_element_template!("reactive_import1", "kvarh", "Reactive Energy (Active Import) 1", "Phase A reactive energy accumulated while active was imported", Frequency.medium),
+    make_element_template!("reactive_import2", "kvarh", "Reactive Energy (Active Import) 2", "Phase B reactive energy accumulated while active was imported", Frequency.medium),
+    make_element_template!("reactive_import3", "kvarh", "Reactive Energy (Active Import) 3", "Phase C reactive energy accumulated while active was imported", Frequency.medium),
+    make_element_template!("reactive_export", "kvarh", "Reactive Energy (Active Export)", "Reactive energy accumulated while active power was exported (= q2 + q3)", Frequency.medium),
+    make_element_template!("reactive_export1", "kvarh", "Reactive Energy (Active Export) 1", "Phase A reactive energy accumulated while active was exported", Frequency.medium),
+    make_element_template!("reactive_export2", "kvarh", "Reactive Energy (Active Export) 2", "Phase B reactive energy accumulated while active was exported", Frequency.medium),
+    make_element_template!("reactive_export3", "kvarh", "Reactive Energy (Active Export) 3", "Phase C reactive energy accumulated while active was exported", Frequency.medium),
+
+    // apparent energy split by active flow direction at sample time
+    make_element_template!("apparent_import", "kVAh", "Apparent Import Energy", "Apparent energy accumulated while active power flowing in", Frequency.medium),
+    make_element_template!("apparent_import1", "kVAh", "Apparent Import Energy 1", "Phase A apparent import energy", Frequency.medium),
+    make_element_template!("apparent_import2", "kVAh", "Apparent Import Energy 2", "Phase B apparent import energy", Frequency.medium),
+    make_element_template!("apparent_import3", "kVAh", "Apparent Import Energy 3", "Phase C apparent import energy", Frequency.medium),
+    make_element_template!("apparent_export", "kVAh", "Apparent Export Energy", "Apparent energy accumulated while active power flowing out", Frequency.medium),
+    make_element_template!("apparent_export1", "kVAh", "Apparent Export Energy 1", "Phase A apparent export energy", Frequency.medium),
+    make_element_template!("apparent_export2", "kVAh", "Apparent Export Energy 2", "Phase B apparent export energy", Frequency.medium),
+    make_element_template!("apparent_export3", "kVAh", "Apparent Export Energy 3", "Phase C apparent export energy", Frequency.medium),
+
     make_element_template!("total_apparent", "kVAh", "Total Apparent Energy", "Accumulated apparent energy", Frequency.medium),
     make_element_template!("total_apparent1", "kVAh", "Total Apparent Energy 1", "Phase A accumulated apparent energy", Frequency.medium),
     make_element_template!("total_apparent2", "kVAh", "Total Apparent Energy 2", "Phase B accumulated apparent energy", Frequency.medium),
@@ -2374,12 +2401,30 @@ __gshared immutable KnownElementTemplate[] g_SolarConfig_elements = [
 ];
 
 __gshared immutable KnownElementTemplate[] g_Inverter_elements = [
-//    make_element_template!("state", "???", "Inverter State", "Current inverter operating state", Frequency.high), // TODO: standardise these enums
+    make_element_template!("state", null, "Inverter State", "Operating state", Frequency.high),
+    make_element_template!("events", null, "Event Flags", "Active fault/event flags (bitfield)", Frequency.high),
 //    make_element_template!("mode", "???", "Inverter Mode", "Current inverter operating mode", Frequency.high),
-    make_element_template!("temp", "°C", "Temperature", "Inverter temperature", Frequency.low),
+    make_element_template!("temp", "°C", "Temperature", "Inverter temperature (representative)", Frequency.low),
+    make_element_template!("heatsink_temp", "°C", "Heatsink Temperature", "Heatsink temperature (closest to die)", Frequency.low),
+    make_element_template!("cabinet_temp", "°C", "Cabinet Temperature", "Cabinet/ambient temperature inside the enclosure", Frequency.low),
+    make_element_template!("transformer_temp", "°C", "Transformer Temperature", "Transformer temperature (transformer-based inverters)", Frequency.low),
     make_element_template!("rated_power", "W", "Rated Power", "Inverter rated output power", Frequency.constant),
     make_element_template!("efficiency", "%", "Efficiency", "Current conversion efficiency", Frequency.high),
     make_element_template!("bus_voltage", "V", "DC Bus Voltage", null, Frequency.realtime),
+];
+
+__gshared immutable KnownElementTemplate[] g_InverterConfig_elements = [
+    make_element_template!("rated_power", "W", "Rated Power", "Rated active power output", Frequency.constant),
+    make_element_template!("rated_apparent", "VA", "Rated Apparent Power", "Rated apparent power output", Frequency.constant),
+    make_element_template!("rated_current", "A", "Rated Current", "Rated AC current", Frequency.constant),
+    make_element_template!("rated_reactive_inject", "var", "Rated Reactive Injection", "Maximum reactive output when injecting (over-excited / leading)", Frequency.constant),
+    make_element_template!("rated_reactive_absorb", "var", "Rated Reactive Absorption", "Maximum reactive output when absorbing (under-excited / lagging)", Frequency.constant),
+    make_element_template!("pf_over_excited", "1", "Min PF Over-Excited", "Minimum power factor when over-excited (leading)", Frequency.constant),
+    make_element_template!("pf_under_excited", "1", "Min PF Under-Excited", "Minimum power factor when under-excited (lagging)", Frequency.constant),
+    make_element_template!("voltage_nominal", "V", "Nominal Voltage", "Nominal AC line voltage", Frequency.constant),
+    make_element_template!("voltage_min", "V", "Minimum Voltage", "Minimum operational AC line voltage", Frequency.constant),
+    make_element_template!("voltage_max", "V", "Maximum Voltage", "Maximum operational AC line voltage", Frequency.constant),
+    make_element_template!("intentional_islanding", null, "Intentional Islanding Modes", "Bitfield of supported intentional islanding categories", Frequency.constant),
 ];
 
 __gshared immutable KnownElementTemplate[] g_EVSE_elements = [

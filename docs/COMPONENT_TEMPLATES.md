@@ -75,6 +75,8 @@ Can be nested for grouped parameters. Standard network sub-components:
 
 ### modbus: Modbus
 - `status: enum/string` - Connection status
+- `variant: enum/string` - Protocol variant: rtu, tcp, or ascii
+- `address: u8` - Modbus slave/unit address
 
 ### ethernet: Ethernet
 - `status: enum/string` - Connection status
@@ -158,18 +160,30 @@ All single-phase elements plus:
 - `absolute1-3: kWh` - Per-phase gross
 
 ### Reactive Energy
-- `import_reactive: kvarh` - Total import
-- `import_reactive1-3: kvarh` - Per-phase import
-- `export_reactive: kvarh` - Total export
-- `export_reactive1-3: kvarh` - Per-phase export
-- `net_reactive: kvarh` - Total (net)
-- `net_reactive1-3: kvarh` - Per-phase total
-- `absolute_reactive: kvarh` - Gross (absolute)
-- `absolute_reactive1-3: kvarh` - Per-phase gross
+- `q1: kvarh` - Quadrant 1 (active import, inductive)
+- `q2: kvarh` - Quadrant 2 (active export, inductive)
+- `q3: kvarh` - Quadrant 3 (active export, capacitive)
+- `q4: kvarh` - Quadrant 4 (active import, capacitive)
+- `inductive: kvarh` - Inductive total (= q1 + q2); split by Q sign
+- `inductive1-3: kvarh` - Per-phase inductive
+- `capacitive: kvarh` - Capacitive total (= q3 + q4); split by Q sign
+- `capacitive1-3: kvarh` - Per-phase capacitive
+- `reactive_import: kvarh` - Reactive accumulated while active was imported (= q1 + q4); split by P sign
+- `reactive_import1-3: kvarh` - Per-phase
+- `reactive_export: kvarh` - Reactive accumulated while active was exported (= q2 + q3); split by P sign
+- `reactive_export1-3: kvarh` - Per-phase
+- `net_reactive: kvarh` - Net (= inductive - capacitive); used when device doesn't split
+- `net_reactive1-3: kvarh` - Per-phase net
+- `absolute_reactive: kvarh` - Gross (= inductive + capacitive)
+- `absolute_reactive1-3: kvarh` - Per-phase absolute
 
 ### Apparent Energy
-- `apparent: kVAh` - Total apparent
-- `apparent1-3: kVAh` - Per-phase apparent
+- `apparent: kVAh` - Total apparent (= apparent_import + apparent_export; populated directly by meters that don't split)
+- `apparent1-3: kVAh` - Per-phase total
+- `apparent_import: kVAh` - Apparent energy accumulated while importing active power
+- `apparent_import1-3: kVAh` - Per-phase
+- `apparent_export: kVAh` - Apparent energy accumulated while exporting active power
+- `apparent_export1-3: kVAh` - Per-phase
 
 ### DC Energy
 - `import: kWh` - Total import (or charge)
@@ -326,9 +340,13 @@ Static solar PV configuration and specifications.
 Solar/battery/hybrid inverter with optional grid, battery, renewable inputs, and load connections.
 
 ### Optional
-- `state: enum` - Inverter state: standby, grid_tied, off_grid, fault, etc.
+- `state: enum` - Operating state
+- `events: bitfield` - Active fault/event flags
 - `mode: enum` - Operating mode: on_grid, off_grid, hybrid, eco, backup
-- `temp: °C` - Inverter temperature
+- `temp: °C` - Inverter temperature (representative; use specific temps below when available)
+- `heatsink_temp: °C` - Heatsink temperature (closest to die; most useful for thermal monitoring)
+- `cabinet_temp: °C` - Cabinet/ambient temperature inside the enclosure
+- `transformer_temp: °C` - Transformer temperature (transformer-based inverters)
 - `rated_power: W` - Rated output power
 - `efficiency: %` - Current conversion efficiency
 - `bus_voltage: V` - DC bus voltage
@@ -341,7 +359,29 @@ Solar/battery/hybrid inverter with optional grid, battery, renewable inputs, and
 - `backup: EnergyMeter` - Backup/EPS output
 - `export_meter: EnergyMeter` - External energy meter for self-consumption reference
 - `evse: EVSE` - Integrated EV charger (for inverters with built-in EVSE)
-- `config: Configuration` - Inverter configuration
+- `config: InverterConfig` - Static inverter ratings and capabilities
+
+---
+
+## InverterConfig
+
+Static inverter configuration and ratings (analogous to BatteryConfig / SolarConfig).
+
+### Power Ratings
+- `rated_power: W` - Rated active power output
+- `rated_apparent: VA` - Rated apparent power output
+- `rated_current: A` - Rated AC current
+- `rated_reactive_inject: var` - Maximum reactive output when injecting (over-excited / leading)
+- `rated_reactive_absorb: var` - Maximum reactive output when absorbing (under-excited / lagging)
+- `pf_over_excited: 1` - Minimum power factor when over-excited (leading)
+- `pf_under_excited: 1` - Minimum power factor when under-excited (lagging)
+
+### Grid Limits
+- `voltage_nominal: V` - Nominal AC line voltage
+- `voltage_min: V` / `voltage_max: V` - Operational voltage range
+
+### Capability
+- `intentional_islanding: bitfield` - Supported intentional islanding categories
 
 ---
 
