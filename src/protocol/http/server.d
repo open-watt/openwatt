@@ -210,9 +210,9 @@ protected:
                 log.trace("subscribed to ", _certificates.length, " certificate(s)");
         }
 
-        if (_port != 0 || _tls_server)
-            return CompletionStatus.complete;
-        return CompletionStatus.continue_;
+        bool http_up = (_port != 0) && _server && _server.running;
+        bool tls_up  = (_tls_port != 0) && _tls_server && _tls_server.running;
+        return (http_up || tls_up) ? CompletionStatus.complete : CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()

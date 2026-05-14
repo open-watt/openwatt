@@ -543,6 +543,9 @@
     <DCompile Include="src\router\iface\mac.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\telnet\client.d">
+      <Filter>src\protocol\telnet</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\telnet\server.d">
       <Filter>src\protocol\telnet</Filter>
     </DCompile>

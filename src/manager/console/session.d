@@ -47,6 +47,7 @@ enum TerminalEvents : ubyte
     none             = 0,
     resized          = 1 << 0,
     features_changed = 1 << 1,
+    interrupt        = 1 << 2,
 }
 
 // Side-channel between a protocol-aware stream and a Session.
@@ -122,7 +123,12 @@ nothrow @nogc:
                     return;
                 }
                 if (r > 0)
-                    receive_input(recvbuf[0 .. r]);
+                {
+                    if (_current_command && _current_command.consumes_input())
+                        _current_command.receive_input(recvbuf[0 .. r]);
+                    else
+                        receive_input(recvbuf[0 .. r]);
+                }
             }
             while (r == recvbuf.length);
 
@@ -191,6 +197,30 @@ nothrow @nogc:
         }
 
         _console = null;
+    }
+
+    final inout(Stream) stream() inout pure
+        => _stream;
+
+    final ushort width() const pure
+        => _width;
+    final ushort height() const pure
+        => _height;
+    final ClientFeatures features() const pure
+        => _features;
+    final const(char)[] terminal_type()
+    {
+        if (!_stream)
+            return null;
+        auto term = _stream.terminal_channel();
+        return term ? term.terminal_type : null;
+    }
+
+    ptrdiff_t write_raw(const(void)[] data)
+    {
+        if (!_stream)
+            return -1;
+        return _stream.write(data);
     }
 
     void write_output(const(char)[] text, bool newline)
@@ -716,6 +746,15 @@ private:
             term.pending_events &= ~TerminalEvents.features_changed;
             if (_show_prompt && (_features & ClientFeatures.escape))
                 send_prompt_and_buffer(true);
+        }
+        if (term.pending_events & TerminalEvents.interrupt)
+        {
+            term.pending_events &= ~TerminalEvents.interrupt;
+            char[1] ctrl_c = ['\x03'];
+            if (_current_command && _current_command.consumes_input())
+                _current_command.receive_input(ctrl_c[]);
+            else
+                receive_input(ctrl_c[]);
         }
     }
 

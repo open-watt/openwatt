@@ -52,6 +52,11 @@ nothrow @nogc:
     }
 
     abstract void request_cancel();
+
+    bool consumes_input() const pure
+        => false;
+
+    void receive_input(const(char)[]) {}
 }
 
 
