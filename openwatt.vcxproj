@@ -170,11 +170,14 @@
     <DCompile Include="src\protocol\modbus\message.d" />
     <DCompile Include="src\protocol\modbus\node.d" />
     <DCompile Include="src\protocol\modbus\package.d" />
+    <DCompile Include="src\protocol\mqtt\binding.d" />
     <DCompile Include="src\protocol\mqtt\broker.d" />
     <DCompile Include="src\protocol\mqtt\client.d" />
+    <DCompile Include="src\protocol\mqtt\codec.d" />
+    <DCompile Include="src\protocol\mqtt\connection.d" />
     <DCompile Include="src\protocol\mqtt\package.d" />
-    <DCompile Include="src\protocol\mqtt\sampler.d" />
-    <DCompile Include="src\protocol\mqtt\util.d" />
+    <DCompile Include="src\protocol\mqtt\session.d" />
+    <DCompile Include="src\protocol\mqtt\topic.d" />
     <DCompile Include="src\protocol\package.d" />
     <DCompile Include="src\protocol\ppp\client.d" />
     <DCompile Include="src\protocol\ppp\package.d" />

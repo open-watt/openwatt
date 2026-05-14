@@ -1,4 +1,4 @@
-module protocol.mqtt.sampler;
+module protocol.mqtt.binding;
 
 import urt.array;
 import urt.lifetime;
@@ -19,6 +19,8 @@ private alias Access = manager.element.Access;
 import manager.sampler;
 
 import protocol.mqtt.broker;
+import protocol.mqtt.client;
+import protocol.mqtt.topic : PublishCallback;
 
 //version = DebugMQTTBinding;
 
@@ -27,9 +29,10 @@ nothrow @nogc:
 
 class MQTTBinding : ProfileBinding
 {
-    alias Properties = AliasSeq!(Prop!("broker", broker),
+    alias Properties = AliasSeq!(Prop!("broker",  broker),
+                                 Prop!("client",  client),
                                  Prop!("profile", profile),
-                                 Prop!("model", model));
+                                 Prop!("model",   model));
 nothrow @nogc:
 
     enum type_name = "mqtt-binding";
@@ -46,13 +49,23 @@ nothrow @nogc:
     {
         if (_broker.get is value)
             return;
-        if (_subscribed)
-        {
-            _broker.unsubscribe(&state_change);
-            _broker.unsubscribe(&on_publish);
-            _subscribed = false;
-        }
+        detach_source();
         _broker = value;
+        if (value)
+            _client = null;             // mutually exclusive
+        restart();
+    }
+
+    final inout(MQTTClient) client() inout pure
+        => _client.get;
+    final void client(MQTTClient value)
+    {
+        if (_client.get is value)
+            return;
+        detach_source();
+        _client = value;
+        if (value)
+            _broker = null;             // mutually exclusive
         restart();
     }
 
@@ -78,7 +91,8 @@ nothrow @nogc:
 
     final override bool validate() const pure
     {
-        return _broker.get !is null && !_profile_name.empty && !_device.empty;
+        bool has_source = _broker.get !is null || _client.get !is null;
+        return has_source && !_profile_name.empty && !_device.empty;
     }
 
     override CompletionStatus startup()
@@ -86,8 +100,8 @@ nothrow @nogc:
         if (!materialise())
             return CompletionStatus.error;
 
-        MQTTBroker b = _broker.get;
-        if (!b || !b.running)
+        ActiveObject src = active_source();
+        if (!src || !src.running)
             return CompletionStatus.continue_;
 
         bool sub_failed;
@@ -108,23 +122,18 @@ nothrow @nogc:
                 log.warning("failed to substitute variables in subscription '", s, "'");
                 continue;
             }
-            b.subscribe(sub.move, &on_publish);
+            subscribe_filter(sub.move);
         }
 
-        b.subscribe(&state_change);
+        src.subscribe(&state_change);
         _subscribed = true;
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
-        if (_subscribed)
-        {
-            _broker.unsubscribe(&state_change);
-            _broker.unsubscribe(&on_publish);
-            _subscribed = false;
-        }
-        // Drop write-back delegates before super.shutdown frees the profile
+        detach_source();
+        // Drop write-back delegates before super.shutdown frees the profile.
         foreach (ref se; _elements)
         {
             if (se.element.access & Access.write)
@@ -195,6 +204,7 @@ protected:
 private:
 
     ObjectRef!MQTTBroker _broker;
+    ObjectRef!MQTTClient _client;
     String _profile_name;
     String _model_name;
 
@@ -209,6 +219,46 @@ private:
         TextValueDesc desc;
         String read_topic;
         String write_topic;
+    }
+
+    inout(ActiveObject) active_source() inout pure
+    {
+        if (auto b = _broker.get)
+            return b;
+        return _client.get;
+    }
+
+    void subscribe_filter(String filter)
+    {
+        if (auto b = _broker.get)
+            b.subscribe(filter.move, &on_publish);
+        else if (auto c = _client.get)
+            c.subscribe(filter.move, &on_publish);
+    }
+
+    void publish_value(const(char)[] topic, const(ubyte)[] payload, MonoTime ts)
+    {
+        if (auto b = _broker.get)
+            b.publish(null, 0, topic, payload, null, ts);
+        else if (auto c = _client.get)
+            c.publish(topic, payload);
+    }
+
+    void detach_source()
+    {
+        if (!_subscribed)
+            return;
+        if (auto b = _broker.get)
+        {
+            b.unsubscribe(&state_change);
+            b.unsubscribe(&on_publish);
+        }
+        else if (auto c = _client.get)
+        {
+            c.unsubscribe(&state_change);
+            c.unsubscribe(&on_publish);
+        }
+        _subscribed = false;
     }
 
     void state_change(ActiveObject obj, StateSignal signal)
@@ -257,7 +307,7 @@ private:
             if (!se.write_topic.empty)
             {
                 const(char)[] text = format_value(val, se.desc);
-                _broker.publish(null, 0, se.write_topic[], cast(const(ubyte)[])text, null, cast(MonoTime)ts);
+                publish_value(se.write_topic[], cast(const(ubyte)[])text, cast(MonoTime)ts);
             }
             return;
         }
