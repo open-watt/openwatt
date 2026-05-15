@@ -328,7 +328,7 @@ private:
 
     void push_certs_to_tls()
     {
-        import protocol.http.tls : TLSServer;
+        import router.stream.tls : TLSServer;
         if (auto tls = cast(TLSServer)_tls_server)
             tls.set_certificate_array(_certificates[]);
     }
@@ -350,7 +350,7 @@ private:
 
     void try_start_tls()
     {
-        import protocol.http.tls : TLSServer;
+        import router.stream.tls : TLSServer;
         version (DebugHTTPServer)
             log.trace("try_start_tls, any_cert_valid=", any_cert_valid());
         if (!any_cert_valid())

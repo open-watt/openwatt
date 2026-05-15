@@ -9,6 +9,7 @@ import urt.lifetime;
 import urt.log;
 import urt.mem.allocator;
 import urt.meta;
+import urt.result;
 import urt.string;
 import urt.string.format : tconcat;
 import urt.time;
@@ -19,10 +20,8 @@ import manager.collection;
 
 import protocol.http;
 import protocol.http.message;
-import protocol.http.tls;
 
 import router.stream;
-import router.stream.tcp;
 
 //version = DebugHTTPMessageFlow;
 
@@ -45,29 +44,38 @@ nothrow @nogc:
     }
 
     // Properties...
-    ref const(String) remote() const pure
-        => _host;
+    const(char)[] remote() const
+    {
+        auto r = _conn.remote_name();
+        return r.empty ? null : tconcat(_tls ? "https://" : "http://", r);
+    }
     void remote(InetAddress value)
     {
-        _host = null;
-        if (value == _remote)
-            return;
-        _remote = value;
-
+        _conn.remote(value);
+        _tls = false;
+        _stream = null;
         restart();
     }
-    const(char)[] remote(String value)
+    StringResult remote(String value)
     {
-        if (value.empty)
-            return "remote cannot be empty";
-        if (value == _host)
-            return null;
+        auto url = decompose_http_url(value[]);
+        bool tls;
+        if (url.scheme.empty || url.scheme.icmp("http") == 0)
+            tls = false;
+        else if (url.scheme.icmp("https") == 0)
+            tls = true;
+        else
+            return StringResult(tconcat("unsupported scheme '", url.scheme, "' (expected http or https)"));
+        if (url.host.empty)
+            return StringResult("host cannot be empty");
 
-        _host = value.move;
-        _remote = InetAddress();
-
+        auto r = _conn.remote(url.host.makeString(defaultAllocator));
+        if (r.failed)
+            return r;
+        _tls = tls;
+        _stream = null;
         restart();
-        return null;
+        return StringResult.success;
     }
 
     inout(Stream) stream() inout pure
@@ -78,8 +86,8 @@ nothrow @nogc:
             return "stream cannot be null";
         if (_stream is value)
             return null;
+        _conn.clear_remote();
         _stream = value;
-
         restart();
         return null;
     }
@@ -115,25 +123,19 @@ protected:
     mixin RekeyHandler;
 
     override bool validate() const pure
-        => (!_host.empty || _remote != InetAddress()) != !!_stream; // TODO: validate URL??
+        => _conn.has_remote() != !!_stream; // URL xor external stream
 
     override CompletionStatus startup()
     {
-        if (!_stream)
+        if (!_stream && _conn.has_remote())
         {
-            if (!_host && _remote == InetAddress())
+            ushort default_port = _tls ? 443 : 80;
+            if (!_conn.start(this, default_port, _tls))
                 return CompletionStatus.error;
-
-            const(char)[] stream_name = Collection!Stream().generate_name(name[]);
-            const(char)[] resource;
-            _stream = create_http_stream(stream_name, _host[], _remote, resource);
-            if (!_stream)
-            {
-                assert(false, "error strategy... just write log output?");
-                return CompletionStatus.error;
-            }
+            _stream = _conn.get;
         }
-
+        if (!_stream)
+            return CompletionStatus.error;
         if (_stream.running)
             return CompletionStatus.complete;
         return CompletionStatus.continue_;
@@ -141,9 +143,9 @@ protected:
 
     override CompletionStatus shutdown()
     {
-        if (_host || _remote != InetAddress())
+        if (_conn.has_remote())
         {
-            _stream.destroy();
+            _conn.stop();
             _stream = null;
         }
         return CompletionStatus.complete;
@@ -183,8 +185,8 @@ protected:
 
 private:
     ObjectRef!Stream _stream;
-    String _host;
-    InetAddress _remote;
+    ClientConnection _conn;
+    bool _tls;
 
     HTTPVersion server_version = HTTPVersion.V1_1;
 
@@ -193,7 +195,7 @@ private:
 
     void send_request(ref HTTPMessage request)
     {
-        Array!char message = request.format_message(http_host_header(_host[]));
+        Array!char message = request.format_message(_conn.host[]);
         if (message.empty)
             return;
         ptrdiff_t r = stream.write(message[]);
@@ -207,14 +209,14 @@ private:
         version (DebugHTTPMessageFlow)
         {
             import urt.meta.enuminfo;
-            writeDebug("HTTP: request to ", _host, " - ", enum_key_from_value!HTTPMethod(request.method), " ", request.request_target, " (", request.content.length, " bytes)");
+            writeDebug("HTTP: request to ", _conn.host, " - ", enum_key_from_value!HTTPMethod(request.method), " ", request.request_target, " (", request.content.length, " bytes)");
         }
     }
 
     int dispatch_message(ref const HTTPMessage response)
     {
         version (DebugHTTPMessageFlow)
-            writeDebug("HTTP: response from ", _host, " - ", response.status_code, " (", response.content.length, " bytes)");
+            writeDebug("HTTP: response from ", _conn.host, " - ", response.status_code, " (", response.content.length, " bytes)");
 
         if (requests.empty)
             return -1;

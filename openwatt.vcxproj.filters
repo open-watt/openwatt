@@ -360,6 +360,9 @@
     <DCompile Include="src\router\stream\tcp.d">
       <Filter>src\router\stream</Filter>
     </DCompile>
+    <DCompile Include="src\router\stream\tls.d">
+      <Filter>src\router\stream</Filter>
+    </DCompile>
     <DCompile Include="src\router\stream\udp.d">
       <Filter>src\router\stream</Filter>
     </DCompile>
@@ -475,9 +478,6 @@
       <Filter>src\protocol\http</Filter>
     </DCompile>
     <DCompile Include="src\protocol\http\server.d">
-      <Filter>src\protocol\http</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\http\tls.d">
       <Filter>src\protocol\http</Filter>
     </DCompile>
     <DCompile Include="src\protocol\http\websocket.d">

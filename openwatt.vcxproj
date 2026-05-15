@@ -151,7 +151,6 @@
     <DCompile Include="src\protocol\http\package.d" />
     <DCompile Include="src\protocol\http\sampler.d" />
     <DCompile Include="src\protocol\http\server.d" />
-    <DCompile Include="src\protocol\http\tls.d" />
     <DCompile Include="src\protocol\http\websocket.d" />
     <DCompile Include="src\protocol\ip\address.d" />
     <DCompile Include="src\protocol\ip\arp.d" />
@@ -220,6 +219,7 @@
     <DCompile Include="src\router\stream\package.d" />
     <DCompile Include="src\router\stream\serial.d" />
     <DCompile Include="src\router\stream\tcp.d" />
+    <DCompile Include="src\router\stream\tls.d" />
     <DCompile Include="src\router\stream\udp.d" />
     <DCompile Include="third_party\urt\src\object.d" />
     <DCompile Include="third_party\urt\src\std\math.d" />

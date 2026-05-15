@@ -89,6 +89,7 @@ void register_modules(Application app)
     register_module!(router.stream.memory)(app);
     register_module!(router.stream.serial)(app);
     register_module!(router.stream.tcp)(app);
+    register_module!(router.stream.tls)(app);
     register_module!(router.stream.udp)(app);
 
     import router.iface;

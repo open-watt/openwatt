@@ -1,4 +1,33 @@
-module protocol.http.tls;
+module router.stream.tls;
+
+// =============================================================================
+// TODO: POSIX TLS CLIENT VALIDATION IS DISABLED.
+//
+// On POSIX (mbedtls), client mode currently uses MBEDTLS_SSL_VERIFY_NONE - we
+// accept ANY server certificate without validating the chain, expiry, or
+// hostname. TLS gives us encryption-only with zero identity guarantees;
+// every outbound connection is trivially MITM-able by anyone on the path.
+//
+// Windows (Schannel) is fine - SCH_CRED_AUTO_CRED_VALIDATION walks the OS
+// trust store and validates chain + hostname. The asymmetry means Windows
+// builds get real TLS, Linux/RouterOS/embedded builds get a security smell.
+//
+// To fix (probably half a day):
+//   1. Load a CA bundle on startup
+//        - Linux/RouterOS: /etc/ssl/certs/ca-certificates.crt (Alpine, Debian)
+//        - Embedded: baked-in bundle, or per-cert pinning
+//      via mbedtls_x509_crt_parse_file() / _parse_path()
+//   2. mbedtls_ssl_conf_ca_chain(_ssl_conf, &ca_chain, null)
+//   3. Flip authmode to MBEDTLS_SSL_VERIFY_REQUIRED
+//   4. mbedtls_ssl_set_hostname() is already called - it drives hostname
+//      matching once VERIFY_REQUIRED is on, so it Just Works
+//   5. Decide policy for self-signed / pinned certs (config-time trust list?)
+//
+// MUST land before production deployment. The MITM-as-first-class-capability
+// direction is fundamentally broken without it: the outbound legs of a router
+// MITM must validate cloud cert chains to detect tampering - otherwise our
+// MITM defeats its own security model.
+// =============================================================================
 
 import urt.array;
 import urt.log;
@@ -12,8 +41,9 @@ import manager;
 import manager.base;
 import manager.certificate : Certificate;
 import manager.collection;
-
-import protocol.http;
+import manager.console;
+import manager.expression : NamedArgument;
+import manager.plugin;
 
 import router.stream;
 import router.stream.tcp;
@@ -65,33 +95,33 @@ nothrow @nogc:
             return "stream cannot be null";
         if (value is _stream)
             return null;
+        if (_conn.get !is null)
+            _conn.stop();
         _stream = value;
         restart();
         return null;
     }
 
     ref const(String) remote() const pure
-        => _host;
+        => _conn.host;
     const(char)[] remote(String value)
     {
         if (value.empty)
             return "remote cannot be empty";
-        if (value == _host)
+        if (value == _conn.host)
             return null;
-        _host = value.move;
+        auto r = _conn.remote(value.move);
+        if (r.failed)
+            return r.message;
         restart();
         return null;
     }
 
     bool keepalive() const pure
-        => _keep_enable;
+        => _conn.keepalive;
     void keepalive(bool value)
     {
-        if (_keep_enable == value)
-            return;
-        _keep_enable = value;
-        if (TCPStream tcp = cast(TCPStream)_stream)
-            tcp.keepalive = value;
+        _conn.keepalive(value);
     }
 
     void certificate(Certificate value)
@@ -121,7 +151,7 @@ nothrow @nogc:
         // Server mode: need a certificate. Client mode: need a remote host.
         if (_certificates.length > 0)
             return true;
-        return !_host.empty;
+        return _conn.has_remote();
     }
 
     final override CompletionStatus startup()
@@ -141,14 +171,13 @@ nothrow @nogc:
                 return CompletionStatus.error;
             }
 
-            // Client-mode: create a TCP stream to connect outward.
-            const(char)[] new_name = Collection!Stream().generate_name(name[]);
-            _stream = cast(Stream)Collection!TCPStream().create(new_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("keepalive", _keep_enable), NamedArgument("remote", _host));
-            if (!_stream)
+            // Client-mode: bring up an owned TCP stream to connect outward.
+            if (!_conn.start(this))
             {
                 log.error("failed to create underlying TCP stream");
                 return CompletionStatus.error;
             }
+            _stream = _conn.get;
         }
         if (!_stream.running)
         {
@@ -218,7 +247,7 @@ nothrow @nogc:
                     init_context(true, cast(const(CERT_CONTEXT)*)(cast(Certificate)_selected_cert).get_cert_context());
                     // process the already-buffered ClientHello
                     if (_handshake_state == HandshakeState.in_progress)
-                        advance_handshake(_host[], true);
+                        advance_handshake(_conn.host[], true);
                 }
                 else
                     init_context(false, null);
@@ -253,7 +282,7 @@ nothrow @nogc:
                         return CompletionStatus.error;
                     }
                     _receive_buffer ~= read_buffer[0 .. bytes_received];
-                    advance_handshake(_host[], is_server);
+                    advance_handshake(_conn.host[], is_server);
                 }
             }
         }
@@ -300,7 +329,9 @@ nothrow @nogc:
         _selected_cert = null;
         _handshake_start = SysTime();
 
-        if (_stream)
+        if (_conn.get !is null)
+            _conn.stop();
+        else if (_stream)
             _stream.destroy();
         _stream = null;
 
@@ -587,8 +618,7 @@ protected:
     mixin RekeyHandler;
 
 private:
-    String _host;
-    bool _keep_enable = false;
+    ClientConnection _conn;
     bool _close_notify = false;
 
     Array!(ObjectRef!Certificate) _certificates;
@@ -730,9 +760,9 @@ private:
 
             mbedtls_ssl_set_bio(_ssl, cast(void*)this, &tls_bio_send, &tls_bio_recv, null);
 
-            if (!is_server && !_host.empty)
+            if (!is_server && !_conn.host.empty)
             {
-                auto host = _host[];
+                auto host = _conn.host[];
                 auto colon = host.findFirst(':');
                 if (colon < host.length)
                     host = host[0 .. colon];
@@ -791,7 +821,7 @@ private:
 
             // For a client, we kick off the handshake immediately.
             if (!is_server)
-                advance_handshake(_host[], false);
+                advance_handshake(_conn.host[], false);
         }
 
         void advance_handshake(const(char)[] host, bool is_server)
@@ -925,6 +955,15 @@ nothrow @nogc:
         restart();
     }
 
+    void set_certificate_array(ObjectRef!Certificate[] certs)
+    {
+        _certificates.clear();
+        _certificates.reserve(certs.length);
+        foreach (ref c; certs)
+            if (c)
+                _certificates.emplaceBack(c.get());
+    }
+
 protected:
     mixin RekeyHandler;
 
@@ -976,20 +1015,27 @@ protected:
         return tls;
     }
 
-package:
-
-    void set_certificate_array(ObjectRef!Certificate[] certs)
-    {
-        _certificates.clear();
-        _certificates.reserve(certs.length);
-        foreach (ref c; certs)
-            if (c)
-                _certificates.emplaceBack(c.get());
-    }
-
 private:
 
     Array!(ObjectRef!ActiveObject) _certificates;
+}
+
+
+class TLSStreamModule : Module
+{
+    mixin DeclareModule!"stream.tls";
+nothrow @nogc:
+
+    override void init()
+    {
+        g_app.console.register_collection!TLSStream();
+        g_app.console.register_collection!TLSServer();
+    }
+
+    override void update()
+    {
+        Collection!TLSServer().update_all();
+    }
 }
 
 

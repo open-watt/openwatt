@@ -17,8 +17,7 @@ import manager.expression : NamedArgument;
 
 import router.stream;
 import router.stream.tcp;
-
-import protocol.http.tls : TLSServer;
+import router.stream.tls : TLSServer;
 
 import protocol.mqtt.codec;
 import protocol.mqtt.connection;
