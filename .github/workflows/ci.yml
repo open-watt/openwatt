@@ -109,3 +109,36 @@ jobs:
 
       - name: Build
         run: timeout 180 make PLATFORM=${{ matrix.platform }} CONFIG=release ${{ matrix.make_args || '' }}
+
+  cross-esp:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - { name: esp32,    arch: xtensa }  # LX6
+          - { name: esp32-s3, arch: xtensa }  # LX7
+          - { name: esp32-p4, arch: riscv  }  # RV32IMAFDCV
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+          fetch-depth: 1
+
+      - name: Setup LDC
+        uses: dlang-community/setup-dlang@v2
+        with:
+          compiler: ldc
+
+      - name: Install RISC-V toolchain
+        if: matrix.target.arch == 'riscv'
+        run: sudo apt-get update && sudo apt-get install -y gcc-riscv64-unknown-elf picolibc-riscv64-unknown-elf
+
+      - name: Build
+        run: make PLATFORM=${{ matrix.target.name }} CONFIG=unittest
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwatt_test_${{ matrix.target.name }}
+          path: bin/*/openwatt_test

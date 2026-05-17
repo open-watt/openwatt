@@ -1014,11 +1014,17 @@
     <DCompile Include="third_party\urt\src\urt\format\json.d">
       <Filter>third_party\urt\format</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\digest\hmac.d">
+      <Filter>third_party\urt\digest</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\digest\md5.d">
       <Filter>third_party\urt\digest</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\digest\sha.d">
       <Filter>third_party\urt\digest</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\aes.d">
+      <Filter>third_party\urt\crypto</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\crypto\chacha.d">
       <Filter>third_party\urt\crypto</Filter>
@@ -1026,10 +1032,16 @@
     <DCompile Include="third_party\urt\src\urt\crypto\der.d">
       <Filter>third_party\urt\crypto</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\ecdh.d">
+      <Filter>third_party\urt\crypto</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\crypto\pem.d">
       <Filter>third_party\urt\crypto</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\crypto\pki.d">
+      <Filter>third_party\urt\crypto</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\random.d">
       <Filter>third_party\urt\crypto</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\algorithm.d">

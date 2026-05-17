@@ -18,7 +18,11 @@ import protocol.http;
 import router.stream;
 import router.stream.tcp;
 
-version (Windows)
+version (MbedTLS)
+{
+    import urt.internal.mbedtls;
+}
+else version (Windows)
 {
     import urt.internal.sys.windows;
     import urt.internal.sys.windows.ntsecpkg;
@@ -28,10 +32,6 @@ version (Windows)
     import urt.internal.sys.windows.wincrypt;
 
     pragma(lib, "Secur32");
-}
-else version (Posix)
-{
-    import urt.internal.mbedtls;
 }
 
 version = DebugTLS;
@@ -204,7 +204,14 @@ nothrow @nogc:
                 _selected_cert = selected;
             }
 
-            version (Windows)
+            version (MbedTLS)
+            {
+                if (is_server)
+                    init_mbedtls_context(true, cast(Certificate)_selected_cert);
+                else
+                    init_mbedtls_context(false, null);
+            }
+            else version (Windows)
             {
                 if (is_server)
                 {
@@ -216,18 +223,23 @@ nothrow @nogc:
                 else
                     init_context(false, null);
             }
-            else version (Posix)
-            {
-                if (is_server)
-                    init_mbedtls_context(true, cast(Certificate)_selected_cert);
-                else
-                    init_mbedtls_context(false, null);
-            }
         }
 
         if (_handshake_state == HandshakeState.in_progress)
         {
-            version (Windows)
+            version (MbedTLS)
+            {
+                int ret = mbedtls_ssl_handshake(_ssl);
+                if (ret == 0)
+                    _handshake_state = HandshakeState.completed;
+                else if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE)
+                {
+                    version (DebugTLS)
+                        log.trace("TLS handshake failed: -", cast(uint)(-ret));
+                    _handshake_state = HandshakeState.failed;
+                }
+            }
+            else version (Windows)
             {
                 while (true)
                 {
@@ -242,18 +254,6 @@ nothrow @nogc:
                     }
                     _receive_buffer ~= read_buffer[0 .. bytes_received];
                     advance_handshake(_host[], is_server);
-                }
-            }
-            else version (Posix)
-            {
-                int ret = mbedtls_ssl_handshake(_ssl);
-                if (ret == 0)
-                    _handshake_state = HandshakeState.completed;
-                else if (ret != MBEDTLS_ERR_SSL_WANT_READ && ret != MBEDTLS_ERR_SSL_WANT_WRITE)
-                {
-                    version (DebugTLS)
-                        log.trace("TLS handshake failed: -", cast(uint)(-ret));
-                    _handshake_state = HandshakeState.failed;
                 }
             }
         }
@@ -283,16 +283,16 @@ nothrow @nogc:
 
     final override CompletionStatus shutdown()
     {
-        version (Windows)
+        version (MbedTLS)
+        {
+            free_mbedtls_contexts();
+        }
+        else version (Windows)
         {
             if (_context.dwLower != 0 || _context.dwUpper != 0)
                 DeleteSecurityContext(&_context);
             if (_credentials.dwLower != 0 || _credentials.dwUpper != 0)
                 FreeCredentialsHandle(&_credentials);
-        }
-        else version (Posix)
-        {
-            free_mbedtls_contexts();
         }
 
         _app_buffer.clear();
@@ -325,7 +325,33 @@ nothrow @nogc:
             return;
         }
 
-        version (Windows)
+        version (MbedTLS)
+        {
+            ubyte[8192] read_buf = void;
+            while (true)
+            {
+                int ret = mbedtls_ssl_read(_ssl, read_buf.ptr, read_buf.length);
+                if (ret > 0)
+                    incoming_message(read_buf[0 .. ret]);
+                else if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY)
+                {
+                    version (DebugTLS)
+                        log.trace("close_notify received");
+                    _close_notify = true;
+                    return;
+                }
+                else if (ret == MBEDTLS_ERR_SSL_WANT_READ)
+                    return;
+                else
+                {
+                    version (DebugTLS)
+                        log.trace("TLS read error: -", cast(uint)(-ret));
+                    _handshake_state = HandshakeState.failed;
+                    return;
+                }
+            }
+        }
+        else version (Windows)
         {
             ubyte[8192] read_buffer = void;
             ptrdiff_t bytes_received = _stream.read(read_buffer[]);
@@ -414,32 +440,6 @@ nothrow @nogc:
                     _receive_buffer.clear();
             }
         }
-        else version (Posix)
-        {
-            ubyte[8192] read_buf = void;
-            while (true)
-            {
-                int ret = mbedtls_ssl_read(_ssl, read_buf.ptr, read_buf.length);
-                if (ret > 0)
-                    incoming_message(read_buf[0 .. ret]);
-                else if (ret == 0 || ret == MBEDTLS_ERR_SSL_PEER_CLOSE_NOTIFY)
-                {
-                    version (DebugTLS)
-                        log.trace("close_notify received");
-                    _close_notify = true;
-                    return;
-                }
-                else if (ret == MBEDTLS_ERR_SSL_WANT_READ)
-                    return;
-                else
-                {
-                    version (DebugTLS)
-                        log.trace("TLS read error: -", cast(uint)(-ret));
-                    _handshake_state = HandshakeState.failed;
-                    return;
-                }
-            }
-        }
     }
 
     override bool connect()
@@ -471,7 +471,28 @@ nothrow @nogc:
 
         ptrdiff_t result = -1;
 
-        version (Windows)
+        version (MbedTLS)
+        {
+            ptrdiff_t total = 0;
+            foreach (ref d; data)
+            {
+                auto chunk = cast(const(ubyte)[])d;
+                while (chunk.length > 0)
+                {
+                    int ret = mbedtls_ssl_write(_ssl, chunk.ptr, chunk.length);
+                    if (ret > 0)
+                    {
+                        chunk = chunk[ret .. $];
+                        total += ret;
+                    }
+                    else
+                        return -1;
+                }
+            }
+
+            result = total;
+        }
+        else version (Windows)
         {
             SecPkgContext_StreamSizes sizes;
             auto status = QueryContextAttributesA(&_context, SECPKG_ATTR_STREAM_SIZES, &sizes);
@@ -542,27 +563,6 @@ nothrow @nogc:
             }
 
             result = data_len;
-        }
-        else version (Posix)
-        {
-            ptrdiff_t total = 0;
-            foreach (ref d; data)
-            {
-                auto chunk = cast(const(ubyte)[])d;
-                while (chunk.length > 0)
-                {
-                    int ret = mbedtls_ssl_write(_ssl, chunk.ptr, chunk.length);
-                    if (ret > 0)
-                    {
-                        chunk = chunk[ret .. $];
-                        total += ret;
-                    }
-                    else
-                        return -1;
-                }
-            }
-
-            result = total;
         }
 
         if (result >= 0 && _logging)
@@ -646,7 +646,118 @@ private:
     }
     HandshakeState _handshake_state;
 
-    version (Windows)
+    version (MbedTLS)
+    {
+        mbedtls_ssl_context* _ssl;
+        mbedtls_ssl_config* _ssl_conf;
+
+        void init_mbedtls_context(bool is_server, Certificate cert)
+        {
+            // Ensure the global RNG is initialised (no-op after the first call).
+            // On 4.x this brings up PSA; on <4 it seeds the module-static CTR-DRBG.
+            int ret = urt_rng_init();
+            if (ret != 0)
+            {
+                free_mbedtls_contexts();
+                _handshake_state = HandshakeState.failed;
+                return;
+            }
+
+            _ssl_conf = urt_ssl_config_new();
+            if (_ssl_conf is null)
+            {
+                free_mbedtls_contexts();
+                _handshake_state = HandshakeState.failed;
+                return;
+            }
+
+            ret = mbedtls_ssl_config_defaults(_ssl_conf,
+                is_server ? MBEDTLS_SSL_IS_SERVER : MBEDTLS_SSL_IS_CLIENT,
+                MBEDTLS_SSL_TRANSPORT_STREAM,
+                MBEDTLS_SSL_PRESET_DEFAULT);
+            if (ret != 0)
+            {
+                free_mbedtls_contexts();
+                _handshake_state = HandshakeState.failed;
+                return;
+            }
+
+            urt_ssl_attach_rng(_ssl_conf);
+
+            if (is_server && cert !is null)
+            {
+                auto x509 = cast(mbedtls_x509_crt*)cert.get_cert_context();
+                auto pk = cast(mbedtls_pk_context*)cert.get_key_context();
+                if (x509 is null || pk is null)
+                {
+                    log.error("certificate missing cert or key context");
+                    free_mbedtls_contexts();
+                    _handshake_state = HandshakeState.failed;
+                    return;
+                }
+                ret = mbedtls_ssl_conf_own_cert(_ssl_conf, x509, pk);
+                if (ret != 0)
+                {
+                    version (DebugTLS)
+                        log.trace("ssl_conf_own_cert failed: -", cast(uint)(-ret));
+                    free_mbedtls_contexts();
+                    _handshake_state = HandshakeState.failed;
+                    return;
+                }
+                mbedtls_ssl_conf_authmode(_ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
+            }
+            else if (!is_server)
+            {
+                // Client mode: skip server cert verification for now
+                mbedtls_ssl_conf_authmode(_ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
+            }
+
+            _ssl = urt_ssl_new();
+            if (_ssl is null)
+            {
+                free_mbedtls_contexts();
+                _handshake_state = HandshakeState.failed;
+                return;
+            }
+
+            ret = mbedtls_ssl_setup(_ssl, _ssl_conf);
+            if (ret != 0)
+            {
+                free_mbedtls_contexts();
+                _handshake_state = HandshakeState.failed;
+                return;
+            }
+
+            mbedtls_ssl_set_bio(_ssl, cast(void*)this, &tls_bio_send, &tls_bio_recv, null);
+
+            if (!is_server && !_host.empty)
+            {
+                auto host = _host[];
+                auto colon = host.findFirst(':');
+                if (colon < host.length)
+                    host = host[0 .. colon];
+                mbedtls_ssl_set_hostname(_ssl, host.tstringz);
+            }
+
+            _handshake_state = HandshakeState.in_progress;
+        }
+
+        void free_mbedtls_contexts()
+        {
+            if (_ssl !is null)
+            {
+                mbedtls_ssl_close_notify(_ssl);
+                urt_ssl_delete(_ssl);
+                _ssl = null;
+            }
+            if (_ssl_conf !is null)
+            {
+                urt_ssl_config_delete(_ssl_conf);
+                _ssl_conf = null;
+            }
+        }
+    }
+    else version (Windows)
     {
         CredHandle _credentials;
         CtxtHandle _context;
@@ -779,136 +890,6 @@ private:
             // After the loop, perform one single, efficient trim of the buffer.
             if (consumed > 0)
                 _receive_buffer.remove(0, consumed);
-        }
-    }
-    else version (Posix)
-    {
-        mbedtls_ssl_context* _ssl;
-        mbedtls_ssl_config* _ssl_conf;
-        mbedtls_entropy_context* _entropy;
-        mbedtls_ctr_drbg_context* _ctr_drbg;
-
-        void init_mbedtls_context(bool is_server, Certificate cert)
-        {
-            _entropy = urt_entropy_new();
-            _ctr_drbg = urt_ctr_drbg_new();
-            if (_entropy is null || _ctr_drbg is null)
-            {
-                free_mbedtls_contexts();
-                _handshake_state = HandshakeState.failed;
-                return;
-            }
-
-            int ret = mbedtls_ctr_drbg_seed(_ctr_drbg, &mbedtls_entropy_func, cast(void*)_entropy, null, 0);
-            if (ret != 0)
-            {
-                free_mbedtls_contexts();
-                _handshake_state = HandshakeState.failed;
-                return;
-            }
-
-            _ssl_conf = urt_ssl_config_new();
-            if (_ssl_conf is null)
-            {
-                free_mbedtls_contexts();
-                _handshake_state = HandshakeState.failed;
-                return;
-            }
-
-            ret = mbedtls_ssl_config_defaults(_ssl_conf,
-                is_server ? MBEDTLS_SSL_IS_SERVER : MBEDTLS_SSL_IS_CLIENT,
-                MBEDTLS_SSL_TRANSPORT_STREAM,
-                MBEDTLS_SSL_PRESET_DEFAULT);
-            if (ret != 0)
-            {
-                free_mbedtls_contexts();
-                _handshake_state = HandshakeState.failed;
-                return;
-            }
-
-            mbedtls_ssl_conf_rng(_ssl_conf, &mbedtls_ctr_drbg_random, cast(void*)_ctr_drbg);
-
-            if (is_server && cert !is null)
-            {
-                auto x509 = cast(mbedtls_x509_crt*)cert.get_cert_context();
-                auto pk = cast(mbedtls_pk_context*)cert.get_key_context();
-                if (x509 is null || pk is null)
-                {
-                    log.error("certificate missing cert or key context");
-                    free_mbedtls_contexts();
-                    _handshake_state = HandshakeState.failed;
-                    return;
-                }
-                ret = mbedtls_ssl_conf_own_cert(_ssl_conf, x509, pk);
-                if (ret != 0)
-                {
-                    version (DebugTLS)
-                        log.trace("ssl_conf_own_cert failed: -", cast(uint)(-ret));
-                    free_mbedtls_contexts();
-                    _handshake_state = HandshakeState.failed;
-                    return;
-                }
-                mbedtls_ssl_conf_authmode(_ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
-            }
-            else if (!is_server)
-            {
-                // Client mode: skip server cert verification for now
-                mbedtls_ssl_conf_authmode(_ssl_conf, MBEDTLS_SSL_VERIFY_NONE);
-            }
-
-            _ssl = urt_ssl_new();
-            if (_ssl is null)
-            {
-                free_mbedtls_contexts();
-                _handshake_state = HandshakeState.failed;
-                return;
-            }
-
-            ret = mbedtls_ssl_setup(_ssl, _ssl_conf);
-            if (ret != 0)
-            {
-                free_mbedtls_contexts();
-                _handshake_state = HandshakeState.failed;
-                return;
-            }
-
-            mbedtls_ssl_set_bio(_ssl, cast(void*)this, &tls_bio_send, &tls_bio_recv, null);
-
-            if (!is_server && !_host.empty)
-            {
-                auto host = _host[];
-                auto colon = host.findFirst(':');
-                if (colon < host.length)
-                    host = host[0 .. colon];
-                mbedtls_ssl_set_hostname(_ssl, host.tstringz);
-            }
-
-            _handshake_state = HandshakeState.in_progress;
-        }
-
-        void free_mbedtls_contexts()
-        {
-            if (_ssl !is null)
-            {
-                mbedtls_ssl_close_notify(_ssl);
-                urt_ssl_delete(_ssl);
-                _ssl = null;
-            }
-            if (_ssl_conf !is null)
-            {
-                urt_ssl_config_delete(_ssl_conf);
-                _ssl_conf = null;
-            }
-            if (_ctr_drbg !is null)
-            {
-                urt_ctr_drbg_delete(_ctr_drbg);
-                _ctr_drbg = null;
-            }
-            if (_entropy !is null)
-            {
-                urt_entropy_delete(_entropy);
-                _entropy = null;
-            }
         }
     }
 }
@@ -1095,7 +1076,7 @@ const(char)[] extract_sni_hostname(const(ubyte)[] data) nothrow @nogc
     return null;
 }
 
-version (Posix)
+version (MbedTLS)
 {
     // BIO callbacks for mbedtls; called during ssl_handshake, ssl_read, ssl_write
     // p_bio is the TLSStream instance (set via mbedtls_ssl_set_bio)

@@ -34,6 +34,17 @@ nothrow @nogc:
 
     Map!(MACAddress, BLEAdvEntry*) devices;
 
+    override void pre_init()
+    {
+        import urt.driver.ble : num_ble;
+        static if (num_ble > 0)
+        {
+            import urt.mem.temp : tconcat;
+            foreach (i; 0 .. num_ble)
+                Collection!BLEInterface().create(tconcat("ble", i + 1));
+        }
+    }
+
     override void init()
     {
         g_app.console.register_collection!BLEInterface();

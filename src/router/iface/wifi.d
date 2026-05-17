@@ -212,6 +212,11 @@ nothrow @nogc:
         mark_set!(typeof(this), "secret")();
     }
 
+    final void on_radio_rx(const(ubyte)[] data, SysTime ts)
+    {
+        incoming_ethernet_frame(data, ts);
+    }
+
 protected:
     mixin RekeyHandler;
 
