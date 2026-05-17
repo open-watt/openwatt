@@ -4,7 +4,7 @@ import manager;
 import manager.console;
 import manager.console.builtin_commands;
 import manager.console.session;
-import manager.expression : NamedArgument, ScriptCommand, ScriptBody, Expression, EvalContext, parse_commands;
+import manager.expression : NamedArgument, ScriptCommand, Script, Expression, EvalContext, parse_commands;
 
 import urt.array;
 import urt.map;
@@ -72,7 +72,7 @@ nothrow @nogc:
 
     Array!char source;                          // owned text buffer that owned_script[] borrows from (top-level only)
     Array!ScriptCommand owned_script;           // owned parsed commands (top-level only)
-    ScriptBody held_script;                     // refcount holder for child contexts created from a Script value
+    Script held_script;                     // refcount holder for child contexts created from a Script value
     const(ScriptCommand)[] script;              // iterated view (owned_script[], held_script.commands, or borrowed from parent)
     Scope* root_scope;                          // root for /-prefixed commands
     Scope* script_scope;                        // root for :-prefixed scripting verbs
@@ -112,7 +112,7 @@ nothrow @nogc:
         this.frame_kind = frame_kind;
     }
 
-    this(Session session, Scope* root_scope, Scope* script_scope, ref ScriptBody body_, Map!(String, Variant)* locals, FrameKind frame_kind)
+    this(Session session, Scope* root_scope, Scope* script_scope, ref const Script body_, Map!(String, Variant)* locals, FrameKind frame_kind)
     {
         super(session, null);
         this.root_scope = root_scope;

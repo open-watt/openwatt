@@ -9,7 +9,7 @@ import urt.variant;
 
 import manager.console;
 import manager.console.command;
-import manager.expression : NamedArgument, ScriptBody, is_truthy, make_script;
+import manager.expression : NamedArgument, Script, is_truthy, make_script;
 
 nothrow @nogc:
 
@@ -286,7 +286,7 @@ nothrow @nogc:
         if (parent is null)
             return null;
 
-        ScriptBody body_;
+        Script body_;
         foreach (ref na; namedArgs)
         {
             if (na.name == "file" && na.value.isString)
@@ -352,7 +352,7 @@ nothrow @nogc:
             }
         }
 
-        ScriptBody chosen = cond ? find_script_named(namedArgs, "then") : find_script_named(namedArgs, "else");
+        Script chosen = cond ? find_script_named(namedArgs, "then") : find_script_named(namedArgs, "else");
         if (chosen.empty)
             return null;
 
@@ -382,8 +382,8 @@ nothrow @nogc:
         if (parent is null)
             return null;
 
-        ScriptBody cond_body = find_script_named(namedArgs, "cond");
-        ScriptBody do_body = find_script_named(namedArgs, "do");
+        Script cond_body = find_script_named(namedArgs, "cond");
+        Script do_body = find_script_named(namedArgs, "do");
 
         if (cond_body.empty || do_body.empty)
         {
@@ -407,7 +407,7 @@ class WhileLoopState : CommandState
 {
 nothrow @nogc:
 
-    this(Session session, Context parent, ref ScriptBody cond_body, ref ScriptBody do_body)
+    this(Session session, Context parent, ref const Script cond_body, ref const Script do_body)
     {
         super(session, null);
         this.parent = parent;
@@ -466,27 +466,27 @@ nothrow @nogc:
 
 private:
     Context parent;
-    ScriptBody cond_body;
-    ScriptBody do_body;
+    Script cond_body;
+    Script do_body;
     Context current_iter;
     bool evaluating_cond = true;
     bool _cancelled = false;
 }
 
 
-private ScriptBody find_script(const Variant[] args, const NamedArgument[] namedArgs, const(char)[] name)
+private Script find_script(const Variant[] args, const NamedArgument[] namedArgs, const(char)[] name)
 {
-    if (args.length > 0 && args[0].isUser!ScriptBody)
-        return ScriptBody(args[0].asUser!ScriptBody);
+    if (args.length > 0 && args[0].isUser!Script)
+        return Script(args[0].asUser!Script);
     return find_script_named(namedArgs, name);
 }
 
-private ScriptBody find_script_named(const NamedArgument[] namedArgs, const(char)[] name)
+private Script find_script_named(const NamedArgument[] namedArgs, const(char)[] name)
 {
     foreach (ref na; namedArgs)
-        if (na.name == name && na.value.isUser!ScriptBody)
-            return ScriptBody(na.value.asUser!ScriptBody);
-    return ScriptBody.init;
+        if (na.name == name && na.value.isUser!Script)
+            return Script(na.value.asUser!Script);
+    return Script.init;
 }
 
 

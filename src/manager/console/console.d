@@ -198,6 +198,24 @@ nothrow @nogc:
         return ctx;
     }
 
+    CommandState execute(Session session, ref const Script body_, out Variant result)
+    {
+        assert(session.current_command is null, "TODO: gotta do something about concurrent command execution...");
+
+        if (body_.empty)
+            return null;
+
+        Context ctx = _allocator.allocT!Context(session, root, script_scope, body_, &session._session_locals, Context.FrameKind.function_);
+        auto state = ctx.update();
+        if (state >= CommandCompletionState.finished)
+        {
+            result = ctx.result.move;
+            _allocator.freeT(ctx);
+            return null;
+        }
+        return ctx;
+    }
+
     bool execute_script(Session session, Array!char source)
     {
         assert(session.current_command is null, "TODO: gotta do something about concurrent command execution...");
