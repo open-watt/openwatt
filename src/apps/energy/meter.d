@@ -3,7 +3,7 @@ module apps.energy.meter;
 import urt.si;
 import urt.util : log2;
 
-import apps.energy.circuit : CircuitType;
+import apps.energy.circuit : CircuitType, is_multi_phase;
 
 import manager.component;
 
@@ -119,6 +119,40 @@ static CircuitType get_meter_type(Component meter)
     return CircuitType.unknown;
 }
 
+MeterData extract_phase(ref const MeterData raw, CircuitType type, ubyte meter_phase) pure
+{
+    MeterData r;
+    r.type = type;
+    r.fields = raw.fields;
+    r.voltage[0] = raw.voltage[meter_phase];
+    r.cross_phase_voltage[0] = raw.cross_phase_voltage[meter_phase];
+    r.current[0] = raw.current[meter_phase];
+    r.active[0] = raw.active[meter_phase];
+    r.reactive[0] = raw.reactive[meter_phase];
+    r.apparent[0] = raw.apparent[meter_phase];
+    r.pf[0] = raw.pf[meter_phase];
+    r.freq = raw.freq;
+    r.phase[0] = raw.phase[meter_phase];
+    r.total_import_active[0] = raw.total_import_active[meter_phase];
+    r.total_export_active[0] = raw.total_export_active[meter_phase];
+
+    if (is_multi_phase(r.type))
+    {
+        r.voltage[1..4] = raw.voltage[1..4];
+        r.cross_phase_voltage[1..4] = raw.cross_phase_voltage[1..4];
+        r.current[1..4] = raw.current[1..4];
+        r.active[1..4] = raw.active[1..4];
+        r.reactive[1..4] = raw.reactive[1..4];
+        r.apparent[1..4] = raw.apparent[1..4];
+        r.pf[1..4] = raw.pf[1..4];
+        r.phase[1..4] = raw.phase[1..4];
+        r.total_import_active[1..4] = raw.total_import_active[1..4];
+        r.total_export_active[1..4] = raw.total_export_active[1..4];
+    }
+
+    return r;
+}
+
 static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.all)
 {
     import manager.element;
@@ -203,8 +237,12 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         {
             if (Element* e = meter.find_element(field_names[i]))
             {
-                r.freq = e.scaled_value!Hertz();
-                r.fields |= FieldFlags.frequency;
+                double v = e.scaled_value!Hertz();
+                if (v == v)
+                {
+                    r.freq = v;
+                    r.fields |= FieldFlags.frequency;
+                }
             }
             continue;
         }
@@ -214,8 +252,12 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         {
             if (Element* e = meter.find_element(j == 0 ? field_names[i] : tconcat(field_names[i], j)))
             {
-                f[i][j] = e.normalised_value();
-                values_present |= 1 << j;
+                double v = e.normalised_value();
+                if (v == v)
+                {
+                    f[i][j] = v;
+                    values_present |= 1 << j;
+                }
             }
         }
         if (values_present == 0)

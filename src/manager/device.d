@@ -67,16 +67,27 @@ nothrow @nogc:
     {
         foreach (ref e; expressions)
         {
-            bool have_var_refs;
-            Array!(const(char)[]) refs = e.expression.get_element_refs(have_var_refs);
-            foreach (r; refs)
+            if (e.bound)
             {
-                Element* el = find_element(r);
-                el.remove_subscriber(&e.element_updated);
+                bool have_var_refs;
+                Array!(const(char)[]) refs = e.expression.get_element_refs(have_var_refs);
+                foreach (r; refs)
+                {
+                    Element* el = resolve_ref(r);
+                    if (el)
+                        el.remove_subscriber(&e.element_updated);
+                }
             }
             e.expression.free_expression();
         }
         expressions.clear();
+    }
+
+    Element* resolve_ref(const(char)[] r)
+    {
+        if (r.length > 0 && r[0] == '.')
+            return g_app.find_element(r[1 .. $]);
+        return find_element(r);
     }
 
     void update()
@@ -87,6 +98,8 @@ nothrow @nogc:
         SysTime now = getSysTime();
         foreach (ref sum; sums)
         {
+            if (!sum.bound)
+                continue;
             Element* src = sum.source;
             // force an element update to progress accumulation
             if (now - src.last_update >= 1.seconds)
@@ -145,6 +158,49 @@ nothrow @nogc:
     Array!(Element*) sample_elements;
     MonoTime last_poll;
 
+package:
+    void try_bind_pending()
+    {
+        foreach (ref expr; expressions)
+        {
+            if (expr.bound)
+                continue;
+            bool _;
+            Array!(const(char)[]) refs = expr.expression.get_element_refs(_);
+            bool all_resolved = true;
+            foreach (r; refs)
+            {
+                if (!resolve_ref(r))
+                {
+                    all_resolved = false;
+                    break;
+                }
+            }
+            if (!all_resolved)
+                continue;
+            foreach (r; refs)
+            {
+                Element* e = resolve_ref(r);
+                e.add_subscriber(&expr.element_updated);
+                expr.element_updated(*e, e.latest, e.last_update, e.prev, e.prev_update);
+            }
+            expr.bound = true;
+        }
+
+        foreach (ref sum; sums)
+        {
+            if (sum.bound)
+                continue;
+            const(char)[] src = as_dstring(cast(const char*)sum.source);
+            Element* e = resolve_ref(src);
+            if (!e)
+                continue;
+            e.add_subscriber(&sum.element_updated);
+            sum.source = e;
+            sum.bound = true;
+        }
+    }
+
 private:
 
     struct ExpressionElement
@@ -152,6 +208,7 @@ private:
         Device device;
         Element* element;
         Expression* expression;
+        bool bound;
 
     nothrow @nogc:
         void element_updated(ref Element, ref const Variant, SysTime timestamp, ref const Variant, SysTime)
@@ -169,6 +226,7 @@ private:
         Element* element;
         Element* source;
         SumType type;
+        bool bound;
 
     nothrow @nogc:
         void element_updated(ref Element, ref const Variant next_sample, SysTime timestamp, ref const Variant prev_sample, SysTime prev_timestamp)
@@ -353,8 +411,9 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                 case alias_:
                     import urt.mem.temp : tconcat;
                     const(char)[] target_path = as_dstring(el.get_source(profile));
-                    Element* target = device.find_element(target_path);
-                    device.owned_links ~= g_app.create_link(e, null, target, tconcat(device.id, ".", target_path));
+                    Element* target = device.resolve_ref(target_path);
+                    const(char)[] link_path = (target_path.length > 0 && target_path[0] == '.') ? target_path[1 .. $] : tconcat(device.id, ".", target_path);
+                    device.owned_links ~= g_app.create_link(e, null, target, link_path);
                     e.sampling_mode = SamplingMode.dependent;
                     break;
             }
@@ -380,42 +439,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
         device.components ~= c;
     }
 
-    // hookup expressions
-    outer: foreach (ref expr; device.expressions)
-    {
-        bool _;
-        Array!(const(char)[]) refs = expr.expression.get_element_refs(_);
-        foreach (r; refs)
-        {
-            if (!device.find_element(r))
-            {
-                writeWarning("Failed to resolve element references in expression: @", r);
-                break outer;
-            }
-        }
-        foreach (r; refs)
-        {
-            Element* e = device.find_element(r);
-            e.add_subscriber(&expr.element_updated);
-
-            // allow the expression to initialise by calling with the reference init values
-            expr.element_updated(*e, e.latest, e.last_update, e.prev, e.prev_update);
-        }
-    }
-
-    // hookup sum samplers
-    foreach (ref sum; device.sums)
-    {
-        const(char)[] src = as_dstring(cast(const char*)sum.source);
-        Element* e = device.find_element(src);
-        if (!e)
-        {
-            writeWarning("Failed to find source element for sum element");
-            continue;
-        }
-        e.add_subscriber(&sum.element_updated);
-        sum.source = e;
-    }
+    device.try_bind_pending();
 
     g_app.devices.insert(device.id[], device);
 

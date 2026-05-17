@@ -44,6 +44,7 @@ nothrow @nogc:
 
     Circuit* circuit;
     Component meter;
+    ubyte meter_phase;
 
     MeterData meter_data;
 

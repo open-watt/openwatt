@@ -15,7 +15,7 @@ alias EUI64 = EUI!64;
 struct EUI(int width)
 {
     static assert(width == 48 || width == 64, "Invalid EUI width");
-    enum Bytes = width / 8;
+    enum bytes = width / 8;
 nothrow @nogc:
 
     static if (width == 48)
@@ -53,12 +53,12 @@ nothrow @nogc:
         }
     }
 
-    this(ubyte[Bytes] b...) pure
+    this(ubyte[bytes] b...) pure
     {
         this.b = b;
     }
 
-    EUI64 makeEui64()() const pure if (width == 48)
+    EUI64 make_eui64()() const pure if (width == 48)
         => EUI64(b[0] | 2, b[1], b[2], 0xFF, 0xFE, b[3], b[4], b[5]);
 
     bool opCast(T : bool)() const pure
@@ -67,12 +67,12 @@ nothrow @nogc:
     bool opEquals(ref const EUI!width rhs) const pure
         => ul == rhs.ul;
 
-    bool opEquals(ref const(ubyte)[Bytes] bytes) const pure
+    bool opEquals(ref const(ubyte)[bytes] bytes) const pure
         => b == bytes;
 
     int opCmp(ref const EUI!width rhs) const pure
     {
-        for (size_t i = 0; i < Bytes; ++i)
+        for (size_t i = 0; i < bytes; ++i)
         {
             int c = rhs.b[i] - b[i];
             if (c != 0)
@@ -81,13 +81,13 @@ nothrow @nogc:
         return 0;
     }
 
-    bool isBroadcast() const pure
+    bool is_broadcast() const pure
         => ul == broadcast.ul;
 
     bool is_multicast() const pure
         => (b[0] & 0x01) != 0;
 
-    bool isLocal() const pure
+    bool is_local() const pure
         => (b[0] & 0x02) != 0;
 
     size_t toHash() const pure
@@ -104,7 +104,7 @@ nothrow @nogc:
             hash = 0xBAADF00DDEADB33F ^ (cast(ulong)s[0] << 0) ^ (cast(ulong)s[0] << 37);
             hash ^= (cast(ulong)s[1] << 14) ^ (cast(ulong)s[1] << 51);
             hash ^= (cast(ulong)s[2] << 28) ^ (cast(ulong)s[2] << 7);
-            static if (Bytes == 8)
+            static if (bytes == 8)
                 hash ^= (cast(ulong)s[3] << 21) ^ (cast(ulong)s[3] << 44);
 
             // bonus rotation
@@ -118,14 +118,14 @@ nothrow @nogc:
             hash ^= (cast(uint)s[1] << 16);
             hash = (hash << 5) | (hash >> 27);  // 5-bit rotate left
             hash ^= s[2];
-            static if (Bytes == 8)
+            static if (bytes == 8)
                 hash ^= (cast(uint)s[3] << 16);
 //            hash ^= 0xA5A5A5A5;
         }
         return hash;
     }
 
-    enum StringLen = Bytes == 6 ? 17 : 23;
+    enum StringLen = bytes == 6 ? 17 : 23;
     ptrdiff_t toString(char[] buffer, const(char)[] format, const(FormatArg)[] format_args) const
     {
         import urt.string.ascii : hex_digits;
@@ -151,7 +151,7 @@ nothrow @nogc:
         buffer[14] = ':';
         buffer[15] = hex_digits[b[5] >> 4];
         buffer[16] = hex_digits[b[5] & 0xF];
-        static if (Bytes == 8)
+        static if (bytes == 8)
         {
             buffer[17] = ':';
             buffer[18] = hex_digits[b[6] >> 4];
@@ -165,22 +165,21 @@ nothrow @nogc:
 
     ptrdiff_t fromString(const(char)[] s)
     {
-        import urt.conv;
-        import urt.string.ascii;
-
-        if (s.length < StringLen)
+        const len = s.length;
+        if (len < bytes*2)
             return -1;
-        size_t i = 0, j = 0;
-        for (size_t n = 0; n < StringLen; ++n)
+        size_t n = 0, i = 0, j = 0;
+        while (true)
         {
-            char c = s[n];
+            if (n >= len)
+                return -1;
+            char c = s[n++];
+
             if (i == 2)
             {
-                if (c != ':')
-                    return -1;
-                ++j;
                 i = 0;
-                continue;
+                if (c == ':')
+                    continue;
             }
 
             uint digit = c - '0';
@@ -192,13 +191,16 @@ nothrow @nogc:
                 digit += 10;
             }
 
-            if (i == 0)
+            if (i++ == 0)
                 b[j] = cast(ubyte)(digit << 4);
             else
+            {
                 b[j] |= cast(ubyte)digit;
-            ++i;
+                if (++j == bytes)
+                    break;
+            }
         }
-        return StringLen;
+        return n;
     }
 
     version (Windows)
@@ -216,6 +218,97 @@ nothrow @nogc:
         }
         auto __debugExpanded() => b[];
     }
+}
+
+
+unittest
+{
+    static immutable ubyte[6] kMac = [0x24, 0x0A, 0xC4, 0x12, 0x34, 0x56];
+
+    // construction and accessors
+    MACAddress mac = MACAddress(0x24, 0x0A, 0xC4, 0x12, 0x34, 0x56);
+    assert(mac.b == kMac);
+    assert(cast(bool)mac);
+    assert(!cast(bool)MACAddress.init);
+
+    // bit-flag predicates
+    assert(!mac.is_multicast);
+    assert(!mac.is_local);
+    assert(!mac.is_broadcast);
+    assert(MACAddress.broadcast.is_broadcast);
+    assert(MACAddress.broadcast.is_multicast);
+    assert(MACAddress.stp_multicast.is_multicast);
+    assert(MACAddress(0x02, 0, 0, 0, 0, 0).is_local);
+    assert(MACAddress.stp_multicast.is_link_local);
+    assert(MACAddress.lacp_multicast.is_link_local);
+    assert(MACAddress.lldp_multicast.is_link_local);
+    assert(!MACAddress(0x01, 0x80, 0xC2, 0x00, 0x00, 0x10).is_link_local);
+    assert(!mac.is_link_local);
+
+    // toString
+    char[MACAddress.StringLen] buf;
+    assert(mac.toString(null, null, null) == MACAddress.StringLen);
+    assert(mac.toString(buf[], null, null) == MACAddress.StringLen);
+    assert(buf[] == "24:0A:C4:12:34:56");
+    char[5] short_buf;
+    assert(mac.toString(short_buf[], null, null) == -1);
+
+    MACAddress p;
+
+    // canonical colon-delimited form
+    assert(p.fromString("24:0a:c4:12:34:56") == 17);
+    assert(p.b == kMac);
+
+    // uppercase hex
+    p = MACAddress.init;
+    ubyte[6] expected_upper = [0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF];
+    assert(p.fromString("AA:BB:CC:DD:EE:FF") == 17);
+    assert(p.b == expected_upper);
+
+    // new compact form: no separators
+    p = MACAddress.init;
+    assert(p.fromString("240ac4123456") == 12);
+    assert(p.b == kMac);
+
+    // separators are optional between any byte boundary
+    p = MACAddress.init;
+    assert(p.fromString("240a:c412:3456") == 14);
+    assert(p.b == kMac);
+    p = MACAddress.init;
+    assert(p.fromString("24:0ac412:3456") == 14);
+    assert(p.b == kMac);
+
+    // returns consumed length so callers can keep parsing trailing input
+    p = MACAddress.init;
+    assert(p.fromString("24:0a:c4:12:34:56/24") == 17);
+    assert(p.b == kMac);
+    p = MACAddress.init;
+    assert(p.fromString("240ac4123456tail") == 12);
+    assert(p.b == kMac);
+
+    // rejected inputs
+    assert(p.fromString("") == -1);
+    assert(p.fromString("24:0a:c4:12:34") == -1);     // ran out before last byte
+    assert(p.fromString("24567890123") == -1);        // shorter than minimum
+    assert(p.fromString("24:0a:c4:12:34:gg") == -1);  // invalid hex digit
+    assert(p.fromString("24:0a:c4:12:34:5") == -1);   // truncated last byte
+
+    // make_eui64 sets the U/L bit and inserts FF:FE in the middle
+    EUI64 eui = MACAddress(0x00, 0x11, 0x22, 0x33, 0x44, 0x55).make_eui64();
+    ubyte[8] expected_eui = [0x02, 0x11, 0x22, 0xFF, 0xFE, 0x33, 0x44, 0x55];
+    assert(eui.b == expected_eui);
+
+    // EUI64 accepts both parse styles
+    ubyte[8] kEui = [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF];
+    EUI64 e;
+    assert(e.fromString("01:23:45:67:89:ab:cd:ef") == 23);
+    assert(e.b == kEui);
+    e = EUI64.init;
+    assert(e.fromString("0123456789abcdef") == 16);
+    assert(e.b == kEui);
+
+    // hashing distinguishes neighbours
+    assert(MACAddress(0, 0, 0, 0, 0, 0x01).toHash() != MACAddress(0, 0, 0, 0, 0, 0x02).toHash());
 }
 
 

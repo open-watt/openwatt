@@ -55,46 +55,19 @@ nothrow @nogc:
         foreach (a; appliances)
         {
             if (a.meter)
-                a.meter_data = get_meter_data(a.meter);
+            {
+                MeterData raw = get_meter_data(a.meter);
+                CircuitType atype = a.meter_phase != 0 ? CircuitType.single_phase : raw.type;
+                a.meter_data = extract_phase(raw, atype, a.meter_phase);
+            }
         }
 
         if (meter)
         {
-            // if the circuit has a meter, just read the meter!
-            MeterData raw_meter_data = get_meter_data(meter);
-
-            // if circuit type is unknown, inherit from meter
+            MeterData raw = get_meter_data(meter);
             if (type == CircuitType.unknown)
-                type = raw_meter_data.type;
-
-            meter_data.type = type;
-            meter_data.fields = raw_meter_data.fields;
-            meter_data.voltage[0] = raw_meter_data.voltage[meter_phase];
-            meter_data.cross_phase_voltage[0] = raw_meter_data.cross_phase_voltage[meter_phase];
-            meter_data.current[0] = raw_meter_data.current[meter_phase];
-            meter_data.active[0] = raw_meter_data.active[meter_phase];
-            meter_data.reactive[0] = raw_meter_data.reactive[meter_phase];
-            meter_data.apparent[0] = raw_meter_data.apparent[meter_phase];
-            meter_data.pf[0] = raw_meter_data.pf[meter_phase];
-            meter_data.freq = raw_meter_data.freq;
-            meter_data.phase[0] = raw_meter_data.phase[meter_phase];
-            meter_data.total_import_active[0] = raw_meter_data.total_import_active[meter_phase];
-            meter_data.total_export_active[0] = raw_meter_data.total_export_active[meter_phase];
-
-            // for multi-phase circuits, copy all phase data
-            if (is_multi_phase(meter_data.type))
-            {
-                meter_data.voltage[1..4] = raw_meter_data.voltage[1..4];
-                meter_data.cross_phase_voltage[1..4] = raw_meter_data.cross_phase_voltage[1..4];
-                meter_data.current[1..4] = raw_meter_data.current[1..4];
-                meter_data.active[1..4] = raw_meter_data.active[1..4];
-                meter_data.reactive[1..4] = raw_meter_data.reactive[1..4];
-                meter_data.apparent[1..4] = raw_meter_data.apparent[1..4];
-                meter_data.pf[1..4] = raw_meter_data.pf[1..4];
-                meter_data.phase[1..4] = raw_meter_data.phase[1..4];
-                meter_data.total_import_active[1..4] = raw_meter_data.total_import_active[1..4];
-                meter_data.total_export_active[1..4] = raw_meter_data.total_export_active[1..4];
-            }
+                type = raw.type;
+            meter_data = extract_phase(raw, type, meter_phase);
         }
         else
         {

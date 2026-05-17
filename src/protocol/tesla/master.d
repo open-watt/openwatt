@@ -361,7 +361,7 @@ nothrow @nogc:
                 //... ???
             }
 
-            if (p.eth.dst.isBroadcast)
+            if (p.eth.dst.is_broadcast)
             {
                 switch (msg.type)
                 {

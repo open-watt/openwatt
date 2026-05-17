@@ -237,7 +237,7 @@ private:
         uint flags = (dir == PacketDirection.incoming) ? 1 : 2; // 01 = inbound, 10 = outbound
 
         // 2-4 Reception type (000 = not specified, 001 = unicast, 010 = multicast, 011 = broadcast, 100 = promiscuous)
-        if (p.eth.dst.isBroadcast)
+        if (p.eth.dst.is_broadcast)
             flags |= 3 << 2;
         else if (p.eth.dst.is_multicast)
             flags |= 2 << 2;

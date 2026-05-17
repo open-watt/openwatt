@@ -439,7 +439,7 @@ protected:
 
             ubyte wire_address = map.iface is this ? map.local_address : map.universal_address;
             const(ubyte)[] pdu = cast(ubyte[])packet.data;
-            return frame_and_send(wire_address, pdu);
+            return frame_and_send(wire_address, pdu, hdr.sequence_number);
         }
     }
 
@@ -498,7 +498,7 @@ private:
     ubyte[260] _tail;
     ushort _tail_bytes;
 
-    int frame_and_send(ubyte address, const(ubyte)[] pdu)
+    int frame_and_send(ubyte address, const(ubyte)[] pdu, ushort tx_id = 0)
     {
         ushort length = 0;
         ubyte[520] buffer = void;
@@ -515,7 +515,13 @@ private:
                 length += 2;
                 break;
             case ModbusProtocol.tcp:
-                assert(false);
+                buffer[0..2] = tx_id.nativeToBigEndian;
+                buffer[2..4] = 0; // protocol identifier
+                buffer[4..6] = nativeToBigEndian(cast(ushort)(1 + pdu.length));
+                buffer[6] = address;
+                buffer[7 .. 7 + pdu.length] = pdu[];
+                length = cast(ushort)(7 + pdu.length);
+                break;
             case ModbusProtocol.ascii:
                 ubyte lrc = address;
                 foreach (b; cast(ubyte[])pdu[])
@@ -560,7 +566,7 @@ private:
 
             const(ubyte)[] pdu = cast(ubyte[])frame.packet.data;
 
-            if (frame_and_send(pm.local_server_address, pdu) < 0)
+            if (frame_and_send(pm.local_server_address, pdu, tag) < 0)
             {
                 log.debug_("dispatch: frame_and_send failed for addr ", pm.local_server_address);
                 _queue.complete(tag, MessageState.failed);
@@ -802,31 +808,20 @@ private:
                 if (!frame_info.has_sequence_number)
                     assert(false);
 
-                ushort seq = frame_info.sequence_number;
-                ubyte matched_tag = 0;
-                PendingModbus* pm = null;
+                ubyte tag = cast(ubyte)frame_info.sequence_number;
+                PendingModbus* pm = tag in _pending;
 
-                foreach (kvp; _pending[])
-                {
-                    if (kvp.value.local_server_address == frame_info.address && kvp.value.sequence_number == seq)
-                    {
-                        matched_tag = kvp.key;
-                        pm = &kvp.value();
-                        break;
-                    }
-                }
-
-                if (pm !is null)
+                if (pm !is null && pm.local_server_address == frame_info.address)
                 {
                     hdr.src_address = address;
                     hdr.dst_address = pm.request_from_address;
-                    hdr.sequence_number = seq;
+                    hdr.sequence_number = pm.sequence_number;
                     dispatch(p);
-                    _queue.complete(matched_tag, MessageState.complete);
+                    _queue.complete(tag, MessageState.complete);
                 }
                 else
                 {
-                    log.debug_("rx-drop: no pending match for addr=", frame_info.address, " seq=", seq);
+                    log.debug_("rx-drop: no pending match for addr=", frame_info.address, " tag=", tag);
                     add_rx_drop();
                 }
 
@@ -1053,8 +1048,37 @@ size_t parse_rtu(const(ubyte)[] data, out const(void)[] message, out ModbusFrame
 
 size_t parse_tcp(const(ubyte)[] data, out const(void)[] message, out ModbusFrameInfo frame_info)
 {
-    assert(false);
-    return 0;
+    // Modbus TCP ADU: [TxID:2][ProtocolID:2=0][Length:2][UnitID:1][PDU:N]
+    // Length field = bytes following the header = unit ID (1) + PDU length
+    if (data.length < 8) // 6 MBAP header + unit ID + function code (min)
+        return 0;
+
+    if (data[2..4].bigEndianToNative!ushort != 0) // protocol identifier must be 0x0000
+        return 0;
+
+    ushort len = data[4..6].bigEndianToNative!ushort;
+    if (len < 2) // must have at least unit ID + function code
+        return 0;
+
+    const size_t frame_length = 6 + len;
+
+    if (data.length < frame_length)
+        return 0; // incomplete frame, wait for more data
+
+
+    frame_info.has_sequence_number = true;
+    frame_info.sequence_number = data[0..2].bigEndianToNative!ushort;
+    frame_info.has_crc = false;
+    frame_info.address = data[6];
+    frame_info.frame_type = ModbusFrameType.response;
+
+    ubyte fn = data[7];
+    frame_info.function_code = cast(FunctionCode)(fn & 0x7F);
+    if ((fn & 0x80) && len >= 3)
+        frame_info.exception_code = cast(ExceptionCode)data[8];
+
+    message = data[7 .. frame_length]; // PDU only (skips unit ID)
+    return frame_length;
 }
 
 size_t parse_ascii(const(ubyte)[] data, out const(void)[] message, out ModbusFrameInfo frame_info)
