@@ -756,10 +756,25 @@
     <DCompile Include="src\apps\api\package.d">
       <Filter>src\apps\api</Filter>
     </DCompile>
+    <DCompile Include="src\apps\energy\accounts.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\allocator.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
     <DCompile Include="src\apps\energy\appliance.d">
       <Filter>src\apps\energy</Filter>
     </DCompile>
     <DCompile Include="src\apps\energy\circuit.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\control.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\forecast.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\island.d">
       <Filter>src\apps\energy</Filter>
     </DCompile>
     <DCompile Include="src\apps\energy\manager.d">
@@ -769,6 +784,18 @@
       <Filter>src\apps\energy</Filter>
     </DCompile>
     <DCompile Include="src\apps\energy\package.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\planner.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\policy.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\state.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\vehicle.d">
       <Filter>src\apps\energy</Filter>
     </DCompile>
     <DCompile Include="src\apps\ota\package.d">

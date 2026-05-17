@@ -2,469 +2,303 @@ module apps.energy.appliance;
 
 import urt.array;
 import urt.lifetime;
-import urt.si.quantity;
+import urt.log;
+import urt.mem.temp : tconcat;
+import urt.meta : AliasSeq;
 import urt.string;
-import urt.util;
 
+import apps.energy : EnergyAppModule;
 import apps.energy.circuit;
-import apps.energy.manager;
 import apps.energy.meter;
 
+import manager;
+import manager.base;
+import manager.collection;
 import manager.component;
 import manager.device;
 import manager.element;
+import manager : get_module;
 
 nothrow @nogc:
 
 
-enum ControlCapability
+// Flat user-facing entity. Same struct shape for every appliance — different
+// "types" use different subsets of the bindings.
+//
+// type is a freeform tag (UX only — never branched on by the system).
+// Capabilities are inferred at use-time by inspecting which bindings resolve
+// to components/elements with the relevant shape.
+class Appliance : ActiveObject
 {
-    None = 0,           // no control capability
-    Implicit = 1 << 0,  // will adapt to other appliances
-    OnOff = 1 << 1,     // can enable/disable operation
-    Linear = 1 << 2,    // can specify target power consumption
-    Reverse = 1 << 3,   // can reverse flow to supply energy
-}
-
-
-extern(C++)
-class Appliance
-{
-extern(D):
+    alias Properties = AliasSeq!(Prop!("kind", kind),
+                                 Prop!("vin", vin),
+                                 Prop!("circuit", circuit),
+                                 Prop!("meter_phase", meter_phase),
+                                 Prop!("device", device),
+                                 Prop!("meter", meter),
+                                 Prop!("state", state));
 nothrow @nogc:
 
-    String id;
-    String type;
-    String name;
+    enum type_name = "appliance";
+    enum path = "/apps/energy/appliance";
+    enum collection_id = CollectionType.appliance;
 
-    EnergyManager* manager;
-
-    Component info;
-    Component config;
-
-    Circuit* circuit;
-    Component meter;
-    ubyte meter_phase;
-
-    MeterData meter_data;
-
-    bool enabled = true;
-    Watts target_power = Watts(0);
-
-    // HACK: distribute power according to priority...
-    int priority;
-
-    this(String id, String type, EnergyManager* manager)
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        this.id = id.move;
-        this.type = type.move;
-        this.manager = manager;
+        super(collection_type_info!Appliance, id, flags);
     }
 
-    void init(Device device) // TODO: rest of cmdline args...
+    // freeform tag — for /print grouping and user's mental anchor.
+    // System NEVER dispatches on this. Capability is inferred from bindings.
+    // Named `kind` (not `type`) to avoid shadowing BaseObject.type (which holds
+    // the class type name like "appliance"). User-facing label is the same idea.
+    const(char)[] kind() const pure { return _kind[]; }
+    void kind(const(char)[] value)
     {
-        if (device)
+        if (_kind[] == value)
+            return;
+        _kind = value.makeString(g_app.allocator);
+    }
+
+    // optional. Presence enables VIN-based pairing (e.g. car appliance to charger).
+    const(char)[] vin() const pure { return _vin[]; }
+    void vin(const(char)[] value)
+    {
+        if (_vin[] == value)
+            return;
+        _vin = value.makeString(g_app.allocator);
+    }
+
+    // circuit assignment — references a circuit by name in the energy module.
+    const(char)[] circuit() const pure { return _circuit_id[]; }
+    const(char)[] circuit(const(char)[] value)
+    {
+        if (value.length == 0)
         {
-            if (!meter)
-            {
-                if (Component em = device.get_first_component_by_template("EnergyMeter"))
-                    meter = em;
-            }
-            if (!config)
-                config = device.get_first_component_by_template("Configuration");
+            detach_from_circuit();
+            _circuit = null;
+            _circuit_id = String();
+            return null;
         }
-    }
-
-    T as(T)() pure
-        if (is(T : Appliance))
-    {
-        if (type[] == T.Type[])
-            return cast(T)this;
+        auto mod = get_module!EnergyAppModule;
+        if (mod is null || mod.manager is null)
+            return "energy module not initialised";
+        Circuit* c = mod.manager.find_circuit(value);
+        if (c is null)
+            return tconcat("circuit not found: ", value);
+        if (_circuit is c)
+            return null;
+        detach_from_circuit();
+        _circuit_id = value.makeString(g_app.allocator);
+        _circuit = c;
+        restart();
         return null;
     }
 
-    // get the power currently being consumed by the appliance
-    Watts currentConsumption() const
-        => meter_data.active[0] > Watts(0) ? cast(Watts)meter_data.active[0] : Watts(0);
-
-    // returns true if the appliance can be controlled
-    bool canControl() const
-        => hasControl() != ControlCapability.None;
-
-    // returns the control capabilities of the appliance
-    ControlCapability hasControl() const
-        => ControlCapability.None;
-
-    // enable/disable the appliance
-    void enable(bool on)
+    ubyte meter_phase() const pure { return _meter_phase; }
+    void meter_phase(ubyte value)
     {
-        enabled = on;
-    }
-
-    // specifies power that the appliance wants to consume
-    Watts wantsPower() const
-        => Watts(0);
-
-    // offset power to the appliance, returns the amount accepted
-    Watts offerPower(Watts watts)
-    {
-        Watts min, max;
-        if (minPowerLimit(min) && watts < min)
-            target_power = min;
-        else if (maxPowerLimit(max) && watts > max)
-            target_power = max;
-        else
-            target_power = watts;
-        return target_power;
-    }
-
-    // specifies the minimum power that the appliance can accept
-    bool minPowerLimit(out Watts limit) const
-        => false;
-
-    // specifies the maximum power that the appliance can accept
-    bool maxPowerLimit(out Watts limit) const
-        => false;
-
-    void update()
-    {
-    }
-}
-
-class Inverter : Appliance
-{
-nothrow @nogc:
-    enum Type = StringLit!"inverter";
-
-    Component inverter; // inverter container component
-
-    Component control;
-    Component backup; // meter for the backup circuit, if available...
-    Array!(Component) mppt; // solar arrays
-    Array!(Component) battery; // batteries
-
-    Component dummyMeter; // this can be used to control the charge/discharge functionality
-
-    Watts ratedPower = Watts(0);
-
-    this(String id, EnergyManager* manager)
-    {
-        super(id.move, Type, manager);
-    }
-
-    final override void init(Device device) // TODO: rest of cmdline args...
-    {
-        super.init(device);
-
-        if (device)
-        {
-            if (!inverter)
-                inverter = device.get_first_component_by_template("Inverter");
-
-            if (!backup && inverter)
-                backup = inverter.find_component("backup");
-
-            if (mppt.empty && inverter)
-            {
-                Component solar = inverter.get_first_component_by_template("Solar");
-                if (solar)
-                {
-                    mppt = solar.find_components_by_template("Solar");
-                    if (mppt.empty)
-                        mppt ~= solar;
-                }
-            }
-
-            if (battery.empty && inverter)
-            {
-                Component bat = inverter.get_first_component_by_template("Battery");
-                if (bat)
-                {
-                    battery ~= bat;
-                    mppt ~= bat;
-                }
-            }
-        }
-    }
-
-    final override ControlCapability hasControl() const
-    {
-        // we need to drill into these components, and see what controls they actually offer...
-        if (control || dummyMeter)
-            return ControlCapability.OnOff | ControlCapability.Linear | ControlCapability.Reverse;
-
-        // if there are no controls but it's a battery inverter, then it should have implicit control
-        if (battery.length)
-            return ControlCapability.Implicit | ControlCapability.Reverse;
-
-        return ControlCapability.Reverse;
-    }
-
-    final override Watts wantsPower() const
-    {
-        // if SOC < 100%, then we want to charge the battery
-
-        // TODO: it would be REALLY great to attenuate the power request based on
-        //       the amount of sunlight hours remaining in the day...
-        //       we should aim to fill the battery by sun-down, while also not charging faster than necessary
-
-//        return 0;
-        // HACK:
-        return ratedPower ? ratedPower : Watts(5000); // we should work out how much the battery actually wants!
-    }
-
-    final override void update()
-    {
-        if (info)
-        {
-            if (Element* rp = info.find_element("ratedPower"))
-            {
-                if (rp)
-                    ratedPower = rp.value.asQuantity;
-            }
-        }
-
-        if (control)
-        {
-            // specify control parameters...
-        }
-        else if (dummyMeter)
-        {
-            // specify the meter values to influence the inverter...
-        }
-        else
-        {
-            // nothing?
-        }
-    }
-}
-
-class EVSE : Appliance
-{
-nothrow @nogc:
-    enum Type = StringLit!"evse";
-
-    Component control;
-
-    Car connectedCar;
-
-    this(String id, EnergyManager* manager)
-    {
-        super(id.move, Type, manager);
-    }
-
-    final override void init(Device device) // TODO: rest of cmdline args...
-    {
-        super.init(device);
-
-        if (device)
-        {
-            if (!control)
-                control = device.get_first_component_by_template("ChargeControl");
-        }
-    }
-
-    final override ControlCapability hasControl() const
-    {
-        if (control && control.find_element("target_current"))
-            return ControlCapability.Linear;
-        // on/off control?
-
-        // TODO: maybe we can control the car directly?
-        //       which should we prefer?
-
-        return ControlCapability.None;
-    }
-
-    final override Watts wantsPower() const
-    {
-        Watts wants = 0;
-        if (connectedCar)
-            maxPowerLimit(wants);
-        return wants;
-    }
-
-    final override bool minPowerLimit(out Watts watts) const
-    {
-        watts = meter_data.voltage[0] ? cast(Volts)meter_data.voltage[0] * Amps(6) : Volts(230) * Amps(6);
-        return true;
-    }
-    final override bool maxPowerLimit(out Watts watts) const
-    {
-        watts = meter_data.voltage[0] ? cast(Volts)meter_data.voltage[0] * Amps(32) : Volts(240) * Amps(32);
-        return true;
-    }
-
-    final override void update()
-    {
-        if (!info)
+        if (_meter_phase == value)
             return;
+        _meter_phase = value;
+    }
 
-        // check the charger for a connected VIN
-        if (Element* e = info.find_element("vin"))
+    // primary device or sub-component. Usually carries the control surface.
+    const(char)[] device() const pure { return _device_path[]; }
+    const(char)[] device(const(char)[] value)
+    {
+        if (value.length == 0)
         {
-            if (connectedCar)
-                connectedCar.evse = null;
-            connectedCar = null;
-
-            const(char)[] vin = e.value.asString();
-            if (vin.length > 0)
-            {
-                // find a car with this VIN among our appliances...
-                foreach (a; manager.appliances.values)
-                {
-                    if (a.type != "car")
-                        continue;
-                    Car car = cast(Car)a;
-
-                    if (car.vin[] != vin[])
-                        continue;
-
-                    connectedCar = car;
-                    car.evse = this;
-                    break;
-                }
-            }
+            _device_path = String();
+            _device = null;
+            restart();
+            return null;
         }
+        Component c = resolve_component_path(value);
+        if (c is null)
+            return tconcat("device not found: ", value);
+        _device_path = value.makeString(g_app.allocator);
+        _device = c;
+        restart();
+        return null;
+    }
 
-        Watts target = target_power;
-        if (connectedCar)
+    // explicit consumption meter (when not on device itself, or when measuring
+    // a circuit-level loop rather than the device's internal meter).
+    const(char)[] meter() const pure { return _meter_path[]; }
+    const(char)[] meter(const(char)[] value)
+    {
+        if (value.length == 0)
         {
-            if (connectedCar.target_power > Watts(0))
-                target = max(target_power, connectedCar.target_power);
+            _meter_path = String();
+            _meter = null;
+            restart();
+            return null;
         }
-        Amps target_current = target / (meter_data.voltage[0] ? cast(Volts)meter_data.voltage[0] : Volts(230));
-        if (target_current > Amps(0))
+        Component c = resolve_component_path(value);
+        if (c is null)
+            return tconcat("meter not found: ", value);
+        _meter_path = value.makeString(g_app.allocator);
+        _meter = c;
+        restart();
+        return null;
+    }
+
+    // explicit state component (SOC, temperature, on/off, etc).
+    // Used when state lives on a different device than the control surface
+    // (e.g. car BLE provides SOC, TWC provides linear-A control).
+    const(char)[] state() const pure { return _state_path[]; }
+    const(char)[] state(const(char)[] value)
+    {
+        if (value.length == 0)
         {
-            // set the
-
-            if (control)
-            {
-                Element* e = control.find_element("target_current");
-                if (e)
-                    e.value = target_current;
-            }
-
+            _state_path = String();
+            _state = null;
+            restart();
+            return null;
         }
-    }
-}
-
-class Car : Appliance
-{
-nothrow @nogc:
-    enum Type = StringLit!"car";
-
-    String vin;
-    Component battery;
-    Component control;
-
-    EVSE evse;
-
-    this(String id, EnergyManager* manager)
-    {
-        super(id.move, Type, manager);
+        Component c = resolve_component_path(value);
+        if (c is null)
+            return tconcat("state not found: ", value);
+        _state_path = value.makeString(g_app.allocator);
+        _state = c;
+        restart();
+        return null;
     }
 
-    final override ControlCapability hasControl() const
+    // resolved-reference accessors (for use by allocator/planner)
+    Component device_ref() pure { return _device; }
+    Component meter_ref() pure { return _meter; }
+    Component state_ref() pure { return _state; }
+    Circuit* circuit_ref() pure { return _circuit; }
+
+    // runtime state, populated per-tick by circuit.update()
+    MeterData meter_data;
+
+    // runtime pairing. Set by update_vin_pairings() when this appliance's VIN
+    // matches a VIN reported by another appliance's primary device.
+    // Read by ControlRegistry to source partner elements during synthesis.
+    Appliance paired_with;
+
+protected:
+    override bool validate() const
     {
-        if (evse)
-            return evse.hasControl();
-
-        // some cars can be controlled directly...
-        // tesla API?
-
-        return ControlCapability.None;
-    }
-
-    final override Watts currentConsumption() const
-    {
-        if (evse)
-            return evse.currentConsumption();
-        return Watts(0);
-    }
-
-    final override Watts wantsPower() const
-    {
-        // if it actually wants to charge...
-
-        Watts wants = Watts(0);
-        if (evse)
-            maxPowerLimit(wants);
-        return wants;
-    }
-
-    final override bool minPowerLimit(out Watts watts) const
-    {
-        watts = meter_data.voltage[0] ? cast(Volts)meter_data.voltage[0] * Amps(6) : Volts(230) * Amps(6);
-        return true;
-    }
-    final override bool maxPowerLimit(out Watts watts) const
-    {
-        watts = meter_data.voltage[0] ? cast(Volts)meter_data.voltage[0] * Amps(32) : Volts(240) * Amps(32);
+        // Degenerate appliances (just-a-name placeholders, e.g. cabin_hot_water
+        // with no device and no meter) are allowed: the user uses them as
+        // anchors for intent before infrastructure exists.
         return true;
     }
 
-    final override void update()
+    override CompletionStatus startup()
     {
+        attach_to_circuit();
+        return CompletionStatus.complete;
+    }
 
-        if (control)
-        {
-            // specify control parameters...
-        }
+    override CompletionStatus shutdown()
+    {
+        detach_from_circuit();
+        break_pairing();
+        return CompletionStatus.complete;
+    }
+
+    override void update() {}
+
+private:
+    String _kind;
+    String _vin;
+    String _circuit_id;
+    Circuit* _circuit;
+    ubyte _meter_phase;
+
+    String _device_path;
+    Component _device;
+    String _meter_path;
+    Component _meter;
+    String _state_path;
+    Component _state;
+
+    void attach_to_circuit()
+    {
+        if (_circuit is null)
+            return;
+        foreach (a; _circuit.appliances)
+            if (a is this)
+                return;
+        _circuit.appliances ~= this;
+    }
+
+    void detach_from_circuit()
+    {
+        if (_circuit is null)
+            return;
+        _circuit.appliances.removeFirstSwapLast(this);
+    }
+
+    void break_pairing()
+    {
+        if (paired_with is null)
+            return;
+        if (paired_with.paired_with is this)
+            paired_with.paired_with = null;
+        paired_with = null;
     }
 }
 
-class HVAC : Appliance
+
+// VIN-pairing pass. Call once per tick from EnergyAppModule.update().
+// For each appliance with a vin set, find an appliance whose primary device
+// reports a matching VIN element and pair them bidirectionally.
+void update_vin_pairings()
 {
-nothrow @nogc:
-    enum Type = StringLit!"hvac";
-
-    Component control;
-
-    this(String id, EnergyManager* manager)
+    auto col = Collection!Appliance();
+    foreach (Appliance a; col.values)
     {
-        super(id.move, Type, manager);
-    }
-
-    final override void update()
-    {
-
-        if (control)
-        {
-            // specify control parameters...
-        }
+        if (a.vin.length == 0)
+            continue;
+        Appliance partner = find_appliance_reporting_vin(col, a.vin);
+        if (a.paired_with is partner)
+            continue;
+        // tear down stale links on both sides
+        if (a.paired_with !is null && a.paired_with.paired_with is a)
+            a.paired_with.paired_with = null;
+        if (partner !is null && partner.paired_with !is null && partner.paired_with.paired_with is partner)
+            partner.paired_with.paired_with = null;
+        a.paired_with = partner;
+        if (partner !is null)
+            partner.paired_with = a;
     }
 }
 
-class WaterHeater : Appliance
+
+private:
+
+Appliance find_appliance_reporting_vin(Collection!Appliance col, const(char)[] vin)
 {
-nothrow @nogc:
-    enum Type = StringLit!"water-heater";
-
-    Component control;
-
-    this(String id, EnergyManager* manager)
+    foreach (Appliance a; col.values)
     {
-        super(id.move, Type, manager);
-    }
-
-    final override Watts wantsPower() const
-    {
-        // we need to check the thermostat to see if temp < target
-        //...
-
-        // in the meantime, we probably just offer power any time we have unused excess...
-
-        return Watts(0);
-    }
-
-    final override void update()
-    {
-
-        // this thing really needs to respond to the thermostat...
-        if (control)
+        if (a.device_ref is null)
+            continue;
+        Element* e = a.device_ref.find_element("vin");
+        if (e is null)
         {
-            // specify control parameters...
+            if (Component info = a.device_ref.get_first_component_by_template("DeviceInfo"))
+                e = info.find_element("vin");
         }
+        if (e !is null && e.value.isString && e.value.asString == vin)
+            return a;
     }
+    return null;
+}
+
+Component resolve_component_path(const(char)[] path)
+{
+    size_t dot = path.findFirst('.');
+    const(char)[] device_id = path[0 .. dot];
+    Device* d = device_id in g_app.devices;
+    if (!d)
+        return null;
+    if (dot == path.length)
+        return *d;
+    return (*d).find_component(path[dot + 1 .. $]);
 }

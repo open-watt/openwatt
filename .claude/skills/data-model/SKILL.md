@@ -829,7 +829,7 @@ struct SampleElement {
   ```
 - Conditional reporting: values only set when `charger.flags` indicate data received
 - Write: only `target_current`, directly sets `charger.target_current`
-- Device template hardcoded in `materialise()` (components: info, charge_control, meter)
+- Device template hardcoded in `materialise()` (components: info, control, meter)
 
 ---
 

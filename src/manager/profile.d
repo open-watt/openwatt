@@ -2143,7 +2143,8 @@ __gshared immutable KnownElementTemplate[][string] g_well_known_elements = [
     "InverterConfig": g_InverterConfig_elements,
     "EVSE": g_EVSE_elements,
     "Vehicle": g_Vehicle_elements,
-    "ChargeControl": g_ChargeControl_elements,
+    "WaterHeater": g_WaterHeater_elements,
+    "PowerControl": g_PowerControl_elements,
     "Switch": g_Switch_elements,
     "ContactSensor": g_ContactSensor_elements,
     "ModbusConfig": g_ModbusConfig_elements,
@@ -2355,6 +2356,9 @@ __gshared immutable KnownElementTemplate[] g_Battery_elements = [
     // cell voltages/temps
     make_element_template!("mosfet_temp", "°C", "MOSFET Temperature", null, Frequency.low),
     make_element_template!("env_temp", "°C", "Environment Temperature", null, Frequency.low),
+    // energy-management setpoints (optional; writable; tracked by the energy app)
+    make_element_template!("target_state", "%", "Target SOC", "SOC target the BMS/inverter should aim for; the energy app may shift this throughout the day", Frequency.high),
+    make_element_template!("min_state", "%", "Min SOC", "SOC floor below which the BMS must not discharge regardless of load demand", Frequency.high),
 //    make_element_template!("warning_flag", "Bitfield", "Warning Flags", "Battery warning flags", Frequency.high),
 //    make_element_template!("protection_flag", "Bitfield", "Protection Flags", "Battery protection flags", Frequency.high),
 //    make_element_template!("status_fault_flag", "Bitfield", "Status/Fault Flags", "Battery status/fault flags", Frequency.high),
@@ -2450,20 +2454,46 @@ __gshared immutable KnownElementTemplate[] g_Vehicle_elements = [
     make_element_template!("battery_capacity", "kWh", "Battery Capacity", null, Frequency.constant),
 ];
 
-__gshared immutable KnownElementTemplate[] g_ChargeControl_elements = [
-    make_element_template!("max_current", "A", "Max Charging Current", "Maximum charging current/limit", Frequency.constant),
-    make_element_template!("min_current", "A", "Min Charging Current", "Minimum charging current", Frequency.constant),
-    make_element_template!("target_current", "A", "Target Charging Current", "Target/commanded charging current", Frequency.realtime),
-    make_element_template!("actual_current", "A", "Actual Charging Current", "Actual charging current", Frequency.realtime), // TODO: should this be represented by a meter instead?
-    make_element_template!("max_power", "W", "Max Charging Power", "Maximum charging power", Frequency.constant),
-    make_element_template!("target_power", "W", "Target Charging Power", "Target/commanded charging power", Frequency.realtime),
-    make_element_template!("actual_power", "W", "Actual Charging Power", "Actual charging power", Frequency.realtime), // TODO: should this be represented by a meter instead?
+__gshared immutable KnownElementTemplate[] g_PowerControl_elements = [
+    make_element_template!("kind", null, "Control Kind", "autonomous | discrete | continuous | staged", Frequency.constant),
+    make_element_template!("direction", null, "Direction", "consume | produce | bidirectional", Frequency.constant),
+    make_element_template!("unit", null, "Setpoint Unit", "A | W | percent | nameplate_fraction", Frequency.constant),
+    make_element_template!("min", null, "Minimum Setpoint", "Minimum non-zero setpoint in `unit`", Frequency.constant),
+    make_element_template!("max", null, "Maximum Setpoint", "Maximum setpoint in `unit`", Frequency.constant),
+    make_element_template!("step", null, "Setpoint Step", "Resolution of setpoint changes in `unit`", Frequency.constant),
+    make_element_template!("setpoint", null, "Setpoint", "The actuator value; type depends on kind/unit", Frequency.realtime),
+    make_element_template!("can_disable", "Boolean", "Can Disable", "False for devices that cannot be cleanly turned off", Frequency.constant),
+    make_element_template!("min_on_time", "s", "Min On Time", "Minimum duration the device must remain on after being turned on", Frequency.constant),
+    make_element_template!("min_off_time", "s", "Min Off Time", "Minimum duration the device must remain off after being turned off", Frequency.constant),
+    make_element_template!("min_dwell", "s", "Min Dwell", "Minimum time between setpoint changes", Frequency.constant),
+    make_element_template!("max_cycles_per_hour", "Count", "Max Cycles per Hour", "Cap on on-off transitions per hour", Frequency.constant),
+    make_element_template!("ramp_rate", null, "Ramp Rate", "Maximum rate of setpoint change in `unit`/s", Frequency.constant),
+    make_element_template!("command_latency", "s", "Command Latency", "Typical command-to-effect lag (informational)", Frequency.constant),
+    make_element_template!("autonomous_mode", null, "Autonomous Mode", "track_meter | schedule | weather | unknown (when kind=autonomous)", Frequency.constant),
+];
+
+__gshared immutable KnownElementTemplate[] g_WaterHeater_elements = [
+    make_element_template!("temperature", "°C", "Temperature", "Current water temperature", Frequency.high),
+    make_element_template!("target_temperature", "°C", "Target Temperature", "Normal heating setpoint", Frequency.high),
+    make_element_template!("min_temperature", "°C", "Min Temperature", "Comfort floor for hot water availability", Frequency.constant),
+    make_element_template!("super_temperature", "°C", "Super Temperature", "Opportunistic ceiling for super-heating when surplus energy is available", Frequency.constant),
+    make_element_template!("state", null, "Heater State", "Heating/idle/error", Frequency.high),
+    make_element_template!("mode", null, "Operating Mode", "Normal/vacation/boost/etc", Frequency.constant),
+    make_element_template!("volume", "L", "Tank Volume", "Tank capacity (informational)", Frequency.constant),
 ];
 
 __gshared immutable KnownElementTemplate[] g_Switch_elements = [
     make_element_template!("switch", "Boolean", "Switch State", null, Frequency.realtime),
 //    make_element_template!("mode", "SwitchMode", "Switch Mode", "Current switch mode", Frequency.high), // TODO: ...
     make_element_template!("timer", "s", "Timer", "Timer value", Frequency.high),
+    make_element_template!("direction", null, "Direction", "consume | produce | bidirectional", Frequency.constant),
+    make_element_template!("nameplate_power", "W", "Nameplate Power", "Known nominal load when on", Frequency.constant),
+    make_element_template!("min_on_time", "s", "Min On Time", "Minimum duration the switch must remain on after being turned on", Frequency.constant),
+    make_element_template!("min_off_time", "s", "Min Off Time", "Minimum duration the switch must remain off after being turned off", Frequency.constant),
+    make_element_template!("min_dwell", "s", "Min Dwell", "Minimum time between transitions", Frequency.constant),
+    make_element_template!("max_cycles_per_hour", "Count", "Max Cycles per Hour", "Cap on on-off cycles per hour (relay-protection)", Frequency.constant),
+    make_element_template!("command_latency", "s", "Command Latency", "Typical command-to-effect lag (informational)", Frequency.constant),
+    make_element_template!("can_disable", "Boolean", "Can Disable", "False for switches that accept commands but cannot be cleanly turned off", Frequency.constant),
 ];
 
 __gshared immutable KnownElementTemplate[] g_ContactSensor_elements = [
