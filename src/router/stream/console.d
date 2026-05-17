@@ -54,13 +54,26 @@ nothrow @nogc:
         version (Windows)
             auto bytes = read_console_input(buffer);
         else version (Posix)
+        {
             auto bytes = urt.internal.sys.posix.read(STDIN_FILENO, buffer.ptr, buffer.length);
+            if (bytes < 0)
+            {
+                import urt.result : errno_result;
+                import urt.internal.stdc.errno : EAGAIN, EWOULDBLOCK, EINTR;
+                uint e = errno_result().system_code;
+                if (e == EAGAIN || e == EWOULDBLOCK || e == EINTR)
+                    bytes = 0;
+            }
+        }
         else version (Embedded)
             auto bytes = 0;
         else
             static assert(false, "Unsupported platform");
         version (Embedded) {} else
-            add_rx_bytes(bytes);
+        {
+            if (bytes > 0)
+                add_rx_bytes(bytes);
+        }
         return bytes;
     }
 
