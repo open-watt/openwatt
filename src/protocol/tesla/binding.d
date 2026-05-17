@@ -172,12 +172,19 @@ protected:
         _elements ~= find_or_create_element(info, "lifetime_energy");
         _elements ~= find_or_create_element(info, "vin");
 
-        Component cc = find_or_create_component(device, "charge_control", "ChargeControl");
-        _elements ~= find_or_create_element(cc, "state");
-        _elements ~= find_or_create_element(cc, "twc_state");
-        _target_current = find_or_create_element(cc, "target_current", Access.read_write);
+        Component evse = find_or_create_component(device, "evse", "EVSE");
+        _elements ~= find_or_create_element(evse, "state");
+        _elements ~= find_or_create_element(evse, "twc_state");
+
+        Component control = find_or_create_component(evse, "control", "PowerControl");
+        set_constant(find_or_create_element(control, "kind"), "continuous");
+        set_constant(find_or_create_element(control, "direction"), "consume");
+        set_constant(find_or_create_element(control, "unit"), "A");
+        set_constant(find_or_create_element(control, "min"), 6);
+        set_constant(find_or_create_element(control, "step"), 1);
+        _elements ~= find_or_create_element(control, "max");
+        _target_current = find_or_create_element(control, "setpoint", Access.read_write);
         _elements ~= _target_current;
-        _elements ~= find_or_create_element(cc, "max_current");
 
         Component meter = find_or_create_component(device, "meter", "EnergyMeter");
         set_constant(find_or_create_element(meter, "type"), "three-phase");
@@ -192,6 +199,8 @@ protected:
         _elements ~= find_or_create_element(meter, "import");
 
         _built = true;
+        device.notify(ComponentEvent.tree_changed);
+        device.notify(ComponentEvent.online);
         return true;
     }
 

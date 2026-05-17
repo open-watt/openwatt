@@ -47,6 +47,8 @@ Device identification and metadata.
 - `hardware_version: string` - Hardware version
 - `app_ver: string` - Application version (Zigbee)
 - `zcl_ver: string` - ZCL version (Zigbee)
+- `manufacture_location: string` - Plant / region where the unit was built
+- `model_year: int` - Model year (vehicles, white goods, etc. that publish one)
 
 ---
 
@@ -415,13 +417,53 @@ Electric Vehicle Supply Equipment (EV charger).
 
 ## Vehicle
 
-Vehicle information (typically EV connected to charger).
+Connected vehicle. Component id is the VIN (canonical cross-source identifier
+shared by all vehicle data sources — Tesla BLE, OVMS, BlueLink, etc.).
+Populated into the EnergyModule-owned `vehicles` Device.
 
-### Optional
-- `vin: string` - Vehicle identification number
-- `soc: %` - State of charge (0-100%)
+Vehicle is mostly a composition of standard primitives — DeviceInfo, Battery,
+EnergyMeter, PowerControl — with a small set of vehicle-specific fields for
+presence and live charging state.
+
+### Presence
+- `connected: boolean` - Active data session present
+- `last_seen: systime` - When data last arrived (stale detection)
+
+### Range
 - `range: km` - Remaining range
-- `battery_capacity: kWh` - Battery capacity
+
+### Charging
+- `charging_state: enum` - disconnected, no_power, starting, charging, complete, stopped, calibrating
+- `minutes_to_full: count` - ETA to full at current rate
+
+(Current setpoint and the vehicle's max-accept limit live on the `control`
+sub-component as `setpoint` and `max` — see [PowerControl](#powercontrol).
+`max` is dynamic, not a static config value: the vehicle reports its instantaneous
+willingness-to-accept which the energy app reads when choosing a new setpoint.)
+
+### Sub-components
+- `info: DeviceInfo` - `type="vehicle"`, `serial_number=<VIN>`, optional
+  `manufacturer_name`, `model_name`, `software_version`, and `name` (friendly
+  display name overriding the VIN in UIs)
+- `status: DeviceStatus` (optional) - `time` (vehicle clock), `network` (BLE
+  link status if reported)
+- `battery: Battery` - At minimum populates `soc`; vehicle-specific extension is
+  `full_capacity` in kWh (semantically energy capacity, not chemistry Ah) and
+  `usable_soc` (%) excluding the reserve buffer
+- `meter: EnergyMeter` (type: "ac" for typical home/destination charging, "dc" for
+  Supercharger / CCS DC fast charging) - `voltage`, `current`, `power`, `import` =
+  current-session energy delivered, `absolute` = lifetime energy delivered to this VIN
+- `control: PowerControl` - Energy-app charge-rate actuator. Charge-only vehicles:
+  `kind=continuous, direction=consume, unit=A, min=6, max=<max_amps>, step=1`.
+  V2G-capable vehicles: `direction=bidirectional` with the setpoint range extended
+  into negative values to represent discharge current (export to grid/load).
+- `config: Configuration` - Static fields (model, capacity override)
+
+### Sub-components (future / TBD)
+- `hvac: HVAC` - Climate control (preconditioning)
+- `locks: ?` - Door/trunk locks
+- `location: ?` - Lat/lon/heading
+- `flash: ?` / `beep: ?` - Find-my-car momentary actuators
 
 ---
 

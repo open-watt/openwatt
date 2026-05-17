@@ -1,10 +1,15 @@
 module manager.secret;
 
 import urt.array;
+import urt.crypto.ecdh : ecdh_p256_compute_shared;
+import urt.crypto.pki;
+import urt.file : load_file, save_file;
 import urt.lifetime;
+import urt.log;
 import urt.map;
 import urt.mem.allocator;
 import urt.rand;
+import urt.result;
 import urt.string;
 
 import manager.base;
@@ -20,9 +25,18 @@ enum HashFunction
     // TODO: how about some real password KDF? Argon2id/scrypt/bcrypt?
 }
 
+enum SecretKind : ubyte
+{
+    password,
+    ec_p256,
+    // TODO: ec_p384, rsa_2048, x509_cert+key, api_token, ...
+}
+
 class Secret : BaseObject
 {
-    alias Properties = AliasSeq!(Prop!("password", password),
+    alias Properties = AliasSeq!(Prop!("kind", kind),
+                                 Prop!("key_file", key_file),
+                                 Prop!("password", password),
                                  Prop!("algorithm", algorithm),
                                  Prop!("services", services));
 nothrow @nogc:
@@ -37,6 +51,27 @@ nothrow @nogc:
     }
 
     // Properties...
+
+    SecretKind kind() const pure
+        => _kind;
+    void kind(SecretKind value)
+    {
+        if (_kind == value)
+            return;
+        _kind = value;
+        maybe_load_key();
+    }
+
+    ref const(String) key_file() const pure
+        => _key_file;
+    void key_file(String value)
+    {
+        if (value == _key_file)
+            return;
+        _key_file = value.move;
+        maybe_load_key();
+    }
+
     const(char)[] password() const pure
     {
         if (_function == HashFunction.plain_text)
@@ -186,6 +221,35 @@ nothrow @nogc:
         return hash[] == _hash[];
     }
 
+
+    // ---- ec_p256 API (only valid when kind == ec_p256 and key is loaded) ----
+
+    // 64-byte uncompressed public point (X || Y), no leading 0x04.
+    // Returns empty slice if the key isn't loaded.
+    const(ubyte)[] public_key_raw() const pure
+    {
+        if (_kind != SecretKind.ec_p256 || !_pubkey_cached)
+            return null;
+        return _pubkey_xy[];
+    }
+
+    // Sign a hash (typically SHA-256). Output is DER-encoded ECDSA signature.
+    Result sign_hash(const(ubyte)[] hash, out Array!ubyte signature)
+    {
+        if (_kind != SecretKind.ec_p256 || !_keypair.valid)
+            return InternalResult.invalid_parameter;
+        return .sign_hash(_keypair, hash, signature);
+    }
+
+    // Compute ECDH-P256 shared secret with peer_xy (64-byte uncompressed point).
+    // Writes 32 bytes of the shared X coordinate into shared_x.
+    Result ecdh_compute_shared(const(ubyte)[] peer_xy, ubyte[] shared_x)
+    {
+        if (_kind != SecretKind.ec_p256 || !_keypair.valid || !_pubkey_cached)
+            return InternalResult.invalid_parameter;
+        return ecdh_p256_compute_shared(_privkey_d[], _pubkey_xy[], peer_xy, shared_x);
+    }
+
 private:
     struct Service
     {
@@ -193,11 +257,20 @@ private:
         String profile;
     }
 
+    SecretKind _kind = SecretKind.password;
+
+    // ---- password storage ----
     HashFunction _function = HashFunction.plain_text; // TODO: not a great default! :P
     ubyte[16] _salt;
     Array!ubyte _hash;
 
-    Array!ubyte _private_key; // for asymmetric keys (we should implement a secure keystore somehow...)
+    // ---- ec_p256 storage ----
+    KeyPair _keypair;
+    ubyte[32] _privkey_d;
+    ubyte[64] _pubkey_xy;
+    bool _pubkey_cached;
+
+    String _key_file;
 
     Map!(String, Service) _services;
     String _def_profile;
@@ -213,6 +286,70 @@ private:
         }
         _function = hash_function;
         _hash = hash_password(password, _salt[], hash_function);
+    }
+
+    void maybe_load_key()
+    {
+        if (_kind != SecretKind.ec_p256 || _key_file.empty)
+            return;
+
+        if (_keypair.valid)
+            free_keypair(_keypair);
+        _pubkey_cached = false;
+
+        void[] file = load_file(_key_file[], defaultAllocator());
+        if (file)
+        {
+            scope(exit) defaultAllocator.free(file);
+            Result r = import_private_key(cast(const(ubyte)[])file, _keypair);
+            if (r.failed)
+            {
+                log.warning("failed to load EC key from '", _key_file[], "': ", r.system_code);
+                return;
+            }
+        }
+        else
+        {
+            Result r = generate_keypair(_keypair);
+            if (r.failed)
+            {
+                log.warning("failed to generate EC keypair: ", r.system_code);
+                return;
+            }
+            Array!ubyte exported;
+            r = export_private_key(_keypair, exported);
+            if (r.failed)
+            {
+                log.warning("failed to export newly-generated EC key: ", r.system_code);
+                free_keypair(_keypair);
+                return;
+            }
+            r = save_file(_key_file[], exported[]);
+            if (r.failed)
+            {
+                log.warning("failed to save EC key to '", _key_file[], "': ", r.system_code);
+                // keep the keypair in memory anyway so the install can keep working until the user fixes the path
+                // ...next restart will re-generate.
+            }
+        }
+
+        Array!ubyte x, y;
+        Result r = export_public_key_raw(_keypair, x, y);
+        if (r.failed || x.length != 32 || y.length != 32)
+        {
+            log.warning("failed to export public key components");
+            free_keypair(_keypair);
+            return;
+        }
+        _pubkey_xy[0 .. 32] = x[];
+        _pubkey_xy[32 .. 64] = y[];
+
+        ubyte[32] d = void;
+        r = export_private_scalar(_keypair, d);
+        if (r.succeeded)
+            _privkey_d[] = d[];
+
+        _pubkey_cached = true;
     }
 }
 

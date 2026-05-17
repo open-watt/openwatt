@@ -624,6 +624,9 @@
     <DCompile Include="src\protocol\tesla\twc.d">
       <Filter>src\protocol\tesla</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\tesla\vehicle.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
     <DCompile Include="src\manager\system.d">
       <Filter>src\manager</Filter>
     </DCompile>
