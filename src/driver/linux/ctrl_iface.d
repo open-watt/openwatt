@@ -255,17 +255,22 @@ size_t format_local_path(char[] dst, const(char)[] tag, const(char)[] iface)
             return 0;
         dst[i++] = c;
     }
-    if (i >= dst.length) return 0;
+    if (i >= dst.length)
+        return 0;
     dst[i++] = '_';
     ptrdiff_t r = format_uint(pid, dst[i .. $]);
-    if (r < 0) return 0;
+    if (r < 0)
+        return 0;
     i += r;
-    if (i >= dst.length) return 0;
+    if (i >= dst.length)
+        return 0;
     dst[i++] = '_';
     r = format_uint(n, dst[i .. $]);
-    if (r < 0) return 0;
+    if (r < 0)
+        return 0;
     i += r;
-    if (i >= dst.length) return 0;
+    if (i >= dst.length)
+        return 0;
     dst[i++] = '_';
     if (i + iface.length >= dst.length)
         return 0;

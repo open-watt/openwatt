@@ -374,8 +374,6 @@ nothrow @nogc:
 
         if (tls)
         {
-            // TLSStream takes remote as "host[:port]" string — no separate port, no InetAddress setter.
-            // Format whichever we have. TLSStream itself decides whether bare-IP is acceptable.
             const(char)[] host_with_port;
             if (!clean_host.empty)
             {

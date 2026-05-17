@@ -279,8 +279,10 @@ private:
     ushort secs_field() const
     {
         long elapsed = (getTime() - _request_started).as!"seconds";
-        if (elapsed < 0) return 0;
-        if (elapsed > ushort.max) return ushort.max;
+        if (elapsed < 0)
+            return 0;
+        if (elapsed > ushort.max)
+            return ushort.max;
         return cast(ushort)elapsed;
     }
 

@@ -651,7 +651,8 @@ ptrdiff_t set_zcl_value(ZCLDataType type, Variant value, ubyte[] buffer) nothrow
             if (!value.isString)
                 return -1;
             const(char)[] s = value.asString;
-            if (buffer.length < 2 + s.length) return -1;
+            if (buffer.length < 2 + s.length)
+                return -1;
             buffer[0..2] = (cast(ushort)s.length).nativeToLittleEndian;
             buffer[2 .. 2 + s.length] = cast(const(ubyte)[])s;
             return cast(ptrdiff_t)(2 + s.length);
@@ -670,7 +671,8 @@ ptrdiff_t set_zcl_value(ZCLDataType type, Variant value, ubyte[] buffer) nothrow
             if (!value.isString)
                 return -1;
             const(void)[] s = value.asBuffer;
-            if (buffer.length < 2 + s.length) return -1;
+            if (buffer.length < 2 + s.length)
+                return -1;
             buffer[0..2] = (cast(ushort)s.length).nativeToLittleEndian;
             buffer[2 .. 2 + s.length] = cast(const(ubyte)[])s;
             return cast(ptrdiff_t)(2 + s.length);
