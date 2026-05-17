@@ -91,9 +91,6 @@
     <Filter Include="src\protocol\esphome">
       <UniqueIdentifier>{03c25b68-9fb8-42a5-875f-998be53670a9}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\protocol\esphome\protobuf">
-      <UniqueIdentifier>{120add6b-a8dc-4a80-b82a-4c126e766583}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\protocol\goodwe">
       <UniqueIdentifier>{45765f37-2305-4031-b32b-a2c3b88bebe0}</UniqueIdentifier>
     </Filter>
@@ -144,6 +141,12 @@
     </Filter>
     <Filter Include="src\router\stream">
       <UniqueIdentifier>{e1c51f7a-999b-4f32-97d6-9364d012699e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\tools">
+      <UniqueIdentifier>{7c4f8e2d-9b1a-4e3f-8d6b-2a5c9e1f4b8d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\tools\protobuf">
+      <UniqueIdentifier>{e8d3a7f1-2c9b-4d5a-9e7f-3b1d8a6c4f2e}</UniqueIdentifier>
     </Filter>
     <Filter Include="third_party">
       <UniqueIdentifier>{bfd0dc75-e884-4b56-bee1-3f94570b47b0}</UniqueIdentifier>
@@ -387,6 +390,12 @@
     <DCompile Include="src\router\stream\udp.d">
       <Filter>src\router\stream</Filter>
     </DCompile>
+    <DCompile Include="src\tools\protobuf\package.d">
+      <Filter>src\tools\protobuf</Filter>
+    </DCompile>
+    <DCompile Include="src\tools\protobuf\parse.d">
+      <Filter>src\tools\protobuf</Filter>
+    </DCompile>
     <DCompile Include="src\devices\goodwe\scanner.d">
       <Filter>src\devices\goodwe</Filter>
     </DCompile>
@@ -467,12 +476,6 @@
     </DCompile>
     <DCompile Include="src\protocol\esphome\package.d">
       <Filter>src\protocol\esphome</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\esphome\protobuf\package.d">
-      <Filter>src\protocol\esphome\protobuf</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\esphome\protobuf\parse.d">
-      <Filter>src\protocol\esphome\protobuf</Filter>
     </DCompile>
     <DCompile Include="src\protocol\esphome\sampler.d">
       <Filter>src\protocol\esphome</Filter>

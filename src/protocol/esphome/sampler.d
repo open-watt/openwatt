@@ -24,7 +24,8 @@ import manager.sampler;
 
 import protocol.esphome;
 import protocol.esphome.client;
-import protocol.esphome.protobuf;
+
+import tools.protobuf;
 
 import router.iface.mac;
 

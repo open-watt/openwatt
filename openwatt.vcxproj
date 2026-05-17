@@ -142,8 +142,6 @@
     <DCompile Include="src\protocol\dns\server.d" />
     <DCompile Include="src\protocol\esphome\client.d" />
     <DCompile Include="src\protocol\esphome\package.d" />
-    <DCompile Include="src\protocol\esphome\protobuf\package.d" />
-    <DCompile Include="src\protocol\esphome\protobuf\parse.d" />
     <DCompile Include="src\protocol\esphome\sampler.d" />
     <DCompile Include="src\protocol\ezsp\ashv2.d" />
     <DCompile Include="src\protocol\ezsp\client.d" />
@@ -227,6 +225,8 @@
     <DCompile Include="src\router\stream\tcp.d" />
     <DCompile Include="src\router\stream\tls.d" />
     <DCompile Include="src\router\stream\udp.d" />
+    <DCompile Include="src\tools\protobuf\package.d" />
+    <DCompile Include="src\tools\protobuf\parse.d" />
     <DCompile Include="third_party\urt\src\object.d" />
     <DCompile Include="third_party\urt\src\std\math.d" />
     <DCompile Include="third_party\urt\src\urt\algorithm.d" />
