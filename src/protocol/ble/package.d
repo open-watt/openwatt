@@ -106,7 +106,7 @@ nothrow @nogc:
             session.write_line("client not connected");
             return;
         }
-        client.read_characteristic(handle);
+        client.read(handle);
         session.write_line("read submitted");
     }
 

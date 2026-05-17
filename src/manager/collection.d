@@ -57,6 +57,8 @@ enum CollectionType : ubyte
     sync_peer,
     sync_ws_server,
     tcp_server,
+    tesla_vehicle_scanner,
+    tesla_vehicle_session,
     tls_server,
     ws_server,
     zb_controller,

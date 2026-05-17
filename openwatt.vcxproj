@@ -214,6 +214,7 @@
     <DCompile Include="src\protocol\tesla\master.d" />
     <DCompile Include="src\protocol\tesla\package.d" />
     <DCompile Include="src\protocol\tesla\twc.d" />
+    <DCompile Include="src\protocol\tesla\vehicle.d" />
     <DCompile Include="src\protocol\tls\certificate.d" />
     <DCompile Include="src\protocol\tls\package.d" />
     <DCompile Include="src\protocol\tls\stream.d" />
