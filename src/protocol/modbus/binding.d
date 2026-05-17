@@ -46,7 +46,8 @@ DataType parse_modbus_data_type(const(char)[] desc)
 {
     if (desc.length == 3 && desc[1] == '8')
     {
-        uint flags;
+        // high/low byte of a register: occupies a full big-endian word on the wire, samples to one byte
+        uint flags = DataType.u16 | DataType.big_endian;
         if (desc[0] == 'i')
             flags |= DataType.signed;
         else if (desc[0] != 'u')
@@ -211,7 +212,14 @@ nothrow @nogc:
 
         _snooping = c.isSnooping;
         if (_snooping)
+        {
+            if (!_slave_server)
+            {
+                log.warning("snooping requires slave=");
+                return CompletionStatus.error;
+            }
             c.setSnoopHandler(&snoop_handler);
+        }
 
         if (_serve && !_snooping)
         {
@@ -319,10 +327,9 @@ nothrow @nogc:
             }
 
             ModbusPDU pdu = createMessage_Read(cast(RegisterType)elements[i].regKind, firstReg, count);
+            // rejection invokes error_handler inline, which releases the batch's in-flight flags
             if (!c.sendRequest(_slave_server.universal_address, pdu, &response_handler, &error_handler, 0, retryTime, batch_pcp, batch_dei))
             {
-                for (size_t k = i; k < j; ++k)
-                    elements[k].flags &= 0xFE;
                 i = j;
                 continue;
             }
@@ -378,6 +385,7 @@ protected:
             import urt.file : load_file;
             const(char)[] pname = _profile_name_explicit[];
             void[] file = load_file(tconcat(profile_dir(), pname, ".conf"), g_app.allocator);
+            scope (exit) g_app.allocator.free(file);
             if (!file)
             {
                 log.warning(name[], ": failed to load serve profile '", pname, "'");
@@ -411,6 +419,31 @@ protected:
         add_register_entry(e, desc, mb);
         device.sample_elements ~= e;
     }
+
+
+unittest
+{
+    // u8h/u8l sample one byte of a big-endian register word
+    ubyte[2] word = [0xAB, 0xCD];
+    ValueDesc hi = ValueDesc(parse_modbus_data_type("u8h"));
+    ValueDesc lo = ValueDesc(parse_modbus_data_type("u8l"));
+    assert(hi.data_length == 2 && lo.data_length == 2);
+    assert(sample_value(word.ptr, hi) == 0xAB);
+    assert(sample_value(word.ptr, lo) == 0xCD);
+    assert(sample_value(word.ptr, ValueDesc(parse_modbus_data_type("i8h"))) == cast(byte)0xAB);
+    assert(sample_value(word.ptr, ValueDesc(parse_modbus_data_type("i8l"))) == cast(byte)0xCD);
+
+    ubyte[2] buf;
+    assert(write_value(buf[], Variant(ulong(0xAB)), hi) == 2 && buf[] == [0xAB, 0x00]);
+    assert(write_value(buf[], Variant(ulong(0xCD)), lo) == 2 && buf[] == [0x00, 0xCD]);
+
+    // multi-register date stripe, as read from GoodWe RTC registers (YM, DH, MS)
+    ubyte[6] rtc = [0x1A, 0x07, 0x03, 0x0C, 0x22, 0x38];
+    DateTime dt = sample_value(rtc.ptr, ValueDesc(parse_modbus_data_type("dt48be"), DateFormat.yymmddhhmmss)).as!DateTime;
+    assert(dt.year == 2026 && dt.month == Month.July && dt.day == 3);
+    assert(dt.hour == 12 && dt.minute == 34 && dt.second == 56);
+}
+
 
 private:
 
@@ -523,6 +556,8 @@ private:
                      request.function_code == FunctionCode.read_input_registers ? 3 :
                      request.function_code == FunctionCode.read_discrete_inputs ? 1 :
                      request.function_code == FunctionCode.read_coils ? 0 : ubyte.max;
+        if (kind == ubyte.max)
+            return; // snooped busses carry write traffic too; only read responses hold data we can sample
         ushort first = request.data[0..2].bigEndianToNative!ushort;
         ushort count = request.data[2..4].bigEndianToNative!ushort;
 
@@ -572,7 +607,8 @@ private:
 
         foreach (ref e; elements)
         {
-            if (e.regKind != kind || e.register < first || e.register >= first + count)
+            // require the element's full span; snooped third-party reads may cover it only partially
+            if (e.regKind != kind || e.register < first || e.register + e.seqLen > first + count)
                 continue;
 
             e.lastUpdate = response_time;
@@ -1034,7 +1070,13 @@ private:
                 const ubyte word_count = ent.seqLen;
                 ptrdiff_t n = write_value(buf[0 .. word_count * 2], ent.element.value, ent.desc);
                 if (n != word_count * 2)
+                {
+                    // abandoning the run; clear the in-flight bits or these elements can never write again
+                    foreach (ref r; run)
+                        r.flags &= ~cast(ubyte)8;
+                    log.warning("can't encode value for reg ", ent.register, "; write dropped");
                     return;
+                }
                 for (size_t j = 0; j < word_count; ++j)
                     words[word_idx++] = cast(ushort)((buf[j*2] << 8) | buf[j*2 + 1]);
             }

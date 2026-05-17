@@ -580,12 +580,18 @@ private:
             if (elem.display_unit && su.parseUnit(elem.display_unit[], pre_scale) > 0)
             {
                 // convert to display unit
-                json ~= quantity.adjust_scale(su).value / pre_scale;
+                if (quantity.is_nan)
+                    json ~= "null";
+                else
+                    json ~= quantity.adjust_scale(su).value / pre_scale;
                 json.append(",\"unit\":\"", elem.display_unit[], '\"');
             }
             else
             {
-                json ~= quantity.value;
+                if (quantity.is_nan)
+                    json ~= "null";
+                else
+                    json ~= quantity.value;
 
                 // write the unit separately for quantities
                 if (quantity.unit.pack != 0)
@@ -745,12 +751,12 @@ private:
             if (Device* dev = device_id in g_app.devices)
             {
                 if (path.empty)
-                    build_component_list(*dev, response_json, shallow, true);
+                    build_component_list(*dev, response_json, shallow, true, true);
                 else
                 {
                     Component comp = dev.find_component(path);
                     if (comp)
-                        build_component_list(comp, response_json, shallow, false);
+                        build_component_list(comp, response_json, shallow, false, true);
                 }
             }
         }
@@ -764,25 +770,35 @@ private:
         return 0;
     }
 
-    void build_component_list(Component comp, ref Array!char json, bool shallow, bool is_device = false)
+    void build_component_list(Component comp, ref Array!char json, bool shallow, bool is_device = false, bool as_root = false)
     {
-        json.append('\"', comp.id[], "\":{\"type\":\"", is_device ? "device" : "component", "\",\"template\":\"", comp.template_[], "\",\"components\":", shallow ? '[' : '{');
+        json.append('\"', comp.id[], "\":{\"type\":\"", is_device ? "device" : "component", "\",\"template\":\"", comp.template_[], '\"');
+        if (comp.hidden)
+            json ~= ",\"hidden\":true";
+
+        bool prune = comp.hidden && !as_root;
+
+        json.append(",\"components\":", shallow ? '[' : '{');
 
         bool first = true;
-        foreach (child; comp.components)
+        if (!prune)
         {
-            if (!first)
-                json ~= ',';
-            first = false;
-            if (shallow)
-                json.append('\"', child.id[], '\"');
-            else
-                build_component_list(child, json, false);
+            foreach (child; comp.components)
+            {
+                if (!first)
+                    json ~= ',';
+                first = false;
+                if (shallow)
+                    json.append('\"', child.id[], '\"');
+                else
+                    build_component_list(child, json, false);
+            }
         }
 
         json.append(shallow ? ']' : '}', ",\"elements\":{");
 
         first = true;
+        if (!prune)
         foreach (ref Element* elem; comp.elements)
         {
             import urt.si.quantity;

@@ -6,7 +6,7 @@ import urt.lifetime;
 import urt.mem.allocator;
 import urt.result;
 import urt.string;
-import urt.time : MonoTime;
+import urt.time : Duration, MonoTime, getTime;
 
 import manager.id;
 
@@ -22,6 +22,7 @@ enum CollectionType : ubyte
 {
     aa55,
     api,
+    appliance,
     binding, // all protocol bindings
     ble_client,
     certificate,
@@ -48,6 +49,7 @@ enum CollectionType : ubyte
     ntp_client,
     ota,
     pcap_server,
+    policy,
     ppp_server,
     pppoe_server,
     recorder,
@@ -64,6 +66,7 @@ enum CollectionType : ubyte
     zb_controller,
     zb_endpoint,
     zigbee, // node, router, coordinator
+    link,
     count
 }
 
@@ -97,7 +100,7 @@ Item get_item(Item : BaseObject)(CID id) pure
 Item get_item_by_name(Item : BaseObject)(const(char)[] id) pure
     if (!is(Item == BaseObject))
 {
-    BaseObject item = item_table(Item.collection_id).get_by_name(id);
+    BaseObject item = item_table(Item.collection_id).get_by_name(id, Item.collection_id);
     return cast(Item)item; // TODO: this is a D dynamic cast, but we could check our own typeinfo
 }
 
@@ -218,12 +221,23 @@ nothrow @nogc:
     {
         assert(type_info.get_super is null, "update_all should only be called on root collections");
 
+        enum SlowObjectUpdateMs = 50;
         size_t i = 0;
         outer: while (i < table._entries.length)
         {
             CID just_processed = table._entries[i].id;
             if (auto active = cast(ActiveObject)table._entries[i].value)
+            {
+                MonoTime t = getTime();
                 active.do_update();
+                Duration d = getTime() - t;
+                if (d.as!"msecs" >= SlowObjectUpdateMs)
+                {
+                    import urt.log : writeWarning;
+                    writeWarning("collection.update.", type_info.type[], ".", active.name[],
+                                 ": ", d.as!"msecs", "ms");
+                }
+            }
 
             // skip to the entry after the one we just did (array may have grown)
             while (table._entries[i++].id != just_processed)

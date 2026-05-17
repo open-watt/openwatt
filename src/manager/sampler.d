@@ -682,6 +682,11 @@ ptrdiff_t write_value(ubyte[] buffer, ref const Variant value, ref const ValueDe
             }
             else
                 return -1;
+            // mirror sample_value: high_byte lives in the word's high byte (the pair byte stores as 0)
+            if (kind == high_byte)
+                raw_value = (raw_value & 0xFF) << 8;
+            else if (kind == low_byte)
+                raw_value &= 0xFF;
             break;
 
         case floating:

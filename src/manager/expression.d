@@ -1079,7 +1079,7 @@ Expression* parse_primary_exp(ref const(char)[] text)
                 break scan_string;
         }
 
-        if (identifier && !c.is_alpha_numeric && c != '_' && c != '-' && !(is_var || is_element && c == '.'))
+        if (identifier && !c.is_alpha_numeric && c != '_' && c != '-' && c != '.')
         {
             if (is_var || is_element)
                 break;

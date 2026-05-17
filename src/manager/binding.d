@@ -109,6 +109,7 @@ protected:
         import urt.file : load_file;
 
         void[] file = load_file(tconcat(profile_dir(), pname, ".conf"), g_app.allocator);
+        scope (exit) g_app.allocator.free(file);
         if (!file)
         {
             writeWarning(name, ": failed to load profile '", pname, "'");

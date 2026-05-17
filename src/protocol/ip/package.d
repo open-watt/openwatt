@@ -2292,6 +2292,7 @@ else
         Thread      _thread;
         Semaphore   _space;     // backpressure: dispatch signals as event slots free
         shared bool _stop;
+        shared bool _dispatch_pending;
         Socket      _wake = Socket.invalid;
         InetAddress _wake_addr;
 
@@ -2366,7 +2367,7 @@ else
                 }
 
                 if (posted)
-                    g_app.post_event(&dispatch, getTime());
+                    request_dispatch();
             }
         }
 
@@ -2517,7 +2518,7 @@ else
             Ev* slot = _ring.reserve();
             while (slot is null)
             {
-                g_app.post_event(&dispatch, getTime());
+                request_dispatch();
                 _space.wait(msecs(50));
                 if (atomicLoad!(MemoryOrder.acquire)(_stop))
                     return false;
@@ -2526,6 +2527,15 @@ else
             *slot = ev;
             _ring.commit();
             return true;
+        }
+
+        void request_dispatch()
+        {
+            if (cas(&_dispatch_pending, false, true))
+            {
+                if (!g_app.post_event(&dispatch, getTime()))
+                    atomicStore!(MemoryOrder.release)(_dispatch_pending, false);
+            }
         }
 
         // main thread ------------------------------------------------------
@@ -2538,6 +2548,9 @@ else
                 handle(ev);
                 _space.signal();
             }
+            atomicStore!(MemoryOrder.release)(_dispatch_pending, false);
+            if (!_ring.empty())
+                request_dispatch();
         }
 
         void handle(ref Ev ev)

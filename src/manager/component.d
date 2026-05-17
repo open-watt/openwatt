@@ -55,6 +55,8 @@ nothrow @nogc:
     String template_;
     Component parent;
 
+    bool hidden;
+
     Array!(Component) components;
     Array!(Element*) elements;
 

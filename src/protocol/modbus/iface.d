@@ -806,7 +806,7 @@ private:
     bool validate_response_length(ubyte tag, const(void)[] response_message) const
     {
         auto frame = _queue.find_in_flight(tag);
-        if (!frame)
+        if (!frame || frame.packet is null)
             return true; // can't validate without the request
 
         const(ubyte)[] request_pdu = cast(const(ubyte)[])frame.packet.data;
@@ -980,7 +980,8 @@ private:
                 PendingModbus* pm = null;
                 foreach (kvp; _pending[])
                 {
-                    if (!_queue.is_queued(kvp.key))
+                    auto frame = _queue.find_in_flight(kvp.key);
+                    if (frame && frame.packet)
                     {
                         matched_tag = kvp.key;
                         pm = &kvp.value();

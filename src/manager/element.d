@@ -146,7 +146,7 @@ nothrow @nogc:
         return value.asQuantity().adjust_scale(unit).value;
     }
 
-    ref inout(Variant) value() @property inout
+    ref inout(Variant) value() @property inout pure
         => latest;
 
     void value(T)(auto ref T v, SysTime timestamp = getSysTime(), Subscriber who = null)

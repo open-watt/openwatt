@@ -223,9 +223,24 @@ private:
                     e.value = res.friendly_name.move;
                 }
 
+                // client name/info...
+//                if (_client.server_name[])
+//                {
+//                    e = _dev.find_or_create_element("status.name");
+//                    e.value(Variant(_client.server_name[]));
+//                }
+//                if (_client.server_info[])
+//                {
+//                    e = _dev.find_or_create_element("status.info");
+//                    e.value(Variant(_client.server_info[]));
+//                }
+
                 // do we know if it's wifi or not?
                 e = _dev.find_or_create_element("status.network.mode");
                 e.value = StringLit!"wifi";
+
+                e = _dev.find_or_create_element("status.network.ip.address");
+                e.value(Variant(_client.get_address()));
 
                 if (res.webserver_port)
                 {
@@ -253,7 +268,7 @@ private:
                     c.template_ = StringLit!"DeviceStatus";
                 c = _dev.find_component("status.network");
                 if (c)
-                    c.template_ = StringLit!"DeviceStatus";
+                    c.template_ = StringLit!"Network";
                 c = _dev.find_component("status.network.wifi");
                 if (c)
                     c.template_ = StringLit!"Wifi";
