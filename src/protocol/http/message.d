@@ -775,7 +775,7 @@ Array!char format_message_head(ref HTTPMessage message, const(char)[] host = nul
         if (!(message.flags & HTTPFlags.NoDefaults))
         {
             msg.append("User-Agent: OpenWatt\r\nAccept-Encoding: gzip, deflate\r\n");
-            if (message.http_version == HTTPVersion.V1_1)
+            if (message.http_version == HTTPVersion.V1_1 && !message.header("Connection"))
                 msg.append("Connection: keep-alive\r\n");
         }
 

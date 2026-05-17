@@ -58,6 +58,68 @@ HttpUrl decompose_http_url(const(char)[] url) pure
     return r;
 }
 
+bool http_request(const(char)[] url,
+                  HTTPMessageHandler on_response,
+                  HTTPMethod method = HTTPMethod.GET,
+                  const(void)[] content = null,
+                  HTTPParam[] headers = null,
+                  String username = null,
+                  String password = null,
+                  HTTPFlags flags = HTTPFlags.None)
+{
+    if (on_response is null)
+        return false;
+
+    HttpUrl parsed = decompose_http_url(url);
+    if (parsed.host.empty)
+        return false;
+
+    const(char)[] scheme = parsed.scheme.empty ? "http" : parsed.scheme;
+    if (scheme.icmp("http") != 0 && scheme.icmp("https") != 0)
+        return false;
+
+    HTTPOneShot one = defaultAllocator.allocT!HTTPOneShot();
+    one.user_handler = on_response;
+    one.method = method;
+    one.path = (parsed.path.empty ? "/" : parsed.path).makeString(defaultAllocator);
+    if (content.length > 0)
+        one.content ~= cast(const(ubyte)[])content;
+    one.username = username.move;
+    one.password = password.move;
+    one.flags = flags;
+
+    // copy caller's headers and force Connection: close so the client's temporary
+    // flag tears the connection down after exactly one response.
+    foreach (ref h; headers)
+    {
+        if (h.key[].icmp("Connection") == 0)
+            continue;
+        one.headers ~= HTTPParam(h.key, h.value);
+    }
+    one.headers ~= HTTPParam(StringLit!"Connection", StringLit!"close");
+
+    String remote_str = tconcat(scheme, "://", parsed.host).makeString(defaultAllocator);
+    const(char)[] client_name = Collection!HTTPClient().generate_name("http-req");
+    HTTPClient c = Collection!HTTPClient().create(client_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary), NamedArgument("remote", remote_str));
+    if (!c)
+    {
+        defaultAllocator.freeT(one);
+        return false;
+    }
+
+    one.client = c;
+    c.subscribe(&one.on_state);
+
+    // HACK: create() advances the state machine one tick. The client is usually still
+    // `starting` (waiting on TCP connect) at this point, but cover the case where
+    // it became running synchronously.
+    // TODO: clean this up when we stop this terrible eager update policy!
+    if (c.running)
+        one.on_state(c, StateSignal.online);
+
+    return true;
+}
+
 
 class HTTPModule : Module
 {
@@ -88,32 +150,17 @@ nothrow @nogc:
 
         CommandCompletionState state = CommandCompletionState.in_progress;
 
-        HTTPClient client;
-
         this(Session session)
         {
             super(session, null);
         }
 
-        ~this()
-        {
-            if (client)
-            {
-                // TODO: destroy the client...
-                assert(false);
-            }
-        }
-
         override CommandCompletionState update()
-        {
-            // TODO: how to handle request cancellation? if we bail, then the client will try and call a dead delegate...
-
-            return state;
-        }
+            => state;
 
         override void request_cancel()
         {
-            // TODO: how to handle request cancellation? if we bail, then the client will try and call a dead delegate...
+            // TODO: thread cancellation through to http_request's HTTPOneShot
         }
 
         int response_handler(ref const HTTPMessage response)
@@ -131,17 +178,96 @@ nothrow @nogc:
         }
     }
 
-    HTTPRequestState request(Session session, const(char)[] client, const(char)[] uri = "/", HTTPMethod method = HTTPMethod.GET)
+    HTTPRequestState request(Session session, const(char)[] url, HTTPMethod method = HTTPMethod.GET)
     {
-        HTTPClient c = Collection!HTTPClient().get(client);
-        if (!c)
+        HTTPRequestState state = g_app.allocator.allocT!HTTPRequestState(session);
+        if (!http_request(url, &state.response_handler, method))
         {
-            session.writef("No HTTP client: '{0}'", client);
+            session.writef("HTTP request setup failed for '{0}'", url);
+            g_app.allocator.freeT(state);
             return null;
         }
-
-        HTTPRequestState state = g_app.allocator.allocT!HTTPRequestState(session);
-        c.request(method, uri, &state.response_handler);
         return state;
+    }
+}
+
+
+private:
+
+class HTTPOneShot
+{
+nothrow @nogc:
+
+    HTTPClient client;
+    HTTPMessageHandler user_handler;
+
+    HTTPMethod method;
+    String path;
+    Array!ubyte content;
+    Array!HTTPParam headers;
+    String username;
+    String password;
+    HTTPFlags flags;
+
+    bool submitted;
+    bool fired;
+
+    void on_state(ActiveObject, StateSignal sig)
+    {
+        final switch (sig)
+        {
+            case StateSignal.online:
+                if (submitted)
+                    return;
+                submitted = true;
+                HTTPMessage* req = client.request(method, path[], &on_response, content[], null, headers[], username.move, password.move);
+                if (req !is null)
+                    req.flags = flags;
+                else
+                {
+                    fire_failure();
+                    HTTPClient c = client;
+                    c.destroy();
+                }
+                break;
+
+            case StateSignal.offline:
+                break;
+
+            case StateSignal.destroyed:
+                client.unsubscribe(&on_state);
+                fire_failure();
+                defaultAllocator.freeT(this);
+                break;
+        }
+    }
+
+    int on_response(ref const HTTPMessage response)
+    {
+        fire(response);
+        if (response.status_code == 0)
+        {
+            // failure path (timeout); the success path triggers teardown via
+            // the Connection: close header + temporary flag
+            HTTPClient c = client;
+            c.destroy();
+        }
+        return 0;
+    }
+
+    void fire(ref const HTTPMessage response)
+    {
+        if (fired || user_handler is null)
+            return;
+        fired = true;
+        user_handler(response);
+    }
+
+    void fire_failure()
+    {
+        if (fired)
+            return;
+        HTTPMessage empty;
+        fire(empty);
     }
 }

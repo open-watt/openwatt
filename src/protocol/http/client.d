@@ -171,6 +171,11 @@ protected:
             HTTPMessage* r = requests[i];
             if (now - r.timestamp > 5.seconds)
             {
+                if (r.response_handler)
+                {
+                    HTTPMessage empty;
+                    r.response_handler(empty);
+                }
                 requests.remove(i);
                 defaultAllocator().freeT(r);
                 sendNext = true;
