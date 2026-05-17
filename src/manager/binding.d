@@ -10,6 +10,7 @@ import urt.variant;
 
 import manager;
 import manager.base;
+import manager.component;
 import manager.device;
 import manager.element;
 import manager.profile;
@@ -38,6 +39,11 @@ nothrow @nogc:
         if (value == _device)
             return;
         _device = value.move;
+        if (!_device.empty && _device[] !in g_app.devices)
+        {
+            Device d = g_app.allocator.allocT!Device(_device[].makeString(g_app.allocator));
+            g_app.devices.insert(d.id[], d);
+        }
         restart();
     }
 
