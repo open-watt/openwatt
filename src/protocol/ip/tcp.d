@@ -7,6 +7,8 @@ import urt.log;
 import urt.mem.allocator : defaultAllocator;
 import urt.time;
 
+import manager.base : ActiveObject, StateSignal;
+
 import router.iface;
 import router.iface.packet;
 
@@ -16,46 +18,29 @@ import protocol.ip.stack;
 //version = DebugTCP;       // buffering / transmission characteristics
 //version = DebugTCPProto;  // every segment in/out, state transitions, options
 
+// Outstanding loss-recovery / RTT features. We currently rely on RTO + Fast
+// Retransmit only, which is correct but conservative -- the floor is at 1s and
+// every RTT sample includes the peer's delay-ACK time. Priority order:
+//
+//   1. TCP Timestamps (RFC 7323). Per-segment echo of send time gives accurate
+//      RTT samples that aren't poisoned by peer delay-ACK, and lets retransmits
+//      produce valid samples (sidestepping Karn). Once srtt converges near
+//      true RTT, the 1s floor stops mattering. Requires SYN option negotiation
+//      and TS echo on every segment we emit.
+//
+//   2. SACK (RFC 2018). Peer reports received ranges so we retransmit only the
+//      gaps instead of everything from snd_una. Big win when multiple segments
+//      of a single flight are lost. Needs SACK-permitted in SYN, parser for
+//      the option, and gap-aware retransmit/transmit logic.
+//
+//   3. TLP -- Tail Loss Probe (RFC 8985). For the last segment of a flight
+//      (no follow-up to elicit dup-ACKs), send a probe at ~2*srtt to either
+//      get an ACK or surface a dup-ACK that triggers Fast Retransmit. Cheap
+//      once timestamps are in.
+
 private alias log = Log!"tcp";
 
 nothrow @nogc:
-
-
-// TODO: Path MTU Discovery is not implemented.
-//
-// We currently seed pcb.send_mss from the local egress interface's MTU at
-// connection setup (refresh_route()), and lower it further if the peer
-// advertises a smaller MSS in its SYN. That covers two of the three bounds
-// on effective MSS:
-//
-//   1. local link MTU             - covered (egress.actual_mtu - 40)
-//   2. peer's receive MSS         - covered (parse_options)
-//   3. path MTU (smallest hop)    - NOT COVERED
-//
-// If any router along the path has a smaller MTU than our local link, every
-// full-sized segment we send will be dropped at that hop. Routers signal
-// this via ICMP "Fragmentation Needed" (type 3, code 4) carrying the
-// next-hop MTU in the ICMP code_data field. Real TCP stacks set the DF
-// (Don't Fragment) bit on outgoing segments, catch the resulting ICMP, and
-// lower send_mss for that destination, then retransmit.
-//
-// What we do instead today: nothing. icmp_input() ignores
-// dest_unreachable/frag_needed. A connection over a path with a sub-link
-// bottleneck will retransmit the same oversized segments until the retry
-// counter exhausts and the connection fails.
-//
-// Resolution requires:
-//   - Set IP DF flag on outgoing TCP segments (currently flags_frag = 0).
-//   - In icmp_input(), recognize type=3 code=4, locate the PCB by parsing
-//     the quoted IP+TCP header in the ICMP body, lower pcb.send_mss to the
-//     advertised next-hop MTU - 40 (clamped to TcpDefaultMss = 536 floor).
-//   - Mark snd_una..snd_nxt for immediate retransmission so the lowered
-//     MSS takes effect without waiting for the RTO.
-//
-// Until this lands, OpenWatt's TCP works correctly only when the path MTU
-// equals the local link MTU - which is the LAN-only case we currently
-// deploy in. Tunneled / WAN paths with smaller intermediate MTUs will
-// stall connections.
 
 
 // -------------------------------------------------------------------------
@@ -106,9 +91,16 @@ enum size_t TcpRecvBufSize    = 8192;
 enum size_t TcpAcceptQueueMax = 16;
 
 enum uint  TcpInitialRtoMs = 1000;
+enum uint  TcpMinRtoMs     = 1000;          // RFC 6298 §2.4: floor must clear peer's delay-ACK (RFC 1122 max 500ms) plus actual RTT
 enum uint  TcpMaxRtoMs     = 60_000;
 enum ubyte TcpMaxRetries   = 5;
 enum uint  TcpTimeWaitMs   = 60_000;        // 2 * MSL with MSL=30s
+enum uint  TcpFinWait2Ms   = 60_000;        // bound stuck half-closes (Linux default)
+enum uint  TcpDelayedAckMs = 200;           // RFC 1122 says <= 500ms; 200 is common
+enum uint  TcpClockGranularityMs = 10;      // RFC 6298 G
+
+enum size_t TcpOoOMaxBytes = 4096;
+enum size_t TcpOoOMaxSegs  = 8;
 
 
 // -------------------------------------------------------------------------
@@ -141,10 +133,19 @@ static assert(TcpHeader.sizeof == 20);
 // -------------------------------------------------------------------------
 // PCB
 
+// Single out-of-order segment buffered while we wait for the missing prefix.
+// `data` is owned (heap-allocated copy of the payload).
+struct TcpOooSeg
+{
+    uint        seq;
+    Array!ubyte data;
+}
+
+
 struct TcpPcb
 {
     // Monotonic per-PCB id; lets log lines correlate across a single
-    // connection's lifetime amid mixed traffic. Assigned in tcp_register.
+    // connection's lifetime amid mixed traffic. Assigned in tcp_assign_id.
     uint id;
 
     // 4-tuple
@@ -173,6 +174,7 @@ struct TcpPcb
     BaseInterface route_egress;
     IPAddr   route_next_hop;
     uint     route_gen;
+    bool     local_delivery;    // dst is one of our IPs; bypass egress, deliver up
 
     // Send/recv buffers (linear; recv_buf[0] is at sequence rcv_irs+1 + read_offset
     // — we slide both via Array.remove on consume)
@@ -189,8 +191,42 @@ struct TcpPcb
     uint     rto_ms;
     ubyte    retries;
 
+    // Fast Retransmit (RFC 5681 §3.2). Counts duplicate ACKs since last
+    // forward progress; on the third we retransmit snd_una immediately
+    // instead of waiting for RTO. fast_rxmit_done suppresses repeat firing
+    // within a single loss event -- cleared once snd_una advances again.
+    // last_ack_wnd is the wnd field of the previous ACK we accepted; an ACK
+    // only counts as a dup if its window matches (RFC 5681 criterion (e)),
+    // otherwise window-update ACKs would falsely trip fast retransmit.
+    ubyte    dup_ack_count;
+    bool     fast_rxmit_done;
+    uint     last_ack_wnd;
+
+    // RTT estimation (RFC 6298). srtt_ms == 0 means no measurement yet.
+    uint     srtt_ms;
+    uint     rttvar_ms;
+    MonoTime rtt_send_time;     // .ticks == 0 = no sample in flight (Karn)
+    uint     rtt_send_seq;      // sample completes when ack >= this
+
+    // Delayed ACK (RFC 1122 4.2.3.2)
+    bool     ack_pending;
+    MonoTime ack_deadline;
+
+    // Out-of-order segments held while we wait for the missing prefix.
+    Array!TcpOooSeg ooo_buf;
+    uint     ooo_total_bytes;
+
     // Time-wait
     MonoTime time_wait_start;
+
+    // FIN_WAIT_2 timeout
+    MonoTime fin_wait_2_start;
+
+    // Zero-window probe (RFC 1122 4.2.2.17). Armed when peer's window is 0
+    // and we have data queued; disarmed once the window reopens or the probe
+    // creates unacked data (retransmit timer takes over from there).
+    MonoTime persist_deadline;          // .ticks == 0 = not armed
+    uint     persist_rto_ms;
 
     // Listen-state state:
     Array!(TcpPcb*) accept_queue;       // completed conns awaiting accept
@@ -219,10 +255,18 @@ __gshared Array!(TcpPcb*) _pcbs;
 __gshared uint _pcb_next_id = 1;
 
 
-void tcp_register(TcpPcb* pcb)
+void tcp_assign_id(TcpPcb* pcb)
 {
     if (pcb.id == 0)
         pcb.id = _pcb_next_id++;
+}
+
+void tcp_register(TcpPcb* pcb)
+{
+    tcp_assign_id(pcb);
+    foreach (p; _pcbs[])
+        if (p is pcb)
+            return;
     _pcbs ~= pcb;
 }
 
@@ -240,6 +284,82 @@ void tcp_unregister(TcpPcb* pcb)
 
 
 // -------------------------------------------------------------------------
+// Cached-egress lifetime
+//
+// PCBs cache a BaseInterface pointer for the fast send path. We subscribe
+// once per distinct interface and refcount how many PCBs reference it; on
+// the interface's offline signal we sweep all PCBs that pointed at it and
+// clear their cache. All mutation of pcb.route_egress must go through
+// set_pcb_egress so the bookkeeping stays consistent.
+
+private struct IfaceRef
+{
+    BaseInterface iface;
+    uint count;
+}
+
+private struct IfaceWatcher
+{
+nothrow @nogc:
+
+    void track(BaseInterface iface)
+    {
+        if (!iface)
+            return;
+        foreach (ref r; _refs[])
+            if (r.iface is iface)
+            {
+                ++r.count;
+                return;
+            }
+        _refs ~= IfaceRef(iface, 1);
+        iface.subscribe(&on_state);
+    }
+
+    void untrack(BaseInterface iface)
+    {
+        if (!iface)
+            return;
+        foreach (i, ref r; _refs[])
+            if (r.iface is iface)
+            {
+                if (--r.count == 0)
+                {
+                    iface.unsubscribe(&on_state);
+                    _refs.remove(i);
+                }
+                return;
+            }
+    }
+
+    void on_state(ActiveObject obj, StateSignal sig)
+    {
+        if (sig != StateSignal.offline)
+            return;
+        auto iface = cast(BaseInterface)obj;
+        foreach (pcb; _pcbs[])
+            if (pcb.route_egress is iface)
+                set_pcb_egress(pcb, null);
+    }
+
+private:
+    Array!IfaceRef _refs;
+}
+
+__gshared IfaceWatcher _iface_watcher;
+
+
+void set_pcb_egress(TcpPcb* pcb, BaseInterface new_iface)
+{
+    if (pcb.route_egress is new_iface)
+        return;
+    _iface_watcher.untrack(pcb.route_egress);
+    pcb.route_egress = new_iface;
+    _iface_watcher.track(new_iface);
+}
+
+
+// -------------------------------------------------------------------------
 // Public API
 
 void tcp_listen(TcpPcb* pcb)
@@ -247,6 +367,7 @@ void tcp_listen(TcpPcb* pcb)
     pcb.state        = TcpState.listen;
     pcb.is_listener  = true;
     pcb.rcv_wnd      = TcpRecvBufSize;
+    tcp_register(pcb);
     version (DebugTCP)
         log.trace("c", pcb.id, " listen :", pcb.local_port);
 }
@@ -256,7 +377,7 @@ bool tcp_connect(ref IPStack stack, TcpPcb* pcb)
     if (pcb.local_port == 0 || pcb.remote_port == 0)
         return false;
     refresh_route(stack, pcb);
-    if (!pcb.route_egress)
+    if (!pcb.route_egress && !pcb.local_delivery)
         return false;
     if (pcb.local_addr == IPAddr.any)
         pcb.local_addr = stack.select_source_v4(pcb.remote_addr);
@@ -269,19 +390,19 @@ bool tcp_connect(ref IPStack stack, TcpPcb* pcb)
     pcb.rcv_wnd   = TcpRecvBufSize;
     pcb.rto_ms    = TcpInitialRtoMs;
     pcb.state     = TcpState.syn_sent;
+    tcp_register(pcb);      // findable before SYN goes out, in case of synchronous loopback delivery
 
-    version (DebugTCP)
-        log.trace("c", pcb.id, " connect ", pcb.local_addr, ':', pcb.local_port, " -> ", pcb.remote_addr, ':', pcb.remote_port);
+    log.info("c", pcb.id, " connect ", pcb.local_addr, ':', pcb.local_port, " -> ", pcb.remote_addr, ':', pcb.remote_port, " egress=", pcb.route_egress ? pcb.route_egress.name[] : "<null>");
 
     send_segment_at(stack, pcb, TcpFlag.syn, pcb.snd_iss, null);
+    start_rtt_sample(pcb, pcb.snd_nxt);
     pcb.last_send = getTime();
     return true;
 }
 
 void tcp_close(ref IPStack stack, TcpPcb* pcb)
 {
-    version (DebugTCP)
-        log.trace("c", pcb.id, " close :", pcb.local_port, "->:", pcb.remote_port, " state=", pcb.state);
+    log.info("c", pcb.id, " tcp_close called in state=", pcb.state, " (", pcb.local_port, "->:", pcb.remote_port, ")");
 
     final switch (pcb.state) with (TcpState)
     {
@@ -466,6 +587,65 @@ void tcp_tick(ref IPStack stack, MonoTime now)
             continue;
         }
 
+        // FIN_WAIT_2 timeout: peer never sent FIN. Bound the leak.
+        if (pcb.state == TcpState.fin_wait_2)
+        {
+            if (now - pcb.fin_wait_2_start >= TcpFinWait2Ms.msecs)
+            {
+                log.warning("c", pcb.id, " fin_wait_2 timeout (peer never closed)");
+                pcb.state = TcpState.closed;
+                doomed ~= pcb;
+                continue;
+            }
+        }
+
+        // Delayed ACK flush
+        if (pcb.ack_pending && now >= pcb.ack_deadline)
+            send_segment_at(stack, pcb, TcpFlag.ack, pcb.snd_nxt, null);
+
+        // Zero-window probe: send 1 byte (or FIN) of new data; the peer's
+        // response carries the current window, breaking the deadlock if the
+        // peer's window-update was lost. Once snd_nxt advances, the regular
+        // retransmit timer drives further probes with backoff.
+        if (pcb.persist_deadline.ticks != 0 && now >= pcb.persist_deadline)
+        {
+            uint sent_offset = pcb.snd_nxt - pcb.snd_una;
+            if (sent_offset < pcb.send_buf.length)
+            {
+                // Defensive: prior crash here (AV reading data slice) suggested
+                // either send_buf.ptr was null with non-zero length, or pcb itself
+                // was freed. Validate before slicing so we capture state instead
+                // of crashing if it recurs.
+                auto buf = pcb.send_buf[];
+                if (buf.ptr is null || sent_offset + 1 > buf.length)
+                {
+                    log.error("c", pcb.id, " persist-probe: send_buf inconsistent (state=", pcb.state,
+                              " snd_una=", pcb.snd_una, " snd_nxt=", pcb.snd_nxt,
+                              " sent_offset=", sent_offset, " buf.length=", buf.length,
+                              " buf.ptr=", cast(size_t)buf.ptr, ") -- skipping probe");
+                    pcb.persist_deadline = MonoTime.init;
+                    continue;
+                }
+                const(ubyte)[] probe = buf[sent_offset .. sent_offset + 1];
+                send_segment_at(stack, pcb, TcpFlag.psh, pcb.snd_nxt, probe);
+                pcb.snd_nxt += 1;
+                pcb.last_send = now;
+                version (DebugTCP)
+                    log.trace("c", pcb.id, " zero-window probe seq=", pcb.snd_nxt - 1);
+            }
+            else if (pcb.fin_pending && !pcb.fin_sent)
+            {
+                send_segment_at(stack, pcb, TcpFlag.fin | TcpFlag.ack, pcb.snd_nxt, null);
+                pcb.snd_nxt += 1;
+                pcb.fin_sent = true;
+                pcb.state = (pcb.state == TcpState.close_wait) ? TcpState.last_ack : TcpState.fin_wait_1;
+                pcb.last_send = now;
+                version (DebugTCP)
+                    log.trace("c", pcb.id, " zero-window probe FIN");
+            }
+            pcb.persist_deadline = MonoTime.init;       // retransmit timer takes over
+        }
+
         // Retransmit unacked data / control
         bool has_unacked = false;
         switch (pcb.state) with (TcpState)
@@ -493,8 +673,7 @@ void tcp_tick(ref IPStack stack, MonoTime now)
 
         if (pcb.retries >= TcpMaxRetries)
         {
-            version (DebugTCP)
-                log.warning("c", pcb.id, " abort: max retries exhausted in state=", pcb.state, " (peer unreachable?)");
+            log.warning("c", pcb.id, " abort: max retries exhausted in state=", pcb.state, " (peer unreachable?)");
             pcb.error_event = true;
             pcb.state = TcpState.closed;
             doomed ~= pcb;
@@ -506,6 +685,7 @@ void tcp_tick(ref IPStack stack, MonoTime now)
             pcb.rto_ms = TcpMaxRtoMs;
 
         retransmit(stack, pcb);
+        log_recovery_features_needed(pcb, /*was_rto:*/true);
         pcb.last_send = now;
     }
 
@@ -517,6 +697,49 @@ void tcp_tick(ref IPStack stack, MonoTime now)
         // free here.
         if (pcb.handle == 0)
             free_pcb(pcb);
+    }
+}
+
+
+// -------------------------------------------------------------------------
+// PMTU Discovery: drop our send_mss when an upstream router signals that our
+// DF=1 segment couldn't fit. RFC 1191. `code_data` carries the next-hop MTU
+// in its low 16 bits (RFC 1191 §3); 0 means a legacy router that didn't
+// supply it -- step down to a conservative floor.
+
+void tcp_handle_unreachable(ref IPStack stack, ubyte code, uint code_data,
+                            IPAddr local, ushort local_port,
+                            IPAddr remote, ushort remote_port)
+{
+    TcpPcb* pcb = find_pcb_4tuple(local, local_port, remote, remote_port);
+    if (!pcb)
+        return;
+
+    if (code != IcmpDestUnreachableCode.frag_needed)
+        return;
+
+    ushort next_hop_mtu = cast(ushort)(code_data & 0xFFFF);
+    ushort new_mss;
+    if (next_hop_mtu >= IPv4Header.sizeof + TcpHeader.sizeof + 8)   // sanity floor
+        new_mss = cast(ushort)(next_hop_mtu - IPv4Header.sizeof - TcpHeader.sizeof);
+    else
+        new_mss = TcpDefaultMss;
+
+    if (new_mss < TcpDefaultMss)
+        new_mss = TcpDefaultMss;
+    if (new_mss >= pcb.send_mss)
+        return;             // ICMP suggests the same or larger MSS; ignore
+
+    version (DebugTCP)
+        log.info("c", pcb.id, " PMTU mss ", pcb.send_mss, " -> ", new_mss, " (next-hop MTU=", next_hop_mtu, ")");
+
+    pcb.send_mss = new_mss;
+
+    // Re-send any unacked data immediately with the new MSS clamp.
+    if (pcb.snd_una != pcb.snd_nxt)
+    {
+        retransmit(stack, pcb);
+        pcb.last_send = getTime();
     }
 }
 
@@ -570,8 +793,7 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
         {
             if (acceptable_ack)
             {
-                version (DebugTCP)
-                    log.warning("c", pcb.id, " RST during connect (refused) ", pcb.remote_addr, ':', pcb.remote_port);
+                log.warning("c", pcb.id, " RST during connect (refused) ", pcb.remote_addr, ':', pcb.remote_port);
                 pcb.state = TcpState.closed;
                 pcb.error_event = true;
                 tcp_unregister(pcb);
@@ -590,12 +812,12 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
             if (seq_gt(pcb.snd_una, pcb.snd_iss))
             {
                 pcb.state = TcpState.established;
+                finish_rtt_sample(pcb, ack, getTime());     // SYN-ACK round-trip
                 version (DebugTCP)
                     log.trace("c", pcb.id, " established (active) mss=", pcb.send_mss, " peer_wnd=", pcb.snd_wnd);
                 send_segment_at(stack, pcb, TcpFlag.ack, pcb.snd_nxt, null);
                 pcb.writable_event = true;
                 pcb.retries = 0;
-                pcb.rto_ms  = TcpInitialRtoMs;
             }
             else
             {
@@ -623,8 +845,7 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
         if (pcb.state == TcpState.syn_received && pcb.parent)
         {
             // Refused passive open
-            version (DebugTCP)
-                log.warning("c", pcb.id, " RST during passive open from ", pcb.remote_addr, ':', pcb.remote_port);
+            log.warning("c", pcb.id, " RST during passive open from ", pcb.remote_addr, ':', pcb.remote_port);
             remove_child(pcb.parent, pcb);
             pcb.state = TcpState.closed;
             tcp_unregister(pcb);
@@ -632,8 +853,7 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
         }
         else
         {
-            version (DebugTCP)
-                log.warning("c", pcb.id, " RST in state=", pcb.state, " from ", pcb.remote_addr, ':', pcb.remote_port);
+            log.warning("c", pcb.id, " RST in state=", pcb.state, " from ", pcb.remote_addr, ':', pcb.remote_port);
             pcb.state = TcpState.closed;
             pcb.error_event = true;
             tcp_unregister(pcb);
@@ -644,8 +864,7 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
     // 3. SYN in synchronized state -> connection has been broken
     if (flags & TcpFlag.syn)
     {
-        version (DebugTCP)
-            log.warning("c", pcb.id, " SYN in synchronized state=", pcb.state, " (peer crashed?); aborting");
+        log.warning("c", pcb.id, " SYN in synchronized state=", pcb.state, " (peer crashed?); aborting");
         send_segment_at(stack, pcb, TcpFlag.rst, pcb.snd_nxt, null);
         pcb.state = TcpState.closed;
         pcb.error_event = true;
@@ -664,10 +883,10 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
             pcb.snd_una = ack;
             pcb.snd_wnd = wnd;
             pcb.state = TcpState.established;
+            finish_rtt_sample(pcb, ack, getTime());     // SYN-ACK round-trip
             version (DebugTCP)
                 log.trace("c", pcb.id, " established (passive) mss=", pcb.send_mss, " peer_wnd=", pcb.snd_wnd);
             pcb.retries = 0;
-            pcb.rto_ms = TcpInitialRtoMs;
 
             if (pcb.parent)
             {
@@ -715,8 +934,39 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
             uint acked_total = ack - pcb.snd_una;
             pcb.snd_una = ack;
             pcb.snd_wnd = wnd;
-            pcb.retries = 0;
-            pcb.rto_ms  = TcpInitialRtoMs;
+            // RFC 6298 §5.3: ACK of new data restarts the RTO timer from now.
+            // Without this, last_send stays anchored on the oldest in-flight
+            // segment and a slow-but-steady receiver triggers spurious retransmits.
+            if (acked_total > 0)
+            {
+                pcb.retries = 0;
+                pcb.last_send = getTime();
+                pcb.dup_ack_count = 0;
+                pcb.fast_rxmit_done = false;
+            }
+            else if (payload.length == 0 && !(flags & (TcpFlag.syn | TcpFlag.fin)) &&
+                     pcb.snd_una != pcb.snd_nxt && wnd == pcb.last_ack_wnd)
+            {
+                // RFC 5681 §3.2 strict duplicate ACK: outstanding data, ACK is
+                // pure, ack number unchanged, AND window unchanged (window-update
+                // ACKs without new data must not count -- they don't indicate
+                // a peer-side gap). Three of these mean a segment is missing in
+                // the peer's stream; retransmit snd_una immediately rather than
+                // waiting for RTO.
+                if (++pcb.dup_ack_count == 3 && !pcb.fast_rxmit_done)
+                {
+                    pcb.fast_rxmit_done = true;
+                    log.info("c", pcb.id, " fast retransmit (3 dup-ACK) snd_una=", pcb.snd_una, " snd_nxt=", pcb.snd_nxt);
+                    retransmit(stack, pcb);     // also invalidates RTT sample (Karn)
+                    log_recovery_features_needed(pcb, /*was_rto:*/false);
+                    pcb.last_send = getTime();
+                }
+            }
+            pcb.last_ack_wnd = wnd;
+            // finish_rtt_sample updates rto_ms when a sample is in flight.
+            // If invalidated (Karn), rto_ms stays at the doubled value until
+            // a future sample completes cleanly.
+            finish_rtt_sample(pcb, ack, getTime());
 
             // FIN-was-sent and FIN-is-acked accounting:
             // If fin_sent, the last sequence (snd_nxt - 1) is the FIN's sequence (no byte in send_buf).
@@ -740,7 +990,10 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
             if (pcb.fin_sent && ack == pcb.snd_nxt)
             {
                 if (pcb.state == TcpState.fin_wait_1)
+                {
                     pcb.state = TcpState.fin_wait_2;
+                    pcb.fin_wait_2_start = getTime();
+                }
                 else if (pcb.state == TcpState.closing)
                 {
                     pcb.state = TcpState.time_wait;
@@ -776,21 +1029,41 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
     {
         if (seq == pcb.rcv_nxt)
         {
-            size_t free = TcpRecvBufSize - pcb.recv_buf.length;
-            size_t n = payload.length < free ? payload.length : free;
+            size_t free_buf = TcpRecvBufSize - pcb.recv_buf.length;
+            size_t n = payload.length < free_buf ? payload.length : free_buf;
             if (n > 0)
             {
                 pcb.recv_buf ~= payload[0 .. n];
                 pcb.rcv_nxt += n;
-                pcb.rcv_wnd  = cast(uint)(TcpRecvBufSize - pcb.recv_buf.length);
                 pcb.readable_event = true;
             }
-            send_segment_at(stack, pcb, TcpFlag.ack, pcb.snd_nxt, null);
+            // Splice in any contiguous OOO segments now waiting on rcv_nxt.
+            uint spliced = drain_ooo(pcb);
+            if (spliced > 0)
+                pcb.readable_event = true;
+            pcb.rcv_wnd = cast(uint)(TcpRecvBufSize - pcb.recv_buf.length);
+
+            // Delayed ACK: piggyback on data we may emit, or flush in tick.
+            // Force-ACK now if peer already had one delayed (every-other-segment)
+            // or if there are still gaps (let peer know we received contiguous prefix).
+            if (pcb.ack_pending || pcb.ooo_buf.length > 0)
+            {
+                send_segment_at(stack, pcb, TcpFlag.ack, pcb.snd_nxt, null);
+                pcb.ack_pending = false;
+            }
+            else
+            {
+                pcb.ack_pending  = true;
+                pcb.ack_deadline = getTime() + TcpDelayedAckMs.msecs;
+            }
         }
         else
         {
-            // Out-of-order: not buffered (no SACK). ACK current state.
+            // Out-of-order: queue if room, then force-ACK to elicit retransmit.
+            queue_ooo(pcb, seq, payload);
+            pcb.rcv_wnd = cast(uint)(TcpRecvBufSize - pcb.recv_buf.length);
             send_segment_at(stack, pcb, TcpFlag.ack, pcb.snd_nxt, null);
+            pcb.ack_pending = false;
         }
     }
 
@@ -810,8 +1083,7 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
             {
                 case established:
                     pcb.state = close_wait;
-                    version (DebugTCP)
-                        log.trace("c", pcb.id, " peer FIN -> close_wait");
+                    log.info("c", pcb.id, " peer FIN -> close_wait (", pcb.remote_addr, ':', pcb.remote_port, ")");
                     break;
                 case fin_wait_1:
                     if (pcb.fin_sent && pcb.snd_una == pcb.snd_nxt)
@@ -834,6 +1106,7 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
                 default:
                     break;
             }
+            pcb.ack_pending = false;        // we just ACKed the FIN above
         }
     }
 
@@ -872,6 +1145,7 @@ void spawn_child_from_listen(ref IPStack stack, TcpPcb* listener, const IPv4Head
         log.trace("c", child.id, " accept (SYN) :", child.local_port, "<-", child.remote_addr, ':', child.remote_port);
 
     send_segment_at(stack, child, TcpFlag.syn | TcpFlag.ack, child.snd_iss, null);
+    start_rtt_sample(child, child.snd_nxt);
     child.last_send = getTime();
 }
 
@@ -938,6 +1212,10 @@ void send_segment_at(ref IPStack stack, TcpPcb* pcb, ubyte flags, uint seq, cons
     send_segment_raw(stack, pcb.local_addr, pcb.local_port, pcb.remote_addr, pcb.remote_port,
                      seq, ack_val, flags, window, data, advertise_mss,
                      pcb.route_egress, pcb.route_next_hop);
+
+    // This segment carried an ACK -> our delayed-ACK debt is paid.
+    if (flags & TcpFlag.ack)
+        pcb.ack_pending = false;
 }
 
 
@@ -966,9 +1244,10 @@ void send_segment_raw(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAdd
     ip.tos      = 0;
     ip.total_length[0] = cast(ubyte)(total >> 8);
     ip.total_length[1] = cast(ubyte)total;
-    ip.ident[0] = 0;
-    ip.ident[1] = 0;
-    ip.flags_frag[0] = 0;
+    ushort ip_id = next_ip_id();
+    ip.ident[0] = cast(ubyte)(ip_id >> 8);
+    ip.ident[1] = cast(ubyte)ip_id;
+    ip.flags_frag[0] = 0x40;        // DF: required for PMTU Discovery
     ip.flags_frag[1] = 0;
     ip.ttl      = 64;
     ip.protocol = IpProtocol.tcp;
@@ -1068,6 +1347,14 @@ void transmit_pending(ref IPStack stack, TcpPcb* pcb)
 
     if (send_window == 0)
     {
+        // Arm persist timer if peer's window is closed and we have something
+        // to send but nothing in flight (otherwise retransmit handles probing).
+        if (pcb.snd_wnd == 0 && (queued > 0 || pcb.fin_pending) && pcb.snd_una == pcb.snd_nxt
+            && pcb.persist_deadline.ticks == 0)
+        {
+            pcb.persist_rto_ms   = TcpInitialRtoMs;
+            pcb.persist_deadline = getTime() + pcb.persist_rto_ms.msecs;
+        }
         version (DebugTCP)
         {
             if (queued > 0)
@@ -1075,6 +1362,8 @@ void transmit_pending(ref IPStack stack, TcpPcb* pcb)
         }
         return;
     }
+
+    pcb.persist_deadline = MonoTime.init;       // window has space; persist not needed
 
     uint segs = 0;
     uint sent_bytes = 0;
@@ -1090,6 +1379,7 @@ void transmit_pending(ref IPStack stack, TcpPcb* pcb)
         send_segment_at(stack, pcb, TcpFlag.psh, pcb.snd_nxt, slice);
 
         pcb.snd_nxt += chunk;
+        start_rtt_sample(pcb, pcb.snd_nxt);
         sent_offset += chunk;
         queued      -= chunk;
         send_window -= chunk;
@@ -1109,6 +1399,7 @@ void transmit_pending(ref IPStack stack, TcpPcb* pcb)
     {
         send_segment_at(stack, pcb, TcpFlag.fin | TcpFlag.ack, pcb.snd_nxt, null);
         pcb.snd_nxt   += 1;
+        start_rtt_sample(pcb, pcb.snd_nxt);
         pcb.fin_sent   = true;
         pcb.state      = (pcb.state == TcpState.close_wait) ? TcpState.last_ack : TcpState.fin_wait_1;
         pcb.last_send  = getTime();
@@ -1116,13 +1407,51 @@ void transmit_pending(ref IPStack stack, TcpPcb* pcb)
 }
 
 
+// Diagnostic: tag a retransmit with which not-yet-implemented feature would
+// have helped, so we can grep + count to measure the value of implementing
+// SACK / TLP / Timestamps. See feature list at top of file.
+//
+//   needs=sack  -- in_flight > MSS, so multiple unacked segments behind the
+//                  hole. Without SACK we recover one MSS per round-trip; with
+//                  SACK we'd retransmit all gaps in a single shot.
+//   needs=tlp   -- RTO fired on a tail-of-flight (single segment, first try).
+//                  TLP would have probed at ~2*srtt and elicited the dup-ACKs
+//                  needed for fast retransmit, recovering in ~1 RTT instead.
+//   needs=ts    -- RTO floor was the binding constraint (rto stuck near floor
+//                  because srtt is inflated by peer's delay-ACK). Accurate
+//                  per-segment RTT samples would let srtt converge near true
+//                  RTT and shrink rto safely.
+void log_recovery_features_needed(TcpPcb* pcb, bool was_rto)
+{
+    // Handshake retransmits are "peer not answering", not loss recovery:
+    // no RTT sample exists yet (TS irrelevant), no data in flight (TLP/SACK
+    // irrelevant). Skip everything before established/close path.
+    if (pcb.state == TcpState.syn_sent || pcb.state == TcpState.syn_received ||
+        pcb.state == TcpState.listen   || pcb.state == TcpState.closed)
+        return;
+
+    uint in_flight = pcb.snd_nxt - pcb.snd_una;
+    bool needs_sack = in_flight > pcb.send_mss;
+    bool needs_tlp  = was_rto && pcb.retries == 1 && in_flight <= pcb.send_mss;
+    // rto_ms was just doubled by the caller; the pre-doubled value is what
+    // actually drove the timeout we just saw.
+    bool needs_ts   = was_rto && (pcb.rto_ms / 2) >= TcpMinRtoMs;
+    if (!needs_sack && !needs_tlp && !needs_ts)
+        return;
+    log.info("c", pcb.id, " recovery needs=",
+             needs_sack ? "sack " : "",
+             needs_tlp  ? "tlp "  : "",
+             needs_ts   ? "ts"    : "");
+}
+
+
 // Retransmit the oldest unacked content (one MSS worth, or SYN/SYN-ACK).
 void retransmit(ref IPStack stack, TcpPcb* pcb)
 {
     refresh_route(stack, pcb);
+    invalidate_rtt_sample(pcb);     // Karn
 
-    version (DebugTCP)
-        log.trace("c", pcb.id, " retransmit state=", pcb.state, " retries=", pcb.retries, " rto=", pcb.rto_ms, "ms snd_una=", pcb.snd_una, " snd_nxt=", pcb.snd_nxt);
+    log.info("c", pcb.id, " retransmit state=", pcb.state, " retries=", pcb.retries, " rto=", pcb.rto_ms, "ms snd_una=", pcb.snd_una, " snd_nxt=", pcb.snd_nxt, " egress=", pcb.route_egress ? pcb.route_egress.name[] : "<null>");
 
     final switch (pcb.state) with (TcpState)
     {
@@ -1161,6 +1490,199 @@ void retransmit(ref IPStack stack, TcpPcb* pcb)
 
 
 // -------------------------------------------------------------------------
+// RTT estimation (RFC 6298)
+
+// Begin a sample if none is in flight. `expected_ack` is the value of
+// pcb.snd_nxt after the segment was sent -- when ack >= expected_ack we
+// know that segment has been acknowledged.
+void start_rtt_sample(TcpPcb* pcb, uint expected_ack)
+{
+    if (pcb.rtt_send_time.ticks != 0)
+        return;     // already sampling
+    pcb.rtt_send_time = getTime();
+    pcb.rtt_send_seq  = expected_ack;
+}
+
+// If a sample is in flight and the ACK covers it, fold the measurement
+// into srtt/rttvar/rto.
+void finish_rtt_sample(TcpPcb* pcb, uint ack, MonoTime now)
+{
+    if (pcb.rtt_send_time.ticks == 0)
+        return;
+    if (seq_lt(ack, pcb.rtt_send_seq))
+        return;     // not yet covered
+
+    Duration rtt = now - pcb.rtt_send_time;
+    pcb.rtt_send_time = MonoTime();
+    long ms_long = rtt.as!"msecs";
+    if (ms_long <= 0) ms_long = 1;
+    if (ms_long > TcpMaxRtoMs) ms_long = TcpMaxRtoMs;
+    uint sample_ms = cast(uint)ms_long;
+
+    if (pcb.srtt_ms == 0)
+    {
+        pcb.srtt_ms   = sample_ms;
+        pcb.rttvar_ms = sample_ms / 2;
+    }
+    else
+    {
+        // rttvar = 3/4 rttvar + 1/4 |srtt - sample|
+        uint absdiff = pcb.srtt_ms > sample_ms ? pcb.srtt_ms - sample_ms : sample_ms - pcb.srtt_ms;
+        pcb.rttvar_ms = (pcb.rttvar_ms * 3 + absdiff) / 4;
+        // srtt = 7/8 srtt + 1/8 sample
+        pcb.srtt_ms = (pcb.srtt_ms * 7 + sample_ms) / 8;
+    }
+
+    // RTO = srtt + max(G, 4 rttvar), clamped to [TcpMinRtoMs, TcpMaxRtoMs]
+    uint variance_term = pcb.rttvar_ms * 4;
+    if (variance_term < TcpClockGranularityMs)
+        variance_term = TcpClockGranularityMs;
+    uint rto = pcb.srtt_ms + variance_term;
+    if (rto < TcpMinRtoMs) rto = TcpMinRtoMs;
+    if (rto > TcpMaxRtoMs) rto = TcpMaxRtoMs;
+    pcb.rto_ms = rto;
+
+    version (DebugTCPProto)
+        log.trace("c", pcb.id, " rtt sample=", sample_ms, "ms srtt=", pcb.srtt_ms, " rttvar=", pcb.rttvar_ms, " rto=", pcb.rto_ms);
+}
+
+// Karn: if we retransmit, discard the current sample (we can't tell which
+// transmission's ACK we're seeing).
+void invalidate_rtt_sample(TcpPcb* pcb) pure
+{
+    pcb.rtt_send_time = MonoTime();
+}
+
+
+// -------------------------------------------------------------------------
+// Out-of-order receive buffer
+
+// Insert `payload` at sequence `seq` if it's strictly past rcv_nxt and we
+// have room. Drops on overflow (peer will retransmit).
+void queue_ooo(TcpPcb* pcb, uint seq, const(ubyte)[] payload)
+{
+    if (payload.length == 0)
+        return;
+    if (pcb.ooo_total_bytes + payload.length > TcpOoOMaxBytes)
+        return;
+    if (pcb.ooo_buf.length >= TcpOoOMaxSegs)
+        return;
+
+    // Don't bother if we already have a segment that fully covers this range.
+    foreach (ref s; pcb.ooo_buf[])
+    {
+        if (seq_le(s.seq, seq) && seq_ge(s.seq + cast(uint)s.data.length, seq + cast(uint)payload.length))
+            return;
+    }
+
+    TcpOooSeg s;
+    s.seq = seq;
+    s.data ~= payload;
+    pcb.ooo_buf ~= s;
+    pcb.ooo_total_bytes += cast(uint)payload.length;
+}
+
+// After advancing rcv_nxt, splice in any contiguous OOO segments and
+// release them. Returns total bytes spliced.
+uint drain_ooo(TcpPcb* pcb)
+{
+    uint spliced = 0;
+    bool merged;
+    do
+    {
+        merged = false;
+        for (size_t i = 0; i < pcb.ooo_buf.length; ++i)
+        {
+            ref s = pcb.ooo_buf[i];
+            uint s_end = s.seq + cast(uint)s.data.length;
+
+            // Stale (entirely below rcv_nxt): drop.
+            if (seq_le(s_end, pcb.rcv_nxt))
+            {
+                pcb.ooo_total_bytes -= cast(uint)s.data.length;
+                s.data.clear();
+                pcb.ooo_buf.remove(i);
+                merged = true;
+                break;
+            }
+
+            // Fully or partially adjacent to rcv_nxt: splice the new bytes.
+            if (seq_le(s.seq, pcb.rcv_nxt) && seq_gt(s_end, pcb.rcv_nxt))
+            {
+                size_t skip = pcb.rcv_nxt - s.seq;
+                size_t free_buf = TcpRecvBufSize - pcb.recv_buf.length;
+                size_t new_bytes = s.data.length - skip;
+                if (new_bytes > free_buf)
+                    new_bytes = free_buf;
+                if (new_bytes > 0)
+                {
+                    pcb.recv_buf ~= s.data[skip .. skip + new_bytes];
+                    pcb.rcv_nxt += cast(uint)new_bytes;
+                    spliced     += cast(uint)new_bytes;
+                }
+                pcb.ooo_total_bytes -= cast(uint)s.data.length;
+                s.data.clear();
+                pcb.ooo_buf.remove(i);
+                merged = true;
+                break;
+            }
+        }
+    } while (merged);
+    return spliced;
+}
+
+
+// -------------------------------------------------------------------------
+// Console
+
+import manager.console.session : Session;
+import manager.console.table : Table;
+import urt.mem.temp : tconcat, tformat;
+
+public void tcp_print(Session session)
+{
+    if (_pcbs.length == 0)
+    {
+        session.write_line("No TCP connections");
+        return;
+    }
+
+    Table t;
+    t.add_column("id");
+    t.add_column("state");
+    t.add_column("local");
+    t.add_column("remote");
+    t.add_column("mss",     Table.TextAlign.right);
+    t.add_column("pwnd",    Table.TextAlign.right);
+    t.add_column("snd",     Table.TextAlign.right);
+    t.add_column("rcv",     Table.TextAlign.right);
+    t.add_column("rto",     Table.TextAlign.right);
+    t.add_column("srtt",    Table.TextAlign.right);
+    t.add_column("rtry",    Table.TextAlign.right);
+    t.add_column("ooo",     Table.TextAlign.right);
+
+    foreach (pcb; _pcbs[])
+    {
+        t.add_row();
+        t.cell(tconcat("c", pcb.id));
+        t.cell(tconcat(pcb.state));
+        t.cell(tconcat(pcb.local_addr, ':', pcb.local_port));
+        t.cell(pcb.is_listener ? "*" : tconcat(pcb.remote_addr, ':', pcb.remote_port));
+        t.cell(tconcat(pcb.send_mss));
+        t.cell(tconcat(pcb.snd_wnd));
+        t.cell(tconcat(pcb.snd_nxt - pcb.snd_una, '/', cast(uint)pcb.send_buf.length));
+        t.cell(tconcat(cast(uint)pcb.recv_buf.length, '/', pcb.rcv_wnd));
+        t.cell(tconcat(pcb.rto_ms, "ms"));
+        t.cell(pcb.srtt_ms ? tconcat(pcb.srtt_ms, "ms") : "-");
+        t.cell(tconcat(pcb.retries));
+        t.cell(pcb.ooo_buf.length ? tconcat(cast(uint)pcb.ooo_buf.length, '/', pcb.ooo_total_bytes, 'B') : "-");
+    }
+
+    t.render(session);
+}
+
+
+// -------------------------------------------------------------------------
 // Helpers
 
 // Refresh the PCB's cached egress + next-hop + MSS if the route table has
@@ -1169,18 +1691,28 @@ void retransmit(ref IPStack stack, TcpPcb* pcb)
 void refresh_route(ref IPStack stack, TcpPcb* pcb)
 {
     uint cur_gen = route_generation();
-    if (pcb.route_gen == cur_gen && pcb.route_egress)
+    if (pcb.route_gen == cur_gen && (pcb.route_egress || pcb.local_delivery))
         return;
 
     RouteResult r = stack.route_lookup_v4_dst(pcb.remote_addr);
+    if (r.kind == RouteResult.Kind.local)
+    {
+        set_pcb_egress(pcb, null);
+        pcb.local_delivery = true;
+        pcb.route_gen      = cur_gen;
+        if (pcb.send_mss == 0 || TcpEthernetMss < pcb.send_mss)
+            pcb.send_mss = TcpEthernetMss;
+        return;
+    }
+    pcb.local_delivery = false;
     if (r.kind != RouteResult.Kind.forward || !r.out_iface)
     {
-        pcb.route_egress = null;
+        set_pcb_egress(pcb, null);
         pcb.route_gen = cur_gen;
         return;
     }
 
-    pcb.route_egress   = r.out_iface;
+    set_pcb_egress(pcb, r.out_iface);
     pcb.route_next_hop = r.next_hop;
     pcb.route_gen      = cur_gen;
 
@@ -1283,14 +1815,18 @@ TcpPcb* find_listener(IPAddr addr, ushort port)
 }
 
 
-void free_pcb(TcpPcb* pcb)
+public void free_pcb(TcpPcb* pcb)
 {
     if (pcb.parent !is null)
         remove_child(pcb.parent, pcb);
+    set_pcb_egress(pcb, null);
     pcb.send_buf.clear();
     pcb.recv_buf.clear();
     pcb.accept_queue.clear();
     pcb.child_list.clear();
+    foreach (ref s; pcb.ooo_buf[])
+        s.data.clear();
+    pcb.ooo_buf.clear();
     defaultAllocator().freeT(pcb);
 }
 

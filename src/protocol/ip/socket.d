@@ -99,7 +99,7 @@ SocketResult c_create(AddressFamily af, SocketType type, Protocol proto, out Soc
     {
         s.tcp = defaultAllocator().allocT!TcpPcb();
         s.tcp.handle = h;
-        tcp_register(s.tcp);
+        tcp_assign_id(s.tcp);
     }
     else
     {
@@ -134,13 +134,7 @@ SocketResult c_close(Socket socket)
         // If tcp_close drove us straight to closed (e.g. listen with no children,
         // or syn_sent), the PCB has already been unregistered and we own it.
         if (s.tcp.state == TcpState.closed)
-        {
-            s.tcp.send_buf.clear();
-            s.tcp.recv_buf.clear();
-            s.tcp.accept_queue.clear();
-            s.tcp.child_list.clear();
-            defaultAllocator().freeT(s.tcp);
-        }
+            free_pcb(s.tcp);
     }
     _slots.remove(socket.handle);
     defaultAllocator().freeT(s);

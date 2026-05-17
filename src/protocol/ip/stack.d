@@ -33,6 +33,7 @@ nothrow @nogc:
 
 
 __gshared uint _route_gen = 1;
+__gshared ushort _ip_id;
 
 void bump_route_generation()
 {
@@ -40,6 +41,9 @@ void bump_route_generation()
 }
 uint route_generation()
     => _route_gen;
+
+ushort next_ip_id()
+    => ++_ip_id;
 
 
 struct RouteResult
@@ -147,6 +151,13 @@ nothrow @nogc:
 
     RouteResult route_lookup_v4_dst(IPAddr dst)
     {
+        if (dst.is_loopback())
+        {
+            version (DebugIPRoute)
+                log.trace("route dst=", dst, " -> local (loopback)");
+            return RouteResult(RouteResult.Kind.local, null, dst, 0);
+        }
+
         foreach (a; Collection!IPAddress().values)
         {
             if (a.address.addr == dst)
@@ -222,6 +233,12 @@ nothrow @nogc:
         // TODO: ppp handler -> register for an appropriate PacketType
         // TODO: raw_ip tunnel handler -> register for PacketType.raw (peek IP version byte)
     }
+
+    // Diagnostics access to the neighbour caches (for /protocol/ip/neighbour print).
+    ref inout(NeighbourCache!IPAddr) neighbour_v4_cache() inout pure return
+        => neighbour_v4;
+    ref inout(NeighbourCache!IPv6Addr) neighbour_v6_cache() inout pure return
+        => neighbour_v6;
 
 private:
 
@@ -374,8 +391,7 @@ private:
         if (link_addr is null)
         {
             version (DebugIPEgress)
-                log.trace("egress drop: no neighbour for ", next_hop);
-            // TODO: queue pending packet, kick off ARP request
+                log.trace("egress defer: no neighbour for ", next_hop, " (queued, awaiting resolution)");
             return;
         }
 

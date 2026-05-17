@@ -89,9 +89,12 @@ void on_arp(ref const Packet pkt, BaseInterface iface, ref NeighbourCache!IPAddr
     }
 
     const a = cast(const(ArpV4Packet)*)data.ptr;
-    if (be_u16(a.htype) != ArpHType.ethernet) return;
-    if (be_u16(a.ptype) != EtherType.ip4)     return;
-    if (a.hlen != 6 || a.plen != 4)           return;
+    if (be_u16(a.htype) != ArpHType.ethernet)
+        return;
+    if (be_u16(a.ptype) != EtherType.ip4)
+        return;
+    if (a.hlen != 6 || a.plen != 4)
+        return;
 
     ushort op = be_u16(a.op);
 

@@ -2,10 +2,16 @@ module protocol.ip.neighbour;
 
 import urt.array;
 import urt.inet;
+import urt.log;
 import urt.time;
 
 import router.iface;
 import router.iface.packet;
+
+private alias log = Log!"neighbour";
+
+// TODO: replace fixed-slot pending queue with byte-budget buffer (cf. Linux unres_qlen_bytes).
+private enum pending_queue_depth = 3;
 
 nothrow @nogc:
 
@@ -28,7 +34,8 @@ struct NeighbourEntry(IP)
     MonoTime last_confirmed;
     MonoTime last_request;      // when we last sent a resolution request
     ubyte retry_count;
-    Packet* pending;            // single-slot queue; replaced on overflow
+    ubyte pending_count;
+    Packet*[pending_queue_depth] pending;
 }
 
 struct NeighbourCache(IP)
@@ -38,8 +45,12 @@ nothrow @nogc:
     alias SendRequestDg = void delegate(IP target, BaseInterface iface) nothrow @nogc;
     alias DrainDg       = void delegate(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr) nothrow @nogc;
 
-    enum uint  retry_interval_ms = 1000;
-    enum ubyte max_retries       = 3;
+    enum uint  retry_interval_ms       = 1000;
+    enum ubyte max_retries             = 3;
+    enum uint  reachable_time_ms       = 30_000;
+    enum uint  stale_probe_interval_ms = 5_000;
+    enum ubyte max_stale_probes        = 3;
+    enum uint  failed_lifetime_ms      = 60_000;
 
     SendRequestDg send_request;
     DrainDg       drain;
@@ -98,6 +109,13 @@ nothrow @nogc:
                 case stale:
                     return e.link_addr[0 .. e.link_addr_len];
                 case failed:
+                    // peer may have come back -- restart resolution
+                    e.state        = NeighbourState.incomplete;
+                    e.last_request = getTime();
+                    e.retry_count  = 1;
+                    queue_pending(*e, pending);
+                    if (send_request)
+                        send_request(ip, iface);
                     return null;
                 case incomplete:
                     queue_pending(*e, pending);
@@ -111,7 +129,7 @@ nothrow @nogc:
         n.state         = NeighbourState.incomplete;
         n.last_request  = getTime();
         n.retry_count   = 1;
-        n.pending       = pending.clone();
+        queue_pending(n, pending);
         _entries ~= n;
 
         if (send_request)
@@ -124,22 +142,64 @@ nothrow @nogc:
     {
         foreach (ref e; _entries[])
         {
-            if (e.state != NeighbourState.incomplete)
-                continue;
-            if (now - e.last_request < retry_interval_ms.msecs)
-                continue;
-
-            if (e.retry_count >= max_retries)
+            final switch (e.state) with (NeighbourState)
             {
-                e.state = NeighbourState.failed;
-                free_pending(e);
-                continue;
-            }
+                case incomplete:
+                    if (now - e.last_request < retry_interval_ms.msecs)
+                        break;
+                    if (e.retry_count >= max_retries)
+                    {
+                        e.state = NeighbourState.failed;
+                        e.last_confirmed = now;     // repurposed as failure timestamp
+                        free_pending(e);
+                        break;
+                    }
+                    ++e.retry_count;
+                    e.last_request = now;
+                    if (send_request)
+                        send_request(e.ip, e.iface);
+                    break;
 
-            ++e.retry_count;
-            e.last_request = now;
-            if (send_request)
-                send_request(e.ip, e.iface);
+                case reachable:
+                    if (now - e.last_confirmed >= reachable_time_ms.msecs)
+                    {
+                        e.state        = NeighbourState.stale;
+                        e.last_request = now;       // arm probe interval
+                        e.retry_count  = 0;
+                    }
+                    break;
+
+                case stale:
+                    if (now - e.last_request < stale_probe_interval_ms.msecs)
+                        break;
+                    if (e.retry_count >= max_stale_probes)
+                    {
+                        e.state          = NeighbourState.failed;
+                        e.last_confirmed = now;
+                        break;
+                    }
+                    ++e.retry_count;
+                    e.last_request = now;
+                    if (send_request)
+                        send_request(e.ip, e.iface);
+                    break;
+
+                case failed:
+                    break;
+            }
+        }
+
+        // GC failed entries past their lifetime; iterate in reverse for swap-remove safety
+        for (size_t i = _entries.length; i > 0; --i)
+        {
+            size_t idx = i - 1;
+            auto e = &_entries[idx];
+            if (e.state == NeighbourState.failed
+                && now - e.last_confirmed >= failed_lifetime_ms.msecs)
+            {
+                free_pending(*e);
+                _entries.removeSwapLast(idx);
+            }
         }
     }
 
@@ -149,28 +209,46 @@ nothrow @nogc:
 private:
     void queue_pending(ref NeighbourEntry!IP e, ref Packet pkt)
     {
-        free_pending(e);
-        e.pending = pkt.clone();
+        if (e.pending_count == pending_queue_depth)
+        {
+            // evict oldest to make room for newest
+            e.pending[0].free_clone();
+            foreach (i; 1 .. pending_queue_depth)
+                e.pending[i - 1] = e.pending[i];
+            --e.pending_count;
+
+            ++_pending_overflow;
+            if (_pending_overflow == 1 || (_pending_overflow & 0xFF) == 0)
+                log.warning("pending-queue overflow #", _pending_overflow,
+                            ": dropping queued packet for ", e.ip,
+                            " on ", e.iface.name, " (state=", e.state, ")");
+        }
+        e.pending[e.pending_count] = pkt.clone();
+        ++e.pending_count;
     }
 
     void free_pending(ref NeighbourEntry!IP e)
     {
-        if (!e.pending)
-            return;
-        e.pending.free_clone();
-        e.pending = null;
+        foreach (i; 0 .. e.pending_count)
+            e.pending[i].free_clone();
+        e.pending_count = 0;
     }
 
     void drain_pending(ref NeighbourEntry!IP e)
     {
-        if (!e.pending || !drain)
+        if (!drain)
         {
             free_pending(e);
             return;
         }
-        drain(*e.pending, e.iface, e.link_addr[0 .. e.link_addr_len]);
-        free_pending(e);
+        foreach (i; 0 .. e.pending_count)
+        {
+            drain(*e.pending[i], e.iface, e.link_addr[0 .. e.link_addr_len]);
+            e.pending[i].free_clone();
+        }
+        e.pending_count = 0;
     }
 
     Array!(NeighbourEntry!IP) _entries;
+    ulong _pending_overflow;        // diagnostic: total packets dropped by single-slot pending queue
 }

@@ -231,7 +231,7 @@ nothrow @nogc:
         Result r = recv(_socket, null, MsgFlags.peek, &bytesReceived);
         if (r != Result.success && r.socket_result != SocketResult.would_block)
         {
-            // something happened... we should try and reconnect I guess?
+            log.warning("restart: liveness poll failed (", r.socket_result, ")");
             restart();
             return;
         }
@@ -288,7 +288,10 @@ nothrow @nogc:
         {
             SocketResult sr = r.socket_result;
             if (sr != SocketResult.would_block)
+            {
+                log.warning("restart: recv failed (", sr, ")");
                 restart();
+            }
             return 0;
         }
         if (_logging)
@@ -331,7 +334,7 @@ nothrow @nogc:
         if (r.failed && r.socket_result != SocketResult.would_block)
         {
             version (DebugTCPStream)
-                log.warning("send failed: ", r.socket_result, "; restarting");
+                log.warning("restart: send failed (", r.socket_result, ")");
             restart();
             return 0;
         }
@@ -437,7 +440,7 @@ private:
             if (r.failed && r.socket_result != SocketResult.would_block)
             {
                 version (DebugTCPStream)
-                    log.warning("drain failed: ", r.socket_result, "; restarting (pending=", _pending.length, ')');
+                    log.warning("restart: drain send failed (", r.socket_result, "), pending=", _pending.length);
                 restart();
                 return false;
             }
