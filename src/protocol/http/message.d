@@ -75,9 +75,7 @@ nothrow @nogc:
     ushort status_code;             // Status code (e.g., 200, 404, 500) // TODO: Collapse with flags
     String reason;                  // Reason
 
-    // TODO: these fields don't feel right... not clear what they are.
-    String url;                     // URL or path (e.g., "/index.html" or full "https://example.com")
-    String request_target;
+    String request_target;          // Path portion of the request (e.g., "/settings")
 
     String username;                // Username
     String password;                // Password
@@ -579,21 +577,6 @@ void http_date(ref const DateTime date, ref Array!char str)
                      day[0..3], date.day, month[0..3], date.year, date.hour, date.minute, date.second);
 }
 
-HTTPMessage create_request(HTTPVersion http_version, HTTPMethod method, String url, String content_type, const(void)[] content)
-{
-    // TODO: break the URL into host and request_target
-    assert(false, "NOT TESTED");
-
-    HTTPMessage msg;
-    msg.http_version = http_version;
-    msg.method = method;
-    msg.url = url.move;
-    assert (method < HTTPMethod.POST && (content_type || content), "Method can not have body data!");
-    msg.content_type = content_type.move;
-    msg.content = cast(ubyte[])content;
-    return msg;
-}
-
 HTTPMessage create_response(HTTPVersion http_version, ushort status_code, String reason, String content_type, const(void)[] content)
 {
     HTTPMessage msg;
@@ -620,7 +603,7 @@ Array!char format_message(ref HTTPMessage message, const(char)[] host = null)
     bool include_body = true;
     if (message.method == HTTPMethod.HEAD || message.method == HTTPMethod.TRACE || message.method == HTTPMethod.CONNECT)
         include_body = false;
-    if (include_body && message.content.length == 0 && !(message.flags & HTTPFlags.ForceBody))
+    else if (message.content.length == 0 && !(message.flags & HTTPFlags.ForceBody) && !(message.method == HTTPMethod.POST || message.method == HTTPMethod.PUT || message.method == HTTPMethod.PATCH))
         include_body = false;
 
     Array!char msg;

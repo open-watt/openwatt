@@ -67,14 +67,21 @@ nothrow @nogc:
         }
     }
 
-    final void on_change(Element* e, ref const Variant val, SysTime timestamp, Subscriber)
+    final void on_change(Element* e, ref const Variant val, SysTime timestamp, Subscriber who)
     {
-        // this is called when the element is changed...
-        foreach (se; elements)
+        if (who is this)
+            return;
+
+        foreach (ref se; elements)
         {
             if (se.element != e)
                 continue;
-//            broker.publish(null, 0, se.write_topic[], cast(ubyte[])"true", null, cast(MonoTime)timestamp);
+            if (!se.write_topic.empty)
+            {
+                const(char)[] text = format_value(val, se.desc);
+                broker.publish(null, 0, se.write_topic[], cast(const(ubyte)[])text, null, cast(MonoTime)timestamp);
+            }
+            return;
         }
     }
 
@@ -91,7 +98,7 @@ nothrow @nogc:
 
             // Parse payload as UTF-8 text and convert to Variant
             const(char)[] payload_str = cast(const(char)[])payload;
-            Variant value = parse_mqtt_payload(payload_str, e.desc);
+            Variant value = sample_value(payload_str, e.desc);
 
             if (value != Variant())
             {
@@ -118,63 +125,5 @@ private:
         TextValueDesc desc;
         String read_topic;
         String write_topic;
-    }
-}
-
-Variant parse_mqtt_payload(const(char)[] payload, ref const TextValueDesc desc)
-{
-    import urt.inet;
-
-    final switch (desc.type) with (TextType)
-    {
-        case bool_:
-            if (payload.ieq("true") || payload.ieq("1") || payload.ieq("on"))
-                return Variant(true);
-//            if (payload.ieq("false") || payload.ieq("0") || payload.ieq("off"))
-//                return Variant(false);
-            return Variant(false); // ...or should we record a null? (probable downstream errors...)
-
-        case num:
-            import urt.si.quantity;
-
-            size_t taken;
-            int e;
-            uint base;
-            long raw_value = parse_int_with_exponent_and_base(payload, e, base, &taken);
-            if (taken == 0)
-                return Variant(0); // ...or should we record a null? (probable downstream errors...)
-
-            if (e == 0 && desc.pre_scale == 1)
-                return Variant(Quantity!long(raw_value, desc.unit));
-
-            // TODO: handle this better; split the int and float cases...
-            double value = raw_value * double(base)^^e;
-
-            if (desc.pre_scale != 1)
-                return Variant(Quantity!double(value * desc.pre_scale, desc.unit));
-
-            return Variant(Quantity!double(value, desc.unit));
-
-        case str:
-            // Return string as-is (just use the slice, no allocation needed)
-            return Variant(payload);
-
-        case dt:
-            SysTime t;
-            if (t.fromString(payload) <= 0)
-                return Variant(SysTime());
-            return Variant(t);
-
-        case ipaddr:
-            IPAddr ip;
-            if (ip.fromString(payload) <= 0)
-                return Variant(IPAddr());
-            return Variant(ip);
-
-        case ip6addr:
-            IPv6Addr ip6;
-            if (ip6.fromString(payload) <= 0)
-                return Variant(IPv6Addr());
-            return Variant(ip6);
     }
 }

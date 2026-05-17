@@ -1,10 +1,11 @@
 module manager.sampler;
 
-import urt.conv : parse_int_fast;
+import urt.conv;
 import urt.endian;
 import urt.meta.enuminfo;
 import urt.si.unit;
 import urt.string;
+import urt.time;
 import urt.util : max, byte_reverse;
 import urt.variant;
 
@@ -106,7 +107,10 @@ enum TextType : ubyte
     bool_,
     num,
     str,
+    enum_,
+    bf,
     dt,
+    inetaddr,
     ipaddr,
     ip6addr,
 }
@@ -118,6 +122,7 @@ nothrow @nogc:
     TextType type;
     ScaledUnit unit;
     float pre_scale = 1;
+    const(VoidEnumInfo)* enum_info;
 
     this(TextType type_) pure
     {
@@ -129,6 +134,12 @@ nothrow @nogc:
         type = type_;
         unit = unit_;
         pre_scale = pre_scale_;
+    }
+
+    this(TextType type_, const(VoidEnumInfo)* ei) pure
+    {
+        type = type_;
+        enum_info = ei;
     }
 
     bool parse_units(const(char)[] units) pure
@@ -249,6 +260,12 @@ nothrow @nogc:
 
     const(VoidEnumInfo)* enum_info() const pure
         => is_enum() ? _enum_info : null;
+
+    ScaledUnit unit() const pure
+        => is_enum ? ScaledUnit() : _unit;
+
+    float pre_scale() const pure
+        => is_enum ? 1 : _pre_scale;
 
 private:
     DataType _type;
@@ -472,6 +489,138 @@ Variant sample_value(const void* data, ref const ValueDesc desc)
     }
     r.set_unit(desc._unit);
     return r;
+}
+
+Variant sample_value(const(char)[] data, ref const TextValueDesc desc)
+{
+    size_t taken = void;
+
+    final switch (desc.type) with (TextType)
+    {
+        case bool_:
+            if (data.ieq("true") || data.ieq("1") || data.ieq("on"))
+                return Variant(true);
+//            if (payload.ieq("false") || payload.ieq("0") || payload.ieq("off"))
+//                return Variant(false);
+            return Variant(false); // ...or should we record a null? (probable downstream errors...)
+
+        case num:
+            import urt.si.quantity;
+
+            int e;
+            uint base;
+            long raw_value = parse_int_with_exponent_and_base(data, e, base, &taken);
+            if (taken == 0)
+                return Variant(Quantity!long(0, desc.unit)); // ...or should we record a null? (probable downstream errors...)
+
+            if (e == 0 && desc.pre_scale == 1)
+                return Variant(Quantity!long(raw_value, desc.unit));
+
+            double value = raw_value * double(base)^^e;
+
+            if (desc.pre_scale != 1)
+                return Variant(Quantity!double(value * desc.pre_scale, desc.unit));
+
+            return Variant(Quantity!double(value, desc.unit));
+
+        case str:
+            return Variant(data);
+
+        case enum_:
+        case bf:
+            long ef_val = parse_int_with_base(data, &taken);
+            if (taken == data.length)
+            {
+                if (desc.enum_info)
+                    return Variant(ef_val, desc.enum_info);
+                return Variant(ef_val);
+            }
+            if (desc.enum_info)
+            {
+                ef_val = 0;
+                if (desc.type == TextType.bf)
+                {
+                    const(char)[] remaining = data;
+                    while (!remaining.empty)
+                    {
+                        const(char)[] key = remaining.split!'|'.trimFront.trimBack;
+                        if (!key.empty)
+                            ef_val |= desc.enum_info.value_for(key).asLong;
+                    }
+                }
+                else
+                    ef_val = desc.enum_info.value_for(data).asLong;
+                return Variant(ef_val, desc.enum_info);
+            }
+            return Variant(data);
+
+        case dt:
+            SysTime t;
+            if (t.fromString(data) <= 0)
+                return Variant(SysTime());
+            return Variant(t);
+
+        case inetaddr:
+            import urt.inet;
+            InetAddress addr;
+            if (addr.fromString(data) <= 0)
+                return Variant(InetAddress());
+            return Variant(addr);
+
+        case ipaddr:
+            import urt.inet;
+            IPAddr ip;
+            if (ip.fromString(data) <= 0)
+                return Variant(IPAddr());
+            return Variant(ip);
+
+        case ip6addr:
+            import urt.inet;
+            IPv6Addr ip6;
+            if (ip6.fromString(data) <= 0)
+                return Variant(IPv6Addr());
+            return Variant(ip6);
+    }
+}
+
+const(char)[] format_value(ref const Variant val, ref const TextValueDesc desc)
+{
+    import urt.mem.temp : talloc, tstring;
+
+    if (val.isNull)
+        return "null";
+
+    final switch (desc.type) with (TextType)
+    {
+        case bool_:
+            return val.asBool ? "true" : "false";
+
+        case num:
+            // TODO: WHAT ABOUT QUANTITIES?
+            if (val.isDouble || desc.pre_scale != 1)
+            {
+                double d = val.asDouble;
+                if (desc.pre_scale != 1)
+                    d = d / desc.pre_scale;
+                return tstring(d);
+            }
+            else if (val.isLong())
+                return tstring(val.asLong());
+            return tstring(val.asUlong());
+
+        case str:
+            return val.asString;
+
+        case enum_:
+        case bf:
+            return tstring(val.asLong);
+
+        case dt:
+        case inetaddr:
+        case ipaddr:
+        case ip6addr:
+            return tstring(val);
+    }
 }
 
 void adjust_value(ref Variant value, ref const ValueDesc desc)

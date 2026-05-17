@@ -3,6 +3,7 @@ module manager.expression;
 import urt.array;
 import urt.conv;
 import urt.log;
+import urt.map;
 import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.si.unit;
@@ -132,8 +133,8 @@ struct EvalContext
 {
     import manager.component;
 
-    // TODO: local variable storage...
     Component root;
+    Map!(const(char)[], Variant)* locals;
 }
 
 struct Expression
@@ -290,7 +291,23 @@ nothrow @nogc:
             case Type.str:
                 return Variant(get_str());
             case Type.var:
-                assert(false, "TODO: lookup variable...");
+                if (ctx.locals !is null)
+                {
+                    const(char)[] path = get_str();
+                    const(char)[] first = path.split!'.';
+                    if (Variant* val = first in *ctx.locals)
+                    {
+                        Variant* current = val;
+                        while (!path.empty && current !is null && current.isObject)
+                        {
+                            const(char)[] segment = path.split!'.';
+                            current = current.getMember(segment);
+                        }
+                        if (current !is null && path.empty)
+                            return *current;
+                    }
+                }
+                return Variant(null);
             case Type.elem:
                 const(char)[] id = get_str();
                 Element* e = ctx.root ? ctx.root.find_element(id) : g_app.find_element(id);
@@ -381,7 +398,9 @@ nothrow @nogc:
                 return Variant(ty == Type.eq ? cmp : !cmp);
             case Type.lt:
             case Type.le:
-                assert(false, "TODO: comparison operators");
+                Variant l = left.evaluate(ctx);
+                Variant r = right.evaluate(ctx);
+                return Variant(ty == Type.lt ? l < r : l <= r);
             case Type.add:
             case Type.sub:
             case Type.mul:
