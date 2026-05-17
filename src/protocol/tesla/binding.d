@@ -204,6 +204,8 @@ protected:
         add_sample(meter, "import", SampleKind.import_, quantity_format(ValueType.u64, WattHour));
 
         _built = true;
+        device.notify(ComponentEvent.tree_changed);
+        device.notify(ComponentEvent.online);
         return true;
     }
 
