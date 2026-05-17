@@ -7,7 +7,6 @@ import urt.si.quantity;
 import urt.string;
 
 import apps.energy.appliance;
-import apps.energy.manager;
 import apps.energy.meter;
 
 import manager.component;
@@ -20,6 +19,28 @@ enum CircuitType : ubyte { unknown, dc, single_phase, split_phase, three_phase, 
 
 bool is_multi_phase(CircuitType type) pure nothrow @nogc
     => type == CircuitType.three_phase || type == CircuitType.delta;
+
+
+// Fields that sum across siblings/children on the same circuit boundary.
+// Primary AC fields (V, I, S, PF, phase) don't sum meaningfully and are derived
+// after the sum from active + reactive + voltage.
+private static immutable MeterField[] sumFields = [
+    MeterField.power,
+    MeterField.reactive,
+    MeterField.total_active,
+    MeterField.total_import_active,
+    MeterField.total_export_active,
+    MeterField.total_absolute_active,
+    MeterField.total_reactive,
+    MeterField.total_inductive,
+    MeterField.total_capacitive,
+    MeterField.total_absolute_reactive,
+    MeterField.total_reactive_import,
+    MeterField.total_reactive_export,
+    MeterField.total_apparent,
+    MeterField.total_apparent_import,
+    MeterField.total_apparent_export,
+];
 
 
 struct Circuit
@@ -44,23 +65,42 @@ nothrow @nogc:
     ubyte parent_phase;
     ubyte meter_phase;
 
+    // Runtime state at this circuit boundary. Provenance is per-(field, phase):
+    // measured/synthesized from a real meter, or inferred_sum/inferred_subtraction
+    // when computed from children. `rogue` is populated only at metered circuits
+    // and carries the residual after known children/loads are subtracted out.
     MeterData meter_data;
     MeterData rogue;
 
+    // Manual override: declares this circuit cut off from its parent. Used for
+    // transfer switches and other disconnects that aren't observable from voltage.
+    bool isolated;
+
+    // Computed per tick by update_liveness(): whether the circuit currently has
+    // voltage on it. A metered circuit derives this from its own measured voltage;
+    // an unmetered circuit inherits from its parent (unless isolated).
+    bool is_live;
+
     void update()
     {
-        // update the circuit graph
+        // Update children first (depth-first traversal of the circuit tree)
         foreach (c; sub_circuits)
             c.update();
+
+        // Update attached appliances' meter_data
         foreach (a; appliances)
         {
-            if (a.meter)
+            Component am = a.meter_ref;
+            if (am)
             {
-                MeterData raw = get_meter_data(a.meter);
+                MeterData raw = get_meter_data(am);
                 CircuitType atype = a.meter_phase != 0 ? CircuitType.single_phase : raw.type;
                 a.meter_data = extract_phase(raw, atype, a.meter_phase);
             }
         }
+
+        meter_data.reset_to_missing();
+        rogue.reset_to_missing();
 
         if (meter)
         {
@@ -69,141 +109,226 @@ nothrow @nogc:
                 type = raw.type;
             meter_data = extract_phase(raw, type, meter_phase);
         }
+
+        fill_from_children();
+        derive_secondary_fields(meter_data, Provenance.synthesized);
+
+        if (meter)
+            compute_rogue();
+    }
+
+    // Determine liveness for this circuit and propagate to children.
+    // Caller invokes on the root after Circuit.update(); the walk is top-down
+    // because unmetered children inherit from their parent.
+    void update_liveness(float voltage_threshold)
+    {
+        if (meter && meter_data.has(MeterField.voltage))
+        {
+            // Direct evidence: live if any phase shows voltage above the threshold
+            float v = 0;
+            foreach (j; 0..4)
+            {
+                if (meter_data.has(MeterField.voltage, cast(ubyte)j))
+                {
+                    float pv = meter_data.voltage[j].value;
+                    if (pv > v)
+                        v = pv;
+                }
+            }
+            is_live = v > voltage_threshold;
+        }
         else
         {
-            // no meter; we'll infer usage from sub-circuits and appliances...
-            // of course, this data is incomplete, and not all energy on this circuit will be accounted for
-
-            meter_data.voltage[] = MeterVolts(0);
-            meter_data.cross_phase_voltage[] = MeterVolts(0);
-            meter_data.freq = 0;
-
-            meter_data.active[] = MeterWatts(0);
-            meter_data.reactive[] = 0;
-
-            // sum the known loads...
-            int num_loads = 0;
-            foreach (c; sub_circuits)
-            {
-                if (c.meter_data.fields == 0)
-                    continue;
-                ++num_loads;
-
-                meter_data.active[] += c.meter_data.active[];
-                // TODO: I think summing reactive power this way is imprecise? (phase cancellation effects?)
-                meter_data.reactive[] += c.meter_data.reactive[];
-
-                meter_data.freq += c.meter_data.freq;
-            }
-            foreach (a; appliances)
-            {
-                if (a.meter_data.fields == 0)
-                    continue;
-                ++num_loads;
-
-                meter_data.active[] += a.meter_data.active[];
-                // TODO: I think summing reactive power this way is imprecise? (phase cancellation effects?)
-                meter_data.reactive[] += a.meter_data.reactive[];
-
-                meter_data.freq += a.meter_data.freq;
-            }
-            // average the frequency (there really shouldn't be any meaningful deviation!)
-            if (num_loads)
-                meter_data.freq /= num_loads;
-
-            // calculate the apparent power, power factor, phase angle, voltage, and current...
-            foreach (i; 0..4)
-            {
-                // apparent power can be calculated from active and reactive power
-                meter_data.apparent[i] = sqrt(meter_data.active[i].value^^2 + meter_data.reactive[i]^^2);
-
-                // with the apparent power, we can calculate the power factor and phase angle
-                if (meter_data.apparent[i] > 0)
-                    meter_data.pf[i] = fabs(meter_data.active[i].value) / meter_data.apparent[i];
-                else
-                    meter_data.pf[i] = meter_data.active[i] ? 1 : 0;
-                if (meter_data.pf[i] != 0)
-                {
-                    // in degrees
-                    meter_data.phase[i] = acos(meter_data.pf[i])*(1.0/(2*PI));
-                    if (meter_data.reactive[i] < 0)
-                        meter_data.phase[i] = -meter_data.phase[i];
-                }
-
-                // this might be wrong to calculate the voltage... (weighted average of sub-circuits and appliances)
-                // but I think it's better than averaging the violtages of the sub-circuits
-                if (meter_data.apparent[i] > 0)
-                {
-                    foreach (c; sub_circuits)
-                        meter_data.voltage[i].value += c.meter_data.apparent[i] * c.meter_data.voltage[i].value;
-                    foreach (a; appliances)
-                        meter_data.voltage[i].value += a.meter_data.apparent[i] * a.meter_data.voltage[i].value;
-                    meter_data.voltage[i].value /= meter_data.apparent[i];
-                }
-
-                // and given the voltage, we can calculate the current
-                // TODO: confirm; I found this from some reference. I'm not sure why `/V` is inside the sqrt?
-                //       I would have guessed A = VA/V, rather than A = sqrt(V²A²/V²)...
-                if (meter_data.voltage[i])
-                    meter_data.current[i].value = sqrt((meter_data.active[i].value^^2 + meter_data.reactive[i]^^2) / meter_data.voltage[i].value^^2);
-                else
-                    meter_data.current[i] = Amps(0);
-            }
-            // the same reference seemed to think this was also better to sum the currents
-            // TODO: confirm; I would have guessed SUM = L1+L2+L3, rather than SUM = sqrt(L1²+L2²+L3²)...
-            meter_data.current[0].value = sqrt(meter_data.current[1].value^^2 + meter_data.current[2].value^^2 + meter_data.current[3].value^^2);
+            // No voltage evidence: inherit from parent, suppressed by isolation
+            is_live = (parent ? parent.is_live : true) && !isolated;
         }
 
-        // calculate rogue load...
-        if (meter)
+        foreach (c; sub_circuits)
+            c.update_liveness(voltage_threshold);
+    }
+
+private:
+
+    void fill_from_children()
+    {
+        foreach (field; sumFields)
         {
-            // if the circuit has a meter, then we want to know what portion of the load is not being sub-metered...
-            rogue.voltage[] = meter_data.voltage[];
-            rogue.cross_phase_voltage[] = meter_data.cross_phase_voltage[];
-            rogue.freq = meter_data.freq;
+            foreach (j; 0..4)
+            {
+                if (meter_data.has(field, cast(ubyte)j))
+                    continue;
+                float sum = 0;
+                bool any = false;
+                foreach (c; sub_circuits)
+                {
+                    if (c.meter_data.has(field, cast(ubyte)j))
+                    {
+                        sum += c.meter_data.read_value(field, cast(ubyte)j);
+                        any = true;
+                    }
+                }
+                foreach (a; appliances)
+                {
+                    if (a.meter_data.has(field, cast(ubyte)j))
+                    {
+                        sum += a.meter_data.read_value(field, cast(ubyte)j);
+                        any = true;
+                    }
+                }
+                if (any)
+                {
+                    meter_data.write_value(field, cast(ubyte)j, sum);
+                    meter_data.mark(field, cast(ubyte)j, Provenance.inferred_sum);
+                }
+            }
+        }
 
-            rogue.active[] = meter_data.active[];
-            rogue.reactive[] = meter_data.reactive[];
-
-            // subtract the known loads from the meter total...
+        foreach (j; 0..4)
+        {
+            if (meter_data.has(MeterField.voltage, cast(ubyte)j))
+                continue;
             foreach (c; sub_circuits)
             {
-                rogue.active[] -= c.meter_data.active[];
-                // TODO: I think subtracting reactive power this way is imprecise? (phase cancellation effects?)
-                rogue.reactive[] -= c.meter_data.reactive[];
+                if (c.meter_data.has(MeterField.voltage, cast(ubyte)j))
+                {
+                    meter_data.voltage[j] = c.meter_data.voltage[j];
+                    meter_data.mark(MeterField.voltage, cast(ubyte)j, Provenance.inferred_sum);
+                    break;
+                }
             }
+            if (meter_data.has(MeterField.voltage, cast(ubyte)j))
+                continue;
             foreach (a; appliances)
             {
-                rogue.active[] -= a.meter_data.active[];
-                // TODO: I think subtracting reactive power this way is imprecise? (phase cancellation effects?)
-                rogue.reactive[] -= a.meter_data.reactive[];
-            }
-            foreach (i; 0..4)
-            {
-                // calculate the rogue apparent power
-                rogue.apparent[i] = sqrt(rogue.active[i].value^^2 + rogue.reactive[i]^^2);
-
-                // calculate rogue power factor and phase angle
-                if (rogue.apparent[i] > 0)
-                    rogue.pf[i] = rogue.active[i].value / rogue.apparent[i];
-                else
-                    rogue.pf[i] = rogue.active[i] ? 1 : 0;
-                if (rogue.pf[i] != 0)
+                if (a.meter_data.has(MeterField.voltage, cast(ubyte)j))
                 {
-                    // in degrees
-                    rogue.phase[i] = acos(rogue.pf[i])*(1.0/(2*PI));
-                    if (rogue.reactive[i] < 0)
-                        rogue.phase[i] = -rogue.phase[i];
+                    meter_data.voltage[j] = a.meter_data.voltage[j];
+                    meter_data.mark(MeterField.voltage, cast(ubyte)j, Provenance.inferred_sum);
+                    break;
                 }
-
-                // calculate rogue currents assuming the voltages specified by the meter
-                if (rogue.voltage[i])
-                    rogue.current[i].value = sqrt((rogue.active[i].value^^2 + rogue.reactive[i]^^2) / rogue.voltage[i].value^^2);
-                else
-                    rogue.current[i] = Amps(0);
             }
-            // calculate the sum of the rogue currents
-            rogue.current[0].value = sqrt(rogue.current[1].value^^2 + rogue.current[2].value^^2 + rogue.current[3].value^^2);
+        }
+
+        if (meter_data.has(MeterField.frequency))
+            return;
+        foreach (c; sub_circuits)
+        {
+            if (c.meter_data.has(MeterField.frequency))
+            {
+                meter_data.freq = c.meter_data.freq;
+                meter_data.mark(MeterField.frequency, 0, Provenance.inferred_sum);
+                return;
+            }
+        }
+        foreach (a; appliances)
+        {
+            if (a.meter_data.has(MeterField.frequency))
+            {
+                meter_data.freq = a.meter_data.freq;
+                meter_data.mark(MeterField.frequency, 0, Provenance.inferred_sum);
+                return;
+            }
+        }
+    }
+
+    // Metered circuit: rogue = meter total minus the sum of known children/loads.
+    // Per (field, phase). Marks rogue when at least one contributor was subtracted;
+    // leaves missing (NaN) where there are no children/loads to attribute to.
+    void compute_rogue()
+    {
+        foreach (field; sumFields)
+        {
+            foreach (j; 0..4)
+            {
+                if (!meter_data.has(field, cast(ubyte)j))
+                    continue;
+                float total = meter_data.read_value(field, cast(ubyte)j);
+                bool any_subtracted = false;
+                foreach (c; sub_circuits)
+                {
+                    if (c.meter_data.has(field, cast(ubyte)j))
+                    {
+                        total -= c.meter_data.read_value(field, cast(ubyte)j);
+                        any_subtracted = true;
+                    }
+                }
+                foreach (a; appliances)
+                {
+                    if (a.meter_data.has(field, cast(ubyte)j))
+                    {
+                        total -= a.meter_data.read_value(field, cast(ubyte)j);
+                        any_subtracted = true;
+                    }
+                }
+                if (any_subtracted)
+                {
+                    rogue.write_value(field, cast(ubyte)j, total);
+                    rogue.mark(field, cast(ubyte)j, Provenance.rogue);
+                }
+            }
+        }
+
+        // Voltage/frequency on rogue inherit from the parent meter: it's the same wire.
+        foreach (j; 0..4)
+        {
+            if (meter_data.has(MeterField.voltage, cast(ubyte)j))
+            {
+                rogue.voltage[j] = meter_data.voltage[j];
+                rogue.mark(MeterField.voltage, cast(ubyte)j, Provenance.rogue);
+            }
+        }
+        if (meter_data.has(MeterField.frequency))
+        {
+            rogue.freq = meter_data.freq;
+            rogue.mark(MeterField.frequency, 0, Provenance.rogue);
+        }
+
+        rogue.type = meter_data.type;
+        derive_secondary_fields(rogue, Provenance.rogue);
+    }
+}
+
+
+// Derive current, apparent, PF, phase angle from active + reactive (+ voltage), per phase.
+// Used by both unmetered inference and rogue computation; only fills cells that
+// don't already have a value.
+private void derive_secondary_fields(ref MeterData r, Provenance prov) pure
+{
+    foreach (j; 0..4)
+    {
+        if (!r.has(MeterField.power, cast(ubyte)j))
+            continue;
+        float p = r.active[j].value;
+        float q = r.has(MeterField.reactive, cast(ubyte)j) ? r.reactive[j] : 0;
+
+        if (!r.has(MeterField.apparent, cast(ubyte)j))
+        {
+            r.apparent[j] = sqrt(p*p + q*q);
+            r.mark(MeterField.apparent, cast(ubyte)j, prov);
+        }
+
+        if (!r.has(MeterField.power_factor, cast(ubyte)j))
+        {
+            r.pf[j] = r.apparent[j] > 0 ? fabs(p) / r.apparent[j] : (p != 0 ? 1 : 0);
+            r.mark(MeterField.power_factor, cast(ubyte)j, prov);
+        }
+
+        if (!r.has(MeterField.phase_angle, cast(ubyte)j))
+        {
+            if (r.pf[j] > 0 && r.pf[j] <= 1)
+            {
+                float phi = cast(float)(acos(r.pf[j]) * (180.0/PI));
+                if (q < 0)
+                    phi = -phi;
+                r.phase[j] = phi;
+                r.mark(MeterField.phase_angle, cast(ubyte)j, prov);
+            }
+        }
+
+        if (!r.has(MeterField.current, cast(ubyte)j) && r.has(MeterField.voltage, cast(ubyte)j) && r.voltage[j].value > 0)
+        {
+            r.current[j] = MeterAmps(r.apparent[j] / r.voltage[j].value);
+            r.mark(MeterField.current, cast(ubyte)j, prov);
         }
     }
 }

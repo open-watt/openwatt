@@ -1,17 +1,29 @@
 module apps.energy;
 
 import urt.array;
+import urt.lifetime;
+import urt.log;
 import urt.map;
 import urt.mem;
 import urt.meta.nullable;
 import urt.string;
+import urt.time : SysTime, getSysTime;
 import urt.variant;
 
 import apps.api : APIModule;
+import apps.energy.accounts;
+import apps.energy.allocator;
 import apps.energy.appliance;
 import apps.energy.circuit;
+import apps.energy.control;
+import apps.energy.forecast;
+import apps.energy.island;
 import apps.energy.manager;
 import apps.energy.meter;
+import apps.energy.planner;
+import apps.energy.policy;
+import apps.energy.state;
+import apps.energy.vehicle;
 
 import protocol.http.message;
 import protocol.http.server;
@@ -19,6 +31,7 @@ import protocol.http.server;
 import router.stream;
 
 import manager;
+import manager.collection;
 import manager.component;
 import manager.device;
 import manager.console.command;
@@ -37,44 +50,95 @@ class EnergyAppModule : Module
     mixin DeclareModule!"apps.energy";
 nothrow @nogc:
 
-    Map!(const(char)[], Appliance function(String id, EnergyManager* manager) nothrow @nogc) appliance_factory;
-
     EnergyManager* manager;
+
+    // Synthetic device that publishes the energy app's runtime state (per-island
+    // accounts, pressures, policy/allocation records). See state.d.
+    Device energy_device;
+
+    DailySnapshot daily;
+    Planner planner;
+    ControlRegistry registry;
+
+    Array!Device subscribed_devices;
 
     override void init()
     {
         g_app.register_enum!CircuitType();
-
-        register_appliance_type!Inverter();
-        register_appliance_type!EVSE();
-        register_appliance_type!Car();
-        register_appliance_type!HVAC();
-        register_appliance_type!WaterHeater();
+        g_app.register_enum!PolicyTier();
+        g_app.register_enum!PolicyShape();
 
         manager = defaultAllocator.allocT!EnergyManager();
+        energy_device = create_energy_device();
+        create_vehicles_device();
+        registry = defaultAllocator.allocT!ControlRegistry();
+
+        planner.supply_forecast = defaultAllocator.allocT!NoSupplyForecast();
+        planner.demand_forecast = defaultAllocator.allocT!ConstantLoadDemandForecast();
 
         g_app.console.register_command!circuit_add("/apps/energy/circuit", this, "add");
         g_app.console.register_command!circuit_print("/apps/energy/circuit", this, "print");
+        g_app.console.register_command!circuit_set("/apps/energy/circuit", this, "set");
 
-        g_app.console.register_command!appliance_add("/apps/energy/appliance", this, "add");
+        g_app.console.register_collection!Appliance();
+
+        g_app.console.register_command!control_print("/apps/energy/control", this, "print");
+
+        g_app.console.register_collection!Policy();
+
+        g_app.console.register_command!why("/apps/energy", this, "why");
+        g_app.console.register_command!live("/apps/energy", this, "live");
 
         get_module!APIModule.register_api_handler("/energy", &energy_api);
     }
 
-    void register_appliance_type(ApplianceType)()
-    {
-        appliance_factory.insert(ApplianceType.Type[], (String id, EnergyManager* manager) => cast(Appliance)defaultAllocator().allocT!ApplianceType(id.move, manager));
-    }
-    Appliance create_appliance(const(char)[] type, String id, EnergyManager* manager)
-    {
-        if (auto fn = type in appliance_factory)
-            return (*fn)(id.move, manager);
-        return defaultAllocator().allocT!Appliance(id.move, type.makeString(defaultAllocator()), manager);
-    }
-
     override void update()
     {
+        refresh_device_subscriptions();
         manager.update();
+        Collection!Appliance().update_all();
+        update_vin_pairings();
+        registry.resync_all();
+        Collection!Policy().update_all();
+        foreach (Policy p; Collection!Policy().values)
+            publish_policy(energy_device, p, registry);
+        planner.tick(energy_device, registry, manager.archipelago, getSysTime());
+        run_allocator(energy_device, registry, planner, manager.archipelago);
+        update_accounts(energy_device, manager.archipelago, daily);
+    }
+
+    void refresh_device_subscriptions()
+    {
+        foreach (Device d; g_app.devices.values)
+        {
+            if (d is energy_device)
+                continue;
+            if (subscribed_devices[].findFirst(d) < subscribed_devices.length)
+                continue;
+            subscribed_devices ~= d;
+            d.subscribe(&on_device_event);
+            // TODO: device tree change should mark dependent appliances dirty
+            //       so registry.resync_all only re-synthesizes affected controls.
+        }
+    }
+
+    void on_device_event(Component c, ComponentEvent event)
+    {
+        Device d = cast(Device)c;
+        if (d is null)
+            return;
+        if (event == ComponentEvent.destroyed)
+        {
+            d.unsubscribe(&on_device_event);
+            subscribed_devices.removeFirstSwapLast(d);
+            // TODO: matching appliances should clear their device_ref or fail
+            //       resolution on next validate. For now registry.resync_all
+            //       drops their controls on the next tick (find_actuator_in
+            //       returns null when device_ref dangles? No — it could crash).
+            return;
+        }
+        // ComponentEvent.tree_changed: registry.resync_all picks up new/removed
+        // PowerControl/Switch components on next tick.
     }
 
     void circuit_add(Session session, const(char)[] name, Nullable!(const(char)[]) parent, Nullable!Component meter, Nullable!(uint) max_current, Nullable!CircuitType _type, Nullable!(uint) parent_phase, Nullable!(uint) meter_phase)
@@ -143,129 +207,204 @@ nothrow @nogc:
         manager.add_circuit(name.makeString(g_app.allocator), p, max_current ? max_current.value : 0, meter ? meter.value : null, type, pphase, mphase);
     }
 
-    void appliance_add(Session session, const(char)[] id, Nullable!(Device) device, Nullable!(const(char)[]) _type, Nullable!(const(char)[]) name, Nullable!(const(char)[]) circuit, Nullable!(int) priority, Nullable!Component meter, Nullable!(uint) meter_phase, Nullable!(const(char)[]) vin, Nullable!Component _info, Nullable!Component control, Nullable!(Component[]) mppt, Nullable!Component backup, Nullable!Component battery)
+    void circuit_set(Session session, const(char)[] name, Nullable!bool isolated)
     {
-        const(char)[] type = _type ? _type.value : null;
-        Component info = _info ? _info.value : null;
-
-        ubyte mphase = 0;
-        if (meter_phase)
+        Circuit* c = manager.find_circuit(name);
+        if (!c)
         {
-            if (meter_phase.value < 1 || meter_phase.value > 3)
-            {
-                session.write_line("Meter phase must be 1, 2, or 3");
-                return;
-            }
-            mphase = cast(ubyte)meter_phase.value;
-        }
-
-        if (device && !info)
-            info = device.value.get_first_component_by_template("DeviceInfo");
-
-        if (!type && info)
-        {
-            if (Element* infoEl = info.find_element("type"))
-                type = infoEl.value.asString();
-        }
-        if (!type)
-        {
-            session.write_line("No appliance type for '", id, "'");
+            session.write_line("Circuit '", name, "' not found");
             return;
         }
+        if (isolated)
+            c.isolated = isolated.value;
+    }
 
-        Appliance appliance = create_appliance(type, id.makeString(g_app.allocator), manager);
-        if (!appliance)
+    CommandState live(Session session, const(Variant)[] args)
+    {
+        return defaultAllocator.allocT!EnergyLiveView(session, this);
+    }
+
+    Table build_island_table()
+    {
+        import urt.conv : format_float;
+        import urt.mem.temp : tconcat;
+        import manager.console.table;
+
+        Table table;
+        table.add_column("island");
+        table.add_column("mode");
+        table.add_column("solar", Table.TextAlign.right);
+        table.add_column("battery", Table.TextAlign.right);
+        table.add_column("grid", Table.TextAlign.right);
+        table.add_column("generation", Table.TextAlign.right);
+        table.add_column("load", Table.TextAlign.right);
+
+        foreach (island; this.manager.archipelago[])
         {
-            session.write_line("Couldn't create appliance of type '", type, "'");
-            return;
+            table.add_row();
+            table.cell(island.id[]);
+            table.cell(island_mode_name(island.mode));
+            table.cell(read_account_cell(island.id[], "account.solar.power"));
+            table.cell(read_account_cell(island.id[], "account.battery.power"));
+            table.cell(read_account_cell(island.id[], "account.grid.power"));
+            table.cell(read_account_cell(island.id[], "account.generation.power"));
+            table.cell(read_account_cell(island.id[], "account.load.total.power"));
+        }
+        return table;
+    }
+
+    const(char)[] read_account_cell(const(char)[] island_id, const(char)[] path)
+    {
+        import urt.mem.temp : tconcat;
+        Element* e = energy_device.find_element(tconcat("archipelago.island.", island_id, ".", path));
+        if (!e || !e.value.isNumber)
+            return "-";
+        float v = e.value.asFloat;
+        if (v != v)
+            return "-";
+        return tconcat(v, "W");
+    }
+
+    void why(Session session)
+    {
+        import urt.mem.temp : tconcat;
+        import urt.meta.enuminfo : enum_key_from_value;
+        import manager.console.table;
+
+        Table table;
+        table.add_column("policy");
+        table.add_column("target");
+        table.add_column("tier");
+        table.add_column("goal");
+        table.add_column("current", Table.TextAlign.right);
+        table.add_column("ok");
+        table.add_column("mv", Table.TextAlign.right);
+        table.add_column("decision");
+        table.add_column("commanded", Table.TextAlign.right);
+
+        SysTime now = getSysTime();
+
+        foreach (Policy p; Collection!Policy().values)
+        {
+            table.add_row();
+            table.cell(p.name[]);
+            table.cell(p.target);
+            table.cell(enum_key_from_value!PolicyTier(p.tier));
+            table.cell(p.goal);
+
+            Control* ctl = registry.lookup(p.target_appliance);
+            float cv = current_value(p, ctl);
+            table.cell(cv == cv ? tconcat(cv) : "-");
+            table.cell(satisfied(p, ctl) ? "yes" : "no");
+
+            IslandBudget* b = planner.budget_for_policy(p, this.manager.archipelago);
+            PolicyAnalysis a = analyse_policy(p, registry, now, planner.slack_threshold, b);
+            table.cell(a.marginal_value == a.marginal_value ? tconcat(a.marginal_value) : "-");
+
+            const(char)[] reason_path = tconcat("allocation.", p.name[], ".reason");
+            const(char)[] cmd_path = tconcat("allocation.", p.name[], ".commanded");
+            Element* reason_e = energy_device.find_element(reason_path);
+            Element* cmd_e = energy_device.find_element(cmd_path);
+            table.cell((reason_e && reason_e.value.isString) ? reason_e.value.asString : "-");
+            table.cell((cmd_e && cmd_e.value.isNumber) ? tconcat(cmd_e.value.asFloat) : "-");
         }
 
-        appliance.name = name ? name.value.makeString(g_app.allocator) : String();
-        appliance.info = info;
-        appliance.meter = meter ? meter.value : null;
-        appliance.meter_phase = mphase;
-        appliance.priority = priority ? priority.value : int.max;
+        table.render(session);
+    }
 
-        appliance.init(device ? device.value : null);
+    void control_print(Session session)
+    {
+        import urt.mem.temp : tconcat;
+        import urt.meta.enuminfo : enum_key_from_value;
+        import urt.si.quantity : Amps, Watts;
+        import manager.console.table;
 
-        // TODO: delete this, move it all into init functions...
-        switch (type)
+        Table table;
+        table.add_column("appliance");
+        table.add_column("device");
+        table.add_column("path");
+        table.add_column("kind");
+        table.add_column("dir");
+        table.add_column("unit");
+        table.add_column("range", Table.TextAlign.right);
+        table.add_column("setpoint", Table.TextAlign.right);
+        table.add_column("nameplate", Table.TextAlign.right);
+
+        char[256] path_buf = void;
+
+        foreach (ref ctl; registry.by_owner.values)
         {
-            case "inverter":
-                Inverter a = cast(Inverter)appliance;
+            table.add_row();
+            table.cell(ctl.owner ? ctl.owner.name[] : "-");
+            table.cell(ctl.device ? ctl.device.id[] : "-");
 
-                if (control)
-                    a.control = control.value;
-                if (backup)
-                    a.backup = backup.value;
-                if (mppt) foreach (pv; mppt.value)
-                    a.mppt ~= pv;
-                if (battery)
-                {
-                    a.battery ~= battery.value;
-                    a.mppt ~= battery.value;
-                }
-
-                // TODO: dummy meter stuff...
-                break;
-
-            case "evse":
-                EVSE a = cast(EVSE)appliance;
-
-                if (control)
-                    a.control = control.value;
-                else if (device)
-                {
-                    a.control = device.value.find_component("charge_control");
-                    if (!a.control)
-                        a.control = device.value.find_component("control"); // TODO: delete this alias? or should we allow it for non-chargers?
-                }
-                break;
-
-            case "car":
-                Car a = cast(Car)appliance;
-
-                if (battery)
-                    a.battery = battery.value;
-                if (control)
-                    a.control = control.value;
-                if (vin)
-                    a.vin = vin.value.makeString(g_app.allocator);
-                break;
-
-            case "hvac":
-                HVAC a = cast(HVAC)appliance;
-
-                if (info)
-                    a.info = info;
-                if (control)
-                    a.control = control.value;
-                break;
-
-            case "water-heater":
-                WaterHeater a = cast(WaterHeater)appliance;
-
-                if (control)
-                    a.control = control.value;
-                break;
-
-            default:
-                break;
-        }
-
-        Circuit* c;
-        if (circuit)
-        {
-            Circuit** t = circuit.value in manager.circuits;
-            if (!t)
+            if (ctl.source is null)
+                table.cell("-");
+            else
             {
-                session.write_line("Circuit '", circuit.value, "' not found");
-                return;
+                ptrdiff_t n = ctl.source.full_path(path_buf[]);
+                const(char)[] path = n <= path_buf.length ? path_buf[0 .. n] : "...";
+                if (ctl.device !is null)
+                {
+                    const(char)[] dev_prefix = tconcat(ctl.device.id[], ".");
+                    if (path.length > dev_prefix.length && path[0 .. dev_prefix.length] == dev_prefix)
+                        path = path[dev_prefix.length .. $];
+                }
+                table.cell(path);
             }
-            c = *t;
+
+            table.cell(enum_key_from_value!ControlKind(ctl.kind));
+            table.cell(enum_key_from_value!ControlDirection(ctl.direction));
+            table.cell(enum_key_from_value!ControlUnit(ctl.unit));
+
+            const(char)[] suffix;
+            final switch (ctl.unit) with (ControlUnit)
+            {
+                case A:                  suffix = "A"; break;
+                case W:                  suffix = "W"; break;
+                case percent:            suffix = "%"; break;
+                case boolean:
+                case nameplate_fraction:
+                case unknown:            suffix = ""; break;
+            }
+
+            bool has_min = ctl.min == ctl.min;
+            bool has_max = ctl.max == ctl.max;
+            if (has_min && has_max)
+                table.cell(tconcat(ctl.min, "-", ctl.max, suffix));
+            else if (has_max)
+                table.cell(tconcat("<=", ctl.max, suffix));
+            else if (has_min)
+                table.cell(tconcat(">=", ctl.min, suffix));
+            else
+                table.cell("-");
+
+            if (ctl.setpoint is null)
+                table.cell("-");
+            else if (ctl.setpoint.value.isBool)
+                table.cell(ctl.setpoint.value.asBool ? "on" : "off");
+            else if (!ctl.setpoint.value.isNumber)
+                table.cell("-");
+            else
+            {
+                final switch (ctl.unit) with (ControlUnit)
+                {
+                    case A:                  table.cell(tconcat(cast(Amps)ctl.setpoint.value.asQuantity)); break;
+                    case W:                  table.cell(tconcat(cast(Watts)ctl.setpoint.value.asQuantity)); break;
+                    case percent:            table.cell(tconcat(ctl.setpoint.value.asFloat, "%")); break;
+                    case boolean:
+                    case nameplate_fraction:
+                    case unknown:            table.cell(tconcat(ctl.setpoint.value.asFloat)); break;
+                }
+            }
+
+            if (ctl.nameplate_power == ctl.nameplate_power)
+                table.cell(tconcat(ctl.nameplate_power, "W"));
+            else
+                table.cell("-");
         }
 
-        manager.add_appliance(appliance, c);
+        table.render(session);
     }
 
     CommandState circuit_print(Session session, const(Variant)[] args)
@@ -358,38 +497,45 @@ nothrow @nogc:
                 const(char)[] a_branch = last_child ? tLast : tBranch;
                 const(char)[] a_prefix = tconcat(child_prefix, last_child ? tBlank : tPipe);
 
-                add_meter_row(t, tconcat(child_prefix, a_branch), a.id[], a.meter_data);
+                add_meter_row(t, tconcat(child_prefix, a_branch), a.name[], a.meter_data);
 
-                if (Inverter inverter = a.as!Inverter)
+                // Heuristic drilldown: walk the appliance's primary device for
+                // Solar/Battery sub-components and show their per-MPPT meter
+                // data + SOC bar. Replaces the old type-specific Inverter walker.
+                // Also show VIN-paired partner (replaces old EVSE.connectedCar).
+                Array!Component drilldown_components;
+                if (a.device_ref !is null)
                 {
-                    foreach (mi, mppt; inverter.mppt)
+                    collect_drilldown(a.device_ref, drilldown_components);
+                }
+                size_t drilldown_total = drilldown_components.length + (a.paired_with !is null ? 1 : 0);
+                size_t drilldown_idx = 0;
+                foreach (sub; drilldown_components)
+                {
+                    ++drilldown_idx;
+                    bool last_drill = drilldown_idx == drilldown_total;
+                    Component meter = sub.get_first_component_by_template("EnergyMeter");
+                    if (meter is null)
+                        continue;
+                    MeterData sub_data = get_meter_data(meter);
+                    MutableString!0 detail;
+                    if (sub.template_[] == "Battery")
                     {
-                        Component meter = mppt.get_first_component_by_template("EnergyMeter");
-                        if (meter)
+                        if (Element* soc_el = sub.find_element("soc"))
                         {
-                            MeterData mppt_data = get_meter_data(meter);
-                            bool last_mppt = mi == inverter.mppt.length - 1;
-                            MutableString!0 detail;
-                            if (mppt.template_[] == "Battery")
-                            {
-                                if (Element* soc_el = mppt.find_element("soc"))
-                                {
-                                    float soc = soc_el.value.asFloat();
-                                    detail ~= format_soc_bar(soc);
-                                    detail ~= "  ";
-                                }
-                            }
-                            detail.append(mppt_data.active[0], "  ", mppt_data.voltage[0], "  ", mppt_data.current[0], "  (",
-                                mppt_data.total_import_active[0] * 0.001f, "/", mppt_data.total_export_active[0] * 0.001f, "kWh)");
-
-                            add_span_row(t, tconcat(a_prefix, last_mppt ? tLast : tBranch), mppt.id[], detail[]);
+                            float soc = soc_el.value.asFloat();
+                            detail ~= format_soc_bar(soc);
+                            detail ~= "  ";
                         }
                     }
+                    detail.append(sub_data.active[0], "  ", sub_data.voltage[0], "  ", sub_data.current[0], "  (",
+                        sub_data.total_import_active[0] * 0.001f, "/", sub_data.total_export_active[0] * 0.001f, "kWh)");
+                    add_span_row(t, tconcat(a_prefix, last_drill ? tLast : tBranch), sub.id[], detail[]);
                 }
-                else if (EVSE evse = a.as!EVSE)
+                if (a.paired_with !is null)
                 {
-                    if (evse.connectedCar)
-                        add_span_row(t, tconcat(a_prefix, tLast), evse.connectedCar.id[], evse.connectedCar.vin[]);
+                    Appliance partner = a.paired_with;
+                    add_span_row(t, tconcat(a_prefix, tLast), partner.name[], partner.vin);
                 }
             }
 
@@ -482,7 +628,7 @@ nothrow @nogc:
                 if (!first)
                     json ~= ',';
                 first = false;
-                json.append('\"', a.id[], '\"');
+                json.append('\"', a.name[], '\"');
             }
             json ~= "]";
         }
@@ -496,94 +642,77 @@ nothrow @nogc:
         json.reserve(4096);
         json ~= '{';
 
+        // TODO: this API surface is heuristic — walks each appliance's primary
+        //       device for Solar/Battery sub-components and emits them as
+        //       generic blobs. Loses the explicit shape of the old
+        //       inverter/evse/car JSON. The full UX-side renovation will
+        //       replace this with a properly structured surface.
         bool first = true;
-        foreach (a; manager.appliances.values)
+        foreach (Appliance a; Collection!Appliance().values)
         {
             if (!first)
                 json ~= ',';
             first = false;
 
-            json.append('\"', a.id[], "\":{");
+            json.append('\"', a.name[], "\":{");
 
-            json.append("\"type\":\"", a.type, '\"');
+            json.append("\"kind\":\"", a.kind, '\"');
 
             if (a.name.length > 0)
                 json.append(",\"name\":\"", a.name[], '\"');
 
-            if (a.circuit)
-                json.append(",\"circuit\":\"", a.circuit.id[], '\"');
+            if (a.circuit_ref)
+                json.append(",\"circuit\":\"", a.circuit_ref.id[], '\"');
 
-            if (a.meter)
-                json.append(",\"meter\":\"", a.meter.id[], '\"');
+            if (a.meter_ref)
+                json.append(",\"meter\":\"", a.meter_ref.id[], '\"');
 
-            json.append(",\"enabled\":", a.enabled ? "true" : "false");
-            json.append(",\"priority\":", a.priority);
+            if (a.vin.length > 0)
+                json.append(",\"vin\":\"", a.vin, '\"');
+
+            if (a.paired_with !is null)
+                json.append(",\"paired_with\":\"", a.paired_with.name[], '\"');
 
             json ~= ',';
             append_meter_data(a.meter_data, json);
 
-            if (Inverter inv = a.as!Inverter)
+            // Generic sub-component drilldown (replaces inverter.mppt blob)
+            Array!Component drill;
+            if (a.device_ref !is null)
+                collect_drilldown(a.device_ref, drill);
+            if (drill.length > 0)
             {
-                json ~= ",\"inverter\":{";
-                json.append("\"rated_power\":", inv.ratedPower.value);
-
-                if (inv.mppt.length > 0)
+                json ~= ",\"subassemblies\":[";
+                bool first_sub = true;
+                foreach (sub; drill)
                 {
-                    json ~= ",\"mppt\":[";
-                    bool first_mppt = true;
-                    foreach (mppt; inv.mppt)
-                    {
-                        if (!first_mppt)
-                            json ~= ',';
-                        first_mppt = false;
-                        json.append("{\"id\":\"", mppt.id[], "\",\"template\":\"", mppt.template_[], '\"');
-
-                        Component meter = mppt.get_first_component_by_template("EnergyMeter");
-                        if (meter)
-                        {
-                            MeterData mppt_data = get_meter_data(meter);
-                            json ~= ',';
-                            append_meter_data(mppt_data, json);
-                        }
-
-                        if (mppt.template_[] == "Battery")
-                        {
-                            if (Element* soc_el = mppt.find_element("soc"))
-                                json.append(",\"soc\":", soc_el.value.asFloat());
-                            if (Element* mode_el = mppt.find_element("mode"))
-                                json.append(",\"mode\":", mode_el.value.asFloat());
-                            if (Element* remain_el = mppt.find_element("remain_capacity"))
-                                json.append(",\"remain_capacity\":", remain_el.value.asFloat());
-                            if (Element* full_el = mppt.find_element("full_capacity"))
-                                json.append(",\"full_capacity\":", full_el.value.asFloat());
-                        }
-                        json ~= '}';
-                    }
-                    json ~= ']';
-                }
-                json ~= '}';
-            }
-            else if (EVSE evse = a.as!EVSE)
-            {
-                json ~= ",\"evse\":{";
-                if (evse.connectedCar)
-                    json.append("\"connected_car\":\"", evse.connectedCar.id[], '\"');
-                else
-                    json ~= "\"connected_car\":null";
-                json ~= '}';
-            }
-            else if (Car car = a.as!Car)
-            {
-                json ~= ",\"car\":{";
-                if (car.vin.length > 0)
-                    json.append("\"vin\":\"", car.vin[], '\"');
-                if (car.evse)
-                {
-                    if (car.vin.length > 0)
+                    if (!first_sub)
                         json ~= ',';
-                    json.append("\"evse\":\"", car.evse.id[], '\"');
+                    first_sub = false;
+                    json.append("{\"id\":\"", sub.id[], "\",\"template\":\"", sub.template_[], '\"');
+
+                    Component meter = sub.get_first_component_by_template("EnergyMeter");
+                    if (meter)
+                    {
+                        MeterData sub_data = get_meter_data(meter);
+                        json ~= ',';
+                        append_meter_data(sub_data, json);
+                    }
+
+                    if (sub.template_[] == "Battery")
+                    {
+                        if (Element* soc_el = sub.find_element("soc"))
+                            json.append(",\"soc\":", soc_el.value.asFloat());
+                        if (Element* mode_el = sub.find_element("mode"))
+                            json.append(",\"mode\":", mode_el.value.asFloat());
+                        if (Element* remain_el = sub.find_element("remain_capacity"))
+                            json.append(",\"remain_capacity\":", remain_el.value.asFloat());
+                        if (Element* full_el = sub.find_element("full_capacity"))
+                            json.append(",\"full_capacity\":", full_el.value.asFloat());
+                    }
+                    json ~= '}';
                 }
-                json ~= '}';
+                json ~= ']';
             }
 
             json ~= '}';
@@ -649,6 +778,39 @@ nothrow @nogc:
     }
 }
 
+// Heuristic walker for the circuit-tree drilldown UI: collect direct Solar
+// and Battery sub-components from an appliance's primary device. Misses
+// non-conforming devices (anything that doesn't expose its arrays as
+// Solar/Battery templates), which is fine — the row just doesn't drill in.
+// TODO: a more principled mechanism would be an explicit `subassemblies=`
+//       slot on Appliance, or a generic "show me your meterable parts"
+//       interface on Component. Punted until the device side of the UX gets
+//       a proper renovation.
+void collect_drilldown(Component device, ref Array!Component into)
+{
+    if (device is null)
+        return;
+    Component solar_root = device.get_first_component_by_template("Solar");
+    if (solar_root !is null)
+    {
+        // If there's an outer Solar wrapper with nested Solar children, list
+        // the children; otherwise list the wrapper itself.
+        Array!Component nested = solar_root.find_components_by_template("Solar");
+        if (nested.length > 0)
+        {
+            foreach (n; nested)
+                into ~= n;
+        }
+        else
+        {
+            into ~= solar_root;
+        }
+    }
+    if (Component battery = device.get_first_component_by_template("Battery"))
+        into ~= battery;
+}
+
+
 const(char)[] format_soc_bar(float soc)
 {
     import urt.mem.temp : tconcat;
@@ -685,6 +847,51 @@ const(char)[] format_soc_bar(float soc)
     return tconcat(green_bg, bar[0 .. split], grey_bg, bar[split .. $], reset);
 }
 
+class EnergyLiveView : LiveViewState
+{
+nothrow @nogc:
+
+    this(Session session, EnergyAppModule mod)
+    {
+        super(session, null);
+        _mod = mod;
+    }
+
+    override uint content_height()
+        => cast(uint)_mod.manager.archipelago.length;
+
+    override uint header_rows()
+        => 1;
+
+    override void render_content(uint offset, uint count, uint width)
+    {
+        import manager.console.table : Table;
+        if (width != _prev_width)
+        {
+            _sticky_widths[] = 0;
+            _prev_width = width;
+        }
+        _mod.build_island_table().render_viewport(session, offset, count, _sticky_widths[]);
+    }
+
+    override const(char)[] status_text()
+    {
+        import urt.mem.temp : tconcat;
+        size_t n = _mod.manager.archipelago.length;
+        if (n == 0)
+            return "no islands";
+        return tconcat(n, n == 1 ? " island" : " islands");
+    }
+
+private:
+    import manager.console.table : Table;
+
+    EnergyAppModule _mod;
+    size_t[Table.max_cols] _sticky_widths;
+    uint _prev_width;
+}
+
+
 class CircuitWatchState : LiveViewState
 {
 nothrow @nogc:
@@ -702,6 +909,9 @@ nothrow @nogc:
         return count_rows(_mod.manager.main);
     }
 
+    override uint header_rows()
+        => 1;
+
     override void render_content(uint offset, uint count, uint width)
     {
         if (width != _prev_width)
@@ -709,8 +919,7 @@ nothrow @nogc:
             _sticky_widths[] = 0;
             _prev_width = width;
         }
-        auto avail = count > 0 ? count - 1 : 0;
-        _mod.build_circuit_table(session).render_viewport(session, offset, avail, _sticky_widths[]);
+        _mod.build_circuit_table(session).render_viewport(session, offset, count, _sticky_widths[]);
     }
 
     override const(char)[] status_text()
@@ -737,19 +946,17 @@ private:
         foreach (a; c.appliances)
         {
             ++rows;
-            if (Inverter inv = a.as!Inverter)
-            {
-                foreach (mppt; inv.mppt)
-                {
-                    if (mppt.get_first_component_by_template("EnergyMeter"))
-                        ++rows;
-                }
-            }
-            else if (EVSE evse = a.as!EVSE)
-            {
-                if (evse.connectedCar)
+            // Match the drilldown in build_circuit_table.traverse: count each
+            // Solar/Battery sub-component that has its own EnergyMeter, plus
+            // the paired-partner row.
+            Array!Component drill;
+            if (a.device_ref !is null)
+                collect_drilldown(a.device_ref, drill);
+            foreach (sub; drill)
+                if (sub.get_first_component_by_template("EnergyMeter"))
                     ++rows;
-            }
+            if (a.paired_with !is null)
+                ++rows;
         }
         foreach (sub; c.sub_circuits)
             rows += count_rows(sub);
