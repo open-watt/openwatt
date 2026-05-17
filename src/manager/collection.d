@@ -22,6 +22,7 @@ enum CollectionType : ubyte
 {
     aa55,
     api,
+    appliance,
     binding, // all protocol bindings
     ble_client,
     certificate,
@@ -46,6 +47,7 @@ enum CollectionType : ubyte
     mqtt_client,
     ota,
     pcap_server,
+    policy,
     ppp_server,
     pppoe_server,
     secret,
@@ -94,7 +96,7 @@ Item get_item(Item : BaseObject)(CID id) pure
 Item get_item_by_name(Item : BaseObject)(const(char)[] id) pure
     if (!is(Item == BaseObject))
 {
-    BaseObject item = item_table(Item.collection_id).get_by_name(id);
+    BaseObject item = item_table(Item.collection_id).get_by_name(id, Item.collection_id);
     return cast(Item)item; // TODO: this is a D dynamic cast, but we could check our own typeinfo
 }
 
