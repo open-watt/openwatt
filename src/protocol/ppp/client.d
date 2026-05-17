@@ -82,6 +82,7 @@ protected:
 
     final override CompletionStatus shutdown()
     {
+        _tail.clear();
         return CompletionStatus.complete;
     }
 
