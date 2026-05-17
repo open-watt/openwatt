@@ -37,11 +37,24 @@ nothrow @nogc:
 
 protected:
 
+    uint header_rows()
+        => 0;
+
     const(char)[] status_text()
         => null;
 
     bool handle_key(const(char)[] seq)
         => false;
+
+    void ensure_visible(uint row)
+    {
+        uint dh = data_height();
+        if (row < _scroll_offset)
+            _scroll_offset = row;
+        else if (row >= _scroll_offset + dh)
+            _scroll_offset = row - dh + 1;
+        _follow = false;
+    }
 
     override CommandCompletionState update()
     {
@@ -58,8 +71,8 @@ protected:
             {
                 uint ch = content_height();
                 uint h = session.height();
-                // +1 for status bar
-                _mode = (ch + 1 >= h) ? LiveViewMode.fullscreen : LiveViewMode.inline_;
+                // +1 for status bar, +header_rows() for sticky header
+                _mode = (ch + 1 + header_rows() >= h) ? LiveViewMode.fullscreen : LiveViewMode.inline_;
             }
             if (_mode == LiveViewMode.fullscreen && _has_cursor)
                 session.write_output("\x1b[?1049h\x1b[2J\x1b[?25l", false);
@@ -113,11 +126,22 @@ private:
             if (buf[i] == 'q' || buf[i] == '\x03')
                 return false;
 
+            size_t consumed;
+            const(char)[] seq;
             if (size_t ansi_len = parse_ansi_code(buf[i .. n]))
             {
-                const(char)[] seq = buf[i .. i + ansi_len];
-                auto page = session.height() > 2 ? session.height() - 2 : 1;
+                seq = buf[i .. i + ansi_len];
+                consumed = ansi_len;
+            }
+            else
+            {
+                seq = buf[i .. i + 1];
+                consumed = 1;
+            }
 
+            if (!handle_key(seq))
+            {
+                auto page = session.height() > 2 ? session.height() - 2 : 1;
                 if (seq[] == ANSI_ARROW_UP)
                 {
                     if (_scroll_offset > 0)
@@ -128,8 +152,8 @@ private:
                 {
                     ++_scroll_offset;
                     uint ch = content_height();
-                    uint vh = visible_height();
-                    if (ch > vh && _scroll_offset >= ch - vh)
+                    uint dh = data_height();
+                    if (ch > dh && _scroll_offset >= ch - dh)
                         _follow = true;
                 }
                 else if (seq[] == ANSI_PGUP)
@@ -146,11 +170,9 @@ private:
                 }
                 else if (seq[] == ANSI_END1 || seq[] == ANSI_END2 || seq[] == ANSI_END3)
                     _follow = true;
-                else
-                    handle_key(seq);
-
-                i += ansi_len - 1;
             }
+
+            i += consumed - 1;
         }
         return true;
     }
@@ -164,15 +186,22 @@ private:
             return h > 2 ? h - 2 : 1;
     }
 
+    uint data_height()
+    {
+        uint vh = visible_height();
+        uint hdr = header_rows();
+        return vh > hdr ? vh - hdr : 0;
+    }
+
     void clamp_scroll()
     {
         uint ch = content_height();
-        uint vh = visible_height();
-        if (_follow && ch > vh)
-            _scroll_offset = ch - vh;
-        if (ch > vh && _scroll_offset > ch - vh)
-            _scroll_offset = ch - vh;
-        if (ch <= vh)
+        uint dh = data_height();
+        if (_follow && ch > dh)
+            _scroll_offset = ch - dh;
+        if (ch > dh && _scroll_offset > ch - dh)
+            _scroll_offset = ch - dh;
+        if (ch <= dh)
             _scroll_offset = 0;
     }
 
@@ -186,15 +215,17 @@ private:
             return;
 
         uint vh = visible_height();
+        uint hdr = header_rows();
+        uint dh = data_height();
         uint ch = content_height();
         clamp_scroll();
 
         session.write_output("\x1b[?2026h\x1b[?25l\x1b[1;1H", false);
-        uint count = ch > vh ? vh : ch;
+        uint count = ch > dh ? dh : ch;
         render_content(_scroll_offset, count, w);
 
         // clear gap between content and status bar
-        for (uint i = count; i < vh; ++i)
+        for (uint i = count + hdr; i < vh; ++i)
             session.write_output("\x1b[K\n", false);
 
         // status bar at last row
@@ -214,7 +245,8 @@ private:
         import urt.string.format : tformat;
 
         auto w = session.width();
-        uint vh = visible_height();
+        uint hdr = header_rows();
+        uint dh = data_height();
         uint ch = content_height();
         clamp_scroll();
 
@@ -226,16 +258,17 @@ private:
             session.write_output("\r", false);
         }
 
-        uint count = ch > vh ? vh : ch;
+        uint count = ch > dh ? dh : ch;
         render_content(_scroll_offset, count, w);
 
-        if (count < _prev_inline_height)
+        uint drawn = count + hdr;
+        if (drawn < _prev_inline_height)
         {
-            for (uint i = count; i < _prev_inline_height; ++i)
+            for (uint i = drawn; i < _prev_inline_height; ++i)
                 session.write_output("\x1b[2K\n", false);
         }
 
-        _prev_inline_height = count;
+        _prev_inline_height = drawn;
         session.write_output("\x1b[?2026l", false);
     }
 

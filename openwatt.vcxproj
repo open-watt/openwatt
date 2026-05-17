@@ -98,6 +98,7 @@
     <DCompile Include="src\manager\console\package.d" />
     <DCompile Include="src\manager\console\session.d" />
     <DCompile Include="src\manager\console\table.d" />
+    <DCompile Include="src\manager\console\tree_view.d" />
     <DCompile Include="src\manager\cron\job.d" />
     <DCompile Include="src\manager\cron\package.d" />
     <DCompile Include="src\manager\device.d" />

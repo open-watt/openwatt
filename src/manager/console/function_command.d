@@ -121,7 +121,7 @@ nothrow @nogc:
 
         static foreach (j; 0 .. ParamNames.length)
         {
-            static if (ParamNames[j] != "_args" && ParamNames[j] != "named_args")
+            static if (ParamNames[j] != "args" && ParamNames[j] != "named-args")
             {{
                 static if (is(Params[j] == Nullable!T, T))
                 {

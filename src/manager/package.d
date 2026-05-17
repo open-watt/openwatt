@@ -473,94 +473,162 @@ nothrow @nogc:
 
 
     // /device/print command
-    void device_print(Session session, Nullable!(const(char)[]) _scope)
+    @TabComplete(&device_print_suggest)
+    CommandState device_print(Session session, Nullable!(const(char)[]) filter, const(Variant)[] args)
     {
-        if (_scope)
+        const(char)[] pattern = filter ? filter.value : null;
+        bool watch;
+        bool expand_all;
+        foreach (a; args)
         {
-            // split on dots...
+            auto s = a.asString();
+            if (s == "-w" || s == "--watch")
+                watch = true;
+            else if (s == "-e" || s == "--expand")
+                expand_all = true;
         }
 
-        void printComponent(Component c, int indent)
+        if (watch)
         {
-            session.writef("{'', *0}{1}: {2} [{3}]\n", indent, c.id, c.name, c.template_);
+            auto view = allocator.allocT!DeviceTreeView(session, this, pattern);
+            view.default_expand = expand_all;
+            return view;
+        }
+
+        build_device_table(pattern).render(session);
+        return null;
+    }
+
+    Table build_device_table(const(char)[] pattern)
+    {
+        import urt.mem.temp : tconcat;
+
+        enum t_branch = "├─ ";
+        enum t_last   = "└─ ";
+        enum t_pipe   = "│  ";
+        enum t_blank  = "   ";
+
+        Table table;
+        table.add_column("name");
+        table.add_column("value");
+        table.add_column("age", Table.TextAlign.right);
+
+        SysTime now = getSysTime();
+
+        const(char)[] format_age(Duration d)
+        {
+            long ds = d.as!"msecs" / 100;
+            if (ds < 600)
+                return tconcat(ds / 10, ".", ds % 10, "s");
+            long s = ds / 10;
+            if (s < 3600)
+                return tconcat(s / 60, "m", s % 60, "s");
+            return tconcat(s / 3600, "h", (s / 60) % 60, "m");
+        }
+
+        Array!char path;
+        Array!char prefix;
+
+        bool path_matches()
+            => pattern.length == 0 || wildcard_match(pattern, path[]);
+
+        void push(const(char)[] id)
+        {
+            path ~= '.';
+            path ~= id;
+        }
+
+        bool subtree_matches(Component c)
+        {
+            if (path_matches())
+                return true;
+            size_t reset = path.length;
+            scope(exit) path.resize(reset);
             foreach (e; c.elements)
-                session.writef("{'', *5}  {0}{@4, ?3}: {2}\n", e.id, e.name, e.value, e.name.length > 0, " ({1})", indent);
-            foreach (c2; c.components)
-                printComponent(c2, indent + 2);
+            {
+                push(e.id[]);
+                if (path_matches())
+                    return true;
+                path.resize(reset);
+            }
+            foreach (sc; c.components)
+            {
+                push(sc.id[]);
+                if (subtree_matches(sc))
+                    return true;
+                path.resize(reset);
+            }
+            return false;
         }
 
-        const(char)[] newLine = "";
+        void emit_node(Component c, bool is_last, bool is_root)
+        {
+            const(char)[] branch = is_root ? "" : (is_last ? t_last : t_branch);
+            const(char)[] label = c.name.length ? tconcat(c.id[], " (", c.name[], ")") : c.id[];
+            table.add_row();
+            table.cell(tconcat(prefix[], branch, label));
+            table.cell(c.template_.length ? tconcat("[", c.template_[], "]") : "");
+            table.cell("");
+
+            size_t path_reset = path.length;
+            size_t prefix_reset = prefix.length;
+            scope(exit) { path.resize(path_reset); prefix.resize(prefix_reset); }
+
+            if (!is_root)
+                prefix ~= (is_last ? t_blank : t_pipe);
+
+            size_t visible;
+            foreach (e; c.elements)
+            {
+                push(e.id[]);
+                if (path_matches())
+                    ++visible;
+                path.resize(path_reset);
+            }
+            foreach (sc; c.components)
+            {
+                push(sc.id[]);
+                if (subtree_matches(sc))
+                    ++visible;
+                path.resize(path_reset);
+            }
+
+            size_t emitted;
+            foreach (e; c.elements)
+            {
+                push(e.id[]);
+                scope(exit) path.resize(path_reset);
+                if (!path_matches())
+                    continue;
+                ++emitted;
+                bool last = emitted == visible;
+                table.add_row();
+                table.cell(tconcat(prefix[], last ? t_last : t_branch, e.id[]));
+                table.cell(e.value);
+                table.cell(e.last_update && e.sampling_mode != SamplingMode.constant ? format_age(now - e.last_update) : "");
+            }
+            foreach (sc; c.components)
+            {
+                push(sc.id[]);
+                scope(exit) path.resize(path_reset);
+                if (!subtree_matches(sc))
+                    continue;
+                ++emitted;
+                bool last = emitted == visible;
+                emit_node(sc, last, false);
+            }
+        }
+
         foreach (dev; devices.values)
         {
-            session.write_line(newLine, dev.id, ": ", dev.name);
-            newLine = "\n";
-            foreach (c; dev.components)
-                printComponent(c, 2);
+            path.clear();
+            prefix.clear();
+            path ~= dev.id[];
+            if (!subtree_matches(dev))
+                continue;
+            emit_node(dev, true, true);
         }
-
-
-/+
-        import urt.util;
-
-        size_t nameLen = 4;
-        size_t typeLen = 4;
-        foreach (i, iface; interfaces)
-        {
-            nameLen = max(nameLen, iface.name.length);
-            typeLen = max(typeLen, iface.type.length);
-
-            // TODO: MTU stuff?
-        }
-
-        session.write_line("Flags: R - RUNNING; S - SLAVE");
-        if (stats)
-        {
-            size_t rxLen = 7;
-            size_t txLen = 7;
-            size_t rpLen = 9;
-            size_t tpLen = 9;
-            size_t rdLen = 7;
-            size_t tdLen = 7;
-
-            foreach (i, iface; interfaces)
-            {
-                rxLen = max(rxLen, iface.getStatus.rx_bytes.format_int(null));
-                txLen = max(txLen, iface.getStatus.tx_bytes.format_int(null));
-                rpLen = max(rpLen, iface.getStatus.rx_packets.format_int(null));
-                tpLen = max(tpLen, iface.getStatus.tx_packets.format_int(null));
-                rdLen = max(rdLen, iface.getStatus.rx_dropped.format_int(null));
-                tdLen = max(tdLen, iface.getStatus.tx_dropped.format_int(null));
-            }
-
-            session.writef(" ID    {0, *1}  {2, *3}  {4, *5}  {6, *7}  {8, *9}  {10, *11}  {12, *13}\n",
-                           "NAME", nameLen,
-                           "RX-BYTE", rxLen, "TX-BYTE", txLen,
-                           "RX-PACKET", rpLen, "TX-PACKET", tpLen,
-                           "RX-DROP", rdLen, "TX-DROP", tdLen);
-
-            size_t i = 0;
-            foreach (iface; interfaces)
-            {
-                session.writef("{0, 3} {1}{2} {3, *4}  {5, *6}  {7, *8}  {9, *10}  {11, *12}  {13, *14}  {15, *16}\n",
-                               i, iface.getStatus.link_status ? 'R' : ' ', iface.master ? 'S' : ' ',
-                               iface.name, nameLen,
-                               iface.getStatus.rx_bytes, rxLen, iface.getStatus.tx_bytes, txLen,
-                               iface.getStatus.rx_packets, rpLen, iface.getStatus.tx_packets, tpLen,
-                               iface.getStatus.rx_dropped, rdLen, iface.getStatus.tx_dropped, tdLen);
-                ++i;
-            }
-        }
-        else
-        {
-            session.writef(" ID    {0, *1}  {2, *3}  MAC-ADDRESS\n", "NAME", nameLen, "TYPE", typeLen);
-            size_t i = 0;
-            foreach (iface; interfaces)
-            {
-                session.writef("{0, 3} {6}{7}  {1, *2}  {3, *4}  {5}\n", i, iface.name, nameLen, iface.type, typeLen, iface.mac, iface.getStatus.link_status ? 'R' : ' ', iface.master ? 'S' : ' ');
-                ++i;
-            }
-        }
-+/
+        return table;
     }
 
     // element link API
@@ -673,6 +741,255 @@ Element* resolve_global_element(const(char)[] path) nothrow @nogc
     return null;
 }
 
+
+class DeviceTreeView : TreeViewState
+{
+nothrow @nogc:
+
+    this(Session session, Application app, const(char)[] pattern)
+    {
+        super(session, null);
+        _app = app;
+        if (pattern.length > 0)
+        {
+            _pattern = pattern.makeString(app.allocator);
+            compute_auto_expand();
+        }
+    }
+
+    override void configure_columns(ref Table table)
+    {
+        table.add_column("value");
+        table.add_column("age", Table.TextAlign.right);
+    }
+
+    override bool default_expanded(const(char)[] id)
+    {
+        if (super.default_expanded(id))
+            return true;
+        if (_pattern.length == 0)
+            return false;
+        uint start = 0;
+        foreach (end; _auto_expand_ends[])
+        {
+            if (_auto_expand_paths[start .. end] == id)
+                return true;
+            start = end;
+        }
+        return false;
+    }
+
+    override void walk_tree(scope TreeYield yield)
+    {
+        import urt.mem.temp : tconcat;
+
+        SysTime now = getSysTime();
+        Array!char path;
+
+        const(char)[] format_age(Duration d)
+        {
+            long ds = d.as!"msecs" / 100;
+            if (ds < 600)
+                return tconcat(ds / 10, ".", ds % 10, "s");
+            long s = ds / 10;
+            if (s < 3600)
+                return tconcat(s / 60, "m", s % 60, "s");
+            return tconcat(s / 3600, "h", (s / 60) % 60, "m");
+        }
+
+        void emit_element(Element* e, uint depth, bool is_last)
+        {
+            TreeNodeInfo info = TreeNodeInfo(path[], e.id[], depth, is_last, false);
+            yield(info, (ref Table t) {
+                t.cell(e.value);
+                t.cell(e.last_update && e.sampling_mode != SamplingMode.constant
+                    ? format_age(now - e.last_update) : "");
+            });
+        }
+
+        void emit_component(Component c, uint depth, bool is_last)
+        {
+            const(char)[] label = c.name.length ? tconcat(c.id[], " (", c.name[], ")") : c.id[];
+            size_t total = c.elements.length + c.components.length;
+            TreeNodeInfo info = TreeNodeInfo(path[], label, depth, is_last, total > 0);
+            bool descend = yield(info, (ref Table t) {
+                t.cell(c.template_.length ? tconcat("[", c.template_[], "]") : "");
+                t.cell("");
+            });
+
+            if (!descend || total == 0)
+                return;
+
+            size_t emitted;
+            size_t reset = path.length;
+            foreach (e; c.elements)
+            {
+                ++emitted;
+                path ~= '.';
+                path ~= e.id[];
+                emit_element(e, depth + 1, emitted == total);
+                path.resize(reset);
+            }
+            foreach (sc; c.components)
+            {
+                ++emitted;
+                path ~= '.';
+                path ~= sc.id[];
+                emit_component(sc, depth + 1, emitted == total);
+                path.resize(reset);
+            }
+        }
+
+        size_t total_devs = _app.devices.length;
+        size_t emitted_devs;
+        foreach (dev; _app.devices.values)
+        {
+            ++emitted_devs;
+            path.clear();
+            path ~= dev.id[];
+            emit_component(dev, 0, emitted_devs == total_devs);
+        }
+    }
+
+private:
+    Application _app;
+    String _pattern;
+    Array!char _auto_expand_paths;
+    Array!uint _auto_expand_ends;
+
+    void compute_auto_expand()
+    {
+        Array!char path;
+
+        void add_with_ancestors(const(char)[] p)
+        {
+            size_t end = p.length;
+            while (end > 0)
+            {
+                const(char)[] sub = p[0 .. end];
+                bool present;
+                uint start = 0;
+                foreach (e; _auto_expand_ends[])
+                {
+                    if (_auto_expand_paths[start .. e] == sub)
+                    {
+                        present = true;
+                        break;
+                    }
+                    start = e;
+                }
+                if (!present)
+                {
+                    _auto_expand_paths ~= sub;
+                    _auto_expand_ends ~= cast(uint)_auto_expand_paths.length;
+                }
+                size_t prev_dot = end;
+                foreach_reverse (i, c; sub)
+                {
+                    if (c == '.')
+                    {
+                        prev_dot = i;
+                        break;
+                    }
+                }
+                if (prev_dot == end)
+                    break;
+                end = prev_dot;
+            }
+        }
+
+        void check(const(char)[] p)
+        {
+            if (wildcard_match(_pattern[], p))
+                add_with_ancestors(p);
+        }
+
+        void walk_paths(Component c)
+        {
+            check(path[]);
+            foreach (e; c.elements)
+            {
+                size_t r = path.length;
+                path ~= '.';
+                path ~= e.id[];
+                check(path[]);
+                path.resize(r);
+            }
+            foreach (sc; c.components)
+            {
+                size_t r = path.length;
+                path ~= '.';
+                path ~= sc.id[];
+                walk_paths(sc);
+                path.resize(r);
+            }
+        }
+
+        foreach (dev; _app.devices.values)
+        {
+            path.clear();
+            path ~= dev.id[];
+            walk_paths(dev);
+        }
+    }
+}
+
+
+Array!String device_print_suggest(bool is_value, const(char)[] name, const(char)[] value) nothrow @nogc
+{
+    Array!String result;
+
+    if (!is_value)
+    {
+        static immutable flags = ["-e", "-w", "--expand", "--watch"];
+        foreach (f; flags)
+        {
+            if (f.startsWith(name))
+                result ~= f.makeString(defaultAllocator);
+        }
+        return result;
+    }
+
+    if (name != "filter" || g_app is null)
+        return result;
+
+    size_t last_dot = value.findLast('.');
+    const(char)[] parent_path = last_dot == value.length ? null : value[0 .. last_dot];
+    const(char)[] partial = last_dot == value.length ? value : value[last_dot + 1 .. $];
+
+    Array!char buf;
+    if (parent_path.length > 0)
+    {
+        buf ~= parent_path;
+        buf ~= '.';
+    }
+    size_t reset = buf.length;
+
+    void emit(const(char)[] id)
+    {
+        if (!id.startsWith(partial))
+            return;
+        buf.resize(reset);
+        buf ~= id;
+        result ~= buf[].makeString(defaultAllocator);
+    }
+
+    if (parent_path.length == 0)
+    {
+        foreach (dev; g_app.devices.values)
+            emit(dev.id[]);
+        return result;
+    }
+
+    Component parent = g_app.find_component(parent_path);
+    if (parent is null)
+        return result;
+    foreach (e; parent.elements)
+        emit(e.id[]);
+    foreach (sc; parent.components)
+        emit(sc.id[]);
+    return result;
+}
 
 
 private:

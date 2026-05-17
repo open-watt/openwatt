@@ -495,6 +495,9 @@ nothrow @nogc:
     override uint content_height()
         => cast(uint)_collection.item_count;
 
+    override uint header_rows()
+        => 1;
+
     override void render_content(uint offset, uint count, uint width)
     {
         if (width != _prev_width)
@@ -505,9 +508,7 @@ nothrow @nogc:
 
         Table table;
         populate_collection_table(table, _collection);
-
-        auto avail = count > 0 ? count - 1 : 0;  // reserve 1 row for table header
-        table.render_viewport(session, offset, avail, _sticky_widths[]);
+        table.render_viewport(session, offset, count, _sticky_widths[]);
     }
 
     override const(char)[] status_text()
