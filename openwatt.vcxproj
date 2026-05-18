@@ -70,6 +70,7 @@
     <DCompile Include="src\driver\linux\wifi.d" />
     <DCompile Include="src\driver\linux\wpa_supplicant.d" />
     <DCompile Include="src\driver\wifi.d" />
+    <DCompile Include="src\driver\windows\adapter_watcher.d" />
     <DCompile Include="src\driver\windows\ethernet.d" />
     <DCompile Include="src\driver\windows\pcap.d" />
     <DCompile Include="src\driver\windows\wifi.d" />

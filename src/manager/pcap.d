@@ -163,7 +163,7 @@ private:
     bool enabled = true;
 
     Duration max_buffer_time;
-    size_t max_buffer_bytes;
+    size_t max_buffer_bytes  = 64 * 1024;
 
     struct InterfacePacketBuffer
     {
@@ -899,6 +899,7 @@ nothrow @nogc:
 
         PcapInterface* pcap = g_app.allocator.allocT!PcapInterface();
         pcap.name = n.move;
+        pcap.max_buffer_time = 100.msecs;
 
         if (!pcap.open_file(file))
         {

@@ -20,16 +20,26 @@ nothrow @nogc:
 
     bool open(const(char)[] adapter_name)
     {
+        // pcap_open is a WinPcap extension; only present when NPCap is installed
+        // in WinPcap-API-compatible mode. We require it for NOCAPTURE_LOCAL --
+        // without it npcap echoes our own pcap_sendpacket frames back into the
+        // receive queue and the IP stack route-loops.
+        if (pcap_open is null)
+        {
+            writeError("pcap_open unavailable -- NPCap must be installed in WinPcap API-compatible mode");
+            return false;
+        }
+
         char[PCAP_ERRBUF_SIZE] errbuf = void;
 
         // TODO: we may not want to open promiscuous unless we're a member of a bridge, or some form of L2 tunnel.
-        bool promiscuous = true;
+        int flags = PCAP_OPENFLAG_PROMISCUOUS | PCAP_OPENFLAG_NOCAPTURE_LOCAL | PCAP_OPENFLAG_MAX_RESPONSIVENESS;
         int timeout_ms = 1; // TODO: we could probably tune this to our program update rate...?
 
-        handle = pcap_open_live(adapter_name.tstringz, ushort.max, promiscuous, timeout_ms, errbuf.ptr);
+        handle = pcap_open(adapter_name.tstringz, ushort.max, flags, timeout_ms, null, errbuf.ptr);
         if (handle is null)
         {
-            writeError("pcap_open_live failed for adapter '", adapter_name, "': ", errbuf.ptr[0 .. strlen(errbuf.ptr)]);
+            writeError("pcap_open failed for adapter '", adapter_name, "': ", errbuf.ptr[0 .. strlen(errbuf.ptr)]);
             return false;
         }
         if (pcap_setnonblock(handle, 1, errbuf.ptr) != 0)

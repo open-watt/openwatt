@@ -267,6 +267,9 @@
     <DCompile Include="src\driver\wifi.d">
       <Filter>src\driver</Filter>
     </DCompile>
+    <DCompile Include="src\driver\windows\adapter_watcher.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
     <DCompile Include="src\driver\windows\ethernet.d">
       <Filter>src\driver\windows</Filter>
     </DCompile>
