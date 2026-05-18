@@ -11,6 +11,7 @@ import urt.mem : memmove;
 import urt.mem.allocator;
 import urt.rand;
 import urt.string;
+import urt.string.format : tconcat;
 import urt.time;
 
 import manager;
@@ -75,24 +76,38 @@ nothrow @nogc:
 
     // Properties...
 
-    ref const(String) remote() const pure
-        => _host;
+    const(char)[] remote() const
+    {
+        auto r = _conn.remote_name();
+        return r.empty ? null : tconcat(_tls ? "wss://" : "ws://", r, _resource[]);
+    }
     void remote(InetAddress value)
     {
-        _host = null;
-        if (value == _remote)
-            return;
-        _remote = value;
+        _conn.remote(value);
+        _tls = false;
+        _resource = String();
+        _stream = null;
         restart();
     }
     const(char)[] remote(String value)
     {
-        if (value.empty)
-            return "remote cannot be empty";
-        if (value == _host)
-            return null;
-        _host = value.move;
-        _remote = InetAddress();
+        auto url = decompose_http_url(value[]);
+        bool tls;
+        if (url.scheme.empty || url.scheme.icmp("ws") == 0 || url.scheme.icmp("http") == 0)
+            tls = false;
+        else if (url.scheme.icmp("wss") == 0 || url.scheme.icmp("https") == 0)
+            tls = true;
+        else
+            return tconcat("unsupported scheme '", url.scheme, "' (expected ws or wss)");
+        if (url.host.empty)
+            return "host cannot be empty";
+
+        auto r = _conn.remote(url.host.makeString(defaultAllocator));
+        if (r.failed)
+            return r.message;
+        _tls = tls;
+        _resource = url.path.makeString(defaultAllocator);
+        _stream = null;
         restart();
         return null;
     }
@@ -108,6 +123,7 @@ nothrow @nogc:
             _stream.unsubscribe(&stream_state_change);
             _subscribed = false;
         }
+        _conn.clear_remote();
         _stream = stream;
         restart();
     }
@@ -122,19 +138,20 @@ protected:
         if (_is_server)
             return _stream !is null;
         // client: URL xor stream
-        return (!_host.empty || _remote != InetAddress()) != !!_stream;
+        return _conn.has_remote() != !!_stream;
     }
 
     override CompletionStatus startup()
     {
-        if (!_stream)
+        if (!_stream && _conn.has_remote())
         {
-            // Only client-mode reaches here; server-mode objects always have _stream set.
-            const(char)[] stream_name = Collection!Stream().generate_name(name[]);
-            _stream = create_http_stream(stream_name, _host[], _remote, _resource);
-            if (!_stream)
+            ushort default_port = _tls ? 443 : 80;
+            if (!_conn.start(this, default_port, _tls))
                 return CompletionStatus.error;
+            _stream = _conn.get;
         }
+        if (!_stream)
+            return CompletionStatus.error;
 
         if (!_stream.running)
             return CompletionStatus.continue_;
@@ -153,14 +170,14 @@ protected:
             req.http_version = HTTPVersion.V1_1;
             req.method = HTTPMethod.GET;
             req.flags = HTTPFlags.NoDefaults;
-            req.request_target = (_resource.length ? _resource : "/").makeString(defaultAllocator);
+            req.request_target = (_resource.empty ? "/" : _resource[]).makeString(defaultAllocator);
             req.headers ~= HTTPParam(StringLit!"User-Agent", StringLit!"OpenWatt");
             req.headers ~= HTTPParam(StringLit!"Upgrade", StringLit!"websocket");
             req.headers ~= HTTPParam(StringLit!"Connection", StringLit!"Upgrade");
             req.headers ~= HTTPParam(StringLit!"Sec-WebSocket-Key", _handshake_key);
             req.headers ~= HTTPParam(StringLit!"Sec-WebSocket-Version", StringLit!"13");
 
-            Array!char msg = req.format_message(http_host_header(_host[]));
+            Array!char msg = req.format_message(_conn.host[]);
             if (msg.empty || _stream.write(msg[]) != msg.length)
                 return CompletionStatus.error;
 
@@ -200,12 +217,12 @@ protected:
             _handshake_parser = null;
             _handshake_key = String();
         }
-        if (!_is_server && (!_host.empty || _remote != InetAddress()) && _stream)
+        if (!_is_server && _conn.has_remote())
         {
-            _stream.destroy();
+            _conn.stop();
             _stream = null;
         }
-        _resource = null;
+        _resource = String();
         _close_sent = false;
         _message.clear();
         _decoded_bytes = 0;
@@ -557,11 +574,11 @@ protected:
 
 private:
     ObjectRef!Stream _stream;
-    String _host;
-    InetAddress _remote;
-    const(char)[] _resource; // slice into _host[]; url path, or empty
+    ClientConnection _conn;
+    String _resource; // url path, or empty
     WSExtensions _extensions;
     String _protocol;
+    bool _tls;
     bool _is_server;
     bool _subscribed;
     bool _close_sent;

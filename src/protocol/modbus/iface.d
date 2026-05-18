@@ -4,10 +4,12 @@ import urt.array;
 import urt.conv;
 import urt.crc;
 import urt.endian;
+import urt.inet;
 import urt.log;
 import urt.map;
 import urt.mem;
 import urt.meta.nullable;
+import urt.result;
 import urt.string;
 import urt.string.format;
 import urt.time;
@@ -65,6 +67,10 @@ struct ModbusFrame
 class ModbusInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("stream", stream),
+                                 Prop!("remote", remote),
+                                 Prop!("port", port),
+                                 Prop!("tls", tls),
+                                 Prop!("keepalive", keepalive),
                                  Prop!("protocol", protocol),
                                  Prop!("master", master));
 nothrow @nogc:
@@ -149,6 +155,7 @@ nothrow @nogc:
             return "stream cannot be null";
         if (_stream is value)
             return null;
+        _conn.clear_remote();
         _stream = value;
 
         if (_stream)
@@ -172,6 +179,54 @@ nothrow @nogc:
         // flush messages and the address mapping tables
         restart();
         return null;
+    }
+
+    const(char)[] remote() const
+        => _conn.remote_name();
+    StringResult remote(String value)
+    {
+        auto r = _conn.remote(value.move);
+        if (r.succeeded)
+        {
+            _stream = null;  // remote takes ownership of the stream slot
+            if (_protocol == ModbusProtocol.unknown)
+                _protocol = ModbusProtocol.tcp;
+            restart();
+        }
+        return r;
+    }
+    void remote(InetAddress value)
+    {
+        _conn.remote(value);
+        _stream = null;
+        if (_protocol == ModbusProtocol.unknown)
+            _protocol = ModbusProtocol.tcp;
+        restart();
+    }
+
+    ushort port() const pure
+        => _conn.port;
+    void port(ushort value)
+    {
+        _conn.port(value);
+        restart();
+    }
+
+    bool tls() const pure
+        => _tls;
+    void tls(bool value)
+    {
+        if (_tls == value)
+            return;
+        _tls = value;
+        restart();
+    }
+
+    bool keepalive() const pure
+        => _conn.keepalive;
+    void keepalive(bool value)
+    {
+        _conn.keepalive(value);
     }
 
 
@@ -204,10 +259,18 @@ protected:
     mixin RekeyHandler;
 
     override bool validate() const
-        => _stream !is null && (!master || _protocol != ModbusProtocol.unknown);
+        => (_stream !is null || _conn.has_remote()) && (!master || _protocol != ModbusProtocol.unknown);
 
     override CompletionStatus startup()
     {
+        if (!_stream && _conn.has_remote())
+        {
+            if (!_conn.start(this, _tls ? 802 : 502, _tls))
+                return CompletionStatus.error;
+            _stream = _conn.get;
+            if (_protocol == ModbusProtocol.unknown)
+                _protocol = ModbusProtocol.tcp;
+        }
         if (!_stream)
             return CompletionStatus.error;
         if (!_stream.running)
@@ -269,6 +332,12 @@ protected:
         {
             get_module!ModbusProtocolModule().release_universal_address(_master_address);
             _master_address = 0;
+        }
+
+        if (_conn.has_remote())
+        {
+            _conn.stop();
+            _stream = null;
         }
 
         return CompletionStatus.complete;
@@ -461,6 +530,8 @@ private:
     }
 
     ObjectRef!Stream _stream;
+    ClientConnection _conn;
+    bool _tls;
 
     ModbusProtocol _protocol;
     bool _is_bus_master;
