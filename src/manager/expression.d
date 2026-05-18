@@ -104,21 +104,51 @@ struct EvalContext
     Map!(const(Expression)*, Variant)* sub_results;
 }
 
-struct ScriptBody
+struct Script
 {
 nothrow @nogc:
 
-    this(ref const ScriptBody rhs) inout pure
+    this(typeof(null)) inout pure { }
+
+    this(ref const Script rhs) inout pure
     {
+        if (rhs.p)
+            ++(cast(Payload*)rhs.p).refcount;
         p = cast(inout(Payload)*)rhs.p;
-        if (p)
-            ++(cast(Payload*)p).refcount;
     }
 
     ~this() pure
     {
-        if (p && --p.refcount == 0)
-            defaultAllocator().freeT(p);
+        if (p && --(cast(Payload*)p).refcount == 0)
+            defaultAllocator().freeT(cast(Payload*)p);
+    }
+
+    void opAssign(typeof(null))
+    {
+        if (p)
+        {
+            if (--(cast(Payload*)p).refcount == 0)
+                defaultAllocator().freeT(cast(Payload*)p);
+            p = null;
+        }
+    }
+
+    void opAssign(ref const Script rhs)
+    {
+        if (rhs.p is p)
+            return;
+        if (rhs.p)
+            ++(cast(Payload*)rhs.p).refcount;
+        if (p && --(cast(Payload*)p).refcount == 0)
+            defaultAllocator().freeT(cast(Payload*)p);
+        p = cast(Payload*)rhs.p;
+    }
+
+    void opAssign(Script rhs)
+    {
+        auto tmp = p;
+        p = rhs.p;
+        rhs.p = tmp;
     }
 
     bool empty() const pure
@@ -140,10 +170,10 @@ private:
     Payload* p;
 }
 
-ScriptBody make_script(const(char)[] source_text) nothrow @nogc
+Script make_script(const(char)[] source_text) nothrow @nogc
 {
-    ScriptBody b;
-    b.p = defaultAllocator().allocT!(ScriptBody.Payload)();
+    Script b;
+    b.p = defaultAllocator().allocT!(Script.Payload)();
     b.p.refcount = 1;
     b.p.source ~= source_text;
     const(char)[] cursor = b.p.source[];
@@ -1275,9 +1305,9 @@ unittest
 
     EvalContext ctx;
     Variant v = e.evaluate(ctx);
-    assert(v.isUser!ScriptBody);
+    assert(v.isUser!Script);
 
-    ScriptBody sb = v.asUser!ScriptBody;
+    Script sb = v.asUser!Script;
     assert(!sb.empty);
     assert(sb.commands.length == 1);
     assert(sb.commands[0].command == "/print");

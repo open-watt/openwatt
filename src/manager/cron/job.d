@@ -3,23 +3,36 @@ module manager.cron.job;
 import urt.array;
 import urt.lifetime;
 import urt.log;
+import urt.mem;
+import urt.mem.temp;
 import urt.string;
 import urt.time;
+import urt.util : popcnt;
 import urt.variant;
 
 import manager.base;
 import manager.console;
 import manager.console.command;
 import manager.console.session;
+import manager.expression : Script;
 
 nothrow @nogc:
+
+
+enum Weekday : ubyte
+{
+    sun, mon, tue, wed, thu, fri, sat
+}
 
 
 class CronJob : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("schedule", schedule),
+                                 Prop!("at", at),
+                                 Prop!("days", days),
+                                 Prop!("when", when),
                                  Prop!("repeat", repeat),
-                                 Prop!("command", command),
+                                 Prop!("do", script),
                                  Prop!("last_run", last_run),
                                  Prop!("next_run", next_run),
                                  Prop!("run_count", run_count));
@@ -37,10 +50,52 @@ class CronJob : ActiveObject
     Duration schedule() const { return _schedule; }
     void schedule(Duration value)
     {
-        if (_schedule == value)
+        if (_schedule_type == ScheduleType.duration && _schedule == value)
             return;
         _schedule = value;
         _schedule_type = ScheduleType.duration;
+        restart();
+    }
+
+    TimeOfDay at() const { return _at; }
+    void at(TimeOfDay value)
+    {
+        if (_schedule_type == ScheduleType.tod && _at == value)
+            return;
+        _at = value;
+        _schedule_type = ScheduleType.tod;
+        restart();
+    }
+
+    Weekday[] days() const
+    {
+        auto buf = tempAllocator().allocArray!Weekday(popcnt(_days_mask));
+        size_t i = 0;
+        foreach (ubyte w; 0 .. 7)
+        {
+            if (_days_mask & (1 << w))
+                buf[i++] = cast(Weekday)w;
+        }
+        return buf;
+    }
+    void days(Weekday[] value)
+    {
+        ubyte mask = 0;
+        foreach (w; value)
+            mask |= cast(ubyte)(1 << w);
+        if (_days_mask == mask)
+            return;
+        _days_mask = mask;
+        restart();
+    }
+
+    SysTime when() const { return _when; }
+    void when(SysTime value)
+    {
+        if (_schedule_type == ScheduleType.absolute && _when == value)
+            return;
+        _when = value;
+        _schedule_type = ScheduleType.absolute;
         restart();
     }
 
@@ -52,12 +107,12 @@ class CronJob : ActiveObject
         _repeat = value;
     }
 
-    ref const(String) command() const { return _command; }
-    const(char)[] command(String value)
+    Script script() const { return Script(_script); }
+    const(char)[] script(Script value)
     {
         if (value.empty)
-            return "command cannot be empty";
-        _command = value.move;
+            return "script cannot be empty";
+        _script = value;
         return null;
     }
 
@@ -74,9 +129,9 @@ protected:
             return false;
         }
 
-        if (_command.length == 0)
+        if (_script.empty)
         {
-            writeError("CronJob '", name, "': No command specified");
+            writeError("CronJob '", name, "': No script specified");
             return false;
         }
 
@@ -87,8 +142,20 @@ protected:
     {
         SysTime now = getSysTime();
 
-        if (_schedule_type == ScheduleType.duration)
-            _next_run = now + _schedule;
+        final switch (_schedule_type)
+        {
+            case ScheduleType.none:
+                break;
+            case ScheduleType.duration:
+                _next_run = now + _schedule;
+                break;
+            case ScheduleType.tod:
+                _next_run = next_occurrence(now, _at, _days_mask);
+                break;
+            case ScheduleType.absolute:
+                _next_run = _when;
+                break;
+        }
 
         writeInfo("CronJob '", name, "': Scheduled, next run at ", _next_run);
         return CompletionStatus.complete;
@@ -121,9 +188,30 @@ protected:
         _last_run = now;
         ++_run_count;
 
-        if (_repeat)
-            _next_run = _next_run + _schedule;
-        else if (_running_commands.length == 0)
+        bool one_shot = false;
+        final switch (_schedule_type)
+        {
+            case ScheduleType.none:
+                one_shot = true;
+                break;
+            case ScheduleType.duration:
+                if (_repeat)
+                    _next_run = _next_run + _schedule;
+                else
+                    one_shot = true;
+                break;
+            case ScheduleType.tod:
+                if (_repeat)
+                    _next_run = next_occurrence(now, _at, _days_mask);
+                else
+                    one_shot = true;
+                break;
+            case ScheduleType.absolute:
+                one_shot = true;
+                break;
+        }
+
+        if (one_shot && _running_commands.length == 0)
         {
             writeInfo("CronJob '", name, "': One-shot job completed, disabling");
             disabled = true;
@@ -135,6 +223,8 @@ private:
     {
         none,
         duration,
+        tod,
+        absolute,
     }
 
     struct RunningCommand
@@ -144,10 +234,13 @@ private:
     }
 
     Duration _schedule;
+    TimeOfDay _at;
+    SysTime _when;
+    ubyte _days_mask;
     ScheduleType _schedule_type;
     bool _repeat = true;
 
-    String _command;
+    Script _script;
 
     SysTime _last_run;
     SysTime _next_run;
@@ -173,11 +266,11 @@ private:
 
     void execute_command()
     {
-        writeInfo("CronJob '", name, "': Executing command: ", _command);
+        writeInfo("CronJob '", name, "': Executing script: ", _script.source);
 
         Variant result;
         Session session = g_app.allocator.allocT!Session(g_app.console);
-        CommandState command = g_app.console.execute(session, _command[], result);
+        CommandState command = g_app.console.execute(session, _script, result);
 
         if (command)
             _running_commands ~= RunningCommand(session, command);

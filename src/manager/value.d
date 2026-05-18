@@ -46,6 +46,8 @@ template struct_name_override(T)
         enum struct_name_override = "eui";
     else static if (is(T == DateTime) || is(T == SysTime))
         enum struct_name_override = "dt";
+    else static if (is(T == TimeOfDay))
+        enum struct_name_override = "tod";
     else
         enum struct_name_override = T.stringof;
 }
