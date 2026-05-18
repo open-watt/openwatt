@@ -15,7 +15,7 @@ import urt.zip;
 
 import protocol.http;
 
-import router.stream.tcp;
+import protocol.ip.tcp_stream;
 
 nothrow @nogc:
 

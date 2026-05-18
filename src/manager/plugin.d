@@ -4,6 +4,7 @@ import urt.string;
 
 import manager;
 import manager.config : ConfItem;
+import manager.features;
 
 nothrow @nogc:
 
@@ -67,66 +68,78 @@ mixin template DeclareModule(string name)
 //
 void register_modules(Application app)
 {
-    import manager.log, manager.pcap, manager.cron, manager.certificate, manager.sync;
+    import manager.log, manager.cron, manager.sync;
     register_module!(manager.log)(app);
-    register_module!(manager.pcap)(app);
     register_module!(manager.cron)(app);
-    register_module!(manager.certificate)(app);
     register_module!(manager.sync)(app);
 
-    version (linux)
+    static if (has_switch)
     {
-        import manager.os.netlink;
-        register_module!(manager.os.netlink)(app);
+        version (linux)
+        {
+            import driver.linux.netlink;
+            register_module!(driver.linux.netlink)(app);
+        }
+
+        import router.pcap;
+        register_module!(router.pcap)(app);
+
+        import router.stream;
+        register_module!(router.stream)(app);
+        register_module!(router.stream.bridge)(app);
+        register_module!(router.stream.console)(app);
+        register_module!(router.stream.duplex)(app);
+        register_module!(router.stream.file)(app);
+        register_module!(router.stream.memory)(app);
+        register_module!(router.stream.serial)(app);
+
+        import router.iface;
+        register_module!(router.iface)(app);
+        register_module!(router.iface.bridge)(app);
+        register_module!(router.iface.wifi)(app);
+
+        import driver.ethernet, driver.wifi;
+        register_module!(driver.ethernet)(app);
+        register_module!(driver.wifi)(app);
     }
 
-    import router.stream;
-    register_module!(router.stream)(app);
-    register_module!(router.stream.bridge)(app);
-    register_module!(router.stream.console)(app);
-    register_module!(router.stream.duplex)(app);
-    register_module!(router.stream.file)(app);
-    register_module!(router.stream.memory)(app);
-    register_module!(router.stream.serial)(app);
-    register_module!(router.stream.tcp)(app);
-    register_module!(router.stream.tls)(app);
-    register_module!(router.stream.udp)(app);
+    static if (has_all)
+    {
+        import protocol;
+        register_module!(protocol.ble)(app);
+        register_module!(protocol.can)(app);
+        register_module!(protocol.dhcp)(app);
+        register_module!(protocol.dns)(app);
+        register_module!(protocol.esphome)(app);
+        register_module!(protocol.ezsp)(app);
+        register_module!(protocol.goodwe)(app);
+        register_module!(protocol.http)(app);
+        register_module!(protocol.ip)(app);
+        register_module!(protocol.ip.tcp_stream)(app);
+        register_module!(protocol.ip.udp_stream)(app);
+        register_module!(protocol.modbus)(app);
+        register_module!(protocol.mqtt)(app);
+        register_module!(protocol.ppp)(app);
+        register_module!(protocol.snmp)(app);
+        register_module!(protocol.telnet)(app);
+        register_module!(protocol.tesla)(app);
+        register_module!(protocol.zigbee)(app);
 
-    import router.iface;
-    register_module!(router.iface)(app);
-    register_module!(router.iface.bridge)(app);
-    register_module!(router.iface.wifi)(app);
+        static if (has_tls)
+        {
+            import protocol.tls;
+            register_module!(protocol.tls)(app);
+        }
 
-    import driver.ethernet, driver.wifi;
-    register_module!(driver.ethernet)(app);
-    register_module!(driver.wifi)(app);
+        import apps.api;
+        register_module!(apps.api)(app);
 
-    import protocol;
-    register_module!(protocol.ble)(app);
-    register_module!(protocol.can)(app);
-    register_module!(protocol.dhcp)(app);
-    register_module!(protocol.dns)(app);
-    register_module!(protocol.esphome)(app);
-    register_module!(protocol.ezsp)(app);
-    register_module!(protocol.goodwe)(app);
-    register_module!(protocol.http)(app);
-    register_module!(protocol.ip)(app);
-    register_module!(protocol.modbus)(app);
-    register_module!(protocol.mqtt)(app);
-    register_module!(protocol.ppp)(app);
-//    register_module!(protocol.snmp)(app);
-    register_module!(protocol.telnet)(app);
-    register_module!(protocol.tesla)(app);
-    register_module!(protocol.zigbee)(app);
+        import apps.energy;
+        register_module!(apps.energy)(app);
 
-    import apps.api;
-    register_module!(apps.api)(app);
-
-    import apps.energy;
-    register_module!(apps.energy)(app);
-
-    import apps.ota;
-    register_module!(apps.ota)(app);
+        import apps.ota;
+        register_module!(apps.ota)(app);
+    }
 }
 
 

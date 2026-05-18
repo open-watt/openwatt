@@ -1,4 +1,4 @@
-module manager.os.iphlpapi;
+module driver.windows.iphlpapi;
 
 version (Windows):
 

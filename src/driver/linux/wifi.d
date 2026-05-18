@@ -33,9 +33,9 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
-import manager.os.netlink;
-import manager.os.nl80211;
-import manager.os.sysfs;
+import driver.linux.netlink;
+import driver.linux.nl80211;
+import driver.linux.sysfs;
 
 import driver.linux.ctrl_iface;
 import driver.linux.hostapd;

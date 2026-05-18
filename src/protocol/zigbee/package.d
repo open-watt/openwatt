@@ -28,7 +28,7 @@ import protocol.zigbee.router;
 import protocol.zigbee.zcl;
 
 import router.iface;
-import router.iface.zigbee;
+import protocol.zigbee.iface;
 
 nothrow @nogc:
 

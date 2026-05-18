@@ -21,6 +21,7 @@ import manager.collection;
 import protocol.http;
 import protocol.http.message;
 import protocol.http.server;
+import protocol.ip.client : IPClient;
 
 import router.iface;
 import router.stream;
@@ -549,7 +550,7 @@ protected:
 
 private:
     ObjectRef!Stream _stream;
-    ClientConnection _conn;
+    IPClient _conn;
     String _resource; // url path, or empty
     WSExtensions _extensions;
     String _protocol;

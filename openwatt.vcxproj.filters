@@ -76,9 +76,6 @@
     <Filter Include="src\devices\goodwe">
       <UniqueIdentifier>{40945e90-884d-42fe-af71-ebfa344845cc}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\manager\os">
-      <UniqueIdentifier>{a17bdf4a-06e2-4856-bb09-afe42c85e130}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\protocol">
       <UniqueIdentifier>{e3d26653-740a-4de4-ad46-6df4e33023d0}</UniqueIdentifier>
     </Filter>
@@ -129,6 +126,9 @@
     </Filter>
     <Filter Include="src\protocol\ip">
       <UniqueIdentifier>{7a6b8c28-6a40-46e8-9b2e-2e28576d413a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src\protocol\tls">
+      <UniqueIdentifier>{8b7c9d39-7b51-57f9-ac3f-3f39687e524b}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\router">
       <UniqueIdentifier>{246d3667-a7d7-4f96-bd0a-7d418f4c1d4d}</UniqueIdentifier>
@@ -270,7 +270,16 @@
     <DCompile Include="src\driver\linux\hostapd.d">
       <Filter>src\driver\linux</Filter>
     </DCompile>
+    <DCompile Include="src\driver\linux\netlink.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\nl80211.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
     <DCompile Include="src\driver\linux\raw.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\sysfs.d">
       <Filter>src\driver\linux</Filter>
     </DCompile>
     <DCompile Include="src\driver\linux\system.d">
@@ -294,6 +303,12 @@
     <DCompile Include="src\driver\windows\ethernet.d">
       <Filter>src\driver\windows</Filter>
     </DCompile>
+    <DCompile Include="src\driver\windows\iphlpapi.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\windows\npcap.d">
+      <Filter>src\driver\windows</Filter>
+    </DCompile>
     <DCompile Include="src\driver\windows\pcap.d">
       <Filter>src\driver\windows</Filter>
     </DCompile>
@@ -305,9 +320,6 @@
     </DCompile>
     <DCompile Include="src\driver\windows\wlanapi.d">
       <Filter>src\driver\windows</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\certificate.d">
-      <Filter>src\manager</Filter>
     </DCompile>
     <DCompile Include="src\manager\component.d">
       <Filter>src\manager</Filter>
@@ -381,14 +393,23 @@
     <DCompile Include="src\router\stream\serial.d">
       <Filter>src\router\stream</Filter>
     </DCompile>
-    <DCompile Include="src\router\stream\tcp.d">
-      <Filter>src\router\stream</Filter>
+    <DCompile Include="src\protocol\ip\client.d">
+      <Filter>src\protocol\ip</Filter>
     </DCompile>
-    <DCompile Include="src\router\stream\tls.d">
-      <Filter>src\router\stream</Filter>
+    <DCompile Include="src\protocol\ip\tcp_stream.d">
+      <Filter>src\protocol\ip</Filter>
     </DCompile>
-    <DCompile Include="src\router\stream\udp.d">
-      <Filter>src\router\stream</Filter>
+    <DCompile Include="src\protocol\ip\udp_stream.d">
+      <Filter>src\protocol\ip</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tls\certificate.d">
+      <Filter>src\protocol\tls</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tls\package.d">
+      <Filter>src\protocol\tls</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\tls\stream.d">
+      <Filter>src\protocol\tls</Filter>
     </DCompile>
     <DCompile Include="src\tools\protobuf\package.d">
       <Filter>src\tools\protobuf</Filter>
@@ -404,18 +425,6 @@
     </DCompile>
     <DCompile Include="src\manager\log.d">
       <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\os\iphlpapi.d">
-      <Filter>src\manager\os</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\os\netlink.d">
-      <Filter>src\manager\os</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\os\npcap.d">
-      <Filter>src\manager\os</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\os\sysfs.d">
-      <Filter>src\manager\os</Filter>
     </DCompile>
     <DCompile Include="src\manager\console\builtin_commands.d">
       <Filter>src\manager\console</Filter>
@@ -639,8 +648,8 @@
     <DCompile Include="src\router\iface\ethernet.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
-    <DCompile Include="src\router\iface\zigbee.d">
-      <Filter>src\router\iface</Filter>
+    <DCompile Include="src\protocol\zigbee\iface.d">
+      <Filter>src\protocol\zigbee</Filter>
     </DCompile>
     <DCompile Include="src\protocol\dhcp\client.d">
       <Filter>src\protocol\dhcp</Filter>
@@ -690,7 +699,13 @@
     <DCompile Include="src\apps\ota\package.d">
       <Filter>src\apps\ota</Filter>
     </DCompile>
-    <DCompile Include="src\manager\pcap.d">
+    <DCompile Include="src\router\pcap.d">
+      <Filter>src\router</Filter>
+    </DCompile>
+    <DCompile Include="src\router\pcap_server.d">
+      <Filter>src\router</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\features.d">
       <Filter>src\manager</Filter>
     </DCompile>
     <DCompile Include="src\protocol\package.d">

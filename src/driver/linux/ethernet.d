@@ -13,8 +13,8 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
-import manager.os.netlink;
-import manager.os.sysfs;
+import driver.linux.netlink;
+import driver.linux.sysfs;
 
 import driver.linux.raw;
 

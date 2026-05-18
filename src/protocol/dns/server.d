@@ -24,8 +24,8 @@ import protocol.http.message;
 import protocol.http.server;
 
 import router.iface;
-import router.stream.tcp;
-import router.stream.tls;
+import protocol.ip.tcp_stream;
+import protocol.tls;
 
 version = DebugDNSMessageFlow;
 

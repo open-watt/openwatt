@@ -20,6 +20,7 @@ import manager.collection;
 
 import protocol.http;
 import protocol.http.message;
+import protocol.ip.client : IPClient;
 
 import router.stream;
 
@@ -190,7 +191,7 @@ protected:
 
 private:
     ObjectRef!Stream _stream;
-    ClientConnection _conn;
+    IPClient _conn;
     bool _tls;
 
     HTTPVersion server_version = HTTPVersion.V1_1;

@@ -1,4 +1,4 @@
-module manager.os.nl80211;
+module driver.linux.nl80211;
 
 version (linux):
 

@@ -26,8 +26,8 @@ import protocol.http.server;
 import protocol.http.websocket;
 
 import router.stream;
-import router.stream.tcp;
-import router.stream.tls;
+import protocol.ip.tcp_stream;
+import protocol.tls;
 
 nothrow @nogc:
 

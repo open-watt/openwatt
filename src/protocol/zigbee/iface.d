@@ -1,4 +1,4 @@
-module router.iface.zigbee;
+module protocol.zigbee.iface;
 
 import urt.array;
 import urt.endian;

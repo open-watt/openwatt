@@ -1,4 +1,4 @@
-module manager.os.netlink;
+module driver.linux.netlink;
 
 version (linux):
 

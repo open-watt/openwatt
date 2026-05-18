@@ -1,6 +1,7 @@
 module manager.console.session;
 
 import manager.console;
+import manager.features;
 
 import urt.array;
 import urt.lifetime;
@@ -69,13 +70,15 @@ nothrow @nogc:
 
     this(ref Console console, Stream stream = null)
     {
-        import protocol.telnet.stream : TelnetStream;
-
         _console = &console;
         _stream = stream;
         _prompt_suffix = "> ";
         _cur_scope = console.root;
-        _nvt_input = cast(TelnetStream)stream !is null;
+        static if (has_all)
+        {
+            import protocol.telnet.stream : TelnetStream;
+            _nvt_input = cast(TelnetStream)stream !is null;
+        }
         rebuild_prompt();
 
         if (_stream)
