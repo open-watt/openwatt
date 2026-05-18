@@ -168,6 +168,21 @@ ModbusPDU createMessage_Write(RegisterType type, ushort register, ushort value) 
     return createMessage_Write(type, register, (&value)[0..1]);
 }
 
+ModbusPDU createMessage_WriteCoils(ushort register, const(ubyte)[] packed_bits, ushort count) nothrow @nogc
+{
+    assert(count >= 1 && count <= 1968, "coil count out of range");
+    assert(packed_bits.length == (count + 7) / 8, "packed bit buffer length mismatch");
+
+    ModbusPDU pdu;
+    pdu.function_code = FunctionCode.write_multiple_coils;
+    pdu.buffer[0..2] = register.nativeToBigEndian;
+    pdu.buffer[2..4] = count.nativeToBigEndian;
+    pdu.buffer[4] = cast(ubyte)packed_bits.length;
+    pdu.length = cast(ubyte)(5 + packed_bits.length);
+    pdu.buffer[5 .. 5 + packed_bits.length] = packed_bits[];
+    return pdu;
+}
+
 ModbusPDU createMessage_Write(RegisterType type, ushort register, ushort[] values) nothrow @nogc
 {
     ModbusPDU pdu;

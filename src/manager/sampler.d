@@ -409,7 +409,7 @@ Variant sample_value(const void* data, ref const ValueDesc desc)
             const(char)[] str_buffer = (cast(char*)data)[0 .. desc._type.data_length];
 
             char[256] swapped = void;
-            if (desc._type & DataType.little_endian)
+            if (desc._type & DataType.word_reverse)
             {
                 size_t n = str_buffer.length;
                 assert(n <= swapped.length, "string longer than swap buffer");
@@ -748,7 +748,7 @@ ptrdiff_t write_value(ubyte[] buffer, ref const Variant value, ref const ValueDe
 
     if (store_little_endian)
     {
-        /+final+/ switch (desc._type & 0x1F)
+        final switch (desc._type & 0x1F)
         {
             case 0x0, 0x8, 0x10, 0x18: buffer[0] = raw_value & 0xFF; return 1;
             case 0x1, 0x9, 0x11, 0x19: buffer[0..2] = (cast(ushort)raw_value).nativeToLittleEndian; return 2;
@@ -758,20 +758,16 @@ ptrdiff_t write_value(ubyte[] buffer, ref const Variant value, ref const ValueDe
             case 0x5, 0xD: buffer[0..4] = (cast(uint)raw_value).nativeToLittleEndian; buffer[4..6] = (cast(ushort)(raw_value >> 32)).nativeToLittleEndian; return 6;
             case 0x6, 0xE: buffer[0..4] = (cast(uint)raw_value).nativeToLittleEndian; buffer[4..6] = (cast(ushort)(raw_value >> 32)).nativeToLittleEndian; buffer[6] = (raw_value >> 48) & 0xFF; return 7;
             case 0x7, 0xF: buffer[0..8] = raw_value.nativeToLittleEndian; return 8;
-//            // unsigned word-reverse
-//            case 0x13: raw_value = (ulong(loadLittleEndian(usptr)) << 16) | loadLittleEndian(usptr + 1); goto check_float;
-//            case 0x15: raw_value = (ulong(loadLittleEndian(usptr)) << 32) | (ulong(loadLittleEndian(usptr + 1)) << 16) | loadLittleEndian(usptr + 2); break;
-//            // signed word-reverse
-//            case 0x1B: raw_value = long(loadLittleEndian(sptr) << 16) | loadLittleEndian(usptr + 1); goto check_float;
-//            case 0x1D: raw_value = (long(loadLittleEndian(sptr)) << 32) | (ulong(loadLittleEndian(usptr + 1)) << 16) | loadLittleEndian(usptr + 2); break;
-//            case 0x17, 0x1F: raw_value = (ulong(loadLittleEndian(usptr)) << 48) | (ulong(loadLittleEndian(usptr + 1)) << 32) | (ulong(loadLittleEndian(usptr + 2)) << 16) | loadLittleEndian(usptr + 3); goto check_double;
-//            case 0x12, 0x14, 0x16, 0x1A, 0x1C, 0x1E: assert(false, "not a word multiple");
-            default: assert(false, "TODO");
+            // word-reverse
+            case 0x13, 0x1B: buffer[0..2] = (cast(ushort)(raw_value >> 16)).nativeToLittleEndian; buffer[2..4] = (cast(ushort)raw_value).nativeToLittleEndian; return 4;
+            case 0x15, 0x1D: buffer[0..2] = (cast(ushort)(raw_value >> 32)).nativeToLittleEndian; buffer[2..4] = (cast(ushort)(raw_value >> 16)).nativeToLittleEndian; buffer[4..6] = (cast(ushort)raw_value).nativeToLittleEndian; return 6;
+            case 0x17, 0x1F: buffer[0..2] = ushort(raw_value >> 48).nativeToLittleEndian; buffer[2..4] = (cast(ushort)(raw_value >> 32)).nativeToLittleEndian; buffer[4..6] = (cast(ushort)(raw_value >> 16)).nativeToLittleEndian; buffer[6..8] = (cast(ushort)raw_value).nativeToLittleEndian; return 8;
+            case 0x12, 0x14, 0x16, 0x1A, 0x1C, 0x1E: assert(false, "not a word multiple");
         }
     }
     else
     {
-        /+final+/ switch (desc._type & 0x1F)
+        final switch (desc._type & 0x1F)
         {
             case 0x0, 0x8, 0x10, 0x18: buffer[0] = raw_value & 0xFF; return 1;
             case 0x1, 0x9, 0x11, 0x19: buffer[0..2] = (cast(ushort)raw_value).nativeToBigEndian; return 2;
@@ -781,15 +777,11 @@ ptrdiff_t write_value(ubyte[] buffer, ref const Variant value, ref const ValueDe
             case 0x5, 0xD: buffer[0..4] = (cast(uint)(raw_value >> 16)).nativeToBigEndian; buffer[4..6] = (cast(ushort)raw_value).nativeToBigEndian; return 6;
             case 0x6, 0xE: buffer[0..4] = (cast(uint)(raw_value >> 24)).nativeToBigEndian; buffer[4..6] = (cast(ushort)(raw_value >> 8)).nativeToBigEndian; buffer[6] = raw_value & 0xFF; return 7;
             case 0x7, 0xF: buffer[0..8] = raw_value.nativeToBigEndian; return 8;
-//            // unsigned word-reverse
-//            case 0x13: raw_value = loadBigEndian(usptr) | (ulong(loadBigEndian(usptr + 1)) << 16); goto check_float;
-//            case 0x15: raw_value = loadBigEndian(usptr) | (ulong(loadBigEndian(usptr + 1)) << 16) | (ulong(loadBigEndian(usptr + 2)) << 32); break;
-//            // signed word-reverse
-//            case 0x1B: raw_value = loadBigEndian(usptr) | long(loadBigEndian(sptr + 1) << 16); goto check_float;
-//            case 0x1D: raw_value = loadBigEndian(usptr) | (ulong(loadBigEndian(usptr + 1)) << 16) | (long(loadBigEndian(sptr + 2)) << 32); break;
-//            case 0x17, 0x1F: raw_value = loadBigEndian(usptr) | (ulong(loadBigEndian(usptr + 1)) << 16) | (ulong(loadBigEndian(usptr + 2)) << 32) | (ulong(loadBigEndian(usptr + 3)) << 48); goto check_double;
-//            case 0x12, 0x14, 0x16, 0x1A, 0x1C, 0x1E: assert(false, "not a word multiple");
-            default: assert(false, "TODO");
+            // word-reverse
+            case 0x13, 0x1B: buffer[0..2] = (cast(ushort)raw_value).nativeToBigEndian; buffer[2..4] = (cast(ushort)(raw_value >> 16)).nativeToBigEndian; return 4;
+            case 0x15, 0x1D: buffer[0..2] = (cast(ushort)raw_value).nativeToBigEndian; buffer[2..4] = (cast(ushort)(raw_value >> 16)).nativeToBigEndian; buffer[4..6] = (cast(ushort)(raw_value >> 32)).nativeToBigEndian; return 6;
+            case 0x17, 0x1F: buffer[0..2] = (cast(ushort)raw_value).nativeToBigEndian; buffer[2..4] = (cast(ushort)(raw_value >> 16)).nativeToBigEndian; buffer[4..6] = (cast(ushort)(raw_value >> 32)).nativeToBigEndian; buffer[6..8] = ushort(raw_value >> 48).nativeToBigEndian; return 8;
+            case 0x12, 0x14, 0x16, 0x1A, 0x1C, 0x1E: assert(false, "not a word multiple");
         }
     }
 }
@@ -846,14 +838,10 @@ DataType parse_data_type(const(char)[] desc, ubyte default_flags = 0) pure
         if (!success || len <= 0)
             return DataType.invalid;
         kind = DataKind.string_;
-        if (desc.length >= 2 && desc[0 .. 2] == "le")
+        // _r means bytes within each word are swapped
+        if (desc.length >= 2 && desc[0 .. 2] == "_r")
         {
-            flags |= DataType.little_endian;
-            desc = desc[2 .. $];
-        }
-        else if (desc.length >= 2 && desc[0 .. 2] == "be")
-        {
-            flags |= DataType.big_endian;
+            flags |= DataType.word_reverse;
             desc = desc[2 .. $];
         }
         // signed bit means string is space-padded
@@ -889,24 +877,12 @@ DataType parse_data_type(const(char)[] desc, ubyte default_flags = 0) pure
             flags |= DataType.big_endian;
             desc = desc[2 .. $];
         }
-        if (desc.length >= 3)
+        if (desc.length >= 2 && desc[0 .. 2] == "_r")
         {
-            if (desc[0 .. 3] == "_le")
-            {
-                if ((flags & (DataType.little_endian | DataType.big_endian)) == 0)
-                    return DataType.invalid;
-                if (flags & DataType.big_endian)
-                    flags |= DataType.word_reverse;
-                desc = desc[3 .. $];
-            }
-            else if (desc[0 .. 3] == "_be")
-            {
-                if ((flags & (DataType.little_endian | DataType.big_endian)) == 0)
-                    return DataType.invalid;
-                if (flags & DataType.little_endian)
-                    flags |= DataType.word_reverse;
-                desc = desc[3 .. $];
-            }
+            if ((bytes & 1) == 0) // word-reverse only meaningful at word-multiple sizes (16/32/48/64-bit)
+                return DataType.invalid;
+            flags |= DataType.word_reverse;
+            desc = desc[2 .. $];
         }
     }
 
@@ -953,20 +929,87 @@ unittest
     assert(sample_value(buffer.ptr, ValueDesc(data_type!"u64be")) == 0x8081828384858687);
     assert(sample_value(buffer.ptr, ValueDesc(data_type!"i64le")) == long(0x8786858483828180));
     assert(sample_value(buffer.ptr, ValueDesc(data_type!"i64be")) == long(0x8081828384858687));
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u16le_be")) == 0x8180);
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u16be_le")) == 0x8081);
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i16le_be")) == long(0xFFFFFFFFFFFF8180));
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i16be_le")) == long(0xFFFFFFFFFFFF8081));
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u32le_be")) == 0x81808382);
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u32be_le")) == 0x82838081);
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i32le_be")) == long(0xFFFFFFFF81808382));
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i32be_le")) == long(0xFFFFFFFF82838081));
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u48le_be")) == 0x818083828584);
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u48be_le")) == 0x848582838081);
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i48le_be")) == long(0xFFFF818083828584));
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i48be_le")) == long(0xFFFF848582838081));
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u64le_be")) == 0x8180838285848786);
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u64be_le")) == 0x8687848582838081);
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i64le_be")) == long(0x8180838285848786));
-    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i64be_le")) == long(0x8687848582838081));
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u16le_r")) == 0x8180);
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u16be_r")) == 0x8081);
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i16le_r")) == long(0xFFFFFFFFFFFF8180));
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i16be_r")) == long(0xFFFFFFFFFFFF8081));
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u32le_r")) == 0x81808382);
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u32be_r")) == 0x82838081);
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i32le_r")) == long(0xFFFFFFFF81808382));
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i32be_r")) == long(0xFFFFFFFF82838081));
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u48le_r")) == 0x818083828584);
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u48be_r")) == 0x848582838081);
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i48le_r")) == long(0xFFFF818083828584));
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i48be_r")) == long(0xFFFF848582838081));
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u64le_r")) == 0x8180838285848786);
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"u64be_r")) == 0x8687848582838081);
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i64le_r")) == long(0x8180838285848786));
+    assert(sample_value(buffer.ptr, ValueDesc(data_type!"i64be_r")) == long(0x8687848582838081));
+
+    // string decoding: natural order vs _r (bytes-within-word swapped, as Shelly devices present them)
+    {
+        ubyte[4] sbuf = ['A', 'B', 'C', 'D'];
+        assert(sample_value(sbuf.ptr, ValueDesc(data_type!"str4")) == "ABCD");
+        assert(sample_value(sbuf.ptr, ValueDesc(data_type!"str4_r")) == "BADC");
+    }
+
+    // round-trip each type through write_value and verify the bytes match the source buffer
+    void check_encode(ValueDesc desc)
+    {
+        Variant decoded = sample_value(buffer.ptr, desc);
+        ubyte[16] buf = 0;
+        ptrdiff_t n = write_value(buf[], decoded, desc);
+        ushort expect = desc.data_length;
+        assert(n == expect);
+        assert(buf[0..expect] == buffer[0..expect]);
+    }
+
+    check_encode(ValueDesc(data_type!"u8le"));
+    check_encode(ValueDesc(data_type!"u8be"));
+    check_encode(ValueDesc(data_type!"i8le"));
+    check_encode(ValueDesc(data_type!"i8be"));
+    check_encode(ValueDesc(data_type!"u16le"));
+    check_encode(ValueDesc(data_type!"u16be"));
+    check_encode(ValueDesc(data_type!"i16le"));
+    check_encode(ValueDesc(data_type!"i16be"));
+    check_encode(ValueDesc(data_type!"u24le"));
+    check_encode(ValueDesc(data_type!"u24be"));
+    check_encode(ValueDesc(data_type!"i24le"));
+    check_encode(ValueDesc(data_type!"i24be"));
+    check_encode(ValueDesc(data_type!"u32le"));
+    check_encode(ValueDesc(data_type!"u32be"));
+    check_encode(ValueDesc(data_type!"i32le"));
+    check_encode(ValueDesc(data_type!"i32be"));
+    check_encode(ValueDesc(data_type!"u40le"));
+    check_encode(ValueDesc(data_type!"u40be"));
+    check_encode(ValueDesc(data_type!"i40le"));
+    check_encode(ValueDesc(data_type!"i40be"));
+    check_encode(ValueDesc(data_type!"u48le"));
+    check_encode(ValueDesc(data_type!"u48be"));
+    check_encode(ValueDesc(data_type!"i48le"));
+    check_encode(ValueDesc(data_type!"i48be"));
+    check_encode(ValueDesc(data_type!"u56le"));
+    check_encode(ValueDesc(data_type!"u56be"));
+    check_encode(ValueDesc(data_type!"i56le"));
+    check_encode(ValueDesc(data_type!"i56be"));
+    check_encode(ValueDesc(data_type!"u64le"));
+    check_encode(ValueDesc(data_type!"u64be"));
+    check_encode(ValueDesc(data_type!"i64le"));
+    check_encode(ValueDesc(data_type!"i64be"));
+    check_encode(ValueDesc(data_type!"u16le_r"));
+    check_encode(ValueDesc(data_type!"u16be_r"));
+    check_encode(ValueDesc(data_type!"i16le_r"));
+    check_encode(ValueDesc(data_type!"i16be_r"));
+    check_encode(ValueDesc(data_type!"u32le_r"));
+    check_encode(ValueDesc(data_type!"u32be_r"));
+    check_encode(ValueDesc(data_type!"i32le_r"));
+    check_encode(ValueDesc(data_type!"i32be_r"));
+    check_encode(ValueDesc(data_type!"u48le_r"));
+    check_encode(ValueDesc(data_type!"u48be_r"));
+    check_encode(ValueDesc(data_type!"i48le_r"));
+    check_encode(ValueDesc(data_type!"i48be_r"));
+    check_encode(ValueDesc(data_type!"u64le_r"));
+    check_encode(ValueDesc(data_type!"u64be_r"));
+    check_encode(ValueDesc(data_type!"i64le_r"));
+    check_encode(ValueDesc(data_type!"i64be_r"));
 }

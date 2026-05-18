@@ -112,7 +112,7 @@ private:
 struct ElementDesc_Modbus
 {
     import protocol.modbus.message : RegisterType;
-    import protocol.modbus.sampler : modbus_data_type;
+    import protocol.modbus.binding : modbus_data_type;
 
     ushort reg;
     RegisterType reg_type = RegisterType.holding_register;
@@ -1253,7 +1253,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
 
                         // TODO: MOVE THIS CODE!
                         import protocol.modbus.message : RegisterType;
-                        import protocol.modbus.sampler : parse_modbus_data_type;
+                        import protocol.modbus.binding : parse_modbus_data_type;
 
                         size_t taken;
                         ulong reg = register.parse_uint_with_base(&taken);
