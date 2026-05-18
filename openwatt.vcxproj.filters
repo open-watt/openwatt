@@ -498,19 +498,28 @@
     <DCompile Include="src\protocol\modbus\package.d">
       <Filter>src\protocol\modbus</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\mqtt\binding.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\mqtt\broker.d">
       <Filter>src\protocol\mqtt</Filter>
     </DCompile>
     <DCompile Include="src\protocol\mqtt\client.d">
       <Filter>src\protocol\mqtt</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\mqtt\codec.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\connection.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\mqtt\package.d">
       <Filter>src\protocol\mqtt</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\mqtt\sampler.d">
+    <DCompile Include="src\protocol\mqtt\session.d">
       <Filter>src\protocol\mqtt</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\mqtt\util.d">
+    <DCompile Include="src\protocol\mqtt\topic.d">
       <Filter>src\protocol\mqtt</Filter>
     </DCompile>
     <DCompile Include="src\router\iface\packet.d">

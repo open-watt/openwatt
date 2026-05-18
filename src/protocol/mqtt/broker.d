@@ -6,23 +6,33 @@ import urt.log;
 import urt.map;
 import urt.mem.allocator;
 import urt.string;
+import urt.string.format : tconcat;
 import urt.time;
 
 import manager;
 import manager.base;
+import manager.certificate : Certificate;
 import manager.collection;
+import manager.expression : NamedArgument;
 
-import protocol.mqtt.client;
-
+import router.stream;
 import router.stream.tcp;
+
+import protocol.http.tls : TLSServer;
+
+import protocol.mqtt.codec;
+import protocol.mqtt.connection;
+import protocol.mqtt.session;
+import protocol.mqtt.topic;
 
 nothrow @nogc:
 
-alias PublishCallback = void delegate(const(char)[] sender, const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp) nothrow @nogc;
 
 class MQTTBroker : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("port", port),
+                                 Prop!("tls-port", tls_port),
+                                 Prop!("certificates", certificates),
                                  Prop!("allow-anonymous", allow_anonymous),
                                  Prop!("client-timeout", _client_timeout));
 nothrow @nogc:
@@ -36,396 +46,425 @@ nothrow @nogc:
         super(collection_type_info!MQTTBroker, id, flags);
     }
 
-    // Properties...
     ushort port() const pure
         => _port;
     void port(ushort value)
     {
-        _port = value ? value : 1883;
+        if (_port == value)
+            return;
+        _port = value;
         if (_server)
-        {
-            // TODO: this will cause a restart of the server, we need to check this doesn't cascade a reset of the whole broker...
             _server.port = _port;
-        }
     }
 
-    bool allow_anonymous() const pure
-        => (_flags & MQTTFlags.allow_anonymous_login) != 0;
-    void allow_anonymous(bool value)
+    ushort tls_port() const pure
+        => _tls_port;
+    void tls_port(ushort value)
     {
-        _flags = cast(MQTTFlags)((_flags & ~MQTTFlags.allow_anonymous_login) | (value ? MQTTFlags.allow_anonymous_login : 0));
+        if (_tls_port == value)
+            return;
+        _tls_port = value;
+        if (_tls_server)
+            _tls_server.port = _tls_port;
     }
 
-    // API...
+    void certificates(Certificate[] value)
+    {
+        if (_cert_subscribed)
+        {
+            foreach (ref c; _certificates)
+                if (c)
+                    c.unsubscribe(&cert_state_change);
+            _cert_subscribed = false;
+        }
+        _certificates.clear();
+        _certificates.reserve(value.length);
+        foreach (c; value)
+            _certificates.emplaceBack(c);
+        restart();
+    }
 
-    // alias the base functions into this scope to merge the overload sets
+    bool allow_anonymous() const pure => _allow_anonymous;
+    void allow_anonymous(bool value) { _allow_anonymous = value; }
+
     alias subscribe = ActiveObject.subscribe;
     alias unsubscribe = ActiveObject.unsubscribe;
 
     void subscribe(String topic_filter, PublishCallback callback)
     {
-        Subscription* sub = &_subs.pushBack();
-        sub.topic_filter = topic_filter;
+        Subscription sub;
+        sub.subscriber = callback.ptr;
         sub.callback = callback;
+        _trie.register(topic_filter[], sub);
+
+        const(char)[] filter_slice = topic_filter[];
+        _trie.match_retained(filter_slice, (ref const RetainedMessage rm) nothrow @nogc {
+            callback(null, rm.topic[], rm.payload[], getTime());
+        });
     }
 
     void unsubscribe(PublishCallback callback)
     {
-        for (size_t i = 0; i < _subs.length; )
-        {
-            if (_subs[i].callback == callback)
-                _subs.removeSwapLast(i);
-            else
-                ++i;
-        }
+        _trie.unregister_all(callback.ptr);
     }
 
-    void publish(const(char)[] client_id, ubyte flags, const(char)[] topic, const(ubyte)[] payload, const(ubyte)[] properties = null, MonoTime timestamp = getTime())
+    void publish(const(char)[] client_id, ubyte flags, const(char)[] topic,
+                 const(ubyte)[] payload, const(ubyte)[] properties = null,
+                 MonoTime timestamp = MonoTime.init)
     {
-        Value* get_record(Value* val, const(char)[] topic)
-        {
-            char sep;
-            const(char)[] level = topic.split!'/'(sep);
-            Value* child = level in val.children;
-            if (!child)
-                child = val.children.insert(level.makeString(defaultAllocator()), Value());
-            if (sep == 0)
-                return child;
-            return get_record(child, topic);
-        }
-
-        void delete_record(Value* val, const(char)[] topic) nothrow @nogc
-        {
-            char sep;
-            const(char)[] level = topic.split!'/'(sep);
-            Value* child = level in val.children;
-            if (sep == 0)
-                child.data = null;
-            else if(child)
-                delete_record(child, topic);
-            if (child.children.empty)
-                val.children.remove(level);
-        }
-
-        // retain message and/or push to subscribers...
-        ubyte qos = (flags >> 1) & 3;
-        bool retain = (flags & 1) != 0;
-        bool dup = (flags & 8) != 0;
-
-        if (payload.empty)
-        {
-            delete_record(&_root, topic);
-            return;
-        }
-
-        if (retain)
-        {
-            Value* value = get_record(&_root, topic);
-            if (value)
-            {
-                value.data = payload[];
-                if (properties)
-                    value.properties = properties[];
-                else
-                    value.properties = null;
-                value.flags = flags;
-            }
-        }
-
-        foreach (ref sub; _subs)
-        {
-            if (topic_matches_filter(topic, sub.topic_filter[]))
-                sub.callback(client_id, topic, payload, timestamp);
-        }
+        if (timestamp == MonoTime.init)
+            timestamp = getTime();
+        bool retain = (flags & 0x01) != 0;
+        publish_internal(null, client_id, topic, payload, properties, retain, timestamp);
     }
+
+    package Session* claim_or_create_session(const(char)[] client_id, bool clean_start, ProtocolLevel level, ref bool present)
+    {
+        Session** existing = client_id in _sessions;
+        if (existing)
+        {
+            Session* s = *existing;
+            if (s.connection !is null)
+            {
+                Connection* old = cast(Connection*)s.connection;
+                old.clear_session();
+                old.disconnect(ReasonCode.SessionTakenOver);
+                s.connection = null;
+            }
+            if (clean_start)
+            {
+                clear_session_subs(s);
+                s.reset();
+                s.protocol_level = level;
+                present = false;
+            }
+            else
+            {
+                present = true;
+            }
+            return s;
+        }
+
+        String id = client_id.makeString(defaultAllocator());
+        Session* s = defaultAllocator().allocT!Session(id, level);
+        _sessions.insert(s.client_id[], s);
+        present = false;
+        return s;
+    }
+
+    package ubyte subscribe_session(Session* s, const(char)[] filter, ubyte requested_qos, bool no_local,
+                                    bool retain_as_published, ubyte retain_handling, uint subscription_id)
+    {
+        // Cap granted QoS until outbound QoS 1/2 ships.
+        ubyte granted = 0;
+
+        String filter_str = filter.makeString(defaultAllocator());
+        bool was_new = s.record_subscription(filter_str, granted, no_local,
+                                             retain_as_published, retain_handling,
+                                             subscription_id);
+
+        Subscription sub;
+        sub.subscriber = s;
+        sub.callback = null;
+        sub.qos = granted;
+        sub.no_local = no_local;
+        sub.retain_as_published = retain_as_published;
+        sub.retain_handling = retain_handling;
+        sub.subscription_id = subscription_id;
+        _trie.register(filter, sub);
+
+        // retain_handling: 0=always, 1=only-if-new-subscription, 2=never (MQTT v5 §3.8.3.1).
+        bool send_retained = (retain_handling == 0) || (retain_handling == 1 && was_new);
+        if (send_retained && s.connection !is null)
+        {
+            Connection* conn = cast(Connection*)s.connection;
+            _trie.match_retained(filter, (ref const RetainedMessage rm) nothrow @nogc {
+                conn.send_publish_to_subscriber(rm.topic[], rm.payload[], rm.properties[], granted, true);
+            });
+        }
+        return granted;
+    }
+
+    package bool unsubscribe_session(Session* s, const(char)[] filter)
+    {
+        bool removed_from_trie = _trie.unregister(filter, s);
+        bool removed_from_session = s.drop_subscription(filter);
+        return removed_from_trie || removed_from_session;
+    }
+
+    package void publish(Session* publisher, const(char)[] topic, const(ubyte)[] payload,
+                         const(ubyte)[] properties, bool retain, MonoTime timestamp)
+    {
+        const(char)[] sender_id = publisher ? publisher.client_id[] : null;
+        publish_internal(publisher, sender_id, topic, payload, properties, retain, timestamp);
+    }
+
 
 protected:
 
+    override bool validate() const pure
+        => _port != 0 || _tls_port != 0;
+
     override CompletionStatus startup()
     {
-        if (!_server)
-            _server = create_server();
-        if (_server.running)
-            return CompletionStatus.complete;
-        return CompletionStatus.continue_;
+        if (_port != 0 && !_server)
+        {
+            if (!try_start_tcp())
+                return CompletionStatus.error;
+        }
+        if (_tls_port != 0 && !_tls_server)
+            try_start_tls();
+
+        if (!_cert_subscribed && _certificates.length > 0)
+        {
+            foreach (ref c; _certificates)
+                if (c)
+                    c.subscribe(&cert_state_change);
+            _cert_subscribed = true;
+        }
+
+        // Running = at least one configured listener is actually accepting.
+        bool tcp_up = (_port != 0) && _server && _server.running;
+        bool tls_up = (_tls_port != 0) && _tls_server && _tls_server.running;
+        return (tcp_up || tls_up) ? CompletionStatus.complete : CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()
     {
-        _server.destroy();
-        _server = null;
+        if (_cert_subscribed)
+        {
+            foreach (ref c; _certificates)
+                if (c)
+                    c.unsubscribe(&cert_state_change);
+            _cert_subscribed = false;
+        }
 
-        foreach (ref client; _clients)
-            client.disconnect(0x98);
-        _clients.clear();
+        if (_tls_server)
+        {
+            _tls_server.unsubscribe(&server_state_change);
+            _tls_server.destroy();
+            _tls_server = null;
+        }
+        if (_server)
+        {
+            _server.unsubscribe(&server_state_change);
+            _server.destroy();
+            _server = null;
+        }
 
+        foreach (c; _connections)
+        {
+            c.disconnect(ReasonCode.ServerShuttingDown);
+            defaultAllocator().freeT(c);
+        }
+        _connections.clear();
+
+        foreach (kvp; _sessions)
+            defaultAllocator().freeT(kvp.value);
         _sessions.clear();
-        _subs.clear();
 
+        _trie.clear();
         return CompletionStatus.complete;
     }
 
     override void update()
     {
-        if (_server.running)
+        if (_server && _server.running)
             _server.update();
+        if (_tls_server && _tls_server.running)
+            _tls_server.update();
 
-        // update clients
-        for (size_t i = 0; i < _clients.length; )
+        MonoTime now = getTime();
+
+        for (size_t i = 0; i < _connections.length; )
         {
-            if (!_clients[i].update())
+            Connection* c = _connections[i];
+            if (!c.update())
             {
-                // destroy client...
-                _clients[i].terminate();
-                _clients.removeSwapLast(i);
+                detach_and_close(c, now);
+                defaultAllocator().freeT(c);
+                _connections.removeSwapLast(i);
             }
             else
                 ++i;
         }
 
-        // update sessions
-        MonoTime now = getTime();
-        const(char)[][16] items_to_remove;
-        size_t num_items_to_remove = 0;
-        foreach (ref session; _sessions.values)
+        Session*[16] to_evict = void;
+        size_t evict_count = 0;
+        foreach (kvp; _sessions)
         {
-            if (session.client)
-                continue;
-
-            if (session.session_expiry_interval != 0xFFFFFFFF)
-            {
-                if (now - session.close_time >= session.session_expiry_interval.seconds)
-                {
-                    // session expired
-                    if (num_items_to_remove == 16)
-                        break;
-                    items_to_remove[num_items_to_remove++] = session.identifier[];
-                }
-            }
+            if (evict_count == to_evict.length)
+                break;
+            if (kvp.value.expired(now))
+                to_evict[evict_count++] = kvp.value;
         }
-        foreach (i; 0 .. num_items_to_remove)
-            _sessions.remove(items_to_remove[i]);
-    }
-
-package:
-    MQTTSession* create_or_claim_session(const(char)[] id, ubyte clean_session, out bool exists)
-    {
-        MQTTSession* s = id in _sessions;
-        if (s)
-        {
-            if (clean_session)
-                destroy_session(*s);
-            else
-            {
-                exists = true;
-                if (s.client)
-                {
-                    s.client.disconnect(0x8E); // 8E = session taken over
-                    s.client = null;
-                }
-            }
-        }
-        else
-        {
-            String id_str = id.makeString(defaultAllocator());
-            s = _sessions.insert(id_str[], MQTTSession(id_str.move));
-        }
-        return s;
-    }
-
-    void destroy_session(ref MQTTSession session)
-    {
-        send_lwt(session);
-
-        unsubscribe(&session.publish_callback);
-
-        if (session.client)
-        {
-            session.client.disconnect(0);
-            session.client = null;
-        }
-
-        session.subs.clear();
-        session.subs_by_filter.clear();
-        session.will_topic = null;
-        session.will_message = null;
-        session.will_props = null;
-        session.will_delay = 0;
-        session.will_flags = 0;
-        session.packet_id = 1;
-    }
-
-    void send_lwt(ref MQTTSession session)
-    {
-        if (!session.will_topic || session.will_sent)
-            return;
-        publish(session.identifier[], session.will_flags, session.will_topic[], session.will_message[], session.will_props[]);
-        session.will_sent = true;
+        foreach (i; 0 .. evict_count)
+            drop_session(to_evict[i]);
     }
 
 private:
-
-    struct Value
-    {
-        Map!(String, Value) children;
-        Array!ubyte data;
-        Array!ubyte properties;
-        ubyte flags;
-    }
-
-    struct Subscription
-    {
-        String topic_filter;    // Can include wildcards: +, #
-        PublishCallback callback;
-    }
-
-    TCPServer _server;
-    ushort _port = 1883;
-    MQTTFlags _flags;
+    ushort _port;
+    ushort _tls_port;
+    bool _allow_anonymous;
+    bool _cert_subscribed;
     Duration _client_timeout;
 
-    Map!(const(char)[], MQTTSession) _sessions;
-    Array!MQTTClient _clients;
-    Array!Subscription _subs;
+    TCPServer _server;
+    TCPServer _tls_server;
+    Array!(ObjectRef!Certificate) _certificates;
+    Map!(const(char)[], Session*) _sessions;
+    Array!(Connection*) _connections;
+    TopicTrie _trie;
 
-    // retained values
-    Value _root;
-
-    final TCPServer create_server()
+    void publish_internal(Session* publisher, const(char)[] sender_id, const(char)[] topic,
+                          const(ubyte)[] payload, const(ubyte)[] properties, bool retain, MonoTime timestamp)
     {
-        import manager.expression : NamedArgument;
+        if (retain)
+            _trie.store_retained(topic, payload, properties, 0x01);
 
-        TCPServer s = Collection!TCPServer().create(name[], ObjectFlags.dynamic, NamedArgument("port", _port ? _port : 1883));
-        s.subscribe(&server_signal);
-        s.set_connection_callback(&new_connection, null);
-        return s;
-    }
-
-    final void server_signal(ActiveObject object, StateSignal signal)
-    {
-        final switch (signal)
-        {
-            case StateSignal.online:
-                log.info("listening on port ", _server.port, "...");
-                break;
-
-            case StateSignal.offline:
-                log.info("stopped listening");
-                break;
-
-            case StateSignal.destroyed:
-                debug assert(object is _server);
-                object.unsubscribe(&server_signal);
-
-                if (running) // if we're still running, we'll recreate a new server
-                    _server = create_server();
-                break;
-        }
-    }
-
-    final void new_connection(Stream client, void* user_data)
-    {
-        _clients ~= MQTTClient(this, client);
-
-        log.info("MQTT client connected: ", client.remote_name());
-    }
-}
-
-
-private:
-
-enum MQTTFlags
-{
-    none = 0,
-    allow_anonymous_login = 1 << 0,
-}
-
-package struct MQTTSession
-{
-    this(this) @disable;
-
-    struct Subscription
-    {
-        String topic;
-        ubyte options;
-    }
-
-    String identifier;
-    MQTTClient* client;
-
-    uint session_expiry_interval = 0;
-
-    MonoTime close_time;
-
-    Array!Subscription subs;
-    Map!(const(char)[], Subscription*) subs_by_filter;
-
-    // last will and testament
-    String will_topic;
-    Array!ubyte will_message;
-    Array!ubyte will_props;
-    uint will_delay;
-    ubyte will_flags;
-    bool will_sent;
-
-    // publish state
-    ushort packet_id = 1;
-
-    // TODO: pending messages...
-    ubyte[] pending_messages;
-
-nothrow @nogc:
-    void publish_callback(const(char)[] sender, const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp)
-    {
-        if (sender[] == identifier[])
-            return; // don't echo back to sender
-
-        if (client)
-            client.publish(topic[], payload); // TODO: handle qos/retain/etc
-    }
-}
-
-bool topic_matches_filter(const(char)[] topic, const(char)[] filter) pure
-{
-    size_t topic_pos = 0;
-    size_t filter_pos = 0;
-
-    while (filter_pos < filter.length)
-    {
-        if (filter[filter_pos] == '#')
-        {
-            // Multi-level wildcard - matches everything remaining
-            return true;
-        }
-        else if (filter[filter_pos] == '+')
-        {
-            // Single-level wildcard - skip to next '/' in topic
-            while (topic_pos < topic.length && topic[topic_pos] != '/')
-                ++topic_pos;
-
-            // Skip the wildcard in filter
-            ++filter_pos;
-
-            // Both should either be at '/' or at end
-            if (filter_pos < filter.length && filter[filter_pos] == '/')
+        _trie.match_subscribers(topic, (ref const Subscription sub) nothrow @nogc {
+            if (sub.no_local && sub.subscriber is publisher)
+                return;
+            if (sub.callback !is null)
             {
-                if (topic_pos >= topic.length || topic[topic_pos] != '/')
-                    return false;
-                ++filter_pos;
-                ++topic_pos;
+                sub.callback(sender_id, topic, payload, timestamp);
+                return;
+            }
+            Session* s = cast(Session*)sub.subscriber;
+            if (!s || s.connection is null)
+                return; // detached -- drop (TODO: queue for QoS > 0)
+            Connection* conn = cast(Connection*)s.connection;
+            conn.send_publish_to_subscriber(topic, payload, properties, sub.qos, false);
+        });
+    }
+
+    void detach_and_close(Connection* c, MonoTime now)
+    {
+        Session* s = c.attached_session;
+        if (s)
+        {
+            s.detach(now);
+            // Graceful DISCONNECT clears will.present before we get here, so this only fires for abnormal disconnect. TODO: WillDelayInterval.
+            if (s.will.present && !s.will.sent)
+            {
+                publish_internal(s, s.client_id[], s.will.topic[], s.will.payload[], s.will.properties[], s.will.retain, now);
+                s.will.sent = true;
             }
         }
-        else
-        {
-            // Literal character - must match exactly
-            if (topic_pos >= topic.length || topic[topic_pos] != filter[filter_pos])
-                return false;
+        c.terminate();
+    }
 
-            ++topic_pos;
-            ++filter_pos;
+    void drop_session(Session* s)
+    {
+        if (s.connection !is null)
+        {
+            Connection* c = cast(Connection*)s.connection;
+            c.terminate();
+            s.connection = null;
+        }
+        clear_session_subs(s);
+        _sessions.remove(s.client_id[]);
+        defaultAllocator().freeT(s);
+    }
+
+    void clear_session_subs(Session* s)
+    {
+        foreach (ref sub; s.subscriptions)
+            _trie.unregister(sub.filter[], s);
+    }
+
+    bool try_start_tcp()
+    {
+        const(char)[] tcp_name = Collection!TCPServer().generate_name(tconcat(name[], "_tcp"));
+        _server = Collection!TCPServer().create(tcp_name, ObjectFlags.dynamic, NamedArgument("port", _port));
+        if (!_server)
+        {
+            log.error("failed to create MQTT TCP listener");
+            return false;
+        }
+        _server.set_connection_callback(&new_connection, null);
+        _server.subscribe(&server_state_change);
+        log.notice("listening on MQTT port ", _port);
+        return true;
+    }
+
+    void try_start_tls()
+    {
+        if (!any_cert_valid())
+            return;
+
+        BaseObject[32] certs;
+        size_t num_certs = 0;
+        foreach (ref c; _certificates)
+            if (auto cert = c.get())
+                certs[num_certs++] = cert;
+
+        const(char)[] tls_name = Collection!TLSServer().generate_name(tconcat(name[], "_tls"));
+        _tls_server = Collection!TLSServer().create(tls_name, ObjectFlags.dynamic,
+            NamedArgument("port", _tls_port), NamedArgument("certificates", certs[0 .. num_certs]));
+        if (!_tls_server)
+        {
+            log.error("failed to create MQTTS listener");
+            return;
+        }
+        _tls_server.set_connection_callback(&new_connection, null);
+        _tls_server.subscribe(&server_state_change);
+        log.notice("listening on MQTTS port ", _tls_port);
+    }
+
+    bool any_cert_valid()
+    {
+        foreach (ref c; _certificates)
+            if (auto cert = cast(Certificate)c.get())
+                if (cert.is_valid)
+                    return true;
+        return false;
+    }
+
+    // TLSServer's cert set is bound at creation; updating it means destroying and recreating the listener -- what cert_state_change does on any transition.
+    void restart_tls()
+    {
+        if (_tls_server)
+        {
+            _tls_server.unsubscribe(&server_state_change);
+            _tls_server.destroy();
+            _tls_server = null;
+        }
+        if (_tls_port != 0 && any_cert_valid())
+            try_start_tls();
+    }
+
+    void server_state_change(ActiveObject obj, StateSignal signal)
+    {
+        if (signal == StateSignal.destroyed)
+        {
+            if (obj is _server)
+            {
+                log.warning("MQTT listener destroyed externally, recreating");
+                _server = null;
+                if (running && _port != 0)
+                    try_start_tcp();
+            }
+            else if (obj is _tls_server)
+            {
+                log.warning("MQTTS listener destroyed externally, recreating");
+                _tls_server = null;
+                if (running && _tls_port != 0)
+                    try_start_tls();
+            }
         }
     }
 
-    // Both must be fully consumed
-    return topic_pos == topic.length && filter_pos == filter.length;
+    void cert_state_change(ActiveObject obj, StateSignal signal)
+    {
+        if (signal == StateSignal.online || signal == StateSignal.offline)
+            restart_tls();
+    }
+
+    void new_connection(Stream client, void* user_data)
+    {
+        Connection* c = defaultAllocator().allocT!Connection(this, client);
+        _connections ~= c;
+        log.info("MQTT client connected: ", client.remote_name());
+    }
 }

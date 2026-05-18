@@ -40,6 +40,7 @@ enum CollectionType : ubyte
     ip_route,
     mb_node,
     mqtt_broker,
+    mqtt_client,
     pcap_server,
     ppp_server,
     pppoe_server,
