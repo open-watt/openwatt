@@ -34,6 +34,12 @@ make PLATFORM=k210                     # K210 RISC-V microcontroller
 make ARCH=arm64 OS=linux               # Generic ARM64 Linux build
 make ARCH=riscv64                      # Generic RISC-V 64-bit build
 
+# Feature-tier builds
+make FEATURES=switch                   # L2 packet-fabric only, no IP/protocols/apps
+make FEATURES=full                     # Default: full standalone instance
+make HEADLESS=1                        # Embedded role: no human shell/web; gates CLI help, prompts, banners
+make PLATFORM=bl808 PROCESSOR=e907     # BL808 M0 coprocessor (auto-defaults to switch + headless)
+
 # Testing
 make CONFIG=unittest                    # Build with unit tests enabled
 ./bin/x86_64_unittest/openwatt_test    # Run unit tests (adjust platform as needed)
@@ -45,10 +51,15 @@ make CONFIG=unittest                    # Build with unit tests enabled
 - `PLATFORM`: Auto-detected from host if unspecified. Values: `windows`, `linux`, `routeros`, embedded targets (`esp32`, `k210`, `cortex-a7`, etc.)
 - `ARCH`: Target architecture (`x86_64`, `arm64`, `riscv64`, etc.) - auto-detected or set by PLATFORM
 - `OS`: Target OS (`windows`, `linux`, `freertos`) - usually auto-detected
+- `FEATURES`: `switch` (L2 fabric only) or `full` (default; protocols+apps+devices+tools). `minimal` is deferred. See [features.mk](features.mk).
+- `HEADLESS`: `0` (default) or `1`. Orthogonal to FEATURES; strips human-facing CLI affordances. Auto-set with BL808 e907.
+- `TINY`: `0`/`1`, set by [third_party/urt/platforms.mk](third_party/urt/platforms.mk) for <~350KB-RAM / <2MB-flash targets. Forces `-Oz` under LDC, strips verbose strings, drops heavy helpers.
 
 **Output directories:**
 - Special platforms: `bin/$(PLATFORM)_$(CONFIG)/` (e.g., `bin/routeros_release/`)
 - Generic platforms: `bin/$(ARCH)_$(OS)_$(CONFIG)/` (e.g., `bin/arm64_linux_release/`)
+
+Note: output paths don't include `$(FEATURES)`, so switching presets in the same tree currently won't trigger a rebuild — `make clean` between FEATURES changes.
 
 **Special platform: `routeros`**
 - Builds statically-linked ARM64 binary for MikroTik RouterOS
@@ -283,7 +294,7 @@ The router layer abstracts all protocols into a unified packet format for routin
 
 **Example:** ModbusInterface handles RTU/TCP/ASCII framing, validates CRC, correlates requests/responses by sequence number, and translates between local Modbus addresses and universal addressing.
 
-See [src/router/iface/modbus.d](src/router/iface/modbus.d) (1143 lines) for comprehensive protocol interface example.
+See [src/protocol/modbus/iface.d](src/protocol/modbus/iface.d) for comprehensive protocol interface example.
 
 #### 7. Sampler System: Smart Data Collection
 
@@ -303,7 +314,7 @@ Samplers periodically read data from devices and update Elements. Key features:
 5. Sampler decodes registers and updates Elements
 6. Elements notify subscribers of value changes
 
-See [src/protocol/modbus/sampler.d](src/protocol/modbus/sampler.d) (557 lines) for implementation.
+See [src/protocol/modbus/binding.d](src/protocol/modbus/binding.d) for implementation.
 
 ### Layer Details
 
@@ -326,23 +337,44 @@ Runs a `do={...}` script body on a schedule. Schedule kinds (mutually exclusive,
 #### Router Layer (src/router/)
 
 Network routing infrastructure:
-- **Interfaces** (`router/iface/`): Packet interfaces (Ethernet, CAN, Modbus, Tesla, Bridge)
-- **Streams** (`router/stream/`): Byte streams (TCP, UDP, Serial, Bridge, WebSocket)
+- **Interfaces** (`router/iface/`): Generic L2 packet infrastructure (Ethernet, WiFi, Bridge, VLAN) and shared utilities (Packet, MAC, PriorityQueue, AddressTable). Protocol-specific interfaces (Modbus, CAN, Tesla, Zigbee, BLE) live in `protocol/<name>/iface.d`.
+- **Streams** (`router/stream/`): Byte streams (Serial, Bridge, Console, Duplex, File, Memory). IP-dependent streams (TCP, UDP) live in `protocol/ip/`; TLS lives in `protocol/tls/`; WebSocket lives in `protocol/http/`.
 - **Ports** (`router/port/`): Low-level hardware (serial ports)
 
 #### Protocol Layer (src/protocol/)
 
-Protocol implementations:
-- **Modbus** (RTU/TCP/ASCII): Client, sampler, profile-based device discovery
-- **MQTT**: Client and broker
-- **HTTP/WebSocket**: Client and server (HTTPS WIP, needs TLS)
-- **Zigbee**: EZSP driver, coordinator, ZCL/ZDO/APS layers
-- **Others**: DNS/mDNS, Telnet, PPP, Tesla TWC, SNMP (planned)
+Protocol implementations. Several protocols carry their own packet interface (`iface.d`); these plug into the router fabric the same way the generic L2 interfaces in `router/iface/` do.
 
-Each protocol typically provides:
-- Client/Server implementations
-- Integration with interface layer
-- Samplers for data collection
+**Industrial bus / fieldbus:**
+- **Modbus** (`protocol/modbus/`): RTU, TCP and ASCII framing. `iface.d` is the packet interface (CRC, sequence correlation, address translation via [[modbus_server_map_is_arp]]); `client.d` issues requests; `binding.d` bridges to the data model with register batching and adaptive polling; `sunspec.d` decodes SunSpec models; `node.d` / `message.d` are the shared data types. Future direction: [[modbus_l2_l3_split_trajectory]].
+- **CAN** (`protocol/can/`): CAN bus packet interface plus event-driven binding.
+- **Tesla** (`protocol/tesla/`): TWC (Tesla Wall Connector) master/slave. `iface.d` framing, `master.d` heartbeat round-robin, `binding.d` direct value push, `twc.d` device model. (Tesla *vehicle* BLE lives under `protocol/ble/` — see [[tesla_ble_architecture]].)
+- **GoodWe** (`protocol/goodwe/`): AA55 vendor protocol decoder + binding.
+
+**Wireless / radio:**
+- **Zigbee** (`protocol/zigbee/`): full stack — `iface.d` packet interface, `aps.d` APS layer, `coordinator.d` network formation / security / join handling, `router.d` ZDO base, `controller.d` async node-interview loop, `client.d` runtime Node/Endpoint objects, `zcl.d` / `zdo.d` cluster and discovery handling.
+- **EZSP** (`protocol/ezsp/`): EmberZNet Serial Protocol driver — `client.d` command queue, `ashv2.d` ASHv2 framing over serial (BaseInterface), `commands.d` command definitions. Consumed by Zigbee, not used standalone.
+- **BLE** (`protocol/ble/`): Bluetooth LE link layer as a packet interface, advert dispatch, client/device objects. Tesla vehicle session logic also lives here (see [[tesla_ble_architecture]]).
+
+**IP stack and transports:**
+- **IP** (`protocol/ip/`): in-tree IPv4/IPv6 stack — `stack.d`, `address.d`, `route.d`, `arp.d`, `neighbour.d`, `icmp.d`, `firewall.d`, `pool.d`, `socket.d`. `tcp.d` / `udp.d` are the transports; `tcp_stream.d` / `udp_stream.d` expose them as router Streams. `client.d` is the `IPClient` helper used by protocols that need a TCP (or, when TLS is built, TLS-over-TCP) outbound connection.
+- **TLS** (`protocol/tls/`): `certificate.d` for cert management, `stream.d` wraps any byte stream as a TLSStream. Fully gated by the `has_tls` feature flag — protocols that opt-in (HTTP, IPClient) gracefully degrade when TLS is compiled out.
+- **DHCP** (`protocol/dhcp/`): client + server, lease store, option codec, message decoder.
+- **DNS** (`protocol/dns/`): server (mDNS-capable) + message codec.
+- **PPP** (`protocol/ppp/`): client and server.
+
+**Application protocols:**
+- **HTTP** (`protocol/http/`): client and server (`server.d` self-adapts to HTTPS when `has_tls`), HTTP message codec, WebSocket (`websocket.d`), and an HTTP-polling `binding.d`.
+- **MQTT** (`protocol/mqtt/`): client, full broker (`broker.d` + `session.d` + `topic.d`), wire codec, connection state machine, `binding.d` for topic-driven Element bindings.
+- **Telnet** (`protocol/telnet/`): client, server (spawns console sessions), and a `stream.d` wrapper that handles IAC sequences and terminal channel negotiation.
+- **SNMP** (`protocol/snmp/`): agent + MIB tree; exposes Device/Component/Element values as OIDs and accepts SET writes on managed properties.
+- **ESPHome** (`protocol/esphome/`): native API client (proto file + binding) for ESPHome devices.
+
+Each protocol typically provides some subset of:
+- Packet interface (`iface.d`) for protocols that route packets
+- Client and/or Server objects (BaseObject-managed, Collection-registered)
+- A Binding (`binding.d`) that bridges the protocol to the Device/Component/Element data model
+- Codec / message types shared between client and server
 
 #### Apps Layer (src/apps/)
 
@@ -467,8 +499,8 @@ uRT replaces the D standard library to enable embedded targets without OS depend
 - [src/manager/console/console.d](src/manager/console/console.d) - Console dispatcher
 
 **Example implementations:**
-- [src/router/iface/modbus.d](src/router/iface/modbus.d) - Protocol interface (1143 lines)
-- [src/protocol/modbus/sampler.d](src/protocol/modbus/sampler.d) - Sampler implementation (557 lines)
+- [src/protocol/modbus/iface.d](src/protocol/modbus/iface.d) - Protocol interface
+- [src/protocol/modbus/binding.d](src/protocol/modbus/binding.d) - Sampler/binding implementation
 - [src/protocol/modbus/client.d](src/protocol/modbus/client.d) - Protocol client
 
 **Documentation:**

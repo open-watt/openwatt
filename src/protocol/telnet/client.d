@@ -15,7 +15,7 @@ import manager.expression : NamedArgument;
 import protocol.telnet.stream;
 
 import router.stream;
-import router.stream.tcp;
+import protocol.ip.tcp_stream;
 
 nothrow @nogc:
 

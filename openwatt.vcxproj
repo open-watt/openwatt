@@ -69,7 +69,10 @@
     <DCompile Include="src\driver\linux\ctrl_iface.d" />
     <DCompile Include="src\driver\linux\ethernet.d" />
     <DCompile Include="src\driver\linux\hostapd.d" />
+    <DCompile Include="src\driver\linux\netlink.d" />
+    <DCompile Include="src\driver\linux\nl80211.d" />
     <DCompile Include="src\driver\linux\raw.d" />
+    <DCompile Include="src\driver\linux\sysfs.d" />
     <DCompile Include="src\driver\linux\system.d" />
     <DCompile Include="src\driver\linux\wifi.d" />
     <DCompile Include="src\driver\linux\wpa_supplicant.d" />
@@ -77,6 +80,8 @@
     <DCompile Include="src\driver\wifi.d" />
     <DCompile Include="src\driver\windows\adapter_watcher.d" />
     <DCompile Include="src\driver\windows\ethernet.d" />
+    <DCompile Include="src\driver\windows\iphlpapi.d" />
+    <DCompile Include="src\driver\windows\npcap.d" />
     <DCompile Include="src\driver\windows\pcap.d" />
     <DCompile Include="src\driver\windows\system.d" />
     <DCompile Include="src\driver\windows\wifi.d" />
@@ -84,7 +89,6 @@
     <DCompile Include="src\main.d" />
     <DCompile Include="src\manager\base.d" />
     <DCompile Include="src\manager\binding.d" />
-    <DCompile Include="src\manager\certificate.d" />
     <DCompile Include="src\manager\collection.d" />
     <DCompile Include="src\manager\component.d" />
     <DCompile Include="src\manager\config.d" />
@@ -104,14 +108,10 @@
     <DCompile Include="src\manager\device.d" />
     <DCompile Include="src\manager\element.d" />
     <DCompile Include="src\manager\expression.d" />
+    <DCompile Include="src\manager\features.d" />
     <DCompile Include="src\manager\id.d" />
     <DCompile Include="src\manager\log.d" />
-    <DCompile Include="src\manager\os\iphlpapi.d" />
-    <DCompile Include="src\manager\os\netlink.d" />
-    <DCompile Include="src\manager\os\npcap.d" />
-    <DCompile Include="src\manager\os\sysfs.d" />
     <DCompile Include="src\manager\package.d" />
-    <DCompile Include="src\manager\pcap.d" />
     <DCompile Include="src\manager\plugin.d" />
     <DCompile Include="src\manager\profile.d" />
     <DCompile Include="src\manager\sampler.d" />
@@ -159,6 +159,7 @@
     <DCompile Include="src\protocol\http\websocket.d" />
     <DCompile Include="src\protocol\ip\address.d" />
     <DCompile Include="src\protocol\ip\arp.d" />
+    <DCompile Include="src\protocol\ip\client.d" />
     <DCompile Include="src\protocol\ip\firewall.d" />
     <DCompile Include="src\protocol\ip\icmp.d" />
     <DCompile Include="src\protocol\ip\neighbour.d" />
@@ -168,7 +169,9 @@
     <DCompile Include="src\protocol\ip\socket.d" />
     <DCompile Include="src\protocol\ip\stack.d" />
     <DCompile Include="src\protocol\ip\tcp.d" />
+    <DCompile Include="src\protocol\ip\tcp_stream.d" />
     <DCompile Include="src\protocol\ip\udp.d" />
+    <DCompile Include="src\protocol\ip\udp_stream.d" />
     <DCompile Include="src\protocol\modbus\binding.d" />
     <DCompile Include="src\protocol\modbus\iface.d" />
     <DCompile Include="src\protocol\modbus\message.d" />
@@ -197,10 +200,14 @@
     <DCompile Include="src\protocol\tesla\package.d" />
     <DCompile Include="src\protocol\tesla\sampler.d" />
     <DCompile Include="src\protocol\tesla\twc.d" />
+    <DCompile Include="src\protocol\tls\certificate.d" />
+    <DCompile Include="src\protocol\tls\package.d" />
+    <DCompile Include="src\protocol\tls\stream.d" />
     <DCompile Include="src\protocol\zigbee\aps.d" />
     <DCompile Include="src\protocol\zigbee\client.d" />
     <DCompile Include="src\protocol\zigbee\controller.d" />
     <DCompile Include="src\protocol\zigbee\coordinator.d" />
+    <DCompile Include="src\protocol\zigbee\iface.d" />
     <DCompile Include="src\protocol\zigbee\package.d" />
     <DCompile Include="src\protocol\zigbee\router.d" />
     <DCompile Include="src\protocol\zigbee\zcl.d" />
@@ -214,7 +221,8 @@
     <DCompile Include="src\router\iface\priority_queue.d" />
     <DCompile Include="src\router\iface\vlan.d" />
     <DCompile Include="src\router\iface\wifi.d" />
-    <DCompile Include="src\router\iface\zigbee.d" />
+    <DCompile Include="src\router\pcap.d" />
+    <DCompile Include="src\router\pcap_server.d" />
     <DCompile Include="src\router\port\package.d" />
     <DCompile Include="src\router\status.d" />
     <DCompile Include="src\router\stream\bridge.d" />
@@ -224,9 +232,6 @@
     <DCompile Include="src\router\stream\memory.d" />
     <DCompile Include="src\router\stream\package.d" />
     <DCompile Include="src\router\stream\serial.d" />
-    <DCompile Include="src\router\stream\tcp.d" />
-    <DCompile Include="src\router\stream\tls.d" />
-    <DCompile Include="src\router\stream\udp.d" />
     <DCompile Include="src\tools\protobuf\package.d" />
     <DCompile Include="src\tools\protobuf\parse.d" />
     <DCompile Include="third_party\urt\src\object.d" />

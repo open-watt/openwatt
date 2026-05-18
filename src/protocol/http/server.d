@@ -13,13 +13,14 @@ import urt.time;
 
 import manager;
 import manager.base;
-import manager.certificate : Certificate;
+import manager.features;
+import protocol.tls : Certificate;
 import manager.collection;
 
 import protocol.http;
 import protocol.http.message;
 
-import router.stream.tcp;
+import protocol.ip.tcp_stream;
 import router.iface;
 
 version = DebugHTTPServer;
@@ -328,9 +329,12 @@ private:
 
     void push_certs_to_tls()
     {
-        import router.stream.tls : TLSServer;
-        if (auto tls = cast(TLSServer)_tls_server)
-            tls.set_certificate_array(_certificates[]);
+        static if (has_tls)
+        {
+            import protocol.tls : TLSServer;
+            if (auto tls = cast(TLSServer)_tls_server)
+                tls.set_certificate_array(_certificates[]);
+        }
     }
 
     bool try_start_http()
@@ -350,29 +354,32 @@ private:
 
     void try_start_tls()
     {
-        import router.stream.tls : TLSServer;
-        version (DebugHTTPServer)
-            log.trace("try_start_tls, any_cert_valid=", any_cert_valid());
-        if (!any_cert_valid())
-            return;
-
-        BaseObject[32] certs;
-        size_t num_certs = 0;
-        foreach (ref c; _certificates)
-            if (auto cert = c.get())
-                certs[num_certs++] = cert;
-
-        const(char)[] tls_name = Collection!TLSServer().generate_name(tconcat(name[], "_tls"));
-        _tls_server = Collection!TLSServer().create(tls_name, ObjectFlags.dynamic,
-            NamedArgument("port", _tls_port), NamedArgument("certificates", certs[0 .. num_certs]));
-        if (!_tls_server)
+        static if (has_tls)
         {
-            log.error("failed to create TLS listener");
-            return;
+            import protocol.tls : TLSServer;
+            version (DebugHTTPServer)
+                log.trace("try_start_tls, any_cert_valid=", any_cert_valid());
+            if (!any_cert_valid())
+                return;
+
+            BaseObject[32] certs;
+            size_t num_certs = 0;
+            foreach (ref c; _certificates)
+                if (auto cert = c.get())
+                    certs[num_certs++] = cert;
+
+            const(char)[] tls_name = Collection!TLSServer().generate_name(tconcat(name[], "_tls"));
+            _tls_server = Collection!TLSServer().create(tls_name, ObjectFlags.dynamic,
+                NamedArgument("port", _tls_port), NamedArgument("certificates", certs[0 .. num_certs]));
+            if (!_tls_server)
+            {
+                log.error("failed to create TLS listener");
+                return;
+            }
+            _tls_server.set_connection_callback(&accept_tls_connection, null);
+            _tls_server.subscribe(&server_state_change);
+            log.notice("listening on HTTPS port ", _tls_port);
         }
-        _tls_server.set_connection_callback(&accept_tls_connection, null);
-        _tls_server.subscribe(&server_state_change);
-        log.notice("listening on HTTPS port ", _tls_port);
     }
 
     void server_state_change(ActiveObject obj, StateSignal signal)

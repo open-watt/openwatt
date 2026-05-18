@@ -1,4 +1,4 @@
-module manager.certificate;
+module protocol.tls.certificate;
 
 import urt.array;
 import urt.crypto.pem;
@@ -25,7 +25,6 @@ import protocol.http.message;
 import protocol.http.server;
 
 import router.stream;
-
 
 version = DebugCertificate;
 
@@ -1575,19 +1574,3 @@ Array!char base64url(const(ubyte)[] data)
     return result;
 }
 
-
-class CertificateModule : Module
-{
-    mixin DeclareModule!"certificate";
-nothrow @nogc:
-
-    override void init()
-    {
-        g_app.console.register_collection!Certificate();
-    }
-
-    override void update()
-    {
-        Collection!Certificate().update_all();
-    }
-}

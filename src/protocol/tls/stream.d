@@ -1,4 +1,4 @@
-module router.stream.tls;
+module protocol.tls.stream;
 
 // =============================================================================
 // TODO: POSIX TLS CLIENT VALIDATION IS DISABLED.
@@ -39,14 +39,15 @@ import urt.time;
 
 import manager;
 import manager.base;
-import manager.certificate : Certificate;
+import protocol.tls.certificate : Certificate;
 import manager.collection;
 import manager.console;
 import manager.expression : NamedArgument;
 import manager.plugin;
 
 import router.stream;
-import router.stream.tcp;
+import protocol.ip.client : IPClient;
+import protocol.ip.tcp_stream;
 
 version (MbedTLS)
 {
@@ -618,7 +619,7 @@ protected:
     mixin RekeyHandler;
 
 private:
-    ClientConnection _conn;
+    IPClient _conn;
     bool _close_notify = false;
 
     Array!(ObjectRef!Certificate) _certificates;
@@ -1020,23 +1021,6 @@ private:
     Array!(ObjectRef!ActiveObject) _certificates;
 }
 
-
-class TLSStreamModule : Module
-{
-    mixin DeclareModule!"stream.tls";
-nothrow @nogc:
-
-    override void init()
-    {
-        g_app.console.register_collection!TLSStream();
-        g_app.console.register_collection!TLSServer();
-    }
-
-    override void update()
-    {
-        Collection!TLSServer().update_all();
-    }
-}
 
 
 private:

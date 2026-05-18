@@ -11,7 +11,7 @@ You are working on the Zigbee subsystem of OpenWatt. This skill provides deep ar
 
 | File | Role |
 |------|------|
-| `src/router/iface/zigbee.d` | **ZigbeeInterface** — packet interface, message queues, EZSP callbacks |
+| `src/protocol/zigbee/iface.d` | **ZigbeeInterface** — packet interface, message queues, EZSP callbacks |
 | `src/protocol/zigbee/package.d` | **ZigbeeProtocolModule** + **NodeMap** struct — node storage and lookup |
 | `src/protocol/zigbee/coordinator.d` | **ZigbeeCoordinator** — network formation, security, join handling |
 | `src/protocol/zigbee/router.d` | **ZigbeeRouter** — base class for coordinator, ZDO frame handling, NetworkParams |
@@ -27,7 +27,7 @@ You are working on the Zigbee subsystem of OpenWatt. This skill provides deep ar
 ## Component Relationships
 
 ```
-ZigbeeInterface (router/iface/zigbee.d)
+ZigbeeInterface (protocol/zigbee/iface.d)
     ├── owns _ezsp_client: EZSPClient (serial transport)
     ├── owns _coordinator: ZigbeeCoordinator (network mgmt)
     ├── _queue (PriorityPacketQueue), _pending (Map tag→PendingMessage)

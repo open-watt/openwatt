@@ -25,7 +25,7 @@ import protocol.zigbee.zdo;
 
 import router.iface;
 import router.iface.packet;
-import router.iface.zigbee;
+import protocol.zigbee.iface;
 
 version = DebugZigbee;
 

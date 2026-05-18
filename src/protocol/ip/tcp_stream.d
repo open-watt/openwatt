@@ -1,4 +1,4 @@
-module router.stream.tcp;
+module protocol.ip.tcp_stream;
 
 import urt.array;
 import urt.conv;

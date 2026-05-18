@@ -17,6 +17,7 @@ URT_SRCDIR := $(URT_DIR)/src
 USE_INTERNAL_IP_STACK := 1
 
 include $(URT_DIR)/platforms.mk
+include features.mk
 
 # =======================================================================
 # Paths and names
@@ -43,8 +44,11 @@ endif
 # Sources (URT_SOURCES already populated by platforms.mk)
 # =======================================================================
 
-APP_SOURCES := $(shell find "$(SRCDIR)" -type f -name '*.d')
+APP_SOURCES := $(SRCDIR)/main.d \
+    $(foreach d,$(FEATURE_DIRS),$(shell find "$(SRCDIR)/$(d)" -type f -name '*.d'))
 SOURCES := $(APP_SOURCES) $(URT_SOURCES)
+
+DFLAGS := $(DFLAGS) $(FEATURE_DFLAGS)
 
 # =======================================================================
 # App-specific compiler flags

@@ -10,7 +10,7 @@ import urt.system : sleep;
 import urt.thread : SPSCRing;
 import urt.time : msecs;
 
-import manager.os.npcap;
+import driver.windows.npcap;
 
 import urt.internal.sys.windows;
 

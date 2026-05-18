@@ -60,10 +60,12 @@ import manager.console;
 import manager.console.command : CommandState, CommandCompletionState;
 import manager.console.session;
 import manager.plugin;
+import manager.features;
 import manager.sync.encoder;
 import manager.sync.json_encoder;
 import manager.sync.peer;
-import manager.sync.ws_server;
+static if (has_http)
+    import manager.sync.ws_server;
 
 
 nothrow @nogc:
@@ -186,7 +188,8 @@ nothrow @nogc:
         g_encoders[SyncEncoderKind.json] = g_json_encoder;
 
         g_app.console.register_collection!SyncPeer();
-        g_app.console.register_collection!WebSocketSyncServer();
+        static if (has_http)
+            g_app.console.register_collection!WebSocketSyncServer();
 
         register_object_created_handler(&on_object_created);
         register_object_state_handler(&on_object_state);
@@ -194,7 +197,8 @@ nothrow @nogc:
 
     override void update()
     {
-        Collection!WebSocketSyncServer().update_all();
+        static if (has_http)
+            Collection!WebSocketSyncServer().update_all();
         Collection!SyncPeer().update_all();
 
         foreach (p; peers[])

@@ -27,7 +27,6 @@ public static import router.iface.bridge;
 public static import router.iface.ethernet;
 public static import router.iface.vlan;
 public static import router.iface.wifi;
-public static import router.iface.zigbee;
 
 nothrow @nogc:
 
@@ -255,7 +254,7 @@ nothrow @nogc:
     final const(char)[] pcap(const(char)[] value)
     {
         // TODO: unsubscribe from old pcap interface, if any...
-        import manager.pcap;
+        import router.pcap;
         PcapInterface* cap = get_module!PcapModule.findInterface(value);
         if (!cap)
             return tconcat("Failed to attach pcap interface '", value, "' to '", name, "'; doesn't exist");

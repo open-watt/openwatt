@@ -432,12 +432,12 @@ All samplers are `nothrow @nogc`.
 | File | Role |
 |------|------|
 | `src/manager/sampler.d` | **Sampler** base, **ValueDesc**, **TextValueDesc**, `sample_value()`, `format_value()` |
-| `src/protocol/modbus/sampler.d` | **ModbusSampler** -- register batching, active polling |
+| `src/protocol/modbus/binding.d` | **ModbusBinding** -- register batching, active polling |
 | `src/protocol/modbus/client.d` | **ModbusClient** -- request/response via interface |
 | `src/protocol/can/sampler.d` | **CANSampler** -- event-driven packet handler |
 | `src/protocol/zigbee/controller.d` | **ZigbeeController** -- attribute report handler |
 | `src/protocol/http/sampler.d` | **HTTPSampler** -- request/response, JSON/regex parsing |
-| `src/protocol/mqtt/sampler.d` | **MQTTSampler** -- topic subscription, bidirectional |
+| `src/protocol/mqtt/binding.d` | **MQTTBinding** -- topic subscription, bidirectional |
 | `src/protocol/tesla/sampler.d` | **TeslaTWCSampler** -- direct value push from master |
 | `src/protocol/tesla/master.d` | **TeslaTWCMaster** -- heartbeat round-robin controller |
 

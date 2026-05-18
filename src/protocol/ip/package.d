@@ -24,7 +24,7 @@ version(Windows)
 {
     import urt.array;
     import urt.internal.sys.windows.winsock2 : AF_INET, sockaddr_in;
-    import manager.os.iphlpapi;
+    import driver.windows.iphlpapi;
     import driver.windows.ethernet : WindowsPcapEthernet;
     import driver.windows.wifi : WindowsWifiRadio, WindowsWlan;
 }

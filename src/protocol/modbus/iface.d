@@ -18,6 +18,7 @@ import manager;
 import manager.base;
 import manager.collection;
 import manager.console;
+import manager.features;
 import manager.plugin;
 
 import protocol.modbus;
@@ -66,13 +67,6 @@ struct ModbusFrame
 
 class ModbusInterface : BaseInterface
 {
-    alias Properties = AliasSeq!(Prop!("stream", stream),
-                                 Prop!("remote", remote),
-                                 Prop!("port", port),
-                                 Prop!("tls", tls),
-                                 Prop!("keepalive", keepalive),
-                                 Prop!("protocol", protocol),
-                                 Prop!("master", master));
 nothrow @nogc:
 
     enum type_name = "modbus";
@@ -155,7 +149,8 @@ nothrow @nogc:
             return "stream cannot be null";
         if (_stream is value)
             return null;
-        _conn.clear_remote();
+        static if (has_ip)
+            _conn.clear_remote();
         _stream = value;
 
         if (_stream)
@@ -170,10 +165,13 @@ nothrow @nogc:
             // if we're not the master, we can't write to the bus unless we are responding...
             // and if the stream is TCP, we'll never know if the remote has dropped the connection
             // we'll enable keep-alive in tcp streams to to detect this...
-            import router.stream.tcp : TCPStream;
-            auto tcpStream = cast(TCPStream)_stream;
-            if (tcpStream)
-                tcpStream.enable_keep_alive(true, seconds(10), seconds(1), 10);
+            static if (has_ip)
+            {
+                import protocol.ip.tcp_stream : TCPStream;
+                auto tcpStream = cast(TCPStream)_stream;
+                if (tcpStream)
+                    tcpStream.enable_keep_alive(true, seconds(10), seconds(1), 10);
+            }
         }
 
         // flush messages and the address mapping tables
@@ -181,53 +179,69 @@ nothrow @nogc:
         return null;
     }
 
-    const(char)[] remote() const
-        => _conn.remote_name();
-    StringResult remote(String value)
+    static if (has_ip)
     {
-        auto r = _conn.remote(value.move);
-        if (r.succeeded)
+        const(char)[] remote() const
+            => _conn.remote_name();
+        StringResult remote(String value)
         {
-            _stream = null;  // remote takes ownership of the stream slot
+            auto r = _conn.remote(value.move);
+            if (r.succeeded)
+            {
+                _stream = null;  // remote takes ownership of the stream slot
+                if (_protocol == ModbusProtocol.unknown)
+                    _protocol = ModbusProtocol.tcp;
+                restart();
+            }
+            return r;
+        }
+        void remote(InetAddress value)
+        {
+            _conn.remote(value);
+            _stream = null;
             if (_protocol == ModbusProtocol.unknown)
                 _protocol = ModbusProtocol.tcp;
             restart();
         }
-        return r;
-    }
-    void remote(InetAddress value)
-    {
-        _conn.remote(value);
-        _stream = null;
-        if (_protocol == ModbusProtocol.unknown)
-            _protocol = ModbusProtocol.tcp;
-        restart();
+
+        ushort port() const pure
+            => _conn.port;
+        void port(ushort value)
+        {
+            _conn.port(value);
+            restart();
+        }
+
+        bool tls() const pure
+            => _tls;
+        void tls(bool value)
+        {
+            if (_tls == value)
+                return;
+            _tls = value;
+            restart();
+        }
+
+        bool keepalive() const pure
+            => _conn.keepalive;
+        void keepalive(bool value)
+        {
+            _conn.keepalive(value);
+        }
     }
 
-    ushort port() const pure
-        => _conn.port;
-    void port(ushort value)
-    {
-        _conn.port(value);
-        restart();
-    }
-
-    bool tls() const pure
-        => _tls;
-    void tls(bool value)
-    {
-        if (_tls == value)
-            return;
-        _tls = value;
-        restart();
-    }
-
-    bool keepalive() const pure
-        => _conn.keepalive;
-    void keepalive(bool value)
-    {
-        _conn.keepalive(value);
-    }
+    static if (has_ip)
+        alias Properties = AliasSeq!(Prop!("stream", stream),
+                                     Prop!("remote", remote),
+                                     Prop!("port", port),
+                                     Prop!("tls", tls),
+                                     Prop!("keepalive", keepalive),
+                                     Prop!("protocol", protocol),
+                                     Prop!("master", master));
+    else
+        alias Properties = AliasSeq!(Prop!("stream", stream),
+                                     Prop!("protocol", protocol),
+                                     Prop!("master", master));
 
 
     // API...
@@ -259,17 +273,25 @@ protected:
     mixin RekeyHandler;
 
     override bool validate() const
-        => (_stream !is null || _conn.has_remote()) && (!master || _protocol != ModbusProtocol.unknown);
+    {
+        bool have_target = _stream !is null;
+        static if (has_ip)
+            have_target = have_target || _conn.has_remote();
+        return have_target && (!master || _protocol != ModbusProtocol.unknown);
+    }
 
     override CompletionStatus startup()
     {
-        if (!_stream && _conn.has_remote())
+        static if (has_ip)
         {
-            if (!_conn.start(this, _tls ? 802 : 502, _tls))
-                return CompletionStatus.error;
-            _stream = _conn.get;
-            if (_protocol == ModbusProtocol.unknown)
-                _protocol = ModbusProtocol.tcp;
+            if (!_stream && _conn.has_remote())
+            {
+                if (!_conn.start(this, _tls ? 802 : 502, _tls))
+                    return CompletionStatus.error;
+                _stream = _conn.get;
+                if (_protocol == ModbusProtocol.unknown)
+                    _protocol = ModbusProtocol.tcp;
+            }
         }
         if (!_stream)
             return CompletionStatus.error;
@@ -335,10 +357,13 @@ protected:
             _master_address = 0;
         }
 
-        if (_conn.has_remote())
+        static if (has_ip)
         {
-            _conn.stop();
-            _stream = null;
+            if (_conn.has_remote())
+            {
+                _conn.stop();
+                _stream = null;
+            }
         }
 
         return CompletionStatus.complete;
@@ -531,8 +556,12 @@ private:
     }
 
     ObjectRef!Stream _stream;
-    ClientConnection _conn;
-    bool _tls;
+    static if (has_ip)
+    {
+        import protocol.ip.client : IPClient;
+        IPClient _conn;
+        bool _tls;
+    }
 
     ModbusProtocol _protocol;
     bool _is_bus_master;

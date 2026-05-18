@@ -1,4 +1,4 @@
-module manager.os.npcap;
+module driver.windows.npcap;
 
 version (Windows):
 

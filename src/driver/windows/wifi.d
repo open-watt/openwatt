@@ -59,8 +59,8 @@ import manager.collection;
 import manager.console;
 import manager.plugin;
 
-import manager.os.iphlpapi;
-import manager.os.npcap;
+import driver.windows.iphlpapi;
+import driver.windows.npcap;
 
 import driver.windows.adapter_watcher;
 import driver.windows.pcap;

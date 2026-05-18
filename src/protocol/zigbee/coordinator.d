@@ -13,7 +13,7 @@ import manager.collection;
 
 import router.iface;
 import router.iface.packet;
-import router.iface.zigbee;
+import protocol.zigbee.iface;
 
 import protocol.ezsp;
 import protocol.ezsp.client;

@@ -1,4 +1,4 @@
-module manager.os.sysfs;
+module driver.linux.sysfs;
 
 version (linux):
 

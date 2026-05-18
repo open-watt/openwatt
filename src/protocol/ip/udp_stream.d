@@ -1,4 +1,4 @@
-module router.stream.udp;
+module protocol.ip.udp_stream;
 
 import urt.io;
 import urt.lifetime;

@@ -1,0 +1,401 @@
+module router.pcap;
+
+import urt.array;
+import urt.endian;
+import urt.file;
+import urt.lifetime;
+import urt.log;
+import urt.map;
+import urt.mem.allocator;
+import urt.socket : InetAddress, AddressFamily;
+import urt.string;
+import urt.system;
+import urt.time;
+import urt.util : align_up, swap;
+
+import manager;
+import manager.collection;
+import manager.features;
+import manager.plugin;
+import manager.console;
+
+import router.iface;
+import protocol.ip.tcp_stream;
+
+static if (has_ip)
+    import router.pcap_server;
+
+nothrow @nogc:
+
+
+enum LinkType : ushort
+{
+    ETHERNET = 1, // IEEE 802.3 Ethernet
+    RAW = 101, // Raw IP; the packet begins with an IPv4 or IPv6 header, with the version field of the header indicating whether it's an IPv4 or IPv6 header
+    IPV4 = 228, // Raw IPv4; the packet begins with an IPv4 header
+    IPV6 = 229, // Raw IPv6; the packet begins with an IPv6 header
+    IEEE802_11 = 105, // IEEE 802.11 wireless LAN
+    IEEE802_11_RADIOTAP = 127, // Radiotap link-layer information followed by an 802.11 header
+    IEEE802_15_4_WITHFCS = 195, // IEEE 802.15.4 Low-Rate Wireless Networks, with each packet having the FCS at the end of the frame
+    IEEE802_15_4_NONASK_PHY = 215, // IEEE 802.15.4 Low-Rate Wireless Networks, with each packet having the FCS at the end of the frame, and with the PHY-level data for the O-QPSK, BPSK, GFSK, MSK, and RCC DSS BPSK PHYs (4 octets of 0 as preamble, one octet of SFD, one octet of frame length + reserved bit) preceding the MAC-layer data (starting with the frame control field)
+    IEEE802_15_4_NOFCS = 230, // IEEE 802.15.4 Low-Rate Wireless Network, without the FCS at the end of the frame
+    IEEE802_15_4_TAP = 283, // IEEE 802.15.4 Low-Rate Wireless Networks, with a pseudo-header (https://github.com/jkcko/ieee802.15.4-tap/blob/master/IEEE%20802.15.4%20TAP%20Link%20Type%20Specification.pdf) containing TLVs with metadata preceding the 802.15.4 header
+    CAN20B = 190, // Controller Area Network (CAN) v. 2.0B
+    CAN_SOCKETCAN = 227, // CAN (Controller Area Network) frames, with a pseudo-header (https://www.tcpdump.org/linktypes/LINKTYPE_CAN_SOCKETCAN.html) followed by the frame payload
+    I2C_LINUX = 209, // Linux I2C packets (https://www.tcpdump.org/linktypes/LINKTYPE_I2C_LINUX.html)
+    LORATAP = 270 // LoRaTap pseudo-header (https://github.com/eriknl/LoRaTap/blob/master/README.md), followed by the payload, which is typically the PHYPayload from the LoRaWan specification
+}
+
+struct PcapInterface
+{
+nothrow @nogc:
+
+    bool open_file(const char[] filename, bool overwrite = false)
+    {
+        if (pcap_file.is_open)
+            return false;
+
+        // open file
+        Result r = pcap_file.open(filename, overwrite ? FileOpenMode.WriteTruncate : FileOpenMode.WriteAppend, FileOpenFlags.Sequential);
+        if (r != Result.success)
+            return false;
+
+        start_offset = pcap_file.get_pos();
+
+        // write section header...
+        auto buffer = Array!ubyte(Reserve, 256);
+
+        SectionHeaderBlock shb;
+        buffer ~= shb.as_bytes;
+
+        SystemInfo sysInfo = get_sysinfo();
+        buffer.write_option(2, sysInfo.processor); // shb_hardware
+        buffer.write_option(3, sysInfo.os_name); // shb_os
+        buffer.write_option(4, "OpenWatt"); // shb_userappl
+        buffer.write_option(0, null);
+
+        buffer.write_block_len();
+        write(buffer[]);
+
+        return true;
+    }
+
+    bool open_remote(const char[] remotehost)
+    {
+        return false;
+    }
+
+    void close()
+    {
+        // update section header length
+        ulong endOffset = pcap_file.get_pos();
+        pcap_file.set_pos(start_offset + SectionHeaderBlock.sectionLength.offsetof);
+        size_t written;
+        pcap_file.write((endOffset - start_offset).as_bytes, written);
+        assert(written == 8);
+
+        // close file
+        pcap_file.close();
+    }
+
+    bool enable(bool enable)
+        => enabled.swap(enable);
+
+    void set_buffer_params(Duration max_time = 0.seconds, size_t max_bytes = 0)
+    {
+        max_buffer_time = max_time;
+        max_buffer_bytes = max_bytes;
+    }
+
+    bool subscribe_interface(BaseInterface iface)
+    {
+        if (iface.pcap_type() == 0)
+        {
+            iface.log.warning("interface does not support packet capture");
+            return false;
+        }
+
+        auto filter = PacketFilter(type: PacketType.unknown, direction: cast(PacketDirection)(PacketDirection.incoming | PacketDirection.outgoing));
+        iface.subscribe(&packet_handler, filter);
+        return true;
+    }
+
+    void flush()
+    {
+        last_update = getTime();
+
+        foreach (ref InterfacePacketBuffer ib; packet_buffers.values)
+        {
+            if (ib.packet_buffer.empty)
+                continue;
+
+            write(ib.packet_buffer[]);
+            ib.packet_buffer.clear();
+        }
+    }
+
+    void write(const void[] data)
+    {
+        // TODO: should we actually just bail? maybe something more particular?
+        if (!pcap_file.is_open)
+            return;
+
+        size_t written;
+        pcap_file.write(data, written);
+        assert(written == data.length, "Write length wrong! ... what to do?");
+        // TODO: what to do? try again?
+    }
+
+    void update()
+    {
+        if (getTime() - last_update < max_buffer_time)
+            return;
+        flush();
+    }
+
+private:
+
+    String name;
+    Map!(BaseInterface, InterfacePacketBuffer) packet_buffers;
+
+    ulong start_offset;
+    MonoTime last_update;
+
+    File pcap_file;
+
+    uint next_interface_index = 0;
+    bool enabled = true;
+
+    Duration max_buffer_time;
+    size_t max_buffer_bytes  = 64 * 1024;
+
+    struct InterfacePacketBuffer
+    {
+        BaseInterface iface;
+        int index = -1;
+        ushort linkType;
+
+        Array!ubyte packet_buffer;
+    }
+
+    void packet_handler(ref const Packet p, BaseInterface i, PacketDirection dir, void*)
+    {
+        write_packet(p, i, dir);
+    }
+
+    void write_packet(ref const Packet p, BaseInterface i, PacketDirection dir)
+    {
+        static if (has_all)
+            import protocol.zigbee.iface : ZigbeeInterface;
+
+        if (!enabled)
+            return;
+
+        InterfacePacketBuffer* ib = packet_buffers.get(i);
+        if (!ib)
+        {
+            ib = packet_buffers.insert(i, InterfacePacketBuffer(i, next_interface_index++, i.pcap_type()));
+
+            // write IDB header...
+            auto buffer = Array!ubyte(Reserve, 256);
+
+            InterfaceDescriptionBlock idb;
+            idb.linkType = ib.linkType;
+            buffer ~= idb.as_bytes;
+            buffer.write_option(2, i.name[]); // if_name
+            static if (has_all)
+            {
+                if (cast(ZigbeeInterface)i is null)
+                    buffer.write_option(6, i.mac.b[]); // if_MACaddr
+            }
+            else
+                buffer.write_option(6, i.mac.b[]); // if_MACaddr
+            ubyte ts = 9; // 6 = microseconds, 9 = nanoseconds
+            buffer.write_option(9, (&ts)[0..1]); // if_tsresol
+            buffer.write_option(0, null);
+            buffer.write_block_len();
+
+            write(buffer[]);
+            buffer.clear();
+        }
+
+        size_t packetOffset = ib.packet_buffer.length;
+        ulong timestamp = unixTimeNs(p.creation_time);
+
+        // write packet block...
+        EnhancedPacketBlock epb;
+        epb.interfaceID = ib.index;
+        epb.timestampHigh = timestamp >> 32;
+        epb.timestampLow = cast(uint)timestamp;
+//        epb.capturedLength = cast(uint)p.data.length; // write it later
+//        epb.originalLength = cast(uint)p.data.length;
+        ib.packet_buffer ~= epb.as_bytes;
+        size_t capturedLengthOffset = ib.packet_buffer.length - 8;
+
+        uint packetLen;
+        i.pcap_write(p, dir, (const void[] packetData) {
+            packetLen += cast(uint)packetData.length;
+            ib.packet_buffer ~= cast(const ubyte[])packetData;
+        });
+        ib.packet_buffer.align_block();
+
+        // write capture length...
+        ib.packet_buffer[][capturedLengthOffset .. capturedLengthOffset + 4] = packetLen.as_bytes;
+        ib.packet_buffer[][capturedLengthOffset + 4 .. capturedLengthOffset + 8] = packetLen.as_bytes;
+
+        // write packet flags:
+        uint flags = (dir == PacketDirection.incoming) ? 1 : 2; // 01 = inbound, 10 = outbound
+
+        // 2-4 Reception type (000 = not specified, 001 = unicast, 010 = multicast, 011 = broadcast, 100 = promiscuous)
+        if (p.eth.dst.is_broadcast)
+            flags |= 3 << 2;
+        else if (p.eth.dst.is_multicast)
+            flags |= 2 << 2;
+        else
+            flags |= 1 << 2;
+        ib.packet_buffer.write_option(2, flags.as_bytes); // epb_flags
+
+        // epb_dropcount
+        // epb_packetid
+
+        ib.packet_buffer.write_option(0, null);
+        ib.packet_buffer.write_block_len(packetOffset);
+
+        if (ib.packet_buffer.length > max_buffer_bytes)
+            flush();
+    }
+}
+
+
+class PcapModule : Module
+{
+    mixin DeclareModule!"manager.pcap";
+nothrow @nogc:
+
+    Array!(PcapInterface*) interfaces;
+
+    PcapInterface* findInterface(const(char)[] name)
+    {
+        foreach (PcapInterface* pcap; interfaces)
+            if (pcap.name == name)
+                return pcap;
+        return null;
+    }
+
+    override void init()
+    {
+        g_app.console.register_command!add("/tools/pcap", this);
+        static if (has_ip)
+            g_app.console.register_collection!PCAPServer();
+    }
+
+    override void update()
+    {
+        static if (has_ip)
+            Collection!PCAPServer().update_all();
+    }
+
+    override void post_update()
+    {
+        foreach (PcapInterface* pcap; interfaces)
+            pcap.update();
+    }
+
+    import urt.meta.nullable;
+
+    // /tools/pcap/add command
+    void add(Session session, const(char)[] name, const(char)[] file)
+    {
+        if (name.empty)
+        {
+            session.write_line("PCAP interface must have a name");
+            return;
+        }
+        foreach (PcapInterface* pcap; interfaces)
+        {
+            if (pcap.name == name)
+            {
+                session.write_line("PCAP interface '", name, "' already exists");
+                return;
+            }
+        }
+        String n = name.makeString(g_app.allocator);
+
+        PcapInterface* pcap = g_app.allocator.allocT!PcapInterface();
+        pcap.name = n.move;
+        pcap.max_buffer_time = 100.msecs;
+
+        if (!pcap.open_file(file))
+        {
+            log_info(ModuleName, "couldn't open PCAP file '", file, "'");
+            g_app.allocator.freeT(pcap);
+            return;
+        }
+
+        interfaces ~= pcap;
+
+        log_info(ModuleName, "create PCAP interface '", name, "' to file: ", file);
+    }
+}
+
+
+private:
+
+struct SectionHeaderBlock
+{
+    uint type = 0x0A0D0D0A;
+    uint blockLength = 0;
+    uint byteOrderMagic = 0x1A2B3C4D;
+    ushort majorVersion = 1;
+    ushort minorVersion = 0;
+    ulong sectionLength = -1;
+}
+static assert(SectionHeaderBlock.sizeof == 24);
+
+struct InterfaceDescriptionBlock
+{
+    uint type = 0x00000001;
+    uint blockLength = 0;
+    ushort linkType;
+    ushort reserved = 0;
+    uint snapLength = 0;
+}
+static assert(InterfaceDescriptionBlock.sizeof == 16);
+
+struct EnhancedPacketBlock
+{
+    uint type = 0x00000006;
+    uint blockLength = 0;
+    uint interfaceID;
+    uint timestampHigh;
+    uint timestampLow;
+    uint capturedLength;
+    uint originalLength;
+}
+static assert(EnhancedPacketBlock.sizeof == 28);
+
+ubyte[T.sizeof] as_bytes(T)(auto ref const T data)
+    => *cast(ubyte[T.sizeof]*)&data;
+
+void write_option(ref Array!ubyte buffer, ushort option, const void[] data)
+{
+    buffer ~= option.as_bytes;
+    buffer ~= (cast(ushort)data.length).as_bytes;
+    buffer ~= cast(ubyte[])data;
+    buffer.align_block();
+}
+
+void write_block_len(ref Array!ubyte buffer, size_t start_offset = 0)
+{
+    uint len = cast(uint)((buffer.length - start_offset) + 4);
+    buffer ~= len.as_bytes;
+    buffer[][start_offset + 4 .. start_offset + 8] = len.as_bytes; // TODO: what is wrong with array indexing?
+    assert(buffer.length - start_offset == len);
+}
+
+void align_block(ref Array!ubyte buffer)
+{
+    buffer.resize(buffer.length.align_up!4);
+}
+
+

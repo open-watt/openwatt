@@ -15,7 +15,7 @@ import protocol.telnet.server;
 import protocol.telnet.stream;
 
 import router.iface;
-import router.stream.tcp;
+import protocol.ip.tcp_stream;
 
 nothrow @nogc:
 

@@ -8,6 +8,10 @@ module manager.sync.ws_server;
 // Peers are destroyed when their WebSocket transport dies, either via the
 // client disconnecting (ObjectRef detaches) or shutdown.
 
+// Depends on protocol.http.server + websocket. Gated to drop out when
+// HTTP isn't compiled in.
+version (Feature_HTTP):
+
 import urt.array;
 import urt.lifetime;
 import urt.log;

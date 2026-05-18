@@ -6,7 +6,7 @@ import urt.log;
 import urt.string;
 import urt.time;
 
-import manager.os.npcap;
+import driver.windows.npcap;
 
 nothrow @nogc:
 
