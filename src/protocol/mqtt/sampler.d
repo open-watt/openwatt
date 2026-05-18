@@ -1,129 +1,265 @@
 module protocol.mqtt.sampler;
 
 import urt.array;
-import urt.conv;
 import urt.lifetime;
 import urt.log;
-import urt.mem.string;
+import urt.meta : AliasSeq;
 import urt.string;
 import urt.time;
 import urt.variant;
 
+import manager;
+import manager.base;
+import manager.binding;
+import manager.collection;
 import manager.device;
 import manager.element;
 import manager.profile;
+private alias Access = manager.element.Access;
 import manager.sampler;
-import manager.subscriber;
 
 import protocol.mqtt.broker;
-import protocol.mqtt.client;
 
-//version = DebugMQTTSampler;
+//version = DebugMQTTBinding;
 
 nothrow @nogc:
 
 
-class MQTTSampler : Sampler
+class MQTTBinding : ProfileBinding
 {
+    alias Properties = AliasSeq!(Prop!("broker", broker),
+                                 Prop!("profile", profile),
+                                 Prop!("model", model));
 nothrow @nogc:
 
-    this(MQTTBroker broker, ref Array!String subs)
-    {
-        import urt.mem.allocator : defaultAllocator;
-        this.broker = broker;
+    enum type_name = "mqtt-binding";
+    enum path = "/binding/mqtt";
 
-        foreach (ref s; subs)
-            broker.subscribe(s.move, &on_publish);
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
+    {
+        super(collection_type_info!MQTTBinding, id, flags);
     }
 
-    ~this()
+    final inout(MQTTBroker) broker() inout pure
+        => _broker.get;
+    final void broker(MQTTBroker value)
     {
-        if (broker)
-            broker.unsubscribe(&on_publish);
-    }
-
-    final void add_element(Element* element, ref const ElementDesc desc, String read_topic, String write_topic, TextValueDesc value_desc)
-    {
-        SampleElement* e = &elements.pushBack();
-        e.element = element;
-        e.read_topic = read_topic.move;
-        e.write_topic = write_topic.move;
-        e.desc = value_desc;
-
-        if (element.access & manager.element.Access.write)
-            element.add_subscriber(this);
-    }
-
-    final override void remove_element(Element* element)
-    {
-        for (size_t i = 0; i < elements.length; ++i)
+        if (_broker.get is value)
+            return;
+        if (_subscribed)
         {
-            if (elements[i].element == element)
+            _broker.unsubscribe(&state_change);
+            _broker.unsubscribe(&on_publish);
+            _subscribed = false;
+        }
+        _broker = value;
+        restart();
+    }
+
+    final ref const(String) profile() const pure
+        => _profile_name;
+    final void profile(String value)
+    {
+        if (value == _profile_name)
+            return;
+        _profile_name = value.move;
+        restart();
+    }
+
+    final ref const(String) model() const pure
+        => _model_name;
+    final void model(String value)
+    {
+        if (value == _model_name)
+            return;
+        _model_name = value.move;
+        restart();
+    }
+
+    final override bool validate() const pure
+    {
+        return _broker.get !is null && !_profile_name.empty && !_device.empty;
+    }
+
+    override CompletionStatus startup()
+    {
+        if (!materialise())
+            return CompletionStatus.error;
+
+        MQTTBroker b = _broker.get;
+        if (!b || !b.running)
+            return CompletionStatus.continue_;
+
+        bool sub_failed;
+        const(char)[] get_substitute(size_t, const(char)[] param)
+        {
+            const(char)[] v = get_param(param);
+            if (v is null)
+                sub_failed = true;
+            return v;
+        }
+
+        foreach (s; _profile_data.get_mqtt_subs)
+        {
+            sub_failed = false;
+            String sub = String(s.substitute_parameters(&get_substitute, sub_failed));
+            if (sub_failed || !sub)
             {
-                // TODO: Unsubscribe from topic if no other elements use it
-                elements.removeSwapLast(i);
+                log.warning("failed to substitute variables in subscription '", s, "'");
+                continue;
+            }
+            b.subscribe(sub.move, &on_publish);
+        }
+
+        b.subscribe(&state_change);
+        _subscribed = true;
+        return CompletionStatus.complete;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        if (_subscribed)
+        {
+            _broker.unsubscribe(&state_change);
+            _broker.unsubscribe(&on_publish);
+            _subscribed = false;
+        }
+        // Drop write-back delegates before super.shutdown frees the profile
+        foreach (ref se; _elements)
+        {
+            if (se.element.access & Access.write)
+                se.element.remove_subscriber(&on_element_change);
+        }
+        _elements.clear();
+        return super.shutdown();
+    }
+
+protected:
+    final override const(char)[] profile_dir() const pure
+        => "conf/mqtt_profiles/";
+    final override const(char)[] profile_name() const pure
+        => _profile_name[];
+    final override const(char)[] model_name() const pure
+        => _model_name[];
+
+    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
+    {
+        assert(desc.type == ElementType.mqtt);
+        ref const ElementDesc_MQTT mqtt = _profile_data.get_mqtt(desc.element);
+
+        bool sub_failed;
+        const(char)[] get_substitute(size_t, const(char)[] param)
+        {
+            const(char)[] v = get_param(param);
+            if (v is null)
+                sub_failed = true;
+            return v;
+        }
+
+        String read_topic, write_topic;
+        const(char)[] raw = mqtt.get_read_topic(*_profile_data);
+        if (raw.length > 0)
+        {
+            sub_failed = false;
+            read_topic = String(raw.substitute_parameters(&get_substitute, sub_failed));
+            if (sub_failed)
+            {
+                log.warning("failed to substitute variables in topic '", raw, "'");
                 return;
             }
         }
-    }
-
-    final void on_change(Element* e, ref const Variant val, SysTime timestamp, Subscriber who)
-    {
-        if (who is this)
-            return;
-
-        foreach (ref se; elements)
+        raw = mqtt.get_write_topic(*_profile_data);
+        if (raw.length > 0)
         {
-            if (se.element != e)
-                continue;
-            if (!se.write_topic.empty)
+            sub_failed = false;
+            write_topic = String(raw.substitute_parameters(&get_substitute, sub_failed));
+            if (sub_failed)
             {
-                const(char)[] text = format_value(val, se.desc);
-                broker.publish(null, 0, se.write_topic[], cast(const(ubyte)[])text, null, cast(MonoTime)timestamp);
+                log.warning("failed to substitute variables in topic '", raw, "'");
+                return;
             }
-            return;
         }
+
+        SampleElement* se = &_elements.pushBack();
+        se.element = e;
+        se.read_topic = read_topic.move;
+        se.write_topic = write_topic.move;
+        se.desc = mqtt.value_desc;
+
+        if (e.access & Access.write)
+            e.add_subscriber(&on_element_change);
+
+        device.sample_elements ~= e; // TODO: remove this?
     }
 
-    final void on_publish(const(char)[] sender, const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp)
+private:
+
+    ObjectRef!MQTTBroker _broker;
+    String _profile_name;
+    String _model_name;
+
+    bool _subscribed;
+    bool _self_write;
+
+    Array!SampleElement _elements;
+
+    struct SampleElement
     {
-        // empty payload is generally a request for data...
+        Element* element;
+        TextValueDesc desc;
+        String read_topic;
+        String write_topic;
+    }
+
+    void state_change(ActiveObject obj, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
+    }
+
+    void on_publish(const(char)[] sender, const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp)
+    {
         if (payload.empty)
             return;
 
-        foreach (ref e; elements)
+        foreach (ref e; _elements)
         {
             if (e.read_topic[] != topic)
                 continue;
 
-            // Parse payload as UTF-8 text and convert to Variant
             const(char)[] payload_str = cast(const(char)[])payload;
             Variant value = sample_value(payload_str, e.desc);
 
             if (value != Variant())
             {
-                e.element.value(value, cast(SysTime)timestamp, this);
+                _self_write = true;
+                scope(exit) _self_write = false;
+                e.element.value(value, cast(SysTime)timestamp);
 
-                version (DebugMQTTSampler)
+                version (DebugMQTTBinding)
                     writeDebugf("mqtt: sample - topic: {0} value: {1} = {2} (raw: {3})", topic, e.element.id, e.element.value, cast(const(char)[])payload);
             }
             else
-                writeWarning("Failed to parse MQTT payload for topic ", topic, ": ", payload_str);
-            break;
+                log.warning("failed to parse MQTT payload for topic ", topic, ": ", payload_str);
+            return;
         }
     }
 
-private:
-
-    MQTTBroker broker;
-    Array!SampleElement elements;
-
-    struct SampleElement
+    void on_element_change(ref Element e, ref const Variant val, SysTime ts, ref const Variant prev, SysTime prev_ts)
     {
-        MonoTime last_update;
-        Element* element;
-        TextValueDesc desc;
-        String read_topic;
-        String write_topic;
+        if (_self_write)
+            return;
+
+        foreach (ref se; _elements)
+        {
+            if (se.element != &e)
+                continue;
+            if (!se.write_topic.empty)
+            {
+                const(char)[] text = format_value(val, se.desc);
+                _broker.publish(null, 0, se.write_topic[], cast(const(ubyte)[])text, null, cast(MonoTime)ts);
+            }
+            return;
+        }
     }
 }

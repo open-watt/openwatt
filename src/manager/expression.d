@@ -134,7 +134,7 @@ struct EvalContext
     import manager.component;
 
     Component root;
-    Map!(const(char)[], Variant)* locals;
+    Map!(String, Variant)* locals;
 }
 
 struct Expression

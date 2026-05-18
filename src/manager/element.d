@@ -33,7 +33,7 @@ enum SamplingMode : ubyte
     constant,
     dependent,
 
-    // these signal how samplers intend to interact with the element
+    // these signal how bindings intend to interact with the element
     poll,
     report,
     on_demand,

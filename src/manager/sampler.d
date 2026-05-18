@@ -9,22 +9,7 @@ import urt.time;
 import urt.util : max, byte_reverse;
 import urt.variant;
 
-import manager.element;
-import manager.subscriber;
-
 nothrow @nogc:
-
-
-class Sampler : Subscriber
-{
-nothrow @nogc:
-
-    void update()
-    {
-    }
-
-    abstract void remove_element(Element* element);
-}
 
 
 // data sampling helper

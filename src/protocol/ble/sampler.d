@@ -2,9 +2,17 @@ module protocol.ble.sampler;
 
 import urt.array;
 import urt.endian;
+import urt.log;
+import urt.meta : AliasSeq;
+import urt.string;
 import urt.time;
 import urt.uuid;
 
+import manager;
+import manager.base;
+import manager.binding;
+import manager.collection;
+import manager.device;
 import manager.element;
 import manager.profile;
 import manager.sampler;
@@ -18,46 +26,149 @@ import router.iface.packet;
 nothrow @nogc:
 
 
-class BLESampler : Sampler
+class BLEClientBinding : ProfileBinding
 {
+    alias Properties = AliasSeq!(Prop!("client", client),
+                                 Prop!("profile", profile),
+                                 Prop!("model", model));
 nothrow @nogc:
 
-    this(BLEInterface iface, BLEClient client)
-    {
-        this.iface = iface;
-        this.client = client;
+    enum type_name = "ble-client-binding";
+    enum path = "/binding/ble/client";
 
-        (cast(BaseInterface)iface).subscribe(&packet_handler,
-            PacketFilter(type: PacketType.unknown, direction: PacketDirection.incoming));
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
+    {
+        super(collection_type_info!BLEClientBinding, id, flags);
     }
 
-    final void add_element(Element* element, ref const ElementDesc desc, ref const ElementDesc_BLE ble_info)
+    final inout(BLEClient) client() inout pure
+        => _client.get;
+    final void client(BLEClient value)
     {
-        SampleElement* e = &elements.pushBack();
-        e.element = element;
-        e.service_uuid = ble_info.service_uuid;
-        e.char_uuid = ble_info.char_uuid;
-        e.handle = ushort.max;
-        e.offset = ble_info.offset;
-        e.desc = ble_info.value_desc;
+        if (_client.get is value)
+            return;
+        if (_subscribed)
+        {
+            _client.unsubscribe(&state_change);
+            _iface.unsubscribe(&state_change);
+            _iface.unsubscribe(&packet_handler);
+            _subscribed = false;
+        }
+        _client = value;
+        _iface = null;
+        restart();
     }
 
-    final override void remove_element(Element* element)
+    final ref const(String) profile() const pure
+        => _profile_name;
+    final void profile(String value)
     {
+        if (value == _profile_name)
+            return;
+        _profile_name = value.move;
+        restart();
     }
 
-    final override void update()
+    final ref const(String) model() const pure
+        => _model_name;
+    final void model(String value)
     {
-        if (!handles_resolved)
+        if (value == _model_name)
+            return;
+        _model_name = value.move;
+        restart();
+    }
+
+    final override bool validate() const pure
+    {
+        return _client.get !is null && !_profile_name.empty && !_device.empty;
+    }
+
+    override CompletionStatus startup()
+    {
+        if (!materialise())
+            return CompletionStatus.error;
+
+        BLEClient c = _client.get;
+        if (!c || !c.running)
+            return CompletionStatus.continue_;
+
+        BLEInterface iface = cast(BLEInterface)c.iface;
+        if (!iface)
+        {
+            log.warning("client '", c.name, "' has no BLE interface");
+            return CompletionStatus.error;
+        }
+        _iface = iface;
+
+        c.subscribe(&state_change);
+        iface.subscribe(&state_change);
+        iface.subscribe(&packet_handler, PacketFilter(PacketType.unknown, PacketDirection.incoming));
+        _subscribed = true;
+
+        return CompletionStatus.complete;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        if (_subscribed)
+        {
+            _client.unsubscribe(&state_change);
+            _iface.unsubscribe(&state_change);
+            _iface.unsubscribe(&packet_handler);
+            _subscribed = false;
+        }
+        _iface = null;
+        _handles_resolved = false;
+        elements.clear();
+        return super.shutdown();
+    }
+
+    override void update()
+    {
+        if (!_handles_resolved)
             try_resolve_handles();
+    }
+
+protected:
+    final override const(char)[] profile_dir() const pure
+        => "conf/ble_profiles/";
+    final override const(char)[] profile_name() const pure
+        => _profile_name[];
+    final override const(char)[] model_name() const pure
+        => _model_name[];
+
+    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
+    {
+        assert(desc.type == ElementType.ble);
+        ref const ElementDesc_BLE ble = _profile_data.get_ble(desc.element);
+
+        ubyte[256] tmp = void;
+        tmp[0 .. ble.value_desc.data_length] = 0;
+        e.value = sample_value(tmp.ptr, ble.value_desc);
+
+        SampleElement* se = &elements.pushBack();
+        se.element = e;
+        se.service_uuid = ble.service_uuid;
+        se.char_uuid = ble.char_uuid;
+        se.handle = ushort.max;
+        se.offset = ble.offset;
+        se.desc = ble.value_desc;
+
+        device.sample_elements ~= e; // TODO: remove this?
     }
 
 private:
 
-    BLEInterface iface;
-    BLEClient client;
+    ObjectRef!BLEClient _client;
+    String _profile_name;
+    String _model_name;
+
+    BLEInterface _iface;
+    bool _subscribed;
+    bool _handles_resolved;
+
     Array!SampleElement elements;
-    bool handles_resolved;
 
     struct SampleElement
     {
@@ -69,12 +180,18 @@ private:
         ValueDesc desc;
     }
 
+    void state_change(ActiveObject obj, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
+    }
+
     void try_resolve_handles()
     {
-        if (!client.running)
+        if (!_client)
             return;
 
-        auto session = iface.find_session_by_peer(client.peer);
+        auto session = _iface.find_session_by_peer(_client.peer);
         if (session is null || session.num_chars == 0)
             return;
 
@@ -84,11 +201,11 @@ private:
             if (e.handle != ushort.max)
                 continue;
 
-            foreach (ref c; session.chars[0 .. session.num_chars])
+            foreach (ref gc; session.chars[0 .. session.num_chars])
             {
-                if (e.service_uuid == c.service_uuid && e.char_uuid == c.char_uuid)
+                if (e.service_uuid == gc.service_uuid && e.char_uuid == gc.char_uuid)
                 {
-                    e.handle = c.handle;
+                    e.handle = gc.handle;
                     break;
                 }
             }
@@ -96,7 +213,7 @@ private:
             if (e.handle == ushort.max)
                 all_resolved = false;
         }
-        handles_resolved = all_resolved;
+        _handles_resolved = all_resolved;
     }
 
     void packet_handler(ref const Packet p, BaseInterface i, PacketDirection dir, void* u)
@@ -105,7 +222,8 @@ private:
             return;
 
         ref att = p.hdr!BLEATTFrame;
-        if (att.src != client.peer)
+        BLEClient c = _client.get;
+        if (!c || att.src != c.peer)
             return;
 
         if (att.opcode != ATTOpcode.notification && att.opcode != ATTOpcode.indication)

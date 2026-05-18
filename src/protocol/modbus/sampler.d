@@ -3,21 +3,31 @@ module protocol.modbus.sampler;
 import urt.array;
 import urt.endian;
 import urt.log;
+import urt.mem.temp : tconcat;
+import urt.meta : AliasSeq;
 import urt.si;
+import urt.string;
 import urt.time;
 import urt.util : align_up;
 
+import manager;
+import manager.base;
+import manager.binding;
+import manager.collection;
+import manager.device;
 import manager.element;
+import manager.plugin;
 import manager.profile;
 import manager.sampler;
 
+import protocol.modbus;
 import protocol.modbus.client;
 import protocol.modbus.message;
 
 import router.iface.packet : PCP, pcp_priority_map;
 
-//version = DebugModbusSampler;
-//version = DebugModbusSamplerRegs;
+//version = DebugModbusClientBinding;
+//version = DebugModbusClientBindingRegs;
 
 nothrow @nogc:
 
@@ -69,23 +79,145 @@ DataType parse_modbus_data_type(const(char)[] desc)
 }
 
 
-class ModbusSampler : Sampler
+abstract class ModbusBinding : ProfileBinding
 {
 nothrow @nogc:
 
-    this(ModbusClient client, ubyte server_address)
+    this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        this.client = client;
-        this.server_address = server_address;
-
-        snooping = client.isSnooping;
-        if (snooping)
-            client.setSnoopHandler(&snoop_handler);
+        super(type_info, id, flags);
     }
 
-    final override void update()
+protected:
+    abstract void add_register_element(Element* element, ref const ElementDesc desc, ref const ElementDesc_Modbus reg_info);
+
+    final override const(char)[] profile_dir() const pure
+        => "conf/modbus_profiles/";
+
+    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
-        import protocol.modbus.message;
+        assert(desc.type == ElementType.modbus);
+        ref const ElementDesc_Modbus mb = _profile_data.get_mb(desc.element);
+
+        // write a null value of the proper type
+        ubyte[256] tmp = void;
+        tmp[0 .. mb.value_desc.data_length] = 0;
+        e.value = sample_value(tmp.ptr, mb.value_desc);
+
+        add_register_element(e, desc, mb);
+        device.sample_elements ~= e; // TODO: remove this?
+    }
+}
+
+
+class ModbusClientBinding : ModbusBinding
+{
+    alias Properties = AliasSeq!(Prop!("client", client),
+                                 Prop!("slave", slave));
+nothrow @nogc:
+
+    enum type_name = "modbus_client";
+    enum path = "/binding/modbus/client";
+
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
+    {
+        super(collection_type_info!ModbusClientBinding, id, flags);
+    }
+
+    // Properties...
+
+    final inout(ModbusClient) client() inout pure
+        => _client.get;
+    final void client(ModbusClient value)
+    {
+        if (_client.get is value)
+            return;
+        if (_subscribed)
+        {
+            _client.unsubscribe(&client_state_change);
+            _subscribed = false;
+        }
+        if (_snooping)
+        {
+            _client.setSnoopHandler(null);
+            _snooping = false;
+        }
+        _client = value;
+        restart();
+    }
+
+    final ref const(String) slave() const pure
+        => _slave_name;
+    final void slave(String value)
+    {
+        if (value == _slave_name)
+            return;
+        _slave_name = value.move;
+        _slave_server = null;
+        restart();
+    }
+
+    // Lifecycle...
+
+    final override bool validate() const pure
+    {
+        return _client.get !is null && !_slave_name.empty && !_device.empty;
+    }
+
+    override CompletionStatus startup()
+    {
+        if (!_slave_server)
+        {
+            _slave_server = get_module!ModbusProtocolModule.find_server_by_name(_slave_name[]);
+            if (!_slave_server)
+            {
+                log.warning("remote-server '", _slave_name, "' not found");
+                return CompletionStatus.error;
+            }
+            if (_slave_server.profile.empty)
+            {
+                log.warning("remote-server '", _slave_name, "' has no profile");
+                return CompletionStatus.error;
+            }
+        }
+
+        if (!materialise())
+            return CompletionStatus.error;
+
+        ModbusClient c = _client.get;
+        if (!c || !c.running)
+            return CompletionStatus.continue_;
+
+        _snooping = c.isSnooping;
+        if (_snooping)
+            c.setSnoopHandler(&snoop_handler);
+
+        c.subscribe(&client_state_change);
+        _subscribed = true;
+
+        return CompletionStatus.complete;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        if (_subscribed)
+        {
+            _client.unsubscribe(&client_state_change);
+            _subscribed = false;
+        }
+        if (_snooping)
+        {
+            _client.setSnoopHandler(null);
+            _snooping = false;
+        }
+        elements.clear();
+        needsSort = true;
+        return super.shutdown();
+    }
+
+    override void update()
+    {
+        ModbusClient c = _client.get;
 
         if (needsSort)
         {
@@ -96,7 +228,7 @@ nothrow @nogc:
             needsSort = false;
         }
 
-        if (snooping)
+        if (_snooping)
             return;
 
         enum MaxRegs = 128;
@@ -167,7 +299,7 @@ nothrow @nogc:
 
             // send request
             ModbusPDU pdu = createMessage_Read(cast(RegisterType)elements[i].regKind, firstReg, count);
-            if (!client.sendRequest(server_address, pdu, &response_handler, &error_handler, 0, retryTime, batch_pcp, batch_dei))
+            if (!c.sendRequest(_slave_server.universal_address, pdu, &response_handler, &error_handler, 0, retryTime, batch_pcp, batch_dei))
             {
                 // queue rejected - release in-flight flags for this batch
                 // continue scanning: later batches (possibly higher priority) may still be accepted
@@ -177,13 +309,13 @@ nothrow @nogc:
                 continue;
             }
 
-            version (DebugModbusSampler)
-                client.log.tracef("Request: {0} [{1}{2,04x}:{3}]", server_address, elements[i].regKind, firstReg, count);
+            version (DebugModbusClientBinding)
+                log.tracef("Request: {0} [{1}{2,04x}:{3}]", _slave_server.universal_address, elements[i].regKind, firstReg, count);
 
             i = j;
         }
 
-        version (DebugModbusSampler)
+        version (DebugModbusClientBinding)
         {
             if (++_diag_counter >= 100)
             {
@@ -194,13 +326,19 @@ nothrow @nogc:
                     if (e.flags & 2) ++n_const;
                     else if (e.flags & 1) ++n_in_flight;
                 }
-                client.log.debugf("Sampler {0}: {1} elements, {2} in-flight, {3} const-done",
-                    server_address, elements.length, n_in_flight, n_const);
+                log.debugf("Binding {0}: {1} elements, {2} in-flight, {3} const-done",
+                    _slave_server.universal_address, elements.length, n_in_flight, n_const);
             }
         }
     }
 
-    final void add_element(Element* element, ref const ElementDesc desc, ref const ElementDesc_Modbus reg_info)
+protected:
+    final override const(char)[] profile_name() const pure
+        => _slave_server ? _slave_server.profile[] : null;
+    final override const(char)[] model_name() const pure
+        => _slave_server ? _slave_server.model[] : null;
+
+    final override void add_register_element(Element* element, ref const ElementDesc desc, ref const ElementDesc_Modbus reg_info)
     {
         SampleElement* e = &elements.pushBack();
         e.element = element;
@@ -219,24 +357,23 @@ nothrow @nogc:
             default: assert(false);
         }
 
-        // we need to re-sort the regs after adding any new ones...
         needsSort = true;
-    }
-
-    final override void remove_element(Element* element)
-    {
-        // TODO: find the element in the list and remove it...
     }
 
 private:
 
-    ModbusClient client;
-    ubyte server_address;
+    ObjectRef!ModbusClient _client;
+    String _slave_name;
+    ServerMap* _slave_server;
+
+    bool _subscribed;
+    bool _snooping;
+
     Array!SampleElement elements;
     ushort retryTime = 500;
     bool needsSort = true;
-    bool snooping;
-    version (DebugModbusSampler)
+
+    version (DebugModbusClientBinding)
         ubyte _diag_counter;
 
     struct SampleElement
@@ -254,8 +391,15 @@ private:
             => cast(ubyte)(desc.data_length / 2);
     }
 
+    void client_state_change(ActiveObject obj, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
+    }
+
     void response_handler(ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time)
     {
+        const ubyte uni_addr = _slave_server.universal_address;
         ubyte kind = request.function_code == FunctionCode.read_holding_registers ? 4 :
                      request.function_code == FunctionCode.read_input_registers ? 3 :
                      request.function_code == FunctionCode.read_discrete_inputs ? 1 :
@@ -268,45 +412,43 @@ private:
         {
             const ubyte ex = response.data.length >= 1 ? response.data[0] : 0;
             const ex_name = get_exception_code_string(cast(ExceptionCode)ex);
-            client.log.warningf("exception from {0} for fc={1} reg={2} count={3}: {4} ({5})",
-                server_address, cast(ubyte)request.function_code, first, count, ex_name ? ex_name : "unknown", ex);
+            log.warningf("exception from {0} for fc={1} reg={2} count={3}: {4} ({5})",
+                uni_addr, cast(ubyte)request.function_code, first, count, ex_name ? ex_name : "unknown", ex);
             release_in_flight(kind, first, count);
             return;
         }
         if (response.function_code != request.function_code)
         {
-            client.log.warningf("function code mismatch from {0} expected={1} got={2}",
-                server_address, cast(ubyte)request.function_code, cast(ubyte)response.function_code);
+            log.warningf("function code mismatch from {0} expected={1} got={2}",
+                uni_addr, cast(ubyte)request.function_code, cast(ubyte)response.function_code);
             release_in_flight(kind, first, count);
             return;
         }
         if (response.data.length == 0)
         {
-            client.log.warningf("empty response from {0} for fc={1} reg={2} count={3}",
-                server_address, cast(ubyte)request.function_code, first, count);
+            log.warningf("empty response from {0} for fc={1} reg={2} count={3}",
+                uni_addr, cast(ubyte)request.function_code, first, count);
             release_in_flight(kind, first, count);
             return;
         }
         ushort response_bytes = response.data[0];
-        // PDU byte_count claims more data than the frame actually carries.
         if (response_bytes + 1 > response.data.length)
         {
-            client.log.warningf("truncated response from {0} for fc={1} reg={2} count={3}: PDU byte_count={4} but only {5} data bytes in frame",
-                server_address, cast(ubyte)request.function_code, first, count, response_bytes, response.data.length - 1);
+            log.warningf("truncated response from {0} for fc={1} reg={2} count={3}: PDU byte_count={4} but only {5} data bytes in frame",
+                uni_addr, cast(ubyte)request.function_code, first, count, response_bytes, response.data.length - 1);
             release_in_flight(kind, first, count);
             return;
         }
-        // Well-formed PDU but with fewer registers/coils than requested.
         if ((kind < 2 && response_bytes * 8 != count.align_up(8)) || (kind > 2 && response_bytes / 2 != count))
         {
-            client.log.warningf("short response from {0} for fc={1} reg={2} count={3}: got {4} bytes (expected {5})",
-                server_address, cast(ubyte)request.function_code, first, count, response_bytes, count*2);
+            log.warningf("short response from {0} for fc={1} reg={2} count={3}: got {4} bytes (expected {5})",
+                uni_addr, cast(ubyte)request.function_code, first, count, response_bytes, count*2);
             release_in_flight(kind, first, count);
             return;
         }
 
-        version (DebugModbusSampler)
-            client.log.tracef("Response: {0}, [{1}{2,04x}:{3}] - {4}", server_address, kind, first, count, response_time - request_time);
+        version (DebugModbusClientBinding)
+            log.tracef("Response: {0}, [{1}{2,04x}:{3}] - {4}", uni_addr, kind, first, count, response_time - request_time);
 
         ubyte[] data = response.data[1 .. 1 + response_bytes];
 
@@ -317,7 +459,7 @@ private:
 
             e.lastUpdate = response_time;
 
-            if (!snooping)
+            if (!_snooping)
             {
                 // release the in-flight flag
                 e.flags &= 0xFE;
@@ -338,8 +480,8 @@ private:
             else
                 e.element.value(sample_value(data.ptr + byte_offset, e.desc), response_time);
 
-            version (DebugModbusSamplerRegs)
-                client.log.tracef("Got reg {0,04x}: {1} = {2}", e.register, e.element.id, e.element.value);
+            version (DebugModbusClientBindingRegs)
+                log.tracef("Got reg {0,04x}: {1} = {2}", e.register, e.element.id, e.element.value);
         }
     }
 
@@ -352,11 +494,11 @@ private:
         ushort first = request.data[0..2].bigEndianToNative!ushort;
         ushort count = request.data[2..4].bigEndianToNative!ushort;
 
-        version (DebugModbusSampler)
+        version (DebugModbusClientBinding)
         {
             const(char)[] label = errorType == ModbusErrorType.Retrying ? "Retrying" :
                                   errorType == ModbusErrorType.Timeout ? "Timeout" : "Failed";
-            client.log.debugf("{4}: [{0}{1,04x}:{2}] - {3}", kind, first, count, getTime()-request_time, label);
+            log.debugf("{4}: [{0}{1,04x}:{2}] - {3}", kind, first, count, getTime()-request_time, label);
         }
 
         release_in_flight(kind, first, count);
@@ -364,7 +506,7 @@ private:
 
     void release_in_flight(ubyte kind, ushort first, ushort count)
     {
-        if (snooping)
+        if (_snooping)
             return;
         foreach (ref e; elements)
         {
@@ -376,7 +518,7 @@ private:
 
     void snoop_handler(ubyte server_addr, ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time)
     {
-        if (server_addr != server_address)
+        if (server_addr != _slave_server.universal_address)
             return;
 
         response_handler(request, response, request_time, response_time);

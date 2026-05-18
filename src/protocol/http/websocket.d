@@ -237,7 +237,7 @@ protected:
             }
 
             // parse any complete frames already in the buffer - important on the
-            // first iteration after an HTTP→WS upgrade, where _message was seeded
+            // first iteration after an HTTP->WS upgrade, where _message was seeded
             // with leftover bytes from the HTTP parser before any stream.read.
             while (frame_start + 2 < read)
             {

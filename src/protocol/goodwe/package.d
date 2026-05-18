@@ -1,19 +1,13 @@
 module protocol.goodwe;
 
 import urt.inet;
-import urt.lifetime;
 import urt.log;
-import urt.mem.allocator;
-import urt.meta.nullable;
 import urt.result;
 import urt.socket;
-import urt.string;
 
 import manager;
 import manager.collection;
-import manager.console.session;
 import manager.plugin;
-import manager.sampler;
 
 import protocol.goodwe.aa55;
 import protocol.goodwe.sampler;
@@ -31,7 +25,7 @@ nothrow @nogc:
     override void init()
     {
         g_app.console.register_collection!AA55Client();
-        g_app.console.register_command!device_add("/protocol/goodwe/device", this, "add");
+        g_app.console.register_collection!GoodWeBinding();
 
         // Create socket for AA55 clients
         Socket socket;
@@ -106,54 +100,4 @@ nothrow @nogc:
         }
     }
 
-    void device_add(Session session, const(char)[] id, AA55Client aa55_client, Nullable!(const(char)[]) name)
-    {
-        import urt.file;
-        import urt.string.format;
-        import manager.device;
-        import manager.element;
-        import manager.profile;
-
-        const(char)[] profileName = aa55_client.profile[];
-
-        void[] file = load_file(tconcat("conf/goodwe_profiles/", profileName, ".conf"), g_app.allocator);
-        if (!file)
-        {
-            session.write_line("Profile file not found: '", profileName, "'");
-            return;
-        }
-        scope(exit) g_app.allocator.free(file);
-
-        Profile* profile = parse_profile(cast(char[])file, g_app.allocator);
-        if (!profile)
-        {
-            session.write_line("Failed to load profile: '", profileName, "'");
-            return;
-        }
-
-        // create a sampler for this modbus server...
-        GoodWeSampler sampler = g_app.allocator.allocT!GoodWeSampler(aa55_client);
-
-        Device device = create_device_from_profile(*profile, aa55_client.model[], id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
-            assert(desc.type == ElementType.aa55);
-            ref const ElementDesc_AA55 aa55 = profile.get_aa55(desc.element);
-
-            // write a null value of the proper type
-            ubyte[256] tmp = void;
-            tmp[0 .. aa55.value_desc.data_length] = 0;
-            e.value = sample_value(tmp.ptr, aa55.value_desc);
-
-            // record samper data...
-            sampler.add_element(e, desc, aa55);
-            device.sample_elements ~= e; // TODO: remove this?
-        });
-        if (!device)
-        {
-            g_app.allocator.freeT(profile);
-            session.write_line("Failed to create device '", id, "'");
-            return;
-        }
-        device.profile = profile;
-        device.samplers ~= sampler;
-    }
 }

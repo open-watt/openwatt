@@ -28,6 +28,35 @@ enum DebugType = null;
 nothrow @nogc:
 
 
+// ============================================================================
+// TODO (high priority): startup-latency / pending-reference system
+// ============================================================================
+// Today, when startup.conf creates an object on one line and references it on
+// the next, the second line will fail unless the first object has already
+// reached Running. We currently paper over this in
+// `manager/console/collection_commands.d` (CollectionAddCommand.execute) by
+// synchronously ticking the state machine of every newly-created ActiveObject
+// — see the "HACK: synchronous state-machine tick" block there.
+//
+// That fix only works for one-tick startups; anything that waits on a
+// dependency (return CompletionStatus.continue_ from startup) still races the
+// next script line. It also gives every object an extra synchronous tick at
+// construction time, which is surprising for code running in startup() or
+// update().
+//
+// The proper fix lives close to ObjectRef and the property/argument plumbing:
+// when a property setter takes a name that resolves to nothing, we should
+// retain the unresolved name and have the relevant Collection wake the
+// pending reference up when the named target is created. ObjectRef already
+// supports detached state and try_reattach() — we just need creation to
+// notify pending refs rather than relying on synchronous ordering.
+//
+// Until that lands, do NOT add code paths that depend on construction
+// ordering at script-execution time, and do NOT rely on the synchronous tick
+// in collection_commands.d as a load-bearing mechanism.
+// ============================================================================
+
+
 enum ObjectFlags : ubyte
 {
     none         = 0,
@@ -307,6 +336,11 @@ nothrow @nogc:
                 return r;
             }
         }
+        return set_unknown_property(property, value);
+    }
+
+    StringResult set_unknown_property(scope const(char)[] property, ref const Variant value)
+    {
         return StringResult(tconcat("No property '", property, "' for ", name[]));
     }
 

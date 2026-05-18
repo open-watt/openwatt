@@ -232,7 +232,7 @@ nothrow @nogc:
                         }
 
                         // no Content-Length and not chunked -> no body.
-                        // per RFC 7230 §3.3.3, requests without either are treated as having no body
+                        // per RFC 7230 section 3.3.3, requests without either are treated as having no body
                         // (responses would read-until-close, but the parser is request-oriented here).
                     }
 

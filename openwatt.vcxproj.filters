@@ -561,6 +561,9 @@
     <DCompile Include="src\manager\sampler.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\manager\binding.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\ezsp\package.d">
       <Filter>src\protocol\ezsp</Filter>
     </DCompile>

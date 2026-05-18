@@ -70,11 +70,11 @@ nothrow @nogc:
 
         g_app.console.register_collection!ModbusInterface();
         g_app.console.register_collection!ModbusClient();
+        g_app.console.register_collection!ModbusClientBinding();
 
         // TODO: should we relocate this command?
         g_app.console.register_command!remote_server_add("/interface/modbus/remote-server", this, "add");
 
-        g_app.console.register_command!device_add("/protocol/modbus/device", this, "add");
         g_app.console.register_command!request_raw("/protocol/modbus/client/request", this, "raw");
         g_app.console.register_command!request_read("/protocol/modbus/client/request", this, "read");
         g_app.console.register_command!request_write("/protocol/modbus/client/request", this, "write");
@@ -86,7 +86,7 @@ nothrow @nogc:
         Collection!ModbusClient().update_all();
     }
 
-        final ServerMap* find_server_by_name(const(char)[] name)
+    final ServerMap* find_server_by_name(const(char)[] name)
     {
         foreach (ref map; remote_servers.values)
         {
@@ -225,78 +225,6 @@ nothrow @nogc:
         }
 
         add_remote_server(name, modbusInterface, address, profile, model ? model.value : null, universal_address ? universal_address.value : 0);
-    }
-
-    void device_add(Session session, const(char)[] id, const(char)[] _client, const(char)[] slave, Nullable!(const(char)[]) name, Nullable!(const(char)[]) _profile)
-    {
-        import manager.component;
-        import manager.device;
-        import manager.element;
-        import urt.file;
-        import urt.si;
-        import urt.string.format;
-
-        ServerMap* map;
-        ModbusClient client = lookupClientAndSlave(session, _client, slave, map);
-        if (!client)
-            return;
-
-        ubyte server_address;
-        const(char)[] profileName;
-        if (map)
-        {
-            if (!map.profile)
-            {
-                session.write_line("Slave '", slave, "' doesn't have a profile specified");
-                return;
-            }
-            server_address = map.universal_address;
-            profileName = map.profile[];
-        }
-        else
-        {
-            import urt.conv : parse_int;
-            size_t taken;
-            long result = parse_int(slave, &taken);
-            if (taken == 0 || taken != slave.length || result < 1 || result > 247)
-            {
-                session.write_line("Invalid slave identifier or address '", slave, "'");
-                return;
-            }
-            server_address = cast(ubyte)result;
-            if (!_profile)
-            {
-                session.write_line("No profile specified");
-                return;
-            }
-            profileName = _profile.value;
-        }
-
-        void[] file = load_file(tconcat("conf/modbus_profiles/", profileName, ".conf"), g_app.allocator);
-        Profile* profile = parse_profile(cast(char[])file, g_app.allocator);
-
-        // create a sampler for this modbus server...
-        ModbusSampler sampler = g_app.allocator.allocT!ModbusSampler(client, server_address);
-
-        Device device = create_device_from_profile(*profile, map.model[], id, name ? name.value : null, (Device device, Element* e, ref const ElementDesc desc, ubyte) {
-            assert(desc.type == ElementType.modbus);
-            ref const ElementDesc_Modbus mb = profile.get_mb(desc.element);
-
-            // write a null value of the proper type
-            ubyte[256] tmp = void;
-            tmp[0 .. mb.value_desc.data_length] = 0;
-            e.value = sample_value(tmp.ptr, mb.value_desc);
-
-            // record samper data...
-            sampler.add_element(e, desc, mb);
-            device.sample_elements ~= e; // TODO: remove this?
-        });
-        if (!device)
-        {
-            session.write_line("Failed to create device '", id, "'");
-            return;
-        }
-        device.samplers ~= sampler;
     }
 
     ModbusRequestState sendRequest(Session session, const(char)[] client, const(char)[] slave, ref ModbusPDU msg)

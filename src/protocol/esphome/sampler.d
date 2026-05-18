@@ -5,13 +5,17 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem.temp : tconcat;
+import urt.meta : AliasSeq;
 import urt.si.unit;
 import urt.si.quantity;
 import urt.string;
 import urt.time;
 import urt.variant;
 
+import manager;
 import manager.base;
+import manager.binding;
+import manager.collection;
 import manager.component;
 import manager.device;
 import manager.element;
@@ -24,42 +28,128 @@ import protocol.esphome.protobuf;
 
 import router.iface.mac;
 
-//version = DebugESPHomeSampler;
+//version = DebugESPHomeBinding;
 
 nothrow @nogc:
 
 
-class ESPHomeSampler : Sampler
+class ESPHomeBinding : ProfileBinding
 {
+    alias Properties = AliasSeq!(Prop!("client", client),
+                                 Prop!("profile", profile),
+                                 Prop!("model", model));
 nothrow @nogc:
 
-    this(Device device, ESPHomeClient client)
+    enum type_name = "esphome-binding";
+    enum path = "/binding/esphome";
+
+    this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
-        _device = device;
-        _client = client;
-        _client.subscribe(&client_state_handler);
-        _client.subscribe(&message_handler);
+        super(collection_type_info!ESPHomeBinding, id, flags);
+    }
+
+    final inout(ESPHomeClient) client() inout pure
+        => _client.get;
+    final void client(ESPHomeClient value)
+    {
+        if (_client.get is value)
+            return;
+        if (_subscribed)
+        {
+            _client.unsubscribe(&state_change);
+            _client.unsubscribe(&message_handler);
+            _subscribed = false;
+        }
+        _client = value;
+        restart();
+    }
+
+    final ref const(String) profile() const pure
+        => _profile_name;
+    final void profile(String value)
+    {
+        if (value == _profile_name)
+            return;
+        _profile_name = value.move;
+        restart();
+    }
+
+    final ref const(String) model() const pure
+        => _model_name;
+    final void model(String value)
+    {
+        if (value == _model_name)
+            return;
+        _model_name = value.move;
+        restart();
+    }
+
+    final override bool validate() const pure
+    {
+        return _client.get !is null && !_profile_name.empty && !_device.empty;
+    }
+
+    override CompletionStatus startup()
+    {
+        if (!materialise())
+            return CompletionStatus.error;
+
+        ESPHomeClient c = _client.get;
+        if (!c || !c.running)
+            return CompletionStatus.continue_;
+
+        c.subscribe(&state_change);
+        c.subscribe(&message_handler);
+        _subscribed = true;
+
+        c.send_message(DeviceInfoRequest());
+        _init_state = 1;
+        return CompletionStatus.complete;
+    }
+
+    override CompletionStatus shutdown()
+    {
+        if (_subscribed)
+        {
+            _client.unsubscribe(&state_change);
+            _client.unsubscribe(&message_handler);
+            _subscribed = false;
+        }
+        _elements.clear();
+        _dev = null;
+        _init_state = 0;
+        return super.shutdown();
     }
 
     final override void update()
     {
-        if (_client.detached)
-            return;
-        if (!_client.running)
-            return;
-
-        if (_init_state == 0)
-        {
-            _client.send_message(DeviceInfoRequest());
-            _init_state = 1;
-        }
-
-        // TODO: propagate any changes...
     }
 
-    final override void remove_element(Element* element)
+protected:
+    final override const(char)[] profile_dir() const pure
+        => "conf/ha_profiles/";
+    final override const(char)[] profile_name() const pure
+        => _profile_name[];
+    final override const(char)[] model_name() const pure
+        => _model_name[];
+
+    final override bool materialise()
     {
-        // TODO...
+        if (!super.materialise())
+            return false;
+        if (!_dev)
+        {
+            Device* p = _device[] in g_app.devices;
+            if (!p)
+                return false;
+            _dev = *p;
+        }
+        return true;
+    }
+
+    final override void add_handler(Device, Element* e, ref const ElementDesc, ubyte)
+    {
+        log.warning("element-map is not supported in ESPHome profiles (sensors are discovered at runtime); ignoring '", e.id, '\'');
     }
 
 private:
@@ -72,34 +162,20 @@ private:
         String custom_unit;
     }
 
-    Device _device;
     ObjectRef!ESPHomeClient _client;
+    String _profile_name;
+    String _model_name;
+
+    Device _dev;
+    bool _subscribed;
+    ubyte _init_state;
 
     Map!(uint, SampleElement) _elements;
 
-    ubyte _init_state = 0;
-
-    void client_state_handler(ActiveObject object, StateSignal signal)
+    void state_change(ActiveObject obj, StateSignal signal)
     {
-        if (signal == StateSignal.online)
-        {
-            if (_init_state == 2)
-            {
-                _client.send_message(SubscribeStatesRequest());
-                _init_state = 3;
-            }
-        }
-        else if (signal == StateSignal.offline)
-        {
-            if (_init_state == 3)
-                _init_state = 2;
-        }
-        else if (signal == StateSignal.destroyed)
-        {
-            _client.unsubscribe(&client_state_handler);
-            _client = null;
-            _init_state = 0;
-        }
+        if (signal == StateSignal.offline)
+            restart();
     }
 
     void message_handler(uint msg_type, const(ubyte)[] frame)
@@ -114,50 +190,50 @@ private:
                 // TODO: id should be `res.name`...
 
                 if (res.friendly_name)
-                    _device.name = res.friendly_name;
+                    _dev.name = res.friendly_name;
                 else
-                    _device.name = res.name;
+                    _dev.name = res.name;
 
-                Element* e = _device.find_or_create_element("info.name");
+                Element* e = _dev.find_or_create_element("info.name");
                 if (res.friendly_name)
                     e.value = res.friendly_name.move;
                 else
                     e.value = res.name.move;
-                e = _device.find_or_create_element("info.esphome_ver");
+                e = _dev.find_or_create_element("info.esphome_ver");
                 e.value = res.esphome_version.move;
-                e = _device.find_or_create_element("info.compilation_time");
+                e = _dev.find_or_create_element("info.compilation_time");
                 SysTime comp_time;
                 ptrdiff_t taken = comp_time.fromString(res.compilation_time[]);
                 if (taken == res.compilation_time.length)
                     e.value = comp_time;
                 if (res.manufacturer)
                 {
-                    e = _device.find_or_create_element("info.manufacturer_name");
+                    e = _dev.find_or_create_element("info.manufacturer_name");
                     e.value = res.manufacturer.move;
                 }
                 if (res.model)
                 {
-                    e = _device.find_or_create_element("info.model_id");
+                    e = _dev.find_or_create_element("info.model_id");
                     e.value = res.model.move;
                 }
                 if (res.friendly_name)
                 {
-                    e = _device.find_or_create_element("info.model_name");
+                    e = _dev.find_or_create_element("info.model_name");
                     e.value = res.friendly_name.move;
                 }
 
                 // do we know if it's wifi or not?
-                e = _device.find_or_create_element("status.network.mode");
+                e = _dev.find_or_create_element("status.network.mode");
                 e.value = StringLit!"wifi";
 
                 if (res.webserver_port)
                 {
-                    e = _device.find_or_create_element("status.network.webserver_port");
+                    e = _dev.find_or_create_element("status.network.webserver_port");
                     e.value = res.webserver_port;
                 }
                 if (res.mac_address)
                 {
-                    e = _device.find_or_create_element("status.network.wifi.mac_address");
+                    e = _dev.find_or_create_element("status.network.wifi.mac_address");
                     MACAddress addr;
                     taken = addr.fromString(res.mac_address[]);
                     if (taken == res.mac_address.length)
@@ -165,22 +241,22 @@ private:
                 }
                 if (res.bluetooth_mac_address)
                 {
-                    e = _device.find_or_create_element("status.network.bluetooth.mac_address");
+                    e = _dev.find_or_create_element("status.network.bluetooth.mac_address");
                     e.value = MACAddress().fromString(res.bluetooth_mac_address[]);
                 }
 
-                Component c = _device.find_component("info");
+                Component c = _dev.find_component("info");
                 c.template_ = StringLit!"DeviceInfo";
-                c = _device.find_component("status");
+                c = _dev.find_component("status");
                 if (c)
                     c.template_ = StringLit!"DeviceStatus";
-                c = _device.find_component("status.network");
+                c = _dev.find_component("status.network");
                 if (c)
                     c.template_ = StringLit!"DeviceStatus";
-                c = _device.find_component("status.network.wifi");
+                c = _dev.find_component("status.network.wifi");
                 if (c)
                     c.template_ = StringLit!"Wifi";
-                c = _device.find_component("status.network.bluetooth");
+                c = _dev.find_component("status.network.bluetooth");
                 if (c)
                     c.template_ = StringLit!"Bluetooth";
 
@@ -189,7 +265,6 @@ private:
                 break;
 
             case ListEntitiesDoneResponse.id:
-                // subscribe for updates
                 _client.send_message(SubscribeStatesRequest());
                 _init_state = 3;
                 break;
@@ -198,28 +273,28 @@ private:
                 ListEntitiesBinarySensorResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has BinarySensor: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has BinarySensor: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesCoverResponse.id:
                 ListEntitiesCoverResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Cover: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Cover: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesFanResponse.id:
                 ListEntitiesFanResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Fan: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Fan: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesLightResponse.id:
                 ListEntitiesLightResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Light: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Light: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesSensorResponse.id:
@@ -240,11 +315,13 @@ private:
                 }
                 const(char)[] id = tmp[0 .. res.name.length];
 
-                Element* e = _device.find_or_create_element(tconcat("sensors.", id));
+                Element* e = _dev.find_or_create_element(tconcat("sensors.", id));
                 e.name = res.name.move;
 
-                // record the element...
-                SampleElement* el = _elements.insert(res.key, SampleElement(key: res.key, element: e));
+                SampleElement entry;
+                entry.key = res.key;
+                entry.element = e;
+                SampleElement* el = _elements.insert(res.key, entry);
                 if (!el)
                 {
                     // TODO: what went wrong?!
@@ -272,147 +349,147 @@ private:
                 ListEntitiesSwitchResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Switch: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Switch: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesTextSensorResponse.id:
                 ListEntitiesTextSensorResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has TextSensor: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has TextSensor: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesServicesResponse.id:
                 ListEntitiesServicesResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Services: ", res.name);
+                log.debug_("has Services: ", res.name);
                 break;
 
             case ListEntitiesCameraResponse.id:
                 ListEntitiesCameraResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Camera: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Camera: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesClimateResponse.id:
                 ListEntitiesClimateResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Climate: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Climate: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesWaterHeaterResponse.id:
                 ListEntitiesWaterHeaterResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has WaterHeater: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has WaterHeater: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesNumberResponse.id:
                 ListEntitiesNumberResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Number: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Number: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesSelectResponse.id:
                 ListEntitiesSelectResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Select: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Select: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesSirenResponse.id:
                 ListEntitiesSirenResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Siren: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Siren: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesLockResponse.id:
                 ListEntitiesLockResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Lock: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Lock: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesButtonResponse.id:
                 ListEntitiesButtonResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Button: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Button: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesMediaPlayerResponse.id:
                 ListEntitiesMediaPlayerResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has MediaPlayer: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has MediaPlayer: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesAlarmControlPanelResponse.id:
                 ListEntitiesAlarmControlPanelResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has AlarmControlPanel: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has AlarmControlPanel: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesTextResponse.id:
                 ListEntitiesTextResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Text: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Text: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesDateResponse.id:
                 ListEntitiesDateResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Date: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Date: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesTimeResponse.id:
                 ListEntitiesTimeResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Time: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Time: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesEventResponse.id:
                 ListEntitiesEventResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Event: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Event: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesValveResponse.id:
                 ListEntitiesValveResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Valve: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Valve: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesDateTimeResponse.id:
                 ListEntitiesDateTimeResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has DateTime: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has DateTime: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesUpdateResponse.id:
                 ListEntitiesUpdateResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Update: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Update: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case ListEntitiesInfraredResponse.id:
                 ListEntitiesInfraredResponse res;
                 if (proto_deserialise(frame, res) != frame.length)
                     assert(false, "what here?");
-                writeDebug(_client.name, " has Infrared: ", res.object_id, " (", res.device_id, ")");
+                log.debug_("has Infrared: ", res.object_id, " (", res.device_id, ")");
                 break;
 
             case SensorStateResponse.id:
@@ -424,8 +501,8 @@ private:
                 if (SampleElement* el = res.key in _elements)
                 {
                     el.element.value = Quantity!float(res.state * el.pre_scale, el.unit);
-                    version (DebugESPHomeSampler)
-                        writeDebug("esphome - sample: ", el.element.id, " = ", el.element.value);
+                    version (DebugESPHomeBinding)
+                        log.trace("sample: ", el.element.id, " = ", el.element.value);
                 }
                 break;
 
