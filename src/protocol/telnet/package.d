@@ -10,6 +10,7 @@ import manager.collection;
 import manager.console.session;
 import manager.plugin;
 
+import protocol.telnet.client;
 import protocol.telnet.server;
 import protocol.telnet.stream;
 
@@ -30,6 +31,7 @@ nothrow @nogc:
     {
         g_app.console.register_collection!TelnetStream();
         g_app.console.register_command!add_server("/protocol/telnet/server", this, "add");
+        g_app.console.register_command!telnet("/tools", this);
     }
 
     override void update()

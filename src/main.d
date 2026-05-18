@@ -138,8 +138,9 @@ int main(string[] args)
     if (combined_config.length > 0)
     {
         import urt.lifetime : move;
-        session.feed_input(combined_config.move);
-        startup_pending = true;
+        if (!g_app.console.execute_script(session, combined_config.move))
+            return -1;
+        startup_pending = !session.is_idle();
     }
     else
     {

@@ -123,11 +123,20 @@ nothrow @nogc:
         {
             static if (ParamNames[j] != "_args" && ParamNames[j] != "named_args")
             {{
-                fnCmd._args ~= FunctionArgument(StringLit!(ParamNames[j]));
                 static if (is(Params[j] == Nullable!T, T))
+                {
+                    enum bool ParamIsNullable = true;
                     alias ArgTy = T;
+                }
                 else
+                {
+                    enum bool ParamIsNullable = false;
                     alias ArgTy = Params[j];
+                }
+                version (ExcludeHelpText)
+                    fnCmd._args ~= FunctionArgument(StringLit!(ParamNames[j]));
+                else
+                    fnCmd._args ~= FunctionArgument(StringLit!(ParamNames[j]), StringLit!(ParamIsNullable ? "?" ~ ArgTy.stringof : ArgTy.stringof));
                 static if (is(typeof(&suggest_completion!ArgTy)))
                     fnCmd._args[$-1].suggest = &suggest_completion!ArgTy;
             }}
@@ -151,7 +160,7 @@ nothrow @nogc:
         this._fn = _fn;
     }
 
-    override CommandState execute(Session session, const Variant[] _args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope*, const Variant[] _args, const NamedArgument[] namedArgs, out Variant result)
     {
         CommandState state;
         const(char)[] r = _fn(session, state, _args, namedArgs, _instance);
@@ -170,7 +179,7 @@ nothrow @nogc:
         return null;
     }
 
-    override MutableString!0 complete(const(char)[] cmdLine)
+    override MutableString!0 complete(const(char)[] cmdLine, Scope*, Scope*)
     {
         version (ExcludeAutocomplete)
             return null;
@@ -207,7 +216,7 @@ nothrow @nogc:
         }
     }
 
-    override Array!String suggest(const(char)[] cmdLine)
+    override Array!String suggest(const(char)[] cmdLine, Scope*, Scope*)
     {
         // get incomplete argument
         ptrdiff_t lastToken = cmdLine.length;
@@ -224,6 +233,26 @@ nothrow @nogc:
         if (equals == lastTok.length)
             return suggest_args(lastTok);
         return suggest_values(lastTok[0 .. equals], lastTok[equals + 1 .. $]);
+    }
+
+    version (ExcludeHelpText) {} else
+    override const(char)[] help(const(char)[] args) const
+    {
+        auto buf = MutableString!0(Concat, "Usage: ", name[]);
+        foreach (ref a; _args)
+        {
+            buf ~= "\n  ";
+            const(char)[] tn = a.type_name[];
+            bool optional = tn[0] == '?';
+            if (optional)
+            {
+                buf ~= '[';
+                tn = tn[1 .. $];
+            }
+            buf.append(a.name[], "=<", tn, '>');
+            if (optional) buf ~= ']';
+        }
+        return tconcat(buf[]);
     }
 
 private:
@@ -273,6 +302,8 @@ private:
 struct FunctionArgument
 {
     String name;
+    version (ExcludeHelpText) {} else
+        String type_name = StringLit!"";  // prefixed with '?' if the param is Nullable
     Array!String function(const(char)[]) nothrow @nogc suggest;
 }
 

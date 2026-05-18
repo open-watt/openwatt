@@ -35,9 +35,16 @@ enum TelnetOptions : ubyte
     CHARSET             = 42
 }
 
+enum TelnetRole : ubyte
+{
+    server,
+    client,
+}
+
 class TelnetStream : Stream
 {
-    alias Properties = AliasSeq!(Prop!("transport", transport));
+    alias Properties = AliasSeq!(Prop!("transport", transport),
+                                 Prop!("role", role));
 nothrow @nogc:
 
     enum type_name = "telnet";
@@ -64,9 +71,51 @@ nothrow @nogc:
         restart();
     }
 
+    TelnetRole role() const pure
+        => _role;
+
+    final void role(TelnetRole value)
+    {
+        if (_role == value)
+            return;
+        _role = value;
+        restart();
+    }
+
     override TerminalChannel* terminal_channel()
     {
         return &_terminal;
+    }
+
+    final void set_terminal_state(uint width, uint height, ClientFeatures features, const(char)[] terminal_type)
+    {
+        bool first = !_terminal_aware;
+        bool size_changed = (_terminal.width != width || _terminal.height != height);
+
+        _terminal.width = width;
+        _terminal.height = height;
+        _terminal.features = features;
+        if (terminal_type.length > 0)
+        {
+            _terminal_type.clear();
+            _terminal_type ~= terminal_type;
+            _terminal.terminal_type = _terminal_type[];
+        }
+        _terminal_aware = true;
+
+        if (_role != TelnetRole.client || !_inner || !_inner.running)
+            return;
+
+        if (first)
+        {
+            will(TelnetOptions.TERMINAL_TYPE);
+            will(TelnetOptions.WINDOW_SIZE);
+            do_(TelnetOptions.ECHO);
+            do_(TelnetOptions.SUPPRESS_GO_AHEAD);
+            emit_naws();
+        }
+        else if (size_changed && (_server_state & (1UL << TelnetOptions.WINDOW_SIZE)))
+            emit_naws();
     }
 
     final bool server_enabled(TelnetOptions opt)
@@ -131,8 +180,7 @@ nothrow @nogc:
 
                     case NVT.BRK:
                     case NVT.IP:
-                        if (out_pos < buffer.length)
-                            out_buf[out_pos++] = '\x03';
+                        _terminal.pending_events |= TerminalEvents.interrupt;
                         break;
 
                     case NVT.AO:
@@ -229,12 +277,14 @@ nothrow @nogc:
                     if (j > start)
                     {
                         auto r = _inner.write(bytes[start .. j]);
-                        if (r < 0) return -1;
+                        if (r < 0)
+                            return -1;
                         total += r;
                     }
                     ubyte[2] iac = [0xFF, 0xFF];
                     auto r = _inner.write(iac[]);
-                    if (r < 0) return -1;
+                    if (r < 0)
+                        return -1;
                     total += 1;
                     start = j + 1;
                 }
@@ -242,7 +292,8 @@ nothrow @nogc:
             if (start < bytes.length)
             {
                 auto r = _inner.write(bytes[start .. $]);
-                if (r < 0) return -1;
+                if (r < 0)
+                    return -1;
                 total += r;
             }
         }
@@ -276,15 +327,34 @@ protected:
         if (!_inner.running)
             return CompletionStatus.continue_;
 
-        will(TelnetOptions.ECHO);
-        dont(TelnetOptions.ECHO, true);
-        will(TelnetOptions.SUPPRESS_GO_AHEAD);
-        do_(TelnetOptions.TERMINAL_TYPE);
-        do_(TelnetOptions.WINDOW_SIZE);
-        do_(TelnetOptions.CHARSET);
+        final switch (_role)
+        {
+            case TelnetRole.server:
+                will(TelnetOptions.ECHO);
+                dont(TelnetOptions.ECHO, true);
+                will(TelnetOptions.SUPPRESS_GO_AHEAD);
+                do_(TelnetOptions.TERMINAL_TYPE);
+                do_(TelnetOptions.WINDOW_SIZE);
+                do_(TelnetOptions.CHARSET);
 
-        _terminal.features = cast(ClientFeatures)(ClientFeatures.crlf | ClientFeatures.ansi);
-        _terminal.pending_events |= TerminalEvents.features_changed;
+                _terminal.features = cast(ClientFeatures)(ClientFeatures.crlf | ClientFeatures.ansi);
+                _terminal.pending_events |= TerminalEvents.features_changed;
+                break;
+
+            case TelnetRole.client:
+                // Naked client mode: send nothing proactively; respond passively.
+                // set_terminal_state() upgrades to terminal-aware mode and advertises
+                // WILL NAWS / WILL TTYPE / DO ECHO / DO SGA.
+                if (_terminal_aware)
+                {
+                    will(TelnetOptions.TERMINAL_TYPE);
+                    will(TelnetOptions.WINDOW_SIZE);
+                    do_(TelnetOptions.ECHO);
+                    do_(TelnetOptions.SUPPRESS_GO_AHEAD);
+                    emit_naws();
+                }
+                break;
+        }
 
         _inner.subscribe(&inner_state_change);
         _subscribed = true;
@@ -312,8 +382,11 @@ protected:
 private:
     ObjectRef!Stream _inner;
     TerminalChannel _terminal;
+    Array!char _terminal_type;
     Array!ubyte _tail;
     bool _subscribed;
+    bool _terminal_aware;
+    TelnetRole _role;
 
     ulong _server_state;
     ulong _server_state_req;
@@ -333,15 +406,19 @@ private:
             case TelnetOptions.TERMINAL_TYPE:
                 if (sub.length < 2)
                     break;
-                if (sub[1] == 0x00)
+                if (sub[1] == 0x00) // IS: peer is telling us their terminal type
                 {
-                    _terminal.terminal_type = cast(const(char)[])sub[2 .. $];
+                    _terminal_type.clear();
+                    _terminal_type ~= cast(const(char)[])sub[2 .. $];
+                    _terminal.terminal_type = _terminal_type[];
                     _terminal.features = cast(ClientFeatures)(map_terminal_features(_terminal.terminal_type) | ClientFeatures.crlf);
                     _terminal.pending_events |= TerminalEvents.features_changed;
 
                     version (TelnetDebug)
                         debug log.trace("Telnet: <-- TERMINAL-TYPE: ", _terminal.terminal_type);
                 }
+                else if (sub[1] == 0x01) // SEND: peer is asking for our terminal type
+                    emit_ttype_is();
                 break;
 
             case TelnetOptions.WINDOW_SIZE:
@@ -392,7 +469,8 @@ private:
 
                 if (activated)
                 {
-                    if (opt == TelnetOptions.TERMINAL_TYPE)
+                    // only the server side of TERMINAL_TYPE solicits the value
+                    if (_role == TelnetRole.server && opt == TelnetOptions.TERMINAL_TYPE)
                     {
                         ubyte[6] t = [NVT.IAC, NVT.SB, TelnetOptions.TERMINAL_TYPE, 0x01, NVT.IAC, NVT.SE];
                         _inner.write(t);
@@ -422,7 +500,11 @@ private:
                 }
                 else
                 {
-                    if (SupportedOptions & (1UL << opt))
+                    ulong supported = SupportedOptions;
+                    // naked client streams have no terminal state to source
+                    if (_role == TelnetRole.client && !_terminal_aware)
+                        supported &= ~((1UL << TelnetOptions.TERMINAL_TYPE) | (1UL << TelnetOptions.WINDOW_SIZE));
+                    if (supported & (1UL << opt))
                     {
                         _server_state |= 1UL << opt;
                         _server_state_req |= 1UL << opt;
@@ -512,6 +594,41 @@ private:
 
         version (TelnetDebug)
             debug log.trace("Telnet: --> DON'T ", opt);
+    }
+
+    void emit_naws()
+    {
+        // 16-bit big-endian width, height; payload bytes must IAC-escape 0xFF.
+        ubyte[4] payload = [
+            cast(ubyte)(_terminal.width  >> 8), cast(ubyte)(_terminal.width  & 0xff),
+            cast(ubyte)(_terminal.height >> 8), cast(ubyte)(_terminal.height & 0xff),
+        ];
+        ubyte[14] t = void;
+        size_t n = 0;
+        t[n++] = NVT.IAC; t[n++] = NVT.SB; t[n++] = TelnetOptions.WINDOW_SIZE;
+        foreach (b; payload)
+        {
+            t[n++] = b;
+            if (b == 0xff)
+                t[n++] = 0xff;
+        }
+        t[n++] = NVT.IAC; t[n++] = NVT.SE;
+        _inner.write(t[0 .. n]);
+
+        version (TelnetDebug)
+            debug log.trace("Telnet: --> NAWS ", _terminal.width, 'x', _terminal.height);
+    }
+
+    void emit_ttype_is()
+    {
+        const(char)[] tt = _terminal.terminal_type.length ? _terminal.terminal_type : "UNKNOWN";
+
+        ubyte[4] hdr = [NVT.IAC, NVT.SB, TelnetOptions.TERMINAL_TYPE, 0x00];
+        ubyte[2] trl = [NVT.IAC, NVT.SE];
+        _inner.write(hdr[], cast(const(ubyte)[])tt, trl[]);
+
+        version (TelnetDebug)
+            debug log.trace("Telnet: --> TERMINAL-TYPE IS ", tt);
     }
 }
 

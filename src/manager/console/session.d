@@ -47,6 +47,7 @@ enum TerminalEvents : ubyte
     none             = 0,
     resized          = 1 << 0,
     features_changed = 1 << 1,
+    interrupt        = 1 << 2,
 }
 
 // Side-channel between a protocol-aware stream and a Session.
@@ -63,6 +64,7 @@ struct TerminalChannel
 class Session
 {
     import router.stream;
+    import manager.base : ObjectFlags;
 nothrow @nogc:
 
     this(ref Console console, Stream stream = null)
@@ -71,9 +73,10 @@ nothrow @nogc:
 
         _console = &console;
         _stream = stream;
-        _prompt = "> ";
-        _cur_scope = console.get_root;
+        _prompt_suffix = "> ";
+        _cur_scope = console.root;
         _nvt_input = cast(TelnetStream)stream !is null;
+        rebuild_prompt();
 
         if (_stream)
         {
@@ -96,6 +99,9 @@ nothrow @nogc:
             allocator.freeT(_current_command);
             _current_command = null;
         }
+        if (_stream && (_stream.flags & ObjectFlags.dynamic))
+            _stream.destroy();
+        _stream = null;
         _console = null;
     }
 
@@ -117,7 +123,12 @@ nothrow @nogc:
                     return;
                 }
                 if (r > 0)
-                    receive_input(recvbuf[0 .. r]);
+                {
+                    if (_current_command && _current_command.consumes_input())
+                        _current_command.receive_input(recvbuf[0 .. r]);
+                    else
+                        receive_input(recvbuf[0 .. r]);
+                }
             }
             while (r == recvbuf.length);
 
@@ -186,6 +197,30 @@ nothrow @nogc:
         }
 
         _console = null;
+    }
+
+    final inout(Stream) stream() inout pure
+        => _stream;
+
+    final ushort width() const pure
+        => _width;
+    final ushort height() const pure
+        => _height;
+    final ClientFeatures features() const pure
+        => _features;
+    final const(char)[] terminal_type()
+    {
+        if (!_stream)
+            return null;
+        auto term = _stream.terminal_channel();
+        return term ? term.terminal_type : null;
+    }
+
+    ptrdiff_t write_raw(const(void)[] data)
+    {
+        if (!_stream)
+            return -1;
+        return _stream.write(data);
     }
 
     void write_output(const(char)[] text, bool newline)
@@ -281,10 +316,18 @@ nothrow @nogc:
 
     final const(char)[] set_prompt(const(char)[] prompt)
     {
-        const(char)[] old = _prompt.swap(prompt);
-        if ((_features & ClientFeatures.escape) && !_current_command && _show_prompt && prompt[] != old[])
-            send_prompt_and_buffer(true);
+        const(char)[] old = _prompt_suffix.swap(prompt);
+        if (prompt[] != old[])
+            rebuild_prompt();
         return old;
+    }
+
+    package final void set_scope(Scope* s)
+    {
+        if (_cur_scope is s)
+            return;
+        _cur_scope = s;
+        rebuild_prompt();
     }
 
     final ptrdiff_t read_input(char[] buffer)
@@ -503,8 +546,10 @@ protected:
             }
             else if (taken < input.length)
             {
+                import manager.expression : skip_whitespace_and_newlines;
                 MutableString!0 cmdInput = take_input();
-                const(char)[] command = cmdInput[].trim_cmd_line;
+                const(char)[] command = cmdInput[];
+                skip_whitespace_and_newlines(command);
                 _buffer = input[taken + 1 .. $];
 
                 Variant result;
@@ -670,7 +715,8 @@ private:
     bool _closing = false;
     bool _nvt_input = false;
 
-    const(char)[] _prompt;
+    const(char)[] _prompt_suffix;
+    MutableString!0 _prompt;
     MutableString!0 _buffer;
     uint _position = 0;
 
@@ -700,6 +746,15 @@ private:
             term.pending_events &= ~TerminalEvents.features_changed;
             if (_show_prompt && (_features & ClientFeatures.escape))
                 send_prompt_and_buffer(true);
+        }
+        if (term.pending_events & TerminalEvents.interrupt)
+        {
+            term.pending_events &= ~TerminalEvents.interrupt;
+            char[1] ctrl_c = ['\x03'];
+            if (_current_command && _current_command.consumes_input())
+                _current_command.receive_input(ctrl_c[]);
+            else
+                receive_input(ctrl_c[]);
         }
     }
 
@@ -891,21 +946,60 @@ private:
 
         if (_features & ClientFeatures.escape)
         {
-            char[] prompt = tformat("{0, ?1}{2}{3}\x1b[K{@5, ?4}", "\r", with_clear, _prompt, _buffer, _position < _buffer.length, "\x1b[{6}D", _buffer.length - _position);
+            char[] prompt = tformat("{0, ?1}{2}{3}\x1b[K{@5, ?4}", "\r", with_clear, _prompt[], _buffer, _position < _buffer.length, "\x1b[{6}D", _buffer.length - _position);
             write_output(prompt, false);
         }
         else
         {
             if (with_clear)
                 write_output("\r", false);
-            char[] prompt = tformat("{0}{1}", _prompt, _buffer);
+            char[] prompt = tformat("{0}{1}", _prompt[], _buffer);
             write_output(prompt, false);
         }
     }
 
+    void rebuild_prompt()
+    {
+        MutableString!0 buf;
+        buf ~= '[';
+        append_scope_path(buf, _cur_scope);
+        buf ~= ']';
+        buf ~= _prompt_suffix;
+
+        if (buf[] == _prompt[])
+            return;
+        _prompt = buf.move;
+
+        if ((_features & ClientFeatures.escape) && !_current_command && _executing_context is null && _show_prompt)
+            send_prompt_and_buffer(true);
+    }
+
+    static void append_scope_path(ref MutableString!0 buf, Scope* s)
+    {
+        if (s is null || s.parent is null)
+        {
+            buf ~= '/';
+            return;
+        }
+        walk_scope_path(buf, s);
+    }
+
+    static void walk_scope_path(ref MutableString!0 buf, Scope* s)
+    {
+        if (s.parent is null)
+            return;
+        walk_scope_path(buf, s.parent);
+        buf ~= '/';
+        buf ~= s.name[];
+    }
+
 package:
     Console* _console;
-    Scope _cur_scope = null;
+    Scope* _cur_scope = null;
+    Context _executing_context = null;
+    Map!(String, Variant) _session_locals;
+    Variant _return_value;
+    bool _returning = false;
 
     ref CommandState current_command() => _current_command;
 }
