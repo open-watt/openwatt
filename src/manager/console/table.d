@@ -17,6 +17,16 @@ nothrow @nogc:
     enum gap = 2;
     enum max_cols = 32;
 
+    uint num_rows() const pure
+        => _num_rows;
+
+    void highlight_row(uint row, const(char)[] prefix = "\x1b[7m", const(char)[] suffix = "\x1b[27m")
+    {
+        _highlight_row = row;
+        _highlight_prefix = prefix;
+        _highlight_suffix = suffix;
+    }
+
     void add_column(const(char)[] header, TextAlign alignment = TextAlign.left)
     {
         _columns ~= ColumnDef(header, alignment);
@@ -158,6 +168,7 @@ nothrow @nogc:
         _cell_ends.clear();
         _cell_spans.clear();
         _num_rows = 0;
+        _highlight_row = uint.max;
     }
 
 private:
@@ -172,6 +183,9 @@ private:
     Array!char _text_buf;
     Array!uint _cell_ends;
     Array!ubyte _cell_spans;
+    const(char)[] _highlight_prefix;
+    const(char)[] _highlight_suffix;
+    uint _highlight_row = uint.max;
     uint _num_rows;
 
     void compute_column_widths(Session session, size_t[] alloc)
@@ -395,6 +409,13 @@ private:
         char[512] buf = void;
         size_t pos;
 
+        const is_highlighted = row >= 0 && row == _highlight_row;
+        if (is_highlighted && _highlight_prefix.length > 0)
+        {
+            buf[pos .. pos + _highlight_prefix.length] = _highlight_prefix;
+            pos += _highlight_prefix.length;
+        }
+
         uint col = 0;
         while (col < num_cols)
         {
@@ -467,6 +488,11 @@ private:
 
         buf[pos .. pos + 3] = "\x1b[K";
         pos += 3;
+        if (is_highlighted && _highlight_suffix.length > 0)
+        {
+            buf[pos .. pos + _highlight_suffix.length] = _highlight_suffix;
+            pos += _highlight_suffix.length;
+        }
         session.write_output(buf[0 .. pos], true);
     }
 }

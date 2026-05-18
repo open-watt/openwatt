@@ -765,6 +765,9 @@
     <DCompile Include="src\manager\console\table.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
+    <DCompile Include="src\manager\console\tree_view.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
     <DCompile Include="src\manager\collection.d">
       <Filter>src\manager</Filter>
     </DCompile>
