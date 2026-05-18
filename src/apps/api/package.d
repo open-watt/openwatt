@@ -147,7 +147,7 @@ private:
             _default_handler(request, stream, leftover);
         else if (_uri)
         {
-            HTTPMessage response = create_response(request.http_version, 404, StringLit!"Not Found", StringLit!"application/json", "{\"error\":\"Not Found\"}");
+            HTTPMessage response = create_response(request.http_version, 404, StringLit!"application/json", "{\"error\":\"Not Found\"}");
             stream.write(response.format_message()[]);
         }
 
@@ -156,7 +156,7 @@ private:
 
     int handle_options(ref const HTTPMessage request, ref Stream stream)
     {
-        HTTPMessage response = create_response(request.http_version, 204, StringLit!"No Content", String(), null);
+        HTTPMessage response = create_response(request.http_version, 204, String(), null);
         add_cors_headers(response);
         stream.write(response.format_message()[]);
         return 0;
@@ -167,7 +167,7 @@ private:
         version (DebugAPI)
             writeDebug("API request: ", request.method, " ", request.request_target);
 
-        HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", tconcat("{\"status\":\"healthy\",\"uptime\":", getAppTime().as!"seconds", "}"));
+        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", tconcat("{\"status\":\"healthy\",\"uptime\":", getAppTime().as!"seconds", "}"));
         add_cors_headers(response);
         stream.write(response.format_message()[]);
         return 0;
@@ -192,7 +192,7 @@ private:
 
         if (command_text.length == 0)
         {
-            HTTPMessage response = create_response(request.http_version, 400, StringLit!"Bad Request", StringLit!"application/json", "{\"error\":\"Command body required\"}");
+            HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Command body required\"}");
             add_cors_headers(response);
             stream.write(response.format_message()[]);
             return 0;
@@ -218,7 +218,7 @@ private:
 
     void send_cli_response(HTTPVersion http_version, ref Stream stream, const(char)[] output, ref Variant result)
     {
-        HTTPMessage response = create_response(http_version, 200, StringLit!"OK", StringLit!"application/json", "{\"result\":");
+        HTTPMessage response = create_response(http_version, 200, StringLit!"application/json", "{\"result\":");
 
         ptrdiff_t len = result.write_json(null, true, 0, 0);
         if (len > 0)
@@ -320,7 +320,7 @@ private:
         }
         json ~= '}';
 
-        HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", json[]);
+        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", json[]);
         add_cors_headers(response);
         stream.write(response.format_message()[]);
         return 0;
@@ -333,7 +333,7 @@ private:
         {
             if (name[0] != '/')
             {
-                HTTPMessage response = create_response(request.http_version, 404, StringLit!"Not Found", StringLit!"application/json", "{\"error\":\"Not Found\"}");
+                HTTPMessage response = create_response(request.http_version, 404, StringLit!"application/json", "{\"error\":\"Not Found\"}");
                 stream.write(response.format_message()[]);
                 return 0;
             }
@@ -388,7 +388,7 @@ private:
             json ~= '}';
         }
 
-        HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", json[]);
+        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", json[]);
         add_cors_headers(response);
         stream.write(response.format_message()[]);
         return 0;
@@ -404,7 +404,7 @@ private:
 
         if (!json.isObject)
         {
-            HTTPMessage response = create_response(request.http_version, 400, StringLit!"Bad Request", StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
+            HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
             add_cors_headers(response);
             stream.write(response.format_message()[]);
             return 0;
@@ -416,7 +416,7 @@ private:
 
         if (!paths_var || paths_var.isNull)
         {
-            HTTPMessage response = create_response(request.http_version, 400, StringLit!"Bad Request", StringLit!"application/json", "{\"error\":\"Missing 'path' or 'paths' field\"}");
+            HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Missing 'path' or 'paths' field\"}");
             add_cors_headers(response);
             stream.write(response.format_message()[]);
             return 0;
@@ -432,7 +432,7 @@ private:
             paths ~= paths_var.asString();
         else
         {
-            HTTPMessage response = create_response(request.http_version, 400, StringLit!"Bad Request", StringLit!"application/json", "{\"error\":\"'path' or 'paths' must be string or array\"}");
+            HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"'path' or 'paths' must be string or array\"}");
             add_cors_headers(response);
             stream.write(response.format_message()[]);
             return 0;
@@ -469,7 +469,7 @@ private:
 
         response_json ~= '}';
 
-        HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", response_json[]);
+        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", response_json[]);
         add_cors_headers(response);
         stream.write(response.format_message()[]);
 
@@ -616,7 +616,7 @@ private:
 
         if (!json.isObject)
         {
-            HTTPMessage response = create_response(request.http_version, 400, StringLit!"Bad Request", StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
+            HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
             add_cors_headers(response);
             stream.write(response.format_message()[]);
             return 0;
@@ -625,7 +625,7 @@ private:
         Variant* values_var = json.getMember("values");
         if (!values_var || !values_var.isObject)
         {
-            HTTPMessage response = create_response(request.http_version, 400, StringLit!"Bad Request", StringLit!"application/json", "{\"error\":\"Missing 'values' object\"}");
+            HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Missing 'values' object\"}");
             add_cors_headers(response);
             stream.write(response.format_message()[]);
             return 0;
@@ -691,7 +691,7 @@ private:
 
         response_json ~= "}}";
 
-        HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", response_json[]);
+        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", response_json[]);
         add_cors_headers(response);
         stream.write(response.format_message()[]);
 
@@ -707,7 +707,7 @@ private:
 
         if (!json.isObject)
         {
-            HTTPMessage response = create_response(request.http_version, 400, StringLit!"Bad Request", StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
+            HTTPMessage response = create_response(request.http_version, 400, StringLit!"application/json", "{\"error\":\"Invalid JSON\"}");
             add_cors_headers(response);
             stream.write(response.format_message()[]);
             return 0;
@@ -757,7 +757,7 @@ private:
 
         response_json ~= '}';
 
-        HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK", StringLit!"application/json", response_json[]);
+        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/json", response_json[]);
         add_cors_headers(response);
         stream.write(response.format_message()[]);
 

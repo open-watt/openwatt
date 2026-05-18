@@ -1337,8 +1337,7 @@ private:
 
         if (!_challenge_registered || _challenge_token.empty)
         {
-            HTTPMessage response = create_response(request.http_version, 404, StringLit!"Not Found",
-                StringLit!"text/plain", "No pending challenge");
+            HTTPMessage response = create_response(request.http_version, 404, StringLit!"text/plain", "No pending challenge");
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -1348,8 +1347,7 @@ private:
         enum challenge_prefix = "/.well-known/acme-challenge/";
         if (!path.startsWith(challenge_prefix))
         {
-            HTTPMessage response = create_response(request.http_version, 404, StringLit!"Not Found",
-                StringLit!"text/plain", "Not found");
+            HTTPMessage response = create_response(request.http_version, 404, StringLit!"text/plain", "Not found");
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -1357,8 +1355,7 @@ private:
         const(char)[] token = path[challenge_prefix.length .. $];
         if (token != _challenge_token[])
         {
-            HTTPMessage response = create_response(request.http_version, 404, StringLit!"Not Found",
-                StringLit!"text/plain", "Unknown token");
+            HTTPMessage response = create_response(request.http_version, 404, StringLit!"text/plain", "Unknown token");
             stream.write(response.format_message()[]);
             return 0;
         }
@@ -1367,8 +1364,7 @@ private:
         version (DebugCertificate)
             writeDebug("Certificate '", name, "': serving challenge auth=", _challenge_auth);
         writeInfo("Certificate '", name, "': serving ACME challenge response");
-        HTTPMessage response = create_response(request.http_version, 200, StringLit!"OK",
-            StringLit!"application/octet-stream", _challenge_auth[]);
+        HTTPMessage response = create_response(request.http_version, 200, StringLit!"application/octet-stream", _challenge_auth[]);
         stream.write(response.format_message()[]);
         return 0;
     }
