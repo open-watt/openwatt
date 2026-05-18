@@ -185,7 +185,7 @@ Simpler (no M0 handshake, no PSRAM, no D-cache):
 OpenWatt runs as **two clustered instances** on BL808, not as "app + custom firmware":
 
 - **M0 instance (data plane):** OpenWatt compiled for RV32. Owns WiFi, EMAC, radio hardware. Handles bridging and packet switching. Minimal module set (router layer + interface drivers only).
-- **D0 instance (control plane):** OpenWatt on RV64 with PSRAM. Handles protocol decode, samplers, energy management, console, apps. Full module set.
+- **D0 instance (control plane):** OpenWatt on RV64 with PSRAM. Handles protocol decode, bindings, energy management, console, apps. Full module set.
 - **IPC:** XRAM ring buffers (16KB shared at 0x22020000) mapped as a Bridge interface on both sides. Same packet format, same BaseInterface abstraction.
 
 ### XRAM Ring Buffers

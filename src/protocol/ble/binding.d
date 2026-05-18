@@ -1,4 +1,4 @@
-module protocol.ble.sampler;
+module protocol.ble.binding;
 
 import urt.array;
 import urt.endian;

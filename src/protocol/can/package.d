@@ -11,7 +11,7 @@ import manager.collection;
 import manager.plugin;
 
 import protocol.can.iface;
-import protocol.can.sampler;
+import protocol.can.binding;
 
 import router.iface;
 import router.iface.packet;

@@ -5,7 +5,7 @@ import manager.collection;
 import manager.plugin;
 
 import protocol.esphome.client;
-import protocol.esphome.sampler;
+import protocol.esphome.binding;
 
 import tools.protobuf;
 

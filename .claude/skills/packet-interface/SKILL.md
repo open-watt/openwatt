@@ -420,7 +420,7 @@ Serial Stream
 ```
 ModbusClient (protocol/modbus/client.d)
     — request/response correlation by transaction ID
-    — sampler integration, register decoding
+    — binding integration, register decoding
     |  forward(packet)
     v
 ModbusInterface (BaseInterface) — async, uses PriorityPacketQueue

@@ -21,7 +21,7 @@ import manager.plugin;
 
 import protocol.http.client;
 import protocol.http.message;
-import protocol.http.sampler;
+import protocol.http.binding;
 import protocol.http.server;
 import protocol.http.websocket;
 
