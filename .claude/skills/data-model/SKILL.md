@@ -1,11 +1,11 @@
 ---
 name: data-model
-description: Device/Component/Element data model, profile system, and samplers across all protocols. Use when working on devices, elements, profiles, samplers, or implementing new protocol integrations (e.g. BLE sampler).
+description: Device/Component/Element data model, profile system, and protocol bindings. Use when working on devices, elements, profiles, bindings, or adding a new protocol integration.
 ---
 
-# Data Model & Samplers
+# Data Model & Protocol Bindings
 
-You are working on OpenWatt's runtime data model. This skill covers the full chain: how profile configuration files define device structure, how Device/Component/Element hierarchies are built at runtime, and how protocol-specific samplers populate elements with live data.
+You are working on OpenWatt's runtime data model. This skill covers the full chain: how profile configuration files define device structure, how Device/Component/Element hierarchies are built at runtime, and how protocol-specific bindings populate elements with live data.
 
 ## Part 1: Device / Component / Element Hierarchy
 
@@ -14,7 +14,7 @@ You are working on OpenWatt's runtime data model. This skill covers the full cha
 OpenWatt represents all equipment and sensor data in a three-level hierarchy:
 
 ```
-Device (e.g., "inverter")          <- extends Component, owns Samplers
+Device (e.g., "inverter")          <- extends Component
   +- Component (e.g., "info")      <- logical grouping
   |    +- Element ("type" = "solar-inverter")
   |    +- Element ("serial_number" = "SN12345")
@@ -28,6 +28,8 @@ Device (e.g., "inverter")          <- extends Component, owns Samplers
        +- Component (nested)
             +- Element (...)
 ```
+
+Devices live in `g_app.devices` (Map keyed by name) and are populated by **bindings** — top-level `ActiveObject`s in `Collection!ProtocolBinding` that look up or create a Device by name and materialise its component tree from a profile.
 
 ### Component
 
@@ -53,19 +55,16 @@ extern(C++) class Component {
 
 ```d
 // src/manager/device.d
-extern(C++) class Device : Component {
+class Device : Component {
     Profile* profile;
-    Array!Sampler samplers;                // protocol samplers
-    Array!ExpressionElement expressions;   // computed elements
-    Array!SumElement sums;                 // time-integrated elements
-    Array!(ElementLink*) owned_links;      // element aliases
+    Array!Computation computations;   // expression / accumulator / alias bindings
+    Array!(Element*) sample_elements; // elements that need force-updates (sum/integration)
 }
 ```
 
-**Runtime lifecycle:** `device.update()` is called each frame by the module and:
-1. Calls `sampler.update()` for each sampler in `samplers[]`
-2. Updates accumulated `SumElement` values (Riemann integration)
-3. Force-updates sums if 1+ seconds elapsed
+Devices are pure data — they do **not** own bindings. The binding registry (`Collection!ProtocolBinding`) is the owner; each binding holds a String `device` name and resolves it through `g_app.devices`.
+
+**Runtime lifecycle:** `device.update()` runs each frame and force-updates accumulator sources (Riemann integrals) that need fresh samples. The binding's own `update()` is driven independently by the binding collection.
 
 ### Element
 
@@ -101,7 +100,7 @@ interface Subscriber {
 }
 ```
 
-Samplers implement `Subscriber` so they can detect element changes for write-back (e.g. MQTT publish on value change).
+Bindings that support write-back (HTTP, MQTT) implement `Subscriber` so they can react to element changes and push the new value out over their protocol.
 
 ### Element Types in Device Template
 
@@ -229,7 +228,7 @@ http: status, ev_meter.import_active_power, num, W,  desc: ev_power, W, realtime
 ```
 parameters: param1, param2
 ```
-Defines named placeholders (`{param1}`, `{param2}`) that are substituted at device creation from named arguments passed to the `device_add` command. Used in URL paths, request bodies, topic strings, etc. The older `mqtt-variables:` syntax is a deprecated alias for `parameters:`.
+Defines named placeholders (`{param1}`, `{param2}`) that are substituted into URL paths, request bodies, topic strings, etc. at device materialisation. Values come from named arguments set on the binding (e.g. `host=192.168.1.5 device_id=plug42` on the `add` command). `mqtt-variables:` is an alias for `parameters:`.
 
 ### 2.3 Data Types
 
@@ -316,41 +315,64 @@ conf/ha_profiles/         # ESPHome/Home Assistant
 
 ## Part 3: Device Creation Flow
 
-All protocol modules follow the same pattern in their `device_add` console command:
+Devices are created on demand by **bindings**. A binding is a top-level Collection-managed object configured at runtime, e.g.:
+
+```
+/binding/modbus/add name=inv1 node=n1 device=inverter profile=goodwe_es model=GW10K-ES
+```
+
+This creates a `ModbusBinding`, sets `device="inverter"` (auto-creating the Device in `g_app.devices` if it doesn't exist), and triggers `restart()` which moves the binding through the state machine into `startup()`.
+
+The binding's lifecycle does the work:
 
 ```d
-void device_add(Session session, const(char)[] id, ProtocolClient client, const(char)[] profile_name, ...)
+// src/manager/binding.d (abridged)
+abstract class ProfileBinding : ProtocolBinding {
+nothrow @nogc:
+    abstract const(char)[] profile_dir() const pure;     // e.g. "conf/modbus_profiles/"
+    abstract const(char)[] profile_name() const pure;
+    abstract const(char)[] model_name() const pure;
+    abstract void add_handler(Device device, Element* e,
+                              ref const ElementDesc desc, ubyte index);
+
+    bool materialise()
+    {
+        // 1. Load and parse profile file
+        void[] file = load_file(tconcat(profile_dir(), profile_name(), ".conf"), g_app.allocator);
+        _profile_data = parse_profile(cast(char[])file, g_app.allocator);
+
+        // 2. Validate required parameters were set on the binding
+        // (parameters declared in the profile come in as Property setters via
+        //  set_unknown_property; stored in _params Map and substituted into
+        //  templated identifiers/topics/paths)
+
+        // 3. Build device hierarchy from profile template;
+        //    add_handler is called for each element-map
+        Device device = create_device_from_profile(
+            *_profile_data, model_name(), _device[], null, &add_handler);
+        return device !is null;
+    }
+}
+```
+
+The subclass's `add_handler` is the wiring hook — for each `element-map` in the profile, it pulls the protocol-specific descriptor (register / topic / handle / CAN ID + offset), initialises the element value, and registers the element with the binding's internal element table so subsequent samples can find it. For example, in ModbusBinding:
+
+```d
+override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte index)
 {
-    // 1. Load and parse profile
-    void[] file = load_file(tconcat("conf/xxx_profiles/", profile_name, ".conf"), g_app.allocator);
-    Profile* profile = parse_profile(cast(char[])file, g_app.allocator);
-
-    // 2. Create protocol-specific sampler
-    MySampler sampler = g_app.allocator.allocT!MySampler(client, ...);
-
-    // 3. Build device hierarchy from profile template
-    Device device = create_device_from_profile(*profile, model, id, name,
-        (Device device, Element* e, ref const ElementDesc desc, ubyte index) {
-            // Called for each element-map in the template
-            ref const ElementDesc_MyProto proto = profile.get_xxx(desc.element);
-
-            // Initialize element value to zero/default of correct type
-            ubyte[256] tmp = void;
-            tmp[0 .. proto.value_desc.data_length] = 0;
-            e.value = sample_value(tmp.ptr, proto.value_desc);
-
-            // Register element with sampler
-            sampler.add_element(e, desc, proto);
-            device.sample_elements ~= e;
-        }
-    );
-
-    // 4. Attach sampler to device
-    device.samplers ~= sampler;
+    ref const ElementDesc_Modbus mb = _profile_data.get_modbus(desc.element);
+    // initialise element value
+    ubyte[256] tmp = void;
+    tmp[0 .. mb.value_desc.data_length] = 0;
+    e.value = sample_value(tmp.ptr, mb.value_desc);
+    // append to internal SampleElement array
+    _elements ~= SampleElement(/* register, regKind, desc, ... */);
 }
 ```
 
 `create_device_from_profile()` handles: component hierarchy construction, static elements, expression elements, sum elements, aliases, model variant filtering, and calls the delegate for each `element-map`.
+
+**Properties as profile parameters:** Profiles declare `parameters: host`, `device_id`, etc. The binding's `set_unknown_property` (`manager.binding`) accepts any unknown property name and stuffs it into the binding's `_params` Map, which is later substituted into URL paths, MQTT topics, etc. This means console syntax like `host=192.168.1.5 device_id=plug42` Just Works without each binding subclass having to declare those properties.
 
 ---
 
@@ -397,53 +419,78 @@ struct TextValueDesc {
 
 **Decoding:** `Variant sample_value(const(char)[] data, ref const TextValueDesc desc)`
 **Formatting:** `const(char)[] format_value(ref const Variant val, ref const TextValueDesc desc)` -- inverse (Variant to string for write-back)
-**Applying:** `void apply_value(Element*, ref Variant, ref const TextValueDesc, SysTime)` -- type-aware assignment with unit handling (HTTP sampler)
+**Applying:** `void apply_value(Element*, ref Variant, ref const TextValueDesc, SysTime)` -- type-aware assignment with unit handling (HTTP binding)
 
 ---
 
-## Part 5: Data Samplers
+## Part 5: Protocol Bindings
 
-### Base Sampler Class
+### Base Classes
 
 ```d
-// src/manager/sampler.d
-class Sampler : Subscriber {
-nothrow @nogc:
-    void update() {}                        // override for active polling
-    abstract void remove_element(Element*); // must implement
+// src/manager/binding.d
+abstract class ProtocolBinding : ActiveObject {
+    // device name (String) — Device is created in g_app.devices if absent
+    final ref const(String) device() const pure;
+    final void device(String value);
+protected:
+    String _device;
+    bool materialise() { return true; }  // override to build the device tree
+}
+
+abstract class ProfileBinding : ProtocolBinding {
+    // load profile, create_device_from_profile(), iterate element-map entries
+    // through add_handler()
+    abstract const(char)[] profile_dir() const pure;
+    abstract const(char)[] profile_name() const pure;
+    abstract const(char)[] model_name() const pure;
+    abstract void add_handler(Device device, Element* e,
+                              ref const ElementDesc desc, ubyte index);
 }
 ```
 
-All samplers are `nothrow @nogc`.
+All bindings are `nothrow @nogc`. They are registered as collections (e.g. `g_app.console.register_collection!ModbusBinding()`) and updated by `Collection!ProtocolBinding().update_all()` in `manager.package.update()`.
 
-### Sampler Taxonomy
+Helpers like `ValueDesc`, `TextValueDesc`, `sample_value()`, `format_value()`, and `apply_value()` live in `src/manager/sampler.d`. That module holds the shared descriptor/codec utilities; the binding class hierarchy is in `src/manager/binding.d`.
 
-| Protocol | Class | Model | Descriptor | Write | Profile Dir |
-|----------|-------|-------|-----------|-------|-------------|
-| **Modbus** | `ModbusSampler` | Active polling | `ValueDesc` | No | `modbus_profiles/` |
-| **CAN** | `CANSampler` | Event-driven | `ValueDesc` | No | `can_profiles/` |
-| **Zigbee** | (ZigbeeController) | Event-driven | `ValueDesc` | No | `zigbee_profiles/` |
-| **HTTP** | `HTTPSampler` | Active polling | `TextValueDesc` | Yes | `rest_profiles/` |
-| **MQTT** | `MQTTSampler` | Event-driven | `TextValueDesc` | Yes | `mqtt_profiles/` |
-| **TWC** | `TeslaTWCSampler` | Active push | Direct | Yes | (hardcoded) |
+### Binding Taxonomy
+
+| Protocol | Class | Base | Model | Descriptor | Write | Profile Dir |
+|----------|-------|------|-------|------------|-------|-------------|
+| **Modbus** | `ModbusBinding` | `ProfileBinding` | Active polling | `ValueDesc` | Server mode | `modbus_profiles/` |
+| **SunSpec** | `SunspecBinding` | `ProfileBinding` | Active polling | `ValueDesc` | No | `modbus_profiles/` |
+| **CAN** | `CANBinding` | `ProfileBinding` | Event-driven | `ValueDesc` | No | `can_profiles/` |
+| **Zigbee** | (`ZigbeeController`) | `ActiveObject + Subscriber` | Event-driven | `ValueDesc` | Yes | `zigbee_profiles/` |
+| **BLE** | `BLEClientBinding` | `ProfileBinding` | Hybrid (notify + poll) | `ValueDesc` | Characteristic write | `ble_profiles/` |
+| **HTTP** | `HTTPClientBinding` | `ProfileBinding` | Active polling | `TextValueDesc` | Yes | `rest_profiles/` |
+| **MQTT** | `MQTTBinding` | `ProfileBinding` | Event-driven | `TextValueDesc` | Yes | `mqtt_profiles/` |
+| **ESPHome** | `ESPHomeBinding` | `ProfileBinding` | Event-driven | Direct (typed proto) | Yes | `ha_profiles/` |
+| **GoodWe** | `GoodWeBinding` | `ProfileBinding` | Active polling | `ValueDesc` | No | `goodwe_profiles/` |
+| **TWC** | `TeslaTWCBinding` | `ProtocolBinding` | Active push | Direct | Yes | (hardcoded) |
+
+Zigbee is the one exception that doesn't subclass `ProtocolBinding` — it uses `ZigbeeController` directly because device discovery is event-driven (devices join and identify themselves), and the controller creates devices via `create_device_from_profile()` inline when nodes are interviewed.
 
 ### File Map
 
 | File | Role |
 |------|------|
-| `src/manager/sampler.d` | **Sampler** base, **ValueDesc**, **TextValueDesc**, `sample_value()`, `format_value()` |
-| `src/protocol/modbus/binding.d` | **ModbusBinding** -- register batching, active polling |
+| `src/manager/binding.d` | **ProtocolBinding** + **ProfileBinding** base classes |
+| `src/manager/sampler.d` | **ValueDesc**, **TextValueDesc**, `sample_value()`, `format_value()`, `apply_value()` -- descriptor/codec utilities |
+| `src/protocol/modbus/binding.d` | **ModbusBinding**, **SunspecBinding** -- register batching, active polling |
 | `src/protocol/modbus/client.d` | **ModbusClient** -- request/response via interface |
-| `src/protocol/can/sampler.d` | **CANSampler** -- event-driven packet handler |
-| `src/protocol/zigbee/controller.d` | **ZigbeeController** -- attribute report handler |
-| `src/protocol/http/sampler.d` | **HTTPSampler** -- request/response, JSON/regex parsing |
+| `src/protocol/can/binding.d` | **CANBinding** -- event-driven packet handler |
+| `src/protocol/zigbee/controller.d` | **ZigbeeController** -- attribute report handler, inline device materialisation |
+| `src/protocol/ble/binding.d` | **BLEClientBinding** -- GATT notify + read, characteristic write |
+| `src/protocol/http/binding.d` | **HTTPClientBinding** -- request/response, JSON/regex parsing |
 | `src/protocol/mqtt/binding.d` | **MQTTBinding** -- topic subscription, bidirectional |
-| `src/protocol/tesla/sampler.d` | **TeslaTWCSampler** -- direct value push from master |
+| `src/protocol/esphome/binding.d` | **ESPHomeBinding** -- native ESPHome API |
+| `src/protocol/goodwe/binding.d` | **GoodWeBinding** -- AA55 vendor protocol |
+| `src/protocol/tesla/binding.d` | **TeslaTWCBinding** -- direct value push from master |
 | `src/protocol/tesla/master.d` | **TeslaTWCMaster** -- heartbeat round-robin controller |
 
 ---
 
-### Modbus Sampler -- Active Polling with Register Batching
+### Modbus Binding -- Active Polling with Register Batching
 
 **Key concept:** Groups contiguous registers into efficient batch reads.
 
@@ -487,7 +534,7 @@ on_demand-> ushort.max (never)
 
 ---
 
-### CAN Sampler -- Event-Driven Packet Handler
+### CAN Binding -- Event-Driven Packet Handler
 
 **SampleElement:**
 ```d
@@ -509,7 +556,7 @@ struct SampleElement {
 
 ### Zigbee -- Attribute Report Handler
 
-Zigbee doesn't use a `Sampler` subclass. `ZigbeeController` handles sampling directly.
+Zigbee doesn't use a `ProtocolBinding` subclass. `ZigbeeController` handles sampling directly because device discovery is event-driven (devices announce themselves via join/interview) — the controller creates devices on the fly via `create_device_from_profile()`.
 
 **SampleElement:**
 ```d
@@ -534,9 +581,9 @@ Stored in `Map!(ulong[2], SampleElement)` keyed by `make_sample_key(eui, endpoin
 
 ---
 
-### HTTP Sampler -- Request/Response with JSON Parsing
+### HTTP Binding -- Request/Response with JSON Parsing
 
-The HTTP sampler is the most feature-rich sampler. It supports multiple request/response patterns, body formatting, JSON path navigation, regex parsing, success validation, and bidirectional element binding.
+The HTTP binding is the most feature-rich. It supports multiple request/response patterns, body formatting, JSON path navigation, regex parsing, success validation, and bidirectional element binding.
 
 #### Profile: Request Definitions
 
@@ -673,7 +720,7 @@ If expression evaluates to false, all element updates for that response are skip
 
 #### Write-Back Flow
 
-1. Element value changes (from outside HTTP sampler)
+1. Element value changes (from outside the HTTP binding)
 2. `on_change()`: finds element's `write_request_index`, marks that `RequestState.write_dirty = true`
 3. Next `update()`: sends write request before checking read timing
 4. For singular requests: one request per changed element
@@ -741,7 +788,7 @@ elements:
 
 ---
 
-### MQTT Sampler -- Topic Subscription, Bidirectional
+### MQTT Binding -- Topic Subscription, Bidirectional
 
 **SampleElement:**
 ```d
@@ -764,13 +811,13 @@ struct SampleElement {
 
 ---
 
-### Tesla TWC Sampler -- Direct Value Push
+### Tesla TWC Binding -- Direct Value Push
 
-Unique pattern: no profile, no descriptors. Values read directly from master controller struct.
+`TeslaTWCBinding` subclasses `ProtocolBinding` (not `ProfileBinding`) — no profile, no descriptors. Device template is built inline in the binding's `materialise()`. Values are read directly from the master controller struct.
 
 **How it works:**
 - `TeslaTWCMaster` handles protocol: 400ms heartbeat round-robin, request cycling (heartbeat -> charge info -> serial -> VIN)
-- `TeslaTWCSampler.update()`: lazy-binds to master by `charger_id` or `mac`, then pushes charger fields to elements by `element.id` string match:
+- `TeslaTWCBinding.update()`: lazy-binds to master by `charger_id` or `mac`, then pushes charger fields to elements by `element.id` string match:
   ```
   "state"         -> charger.charger_state()
   "voltage1"      -> Volts(charger.voltage1)
@@ -782,16 +829,16 @@ Unique pattern: no profile, no descriptors. Values read directly from master con
   ```
 - Conditional reporting: values only set when `charger.flags` indicate data received
 - Write: only `target_current`, directly sets `charger.target_current`
-- Device template hardcoded in `package.d:device_add()` (components: info, charge_control, meter)
+- Device template hardcoded in `materialise()` (components: info, charge_control, meter)
 
 ---
 
-## Part 6: Implementing a New Sampler
+## Part 6: Implementing a New Binding
 
 ### 1. Choose Sampling Model
 - **Active polling** (Modbus, HTTP): override `update()`, manage per-element timing, submit requests
-- **Event-driven** (CAN, MQTT): subscribe to data source in constructor, process callbacks
-- **Direct push** (TWC): read state from protocol controller in `update()`
+- **Event-driven** (CAN, MQTT, BLE): subscribe to the data source in `startup()`, react in callbacks
+- **Direct push** (TWC): read state from a protocol controller in `update()`
 
 ### 2. Choose Value Descriptor
 - **Binary data** (raw bytes): use `ValueDesc` + `sample_value(void*, ValueDesc)`
@@ -808,73 +855,106 @@ struct SampleElement {
 }
 ```
 
-### 4. Implement Sampler Class
+### 4. Implement Binding Class
+
+For a profile-driven binding, subclass `ProfileBinding`:
+
 ```d
-class MySampler : Sampler {
+class MyBinding : ProfileBinding {
+    alias Properties = AliasSeq!(Prop!("client", client),
+                                 Prop!("profile", profile),
+                                 Prop!("model", model));
 nothrow @nogc:
-    this(ProtocolClient client, ...) { /* store refs, subscribe if event-driven */ }
+    enum type_name = "my-binding";
+    enum path = "/binding/my";
 
-    final void add_element(Element* element, ref const ElementDesc desc,
-                          ref const ElementDesc_MyProto proto_info) {
+    this(CID id, ObjectFlags flags = ObjectFlags.none) {
+        super(collection_type_info!MyBinding, id, flags);
+    }
+
+    final override bool validate() const pure {
+        return _client.get !is null && !_profile_name.empty && !_device.empty;
+    }
+
+    override CompletionStatus startup() {
+        if (!materialise()) return CompletionStatus.error;
+        // subscribe to data source, etc.
+        return CompletionStatus.complete;
+    }
+
+    override CompletionStatus shutdown() {
+        // unsubscribe, clear state
+        return CompletionStatus.complete;
+    }
+
+    override void update() {
+        // active polling: check timing, submit requests
+    }
+
+    final override const(char)[] profile_dir() const pure => "conf/my_profiles/";
+    final override const(char)[] profile_name() const pure => _profile_name[];
+    final override const(char)[] model_name()   const pure => _model_name[];
+
+    final override void add_handler(Device device, Element* e,
+                                    ref const ElementDesc desc, ubyte index) {
+        ref const ElementDesc_MyProto p = _profile_data.get_my(desc.element);
+        // initialise element value to typed zero
+        ubyte[256] tmp = void;
+        tmp[0 .. p.value_desc.data_length] = 0;
+        e.value = sample_value(tmp.ptr, p.value_desc);
         // push SampleElement with protocol-specific info
-        // optionally: element.add_subscriber(this) for write support
+        _elements ~= SampleElement(/* ... */);
+        // optional: element.add_subscriber(this) for write-back
     }
 
-    final override void remove_element(Element* element) {
-        // remove from array, unsubscribe if needed
-    }
-
-    // Active polling:
-    final override void update() {
-        // check timing, submit requests, handle responses
-    }
-
-    // Event-driven:
-    void on_data_received(...) {
-        // match to element, decode, call element.value(v, timestamp, this)
-    }
-
-    // Write support:
-    override void on_change(Element* e, ref const Variant val, SysTime ts, Subscriber who) {
+    // Write-back (if Subscriber implemented):
+    override void on_change(Element* e, ref const Variant val,
+                            SysTime ts, Subscriber who) {
         if (who is this) return;  // don't echo own changes
-        // format and send write to protocol
+        // format and send via protocol
     }
 
 private:
-    Array!SampleElement elements;
-    ProtocolClient client;
+    ObjectRef!MyClient _client;
+    String _profile_name, _model_name;
+    Array!SampleElement _elements;
 }
 ```
 
-### 5. Add Profile Support
-- Add `ElementDesc_MyProto` struct to `src/manager/profile.d`
-- Add `ElementType.myproto` to enum
-- Add parsing case in `parse_profile()`
-- Add `myproto_elements[]` to `Profile` struct
-- Create `conf/myproto_profiles/` directory
+If no profile is needed (the TWC case), subclass `ProtocolBinding` directly and build the device tree inline by overriding `materialise()`.
 
-### 6. Wire Up device_add Command
-In `src/protocol/myproto/package.d`: load profile, create sampler, `create_device_from_profile()`, attach.
+### 5. Add Profile Support (skip for direct-push bindings)
+- Add `ElementDesc_MyProto` struct to `src/manager/profile.d`
+- Add `ElementType.myproto` to the enum
+- Add a parsing case in `parse_profile()`
+- Add `myproto_elements[]` to `Profile` struct
+- Create `conf/myproto_profiles/`
+
+### 6. Register the Collection
+In your protocol module's `init()`:
+```d
+g_app.console.register_collection!MyBinding();
+```
+
+That gives you `/binding/my/add`, `/binding/my/set`, `/binding/my/print`, etc. for free.
 
 ### 7. Register Module
 Add to `src/manager/plugin.d` module list.
 
 ---
 
-## Part 7: Current BLE State
+## Part 7: BLE Bindings
 
 ### What Exists
 - `BLEInterface` -- GATT session management, WinRT backend, packet routing
 - `BLEClient` -- connection initiator, `read_characteristic(handle)`
+- `BLEClientBinding` (`src/protocol/ble/binding.d`) -- the `ProfileBinding` subclass that wires GATT characteristics to elements
 - GATT discovery: services -> characteristics with handles, UUIDs, properties
 - Notifications auto-subscribed for notify/indicate characteristics
 - WinRT: `submit_read()`, `submit_write()`, `poll_gatt()` functional
 
-### What's Missing for BLE Sampler
-- No `BLESampler` class
-- No `ElementDesc_BLE` in profile.d, no `ElementType.ble`
-- No BLE profile parsing or profile files
-- No `device_add` command for BLE
+### Operating Model
+Hybrid: **react** to notifications/indications (like CAN) + **poll** read-only characteristics that don't notify. Profiles in `conf/ble_profiles/` map `service_uuid + char_uuid` to elements with `ValueDesc` for decoding raw bytes. UUIDs are 128-bit but many BLE profiles use 16-bit short UUIDs (0x2A19 = battery level).
 
 ### BLE Characteristic Model
 ```d
@@ -886,5 +966,5 @@ struct GattCharacteristic {
 }
 ```
 
-### Likely BLE Sampler Design
-Hybrid model: **poll** characteristics without notify (schedule reads by handle) + **react** to notifications (like CAN). Profile would map `service_uuid + char_uuid` to element with `ValueDesc` for decoding raw bytes. UUIDs are 128-bit but many BLE profiles use 16-bit short UUIDs (0x2A19 = battery level).
+### Tesla Vehicle BLE
+The Tesla vehicle BLE flow (separate from TWC charging) is implemented as a session model in `protocol/ble/` — see [[tesla_ble_architecture]] in memory. It doesn't go through `BLEClientBinding` because vehicle sessions are server-spawned, ephemeral, and identified by VIN rather than configured by a binding.

@@ -1,4 +1,4 @@
-module protocol.can.sampler;
+module protocol.can.binding;
 
 import urt.array;
 import urt.endian;

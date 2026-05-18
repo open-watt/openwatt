@@ -1,4 +1,4 @@
-module protocol.esphome.sampler;
+module protocol.esphome.binding;
 
 import urt.array;
 import urt.lifetime;

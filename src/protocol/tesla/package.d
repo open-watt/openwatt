@@ -15,7 +15,7 @@ import manager.plugin;
 
 import protocol.tesla.iface;
 import protocol.tesla.master;
-import protocol.tesla.sampler;
+import protocol.tesla.binding;
 
 import router.iface;
 import router.iface.mac;

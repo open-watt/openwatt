@@ -10,7 +10,7 @@ import manager.collection;
 import manager.plugin;
 
 import protocol.goodwe.aa55;
-import protocol.goodwe.sampler;
+import protocol.goodwe.binding;
 
 nothrow @nogc:
 

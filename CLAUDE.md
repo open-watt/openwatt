@@ -170,44 +170,42 @@ See [src/manager/base.d:325-495](src/manager/base.d#L325-L495) for state machine
 
 ##### ObjectRef and Dependency Management
 
-When a BaseObject holds a reference to another BaseObject (e.g., an interface referencing its stream, or a protocol client referencing its interface), use `ObjectRef!Type` instead of a raw pointer. ObjectRef provides:
+When a BaseObject holds a reference to another BaseObject (e.g., an interface referencing its stream, or a binding referencing its client), use `ObjectRef!Type` instead of a raw pointer.
 
-- **Safe detach on destruction**: When the referenced object is destroyed, ObjectRef auto-detaches (stores the name instead of a dangling pointer)
-- **Name-based reattach**: `try_reattach()` looks up the stored name in the Collection to recover after the target is recreated
+`ObjectRef!T` stores a single `CID` — a hash of the target's `(name, type_index)`. Every dereference looks up the CID in the global `CollectionTable`, so the ref tracks the underlying entry rather than caching a pointer:
 
-**Offline detection via state subscriptions**: Don't poll `!dependency.running` in `update()` — this misses offline→online bounces between update cycles. Instead, subscribe to `StateSignal.offline` on the dependency and call `restart()` immediately.
+- **Destruction tombstones the entry**: The CID slot stays, its `value` is nulled. `_ref.get` returns null, `_ref !is null` is false (via `alias get this`).
+- **Recreation auto-rebinds**: A new object with the same name and type hashes to the same CID, populating the same slot. The ref points at the new object — no explicit reattach call.
+
+**Offline detection via state subscriptions**: Don't poll `!dependency.running` in `update()` — this misses offline→online bounces between update cycles. Subscribe to `StateSignal.offline` on the dependency and call `restart()` from the handler.
 
 **Subscription lifecycle rule**: Subscribe at the end of `startup()`, unsubscribe in `shutdown()`. Track with an explicit `_subscribed` flag (placed in struct padding). The flag ensures visibly symmetrical bookkeeping — every subscribe has a matching unsubscribe, no no-ops. Property setters unsubscribe and clear the flag when `_subscribed` is true, then store the new reference and `restart()` — startup will re-subscribe. This prevents use-after-free: destruction cycles through shutdown, which unsubscribes before the object is freed.
 
 ```d
 // Property setter — tear down subscription, swap reference, restart
-final void stream(Stream stream)
+final void iface(CANInterface value)
 {
-    if (_stream is stream)
+    if (_iface.get is value)
         return;
     if (_subscribed)
     {
-        _stream.unsubscribe(&stream_state_change);
+        _iface.unsubscribe(&iface_state_change);
+        _iface.unsubscribe(&packet_handler);
         _subscribed = false;
     }
-    _stream = stream;
+    _iface = value;
     restart();
 }
 
-// validating() — recover detached ObjectRefs
-override CompletionStatus validating()
-{
-    _stream.try_reattach();
-    return super.validating();
-}
-
-// startup() — subscribe when going online
+// startup() — subscribe when the dependency is up
 override CompletionStatus startup()
 {
-    if (!_stream || !_stream.running)
+    CANInterface i = _iface.get;
+    if (!i || !i.running)
         return CompletionStatus.continue_;
-    // ... initialization ...
-    _stream.subscribe(&stream_state_change);
+
+    i.subscribe(&packet_handler, PacketFilter(...));
+    i.subscribe(&iface_state_change);
     _subscribed = true;
     return CompletionStatus.complete;
 }
@@ -217,15 +215,15 @@ override CompletionStatus shutdown()
 {
     if (_subscribed)
     {
-        _stream.unsubscribe(&stream_state_change);
+        _iface.unsubscribe(&iface_state_change);
+        _iface.unsubscribe(&packet_handler);
         _subscribed = false;
     }
-    // ... cleanup ...
-    return CompletionStatus.complete;
+    return super.shutdown();
 }
 
-// State change handler — restart when dependency goes offline
-void stream_state_change(BaseObject, StateSignal signal)
+// State-change handler — restart when dependency goes offline
+void iface_state_change(ActiveObject, StateSignal signal)
 {
     if (signal == StateSignal.offline)
         restart();
@@ -233,10 +231,9 @@ void stream_state_change(BaseObject, StateSignal signal)
 ```
 
 **Key details:**
-- `ObjectRef` uses `alias get this`, so `_stream !is null` works naturally (covers both "never set" and "detached" cases)
-- `destroy()` fires `StateSignal.offline` before `StateSignal.destroyed` for running objects, so handling `offline` alone is sufficient
-- `unsubscribe()` is idempotent — safe to call in shutdown() even if startup() never completed
-- Call `try_reattach()` in `validating()` so objects recover after their dependency is destroyed and recreated
+- `ObjectRef` uses `alias get this`, so `_iface !is null` works naturally and covers both "never set" and "target destroyed/missing" cases — no separate `detached()` check needed at use sites.
+- `destroy()` fires `StateSignal.offline` before `StateSignal.destroyed` for running objects, so handling `offline` alone is sufficient.
+- `unsubscribe()` is idempotent — safe to call in `shutdown()` even if `startup()` never completed.
 
 #### 4. Module System
 
@@ -296,25 +293,32 @@ The router layer abstracts all protocols into a unified packet format for routin
 
 See [src/protocol/modbus/iface.d](src/protocol/modbus/iface.d) for comprehensive protocol interface example.
 
-#### 7. Sampler System: Smart Data Collection
+#### 7. Binding System: Protocol-to-Data-Model Bridge
 
-Samplers periodically read data from devices and update Elements. Key features:
+Bindings are the bridge between a protocol client/interface and the Device/Component/Element data model. They are top-level `ActiveObject` instances managed by `Collection!ProtocolBinding` — created at runtime via console commands like `/binding/modbus/add` and updated by the manager each frame.
 
-- **Smart batching**: Groups adjacent registers, respects protocol limits (e.g., Modbus 128-register max)
-- **Gap threshold**: Skips gaps >16 registers to optimize requests
-- **Adaptive sampling**: Frequencies: Realtime (400ms), High (1s), Medium (10s), Low (60s), Constant (once)
-- **Type-aware decoding**: Supports U8/S8/U16/S16/U32/F32/U64/F64 with 4 endian combinations
-- **Closed-loop**: Samplers implement Subscriber pattern, get notified of element changes
+The base hierarchy (`src/manager/binding.d`):
+- **`ProtocolBinding`** — abstract base, holds the bound `device` name, creates the Device in `g_app.devices` if missing.
+- **`ProfileBinding`** — adds profile loading: `profile_dir()` / `profile_name()` / `model_name()` are overridden by subclasses, `materialise()` loads the profile file and calls `create_device_from_profile()` with an `add_handler` delegate that the subclass uses to wire elements to its sampling/event logic.
 
-**Data flow:**
-1. Sampler sends batched read request to protocol client
+Bindings support two operating modes per protocol:
+- **Active polling** (Modbus, HTTP): `update()` drives requests; smart batching where applicable. Modbus groups adjacent registers (max 128-register span, max 16-register gap) and assigns PCP priority based on sample frequency.
+- **Event-driven** (CAN, MQTT, Zigbee, BLE): subscribe to data source in `startup()`, react to incoming packets / publishes / GATT notifications.
+
+Other features:
+- **Adaptive sampling**: Frequencies: Realtime (400ms), High (1s), Medium (10s), Low (60s), Constant (once), OnDemand (never)
+- **Type-aware decoding**: `ValueDesc` (binary) + `TextValueDesc` (text) via `sample_value()` / `format_value()` in [src/manager/sampler.d](src/manager/sampler.d) (shared descriptor/codec utilities).
+- **Bidirectional**: Bindings that implement `Subscriber` (HTTP, MQTT) get notified of element changes for write-back
+
+**Data flow (active polling):**
+1. Binding's `update()` checks per-element timing, builds batched read requests
 2. Protocol client submits to interface with callback handler
 3. Interface transmits packet, correlates response by sequence number
 4. Response invokes callback with data
-5. Sampler decodes registers and updates Elements
+5. Binding decodes via `sample_value()` and calls `element.value()`
 6. Elements notify subscribers of value changes
 
-See [src/protocol/modbus/binding.d](src/protocol/modbus/binding.d) for implementation.
+See [src/protocol/modbus/binding.d](src/protocol/modbus/binding.d) for the most thorough implementation.
 
 ### Layer Details
 
@@ -500,7 +504,7 @@ uRT replaces the D standard library to enable embedded targets without OS depend
 
 **Example implementations:**
 - [src/protocol/modbus/iface.d](src/protocol/modbus/iface.d) - Protocol interface
-- [src/protocol/modbus/binding.d](src/protocol/modbus/binding.d) - Sampler/binding implementation
+- [src/protocol/modbus/binding.d](src/protocol/modbus/binding.d) - Binding implementation
 - [src/protocol/modbus/client.d](src/protocol/modbus/client.d) - Protocol client
 
 **Documentation:**
@@ -571,10 +575,10 @@ The REPL method enables true interactive investigation: send a command, analyze 
 
 ### Adding a New Device Type
 
-1. Create modbus profile in appropriate location (or use other protocol)
-2. Implement Sampler for the protocol if needed
-3. Register device type in energy app or create new app module
-4. Add console commands to create device instances
+1. Create a profile file in the appropriate location (e.g. `conf/modbus_profiles/`, `conf/rest_profiles/`)
+2. If the protocol doesn't yet have a Binding, implement one (subclass `ProfileBinding` or `ProtocolBinding`)
+3. Register the binding's Collection in the protocol's Module `init()`
+4. The user creates an instance at runtime: `/binding/<proto>/add name=... device=... profile=... ...`
 
 ### Debugging Tips
 

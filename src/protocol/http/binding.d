@@ -1,4 +1,4 @@
-module protocol.http.sampler;
+module protocol.http.binding;
 
 import urt.array;
 import urt.conv;

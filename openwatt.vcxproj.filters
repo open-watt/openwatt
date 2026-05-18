@@ -456,6 +456,9 @@
     <DCompile Include="src\router\port\package.d">
       <Filter>src\router\port</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\ble\binding.d">
+      <Filter>src\protocol\ble</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\ble\client.d">
       <Filter>src\protocol\ble</Filter>
     </DCompile>
@@ -468,8 +471,8 @@
     <DCompile Include="src\protocol\ble\package.d">
       <Filter>src\protocol\ble</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\ble\sampler.d">
-      <Filter>src\protocol\ble</Filter>
+    <DCompile Include="src\protocol\can\binding.d">
+      <Filter>src\protocol\can</Filter>
     </DCompile>
     <DCompile Include="src\protocol\can\iface.d">
       <Filter>src\protocol\can</Filter>
@@ -477,8 +480,8 @@
     <DCompile Include="src\protocol\can\package.d">
       <Filter>src\protocol\can</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\can\sampler.d">
-      <Filter>src\protocol\can</Filter>
+    <DCompile Include="src\protocol\esphome\binding.d">
+      <Filter>src\protocol\esphome</Filter>
     </DCompile>
     <DCompile Include="src\protocol\esphome\client.d">
       <Filter>src\protocol\esphome</Filter>
@@ -486,17 +489,17 @@
     <DCompile Include="src\protocol\esphome\package.d">
       <Filter>src\protocol\esphome</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\esphome\sampler.d">
-      <Filter>src\protocol\esphome</Filter>
-    </DCompile>
     <DCompile Include="src\protocol\goodwe\aa55.d">
+      <Filter>src\protocol\goodwe</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\goodwe\binding.d">
       <Filter>src\protocol\goodwe</Filter>
     </DCompile>
     <DCompile Include="src\protocol\goodwe\package.d">
       <Filter>src\protocol\goodwe</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\goodwe\sampler.d">
-      <Filter>src\protocol\goodwe</Filter>
+    <DCompile Include="src\protocol\http\binding.d">
+      <Filter>src\protocol\http</Filter>
     </DCompile>
     <DCompile Include="src\protocol\http\client.d">
       <Filter>src\protocol\http</Filter>
@@ -505,9 +508,6 @@
       <Filter>src\protocol\http</Filter>
     </DCompile>
     <DCompile Include="src\protocol\http\package.d">
-      <Filter>src\protocol\http</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\http\sampler.d">
       <Filter>src\protocol\http</Filter>
     </DCompile>
     <DCompile Include="src\protocol\http\server.d">
@@ -570,6 +570,9 @@
     <DCompile Include="src\protocol\snmp\package.d">
       <Filter>src\protocol\snmp</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\tesla\binding.d">
+      <Filter>src\protocol\tesla</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\tesla\iface.d">
       <Filter>src\protocol\tesla</Filter>
     </DCompile>
@@ -577,9 +580,6 @@
       <Filter>src\protocol\tesla</Filter>
     </DCompile>
     <DCompile Include="src\protocol\tesla\package.d">
-      <Filter>src\protocol\tesla</Filter>
-    </DCompile>
-    <DCompile Include="src\protocol\tesla\sampler.d">
       <Filter>src\protocol\tesla</Filter>
     </DCompile>
     <DCompile Include="src\protocol\tesla\twc.d">

@@ -19,7 +19,7 @@ import router.iface.packet;
 import protocol.ble.client;
 import protocol.ble.device;
 import protocol.ble.iface;
-import protocol.ble.sampler;
+import protocol.ble.binding;
 
 nothrow @nogc:
 

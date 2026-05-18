@@ -1,4 +1,4 @@
-module protocol.goodwe.sampler;
+module protocol.goodwe.binding;
 
 import urt.array;
 import urt.lifetime;

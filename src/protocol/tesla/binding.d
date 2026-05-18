@@ -1,4 +1,4 @@
-module protocol.tesla.sampler;
+module protocol.tesla.binding;
 
 import urt.array;
 import urt.log;
