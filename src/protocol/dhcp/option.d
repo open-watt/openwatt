@@ -210,6 +210,8 @@ private:
 
 bool parse_hex_bytes(const(char)[] s, ubyte[] out_, ref size_t out_len) pure
 {
+    import urt.string.ascii : is_hex;
+
     out_len = 0;
     size_t i = 0;
     while (i < s.length)
@@ -218,24 +220,22 @@ bool parse_hex_bytes(const(char)[] s, ubyte[] out_, ref size_t out_len) pure
             ++i;
         if (i >= s.length)
             break;
-        if (i + 1 >= s.length)
+        if (i + 1 >= s.length || out_len >= out_.length)
             return false;
-        int hi = hex_digit(s[i]);
-        int lo = hex_digit(s[i + 1]);
-        if (hi < 0 || lo < 0)
+        ubyte c0 = s[i];
+        ubyte c1 = s[i + 1];
+        if (!c0.is_hex || !c1.is_hex)
             return false;
-        if (out_len >= out_.length)
-            return false;
-        out_[out_len++] = cast(ubyte)((hi << 4) | lo);
+        if ((c0 | 0x20) >= 'a')
+            c0 = cast(ubyte)((c0 | 0x20) - 'a' + 10);
+        else
+            c0 -= '0';
+        if ((c1 | 0x20) >= 'a')
+            c1 = cast(ubyte)((c1 | 0x20) - 'a' + 10);
+        else
+            c1 -= '0';
+        out_[out_len++] = cast(ubyte)(c0 << 4 | c1);
         i += 2;
     }
     return true;
-}
-
-int hex_digit(char c) pure
-{
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
 }

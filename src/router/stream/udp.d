@@ -77,7 +77,8 @@ protected:
     {
         AddressInfoResolver resolve;
         Result r = _local_host[].get_address_info(tconcat(_local_port), null, resolve);
-        if (!r) return CompletionStatus.error;
+        if (!r)
+            return CompletionStatus.error;
 
         AddressInfo addr;
         while (resolve.next_address(addr))
@@ -87,7 +88,8 @@ protected:
         }
 
         r = _remote_host[].get_address_info(tconcat(_remote_port), null, resolve);
-        if (!r) return CompletionStatus.error;
+        if (!r)
+            return CompletionStatus.error;
 
         while (resolve.next_address(addr))
         {

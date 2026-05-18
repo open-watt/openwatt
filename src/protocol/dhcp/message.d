@@ -357,7 +357,8 @@ nothrow @nogc:
     bool lease_time(out Duration d)
     {
         uint s;
-        if (!uint_option(DhcpOption.lease_time, s)) return false;
+        if (!uint_option(DhcpOption.lease_time, s))
+            return false;
         d = s.seconds;
         return true;
     }
@@ -365,7 +366,8 @@ nothrow @nogc:
     bool renewal_time(out Duration d)
     {
         uint s;
-        if (!uint_option(DhcpOption.renewal_time, s)) return false;
+        if (!uint_option(DhcpOption.renewal_time, s))
+            return false;
         d = s.seconds;
         return true;
     }
@@ -373,7 +375,8 @@ nothrow @nogc:
     bool rebinding_time(out Duration d)
     {
         uint s;
-        if (!uint_option(DhcpOption.rebinding_time, s)) return false;
+        if (!uint_option(DhcpOption.rebinding_time, s))
+            return false;
         d = s.seconds;
         return true;
     }

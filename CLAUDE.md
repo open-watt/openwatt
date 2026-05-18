@@ -321,7 +321,7 @@ Core runtime providing:
 
 ##### Cron System
 
-Scheduled task execution for running console commands at intervals. Example: `/system/cron/add name=poll schedule=5m command="/device/print"`. Supports duration-based scheduling (5m, 30s, 1h), repeat flag, concurrent execution of slow commands. See [src/manager/cron/job.d](src/manager/cron/job.d).
+Runs a `do={...}` script body on a schedule. Schedule kinds (mutually exclusive, last one set wins): `schedule=<duration>` (every N), `at=<HH:MM>` with optional `days=mon,wed,fri` (daily/weekly), `when=<datetime>` (absolute one-shot). `repeat=false` makes any kind one-shot. Times are local (currently UTC; no timezone offset yet). Example: `/system/cron/add name=poll schedule=5m do={ /device/print }`. See [src/manager/cron/job.d](src/manager/cron/job.d).
 
 #### Router Layer (src/router/)
 
