@@ -5,8 +5,9 @@ import manager.collection;
 import manager.plugin;
 
 import protocol.esphome.client;
-import protocol.esphome.protobuf;
 import protocol.esphome.sampler;
+
+import tools.protobuf;
 
 nothrow @nogc:
 

@@ -1,6 +1,6 @@
-module protocol.esphome.protobuf.parse;
+module tools.protobuf.parse;
 
-import protocol.esphome.protobuf;
+import tools.protobuf;
 import urt.array;
 import urt.string;
 import urt.conv;

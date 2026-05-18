@@ -1,4 +1,4 @@
-module protocol.esphome.protobuf;
+module tools.protobuf;
 
 import urt.array;
 import urt.conv;
@@ -15,7 +15,7 @@ mixin template LoadProtobuf(string name)
         mixin(generate_message(spec.messages[i], spec.syntax));
 
 private:
-    import protocol.esphome.protobuf.parse;
+    import tools.protobuf.parse;
     import urt.array;
     import urt.string;
 

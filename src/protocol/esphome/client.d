@@ -17,7 +17,8 @@ import manager.collection;
 import manager.system : hostname;
 
 import protocol.esphome;
-import protocol.esphome.protobuf;
+
+import tools.protobuf;
 
 import router.stream;
 import router.stream.tcp;
@@ -205,6 +206,7 @@ protected:
         _server_info = null;
         _server_name = null;
         _state = 0;
+        _tail.clear();
 
         if (_stream)
         {
