@@ -8,7 +8,6 @@ import urt.string.format;
 
 import manager;
 import manager.collection;
-import manager.plugin;
 
 public import router.stream;
 
@@ -183,16 +182,4 @@ private:
     ushort _remote_port;
     InetAddress _local;
     InetAddress _remote;
-}
-
-
-class UDPStreamModule : Module
-{
-    mixin DeclareModule!"stream.udp";
-nothrow @nogc:
-
-    override void init()
-    {
-        g_app.console.register_collection!UDPStream();
-    }
 }

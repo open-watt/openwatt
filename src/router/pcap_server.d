@@ -1,6 +1,7 @@
 module router.pcap_server;
 
-version (Feature_IP):
+import manager.features;
+static if (has_ip):
 
 import urt.array;
 import urt.endian;

@@ -14,7 +14,6 @@ import urt.time;
 import manager.base;
 import manager.collection;
 import manager.console;
-import manager.plugin;
 
 public import router.stream;
 
@@ -684,23 +683,5 @@ protected:
         stream.set_state(State.running);
         Collection!TCPStream().add(stream);
         return stream;
-    }
-}
-
-
-class TCPStreamModule : Module
-{
-    mixin DeclareModule!"stream.tcp";
-nothrow @nogc:
-
-    override void init()
-    {
-        g_app.console.register_collection!TCPStream();
-        g_app.console.register_collection!TCPServer();
-    }
-
-    override void update()
-    {
-        Collection!TCPServer().update_all();
     }
 }

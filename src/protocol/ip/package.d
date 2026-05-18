@@ -14,6 +14,8 @@ import protocol.ip.address;
 import protocol.ip.pool;
 import protocol.ip.route;
 import protocol.ip.stack;
+import protocol.ip.tcp_stream;
+import protocol.ip.udp_stream;
 
 import router.iface;
 import router.iface.ethernet;
@@ -228,6 +230,9 @@ nothrow @nogc:
         g_app.console.register_collection!IPPool();
         g_app.console.register_collection!IPv6Pool();
         g_app.console.register_collection!IPRoute();
+        g_app.console.register_collection!TCPStream();
+        g_app.console.register_collection!TCPServer();
+        g_app.console.register_collection!UDPStream();
 
         _stack.init_resolvers();
 
@@ -383,6 +388,7 @@ nothrow @nogc:
         Collection!IPPool().update_all();
         Collection!IPv6Pool().update_all();
         Collection!IPRoute().update_all();
+        Collection!TCPServer().update_all();
         _stack.update();
     }
 
