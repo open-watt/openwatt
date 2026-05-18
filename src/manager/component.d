@@ -14,6 +14,17 @@ import manager.element;
 nothrow @nogc:
 
 
+enum ComponentEvent : ubyte
+{
+    online,         // tree is populated/ready for consumers
+    offline,        // backing source disconnected
+    tree_changed,   // structure (children/elements) mutated
+    destroyed,
+}
+
+alias ComponentSubscriber = void delegate(Component component, ComponentEvent event) nothrow @nogc;
+
+
 struct FieldTemplate
 {
     String name;
@@ -47,13 +58,38 @@ nothrow @nogc:
     Array!(Component) components;
     Array!(Element*) elements;
 
+    final void subscribe(ComponentSubscriber handler)
+    {
+        assert(!_subscribers[].contains(handler), "Already registered");
+        _subscribers ~= handler;
+    }
+
+    final void unsubscribe(ComponentSubscriber handler) pure
+    {
+        _subscribers.removeFirstSwapLast(handler);
+    }
+
+    final void notify(ComponentEvent event)
+    {
+        // Same iteration shape as BaseObject.signal_state_change — handlers may
+        // unsubscribe themselves during the callback.
+        for (size_t i = 0; i < _subscribers.length; )
+        {
+            auto h = _subscribers[i];
+            h(this, event);
+            if (i < _subscribers.length && _subscribers[i] is h)
+                ++i;
+        }
+    }
+
     void add_component(Component component) // TODO: include sampler here...
     {
+        import urt.mem.temp : tconcat;
         foreach (Component c; components)
         {
-            if (c.name[] == component.name[])
+            if (c.id[] == component.id[])
             {
-                debug assert(false, "Component '" ~ component.name[] ~ "' already exists in device '" ~ name[] ~ "'");
+                debug assert(false, tconcat("Component '", component.id[], "' already exists in device '", id[], "'"));
                 assert(false, "Already exists");
                 return;
             }
@@ -126,11 +162,23 @@ nothrow @nogc:
         return e;
     }
 
-    Component get_first_component_by_template(const char[] template_name)
+    inout(Component) get_first_component_by_template(const char[] template_name) inout pure nothrow @nogc
     {
-        foreach (Component c; components)
+        foreach (inout Component c; components)
             if (c.template_[] == template_name[])
                 return c;
+        return null;
+    }
+
+    inout(Component) find_first_component_by_template_recursive(const char[] template_name) inout pure nothrow @nogc
+    {
+        foreach (inout Component c; components)
+        {
+            if (c.template_[] == template_name[])
+                return c;
+            if (inout Component r = c.find_first_component_by_template_recursive(template_name))
+                return r;
+        }
         return null;
     }
 
@@ -163,6 +211,9 @@ nothrow @nogc:
     {
         return format(buffer, "Component({0}, \"{1}\", ...)", id, name).length;
     }
+
+private:
+    Array!ComponentSubscriber _subscribers;
 }
 
 

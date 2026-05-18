@@ -25,8 +25,8 @@ enum MeterField : ubyte
     total_import_active,
     total_export_active,
     total_reactive,
-    total_import_reactive,
-    total_export_reactive,
+    total_inductive,
+    total_capacitive,
     total_apparent,
 }
 
@@ -36,7 +36,7 @@ enum FieldFlags : uint
     basic = voltage | inter_phase_voltage| current | power,
     realtime = basic | reactive | apparent | power_factor | frequency | phase_angle,
     basic_cumulative = total_active | total_import_active | total_export_active,
-    cumulative = basic_cumulative | total_reactive | total_import_reactive | total_export_reactive | total_apparent,
+    cumulative = basic_cumulative | total_reactive | total_inductive | total_capacitive | total_apparent,
 //    demand = ,
     all = realtime | cumulative, //| demand,
 
@@ -53,8 +53,8 @@ enum FieldFlags : uint
     total_import_active = 1 << MeterField.total_import_active,
     total_export_active = 1 << MeterField.total_export_active,
     total_reactive = 1 << MeterField.total_reactive,
-    total_import_reactive = 1 << MeterField.total_import_reactive,
-    total_export_reactive = 1 << MeterField.total_export_reactive,
+    total_inductive = 1 << MeterField.total_inductive,
+    total_capacitive = 1 << MeterField.total_capacitive,
     total_apparent = 1 << MeterField.total_apparent,
 
     // TODO: demand meter?
@@ -93,8 +93,8 @@ struct MeterData
     float[4] total_import_active = 0;   // Sum, L1, L2, L3
     float[4] total_export_active = 0;   // Sum, L1, L2, L3
     float[4] total_reactive = 0;        // Sum, L1, L2, L3
-    float[4] total_import_reactive = 0; // Sum, L1, L2, L3
-    float[4] total_export_reactive = 0; // Sum, L1, L2, L3
+    float[4] total_inductive = 0; // Sum, L1, L2, L3
+    float[4] total_capacitive = 0; // Sum, L1, L2, L3
     float[4] total_apparent = 0;        // Sum, L1, L2, L3
 }
 
@@ -173,8 +173,8 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         "import",
         "export",
         "net_reactive",
-        "import_reactive",
-        "export_reactive",
+        "inductive",
+        "capacitive",
         "total_apparent",
     ];
 
@@ -192,8 +192,8 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         FieldFlags.total_import_active,
         FieldFlags.total_export_active,
         FieldFlags.total_reactive,
-        FieldFlags.total_import_reactive,
-        FieldFlags.total_export_reactive,
+        FieldFlags.total_inductive,
+        FieldFlags.total_capacitive,
         FieldFlags.total_apparent,
     ];
 
@@ -221,8 +221,8 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         r.total_import_active.ptr,
         r.total_export_active.ptr,
         r.total_reactive.ptr,
-        r.total_import_reactive.ptr,
-        r.total_export_reactive.ptr,
+        r.total_inductive.ptr,
+        r.total_capacitive.ptr,
         r.total_apparent.ptr,
     ];
 

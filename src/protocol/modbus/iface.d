@@ -319,6 +319,7 @@ protected:
         _expect_message_type = ModbusFrameType.unknown;
         _last_receive_event = SysTime();
         _baud_estimated = false;
+        _tail_bytes = 0;
 
         foreach (kvp; _pending[])
         {

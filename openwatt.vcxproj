@@ -173,6 +173,7 @@
     <DCompile Include="src\protocol\modbus\message.d" />
     <DCompile Include="src\protocol\modbus\node.d" />
     <DCompile Include="src\protocol\modbus\package.d" />
+    <DCompile Include="src\protocol\modbus\sunspec.d" />
     <DCompile Include="src\protocol\mqtt\binding.d" />
     <DCompile Include="src\protocol\mqtt\broker.d" />
     <DCompile Include="src\protocol\mqtt\client.d" />

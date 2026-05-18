@@ -515,5 +515,8 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
     if (is_new_device)
         g_app.devices.insert(device.id[], device);
 
+    device.notify(ComponentEvent.tree_changed);
+    device.notify(ComponentEvent.online);
+
     return device;
 }
