@@ -1,5 +1,8 @@
 module manager.sync.ws_server;
 
+import manager.features;
+static if (has_http):
+
 // WebSocketSyncServer - binds a URI on an HTTPServer and spawns one SyncPeer
 // per accepted WebSocket connection. Each peer's transport is the WebSocket
 // itself (now a BaseInterface emitting raw packets); the encoder is whatever
@@ -7,10 +10,6 @@ module manager.sync.ws_server;
 //
 // Peers are destroyed when their WebSocket transport dies, either via the
 // client disconnecting (ObjectRef detaches) or shutdown.
-
-// Depends on protocol.http.server + websocket. Gated to drop out when
-// HTTP isn't compiled in.
-version (Feature_HTTP):
 
 import urt.array;
 import urt.lifetime;

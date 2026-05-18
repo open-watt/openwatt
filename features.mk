@@ -71,17 +71,18 @@ FEATURE_DIRS_full    := manager db driver router protocol apps devices tools
 
 FEATURE_DIRS := $(FEATURE_DIRS_$(FEATURES))
 
-# -- D version flags per preset (cumulative) -----------------------------
+# -- D version flags per preset ------------------------------------------
+# Defaults are "everything on" so builds that don't run features.mk
+# (Visual Studio, fresh checkouts, ad-hoc tools) get a full standalone
+# instance. Reduced tiers emit -version=No* flags to opt out.
 
-ifneq ($(filter $(FEATURES),switch full),)
-    FEATURE_DFLAGS += $(VERSION_FLAG)Feature_Switch
+ifeq ($(FEATURES),switch)
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoAll
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoHTTP
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoIP
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoTLS
 endif
-ifeq ($(FEATURES),full)
-    FEATURE_DFLAGS += $(VERSION_FLAG)Feature_All
-    FEATURE_DFLAGS += $(VERSION_FLAG)Feature_HTTP
-    FEATURE_DFLAGS += $(VERSION_FLAG)Feature_IP
-    FEATURE_DFLAGS += $(VERSION_FLAG)Feature_TLS
-endif
+# minimal (deferred) would additionally emit -version=NoSwitch.
 
 ifeq ($(HEADLESS),1)
     FEATURE_DFLAGS += $(VERSION_FLAG)Headless
