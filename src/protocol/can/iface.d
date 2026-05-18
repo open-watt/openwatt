@@ -210,6 +210,8 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        _tail_bytes = 0;
+        _resyncing = false;
         if (_can.is_open)
         {
             can_close(_can);
@@ -267,71 +269,61 @@ protected:
             Packet packet;
 
             size_t offset = 0;
-            while (offset < length)
+            parse_loop: while (offset < length)
             {
-                // parse packets from the stream...
                 ref CANFrame can = packet.init!CANFrame(null, now);
 
                 size_t taken = 0;
                 switch (protocol)
                 {
                     case CANInterfaceProtocol.ebyte:
+                        if (length - offset < EbyteFrameSize)
+                            break parse_loop;
 
-                        if (length - offset >= EbyteFrameSize)
+                        const ubyte[] ebyte_frame = buffer[offset .. offset + EbyteFrameSize];
+                        if (!validate_ebyte_frame(ebyte_frame))
                         {
-                            // TODO: how can we even do any packet validation?
-                            //       there's basically no error detection data available
-                            //       I guess we could confirm assumed zero bits in the header and _tail?
-
-                            const ubyte[] ebyteFrame = buffer[offset .. offset + EbyteFrameSize];
-
-                            uint len = ebyteFrame[0] & 0xF;
-                            if (len > 8)
+                            // out of sync; slide one byte and try again
+                            if (!_resyncing)
                             {
-                                debug assert(len <= 8, "TODO: bad CAN frame; did we fall off the rails? bad data? skip this message? how do we resync?");
-                                break;
+                                add_rx_drop();
+                                _resyncing = true;
                             }
-
-                            can.remote_transmission_request = (ebyteFrame[0] & 0x40) != 0;
-                            can.extended = (ebyteFrame[0] & 0x80) != 0;
-
-                            can.id = ebyteFrame[1 .. 5].bigEndianToNative!uint;
-
-                            packet.data = ebyteFrame[5 .. 5 + len];
-
-                            taken = EbyteFrameSize;
+                            ++offset;
+                            continue parse_loop;
                         }
+
+                        // confidence check: if any bytes follow, validate as much of the next frame as we can
+                        size_t next = offset + EbyteFrameSize;
+                        if (next < length)
+                        {
+                            size_t avail = length - next;
+                            if (!validate_ebyte_frame(buffer[next .. next + min(avail, EbyteFrameSize)]))
+                            {
+                                if (!_resyncing)
+                                {
+                                    add_rx_drop();
+                                    _resyncing = true;
+                                }
+                                ++offset;
+                                continue parse_loop;
+                            }
+                        }
+
+                        _resyncing = false;
+
+                        can.remote_transmission_request = (ebyte_frame[0] & 0x40) != 0;
+                        can.extended = (ebyte_frame[0] & 0x80) != 0;
+                        can.id = ebyte_frame[1 .. 5].bigEndianToNative!uint;
+                        packet.data = ebyte_frame[5 .. 5 + (ebyte_frame[0] & 0xF)];
+                        taken = EbyteFrameSize;
                         break;
 
                     default:
                         assert(false);
                 }
 
-                if (taken == 0)
-                {
-                    import urt.util : min;
-
-                    // we didn't parse any packets
-                    // we might have a split packet, so we'll shuffle unread data to the front of the buffer
-                    // ...but we'll only keep at most one message worth!
-                    size_t remain = length - offset;
-                    size_t keepBytes = min(remain, LargestProtocolFrame - 1);
-                    size_t trunc = remain - keepBytes;
-                    memmove(buffer.ptr, buffer.ptr + offset + trunc, keepBytes);
-                    length = keepBytes;
-                    readOffset = keepBytes;
-                    offset = 0;
-                    continue read_loop;
-                }
                 offset += taken;
-
-                if (can.id > (can.extended ? 0x1FFFFFFF : 0x7FF))
-                {
-                    version (DebugCANInterface)
-                        writeDebug("CAN packet dropped on interface '", name, "': invalid frame - bad ID");
-                    add_rx_drop();
-                    continue;
-                }
 
                 version (DebugCANInterface)
                     writeDebug("CAN packet received from interface '", name, "': id=", can.id, " (", packet.length , ")[ ", packet.data, " - ", packet.data.bin_to_ascii(), " ]");
@@ -339,8 +331,12 @@ protected:
                 dispatch(packet);
             }
 
-            // we've eaten the whole buffer...
-            length = 0;
+            // shuffle remaining unparsed bytes to the front for the next read
+            size_t remain = length - offset;
+            if (remain > 0 && offset > 0)
+                memmove(buffer.ptr, buffer.ptr + offset, remain);
+            length = remain;
+            readOffset = remain;
         }
     }
 
@@ -462,6 +458,7 @@ private:
     uint _baud_rate = 500_000;
     ubyte[LargestProtocolFrame] _tail;
     ushort _tail_bytes;
+    bool _resyncing;
 
     version(HasGPIO)
     {
@@ -493,6 +490,41 @@ private:
 
 enum EbyteFrameSize = 13;
 enum LargestProtocolFrame = EbyteFrameSize;
+
+bool valid_ebyte_header(ubyte b) pure nothrow @nogc
+    => (b & 0x30) == 0 && (b & 0xF) <= 8;
+
+bool validate_ebyte_frame(const ubyte[] f) pure nothrow @nogc
+    in (f.length >= 1 && f.length <= EbyteFrameSize)
+{
+    if (!valid_ebyte_header(f[0]))
+        return false;
+    bool extended = (f[0] & 0x80) != 0;
+    if (extended)
+    {
+        if (f.length >= 2 && (f[1] & 0xE0) != 0)
+            return false;
+    }
+    else
+    {
+        if (f.length >= 2 && f[1] != 0)
+            return false;
+        if (f.length >= 3 && f[2] != 0)
+            return false;
+        if (f.length >= 4 && (f[3] & 0xF8) != 0)
+            return false;
+    }
+    size_t pad_start = 5 + (f[0] & 0xF);
+    if (f.length > pad_start)
+    {
+        foreach (b; f[pad_start .. $])
+        {
+            if (b != 0)
+                return false;
+        }
+    }
+    return true;
+}
 
 version (DebugCANInterface)
 {
