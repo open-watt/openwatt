@@ -434,28 +434,38 @@ nothrow @nogc:
             if (!dirty)
                 continue;
 
-            ulong set_bits   = dirty &  obj.props_set;
-            ulong reset_bits = dirty & ~obj.props_set;
+            ulong set_bits = dirty & obj.props_set;
 
+            ulong sent_bits = 0;
             auto props = obj.properties();
             foreach (i, p; props)
             {
                 ulong mask = ulong(1) << i;
+                if (!(dirty & mask))
+                    continue;
+
                 if (set_bits & mask)
                     encode_set(peer, obj, i, 0);
-                else if (reset_bits & mask)
+                else
                 {
                     debug assert_reset_matches_init(obj, *p);
                     encode_reset(peer, obj.id, p.name[], 0);
                 }
+
+                if (_last_drop)
+                {
+                    ss.props_dirty &= ~sent_bits;
+                    return;
+                }
+                sent_bits |= mask;
             }
-            ss.props_dirty &= ~dirty;
+            ss.props_dirty &= ~sent_bits;
         }
     }
 
 private:
-    // Scratch buffer reused per frame to avoid per-emit allocation.
     Array!char _buf;
+    bool _last_drop;
 
     void begin_frame(const(char)[] kind)
     {
@@ -466,7 +476,14 @@ private:
     void send_frame(SyncPeer peer)
     {
         _buf ~= '}';
-        peer.transmit_frame(cast(const(ubyte)[])_buf[], true);
+        _last_drop = peer.transmit_frame(cast(const(ubyte)[])_buf[], true) < 0;
+        if (_last_drop)
+        {
+            // event-driven encodes (state/cmd/result/error/sub/...) have no retry path!!
+            // a drop here means the peer permanently misses this event.
+            const preview = _buf.length < 200 ? _buf.length : 200;
+            log.warning("dropped frame to peer (", _buf.length, "B): ", cast(const(char)[])_buf[0 .. preview], _buf.length > 200 ? "..." : "");
+        }
     }
 
     void write_str(const(char)[] s)
