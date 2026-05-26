@@ -24,6 +24,10 @@ nothrow @nogc:
         g_app.console.register_collection!CronJob();
     }
 
+    // Cron firing itself is timer-driven (CronJob.on_fire); this only
+    // exists to keep state-machine transitions (validate → startup →
+    // shutdown) ticking. Once BaseObject state changes become event-
+    // driven, this can go away too.
     override void update()
     {
         Collection!CronJob().update_all();

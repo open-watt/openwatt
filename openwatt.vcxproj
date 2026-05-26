@@ -1059,6 +1059,7 @@
     <DCompile Include="third_party\urt\src\urt\internal\stdc\errno.d" />
     <DCompile Include="third_party\urt\src\urt\internal\stdc\stdio.d" />
     <DCompile Include="third_party\urt\src\urt\internal\stdc\stdlib.d" />
+    <DCompile Include="third_party\urt\src\urt\internal\sys\freertos\package.d" />
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\basetsd.d" />
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\basetyps.d" />
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\ntdef.d" />
@@ -1124,6 +1125,14 @@
     <DCompile Include="third_party\urt\src\urt\string\string.d" />
     <DCompile Include="third_party\urt\src\urt\string\tailstring.d" />
     <DCompile Include="third_party\urt\src\urt\string\uni.d" />
+    <DCompile Include="third_party\urt\src\urt\sync\critical.d" />
+    <DCompile Include="third_party\urt\src\urt\sync\event.d" />
+    <DCompile Include="third_party\urt\src\urt\sync\mpmc.d" />
+    <DCompile Include="third_party\urt\src\urt\sync\mpsc.d" />
+    <DCompile Include="third_party\urt\src\urt\sync\mutex.d" />
+    <DCompile Include="third_party\urt\src\urt\sync\semaphore.d" />
+    <DCompile Include="third_party\urt\src\urt\sync\spinlock.d" />
+    <DCompile Include="third_party\urt\src\urt\sync\spsc.d" />
     <DCompile Include="third_party\urt\src\urt\system.d" />
     <DCompile Include="third_party\urt\src\urt\thread.d" />
     <DCompile Include="third_party\urt\src\urt\time.d" />

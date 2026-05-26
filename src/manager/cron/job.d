@@ -10,6 +10,7 @@ import urt.time;
 import urt.util : popcnt;
 import urt.variant;
 
+import manager;
 import manager.base;
 import manager.console;
 import manager.console.command;
@@ -157,65 +158,53 @@ protected:
                 break;
         }
 
+        _done_firing = false;
+        if (_schedule_type != ScheduleType.none)
+            schedule_fire(getTime());
+
+        if (_schedule_type == ScheduleType.tod || _schedule_type == ScheduleType.absolute)
+        {
+            g_app.subscribe_wallclock_change(&on_wallclock_change);
+            _wc_subscribed = true;
+        }
+
         writeInfo("CronJob '", name, "': Scheduled, next run at ", _next_run);
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
+        if (_wc_subscribed)
+        {
+            g_app.unsubscribe_wallclock_change(&on_wallclock_change);
+            _wc_subscribed = false;
+        }
+        if (_fire_scheduled)
+        {
+            g_app.cancel(&on_fire);
+            _fire_scheduled = false;
+        }
+        if (_cleanup_scheduled)
+        {
+            g_app.cancel(&on_cleanup);
+            _cleanup_scheduled = false;
+        }
+
         foreach (ref cmd; _running_commands)
             cmd.command.request_cancel();
 
         update_running_commands();
 
         if (_running_commands.length > 0)
+        {
+            // commands still draining - keep cleanup scheduled until they
+            // finish; the state machine will re-enter shutdown() until we
+            // return complete
+            schedule_cleanup();
             return CompletionStatus.continue_;
+        }
 
         return CompletionStatus.complete;
-    }
-
-    override void update()
-    {
-        update_running_commands();
-
-        SysTime now = getSysTime();
-
-        if (now < _next_run)
-            return;
-
-        execute_command();
-
-        _last_run = now;
-        ++_run_count;
-
-        bool one_shot = false;
-        final switch (_schedule_type)
-        {
-            case ScheduleType.none:
-                one_shot = true;
-                break;
-            case ScheduleType.duration:
-                if (_repeat)
-                    _next_run = _next_run + _schedule;
-                else
-                    one_shot = true;
-                break;
-            case ScheduleType.tod:
-                if (_repeat)
-                    _next_run = next_occurrence(now, _at, _days_mask);
-                else
-                    one_shot = true;
-                break;
-            case ScheduleType.absolute:
-                one_shot = true;
-                break;
-        }
-
-        if (one_shot && _running_commands.length == 0)
-        {
-            writeInfo("CronJob '", name, "': One-shot job completed, disabling");
-            disabled = true;
-        }
     }
 
 private:
@@ -247,6 +236,115 @@ private:
     uint _run_count;
 
     Array!RunningCommand _running_commands;
+
+    bool _done_firing;
+    bool _fire_scheduled;
+    bool _cleanup_scheduled;
+    bool _wc_subscribed;
+
+    void schedule_fire(MonoTime anchor)
+    {
+        Duration until;
+        final switch (_schedule_type)
+        {
+            case ScheduleType.none:
+                return;
+            case ScheduleType.duration:
+                g_app.schedule(anchor + _schedule, &on_fire);
+                _fire_scheduled = true;
+                return;
+            case ScheduleType.tod:
+            case ScheduleType.absolute:
+                until = _next_run - getSysTime();
+                if (until < Duration.zero)
+                    until = Duration.zero;   // missed deadline -> fire immediately
+                break;
+        }
+        g_app.schedule(getTime() + until, &on_fire);
+        _fire_scheduled = true;
+    }
+
+    void on_wallclock_change()
+    {
+        if (_done_firing)
+            return;
+
+        if (_fire_scheduled)
+        {
+            g_app.cancel(&on_fire);
+            _fire_scheduled = false;
+        }
+
+        if (_schedule_type == ScheduleType.tod)
+            _next_run = next_occurrence(getSysTime(), _at, _days_mask);
+
+        schedule_fire(getTime());
+    }
+
+    void schedule_cleanup()
+    {
+        if (_cleanup_scheduled)
+            return;
+        g_app.schedule(getTime() + msecs(50), &on_cleanup);
+        _cleanup_scheduled = true;
+    }
+
+    void on_fire(MonoTime scheduled)
+    {
+        _fire_scheduled = false;
+
+        execute_command();
+
+        _last_run = getSysTime();
+        ++_run_count;
+
+        bool one_shot = false;
+        final switch (_schedule_type)
+        {
+            case ScheduleType.none:
+            case ScheduleType.absolute:
+                one_shot = true;
+                break;
+            case ScheduleType.duration:
+                one_shot = !_repeat;
+                if (!one_shot)
+                    _next_run = _next_run + _schedule;
+                break;
+            case ScheduleType.tod:
+                one_shot = !_repeat;
+                if (!one_shot)
+                    _next_run = next_occurrence(_last_run, _at, _days_mask);
+                break;
+        }
+
+        if (one_shot)
+            _done_firing = true;
+        else
+            schedule_fire(scheduled);
+
+        if (_running_commands.length > 0)
+            schedule_cleanup();
+        else if (_done_firing)
+            complete_one_shot();
+    }
+
+    void on_cleanup(MonoTime scheduled)
+    {
+        _cleanup_scheduled = false;
+
+        update_running_commands();
+
+        if (_running_commands.length > 0)
+            schedule_cleanup();
+        else if (_done_firing)
+            complete_one_shot();
+    }
+
+    void complete_one_shot()
+    {
+        writeInfo("CronJob '", name, "': One-shot job completed, disabling");
+        disabled = true;
+    }
 
     void update_running_commands()
     {

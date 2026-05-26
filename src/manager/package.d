@@ -9,6 +9,8 @@ import urt.meta.enuminfo : VoidEnumInfo;
 import urt.si.quantity;
 import urt.si.unit;
 import urt.string;
+import urt.sync.event;
+import urt.sync.mpsc;
 import urt.time;
 import urt.traits : is_enum, Unqual;
 import urt.variant;
@@ -38,6 +40,16 @@ enum AuthResult : ubyte
 alias AuthCallback = void delegate(AuthResult result, const(char)[] profile) nothrow @nogc;
 
 alias IntrinsicFunction = Variant function(Variant[] args) nothrow @nogc;
+
+alias TimerHandler      = void delegate(MonoTime scheduled) nothrow @nogc;
+alias EventHandler      = void delegate(MonoTime when) nothrow @nogc;
+alias WallclockHandler  = void delegate() nothrow @nogc;
+
+enum EventPriority : ubyte
+{
+    control,
+    bulk,
+}
 
 struct ElementLink
 {
@@ -195,6 +207,13 @@ nothrow @nogc:
         assert(!g_app, "Application already created!");
         g_app = this;
 
+        _wake_event.init();
+        _priority_events.init();
+        _bulk_events.init();
+
+        import urt.time : subscribe_clock_change;
+        subscribe_clock_change(&notify_wallclock_change);
+
         id_init();
         init_collections();
         init_elements();
@@ -246,10 +265,15 @@ nothrow @nogc:
             m.post_init();
 
         console.freeze();
+
+        schedule(getTime(), &heartbeat);
     }
 
     ~this()
     {
+        import urt.time : unsubscribe_clock_change;
+        unsubscribe_clock_change(&notify_wallclock_change);
+        _wake_event.destroy();
         g_app = null;
     }
 
@@ -348,6 +372,137 @@ nothrow @nogc:
     {
         assert(identifier[] !in intrinsic_functions, "Intrinsic function already registered!");
         intrinsic_functions.insert(identifier.move, func);
+    }
+
+    // MAIN THREAD ONLY; off-thread/ISR callers post a message to schedule a new event
+    void schedule(MonoTime when, TimerHandler handler)
+    {
+        _timer_when ~= when;
+        _timer_handler ~= handler;
+    }
+
+    uint cancel(TimerHandler handler, uint count = 1)
+    {
+        uint removed = 0;
+        foreach (i, h; _timer_handler)
+        {
+            if (h is handler)
+            {
+                _timer_remove(i);
+                if (++removed == count)
+                    return removed;
+            }
+        }
+        return removed;
+    }
+
+    MonoTime process_due()
+    {
+        MonoTime now = getTime();
+    again:
+        size_t next = size_t.max;
+        MonoTime next_when = MonoTime(ulong.max);
+        foreach (i, w; _timer_when)
+        {
+            if (w < next_when)
+            {
+                next = i;
+                next_when = w;
+            }
+        }
+        if (next == size_t.max)
+            return MonoTime(ulong.max);
+        if (next_when <= now)
+        {
+            MonoTime scheduled = next_when;
+            TimerHandler handler = _timer_handler[next];
+            _timer_remove(next);
+            handler(scheduled);
+            goto again;
+        }
+        return next_when;
+    }
+
+    void subscribe_wallclock_change(WallclockHandler h)
+    {
+        _wallclock_handlers ~= h;
+    }
+
+    void unsubscribe_wallclock_change(WallclockHandler h)
+    {
+        foreach (i, hh; _wallclock_handlers)
+        {
+            if (hh is h)
+            {
+                _wallclock_handlers.removeSwapLast(i);
+                return;
+            }
+        }
+    }
+
+    void notify_wallclock_change()
+    {
+        foreach (h; _wallclock_handlers)
+            h();
+    }
+
+    bool post_event(EventHandler handler, MonoTime when, EventPriority priority = EventPriority.control)
+    {
+        bool ok;
+        final switch (priority)
+        {
+            case EventPriority.control:
+                ok = _priority_events.enqueue(PendingEvent(handler, when));
+                break;
+            case EventPriority.bulk:
+                ok = _bulk_events.enqueue(PendingEvent(handler, when));
+                break;
+        }
+        if (!ok)
+            return false;
+        _wake_event.set();
+        return true;
+    }
+
+    void wait_for_wake(MonoTime deadline)
+    {
+        MonoTime now = getTime();
+        if (deadline <= now)
+            return;
+        _wake_event.wait(deadline - now);
+    }
+
+    void process_events()
+    {
+        enum Duration bulk_slice = msecs(500);
+
+        _wake_event.reset();
+        PendingEvent e;
+        for (;;)
+        {
+            bool any_priority = false;
+            while (_priority_events.dequeue(e))
+            {
+                e.handler(e.when);
+                any_priority = true;
+            }
+
+            MonoTime slice_end = getTime() + bulk_slice;
+            bool any_bulk = false;
+            while (_bulk_events.dequeue(e))
+            {
+                e.handler(e.when);
+                any_bulk = true;
+                if (getTime() >= slice_end)
+                {
+                    _wake_event.set();   // re-arm; let main loop fire timers,
+                    return;              // then drop back in priority-first.
+                }
+            }
+
+            if (!any_priority && !any_bulk)
+                break;
+        }
     }
 
     void update()
@@ -728,6 +883,36 @@ nothrow @nogc:
         }
     }
 
+
+private:
+
+    struct PendingEvent
+    {
+        EventHandler handler;
+        MonoTime     when;
+    }
+
+    Array!WallclockHandler _wallclock_handlers;
+
+    Array!MonoTime _timer_when;
+    Array!TimerHandler _timer_handler;
+
+    Event _wake_event;
+
+    MpscQueue!(PendingEvent, 32)  _priority_events;
+    MpscQueue!(PendingEvent, 256) _bulk_events;
+
+    void _timer_remove(size_t i)
+    {
+        _timer_when.removeSwapLast(i);
+        _timer_handler.removeSwapLast(i);
+    }
+
+    void heartbeat(MonoTime scheduled)
+    {
+        update();
+        schedule(scheduled + msecs(1000 / update_rate_hz), &heartbeat);
+    }
 }
 
 Element* resolve_global_element(const(char)[] path) nothrow @nogc
