@@ -266,8 +266,8 @@ nothrow @nogc:
         ip.ttl = 64;
         ip.protocol = IpProtocol.udp;
         ip.checksum[] = 0;
-        ip.src = src;
-        ip.dst = dst;
+        ip.src = src.b;
+        ip.dst = dst.b;
         ushort ihc = internet_checksum(frame[0 .. IPv4Header.sizeof]);
         ip.checksum[0] = cast(ubyte)(ihc >> 8);
         ip.checksum[1] = cast(ubyte)ihc;

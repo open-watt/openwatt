@@ -1,8 +1,10 @@
 module protocol.ip.icmp;
 
+import urt.endian;
 import urt.hash;
 import urt.inet;
 import urt.log;
+import urt.mem.temp : talloc;
 import urt.time;
 
 import router.iface.packet;
@@ -60,15 +62,16 @@ void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, ref const Packet
     const oip = cast(const IPv4Header*)original.data.ptr;
 
     // Don't reply to multicast/broadcast.
-    if (is_multicast_v4(oip.dst) || oip.dst == IPAddr.broadcast)
+    IPAddr oip_dst = IPAddr(oip.dst);
+    if (is_multicast_v4(oip_dst) || oip_dst == IPAddr.broadcast)
     {
         version (DebugICMP)
-            write_log(Severity.debug_, "icmp", null, "suppress error type=", type, " code=", code, " (orig dst=", oip.dst, " is mcast/bcast)");
+            write_log(Severity.debug_, "icmp", null, "suppress error type=", type, " code=", code, " (orig dst=", oip_dst, " is mcast/bcast)");
         return;
     }
 
     // Don't reply to non-first fragments (errors are only sensible for full datagrams).
-    ushort frag = (ushort(oip.flags_frag[0]) << 8) | oip.flags_frag[1];
+    ushort frag = oip.flags_frag.bigEndianToNative!ushort;
     if ((frag & 0x1FFF) != 0)
         return;
 
@@ -96,16 +99,17 @@ void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, ref const Packet
         }
     }
 
-    IPAddr src = stack.select_source_v4(oip.src);
+    IPAddr oip_src = IPAddr(oip.src);
+    IPAddr src = stack.select_source_v4(oip_src);
     if (src == IPAddr.any)
     {
         version (DebugICMP)
-            write_log(Severity.debug_, "icmp", null, "suppress error type=", type, " code=", code, " (no source addr for ", oip.src, ")");
+            write_log(Severity.debug_, "icmp", null, "suppress error type=", type, " code=", code, " (no source addr for ", oip_src, ")");
         return;     // we have no IP that can reach the original sender; can't reply
     }
 
     version (DebugICMP)
-        write_log(Severity.debug_, "icmp", null, "tx error type=", type, " code=", code, " src=", src, " dst=", oip.src, " (orig proto=", oip.protocol, " orig dst=", oip.dst, ")");
+        write_log(Severity.debug_, "icmp", null, "tx error type=", type, " code=", code, " src=", src, " dst=", oip_src, " (orig proto=", oip.protocol, " orig dst=", oip_dst, ")");
 
     enum size_t max_size = 1500;
     size_t orig_quote = oip_hdr_len + 8;
@@ -120,36 +124,29 @@ void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, ref const Packet
     auto rip = cast(IPv4Header*)buf.ptr;
     rip.ver_ihl  = 0x45;
     rip.tos      = 0;
-    rip.total_length[0] = cast(ubyte)(total >> 8);
-    rip.total_length[1] = cast(ubyte)total;
+    rip.total_length = nativeToBigEndian(cast(ushort)total);
     ushort ip_id = next_ip_id();
-    rip.ident[0] = cast(ubyte)(ip_id >> 8);
-    rip.ident[1] = cast(ubyte)ip_id;
+    rip.ident = nativeToBigEndian(ip_id);
     rip.flags_frag[0] = 0;
     rip.flags_frag[1] = 0;
     rip.ttl      = 64;
     rip.protocol = IpProtocol.icmp;
     rip.checksum[] = 0;
-    rip.src = src;
-    rip.dst = oip.src;
+    rip.src = src.b;
+    rip.dst = oip_src.b;
     ushort ihc = internet_checksum(buf[0 .. IPv4Header.sizeof]);
-    rip.checksum[0] = cast(ubyte)(ihc >> 8);
-    rip.checksum[1] = cast(ubyte)ihc;
+    rip.checksum = nativeToBigEndian(ihc);
 
     ubyte* icmp = buf.ptr + IPv4Header.sizeof;
     icmp[0] = type;
     icmp[1] = code;
     icmp[2] = 0;
     icmp[3] = 0;
-    icmp[4] = cast(ubyte)(code_data >> 24);
-    icmp[5] = cast(ubyte)(code_data >> 16);
-    icmp[6] = cast(ubyte)(code_data >> 8);
-    icmp[7] = cast(ubyte)code_data;
+    icmp[4..8] = code_data.nativeToBigEndian;
     icmp[8 .. 8 + orig_quote] = (cast(const(ubyte)*)original.data.ptr)[0 .. orig_quote];
 
     ushort cc = internet_checksum(buf[IPv4Header.sizeof .. total]);
-    icmp[2] = cast(ubyte)(cc >> 8);
-    icmp[3] = cast(ubyte)cc;
+    icmp[2..4] = cc.nativeToBigEndian;
 
     Packet pkt;
     pkt.init!RawFrame(buf[0 .. total]);
@@ -166,7 +163,7 @@ void icmp_input(ref IPStack stack, ref Packet pkt)
 
     const ip = cast(const IPv4Header*)pkt.data.ptr;
     size_t ip_hdr_len = ip.ihl * 4;
-    size_t ip_total = (size_t(ip.total_length[0]) << 8) | ip.total_length[1];
+    size_t ip_total = ip.total_length.bigEndianToNative!ushort;
     if (ip_total < ip_hdr_len + IcmpHeader.sizeof || ip_total > pkt.data.length)
         return;
 
@@ -210,8 +207,7 @@ void handle_dest_unreachable(ref IPStack stack, const(ubyte)[] icmp)
         return;
 
     ubyte code = icmp[1];
-    uint code_data = (uint(icmp[4]) << 24) | (uint(icmp[5]) << 16)
-                   | (uint(icmp[6]) << 8)  |  uint(icmp[7]);
+    uint code_data = icmp[4..8].bigEndianToNative!uint;
 
     const(ubyte)[] inner = icmp[IcmpHeader.sizeof + 4 .. $];
     auto inner_ip = cast(const IPv4Header*)inner.ptr;
@@ -224,12 +220,12 @@ void handle_dest_unreachable(ref IPStack stack, const(ubyte)[] icmp)
     if (inner_ip.protocol == IpProtocol.tcp)
     {
         const(ubyte)[] tcp8 = inner[inner_hdr_len .. inner_hdr_len + 8];
-        ushort src_port = (ushort(tcp8[0]) << 8) | tcp8[1];
-        ushort dst_port = (ushort(tcp8[2]) << 8) | tcp8[3];
+        ushort src_port = tcp8[0..2].bigEndianToNative!ushort;
+        ushort dst_port = tcp8[2..4].bigEndianToNative!ushort;
         // inner_ip.src is *us* (the original sender), inner_ip.dst is the peer.
         tcp_handle_unreachable(stack, code, code_data,
-                               inner_ip.src, src_port,
-                               inner_ip.dst, dst_port);
+                               IPAddr(inner_ip.src), src_port,
+                               IPAddr(inner_ip.dst), dst_port);
     }
     // TODO: UDP unreachables -> notify socket layer
 }
@@ -240,33 +236,36 @@ private:
 void handle_echo_request(ref IPStack stack, ref const Packet pkt, size_t ip_hdr_len)
 {
     enum max_size = 1500;
-    const(ubyte)[] datagram = (cast(const(ubyte)*)pkt.data.ptr)[0 .. pkt.data.length];
+    const ip = cast(const IPv4Header*)pkt.data.ptr;
+    size_t ip_total = ip.total_length.bigEndianToNative!ushort;
+    if (ip_total < ip_hdr_len + IcmpHeader.sizeof || ip_total > pkt.data.length)
+        return;
+
+    const(ubyte)[] datagram = (cast(const(ubyte)*)pkt.data.ptr)[0 .. ip_total];
     if (datagram.length > max_size)
         return;
 
-    ubyte[max_size] buf = void;
-    buf[0 .. datagram.length] = datagram[];
+    ubyte[] buf = cast(ubyte[])talloc(datagram.length);
+    buf[] = datagram[];
 
     auto rip = cast(IPv4Header*)buf.ptr;
-    IPAddr orig_dst = rip.dst;
+    IPAddr orig_dst = IPAddr(rip.dst);
     rip.dst = rip.src;
-    rip.src = orig_dst;
+    rip.src = orig_dst.b;
 
     version (DebugICMP)
         write_log(Severity.debug_, "icmp", null, "tx echo-reply src=", rip.src, " dst=", rip.dst, " (", datagram.length, " bytes)");
     rip.ttl = 64;
     rip.checksum[] = 0;
     ushort ihc = internet_checksum(buf[0 .. ip_hdr_len]);
-    rip.checksum[0] = cast(ubyte)(ihc >> 8);
-    rip.checksum[1] = cast(ubyte)ihc;
+    rip.checksum = nativeToBigEndian(ihc);
 
     ubyte* icmp = buf.ptr + ip_hdr_len;
     icmp[0] = IcmpType.echo_reply;
     icmp[2] = 0;
     icmp[3] = 0;
     ushort cc = internet_checksum(buf[ip_hdr_len .. datagram.length]);
-    icmp[2] = cast(ubyte)(cc >> 8);
-    icmp[3] = cast(ubyte)cc;
+    icmp[2..4] = cc.nativeToBigEndian;
 
     Packet reply;
     reply.init!RawFrame(buf[0 .. datagram.length]);

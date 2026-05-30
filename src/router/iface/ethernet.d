@@ -80,13 +80,11 @@ protected:
             return;
         }
 
-        ref mac_hdr = *cast(const Ethernet*)data.ptr;
-
         Packet packet;
         ref eth = packet.init!Ethernet(data, ts);
-        eth.dst = mac_hdr.dst;
-        eth.src = mac_hdr.src;
-        eth.ether_type = loadBigEndian(&mac_hdr.ether_type);
+        eth.dst = MACAddress(data[0 .. 6]);
+        eth.src = MACAddress(data[6 .. 12]);
+        eth.ether_type = data[12 .. 14].bigEndianToNative!ushort;
         packet._offset = 14;
 
         if (eth.ether_type == 0x88E5) // MACsec
