@@ -470,6 +470,10 @@ nothrow @nogc:
         if (deadline <= now)
             return;
         _wake_event.wait(deadline - now);
+
+        // count the system idle time to get a sense of load
+        import urt.system : count_system_load;
+        count_system_load(now);
     }
 
     void process_events()
@@ -910,9 +914,24 @@ private:
 
     void heartbeat(MonoTime scheduled)
     {
+        version (Embedded)
+        {
+            if (++_heartbeat_ticks >= update_rate_hz)
+            {
+                _heartbeat_ticks = 0;
+                ++_heartbeat_count;
+                import urt.log : writeInfo;
+                import urt.system : get_cpu_load;
+                writeInfo("hb=", _heartbeat_count, " load=", get_cpu_load(), "%");
+            }
+        }
+
         update();
         schedule(scheduled + msecs(1000 / update_rate_hz), &heartbeat);
     }
+
+    uint _heartbeat_ticks;
+    uint _heartbeat_count;
 }
 
 Element* resolve_global_element(const(char)[] path) nothrow @nogc
