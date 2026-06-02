@@ -127,6 +127,9 @@
     <Filter Include="src\protocol\ip">
       <UniqueIdentifier>{7a6b8c28-6a40-46e8-9b2e-2e28576d413a}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\ip\tcp">
+      <UniqueIdentifier>{8b7d2c40-7c51-58fa-bd4f-4a39687e535c}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\protocol\tls">
       <UniqueIdentifier>{8b7c9d39-7b51-57f9-ac3f-3f39687e524b}</UniqueIdentifier>
     </Filter>
@@ -765,8 +768,35 @@
     <DCompile Include="src\protocol\ip\stack.d">
       <Filter>src\protocol\ip</Filter>
     </DCompile>
-    <DCompile Include="src\protocol\ip\tcp.d">
-      <Filter>src\protocol\ip</Filter>
+    <DCompile Include="src\protocol\ip\tcp\ip.d">
+      <Filter>src\protocol\ip\tcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\tcp\opt.d">
+      <Filter>src\protocol\ip\tcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\tcp\package.d">
+      <Filter>src\protocol\ip\tcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\tcp\pbuf.d">
+      <Filter>src\protocol\ip\tcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\tcp\prot_tcp.d">
+      <Filter>src\protocol\ip\tcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\tcp\tcp.d">
+      <Filter>src\protocol\ip\tcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\tcp\tcpbase.d">
+      <Filter>src\protocol\ip\tcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\tcp\tcp_in.d">
+      <Filter>src\protocol\ip\tcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\tcp\tcp_out.d">
+      <Filter>src\protocol\ip\tcp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ip\tcp\tcp_priv.d">
+      <Filter>src\protocol\ip\tcp</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ip\udp.d">
       <Filter>src\protocol\ip</Filter>

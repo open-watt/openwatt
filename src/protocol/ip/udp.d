@@ -12,7 +12,7 @@ import urt.time;
 import router.iface;
 import router.iface.packet;
 
-import protocol.ip : IPv4Header, IPProtocol;
+import protocol.ip : IPv4Header, IPProtocol, pseudo_header_checksum;
 import protocol.ip.icmp;
 import protocol.ip.stack;
 
@@ -227,15 +227,3 @@ void udp_free_datagram_data(ref UdpDatagram d)
 }
 
 
-private:
-
-ushort pseudo_header_checksum(IPAddr src, IPAddr dst, ubyte protocol, ushort transport_length) pure
-{
-    ubyte[12] ph = void;
-    ph[0..4]   = src.b;
-    ph[4..8]   = dst.b;
-    ph[8]      = 0;
-    ph[9]      = protocol;
-    ph[10..12] = transport_length.nativeToBigEndian;
-    return internet_checksum(ph[]);
-}

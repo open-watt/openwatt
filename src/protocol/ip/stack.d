@@ -102,13 +102,20 @@ nothrow @nogc:
         // TODO: RouteResult r = route_lookup_v6(pkt); dispatch(pkt, r, firewall_v6);
     }
 
-    void update()
+    void tick(MonoTime now)
     {
-        MonoTime now = getTime();
-        neighbour_v4.tick(now);
-        neighbour_v6.tick(now);
+
         version (UseInternalIPStack)
-            tcp_tick(this, now);
+        {            tcp_fasttmr();
+            if ((_tick_counter & 0x01) == 0)
+                tcp_slowtmr();
+        }
+        if ((_tick_counter & 0x03) == 0)
+        {
+            neighbour_v4.tick(now);
+            neighbour_v6.tick(now);
+        }
+        ++_tick_counter;
     }
 
     IPAddr select_source_v4(IPAddr dst)
@@ -281,6 +288,16 @@ private:
         if (non_forwardable)
             return;
 
+        // lwIP-style "current packet" globals consumed by tcp_input via
+        // ip_current_src_addr() / ip_current_dest_addr() / ip_current_netif().
+        import protocol.ip.tcp.ip : ip_data;
+        import protocol.ip.tcp.opt : IPADDR_TYPE_V4;
+        ip_data.current_src.u_addr.ip4 = ip.src;
+        ip_data.current_src.type       = IPADDR_TYPE_V4;
+        ip_data.current_dst.u_addr.ip4 = ip.dst;
+        ip_data.current_dst.type       = IPADDR_TYPE_V4;
+        ip_data.current_input_netif    = iface;
+
         RouteResult r = route_lookup_v4(pkt);
         dispatch(pkt, r, firewall_v4);
     }
@@ -433,7 +450,7 @@ private:
                 .icmp_input(this, pkt);
                 break;
             case IPProtocol.tcp:
-                .tcp_input(this, pkt);
+                .tcp_ingress_v4(this, pkt);
                 break;
             case IPProtocol.udp:
                 .udp_input(this, pkt);
@@ -459,6 +476,7 @@ private:
     NeighbourCache!IPv6Addr neighbour_v6;
     FirewallChains firewall_v4;
     FirewallChains firewall_v6;
+    uint _tick_counter;
     // TODO: ReassemblyTable reasm;
     // TODO: ConntrackTable conntrack;
 }

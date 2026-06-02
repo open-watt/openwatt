@@ -168,7 +168,16 @@
     <DCompile Include="src\protocol\ip\route.d" />
     <DCompile Include="src\protocol\ip\socket.d" />
     <DCompile Include="src\protocol\ip\stack.d" />
-    <DCompile Include="src\protocol\ip\tcp.d" />
+    <DCompile Include="src\protocol\ip\tcp\ip.d" />
+    <DCompile Include="src\protocol\ip\tcp\opt.d" />
+    <DCompile Include="src\protocol\ip\tcp\package.d" />
+    <DCompile Include="src\protocol\ip\tcp\pbuf.d" />
+    <DCompile Include="src\protocol\ip\tcp\prot_tcp.d" />
+    <DCompile Include="src\protocol\ip\tcp\tcp.d" />
+    <DCompile Include="src\protocol\ip\tcp\tcpbase.d" />
+    <DCompile Include="src\protocol\ip\tcp\tcp_in.d" />
+    <DCompile Include="src\protocol\ip\tcp\tcp_out.d" />
+    <DCompile Include="src\protocol\ip\tcp\tcp_priv.d" />
     <DCompile Include="src\protocol\ip\tcp_stream.d" />
     <DCompile Include="src\protocol\ip\udp.d" />
     <DCompile Include="src\protocol\ip\udp_stream.d" />
@@ -1640,7 +1649,7 @@
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>UseInternalIPStack;AllocTracking;LWIP_TCP;TCP_QUEUE_OOSEQ;TCP_CALCULATE_EFF_SEND_MSS;CHECKSUM_GEN_TCP</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1672,7 +1681,7 @@
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>AllocTracking;LWIP_TCP;TCP_QUEUE_OOSEQ;TCP_CALCULATE_EFF_SEND_MSS;CHECKSUM_GEN_TCP</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1707,6 +1716,7 @@
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>LWIP_TCP;TCP_QUEUE_OOSEQ;TCP_CALCULATE_EFF_SEND_MSS;CHECKSUM_GEN_TCP</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1739,7 +1749,7 @@
       <ImportCPaths>third_party/npcap-sdk-1.15/Include/</ImportCPaths>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>AllocTracking;LWIP_TCP;TCP_QUEUE_OOSEQ;TCP_CALCULATE_EFF_SEND_MSS;CHECKSUM_GEN_TCP</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1771,7 +1781,7 @@
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>AllocTracking;LWIP_TCP;TCP_QUEUE_OOSEQ;TCP_CALCULATE_EFF_SEND_MSS;CHECKSUM_GEN_TCP</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1806,6 +1816,7 @@
       <AdditionalOptions>-preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>LWIP_TCP;TCP_QUEUE_OOSEQ;TCP_CALCULATE_EFF_SEND_MSS;CHECKSUM_GEN_TCP</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1836,7 +1847,7 @@
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>AllocTracking;LWIP_TCP;TCP_QUEUE_OOSEQ;TCP_CALCULATE_EFF_SEND_MSS;CHECKSUM_GEN_TCP</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1867,7 +1878,7 @@
       <Unittest>true</Unittest>
       <Main>true</Main>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>AllocTracking;LWIP_TCP;TCP_QUEUE_OOSEQ;TCP_CALCULATE_EFF_SEND_MSS;CHECKSUM_GEN_TCP</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1902,6 +1913,7 @@
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>LWIP_TCP;TCP_QUEUE_OOSEQ;TCP_CALCULATE_EFF_SEND_MSS;CHECKSUM_GEN_TCP</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1932,7 +1944,7 @@
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>AllocTracking;LWIP_TCP;TCP_QUEUE_OOSEQ;TCP_CALCULATE_EFF_SEND_MSS;CHECKSUM_GEN_TCP</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1963,7 +1975,7 @@
       <Unittest>true</Unittest>
       <Main>true</Main>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>AllocTracking;LWIP_TCP;TCP_QUEUE_OOSEQ;TCP_CALCULATE_EFF_SEND_MSS;CHECKSUM_GEN_TCP</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -1998,6 +2010,7 @@
       <EnableDebugMixin>true</EnableDebugMixin>
       <AdditionalOptions>-conf=ldc2.conf -preview=bitfields %(AdditionalOptions)</AdditionalOptions>
       <DRuntimeLibrary>None</DRuntimeLibrary>
+      <VersionIdentifiers>LWIP_TCP;TCP_QUEUE_OOSEQ;TCP_CALCULATE_EFF_SEND_MSS;CHECKSUM_GEN_TCP</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>

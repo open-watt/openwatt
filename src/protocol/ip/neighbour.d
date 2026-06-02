@@ -13,7 +13,7 @@ import router.iface.packet;
 private alias log = Log!"neighbour";
 
 // TODO: replace fixed-slot pending queue with byte-budget buffer (cf. Linux unres_qlen_bytes).
-private enum pending_queue_depth = 3;
+private enum pending_queue_depth = 16;
 
 nothrow @nogc:
 

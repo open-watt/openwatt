@@ -49,6 +49,21 @@ SOURCES := $(APP_SOURCES) $(URT_SOURCES)
 
 DFLAGS := $(DFLAGS) $(FEATURE_DFLAGS)
 
+# lwIP-port TCP cross-cutting feature flags. LWIP_TCP gates the whole port;
+# the others toggle code paths referenced from multiple files. Strictly file-
+# local flags (LWIP_IPV4 in tcp.d, CHECKSUM_CHECK_TCP in tcp_in.d, per-subsystem
+# debug toggles) live at the top of their respective .d files instead.
+#
+# CHECKSUM_GEN_TCP stays here because, although it's only *tested* directly in
+# tcp_out.d, it's a *source* in composite derivations across tcp_priv.d /
+# tcp_out.d / package.d for TCP_CHECKSUM_ON_COPY. Per-file declarations would
+# silently desync.
+LWIP_DFLAGS := $(VERSION_FLAG)LWIP_TCP \
+               $(VERSION_FLAG)TCP_QUEUE_OOSEQ \
+               $(VERSION_FLAG)TCP_CALCULATE_EFF_SEND_MSS \
+               $(VERSION_FLAG)CHECKSUM_GEN_TCP
+DFLAGS := $(DFLAGS) $(LWIP_DFLAGS)
+
 # =======================================================================
 # App-specific compiler flags
 #

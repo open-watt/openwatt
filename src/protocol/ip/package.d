@@ -2,11 +2,13 @@ module protocol.ip;
 
 import urt.array;
 import urt.inet;
+import urt.mem : defaultAllocator;
 import urt.mem.temp;
 import urt.socket;
 import urt.string;
 import urt.time;
 import urt.log;
+import urt.time : MonoTime, getTime, msecs;
 
 import manager.collection;
 import manager.console;
@@ -23,14 +25,27 @@ import protocol.ip.udp_stream;
 version (UseInternalIPStack)
 {
     import protocol.ip.udp;
-    import protocol.ip.tcp : TcpPcb, TcpState, tcp_assign_id, tcp_send_data, tcp_close, free_pcb,
-        native_tcp_connect = tcp_connect, native_tcp_listen = tcp_listen;
+    import protocol.ip.tcp;
 
     public import protocol.ip.stack : IPStack;
 }
 
 import router.iface;
 import router.iface.ethernet;
+
+
+ushort pseudo_header_checksum(IPAddr src, IPAddr dst, ubyte protocol, ushort transport_length) pure nothrow @nogc
+{
+    import urt.hash : internet_checksum;
+    ubyte[12] ph = void;
+    ph[0..4]  = src.b[];
+    ph[4..8]  = dst.b[];
+    ph[8]     = 0;
+    ph[9]     = protocol;
+    ph[10]    = cast(ubyte)(transport_length >> 8);
+    ph[11]    = cast(ubyte)transport_length;
+    return internet_checksum(ph[]);
+}
 
 version(Windows)
 {
@@ -131,9 +146,11 @@ nothrow @nogc:
 //     we ever position as a gateway, otherwise low)
 //
 // Neighbour cache (protocol/ip/neighbour.d)
-//   - Single-slot pending-packet queue per entry. On a cold ARP burst all
-//     but the last queued packet is dropped. Aging + NUD probes ARE
-//     implemented; resolution kicks off on first miss. [small] (low)
+//   - Fixed-slot pending-packet queue per entry (currently 32). Beyond that
+//     a cold ARP burst drops the oldest queued packet. Aging + NUD probes
+//     ARE implemented; resolution kicks off on first miss. Move to byte-
+//     budget like Linux's unres_qlen_bytes if real workloads ever push past
+//     this. [small] (low)
 //   - No gratuitous ARP on address bind. Peers won't refresh stale caches
 //     when we change or move our IP. [small] (med — IP roams between iface
 //     are silent failures)
@@ -266,18 +283,14 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
         if (remote.family != AddressFamily.ipv4)
             return null;     // in-tree stack TCP is v4-only for now...
 
-        TcpPcb* pcb = defaultAllocator().allocT!TcpPcb();
-        tcp_assign_id(pcb);
-        pcb.handle = TcpEndpointOwned;     // keep tcp_tick from auto-freeing it
+        tcp_pcb* pcb = tcp_new();
+        if (pcb is null)
+            return null;
         if (local && local.family == AddressFamily.ipv4)
         {
-            pcb.local_addr = local._a.ipv4.addr;
-            pcb.local_port = local._a.ipv4.port;
+            ip_addr_t la = ip_addr_v4(local._a.ipv4.addr);
+            tcp_bind(pcb, &la, local._a.ipv4.port);     // port 0 -> lwIP picks an ephemeral
         }
-        if (pcb.local_port == 0)
-            pcb.local_port = allocate_tcp_port();
-        pcb.remote_addr = remote._a.ipv4.addr;
-        pcb.remote_port = remote._a.ipv4.port;
 
         TCPConnection* c = defaultAllocator().allocT!TCPConnection();
         c._pcb = pcb;
@@ -285,12 +298,13 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
         c._on_recv = on_recv;
         c._on_event = on_event;
         c._phase = TCPConnection.Phase.connecting;
-        pcb.conn_owner = c;
+        install_conn_callbacks(c);
 
-        if (!native_tcp_connect(*_stack_ptr, pcb))
+        ip_addr_t ra = ip_addr_v4(remote._a.ipv4.addr);
+        if (protocol.ip.tcp.tcp_connect(pcb, &ra, remote._a.ipv4.port, &conn_on_connected) != ERR_OK)
         {
-            pcb.conn_owner = null;
-            free_pcb(pcb);
+            tcp_arg(pcb, null);
+            tcp_abort(pcb);
             defaultAllocator().freeT(c);
             return null;
         }
@@ -339,20 +353,32 @@ TCPListener* tcp_listen(InetAddress local, TCPAcceptHandler on_accept)
         if (local.family != AddressFamily.ipv4)
             return null;     // in-tree stack TCP is v4-only
 
-        TcpPcb* pcb = defaultAllocator().allocT!TcpPcb();
-        tcp_assign_id(pcb);
-        pcb.handle = TcpEndpointOwned;
-        pcb.local_addr = local._a.ipv4.addr;
-        pcb.local_port = local._a.ipv4.port;
-        if (pcb.local_port == 0)
-            pcb.local_port = allocate_tcp_port();
+        tcp_pcb* pcb = tcp_new();
+        if (pcb is null)
+            return null;
+        ip_addr_t la = ip_addr_v4(local._a.ipv4.addr);
+        if (tcp_bind(pcb, &la, local._a.ipv4.port) != ERR_OK)
+        {
+            tcp_arg(pcb, null);
+            tcp_abort(pcb);
+            return null;
+        }
+
+        // tcp_listen swaps the pcb for a smaller listen pcb and frees the original.
+        tcp_pcb* lpcb = protocol.ip.tcp.tcp_listen(pcb);
+        if (lpcb is null)
+        {
+            tcp_arg(pcb, null);
+            tcp_abort(pcb);
+            return null;
+        }
 
         TCPListener* l = defaultAllocator().allocT!TCPListener();
-        l._lpcb = pcb;
-        l._local = InetAddress(pcb.local_addr, pcb.local_port);
+        l._lpcb = lpcb;
+        l._local = InetAddress(lpcb.local_ip.u_addr.ip4, lpcb.local_port);
         l._on_accept = on_accept;
-        pcb.listen_owner = l;
-        native_tcp_listen(pcb);     // sets state=listen, registers
+        tcp_arg(lpcb, l);
+        tcp_accept(lpcb, &listener_on_accept);
         _tcp_listeners ~= l;
         return l;
     }
@@ -477,7 +503,7 @@ nothrow @nogc:
     version (UseInternalIPStack)
     {
         InetAddress local()
-            => _pcb ? InetAddress(_pcb.local_addr, _pcb.local_port) : InetAddress();
+            => _pcb ? InetAddress(_pcb.local_ip.u_addr.ip4, _pcb.local_port) : InetAddress();
 
         ptrdiff_t send(const(void[])[] data...)
         {
@@ -493,10 +519,10 @@ nothrow @nogc:
             foreach (b; data)
                 _tx ~= cast(const(ubyte)[])b;
             flush_tx();
-            return _phase == Phase.open ? total : 0;
+            return total;
         }
 
-        // The native stack has no keepalive / Nagle yet; record intent only.
+        // lwIP's keepalive timer isn't enabled in this port; record intent only.
         void enable_keepalive(bool enable, Duration idle = seconds(10), Duration interval = seconds(1), int count = 10)
         {
             _keepalive = enable;
@@ -510,23 +536,25 @@ nothrow @nogc:
         {
             _no_delay = enable;
             _no_delay_set = true;
+            if (_phase == Phase.open && _pcb)
+            {
+                if (enable)
+                    tcp_nagle_disable(_pcb);
+                else
+                    tcp_nagle_enable(_pcb);
+            }
         }
 
+        // Flag and silence lwIP callbacks; the sweep does tcp_close + free outside
+        // any callback context (close may be invoked from within a recv/event handler).
         void close()
         {
             if (_closing)
                 return;
-            if (_pcb)
-            {
-                _pcb.conn_owner = null;
-                _pcb.handle = 0;     // detach: tcp_tick frees the pcb once it's fully closed
-                tcp_close(*_stack_ptr, _pcb);
-                if (_pcb.state == TcpState.closed)
-                    free_pcb(_pcb);
-                _pcb = null;
-            }
-            _phase = Phase.dead;
             _closing = true;
+            _phase = Phase.dead;
+            if (_pcb)
+                tcp_arg(_pcb, null);
         }
     }
     else
@@ -648,56 +676,47 @@ private:
 
     version (UseInternalIPStack)
     {
-        TcpPcb* _pcb;
+        tcp_pcb* _pcb;
 
-        // RX is pushed inline via deliver(); the pump only observes control-state
-        // transitions (connect completion, peer close, reset) and drains TX.
+        // RX, connect completion, peer close and reset all arrive via lwIP
+        // callbacks (conn_on_* below). The pump is a safety net that retries TX
+        // stuck behind a momentarily full send buffer; the sent callback normally
+        // re-drains it as the peer acks.
         void pump()
         {
-            if (_closing || _pcb is null)
-                return;
-            final switch (_phase)
-            {
-                case Phase.connecting:
-                    if (_pcb.state == TcpState.established)
-                    {
-                        _phase = Phase.open;
-                        _remote = InetAddress(_pcb.remote_addr, _pcb.remote_port);
-                        if (_on_event)
-                            _on_event(&this, IPEvent.connected);
-                    }
-                    else if (_pcb.error_event || _pcb.state == TcpState.closed)
-                        fail(IPEvent.error);
-                    break;
-                case Phase.open:
-                    if (_pcb.error_event || _pcb.state == TcpState.closed)
-                        fail(IPEvent.error);
-                    else if (_pcb.fin_seen)
-                        fail(IPEvent.closed);
-                    else
-                        flush_tx();
-                    break;
-                case Phase.dead:
-                    break;
-            }
-        }
-
-        package(protocol.ip) void deliver(const(ubyte)[] data, MonoTime rx_time)
-        {
-            if (_on_recv)
-                _on_recv(&this, data, rx_time);
+            if (!_closing && _pcb && _tx.length)
+                flush_tx();
         }
 
         void flush_tx()
         {
             if (_pcb is null)
                 return;
+            bool wrote = false;
             while (_tx.length > 0)
             {
-                size_t n = tcp_send_data(*_stack_ptr, _pcb, _tx[]);
-                if (n == 0)
-                    break;     // send buffer full; drained on a later pump
-                _tx.remove(0, n);
+                ushort cap = tcp_sndbuf(_pcb);
+                if (cap == 0)
+                    break;
+                ushort chunk = _tx.length < cap ? cast(ushort)_tx.length : cap;
+                if (tcp_write(_pcb, _tx.ptr, chunk, TCP_WRITE_FLAG_COPY) != ERR_OK)
+                    break;     // ERR_MEM (send queue full); retried on the next ack / pump
+                _tx.remove(0, chunk);
+                wrote = true;
+            }
+            if (wrote)
+                tcp_output(_pcb);
+        }
+
+        // tcp_close/abort the pcb. Runs from the sweep on the main loop, never from
+        // inside an lwIP callback, so tcp_abort here is legal.
+        void release()
+        {
+            if (_pcb)
+            {
+                if (tcp_close(_pcb) != ERR_OK)
+                    tcp_abort(_pcb);
+                _pcb = null;
             }
         }
     }
@@ -754,16 +773,9 @@ nothrow @nogc:
         {
             if (_closing)
                 return;
-            if (_lpcb)
-            {
-                _lpcb.listen_owner = null;
-                _lpcb.handle = 0;
-                tcp_close(*_stack_ptr, _lpcb);     // RSTs unaccepted children, frees the listen pcb
-                if (_lpcb.state == TcpState.closed)
-                    free_pcb(_lpcb);
-                _lpcb = null;
-            }
             _closing = true;
+            if (_lpcb)
+                tcp_arg(_lpcb, null);
         }
     }
     else
@@ -784,16 +796,15 @@ private:
 
     version (UseInternalIPStack)
     {
-        TcpPcb* _lpcb;
+        tcp_pcb* _lpcb;
 
-        package(protocol.ip) void on_child(TcpPcb* child, MonoTime rx_time)
+        void release()
         {
-            child.handle = TcpEndpointOwned;
-            TCPConnection* c = register_tcp_conn_pcb(child);
-            if (_on_accept)
-                _on_accept(&this, c, rx_time);
-            else
-                c.close();
+            if (_lpcb)
+            {
+                tcp_close(_lpcb);     // RSTs unaccepted children, frees the listen pcb
+                _lpcb = null;
+            }
         }
     }
     else
@@ -933,6 +944,12 @@ nothrow @nogc:
         version (UseInternalIPStack)
         {
             import protocol.ip.socket : install_socket_backend;
+            import protocol.ip.tcp : tcp_init;
+            import protocol.ip.tcp.ip : tcp_attach_stack;
+
+            tcp_init();
+            tcp_attach_stack(&_stack);
+
             install_socket_backend(&_stack);
             _stack_ptr = &_stack;
         }
@@ -959,6 +976,8 @@ nothrow @nogc:
             import protocol.ip.tcp : tcp_print;
             g_app.console.register_command!tcp_print("/protocol/ip/tcp", this, "print");
             g_app.console.register_command!neighbour_v4_print("/protocol/ip/neighbour", this, "print");
+
+            g_app.schedule(getTime() + msecs(250), &ip_tick);
         }
         else
             _worker.start();
@@ -968,6 +987,13 @@ nothrow @nogc:
     {
         version (UseInternalIPStack) {} else
             _worker.stop();
+    }
+
+    version (UseInternalIPStack)
+    void ip_tick(MonoTime scheduled)
+    {
+        _stack.tick(scheduled);
+        g_app.schedule(scheduled + msecs(250), &ip_tick);
     }
 
     version (UseInternalIPStack)
@@ -1117,9 +1143,6 @@ nothrow @nogc:
         Collection!IPv6Pool().update_all();
         Collection!IPRoute().update_all();
         Collection!TCPServer().update_all();
-
-        version (UseInternalIPStack)
-            _stack.update();
     }
 
 private:
@@ -1159,6 +1182,7 @@ void pump_ip_endpoints()
         {
             if (_tcp_conns[i]._closing)
             {
+                _tcp_conns[i].release();
                 defaultAllocator().freeT(_tcp_conns[i]);
                 _tcp_conns.removeSwapLast(i);
             }
@@ -1167,6 +1191,7 @@ void pump_ip_endpoints()
         {
             if (_tcp_listeners[i]._closing)
             {
+                _tcp_listeners[i].release();
                 defaultAllocator().freeT(_tcp_listeners[i]);
                 _tcp_listeners.removeSwapLast(i);
             }
@@ -1185,11 +1210,8 @@ void pump_ip_endpoints()
 
 version (UseInternalIPStack)
 {
-    enum int TcpEndpointOwned = -1;
-
     __gshared IPStack* _stack_ptr;
     __gshared ushort _next_udp_port = 49_152;
-    __gshared ushort _next_tcp_port = 49_152;
 
     ushort allocate_udp_port()
     {
@@ -1212,22 +1234,109 @@ version (UseInternalIPStack)
         return _next_udp_port;
     }
 
-    ushort allocate_tcp_port()
+    ip_addr_t ip_addr_v4(IPAddr a)
     {
-        ushort p = _next_tcp_port;
-        _next_tcp_port = _next_tcp_port == 65_535 ? 49_152 : cast(ushort)(_next_tcp_port + 1);
-        return p;
+        ip_addr_t r;
+        r.u_addr.ip4 = a;
+        r.type = IPADDR_TYPE_V4;
+        return r;
     }
 
-    TCPConnection* register_tcp_conn_pcb(TcpPcb* pcb)
+    void install_conn_callbacks(TCPConnection* c)
     {
-        TCPConnection* c = defaultAllocator().allocT!TCPConnection();
-        c._pcb = pcb;
+        tcp_arg(c._pcb, c);
+        tcp_recv(c._pcb, &conn_on_recv);
+        tcp_sent(c._pcb, &conn_on_sent);
+        tcp_err(c._pcb, &conn_on_err);
+    }
+
+    // lwIP raw-API callbacks. `arg` is the owning endpoint handle (set via
+    // tcp_arg); close() clears it to null so a callback fired between close()
+    // and the sweep becomes a no-op (the pcb is torn down by release()).
+
+    err_t conn_on_recv(void* arg, tcp_pcb* pcb, pbuf* p, err_t err)
+    {
+        TCPConnection* c = cast(TCPConnection*)arg;
+        if (c is null)
+        {
+            if (p !is null)
+                pbuf_free(p);
+            return ERR_OK;
+        }
+        if (p is null)
+        {
+            c.fail(IPEvent.closed);     // peer FIN; pcb lingers in CLOSE_WAIT until we close
+            return ERR_OK;
+        }
+        ushort total = p.tot_len;
+        if (total > 0)
+        {
+            // ack the window before delivering: the handler may close() the conn,
+            // and we must not touch pcb afterward.
+            tcp_recved(pcb, total);
+            if (c._on_recv)
+            {
+                MonoTime now = getTime();
+                for (pbuf* q = p; q !is null && !c._closing; q = q.next)
+                {
+                    if (q.len)
+                        c._on_recv(c, (cast(const(ubyte)*)q.payload)[0 .. q.len], now);
+                }
+            }
+        }
+        pbuf_free(p);
+        return ERR_OK;
+    }
+
+    err_t conn_on_sent(void* arg, tcp_pcb* pcb, ushort len)
+    {
+        TCPConnection* c = cast(TCPConnection*)arg;
+        if (c !is null && !c._closing && c._tx.length)
+            c.flush_tx();
+        return ERR_OK;
+    }
+
+    void conn_on_err(void* arg, err_t err)
+    {
+        TCPConnection* c = cast(TCPConnection*)arg;
+        if (c is null)
+            return;
+        c._pcb = null;     // lwIP frees the pcb before firing on_err
+        c.fail(IPEvent.error);
+    }
+
+    err_t conn_on_connected(void* arg, tcp_pcb* pcb, err_t err)
+    {
+        TCPConnection* c = cast(TCPConnection*)arg;
+        if (c is null || c._phase != TCPConnection.Phase.connecting)
+            return ERR_OK;
         c._phase = TCPConnection.Phase.open;
-        c._remote = InetAddress(pcb.remote_addr, pcb.remote_port);
-        pcb.conn_owner = c;
+        c._remote = InetAddress(pcb.remote_ip.u_addr.ip4, pcb.remote_port);
+        if (c._no_delay_set)
+            c.set_no_delay(c._no_delay);
+        if (c._on_event)
+            c._on_event(c, IPEvent.connected);
+        return ERR_OK;
+    }
+
+    err_t listener_on_accept(void* arg, tcp_pcb* newpcb, err_t err)
+    {
+        TCPListener* l = cast(TCPListener*)arg;
+        // no consumer for the child -> refuse so lwIP aborts newpcb; we never
+        // call close() (which would tcp_abort) from inside this callback.
+        if (l is null || l._closing || l._on_accept is null || err != ERR_OK || newpcb is null)
+            return ERR_VAL;
+
+        TCPConnection* c = defaultAllocator().allocT!TCPConnection();
+        c._pcb = newpcb;
+        c._phase = TCPConnection.Phase.open;
+        c._remote = InetAddress(newpcb.remote_ip.u_addr.ip4, newpcb.remote_port);
+        // wire callbacks eagerly: data may arrive before the accept handler returns.
+        install_conn_callbacks(c);
+        tcp_backlog_accepted(newpcb);
         _tcp_conns ~= c;
-        return c;
+        l._on_accept(l, c, getTime());
+        return ERR_OK;
     }
 }
 else
