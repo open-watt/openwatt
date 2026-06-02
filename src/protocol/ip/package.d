@@ -2,7 +2,9 @@ module protocol.ip;
 
 import urt.inet;
 import urt.mem.temp;
+import urt.socket;
 import urt.string;
+import urt.time;
 import urt.log;
 
 import manager.collection;
@@ -210,6 +212,554 @@ nothrow @nogc:
 // =============================================================================
 
 
+// =============================================================================
+// Event-driven TCP/UDP endpoint API
+//
+// A callback-based wrapper over urt.socket: the consumer hands in local/remote
+// config plus an RX callback and gets back a handle it uses to send, tweak
+// options, and tear down. The listen counterpart spawns a handle per inbound
+// connection. This is the migration target away from polling raw sockets /
+// Stream objects directly.
+//
+// For now the handles wrap a non-blocking Socket and are pumped each frame from
+// IPModule.update(); the surface is deliberately backend-agnostic so the guts
+// can later move onto the in-tree stack's native callbacks without touching
+// consumers.
+// =============================================================================
+
+enum IPEvent : ubyte
+{
+    connected,      // active connect completed (TCP only)
+    closed,         // peer closed the connection (graceful EOF)
+    error,          // connection reset / fatal error
+}
+
+alias TCPRecvHandler   = void delegate(TCPConnection* conn, const(void)[] data) nothrow @nogc;
+alias TCPEventHandler  = void delegate(TCPConnection* conn, IPEvent event) nothrow @nogc;
+alias TCPAcceptHandler = void delegate(TCPListener* listener, TCPConnection* conn) nothrow @nogc;
+alias UDPRecvHandler   = void delegate(UDPEndpoint* ep, const(void)[] data, ref const InetAddress from) nothrow @nogc;
+
+
+// Initiate an outbound TCP connection. Returns immediately; the handshake
+// completes asynchronously and reports IPEvent.connected (or .error) via
+// on_event. `local` optionally binds a source address/port.
+TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv,
+                           TCPEventHandler on_event = null, const(InetAddress)* local = null)
+{
+    AddressFamily af = remote.family;
+    if (af != AddressFamily.ipv4 && af != AddressFamily.ipv6)
+        return null;
+
+    Socket s;
+    if (create_socket(af, SocketType.stream, Protocol.tcp, s).failed)
+        return null;
+    s.set_socket_option(SocketOption.non_blocking, true);
+
+    if (local && (local.family == AddressFamily.ipv4 || local.family == AddressFamily.ipv6))
+    {
+        if (s.bind(*local).failed)
+        {
+            s.close();
+            return null;
+        }
+    }
+
+    Result r = s.connect(remote);
+    if (r.failed && r.socket_result != SocketResult.would_block)
+    {
+        s.close();
+        return null;
+    }
+
+    TCPConnection* c = register_tcp_conn(s, remote);
+    c._on_recv = on_recv;
+    c._on_event = on_event;
+    return c;
+}
+
+// Listen for inbound TCP connections. on_accept fires with a fresh, already-open
+// TCPConnection* for each peer; the consumer installs that handle's RX/event
+// handlers from inside the callback.
+TCPListener* tcp_listen(InetAddress local, TCPAcceptHandler on_accept)
+{
+    AddressFamily af = local.family;
+    if (af != AddressFamily.ipv4 && af != AddressFamily.ipv6)
+        return null;
+
+    Socket s;
+    if (create_socket(af, SocketType.stream, Protocol.tcp, s).failed)
+        return null;
+    s.set_socket_option(SocketOption.non_blocking, true);
+    s.set_socket_option(SocketOption.reuse_address, true);
+
+    if (s.bind(local).failed || s.listen().failed)
+    {
+        s.close();
+        return null;
+    }
+
+    TCPListener* l = defaultAllocator().allocT!TCPListener();
+    l._socket = s;
+    l._local = local;
+    l._on_accept = on_accept;
+    _tcp_listeners ~= l;
+    return l;
+}
+
+TCPListener* tcp_listen(ushort port, TCPAcceptHandler on_accept)
+    => tcp_listen(InetAddress(IPAddr.any, port), on_accept);
+
+// Open a UDP endpoint. `local` binds a receive address/port (null binds any:0,
+// an ephemeral port); when `remote` is set, send() targets it and the endpoint
+// only delivers datagrams from that peer.
+UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDPRecvHandler on_recv)
+{
+    AddressFamily af = AddressFamily.ipv4;
+    if (local && (local.family == AddressFamily.ipv4 || local.family == AddressFamily.ipv6))
+        af = local.family;
+    else if (remote && (remote.family == AddressFamily.ipv4 || remote.family == AddressFamily.ipv6))
+        af = remote.family;
+
+    Socket s;
+    if (create_socket(af, SocketType.datagram, Protocol.udp, s).failed)
+        return null;
+    s.set_socket_option(SocketOption.non_blocking, true);
+
+    InetAddress bind_addr = local ? *local : (af == AddressFamily.ipv6 ? InetAddress(IPv6Addr.any, 0) : InetAddress(IPAddr.any, 0));
+    if (s.bind(bind_addr).failed)
+    {
+        s.close();
+        return null;
+    }
+
+    UDPEndpoint* ep = defaultAllocator().allocT!UDPEndpoint();
+    ep._socket = s;
+    ep._on_recv = on_recv;
+    if (remote && (remote.family == AddressFamily.ipv4 || remote.family == AddressFamily.ipv6))
+    {
+        ep._remote = *remote;
+        ep._connected = true;
+    }
+    _udp_eps ~= ep;
+    return ep;
+}
+
+
+struct TCPConnection
+{
+nothrow @nogc:
+    InetAddress remote() const pure
+        => _remote;
+    bool connected() const pure
+        => _phase == Phase.open;
+
+    InetAddress local()
+    {
+        InetAddress a;
+        if (_socket)
+            _socket.get_socket_name(a);
+        return a;
+    }
+
+    // Queue bytes for transmission. Whatever the socket can't take immediately
+    // is buffered (bounded by max_tx) and drained on subsequent pumps. Returns
+    // the number of bytes accepted, or 0 if refused / not open.
+    ptrdiff_t send(const(void[])[] data...)
+    {
+        if (_phase != Phase.open)
+            return 0;
+
+        size_t total = 0;
+        foreach (b; data)
+            total += b.length;
+        if (total == 0)
+            return 0;
+
+        if (_tx.length > 0)
+        {
+            flush_tx();
+            if (_phase != Phase.open)
+                return 0;
+            if (_tx.length > 0)
+            {
+                foreach (b; data)
+                {
+                    if (!queue_tx(b))
+                        return 0;
+                }
+                return total;
+            }
+        }
+
+        size_t sent;
+        Result r = _socket.send(MsgFlags.none, &sent, data);
+        if (r.failed && r.socket_result != SocketResult.would_block)
+        {
+            fail(IPEvent.error);
+            return 0;
+        }
+
+        size_t skipped = 0;
+        foreach (b; data)
+        {
+            if (skipped + b.length <= sent)
+            {
+                skipped += b.length;
+                continue;
+            }
+            size_t off = sent > skipped ? sent - skipped : 0;
+            if (!queue_tx(b[off .. $]))
+                break;
+            skipped += b.length;
+        }
+        return total;
+    }
+
+    void enable_keepalive(bool enable, Duration idle = seconds(10), Duration interval = seconds(1), int count = 10)
+    {
+        _keepalive = enable;
+        _keep_idle = idle;
+        _keep_interval = interval;
+        _keep_count = count;
+        _keepalive_set = true;
+        if (_phase == Phase.open)
+            set_keepalive(_socket, enable, idle, interval, count);
+    }
+
+    void set_no_delay(bool enable)
+    {
+        _no_delay = enable;
+        _no_delay_set = true;
+        if (_phase == Phase.open)
+            _socket.set_socket_option(SocketOption.tcp_no_delay, enable);
+    }
+
+    void close()
+    {
+        if (_closing)
+            return;
+        if (_socket)
+            _socket.close();
+        _socket = Socket.invalid;
+        _closing = true;
+    }
+
+private:
+    enum Phase : ubyte { connecting, open, dead }
+
+    Socket _socket;
+    Phase _phase;
+    bool _closing;
+    bool _keepalive;
+    bool _keepalive_set;
+    bool _no_delay;
+    bool _no_delay_set;
+    int _keep_count;
+    Duration _keep_idle;
+    Duration _keep_interval;
+    InetAddress _remote;
+    TCPRecvHandler _on_recv;
+    TCPEventHandler _on_event;
+    Array!ubyte _tx;
+
+    enum size_t max_tx = 256 * 1024;
+
+    void pump()
+    {
+        if (_closing)
+            return;
+        final switch (_phase)
+        {
+            case Phase.connecting:
+                pump_connect();
+                break;
+            case Phase.open:
+                flush_tx();
+                if (_phase == Phase.open)
+                    pump_recv();
+                break;
+            case Phase.dead:
+                break;
+        }
+    }
+
+    void pump_connect()
+    {
+        PollFd fd;
+        fd.socket = _socket;
+        fd.request_events = PollEvents.write;
+        uint num;
+        if (poll(fd, Duration.zero, num).failed)
+        {
+            fail(IPEvent.error);
+            return;
+        }
+        if (num == 0)
+            return;
+        if (fd.return_events & (PollEvents.error | PollEvents.hangup | PollEvents.invalid))
+        {
+            fail(IPEvent.error);
+            return;
+        }
+
+        _phase = Phase.open;
+        _socket.get_peer_name(_remote);
+        if (_keepalive_set)
+            set_keepalive(_socket, _keepalive, _keep_idle, _keep_interval, _keep_count);
+        if (_no_delay_set)
+            _socket.set_socket_option(SocketOption.tcp_no_delay, _no_delay);
+        if (_on_event)
+            _on_event(&this, IPEvent.connected);
+    }
+
+    void pump_recv()
+    {
+        ubyte[4096] buf = void;
+        foreach (_; 0 .. 8)
+        {
+            size_t n;
+            Result r = _socket.recv(buf[], MsgFlags.none, &n);
+            if (r.succeeded)
+            {
+                if (n == 0)
+                    break;
+                if (_on_recv)
+                    _on_recv(&this, buf[0 .. n]);
+                if (_phase != Phase.open || _closing)
+                    return;
+                if (n < buf.length)
+                    break;
+                continue;
+            }
+            SocketResult sr = r.socket_result;
+            if (sr == SocketResult.would_block)
+                break;
+            fail(sr == SocketResult.connection_closed ? IPEvent.closed : IPEvent.error);
+            return;
+        }
+    }
+
+    void flush_tx()
+    {
+        while (_tx.length > 0)
+        {
+            size_t sent;
+            Result r = _socket.send(MsgFlags.none, &sent, cast(const(void)[])_tx[]);
+            if (r.failed && r.socket_result != SocketResult.would_block)
+            {
+                fail(IPEvent.error);
+                return;
+            }
+            if (sent == 0)
+                return;
+            _tx.remove(0, sent);
+        }
+    }
+
+    bool queue_tx(scope const(void)[] b)
+    {
+        if (b.length == 0)
+            return true;
+        if (_tx.length + b.length > max_tx)
+            return false;
+        _tx ~= cast(const(ubyte)[])b;
+        return true;
+    }
+
+    void fail(IPEvent ev)
+    {
+        if (_phase == Phase.dead)
+            return;
+        _phase = Phase.dead;
+        if (_on_event)
+            _on_event(&this, ev);
+    }
+}
+
+
+struct TCPListener
+{
+nothrow @nogc:
+    ushort port() const pure
+        => port_of(_local);
+
+    void close()
+    {
+        if (_closing)
+            return;
+        if (_socket)
+            _socket.close();
+        _socket = Socket.invalid;
+        _closing = true;
+    }
+
+private:
+    Socket _socket;
+    bool _closing;
+    InetAddress _local;
+    TCPAcceptHandler _on_accept;
+
+    void pump()
+    {
+        if (_closing)
+            return;
+        foreach (_; 0 .. 8)
+        {
+            Socket conn;
+            InetAddress remote;
+            Result r = _socket.accept(conn, &remote);
+            if (r.failed)
+            {
+                if (r.socket_result != SocketResult.would_block)
+                    _closing = true;
+                return;
+            }
+
+            conn.set_socket_option(SocketOption.non_blocking, true);
+            TCPConnection* c = register_tcp_conn(conn, remote);
+            c._phase = TCPConnection.Phase.open;
+            if (_on_accept)
+                _on_accept(&this, c);
+            else
+                c.close();
+            if (_closing)
+                return;
+        }
+    }
+}
+
+
+struct UDPEndpoint
+{
+nothrow @nogc:
+    InetAddress remote() const pure
+        => _remote;
+
+    InetAddress local()
+    {
+        InetAddress a;
+        if (_socket)
+            _socket.get_socket_name(a);
+        return a;
+    }
+
+    // Send to the connected remote (set at open). Returns bytes sent, or 0.
+    ptrdiff_t send(scope const(void)[] data)
+    {
+        if (_closing || !_connected)
+            return 0;
+        size_t sent;
+        if (_socket.sendto(&_remote, &sent, data).failed)
+            return 0;
+        return sent;
+    }
+
+    ptrdiff_t sendto(scope const(void)[] data, InetAddress to)
+    {
+        if (_closing)
+            return 0;
+        size_t sent;
+        if (_socket.sendto(&to, &sent, data).failed)
+            return 0;
+        return sent;
+    }
+
+    void close()
+    {
+        if (_closing)
+            return;
+        if (_socket)
+            _socket.close();
+        _socket = Socket.invalid;
+        _closing = true;
+    }
+
+private:
+    Socket _socket;
+    bool _closing;
+    bool _connected;
+    InetAddress _remote;
+    UDPRecvHandler _on_recv;
+
+    void pump()
+    {
+        if (_closing)
+            return;
+        ubyte[2048] buf = void;
+        foreach (_; 0 .. 8)
+        {
+            size_t n;
+            InetAddress from;
+            Result r = _socket.recvfrom(buf[], MsgFlags.none, &from, &n);
+            if (r.failed)
+                break;
+            if (_on_recv)
+                _on_recv(&this, buf[0 .. n], from);
+            if (_closing)
+                return;
+        }
+    }
+}
+
+
+private __gshared Array!(TCPConnection*) _tcp_conns;
+private __gshared Array!(TCPListener*)   _tcp_listeners;
+private __gshared Array!(UDPEndpoint*)   _udp_eps;
+
+private TCPConnection* register_tcp_conn(Socket s, InetAddress remote)
+{
+    TCPConnection* c = defaultAllocator().allocT!TCPConnection();
+    c._socket = s;
+    c._remote = remote;
+    _tcp_conns ~= c;
+    return c;
+}
+
+private ushort port_of(ref const InetAddress a) pure
+{
+    if (a.family == AddressFamily.ipv4)
+        return a._a.ipv4.port;
+    if (a.family == AddressFamily.ipv6)
+        return a._a.ipv6.port;
+    return 0;
+}
+
+private void pump_ip_endpoints()
+{
+    foreach (i; 0 .. _tcp_listeners.length)
+        _tcp_listeners[i].pump();
+    foreach (i; 0 .. _tcp_conns.length)
+        _tcp_conns[i].pump();
+    foreach (i; 0 .. _udp_eps.length)
+        _udp_eps[i].pump();
+
+    for (size_t i = _tcp_conns.length; i-- > 0; )
+    {
+        if (_tcp_conns[i]._closing)
+        {
+            defaultAllocator().freeT(_tcp_conns[i]);
+            _tcp_conns.removeSwapLast(i);
+        }
+    }
+    for (size_t i = _tcp_listeners.length; i-- > 0; )
+    {
+        if (_tcp_listeners[i]._closing)
+        {
+            defaultAllocator().freeT(_tcp_listeners[i]);
+            _tcp_listeners.removeSwapLast(i);
+        }
+    }
+    for (size_t i = _udp_eps.length; i-- > 0; )
+    {
+        if (_udp_eps[i]._closing)
+        {
+            defaultAllocator().freeT(_udp_eps[i]);
+            _udp_eps.removeSwapLast(i);
+        }
+    }
+}
+
+
 class IPModule : Module
 {
     mixin DeclareModule!"protocol.ip";
@@ -384,6 +934,8 @@ nothrow @nogc:
 
     override void update()
     {
+        pump_ip_endpoints();
+
         Collection!IPAddress().update_all();
         Collection!IPPool().update_all();
         Collection!IPv6Pool().update_all();
