@@ -149,6 +149,8 @@ nothrow @nogc:
             return "stream cannot be null";
         if (_stream is value)
             return null;
+        if (_stream)
+            _stream.rx_handler = null;
         static if (has_ip)
             _conn.clear_remote();
         _stream = value;
@@ -330,6 +332,7 @@ protected:
             _queue.init(_support_simultaneous_requests ? 8 : 1, 0, PCP.be, this);
             _queue.set_queue_timeout(_queue_timeout.msecs);
             _queue.set_transport_timeout(_request_timeout.msecs);
+            _stream.rx_handler = &on_data;
             return CompletionStatus.complete;
         }
         return CompletionStatus.continue_;
@@ -337,6 +340,8 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        if (_stream)
+            _stream.rx_handler = null;
         _sequence_number = 0;
         _expect_message_type = ModbusFrameType.unknown;
         _last_receive_event = SysTime();
@@ -376,8 +381,6 @@ protected:
 
         super.update();
 
-        SysTime now = getSysTime();
-
         _queue.timeout_stale(getTime());
 
         // estimate remote baud rate for TCP bridges after collecting stats
@@ -386,39 +389,41 @@ protected:
 
         send_queued_messages();
 
-        // check for data
-        ubyte[1024] buffer = void;
-        buffer[0 .. _tail_bytes] = _tail[0 .. _tail_bytes];
-        ptrdiff_t read_offset = _tail_bytes;
-        ptrdiff_t length = _tail_bytes;
-        _tail_bytes = 0;
-        read_loop: while (true)
+        ubyte[512] buffer = void;
+        while (true)
         {
-            assert(length < 260);
+            ptrdiff_t r = _stream.read(buffer[]);
+            if (r <= 0)
+                break;
+            on_data(_stream, buffer[0 .. r], getTime());
+        }
+    }
 
-            ptrdiff_t r = stream.read(buffer[read_offset .. $]);
-            if (r < 0)
-            {
-                assert(false, "TODO: what causes read to fail?");
-                break read_loop;
-            }
-            if (r == 0)
-            {
-                // if there were no extra bytes available, stash the _tail until later
-                _tail[0 .. length] = buffer[0 .. length];
-                _tail_bytes = cast(ushort)length;
-                break read_loop;
-            }
-            length += r;
-            assert(length <= buffer.sizeof);
+    void on_data(Stream source, const(void)[] data, MonoTime rx_time)
+    {
+        const(ubyte)[] src = cast(const(ubyte)[])data;
 
-//            if (connParams.logDataStream)
-//                logStream.rawWrite(buffer[0 .. length]);
+        ubyte[1024] buffer = void;
+        size_t length = _tail_bytes;
+        if (_tail_bytes)
+            buffer[0 .. _tail_bytes] = _tail[0 .. _tail_bytes];
+        _tail_bytes = 0;
+
+        while (true)
+        {
+            size_t space = buffer.length - length;
+            size_t take = src.length < space ? src.length : space;
+            if (take)
+            {
+                buffer[length .. length + take] = src[0 .. take];
+                length += take;
+                src = src[take .. $];
+            }
 
             size_t offset = 0;
+            bool partial = false;
             while (offset < length)
             {
-                // parse packets from the stream...
                 const(void)[] message = void;
                 ModbusFrameInfo frame_info = void;
                 size_t taken = 0;
@@ -440,27 +445,31 @@ protected:
 
                 if (taken == 0)
                 {
+                    // split packet; keep at most one message worth at the front
                     import urt.util : min;
-
-                    // we didn't parse any packets
-                    // we might have a split packet, so we'll shuffle unread data to the front of the buffer
-                    // ...but we'll only keep at most one message worth!
                     size_t remain = length - offset;
-                    size_t keepBytes = min(remain, 259);
-                    size_t trunc = remain - keepBytes;
-                    memmove(buffer.ptr, buffer.ptr + offset + trunc, keepBytes);
-                    length = keepBytes;
-                    read_offset = keepBytes;
-                    offset = 0;
-                    continue read_loop;
+                    size_t keep = min(remain, 259);
+                    size_t trunc = remain - keep;
+                    memmove(buffer.ptr, buffer.ptr + offset + trunc, keep);
+                    length = keep;
+                    partial = true;
+                    break;
                 }
                 offset += taken;
-
-                incoming_packet(message, now, frame_info);
+                incoming_packet(message, cast(SysTime)rx_time, frame_info);
             }
+            if (!partial)
+                length = 0;
 
-            // we've eaten the whole buffer...
-            length = 0;
+            if (src.length == 0)
+            {
+                if (length)
+                {
+                    _tail[0 .. length] = buffer[0 .. length];
+                    _tail_bytes = cast(ushort)length;
+                }
+                return;
+            }
         }
     }
 

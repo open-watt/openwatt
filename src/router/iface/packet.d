@@ -182,6 +182,7 @@ nothrow @nogc:
     ushort vid() const pure
         => vlan & 0x0FFF;
 
+    // TODO: should be MonoTime - a packet is a physical event, not a wall-clock label; project to SysTime at the pcap/display boundary
     SysTime creation_time; // time received, or time of call to send
     union {
         Ethernet eth;

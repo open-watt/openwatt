@@ -5,6 +5,7 @@ import urt.endian;
 import urt.hash;
 import urt.inet;
 import urt.mem.allocator : defaultAllocator;
+import urt.time;
 
 import router.iface;
 import router.iface.packet;
@@ -46,6 +47,12 @@ struct UdpPcb
 
     Array!UdpDatagram recv_queue;
     enum size_t max_queued = 16;
+
+    version (UseInternalIPStack)
+    {
+        import protocol.ip : UDPEndpoint;
+        UDPEndpoint* owner;
+    }
 
     int handle;
 }
@@ -118,10 +125,19 @@ void udp_input(ref IPStack stack, ref Packet pkt)
                 continue;
         }
 
+        const(ubyte)[] body_ = payload[UdpHeader.sizeof .. udp_len];
+
+        version (UseInternalIPStack)
+        {
+            if (pcb.owner)
+            {
+                pcb.owner.deliver(ip.src, src_port, body_, cast(MonoTime)pkt.creation_time);
+                return;
+            }
+        }
+
         if (pcb.recv_queue.length >= UdpPcb.max_queued)
             return;     // queue full, drop newest
-
-        const(ubyte)[] body_ = payload[UdpHeader.sizeof .. udp_len];
 
         UdpDatagram dgm;
         dgm.src_addr = IPAddr(ip.src);
