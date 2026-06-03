@@ -265,7 +265,14 @@ private:
 
     void on_event(TCPConnection* conn, IPEvent event)
     {
-        _link = event == IPEvent.connected ? 1 : -1;
+        if (event == IPEvent.connected)
+        {
+            _link = 1;
+            if (_state == State.starting)
+                set_state(State.running);
+        }
+        else
+            _link = -1;
     }
 
     void close_conn()
