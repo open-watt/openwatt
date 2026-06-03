@@ -145,6 +145,9 @@ Application create_application()
 
 void shutdown_application()
 {
+    foreach (m; g_app.modules)
+        m.deinit();
+
     defaultAllocator().freeT(g_app);
 
     version (AllocTracking)

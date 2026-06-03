@@ -1,5 +1,6 @@
 module protocol.ip;
 
+import urt.array;
 import urt.inet;
 import urt.mem.temp;
 import urt.socket;
@@ -33,7 +34,6 @@ public import protocol.ip.stack : IPStack;
 
 version(Windows)
 {
-    import urt.array;
     import urt.internal.sys.windows.winsock2 : AF_INET, sockaddr_in;
     import driver.windows.iphlpapi;
     import driver.windows.ethernet : WindowsPcapEthernet;
@@ -218,25 +218,6 @@ nothrow @nogc:
 //
 // =============================================================================
 
-
-// =============================================================================
-// Event-driven TCP/UDP endpoint API
-//
-// The consumer hands in local/remote config plus an RX callback and gets back a
-// handle it uses to send, tweak options, and tear down. The listen counterpart
-// spawns a handle per inbound connection. This is the migration target away from
-// polling raw sockets / Stream objects directly.
-//
-// Two backends, selected at compile time:
-//   - UseInternalIPStack: handles bind directly into the in-tree stack and RX is
-//     pushed inline from ingress (zero-copy; the payload points into the ingress
-//     packet, valid for the callback only).
-//   - otherwise: handles wrap a non-blocking urt.socket, pumped each frame from
-//     IPModule.update() (an event-driven reactor will replace the polling).
-//
-// Currently only UDP takes the direct path; TCP is socket-backed on both.
-// =============================================================================
-
 enum IPEvent : ubyte
 {
     connected,      // active connect completed (TCP only)
@@ -249,16 +230,12 @@ alias TCPEventHandler  = void delegate(TCPConnection* conn, IPEvent event) nothr
 alias TCPAcceptHandler = void delegate(TCPListener* listener, TCPConnection* conn, MonoTime rx_time) nothrow @nogc;
 alias UDPRecvHandler   = void delegate(UDPEndpoint* ep, const(void)[] data, ref const InetAddress from, MonoTime rx_time) nothrow @nogc;
 
-
-// Initiate an outbound TCP connection. Returns immediately; the handshake
-// completes asynchronously and reports IPEvent.connected (or .error) via
-// on_event. `local` optionally binds a source address/port.
 TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventHandler on_event = null, const(InetAddress)* local = null)
 {
     version (UseInternalIPStack)
     {
         if (remote.family != AddressFamily.ipv4)
-            return null;     // in-tree stack TCP is v4-only
+            return null;     // in-tree stack TCP is v4-only for now...
 
         TcpPcb* pcb = defaultAllocator().allocT!TcpPcb();
         tcp_assign_id(pcb);
@@ -281,7 +258,6 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
         c._phase = TCPConnection.Phase.connecting;
         pcb.conn_owner = c;
 
-        // tcp_connect only fails before it registers the pcb, so free_pcb is safe.
         if (!native_tcp_connect(*_stack_ptr, pcb))
         {
             pcb.conn_owner = null;
@@ -322,13 +298,11 @@ TCPConnection* tcp_connect(InetAddress remote, TCPRecvHandler on_recv, TCPEventH
         TCPConnection* c = register_tcp_conn(s, remote);
         c._on_recv = on_recv;
         c._on_event = on_event;
+        _worker.register(EntryKind.tcp_conn, cast(size_t)c, s, true);
         return c;
     }
 }
 
-// Listen for inbound TCP connections. on_accept fires with a fresh, already-open
-// TCPConnection* for each peer; the consumer installs that handle's RX/event
-// handlers from inside the callback.
 TCPListener* tcp_listen(InetAddress local, TCPAcceptHandler on_accept)
 {
     version (UseInternalIPStack)
@@ -376,6 +350,7 @@ TCPListener* tcp_listen(InetAddress local, TCPAcceptHandler on_accept)
         l._local = local;
         l._on_accept = on_accept;
         _tcp_listeners ~= l;
+        _worker.register(EntryKind.tcp_listen, cast(size_t)l, s, false);
         return l;
     }
 }
@@ -383,9 +358,8 @@ TCPListener* tcp_listen(InetAddress local, TCPAcceptHandler on_accept)
 TCPListener* tcp_listen(ushort port, TCPAcceptHandler on_accept)
     => tcp_listen(InetAddress(IPAddr.any, port), on_accept);
 
-// Open a UDP endpoint. `local` binds a receive address/port (null binds any:0,
-// an ephemeral port); when `remote` is set, send() targets it and the endpoint
-// only delivers datagrams from that peer.
+// `local` binds a receive address/port (null binds any:ephemeral);
+// when `remote` is set, send() targets it and the endpoint only delivers datagrams from that peer
 UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDPRecvHandler on_recv)
 {
     version (UseInternalIPStack)
@@ -445,6 +419,7 @@ UDPEndpoint* udp_open(const(InetAddress)* local, const(InetAddress)* remote, UDP
             ep._connected = true;
         }
         _udp_eps ~= ep;
+        _worker.register(EntryKind.udp, cast(size_t)ep, s, false);
         return ep;
     }
 }
@@ -609,10 +584,8 @@ nothrow @nogc:
         {
             if (_closing)
                 return;
-            if (_socket)
-                _socket.close();
-            _socket = Socket.invalid;
             _closing = true;
+            _worker.destroy_ep(EntryKind.tcp_conn, cast(size_t)&this);
         }
     }
 
@@ -705,77 +678,9 @@ private:
 
         void pump()
         {
-            if (_closing)
+            if (_closing || _phase != Phase.open)
                 return;
-            final switch (_phase)
-            {
-                case Phase.connecting:
-                    pump_connect();
-                    break;
-                case Phase.open:
-                    flush_tx();
-                    if (_phase == Phase.open)
-                        pump_recv();
-                    break;
-                case Phase.dead:
-                    break;
-            }
-        }
-
-        void pump_connect()
-        {
-            PollFd fd;
-            fd.socket = _socket;
-            fd.request_events = PollEvents.write;
-            uint num;
-            if (poll(fd, Duration.zero, num).failed)
-            {
-                fail(IPEvent.error);
-                return;
-            }
-            if (num == 0)
-                return;
-            if (fd.return_events & (PollEvents.error | PollEvents.hangup | PollEvents.invalid))
-            {
-                fail(IPEvent.error);
-                return;
-            }
-
-            _phase = Phase.open;
-            _socket.get_peer_name(_remote);
-            if (_keepalive_set)
-                set_keepalive(_socket, _keepalive, _keep_idle, _keep_interval, _keep_count);
-            if (_no_delay_set)
-                _socket.set_socket_option(SocketOption.tcp_no_delay, _no_delay);
-            if (_on_event)
-                _on_event(&this, IPEvent.connected);
-        }
-
-        void pump_recv()
-        {
-            ubyte[4096] buf = void;
-            foreach (_; 0 .. 8)
-            {
-                size_t n;
-                Result r = _socket.recv(buf[], MsgFlags.none, &n);
-                if (r.succeeded)
-                {
-                    if (n == 0)
-                        break;
-                    if (_on_recv)
-                        _on_recv(&this, buf[0 .. n], getTime());
-                    if (_phase != Phase.open || _closing)
-                        return;
-                    if (n < buf.length)
-                        break;
-                    continue;
-                }
-                SocketResult sr = r.socket_result;
-                if (sr == SocketResult.would_block)
-                    break;
-                fail(sr == SocketResult.connection_closed ? IPEvent.closed : IPEvent.error);
-                return;
-            }
+            flush_tx();
         }
 
         void flush_tx()
@@ -838,10 +743,8 @@ nothrow @nogc:
         {
             if (_closing)
                 return;
-            if (_socket)
-                _socket.close();
-            _socket = Socket.invalid;
             _closing = true;
+            _worker.destroy_ep(EntryKind.tcp_listen, cast(size_t)&this);
         }
     }
 
@@ -853,8 +756,6 @@ private:
     version (UseInternalIPStack)
     {
         TcpPcb* _lpcb;
-
-        void pump() {}     // inbound connections arrive via the on_accept hook
 
         package(protocol.ip) void on_child(TcpPcb* child, MonoTime rx_time)
         {
@@ -869,34 +770,6 @@ private:
     else
     {
         Socket _socket;
-
-        void pump()
-        {
-            if (_closing)
-                return;
-            foreach (_; 0 .. 8)
-            {
-                Socket conn;
-                InetAddress remote;
-                Result r = _socket.accept(conn, &remote);
-                if (r.failed)
-                {
-                    if (r.socket_result != SocketResult.would_block)
-                        _closing = true;
-                    return;
-                }
-
-                conn.set_socket_option(SocketOption.non_blocking, true);
-                TCPConnection* c = register_tcp_conn(conn, remote);
-                c._phase = TCPConnection.Phase.open;
-                if (_on_accept)
-                    _on_accept(&this, c, getTime());
-                else
-                    c.close();
-                if (_closing)
-                    return;
-            }
-        }
     }
 }
 
@@ -976,10 +849,8 @@ nothrow @nogc:
         {
             if (_closing)
                 return;
-            if (_socket)
-                _socket.close();
-            _socket = Socket.invalid;
             _closing = true;
+            _worker.destroy_ep(EntryKind.udp, cast(size_t)&this);
         }
     }
 
@@ -993,8 +864,6 @@ private:
     {
         UdpPcb* _pcb;
 
-        // Backend teardown, run from the sweep before the endpoint is freed.
-        // (An explicit ~this() can't be emplaced by allocT in this runtime.)
         void release()
         {
             if (_pcb)
@@ -1015,152 +884,12 @@ private:
                 _on_recv(&this, data, from, rx_time);
             }
         }
-
-        void pump() {}     // RX is push-delivered via deliver()
     }
     else
     {
         Socket _socket;
 
         void release() {}
-
-        void pump()
-        {
-            if (_closing)
-                return;
-            ubyte[2048] buf = void;
-            foreach (_; 0 .. 8)
-            {
-                size_t n;
-                InetAddress from;
-                Result r = _socket.recvfrom(buf[], MsgFlags.none, &from, &n);
-                if (r.failed)
-                    break;
-                if (_on_recv)
-                    _on_recv(&this, buf[0 .. n], from, getTime());
-                if (_closing)
-                    return;
-            }
-        }
-    }
-}
-
-
-private __gshared Array!(TCPConnection*) _tcp_conns;
-private __gshared Array!(TCPListener*)   _tcp_listeners;
-private __gshared Array!(UDPEndpoint*)   _udp_eps;
-
-version (UseInternalIPStack)
-{
-    private __gshared IPStack* _stack_ptr;
-    private __gshared ushort _next_udp_port = 49_152;
-
-    private ushort allocate_udp_port()
-    {
-        foreach (_; 0 .. 16_384)
-        {
-            ushort p = _next_udp_port;
-            _next_udp_port = _next_udp_port == 65_535 ? 49_152 : cast(ushort)(_next_udp_port + 1);
-            bool used = false;
-            foreach (pcb; _pcbs[])
-            {
-                if (pcb.local_port == p)
-                {
-                    used = true;
-                    break;
-                }
-            }
-            if (!used)
-                return p;
-        }
-        return _next_udp_port;
-    }
-}
-
-private IPAddr v4_addr(ref const InetAddress a) pure
-    => a.family == AddressFamily.ipv4 ? a._a.ipv4.addr : IPAddr.any;
-
-version (UseInternalIPStack)
-{
-    // pcb.handle marker: the endpoint owns this pcb, so tcp_tick must not
-    // auto-free it (that path is gated on handle == 0). The endpoint frees it
-    // itself in close(), or hands it to tcp_tick by clearing handle there.
-    private enum int TcpEndpointOwned = -1;
-
-    private __gshared ushort _next_tcp_port = 49_152;
-
-    private ushort allocate_tcp_port()
-    {
-        ushort p = _next_tcp_port;
-        _next_tcp_port = _next_tcp_port == 65_535 ? 49_152 : cast(ushort)(_next_tcp_port + 1);
-        return p;
-    }
-
-    private TCPConnection* register_tcp_conn_pcb(TcpPcb* pcb)
-    {
-        TCPConnection* c = defaultAllocator().allocT!TCPConnection();
-        c._pcb = pcb;
-        c._phase = TCPConnection.Phase.open;
-        c._remote = InetAddress(pcb.remote_addr, pcb.remote_port);
-        pcb.conn_owner = c;
-        _tcp_conns ~= c;
-        return c;
-    }
-}
-else
-{
-    private TCPConnection* register_tcp_conn(Socket s, InetAddress remote)
-    {
-        TCPConnection* c = defaultAllocator().allocT!TCPConnection();
-        c._socket = s;
-        c._remote = remote;
-        _tcp_conns ~= c;
-        return c;
-    }
-}
-
-private ushort port_of(ref const InetAddress a) pure
-{
-    if (a.family == AddressFamily.ipv4)
-        return a._a.ipv4.port;
-    if (a.family == AddressFamily.ipv6)
-        return a._a.ipv6.port;
-    return 0;
-}
-
-private void pump_ip_endpoints()
-{
-    foreach (i; 0 .. _tcp_listeners.length)
-        _tcp_listeners[i].pump();
-    foreach (i; 0 .. _tcp_conns.length)
-        _tcp_conns[i].pump();
-    foreach (i; 0 .. _udp_eps.length)
-        _udp_eps[i].pump();
-
-    for (size_t i = _tcp_conns.length; i-- > 0; )
-    {
-        if (_tcp_conns[i]._closing)
-        {
-            defaultAllocator().freeT(_tcp_conns[i]);
-            _tcp_conns.removeSwapLast(i);
-        }
-    }
-    for (size_t i = _tcp_listeners.length; i-- > 0; )
-    {
-        if (_tcp_listeners[i]._closing)
-        {
-            defaultAllocator().freeT(_tcp_listeners[i]);
-            _tcp_listeners.removeSwapLast(i);
-        }
-    }
-    for (size_t i = _udp_eps.length; i-- > 0; )
-    {
-        if (_udp_eps[i]._closing)
-        {
-            _udp_eps[i].release();
-            defaultAllocator().freeT(_udp_eps[i]);
-            _udp_eps.removeSwapLast(i);
-        }
     }
 }
 
@@ -1199,6 +928,15 @@ nothrow @nogc:
         import protocol.ip.tcp : tcp_print;
         g_app.console.register_command!tcp_print("/protocol/ip/tcp", this, "print");
         g_app.console.register_command!neighbour_v4_print("/protocol/ip/neighbour", this, "print");
+
+        version (UseInternalIPStack) {} else
+            _worker.start();
+    }
+
+    override void deinit()
+    {
+        version (UseInternalIPStack) {} else
+            _worker.stop();
     }
 
     void neighbour_v4_print(Session session)
@@ -1352,4 +1090,654 @@ nothrow @nogc:
 
 private:
     IPStack _stack;
+}
+
+
+private:
+
+__gshared Array!(TCPConnection*) _tcp_conns;
+__gshared Array!(TCPListener*)   _tcp_listeners;
+__gshared Array!(UDPEndpoint*)   _udp_eps;
+
+
+IPAddr v4_addr(ref const InetAddress a) pure
+    => a.family == AddressFamily.ipv4 ? a._a.ipv4.addr : IPAddr.any;
+
+ushort port_of(ref const InetAddress a) pure
+{
+    if (a.family == AddressFamily.ipv4)
+        return a._a.ipv4.port;
+    if (a.family == AddressFamily.ipv6)
+        return a._a.ipv6.port;
+    return 0;
+}
+
+void pump_ip_endpoints()
+{
+    foreach (i; 0 .. _tcp_conns.length)
+        _tcp_conns[i].pump();
+
+    // the socket arm frees endpoints on the worker's destroy handshake instead.
+    version (UseInternalIPStack)
+    {
+        for (size_t i = _tcp_conns.length; i-- > 0; )
+        {
+            if (_tcp_conns[i]._closing)
+            {
+                defaultAllocator().freeT(_tcp_conns[i]);
+                _tcp_conns.removeSwapLast(i);
+            }
+        }
+        for (size_t i = _tcp_listeners.length; i-- > 0; )
+        {
+            if (_tcp_listeners[i]._closing)
+            {
+                defaultAllocator().freeT(_tcp_listeners[i]);
+                _tcp_listeners.removeSwapLast(i);
+            }
+        }
+        for (size_t i = _udp_eps.length; i-- > 0; )
+        {
+            if (_udp_eps[i]._closing)
+            {
+                _udp_eps[i].release();
+                defaultAllocator().freeT(_udp_eps[i]);
+                _udp_eps.removeSwapLast(i);
+            }
+        }
+    }
+}
+
+version (UseInternalIPStack)
+{
+    enum int TcpEndpointOwned = -1;
+
+    __gshared IPStack* _stack_ptr;
+    __gshared ushort _next_udp_port = 49_152;
+    __gshared ushort _next_tcp_port = 49_152;
+
+    ushort allocate_udp_port()
+    {
+        foreach (_; 0 .. 16_384)
+        {
+            ushort p = _next_udp_port;
+            _next_udp_port = _next_udp_port == 65_535 ? 49_152 : cast(ushort)(_next_udp_port + 1);
+            bool used = false;
+            foreach (pcb; _pcbs[])
+            {
+                if (pcb.local_port == p)
+                {
+                    used = true;
+                    break;
+                }
+            }
+            if (!used)
+                return p;
+        }
+        return _next_udp_port;
+    }
+
+    ushort allocate_tcp_port()
+    {
+        ushort p = _next_tcp_port;
+        _next_tcp_port = _next_tcp_port == 65_535 ? 49_152 : cast(ushort)(_next_tcp_port + 1);
+        return p;
+    }
+
+    TCPConnection* register_tcp_conn_pcb(TcpPcb* pcb)
+    {
+        TCPConnection* c = defaultAllocator().allocT!TCPConnection();
+        c._pcb = pcb;
+        c._phase = TCPConnection.Phase.open;
+        c._remote = InetAddress(pcb.remote_addr, pcb.remote_port);
+        pcb.conn_owner = c;
+        _tcp_conns ~= c;
+        return c;
+    }
+}
+else
+{
+    import urt.array;
+    import urt.thread;
+    import urt.sync.semaphore;
+    import urt.sync.spsc;
+    import urt.atomic;
+
+    TCPConnection* register_tcp_conn(Socket s, InetAddress remote)
+    {
+        TCPConnection* c = defaultAllocator().allocT!TCPConnection();
+        c._socket = s;
+        c._remote = remote;
+        _tcp_conns ~= c;
+        return c;
+    }
+
+    enum EntryKind : ubyte
+    {
+        tcp_conn,
+        tcp_listen,
+        udp
+    }
+
+    enum ReqKind : ubyte
+    {
+        register,
+        destroy
+    }
+
+    struct Req
+    {
+        ReqKind   kind;
+        EntryKind ek;
+        size_t    ep;           // endpoint pointer, type-erased to a key
+        Socket    socket;
+        bool      connecting;
+    }
+
+    enum EvKind : ubyte {
+        data,
+        connected,
+        peer_closed,
+        error,
+        accepted,
+        destroyed
+    }
+
+    struct Ev
+    {
+        EvKind    kind;
+        EntryKind ek;
+        size_t    ep;           // endpoint pointer key; for accepted, the listener
+        const(ubyte)[] buffer;  // data payload; owned, freed by the main dispatch
+        InetAddress from;       // udp source / accepted remote
+        Socket    socket;       // accepted child fd
+        MonoTime  rx_time;
+    }
+
+    struct SocketWorker
+    {
+    nothrow @nogc:
+        void start()
+        {
+            _space.init();
+
+            // loopback wake socket: a sendto from the main thread breaks the
+            // worker out of poll() the instant a request is queued.
+            if (create_socket(AddressFamily.ipv4, SocketType.datagram, Protocol.udp, _wake).failed)
+            {
+                writeError("SocketWorker: no wake socket; socket backend disabled");
+                _wake = Socket.invalid;
+                return;
+            }
+            _wake.set_socket_option(SocketOption.non_blocking, true);
+            if (_wake.bind(InetAddress(IPAddr.loopback, 0)).failed ||
+                _wake.get_socket_name(_wake_addr).failed)
+            {
+                writeError("SocketWorker: failed to bind wake socket; socket backend disabled");
+                _wake.close();
+                _wake = Socket.invalid;
+                return;
+            }
+
+            _thread = thread_spawn(&run);
+        }
+
+        void stop()
+        {
+            if (_thread)
+            {
+                atomicStore!(MemoryOrder.release)(_stop, true);
+                wake();
+                _space.signal();
+                thread_join(_thread);
+                _thread = null;
+            }
+            if (_wake)
+            {
+                _wake.close();
+                _wake = Socket.invalid;
+            }
+
+            Ev ev;
+            while (_ring.pop((&ev)[0 .. 1]) == 1)
+            {
+                if (ev.buffer.length)
+                    defaultAllocator().free(cast(void[])ev.buffer);
+                if (ev.kind == EvKind.accepted && ev.socket)
+                    ev.socket.close();
+            }
+            foreach (c; _tcp_conns[])
+            {
+                if (c._socket)
+                    c._socket.close();
+                defaultAllocator().freeT(c);
+            }
+            _tcp_conns.clear();
+            foreach (l; _tcp_listeners[])
+            {
+                if (l._socket)
+                    l._socket.close();
+                defaultAllocator().freeT(l);
+            }
+            _tcp_listeners.clear();
+            foreach (e; _udp_eps[])
+            {
+                if (e._socket)
+                    e._socket.close();
+                defaultAllocator().freeT(e);
+            }
+            _udp_eps.clear();
+            _space.destroy();
+        }
+
+        void register(EntryKind ek, size_t ep, Socket s, bool connecting)
+        {
+            post_req(Req(ReqKind.register, ek, ep, s, connecting));
+        }
+
+        void destroy_ep(EntryKind ek, size_t ep)
+        {
+            post_req(Req(ReqKind.destroy, ek, ep));
+        }
+
+    private:
+        struct Entry
+        {
+            EntryKind kind;
+            size_t    ep;
+            Socket    socket;
+            bool      connecting;
+            bool      dead;     // error/eof posted; quiet until destroyed
+        }
+
+        Thread      _thread;
+        Semaphore   _space;     // backpressure: dispatch signals as event slots free
+        shared bool _stop;
+        Socket      _wake = Socket.invalid;
+        InetAddress _wake_addr;
+
+        SPSCRing!(Req, 1024) _reqs;     // main -> worker
+        SPSCRing!(Ev, 512)   _ring;     // worker -> main
+
+        void post_req(Req r)
+        {
+            if (_thread is null)
+                return;
+            Req* slot = _reqs.reserve();
+            while (slot is null)
+            {
+                wake();
+                slot = _reqs.reserve();
+            }
+            *slot = r;
+            _reqs.commit();
+            wake();
+        }
+
+        void wake()
+        {
+            if (!_wake)
+                return;
+            size_t sent;
+            ubyte one = 0;
+            _wake.sendto(&_wake_addr, &sent, (&one)[0 .. 1]);
+        }
+
+        // worker thread ----------------------------------------------------
+
+        void run()
+        {
+            Array!Entry entries;
+            Array!PollFd fds;
+
+            while (!atomicLoad!(MemoryOrder.acquire)(_stop))
+            {
+                apply_requests(entries);
+
+                fds.clear();
+                fds ~= PollFd(_wake, PollEvents.read);
+                foreach (ref e; entries[])
+                {
+                    if (e.dead)
+                        continue;
+                    fds ~= PollFd(e.socket, e.connecting ? PollEvents.write : PollEvents.read);
+                }
+
+                uint num;
+                if (poll(fds[], msecs(1000), num).failed || num == 0)
+                    continue;
+
+                if (fds[0].return_events & PollEvents.read)
+                    drain_wake();
+
+                bool posted = false;
+                size_t ei = 0;
+                for (size_t f = 1; f < fds.length; ++f)
+                {
+                    while (ei < entries.length && entries[ei].dead)
+                        ++ei;
+                    if (ei >= entries.length)
+                        break;
+                    Entry* e = &entries[ei++];
+                    PollEvents re = fds[f].return_events;
+                    if (re == PollEvents.none)
+                        continue;
+                    if (!service(e, re, posted))
+                        return;     // stopping
+                }
+
+                if (posted)
+                    g_app.post_event(&dispatch, getTime());
+            }
+        }
+
+        void apply_requests(ref Array!Entry entries)
+        {
+            Req r;
+            while (_reqs.pop((&r)[0 .. 1]) == 1)
+            {
+                final switch (r.kind)
+                {
+                    case ReqKind.register:
+                        entries ~= Entry(r.ek, r.ep, r.socket, r.connecting);
+                        break;
+                    case ReqKind.destroy:
+                        foreach (i; 0 .. entries.length)
+                        {
+                            if (entries[i].ep == r.ep)
+                            {
+                                entries.removeSwapLast(i);
+                                break;
+                            }
+                        }
+                        push(Ev(EvKind.destroyed, r.ek, r.ep));
+                        break;
+                }
+            }
+        }
+
+        void drain_wake()
+        {
+            ubyte[64] tmp = void;
+            for (;;)
+            {
+                size_t got;
+                InetAddress from;
+                if (recvfrom(_wake, tmp[], MsgFlags.none, &from, &got).failed || got == 0)
+                    return;
+            }
+        }
+
+        // service one ready entry. returns false only when shutting down.
+        bool service(Entry* e, PollEvents re, ref bool posted)
+        {
+            if (e.connecting)
+            {
+                if (re & (PollEvents.error | PollEvents.hangup | PollEvents.invalid))
+                {
+                    e.dead = true;
+                    posted = true;
+                    return push(Ev(EvKind.error, e.kind, e.ep));
+                }
+                if (re & PollEvents.write)
+                {
+                    e.connecting = false;
+                    posted = true;
+                    return push(Ev(EvKind.connected, e.kind, e.ep));
+                }
+                return true;
+            }
+
+            if (e.kind == EntryKind.tcp_listen)
+                return accept_children(e, posted);
+
+            return read_ready(e, posted);
+        }
+
+        bool accept_children(Entry* e, ref bool posted)
+        {
+            foreach (_; 0 .. 16)
+            {
+                Socket child;
+                InetAddress remote;
+                Result r = e.socket.accept(child, &remote);
+                if (r.failed)
+                {
+                    if (r.socket_result == SocketResult.would_block)
+                        return true;
+                    e.dead = true;
+                    posted = true;
+                    return push(Ev(EvKind.error, e.kind, e.ep));
+                }
+                child.set_socket_option(SocketOption.non_blocking, true);
+
+                Ev ev;
+                ev.kind = EvKind.accepted;
+                ev.ek = EntryKind.tcp_listen;
+                ev.ep = e.ep;
+                ev.from = remote;
+                ev.socket = child;
+                ev.rx_time = getTime();
+                posted = true;
+                if (!push(ev))
+                {
+                    child.close();
+                    return false;
+                }
+            }
+            return true;
+        }
+
+        bool read_ready(Entry* e, ref bool posted)
+        {
+            immutable bool is_udp = e.kind == EntryKind.udp;
+
+            size_t avail;
+            if (pending(e.socket, avail).failed || avail == 0)
+                avail = 2048;
+            else if (avail > 256 * 1024)
+                avail = 256 * 1024;
+
+            void[] buf = defaultAllocator().alloc(avail);
+            size_t got;
+            InetAddress from;
+            Result r = is_udp ? recvfrom(e.socket, buf, MsgFlags.none, &from, &got)
+                              : recv(e.socket, buf, MsgFlags.none, &got);
+
+            if (r.failed)
+            {
+                defaultAllocator().free(buf);
+                if (r.socket_result == SocketResult.would_block || is_udp)
+                    return true;     // udp: ignore transient errors, keep the socket
+                // a genuine peer close (FIN) arrives as a failed ConnectionClosedResult.
+                e.dead = true;
+                posted = true;
+                return push(Ev(EvKind.peer_closed, e.kind, e.ep));
+            }
+            if (got == 0)
+            {
+                defaultAllocator().free(buf);
+                return true;     // nothing ready (would-block reported as success+0)
+            }
+
+            Ev ev;
+            ev.kind = EvKind.data;
+            ev.ek = e.kind;
+            ev.ep = e.ep;
+            ev.buffer = cast(const(ubyte)[])buf[0 .. got];
+            ev.from = from;
+            ev.rx_time = getTime();
+            posted = true;
+            return push(ev);
+        }
+
+        bool push(Ev ev)
+        {
+            Ev* slot = _ring.reserve();
+            while (slot is null)
+            {
+                g_app.post_event(&dispatch, getTime());
+                _space.wait(msecs(50));
+                if (atomicLoad!(MemoryOrder.acquire)(_stop))
+                    return false;
+                slot = _ring.reserve();
+            }
+            *slot = ev;
+            _ring.commit();
+            return true;
+        }
+
+        // main thread ------------------------------------------------------
+
+        void dispatch(MonoTime)
+        {
+            Ev ev;
+            while (_ring.pop((&ev)[0 .. 1]) == 1)
+            {
+                handle(ev);
+                _space.signal();
+            }
+        }
+
+        void handle(ref Ev ev)
+        {
+            final switch (ev.kind)
+            {
+                case EvKind.data:
+                {
+                    if (ev.ek == EntryKind.udp)
+                    {
+                        UDPEndpoint* ep = cast(UDPEndpoint*)ev.ep;
+                        if (!ep._closing && ep._on_recv)
+                        {
+                            InetAddress from = ev.from;
+                            ep._on_recv(ep, ev.buffer, from, ev.rx_time);
+                        }
+                    }
+                    else
+                    {
+                        TCPConnection* c = cast(TCPConnection*)ev.ep;
+                        if (!c._closing && c._on_recv)
+                            c._on_recv(c, ev.buffer, ev.rx_time);
+                    }
+                    break;
+                }
+                case EvKind.connected:
+                {
+                    TCPConnection* c = cast(TCPConnection*)ev.ep;
+                    if (!c._closing && c._phase == TCPConnection.Phase.connecting)
+                    {
+                        c._phase = TCPConnection.Phase.open;
+                        c._socket.get_peer_name(c._remote);
+                        if (c._keepalive_set)
+                            set_keepalive(c._socket, c._keepalive, c._keep_idle, c._keep_interval, c._keep_count);
+                        if (c._no_delay_set)
+                            c._socket.set_socket_option(SocketOption.tcp_no_delay, c._no_delay);
+                        if (c._on_event)
+                            c._on_event(c, IPEvent.connected);
+                    }
+                    break;
+                }
+                case EvKind.peer_closed:
+                {
+                    TCPConnection* c = cast(TCPConnection*)ev.ep;
+                    if (!c._closing)
+                        c.fail(IPEvent.closed);
+                    break;
+                }
+                case EvKind.error:
+                {
+                    TCPConnection* c = cast(TCPConnection*)ev.ep;
+                    if (!c._closing)
+                        c.fail(IPEvent.error);
+                    break;
+                }
+                case EvKind.accepted:
+                    accept_on_main(ev);
+                    break;
+                case EvKind.destroyed:
+                    free_endpoint(ev.ek, ev.ep);
+                    break;
+            }
+
+            if (ev.buffer.length)
+                defaultAllocator().free(cast(void[])ev.buffer);
+        }
+
+        void accept_on_main(ref Ev ev)
+        {
+            TCPListener* l = cast(TCPListener*)ev.ep;
+            Socket child = ev.socket;
+            if (l._closing)
+            {
+                child.close();
+                return;
+            }
+            TCPConnection* c = register_tcp_conn(child, ev.from);
+            c._phase = TCPConnection.Phase.open;
+            // register before on_accept so a close() from the handler is ordered after.
+            register(EntryKind.tcp_conn, cast(size_t)c, child, false);
+            if (l._on_accept)
+                l._on_accept(l, c, ev.rx_time);
+            else
+                c.close();
+        }
+
+        void free_endpoint(EntryKind ek, size_t ep)
+        {
+            final switch (ek)
+            {
+                case EntryKind.tcp_conn:
+                {
+                    TCPConnection* c = cast(TCPConnection*)ep;
+                    for (size_t i = _tcp_conns.length; i-- > 0; )
+                    {
+                        if (_tcp_conns[i] is c)
+                        {
+                            _tcp_conns.removeSwapLast(i);
+                            break;
+                        }
+                    }
+                    if (c._socket)
+                        c._socket.close();
+                    defaultAllocator().freeT(c);
+                    break;
+                }
+                case EntryKind.tcp_listen:
+                {
+                    TCPListener* l = cast(TCPListener*)ep;
+                    for (size_t i = _tcp_listeners.length; i-- > 0; )
+                    {
+                        if (_tcp_listeners[i] is l)
+                        {
+                            _tcp_listeners.removeSwapLast(i);
+                            break;
+                        }
+                    }
+                    if (l._socket)
+                        l._socket.close();
+                    defaultAllocator().freeT(l);
+                    break;
+                }
+                case EntryKind.udp:
+                {
+                    UDPEndpoint* u = cast(UDPEndpoint*)ep;
+                    for (size_t i = _udp_eps.length; i-- > 0; )
+                    {
+                        if (_udp_eps[i] is u)
+                        {
+                            _udp_eps.removeSwapLast(i);
+                            break;
+                        }
+                    }
+                    if (u._socket)
+                        u._socket.close();
+                    defaultAllocator().freeT(u);
+                    break;
+                }
+            }
+        }
+    }
+
+    __gshared SocketWorker _worker;
 }

@@ -121,7 +121,7 @@ void udp_input(ref IPStack stack, ref Packet pkt)
             continue;
         if (pcb.connected)
         {
-            if (pcb.remote_addr != ip.src || pcb.remote_port != src_port)
+            if (pcb.remote_addr != IPAddr(ip.src) || pcb.remote_port != src_port)
                 continue;
         }
 
@@ -131,7 +131,7 @@ void udp_input(ref IPStack stack, ref Packet pkt)
         {
             if (pcb.owner)
             {
-                pcb.owner.deliver(ip.src, src_port, body_, cast(MonoTime)pkt.creation_time);
+                pcb.owner.deliver(IPAddr(ip.src), src_port, body_, cast(MonoTime)pkt.creation_time);
                 return;
             }
         }
