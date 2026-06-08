@@ -13,6 +13,7 @@ enum PacketType : ushort
     unknown,
     raw,
     ethernet,
+    wifi_80211,
     wpan,
     _6lowpan,
     zigbee_nwk,
@@ -205,6 +206,26 @@ struct Ethernet
     ushort ether_type;
     ushort ow_sub_type; // TODO: REMOVE ME!!
 }
+
+struct Wifi80211
+{
+    enum Type = PacketType.wifi_80211;
+
+    ushort frame_control;   // FC field: type[3:2], subtype[7:4], to_ds, from_ds, more_frag, retry, pwr_mgmt, more_data, protected, order
+    ushort seq_ctrl;        // sequence control field (fragment + sequence number)
+    MACAddress addr1;       // receiver (RA) / dst
+    MACAddress addr2;       // transmitter (TA) / src
+    MACAddress addr3;       // BSSID / dst / src depending on ToDS/FromDS
+    byte rssi;              // RX signal strength, dBm
+    ubyte channel;          // RX channel (1..14 for 2.4 GHz)
+
+    // Not included to keep this in 24 bytes -- parse from payload when needed:
+    // ushort duration;      // Duration/ID, only matters for NAV math
+    // MACAddress addr4;     // 4-address WDS / mesh frames only
+    // ushort qos_ctrl;      // QoS data frames (HT/VHT/HE)
+    // uint ht_ctrl;         // HT Control field for +HTC frames
+}
+static assert(Wifi80211.sizeof == 24);
 
 
 private:

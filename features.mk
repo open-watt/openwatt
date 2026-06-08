@@ -10,10 +10,13 @@
 # Axes (orthogonal, can combine freely):
 #
 #   FEATURES        What's compiled in. Drives binary cost.
-#                     switch -- main + manager + db + driver + router
+#                     switch  - main + manager + db + driver + router
 #                               (L2 packet fabric; no IP/protocols/apps).
 #                               Suited to a coprocessor data-plane build.
-#                     full   -- + protocol + apps + devices + tools.
+#                     switch-ip - switch + protocol/ip + protocol/dhcp.
+#                               Used by small WiFi/AP targets that need L3
+#                               service but not the full control plane.
+#                     full   - + protocol + apps + devices + tools.
 #                               Current default; standalone instance.
 #                     minimal (DEFERRED -- needs manager/ decoupling from
 #                               router/protocol; see Phase 2 TODOs at the
@@ -37,12 +40,10 @@
 # -- Per-platform defaults -----------------------------------------------
 # Set BEFORE the ?= fallbacks below.
 
-# BL808 e907 is the bouffalo coprocessor: switch-tier data-plane only,
-# never directly addressed by humans. Exercises the switch+headless
-# build path in CI.
+# BL808 e907 is the bouffalo wifi coprocessor.
 ifeq ($(PLATFORM),bl808)
   ifeq ($(PROCESSOR),e907)
-    FEATURES ?= switch
+    FEATURES ?= switch-ip
     HEADLESS ?= 1
   endif
 endif
@@ -54,8 +55,8 @@ HEADLESS ?= 0
 
 # -- Validate ------------------------------------------------------------
 
-ifeq ($(filter $(FEATURES),switch full),)
-    $(error Unknown FEATURES='$(FEATURES)'; valid: switch | full)
+ifeq ($(filter $(FEATURES),switch switch-ip full),)
+    $(error Unknown FEATURES='$(FEATURES)'; valid: switch | switch-ip | full)
 endif
 
 # -- Source-tree subset per preset ---------------------------------------
@@ -67,6 +68,7 @@ FEATURE_DIRS_minimal := manager db driver
 # the higher-level control plane. The rest of protocol/modbus rides
 # along here until the iface/control split is teased apart (Phase 2).
 FEATURE_DIRS_switch  := manager db driver router protocol/modbus
+FEATURE_DIRS_switch-ip := $(FEATURE_DIRS_switch) protocol/ip protocol/dhcp
 FEATURE_DIRS_full    := manager db driver router protocol apps devices tools
 
 FEATURE_DIRS := $(FEATURE_DIRS_$(FEATURES))
@@ -80,6 +82,11 @@ ifeq ($(FEATURES),switch)
     FEATURE_DFLAGS += $(VERSION_FLAG)NoAll
     FEATURE_DFLAGS += $(VERSION_FLAG)NoHTTP
     FEATURE_DFLAGS += $(VERSION_FLAG)NoIP
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoTLS
+endif
+ifeq ($(FEATURES),switch-ip)
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoAll
+    FEATURE_DFLAGS += $(VERSION_FLAG)NoHTTP
     FEATURE_DFLAGS += $(VERSION_FLAG)NoTLS
 endif
 # minimal (deferred) would additionally emit -version=NoSwitch.

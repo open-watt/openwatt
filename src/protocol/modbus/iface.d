@@ -478,7 +478,11 @@ protected:
 
         if (_is_bus_master)
         {
-            assert(hdr.type == ModbusFrameType.request);
+            if (hdr.type != ModbusFrameType.request)
+            {
+//                add_tx_drop(); // should we count this as a drop?
+                return -1;
+            }
 
             ubyte local_address = 0;
             if (hdr.dst_address != 0)
@@ -509,7 +513,11 @@ protected:
         }
         else
         {
-            assert(hdr.type == ModbusFrameType.response);
+            if (hdr.type != ModbusFrameType.response)
+            {
+//                add_tx_drop(); // should we count this as a drop?
+                return -1;
+            }
 
             if (hdr.dst_address != _master_address)
             {

@@ -1,6 +1,7 @@
 module manager.collection;
 
 import urt.array;
+import urt.attribute : fast_data;
 import urt.lifetime;
 import urt.mem.allocator;
 import urt.result;
@@ -520,7 +521,7 @@ private:
 // HACK: is this satisfactory?
 __gshared Array!ObjectLifecycleHandler _on_object_created;
 
-__gshared CollectionTable[CollectionType.count] g_item_tables;
+@fast_data __gshared CollectionTable[CollectionType.count] g_item_tables;
 
 package void init_collections()
 {
