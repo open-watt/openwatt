@@ -75,8 +75,8 @@ align(1):
     ubyte ttl;
     ubyte protocol;
     ubyte[2] checksum;
-    IPAddr src;
-    IPAddr dst;
+    ubyte[4] src;
+    ubyte[4] dst;
 
     ubyte version_() const pure
         => ver_ihl >> 4;
@@ -280,7 +280,7 @@ private:
         size_t hdr_len = ip.ihl * 4;
         if (pkt.data.length < hdr_len)
             return;
-        ushort total = (ushort(ip.total_length[0]) << 8) | ip.total_length[1];
+        ushort total = ip.total_length.bigEndianToNative!ushort;
         if (total < hdr_len || total > pkt.data.length)
             return;
         if (internet_checksum(pkt.data.ptr[0 .. hdr_len]) != 0)
@@ -290,14 +290,20 @@ private:
         if (pkt.type == PacketType.ethernet)
         {
             const Ethernet eth = pkt.hdr!Ethernet();
-            if (!eth.src.is_multicast())
-                neighbour_v4.learn(ip.src, iface, eth.src.b[]);
+            bool src_mcast = eth.src.is_multicast();
+            bool onlink = is_connected_on_iface(IPAddr(ip.src), iface);
+            if (!src_mcast && onlink)
+                neighbour_v4.learn(IPAddr(ip.src), iface, eth.src.b[]);
         }
 
         // TODO: reassembly via ident/flags/frag_offset
         // TODO: conntrack lookup for stateful firewall
 
         if (firewall_v4.run(HookPoint.prerouting, pkt) == Verdict.drop)
+            return;
+
+        bool non_forwardable = is_non_forwardable_v4_dst(IPAddr(ip.dst), iface);
+        if (non_forwardable)
             return;
 
         RouteResult r = route_lookup_v4(pkt);
@@ -346,11 +352,10 @@ private:
                 // Incremental checksum update (RFC 1624): TTL sits in the high
                 // byte of a 16-bit word, so reducing TTL by N reduces the data
                 // sum by N*256 and the 1's-complement checksum rises by N*256.
-                uint c = (uint(ip.checksum[0]) << 8) | ip.checksum[1];
+                uint c = ip.checksum.bigEndianToNative!ushort;
                 c += uint(r.ttl_decrement) << 8;
                 c = (c & 0xFFFF) + (c >> 16);
-                ip.checksum[0] = cast(ubyte)(c >> 8);
-                ip.checksum[1] = cast(ubyte)(c & 0xFF);
+                ip.checksum = nativeToBigEndian(cast(ushort)c);
                 // TODO: if pkt.length > out_iface.actual_mtu, fragment (v4) or send PTB (v6)
                 if (fw.run(HookPoint.forward, pkt) == Verdict.drop)
                     return;
@@ -368,12 +373,40 @@ private:
         return null;
     }
 
+    bool is_connected_on_iface(IPAddr ip, BaseInterface iface)
+    {
+        foreach (a; Collection!IPAddress().values)
+            if (a.iface is iface && a.address.contains(ip))
+                return true;
+        return false;
+    }
+
+    bool is_non_forwardable_v4_dst(IPAddr dst, BaseInterface iface)
+    {
+        if (dst == IPAddr.broadcast || dst.is_multicast())
+            return true;
+
+        foreach (a; Collection!IPAddress().values)
+        {
+            if (a.iface !is iface)
+                continue;
+            ubyte plen = a.address.prefix_len;
+            if (plen >= 31)
+                continue;
+            IPAddr bcast = a.address.get_network() | ~a.address.net_mask();
+            if (dst == bcast)
+                return true;
+        }
+
+        return false;
+    }
+
     RouteResult route_lookup_v4(ref const Packet pkt)
     {
         if (pkt.length < IPv4Header.sizeof)
             return RouteResult(RouteResult.Kind.none);
         const IPv4Header* h = cast(const(IPv4Header)*)pkt.data.ptr;
-        return route_lookup_v4_dst(h.dst);
+        return route_lookup_v4_dst(IPAddr(h.dst));
     }
 
     void egress(ref Packet pkt, BaseInterface out_iface, IPAddr next_hop, ref FirewallChains fw)

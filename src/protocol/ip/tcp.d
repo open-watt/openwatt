@@ -1,6 +1,7 @@
 module protocol.ip.tcp;
 
 import urt.array;
+import urt.endian;
 import urt.hash;
 import urt.inet;
 import urt.log;
@@ -124,7 +125,7 @@ align(1):
         => data_offset_reserved >> 4;
     void  data_offset(ubyte n) pure
     {
-        data_offset_reserved = cast(ubyte)((n & 0x0F) << 4);
+        data_offset_reserved = (n & 0x0F) << 4;
     }
 }
 static assert(TcpHeader.sizeof == 20);
@@ -527,7 +528,7 @@ void tcp_input(ref IPStack stack, ref Packet pkt)
 
     // Trim to IP total_length: Ethernet pads small frames to 46-byte minimum
     // payload, and pkt.data may include those padding bytes.
-    size_t ip_total = (size_t(ip.total_length[0]) << 8) | ip.total_length[1];
+    size_t ip_total = ip.total_length.bigEndianToNative!ushort;
     if (ip_total < ip_hdr_len + TcpHeader.sizeof || ip_total > pkt.data.length)
         return;
 
@@ -539,27 +540,27 @@ void tcp_input(ref IPStack stack, ref Packet pkt)
         return;
 
     // Verify TCP checksum (pseudo-header + segment).
-    ushort pseudo = pseudo_header_checksum_v4(ip.src, ip.dst, IpProtocol.tcp, cast(ushort)tcp_seg.length);
+    ushort pseudo = pseudo_header_checksum_v4(IPAddr(ip.src), IPAddr(ip.dst), IpProtocol.tcp, cast(ushort)tcp_seg.length);
     ushort calc = internet_checksum(tcp_seg, pseudo);
     if (calc != 0)
         return;
 
-    ushort src_port = be_u16(t.src_port);
-    ushort dst_port = be_u16(t.dst_port);
-    uint   seq      = be_u32(t.seq);
-    uint   ack      = be_u32(t.ack);
-    uint   wnd      = be_u16(t.window);
+    ushort src_port = t.src_port.bigEndianToNative!ushort;
+    ushort dst_port = t.dst_port.bigEndianToNative!ushort;
+    uint   seq      = t.seq.bigEndianToNative!uint;
+    uint   ack      = t.ack.bigEndianToNative!uint;
+    uint   wnd      = t.window.bigEndianToNative!ushort;
     ubyte  flags    = t.flags;
     const(ubyte)[] payload = tcp_seg[tcp_hdr_len .. $];
 
-    TcpPcb* pcb = find_pcb_4tuple(ip.dst, dst_port, ip.src, src_port);
+    TcpPcb* pcb = find_pcb_4tuple(IPAddr(ip.dst), dst_port, IPAddr(ip.src), src_port);
     if (!pcb)
-        pcb = find_listener(ip.dst, dst_port);
+        pcb = find_listener(IPAddr(ip.dst), dst_port);
 
     if (!pcb)
     {
         if (!(flags & TcpFlag.rst))
-            send_rst_for_unknown(stack, ip.src, src_port, ip.dst, dst_port, seq, ack, flags, payload.length);
+            send_rst_for_unknown(stack, IPAddr(ip.src), src_port, IPAddr(ip.dst), dst_port, seq, ack, flags, payload.length);
         return;
     }
 
@@ -718,7 +719,7 @@ void tcp_handle_unreachable(ref IPStack stack, ubyte code, uint code_data,
     if (code != IcmpDestUnreachableCode.frag_needed)
         return;
 
-    ushort next_hop_mtu = cast(ushort)(code_data & 0xFFFF);
+    ushort next_hop_mtu = code_data & 0xFFFF;
     ushort new_mss;
     if (next_hop_mtu >= IPv4Header.sizeof + TcpHeader.sizeof + 8)   // sanity floor
         new_mss = cast(ushort)(next_hop_mtu - IPv4Header.sizeof - TcpHeader.sizeof);
@@ -764,8 +765,8 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
             return;
         if (flags & TcpFlag.ack)
         {
-            send_rst_for_unknown(stack, ip.src, be_u16(t.src_port),
-                                 ip.dst, be_u16(t.dst_port), seq, ack, flags, payload.length);
+            send_rst_for_unknown(stack, IPAddr(ip.src), t.src_port.bigEndianToNative!ushort,
+                                 IPAddr(ip.dst), t.dst_port.bigEndianToNative!ushort, seq, ack, flags, payload.length);
             return;
         }
         if (flags & TcpFlag.syn)
@@ -1124,10 +1125,10 @@ void spawn_child_from_listen(ref IPStack stack, TcpPcb* listener, const IPv4Head
     listener.child_list ~= child;
     tcp_register(child);                    // assigns id before any logging
 
-    child.local_addr  = ip.dst;
+    child.local_addr  = IPAddr(ip.dst);
     child.local_port  = listener.local_port;
-    child.remote_addr = ip.src;
-    child.remote_port = be_u16(t.src_port);
+    child.remote_addr = IPAddr(ip.src);
+    child.remote_port = t.src_port.bigEndianToNative!ushort;
     child.parent      = listener;
     child.snd_iss     = generate_iss();
     child.snd_una     = child.snd_iss;
@@ -1242,31 +1243,28 @@ void send_segment_raw(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAdd
     auto ip = cast(IPv4Header*)buf.ptr;
     ip.ver_ihl  = 0x45;
     ip.tos      = 0;
-    ip.total_length[0] = cast(ubyte)(total >> 8);
-    ip.total_length[1] = cast(ubyte)total;
+    ip.total_length = nativeToBigEndian(cast(ushort)total);
     ushort ip_id = next_ip_id();
-    ip.ident[0] = cast(ubyte)(ip_id >> 8);
-    ip.ident[1] = cast(ubyte)ip_id;
+    ip.ident = nativeToBigEndian(ip_id);
     ip.flags_frag[0] = 0x40;        // DF: required for PMTU Discovery
     ip.flags_frag[1] = 0;
     ip.ttl      = 64;
     ip.protocol = IpProtocol.tcp;
     ip.checksum[] = 0;
-    ip.src      = src_addr;
-    ip.dst      = dst_addr;
+    ip.src      = src_addr.b;
+    ip.dst      = dst_addr.b;
     ushort ihc = internet_checksum(buf[0 .. IPv4Header.sizeof]);
-    ip.checksum[0] = cast(ubyte)(ihc >> 8);
-    ip.checksum[1] = cast(ubyte)ihc;
+    ip.checksum = nativeToBigEndian(ihc);
 
     auto t = cast(TcpHeader*)(buf.ptr + IPv4Header.sizeof);
-    set_be_u16(t.src_port, src_port);
-    set_be_u16(t.dst_port, dst_port);
-    set_be_u32(t.seq, seq);
-    set_be_u32(t.ack, ack_val);
+    t.src_port = nativeToBigEndian(src_port);
+    t.dst_port = nativeToBigEndian(dst_port);
+    t.seq = nativeToBigEndian(seq);
+    t.ack = nativeToBigEndian(ack_val);
     ushort header_len = cast(ushort)(TcpHeader.sizeof + opt_len);
     t.data_offset = cast(ubyte)(header_len / 4);
     t.flags = flags;
-    set_be_u16(t.window, window);
+    t.window = nativeToBigEndian(window);
     t.checksum[] = 0;
     t.urgent[] = 0;
 
@@ -1276,8 +1274,7 @@ void send_segment_raw(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAdd
         ubyte* opt = buf.ptr + IPv4Header.sizeof + TcpHeader.sizeof;
         opt[0] = TcpOptionKind.mss;
         opt[1] = 4;
-        opt[2] = cast(ubyte)(mss >> 8);
-        opt[3] = cast(ubyte)mss;
+        opt[2..4] = mss.nativeToBigEndian;
     }
 
     if (data.length > 0)
@@ -1286,8 +1283,7 @@ void send_segment_raw(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAdd
     ushort tcp_total = cast(ushort)(TcpHeader.sizeof + opt_len + data.length);
     ushort pseudo = pseudo_header_checksum_v4(src_addr, dst_addr, IpProtocol.tcp, tcp_total);
     ushort cc = internet_checksum(buf[IPv4Header.sizeof .. total], pseudo);
-    t.checksum[0] = cast(ubyte)(cc >> 8);
-    t.checksum[1] = cast(ubyte)cc;
+    t.checksum = nativeToBigEndian(cc);
 
     Packet pkt;
     pkt.init!RawFrame(buf[0 .. total]);
@@ -1758,7 +1754,7 @@ void parse_options(const TcpHeader* t, TcpPcb* pcb)
 
         if (kind == TcpOptionKind.mss && olen == 4)
         {
-            ushort mss = (ushort(opts[i + 2]) << 8) | opts[i + 3];
+            ushort mss = opts[i + 2 .. i + 4][0..2].bigEndianToNative!ushort;
             version (DebugTCPProto)
                 log.trace("c", pcb.id, " opt peer mss=", mss);
             if (mss > 0 && mss < pcb.send_mss)
@@ -1847,36 +1843,14 @@ uint generate_iss()
 }
 
 
-ushort be_u16(const ref ubyte[2] x) pure
-    => cast(ushort)((x[0] << 8) | x[1]);
-
-uint be_u32(const ref ubyte[4] x) pure
-    => (uint(x[0]) << 24) | (uint(x[1]) << 16) | (uint(x[2]) << 8) | x[3];
-
-void set_be_u16(ref ubyte[2] x, ushort v) pure
-{
-    x[0] = cast(ubyte)(v >> 8);
-    x[1] = cast(ubyte)v;
-}
-
-void set_be_u32(ref ubyte[4] x, uint v) pure
-{
-    x[0] = cast(ubyte)(v >> 24);
-    x[1] = cast(ubyte)(v >> 16);
-    x[2] = cast(ubyte)(v >> 8);
-    x[3] = cast(ubyte)v;
-}
-
-
 // IPv4 pseudo-header checksum: sum of src_addr, dst_addr, zero+protocol, transport_length.
 ushort pseudo_header_checksum_v4(IPAddr src, IPAddr dst, ubyte protocol, ushort transport_length) pure
 {
     ubyte[12] ph = void;
-    ph[0..4]  = src.b[];
-    ph[4..8]  = dst.b[];
-    ph[8]     = 0;
-    ph[9]     = protocol;
-    ph[10]    = cast(ubyte)(transport_length >> 8);
-    ph[11]    = cast(ubyte)transport_length;
+    ph[0..4]   = src.b;
+    ph[4..8]   = dst.b;
+    ph[8]      = 0;
+    ph[9]      = protocol;
+    ph[10..12] = transport_length.nativeToBigEndian;
     return internet_checksum(ph[]);
 }

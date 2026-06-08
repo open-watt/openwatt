@@ -1,6 +1,7 @@
 module protocol.ip.udp;
 
 import urt.array;
+import urt.endian;
 import urt.hash;
 import urt.inet;
 import urt.mem.allocator : defaultAllocator;
@@ -46,7 +47,6 @@ struct UdpPcb
     Array!UdpDatagram recv_queue;
     enum size_t max_queued = 16;
 
-    // Owner socket handle (filled in when wrapped by socket layer).
     int handle;
 }
 
@@ -82,29 +82,29 @@ void udp_input(ref IPStack stack, ref Packet pkt)
 
     const ip = cast(const IPv4Header*)pkt.data.ptr;
     size_t ip_hdr_len = ip.ihl * 4;
-    size_t ip_total = (size_t(ip.total_length[0]) << 8) | ip.total_length[1];
+    size_t ip_total = ip.total_length.bigEndianToNative!ushort;
     if (ip_total < ip_hdr_len + UdpHeader.sizeof || ip_total > pkt.data.length)
         return;
 
     const(ubyte)[] payload = (cast(const(ubyte)*)pkt.data.ptr)[ip_hdr_len .. ip_total];
     const u = cast(const UdpHeader*)payload.ptr;
 
-    ushort udp_len = (ushort(u.length[0]) << 8) | u.length[1];
+    ushort udp_len = u.length.bigEndianToNative!ushort;
     if (udp_len < UdpHeader.sizeof || udp_len > payload.length)
         return;
 
     // Verify checksum if present (zero means sender opted out).
-    ushort wire_csum = (ushort(u.checksum[0]) << 8) | u.checksum[1];
+    ushort wire_csum = u.checksum.bigEndianToNative!ushort;
     if (wire_csum != 0)
     {
-        ushort pseudo = pseudo_header_checksum(ip.src, ip.dst, IpProtocol.udp, udp_len);
+        ushort pseudo = pseudo_header_checksum(IPAddr(ip.src), IPAddr(ip.dst), IpProtocol.udp, udp_len);
         ushort calc = internet_checksum(payload[0 .. udp_len], pseudo);
         if (calc != 0)
             return;     // bad checksum
     }
 
-    ushort dst_port = (ushort(u.dst_port[0]) << 8) | u.dst_port[1];
-    ushort src_port = (ushort(u.src_port[0]) << 8) | u.src_port[1];
+    ushort dst_port = u.dst_port.bigEndianToNative!ushort;
+    ushort src_port = u.src_port.bigEndianToNative!ushort;
 
     foreach (pcb; _pcbs[])
     {
@@ -124,7 +124,7 @@ void udp_input(ref IPStack stack, ref Packet pkt)
         const(ubyte)[] body_ = payload[UdpHeader.sizeof .. udp_len];
 
         UdpDatagram dgm;
-        dgm.src_addr = ip.src;
+        dgm.src_addr = IPAddr(ip.src);
         dgm.src_port = src_port;
         if (body_.length > 0)
         {
@@ -154,30 +154,24 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
     auto ip = cast(IPv4Header*)buf.ptr;
     ip.ver_ihl  = 0x45;
     ip.tos      = 0;
-    ip.total_length[0] = cast(ubyte)(total >> 8);
-    ip.total_length[1] = cast(ubyte)total;
+    ip.total_length = nativeToBigEndian(cast(ushort)total);
     ushort ip_id = next_ip_id();
-    ip.ident[0] = cast(ubyte)(ip_id >> 8);
-    ip.ident[1] = cast(ubyte)ip_id;
+    ip.ident = nativeToBigEndian(ip_id);
     ip.flags_frag[0] = 0;
     ip.flags_frag[1] = 0;
     ip.ttl      = 64;
     ip.protocol = IpProtocol.udp;
     ip.checksum[] = 0;
-    ip.src      = src_addr;
-    ip.dst      = dst_addr;
+    ip.src      = src_addr.b;
+    ip.dst      = dst_addr.b;
     ushort ihc = internet_checksum(buf[0 .. IPv4Header.sizeof]);
-    ip.checksum[0] = cast(ubyte)(ihc >> 8);
-    ip.checksum[1] = cast(ubyte)ihc;
+    ip.checksum = nativeToBigEndian(ihc);
 
     auto u = cast(UdpHeader*)(buf.ptr + IPv4Header.sizeof);
-    u.src_port[0] = cast(ubyte)(src_port >> 8);
-    u.src_port[1] = cast(ubyte)src_port;
-    u.dst_port[0] = cast(ubyte)(dst_port >> 8);
-    u.dst_port[1] = cast(ubyte)dst_port;
+    u.src_port = nativeToBigEndian(src_port);
+    u.dst_port = nativeToBigEndian(dst_port);
     ushort udp_len = cast(ushort)(UdpHeader.sizeof + payload.length);
-    u.length[0] = cast(ubyte)(udp_len >> 8);
-    u.length[1] = cast(ubyte)udp_len;
+    u.length = nativeToBigEndian(udp_len);
     u.checksum[] = 0;
 
     if (payload.length > 0)
@@ -187,8 +181,7 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
     ushort cc = internet_checksum(buf[IPv4Header.sizeof .. total], pseudo);
     if (cc == 0)
         cc = 0xFFFF;    // RFC 768: zero means "no checksum"; use all-ones to mean "checksum is zero"
-    u.checksum[0] = cast(ubyte)(cc >> 8);
-    u.checksum[1] = cast(ubyte)cc;
+    u.checksum[0..2] = cc.nativeToBigEndian;
 
     Packet pkt;
     pkt.init!RawFrame(buf[0 .. total]);
@@ -197,8 +190,6 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
 }
 
 
-// Pop the oldest queued datagram off `pcb`. Caller takes ownership of `data`
-// and must free it with `udp_free_datagram_data(d)`.
 bool udp_recv(UdpPcb* pcb, out UdpDatagram d)
 {
     if (pcb.recv_queue.length == 0)
@@ -220,17 +211,13 @@ void udp_free_datagram_data(ref UdpDatagram d)
 
 private:
 
-// IPv4 pseudo-header checksum: sum of src_addr, dst_addr, zero+protocol, transport_length.
-// Returns the one's-complement-final value; pass it directly as `initial` to
-// internet_checksum() to chain over the transport segment.
 ushort pseudo_header_checksum(IPAddr src, IPAddr dst, ubyte protocol, ushort transport_length) pure
 {
     ubyte[12] ph = void;
-    ph[0..4]  = src.b[];
-    ph[4..8]  = dst.b[];
-    ph[8]     = 0;
-    ph[9]     = protocol;
-    ph[10]    = cast(ubyte)(transport_length >> 8);
-    ph[11]    = cast(ubyte)transport_length;
+    ph[0..4]   = src.b;
+    ph[4..8]   = dst.b;
+    ph[8]      = 0;
+    ph[9]      = protocol;
+    ph[10..12] = transport_length.nativeToBigEndian;
     return internet_checksum(ph[]);
 }
