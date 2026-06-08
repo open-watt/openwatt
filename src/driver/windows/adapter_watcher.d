@@ -7,7 +7,7 @@ import urt.atomic : atomicLoad, atomicStore, MemoryOrder;
 import urt.lifetime : move;
 import urt.string;
 import urt.system : sleep;
-import urt.thread : SPSCRing;
+import urt.sync.spsc : SPSCRing;
 import urt.time : msecs;
 
 import driver.windows.npcap;

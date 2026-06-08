@@ -6,7 +6,7 @@ static if (num_wifi > 0) {
 
 import urt.endian : loadBigEndian;
 import urt.result : Result;
-import urt.thread : SPSCRing;
+import urt.sync.spsc : SPSCRing;
 import urt.time : SysTime, getSysTime;
 
 import manager.base;

@@ -205,6 +205,9 @@
     <Filter Include="third_party\urt\internal\sys">
       <UniqueIdentifier>{6aed1c5f-ebc2-4e3e-8b87-f6f39b96eb12}</UniqueIdentifier>
     </Filter>
+    <Filter Include="third_party\urt\internal\sys\freertos">
+      <UniqueIdentifier>{a8b9c0d1-e2f3-4a5b-9c8d-7e6f5d4c3b2a}</UniqueIdentifier>
+    </Filter>
     <Filter Include="third_party\urt\internal\sys\winows">
       <UniqueIdentifier>{51839fa1-68ac-4d92-b82c-33642d718550}</UniqueIdentifier>
     </Filter>
@@ -219,6 +222,9 @@
     </Filter>
     <Filter Include="third_party\urt\string">
       <UniqueIdentifier>{eb6617e4-792c-4476-90b3-977eba93f55f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\sync">
+      <UniqueIdentifier>{d4e1f5a2-3b78-4c9e-8a1b-5f2e3d4c6b7a}</UniqueIdentifier>
     </Filter>
     <Filter Include="third_party\urt\si">
       <UniqueIdentifier>{af470b6a-000a-4e83-9502-2ea2ca5f3159}</UniqueIdentifier>
@@ -1026,6 +1032,30 @@
     <DCompile Include="third_party\urt\src\urt\string\uni.d">
       <Filter>third_party\urt\string</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\critical.d">
+      <Filter>third_party\urt\sync</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\event.d">
+      <Filter>third_party\urt\sync</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\mpmc.d">
+      <Filter>third_party\urt\sync</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\mpsc.d">
+      <Filter>third_party\urt\sync</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\mutex.d">
+      <Filter>third_party\urt\sync</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\semaphore.d">
+      <Filter>third_party\urt\sync</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\spinlock.d">
+      <Filter>third_party\urt\sync</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\sync\spsc.d">
+      <Filter>third_party\urt\sync</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\si\package.d">
       <Filter>third_party\urt\si</Filter>
     </DCompile>
@@ -1202,6 +1232,9 @@
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\stdc\stdlib.d">
       <Filter>third_party\urt\internal\stdc</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\internal\sys\freertos\package.d">
+      <Filter>third_party\urt\internal\sys\freertos</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\internal\sys\windows\sspi.d">
       <Filter>third_party\urt\internal\sys\winows</Filter>

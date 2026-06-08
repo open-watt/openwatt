@@ -160,18 +160,19 @@ int main(string[] args)
 
     while (true)
     {
-        MonoTime start = getTime();
-        g_app.update();
+        // handle any expired timers (heartbeat-driven update() lives in here).
+        MonoTime next_deadline = g_app.process_due();
 
         version (ESP32_S3)
             ow_watchdog_feed();
 
         version (Embedded)
         {
-            if ((start - last_heartbeat).as!"seconds" >= 10)
+            MonoTime now = getTime();
+            if ((now - last_heartbeat).as!"seconds" >= 10)
             {
                 log_info("system", "Heartbeat");
-                last_heartbeat = start;
+                last_heartbeat = now;
             }
         }
 
@@ -208,12 +209,9 @@ int main(string[] args)
         if (session && session.is_attached())
             session.update();
 
-        Duration frame_time = getTime() - start;
-
-        long sleep_usecs = 1000_000 / g_app.update_rate_hz;
-        sleep_usecs -= frame_time.as!"usecs";
-        if (sleep_usecs > 20)
-            sleep(sleep_usecs.usecs);
+        // sleep until either the next timer deadline or an event fires.
+        g_app.wait_for_wake(next_deadline);
+        g_app.process_events();
     }
 
     shutdown_application();
