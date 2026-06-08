@@ -63,7 +63,7 @@ alias MessageCallback = void delegate(int msg_handle, MessageState state) nothro
 alias IncomingPacketHandler = void delegate(ref Packet p, BaseInterface i) nothrow @nogc;
 
 
-__gshared IncomingPacketHandler[PacketType.max + 1] _frame_handlers;
+__gshared IncomingPacketHandler[PacketType.count] _frame_handlers;
 
 bool register_frame_handler(PacketType type, IncomingPacketHandler handler)
 {

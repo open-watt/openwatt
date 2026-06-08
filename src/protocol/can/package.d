@@ -26,7 +26,7 @@ nothrow @nogc:
 
     override void init()
     {
-        register_address_extractor(PacketType.can, &CANFrame.extract_src, &CANFrame.extract_dst);
+        register_address_extractor(PacketType.can, &CANFrame.extract_src, &CANFrame.extract_dst, &CANFrame.is_broadcast);
 
         g_app.register_enum!CANInterfaceProtocol();
 

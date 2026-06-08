@@ -79,8 +79,7 @@ protected:
         if (!_transport || !_transport.running)
             return CompletionStatus.continue_;
 
-        _transport.subscribe(&on_transport_packet,
-                             PacketFilter(PacketType.raw, PacketDirection.incoming));
+        _transport.subscribe(&on_transport_packet, PacketFilter(PacketType.raw, PacketDirection.incoming));
         _transport.subscribe(&on_transport_state);
         _transport_subscribed = true;
 

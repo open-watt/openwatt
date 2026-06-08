@@ -80,7 +80,6 @@ ulong extract_aps_src_address(ref const Packet p) pure
     ulong addr = (aps.pan_id << 16) | aps.src;
     addr |= ulong(p.vlan & 0xFFF) << 48;
     addr |= ulong(PacketType.zigbee_aps) << 60;
-    addr |= ulong(aps.src >= 0xFFFB) << 63;
     return addr;
 }
 
@@ -90,9 +89,11 @@ ulong extract_aps_dst_address(ref const Packet p) pure
     ulong addr = (aps.pan_id << 16) | aps.dst;
     addr |= ulong(p.vlan & 0xFFF) << 48;
     addr |= ulong(PacketType.zigbee_aps) << 60;
-    addr |= ulong(aps.dst >= 0xFFFB) << 63;
     return addr;
 }
+
+bool is_aps_broadcast(ulong address) pure
+    => (address & 0xFFFF) >= 0xFFFB;
 
 ptrdiff_t parse_aps_frame(const void[] packet, out APSFrame frame) pure
 {

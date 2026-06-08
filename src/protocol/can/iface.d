@@ -44,16 +44,18 @@ struct CANFrame
         ulong addr = p.hdr!CANFrame().id;
         addr |= ulong(p.vlan & 0xFFF) << 48;
         addr |= ulong(PacketType.can) << 60;
-        return addr; // TODO: should we set the broadcast bit?
+        return addr;
     }
 
     static ulong extract_dst(ref const Packet p) pure nothrow @nogc
     {
         ulong addr = ulong(p.vlan & 0xFFF) << 48;
         addr |= ulong(PacketType.can) << 60;
-        addr |= ulong(1) << 63; // CAN is always broadcast
         return addr;
     }
+
+    static bool is_broadcast(ulong address) pure nothrow @nogc
+        => true; // CAN is always broadcast
 }
 
 

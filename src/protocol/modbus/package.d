@@ -40,7 +40,6 @@ struct ServerMap
 ulong extract_modbus_src_address(ref const Packet p) pure
 {
     ulong addr = p.hdr!ModbusFrame().src_address;
-    addr |= ulong(addr == 0) << 63;
     addr |= ulong(p.vlan & 0xFFF) << 48;
     addr |= ulong(PacketType.modbus) << 60;
     return addr;
@@ -49,11 +48,13 @@ ulong extract_modbus_src_address(ref const Packet p) pure
 ulong extract_modbus_dst_address(ref const Packet p) pure
 {
     ulong addr = p.hdr!ModbusFrame().dst_address;
-    addr |= ulong(addr == 0) << 63;
     addr |= ulong(p.vlan & 0xFFF) << 48;
     addr |= ulong(PacketType.modbus) << 60;
     return addr;
 }
+
+bool is_modbus_broadcast_address(ulong addr) pure
+    => (addr & 0x7F) == 0;
 
 class ModbusProtocolModule : Module
 {
@@ -65,7 +66,7 @@ nothrow @nogc:
 
     override void init()
     {
-        register_address_extractor(PacketType.modbus, &extract_modbus_src_address, &extract_modbus_dst_address);
+        register_address_extractor(PacketType.modbus, &extract_modbus_src_address, &extract_modbus_dst_address, &is_modbus_broadcast_address);
 
         g_app.register_enum!ModbusProtocol();
         g_app.register_enum!SunSpecInverterState();
