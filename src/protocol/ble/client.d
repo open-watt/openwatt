@@ -1,9 +1,11 @@
 module protocol.ble.client;
 
+import urt.array;
 import urt.endian;
 import urt.lifetime;
 import urt.log;
 import urt.string;
+import urt.uuid;
 
 import manager;
 import manager.base;
@@ -15,7 +17,12 @@ import router.iface.packet;
 
 import protocol.ble.iface;
 
+version = DebugBLEClient;
+
 nothrow @nogc:
+
+
+alias NotifyDelegate = void delegate(ushort handle, const(ubyte)[] value) nothrow @nogc;
 
 
 class BLEClient : ActiveObject
@@ -63,12 +70,56 @@ nothrow @nogc:
 
     // API
 
-    void read_characteristic(ushort handle)
+    bool discovery_complete()
     {
-        if (!_connected || !_iface)
-            return;
+        if (!_connected)
+            return false;
+        auto session = ble_iface.find_session_by_peer(_peer);
+        return session !is null && session.num_chars > 0;
+    }
 
-        import urt.endian;
+    ushort find_characteristic(GUID service, GUID char_uuid)
+    {
+        auto session = ble_iface.find_session_by_peer(_peer);
+        if (session is null)
+            return 0;
+        foreach (ref c; session.chars[0 .. session.num_chars])
+        {
+            if (c.service_uuid == service && c.char_uuid == char_uuid)
+                return c.handle;
+        }
+        return 0;
+    }
+
+    int write(ushort handle, const(ubyte)[] data, bool with_response = true, MessageCallback callback = null)
+    {
+        if (!_connected || !_iface || handle == 0)
+            return -1;
+
+        // ATT MTU is 247 (BLEInterface ctor), leaving 245 bytes for handle+value.
+        ubyte[247] buf = void;
+        if (2 + data.length > buf.length)
+            return -1;
+        buf.ptr[0 .. 2] = handle.nativeToLittleEndian;
+        buf.ptr[2 .. 2 + data.length] = data[];
+
+        Packet p;
+        ref att = p.init!BLEATTFrame(buf[0 .. 2 + data.length]);
+        att.src = local_mac;
+        att.dst = _peer;
+        att.opcode = with_response ? ATTOpcode.write_req : ATTOpcode.write_cmd;
+
+        version (DebugBLEClient)
+            log.trace("write ", with_response ? "req" : "cmd", " handle=", handle, " ", data.length, " bytes");
+
+        return _iface.forward(p, callback);
+    }
+
+    int read(ushort handle, MessageCallback callback = null)
+    {
+        if (!_connected || !_iface || handle == 0)
+            return -1;
+
         ubyte[2] payload = handle.nativeToLittleEndian;
 
         Packet p;
@@ -76,14 +127,30 @@ nothrow @nogc:
         att.src = local_mac;
         att.dst = _peer;
         att.opcode = ATTOpcode.read_req;
-        _iface.forward(p);
+        return _iface.forward(p, callback);
+    }
+
+    void on_notify(ushort handle, NotifyDelegate callback)
+    {
+        _notify_handlers ~= NotifyHandler(handle, callback);
+    }
+
+    void clear_notify(ushort handle)
+    {
+        for (size_t i = 0; i < _notify_handlers.length;)
+        {
+            if (_notify_handlers[i].handle == handle)
+                _notify_handlers.remove(i);
+            else
+                ++i;
+        }
     }
 
 protected:
     mixin RekeyHandler;
 
     override bool validate() const
-        => _iface !is null && cast(bool)_peer;
+        => _iface !is null && cast(bool)_peer && (cast(const(BLEInterface))_iface.get) !is null;
 
     override CompletionStatus startup()
     {
@@ -156,12 +223,22 @@ protected:
     }
 
 private:
+    struct NotifyHandler
+    {
+        ushort handle;
+        NotifyDelegate callback;
+    }
+
     ObjectRef!BaseInterface _iface;
     MACAddress _peer;
     MACAddress _local_mac;
     int _connect_handle = -1;
     bool _subscribed;
     bool _connected;
+    Array!NotifyHandler _notify_handlers;
+
+    BLEInterface ble_iface()
+        => cast(BLEInterface)_iface.get;
 
     MACAddress local_mac()
     {
@@ -220,22 +297,40 @@ private:
 
             switch (att.opcode)
             {
+                case ATTOpcode.notification:
+                case ATTOpcode.indication:
+                    if (payload.length < 2)
+                        break;
+                    ushort handle = payload.ptr[0 .. 2].littleEndianToNative!ushort;
+                    const(ubyte)[] value = payload.length > 2 ? payload[2 .. $] : null;
+                    size_t matched = 0;
+                    foreach (ref h; _notify_handlers[])
+                    {
+                        if (h.handle == handle)
+                        {
+                            ++matched;
+                            h.callback(handle, value);
+                        }
+                    }
+                    version (DebugBLEClient)
+                        log.trace(att.opcode == ATTOpcode.indication ? "indication" : "notification",
+                                  " handle=", handle, " ", value.length, " bytes, ", matched, " handler(s)");
+                    break;
+
                 case ATTOpcode.read_rsp:
+                    // TODO: demux to registered read callback by handle
                     log.info("read_rsp: [ ", cast(void[])payload, " ]");
                     break;
 
-                case ATTOpcode.notification:
-                    if (payload.length >= 2)
-                        log.infof("notification handle={0,04x}: [{1}]",
-                            payload.ptr[0..2].littleEndianToNative!ushort,
-                            cast(void[])(payload.length > 2 ? payload[2 .. $] : null));
-                    break;
-
                 case ATTOpcode.write_rsp:
-                    log.info("write_rsp");
+                    // The forward callback already signalled completion to the caller.
+                    version (DebugBLEClient)
+                        log.trace("write_rsp (write acknowledged)");
                     break;
 
                 default:
+                    version (DebugBLEClient)
+                        log.trace("unhandled ATT opcode ", att.opcode, " [ ", cast(void[])payload, " ]");
                     break;
             }
         }

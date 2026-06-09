@@ -52,11 +52,20 @@
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\apps\api\package.d" />
+    <DCompile Include="src\apps\energy\accounts.d" />
+    <DCompile Include="src\apps\energy\allocator.d" />
     <DCompile Include="src\apps\energy\appliance.d" />
     <DCompile Include="src\apps\energy\circuit.d" />
+    <DCompile Include="src\apps\energy\control.d" />
+    <DCompile Include="src\apps\energy\forecast.d" />
+    <DCompile Include="src\apps\energy\island.d" />
     <DCompile Include="src\apps\energy\manager.d" />
     <DCompile Include="src\apps\energy\meter.d" />
     <DCompile Include="src\apps\energy\package.d" />
+    <DCompile Include="src\apps\energy\planner.d" />
+    <DCompile Include="src\apps\energy\policy.d" />
+    <DCompile Include="src\apps\energy\state.d" />
+    <DCompile Include="src\apps\energy\vehicle.d" />
     <DCompile Include="src\apps\ota\package.d" />
     <DCompile Include="src\db\package.d" />
     <DCompile Include="src\db\selfrefptr.d" />
@@ -205,6 +214,7 @@
     <DCompile Include="src\protocol\tesla\master.d" />
     <DCompile Include="src\protocol\tesla\package.d" />
     <DCompile Include="src\protocol\tesla\twc.d" />
+    <DCompile Include="src\protocol\tesla\vehicle.d" />
     <DCompile Include="src\protocol\tls\certificate.d" />
     <DCompile Include="src\protocol\tls\package.d" />
     <DCompile Include="src\protocol\tls\stream.d" />

@@ -143,7 +143,7 @@ Variant to_variant(T)(Array!T arr) nothrow @nogc
     static if (is(T == Variant))
         return Variant(arr.move);
     else
-        return to_variant(arr[], r);
+        return to_variant(arr[]);
 }
 
 Variant to_variant(T)(ref ObjectRef!T v) nothrow @nogc
