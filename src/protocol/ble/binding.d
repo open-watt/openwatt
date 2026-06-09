@@ -88,8 +88,10 @@ nothrow @nogc:
             return CompletionStatus.continue_;
 
         c.subscribe(&state_change);
+        c.on_discovery_done(&resolve_handles);
         _subscribed = true;
 
+        resolve_handles();
         return CompletionStatus.complete;
     }
 
@@ -104,54 +106,6 @@ nothrow @nogc:
         _handles_resolved = false;
         elements.clear();
         return super.shutdown();
-    }
-
-    override void update()
-    {
-        if (_handles_resolved)
-            return;
-
-        BLEClient c = _client.get;
-        if (c is null || !c.discovery_complete())
-            return;
-
-        bool all_resolved = true;
-        foreach (ref e; elements)
-        {
-            if (e.handle != ushort.max)
-                continue;
-
-            ushort h = c.find_characteristic(e.service_uuid, e.char_uuid);
-            if (h == 0)
-            {
-                all_resolved = false;
-                continue;
-            }
-            e.handle = h;
-        }
-
-        if (!all_resolved)
-            return;
-
-        foreach (ref e; elements)
-        {
-            bool already = false;
-            foreach (h; _subscribed_handles[])
-            {
-                if (h == e.handle)
-                {
-                    already = true;
-                    break;
-                }
-            }
-            if (!already)
-            {
-                c.on_notify(e.handle, &on_value);
-                _subscribed_handles ~= e.handle;
-            }
-        }
-
-        _handles_resolved = true;
     }
 
 protected:
@@ -214,10 +168,59 @@ private:
     {
         if (BLEClient c = _client.get)
         {
+            c.clear_discovery_done(&resolve_handles);
             foreach (h; _subscribed_handles[])
                 c.clear_notify(h);
         }
         _subscribed_handles.clear();
+    }
+
+    void resolve_handles()
+    {
+        if (_handles_resolved)
+            return;
+
+        BLEClient c = _client.get;
+        if (c is null || !c.discovery_complete())
+            return;
+
+        bool all_resolved = true;
+        foreach (ref e; elements)
+        {
+            if (e.handle != ushort.max)
+                continue;
+
+            ushort h = c.find_characteristic(e.service_uuid, e.char_uuid);
+            if (h == 0)
+            {
+                all_resolved = false;
+                continue;
+            }
+            e.handle = h;
+        }
+
+        if (!all_resolved)
+            return;
+
+        foreach (ref e; elements)
+        {
+            bool already = false;
+            foreach (h; _subscribed_handles[])
+            {
+                if (h == e.handle)
+                {
+                    already = true;
+                    break;
+                }
+            }
+            if (!already)
+            {
+                c.on_notify(e.handle, &on_value);
+                _subscribed_handles ~= e.handle;
+            }
+        }
+
+        _handles_resolved = true;
     }
 
     void on_value(ushort handle, const(ubyte)[] value)

@@ -23,6 +23,7 @@ nothrow @nogc:
 
 
 alias NotifyDelegate = void delegate(ushort handle, const(ubyte)[] value) nothrow @nogc;
+alias DiscoveryDoneDelegate = void delegate() nothrow @nogc;
 
 
 class BLEClient : ActiveObject
@@ -146,6 +147,23 @@ nothrow @nogc:
         }
     }
 
+    void on_discovery_done(DiscoveryDoneDelegate callback)
+    {
+        _discovery_handlers ~= callback;
+    }
+
+    void clear_discovery_done(DiscoveryDoneDelegate callback)
+    {
+        for (size_t i = 0; i < _discovery_handlers.length; ++i)
+        {
+            if (_discovery_handlers[i] is callback)
+            {
+                _discovery_handlers.remove(i);
+                return;
+            }
+        }
+    }
+
 protected:
     mixin RekeyHandler;
 
@@ -236,6 +254,7 @@ private:
     bool _subscribed;
     bool _connected;
     Array!NotifyHandler _notify_handlers;
+    Array!DiscoveryDoneDelegate _discovery_handlers;
 
     BLEInterface ble_iface()
         => cast(BLEInterface)_iface.get;
@@ -283,6 +302,11 @@ private:
                 _connected = false;
                 log.info("disconnected from ", _peer);
                 restart();
+            }
+            else if (ll.pdu_type == BLELLType.discovery_done)
+            {
+                foreach (cb; _discovery_handlers[])
+                    cb();
             }
             else if (ll.pdu_type == BLELLType.data_start || ll.pdu_type == BLELLType.data_continue)
                 assert(false, "TODO: LL data PDU defragmentation not implemented in BLEClient");
