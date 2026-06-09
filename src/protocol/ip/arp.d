@@ -1,5 +1,7 @@
 module protocol.ip.arp;
 
+version (UseInternalIPStack):
+
 import urt.inet;
 import urt.log;
 import urt.endian;
@@ -32,7 +34,6 @@ enum ArpHType : ushort
 
 struct ArpV4Packet
 {
-align(1):
     ubyte[2] htype;     // big-endian, 1 = Ethernet
     ubyte[2] ptype;     // big-endian, 0x0800 = IPv4
     ubyte    hlen;      // 6

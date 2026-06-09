@@ -8,8 +8,6 @@ import manager;
 import manager.base;
 import manager.collection;
 
-import protocol.ip.stack : bump_route_generation;
-
 import router.iface;
 
 nothrow @nogc:
@@ -114,4 +112,16 @@ private:
     ObjectRef!BaseInterface _iface;
     bool _blackhole;
     ubyte _distance;
+}
+
+
+private:
+
+void bump_route_generation()
+{
+    version (UseInternalIPStack)
+    {
+        import protocol.ip.stack : bump = bump_route_generation;
+        bump();
+    }
 }

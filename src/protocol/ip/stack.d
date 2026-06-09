@@ -1,5 +1,7 @@
 module protocol.ip.stack;
 
+version (UseInternalIPStack):
+
 import urt.array;
 import urt.endian;
 import urt.hash;
@@ -13,6 +15,7 @@ import router.iface;
 import router.iface.mac;
 import router.iface.packet;
 
+import protocol.ip : IPv4Header, IPProtocol;
 import protocol.ip.address;
 import protocol.ip.arp;
 import protocol.ip.firewall;
@@ -63,35 +66,6 @@ struct RouteResult
 }
 
 
-struct IPv4Header
-{
-nothrow @nogc:
-align(1):
-    ubyte ver_ihl;          // upper nibble = version, lower = IHL (32-bit words)
-    ubyte tos;
-    ubyte[2] total_length;
-    ubyte[2] ident;
-    ubyte[2] flags_frag;
-    ubyte ttl;
-    ubyte protocol;
-    ubyte[2] checksum;
-    ubyte[4] src;
-    ubyte[4] dst;
-
-    ubyte version_() const pure
-        => ver_ihl >> 4;
-    ubyte ihl() const pure
-        => ver_ihl & 0x0F;
-}
-
-enum IpProtocol : ubyte
-{
-    icmp = 1,
-    tcp  = 6,
-    udp  = 17,
-}
-
-
 struct IPStack
 {
 nothrow @nogc:
@@ -133,7 +107,8 @@ nothrow @nogc:
         MonoTime now = getTime();
         neighbour_v4.tick(now);
         neighbour_v6.tick(now);
-        tcp_tick(this, now);
+        version (UseInternalIPStack)
+            tcp_tick(this, now);
     }
 
     IPAddr select_source_v4(IPAddr dst)
@@ -454,13 +429,13 @@ private:
 
         switch (ip.protocol)
         {
-            case IpProtocol.icmp:
+            case IPProtocol.icmp:
                 .icmp_input(this, pkt);
                 break;
-            case IpProtocol.tcp:
+            case IPProtocol.tcp:
                 .tcp_input(this, pkt);
                 break;
-            case IpProtocol.udp:
+            case IPProtocol.udp:
                 .udp_input(this, pkt);
                 break;
             default:

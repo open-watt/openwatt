@@ -1,5 +1,7 @@
 module protocol.ip.tcp;
 
+version (UseInternalIPStack):
+
 import urt.array;
 import urt.endian;
 import urt.hash;
@@ -13,10 +15,9 @@ import manager.base : ActiveObject, StateSignal;
 import router.iface;
 import router.iface.packet;
 
+import protocol.ip : IPv4Header, IPProtocol, TCPConnection, TCPListener;
 import protocol.ip.icmp;
 import protocol.ip.stack;
-
-version (UseInternalIPStack) import protocol.ip : TCPConnection, TCPListener;
 
 //version = DebugTCP;       // buffering / transmission characteristics
 //version = DebugTCPProto;  // every segment in/out, state transitions, options
@@ -564,7 +565,7 @@ void tcp_input(ref IPStack stack, ref Packet pkt)
         return;
 
     // Verify TCP checksum (pseudo-header + segment).
-    ushort pseudo = pseudo_header_checksum_v4(IPAddr(ip.src), IPAddr(ip.dst), IpProtocol.tcp, cast(ushort)tcp_seg.length);
+    ushort pseudo = pseudo_header_checksum_v4(IPAddr(ip.src), IPAddr(ip.dst), IPProtocol.tcp, cast(ushort)tcp_seg.length);
     ushort calc = internet_checksum(tcp_seg, pseudo);
     if (calc != 0)
         return;
@@ -1288,7 +1289,7 @@ void send_segment_raw(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAdd
     ip.flags_frag[0] = 0x40;        // DF: required for PMTU Discovery
     ip.flags_frag[1] = 0;
     ip.ttl      = 64;
-    ip.protocol = IpProtocol.tcp;
+    ip.protocol = IPProtocol.tcp;
     ip.checksum[] = 0;
     ip.src      = src_addr.b;
     ip.dst      = dst_addr.b;
@@ -1320,7 +1321,7 @@ void send_segment_raw(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAdd
         buf[IPv4Header.sizeof + TcpHeader.sizeof + opt_len .. total] = data[];
 
     ushort tcp_total = cast(ushort)(TcpHeader.sizeof + opt_len + data.length);
-    ushort pseudo = pseudo_header_checksum_v4(src_addr, dst_addr, IpProtocol.tcp, tcp_total);
+    ushort pseudo = pseudo_header_checksum_v4(src_addr, dst_addr, IPProtocol.tcp, tcp_total);
     ushort cc = internet_checksum(buf[IPv4Header.sizeof .. total], pseudo);
     t.checksum = nativeToBigEndian(cc);
 

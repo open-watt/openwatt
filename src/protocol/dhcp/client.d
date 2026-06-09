@@ -18,7 +18,7 @@ import manager.system : system_hostname = hostname;
 import protocol.dhcp.message;
 import protocol.ip.address;
 import protocol.ip.route;
-import protocol.ip.stack : IPv4Header, IpProtocol;
+import protocol.ip : IPv4Header, IPProtocol;
 
 import router.iface;
 import router.iface.mac;
@@ -407,7 +407,7 @@ private:
         size_t ip_total = (size_t(ip.total_length[0]) << 8) | ip.total_length[1];
         if (ip_total < ip_hdr_len + UdpHeader.sizeof || ip_total > frame.length)
             return;
-        if (ip.protocol != IpProtocol.udp)
+        if (ip.protocol != IPProtocol.udp)
             return;
 
         const u = cast(const UdpHeader*)(frame.ptr + ip_hdr_len);

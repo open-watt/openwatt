@@ -4,7 +4,7 @@ import urt.hash;
 import urt.inet;
 import urt.time;
 
-import protocol.ip.stack : IPv4Header, IpProtocol;
+import protocol.ip : IPv4Header, IPProtocol;
 
 import router.iface;
 import router.iface.mac;
@@ -264,7 +264,7 @@ nothrow @nogc:
         ip.flags_frag[0] = 0;
         ip.flags_frag[1] = 0;
         ip.ttl = 64;
-        ip.protocol = IpProtocol.udp;
+        ip.protocol = IPProtocol.udp;
         ip.checksum[] = 0;
         ip.src = src.b;
         ip.dst = dst.b;
@@ -280,7 +280,7 @@ nothrow @nogc:
         u.length[0] = cast(ubyte)(udp_len >> 8);
         u.length[1] = cast(ubyte)udp_len;
         u.checksum[] = 0;
-        ushort pseudo = pseudo_header_checksum(src, dst, IpProtocol.udp, cast(ushort)udp_len);
+        ushort pseudo = pseudo_header_checksum(src, dst, IPProtocol.udp, cast(ushort)udp_len);
         ushort cc = internet_checksum(frame[IPv4Header.sizeof .. total_len], pseudo);
         if (cc == 0)
             cc = 0xFFFF;
