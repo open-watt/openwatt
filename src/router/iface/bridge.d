@@ -21,6 +21,25 @@ import router.iface.vlan;
 nothrow @nogc:
 
 
+// Kernel-bridge offload seam (docs/LINUX_DATAPLANE.md Phase 3). A platform
+// backend (driver.linux.bridge on Linux) installs these so a BridgeInterface
+// can drive a kernel bridge without router.iface importing any driver.* module.
+// The CPU-port sink injects a frame into the kernel-switched ethernet segment;
+// it returns <0 on failure (mirrors BaseInterface.forward's convention).
+alias CpuPortSink = int delegate(ref Packet packet) nothrow @nogc;
+alias MemberAddedHook = void delegate(BridgeInterface bridge, BaseInterface member) nothrow @nogc;
+alias CpuPromiscHook = void delegate(BridgeInterface bridge) nothrow @nogc;
+
+__gshared MemberAddedHook g_bridge_member_added;
+__gshared CpuPromiscHook g_bridge_cpu_promisc_changed;
+
+void register_bridge_offload_hooks(MemberAddedHook member_added, CpuPromiscHook promisc_changed)
+{
+    g_bridge_member_added = member_added;
+    g_bridge_cpu_promisc_changed = promisc_changed;
+}
+
+
 class BridgeInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("vlan-filtering", vlan_filtering),
@@ -139,6 +158,13 @@ nothrow @nogc:
             }
         }
 
+        // Member added to a running bridge: let the backend (re-)evaluate offload --
+        // a second netdev member may newly qualify it, or an already-offloaded
+        // bridge may need the new netdev enslaved. (Members added before the bridge
+        // is running are picked up when it goes online. Removal stays unsupported.)
+        if (running && g_bridge_member_added)
+            g_bridge_member_added(this, iface);
+
         return true;
     }
 
@@ -172,6 +198,77 @@ nothrow @nogc:
                 return remove_member(i);
         }
         return false;
+    }
+
+    // --- kernel-bridge offload seam (driver.linux.bridge drives this) ---
+
+    size_t member_count() const
+        => _members.length;
+
+    BaseInterface member_iface(size_t i)
+        => _members[i].iface;
+
+    // Mark/unmark a member as kernel-offloaded (by identity, not removal -- the
+    // member stays in _members, keeping port indices and the address table stable).
+    void set_member_offloaded(BaseInterface iface, bool offloaded)
+    {
+        foreach (ref m; _members)
+        {
+            if (m.iface is iface)
+            {
+                m.offloaded = offloaded;
+                return;
+            }
+        }
+    }
+
+    void attach_cpu_port(CpuPortSink sink)
+    {
+        _cpu.send = sink;
+        _cpu.active = true;
+    }
+
+    void detach_cpu_port()
+    {
+        _cpu.active = false;
+        _cpu.send = null;
+    }
+
+    // Ingress from the kernel-switched ethernet segment (the offload module drains
+    // the CPU-port socket and feeds frames here).
+    void cpu_port_incoming(ref Packet packet)
+    {
+        if (!running || !_cpu.active)
+            return;
+
+        // Intra-segment unicast the kernel already switched can still surface here
+        // when the CPU port is promiscuous (a sniffer is attached). The kernel has
+        // delivered it among the netdev members -- nothing for OW to do.
+        ulong dst = get_network_dst_address(packet);
+        if (!dst.is_multicast_address)
+        {
+            int dp = _address_table.get(dst);
+            if (dp >= 0 && dp != _local_port && _members[dp].offloaded)
+                return;
+        }
+
+        // dispatch() fires bridge subscribers (sniff) and delivers bridge-addressed
+        // frames to OW's L3 handlers. Forwarding kernel-segment frames on to
+        // non-netdev members is the (today-inert) cross-domain seam: PacketType
+        // sub-domains don't share frames yet. TODO: wrap-and-forward once an
+        // OW-ethertype carrier exists.
+        dispatch(packet);
+    }
+
+    // The CPU port only needs promiscuous mode to feed a sniffer; bridge-addressed
+    // and broadcast/multicast frames reach it without it.
+    bool cpu_port_wants_promisc() const
+        => _num_subscribers != 0;
+
+    protected override void on_subscribers_changed(bool any)
+    {
+        if (_cpu.active && g_bridge_cpu_promisc_changed)
+            g_bridge_cpu_promisc_changed(this);
     }
 
     protected override int transmit(ref Packet packet, MessageCallback callback)
@@ -317,6 +414,9 @@ protected:
         debug assert(running, "Shouldn't receive packets while not running...?");
 
         ubyte src_port = cast(ubyte)slave_id;
+        // Offloaded members are RX-idled (the kernel switches them), so they must
+        // not deliver frames up to the software bridge.
+        debug assert(!_members[src_port].offloaded, "offloaded member should be RX-idled");
         ref const BridgePort port = _members[src_port];
         ulong src_address;
         ushort src_vlan = 0;
@@ -400,7 +500,15 @@ protected:
 private:
 
     enum ubyte _local_port = 0xFE;
+    enum ubyte _cpu_port = 0xFD;    // kernel-offloaded ethernet segment, reached via the CPU-port AF_PACKET on br-<name>
     enum _tracking_batch_size = 4;
+
+    struct CpuPort
+    {
+        CpuPortSink send;
+        bool active;
+    }
+    CpuPort _cpu;
 
     struct BridgePort
     {
@@ -412,6 +520,7 @@ private:
         ushort pvid = 1;
         bool ingress_filtering = false;
         bool untagged_egress = true;
+        bool offloaded = false;     // enslaved to a kernel bridge; the kernel switches it, OW skips it
     }
 
     struct PortTag
@@ -528,6 +637,12 @@ private:
                 {
                     local_dispatch(packet);
                 }
+                else if (_members[dst_port].offloaded)
+                {
+                    // kernel switches the ethernet segment; inject via the CPU port
+                    if (_cpu.active && src_port != _cpu_port)
+                        _cpu.send(packet);
+                }
                 else if (_members[dst_port].iface.running)
                 {
                     if (_vlan_filtering)
@@ -554,7 +669,7 @@ private:
         // broadcast, or unknown sender...
         foreach (i, ref member; _members)
         {
-            if (i != src_port && member.iface.running)
+            if (i != src_port && !member.offloaded && member.iface.running)
             {
                 if (_vlan_filtering)
                 {
@@ -574,6 +689,10 @@ private:
                     add_tx_drop();
             }
         }
+        // flood once into the kernel-switched ethernet segment (split-horizon: not
+        // when the frame came from there). The kernel floods among the netdev members.
+        if (_cpu.active && src_port != _cpu_port)
+            _cpu.send(packet);
         if (src_port != _local_port)
             local_dispatch(packet);
     }
@@ -653,6 +772,17 @@ private:
                     return 0;
                 }
 
+                if (_members[dst_port].offloaded)
+                {
+                    // kernel switches the ethernet segment; inject via the CPU port
+                    // (fire-and-forget -- AF_PACKET sendto has no ack to track).
+                    recycle_tracking(tracking);
+                    if (_cpu.active)
+                        _cpu.send(packet);
+                    add_tx_frame(packet.data.length);
+                    return 0;
+                }
+
                 // unicast to known port
                 if (!_members[dst_port].iface.running)
                 {
@@ -689,7 +819,7 @@ private:
         // broadcast / unknown destination
         foreach (i, ref member; _members)
         {
-            if (!member.iface.running)
+            if (!member.iface.running || member.offloaded)
                 continue;
 
             if (_vlan_filtering)
@@ -711,6 +841,14 @@ private:
             }
             else if (tag == 0)
                 any_succeeded = true;
+        }
+
+        // flood into the kernel-switched ethernet segment (send_tracked is only
+        // called for the bridge's own egress, so src is never the CPU port).
+        if (_cpu.active)
+        {
+            _cpu.send(packet);
+            any_succeeded = true;
         }
 
         if (tracking.pending == 0)

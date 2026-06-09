@@ -335,13 +335,26 @@ nothrow @nogc:
         return true;
     }
 
+    // OS netdev ifindex, set by a platform backend (e.g. the Linux kernel-bridge
+    // offload) when this interface is backed by a kernel netdev that isn't a
+    // LinuxRawEthernet. The IP mirror resolves it via this accessor.
+    final int kernel_ifindex() const pure
+        => _kernel_ifindex;
+    final void set_kernel_ifindex(int idx)
+    {
+        _kernel_ifindex = idx;
+    }
+
     // alias the base functions into this scope to merge the overload sets
     alias subscribe = typeof(super).subscribe;
     alias unsubscribe = typeof(super).unsubscribe;
 
     void subscribe(InterfaceSubscriber.PacketHandler packet_handler, ref const PacketFilter filter, void* user_data = null)
     {
+        bool was = _num_subscribers != 0;
         _subscribers[_num_subscribers++] = InterfaceSubscriber(filter, packet_handler, user_data);
+        if (!was)
+            on_subscribers_changed(true);
     }
 
     void unsubscribe(InterfaceSubscriber.PacketHandler packet_handler)
@@ -353,9 +366,18 @@ nothrow @nogc:
                 // remove this subscriber
                 if (i < --_num_subscribers)
                     sub = _subscribers[_num_subscribers];
+                if (_num_subscribers == 0)
+                    on_subscribers_changed(false);
                 return;
             }
         }
+    }
+
+    // Fired only on the 0<->1 subscriber transition. Default no-op leaves
+    // standalone interfaces untouched; BridgeInterface overrides it to drive
+    // CPU-port promisc on demand.
+    protected void on_subscribers_changed(bool any)
+    {
     }
 
     int send(MACAddress dest, const(void)[] message, EtherType type, MessageCallback callback = null)
@@ -698,6 +720,7 @@ package:
 protected: // TODO: should probably be private?
     InterfaceSubscriber[4] _subscribers;
     ubyte _num_subscribers;
+    int _kernel_ifindex;    // OS netdev ifindex when a platform backend backs this interface (0 = none)
     Array!VLANInterface _vlans;
 }
 

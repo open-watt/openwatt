@@ -191,7 +191,7 @@ nothrow @nogc:
         static if (has_http)
             g_app.console.register_collection!WebSocketSyncServer();
 
-        register_object_created_handler(&on_object_created);
+        register_object_lifecycle_handler(&on_object_lifecycle);
         register_object_state_handler(&on_object_state);
     }
 
@@ -979,8 +979,13 @@ nothrow @nogc:
 
     // Local object lifecycle hooks (registered in init)
 
-    void on_object_created(BaseObject obj)
+    void on_object_lifecycle(BaseObject obj, ObjectLifecycleEvent event)
     {
+        // Destruction is handled via the state hook (on_object_state) so the
+        // correlation seq can be threaded through; we only act on creation here.
+        if (event != ObjectLifecycleEvent.created)
+            return;
+
         if (!obj._typeInfo.syncable)
             return;
         if (obj._is_remote)
@@ -1024,7 +1029,7 @@ nothrow @nogc:
         // TODO: if local authoritative rename, fan_out_rekey(old, new).
         // If proxy rename, update authority map keyed on the new CID.
         // Blocked on adding a global register_object_rekeyed_handler hook
-        // (analogous to register_object_created_handler).
+        // (analogous to register_object_lifecycle_handler).
     }
 
     // Bind / unbind bookkeeping

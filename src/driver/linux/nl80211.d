@@ -38,6 +38,70 @@ struct PhyCapabilities
 }
 
 
+// Live state of one wifi VIF, from NL80211_CMD_GET_INTERFACE.
+struct WifiIfInfo
+{
+    uint     ifindex;
+    uint     iftype;        // NL80211_IFTYPE_* (name via wifi_iftype_name)
+    uint     freq;          // operating frequency in MHz (0 if not on a channel)
+    char[32] ssid;
+    ubyte    ssid_len;
+
+    const(char)[] ssid_s() const nothrow @nogc return => ssid[0 .. ssid_len];
+}
+
+alias WifiSink = void delegate(ref const WifiIfInfo info) nothrow @nogc;
+
+const(char)[] wifi_iftype_name(uint t)
+{
+    switch (t)
+    {
+        case NL80211_IFTYPE_ADHOC:      return "adhoc";
+        case NL80211_IFTYPE_STATION:    return "STA";
+        case NL80211_IFTYPE_AP:         return "AP";
+        case NL80211_IFTYPE_AP_VLAN:    return "AP-VLAN";
+        case NL80211_IFTYPE_WDS:        return "WDS";
+        case NL80211_IFTYPE_MONITOR:    return "monitor";
+        case NL80211_IFTYPE_MESH_POINT: return "mesh";
+        case NL80211_IFTYPE_P2P_CLIENT: return "P2P-client";
+        case NL80211_IFTYPE_P2P_GO:     return "P2P-GO";
+        default:                        return "wifi";
+    }
+}
+
+// Dump every wifi VIF's live state (mode / SSID / frequency). The radio layer
+// (VIF creation via iw, AP/STA association via hostapd/wpa_supplicant) is not in
+// rtnetlink; this is the nl80211 view that makes /system/linux/print honest about
+// wifi. Returns false (and sinks nothing) on any failure -- callers treat the
+// absence as "no wifi state to report".
+bool query_wifi_interfaces(scope WifiSink sink)
+{
+    int fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
+    if (fd < 0)
+    {
+        log_warning("os.nl80211", "socket() failed: errno=", last_errno());
+        return false;
+    }
+    scope(exit) urt.internal.sys.posix.close(fd);
+
+    sockaddr_nl addr;
+    addr.nl_family = AF_NETLINK;
+    if (bind(fd, &addr, sockaddr_nl.sizeof) < 0)
+        return false;
+
+    timeval tv;
+    tv.tv_sec = 0;
+    tv.tv_usec = 200_000;
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, timeval.sizeof);
+
+    ushort family_id;
+    if (!resolve_family(fd, "nl80211\0", family_id))
+        return false;
+
+    return get_interfaces(fd, family_id, sink);
+}
+
+
 bool query_phy_capabilities(uint ifindex, out PhyCapabilities caps)
 {
     int fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
@@ -245,6 +309,111 @@ bool get_wiphy(int fd, ushort family_id, uint ifindex, out PhyCapabilities caps)
 }
 
 
+bool get_interfaces(int fd, ushort family_id, scope WifiSink sink)
+{
+    ubyte[64] buf = void;
+    sockaddr_nl kernel;
+    kernel.nl_family = AF_NETLINK;
+
+    size_t off = 0;
+    nlmsghdr* hdr = cast(nlmsghdr*)buf.ptr;
+    hdr.nlmsg_type  = family_id;
+    hdr.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+    hdr.nlmsg_seq   = ++g_seq;
+    hdr.nlmsg_pid   = 0;
+    off += nlmsghdr.sizeof;
+
+    genlmsghdr* gh = cast(genlmsghdr*)(buf.ptr + off);
+    gh.cmd         = NL80211_CMD_GET_INTERFACE;
+    gh.gen_version = 1;
+    gh.reserved    = 0;
+    off += genlmsghdr.sizeof;
+
+    hdr.nlmsg_len = cast(uint)off;
+
+    if (sendto(fd, buf.ptr, off, 0, &kernel, sockaddr_nl.sizeof) != cast(ptrdiff_t)off)
+    {
+        log_warning("os.nl80211", "get-interface sendto failed: errno=", last_errno());
+        return false;
+    }
+
+    bool done = false;
+    while (!done)
+    {
+        ubyte[8192] reply = void;
+        ptrdiff_t n = recv(fd, reply.ptr, reply.length, 0);
+        if (n <= 0)
+            return false;
+
+        const(ubyte)[] data = reply[0 .. cast(size_t)n];
+        while (data.length >= nlmsghdr.sizeof)
+        {
+            const nlmsghdr* mh = cast(const nlmsghdr*)data.ptr;
+            uint len = mh.nlmsg_len;
+            if (len < nlmsghdr.sizeof || len > data.length)
+                return false;
+
+            if (mh.nlmsg_type == NLMSG_DONE)
+            {
+                done = true;
+                break;
+            }
+            if (mh.nlmsg_type == NLMSG_ERROR)
+                return false;
+
+            if (len >= nlmsghdr.sizeof + genlmsghdr.sizeof)
+                parse_interface_attrs(data[nlmsghdr.sizeof + genlmsghdr.sizeof .. len], sink);
+
+            uint aligned = (len + 3) & ~3u;
+            if (aligned >= data.length) break;
+            data = data[aligned .. $];
+        }
+    }
+    return true;
+}
+
+void parse_interface_attrs(const(ubyte)[] attrs, scope WifiSink sink)
+{
+    WifiIfInfo info;
+    bool have_ifindex = false;
+
+    while (attrs.length >= nlattr.sizeof)
+    {
+        const nlattr* a = cast(const nlattr*)attrs.ptr;
+        ushort len = a.nla_len;
+        if (len < nlattr.sizeof || len > attrs.length) break;
+        ushort type = a.nla_type & NLA_TYPE_MASK;
+        const(ubyte)[] payload = attrs[nlattr.sizeof .. len];
+
+        switch (type)
+        {
+            case NL80211_ATTR_IFINDEX:
+                if (payload.length >= 4) { info.ifindex = *cast(const(uint)*)payload.ptr; have_ifindex = true; }
+                break;
+            case NL80211_ATTR_IFTYPE:
+                if (payload.length >= 4) info.iftype = *cast(const(uint)*)payload.ptr;
+                break;
+            case NL80211_ATTR_WIPHY_FREQ:
+                if (payload.length >= 4) info.freq = *cast(const(uint)*)payload.ptr;
+                break;
+            case NL80211_ATTR_SSID:
+                size_t c = payload.length < info.ssid.length ? payload.length : info.ssid.length;
+                info.ssid[0 .. c] = cast(const(char)[])payload[0 .. c];
+                info.ssid_len = cast(ubyte)c;
+                break;
+            default:
+                break;
+        }
+
+        uint aligned = (len + 3) & ~3u;
+        if (aligned >= attrs.length) break;
+        attrs = attrs[aligned .. $];
+    }
+
+    if (have_ifindex)
+        sink(info);
+}
+
 void parse_wiphy_attrs(const(ubyte)[] attrs, ref PhyCapabilities caps)
 {
     while (attrs.length >= nlattr.sizeof)
@@ -417,13 +586,24 @@ enum CTRL_ATTR_FAMILY_ID   = 1;
 enum CTRL_ATTR_FAMILY_NAME = 2;
 
 enum NL80211_CMD_GET_WIPHY               = 1;
+enum NL80211_CMD_GET_INTERFACE           = 5;
 enum NL80211_ATTR_IFINDEX                = 3;
+enum NL80211_ATTR_IFTYPE                 = 5;
 enum NL80211_ATTR_SUPPORTED_IFTYPES      = 32;
+enum NL80211_ATTR_WIPHY_FREQ             = 38;
+enum NL80211_ATTR_SSID                   = 52;
 enum NL80211_ATTR_INTERFACE_COMBINATIONS = 120;
 enum NL80211_ATTR_SPLIT_WIPHY_DUMP       = 174;
 
-enum NL80211_IFTYPE_STATION = 2;
-enum NL80211_IFTYPE_AP      = 3;
+enum NL80211_IFTYPE_ADHOC      = 1;
+enum NL80211_IFTYPE_STATION    = 2;
+enum NL80211_IFTYPE_AP         = 3;
+enum NL80211_IFTYPE_AP_VLAN    = 4;
+enum NL80211_IFTYPE_WDS        = 5;
+enum NL80211_IFTYPE_MONITOR    = 6;
+enum NL80211_IFTYPE_MESH_POINT = 7;
+enum NL80211_IFTYPE_P2P_CLIENT = 8;
+enum NL80211_IFTYPE_P2P_GO     = 9;
 
 enum NL80211_IFACE_COMB_LIMITS = 1;
 enum NL80211_IFACE_COMB_MAXNUM = 2;
