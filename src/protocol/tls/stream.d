@@ -48,6 +48,7 @@ import manager.plugin;
 import router.stream;
 import protocol.ip.client : IPClient;
 import protocol.ip.tcp_stream;
+import protocol.ip : TCPConnection;
 
 version (MbedTLS)
 {
@@ -979,14 +980,10 @@ protected:
         return CompletionStatus.continue_;
     }
 
-    final override Stream create_stream(Socket conn)
+    final override Stream create_stream(TCPConnection* conn)
     {
         version (DebugTLS)
-        {
-            InetAddress addr;
-            Result r = conn.get_peer_name(addr);
-            log.trace("creating TLS stream for connection from ", r ? addr : InetAddress());
-        }
+            log.trace("creating TLS stream for connection from ", conn.remote());
 
         BaseObject[32] certs;
         size_t num_certs = 0;

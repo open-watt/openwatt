@@ -35,6 +35,9 @@ version = SupportLogging;
 nothrow @nogc:
 
 
+alias RecvHandler = void delegate(Stream source, const(void)[] data, MonoTime rx_time) nothrow @nogc;
+
+
 enum StreamOptions : ubyte
 {
     none = 0,
@@ -173,32 +176,54 @@ nothrow @nogc:
         mark_set!(typeof(this), [ "link-status", "last-status-change-time", "link-downs", "tx-rate", "rx-rate" ])();
     }
 
-    // Initiate an on-demand connection
     bool connect()
         => true;
 
-    // Disconnect the stream
     void disconnect()
     {
     }
 
     abstract const(char)[] remote_name();
 
-    // Read data from the stream
-    abstract ptrdiff_t read(void[] buffer);
+    final void rx_handler(RecvHandler handler)
+    {
+        _incoming = handler;
+        if (_incoming && _rx_buffer.length)
+        {
+            _incoming(this, _rx_buffer[], getTime());
+            _rx_buffer.clear();
+        }
+    }
+    final RecvHandler rx_handler() const pure
+        => _incoming;
 
-    // Write data to the stream
+    ptrdiff_t read(void[] buffer)
+    {
+        size_t n = _rx_buffer.length < buffer.length ? _rx_buffer.length : buffer.length;
+        if (n > 0)
+        {
+            (cast(ubyte[])buffer)[0 .. n] = _rx_buffer[0 .. n];
+            _rx_buffer.remove(0, n);
+        }
+        return n;
+    }
+
     abstract ptrdiff_t write(const(void[])[] data...);
 
-    // Return the number of bytes in the read buffer
-    abstract ptrdiff_t pending();
+    ptrdiff_t pending()
+        => _rx_buffer.length;
 
-    // Flush the receive buffer (return number of bytes destroyed)
-    abstract ptrdiff_t flush();
+    ptrdiff_t flush()
+    {
+        ptrdiff_t n = _rx_buffer.length;
+        _rx_buffer.clear();
+        return n;
+    }
 
-    // Optional terminal side-channel for streams that support terminal semantics
-    // (TelnetStream, ConsoleStream, etc.). Returns null for non-terminal streams.
-    TerminalChannel* terminal_channel() { return null; }
+    TerminalChannel* terminal_channel()
+    {
+        return null;
+    }
 
     void set_log_file(const(char)[] base_filename)
     {
@@ -245,6 +270,21 @@ protected:
 
     uint _buffer_len = 0;
     void[] _send_buffer;
+
+    RecvHandler _incoming;
+    Array!ubyte _rx_buffer;
+
+    final void incoming(const(void)[] data, MonoTime rx_time)
+    {
+        if (data.length == 0)
+            return;
+        add_rx_bytes(data.length);
+        write_to_log(true, data);
+        if (_incoming)
+            _incoming(this, data, rx_time);
+        else
+            _rx_buffer ~= cast(const(ubyte)[])data;
+    }
 
     final void add_tx_bytes(size_t bytes)
     {

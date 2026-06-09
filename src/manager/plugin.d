@@ -28,6 +28,10 @@ nothrow @nogc:
     {
     }
 
+    void deinit()
+    {
+    }
+
     void pre_update()
     {
     }

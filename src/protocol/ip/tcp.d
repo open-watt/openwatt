@@ -16,6 +16,8 @@ import router.iface.packet;
 import protocol.ip.icmp;
 import protocol.ip.stack;
 
+version (UseInternalIPStack) import protocol.ip : TCPConnection, TCPListener;
+
 //version = DebugTCP;       // buffering / transmission characteristics
 //version = DebugTCPProto;  // every segment in/out, state transitions, options
 
@@ -139,6 +141,7 @@ static assert(TcpHeader.sizeof == 20);
 struct TcpOooSeg
 {
     uint        seq;
+    MonoTime    rx_time;
     Array!ubyte data;
 }
 
@@ -246,6 +249,12 @@ struct TcpPcb
     bool writable_event;
     bool accept_event;
     bool error_event;
+
+    version (UseInternalIPStack) union
+    {
+        TCPConnection* conn_owner;
+        TCPListener*   listen_owner;
+    }
 }
 
 
@@ -514,6 +523,21 @@ void tcp_shutdown_write(ref IPStack stack, TcpPcb* pcb)
 }
 
 
+private void tcp_app_deliver(TcpPcb* pcb, const(ubyte)[] bytes, MonoTime rx_time)
+{
+    version (UseInternalIPStack)
+    {
+        if (pcb.conn_owner !is null)
+        {
+            pcb.conn_owner.deliver(bytes, rx_time);
+            return;
+        }
+    }
+    pcb.recv_buf ~= bytes;
+    pcb.readable_event = true;
+}
+
+
 // -------------------------------------------------------------------------
 // Ingress
 
@@ -564,7 +588,7 @@ void tcp_input(ref IPStack stack, ref Packet pkt)
         return;
     }
 
-    process_segment(stack, pcb, ip, t, seq, ack, wnd, flags, payload);
+    process_segment(stack, pcb, ip, t, seq, ack, wnd, flags, payload, cast(MonoTime)pkt.creation_time);
 }
 
 
@@ -751,7 +775,7 @@ void tcp_handle_unreachable(ref IPStack stack, ubyte code, uint code_data,
 private:
 
 void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const TcpHeader* t,
-                     uint seq, uint ack, uint wnd, ubyte flags, const(ubyte)[] payload)
+                     uint seq, uint ack, uint wnd, ubyte flags, const(ubyte)[] payload, MonoTime rx_time)
 {
     version (DebugTCPProto)
         log.trace("c", pcb.id, " << ", flags_str(flags), " seq=", seq, " ack=", ack, " len=", payload.length, " wnd=", wnd, " state=", pcb.state);
@@ -891,19 +915,35 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
 
             if (pcb.parent)
             {
-                if (pcb.parent.accept_queue.length < TcpAcceptQueueMax)
+                TcpPcb* parent = pcb.parent;
+                bool taken = false;
+                version (UseInternalIPStack)
                 {
-                    pcb.parent.accept_queue ~= pcb;
-                    pcb.parent.accept_event = true;
+                    if (parent.listen_owner !is null)
+                    {
+                        // Endpoint layer takes the child directly; it becomes independent.
+                        remove_child(parent, pcb);
+                        pcb.parent = null;
+                        parent.listen_owner.on_child(pcb, rx_time);
+                        taken = true;
+                    }
                 }
-                else
+                if (!taken)
                 {
-                    send_segment_at(stack, pcb, TcpFlag.rst, pcb.snd_nxt, null);
-                    remove_child(pcb.parent, pcb);
-                    pcb.state = TcpState.closed;
-                    tcp_unregister(pcb);
-                    free_pcb(pcb);
-                    return;
+                    if (parent.accept_queue.length < TcpAcceptQueueMax)
+                    {
+                        parent.accept_queue ~= pcb;
+                        parent.accept_event = true;
+                    }
+                    else
+                    {
+                        send_segment_at(stack, pcb, TcpFlag.rst, pcb.snd_nxt, null);
+                        remove_child(parent, pcb);
+                        pcb.state = TcpState.closed;
+                        tcp_unregister(pcb);
+                        free_pcb(pcb);
+                        return;
+                    }
                 }
             }
         }
@@ -1034,9 +1074,8 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
             size_t n = payload.length < free_buf ? payload.length : free_buf;
             if (n > 0)
             {
-                pcb.recv_buf ~= payload[0 .. n];
+                tcp_app_deliver(pcb, payload[0 .. n], rx_time);
                 pcb.rcv_nxt += n;
-                pcb.readable_event = true;
             }
             // Splice in any contiguous OOO segments now waiting on rcv_nxt.
             uint spliced = drain_ooo(pcb);
@@ -1061,7 +1100,7 @@ void process_segment(ref IPStack stack, TcpPcb* pcb, const IPv4Header* ip, const
         else
         {
             // Out-of-order: queue if room, then force-ACK to elicit retransmit.
-            queue_ooo(pcb, seq, payload);
+            queue_ooo(pcb, seq, payload, rx_time);
             pcb.rcv_wnd = cast(uint)(TcpRecvBufSize - pcb.recv_buf.length);
             send_segment_at(stack, pcb, TcpFlag.ack, pcb.snd_nxt, null);
             pcb.ack_pending = false;
@@ -1555,7 +1594,7 @@ void invalidate_rtt_sample(TcpPcb* pcb) pure
 
 // Insert `payload` at sequence `seq` if it's strictly past rcv_nxt and we
 // have room. Drops on overflow (peer will retransmit).
-void queue_ooo(TcpPcb* pcb, uint seq, const(ubyte)[] payload)
+void queue_ooo(TcpPcb* pcb, uint seq, const(ubyte)[] payload, MonoTime rx_time)
 {
     if (payload.length == 0)
         return;
@@ -1573,6 +1612,7 @@ void queue_ooo(TcpPcb* pcb, uint seq, const(ubyte)[] payload)
 
     TcpOooSeg s;
     s.seq = seq;
+    s.rx_time = rx_time;
     s.data ~= payload;
     pcb.ooo_buf ~= s;
     pcb.ooo_total_bytes += cast(uint)payload.length;
@@ -1612,7 +1652,7 @@ uint drain_ooo(TcpPcb* pcb)
                     new_bytes = free_buf;
                 if (new_bytes > 0)
                 {
-                    pcb.recv_buf ~= s.data[skip .. skip + new_bytes];
+                    tcp_app_deliver(pcb, s.data[skip .. skip + new_bytes], s.rx_time);
                     pcb.rcv_nxt += cast(uint)new_bytes;
                     spliced     += cast(uint)new_bytes;
                 }

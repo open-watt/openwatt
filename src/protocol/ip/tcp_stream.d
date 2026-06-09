@@ -15,6 +15,8 @@ import manager.base;
 import manager.collection;
 import manager.console;
 
+import protocol.ip;
+
 public import router.stream;
 
 //version = DebugTCPStream;       // TCPStream write/queue/drain activity
@@ -145,8 +147,8 @@ nothrow @nogc:
                 update_port(_remote, _port);
         }
 
-        // if the socket is invalid, we'll attempt to initiate a connection...
-        if (_socket == Socket.invalid)
+        // initiate the connection; completion arrives asynchronously via on_event
+        if (_conn is null)
         {
             // we don't want to spam connection attempts...
             SysTime now = getSysTime();
@@ -154,109 +156,52 @@ nothrow @nogc:
                 return CompletionStatus.continue_;
             _last_retry = now;
 
-            Result r = create_socket(AddressFamily.ipv4, SocketType.stream, Protocol.tcp, _socket);
-            if (!r)
-            {
-                debug log.error("create_socket() failed with error: ", r.socket_result);
-                return CompletionStatus.error;
-            }
-
-            set_socket_option(_socket, SocketOption.non_blocking, true);
-            r = _socket.connect(_remote);
-            if (!r.succeeded && r.socket_result != SocketResult.would_block)
-            {
-                if (r.socket_result == SocketResult.network_unreachable || r.socket_result == SocketResult.host_unreachable)
-                {
-                    close_socket();
-                    return CompletionStatus.continue_;
-                }
-                debug log.warning("connect() failed with error: ", r.socket_result);
-                return CompletionStatus.error;
-            }
+            _link = 0;
+            _conn = tcp_connect(_remote, &on_data, &on_event);
+            if (_conn is null)
+                return CompletionStatus.continue_;     // no route / refused outright; retry later
+            if (_keep_enable)
+                _conn.enable_keepalive(_keep_enable, _keep_idle, _keep_interval, _keep_count);
         }
 
-        // the socket is valid, but not live (waiting for connect() to complete)
-        // we'll poll it to see if it connected...
-        PollFd fd;
-        fd.socket = _socket;
-        fd.request_events = PollEvents.write;
-        uint num_events;
-        Result r = poll(fd, Duration.zero, num_events);
-        if (r.failed)
+        if (_link < 0)
         {
-            debug log.error("poll() failed with error: ", r.socket_result);
-            return CompletionStatus.error;
-        }
-
-        // no events returned, still waiting...
-        if (num_events == 0)
+            // the connect attempt failed; tear down and retry after the backoff
+            close_conn();
             return CompletionStatus.continue_;
-
-        // check error conditions
-        if (fd.return_events & (PollEvents.error | PollEvents.hangup | PollEvents.invalid))
-        {
-            debug log.error("connection failed to ", _remote);
-            return CompletionStatus.error;
         }
-
-        // this should be the only case left, we've successfully connected!
-        // let's just assert that the socket is writable to be sure...
-        assert(fd.return_events & PollEvents.write);
-
-        if (_keep_enable)
-            set_keepalive(_socket, _keep_enable, _keep_idle, _keep_interval, _keep_count);
-
-        return CompletionStatus.complete;
+        if (_link > 0)
+            return CompletionStatus.complete;
+        return CompletionStatus.continue_;
     }
 
     final override CompletionStatus shutdown()
     {
         if (_host)
             _remote = InetAddress();
-
-        close_socket();
-
-
+        close_conn();
         return CompletionStatus.complete;
     }
 
     final override void update()
     {
-        // poll to see if the socket is actually alive...
-
-        // TODO: does this actually work?! and do we really even want this?
-        ubyte[1] buffer;
-        size_t bytesReceived;
-        Result r = recv(_socket, null, MsgFlags.peek, &bytesReceived);
-        if (r != Result.success && r.socket_result != SocketResult.would_block)
+        if (_link < 0)
         {
-            log.warning("restart: liveness poll failed (", r.socket_result, ")");
             restart();
             return;
         }
-
-        if (_pending.length > 0)
-            drain_pending();
-
         super.update();
     }
 
     override bool connect()
     {
         _last_retry = SysTime();
-        update();
         return true;
     }
 
     override void disconnect()
     {
-//        if (_reverse_connect_server !is null)
-//        {
-//            _reverse_connect_server.stop();
-//            _reverse_connect_server = null;
-//        }
-
-        close_socket();
+        close_conn();
     }
 
     override const(char)[] remote_name()
@@ -272,79 +217,23 @@ nothrow @nogc:
         _keep_idle = keep_idle;
         _keep_interval = keep_interval;
         _keep_count = keep_count;
-        if (_socket)
-            set_keepalive(_socket, enable, keep_idle, keep_interval, keep_count);
-    }
-
-    override ptrdiff_t read(void[] buffer)
-    {
-        if (!running)
-            return 0;
-
-        size_t bytes = 0;
-        Result r = _socket.recv(buffer, MsgFlags.none, &bytes);
-        if (r != Result.success)
-        {
-            SocketResult sr = r.socket_result;
-            if (sr != SocketResult.would_block)
-            {
-                log.warning("restart: recv failed (", sr, ")");
-                restart();
-            }
-            return 0;
-        }
-        if (_logging)
-            write_to_log(true, buffer[0 .. bytes]);
-        add_rx_bytes(bytes);
-        return bytes;
+        if (_conn)
+            _conn.enable_keepalive(enable, keep_idle, keep_interval, keep_count);
     }
 
     override ptrdiff_t write(const(void[])[] data...)
     {
-        if (!running)
+        if (!running || _conn is null)
             return 0;
 
-        if (_pending.length > 0 && !drain_pending())
-            return 0;
-
-        size_t total = 0;
-        foreach (b; data)
-            total += b.length;
-        if (total == 0)
-            return 0;
-
-        if (_pending.length > 0)
+        ptrdiff_t n = _conn.send(data);
+        if (n > 0)
         {
-            if (_pending.length + total > MaxPendingBytes)
-            {
-                version (DebugTCPStream)
-                    log.warning("write ", total, "B refused: pending=", _pending.length, " cap=", MaxPendingBytes);
-                return 0;
-            }
-            foreach (b; data)
-                _pending ~= cast(const(ubyte)[])b;
-            version (DebugTCPStream)
-                log.trace("write ", total, "B fully queued (socket still full); pending=", _pending.length);
-            return total;
-        }
-
-        size_t bytes;
-        Result r = _socket.send(MsgFlags.none, &bytes, data);
-        if (r.failed && r.socket_result != SocketResult.would_block)
-        {
-            version (DebugTCPStream)
-                log.warning("restart: send failed (", r.socket_result, ")");
-            restart();
-            return 0;
-        }
-
-        if (bytes > 0)
-        {
-            add_tx_bytes(bytes);
+            add_tx_bytes(n);
             if (_logging)
             {
                 import urt.util : min;
-                ptrdiff_t remain = bytes;
+                ptrdiff_t remain = n;
                 for (size_t i = 0; remain > 0; ++i)
                 {
                     size_t len = min(data[i].length, remain);
@@ -353,125 +242,47 @@ nothrow @nogc:
                 }
             }
         }
-
-        size_t unaccepted = total - bytes;
-        if (unaccepted > 0)
-        {
-            if (unaccepted > MaxPendingBytes)
-            {
-                version (DebugTCPStream)
-                    log.warning("write ", total, "B partial: accepted=", bytes, " unaccepted=", unaccepted, " exceeds cap=", MaxPendingBytes);
-                return bytes;
-            }
-            size_t skipped = 0;
-            foreach (b; data)
-            {
-                if (skipped + b.length <= bytes)
-                {
-                    skipped += b.length;
-                    continue;
-                }
-                size_t off = bytes > skipped ? bytes - skipped : 0;
-                _pending ~= (cast(const(ubyte)[])b)[off .. $];
-                skipped += b.length;
-            }
-            version (DebugTCPStream)
-                log.trace("write ", total, "B: socket took ", bytes, ", queued tail ", unaccepted, "; pending=", _pending.length);
-        }
-        else
-        {
-            version (DebugTCPStream)
-            {
-                if (total > 0)
-                    log.trace("write ", total, "B accepted by socket");
-            }
-        }
-
-        return total;
-    }
-
-    override ptrdiff_t pending()
-    {
-        if (!running)
-            return 0;
-
-        size_t bytes;
-        Result r = .pending(_socket, bytes);
-        if (r != Result.success)
-        {
-            restart();
-            return 0;
-        }
-        return bytes;
-    }
-
-    override ptrdiff_t flush()
-    {
-        // TODO: read until can't read no more?
-        assert(0);
+        return n;
     }
 
 private:
-    enum size_t MaxPendingBytes = 256 * 1024;
-
-    Socket _socket;
+    TCPConnection* _conn;
     InetAddress _remote;
     ushort _port;
     SysTime _last_retry;
     String _host;
-    Array!ubyte _pending;
-//    TCPServer _reverse_connect_server;
+    byte _link;
 
     bool _keep_enable = false;
     int _keep_count = 10;
     Duration _keep_idle;
     Duration _keep_interval;
 
-    bool drain_pending()
+    void on_data(TCPConnection* conn, const(void)[] data, MonoTime rx_time)
     {
-        version (DebugTCPStream)
-            size_t initial = _pending.length;
-
-        while (_pending.length > 0)
-        {
-            size_t sent;
-            Result r = _socket.send(MsgFlags.none, &sent, cast(const(void)[])_pending[]);
-            if (r.failed && r.socket_result != SocketResult.would_block)
-            {
-                version (DebugTCPStream)
-                    log.warning("restart: drain send failed (", r.socket_result, "), pending=", _pending.length);
-                restart();
-                return false;
-            }
-            if (sent == 0)
-            {
-                version (DebugTCPStream)
-                    log.trace("drain stalled: socket full, pending=", _pending.length);
-                return true;
-            }
-            add_tx_bytes(sent);
-            if (_logging)
-                write_to_log(false, _pending[0 .. sent]);
-            _pending.remove(0, sent);
-        }
-
-        version (DebugTCPStream)
-        {
-            if (initial > 0)
-                log.trace("drained ", initial, "B fully");
-        }
-        return true;
+        incoming(data, rx_time);
     }
 
-    void close_socket()
+    void on_event(TCPConnection* conn, IPEvent event)
     {
-        _pending.clear();
-        if (_socket == Socket.invalid)
-            return;
-        if (_state == State.stopping)
-            _socket.shutdown(SocketShutdownMode.read_write);
-        _socket.close();
-        _socket = Socket.invalid;
+        if (event == IPEvent.connected)
+        {
+            _link = 1;
+            if (_state == State.starting)
+                set_state(State.running);
+        }
+        else
+            _link = -1;
+    }
+
+    void close_conn()
+    {
+        if (_conn)
+        {
+            _conn.close();
+            _conn = null;
+        }
+        _link = 0;
     }
 
     bool update_port(ref InetAddress addr, ushort port)
@@ -537,149 +348,64 @@ nothrow @nogc:
 
     override CompletionStatus startup()
     {
-        assert(!_ip4_listener);
-        assert(!_ip6_listener);
-
-        Result create(AddressFamily af, ref Socket sock)
+        assert(_listener is null);
+        _listener = tcp_listen(_port, &on_accept);
+        if (_listener is null)
         {
-            Socket s;
-            Result r = create_socket(af, SocketType.stream, Protocol.tcp, s);
-
-            if (!r.failed)
-                r = s.set_socket_option(SocketOption.non_blocking, true);
-            if (!r.failed)
-                r = s.set_socket_option(SocketOption.reuse_address, true);
-
-            if (!r.failed)
-            {
-                if (af == AddressFamily.ipv4)
-                    r = s.bind(InetAddress(IPAddr.any, _port));
-                else if (af == AddressFamily.ipv6)
-                    r = s.bind(InetAddress(IPv6Addr.any, _port));
-                else
-                    assert(false);
-            }
-
-            if (!r.failed)
-                r = s.listen();
-
-            if (r.failed)
-                s.close();
-            else
-                sock = s;
-            return r;
-        }
-
-        Result r = create(AddressFamily.ipv4, _ip4_listener);
-        if (!r)
-        {
-            debug log.error("failed to create listening socket. Error ", r.system_code);
+            debug log.error("failed to listen on port ", _port);
             return CompletionStatus.error;
         }
-
-        // TODO: option to disable this???
-        r = create(AddressFamily.ipv6, _ip6_listener);
-        if (!r)
-        {
-            // tolerate ipv6 failure... (do we want this?)
-            log.info("failed to create IPv6 listener: ", r.system_code);
-//            if (_ip4_listener)
-//            {
-//                _ip4_listener.close();
-//                _ip4_listener = null;
-//            }
-//            return CompletionStatus.error;
-        }
-
         debug log.info("listening on port ", _port);
         return CompletionStatus.complete;
     }
 
     final override CompletionStatus shutdown()
     {
-        if (_ip4_listener)
+        if (_listener)
         {
-            _ip4_listener.close();
-            _ip4_listener = null;
-        }
-        if (_ip6_listener)
-        {
-            _ip6_listener.close();
-            _ip6_listener = null;
+            _listener.close();
+            _listener = null;
         }
         return CompletionStatus.complete;
     }
 
-    final override void update()
-    {
-        while (true)
-        {
-            Socket conn;
-            InetAddress remote_addr;
-            Result r = _ip4_listener.accept(conn, &remote_addr);
-            if (r.failed && r.socket_result == SocketResult.would_block && _ip6_listener)
-                r = _ip6_listener.accept(conn, &remote_addr);
-
-            if (r.failed)
-            {
-                if (r.socket_result != SocketResult.would_block)
-                    restart();
-                return;
-            }
-            assert(conn);
-
-            // if this was a temporary server. maybe we destroy it now?
-//            if (options & ServerOptions.JustOne)
-//                stop();
-
-            conn.set_socket_option(SocketOption.non_blocking, true);
-
-//            if (_raw_connection_callback)
-//                _raw_connection_callback(conn, user_data);
-//            else if (_connection_callback)
-            if (_connection_callback)
-            {
-                Stream stream = create_stream(conn);
-                if (stream)
-                    _connection_callback(stream, _user_data);
-            }
-
-            // TODO: should the stream we just created to into the stream pool...?
-            else
-            {
-                // TODO: if nobody is accepting connections; I guess we should just terminate them as they come?
-                conn.shutdown(SocketShutdownMode.read_write);
-                conn.close();
-            }
-        }
-    }
-
 protected:
-    alias NewRawConnection = void function(Socket client, void* user_data) nothrow @nogc;
-
 //    ServerOptions _options;
     ushort _port;
     NewConnection _connection_callback;
-//    NewRawConnection _raw_connection_callback;
     void* _user_data;
-    Socket _ip4_listener;
-    Socket _ip6_listener;
+    TCPListener* _listener;
 
     this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags)
     {
         super(type_info, id, flags);
     }
 
-    Stream create_stream(Socket conn)
+    void on_accept(TCPListener* listener, TCPConnection* conn, MonoTime)
+    {
+        if (_connection_callback)
+        {
+            Stream stream = create_stream(conn);
+            if (stream)
+                _connection_callback(stream, _user_data);
+        }
+        else
+            conn.close();
+    }
+
+    Stream create_stream(TCPConnection* conn)
     {
         // prevent duplicate stream names...
         const(char)[] newName = Collection!Stream().generate_name(name[]);
 
         TCPStream stream = cast(TCPStream)Collection!TCPStream().alloc(newName, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
 
-        // assign the socket to the stream and bypass the startup process
-        stream._socket = conn;
-        conn.get_peer_name(stream._remote);
+        // adopt the accepted connection and bypass the startup/connect process
+        stream._conn = conn;
+        stream._remote = conn.remote();
+        stream._link = 1;
+        conn.recv_handler(&stream.on_data);
+        conn.event_handler(&stream.on_event);
         stream.set_state(State.running);
         Collection!TCPStream().add(stream);
         return stream;

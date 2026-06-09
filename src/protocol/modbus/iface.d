@@ -149,6 +149,7 @@ nothrow @nogc:
             return "stream cannot be null";
         if (_stream is value)
             return null;
+        unsubscribe_stream();
         static if (has_ip)
             _conn.clear_remote();
         _stream = value;
@@ -188,6 +189,7 @@ nothrow @nogc:
             auto r = _conn.remote(value.move);
             if (r.succeeded)
             {
+                unsubscribe_stream();
                 _stream = null;  // remote takes ownership of the stream slot
                 if (_protocol == ModbusProtocol.unknown)
                     _protocol = ModbusProtocol.tcp;
@@ -198,6 +200,7 @@ nothrow @nogc:
         void remote(InetAddress value)
         {
             _conn.remote(value);
+            unsubscribe_stream();
             _stream = null;
             if (_protocol == ModbusProtocol.unknown)
                 _protocol = ModbusProtocol.tcp;
@@ -228,9 +231,7 @@ nothrow @nogc:
         {
             _conn.keepalive(value);
         }
-    }
 
-    static if (has_ip)
         alias Properties = AliasSeq!(Prop!("stream", stream),
                                      Prop!("remote", remote),
                                      Prop!("port", port),
@@ -238,6 +239,7 @@ nothrow @nogc:
                                      Prop!("keepalive", keepalive),
                                      Prop!("protocol", protocol),
                                      Prop!("master", master));
+    }
     else
         alias Properties = AliasSeq!(Prop!("stream", stream),
                                      Prop!("protocol", protocol),
@@ -288,55 +290,56 @@ protected:
             {
                 if (!_conn.start(this, _tls ? 802 : 502, _tls))
                     return CompletionStatus.error;
-                _stream = _conn.get;
                 if (_protocol == ModbusProtocol.unknown)
                     _protocol = ModbusProtocol.tcp;
             }
         }
-        if (!_stream)
-            return CompletionStatus.error;
-        if (!_stream.running)
-            return CompletionStatus.continue_;
 
-        if (!_is_bus_master && _protocol == ModbusProtocol.unknown)
+        Stream s = active_stream();
+        debug assert(s); // validate should prevent this!
+        if (!_subscribed)
         {
-            // listen for a frame and detect the protocol...
-            assert(false, "TODO");
+            s.rx_handler = &incoming_bytes;
+            s.subscribe(&stream_state);
+            _subscribed = true;
         }
-        if (_protocol != ModbusProtocol.unknown)
-        {
-            // allocate a universal address for the remote bus master on non-master interfaces
-            if (!_is_bus_master && _master_address == 0)
-                _master_address = get_module!ModbusProtocolModule().allocate_universal_address(ephemeral: true);
+        return s.running ? CompletionStatus.complete : CompletionStatus.continue_;
+    }
 
-            // compute timing parameters from baud rate
-            if (!_support_simultaneous_requests)
+    override void online()
+    {
+        super.online();
+
+        // allocate a universal address for the remote bus master on non-master interfaces
+        if (!_is_bus_master && _master_address == 0)
+            _master_address = get_module!ModbusProtocolModule().allocate_universal_address(ephemeral: true);
+
+        // compute timing parameters from baud rate
+        if (!_support_simultaneous_requests)
+        {
+            import router.stream.serial : SerialStream;
+            if (auto serial = cast(SerialStream)_stream)
             {
-                import router.stream.serial : SerialStream;
-                if (auto serial = cast(SerialStream)_stream)
-                {
-                    compute_timing(serial.baud_rate);
-                    _baud_estimated = true;
-                }
-                else
-                {
-                    uint baud = _user_baud != 0 ? _user_baud : _estimated_baud != 0 ? _estimated_baud : 9_600;
-                    compute_timing(baud);
-                    _gap_time_us = 0;
-                    _baud_estimated = _user_baud != 0 || _estimated_baud != 0;
-                }
+                compute_timing(serial.baud_rate);
+                _baud_estimated = true;
             }
-
-            _queue.init(_support_simultaneous_requests ? 8 : 1, 0, PCP.be, this);
-            _queue.set_queue_timeout(_queue_timeout.msecs);
-            _queue.set_transport_timeout(_request_timeout.msecs);
-            return CompletionStatus.complete;
+            else
+            {
+                uint baud = _user_baud != 0 ? _user_baud : _estimated_baud != 0 ? _estimated_baud : 9_600;
+                compute_timing(baud);
+                _gap_time_us = 0;
+                _baud_estimated = _user_baud != 0 || _estimated_baud != 0;
+            }
         }
-        return CompletionStatus.continue_;
+
+        _queue.init(_support_simultaneous_requests ? 8 : 1, 0, PCP.be, this);
+        _queue.set_queue_timeout(_queue_timeout.msecs);
+        _queue.set_transport_timeout(_request_timeout.msecs);
     }
 
     override CompletionStatus shutdown()
     {
+        unsubscribe_stream();
         _sequence_number = 0;
         _expect_message_type = ModbusFrameType.unknown;
         _last_receive_event = SysTime();
@@ -371,12 +374,10 @@ protected:
 
     override void update()
     {
-        if (!_stream || !_stream.running)
-            return restart();
+        Stream s = active_stream();
+        debug assert(s.running, "why didn't the stream's offline signal take us offline?");
 
         super.update();
-
-        SysTime now = getSysTime();
 
         _queue.timeout_stale(getTime());
 
@@ -386,81 +387,13 @@ protected:
 
         send_queued_messages();
 
-        // check for data
-        ubyte[1024] buffer = void;
-        buffer[0 .. _tail_bytes] = _tail[0 .. _tail_bytes];
-        ptrdiff_t read_offset = _tail_bytes;
-        ptrdiff_t length = _tail_bytes;
-        _tail_bytes = 0;
-        read_loop: while (true)
+        ubyte[512] buffer = void;
+        while (true)
         {
-            assert(length < 260);
-
-            ptrdiff_t r = stream.read(buffer[read_offset .. $]);
-            if (r < 0)
-            {
-                assert(false, "TODO: what causes read to fail?");
-                break read_loop;
-            }
-            if (r == 0)
-            {
-                // if there were no extra bytes available, stash the _tail until later
-                _tail[0 .. length] = buffer[0 .. length];
-                _tail_bytes = cast(ushort)length;
-                break read_loop;
-            }
-            length += r;
-            assert(length <= buffer.sizeof);
-
-//            if (connParams.logDataStream)
-//                logStream.rawWrite(buffer[0 .. length]);
-
-            size_t offset = 0;
-            while (offset < length)
-            {
-                // parse packets from the stream...
-                const(void)[] message = void;
-                ModbusFrameInfo frame_info = void;
-                size_t taken = 0;
-                final switch (protocol)
-                {
-                    case ModbusProtocol.unknown:
-                        assert(false, "Modbus protocol not specified");
-                        break;
-                    case ModbusProtocol.rtu:
-                        taken = parse_rtu(buffer[offset .. length], message, frame_info);
-                        break;
-                    case ModbusProtocol.tcp:
-                        taken = parse_tcp(buffer[offset .. length], message, frame_info);
-                        break;
-                    case ModbusProtocol.ascii:
-                        taken = parse_ascii(buffer[offset .. length], message, frame_info);
-                        break;
-                }
-
-                if (taken == 0)
-                {
-                    import urt.util : min;
-
-                    // we didn't parse any packets
-                    // we might have a split packet, so we'll shuffle unread data to the front of the buffer
-                    // ...but we'll only keep at most one message worth!
-                    size_t remain = length - offset;
-                    size_t keepBytes = min(remain, 259);
-                    size_t trunc = remain - keepBytes;
-                    memmove(buffer.ptr, buffer.ptr + offset + trunc, keepBytes);
-                    length = keepBytes;
-                    read_offset = keepBytes;
-                    offset = 0;
-                    continue read_loop;
-                }
-                offset += taken;
-
-                incoming_packet(message, now, frame_info);
-            }
-
-            // we've eaten the whole buffer...
-            length = 0;
+            ptrdiff_t r = s.read(buffer[]);
+            if (r <= 0)
+                break;
+            incoming_bytes(null, buffer[0 .. r], getTime());
         }
     }
 
@@ -564,6 +497,7 @@ private:
     }
 
     ObjectRef!Stream _stream;
+    bool _subscribed;
     static if (has_ip)
     {
         import protocol.ip.client : IPClient;
@@ -592,9 +526,139 @@ private:
     ushort _sequence_number;
     ModbusFrameType _expect_message_type = ModbusFrameType.unknown;
 
-
     ubyte[260] _tail;
     ushort _tail_bytes;
+
+    Stream active_stream()
+    {
+        if (_stream)
+            return _stream;
+        static if (has_ip)
+            return _conn.get;
+        else
+            return null;
+    }
+
+    void stream_state(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.online)
+        {
+            if (_state == State.starting)
+                set_state(State.running);
+        }
+        else if (signal == StateSignal.offline)
+            restart();
+    }
+
+    void unsubscribe_stream()
+    {
+        if (_subscribed)
+        {
+            if (Stream s = active_stream())
+            {
+                s.unsubscribe(&stream_state);
+                s.rx_handler = null;
+            }
+            _subscribed = false;
+        }
+    }
+
+    void incoming_bytes(Stream source, const(void)[] data, MonoTime rx_time)
+    {
+        const(ubyte)[] src = cast(const(ubyte)[])data;
+
+        ubyte[1024] buffer = void;
+        size_t length = _tail_bytes;
+        if (_tail_bytes)
+            buffer[0 .. _tail_bytes] = _tail[0 .. _tail_bytes];
+        _tail_bytes = 0;
+
+        while (true)
+        {
+            size_t space = buffer.length - length;
+            size_t take = src.length < space ? src.length : space;
+            if (take)
+            {
+                buffer[length .. length + take] = src[0 .. take];
+                length += take;
+                src = src[take .. $];
+            }
+
+            size_t offset = 0;
+            bool partial = false;
+            while (offset < length)
+            {
+                const(void)[] message = void;
+                ModbusFrameInfo frame_info = void;
+                size_t taken = 0;
+
+                final switch (protocol)
+                {
+                    case ModbusProtocol.unknown:
+                        taken = parse_rtu(buffer[offset .. length], message, frame_info);
+                        if (taken > 0)
+                        {
+                            protocol = ModbusProtocol.rtu;
+                            goto set_running;
+                        }
+                        taken = parse_tcp(buffer[offset .. length], message, frame_info);
+                        if (taken > 0)
+                        {
+                            protocol = ModbusProtocol.tcp;
+                            goto set_running;
+                        }
+                        taken = parse_ascii(buffer[offset .. length], message, frame_info);
+                        if (taken > 0)
+                        {
+                            protocol = ModbusProtocol.ascii;
+                            goto set_running;
+                        }
+                        // TODO: when should we fail? initial test might fail if we haven't received enough bytes yet....
+                        restart();
+                        return;
+                    case ModbusProtocol.rtu:
+                        taken = parse_rtu(buffer[offset .. length], message, frame_info);
+                        break;
+                    case ModbusProtocol.tcp:
+                        taken = parse_tcp(buffer[offset .. length], message, frame_info);
+                        break;
+                    case ModbusProtocol.ascii:
+                        taken = parse_ascii(buffer[offset .. length], message, frame_info);
+                        break;
+                    set_running:
+                        set_state(State.running);
+                        break;
+                }
+
+                if (taken == 0)
+                {
+                    // split packet; keep at most one message worth at the front
+                    import urt.util : min;
+                    size_t remain = length - offset;
+                    size_t keep = min(remain, 259);
+                    size_t trunc = remain - keep;
+                    memmove(buffer.ptr, buffer.ptr + offset + trunc, keep);
+                    length = keep;
+                    partial = true;
+                    break;
+                }
+                offset += taken;
+                incoming_packet(message, cast(SysTime)rx_time, frame_info);
+            }
+            if (!partial)
+                length = 0;
+
+            if (src.length == 0)
+            {
+                if (length)
+                {
+                    _tail[0 .. length] = buffer[0 .. length];
+                    _tail_bytes = cast(ushort)length;
+                }
+                return;
+            }
+        }
+    }
 
     int frame_and_send(ubyte address, const(ubyte)[] pdu, ushort tx_id = 0)
     {
@@ -634,7 +698,7 @@ private:
                 length += 4;
         }
 
-        ptrdiff_t written = stream.write(buffer[0 .. length]);
+        ptrdiff_t written = active_stream().write(buffer[0 .. length]);
         if (written != length)
         {
             log.debug_("tx-drop: write failed (wrote ", written, " of ", length, ")");
