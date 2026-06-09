@@ -17,6 +17,8 @@ import router.iface.packet;
 
 import protocol.ble.iface;
 
+version = DebugBLEClient;
+
 nothrow @nogc:
 
 
@@ -106,6 +108,10 @@ nothrow @nogc:
         att.src = local_mac;
         att.dst = _peer;
         att.opcode = with_response ? ATTOpcode.write_req : ATTOpcode.write_cmd;
+
+        version (DebugBLEClient)
+            log.trace("write ", with_response ? "req" : "cmd", " handle=", handle, " ", data.length, " bytes");
+
         return _iface.forward(p, callback);
     }
 
@@ -297,11 +303,18 @@ private:
                         break;
                     ushort handle = payload.ptr[0 .. 2].littleEndianToNative!ushort;
                     const(ubyte)[] value = payload.length > 2 ? payload[2 .. $] : null;
+                    size_t matched = 0;
                     foreach (ref h; _notify_handlers[])
                     {
                         if (h.handle == handle)
+                        {
+                            ++matched;
                             h.callback(handle, value);
+                        }
                     }
+                    version (DebugBLEClient)
+                        log.trace(att.opcode == ATTOpcode.indication ? "indication" : "notification",
+                                  " handle=", handle, " ", value.length, " bytes, ", matched, " handler(s)");
                     break;
 
                 case ATTOpcode.read_rsp:
@@ -311,9 +324,13 @@ private:
 
                 case ATTOpcode.write_rsp:
                     // The forward callback already signalled completion to the caller.
+                    version (DebugBLEClient)
+                        log.trace("write_rsp (write acknowledged)");
                     break;
 
                 default:
+                    version (DebugBLEClient)
+                        log.trace("unhandled ATT opcode ", att.opcode, " [ ", cast(void[])payload, " ]");
                     break;
             }
         }

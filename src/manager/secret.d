@@ -304,7 +304,7 @@ private:
             Result r = import_private_key(cast(const(ubyte)[])file, _keypair);
             if (r.failed)
             {
-                log.warning("failed to load EC key from '", _key_file[], "': ", r.system_code);
+                log.error("failed to load EC key from '", _key_file[], "': ", r.system_code);
                 return;
             }
         }
@@ -313,14 +313,14 @@ private:
             Result r = generate_keypair(_keypair);
             if (r.failed)
             {
-                log.warning("failed to generate EC keypair: ", r.system_code);
+                log.error("failed to generate EC keypair: ", r.system_code);
                 return;
             }
             Array!ubyte exported;
             r = export_private_key(_keypair, exported);
             if (r.failed)
             {
-                log.warning("failed to export newly-generated EC key: ", r.system_code);
+                log.error("failed to export newly-generated EC key: ", r.system_code);
                 free_keypair(_keypair);
                 return;
             }
@@ -337,7 +337,7 @@ private:
         Result r = export_public_key_raw(_keypair, x, y);
         if (r.failed || x.length != 32 || y.length != 32)
         {
-            log.warning("failed to export public key components");
+            log.error("failed to export public key components");
             free_keypair(_keypair);
             return;
         }
