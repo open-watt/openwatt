@@ -54,6 +54,13 @@ nothrow @nogc:
         // TeslaInterface update handled by base interface collection
         foreach(m; twc_masters.values)
             m.update();
+
+        // Vehicle sessions are spawned at runtime (not via console `add`), so
+        // they never get the synchronous do_update() kick, so tick them here to
+        // drive their connect, session-info, ready state machine. The scanner
+        // is ticked too for its housekeeping update() (out-of-range teardown).
+        Collection!TeslaVehicleScanner().update_all();
+        Collection!TeslaVehicleSession().update_all();
     }
 
     void twc_add(Session session, const(char)[] name, const(char)[] _interface, ushort id, float max_current)
@@ -112,7 +119,7 @@ nothrow @nogc:
         ref const cs = vehicle.charge_state;
         if (!cs.valid)
         {
-            session.write_line("request sent — no cached state yet, response pending");
+            session.write_line("request sent - no cached state yet, response pending");
             return;
         }
         if (cs.has_battery_level)
@@ -135,7 +142,7 @@ nothrow @nogc:
             session.writef("max_current: {0}A\n", cs.charge_current_request_max);
         if (cs.has_minutes_to_full_charge)
             session.writef("minutes_to_full: {0}\n", cs.minutes_to_full_charge);
-        session.write_line("(refresh requested — values above are last cached)");
+        session.write_line("(refresh requested - values above are last cached)");
     }
 
     void vehicle_charge_start(Session session, TeslaVehicleSession vehicle)

@@ -31,6 +31,9 @@ import router.iface;
 import router.iface.mac;
 import router.iface.packet;
 
+//version = DebugTeslaScanner;
+version = DebugTeslaSession;
+
 nothrow @nogc:
 
 
@@ -1021,29 +1024,27 @@ nothrow @nogc:
 
     // Comma-separated list of known VINs. Adverts whose hashed local name
     // matches any registered VIN trigger a session spawn.
-    String vins() const
+    Array!String vins() const
     {
-        MutableString!0 r;
-        foreach (i, ref e; _vins[])
-            r.concat(i > 0 ? "," : "", e.vin[]);
-        return r[].makeString(defaultAllocator());
+        auto r = Array!String(Reserve, _vins.length);
+        foreach (ref v; _vins[])
+            r ~= v.vin;
+        return r;
     }
-    void vins(String value)
+    void vins(const(char)[][] value...)
     {
-        import apps.energy.vehicle : vehicle_for;
-
         _vins.clear();
-        const(char)[] rest = value[];
-        while (rest.length)
+        foreach (v; value)
         {
-            const(char)[] vin = rest.split!','.trim;
-            if (vin.length == 0)
-                continue;
-            VinEntry e;
-            e.vin = vin.makeString(defaultAllocator());
-            tesla_vin_hash(vin, e.hash);
-            e.component = vehicle_for(e.vin[]);
-            _vins ~= e.move;
+            MutableString!0 t = v;
+            t[].to_upper();
+
+            ubyte[8] hash;
+            tesla_vin_hash(t[], hash);
+
+            _vins ~= VinEntry(String(t.move), hash);
+            version (DebugTeslaScanner)
+                log.trace("registered VIN '", t[], "' -> hash [ ", cast(void[])hash[], " ]");
         }
     }
 
@@ -1069,6 +1070,9 @@ protected:
             _iface.subscribe(&incoming_packet, filter);
             _iface.subscribe(&iface_state_change);
             _subscribed = true;
+
+            version (DebugTeslaScanner)
+                log.trace("scanner subscribed to BLE adverts on '", _iface.get.name[], "', watching ", _vins.length, " VIN(s)");
         }
 
         return CompletionStatus.complete;
@@ -1096,29 +1100,19 @@ protected:
     }
 
 package:
-    // Create a new TeslaVehicleSession for the given vehicle. Allocates and
-    // starts the underlying BLEClient first, then wraps it in a session.
-    // Returns null if either allocation fails (typically a name collision).
+    // Create a new TeslaVehicleSession for the given vehicle. The session owns
+    // its own BLEClient lifecycle (created in startup, destroyed in shutdown) so
+    // restart() cleanly reconnects. Returns null on allocation failure.
     TeslaVehicleSession spawn_session(const(char)[] vin, MACAddress peer)
     {
-        const(char)[] client_name = Collection!BLEClient().generate_name(vin);
-        BLEClient c = Collection!BLEClient().create(client_name, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
-                                                    NamedArgument("interface", _iface.get), NamedArgument("peer", peer));
-        if (!c)
-        {
-            log.error("could not allocate BLEClient for VIN '", vin, "'");
-            return null;
-        }
-
         TeslaVehicleSession s = Collection!TeslaVehicleSession().alloc(vin, cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary));
         if (!s)
         {
             log.error("could not spawn session for VIN '", vin, "' (name collision?)");
-            c.destroy();
             return null;
         }
         s._scanner = this;
-        s.client = c;
+        s._peer = peer;
         Collection!TeslaVehicleSession().add(s);
         return s;
     }
@@ -1153,33 +1147,56 @@ private:
                 return;
         }
 
+        version (DebugTeslaScanner)
+            log.trace("BLE adv pdu ", ll.pdu_type, " from ", ll.src);
+
         if (_vins.empty)
+        {
+            version (DebugTeslaScanner)
+                log.trace("adv from ", ll.src, " ignored: no VINs registered");
             return;
+        }
 
         // BLEModule already parsed the AD payload and updated devices map by
-        // the time this packet fans out — reuse the parsed local name rather
+        // the time this packet fans out, reuse the parsed local name rather
         // than re-walking AD records here.
         BLEAdvEntry** ppe = ll.src in get_module!BLEModule.devices;
         if (!ppe || !*ppe || (*ppe).name.length != TESLA_LOCAL_NAME_LEN)
+        {
+            version (DebugTeslaScanner)
+            {
+                if (!ppe || !*ppe)
+                    log.trace("adv from ", ll.src, ": no parsed BLE device entry yet");
+                else
+                    log.trace("adv from ", ll.src, " local name '", (*ppe).name[], "' len ", (*ppe).name.length, " != Tesla name len ", TESLA_LOCAL_NAME_LEN);
+            }
             return;
+        }
 
         ubyte[8] hash;
         if (!parse_tesla_local_name((*ppe).name[], hash))
+        {
+            version (DebugTeslaScanner)
+                log.trace("adv from ", ll.src, " name '", (*ppe).name[], "' is not a Tesla 'S<hex>C' name");
             return;
+        }
 
         foreach (ref e; _vins[])
         {
             if (e.hash[] != hash[])
                 continue;
 
-            // Already have a session for this VIN? skip.
+            // Already have a session for this VIN? skip silently.
             if (Collection!TeslaVehicleSession().get(e.vin[]) !is null)
                 return;
 
-            log.info("Tesla vehicle '", e.vin[], "' seen at ", ll.src, " — spawning session");
+            log.info("Tesla vehicle '", e.vin[], "' seen at ", ll.src, ", spawning session");
             spawn_session(e.vin[], ll.src);
             return;
         }
+
+        version (DebugTeslaScanner)
+            log.trace("adv from ", ll.src, " is a Tesla, hash [ ", cast(void[])hash[], " ] matches no registered VIN");
     }
 
     void iface_state_change(ActiveObject, StateSignal signal)
@@ -1222,11 +1239,11 @@ nothrow @nogc:
     {
         connecting,         // BLE link establishing
         gatt_ready,         // BLE connected, GATT discovery done, TX/RX handles known
-        session_info_xchg,  // session_info_request sent, awaiting session_info from vehicle
-        trust_check,        // session_info received, doing a signed query to verify whitelist status
-        awaiting_approval,  // trust check failed → AddKey sent, waiting for user tap on car screen
-        ready,              // trusted, session established, signed commands flow
-        failed,             // unrecoverable error (rejected, timeout, etc.)
+        session_info_xchg,  // VCSEC SessionInfoRequest sent, awaiting response (enrollment check)
+        awaiting_approval,  // VCSEC: key not whitelisted, AddKey sent, awaiting card tap
+        info_xchg,          // enrolled; INFOTAINMENT SessionInfoRequest sent, awaiting response
+        ready,              // both sessions established, signed commands flow
+        failed,             // (transient) error; the machine reconnects
     }
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
@@ -1239,7 +1256,7 @@ nothrow @nogc:
         => name[];
 
     MACAddress peer() const pure
-        => _client ? _client.peer : MACAddress();
+        => _peer;
 
     inout(BLEClient) client() inout pure
         => _client;
@@ -1283,10 +1300,38 @@ nothrow @nogc:
 
 protected:
     override bool validate() const
-        => _scanner !is null && _client !is null;
+        => _scanner !is null && cast(bool)_peer;
+
+    // Surface the pairing sub-state so `print` explains why the session is still
+    // in Starting (connecting vs. waiting for the user to tap a key card).
+    override const(char)[] status_message() const
+    {
+        final switch (_state)
+        {
+            case State.connecting:        return "connecting to vehicle";
+            case State.gatt_ready:
+            case State.session_info_xchg:
+            case State.info_xchg:         return "establishing session";
+            case State.awaiting_approval: return "waiting for key card tap on the console to authorise";
+            case State.ready:             return super.status_message();
+            case State.failed:            return super.status_message();
+        }
+    }
 
     override CompletionStatus startup()
     {
+        if (_client is null)
+        {
+            BaseInterface iface = _scanner._iface.get;
+            if (!iface)
+                return CompletionStatus.continue_;
+            _client = Collection!BLEClient().create(Collection!BLEClient().generate_name(name[]),
+                cast(ObjectFlags)(ObjectFlags.dynamic | ObjectFlags.temporary),
+                NamedArgument("interface", iface), NamedArgument("peer", _peer));
+            if (_client is null)
+                return CompletionStatus.continue_;
+        }
+
         if (!_client.running)
             return CompletionStatus.continue_;
 
@@ -1294,13 +1339,14 @@ protected:
         {
             _client.subscribe(&client_state_change);
             _subscribed = true;
+            _state = State.connecting;
+            _rx_buffer.clear();
+            _counter = 0;
+            _routing_seeded = false;
+            _last_rx_time = getTime();
         }
 
-        _state = State.connecting;
-        _rx_buffer.clear();
-        _counter = 0;
-        _routing_seeded = false;
-        return CompletionStatus.complete;
+        return advance();
     }
 
     override CompletionStatus shutdown()
@@ -1325,9 +1371,6 @@ protected:
         _cap = CapacitySamplerState.init;
         _last_poll_time = MonoTime.init;
 
-        // Mark the published Vehicle Component as disconnected so consumers
-        // can see the car is no longer reachable (last_seen stays at its
-        // last value for stale-detection).
         foreach (ref e; _scanner._vins[])
         {
             if (e.vin[] == name[] && e.component !is null)
@@ -1348,76 +1391,109 @@ protected:
 
     override void update()
     {
+        if (advance() != CompletionStatus.complete)
+            restart();
+    }
+
+private:
+    // Tesla session state machine. Driven from startup() while pairing (Starting)
+    // and from update() once live (Running). Returns continue_ while still working
+    // through a Starting sub-state, complete once the trusted session is live
+    // (State.ready), and error when the link stalls or a step fails -- the caller
+    // then reconnects (startup() backs off and retries; update() calls restart()).
+    CompletionStatus advance()
+    {
+        // Link-health watchdog: the vehicle broadcasts status ~1/sec, so sustained
+        // silence means the GATT channel is dead even though WinRT still reports
+        // the client connected.
+        if (getTime() - _last_rx_time > link_timeout)
+        {
+            version (DebugTeslaSession)
+                log.trace("no vehicle traffic for ", link_timeout, ", reconnecting");
+            return CompletionStatus.error;
+        }
+
         final switch (_state)
         {
             case State.connecting:
                 if (!_client.discovery_complete())
-                    break;
+                    return CompletionStatus.continue_;
                 _tx_handle = _client.find_characteristic(TESLA_SERVICE_UUID, TESLA_TX_CHAR_UUID);
                 _rx_handle = _client.find_characteristic(TESLA_SERVICE_UUID, TESLA_RX_CHAR_UUID);
                 if (_tx_handle == 0 || _rx_handle == 0)
                 {
                     log.error("Tesla GATT characteristics not found on peer ", _client.peer);
-                    _state = State.failed;
-                    break;
+                    return CompletionStatus.error;
                 }
                 _client.on_notify(_rx_handle, &on_notification);
+                _last_rx_time = getTime();
+                version (DebugTeslaSession)
+                    log.trace("GATT discovery complete, tx=", _tx_handle, " rx=", _rx_handle, ", state=gatt_ready");
                 _state = State.gatt_ready;
-                break;
+                return CompletionStatus.continue_;
 
             case State.gatt_ready:
-                if (send_session_info_request())
-                    _state = State.session_info_xchg;
-                else
-                    _state = State.failed;
-                break;
+                send_session_info_request(TeslaDomain.vehicle_security);
+                version (DebugTeslaSession)
+                    log.trace("sent SessionInfoRequest, state=session_info_xchg");
+                _state = State.session_info_xchg;
+                return CompletionStatus.continue_;
 
             case State.session_info_xchg:
-            case State.awaiting_approval:
-                // No response yet — re-send SessionInfoRequest periodically.
-                // In awaiting_approval we are polling to detect when the user
-                // taps the NFC card and the vehicle starts returning OK status.
                 if (getTime() - _last_request_time > retry_interval)
-                {
-                    if (!send_session_info_request())
-                        _state = State.failed;
-                }
-                break;
+                    send_session_info_request(TeslaDomain.vehicle_security);
+                return CompletionStatus.continue_;
 
-            case State.trust_check:
-                // Reserved for the AES-GCM signed command flow (next milestone).
-                break;
+            case State.awaiting_approval:
+                // Keep the NFC-tap window open: re-send AddKey and poll SessionInfo,
+                // alternating one write per tick to avoid overlapping GATT writes.
+                // A card tap at any moment is picked up by the next poll.
+                if (getTime() - _last_request_time > approval_interval)
+                {
+                    _last_request_time = getTime();
+                    _approval_toggle = !_approval_toggle;
+                    if (_approval_toggle)
+                        send_add_key_request();
+                    else
+                        send_session_info_request(TeslaDomain.vehicle_security);
+                }
+                return CompletionStatus.continue_;
+
+            case State.info_xchg:
+                if (getTime() - _last_request_time > retry_interval)
+                    send_session_info_request(TeslaDomain.infotainment);
+                return CompletionStatus.continue_;
 
             case State.ready:
-                // Adaptive polling: faster while actively charging (need realtime
-                // power for energy app), slower when idle (just want SOC drift and
-                // plug-state changes).
+                // Live: adaptive charge polling (fast while charging, slow when idle).
                 Duration interval = poll_interval_for_state();
                 if (getTime() - _last_poll_time >= interval)
                 {
                     _last_poll_time = getTime();
                     refresh_charge_state();
                 }
-                break;
+                return CompletionStatus.complete;
 
             case State.failed:
-                // Stay here until externally restarted (out-of-range BLE drop
-                // triggers shutdown which will destroy the session).
-                break;
+                return CompletionStatus.error;
         }
     }
 
-private:
     enum Duration retry_interval = 5.seconds;
+    enum Duration approval_interval = 2.seconds;   // AddKey re-send / poll cadence while pairing
+    enum Duration link_timeout = 45.seconds;       // no-traffic window before forcing a reconnect (must exceed poll_idle)
     enum Duration poll_charging  = 2.seconds;   // active-charging cadence
     enum Duration poll_idle      = 30.seconds;  // connected but not charging
 
     TeslaVehicleScanner _scanner;       // back-ref to spawning server (for identity + iface)
-    BLEClient _client;           // GATT transport (dynamic|temporary), set at spawn time
+    MACAddress _peer;            // vehicle BLE address; the session owns its client lifecycle
+    BLEClient _client;           // GATT transport (dynamic|temporary), created in startup()
     bool _subscribed;
+    bool _approval_toggle;       // alternates AddKey / SessionInfo while awaiting_approval
     ushort _tx_handle;           // resolved after gatt discovery
     ushort _rx_handle;
     State _state = State.connecting;
+    MonoTime _last_rx_time;      // last notification from the vehicle; drives the link watchdog
 
     // ---- Session-establishment state ----
     ubyte[16] _routing_address;   // our random local routing id (stable per session lifetime)
@@ -1497,6 +1573,9 @@ private:
         framed ~= cast(ubyte)(payload.length & 0xFF);
         framed ~= payload;
 
+        version (DebugTeslaSession)
+            log.trace("TX ", payload.length, " bytes to handle ", _tx_handle);
+
         enum size_t MAX_WRITE = 245;
         const(ubyte)[] rem = framed[];
         while (rem.length)
@@ -1513,9 +1592,9 @@ private:
         return true;
     }
 
-    // Build + send a SessionInfoRequest RoutableMessage for VEHICLE_SECURITY.
+    // Build + send a SessionInfoRequest RoutableMessage for the given domain.
     // Generates a fresh request_uuid (used as HMAC challenge on the response).
-    bool send_session_info_request()
+    bool send_session_info_request(TeslaDomain domain)
     {
         const(ubyte)[] pub_xy = _scanner.identity.public_key_raw;
         if (pub_xy.length != 64)
@@ -1536,7 +1615,7 @@ private:
         }
         crypto_random_bytes(_request_uuid[]);
 
-        Array!ubyte msg = build_session_info_request(TeslaDomain.vehicle_security, sec1[],
+        Array!ubyte msg = build_session_info_request(domain, sec1[],
                                                     _routing_address[], _request_uuid[]);
         _last_request_time = getTime();
         return write_tesla_frame(msg[]);
@@ -1546,6 +1625,10 @@ private:
     // big-endian length prefix, possibly spanning multiple ATT notifications.
     void on_notification(ushort, const(ubyte)[] value)
     {
+        version (DebugTeslaSession)
+            log.trace("RX notify ", value.length, " bytes (buffer ", _rx_buffer.length, ")");
+
+        _last_rx_time = getTime();
         _rx_buffer ~= value[];
 
         while (_rx_buffer.length >= 2)
@@ -1569,7 +1652,7 @@ private:
             return;
         }
 
-        if (_state == State.session_info_xchg || _state == State.awaiting_approval)
+        if (_state == State.session_info_xchg || _state == State.awaiting_approval || _state == State.info_xchg)
         {
             handle_session_info_response(r);
             return;
@@ -1587,7 +1670,10 @@ private:
         if (r.request_uuid.length == 16 && r.request_uuid[] != _request_uuid[])
             return;
 
-        if (!r.session_info.length || !r.session_info_tag.length)
+        // A KEY_NOT_ON_WHITELIST reply carries session_info (just the status) and no
+        // HMAC tag, since there is no shared key yet. The tag is required only on the
+        // trusted path below, where verify_session_info_tag enforces it.
+        if (!r.session_info.length)
         {
             if (r.has_status)
                 log.warning("vehicle returned protocol error ", r.signed_message_fault);
@@ -1605,18 +1691,16 @@ private:
         {
             if (_state != State.awaiting_approval)
             {
-                log.info("key not enrolled for VIN '", name[], "' — sending AddKey, please tap NFC card");
-                if (send_add_key_request())
-                    _state = State.awaiting_approval;
-                else
-                    _state = State.failed;
+                log.info("key not enrolled for VIN '", name[], "'; tap an enrolled key card on the console reader to authorise (retrying continuously)");
+                send_add_key_request();
+                _state = State.awaiting_approval;
             }
             return;
         }
 
         if (!verify_session_info_tag(info, r))
         {
-            log.error("SessionInfo HMAC tag mismatch for VIN '", name[], "' — discarding");
+            log.error("SessionInfo HMAC tag mismatch for VIN '", name[], "', discarding");
             return;
         }
 
@@ -1626,12 +1710,26 @@ private:
             return;
         }
 
+        // verify_session_info_tag derived and stored this domain's session key.
+        // The VCSEC reply just confirms enrollment; the commands we actually send
+        // (charge data / controls) target INFOTAINMENT, so establish that session
+        // next and let its keys overwrite these. We're only ready once it is up.
         _vehicle_pubkey[] = info.public_key[];
         _epoch[] = info.epoch[];
         _counter = info.counter;
         _epoch_start = getTime() - info.clock_time.seconds;
-        _state = State.ready;
-        log.info("trust verified for VIN '", name[], "' — session ready");
+
+        if (_state == State.info_xchg)
+        {
+            _state = State.ready;
+            log.info("session ready for VIN '", name[], "'");
+        }
+        else
+        {
+            log.info("trust verified for VIN '", name[], "', establishing infotainment session");
+            send_session_info_request(TeslaDomain.infotainment);
+            _state = State.info_xchg;
+        }
     }
 
     void handle_command_response(ref const RoutableResponse r)
@@ -1772,7 +1870,7 @@ private:
     {
         if (_state != State.ready)
         {
-            log.warning("session not ready — command refused");
+            log.warning("session not ready, command refused");
             return false;
         }
 
