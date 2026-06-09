@@ -71,7 +71,7 @@ nothrow @nogc:
 
     final void notify(ComponentEvent event)
     {
-        // Same iteration shape as BaseObject.signal_state_change — handlers may
+        // Same iteration shape as BaseObject.signal_state_change - handlers may
         // unsubscribe themselves during the callback.
         for (size_t i = 0; i < _subscribers.length; )
         {

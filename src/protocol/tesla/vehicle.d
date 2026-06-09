@@ -83,7 +83,7 @@ Array!ubyte build_add_key_request(const(ubyte)[] pubkey_xy)
     enum ubyte ROLE_OWNER = 2;
     // KEY_FORM_FACTOR_CLOUD_KEY = 9 (vcsec.KeyFormFactor)
     enum ubyte FORM_FACTOR_CLOUD_KEY = 9;
-    // SIGNATURE_TYPE_PRESENT_KEY = 2 (vcsec.SignatureType — bootstrap, no crypto)
+    // SIGNATURE_TYPE_PRESENT_KEY = 2 (vcsec.SignatureType - bootstrap, no crypto)
     enum ubyte SIG_TYPE_PRESENT_KEY = 2;
 
     // The vehicle expects SEC1 uncompressed encoding: 0x04 || X || Y, 65 bytes total.
@@ -354,7 +354,7 @@ Array!ubyte build_signed_routable_message(TeslaDomain domain,
     assert(routing_address.length == 16);
     assert(uuid.length == 16);
 
-    // Destination { domain } — 2 bytes, Destination { routing_address } — 18 bytes
+    // Destination { domain } - 2 bytes, Destination { routing_address } - 18 bytes
     enum size_t TO_DEST_LEN = 2;
     enum size_t FROM_DEST_LEN = 1 + 1 + 16;
 
@@ -604,7 +604,7 @@ bool decode_carserver_charge_state(const(ubyte)[] response_bytes, ref ChargeStat
 
         switch (field)
         {
-            case 1:  // charging_state (message — ChargingState oneof)
+            case 1:  // charging_state (message - ChargingState oneof)
                 if (wire != 2) goto Lskip;
                 ulong sl;
                 n = get_varint(cs_bytes[off .. $], sl);
@@ -695,7 +695,7 @@ private bool read_fixed32f_field(const(ubyte)[] buf, ref size_t off, uint wire, 
 
 
 // Outputs from decoding an inbound RoutableMessage that we care about.
-// All slices point into the input buffer — copy out before the buffer goes away.
+// All slices point into the input buffer - copy out before the buffer goes away.
 struct RoutableResponse
 {
     const(ubyte)[] session_info;       // payload oneof field 15, if present
@@ -708,7 +708,7 @@ struct RoutableResponse
 
 // Decode a RoutableMessage looking for the fields trust verification needs.
 // Returns true on a syntactically valid parse (even if our fields of interest
-// are absent — the caller decides what's missing).
+// are absent - the caller decides what's missing).
 bool decode_routable_response(const(ubyte)[] buf, ref RoutableResponse r)
 {
     import tools.protobuf : get_varint;
@@ -969,7 +969,7 @@ bool decode_session_info(const(ubyte)[] buf, ref SessionInfo info)
 
 
 // ---------------------------------------------------------------------------
-// TeslaVehicleScanner — the "server-like" protocol object.
+// TeslaVehicleScanner - the "server-like" protocol object.
 //
 // One per install (typically). User-configured (Collection-managed). Owns the
 // shared identity Secret and the BLE interface used to scan for vehicles.
@@ -1092,7 +1092,7 @@ protected:
 
     override void update()
     {
-        // TODO: periodic housekeeping — out-of-range timeouts, retry backoff.
+        // TODO: periodic housekeeping - out-of-range timeouts, retry backoff.
     }
 
 package:
@@ -1157,7 +1157,7 @@ private:
             return;
 
         // BLEModule already parsed the AD payload and updated devices map by
-        // the time this packet fans out — reuse the parsed local name rather
+        // the time this packet fans out - reuse the parsed local name rather
         // than re-walking AD records here.
         BLEAdvEntry** ppe = ll.src in get_module!BLEModule.devices;
         if (!ppe || !*ppe || (*ppe).name.length != TESLA_LOCAL_NAME_LEN)
@@ -1176,7 +1176,7 @@ private:
             if (Collection!TeslaVehicleSession().get(e.vin[]) !is null)
                 return;
 
-            log.info("Tesla vehicle '", e.vin[], "' seen at ", ll.src, " — spawning session");
+            log.info("Tesla vehicle '", e.vin[], "' seen at ", ll.src, " - spawning session");
             spawn_session(e.vin[], ll.src);
             return;
         }
@@ -1191,12 +1191,12 @@ private:
 
 
 // ---------------------------------------------------------------------------
-// TeslaVehicleSession — the per-active-vehicle runtime.
+// TeslaVehicleSession - the per-active-vehicle runtime.
 //
 // Collection-managed but server-spawned (ObjectFlags.dynamic|temporary).
 // Created by TeslaVehicleScanner when a known VIN appears in BLE range, destroyed
 // when the vehicle leaves range or the corresponding Car appliance is
-// removed. NAME IS THE VIN — direct lookup via
+// removed. NAME IS THE VIN - direct lookup via
 // Collection!TeslaVehicleSession().get_by_name(vin).
 //
 // Owns:
@@ -1234,7 +1234,7 @@ nothrow @nogc:
         super(collection_type_info!TeslaVehicleSession, id, flags);
     }
 
-    // VIN is the object name — no separate property needed.
+    // VIN is the object name - no separate property needed.
     const(char)[] vin() const pure
         => name[];
 
@@ -1374,7 +1374,7 @@ protected:
 
             case State.session_info_xchg:
             case State.awaiting_approval:
-                // No response yet — re-send SessionInfoRequest periodically.
+                // No response yet - re-send SessionInfoRequest periodically.
                 // In awaiting_approval we are polling to detect when the user
                 // taps the NFC card and the vehicle starts returning OK status.
                 if (getTime() - _last_request_time > retry_interval)
@@ -1605,7 +1605,7 @@ private:
         {
             if (_state != State.awaiting_approval)
             {
-                log.info("key not enrolled for VIN '", name[], "' — sending AddKey, please tap NFC card");
+                log.info("key not enrolled for VIN '", name[], "' - sending AddKey, please tap NFC card");
                 if (send_add_key_request())
                     _state = State.awaiting_approval;
                 else
@@ -1616,7 +1616,7 @@ private:
 
         if (!verify_session_info_tag(info, r))
         {
-            log.error("SessionInfo HMAC tag mismatch for VIN '", name[], "' — discarding");
+            log.error("SessionInfo HMAC tag mismatch for VIN '", name[], "' - discarding");
             return;
         }
 
@@ -1631,7 +1631,7 @@ private:
         _counter = info.counter;
         _epoch_start = getTime() - info.clock_time.seconds;
         _state = State.ready;
-        log.info("trust verified for VIN '", name[], "' — session ready");
+        log.info("trust verified for VIN '", name[], "' - session ready");
     }
 
     void handle_command_response(ref const RoutableResponse r)
@@ -1724,7 +1724,7 @@ private:
         import apps.energy.vehicle : add_capacity_sample;
 
         // Tesla resets charge_energy_added at the start of each session. When
-        // we see it decrease, a new session began — drop our anchor and let
+        // we see it decrease, a new session began - drop our anchor and let
         // the next valid SOC re-anchor.
         if (_cap.anchored && energy_added < _cap.energy_anchor)
             _cap.anchored = false;
@@ -1742,7 +1742,7 @@ private:
             return;
         }
 
-        // Out of the linear region — close this window without emitting,
+        // Out of the linear region - close this window without emitting,
         // re-anchor whenever we're back inside.
         if (soc > 85)
         {
@@ -1772,7 +1772,7 @@ private:
     {
         if (_state != State.ready)
         {
-            log.warning("session not ready — command refused");
+            log.warning("session not ready - command refused");
             return false;
         }
 
@@ -1938,7 +1938,7 @@ unittest
 
 
     // ---- Full session info HMAC tag ----
-    // SESSION_INFO bytes (the `session_info` payload field bytes) — from protocol.md.
+    // SESSION_INFO bytes (the `session_info` payload field bytes) - from protocol.md.
     //   08 06                          counter = 6
     //   12 41 <65 bytes>               publicKey (SEC1)
     //   1a 10 <16 bytes>               epoch

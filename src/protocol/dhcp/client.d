@@ -550,7 +550,7 @@ private:
         ubyte plen = subnet_prefix_len(_subnet_mask);
         IPNetworkAddress net_addr = IPNetworkAddress(_offered_addr, plen);
 
-        // /protocol/ip/address — dynamic
+        // /protocol/ip/address - dynamic
         if (!_our_address)
         {
             const(char)[] addr_name = Collection!IPAddress().generate_name(name[]);

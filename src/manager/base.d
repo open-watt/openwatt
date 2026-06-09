@@ -36,7 +36,7 @@ nothrow @nogc:
 // reached Running. We currently paper over this in
 // `manager/console/collection_commands.d` (CollectionAddCommand.execute) by
 // synchronously ticking the state machine of every newly-created ActiveObject
-// — see the "HACK: synchronous state-machine tick" block there.
+// - see the "HACK: synchronous state-machine tick" block there.
 //
 // That fix only works for one-tick startups; anything that waits on a
 // dependency (return CompletionStatus.continue_ from startup) still races the
@@ -48,7 +48,7 @@ nothrow @nogc:
 // when a property setter takes a name that resolves to nothing, we should
 // retain the unresolved name and have the relevant Collection wake the
 // pending reference up when the named target is created. ObjectRef already
-// supports detached state and try_reattach() — we just need creation to
+// supports detached state and try_reattach() - we just need creation to
 // notify pending refs rather than relying on synchronous ordering.
 //
 // Until that lands, do NOT add code paths that depend on construction

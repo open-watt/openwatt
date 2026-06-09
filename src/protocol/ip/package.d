@@ -65,10 +65,10 @@ nothrow @nogc:
 //     at 64KB in flight regardless of bandwidth. PAWS protection absent, but
 //     at our speeds wraparound isn't a real risk. [small each] (med)
 //   - No Nagle. Bursty small-write apps emit many tiny segments. Delayed
-//     ACK *is* implemented. [small] (low/med — depends on app patterns)
+//     ACK *is* implemented. [small] (low/med - depends on app patterns)
 //   - No TCP keepalive. SO_KEEPALIVE is a no-op; long-idle dead peers aren't
 //     detected. FIN_WAIT_2 timeout bounds half-closes but ESTABLISHED can
-//     leak indefinitely. [small] (med — long-lived MQTT/Modbus links care)
+//     leak indefinitely. [small] (med - long-lived MQTT/Modbus links care)
 //   - PMTUD is reactive only. We set DF and react to ICMP frag-needed, but
 //     never re-probe upward (RFC 1191 §6.5) and have no blackhole detection
 //     (RFC 4821 / PLPMTUD). Firewalls that swallow ICMP stall us with no
@@ -76,7 +76,7 @@ nothrow @nogc:
 //   - ISS generation isn't cryptographic (RFC 6528). Spoofing risk on
 //     untrusted networks. [small] (low for LAN, med for internet-facing)
 //   - No challenge-ACK on suspect RST/SYN (RFC 5961). Off-path RST injection
-//     can tear down connections. [small] (low — niche)
+//     can tear down connections. [small] (low - niche)
 //   - No SYN cookies. Vulnerable to SYN flood DoS on internet-exposed ports.
 //     [medium] (med if we expose listeners on the public internet)
 //   - No TCP Fast Open (RFC 7413). Saves an RTT on reconnect; little use for
@@ -99,7 +99,7 @@ nothrow @nogc:
 //     from any peer rather than filtering. [small] (low)
 //   - No IGMP. Multicast joins aren't signalled to the upstream switch /
 //     router; we just listen on the wire. Works on dumb L2; fails on
-//     IGMP-snooping switches. (med — mDNS, SSDP, multicast Modbus)
+//     IGMP-snooping switches. (med - mDNS, SSDP, multicast Modbus)
 //
 // ICMP (protocol/ip/icmp.d)
 //   - frag_needed not generated when forwarding oversized DF=1 packets.
@@ -111,14 +111,14 @@ nothrow @nogc:
 //   - No ICMP rate counter exposed. We rate-limit silently; no way to see
 //     drops in diagnostics. [small] (low)
 //   - No router solicitation / advertisement processing. Static config only.
-//     [small] (low — we use DHCP)
+//     [small] (low - we use DHCP)
 //
 // Routing / forwarding
 //   - No source-address selection per RFC 6724. We pick the first IPAddress
 //     on the egress iface; bites on multi-addressed interfaces (e.g. a
 //     primary plus secondary IP). (med)
 //   - Per-egress metric / multipath: model allows it, lookup doesn't.
-//     [medium] (low — single-uplink deployments)
+//     [medium] (low - single-uplink deployments)
 //   - Implicit-connected fallback in route_lookup_v4_dst is a HACK. Either
 //     document and keep, or require explicit /protocol/ip/route entries --
 //     decide before this pattern entrenches.
@@ -135,12 +135,12 @@ nothrow @nogc:
 //     but the last queued packet is dropped. Aging + NUD probes ARE
 //     implemented; resolution kicks off on first miss. [small] (low)
 //   - No gratuitous ARP on address bind. Peers won't refresh stale caches
-//     when we change or move our IP. [small] (med — IP roams between iface
+//     when we change or move our IP. [small] (med - IP roams between iface
 //     are silent failures)
 //   - No ARP probe / DAD (RFC 5227) before claiming an address. Silent
 //     collisions possible. [small] (low)
 //   - No proxy ARP. Can't transparently bridge L2 to a routed segment.
-//     [small] (low — niche)
+//     [small] (low - niche)
 //   - No console "add static neighbour" command for diagnostics / pinning.
 //     [small] (low)
 //
@@ -156,30 +156,30 @@ nothrow @nogc:
 //
 // Fragmentation
 //   - v4 fragments dropped at ingress (no reassembly). Affects large
-//     incoming UDP / fragmented ICMP. [medium] (med — DNS-over-UDP edge
+//     incoming UDP / fragmented ICMP. [medium] (med - DNS-over-UDP edge
 //     cases bite here)
 //   - Egress doesn't fragment; oversized datagrams dropped. TCP segments by
-//     MSS so this only bites UDP/raw senders. [small] (low — apps can
+//     MSS so this only bites UDP/raw senders. [small] (low - apps can
 //     work around with smaller writes)
 //
 // Sockets (protocol/ip/socket.d)
 //   - DNS / get_address_info stubbed. Apps must use literal IPs.
-//     (low — explicit choice; we resolve via /protocol/dns module instead)
+//     (low - explicit choice; we resolve via /protocol/dns module instead)
 //   - No SO_ERROR readback for non-blocking connect completion. Apps poll
-//     PollEvents.write to detect connect. [small] (low — current apps cope)
+//     PollEvents.write to detect connect. [small] (low - current apps cope)
 //   - Most SocketOption values accepted but no-op (SO_KEEPALIVE, SO_LINGER,
 //     TCP_NODELAY, IP_TTL, SO_REUSEADDR, etc). [small each] (low individually,
 //     med cumulatively for portability of 3rd-party libs)
-//   - No raw sockets. [small] (low — only matters for tools like our own
+//   - No raw sockets. [small] (low - only matters for tools like our own
 //     ping / traceroute, which don't exist yet)
 //   - No async ICMP error delivery. TCP RST / UDP port-unreachable should
 //     surface as ECONNREFUSED / EHOSTUNREACH on next read/write. [small]
 //     (med)
 //   - No IP_PKTINFO / IP_RECVDSTADDR. Apps that bind 0.0.0.0 can't tell
-//     which local addr a packet arrived on. [small] (med — DHCP server,
+//     which local addr a packet arrived on. [small] (med - DHCP server,
 //     multi-homed responders)
 //   - No SO_BINDTODEVICE. Can't constrain a socket to a specific egress
-//     interface. [small] (med — multi-uplink scenarios)
+//     interface. [small] (med - multi-uplink scenarios)
 //   - No dual-stack v4-mapped-in-v6 sockets. (paired with v6 work)
 //
 // Bridging / VLAN
@@ -190,22 +190,22 @@ nothrow @nogc:
 //
 // Stack-wide
 //   - No loopback interface. Apps can't connect to themselves over IP
-//     (127.0.0.1). [small] (med — many libs assume loopback exists)
+//     (127.0.0.1). [small] (med - many libs assume loopback exists)
 //   - No IP options handling on receive (record-route, source routing).
-//     We silently strip / ignore. [small] (low — modern internet drops
+//     We silently strip / ignore. [small] (low - modern internet drops
 //     these anyway)
 //   - No DSCP / TOS preservation across forward. Fields are zeroed on
-//     egress. [small] (low — only matters with traffic shaping)
-//   - No tunneling (IP-in-IP, GRE, VXLAN). [large] (low/med — site-to-site
+//     egress. [small] (low - only matters with traffic shaping)
+//   - No tunneling (IP-in-IP, GRE, VXLAN). [large] (low/med - site-to-site
 //     would benefit but isn't on the deployment roadmap)
 //
 // Diagnostics / console
 //   - tcp_print and neighbour_v4_print expose live state; routes/addresses
 //     print via their Collections. Missing: socket-layer print, UDP PCB
 //     print, per-PCB PMTU history, ICMP error counters, packet drop
-//     counters by reason. [small each] (med — debugging without these is
+//     counters by reason. [small each] (med - debugging without these is
 //     guesswork)
-//   - No /tools/ping or /tools/traceroute. [small] (med — every other
+//   - No /tools/ping or /tools/traceroute. [small] (med - every other
 //     router has these)
 //   - No flow logging hook. Firewall logs only by Verdict, not full path.
 //     [small] (low)

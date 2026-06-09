@@ -132,7 +132,7 @@ private struct RepeatBlock
     ushort count_offset;                   // .d offset of N register (count of instances)
     ushort first_offset;                   // .d offset where the first instance starts
     ushort stride;                         // words per instance
-    string path_prefix;                    // e.g. "inverter.solar.string" — instance index appended
+    string path_prefix;                    // e.g. "inverter.solar.string" - instance index appended
     immutable(ComponentDef)[] components;  // paths RELATIVE to the per-instance root
     immutable(FieldDef)[] fields;          // offsets are WITHIN the instance; scale_off is the model's .d
 }
@@ -405,7 +405,7 @@ private immutable FieldDef[] m203_fields = [
     FieldDef(0, "q2",           "varh", 78, 102, FieldType.acc32, 0, Frequency.medium),
     FieldDef(0, "q3",           "varh", 86, 102, FieldType.acc32, 0, Frequency.medium),
     FieldDef(0, "q4",           "varh", 94, 102, FieldType.acc32, 0, Frequency.medium),
-    // Meter event flags (no canonical enum yet — exposed as raw bitfield32)
+    // Meter event flags (no canonical enum yet - exposed as raw bitfield32)
     FieldDef(0, "events",       null,  103, -1, FieldType.bitfield32, 0, Frequency.high),
 ];
 
@@ -702,7 +702,7 @@ protected:
         ubyte chain_index;   // which _chains entry this model belongs to
     }
 
-    // SolarEdge (and similar) expose more than one parallel SunSpec chain — e.g.
+    // SolarEdge (and similar) expose more than one parallel SunSpec chain - e.g.
     // a base-0 chain with the DER models and a base-40000 chain with model 160
     // and vendor extensions. Each chain is scanned independently into its own
     // buffer and the resulting ModelLocs are aggregated.
@@ -834,7 +834,7 @@ private:
         {
             // device responded with an exception (or stopped responding) past valid
             // data; not every device writes the 0xFFFF terminator. Treat as end-of-
-            // chain regardless — count_models_in_chain isn't free, but the chain has
+            // chain regardless - count_models_in_chain isn't free, but the chain has
             // already populated _models_chain with anything valid.
             version (DebugSunspec)
                 log.tracef("scan: chain at base {0} end-of-data (no 0xFFFF terminator)", chain.base_reg);
@@ -951,7 +951,7 @@ private:
             return;
         _in_flight = false;
         // Many devices don't write 0xFFFF terminator AND don't return a Modbus
-        // exception past valid data — they just drop the request. Treat that as
+        // exception past valid data - they just drop the request. Treat that as
         // chain end if we've already walked at least one header in this chain.
         bool walked_any;
         foreach (ref ml; _models_chain)
@@ -1004,7 +1004,7 @@ private:
         }
 
         // Skip duplicate models. SolarEdge exposes parallel chains at base 0 and
-        // base 40000 that mirror the same physical device — without dedup we'd
+        // base 40000 that mirror the same physical device - without dedup we'd
         // materialise every model twice and poll every register from both chains.
         // Also handles intra-chain repeats like the two Common Models that follow
         // an inverter+meter pair.
@@ -1165,7 +1165,7 @@ private:
         if (idx + words > chain.scan_buffer.length || desc.data_length > 128)
         {
             version (DebugSunspec)
-                log.tracef("materialise: skip {0}.{1} — outside scan buffer", target.id[], fd.id);
+                log.tracef("materialise: skip {0}.{1} - outside scan buffer", target.id[], fd.id);
             return;
         }
 
@@ -1174,13 +1174,13 @@ private:
 
         // Constants that report not-implemented at startup will never become
         // real, so drop them. Dynamic fields might be transiently sentinel
-        // (e.g. solar current at night, vendor-specific events register) — we
+        // (e.g. solar current at night, vendor-specific events register) - we
         // still create the element so it appears in the device tree, and let
         // the poll loop fill in a real value once one is available.
         if (sentinel_now && (fd.freq == Frequency.constant || fd.freq == Frequency.configuration))
         {
             version (DebugSunspec)
-                log.tracef("materialise: skip {0}.{1} — not implemented (constant)", target.id[], fd.id);
+                log.tracef("materialise: skip {0}.{1} - not implemented (constant)", target.id[], fd.id);
             return;
         }
 
@@ -1438,7 +1438,7 @@ private uint field_sentinel(FieldType t) pure
 }
 
 // SunSpec "not implemented" sentinels per data type.
-// Acc32 deliberately does not filter — 0 is a legitimate "nothing accumulated yet" value
+// Acc32 deliberately does not filter - 0 is a legitimate "nothing accumulated yet" value
 // and would cause us to drop newly commissioned energy counters.
 private bool is_sentinel(FieldType t, const(ushort)[] words) pure
 {

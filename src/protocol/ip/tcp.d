@@ -182,7 +182,7 @@ struct TcpPcb
     bool     local_delivery;    // dst is one of our IPs; bypass egress, deliver up
 
     // Send/recv buffers (linear; recv_buf[0] is at sequence rcv_irs+1 + read_offset
-    // — we slide both via Array.remove on consume)
+    // - we slide both via Array.remove on consume)
     Array!ubyte send_buf;
     Array!ubyte recv_buf;
 

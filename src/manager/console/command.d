@@ -287,7 +287,7 @@ private:
 
             args = args[1..$];
             if (next is node)
-                continue;       // lone '/' or ':' — stayed put
+                continue;       // lone '/' or ':' - stayed put
             node = next;
         }
 
@@ -440,7 +440,7 @@ unittest
 {
     import urt.mem.allocator : Mallocator;
 
-    // Bare Console — no Application — exercises only the script primitives
+    // Bare Console - no Application - exercises only the script primitives
     // (:set, :put, :if, :while, :run, :return, :eval, :help). Avoids
     // pulling in module pre_init that touches platform NPCap on Windows.
     // Heap-allocated and leaked: Console registers itself in a __gshared list

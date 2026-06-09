@@ -461,7 +461,7 @@ nothrow @nogc:
                 s._sub_ptr = base + (old_p < K ? old_p : old_p + 1);
             }
 
-            // Commands pointer just needs the (unchanged) _commands.ptr — pool
+            // Commands pointer just needs the (unchanged) _commands.ptr - pool
             // didn't move. But after a Scope-pool realloc, &s might have shifted
             // and we still hold the correct _cmd_ptr (it points into a different
             // pool).
@@ -471,7 +471,7 @@ nothrow @nogc:
         Scope* p = &base[parent_idx]; // parent_idx < K, so parent stayed put
 
         // restore parent's _sub_ptr (the loop incorrectly shifted it if its
-        // old start was at K — empty strip / left-insert case) and extend.
+        // old start was at K - empty strip / left-insert case) and extend.
         p._sub_ptr = base + parent_sub_start;
         ++p._sub_len;
 
@@ -497,7 +497,7 @@ nothrow @nogc:
 
         // fix up every Scope's _cmd_ptr that lives in _commands. Scopes
         // pointing into the shared side-array (collection scopes) are
-        // untouched — the side-array isn't part of _commands.
+        // untouched - the side-array isn't part of _commands.
         Command* base = _commands.ptr;
         foreach (ref Scope s; _scopes[])
         {
