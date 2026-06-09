@@ -401,22 +401,20 @@ version (unittest):
 
 // Run a script string against a fresh StringSession; returns the captured output and the script's result Variant.
 // Output includes both `:put` writes and the auto-echo of the final result Variant (matching the prompt loop).
-private void run_script(const(char)[] script_text, out MutableString!0 output, out Variant result)
+private void run_script(ref Console console, const(char)[] script_text, out MutableString!0 output, out Variant result)
 {
-    import manager : g_app;
-
-    auto s = g_app.console._allocator.allocT!StringSession(g_app.console);
-    scope(exit) g_app.console._allocator.freeT(s);
+    auto s = console._allocator.allocT!StringSession(console);
+    scope(exit) console._allocator.freeT(s);
 
     // Drive the command to completion, in case it's latent.
-    CommandState cmd = g_app.console.execute(s, script_text, result);
+    CommandState cmd = console.execute(s, script_text, result);
     for (int i = 0; cmd !is null && i < 1024; ++i)
     {
         auto cs = cmd.update();
         if (cs >= CommandCompletionState.finished)
         {
             result = cmd.result.move;
-            g_app.console._allocator.freeT(cmd);
+            console._allocator.freeT(cmd);
             cmd = null;
             break;
         }
@@ -440,71 +438,75 @@ private void run_script(const(char)[] script_text, out MutableString!0 output, o
 
 unittest
 {
-    import manager : g_app, Application;
-    import urt.mem : defaultAllocator;
+    import urt.mem.allocator : Mallocator;
 
-    // Build a real Application for the test (sets g_app for the duration).
-    auto app = defaultAllocator().allocT!Application();
-    scope(exit) defaultAllocator().freeT(app);
-    assert(g_app !is null);
+    // Bare Console — no Application — exercises only the script primitives
+    // (:set, :put, :if, :while, :run, :return, :eval, :help). Avoids
+    // pulling in module pre_init that touches platform NPCap on Windows.
+    // Heap-allocated and leaked: Console registers itself in a __gshared list
+    // and never removes itself, so the address must outlive the test.
+    Console* console = Mallocator.instance.allocT!Console(null, StringLit!"test.command", Mallocator.instance);
 
     MutableString!0 out_;
     Variant r;
 
     // :set writes locals; $var reads them in the same script.
-    run_script(":set x=42; :set y=$x; :put $y", out_, r);
+    run_script(*console, ":set x=42; :set y=$x; :put $y", out_, r);
     assert(out_[] == "42\n");
 
     // :if takes the then-branch when cond is truthy, else-branch otherwise.
-    run_script(":if cond=1 then={ :put yes } else={ :put no }", out_, r);
+    run_script(*console, ":if cond=1 then={ :put yes } else={ :put no }", out_, r);
     assert(out_[] == "yes\n");
-    run_script(":if cond=0 then={ :put yes } else={ :put no }", out_, r);
+    run_script(*console, ":if cond=0 then={ :put yes } else={ :put no }", out_, r);
     assert(out_[] == "no\n");
 
     // :run executes a script value, sharing the parent's locals.
-    run_script(":set x=99; :set s={ :put $x }; :run script=$s", out_, r);
+    run_script(*console, ":set x=99; :set s={ :put $x }; :run script=$s", out_, r);
     assert(out_[] == "99\n");
 
     // :while loops until cond returns false; each iteration sees current locals.
-    run_script(":set i=0; :while cond={ :eval ($i < 3) } do={ :put $i; :set i=($i + 1) }", out_, r);
+    run_script(*console, ":set i=0; :while cond={ :eval ($i < 3) } do={ :put $i; :set i=($i + 1) }", out_, r);
     assert(out_[] == "0\n1\n2\n");
 
     // The script's last statement's result is returned via the out-param AND auto-echoed.
-    run_script(":set x=10; :eval ($x * 2)", out_, r);
+    run_script(*console, ":set x=10; :eval ($x * 2)", out_, r);
     assert(r.asLong == 20);
     assert(out_[] == "20\n");
 
     // :put produces no result Variant, so no auto-echo line follows the put output.
-    run_script(":put hello", out_, r);
+    run_script(*console, ":put hello", out_, r);
     assert(r.isNull);
     assert(out_[] == "hello\n");
 
     // :return unwinds the enclosing function frame, setting its result.
-    run_script(":return 42", out_, r);
+    run_script(*console, ":return 42", out_, r);
     assert(r.asLong == 42);
     assert(out_[] == "42\n");
 
     // :return propagates through :if (block frame) up to the enclosing top-level (function frame).
-    run_script(":if cond=1 then={ :return 7 }; :put unreached", out_, r);
+    run_script(*console, ":if cond=1 then={ :return 7 }; :put unreached", out_, r);
     assert(r.asLong == 7);
     assert(out_[] == "7\n");
 
     // :return breaks :while early without spinning the loop further.
-    run_script(":set i=0; :while cond={ :eval 1 } do={ :put $i; :return done }", out_, r);
+    run_script(*console, ":set i=0; :while cond={ :eval 1 } do={ :put $i; :return done }", out_, r);
     assert(out_[] == "0\ndone\n");
 
     // :return inside [...] is absorbed by the substitution (function frame), value flows out.
-    run_script(":put [ :return 9 ]", out_, r);
+    run_script(*console, ":put [ :return 9 ]", out_, r);
     assert(out_[] == "9\n");
 
     // Session locals persist across separate Console.execute calls on the same session.
-    auto s = g_app.console._allocator.allocT!StringSession(g_app.console);
-    scope(exit) g_app.console._allocator.freeT(s);
-    g_app.console.execute(s, ":set x=42", r);
-    g_app.console.execute(s, ":put $x", r);
+    auto s = console._allocator.allocT!StringSession(*console);
+    scope(exit) console._allocator.freeT(s);
+    console.execute(s, ":set x=42", r);
+    console.execute(s, ":put $x", r);
     assert(s.getOutput() == "42\n");
 
-    // :run file= reads and executes a script from disk.
+    // :run file= reads and executes a script from disk. Skipped on baremetal
+    // where there is no filesystem to back get_temp_filename.
+    version (BareMetal) {}
+    else
     {
         import urt.file : get_temp_filename, save_file, delete_file;
         import urt.mem.temp : tconcat;
@@ -513,17 +515,17 @@ unittest
         assert(get_temp_filename(filename, "", "owt"));
         scope(exit) filename.delete_file();
         assert(save_file(filename, ":put from-file"));
-        run_script(tconcat(":run file=\"", filename, "\""), out_, r);
+        run_script(*console, tconcat(":run file=\"", filename, "\""), out_, r);
         assert(out_[] == "from-file\n");
     }
 
     // :help <name> prints meaningful text for known commands; unknown names produce an error.
     version (ExcludeHelpText) {} else
     {
-        run_script(":help return", out_, r);
+        run_script(*console, ":help return", out_, r);
         assert(out_[].contains("Stop running"), "help return should mention stopping");
 
-        run_script(":help bogus", out_, r);
+        run_script(*console, ":help bogus", out_, r);
         assert(out_[].contains("Unknown command"));
     }
 }

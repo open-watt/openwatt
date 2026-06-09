@@ -20,6 +20,8 @@ version (Embedded) version = ImportSystemConf;
 
 version (ESP32_S3)
     private extern(C) void ow_watchdog_feed() nothrow @nogc;
+version (BL808_M0)
+    private extern(C) void ow_hang_watchdog_feed() nothrow @nogc;
 
 nothrow @nogc:
 
@@ -153,28 +155,17 @@ int main(string[] args)
     set_system_idle_params(IdleParams.system_required);
 
     version (Embedded)
-    {
         log_info("system", "Entering main loop");
-        MonoTime last_heartbeat = getTime();
-    }
 
     while (true)
     {
         // handle any expired timers (heartbeat-driven update() lives in here).
         MonoTime next_deadline = g_app.process_due();
 
+        version (BL808_M0)
+            ow_hang_watchdog_feed();
         version (ESP32_S3)
             ow_watchdog_feed();
-
-        version (Embedded)
-        {
-            MonoTime now = getTime();
-            if ((now - last_heartbeat).as!"seconds" >= 10)
-            {
-                log_info("system", "Heartbeat");
-                last_heartbeat = now;
-            }
-        }
 
         if (startup_pending && session.is_idle())
         {
@@ -182,8 +173,6 @@ int main(string[] args)
 
             version (Embedded)
             {
-                // rebind session to the serial console stream created by system.conf
-                // TODO: config can create the whole session and this one goes away
                 import manager : get_module;
                 import router.stream : StreamModule;
 
@@ -232,7 +221,7 @@ void stderr_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
 {
     auto line = format_log_line(msg);
     version (Embedded)
-    {} // TODO: redirect to UART
+    {}
     else
     {
         import urt.io;

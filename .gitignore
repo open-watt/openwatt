@@ -48,3 +48,10 @@ Win32
 charge_car
 platforms/esp32s3/sdkconfig
 platforms/esp32s3/build/
+
+# Vendor SDK working copies (not committed; we extract only what we keep)
+third_party/bouffalo_wifi/
+
+# Vendor blobs that ARE committed (override the global *.a / *.bin rules)
+!platforms/*/vendor/**/*.a
+!platforms/*/vendor/**/*.bin

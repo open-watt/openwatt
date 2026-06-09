@@ -138,6 +138,13 @@ void register_modules(Application app)
         import apps.ota;
         register_module!(apps.ota)(app);
     }
+    else static if (has_ip)
+    {
+        import protocol.ip;
+        import protocol.dhcp;
+        register_module!(protocol.ip)(app);
+        register_module!(protocol.dhcp)(app);
+    }
 }
 
 

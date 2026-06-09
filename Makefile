@@ -30,8 +30,7 @@ ifeq ($(CONFIG),unittest)
     TARGETNAME := $(TARGETNAME)_test
 endif
 
-OBJDIR    := obj/$(BUILDNAME)_$(CONFIG)
-TARGETDIR := bin/$(BUILDNAME)_$(CONFIG)
+# OBJDIR/TARGETDIR and the vendor.mk import come from platforms.mk.
 DEPFILE    = $(OBJDIR)/$(TARGETNAME).d
 
 ifeq ($(OS),windows)
@@ -170,7 +169,7 @@ endif
 RSPFILE := $(OBJDIR)/sources.rsp
 
 ifeq ($(COMPILER),ldc)
-    COMPILE_CMD = "$(DC)" $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -deps=$(DEPFILE) $(BAREMETAL_OBJS) @$(RSPFILE)
+    COMPILE_CMD = "$(DC)" $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -deps=$(DEPFILE) $(BAREMETAL_OBJS) $(VENDOR_OBJS) @$(RSPFILE)
 else
     COMPILE_CMD = "$(DC)" $(DFLAGS) -of$(TARGET) -od$(OBJDIR) -makedeps @$(RSPFILE) > $(DEPFILE)
 endif
@@ -199,7 +198,7 @@ endif
 
 # -- Main target -------------------------------------------------------
 
-$(TARGET): $(SOURCES) $(BAREMETAL_OBJS) $(BK_BEKEN_LIB)
+$(TARGET): $(SOURCES) $(BAREMETAL_OBJS) $(VENDOR_OBJS) $(BK_BEKEN_LIB)
 
 # -- BK7231 FreeRTOS build (must come after $(TARGET) so it doesn't become default goal)
 
@@ -223,6 +222,9 @@ $(TARGET):
 ifeq ($(PLATFORM),bl808)
   ifeq ($(PROCESSOR),c906)
 	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/d0fw.bin
+	@# Gzipped variant for faster flash turnaround. M0's d0_image_load sniffs
+	@# the gzip magic at offset 0 and decompresses straight to PSRAM.
+	gzip -9 -n -c $(TARGETDIR)/d0fw.bin > $(TARGETDIR)/d0fw.bin.gz
   else ifeq ($(PROCESSOR),e907)
 	riscv64-unknown-elf-objcopy -O binary $(TARGET) $(TARGETDIR)/m0fw.bin
   endif

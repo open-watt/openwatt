@@ -23,7 +23,7 @@ type = 0
 name = "FW"
 device = 0
 address0 = 0x10000
-size0 = 0xF0000
+size0 = 0x200000
 address1 = 0
 size1 = 0
 # compressed image must set len,normal image can left it to 0
@@ -35,34 +35,23 @@ header = 1
 type = 2
 name = "D0FW"
 device = 0
-address0 = 0x100000
-size0 = 0x200000
+address0 = 0x210000
+size0 = 0x400000
 address1 = 0
 size1 = 0
 # compressed image must set len,normal image can left it to 0
 len = 0
-# If header is 1, it will add the header.
-header = 1
+# M0 loads D0 directly via memcpy from XIP-mapped flash, so no boot header
+# is needed -- it would just be inert bytes the loader has to skip past.
+# Size matches D0 PSRAM CODE region in bl808_d0.ld so raw d0fw.bin fits.
+header = 0
 
 [[pt_entry]]
 type = 5
 name = "media"
 device = 0
-address0 = 0x300000
-size0 = 0xC00000
-address1 = 0
-size1 = 0
-# compressed image must set len,normal image can left it to 0
-len = 0
-# If header is 1, it will add the header.
-header = 1
-
-[[pt_entry]]
-type = 11
-name = "unused"
-device = 0
-address0 = 0xF00000
-size0 = 0x100000
+address0 = 0x610000
+size0 = 0x8F0000
 address1 = 0
 size1 = 0
 # compressed image must set len,normal image can left it to 0
@@ -72,11 +61,11 @@ header = 1
 
 [[pt_entry]]
 type = 8
-# It shows Dts in DevCube 
+# It shows Dts in DevCube
 name = "factory"
 device = 0
-address0 = 0x910000
-size0 = 0
+address0 = 0xF00000
+size0 = 0x100000
 address1 = 0
 size1 = 0
 # compressed image must set len,normal image can left it to 0

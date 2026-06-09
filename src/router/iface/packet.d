@@ -10,9 +10,10 @@ nothrow @nogc:
 
 enum PacketType : ushort
 {
-    unknown,
-    raw,
+    unknown = ushort.max,
+    raw = 0,
     ethernet,
+    wifi_80211,
     wpan,
     _6lowpan,
     zigbee_nwk,
@@ -21,8 +22,10 @@ enum PacketType : ushort
     can,
     tesla_twc,
     ble_ll,
-    ble_att
+    ble_att,
+    count
 }
+static assert(PacketType.count <= 16, "PacketType must fit in 4 bits");
 
 enum EtherType : ushort
 {
@@ -72,19 +75,24 @@ immutable ubyte[8] pcp_priority_map = [1, 0, 2, 3, 4, 5, 6, 7];
 
 
 alias AddressExtract = ulong function(ref const Packet) pure nothrow @nogc;
+alias IsMulticastAddress = bool function(ulong address) pure nothrow @nogc;
 
-void register_address_extractor(PacketType type, AddressExtract src_extract, AddressExtract dst_extract)
+void register_address_extractor(PacketType type, AddressExtract src_extract, AddressExtract dst_extract, IsMulticastAddress is_multicast)
 {
-    assert(type <= PacketType.max);
+    assert(type <= PacketType.count);
     g_address_extractors[type].src = src_extract;
     g_address_extractors[type].dst = dst_extract;
+    g_address_extractors[type].is_multicast = is_multicast;
 }
 
-ulong get_network_src_address(ref const Packet p)
-    => g_address_extractors[p.type].src(p);
+ulong get_network_src_address(ref const Packet p) pure
+    => get_address_extractor(p.type).src(p);
 
-ulong get_network_dst_address(ref const Packet p)
-    => g_address_extractors[p.type].dst(p);
+ulong get_network_dst_address(ref const Packet p) pure
+    => get_address_extractor(p.type).dst(p);
+
+bool is_network_multicast_address(ulong address) pure
+    => get_address_extractor(cast(PacketType)(address >> 60)).is_multicast(address);
 
 
 struct Packet
@@ -206,6 +214,26 @@ struct Ethernet
     ushort ow_sub_type; // TODO: REMOVE ME!!
 }
 
+struct Wifi80211
+{
+    enum Type = PacketType.wifi_80211;
+
+    ushort frame_control;   // FC field: type[3:2], subtype[7:4], to_ds, from_ds, more_frag, retry, pwr_mgmt, more_data, protected, order
+    ushort seq_ctrl;        // sequence control field (fragment + sequence number)
+    MACAddress addr1;       // receiver (RA) / dst
+    MACAddress addr2;       // transmitter (TA) / src
+    MACAddress addr3;       // BSSID / dst / src depending on ToDS/FromDS
+    byte rssi;              // RX signal strength, dBm
+    ubyte channel;          // RX channel (1..14 for 2.4 GHz)
+
+    // Not included to keep this in 24 bytes -- parse from payload when needed:
+    // ushort duration;      // Duration/ID, only matters for NAV math
+    // MACAddress addr4;     // 4-address WDS / mesh frames only
+    // ushort qos_ctrl;      // QoS data frames (HT/VHT/HE)
+    // uint ht_ctrl;         // HT Control field for +HTC frames
+}
+static assert(Wifi80211.sizeof == 24);
+
 
 private:
 
@@ -213,19 +241,23 @@ struct AddressExtractors
 {
     AddressExtract src;
     AddressExtract dst;
+    IsMulticastAddress is_multicast;
 }
-__gshared AddressExtractors[PacketType.max + 1] g_address_extractors = [ AddressExtractors(), AddressExtractors(&extract_ethernet_src_address, &extract_ethernet_dst_address) ];
+__gshared AddressExtractors[PacketType.count] g_address_extractors = [ AddressExtractors(), AddressExtractors(&extract_ethernet_src_address, &extract_ethernet_dst_address, &is_ethernet_multicast_address) ];
+
+ref const(AddressExtractors) get_address_extractor(PacketType type) pure
+{
+    static ref const(AddressExtractors) impl(PacketType ty) nothrow @nogc
+        => g_address_extractors[ty];
+    alias FP = ref const(AddressExtractors) function(PacketType) pure nothrow @nogc;
+    return (cast(FP)&impl)(type);
+}
 
 ulong extract_ethernet_src_address(ref const Packet p) pure
 {
     ulong addr = p.hdr!Ethernet().src.ul;
     addr |= ulong(p.vlan & 0xFFF) << 48;
     addr |= ulong(PacketType.ethernet) << 60;
-    version (LittleEndian)
-        ulong multicast = addr & 1;
-    else
-        ulong multicast = (addr >> 40) & 1;
-    addr |= multicast << 63;
     return addr;
 }
 
@@ -234,10 +266,13 @@ ulong extract_ethernet_dst_address(ref const Packet p) pure
     ulong addr = p.hdr!Ethernet().dst.ul;
     addr |= ulong(p.vlan & 0xFFF) << 48;
     addr |= ulong(PacketType.ethernet) << 60;
-    version (LittleEndian)
-        ulong multicast = addr & 1;
-    else
-        ulong multicast = (addr >> 40) & 1;
-    addr |= multicast << 63;
     return addr;
+}
+
+bool is_ethernet_multicast_address(ulong address) pure
+{
+    version (LittleEndian)
+        return (address & 1) != 0;
+    else
+        return ((address >> 40) & 1) != 0;
 }

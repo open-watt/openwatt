@@ -41,7 +41,7 @@ nothrow @nogc:
 
     override void init()
     {
-        register_address_extractor(PacketType.tesla_twc, &extract_twc_src_address, &extract_twc_dst_address);
+        register_address_extractor(PacketType.tesla_twc, &extract_twc_src_address, &extract_twc_dst_address, &is_twc_broadcast);
 
         g_app.console.register_collection!TeslaInterface();
         g_app.console.register_collection!TeslaTWCBinding();
@@ -155,7 +155,6 @@ nothrow @nogc:
 ulong extract_twc_src_address(ref const Packet p) pure
 {
     ulong addr = p.hdr!TWCFrame().src;
-    addr |= ulong(addr == 0xFFFF) << 63; // is FFFF the broadcast, or 0000?
     addr |= ulong(p.vlan & 0xFFF) << 48;
     addr |= ulong(PacketType.tesla_twc) << 60;
     return addr;
@@ -164,8 +163,10 @@ ulong extract_twc_src_address(ref const Packet p) pure
 ulong extract_twc_dst_address(ref const Packet p) pure
 {
     ulong addr = p.hdr!TWCFrame().dst;
-    addr |= ulong(addr == 0xFFFF) << 63; // is FFFF the broadcast, or 0000?
     addr |= ulong(p.vlan & 0xFFF) << 48;
     addr |= ulong(PacketType.tesla_twc) << 60;
     return addr;
 }
+
+bool is_twc_broadcast(ulong address) pure
+    => (address & 0xFFFF) == 0xFFFF;

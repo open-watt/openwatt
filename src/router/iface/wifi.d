@@ -33,9 +33,6 @@ enum WifiAuth : byte
     wpa3_enterprise,
 }
 
-// Regulatory installation context. Selects the per-domain allowed channels,
-// max EIRP, and DFS rules for 5GHz; honoured by backends that have a real
-// regulatory hookup (none of ours do yet).
 enum WifiInstallation : byte
 {
     any,
@@ -44,16 +41,14 @@ enum WifiInstallation : byte
 }
 
 
-// Abstract radio. Owns the WLAN/AP bind accounting and shared properties;
-// per-platform subclasses (driver/baremetal/wifi.d, driver/windows/wifi.d, ...)
-// provide actual hardware/OS interaction.
 abstract class WiFiInterface : BaseInterface
 {
     alias Properties = AliasSeq!(Prop!("mode", mode, "radio"),
                                  Prop!("channel", channel, "radio"),
                                  Prop!("active-channel", active_channel, "radio"),
                                  Prop!("tx-power", tx_power, "radio"),
-                                 Prop!("country", country, "radio"));
+                                 Prop!("country", country, "radio"),
+                                 Prop!("monitor", monitor, "radio"));
 nothrow @nogc:
 
     protected this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
@@ -84,8 +79,11 @@ nothrow @nogc:
     {
         if (value > 196)
             return "invalid channel number";
+        if (_channel == value)
+            return null;
         _channel = value;
         mark_set!(typeof(this), "channel")();
+        on_channel_changed(value);
         return null;
     }
 
@@ -96,8 +94,11 @@ nothrow @nogc:
         => _tx_power;
     final const(char)[] tx_power(byte value)
     {
+        if (_tx_power == value)
+            return null;
         _tx_power = value;
         mark_set!(typeof(this), "tx-power")();
+        on_tx_power_changed();
         return null;
     }
 
@@ -107,6 +108,18 @@ nothrow @nogc:
     {
         _country = value.makeString(defaultAllocator);
         mark_set!(typeof(this), "country")();
+    }
+
+    final bool monitor() const pure
+        => _monitor;
+    final const(char)[] monitor(bool value)
+    {
+        if (_monitor == value)
+            return null;
+        _monitor = value;
+        mark_set!(typeof(this), "monitor")();
+        on_monitor_changed(value);
+        return null;
     }
 
     // API
@@ -140,6 +153,12 @@ protected:
 
     void on_active_channel_changed(ubyte channel) {}
 
+    void on_channel_changed(ubyte channel) {}
+
+    void on_tx_power_changed() {}
+
+    void on_monitor_changed(bool enabled) {}
+
     final inout(WLANBaseInterface) bound_sta() inout pure
         => _bound_sta;
     final inout(APInterface)[] bound_aps() inout pure
@@ -160,6 +179,7 @@ private:
     ubyte _channel;
     ubyte _active_channel;
     byte _tx_power;
+    bool _monitor;
     String _country;
     WLANBaseInterface _bound_sta;
     Array!APInterface _bound_aps;
@@ -373,6 +393,7 @@ nothrow @nogc:
     {
         _max_clients = value;
         mark_set!(typeof(this), "max-clients")();
+        on_max_clients_changed(value);
     }
 
     final bool hidden() const pure
@@ -391,6 +412,9 @@ nothrow @nogc:
         mark_set!(typeof(this), "installation")();
     }
 
+protected:
+    void on_max_clients_changed(ubyte value) {}
+
 private:
     WifiAuth _auth;
     ubyte _max_clients;
@@ -400,9 +424,6 @@ private:
 }
 
 
-// Just registers the WifiAuth enum. Per-platform driver modules register
-// their own concrete subclasses (BuiltinWiFi, WindowsWifiRadio, etc.) which
-// claim the canonical /interface/{wifi,wlan,ap} paths.
 class WiFiInterfaceModule : Module
 {
     mixin DeclareModule!"interface.wifi";

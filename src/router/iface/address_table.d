@@ -6,7 +6,10 @@ import urt.mem.allocator;
 nothrow @nogc:
 
 bool is_multicast_address(ulong address) pure
-    => address >> 63 != 0;
+{
+    import router.iface.packet : is_network_multicast_address;
+    return is_network_multicast_address(address);
+}
 
 struct AddressTable
 {

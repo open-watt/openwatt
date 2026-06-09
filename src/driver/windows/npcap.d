@@ -11,7 +11,7 @@ import urt.internal.sys.windows.winsock2 : sockaddr;
 nothrow @nogc:
 
 
-HMODULE _npcap;
+__gshared HMODULE _npcap;
 
 pragma(crt_constructor)
 void crt_bootup()
@@ -65,15 +65,15 @@ struct pcap_pkthdr
     uint len;
 }
 
-extern(Windows) int function(pcap_if**, char*) nothrow @nogc pcap_findalldevs;
-extern(Windows) void function(pcap_if* alldevs) nothrow @nogc pcap_freealldevs;
-extern(Windows) pcap_t* function(const(char)* device, int snaplen, int promisc, int to_ms, char* errbuf) nothrow @nogc pcap_open_live;
-extern(Windows) pcap_t* function(const(char)* source, int snaplen, int flags, int read_timeout, pcap_rmtauth* auth, char* errbuf) nothrow @nogc pcap_open;
-extern(Windows) void function(pcap_t* p) nothrow @nogc pcap_close;
-extern(Windows) int function(pcap_t *p, int nonblock, char *errbuf) pcap_setnonblock;
-extern(Windows) int function(pcap_t* p, const void* buf, int size) nothrow @nogc pcap_sendpacket;
-extern(Windows) int function(pcap_t* p, pcap_pkthdr** pkt_header, const ubyte** pkt_data) nothrow @nogc pcap_next_ex;
-extern(Windows) const(char)* function(pcap_t* p) nothrow @nogc pcap_geterr;
+__gshared extern(Windows) int function(pcap_if**, char*) nothrow @nogc pcap_findalldevs;
+__gshared extern(Windows) void function(pcap_if* alldevs) nothrow @nogc pcap_freealldevs;
+__gshared extern(Windows) pcap_t* function(const(char)* device, int snaplen, int promisc, int to_ms, char* errbuf) nothrow @nogc pcap_open_live;
+__gshared extern(Windows) pcap_t* function(const(char)* source, int snaplen, int flags, int read_timeout, pcap_rmtauth* auth, char* errbuf) nothrow @nogc pcap_open;
+__gshared extern(Windows) void function(pcap_t* p) nothrow @nogc pcap_close;
+__gshared extern(Windows) int function(pcap_t *p, int nonblock, char *errbuf) pcap_setnonblock;
+__gshared extern(Windows) int function(pcap_t* p, const void* buf, int size) nothrow @nogc pcap_sendpacket;
+__gshared extern(Windows) int function(pcap_t* p, pcap_pkthdr** pkt_header, const ubyte** pkt_data) nothrow @nogc pcap_next_ex;
+__gshared extern(Windows) const(char)* function(pcap_t* p) nothrow @nogc pcap_geterr;
 
 HMODULE init_npcap()
 {

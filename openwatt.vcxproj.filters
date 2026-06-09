@@ -178,6 +178,12 @@
     <Filter Include="third_party\urt\driver\bl808">
       <UniqueIdentifier>{feecb6a6-0ef0-45f9-93c1-6132c66b633c}</UniqueIdentifier>
     </Filter>
+    <Filter Include="third_party\urt\driver\bl_common">
+      <UniqueIdentifier>{a82f7ccb-1d4e-4af4-9b8c-7e3c5d1a6f9e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\driver\bl808_m0">
+      <UniqueIdentifier>{8b3d7c5e-4a2f-4e91-bc9d-3f8a1c2d4e5f}</UniqueIdentifier>
+    </Filter>
     <Filter Include="third_party\urt\driver\esp32">
       <UniqueIdentifier>{e0ec80f2-b958-404d-85ff-fb26952715fa}</UniqueIdentifier>
     </Filter>
@@ -192,6 +198,9 @@
     </Filter>
     <Filter Include="third_party\urt\driver\windows">
       <UniqueIdentifier>{a7c3f1d2-8b4e-4f9a-b6d1-e2f4a5c8d7b3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\driver\wpa">
+      <UniqueIdentifier>{06328452-81dd-4c92-b70c-4dfc35165d05}</UniqueIdentifier>
     </Filter>
     <Filter Include="third_party\urt\format">
       <UniqueIdentifier>{0576e295-8b70-4b93-8071-a6fc436aef18}</UniqueIdentifier>
@@ -228,6 +237,9 @@
     </Filter>
     <Filter Include="third_party\urt\si">
       <UniqueIdentifier>{af470b6a-000a-4e83-9502-2ea2ca5f3159}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="third_party\urt\sync">
+      <UniqueIdentifier>{A56B1B62-5853-478C-92C4-D91D52591A9E}</UniqueIdentifier>
     </Filter>
     <Filter Include="third_party\urt\range">
       <UniqueIdentifier>{fda610db-eacb-4a07-80cb-fffc185f2c9a}</UniqueIdentifier>
@@ -834,8 +846,23 @@
     <DCompile Include="third_party\urt\src\urt\driver\uart.d">
       <Filter>third_party\urt\driver</Filter>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\wifi.d">
-      <Filter>third_party\urt\driver</Filter>
+      <DCompile Include="third_party\urt\src\urt\driver\wifi.d">
+        <Filter>third_party\urt\driver</Filter>
+      </DCompile>
+      <DCompile Include="third_party\urt\src\urt\driver\wpa\crypto.d">
+        <Filter>third_party\urt\driver\wpa</Filter>
+      </DCompile>
+      <DCompile Include="third_party\urt\src\urt\driver\wpa\eapol.d">
+        <Filter>third_party\urt\driver\wpa</Filter>
+      </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\fourway.d">
+      <Filter>third_party\urt\driver\wpa</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\package.d">
+      <Filter>third_party\urt\driver\wpa</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\wpa\supplicant.d">
+      <Filter>third_party\urt\driver\wpa</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\baremetal\exception.d">
       <Filter>third_party\urt\driver\baremetal</Filter>
@@ -861,12 +888,6 @@
     <DCompile Include="third_party\urt\src\urt\driver\bk7231\uart.d">
       <Filter>third_party\urt\driver\bk7231</Filter>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl618\alloc.d">
-      <Filter>third_party\urt\driver\bl618</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl618\gpio.d">
-      <Filter>third_party\urt\driver\bl618</Filter>
-    </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl618\irq.d">
       <Filter>third_party\urt\driver\bl618</Filter>
     </DCompile>
@@ -881,18 +902,6 @@
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl618\uart.d">
       <Filter>third_party\urt\driver\bl618</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\alloc.d">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\crash.d">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\exception.d">
-      <Filter>third_party\urt\driver\bl808</Filter>
-    </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\gpio.d">
-      <Filter>third_party\urt\driver\bl808</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl808\i2c.d">
       <Filter>third_party\urt\driver\bl808</Filter>
@@ -915,14 +924,41 @@
     <DCompile Include="third_party\urt\src\urt\driver\bl808\timer.d">
       <Filter>third_party\urt\driver\bl808</Filter>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\uart.d">
+    <DCompile Include="third_party\urt\src\urt\driver\bl808\led.d">
       <Filter>third_party\urt\driver\bl808</Filter>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\driver\bl808\wifi.d">
+    <DCompile Include="third_party\urt\src\urt\driver\bl808\uart.d">
       <Filter>third_party\urt\driver\bl808</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\bl808\xram.d">
       <Filter>third_party\urt\driver\bl808</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\alloc.d">
+      <Filter>third_party\urt\driver\bl_common</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\exception.d">
+      <Filter>third_party\urt\driver\bl_common</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\gpio.d">
+      <Filter>third_party\urt\driver\bl_common</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\system.d">
+      <Filter>third_party\urt\driver\bl_common</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\trng.d">
+      <Filter>third_party\urt\driver\bl_common</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl_common\hbn.d">
+      <Filter>third_party\urt\driver\bl_common</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\start.d">
+      <Filter>third_party\urt\driver\bl808_m0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\bl_ops.d">
+      <Filter>third_party\urt\driver\bl808_m0</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\driver\bl808_m0\wifi.d">
+      <Filter>third_party\urt\driver\bl808_m0</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\driver\esp32\alloc.d">
       <Filter>third_party\urt\driver\esp32</Filter>
@@ -1146,6 +1182,9 @@
     <DCompile Include="third_party\urt\src\urt\crypto\aes.d">
       <Filter>third_party\urt\crypto</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\aes_keywrap.d">
+      <Filter>third_party\urt\crypto</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\crypto\chacha.d">
       <Filter>third_party\urt\crypto</Filter>
     </DCompile>
@@ -1153,6 +1192,9 @@
       <Filter>third_party\urt\crypto</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\crypto\ecdh.d">
+      <Filter>third_party\urt\crypto</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\crypto\pbkdf2.d">
       <Filter>third_party\urt\crypto</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\crypto\pem.d">
@@ -1341,10 +1383,10 @@
     <DCompile Include="third_party\urt\src\urt\socket.d">
       <Filter>third_party\urt</Filter>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\system.d">
-      <Filter>third_party\urt</Filter>
+    <DCompile Include="third_party\urt\src\urt\sync\queue.d">
+      <Filter>third_party\urt\sync</Filter>
     </DCompile>
-    <DCompile Include="third_party\urt\src\urt\thread.d">
+    <DCompile Include="third_party\urt\src\urt\system.d">
       <Filter>third_party\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\time.d">
@@ -1436,6 +1478,9 @@
     <None Include="third_party\urt\src\urt\driver\bl808\start.S">
       <Filter>third_party\urt\driver\bl808</Filter>
     </None>
+    <None Include="third_party\urt\src\urt\driver\bl808_m0\start.S">
+      <Filter>third_party\urt\driver\bl808_m0</Filter>
+    </None>
     <None Include="third_party\urt\src\urt\driver\bk7231\start.S">
       <Filter>third_party\urt\driver\bk7231</Filter>
     </None>
@@ -1518,6 +1563,9 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="third_party\urt\src\urt\driver\bl808\hbn_ram.c">
+      <Filter>third_party\urt\driver\bl808</Filter>
+    </ClCompile>
     <ClCompile Include="third_party\urt\src\urt\driver\esp32\main.c">
       <Filter>third_party\urt\driver\esp32</Filter>
     </ClCompile>
