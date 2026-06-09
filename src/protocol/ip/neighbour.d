@@ -1,5 +1,7 @@
 module protocol.ip.neighbour;
 
+version (UseInternalIPStack):
+
 import urt.array;
 import urt.inet;
 import urt.log;

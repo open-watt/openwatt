@@ -8,11 +8,10 @@ import manager;
 import manager.base;
 import manager.collection;
 
-import protocol.ip.stack : bump_route_generation;
-
 import router.iface;
 
 nothrow @nogc:
+
 
 class IPAddress : BaseObject
 {
@@ -73,4 +72,16 @@ protected:
 private:
     IPNetworkAddress _address;
     ObjectRef!BaseInterface _iface;
+}
+
+
+private:
+
+void bump_route_generation()
+{
+    version (UseInternalIPStack)
+    {
+        import protocol.ip.stack : bump = bump_route_generation;
+        bump();
+    }
 }

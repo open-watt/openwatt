@@ -1,5 +1,7 @@
 module protocol.ip.udp;
 
+version (UseInternalIPStack):
+
 import urt.array;
 import urt.endian;
 import urt.hash;
@@ -10,6 +12,7 @@ import urt.time;
 import router.iface;
 import router.iface.packet;
 
+import protocol.ip : IPv4Header, IPProtocol;
 import protocol.ip.icmp;
 import protocol.ip.stack;
 
@@ -18,7 +21,6 @@ nothrow @nogc:
 
 struct UdpHeader
 {
-align(1):
     ubyte[2] src_port;      // big-endian
     ubyte[2] dst_port;      // big-endian
     ubyte[2] length;        // big-endian; UDP header + data
@@ -104,7 +106,7 @@ void udp_input(ref IPStack stack, ref Packet pkt)
     ushort wire_csum = u.checksum.bigEndianToNative!ushort;
     if (wire_csum != 0)
     {
-        ushort pseudo = pseudo_header_checksum(IPAddr(ip.src), IPAddr(ip.dst), IpProtocol.udp, udp_len);
+        ushort pseudo = pseudo_header_checksum(IPAddr(ip.src), IPAddr(ip.dst), IPProtocol.udp, udp_len);
         ushort calc = internet_checksum(payload[0 .. udp_len], pseudo);
         if (calc != 0)
             return;     // bad checksum
@@ -176,7 +178,7 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
     ip.flags_frag[0] = 0;
     ip.flags_frag[1] = 0;
     ip.ttl      = 64;
-    ip.protocol = IpProtocol.udp;
+    ip.protocol = IPProtocol.udp;
     ip.checksum[] = 0;
     ip.src      = src_addr.b;
     ip.dst      = dst_addr.b;
@@ -193,7 +195,7 @@ bool udp_output(ref IPStack stack, IPAddr src_addr, ushort src_port, IPAddr dst_
     if (payload.length > 0)
         buf[IPv4Header.sizeof + UdpHeader.sizeof .. total] = payload[];
 
-    ushort pseudo = pseudo_header_checksum(src_addr, dst_addr, IpProtocol.udp, udp_len);
+    ushort pseudo = pseudo_header_checksum(src_addr, dst_addr, IPProtocol.udp, udp_len);
     ushort cc = internet_checksum(buf[IPv4Header.sizeof .. total], pseudo);
     if (cc == 0)
         cc = 0xFFFF;    // RFC 768: zero means "no checksum"; use all-ones to mean "checksum is zero"

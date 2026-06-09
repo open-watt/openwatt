@@ -25,12 +25,12 @@ version (UseInternalIPStack)
     import protocol.ip.udp;
     import protocol.ip.tcp : TcpPcb, TcpState, tcp_assign_id, tcp_send_data, tcp_close, free_pcb,
         native_tcp_connect = tcp_connect, native_tcp_listen = tcp_listen;
+
+    public import protocol.ip.stack : IPStack;
 }
 
 import router.iface;
 import router.iface.ethernet;
-
-public import protocol.ip.stack : IPStack;
 
 version(Windows)
 {
@@ -217,6 +217,35 @@ nothrow @nogc:
 //     [medium] (low at our scale)
 //
 // =============================================================================
+
+enum IPProtocol : ubyte
+{
+    icmp = 1,
+    tcp  = 6,
+    udp  = 17,
+}
+
+struct IPv4Header
+{
+nothrow @nogc:
+
+    ubyte ver_ihl;  // upper nibble = version, lower = IHL (32-bit words)
+    ubyte tos;
+    ubyte[2] total_length;
+    ubyte[2] ident;
+    ubyte[2] flags_frag;
+    ubyte ttl;
+    IPProtocol protocol;
+    ubyte[2] checksum;
+    ubyte[4] src;
+    ubyte[4] dst;
+
+    ubyte version_() const pure
+        => ver_ihl >> 4;
+    ubyte ihl() const pure
+        => ver_ihl & 0x0F;
+}
+
 
 enum IPEvent : ubyte
 {
@@ -919,17 +948,19 @@ nothrow @nogc:
         g_app.console.register_collection!TCPServer();
         g_app.console.register_collection!UDPStream();
 
-        _stack.init_resolvers();
+        version (UseInternalIPStack)
+        {
+            _stack.init_resolvers();
 
-        register_frame_handler(PacketType.ethernet, &_stack.on_packet);
-        // TODO: register additional frame handlers when other L3 carriers land
-        //       (PacketType._6lowpan, ppp/IPCP frame type, raw_ip tunnels).
+            register_frame_handler(PacketType.ethernet, &_stack.on_packet);
+            // TODO: register additional frame handlers when other L3 carriers land
+            //       (PacketType._6lowpan, ppp/IPCP frame type, raw_ip tunnels).
 
-        import protocol.ip.tcp : tcp_print;
-        g_app.console.register_command!tcp_print("/protocol/ip/tcp", this, "print");
-        g_app.console.register_command!neighbour_v4_print("/protocol/ip/neighbour", this, "print");
-
-        version (UseInternalIPStack) {} else
+            import protocol.ip.tcp : tcp_print;
+            g_app.console.register_command!tcp_print("/protocol/ip/tcp", this, "print");
+            g_app.console.register_command!neighbour_v4_print("/protocol/ip/neighbour", this, "print");
+        }
+        else
             _worker.start();
     }
 
@@ -939,6 +970,7 @@ nothrow @nogc:
             _worker.stop();
     }
 
+    version (UseInternalIPStack)
     void neighbour_v4_print(Session session)
     {
         import router.iface.mac : MACAddress;
@@ -1085,11 +1117,14 @@ nothrow @nogc:
         Collection!IPv6Pool().update_all();
         Collection!IPRoute().update_all();
         Collection!TCPServer().update_all();
-        _stack.update();
+
+        version (UseInternalIPStack)
+            _stack.update();
     }
 
 private:
-    IPStack _stack;
+    version (UseInternalIPStack)
+        IPStack _stack;
 }
 
 

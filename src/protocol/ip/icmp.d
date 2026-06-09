@@ -1,5 +1,7 @@
 module protocol.ip.icmp;
 
+version (UseInternalIPStack):
+
 import urt.endian;
 import urt.hash;
 import urt.inet;
@@ -9,6 +11,7 @@ import urt.time;
 
 import router.iface.packet;
 
+import protocol.ip : IPv4Header, IPProtocol;
 import protocol.ip.stack;
 
 //version = DebugICMP;
@@ -38,7 +41,6 @@ enum IcmpDestUnreachableCode : ubyte
 
 struct IcmpHeader
 {
-align(1):
     ubyte    type;
     ubyte    code;
     ubyte[2] checksum;
@@ -79,7 +81,7 @@ void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, ref const Packet
 
     // Don't reply to ICMP error messages (loop avoidance). Echo and other
     // queries are fine to error on.
-    if (oip.protocol == IpProtocol.icmp)
+    if (oip.protocol == IPProtocol.icmp)
     {
         if (original.data.length < oip_hdr_len + 1)
             return;
@@ -130,7 +132,7 @@ void icmp_send_error(ref IPStack stack, ubyte type, ubyte code, ref const Packet
     rip.flags_frag[0] = 0;
     rip.flags_frag[1] = 0;
     rip.ttl      = 64;
-    rip.protocol = IpProtocol.icmp;
+    rip.protocol = IPProtocol.icmp;
     rip.checksum[] = 0;
     rip.src = src.b;
     rip.dst = oip_src.b;
@@ -217,7 +219,7 @@ void handle_dest_unreachable(ref IPStack stack, const(ubyte)[] icmp)
     if (inner_hdr_len < IPv4Header.sizeof || inner.length < inner_hdr_len + 8)
         return;
 
-    if (inner_ip.protocol == IpProtocol.tcp)
+    if (inner_ip.protocol == IPProtocol.tcp)
     {
         const(ubyte)[] tcp8 = inner[inner_hdr_len .. inner_hdr_len + 8];
         ushort src_port = tcp8[0..2].bigEndianToNative!ushort;
