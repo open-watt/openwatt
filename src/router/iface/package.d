@@ -309,7 +309,7 @@ nothrow @nogc:
         _status.max_service_us = 0;
         _last_tx_bytes = 0;
         _last_rx_bytes = 0;
-        _last_bitrate_sample = getTime();
+        _last_bitrate_sample = MonoTime.init;
 
         mark_set!(typeof(this), [ "link-downs", "tx-bytes", "rx-bytes", "tx-packets", "rx-packets", "tx-dropped", "rx-dropped",
                                   "tx-rate", "rx-rate", "tx-rate-max", "rx-rate-max", "avg-queue-time", "avg-service-time", "max-service-time" ]);
@@ -317,6 +317,54 @@ nothrow @nogc:
 
     override const(char)[] status_message() const
         => running ? "Running" : super.status_message();
+
+    void heartbeat(MonoTime now)
+    {
+        if (_last_bitrate_sample == MonoTime.init)
+        {
+            // first tick after link-up: anchor the baseline at a grid point; defer the
+            // rate to the next tick so we never report it over a short partial interval.
+            _last_bitrate_sample = now;
+            _last_tx_bytes = _status.tx_bytes;
+            _last_rx_bytes = _status.rx_bytes;
+            return;
+        }
+
+        ulong elapsed_us = (now - _last_bitrate_sample).as!"usecs";
+        if (elapsed_us == 0)
+            return;
+
+        ulong last_tx = _status.tx_rate, last_rx = _status.rx_rate;
+        _status.tx_rate = (_status.tx_bytes - _last_tx_bytes) * 1_000_000 / elapsed_us;
+        _status.rx_rate = (_status.rx_bytes - _last_rx_bytes) * 1_000_000 / elapsed_us;
+
+        ulong dirty = 0;
+        if (_status.tx_rate != last_tx)
+            dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate");
+        if (_status.rx_rate != last_rx)
+            dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate");
+
+        if (_status.tx_rate > _status.tx_rate_max)
+        {
+            _status.tx_rate_max = _status.tx_rate;
+            dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate-max");
+        }
+        if (_status.rx_rate > _status.rx_rate_max)
+        {
+            _status.rx_rate_max = _status.rx_rate;
+            dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate-max");
+        }
+
+        _last_tx_bytes = _status.tx_bytes;
+        _last_rx_bytes = _status.rx_bytes;
+        _last_bitrate_sample = now;
+
+        if (dirty)
+        {
+            _props_set |= dirty;
+            _mark_dirty(dirty);
+        }
+    }
 
     bool set_master(BaseInterface master, byte slave_id) pure
     {
@@ -447,55 +495,11 @@ protected:
     ulong _last_tx_bytes;
     ulong _last_rx_bytes;
 
-    override void update()
-    {
-        assert(_status.link_status == LinkStatus.up, "Interface is not online, it shouldn't be in Running state!");
-
-        MonoTime now = getTime();
-        if ((now - _last_bitrate_sample) >= 1.seconds)
-        {
-            ulong elapsed_us = (now - _last_bitrate_sample).as!"usecs";
-
-            ulong last_tx = _status.tx_rate, last_rx = _status.rx_rate;
-            _status.tx_rate = (_status.tx_bytes - _last_tx_bytes) * 1_000_000 / elapsed_us;
-            _status.rx_rate = (_status.rx_bytes - _last_rx_bytes) * 1_000_000 / elapsed_us;
-
-            ulong dirty = 0;
-            if (_status.tx_rate != last_tx)
-                dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate");
-            if (_status.rx_rate != last_rx)
-                dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate");
-
-            if (_status.tx_rate > _status.tx_rate_max)
-            {
-                _status.tx_rate_max = _status.tx_rate;
-                dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate-max");
-            }
-            if (_status.rx_rate > _status.rx_rate_max)
-            {
-                _status.rx_rate_max = _status.rx_rate;
-                dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate-max");
-            }
-
-            _last_tx_bytes = _status.tx_bytes;
-            _last_rx_bytes = _status.rx_bytes;
-            _last_bitrate_sample = now;
-
-            if (dirty)
-            {
-                _props_set |= dirty;
-                _mark_dirty(dirty);
-            }
-        }
-    }
-
     override void online()
     {
         _status.link_status = LinkStatus.up;
         _status.link_status_change_time = getSysTime();
-        _last_bitrate_sample = getTime();
-        _last_tx_bytes = _status.tx_bytes;
-        _last_rx_bytes = _status.rx_bytes;
+        _last_bitrate_sample = MonoTime.init;   // next heartbeat establishes the rate baseline
         mark_set!(typeof(this), [ "link-status", "last-status-change-time" ])();
     }
 

@@ -150,8 +150,6 @@ nothrow @nogc:
 
 private:
 
-    shared uint _service_pending;
-
     void service_radios(MonoTime)
     {
         import urt.atomic : atomicStore;
@@ -196,3 +194,6 @@ private:
         }
     }
 }
+
+// HACK: not a member of BLEModule to avoid weird compile error!
+__gshared shared(uint) _service_pending;
