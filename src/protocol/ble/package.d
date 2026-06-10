@@ -35,6 +35,7 @@ nothrow @nogc:
 
     override void init()
     {
+        register_packet_codec!BLEFrame();
         register_frame_handler(PacketType.ble, &on_ble_frame);
 
         g_app.console.register_collection!BLEClient();

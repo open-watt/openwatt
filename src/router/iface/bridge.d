@@ -452,14 +452,6 @@ protected:
                     // TODO: check if port is a member of tag_vlan...
                     assert(false, "TODO");
                 }
-
-                if (packet.eth.ether_type == EtherType.ow)
-                {
-                    if (packet.data.length < 2)
-                        goto drop_packet;
-                    packet.eth.ow_sub_type = loadBigEndian(++tag);
-                    packet._offset += 2;
-                }
             }
             else
                 src_vlan = (packet.vlan & 0xF000) | port.pvid;

@@ -72,28 +72,28 @@ struct APSFrame
     // TODO: should we keep these? it's not really APS data, but it's interesting incoming packet knowledge...
     ubyte last_hop_lqi;
     byte last_hop_rssi;
-}
 
-ulong extract_aps_src_address(ref const Packet p) pure
-{
-    ref aps = p.hdr!APSFrame();
-    ulong addr = (aps.pan_id << 16) | aps.src;
-    addr |= ulong(p.vlan & 0xFFF) << 48;
-    addr |= ulong(PacketType.zigbee_aps) << 60;
-    return addr;
-}
+    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    {
+        ref aps = p.hdr!APSFrame();
+        ulong addr = (aps.pan_id << 16) | aps.src;
+        addr |= ulong(p.vlan & 0xFFF) << 48;
+        addr |= ulong(PacketType.zigbee_aps) << 60;
+        return addr;
+    }
 
-ulong extract_aps_dst_address(ref const Packet p) pure
-{
-    ref aps = p.hdr!APSFrame();
-    ulong addr = (aps.pan_id << 16) | aps.dst;
-    addr |= ulong(p.vlan & 0xFFF) << 48;
-    addr |= ulong(PacketType.zigbee_aps) << 60;
-    return addr;
-}
+    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    {
+        ref aps = p.hdr!APSFrame();
+        ulong addr = (aps.pan_id << 16) | aps.dst;
+        addr |= ulong(p.vlan & 0xFFF) << 48;
+        addr |= ulong(PacketType.zigbee_aps) << 60;
+        return addr;
+    }
 
-bool is_aps_broadcast(ulong address) pure
-    => (address & 0xFFFF) >= 0xFFFB;
+    static bool is_multicast(ulong address) pure nothrow @nogc
+        => (address & 0xFFFF) >= 0xFFFB;
+}
 
 ptrdiff_t parse_aps_frame(const void[] packet, out APSFrame frame) pure
 {

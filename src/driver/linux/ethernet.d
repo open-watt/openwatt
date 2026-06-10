@@ -88,7 +88,7 @@ nothrow @nogc:
     override CompletionStatus shutdown()
     {
         _raw.close();
-        return CompletionStatus.complete;
+        return super.shutdown();
     }
 
     // Enslaved to a kernel bridge (offloaded): the kernel switches this port's

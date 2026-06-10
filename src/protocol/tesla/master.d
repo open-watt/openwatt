@@ -44,7 +44,6 @@ nothrow @nogc:
     {
     nothrow @nogc:
         String name;
-        MACAddress mac;
         ushort id;
 
         ubyte req_seq;
@@ -147,9 +146,7 @@ nothrow @nogc:
         this.id = 0x7770 + id_counter++;
         this.sig = iface.mac.b[3];
 
-        iface.subscribe(&incoming_packet, PacketFilter(ether_type: EtherType.ow, ow_subtype: OW_SubType.tesla_twc));
-
-        get_module!TeslaProtocolModule.add_server(name[], iface, id);
+        iface.subscribe(&incoming_packet, PacketFilter(type: PacketType.tesla_twc));
     }
 
     ~this()
@@ -217,7 +214,7 @@ nothrow @nogc:
             message[0..2] = ushort(round_robin_index++ < -5 ? 0xFCE1 : 0xFBE2).nativeToBigEndian;
             message[2..4] = id.nativeToBigEndian;
             message[4] = sig;
-            send_twc_message(MACAddress.broadcast, message[]);
+            send_twc_message(TWCFrame.broadcast, message[]);
             return;
         }
 
@@ -327,22 +324,22 @@ nothrow @nogc:
         }
 
         // send request
-        send_twc_message(c.mac, message[]);
+        send_twc_message(c.id, message[]);
     }
 
-    void send_twc_message(MACAddress dst, const(void)[] message)
+    void send_twc_message(ushort dst, const(void)[] message)
     {
         Packet p;
-        ref Ethernet hdr = p.init!Ethernet(message[]);
-        hdr.src = iface.mac;
-        hdr.dst = dst;
-        hdr.ether_type = EtherType.ow;
-        hdr.ow_sub_type = OW_SubType.tesla_twc;
+        ref TWCFrame twc = p.init!TWCFrame(message[]);
+        twc.src = id;
+        twc.dst = dst;
         iface.forward(p);
     }
 
     void incoming_packet(ref const Packet p, BaseInterface iface, PacketDirection dir, void* user_data) nothrow @nogc
     {
+        ref const twc = p.hdr!TWCFrame;
+
         TWCMessage msg;
         if (parse_twc_message(cast(ubyte[])p.data, msg))
         {
@@ -357,18 +354,17 @@ nothrow @nogc:
             }
             if (!slave)
             {
-                // there's a slave on the bus that was never registered...
-                //... ???
+                // a device on the bus that was never registered (or another master)
+                return;
             }
 
-            if (p.eth.dst.is_broadcast)
+            if (twc.dst == TWCFrame.broadcast)
             {
                 switch (msg.type)
                 {
                     case TWCMessageType.SlaveLinkReady:
                         if (slave.link_ready)
                             break;
-                        slave.mac = p.eth.src;
                         slave.link_ready = true;
                         slave.sig_byte = msg.link_ready.signature;
                         slave.device_max_current = msg.link_ready.amps;
@@ -433,7 +429,7 @@ nothrow @nogc:
                         break;
                 }
             }
-            else if (p.eth.dst == iface.mac && msg.type == TWCMessageType.SlaveHeartbeat)
+            else if (twc.dst == id && msg.type == TWCMessageType.SlaveHeartbeat)
             {
                 // record heartbeat response state...
                 slave.state = msg.heartbeat.state;

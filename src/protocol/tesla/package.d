@@ -18,18 +18,9 @@ import protocol.tesla.master;
 import protocol.tesla.binding;
 
 import router.iface;
-import router.iface.mac;
 
 nothrow @nogc:
 
-
-struct DeviceMap
-{
-    String name;
-    MACAddress mac;
-    ushort address;
-    TeslaInterface iface;
-}
 
 class TeslaProtocolModule : Module
 {
@@ -37,11 +28,10 @@ class TeslaProtocolModule : Module
 nothrow @nogc:
 
     Map!(const(char)[], TeslaTWCMaster) twc_masters;
-    Map!(ushort, DeviceMap) devices;
 
     override void init()
     {
-        register_address_extractor(PacketType.tesla_twc, &extract_twc_src_address, &extract_twc_dst_address, &is_twc_broadcast);
+        register_packet_codec!TWCFrame();
 
         g_app.console.register_collection!TeslaInterface();
         g_app.console.register_collection!TeslaTWCBinding();
@@ -54,60 +44,6 @@ nothrow @nogc:
         // TeslaInterface update handled by base interface collection
         foreach(m; twc_masters.values)
             m.update();
-    }
-
-        DeviceMap* find_server_by_name(const(char)[] name)
-    {
-        foreach (ref map; devices.values)
-        {
-            if (map.name[] == name[])
-                return &map;
-        }
-        return null;
-    }
-
-    DeviceMap* find_server_by_mac(MACAddress mac)
-    {
-        foreach (ref map; devices.values)
-        {
-            if (map.mac == mac)
-                return &map;
-        }
-        return null;
-    }
-
-    DeviceMap* find_server_by_address(ushort address)
-    {
-        return address in devices;
-    }
-
-    DeviceMap* add_device(const(char)[] name, TeslaInterface iface, ushort address)
-    {
-        if (!name)
-            name = tformat("{0}.{1,04X}", iface.name[], address);
-
-        DeviceMap map;
-        map.name = name.makeString(defaultAllocator());
-        map.address = address;
-        map.mac = iface.generate_mac_address();
-        map.mac.b[4] = address >> 8;
-        map.mac.b[5] = address & 0xFF;
-//        while (find_mac_address(map.mac) !is null)
-//            ++map.mac.b[5];
-        map.iface = iface;
-
-        iface.add_address(map.mac, iface);
-        return devices.insert(address, map);
-    }
-
-    DeviceMap* add_server(const(char)[] name, BaseInterface iface, ushort address)
-    {
-        DeviceMap map;
-        map.name = name.makeString(defaultAllocator());
-        map.address = address;
-        map.mac = iface.mac;
-//        map.iface = iface;
-        return devices.insert(address, map);
     }
 
     void twc_add(Session session, const(char)[] name, const(char)[] _interface, ushort id, float max_current)
@@ -151,22 +87,3 @@ nothrow @nogc:
     }
 
 }
-
-ulong extract_twc_src_address(ref const Packet p) pure
-{
-    ulong addr = p.hdr!TWCFrame().src;
-    addr |= ulong(p.vlan & 0xFFF) << 48;
-    addr |= ulong(PacketType.tesla_twc) << 60;
-    return addr;
-}
-
-ulong extract_twc_dst_address(ref const Packet p) pure
-{
-    ulong addr = p.hdr!TWCFrame().dst;
-    addr |= ulong(p.vlan & 0xFFF) << 48;
-    addr |= ulong(PacketType.tesla_twc) << 60;
-    return addr;
-}
-
-bool is_twc_broadcast(ulong address) pure
-    => (address & 0xFFFF) == 0xFFFF;
