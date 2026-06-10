@@ -94,6 +94,53 @@ struct BLELLFrame
     BLELLType pdu_type;
     byte rssi;
     // 14 bytes used, 10 spare
+
+    // LL and ATT frames share one BLE station address space: both stamp ble_ll's type
+    // nibble so bridge/neighbour tables route either packet flavour to the same station.
+    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    {
+        ulong addr = p.hdr!BLELLFrame().src.ul;
+        addr |= ulong(p.vlan & 0xFFF) << 48;
+        addr |= ulong(PacketType.ble_ll) << 60;
+        return addr;
+    }
+
+    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    {
+        ulong addr = p.hdr!BLELLFrame().dst.ul;
+        addr |= ulong(p.vlan & 0xFFF) << 48;
+        addr |= ulong(PacketType.ble_ll) << 60;
+        return addr;
+    }
+
+    static bool is_multicast(ulong address) pure nothrow @nogc
+        => (address & 0xFFFF_FFFF_FFFF) == 0xFFFF_FFFF_FFFF;
+
+    // OW encapsulation wire codec: [src:6][dst:6][pdu_type:1][rssi:1]
+    static ptrdiff_t encode_ow_header(ref const Packet p, ubyte[] buffer) nothrow @nogc
+    {
+        if (buffer.length < 14)
+            return -1;
+        ref const f = p.hdr!BLELLFrame;
+        buffer[0 .. 6] = f.src.b[];
+        buffer[6 .. 12] = f.dst.b[];
+        buffer[12] = f.pdu_type;
+        buffer[13] = cast(ubyte)f.rssi;
+        return 14;
+    }
+
+    static ptrdiff_t decode_ow_header(ref Packet p, const(ubyte)[] header) nothrow @nogc
+    {
+        if (header.length < 14)
+            return -1;
+        p.type = PacketType.ble_ll;
+        ref f = p.hdr!BLELLFrame;
+        f.src = MACAddress(header[0 .. 6]);
+        f.dst = MACAddress(header[6 .. 12]);
+        f.pdu_type = cast(BLELLType)header[12];
+        f.rssi = cast(byte)header[13];
+        return 14;
+    }
 }
 
 // packet header for ATT operations (GATT data, most common)
@@ -107,6 +154,52 @@ struct BLEATTFrame
     ATTOpcode opcode;
     byte rssi;
     // 14 bytes used, 10 spare
+
+    // ATT addresses stamp ble_ll's type nibble; see BLELLFrame.extract_src
+    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    {
+        ulong addr = p.hdr!BLEATTFrame().src.ul;
+        addr |= ulong(p.vlan & 0xFFF) << 48;
+        addr |= ulong(PacketType.ble_ll) << 60;
+        return addr;
+    }
+
+    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    {
+        ulong addr = p.hdr!BLEATTFrame().dst.ul;
+        addr |= ulong(p.vlan & 0xFFF) << 48;
+        addr |= ulong(PacketType.ble_ll) << 60;
+        return addr;
+    }
+
+    static bool is_multicast(ulong address) pure nothrow @nogc
+        => BLELLFrame.is_multicast(address);
+
+    // OW encapsulation wire codec: [src:6][dst:6][opcode:1][rssi:1]
+    static ptrdiff_t encode_ow_header(ref const Packet p, ubyte[] buffer) nothrow @nogc
+    {
+        if (buffer.length < 14)
+            return -1;
+        ref const f = p.hdr!BLEATTFrame;
+        buffer[0 .. 6] = f.src.b[];
+        buffer[6 .. 12] = f.dst.b[];
+        buffer[12] = f.opcode;
+        buffer[13] = cast(ubyte)f.rssi;
+        return 14;
+    }
+
+    static ptrdiff_t decode_ow_header(ref Packet p, const(ubyte)[] header) nothrow @nogc
+    {
+        if (header.length < 14)
+            return -1;
+        p.type = PacketType.ble_att;
+        ref f = p.hdr!BLEATTFrame;
+        f.src = MACAddress(header[0 .. 6]);
+        f.dst = MACAddress(header[6 .. 12]);
+        f.opcode = cast(ATTOpcode)header[12];
+        f.rssi = cast(byte)header[13];
+        return 14;
+    }
 }
 
 static assert(BLELLFrame.sizeof <= 24);
@@ -387,7 +480,6 @@ package:
         return null;
     }
 
-    // incoming packet handler - NAT rewriting and dispatch
     void on_incoming(ref Packet p)
     {
         if (p.type == PacketType.ble_ll)
@@ -396,17 +488,7 @@ package:
 
             switch (ll.pdu_type)
             {
-                case BLELLType.adv_ind:
-                case BLELLType.adv_nonconn_ind:
-                case BLELLType.adv_scan_ind:
-                case BLELLType.adv_direct_ind:
-                case BLELLType.scan_rsp:
-                    import protocol.ble;
-                    get_module!BLEModule.on_advert(ll.src, ll.rssi,
-                        ll.pdu_type == BLELLType.adv_ind,
-                        ll.pdu_type == BLELLType.scan_rsp,
-                        cast(const(ubyte)[])p.data);
-                    break;
+                // advert PDUs feed BLEModule's device table via its registered frame handler
 
                 case BLELLType.connect_ind:
                     MACAddress server = find_adv_source(ll.dst);
@@ -803,6 +885,14 @@ package:
                 _pending_connect_peer = MACAddress.init;
             }
 
+            // establishment must be signalled in-band; clients across a bridge can't see local tag completion
+            Packet p;
+            ref ll = p.init!BLELLFrame(null);
+            ll.src = session.peer;
+            ll.dst = session.client;
+            ll.pdu_type = BLELLType.connect_rsp;
+            on_incoming(p);
+
             // start GATT discovery
             static if (num_ble > 0)
                 ble_gatt_discover(_ble, conn);
@@ -812,11 +902,20 @@ package:
             // connection failed or disconnected
             if (_pending_connect_tag >= 0 && !conn.is_valid)
             {
-                // connect attempt failed
+                // connect attempt failed; notify in-band for remote clients
                 log.error("connection failed");
+
+                Packet p;
+                ref ll = p.init!BLELLFrame(null);
+                ll.src = _pending_connect_peer;
+                ll.dst = _pending_connect_client;
+                ll.pdu_type = BLELLType.disconnect_ind;
+                on_incoming(p);
+
                 _queue.complete(cast(ubyte)_pending_connect_tag, MessageState.failed);
                 _pending_connect_tag = -1;
                 _pending_connect_client = MACAddress.init;
+                _pending_connect_peer = MACAddress.init;
                 return;
             }
 
@@ -875,9 +974,23 @@ package:
             }
         }
 
+        // the characteristic table travels in the payload so clients across a
+        // bridge learn it without access to our session state
+        enum entry_size = 2 + 2 + 16 + 16;
+        ubyte[BLESession.max_chars * entry_size] buf = void;
+        size_t len = 0;
+        foreach (ref gc; session.chars[0 .. session.num_chars])
+        {
+            buf[len .. len + 2] = gc.handle.nativeToLittleEndian;
+            buf[len + 2 .. len + 4] = (cast(ushort)gc.properties).nativeToLittleEndian;
+            guid_to_wire(gc.service_uuid, buf[len + 4 .. len + 20]);
+            guid_to_wire(gc.char_uuid, buf[len + 20 .. len + 36]);
+            len += entry_size;
+        }
+
         Packet p;
-        ref ll = p.init!BLELLFrame(null);
-        ll.src = mac;
+        ref ll = p.init!BLELLFrame(buf[0 .. len]);
+        ll.src = session.peer;
         ll.dst = session.client;
         ll.pdu_type = BLELLType.discovery_done;
         on_incoming(p);
@@ -1034,12 +1147,35 @@ struct GattCharacteristic
     GattCharProps properties;
 }
 
+// GUIDs travel in RFC4122 byte order (big-endian fields)
+void guid_to_wire(ref const GUID g, ubyte[] buffer) nothrow @nogc
+{
+    import urt.endian;
+    buffer[0 .. 4] = g.data1.nativeToBigEndian;
+    buffer[4 .. 6] = g.data2.nativeToBigEndian;
+    buffer[6 .. 8] = g.data3.nativeToBigEndian;
+    buffer[8 .. 16] = g.data4[];
+}
+
+GUID guid_from_wire(const(ubyte)[] data) nothrow @nogc
+{
+    import urt.endian;
+    GUID g;
+    g.data1 = data[0 .. 4].bigEndianToNative!uint;
+    g.data2 = data[4 .. 6].bigEndianToNative!ushort;
+    g.data3 = data[6 .. 8].bigEndianToNative!ushort;
+    g.data4[] = data[8 .. 16];
+    return g;
+}
+
 struct BLESession
 {
+    enum max_chars = 32;
+
     MACAddress client;       // the internal endpoint that owns this connection
     MACAddress peer;         // the BLE device address
     BLEConn conn;            // driver connection handle
-    GattCharacteristic[32] chars;
+    GattCharacteristic[max_chars] chars;
     ubyte num_chars;
     bool active;
 

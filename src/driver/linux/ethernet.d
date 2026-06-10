@@ -87,7 +87,7 @@ nothrow @nogc:
     override CompletionStatus shutdown()
     {
         _raw.close();
-        return CompletionStatus.complete;
+        return super.shutdown();
     }
 
     override void update()

@@ -1053,7 +1053,6 @@ protected:
     {
         const Secret s = _identity.get;
         return _iface !is null
-            && (cast(const(BLEInterface))_iface.get) !is null
             && s !is null
             && s.kind == SecretKind.ec_p256;
     }
@@ -1157,27 +1156,39 @@ private:
             return;
         }
 
-        // BLEModule already parsed the AD payload and updated devices map by
-        // the time this packet fans out, reuse the parsed local name rather
-        // than re-walking AD records here.
-        BLEAdvEntry** ppe = ll.src in get_module!BLEModule.devices;
-        if (!ppe || !*ppe || (*ppe).name.length != TESLA_LOCAL_NAME_LEN)
+        // Pull the local name straight from the advert payload; BLEModule's device
+        // table can't be relied on here since bridged adverts populate it after
+        // this fan-out, and the name may only appear in the scan response.
+        const(char)[] local_name;
+        const(ubyte)[] ad = cast(const(ubyte)[])p.data;
+        while (ad.length >= 2)
+        {
+            ubyte len = ad[0];
+            if (len == 0 || 1 + len > ad.length)
+                break;
+            if (ad[1] == ADType.complete_local_name || ad[1] == ADType.shortened_local_name)
+            {
+                local_name = cast(const(char)[])ad[2 .. 1 + len];
+                break;
+            }
+            ad = ad[1 + len .. $];
+        }
+
+        if (local_name.length != TESLA_LOCAL_NAME_LEN)
         {
             version (DebugTeslaScanner)
             {
-                if (!ppe || !*ppe)
-                    log.trace("adv from ", ll.src, ": no parsed BLE device entry yet");
-                else
-                    log.trace("adv from ", ll.src, " local name '", (*ppe).name[], "' len ", (*ppe).name.length, " != Tesla name len ", TESLA_LOCAL_NAME_LEN);
+                if (local_name.length)
+                    log.trace("adv from ", ll.src, " local name '", local_name, "' len ", local_name.length, " != Tesla name len ", TESLA_LOCAL_NAME_LEN);
             }
             return;
         }
 
         ubyte[8] hash;
-        if (!parse_tesla_local_name((*ppe).name[], hash))
+        if (!parse_tesla_local_name(local_name, hash))
         {
             version (DebugTeslaScanner)
-                log.trace("adv from ", ll.src, " name '", (*ppe).name[], "' is not a Tesla 'S<hex>C' name");
+                log.trace("adv from ", ll.src, " name '", local_name, "' is not a Tesla 'S<hex>C' name");
             return;
         }
 

@@ -1,10 +1,12 @@
 module protocol.ble.client;
 
 import urt.array;
+import urt.driver.ble : GattCharProps;
 import urt.endian;
 import urt.lifetime;
 import urt.log;
 import urt.string;
+import urt.time;
 import urt.uuid;
 
 import manager;
@@ -72,19 +74,11 @@ nothrow @nogc:
     // API
 
     bool discovery_complete()
-    {
-        if (!_connected)
-            return false;
-        auto session = ble_iface.find_session_by_peer(_peer);
-        return session !is null && session.num_chars > 0;
-    }
+        => _connected && _chars.length > 0;
 
     ushort find_characteristic(GUID service, GUID char_uuid)
     {
-        auto session = ble_iface.find_session_by_peer(_peer);
-        if (session is null)
-            return 0;
-        foreach (ref c; session.chars[0 .. session.num_chars])
+        foreach (ref c; _chars[])
         {
             if (c.service_uuid == service && c.char_uuid == char_uuid)
                 return c.handle;
@@ -168,7 +162,7 @@ protected:
     mixin RekeyHandler;
 
     override bool validate() const
-        => _iface !is null && cast(bool)_peer && (cast(const(BLEInterface))_iface.get) !is null;
+        => _iface !is null && !!_peer;
 
     override CompletionStatus startup()
     {
@@ -183,10 +177,21 @@ protected:
             _iface.subscribe(&iface_state_change);
             _subscribed = true;
         }
-        if (_connect_handle >= 0)
-            return CompletionStatus.continue_;
         if (_connected)
             return CompletionStatus.complete;
+
+        if (_pending_connect)
+        {
+            if (getTime() < _connect_deadline)
+                return CompletionStatus.continue_;
+
+            log.warning("connect to ", _peer, " timed out");
+            if (_connect_handle > 0)
+                _iface.abort(_connect_handle);
+            _connect_handle = -1;
+            _pending_connect = false;
+            return CompletionStatus.error;
+        }
 
         // send connect_ind to the interface
         Packet p;
@@ -195,24 +200,25 @@ protected:
         ll.dst = _peer;
         ll.pdu_type = BLELLType.connect_ind;
 
-        _connect_handle = _iface.forward(p, &on_connect_complete);
-
-        if (_connect_handle < 0)
+        int r = _iface.forward(p, &on_connect_complete);
+        if (r < 0)
         {
             log.error("failed to submit connect request");
             return CompletionStatus.error;
         }
 
+        _connect_handle = r;
+        _pending_connect = true;
+        _connect_deadline = getTime() + connect_timeout;
         return CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()
     {
-        if (_connect_handle >= 0)
-        {
+        if (_connect_handle > 0)
             _iface.abort(_connect_handle);
-            _connect_handle = -1;
-        }
+        _connect_handle = -1;
+        _pending_connect = false;
 
         if (_connected)
         {
@@ -226,6 +232,8 @@ protected:
             _connected = false;
         }
 
+        _chars.clear();
+
         if (_subscribed)
         {
             _iface.unsubscribe(&incoming_packet);
@@ -236,10 +244,6 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override void update()
-    {
-    }
-
 private:
     struct NotifyHandler
     {
@@ -247,17 +251,19 @@ private:
         NotifyDelegate callback;
     }
 
+    enum connect_timeout = 15.seconds;
+
     ObjectRef!BaseInterface _iface;
     MACAddress _peer;
     MACAddress _local_mac;
     int _connect_handle = -1;
     bool _subscribed;
     bool _connected;
+    bool _pending_connect;
+    MonoTime _connect_deadline;
+    Array!GattCharacteristic _chars;
     Array!NotifyHandler _notify_handlers;
     Array!DiscoveryDoneDelegate _discovery_handlers;
-
-    BLEInterface ble_iface()
-        => cast(BLEInterface)_iface.get;
 
     MACAddress local_mac()
     {
@@ -277,14 +283,10 @@ private:
 
         _connect_handle = -1;
 
-        if (state == MessageState.complete)
-        {
-            _connected = true;
-            log.info("connected to ", _peer);
-        }
-        else
+        if (state != MessageState.complete)
         {
             log.error("connection to ", _peer, " failed");
+            _pending_connect = false;
             restart();
         }
     }
@@ -297,14 +299,38 @@ private:
             if (ll.dst != local_mac)
                 return;
 
-            if (ll.pdu_type == BLELLType.disconnect_ind)
+            if (ll.pdu_type == BLELLType.connect_rsp)
             {
+                _pending_connect = false;
+                _connected = true;
+                log.info("connected to ", _peer);
+            }
+            else if (ll.pdu_type == BLELLType.disconnect_ind)
+            {
+                _pending_connect = false;
                 _connected = false;
                 log.info("disconnected from ", _peer);
                 restart();
             }
             else if (ll.pdu_type == BLELLType.discovery_done)
             {
+                // payload carries the characteristic table: [handle:2][properties:2][service_uuid:16][char_uuid:16]
+                const(ubyte)[] payload = cast(const(ubyte)[])p.data;
+                _chars.clear();
+                while (payload.length >= 36)
+                {
+                    GattCharacteristic c;
+                    c.handle = payload[0 .. 2].littleEndianToNative!ushort;
+                    c.properties = cast(GattCharProps)payload[2 .. 4].littleEndianToNative!ushort;
+                    c.service_uuid = guid_from_wire(payload[4 .. 20]);
+                    c.char_uuid = guid_from_wire(payload[20 .. 36]);
+                    _chars ~= c;
+                    payload = payload[36 .. $];
+                }
+
+                version (DebugBLEClient)
+                    log.trace("discovery done: ", _chars.length, " characteristics");
+
                 foreach (cb; _discovery_handlers[])
                     cb();
             }

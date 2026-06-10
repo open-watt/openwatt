@@ -166,14 +166,7 @@ private:
     void packet_handler(ref const Packet p, BaseInterface i, PacketDirection dir, void* u)
     {
         if (p.type != PacketType.can)
-        {
-            if (p.type == PacketType.ethernet && p.eth.ether_type == EtherType.ow && p.eth.ow_sub_type == OW_SubType.can)
-            {
-                // de-frame CANoE...
-                assert(false, "TODO");
-            }
             return;
-        }
 
         ref can = p.hdr!CANFrame;
         foreach (ref e; elements)

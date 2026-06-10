@@ -284,7 +284,7 @@ protected:
             _radio.bind_wlan(this, true);
             _bound = false;
         }
-        return CompletionStatus.complete;
+        return super.shutdown();
     }
 
     final const(char)[] get_password() const
@@ -431,6 +431,8 @@ nothrow @nogc:
 
     override void init()
     {
+        register_packet_codec!Wifi80211();
+
         g_app.register_enum!WifiAuth();
         g_app.register_enum!WifiInstallation();
     }

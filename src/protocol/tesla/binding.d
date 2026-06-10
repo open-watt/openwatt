@@ -22,8 +22,6 @@ import manager.plugin;
 import protocol.tesla;
 import protocol.tesla.master;
 
-import router.iface.mac;
-
 version = DebugTWCBinding;
 
 nothrow @nogc:
@@ -31,8 +29,7 @@ nothrow @nogc:
 
 class TeslaTWCBinding : ProtocolBinding
 {
-    alias Properties = AliasSeq!(Prop!("slave_id", slave_id),
-                                 Prop!("mac", mac));
+    alias Properties = AliasSeq!(Prop!("slave_id", slave_id));
 nothrow @nogc:
 
     enum type_name = "twc-binding";
@@ -53,19 +50,9 @@ nothrow @nogc:
         restart();
     }
 
-    final MACAddress mac() const pure
-        => _mac;
-    final void mac(MACAddress value)
-    {
-        if (_mac == value)
-            return;
-        _mac = value;
-        restart();
-    }
-
     final override bool validate() const pure
     {
-        return !_device.empty && (_slave_id != 0 || _mac != MACAddress());
+        return !_device.empty && _slave_id != 0;
     }
 
     override CompletionStatus startup()
@@ -80,7 +67,7 @@ nothrow @nogc:
             {
                 foreach (i, ref c; twc.chargers)
                 {
-                    if ((_slave_id != 0 && _slave_id == c.id) || (_mac != MACAddress() && _mac == c.mac))
+                    if (_slave_id == c.id)
                     {
                         _master = twc;
                         _charger_index = cast(ubyte)i;
@@ -207,7 +194,6 @@ protected:
 private:
 
     ushort _slave_id;
-    MACAddress _mac;
 
     TeslaTWCMaster _master;
     ubyte _charger_index;

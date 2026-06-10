@@ -29,8 +29,53 @@ struct TWCFrame
 {
     enum Type = PacketType.tesla_twc;
 
+    enum ushort broadcast = 0xFFFF;
+
     ushort src;
     ushort dst;
+
+    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    {
+        ulong addr = p.hdr!TWCFrame().src;
+        addr |= ulong(p.vlan & 0xFFF) << 48;
+        addr |= ulong(PacketType.tesla_twc) << 60;
+        return addr;
+    }
+
+    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    {
+        ulong addr = p.hdr!TWCFrame().dst;
+        addr |= ulong(p.vlan & 0xFFF) << 48;
+        addr |= ulong(PacketType.tesla_twc) << 60;
+        return addr;
+    }
+
+    static bool is_multicast(ulong address) pure nothrow @nogc
+        => (address & 0xFFFF) == broadcast;
+
+    // OW encapsulation wire codec: [src:2 BE][dst:2 BE]
+    static ptrdiff_t encode_ow_header(ref const Packet p, ubyte[] buffer) nothrow @nogc
+    {
+        import urt.endian : nativeToBigEndian;
+        if (buffer.length < 4)
+            return -1;
+        ref const f = p.hdr!TWCFrame;
+        buffer[0 .. 2] = f.src.nativeToBigEndian;
+        buffer[2 .. 4] = f.dst.nativeToBigEndian;
+        return 4;
+    }
+
+    static ptrdiff_t decode_ow_header(ref Packet p, const(ubyte)[] header) nothrow @nogc
+    {
+        import urt.endian : bigEndianToNative;
+        if (header.length < 4)
+            return -1;
+        p.type = PacketType.tesla_twc;
+        ref f = p.hdr!TWCFrame;
+        f.src = header[0 .. 2].bigEndianToNative!ushort;
+        f.dst = header[2 .. 4].bigEndianToNative!ushort;
+        return 4;
+    }
 }
 
 class TeslaInterface : BaseInterface
@@ -147,7 +192,7 @@ protected:
 
     override int transmit(ref const Packet packet, MessageCallback) nothrow @nogc
     {
-        if (packet.eth.ether_type != EtherType.ow || packet.eth.ow_sub_type != OW_SubType.tesla_twc)
+        if (packet.type != PacketType.tesla_twc)
         {
             add_tx_drop();
             return -1;
@@ -193,21 +238,17 @@ protected:
 
         version (DebugTeslaInterface) {
             import urt.io;
-            writef("{4} - {0}: TWC packet sent {1}-->{2} [{3}]\n", name, packet.src, packet.dst, packet.data, packet.creation_time);
+            writef("{4} - {0}: TWC packet sent {1,04x}-->{2,04x} [{3}]\n", name, packet.hdr!TWCFrame.src, packet.hdr!TWCFrame.dst, packet.data, packet.creation_time);
         }
 
         add_tx_frame(packet.data.length); // TODO: but should we record the ACTUAL protocol packet?
         return 0;
     }
 
-package:
-    final MACAddress generate_mac_address() pure
-        => super.generate_mac_address();
-
 private:
     ObjectRef!Stream _stream;
 
-    final void incoming_packet(const(ubyte)[] msg, SysTime recv_time)
+    void incoming_packet(const(ubyte)[] msg, SysTime recv_time)
     {
         debug assert(running, "Shouldn't receive packets while not running...?");
 
@@ -218,34 +259,11 @@ private:
             return;
 
         Packet p;
-        p.init!Ethernet(msg);
-        p.creation_time = recv_time;
-        p.eth.ether_type = EtherType.ow;
-        p.eth.ow_sub_type = OW_SubType.tesla_twc;
+        ref TWCFrame twc = p.init!TWCFrame(msg, recv_time);
+        twc.src = message.sender;
+        twc.dst = message.receiver ? message.receiver : TWCFrame.broadcast;
 
-        auto mod_tesla = get_module!TeslaProtocolModule();
-
-        DeviceMap* map = mod_tesla.find_server_by_address(message.sender);
-        if (!map)
-            map = mod_tesla.add_device(null, this, message.sender);
-        p.eth.src = map.mac;
-
-        if (!message.receiver)
-            p.eth.dst = MACAddress.broadcast;
-        else
-        {
-            // find receiver... do we have a global device registry?
-            map = mod_tesla.find_server_by_address(message.receiver);
-            if (!map)
-            {
-                // we haven't seen the other guy, so we can't assign a dst address
-                return;
-            }
-            p.eth.dst = map.mac;
-        }
-
-        if (p.eth.dst)
-            dispatch(p);
+        dispatch(p);
     }
 }
 

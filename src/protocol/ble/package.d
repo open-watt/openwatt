@@ -46,6 +46,10 @@ nothrow @nogc:
 
     override void init()
     {
+        register_packet_codec!BLELLFrame();
+        register_packet_codec!BLEATTFrame();
+        register_frame_handler(PacketType.ble_ll, &incoming_ll_frame);
+
         g_app.console.register_collection!BLEInterface();
         g_app.console.register_collection!BLEClient();
         g_app.console.register_collection!BLEClientBinding();
@@ -66,7 +70,26 @@ nothrow @nogc:
             g_app.post_event(&service_radios, getTime(), EventPriority.bulk);
     }
 
-    // called from BLEInterface.on_incoming when an advert packet is dispatched
+    void incoming_ll_frame(ref Packet p, BaseInterface iface)
+    {
+        ref ll = p.hdr!BLELLFrame;
+        switch (ll.pdu_type)
+        {
+            case BLELLType.adv_ind:
+            case BLELLType.adv_nonconn_ind:
+            case BLELLType.adv_scan_ind:
+            case BLELLType.adv_direct_ind:
+            case BLELLType.scan_rsp:
+                on_advert(ll.src, ll.rssi,
+                    ll.pdu_type == BLELLType.adv_ind,
+                    ll.pdu_type == BLELLType.scan_rsp,
+                    cast(const(ubyte)[])p.data);
+                break;
+            default:
+                break;
+        }
+    }
+
     void on_advert(MACAddress addr, short rssi, bool connectable, bool is_scan_response, const(ubyte)[] payload)
     {
         MonoTime now = getTime();

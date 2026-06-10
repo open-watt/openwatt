@@ -119,10 +119,7 @@ nothrow @nogc:
     MACAddress src;
     MACAddress dst;
     ushort ether_type;
-    union {
-        ushort ow_subtype; // if ether_type == EtherType.ow
-        ushort ether_type_2;
-    }
+    ushort ether_type_2;
     ushort vlan;
 
     bool match(ref const Packet p)
@@ -137,14 +134,7 @@ nothrow @nogc:
                 {
                     if (p.eth.ether_type != ether_type)
                     {
-                        if (!ether_type_2 || ether_type == EtherType.ow)
-                            return false;
-                        if (p.eth.ether_type != ether_type_2)
-                            return false;
-                    }
-                    else if (ether_type == EtherType.ow)
-                    {
-                        if (ow_subtype && p.eth.ow_sub_type != ow_subtype)
+                        if (!ether_type_2 || p.eth.ether_type != ether_type_2)
                             return false;
                     }
                 }

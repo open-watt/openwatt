@@ -82,7 +82,7 @@ nothrow @nogc:
     override CompletionStatus shutdown()
     {
         _pcap.close();
-        return CompletionStatus.complete;
+        return super.shutdown();
     }
 
     override void update()
