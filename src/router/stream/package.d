@@ -103,6 +103,7 @@ nothrow @nogc:
         _status.rx_rate = 0;
         _status.tx_rate_max = 0;
         _status.rx_rate_max = 0;
+        _last_bitrate_sample = MonoTime.init;
 
         mark_set!(typeof(this), [ "link-downs", "tx-bytes", "rx-bytes",
                                     "tx-rate", "rx-rate", "tx-rate-max", "rx-rate-max" ])();
@@ -111,45 +112,51 @@ nothrow @nogc:
     override const(char)[] status_message() const
         => running ? "Running" : super.status_message();
 
-    override void update()
+    void heartbeat(MonoTime now)
     {
-        assert(_status.link_status == LinkStatus.up, "Stream is not online, it shouldn't be in Running state!");
-
-        MonoTime now = getTime();
-        if ((now - _last_bitrate_sample) >= 1.seconds)
+        if (_last_bitrate_sample == MonoTime.init)
         {
-            ulong elapsed_us = (now - _last_bitrate_sample).as!"usecs";
-
-            ulong last_tx = _status.tx_rate, last_rx = _status.rx_rate;
-            _status.tx_rate = (_status.tx_bytes - _last_tx_bytes) * 1_000_000 / elapsed_us;
-            _status.rx_rate = (_status.rx_bytes - _last_rx_bytes) * 1_000_000 / elapsed_us;
-
-            ulong dirty = 0;
-            if (_status.tx_rate != last_tx)
-                dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate");
-            if (_status.rx_rate != last_rx)
-                dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate");
-
-            if (_status.tx_rate > _status.tx_rate_max)
-            {
-                _status.tx_rate_max = _status.tx_rate;
-                dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate-max");
-            }
-            if (_status.rx_rate > _status.rx_rate_max)
-            {
-                _status.rx_rate_max = _status.rx_rate;
-                dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate-max");
-            }
-
+            // first tick after link-up: anchor the baseline at a grid point; defer the
+            // rate to the next tick so we never report it over a short partial interval.
+            _last_bitrate_sample = now;
             _last_tx_bytes = _status.tx_bytes;
             _last_rx_bytes = _status.rx_bytes;
-            _last_bitrate_sample = now;
+            return;
+        }
 
-            if (dirty)
-            {
-                _props_set |= dirty;
-                _mark_dirty(dirty);
-            }
+        ulong elapsed_us = (now - _last_bitrate_sample).as!"usecs";
+        if (elapsed_us == 0)
+            return;
+
+        ulong last_tx = _status.tx_rate, last_rx = _status.rx_rate;
+        _status.tx_rate = (_status.tx_bytes - _last_tx_bytes) * 1_000_000 / elapsed_us;
+        _status.rx_rate = (_status.rx_bytes - _last_rx_bytes) * 1_000_000 / elapsed_us;
+
+        ulong dirty = 0;
+        if (_status.tx_rate != last_tx)
+            dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate");
+        if (_status.rx_rate != last_rx)
+            dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate");
+
+        if (_status.tx_rate > _status.tx_rate_max)
+        {
+            _status.tx_rate_max = _status.tx_rate;
+            dirty |= ulong(1) << prop_index!(typeof(this), "tx-rate-max");
+        }
+        if (_status.rx_rate > _status.rx_rate_max)
+        {
+            _status.rx_rate_max = _status.rx_rate;
+            dirty |= ulong(1) << prop_index!(typeof(this), "rx-rate-max");
+        }
+
+        _last_tx_bytes = _status.tx_bytes;
+        _last_rx_bytes = _status.rx_bytes;
+        _last_bitrate_sample = now;
+
+        if (dirty)
+        {
+            _props_set |= dirty;
+            _mark_dirty(dirty);
         }
     }
 
@@ -157,9 +164,7 @@ nothrow @nogc:
     {
         _status.link_status = LinkStatus.up;
         _status.link_status_change_time = getSysTime();
-        _last_bitrate_sample = getTime();
-        _last_tx_bytes = _status.tx_bytes;
-        _last_rx_bytes = _status.rx_bytes;
+        _last_bitrate_sample = MonoTime.init;   // next heartbeat establishes the rate baseline
         mark_set!(typeof(this), [ "link-status", "last-status-change-time" ])();
     }
 
