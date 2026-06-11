@@ -1,6 +1,7 @@
 module protocol.mqtt.broker;
 
 import urt.array;
+import urt.inet;
 import urt.lifetime;
 import urt.log;
 import urt.map;
@@ -460,10 +461,10 @@ private:
             restart_tls();
     }
 
-    void new_connection(Stream client, void* user_data)
+    void new_connection(Stream client, ref const InetAddress remote, void* user_data)
     {
         Connection* c = defaultAllocator().allocT!Connection(this, client);
         _connections ~= c;
-        log.info("MQTT client connected: ", client.remote_name());
+        log.info("MQTT client connected: ", remote);
     }
 }

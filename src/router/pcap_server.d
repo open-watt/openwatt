@@ -5,6 +5,7 @@ static if (has_ip):
 
 import urt.array;
 import urt.endian;
+import urt.inet;
 import urt.lifetime;
 import urt.log;
 import urt.mem.allocator : defaultAllocator;
@@ -120,9 +121,9 @@ private:
     TCPServer _server;
     Array!(Session*) _sessions;
 
-    void accept_connection(Stream stream, void*)
+    void accept_connection(Stream stream, ref const InetAddress remote, void*)
     {
-        log.info("new connection from ", stream.remote_name);
+        log.info("new connection from ", remote);
         _sessions.pushBack(defaultAllocator().allocT!Session(this, stream));
     }
 
@@ -500,7 +501,7 @@ private:
             send_reply(RPCAP_MSG_STATS_REQ, stats.nativeToBigEndian);
         }
 
-        void data_connection_callback(Stream new_stream, void*)
+        void data_connection_callback(Stream new_stream, ref const InetAddress remote, void*)
         {
             data_stream = new_stream;
             data_stream.subscribe(&stream_destroyed);

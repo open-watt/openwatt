@@ -3,6 +3,7 @@ module protocol.http.server;
 import urt.array;
 import urt.conv;
 import urt.encoding;
+import urt.inet;
 import urt.kvp;
 import urt.lifetime;
 import urt.log;
@@ -306,14 +307,14 @@ private:
     Array!Handler _handlers;
     Array!(Session*) _sessions;
 
-    void accept_http_connection(Stream stream, void*)
+    void accept_http_connection(Stream stream, ref const InetAddress remote, void*)
     {
-        log.info("new HTTP session from ", stream.remote_name);
+        log.info("new HTTP session from ", remote);
         RequestHandler redirect = (_https_redirect && _tls_port != 0) ? &http_redirect_handler : null;
         _sessions.emplaceBack(defaultAllocator().allocT!Session(this, stream, redirect));
     }
 
-    void accept_tls_connection(Stream stream, void*)
+    void accept_tls_connection(Stream stream, ref const InetAddress remote, void*)
     {
         _sessions.emplaceBack(defaultAllocator().allocT!Session(this, stream, null));
     }

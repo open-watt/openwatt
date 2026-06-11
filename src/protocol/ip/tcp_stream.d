@@ -193,24 +193,6 @@ nothrow @nogc:
         super.update();
     }
 
-    override bool connect()
-    {
-        _last_retry = SysTime();
-        return true;
-    }
-
-    override void disconnect()
-    {
-        close_conn();
-    }
-
-    override const(char)[] remote_name()
-    {
-        if (!_host.empty)
-            return tstring(remote);
-        return tstring(_remote);
-    }
-
     final void enable_keep_alive(bool enable, Duration keep_idle = seconds(10), Duration keep_interval = seconds(1), int keep_count = 10)
     {
         _keep_enable = enable;
@@ -317,7 +299,7 @@ nothrow @nogc:
     enum path = "/stream/tcp-server";
     enum collection_id = CollectionType.tcp_server;
 
-    alias NewConnection = void delegate(Stream client, void* user_data) nothrow @nogc;
+    alias NewConnection = void delegate(Stream client, ref const InetAddress remote, void* user_data) nothrow @nogc;
 
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
@@ -385,9 +367,10 @@ protected:
     {
         if (_connection_callback)
         {
+            const InetAddress remote = conn.remote();
             Stream stream = create_stream(conn);
             if (stream)
-                _connection_callback(stream, _user_data);
+                _connection_callback(stream, remote, _user_data);
         }
         else
             conn.close();

@@ -1,6 +1,7 @@
 module protocol.telnet.server;
 
 import urt.array;
+import urt.inet;
 import urt.lifetime;
 import urt.mem.allocator;
 import urt.string;
@@ -93,7 +94,7 @@ package:
 
     Array!Session m_sessions;
 
-    void acceptConnection(Stream client, void* user_data)
+    void acceptConnection(Stream client, ref const InetAddress remote, void* user_data)
     {
         const(char)[] stream_name = Collection!Stream().generate_name(this.name[]);
 

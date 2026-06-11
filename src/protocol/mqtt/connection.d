@@ -170,7 +170,7 @@ nothrow @nogc:
     }
 
     Session* attached_session() => session;
-    const(char)[] remote_name() => stream ? stream.remote_name() : null;
+    const(char)[] stream_name() => stream ? stream.name[] : null;
 
     package void clear_session() { session = null; }
 
@@ -308,7 +308,7 @@ private:
             return false;
 
         state = ConnectionState.active;
-        writeInfo("MQTT CONNECT from ", remote_name(), " as '", client_id, "' (v",
+        writeInfo("MQTT CONNECT on ", stream_name(), " as '", client_id, "' (v",
                   cast(int)protocol_level, ")");
 
         // TODO: resend in-flight outbound from a resumed session
