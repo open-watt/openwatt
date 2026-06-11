@@ -114,7 +114,13 @@ nothrow @nogc:
             return StringResult("ctrl socket not open");
 
         if (send(fd, cmd.ptr, cmd.length, 0) != cast(ptrdiff_t)cmd.length)
-            return StringResult(tconcat("send('", cmd, "') failed: errno=", errno_result().system_code));
+        {
+            // ECONNREFUSED here means the daemon restarted and replaced its
+            // socket; close so the caller's open-retry loop reconnects.
+            auto msg = tconcat("send('", cmd, "') failed: errno=", errno_result().system_code);
+            close_fd();
+            return StringResult(msg);
+        }
 
         for (uint tries = 0; tries < 4; ++tries)
         {
@@ -126,7 +132,9 @@ nothrow @nogc:
                     continue;
                 if (e == EAGAIN_ || e == EWOULDBLOCK_)
                     return StringResult(tconcat("recv('", cmd, "') timed out"));
-                return StringResult(tconcat("recv('", cmd, "') failed: errno=", e));
+                auto msg = tconcat("recv('", cmd, "') failed: errno=", e);
+                close_fd();
+                return StringResult(msg);
             }
             if (n == 0)
                 continue;

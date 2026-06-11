@@ -44,9 +44,7 @@ int main(string[] args)
 
     // route log output
     if (!interactive_mode)
-    {
         register_log_sink(&default_log_sink, null);
-    }
     else
     {
         // if stderr is piped away from the console output: register the sink so logs are captured
@@ -215,6 +213,7 @@ void default_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc
 {
     import urt.io;
     writeln(format_log_line(msg));
+    flush();
 }
 
 void stderr_log_sink(void*, scope ref const LogMessage msg) nothrow @nogc

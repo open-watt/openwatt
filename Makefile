@@ -14,8 +14,6 @@
 URT_DIR    := third_party/urt
 URT_SRCDIR := $(URT_DIR)/src
 
-USE_INTERNAL_IP_STACK := 1
-
 include $(URT_DIR)/platforms.mk
 include features.mk
 
@@ -48,6 +46,13 @@ APP_SOURCES := $(SRCDIR)/main.d \
 SOURCES := $(APP_SOURCES) $(URT_SOURCES)
 
 DFLAGS := $(DFLAGS) $(FEATURE_DFLAGS)
+
+# Linux builds without the in-tree IP stack drive the kernel data plane directly.
+ifeq ($(OS),linux)
+  ifneq ($(USE_INTERNAL_IP_STACK),1)
+    DFLAGS := $(DFLAGS) $(VERSION_FLAG)KernelMirror
+  endif
+endif
 
 # =======================================================================
 # App-specific compiler flags

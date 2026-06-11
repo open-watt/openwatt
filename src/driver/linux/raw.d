@@ -23,6 +23,11 @@ enum PACKET_ADD_MEMBERSHIP    = 1;
 enum PACKET_DROP_MEMBERSHIP   = 2;
 enum PACKET_MR_PROMISC        = 1;
 
+// sll_pkttype values (linux/if_packet.h). PACKET_OUTGOING marks frames we
+// transmitted that the kernel echoes back to AF_PACKET listeners.
+enum PACKET_HOST              = 0;
+enum PACKET_OUTGOING          = 4;
+
 enum SIOCGIFINDEX             = 0x8933;
 enum SIOCGIFMTU               = 0x8921;
 enum SIOCGIFHWADDR            = 0x8927;
@@ -93,6 +98,7 @@ extern(C) nothrow @nogc
     int setsockopt(int fd, int level, int optname, const(void)* optval, uint optlen);
     int ioctl(int fd, c_ulong request, ...);
     ptrdiff_t recv(int fd, void* buf, size_t len, int flags);
+    ptrdiff_t recvfrom(int fd, void* buf, size_t len, int flags, void* src_addr, uint* addrlen);
     ptrdiff_t sendto(int fd, const(void)* buf, size_t len, int flags, const(void)* dest_addr, uint addrlen);
 }
 
@@ -110,7 +116,7 @@ struct RawAdapter
 {
 nothrow @nogc:
 
-    StringResult open(const(char)[] adapter_name)
+    StringResult open(const(char)[] adapter_name, bool promisc = true)
     {
         fd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
         if (fd < 0)
@@ -144,16 +150,17 @@ nothrow @nogc:
             return StringResult(msg);
         }
 
-        // Promiscuous: kernel refcounts per-socket and auto-clears on close,
-        // so a crashed process can't leave the NIC stuck in promisc.
-        packet_mreq mr;
-        mr.mr_ifindex = ifindex;
-        mr.mr_type    = PACKET_MR_PROMISC;
-        if (setsockopt(fd, SOL_PACKET, PACKET_ADD_MEMBERSHIP, &mr, packet_mreq.sizeof) < 0)
+        // Promiscuous (opt-out): kernel refcounts per-socket and auto-clears on
+        // close, so a crashed process can't leave the NIC stuck in promisc. The
+        // CPU port of an offloaded bridge opens non-promisc and toggles on demand.
+        if (promisc)
         {
-            auto msg = tconcat("PACKET_ADD_MEMBERSHIP(PROMISC, '", adapter_name, "') failed: errno=", errno_result().system_code);
-            close_fd();
-            return StringResult(msg);
+            StringResult r = set_promisc(true);
+            if (r.failed)
+            {
+                close_fd();
+                return r;
+            }
         }
 
         int flags_val = fcntl(fd, F_GETFL, 0);
@@ -175,6 +182,26 @@ nothrow @nogc:
         close_fd();
     }
 
+    // Add/drop PACKET_MR_PROMISC. Idempotent via _promisc so repeated calls
+    // don't churn the kernel refcount.
+    StringResult set_promisc(bool on)
+    {
+        if (fd < 0)
+            return StringResult("set_promisc on a closed socket");
+        if (on == _promisc)
+            return StringResult.success;
+
+        packet_mreq mr;
+        mr.mr_ifindex = ifindex;
+        mr.mr_type    = PACKET_MR_PROMISC;
+        int op = on ? PACKET_ADD_MEMBERSHIP : PACKET_DROP_MEMBERSHIP;
+        if (setsockopt(fd, SOL_PACKET, op, &mr, packet_mreq.sizeof) < 0)
+            return StringResult(tconcat("PACKET membership (PROMISC) failed: errno=", errno_result().system_code));
+
+        _promisc = on;
+        return StringResult.success;
+    }
+
     // returns:  1 = got a frame; data points into rx_buf, valid until next poll
     //           0 = no frame ready (EAGAIN / EWOULDBLOCK / EINTR)
     //          -1 = error -- caller can read last_recv_error.system_code for errno
@@ -194,6 +221,31 @@ nothrow @nogc:
         data = rx_buf[0 .. cast(size_t)n];
         wire_len = cast(uint)n;
         timestamp = getSysTime();
+        return 1;
+    }
+
+    // Like poll(), but exposes sll_pkttype so the caller can drop PACKET_OUTGOING
+    // echoes of frames it injected (the CPU port of an offloaded bridge sees its
+    // own sendto frames reflected back).
+    int poll_ll(out const(ubyte)[] data, out uint wire_len, out SysTime timestamp, out ubyte pkttype)
+    {
+        sockaddr_ll sll;
+        uint slen = sockaddr_ll.sizeof;
+        ptrdiff_t n = recvfrom(fd, rx_buf.ptr, rx_buf.length, 0, &sll, &slen);
+        if (n < 0)
+        {
+            Result e = errno_result();
+            if (e.system_code == EAGAIN_ || e.system_code == EWOULDBLOCK_ || e.system_code == EINTR_)
+                return 0;
+            last_recv_error = e;
+            return -1;
+        }
+        if (n == 0)
+            return 0;
+        data = rx_buf[0 .. cast(size_t)n];
+        wire_len = cast(uint)n;
+        timestamp = getSysTime();
+        pkttype = sll.sll_pkttype;
         return 1;
     }
 
@@ -225,6 +277,7 @@ nothrow @nogc:
     int ifindex;
 
 private:
+    bool _promisc;
     void close_fd()
     {
         if (fd >= 0)

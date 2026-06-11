@@ -125,9 +125,23 @@ nothrow @nogc:
         if (candidate_is_sta && !_caps.supports_sta)
             return "driver does not support STA mode";
 
-        // Counts after this binding takes effect (candidate isn't in
-        // bound_aps / bound_sta yet at validate time).
-        size_t ap_count = bound_aps.length + (candidate_is_ap ? 1 : 0);
+        bool already_bound;
+        if (candidate_is_ap)
+        {
+            foreach (ap; bound_aps)
+            {
+                if (ap is candidate)
+                {
+                    already_bound = true;
+                    break;
+                }
+            }
+        }
+        else if (candidate_is_sta)
+            already_bound = bound_sta is candidate;
+
+        // Counts after this binding takes effect.
+        size_t ap_count = bound_aps.length + (candidate_is_ap && !already_bound ? 1 : 0);
         bool has_sta = bound_sta !is null || candidate_is_sta;
 
         if (has_sta && ap_count > 0 && !_caps.supports_sta_ap)
@@ -150,17 +164,6 @@ protected:
 
     override CompletionStatus startup()
     {
-        // Snapshot chipset capabilities once. Cheap (one nl80211 round-trip)
-        // and the answer doesn't change without a kernel module reload, so
-        // we don't bother re-querying after restarts.
-        if (!_caps_queried)
-        {
-            uint ifindex = read_ifindex(_adapter[]);
-            if (ifindex != 0)
-                query_phy_capabilities(ifindex, _caps);
-            _caps_queried = true;
-        }
-
         // ctrl_iface sockets are best-effort: each daemon may or may not
         // be running. Packet path keeps working regardless.
         try_open_daemons();
@@ -172,8 +175,9 @@ protected:
             refresh_state();
         }
 
-        if (_status.connected == ConnectionStatus.disconnected)
-            return CompletionStatus.continue_;
+        // Carrier is telemetry, not a startup condition: an idle radio has no
+        // carrier until a bound STA associates or a bound AP beacons -- both of
+        // which can only happen once the radio is running.
         return CompletionStatus.complete;
     }
 
@@ -189,6 +193,12 @@ protected:
         // Any change to the bound set may shift VIF allocation (e.g. binding
         // a STA evicts the primary AP off the radio's netdev) so always sync.
         sync_hostapd_config();
+    }
+
+    override void on_monitor_changed(bool enabled)
+    {
+        if (enabled)
+            log.warning("monitor mode is not implemented on the Linux backend yet");
     }
 
     override void on_active_channel_changed(ubyte ch)
@@ -249,11 +259,6 @@ protected:
             return;
         _last_refresh = now;
         refresh_state();
-        if (_status.connected == ConnectionStatus.disconnected)
-        {
-            restart();
-            return;
-        }
 
         // Track STA online/offline transitions for the channel-revert grace
         // period, and re-sync hostapd if the target channel has changed
@@ -376,6 +381,21 @@ private:
         // wlan netdev means associated, which is the proxy for "STA online"
         // until nl80211 lands.
 
+        // Snapshot chipset capabilities once -- but only latch after the
+        // netdev's ifindex resolves; at startup the adapter may still be
+        // bouncing (eg a daemon restart recreating VIFs).
+        if (!_caps_queried)
+        {
+            uint ifindex = read_ifindex(_adapter[]);
+            if (ifindex != 0)
+            {
+                query_phy_capabilities(ifindex, _caps);
+                _caps_queried = true;
+                log.info("phy capabilities: valid=", _caps.valid, " sta=", _caps.supports_sta,
+                         " ap=", _caps.supports_ap, " sta+ap=", _caps.supports_sta_ap, " max-aps=", _caps.max_aps);
+            }
+        }
+
         // Retry ctrl_iface connections -- daemons may have launched after us.
         try_open_daemons();
 
@@ -482,7 +502,7 @@ nothrow @nogc:
         auto r = cast(const(LinuxWifiRadio))radio;
         if (!r)
             return "no radio configured";
-        if (ssid.empty)
+        if (super.ssid.empty)
             return "SSID not set";
         if (!r.running)
             return "Waiting for radio";

@@ -251,7 +251,7 @@ nothrow @nogc:
         assert(entry !is null, "CID not in table");
         debug assert(entry.value is null, "add() called twice!");
         entry.value = item;
-        signal_object_created(item);
+        signal_object_lifecycle(item, ObjectLifecycleEvent.created);
     }
 
     void remove(BaseObject item)
@@ -431,11 +431,17 @@ void broadcast_rekey(CID old_id, CID new_id)
                 e.value.do_rekey(old_id, new_id);
 }
 
-alias ObjectLifecycleHandler = void delegate(BaseObject obj) nothrow @nogc;
-
-void register_object_created_handler(ObjectLifecycleHandler handler) nothrow @nogc
+enum ObjectLifecycleEvent : ubyte
 {
-    _on_object_created ~= handler;
+    created,
+    destroyed,
+}
+
+alias ObjectLifecycleHandler = void delegate(BaseObject obj, ObjectLifecycleEvent event) nothrow @nogc;
+
+void register_object_lifecycle_handler(ObjectLifecycleHandler handler) nothrow @nogc
+{
+    _on_object_lifecycle ~= handler;
 }
 
 void foreach_object(scope void delegate(BaseObject obj) nothrow @nogc fn)
@@ -519,7 +525,7 @@ void rekey_field(T)(ref T field, CID old_id, CID new_id)
 private:
 
 // HACK: is this satisfactory?
-__gshared Array!ObjectLifecycleHandler _on_object_created;
+__gshared Array!ObjectLifecycleHandler _on_object_lifecycle;
 
 @fast_data __gshared CollectionTable[CollectionType.count] g_item_tables;
 
@@ -529,10 +535,10 @@ package void init_collections()
         t.init();
 }
 
-void signal_object_created(BaseObject obj) nothrow @nogc
+package void signal_object_lifecycle(BaseObject obj, ObjectLifecycleEvent event) nothrow @nogc
 {
-    foreach (h; _on_object_created[])
-        h(obj);
+    foreach (h; _on_object_lifecycle[])
+        h(obj, event);
 }
 
 package ref CollectionTable item_table(uint collection) pure

@@ -6,7 +6,7 @@ import urt.mem.allocator;
 import urt.string;
 
 import manager.base;
-import manager.base : ObjectRef, Property;
+import manager.base : Property;
 import manager.collection;
 import manager.console.session;
 
@@ -380,7 +380,7 @@ protected:
     }
 
 private:
-    ObjectRef!Stream _inner;
+    Stream _inner;
     TerminalChannel _terminal;
     Array!char _terminal_type;
     Array!ubyte _tail;
@@ -395,8 +395,16 @@ private:
 
     void inner_state_change(ActiveObject, StateSignal signal)
     {
-        if (signal == StateSignal.offline)
-            restart();
+        if (signal != StateSignal.offline)
+            return;
+
+        if (_inner && (_inner.flags & ObjectFlags.temporary))
+        {
+            _inner.unsubscribe(&inner_state_change);
+            _subscribed = false;
+            _inner = null;
+        }
+        restart();
     }
 
     void handle_subnegotiation(const(ubyte)[] sub)

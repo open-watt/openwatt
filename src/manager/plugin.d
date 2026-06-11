@@ -83,6 +83,15 @@ void register_modules(Application app)
         {
             import driver.linux.netlink;
             register_module!(driver.linux.netlink)(app);
+            import driver.linux.netlink_write;
+            register_module!(driver.linux.netlink_write)(app);
+            version (KernelMirror)
+            {
+                import driver.linux.bridge;
+                register_module!(driver.linux.bridge)(app);
+                import driver.linux.netlink_dump;
+                register_module!(driver.linux.netlink_dump)(app);
+            }
         }
 
         import router.pcap;

@@ -90,6 +90,15 @@ nothrow @nogc:
         return CompletionStatus.complete;
     }
 
+    // Enslaved to a kernel bridge (offloaded): the kernel switches this port's
+    // traffic, so OpenWatt must stop polling its AF_PACKET socket or it would
+    // double-process kernel-switched frames. The socket stays open (instant
+    // wire_send / re-enable); the kernel buffers and ages the unread RX.
+    final void set_enslaved(bool value)
+    {
+        _enslaved = value;
+    }
+
     override void update()
     {
         super.update();
@@ -105,6 +114,9 @@ nothrow @nogc:
                 return;
             }
         }
+
+        if (_enslaved)
+            return;
 
         const(ubyte)[] data;
         uint wire_len;
@@ -136,6 +148,7 @@ private:
     RawAdapter _raw;
     String _adapter;
     SysTime _last_refresh;
+    bool _enslaved;
 
     void refresh_os_state()
     {
@@ -200,7 +213,11 @@ private:
             {
                 auto iface_name = next_iface_name();
                 log_info(ModuleName, "Found ethernet interface: \"", description, "\" (", name, ")");
-                auto iface = Collection!LinuxRawEthernet().create(iface_name);
+                // dynamic: we own its lifecycle and rediscover it each boot, so
+                // it isn't persisted to config -- and only dynamic entries are
+                // reaped below when their netdev disappears. Operator/config
+                // interfaces (flags == none) are left alone.
+                auto iface = Collection!LinuxRawEthernet().create(iface_name, ObjectFlags.dynamic);
                 iface.adapter = name;
                 if (description.length > 0)
                     iface.comment = description.makeString(defaultAllocator);
@@ -212,6 +229,12 @@ private:
         Array!LinuxRawEthernet gone;
         foreach (e; Collection!LinuxRawEthernet().values)
         {
+            // Only reap what auto-discovery created; an operator/config interface
+            // (e.g. bound to a veth that enumerate_adapters doesn't list) is not
+            // ours to remove.
+            if (!(e.flags & ObjectFlags.dynamic))
+                continue;
+
             bool still_there = false;
             foreach (ref s; os_buf[])
             {

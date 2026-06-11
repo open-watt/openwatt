@@ -88,6 +88,7 @@ nothrow @nogc:
     {
         super(session, null);
         _telnet = telnet;
+        telnet.subscribe(&telnet_state_change);
     }
 
     ~this()
@@ -129,7 +130,15 @@ nothrow @nogc:
             return CommandCompletionState.finished;
         }
         if (!_telnet)
+        {
+            if (_remote_closed)
+            {
+                session.write_line("");
+                session.write_line("[connection closed]");
+                _remote_closed = false;
+            }
             return CommandCompletionState.finished;
+        }
         if (_telnet.running)
             _connected = true;
         else if (_connected)
@@ -177,7 +186,17 @@ nothrow @nogc:
     }
 
 private:
+    void telnet_state_change(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.online)
+            return;
+        _telnet.unsubscribe(&telnet_state_change);
+        _telnet = null;
+        _remote_closed = true;
+    }
+
     TelnetStream _telnet;
     bool _connected;
     bool _escape_pressed;
+    bool _remote_closed;
 }

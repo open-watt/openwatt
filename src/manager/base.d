@@ -176,7 +176,7 @@ struct Property
 
 struct SyncState
 {
-    BaseObject channel;
+    Object channel;     // opaque owner identity (a SyncPeer, the kernel mirror, ...); compared by `is`, never dereferenced
     ulong props_dirty;
     ushort next;
 }
@@ -292,7 +292,8 @@ nothrow @nogc:
 
     void destroy()
     {
-        import manager.collection : item_table;
+        import manager.collection : item_table, signal_object_lifecycle, ObjectLifecycleEvent;
+        signal_object_lifecycle(this, ObjectLifecycleEvent.destroyed);
         item_table(_typeInfo.collection_id).defer_free(this);
     }
 
@@ -471,6 +472,41 @@ protected:
             ss.props_dirty |= mask;
             slot = ss.next;
         }
+    }
+
+    // Property-delta subscriber. Attaches a slot to this object's dirty fan-out
+    // chain: _mark_dirty then ORs every property change into the slot's
+    // props_dirty, and the owner drains/clears it at its own cadence. Sync peers
+    // are one kind of owner; the Linux kernel mirror is another. `owner` is an
+    // opaque identity; the caller keeps the returned slot index for drain/detach.
+    public final ushort attach_delta_slot(Object owner) nothrow @nogc
+    {
+        ushort slot = sync_state_alloc(owner);
+        sync_state(slot).next = _sync_slot;
+        _sync_slot = slot;
+        return slot;
+    }
+
+    public final void detach_delta_slot(ushort slot) nothrow @nogc
+    {
+        if (slot == sync_slot_none)
+            return;
+        if (_sync_slot == slot)
+            _sync_slot = sync_state(slot).next;
+        else
+        {
+            for (ushort prev = _sync_slot; prev != sync_slot_none; )
+            {
+                ref ps = sync_state(prev);
+                if (ps.next == slot)
+                {
+                    ps.next = sync_state(slot).next;
+                    break;
+                }
+                prev = ps.next;
+            }
+        }
+        sync_state_free(slot);
     }
 
 package:
@@ -973,7 +1009,7 @@ void register_object_state_handler(StateSignalHandler handler) nothrow @nogc
     _on_object_state ~= handler;
 }
 
-ushort sync_state_alloc(BaseObject channel) nothrow @nogc
+ushort sync_state_alloc(Object channel) nothrow @nogc
 {
     ushort slot;
     if (_free_sync_slots.length > 0)
