@@ -1,8 +1,8 @@
 module protocol.ip.linux_mirror;
 
-version (linux):
+version (KernelMirror):
 
-// Mirror OpenWatt's IP tables (addresses, routes, ARP/neighbours) into the
+// Mirror OpenWatt's IP tables (addresses, routes) into the
 // Linux kernel via rtnetlink -- event-driven, not polled. See
 // docs/LINUX_DATAPLANE.md. OpenWatt is the control plane; the kernel is the
 // data plane. Routes are tagged RTPROT_OPENWATT so we only ever delete what we
@@ -15,8 +15,6 @@ version (linux):
 //     mirror is just another delta subscriber, tracked by slot index. drain()
 //     pushes the deltas once per tick (only over tracked objects, only on a
 //     non-zero mask -- not a scan of the collections).
-//   * ARP/neighbours live in the IP stack's internal NeighbourCache, which is
-//     not a BaseObject; it exposes its own event API and we subscribe to it.
 //
 // The handlers are methods of a __gshared instance so &g_mirror.handler is a
 // delegate (the registries want delegates, not free-function pointers). The
@@ -31,9 +29,7 @@ import manager.collection;
 import router.iface;
 
 import protocol.ip.address;
-import protocol.ip.neighbour;
 import protocol.ip.route;
-import protocol.ip.stack;
 
 import driver.linux.ethernet : LinuxRawEthernet;
 import driver.linux.netlink_write;
@@ -41,10 +37,9 @@ import driver.linux.netlink_write;
 nothrow @nogc:
 
 
-void mirror_init(ref IPStack stack)
+void mirror_init()
 {
     register_object_lifecycle_handler(&g_mirror.on_object_lifecycle);
-    stack.neighbour_v4_cache.subscribe(&g_mirror.on_neighbour_event);
 }
 
 void mirror_drain()
@@ -165,22 +160,6 @@ nothrow @nogc:
         }
     }
 
-    void on_neighbour_event(ref const NeighbourEntry!IPAddr e, bool gone)
-    {
-        int idx = kernel_ifindex(e.iface);
-        if (idx == 0)
-            return;
-
-        if (gone)
-            netlink_del_neighbour(idx, e.ip.b);
-        else if (e.link_addr_len >= 6)
-        {
-            ubyte[6] mac;
-            mac[] = e.link_addr[0 .. 6];
-            netlink_add_neighbour(idx, e.ip.b, mac, NUD_REACHABLE, NTF_EXT_LEARNED);
-        }
-    }
-
     void push(Tracked* t)
     {
         if (t.is_route)
@@ -263,6 +242,9 @@ nothrow @nogc:
 
 int kernel_ifindex(const(BaseInterface) iface)
 {
+    // null covers both an unset property and a destroyed ObjectRef target
+    if (iface is null)
+        return 0;
     if (auto e = cast(const(LinuxRawEthernet))iface)
         return netlink_ifindex(e.adapter);
     // A platform backend (e.g. the kernel-bridge offload) may have bound this

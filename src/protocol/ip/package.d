@@ -948,10 +948,10 @@ nothrow @nogc:
         g_app.console.register_collection!TCPServer();
         g_app.console.register_collection!UDPStream();
 
-        version (linux)
+        version (KernelMirror)
         {
             import protocol.ip.linux_mirror : mirror_init;
-            mirror_init(_stack);
+            mirror_init();
         }
 
         version (UseInternalIPStack)
@@ -1127,7 +1127,7 @@ nothrow @nogc:
         version (UseInternalIPStack)
             _stack.update();
 
-        version (linux)
+        version (KernelMirror)
         {
             import protocol.ip.linux_mirror : mirror_drain;
             mirror_drain();

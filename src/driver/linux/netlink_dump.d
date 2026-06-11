@@ -1,6 +1,6 @@
 module driver.linux.netlink_dump;
 
-version (linux):
+version (KernelMirror):
 
 // Read-side netlink DUMP queries (RTM_GET* + NLM_F_DUMP) -> an in-memory model of
 // the kernel's live L2/L3 network state, rendered by /system/linux/print in

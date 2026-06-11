@@ -1,6 +1,6 @@
 module driver.linux.bridge;
 
-version (linux):
+version (KernelMirror):
 
 // Kernel-bridge offload (docs/LINUX_DATAPLANE.md Phase 3). When an OpenWatt
 // BridgeInterface has >=2 kernel-netdev members (LinuxRawEthernet), build a real
@@ -26,16 +26,19 @@ import urt.result;
 import urt.time;
 
 import manager.base;
+import manager.features;
 import manager.plugin;
 
 import router.iface;
 import router.iface.bridge;
+import router.iface.ethernet : EthernetInterface;
 
 import driver.linux.ethernet : LinuxRawEthernet;
 import driver.linux.netlink_write;
 import driver.linux.raw;
 
-import protocol.ip.linux_mirror : mirror_refresh_interface;
+static if (has_ip)
+    import protocol.ip.linux_mirror : mirror_refresh_interface;
 
 nothrow @nogc:
 
@@ -141,6 +144,14 @@ private:
         {
             if (LinuxRawEthernet eth = cast(LinuxRawEthernet)member)
                 enslave(o, eth);
+            else if (cast(EthernetInterface)member)
+            {
+                // the kernel segment can't forward to a software ethernet member;
+                // fall back to full software bridging
+                log_info(ModuleName, "bridge '", bridge.name[], "': software ethernet member '", member.name[], "' added; tearing down kernel offload");
+                disengage(bridge);
+                return;
+            }
             // a netdev or new software member can change the promisc requirement
             cpu_set_promisc(o);
             return;
@@ -168,11 +179,21 @@ private:
             return;
         }
 
-        // qualify: >=2 netdev members
+        // qualify: >=2 netdev members, and no software ethernet members -- the
+        // kernel segment can't forward to those (the CPU port only dispatches
+        // locally), so offloading would silently split the bridge
         size_t netdev_members = 0;
         foreach (i; 0 .. bridge.member_count)
-            if (cast(LinuxRawEthernet)bridge.member_iface(i))
+        {
+            BaseInterface m = bridge.member_iface(i);
+            if (cast(LinuxRawEthernet)m)
                 ++netdev_members;
+            else if (cast(EthernetInterface)m)
+            {
+                log_info(ModuleName, "bridge '", bridge.name[], "': software ethernet member '", m.name[], "' prevents kernel offload");
+                return;
+            }
+        }
         if (netdev_members < 2)
             return;
 
@@ -223,7 +244,8 @@ private:
         // The bridge now owns a kernel netdev; let the IP mirror place its IP/routes
         // on br-<name> (they exist already and won't otherwise re-trigger a push).
         bridge.set_kernel_ifindex(br_ifindex);
-        mirror_refresh_interface(bridge);
+        static if (has_ip)
+            mirror_refresh_interface(bridge);
 
         log_info(ModuleName, "bridge '", bridge.name[], "' offloaded to kernel ", brname, " (", netdev_members, " ports)");
     }
@@ -277,7 +299,13 @@ private:
             log_error(ModuleName, "can't resolve ifindex for member ", eth.adapter, "; not enslaved");
             return;
         }
-        netlink_set_master(mi, o.br_ifindex);
+        int r = netlink_set_master(mi, o.br_ifindex);
+        if (r != 0)
+        {
+            // RX-idling a member the kernel isn't switching would blackhole it
+            log_error(ModuleName, "failed to enslave ", eth.adapter, " (", r, "); member stays software-switched");
+            return;
+        }
         netlink_set_link_up(mi, true);
         eth.set_enslaved(true);
         o.bridge.set_member_offloaded(eth, true);

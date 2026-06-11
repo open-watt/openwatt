@@ -129,7 +129,10 @@ bool query_phy_capabilities(uint ifindex, out PhyCapabilities caps)
 
     ushort family_id;
     if (!resolve_family(fd, "nl80211\0", family_id))
+    {
+        log_warning("os.nl80211", "failed to resolve the nl80211 genl family");
         return false;
+    }
 
     return get_wiphy(fd, family_id, ifindex, caps);
 }
@@ -177,7 +180,9 @@ bool resolve_family(int fd, const(char)[] name, out ushort family_id)
         return false;
     }
 
-    ubyte[1024] reply = void;
+    // The GETFAMILY reply carries the family's full op and mcast-group lists
+    // (~2.5KB for nl80211) and a short recv truncates the datagram.
+    ubyte[8192] reply = void;
     ptrdiff_t n = recv(fd, reply.ptr, reply.length, 0);
     if (n < 0)
     {
@@ -265,7 +270,7 @@ bool get_wiphy(int fd, ushort family_id, uint ifindex, out PhyCapabilities caps)
     bool done = false;
     while (!done)
     {
-        ubyte[16384] reply = void;
+        ubyte[16_384] reply = void;
         ptrdiff_t n = recv(fd, reply.ptr, reply.length, 0);
         if (n < 0)
         {
@@ -281,7 +286,10 @@ bool get_wiphy(int fd, ushort family_id, uint ifindex, out PhyCapabilities caps)
             const nlmsghdr* mh = cast(const nlmsghdr*)data.ptr;
             uint len = mh.nlmsg_len;
             if (len < nlmsghdr.sizeof || len > data.length)
+            {
+                log_warning("os.nl80211", "get-wiphy reply truncated (len=", len, " avail=", data.length, ")");
                 return false;
+            }
 
             if (mh.nlmsg_type == NLMSG_DONE)
             {
@@ -289,7 +297,11 @@ bool get_wiphy(int fd, ushort family_id, uint ifindex, out PhyCapabilities caps)
                 break;
             }
             if (mh.nlmsg_type == NLMSG_ERROR)
+            {
+                int err = len >= nlmsghdr.sizeof + int.sizeof ? *cast(const(int)*)(data.ptr + nlmsghdr.sizeof) : 0;
+                log_warning("os.nl80211", "get-wiphy rejected by kernel (err=", err, ")");
                 return false;
+            }
 
             // genl message: nlmsghdr | genlmsghdr | nl80211 attributes
             if (len >= nlmsghdr.sizeof + genlmsghdr.sizeof)

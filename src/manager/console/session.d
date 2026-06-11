@@ -65,13 +65,18 @@ struct TerminalChannel
 class Session
 {
     import router.stream;
-    import manager.base : ObjectFlags;
+    import manager.base : ObjectFlags, StateSignal, ActiveObject;
 nothrow @nogc:
 
     this(ref Console console, Stream stream = null)
     {
         _console = &console;
         _stream = stream;
+        if (stream)
+        {
+            stream.subscribe(&stream_state_change);
+            _stream_subscribed = true;
+        }
         _prompt_suffix = "> ";
         _cur_scope = console.root;
         static if (has_all)
@@ -102,6 +107,11 @@ nothrow @nogc:
             allocator.freeT(_current_command);
             _current_command = null;
         }
+        if (_stream_subscribed)
+        {
+            _stream.unsubscribe(&stream_state_change);
+            _stream_subscribed = false;
+        }
         if (_stream && (_stream.flags & ObjectFlags.dynamic))
             _stream.destroy();
         _stream = null;
@@ -110,7 +120,6 @@ nothrow @nogc:
 
     void update()
     {
-        // Read from stream if present
         if (_stream)
         {
             enum BufLen = 512;
@@ -717,6 +726,7 @@ private:
     bool _suggestion_pending = false;
     bool _closing = false;
     bool _nvt_input = false;
+    bool _stream_subscribed = false;
 
     const(char)[] _prompt_suffix;
     MutableString!0 _prompt;
@@ -729,6 +739,16 @@ private:
     uint _history_cursor = 0;
     MutableString!0 _history_head;
     File _history_file;
+
+    void stream_state_change(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.online)
+            return;
+        _stream.unsubscribe(&stream_state_change);
+        _stream_subscribed = false;
+        _stream = null;
+        close_session();
+    }
 
     void poll_terminal_events()
     {

@@ -57,10 +57,6 @@ nothrow @nogc:
     SendRequestDg send_request;
     DrainDg       drain;
 
-    alias EventHandler = void delegate(ref const NeighbourEntry!IP entry, bool gone) nothrow @nogc;
-    void subscribe(EventHandler h) { _handlers ~= h; }
-    void unsubscribe(EventHandler h) { _handlers.removeFirstSwapLast(h); }
-
     // Insert or refresh an entry from observed traffic (ARP reply, ND NA, gratuitous, etc).
     // If the entry was incomplete and had a queued packet, drain it.
     void learn(IP ip, BaseInterface iface, const(ubyte)[] link_addr)
@@ -74,17 +70,12 @@ nothrow @nogc:
         {
             if (e.iface is iface && e.ip == ip)
             {
-                bool changed = e.state != NeighbourState.reachable
-                    || e.link_addr_len != link_addr.length
-                    || e.link_addr[0 .. e.link_addr_len] != link_addr[];
                 e.link_addr[0 .. link_addr.length] = link_addr[];
                 e.link_addr_len  = cast(ubyte)link_addr.length;
                 e.state          = NeighbourState.reachable;
                 e.last_confirmed = now;
                 e.retry_count    = 0;
                 drain_pending(e);
-                if (changed)
-                    fire(e, false);
                 return;
             }
         }
@@ -97,7 +88,6 @@ nothrow @nogc:
         n.state                    = NeighbourState.reachable;
         n.last_confirmed           = now;
         _entries ~= n;
-        fire(_entries[$ - 1], false);
     }
 
     NeighbourEntry!IP* find(IP ip, BaseInterface iface)
@@ -188,7 +178,6 @@ nothrow @nogc:
                     {
                         e.state          = NeighbourState.failed;
                         e.last_confirmed = now;
-                        fire(e, true);
                         break;
                     }
                     ++e.retry_count;
@@ -264,12 +253,4 @@ private:
 
     Array!(NeighbourEntry!IP) _entries;
     ulong _pending_overflow;        // diagnostic: total packets dropped by single-slot pending queue
-
-    Array!EventHandler _handlers;
-
-    void fire(ref const NeighbourEntry!IP e, bool gone)
-    {
-        foreach (h; _handlers[])
-            h(e, gone);
-    }
 }
