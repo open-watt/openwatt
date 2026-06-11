@@ -1,7 +1,6 @@
 module protocol.ble.binding;
 
 import urt.array;
-import urt.endian;
 import urt.log;
 import urt.meta : AliasSeq;
 import urt.string;
@@ -18,10 +17,7 @@ import manager.profile;
 import manager.sampler;
 
 import protocol.ble.client;
-import protocol.ble.iface;
 
-import router.iface;
-import router.iface.packet;
 
 nothrow @nogc:
 
@@ -50,12 +46,10 @@ nothrow @nogc:
         if (_subscribed)
         {
             _client.unsubscribe(&state_change);
-            _iface.unsubscribe(&state_change);
-            _iface.unsubscribe(&packet_handler);
+            clear_subscriptions();
             _subscribed = false;
         }
         _client = value;
-        _iface = null;
         restart();
     }
 
@@ -93,19 +87,11 @@ nothrow @nogc:
         if (!c || !c.running)
             return CompletionStatus.continue_;
 
-        BLEInterface iface = cast(BLEInterface)c.iface;
-        if (!iface)
-        {
-            log.warning("client '", c.name, "' has no BLE interface");
-            return CompletionStatus.error;
-        }
-        _iface = iface;
-
         c.subscribe(&state_change);
-        iface.subscribe(&state_change);
-        iface.subscribe(&packet_handler, PacketFilter(PacketType.unknown, PacketDirection.incoming));
+        c.on_discovery_done(&resolve_handles);
         _subscribed = true;
 
+        resolve_handles();
         return CompletionStatus.complete;
     }
 
@@ -114,20 +100,12 @@ nothrow @nogc:
         if (_subscribed)
         {
             _client.unsubscribe(&state_change);
-            _iface.unsubscribe(&state_change);
-            _iface.unsubscribe(&packet_handler);
+            clear_subscriptions();
             _subscribed = false;
         }
-        _iface = null;
         _handles_resolved = false;
         elements.clear();
         return super.shutdown();
-    }
-
-    override void update()
-    {
-        if (!_handles_resolved)
-            try_resolve_handles();
     }
 
 protected:
@@ -164,11 +142,11 @@ private:
     String _profile_name;
     String _model_name;
 
-    BLEInterface _iface;
     bool _subscribed;
     bool _handles_resolved;
 
     Array!SampleElement elements;
+    Array!ushort _subscribed_handles;
 
     struct SampleElement
     {
@@ -186,13 +164,24 @@ private:
             restart();
     }
 
-    void try_resolve_handles()
+    void clear_subscriptions()
     {
-        if (!_client)
+        if (BLEClient c = _client.get)
+        {
+            c.clear_discovery_done(&resolve_handles);
+            foreach (h; _subscribed_handles[])
+                c.clear_notify(h);
+        }
+        _subscribed_handles.clear();
+    }
+
+    void resolve_handles()
+    {
+        if (_handles_resolved)
             return;
 
-        auto session = _iface.find_session_by_peer(_client.peer);
-        if (session is null || session.num_chars == 0)
+        BLEClient c = _client.get;
+        if (c is null || !c.discovery_complete())
             return;
 
         bool all_resolved = true;
@@ -201,48 +190,51 @@ private:
             if (e.handle != ushort.max)
                 continue;
 
-            foreach (ref gc; session.chars[0 .. session.num_chars])
+            ushort h = c.find_characteristic(e.service_uuid, e.char_uuid);
+            if (h == 0)
             {
-                if (e.service_uuid == gc.service_uuid && e.char_uuid == gc.char_uuid)
+                all_resolved = false;
+                continue;
+            }
+            e.handle = h;
+        }
+
+        if (!all_resolved)
+            return;
+
+        foreach (ref e; elements)
+        {
+            bool already = false;
+            foreach (h; _subscribed_handles[])
+            {
+                if (h == e.handle)
                 {
-                    e.handle = gc.handle;
+                    already = true;
                     break;
                 }
             }
-
-            if (e.handle == ushort.max)
-                all_resolved = false;
+            if (!already)
+            {
+                c.on_notify(e.handle, &on_value);
+                _subscribed_handles ~= e.handle;
+            }
         }
-        _handles_resolved = all_resolved;
+
+        _handles_resolved = true;
     }
 
-    void packet_handler(ref const Packet p, BaseInterface i, PacketDirection dir, void* u)
+    void on_value(ushort handle, const(ubyte)[] value)
     {
-        if (p.type != PacketType.ble_att)
-            return;
-
-        ref att = p.hdr!BLEATTFrame;
-        BLEClient c = _client.get;
-        if (!c || att.src != c.peer)
-            return;
-
-        if (att.opcode != ATTOpcode.notification && att.opcode != ATTOpcode.indication)
-            return;
-
-        const(ubyte)[] payload = cast(const(ubyte)[])p.data;
-        if (payload.length < 2)
-            return;
-
-        ushort handle = payload.ptr[0 .. 2].littleEndianToNative!ushort;
-        const(ubyte)[] value = payload.length > 2 ? payload[2 .. $] : null;
-
         foreach (ref e; elements)
         {
             if (e.handle != handle)
                 continue;
             if (value.length < e.offset + e.desc.data_length)
                 continue;
-            e.element.value(sample_value(value.ptr + e.offset, e.desc), p.creation_time);
+            // HACK: Element.value defaults timestamp to getSysTime(); packet creation_time
+            // no longer accessible here (BLEClient delivers value-only callbacks).
+            // TODO: make the packet creation time available here?!
+            e.element.value(sample_value(value.ptr + e.offset, e.desc));
         }
     }
 }

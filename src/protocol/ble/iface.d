@@ -48,6 +48,7 @@ enum BLELLType : ubyte
     // internal connection management (not over-the-air)
     connect_rsp     = 0x20,  // connection established
     disconnect_ind  = 0x21,  // connection lost/closed
+    discovery_done  = 0x22,  // GATT discovery finished
 }
 
 enum ATTOpcode : ubyte
@@ -197,6 +198,7 @@ protected:
             ble_set_read_callback(_ble, &read_dispatch);
             ble_set_write_callback(_ble, &write_dispatch);
             ble_set_notify_callback(_ble, &notify_dispatch);
+            ble_set_wake_callback(_ble, &wake_dispatch);
 
             _active_radios[0] = this;
 
@@ -244,14 +246,6 @@ protected:
     override void update()
     {
         super.update();
-
-        static if (num_ble > 0)
-        {
-            if (_ble.is_open)
-                ble_poll(_ble);
-        }
-
-        cleanup_dead_sessions();
         _queue.timeout_stale(getTime());
         send_queued_messages();
     }
@@ -754,6 +748,23 @@ package:
                 if (auto iface = _active_radios[ble.port])
                     iface.on_notification(conn, handle, data);
         }
+
+        static void wake_dispatch() nothrow @nogc
+        {
+            import protocol.ble : BLEModule;
+            get_module!BLEModule.request_service();
+        }
+    }
+
+    void service()
+    {
+        static if (num_ble > 0)
+        {
+            if (_ble.is_open)
+                ble_poll(_ble);
+        }
+        cleanup_dead_sessions();
+        send_queued_messages();
     }
 
     void on_scan_report(ref const BLEAdvReport report)
@@ -863,6 +874,13 @@ package:
                     ble_gatt_subscribe(_ble, conn, gc.handle, true);
             }
         }
+
+        Packet p;
+        ref ll = p.init!BLELLFrame(null);
+        ll.src = mac;
+        ll.dst = session.client;
+        ll.pdu_type = BLELLType.discovery_done;
+        on_incoming(p);
     }
 
     void on_read_complete(BLEConn conn, ushort handle, const(ubyte)[] data, BLEError error)

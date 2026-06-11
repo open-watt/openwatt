@@ -59,6 +59,13 @@ nothrow @nogc:
         expire_devices();
     }
 
+    void request_service()
+    {
+        import urt.atomic : cas;
+        if (cas(&_service_pending, 0u, 1u))
+            g_app.post_event(&service_radios, getTime(), EventPriority.bulk);
+    }
+
     // called from BLEInterface.on_incoming when an advert packet is dispatched
     void on_advert(MACAddress addr, short rssi, bool connectable, bool is_scan_response, const(ubyte)[] payload)
     {
@@ -106,7 +113,7 @@ nothrow @nogc:
             session.write_line("client not connected");
             return;
         }
-        client.read_characteristic(handle);
+        client.read(handle);
         session.write_line("read submitted");
     }
 
@@ -142,6 +149,21 @@ nothrow @nogc:
     }
 
 private:
+
+    shared uint _service_pending;
+
+    void service_radios(MonoTime)
+    {
+        import urt.atomic : atomicStore;
+        import urt.driver.ble : num_ble;
+        atomicStore(_service_pending, 0u);
+        static if (num_ble > 0)
+        {
+            foreach (iface; BLEInterface._active_radios)
+                if (iface !is null)
+                    iface.service();
+        }
+    }
 
     void expire_devices()
     {
