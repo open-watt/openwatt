@@ -118,9 +118,6 @@ nothrow @nogc:
     final const(ubyte)[] captured() const pure
         => _dynamic[];
 
-    override const(char)[] remote_name()
-        => "memory";
-
     override ptrdiff_t read(void[] buffer)
     {
         ubyte[] dst = cast(ubyte[])buffer;

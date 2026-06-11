@@ -126,11 +126,6 @@ nothrow @nogc:
 
     // Stream API
 
-    override const(char)[] remote_name()
-    {
-        return _inner ? _inner.remote_name() : null;
-    }
-
     // Read clean data from the stream, stripping IAC sequences.
     // IAC commands update the TerminalChannel and set pending events.
     override ptrdiff_t read(void[] buffer)

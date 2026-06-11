@@ -626,7 +626,7 @@ private:
         return r;
     }
 
-    void new_client(Stream client, void* user_data)
+    void new_client(Stream client, ref const InetAddress remote, void* user_data)
     {
         _clients ~= Client(client, last_activity: getTime());
     }

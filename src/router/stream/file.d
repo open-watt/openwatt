@@ -74,17 +74,6 @@ nothrow @nogc:
 
     // API
 
-    override const(char)[] remote_name()
-    {
-        if (_rx_path.length && _tx_path.length)
-            return tconcat(_tx_path[], "<>", _rx_path[]);
-        if (_tx_path.length)
-            return _tx_path[];
-        if (_rx_path.length)
-            return _rx_path[];
-        return "file";
-    }
-
     override ptrdiff_t read(void[] buffer)
     {
         if (!_rx.is_open)

@@ -743,7 +743,7 @@ private:
         if (request.header("Upgrade") == "websocket")
         {
             version (DebugWebSocket)
-                log.trace("upgrade request from ", stream.remote_name,
+                log.trace("upgrade request on ", stream.name,
                           " uri=", request.request_target[], " version=", request.header("Sec-WebSocket-Version")[],
                           " protocol=", request.header("Sec-WebSocket-Protocol")[],
                           " extensions=", request.header("Sec-WebSocket-Extensions")[]);

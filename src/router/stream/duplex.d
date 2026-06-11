@@ -60,17 +60,6 @@ nothrow @nogc:
 
     // API
 
-    override const(char)[] remote_name()
-    {
-        if (_tx && _rx)
-            return tconcat(_tx.name, "<>", _rx.name);
-        if (_tx)
-            return _tx.name[];
-        if (_rx)
-            return _rx.name[];
-        return "duplex";
-    }
-
     override ptrdiff_t read(void[] buffer)
     {
         if (!_rx || !_rx.running)

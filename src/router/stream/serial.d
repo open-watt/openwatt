@@ -602,11 +602,6 @@ nothrow @nogc:
         return bytes_written;
     }
 
-    override const(char)[] remote_name()
-    {
-        return _device[];
-    }
-
     override ptrdiff_t pending()
     {
         version (Embedded)

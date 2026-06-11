@@ -108,9 +108,6 @@ protected:
         return CompletionStatus.complete;
     }
 
-    override const(char)[] remote_name()
-        => _remote_host[];
-
     override ptrdiff_t read(void[] buffer) nothrow @nogc
     {
         size_t bytes;

@@ -46,9 +46,6 @@ nothrow @nogc:
     override TerminalChannel* terminal_channel()
         => &_terminal;
 
-    override const(char)[] remote_name()
-        => "console";
-
     override ptrdiff_t read(void[] buffer)
     {
         version (Windows)

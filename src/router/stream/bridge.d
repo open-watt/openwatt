@@ -39,23 +39,9 @@ nothrow @nogc:
         m_streams.reserve(value.length);
         foreach (s; value)
             m_streams.emplaceBack(s);
-
-        m_remoteName.reserve(60);
-        m_remoteName = "bridge"; // reset remote name
-        m_remoteName ~= '[';
-        foreach (i, s; value)
-        {
-            if (i > 0)
-                m_remoteName ~= '|';
-            m_remoteName ~= s.remote_name();
-        }
-        m_remoteName ~= ']';
     }
 
     // API...
-
-    override const(char)[] remote_name()
-        => m_remoteName[];
 
     override ptrdiff_t read(void[] buffer)
     {
@@ -168,7 +154,6 @@ protected:
 private:
     Array!(ObjectRef!Stream) m_streams;
     Array!ubyte m_inputBuffer;
-    MutableString!0 m_remoteName;
 }
 
 

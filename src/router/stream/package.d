@@ -73,9 +73,6 @@ nothrow @nogc:
 
     ~this()
     {
-        // TODO: should we check if it's already disconnected before calling this?
-        disconnect();
-
         set_log_file(null);
     }
 
@@ -175,15 +172,6 @@ nothrow @nogc:
         _status.rx_rate = 0;
         mark_set!(typeof(this), [ "link-status", "last-status-change-time", "link-downs", "tx-rate", "rx-rate" ])();
     }
-
-    bool connect()
-        => true;
-
-    void disconnect()
-    {
-    }
-
-    abstract const(char)[] remote_name();
 
     final void rx_handler(RecvHandler handler)
     {

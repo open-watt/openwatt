@@ -292,9 +292,9 @@ nothrow @nogc:
         if (_handshake_state == HandshakeState.completed)
         {
             if (_selected_cert)
-                log.info("HTTPS session from ", _stream.remote_name, " cert='", _selected_cert.name, "'");
+                log.info("HTTPS session on ", _stream.name, " cert='", _selected_cert.name, "'");
             else
-                log.info("connected to ", _stream.remote_name);
+                log.info("connected on ", _stream.name);
             return CompletionStatus.complete;
         }
         if (_handshake_state == HandshakeState.failed)
@@ -474,14 +474,6 @@ nothrow @nogc:
             }
         }
     }
-
-    override bool connect()
-        => false;
-
-    override void disconnect() {}
-
-    override const(char)[] remote_name()
-        => _stream ? _stream.remote_name : null;
 
     final override ptrdiff_t read(void[] buffer)
     {
