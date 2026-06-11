@@ -33,20 +33,10 @@ nothrow @nogc:
 
     Map!(MACAddress, BLEAdvEntry*) devices;
 
-    override void pre_init()
-    {
-        import urt.driver.ble : num_ble;
-        static if (num_ble > 0)
-        {
-            import urt.mem.temp : tconcat;
-            foreach (i; 0 .. num_ble)
-                Collection!BLEInterface().create(tconcat("ble", i + 1));
-        }
-    }
-
     override void init()
     {
-        g_app.console.register_collection!BLEInterface();
+        register_frame_handler(PacketType.ble, &on_ble_frame);
+
         g_app.console.register_collection!BLEClient();
         g_app.console.register_collection!BLEClientBinding();
         g_app.console.register_command!print_devices("/protocol/ble/device", this, "print");
@@ -66,7 +56,41 @@ nothrow @nogc:
             g_app.post_event(&service_radios, getTime(), EventPriority.bulk);
     }
 
-    // called from BLEInterface.on_incoming when an advert packet is dispatched
+    void on_ble_frame(ref Packet p, BaseInterface iface)
+    {
+        ref f = p.hdr!BLEFrame;
+
+        if (f.kind == BLEFrameKind.advert)
+        {
+            switch (f.code)
+            {
+                case BLEAdvPDU.adv_ind:
+                case BLEAdvPDU.adv_nonconn_ind:
+                case BLEAdvPDU.adv_scan_ind:
+                case BLEAdvPDU.adv_direct_ind:
+                case BLEAdvPDU.scan_rsp:
+                    on_advert(f.src, f.rssi,
+                        f.code == BLEAdvPDU.adv_ind,
+                        f.code == BLEAdvPDU.scan_rsp,
+                        cast(const(ubyte)[])p.data);
+                    break;
+                default:
+                    // connect_ind targets an advertisement source, not a client
+                    break;
+            }
+            return;
+        }
+
+        foreach (c; Collection!BLEClient().values)
+        {
+            if (c.local_mac == f.dst)
+            {
+                c.incoming_frame(p, iface);
+                return;
+            }
+        }
+    }
+
     void on_advert(MACAddress addr, short rssi, bool connectable, bool is_scan_response, const(ubyte)[] payload)
     {
         MonoTime now = getTime();
@@ -155,14 +179,9 @@ private:
     void service_radios(MonoTime)
     {
         import urt.atomic : atomicStore;
-        import urt.driver.ble : num_ble;
         atomicStore(_service_pending, 0u);
-        static if (num_ble > 0)
-        {
-            foreach (iface; BLEInterface._active_radios)
-                if (iface !is null)
-                    iface.service();
-        }
+        foreach (radio; Collection!BLEInterface().values)
+            radio.service();
     }
 
     void expire_devices()
