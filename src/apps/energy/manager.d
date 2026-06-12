@@ -1,16 +1,12 @@
 module apps.energy.manager;
 
-import urt.algorithm;
-import urt.array;
 import urt.map;
 import urt.mem;
 import urt.si.quantity;
 import urt.string;
-import urt.util;
 
-import apps.energy;
-import apps.energy.appliance;
 import apps.energy.circuit;
+import apps.energy.island;
 import apps.energy.meter;
 
 import manager.component;
@@ -23,7 +19,16 @@ nothrow @nogc:
     Circuit* main;
 
     Map!(const(char)[], Circuit*) circuits;
-    Map!(const(char)[], Appliance) appliances;
+
+    // Threshold (V AC) above which a meter's voltage reading counts as "circuit live".
+    // Tunable per region; the configured value lives on the energy device's config
+    // component and is read from there as Phase 0.6 wires that up.
+    float voltage_threshold = 100.0f;
+
+    // The set of currently-existing islands. Normally length 1 (one site-wide island);
+    // grows transiently when the grid drops and the tree fragments into backup-rooted
+    // subtrees, contracts back when the grid returns.
+    Archipelago archipelago;
 
     inout(Circuit)* find_circuit(const(char)[] name) pure inout
     {
@@ -62,19 +67,6 @@ nothrow @nogc:
         return circuit;
     }
 
-    Appliance add_appliance(Appliance appliance, Circuit* circuit)
-    {
-        if (circuit)
-        {
-            appliance.circuit = circuit;
-            circuit.appliances ~= appliance;
-        }
-
-        appliances.insert(appliance.id[], appliance);
-
-        return appliance;
-    }
-
     Volts get_mains_voltage(int phase = 0) pure
     {
         return cast(Volts)main.meter_data.voltage[phase];
@@ -86,63 +78,7 @@ nothrow @nogc:
             return;
 
         main.update();
-
-        Array!Appliance wantPower;
-        Watts excessSolar = main.meter_data.active[0] < Watts(0) ? cast(Watts)-main.meter_data.active[0] : Watts(0);
-        foreach (a; appliances.values)
-        {
-            if (a.canControl)
-            {
-                Watts power = a.currentConsumption;
-                if (power > Watts(0))
-                    excessSolar += power;
-                if (a.wantsPower || power > Watts(0))
-                    wantPower ~= a;
-            }
-        }
-
-        wantPower.sort!((Appliance x, Appliance y) => compare(x.priority, y.priority));
-
-        // HACK: TO CHARGE MY CAR FOR THE AIRPORT!
-//        excessSolar += Watts(4000);
-
-        // excessSolar is the total excess solar we are able to distribute
-        // some may already be consumed by implicit loads; like a solar battery
-        foreach (a; wantPower)
-        {
-            if (excessSolar <= Watts(0))
-                break;
-
-            Watts wants = a.wantsPower();
-            Watts consumption = a.currentConsumption;
-
-            ControlCapability controlCap = a.hasControl();
-            if (controlCap & ControlCapability.Linear)
-            {
-                // there is a problem where the implicit inverter loses to a downward spiral where chargers creep upwards
-                // HACK: fix it with a scaling factor...
-                Watts minimum;
-                if (!a.minPowerLimit(minimum) || excessSolar >= minimum)
-                    a.offerPower(min(wants, excessSolar * 0.9));
-
-                // TODO: if we fall below the minimum for some period, we should probably turn the device off...
-                //...
-
-            }
-            else if (controlCap & ControlCapability.OnOff)
-            {
-                // TODO: if there is more excess than the device generally consumes, we can turn it on
-                //...
-
-                // TODO: implement a toggle frequency so we don't damage relays!
-            }
-
-            excessSolar -= consumption;
-        }
-
-        // update the appliances, this might commit the state changes from above
-        foreach (a; appliances.values)
-            a.update();
+        main.update_liveness(voltage_threshold);
+        update_archipelago(archipelago, main);
     }
 }
-

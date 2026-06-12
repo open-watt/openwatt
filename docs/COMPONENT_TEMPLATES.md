@@ -15,13 +15,15 @@ Quick reference for standard component templates and their expected elements.
 | `Inverter` | Solar/battery/hybrid inverter | - |
 | `EVSE` | EV charger | `state` |
 | `Vehicle` | Connected vehicle | - |
-| `ChargeControl` | Charge controller | `target_current` |
 | `HVAC` | Climate control system | - |
+| `WaterHeater` | Hot water tank | `temperature` |
 | `Switch` | On/off control | `switch` |
 | `Shutter` | Window/door shutter control | `position` |
 | `ContactSensor` | Contact/door sensor | `open` or `alarm` |
 | `Network` | Network connectivity | - |
 | `Configuration` | Device settings | varies |
+| **Capability primitive (energy app contract)** |||
+| `PowerControl` | Unified actuator surface | `kind`, `setpoint` |
 
 ---
 
@@ -226,6 +228,13 @@ Battery (recursive - can represent whole system, individual pack, or sub-pack).
 - `full_capacity: Ah` - Full capacity
 - `cycle_count: count` - Charge cycles
 
+### Energy-management setpoints (optional, writable)
+- `target_state: %` - SOC target the BMS/inverter should aim for; the energy app
+  may shift this throughout the day (high during solar surplus, lower as overnight
+  reserve adjusts)
+- `min_state: %` - SOC floor below which the BMS must not discharge regardless of
+  load demand; protects overnight reserve
+
 ### Limits
 - `max_charge_current: A` - Maximum charge current
 - `max_discharge_current: A` - Maximum discharge current
@@ -354,7 +363,7 @@ Solar/battery/hybrid inverter with optional grid, battery, renewable inputs, and
 ### Sub-components
 - `solar: Solar` - Solar PV input(s)
 - `battery: Battery` - Connected battery system
-- `charge_control: ChargeControl` - Battery charge controller (for managing battery charging)
+- `control: PowerControl` (optional) - Energy-app actuator; for hybrid inverters, typically `kind=continuous`, `direction=bidirectional` for charge/discharge, or `kind=autonomous` when the inverter runs its own self-consumption policy
 - `load: EnergyMeter` - Inverter load
 - `backup: EnergyMeter` - Backup/EPS output
 - `export_meter: EnergyMeter` - External energy meter for self-consumption reference
@@ -398,7 +407,7 @@ Electric Vehicle Supply Equipment (EV charger).
 - `connected: boolean` - Vehicle connected
 
 ### Sub-components
-- `charge_control: ChargeControl` - Charge control sub-component (for controllable chargers)
+- `control: PowerControl` - Energy-app actuator (typically `kind=continuous, unit=A, min=6, max=<rated>, step=1` for J1772 chargers)
 - `vehicle: Vehicle` - Connected vehicle information (if EVSE can communicate with vehicle)
 - `config: Configuration` - EVSE configuration (mode, limits, etc.)
 
@@ -416,23 +425,6 @@ Vehicle information (typically EV connected to charger).
 
 ---
 
-## ChargeControl
-
-Charge controller for managing charging current/power.
-
-### Required
-- `target_current: A` - Target/commanded current (writable)
-
-### Optional
-- `max_current: A` - Maximum charging current/limit
-- `min_current: A` - Minimum charging current
-- `actual_current: A` - Actual charging current
-- `max_power: W` - Maximum charging power
-- `target_power: W` - Target/commanded power (writable)
-- `actual_power: W` - Actual charging power
-
----
-
 ## HVAC
 
 Heating, ventilation, and air conditioning systems.
@@ -442,11 +434,39 @@ Heating, ventilation, and air conditioning systems.
 ### Optional
 - `temperature: °C/°F` - Current ambient temperature
 - `state: enum` - Current active state - off, heating, cooling, etc
-- `target_temperature: °C/°F` - Target/commanded temperature (writable)
+- `target_temperature: °C/°F` (writable) - Target/commanded temperature
+- `min_temperature: °C/°F` (writable) - Comfort floor; the energy app must add heat (or stop cooling) below this even at the cost of grid import
+- `super_temperature: °C/°F` (writable) - Opportunistic ceiling for pre-cooling/pre-heating when surplus energy is available
 - `humidity: %` - Current relative humidity
-- `target_humidity: %` - Target/commanded humidity (writable)
+- `target_humidity: %` (writable) - Target/commanded humidity
 - `mode: enum` - Operating mode (off, heat, cool, auto, fan_only, dry)
 - `fan_speed: enum/%` - Fan speed (low, medium, high, auto, or 0-100%)
+
+### Sub-components
+- `control: PowerControl` (optional) - Energy-app actuator; typically `kind=discrete` for single-stage units, `kind=staged` for multi-stage
+
+---
+
+## WaterHeater
+
+Hot water tank with thermostat-controlled heating element. Tracked as thermal
+storage by the energy app, which can opportunistically super-heat when surplus
+energy is available and let the tank coast down to a comfort floor otherwise.
+
+### Required
+- `temperature: °C/°F` - Current water temperature
+
+### Optional
+- `state: enum` - Heating/idle/error
+- `target_temperature: °C/°F` (writable) - Normal heating setpoint
+- `min_temperature: °C/°F` (writable) - Comfort floor for hot water availability; below this the energy app must add heat regardless of pressure
+- `super_temperature: °C/°F` (writable) - Opportunistic ceiling for super-heating when surplus energy is available
+- `mode: enum` - Operating mode (e.g. normal, vacation, boost)
+- `volume: L` - Tank capacity (informational; helps planner estimate stored thermal energy)
+
+### Sub-components
+- `meter: EnergyMeter` - Element energy consumption
+- `control: PowerControl` (optional) - Energy-app actuator; typically `kind=discrete` for relay-controlled elements
 
 ---
 
@@ -454,13 +474,31 @@ Heating, ventilation, and air conditioning systems.
 
 On/off control devices.
 
-### Required
-- `switch: boolean/enum` - Switch state (on/off, 0/1)
+`Switch` is itself a control surface: the `switch` element is both the
+observable state and the actuator. The energy app accepts `Switch` directly
+as a discrete control component (implicit `kind=discrete`, `setpoint=switch`).
+There is no need to nest a `PowerControl` under a Switch; instead, optional
+control-metadata elements (the subset that makes sense for a binary actuator)
+can be added directly on the Switch. See [PowerControl](#powercontrol) for the
+full set; the subset applicable to a discrete switch is listed below.
 
-### Optional
+### Required
+- `switch: boolean/enum` - Switch state (on/off, 0/1). Also the setpoint.
+
+### Optional (device-level)
 - `type: enum` - Switch type - light, power, outlet (power outlet), fan, etc
 - `mode: enum` - Switch mode
 - `timer: s` - Timer value
+
+### Optional (energy-app control metadata)
+- `direction: enum` - `consume` (default) / `produce` / `bidirectional`
+- `nameplate_power: W` - Known nominal load when on (for fixed-power appliances)
+- `min_on_time: s` - Minimum duration the switch must remain on after being turned on
+- `min_off_time: s` - Minimum duration it must remain off after being turned off
+- `min_dwell: s` - Minimum time between any two transitions
+- `max_cycles_per_hour: count` - Cap on on-off cycles per hour (relay-protection)
+- `command_latency: s` - Typical command-to-effect lag (informational)
+- `can_disable: bool` - `false` for switches that accept commands but cannot be cleanly turned off (rare; default `true`)
 
 ### Sub-components
 - `meter: EnergyMeter` - Switched circuit energy meter
@@ -545,6 +583,78 @@ Cellular/LTE network configuration (writable settings).
 #### `zigbee: ZigbeeConfig`
 Zigbee network configuration (writable settings).
 - ...
+
+---
+
+## PowerControl
+
+Unified actuator surface for any device whose energy consumption (or
+production) can be observed and optionally directed by an external controller.
+One device may expose multiple `PowerControl` components (e.g. a hybrid inverter
+publishes separate charge and discharge surfaces).
+
+The energy app also accepts a [`Switch`](#switch) component as an implicit
+discrete control surface (kind=discrete, setpoint=switch). A subset of the
+elements documented below - the ones that make sense for a binary actuator -
+can be added directly on the Switch instead of nesting a separate PowerControl
+sub-component.
+
+### Required
+- `kind: enum` - Control type:
+  - `autonomous` - device runs its own policy; no setpoint accepted
+  - `discrete` - on/off (relay, contactor, smart plug)
+  - `continuous` - smoothly adjustable within `[min, max]` at `step` resolution
+  - `staged` - finite ordered set of setpoint values (e.g. multi-tap heater)
+- `setpoint: writable` - The actuator. For `discrete`, a boolean or 0/1 enum.
+  For `continuous`/`staged`, a number in the unit specified by `unit`. Absent
+  on `kind=autonomous`.
+
+### Optional
+- `direction: enum` - `consume` (load), `produce` (source), `bidirectional`. Default: `consume`.
+- `unit: enum` - Setpoint and limit unit:
+  - `A` - amperes (typical for EVSE)
+  - `W` - watts
+  - `percent` - 0-100% of an external reference
+  - `nameplate_fraction` - 0-1 of `max`
+- `min: num` - Minimum non-zero setpoint (in `unit`). Below this the device is effectively off.
+- `max: num` - Maximum allowable setpoint (in `unit`).
+- `step: num` - Resolution of setpoint changes (in `unit`); e.g. 1 A for an EVSE.
+- `measured: alias` - Reference (`@path`) to the element carrying actual current
+  consumption or production, typically a neighbouring `EnergyMeter`'s `power`.
+  Lets the energy app close the loop without per-device knowledge.
+
+### State-change constraints (optional)
+- `min_on_time: s` - Minimum duration the device must remain on after being turned on.
+- `min_off_time: s` - Minimum duration it must remain off after being turned off.
+- `min_dwell: s` - Minimum time between any two setpoint changes.
+- `max_cycles_per_hour: count` - Cap on on-off transitions per hour.
+- `ramp_rate: W/s` or `A/s` - Maximum rate of setpoint change.
+- `command_latency: s` - Typical command-to-effect lag (informational).
+- `can_disable: bool` - `false` for devices that accept setpoint changes but
+  cannot be cleanly turned off (some industrial inverters, always-on
+  controllers). Default: `true`.
+
+### Autonomous control declaration (when `kind=autonomous`)
+- `autonomous_mode: enum` - Identifies the device's autonomous behaviour:
+  - `track_meter` - tracks a referenced energy meter (e.g. meter-watching battery inverter)
+  - `schedule` - runs an internal schedule
+  - `weather` - follows ambient temperature, solar irradiance, etc.
+  - `unknown` - device declares itself autonomous but the policy is opaque
+- `autonomous_reference: alias` - For `track_meter`: the meter element this
+  device watches. Used by the energy app to detect conflicts (two autonomous
+  devices watching the same reference will fight).
+
+### Mapping common cases
+
+| Case | Configuration |
+|------|---------------|
+| Smart plug, no power info | `kind=discrete`, no `max` |
+| Smart plug with nameplate | `kind=discrete`, `unit=W`, `max=<nameplate>` |
+| EVSE, 6-32 A in 1 A steps | `kind=continuous`, `unit=A`, `min=6`, `max=32`, `step=1` |
+| Inverter, % of rated power | `kind=continuous`, `unit=percent`, `min=0`, `max=100`, `step=1` |
+| Hybrid inverter, charge or discharge | two `PowerControl`s, `direction=bidirectional` or split |
+| Meter-watching battery inverter | `kind=autonomous`, `autonomous_mode=track_meter`, `autonomous_reference=@<grid_meter>` |
+| Heat-pump compressor | `kind=discrete`, `min_on_time=600`, `min_off_time=300` |
 
 ---
 
@@ -687,10 +797,15 @@ device-template:
         element-map: error, @error_code
         element-map: connected, @vehicle_connected
         component:
-            id: charge_control
-            template: ChargeControl
-            element-map: max_current, @max_current
-            element-map: target_current, @set_current
+            id: control
+            template: PowerControl
+            element: kind, "continuous"
+            element: direction, "consume"
+            element: unit, "A"
+            element: min, 6
+            element: step, 1
+            element-map: max, @max_current
+            element-map: setpoint, @set_current
         component:
             id: config
             template: Configuration
