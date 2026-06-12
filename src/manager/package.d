@@ -269,7 +269,10 @@ nothrow @nogc:
 
         console.freeze();
 
-        schedule(getTime(), &heartbeat);
+        MonoTime now = getTime();
+        schedule(now, &tick);
+        // this is folded into the high-frequency tick while it exists...
+//        schedule(now + 1.seconds, &heartbeat);
     }
 
     ~this()
@@ -360,6 +363,7 @@ nothrow @nogc:
     {
         assert(type_info.type !in types, "Type already registered!");
         types.insert(type_info.type, RegisteredType(type_info, path));
+        note_heartbeat_collection(type_info);
     }
 
     void register_enum(E)()
@@ -915,26 +919,37 @@ private:
         _timer_handler.removeSwapLast(i);
     }
 
-    void heartbeat(MonoTime scheduled)
+    // legacy 20Hz update poll; slated for removal once its remaining supports migrate off it
+    void tick(MonoTime scheduled)
     {
-        version (Embedded)
+        update();
+
+        if (++_tick_count >= update_rate_hz)
         {
-            if (++_heartbeat_ticks >= update_rate_hz)
+            run_heartbeats(getTime());
+            _tick_count = 0;
+
+            version (Embedded)
             {
-                _heartbeat_ticks = 0;
-                ++_heartbeat_count;
+                ++_tick_seconds;
                 import urt.log : writeInfo;
                 import urt.system : get_cpu_load;
-                writeInfo("hb=", _heartbeat_count, " load=", get_cpu_load(), "%");
+                writeInfo("hb=", _tick_seconds, " load=", get_cpu_load(), "%");
             }
         }
 
-        update();
-        schedule(scheduled + msecs(1000 / update_rate_hz), &heartbeat);
+        schedule(scheduled + msecs(1000 / update_rate_hz), &tick);
     }
 
-    uint _heartbeat_ticks;
-    uint _heartbeat_count;
+    void heartbeat(MonoTime scheduled)
+    {
+        run_heartbeats(getTime());
+        schedule(scheduled + 1.seconds, &heartbeat);
+    }
+
+    uint _tick_count;
+    version (Embedded)
+        uint _tick_seconds;
 }
 
 Element* resolve_global_element(const(char)[] path) nothrow @nogc
