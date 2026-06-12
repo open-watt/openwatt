@@ -81,6 +81,8 @@ void register_modules(Application app)
     {
         version (linux)
         {
+            import driver.linux.fdwatch;
+            register_module!(driver.linux.fdwatch)(app);
             import driver.linux.netlink;
             register_module!(driver.linux.netlink)(app);
             import driver.linux.netlink_write;
@@ -120,6 +122,10 @@ void register_modules(Application app)
     {
         import protocol;
         register_module!(protocol.ble)(app);
+
+        import driver.ble;
+        static if (is(BLEDriverModule))
+            register_module!(driver.ble)(app);
         register_module!(protocol.can)(app);
         register_module!(protocol.dhcp)(app);
         register_module!(protocol.dns)(app);

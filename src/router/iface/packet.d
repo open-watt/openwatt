@@ -21,8 +21,7 @@ enum PacketType : ushort
     modbus,
     can,
     tesla_twc,
-    ble_ll,
-    ble_att,
+    ble,
     count
 }
 static assert(PacketType.count <= 16, "PacketType must fit in 4 bits");
@@ -53,8 +52,7 @@ enum OW_SubType : ushort
     zigbee_nwk          = 0x0031,   // zigbee NWK frame
     zigbee_aps          = 0x0032,   // zigbee APS frame
     tesla_twc           = 0x0040,   // tesla-twc
-    ble_ll              = 0x0050,   // BLE Link Layer PDU
-    ble_att             = 0x0051,   // BLE ATT frame
+    ble                 = 0x0050,   // BLE frame (advert/control/ATT, kind in frame header)
 }
 
 // 802.1p PCP traffic classes
