@@ -9,6 +9,7 @@ import manager.base;
 import manager.collection;
 
 import router.iface;
+import router.iface.ethernet;
 
 nothrow @nogc:
 
@@ -23,7 +24,7 @@ enum VlanTag : ushort
 }
 
 
-class VLANInterface : BaseInterface
+class VLANInterface : EthernetStation
 {
     alias Properties = AliasSeq!(Prop!("interface", iface),
                                  Prop!("vlan", vlan),
@@ -38,7 +39,6 @@ nothrow @nogc:
         super(collection_type_info!VLANInterface, id, flags);
 
         // the super made a mac address, but we don't actually want one...
-        remove_address(mac);
         mac = MACAddress();
     }
 
@@ -85,7 +85,10 @@ nothrow @nogc:
                 return tconcat("interface ", value.name, " of type ", value.type, " does not support vlans");
         }
         _interface = value;
-        mac = _interface.mac;
+        if (auto station = cast(EthernetStation)value)
+            mac = station.mac;
+        else
+            mac = MACAddress();
         mark_set!(typeof(this), "interface")();
         return null;
     }
@@ -123,14 +126,25 @@ protected:
 //        return super.validating();
 //    }
 
-    final override int transmit(ref Packet packet, MessageCallback)
+    final override void medium_tx(ref Packet packet)
     {
-        assert(false, "unreachable - we override forward() instead");
+        debug assert((packet.vlan & 0xFFF) == 0, "packet already has a vlan tag");
+        packet.vlan = (packet.vlan & 0xF000) | (_vlan & 0xFFF);
+
+        if (_interface.forward(packet) < 0)
+            add_tx_drop();
+        else
+            add_tx_frame(packet.data.length);
     }
 
-    // override forward() instead of transmit() to avoid double callback firing
+    // override forward() instead of transmit() for the ethernet path, to pass the
+    // callback through to the parent without double firing; exotic packets route
+    // through the inherited station egress.
     final override int forward(ref Packet packet, MessageCallback callback = null)
     {
+        if (packet.type != PacketType.ethernet)
+            return super.forward(packet, callback);
+
         if (!running)
         {
             if (callback)
@@ -138,8 +152,8 @@ protected:
             return -1;
         }
 
-        assert((packet.vlan & 0xFFF) == 0, "packet already has a vlan tag");
-        packet.vlan = _vlan;
+        debug assert((packet.vlan & 0xFFF) == 0, "packet already has a vlan tag");
+        packet.vlan = (packet.vlan & 0xF000) | (_vlan & 0xFFF);
 
         foreach (ref sub; _subscribers[0 .. _num_subscribers])
         {
@@ -158,7 +172,7 @@ package:
     {
         assert((packet.vlan & 0xFFF) == _vlan, "received packet for wrong vlan!");
         packet.vlan &= 0xF000; // should we clear the p-bits too?
-        dispatch(packet);
+        incoming_packet(packet);
     }
 
 private:

@@ -692,7 +692,7 @@ private:
                     break;
                 }
                 offset += taken;
-                incoming_packet(message, rx_time, frame_info);
+                incoming_frame(message, rx_time, frame_info);
             }
             if (!partial)
                 length = 0;
@@ -914,7 +914,7 @@ private:
         log.info("estimated remote baud rate: ", closest);
     }
 
-    final void incoming_packet(const(void)[] message, MonoTime recvTime, ref ModbusFrameInfo frame_info)
+    final void incoming_frame(const(void)[] message, MonoTime recvTime, ref ModbusFrameInfo frame_info)
     {
         debug assert(running, "Shouldn't receive packets while not running...?");
 
@@ -1011,7 +1011,7 @@ private:
                     hdr.src_address = address;
                     hdr.dst_address = pm.request_from_address;
                     hdr.sequence_number = pm.sequence_number;
-                    dispatch(p);
+                    incoming_packet(p);
                     _queue.complete(matched_tag, MessageState.complete);
                 }
 
@@ -1030,7 +1030,7 @@ private:
                     hdr.src_address = address;
                     hdr.dst_address = pm.request_from_address;
                     hdr.sequence_number = pm.sequence_number;
-                    dispatch(p);
+                    incoming_packet(p);
                     _queue.complete(tag, MessageState.complete);
                 }
                 else
@@ -1066,7 +1066,7 @@ private:
             }
             hdr.sequence_number = seq;
 
-            dispatch(p);
+            incoming_packet(p);
 
             _expect_message_type = type == ModbusFrameType.request ? ModbusFrameType.response : ModbusFrameType.request;
         }

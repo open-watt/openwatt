@@ -9,6 +9,7 @@ import urt.endian;
 import manager.collection;
 
 import router.iface;
+import router.iface.ethernet;
 import router.iface.mac;
 import router.iface.packet;
 
@@ -49,7 +50,7 @@ static assert(ArpV4Packet.sizeof == 28);
 
 // Send an ARP who-has request for `target` out `iface`.
 // Source IP is the first IPAddress we own on `iface`; if none, sent as 0.0.0.0 (probe-style).
-void send_arp_request(IPAddr target, BaseInterface iface)
+void send_arp_request(IPAddr target, EthernetStation iface)
 {
     IPAddr our_ip;
     foreach (a; Collection!IPAddress().values)
@@ -80,7 +81,7 @@ void send_arp_request(IPAddr target, BaseInterface iface)
 
 
 // Parse incoming ARP frame, learn from observed traffic, and reply to who-has-our-IP.
-void on_arp(ref const Packet pkt, BaseInterface iface, ref NeighbourCache!IPAddr cache)
+void on_arp(ref const Packet pkt, EthernetStation iface, ref NeighbourCache!IPAddr cache)
 {
     const data = pkt.data;
     if (data.length < ArpV4Packet.sizeof)

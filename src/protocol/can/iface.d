@@ -355,7 +355,7 @@ protected:
                 version (DebugCANInterface)
                     writeDebug("CAN packet received from interface '", name, "': id=", can.id, " (", packet.length , ")[ ", packet.data, " - ", packet.data.bin_to_ascii(), " ]");
 
-                dispatch(packet);
+                incoming_packet(packet);
             }
 
             // shuffle remaining unparsed bytes to the front for the next read
@@ -502,7 +502,7 @@ private:
             can.id = hw.id;
             can.extended = hw.extended;
             can.remote_transmission_request = hw.rtr;
-            dispatch(packet);
+            incoming_packet(packet);
         }
     }
 }

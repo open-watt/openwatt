@@ -12,6 +12,7 @@ import urt.time;
 import manager.collection;
 
 import router.iface;
+import router.iface.ethernet;
 import router.iface.mac;
 import router.iface.packet;
 
@@ -203,7 +204,13 @@ nothrow @nogc:
         version (DebugRawIngress)
             log.trace("ingress if=", iface.name, " type=", pkt.type, " (", pkt.length, ") [ ", pkt.data[0 .. 24 < pkt.length ? 24 : pkt.length], 24 < pkt.length ? " ... ]" : " ]");
 
-        ethernet_ingress(pkt, iface);
+        if (pkt.type == PacketType.ethernet)
+        {
+            EthernetStation station = cast(EthernetStation)iface;
+            debug assert(station !is null);
+            if (station)
+                ethernet_ingress(pkt, station);
+        }
         // TODO: sixlowpan handler -> register for PacketType._6lowpan
         // TODO: ppp handler -> register for an appropriate PacketType
         // TODO: raw_ip tunnel handler -> register for PacketType.raw (peek IP version byte)
@@ -217,10 +224,8 @@ nothrow @nogc:
 
 private:
 
-    void ethernet_ingress(ref Packet pkt, BaseInterface iface)
+    void ethernet_ingress(ref Packet pkt, EthernetStation iface)
     {
-        if (pkt.type != PacketType.ethernet)
-            return;
         const Ethernet eth = pkt.hdr!Ethernet();
         if (eth.dst != iface.mac && !eth.dst.is_multicast())
             return; // promiscuous capture; not addressed to us
@@ -410,13 +415,14 @@ private:
     //       (or by a virtual on BaseInterface) to choose the framing.
     void frame_and_send(ref Packet pkt, BaseInterface out_iface, const(ubyte)[] link_addr)
     {
-        if (link_addr.length != 6 || pkt.data.length < 1)
+        EthernetStation station = cast(EthernetStation)out_iface;
+        if (!station || link_addr.length != 6 || pkt.data.length < 1)
             return;
         MACAddress dst;
         dst.b[] = link_addr[0 .. 6];
         ubyte ver = (cast(const(ubyte)*)pkt.data.ptr)[0] >> 4;
         EtherType etype = ver == 6 ? EtherType.ip6 : EtherType.ip4;
-        out_iface.send(dst, pkt.data, etype);
+        station.send(dst, pkt.data, etype);
     }
 
     void deliver_local(ref Packet pkt)
@@ -447,7 +453,8 @@ private:
 
     void v4_send_request(IPAddr target, BaseInterface iface)
     {
-        send_arp_request(target, iface);
+        if (EthernetStation station = cast(EthernetStation)iface)
+            send_arp_request(target, station);
     }
 
     void v4_drain(ref Packet pkt, BaseInterface iface, const(ubyte)[] link_addr)

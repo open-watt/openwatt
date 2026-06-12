@@ -160,12 +160,15 @@ abstract class BLEInterface : BaseInterface
     alias Properties = AliasSeq!(Prop!("max-in-flight", max_in_flight));
 nothrow @nogc:
 
+    MACAddress _bd_addr; // synthetic local BD_ADDR; the radio's real address is below this layer
+
     protected this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(type_info, id, flags);
         _mtu = 247; // BLE 5.x max ATT MTU (251 - 4 byte L2CAP header)
         _max_l2mtu = 251;
         _l2mtu = _max_l2mtu;
+        _bd_addr = generate_mac_address(name[]);
 
         mark_set!(typeof(this), "max-l2mtu")();
     }
@@ -404,7 +407,7 @@ protected:
             log_frame(f, cast(const(ubyte)[])p.data, PacketDirection.incoming);
 
         _status.rx_bytes += 14;
-        dispatch(p);
+        incoming_packet(p);
     }
 
     // --- session lifecycle ---

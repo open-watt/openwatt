@@ -176,6 +176,20 @@ struct InterfaceSubscriber
 //      02:FE:ED:xx:xx:yy
 //      02:B0:0B:xx:xx:yy
 
+MACAddress generate_mac_address(const(char)[] name) pure
+{
+    import urt.crc;
+    alias crc_fun = calculate_crc!(Algorithm.crc32_iso_hdlc);
+
+    enum ushort MAGIC = 0x1337;
+
+    uint crc = crc_fun(name);
+    MACAddress addr = MACAddress(0x02, MAGIC >> 8, MAGIC & 0xFF, crc & 0xFF, (crc >> 8) & 0xFF, crc >> 24);
+    if (addr.b[5] < 100 || addr.b[5] >= 240)
+        addr.b[5] ^= 0x80;
+    return addr;
+}
+
 class BaseInterface : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("actual-mtu", actual_mtu, null, "d"),
@@ -208,15 +222,9 @@ nothrow @nogc:
     enum path = "/interface";
     enum collection_id = CollectionType.interface_;
 
-    MACAddress mac;
-    Map!(MACAddress, BaseInterface) macTable;
-
     this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(type_info, id, flags);
-
-        mac = generate_mac_address();
-        add_address(mac, this);
     }
 
     // Properties...
@@ -425,16 +433,6 @@ nothrow @nogc:
     {
     }
 
-    int send(MACAddress dest, const(void)[] message, EtherType type, MessageCallback callback = null)
-    {
-        Packet p;
-        ref eth = p.init!Ethernet(message);
-        eth.src = mac;
-        eth.dst = dest;
-        eth.ether_type = type;
-        return forward(p, callback);
-    }
-
     int forward(ref Packet packet, MessageCallback callback = null)
     {
         if (!running)
@@ -470,25 +468,6 @@ nothrow @nogc:
 
     final InterfaceCaps caps() const pure
         => _caps;
-
-    final void add_address(MACAddress mac, BaseInterface iface)
-    {
-        assert(mac !in macTable, "MAC address already in use!");
-        macTable[mac] = iface;
-    }
-
-    final void remove_address(MACAddress mac)
-    {
-        macTable.remove(mac);
-    }
-
-    final BaseInterface find_mac_address(MACAddress mac)
-    {
-        BaseInterface* i = mac in macTable;
-        if (i)
-            return *i;
-        return null;
-    }
 
     ushort pcap_type() const
         => 0;
@@ -544,32 +523,34 @@ protected:
 
     abstract int transmit(ref Packet packet, MessageCallback callback = null);
 
+    final void incoming_packet(ref Packet packet)
+    {
+        if (_master)
+        {
+            add_rx_frame(packet.length);
+            fire_subscribers(packet);
+            _master.slave_incoming(packet, _slave_id);
+            return;
+        }
+
+        ingress(packet);
+    }
+
+    // Ingress stage between reception and local delivery: switching and station
+    // transforms live here. Default: everything terminates locally.
+    void ingress(ref Packet packet)
+    {
+        dispatch(packet);
+    }
+
     final void dispatch(ref Packet packet)
     {
         import urt.endian : loadBigEndian;
 
+        debug assert(_master is null, "dispatch() on a slaved interface; ingress must enter via incoming_packet()");
+
         add_rx_frame(packet.length);
-
-        if (packet.type == PacketType.ethernet && !packet.eth.src.is_multicast)
-        {
-            if (find_mac_address(packet.eth.src) is null)
-                add_address(packet.eth.src, this);
-        }
-
-        if (_num_subscribers)
-        {
-            foreach (ref subscriber; _subscribers[0.._num_subscribers])
-            {
-                if ((subscriber.filter.direction & PacketDirection.incoming) && subscriber.filter.match(packet))
-                    subscriber.recv_packet(packet, this, PacketDirection.incoming, subscriber.user_data);
-            }
-        }
-
-        if (_master)
-        {
-            _master.slave_incoming(packet, _slave_id);
-            return;
-        }
+        fire_subscribers(packet);
 
         // check for vlan tagged packets. fancy mask catches all possible vlan tags while rejecting all common ethertypes.
         if (packet.type == PacketType.ethernet && (packet.eth.ether_type & 0xE457) == 0x8000)
@@ -629,6 +610,17 @@ protected:
         assert(false, "Override this method to implement a _master interface");
     }
 
+    final void fire_subscribers(ref Packet packet)
+    {
+        if (!_num_subscribers)
+            return;
+        foreach (ref subscriber; _subscribers[0.._num_subscribers])
+        {
+            if ((subscriber.filter.direction & PacketDirection.incoming) && subscriber.filter.match(packet))
+                subscriber.recv_packet(packet, this, PacketDirection.incoming, subscriber.user_data);
+        }
+    }
+
     bool bind_vlan(VLANInterface vlan_interface, bool remove)
     {
         if (remove)
@@ -650,20 +642,6 @@ protected:
         }
         _vlans ~= vlan_interface;
         return true;
-    }
-
-    final MACAddress generate_mac_address() pure
-    {
-        import urt.crc;
-        alias crc_fun = calculate_crc!(Algorithm.crc32_iso_hdlc);
-
-        enum ushort MAGIC = 0x1337;
-
-        uint crc = crc_fun(name[]);
-        MACAddress addr = MACAddress(0x02, MAGIC >> 8, MAGIC & 0xFF, crc & 0xFF, (crc >> 8) & 0xFF, crc >> 24);
-        if (addr.b[5] < 100 || addr.b[5] >= 240)
-            addr.b[5] ^= 0x80;
-        return addr;
     }
 
     final void update_service_times(uint wait_us, uint service_us)

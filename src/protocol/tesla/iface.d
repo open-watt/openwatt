@@ -186,7 +186,7 @@ protected:
             msg = msg[0 .. $-1];
 
             // we seem to have a valid packet...
-            incoming_packet(msg, now);
+            incoming_frame(msg, now);
         }
     }
 
@@ -248,7 +248,7 @@ protected:
 private:
     ObjectRef!Stream _stream;
 
-    final void incoming_packet(const(ubyte)[] msg, MonoTime recv_time)
+    void incoming_frame(const(ubyte)[] msg, MonoTime recv_time)
     {
         debug assert(running, "Shouldn't receive packets while not running...?");
 
@@ -263,7 +263,7 @@ private:
         twc.src = message.sender;
         twc.dst = message.receiver ? message.receiver : TWCFrame.broadcast;
 
-        dispatch(p);
+        incoming_packet(p);
     }
 }
 

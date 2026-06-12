@@ -703,7 +703,7 @@ private:
         version (DebugZigbeeMessageFlow)
             writeDebugf("Zigbee: APS recv ({0, 03}) - {1, 04x}:{2, 02x}<-{3, 04x}:{4, 02x} [{5}:{6, 04x}] - [{7}]", hdr.counter, hdr.dst, hdr.dst_endpoint, hdr.src, hdr.src_endpoint, profile_name(hdr.profile_id), hdr.cluster_id, cast(void[])message);
 
-        dispatch(p);
+        incoming_packet(p);
     }
 
     void lookup_eui_response(void* user_data, EmberStatus status, EmberEUI64 eui64)

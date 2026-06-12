@@ -185,8 +185,7 @@ private:
 
     void write_packet(ref const Packet p, BaseInterface i, PacketDirection dir)
     {
-        static if (has_all)
-            import protocol.zigbee.iface : ZigbeeInterface;
+        import router.iface.ethernet : EthernetStation;
 
         if (!enabled)
             return;
@@ -203,13 +202,8 @@ private:
             idb.linkType = ib.linkType;
             buffer ~= idb.as_bytes;
             buffer.write_option(2, i.name[]); // if_name
-            static if (has_all)
-            {
-                if (cast(ZigbeeInterface)i is null)
-                    buffer.write_option(6, i.mac.b[]); // if_MACaddr
-            }
-            else
-                buffer.write_option(6, i.mac.b[]); // if_MACaddr
+            if (auto station = cast(EthernetStation)i)
+                buffer.write_option(6, station.mac.b[]); // if_MACaddr
             ubyte ts = 9; // 6 = microseconds, 9 = nanoseconds
             buffer.write_option(9, (&ts)[0..1]); // if_tsresol
             buffer.write_option(0, null);

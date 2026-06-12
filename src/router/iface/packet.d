@@ -46,11 +46,14 @@ enum EtherType : ushort
 
 // Bit 15 of the OW encapsulation type field marks control-plane messages;
 // otherwise the field is the PacketType of the encapsulated frame.
+// Control messages use hdr_len = 0 and carry their body in the payload.
 enum ushort ow_control_flag = 0x8000;
 
 enum OWControl : ushort
 {
-    agent_discover = ow_control_flag | 0x0001,  // probably need some way to find peers on the network?
+    who_has     = ow_control_flag | 0x0001,  // body: universal address (u64 BE) -- which station carries this?
+    addr_query  = ow_control_flag | 0x0002,  // body: PacketType (u16 BE, unknown = all) -- report your addresses
+    addr_report = ow_control_flag | 0x0003,  // body: N x universal address (u64 BE) -- response to either of the above
 }
 
 // 802.1p PCP traffic classes

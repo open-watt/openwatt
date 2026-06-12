@@ -405,7 +405,7 @@ private:
         }
         hdr.rssi = rssi;
         hdr.channel = channel;
-        radio.dispatch(pkt);
+        radio.incoming_packet(pkt);
     }
 
     void dispatch_rx(WifiVif vif, const(ubyte)[] data)
@@ -572,11 +572,7 @@ protected:
 
         ubyte[6] mac_buf = void;
         if (radio.drv_get_mac(WifiVif.sta, mac_buf))
-        {
-            remove_address(mac);
             mac = MACAddress(mac_buf);
-            add_address(mac, this);
-        }
 
         _connect_initiated = true;
         _status_detail = "Connecting";
@@ -759,11 +755,7 @@ protected:
 
         ubyte[6] mac_buf = void;
         if (radio.drv_get_mac(WifiVif.ap, mac_buf))
-        {
-            remove_address(mac);
             mac = MACAddress(mac_buf);
-            add_address(mac, this);
-        }
 
         _ap_config_sent = true;
         _status_detail = "Starting AP";

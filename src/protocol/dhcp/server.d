@@ -21,6 +21,7 @@ import protocol.ip.pool;
 import protocol.ip : IPv4Header, IPProtocol;
 
 import router.iface;
+import router.iface.ethernet;
 import router.iface.mac;
 import router.iface.packet;
 
@@ -57,6 +58,8 @@ nothrow @nogc:
     {
         if (!value)
             return "interface cannot be null";
+        if (!cast(EthernetStation)value)
+            return "interface must be an ethernet interface";
         if (_iface is value)
             return null;
         if (_subscribed)
@@ -226,6 +229,10 @@ private:
     enum size_t offer_hold_seconds = 30;
 
     ObjectRef!BaseInterface _iface;
+
+    // TODO: remove this hack and promote _iface to EthernetStation...
+    EthernetStation station()
+        => cast(EthernetStation)_iface.get;
     ObjectRef!IPPool _pool;
     Duration _lease_time;       // initialised in ctor; default = 1 day
     uint _mac_limit;        // 0 = unlimited
@@ -569,7 +576,7 @@ private:
         b.finish();
 
         // NAK always broadcast (RFC 2131 4.3.2).
-        b.transmit(_iface, _server_ip, IPAddr.broadcast, MACAddress.broadcast,
+        b.transmit(station, _server_ip, IPAddr.broadcast, MACAddress.broadcast,
                    DhcpServerPort, DhcpClientPort);
     }
 
@@ -589,13 +596,13 @@ private:
 
         if (broadcast)
         {
-            b.transmit(_iface, _server_ip, IPAddr.broadcast, MACAddress.broadcast,
+            b.transmit(station, _server_ip, IPAddr.broadcast, MACAddress.broadcast,
                        DhcpServerPort, DhcpClientPort);
         }
         else
         {
             IPAddr ip_dst = ciaddr != IPAddr.any ? ciaddr : yiaddr;
-            b.transmit(_iface, _server_ip, ip_dst, client_mac,
+            b.transmit(station, _server_ip, ip_dst, client_mac,
                        DhcpServerPort, DhcpClientPort);
         }
     }

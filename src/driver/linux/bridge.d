@@ -9,11 +9,11 @@ version (KernelMirror):
 // br-<name> as OpenWatt's window for L3 / management / sniffing. OpenWatt is the
 // control plane; the kernel is the data plane.
 //
-// Non-netdev members (Modbus/CAN ...) stay software-switched on the bridge; they
-// live in disjoint PacketType address sub-domains, so today nothing crosses
-// between the kernel ethernet segment and those members (a non-ethernet frame
-// can't be emitted on an ethernet port yet). The cross-domain forwarding shape is
-// reserved (the CPU-port flood seam in bridge.d) but inert.
+// Non-netdev members (Modbus/CAN ...) stay software-switched on the bridge.
+// Exotic traffic crosses the kernel segment OW-encapsulated: the bridge's
+// EthernetStation wraps it into ordinary ethernet frames before they reach this
+// conduit, and OW frames drained from the CPU socket decap at the bridge's
+// attachment. This module only ever sees ethernet frames.
 //
 // Ownership discipline (mirrors RTPROT_OPENWATT for routes): we only ever delete
 // br-* we created and only detach members we enslaved -- tracked in the ledger.
@@ -76,16 +76,17 @@ private:
         bool engaged;
 
         // CpuPortSink: frame an ethernet packet to the wire and push it into the
-        // kernel-switched segment. Non-ethernet sub-domains can't traverse a kernel
-        // bridge (yet), so they're dropped here -- this is the egress half of the
-        // inert cross-domain seam.
+        // kernel-switched segment. Exotic packets are OW-encapsulated at the
+        // bridge's station before they reach this sink, so only ethernet frames
+        // arrive here. Anything else is a routing bug upstream.
         int inject(ref Packet packet)
         {
+            debug assert(packet.type == PacketType.ethernet);
             if (packet.type != PacketType.ethernet)
                 return -1;
 
-            // Mirror EthernetInterface.send (ethernet case). TODO: factor out a
-            // shared framing helper so this isn't a second copy.
+            // Mirror EthernetInterface.medium_tx. TODO: factor out a shared
+            // framing helper so this isn't a second copy.
             ubyte[1518] buffer = void;
             Ethernet* eth = cast(Ethernet*)buffer.ptr;
             eth.dst = packet.eth.dst;

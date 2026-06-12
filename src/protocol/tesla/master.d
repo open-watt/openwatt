@@ -144,7 +144,9 @@ nothrow @nogc:
 
         static ubyte id_counter = 0;
         this.id = 0x7770 + id_counter++;
-        this.sig = iface.mac.b[3];
+
+        import urt.crc;
+        this.sig = cast(ubyte)calculate_crc!(Algorithm.crc32_iso_hdlc)(iface.name[]);
 
         iface.subscribe(&incoming_packet, PacketFilter(type: PacketType.tesla_twc));
     }

@@ -21,6 +21,7 @@ import protocol.ip.route;
 import protocol.ip : IPv4Header, IPProtocol;
 
 import router.iface;
+import router.iface.ethernet;
 import router.iface.mac;
 import router.iface.packet;
 
@@ -52,6 +53,8 @@ nothrow @nogc:
     {
         if (!value)
             return "interface cannot be null";
+        if (!cast(EthernetStation)value)
+            return "interface must be an ethernet interface";
         if (_iface is value)
             return null;
         if (_subscribed)
@@ -224,6 +227,10 @@ private:
     enum size_t max_retries = 5;
 
     ObjectRef!BaseInterface _iface;
+
+    // TODO: delete this hack, promote _iface to EthernetStation...
+    EthernetStation station()
+        => cast(EthernetStation)_iface.get;
     bool _add_default_route = true;
     bool _subscribed;
 
@@ -294,14 +301,14 @@ private:
             log.debug_("tx DISCOVER xid=", _xid);
 
         DhcpBuild b;
-        b.start(BootpRequest, _iface.mac, _xid, secs_field, true);
+        b.start(BootpRequest, station.mac, _xid, secs_field, true);
         b.add_message_type(DhcpMessageType.discover);
-        b.add_client_identifier(_iface.mac);
+        b.add_client_identifier(station.mac);
         add_hostname(b);
         add_vendor_class_id(b);
         b.add_parameter_request_list();
         b.finish();
-        b.transmit(_iface, IPAddr.any, IPAddr.broadcast, MACAddress.broadcast, DhcpClientPort, DhcpServerPort);
+        b.transmit(station, IPAddr.any, IPAddr.broadcast, MACAddress.broadcast, DhcpClientPort, DhcpServerPort);
     }
 
     void send_request_select()
@@ -310,16 +317,16 @@ private:
             log.debug_("tx REQUEST (selecting) xid=", _xid, " offered=", _offered_addr, " server=", _server_id);
 
         DhcpBuild b;
-        b.start(BootpRequest, _iface.mac, _xid, secs_field, true);
+        b.start(BootpRequest, station.mac, _xid, secs_field, true);
         b.add_message_type(DhcpMessageType.request);
-        b.add_client_identifier(_iface.mac);
+        b.add_client_identifier(station.mac);
         b.add_addr_option(DhcpOption.requested_address, _offered_addr);
         b.add_addr_option(DhcpOption.server_id, _server_id);
         add_hostname(b);
         add_vendor_class_id(b);
         b.add_parameter_request_list();
         b.finish();
-        b.transmit(_iface, IPAddr.any, IPAddr.broadcast, MACAddress.broadcast, DhcpClientPort, DhcpServerPort);
+        b.transmit(station, IPAddr.any, IPAddr.broadcast, MACAddress.broadcast, DhcpClientPort, DhcpServerPort);
     }
 
     void send_request_renew()
@@ -328,16 +335,16 @@ private:
             log.debug_("tx REQUEST (renew) xid=", _xid, " ciaddr=", _offered_addr, " server=", _server_id);
 
         DhcpBuild b;
-        b.start(BootpRequest, _iface.mac, _xid, secs_field, false);
+        b.start(BootpRequest, station.mac, _xid, secs_field, false);
         b.set_ciaddr(_offered_addr);
         b.add_message_type(DhcpMessageType.request);
-        b.add_client_identifier(_iface.mac);
+        b.add_client_identifier(station.mac);
         add_hostname(b);
         add_vendor_class_id(b);
         b.add_parameter_request_list();
         b.finish();
         // TODO: ARP-resolve _server_id MAC; for now broadcast renew too.
-        b.transmit(_iface, _offered_addr, _server_id, MACAddress.broadcast, DhcpClientPort, DhcpServerPort);
+        b.transmit(station, _offered_addr, _server_id, MACAddress.broadcast, DhcpClientPort, DhcpServerPort);
     }
 
     void send_request_rebind()
@@ -346,15 +353,15 @@ private:
             log.debug_("tx REQUEST (rebind) xid=", _xid, " ciaddr=", _offered_addr);
 
         DhcpBuild b;
-        b.start(BootpRequest, _iface.mac, _xid, secs_field, true);
+        b.start(BootpRequest, station.mac, _xid, secs_field, true);
         b.set_ciaddr(_offered_addr);
         b.add_message_type(DhcpMessageType.request);
-        b.add_client_identifier(_iface.mac);
+        b.add_client_identifier(station.mac);
         add_hostname(b);
         add_vendor_class_id(b);
         b.add_parameter_request_list();
         b.finish();
-        b.transmit(_iface, _offered_addr, IPAddr.broadcast, MACAddress.broadcast, DhcpClientPort, DhcpServerPort);
+        b.transmit(station, _offered_addr, IPAddr.broadcast, MACAddress.broadcast, DhcpClientPort, DhcpServerPort);
     }
 
     void add_hostname(ref DhcpBuild b)
@@ -378,13 +385,13 @@ private:
         // RFC 2131 §4.4.4: RELEASE is unicast to the server with ciaddr set.
         // TODO: ARP-resolve _server_id MAC; for now broadcast at L2 (same shortcut as renew).
         DhcpBuild b;
-        b.start(BootpRequest, _iface.mac, rand(), 0, false);
+        b.start(BootpRequest, station.mac, rand(), 0, false);
         b.set_ciaddr(_offered_addr);
         b.add_message_type(DhcpMessageType.release);
-        b.add_client_identifier(_iface.mac);
+        b.add_client_identifier(station.mac);
         b.add_addr_option(DhcpOption.server_id, _server_id);
         b.finish();
-        b.transmit(_iface, _offered_addr, _server_id, MACAddress.broadcast, DhcpClientPort, DhcpServerPort);
+        b.transmit(station, _offered_addr, _server_id, MACAddress.broadcast, DhcpClientPort, DhcpServerPort);
     }
 
     // ---- packet parse ----
@@ -432,7 +439,7 @@ private:
         if (xid != _xid)
             return;
 
-        if (dh.chaddr[0 .. 6] != _iface.mac.b[])
+        if (dh.chaddr[0 .. 6] != station.mac.b[])
             return;
 
         // verify magic cookie
