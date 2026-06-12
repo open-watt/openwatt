@@ -48,6 +48,7 @@ enum CollectionType : ubyte
     pcap_server,
     ppp_server,
     pppoe_server,
+    recorder,
     secret,
     snmp_agent,
     snmp_client,
