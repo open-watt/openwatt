@@ -251,6 +251,7 @@ nothrow @nogc:
 
         console.register_command!device_add("/device", this, "add");
         console.register_command!device_print("/device", this, "print");
+        console.register_command!element_set("/element", this, "set");
         console.register_command!link_add("/element/link", this, "add");
         console.register_command!link_print("/element/link", this, "print");
 
@@ -795,6 +796,17 @@ nothrow @nogc:
             emit_node(dev, true, true);
         }
         return table;
+    }
+
+    void element_set(Session session, const(char)[] element, Variant value)
+    {
+        Element* e = find_element(element);
+        if (!e)
+        {
+            session.write_line("Element not found: ", element);
+            return;
+        }
+        e.value(value.move);
     }
 
     // element link API

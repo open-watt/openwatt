@@ -73,6 +73,9 @@ nothrow @nogc:
 
 alias log = Log!"sync";
 
+// History responses must fit in one raw packet (64KB); JSON samples are ~25 bytes each.
+enum uint max_history_points = 2000;
+
 
 // Subscription pattern forms:
 //   "#<decimal>"          - exact CID match (decimal uint)
@@ -834,6 +837,31 @@ nothrow @nogc:
             if (!still_matches)
                 unbind_from_peer(from, obj);
         }
+    }
+
+    void inbound_history_req(SyncPeer from, const(char)[] path, ulong from_ms, ulong to_ms, uint max_points, uint seq)
+    {
+        import urt.time : getSysTime, unixTimeNs;
+        import manager.record;
+
+        RecordStream* rs = get_module!RecordModule.find_stream(path);
+        if (!rs)
+        {
+            encoder_for(from._encoder).encode_error(from, seq, "no record stream");
+            return;
+        }
+
+        ulong now_ms = unixTimeNs(getSysTime()) / 1_000_000;
+        if (to_ms == 0 || to_ms > now_ms)
+            to_ms = now_ms;
+        if (max_points == 0)
+            max_points = 500;
+        else if (max_points > max_history_points)
+            max_points = max_history_points;
+
+        Array!Sample samples;
+        query_stream(*rs, from_ms * 1_000_000, to_ms * 1_000_000, max_points, samples);
+        encoder_for(from._encoder).encode_history(from, seq, path, samples[]);
     }
 
     void inbound_enum_req(SyncPeer from, const(char)[] type_name, uint seq)

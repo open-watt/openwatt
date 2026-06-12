@@ -23,6 +23,7 @@ import urt.variant;
 import manager.base;
 import manager.collection : CID;
 import manager.expression : NamedArgument;
+import manager.record : Sample;
 import manager.sync.peer;
 
 
@@ -121,6 +122,14 @@ nothrow @nogc:
     abstract void encode_enum_req(SyncPeer peer, const(char)[] type_name, uint seq);
     abstract void encode_enum(SyncPeer peer, const(char)[] type_name,
                               ref const Variant members, uint seq);
+
+    // Element history recall (record streams). Times are unix milliseconds
+    // on the wire; samples are (time, value) pairs.
+
+    abstract void encode_history_req(SyncPeer peer, const(char)[] path,
+                                     ulong from_ms, ulong to_ms, uint max_points, uint seq);
+    abstract void encode_history(SyncPeer peer, uint seq, const(char)[] path,
+                                 const(Sample)[] samples);
 
     // Inbound entry point
     //
