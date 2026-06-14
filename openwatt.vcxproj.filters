@@ -273,11 +273,17 @@
     <DCompile Include="src\db\stream.d">
       <Filter>src\db</Filter>
     </DCompile>
+    <DCompile Include="src\driver\baremetal\ble.d">
+      <Filter>src\driver\baremetal</Filter>
+    </DCompile>
     <DCompile Include="src\driver\baremetal\system.d">
       <Filter>src\driver\baremetal</Filter>
     </DCompile>
     <DCompile Include="src\driver\baremetal\wifi.d">
       <Filter>src\driver\baremetal</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\ble.d">
+      <Filter>src\driver</Filter>
     </DCompile>
     <DCompile Include="src\driver\esp32\system.d">
       <Filter>src\driver\esp32</Filter>
@@ -285,10 +291,16 @@
     <DCompile Include="src\driver\ethernet.d">
       <Filter>src\driver</Filter>
     </DCompile>
+    <DCompile Include="src\driver\linux\ble.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
     <DCompile Include="src\driver\linux\ctrl_iface.d">
       <Filter>src\driver\linux</Filter>
     </DCompile>
     <DCompile Include="src\driver\linux\ethernet.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\linux\fdwatch.d">
       <Filter>src\driver\linux</Filter>
     </DCompile>
     <DCompile Include="src\driver\linux\hostapd.d">
@@ -479,6 +491,9 @@
     </DCompile>
     <DCompile Include="src\router\port\package.d">
       <Filter>src\router\port</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ble\att.d">
+      <Filter>src\protocol\ble</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ble\binding.d">
       <Filter>src\protocol\ble</Filter>
