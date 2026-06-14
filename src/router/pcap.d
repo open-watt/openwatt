@@ -220,7 +220,7 @@ private:
         }
 
         size_t packetOffset = ib.packet_buffer.length;
-        ulong timestamp = unixTimeNs(p.creation_time);
+        ulong timestamp = unixTimeNs(cast(SysTime)p.creation_time);
 
         // write packet block...
         EnhancedPacketBlock epb;

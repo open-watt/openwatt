@@ -324,7 +324,7 @@ private:
         {
             const(ubyte)[] data;
             uint wire_len;
-            SysTime ts;
+            MonoTime ts;
             ubyte pkttype;
             int res = o.cpu.poll_ll(data, wire_len, ts, pkttype);
             if (res <= 0)

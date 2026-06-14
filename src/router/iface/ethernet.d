@@ -71,7 +71,7 @@ protected:
         }
     }
 
-    final void incoming_ethernet_frame(const(ubyte)[] data, SysTime ts)
+    final void incoming_ethernet_frame(const(ubyte)[] data, MonoTime ts)
     {
         if (data.length < 14)
         {

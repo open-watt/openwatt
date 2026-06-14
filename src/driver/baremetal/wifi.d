@@ -392,7 +392,7 @@ private:
             return;
         WLANBaseInterface target = vif == WifiVif.ap ? bound_ap : bound_sta;
         if (target !is null && target.running)
-            target.on_radio_rx(data, getSysTime());
+            target.on_radio_rx(data, getTime());
     }
 
     final void on_wifi_event(WifiEvent event, const(void)* data = null)

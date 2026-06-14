@@ -64,7 +64,7 @@ nothrow @nogc:
     // returns:  1 = got a frame; data/wire_len/timestamp populated
     //           0 = no frame ready
     //          -1 = error (already logged)
-    int poll(out const(ubyte)[] data, out uint wire_len, out SysTime timestamp)
+    int poll(out const(ubyte)[] data, out uint wire_len, out MonoTime timestamp)
     {
         pcap_pkthdr* header;
         const(ubyte)* bytes;
@@ -81,7 +81,8 @@ nothrow @nogc:
         }
         data = bytes[0 .. header.caplen];
         wire_len = header.len;
-        timestamp = timeval_to_systime(header.ts);
+        // pcap's header.ts is wall-clock; capture monotonic for transit/retry timing instead
+        timestamp = getTime();
         return 1;
     }
 

@@ -133,7 +133,7 @@ void udp_input(ref IPStack stack, ref Packet pkt)
         {
             if (pcb.owner)
             {
-                pcb.owner.deliver(IPAddr(ip.src), src_port, body_, cast(MonoTime)pkt.creation_time);
+                pcb.owner.deliver(IPAddr(ip.src), src_port, body_, pkt.creation_time);
                 return;
             }
         }

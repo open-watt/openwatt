@@ -679,7 +679,7 @@ protected:
 
     struct SampleEntry
     {
-        SysTime lastUpdate;
+        MonoTime lastUpdate;
         ushort register;
         ubyte regKind = 4; // holding registers only for SunSpec
         ubyte flags;       // bit0 = in-flight, bit1 = constant-sampled
@@ -780,7 +780,7 @@ private:
         return CompletionStatus.continue_;
     }
 
-    void probe_response_handler(ref const ModbusPDU req, ref ModbusPDU resp, SysTime, SysTime)
+    void probe_response_handler(ref const ModbusPDU req, ref ModbusPDU resp, MonoTime, MonoTime)
     {
         _in_flight = false;
         ushort base = sunspec_bases[_probe_index];
@@ -810,7 +810,7 @@ private:
             log.tracef("found SunSpec marker at base {0} (chain {1})", base, _chain_count - 1);
     }
 
-    void probe_error_handler(ModbusErrorType ty, ref const ModbusPDU, SysTime)
+    void probe_error_handler(ModbusErrorType ty, ref const ModbusPDU, MonoTime)
     {
         if (ty == ModbusErrorType.Retrying)
             return;
@@ -916,7 +916,7 @@ private:
         return CompletionStatus.continue_;
     }
 
-    void scan_response_handler(ref const ModbusPDU req, ref ModbusPDU resp, SysTime, SysTime)
+    void scan_response_handler(ref const ModbusPDU req, ref ModbusPDU resp, MonoTime, MonoTime)
     {
         _in_flight = false;
         if (resp.function_code & 0x80)
@@ -945,7 +945,7 @@ private:
         }
     }
 
-    void scan_error_handler(ModbusErrorType ty, ref const ModbusPDU, SysTime)
+    void scan_error_handler(ModbusErrorType ty, ref const ModbusPDU, MonoTime)
     {
         if (ty == ModbusErrorType.Retrying)
             return;
@@ -1216,7 +1216,7 @@ private:
         se.desc = desc;
         se.sampleTimeMs = freq_to_ms(fd.freq);
         se.sentinel = field_sentinel(fd.type);
-        se.lastUpdate = sentinel_now ? SysTime() : getSysTime();
+        se.lastUpdate = sentinel_now ? MonoTime() : getTime();
         sample_entries ~= se;
         e.sampling_mode = freq_to_element_mode(fd.freq);
         version (DebugSunspecRegs)
@@ -1293,7 +1293,7 @@ private:
 
     // Polling response/error handlers.
 
-    void response_handler(ref const ModbusPDU req, ref ModbusPDU resp, SysTime, SysTime response_time)
+    void response_handler(ref const ModbusPDU req, ref ModbusPDU resp, MonoTime, MonoTime response_time)
     {
         ushort first = (cast(ushort)req.data[0] << 8) | req.data[1];
         ushort count = (cast(ushort)req.data[2] << 8) | req.data[3];
@@ -1355,13 +1355,13 @@ private:
                 }
             }
 
-            se.element.value(sample_value(data.ptr + byte_offset, se.desc), response_time);
+            se.element.value(sample_value(data.ptr + byte_offset, se.desc), cast(SysTime)response_time);
             version (DebugSunspecRegs)
                 log.tracef("reg {0} = {1}", se.register, se.element.value);
         }
     }
 
-    void error_handler(ModbusErrorType ty, ref const ModbusPDU req, SysTime)
+    void error_handler(ModbusErrorType ty, ref const ModbusPDU req, MonoTime)
     {
         if (ty == ModbusErrorType.Retrying)
             return;

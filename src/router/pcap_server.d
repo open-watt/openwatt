@@ -539,7 +539,7 @@ private:
 
             uint pkt_len = cast(uint)(len - RpcapPktHdr.sizeof);
 
-            ulong timestamp = unixTimeNs(p.creation_time);
+            ulong timestamp = unixTimeNs(cast(SysTime)p.creation_time);
             RpcapPktHdr pkt_hdr = {
                 timestamp_sec: cast(uint)(timestamp / 1_000_000_000),
                 timestamp_usec: cast(uint)((timestamp % 1_000_000_000) / 1000),

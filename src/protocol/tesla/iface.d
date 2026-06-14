@@ -86,7 +86,7 @@ protected:
         if (!_stream || !_stream.running)
             return restart();
 
-        SysTime now = getSysTime();
+        MonoTime now = getTime();
 
         // check for data
         ubyte[1024] buffer = void;
@@ -207,7 +207,7 @@ package:
 private:
     ObjectRef!Stream _stream;
 
-    final void incoming_packet(const(ubyte)[] msg, SysTime recv_time)
+    final void incoming_packet(const(ubyte)[] msg, MonoTime recv_time)
     {
         debug assert(running, "Shouldn't receive packets while not running...?");
 

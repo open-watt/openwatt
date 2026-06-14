@@ -589,7 +589,7 @@ void tcp_input(ref IPStack stack, ref Packet pkt)
         return;
     }
 
-    process_segment(stack, pcb, ip, t, seq, ack, wnd, flags, payload, cast(MonoTime)pkt.creation_time);
+    process_segment(stack, pcb, ip, t, seq, ack, wnd, flags, payload, pkt.creation_time);
 }
 
 

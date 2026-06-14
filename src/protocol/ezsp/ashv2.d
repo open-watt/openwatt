@@ -422,7 +422,7 @@ private:
         if (data.length > 0)
         {
             Packet p;
-            p.init!RawFrame(data, cast(SysTime)timestamp);
+            p.init!RawFrame(data, timestamp);
             dispatch(p);
         }
 

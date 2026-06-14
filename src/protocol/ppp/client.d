@@ -91,7 +91,7 @@ protected:
         super.update();
 
         ubyte[2048] buffer = void;
-        SysTime now = getSysTime();
+        MonoTime now = getTime();
 
         const ubyte FRAME_END = (_protocol == TunnelProtocol.PPP) ? 0x7E : 0xC0;
 

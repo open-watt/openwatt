@@ -29,10 +29,10 @@ enum ModbusErrorType
     Failed,
 }
 
-alias ModbusRequestHandler = void delegate(ubyte client_address, ushort sequence_number, ref const ModbusPDU request, SysTime request_time) nothrow @nogc;
-alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time) nothrow @nogc;
-alias ModbusErrorHandler = void delegate(ModbusErrorType errorType, ref const ModbusPDU request, SysTime request_time) nothrow @nogc;
-alias ModbusSnoopHandler = void delegate(ubyte server_address, ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time) nothrow @nogc;
+alias ModbusRequestHandler = void delegate(ubyte client_address, ushort sequence_number, ref const ModbusPDU request, MonoTime request_time) nothrow @nogc;
+alias ModbusResponseHandler = void delegate(ref const ModbusPDU request, ref ModbusPDU response, MonoTime request_time, MonoTime response_time) nothrow @nogc;
+alias ModbusErrorHandler = void delegate(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime request_time) nothrow @nogc;
+alias ModbusSnoopHandler = void delegate(ubyte server_address, ref const ModbusPDU request, ref ModbusPDU response, MonoTime request_time, MonoTime response_time) nothrow @nogc;
 
 class ModbusNode : ActiveObject
 {
@@ -114,7 +114,7 @@ nothrow @nogc:
             return false;
         }
 
-        SysTime now = getSysTime();
+        MonoTime now = getTime();
         ushort seq = ++_sequence_number;
         int tag = send_packet(server_address, seq, request, ModbusFrameType.request, pcp, dei);
         if (tag < 0)
@@ -210,7 +210,7 @@ protected:
         {
             PendingRequest* req = &_pending[i];
 
-            SysTime now = getSysTime();
+            MonoTime now = getTime();
 
             if (req.retry_time + msecs(req.timeout * 2) < now)
             {
@@ -255,8 +255,8 @@ private:
 
     struct PendingRequest
     {
-        SysTime request_time;
-        SysTime retry_time;
+        MonoTime request_time;
+        MonoTime retry_time;
         ModbusPDU request;
         ushort sequence_number;
         ubyte num_retries;
@@ -280,7 +280,7 @@ private:
         struct AbandonedRequest
         {
             ushort sequence_number;
-            SysTime abandon_time;
+            MonoTime abandon_time;
         }
 
         AbandonedRequest[8] _abandoned;
@@ -288,7 +288,7 @@ private:
 
         void record_abandoned(ref const PendingRequest req)
         {
-            _abandoned[_abandoned_pos++ & 7] = AbandonedRequest(req.sequence_number, getSysTime());
+            _abandoned[_abandoned_pos++ & 7] = AbandonedRequest(req.sequence_number, getTime());
         }
     }
 
@@ -358,7 +358,7 @@ private:
             }
             else
             {
-                if (hdr.type != ModbusFrameType.response || _pending[0].request_time == SysTime())
+                if (hdr.type != ModbusFrameType.response || _pending[0].request_time == MonoTime())
                     return;
 
                 ModbusPDU response = ModbusPDU(cast(FunctionCode)pdu[0], pdu[1 .. $]);

@@ -236,7 +236,7 @@ protected:
 
         super.update();
 
-        SysTime now = getSysTime();
+        MonoTime now = getTime();
 
         // check for data
         ubyte[1024] buffer = void;
@@ -472,7 +472,7 @@ private:
 
     void poll_native()
     {
-        SysTime now = getSysTime();
+        MonoTime now = getTime();
         CanFrame hw = void;
 
         while (can_receive(_can, hw))
