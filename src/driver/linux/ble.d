@@ -89,7 +89,7 @@ protected:
         _conflict = bluetoothd_running();
         if (_conflict)
         {
-            log.warning("'", name, "': bluetoothd is running; refusing to claim hci", _index);
+            log.warning("bluetoothd is running; refusing to claim hci", _index);
             return CompletionStatus.error;
         }
 
@@ -285,7 +285,7 @@ package:
         bool powered = (settings & mgmt_setting_powered) != 0;
         if (_powered && !powered && running)
         {
-            log.warning("'", name, "': adapter powered off");
+            log.warning("adapter powered off");
             restart();
         }
         _powered = powered;
@@ -550,7 +550,7 @@ private:
 
 class LinuxBLEModule : Module
 {
-    mixin DeclareModule!"interface.ble.linux";
+    mixin DeclareModule!"interface.ble";
 nothrow @nogc:
 
     override void pre_init()
