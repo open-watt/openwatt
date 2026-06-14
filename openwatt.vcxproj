@@ -97,11 +97,13 @@
     <DCompile Include="src\manager\component.d" />
     <DCompile Include="src\manager\config.d" />
     <DCompile Include="src\manager\console\argument.d" />
+    <DCompile Include="src\manager\console\bitmap.d" />
     <DCompile Include="src\manager\console\builtin_commands.d" />
     <DCompile Include="src\manager\console\collection_commands.d" />
     <DCompile Include="src\manager\console\command.d" />
     <DCompile Include="src\manager\console\console.d" />
     <DCompile Include="src\manager\console\function_command.d" />
+    <DCompile Include="src\manager\console\graph.d" />
     <DCompile Include="src\manager\console\live_view.d" />
     <DCompile Include="src\manager\console\package.d" />
     <DCompile Include="src\manager\console\session.d" />
@@ -118,6 +120,7 @@
     <DCompile Include="src\manager\package.d" />
     <DCompile Include="src\manager\plugin.d" />
     <DCompile Include="src\manager\profile.d" />
+    <DCompile Include="src\manager\record.d" />
     <DCompile Include="src\manager\sampler.d" />
     <DCompile Include="src\manager\secret.d" />
     <DCompile Include="src\manager\subscriber.d" />
@@ -1744,7 +1747,7 @@
       <ImportCPaths>third_party/npcap-sdk-1.15/Include/</ImportCPaths>
       <Warnings>None</Warnings>
       <DRuntimeLibrary>None</DRuntimeLibrary>
-      <VersionIdentifiers>AllocTracking</VersionIdentifiers>
+      <VersionIdentifiers>UseInternalIPStack;AllocTracking</VersionIdentifiers>
     </DCompile>
     <Link>
       <SubSystem>Console</SubSystem>
