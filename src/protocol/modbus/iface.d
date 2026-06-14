@@ -342,7 +342,7 @@ protected:
         unsubscribe_stream();
         _sequence_number = 0;
         _expect_message_type = ModbusFrameType.unknown;
-        _last_receive_event = SysTime();
+        _last_receive_event = MonoTime();
         _baud_estimated = false;
         _tail_bytes = 0;
 
@@ -515,7 +515,7 @@ private:
     uint _estimated_baud;          // estimated remote baud rate for TCP bridges
     bool _estimate_baud;           // enable auto-estimation of remote baud rate
     bool _baud_estimated;
-    SysTime _last_receive_event;
+    MonoTime _last_receive_event;
 
     // bus master: message queue and pending metadata
     PriorityPacketQueue _queue;
@@ -643,7 +643,7 @@ private:
                     break;
                 }
                 offset += taken;
-                incoming_packet(message, cast(SysTime)rx_time, frame_info);
+                incoming_packet(message, rx_time, frame_info);
             }
             if (!partial)
                 length = 0;
@@ -712,7 +712,7 @@ private:
 
     void send_queued_messages()
     {
-        if (!_support_simultaneous_requests && getSysTime() - _last_receive_event < _gap_time_us.usecs)
+        if (!_support_simultaneous_requests && getTime() - _last_receive_event < _gap_time_us.usecs)
             return;
 
         for (QueuedFrame* frame = _queue.dequeue(); frame !is null; frame = _queue.dequeue())
@@ -865,7 +865,7 @@ private:
         log.info("estimated remote baud rate: ", closest);
     }
 
-    final void incoming_packet(const(void)[] message, SysTime recvTime, ref ModbusFrameInfo frame_info)
+    final void incoming_packet(const(void)[] message, MonoTime recvTime, ref ModbusFrameInfo frame_info)
     {
         debug assert(running, "Shouldn't receive packets while not running...?");
 

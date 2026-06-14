@@ -32,7 +32,7 @@ version = DebugZigbee;
 nothrow @nogc:
 
 
-alias ZigbeeMessageHandler = void delegate(ref const APSFrame header, const(void)[] message, SysTime timestamp) nothrow @nogc;
+alias ZigbeeMessageHandler = void delegate(ref const APSFrame header, const(void)[] message, MonoTime timestamp) nothrow @nogc;
 alias ZDOResponseHandler = void delegate(ZigbeeResult result, ZDOStatus status, const(ubyte)[] message, void* user_data) nothrow @nogc;
 alias ZCLResponseHandler = void delegate(ZigbeeResult result, const ZCLHeader* hdr, const(ubyte)[] message, void* user_data) nothrow @nogc;
 

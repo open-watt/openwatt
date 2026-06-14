@@ -347,7 +347,7 @@ private:
         return _endpoint.send_zdo_message(dst, ZDOCluster.ieee_addr_req, addr_req_msg[], pcp, response_hander, user_data);
     }
 
-    void message_handler(ref const APSFrame aps, const(void)[] message, SysTime timestamp) nothrow
+    void message_handler(ref const APSFrame aps, const(void)[] message, MonoTime timestamp) nothrow
     {
         if (message.length < ZCLHeader.min_length)
             return;
@@ -575,7 +575,7 @@ private:
                         {
                             Variant v = attr.value;
                             adjust_value(v, e.desc);
-                            e.element.value(v.move, timestamp, this);
+                            e.element.value(v.move, cast(SysTime)timestamp, this);
                         }
 
                         payload = payload[3 + taken .. $];
@@ -728,7 +728,7 @@ private:
                                 if (SampleElement* e = find_sample_element_tuya(nm.eui, aps.src_endpoint, dp.dp_id))
                                 {
                                     adjust_value(v, e.desc);
-                                    e.element.value(v.move, timestamp, this);
+                                    e.element.value(v.move, cast(SysTime)timestamp, this);
                                 }
                             }
                             return;

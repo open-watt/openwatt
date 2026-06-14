@@ -326,11 +326,11 @@ struct SettingInfo
 }
 
 
-alias AA55Response = void delegate(bool success, ref const AA55Request request, SysTime response_time, const(ubyte)[] response_data, void* user_data) nothrow @nogc;
+alias AA55Response = void delegate(bool success, ref const AA55Request request, MonoTime response_time, const(ubyte)[] response_data, void* user_data) nothrow @nogc;
 
 struct AA55Request
 {
-    SysTime request_time;
+    MonoTime request_time;
     ubyte source_addr = 0xC0;
     ubyte dest_addr = 0x7F;
     GoodWeControlCode control_code;
@@ -516,7 +516,7 @@ nothrow @nogc:
 
     override CompletionStatus shutdown()
     {
-        SysTime now = getSysTime();
+        MonoTime now = getTime();
         foreach (ref req; _pending_requests)
             req.callback(false, req, now, null, req.user_data);
         _pending_requests.clear();
@@ -541,7 +541,7 @@ nothrow @nogc:
         }
 
         // Timeout requests...
-        SysTime now = getSysTime();
+        MonoTime now = getTime();
         for (size_t i = 0; i < _pending_requests.length; )
         {
             ref req = _pending_requests[i];
@@ -560,7 +560,7 @@ nothrow @nogc:
     }
 
 package:
-    void incoming_message(const(ubyte)[] data, SysTime now)
+    void incoming_message(const(ubyte)[] data, MonoTime now)
     {
         _last_activity = getTime();
 
@@ -717,7 +717,7 @@ private:
         if (!r)
             return false;
 
-        req.request_time = getSysTime();
+        req.request_time = getTime();
         _pending_requests ~= req;
 
         version (DebugAA55)
@@ -726,7 +726,7 @@ private:
         return true;
     }
 
-    void offline_response(bool success, ref const AA55Request request, SysTime response_time, const(ubyte)[] response, void* user_data)
+    void offline_response(bool success, ref const AA55Request request, MonoTime response_time, const(ubyte)[] response, void* user_data)
     {
         if (!success)
             return;
@@ -748,7 +748,7 @@ private:
         _inverter_addr = 0x0D;
     }
 
-    void reg_response(bool success, ref const AA55Request request, SysTime response_time, const(ubyte)[] response, void* user_data)
+    void reg_response(bool success, ref const AA55Request request, MonoTime response_time, const(ubyte)[] response, void* user_data)
     {
         if (!success)
             return;
@@ -762,7 +762,7 @@ private:
         send_request_internal(req, null);
     }
 
-    void id_response(bool success, ref const AA55Request request, SysTime response_time, const(ubyte)[] response, void* user_data)
+    void id_response(bool success, ref const AA55Request request, MonoTime response_time, const(ubyte)[] response, void* user_data)
     {
         if (!success)
             return;

@@ -212,7 +212,7 @@ private:
 
     struct SampleElement
     {
-        SysTime last_update;
+        MonoTime last_update;
         GoodWeControlCode control;
         GoodWeFunctionCode fn;
         ubyte offset;
@@ -228,7 +228,7 @@ private:
             restart();
     }
 
-    void response_handler(bool success, ref const AA55Request request, SysTime response_time, const(ubyte)[] response, void* user_data)
+    void response_handler(bool success, ref const AA55Request request, MonoTime response_time, const(ubyte)[] response, void* user_data)
     {
         foreach (ref e; elements)
         {
@@ -258,7 +258,7 @@ private:
             assert(e.offset + e.desc.data_length <= response.length, "response too small for element data?!");
 
             Variant sample = sample_value(response.ptr + e.offset, e.desc);
-            e.element.value(sample.move, response_time);
+            e.element.value(sample.move, cast(SysTime)response_time);
 
             version (DebugGoodWeBinding)
             {

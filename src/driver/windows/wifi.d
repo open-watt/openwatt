@@ -335,7 +335,7 @@ protected:
 
         const(ubyte)[] data;
         uint wire_len;
-        SysTime ts;
+        MonoTime ts;
 
         while (true)
         {

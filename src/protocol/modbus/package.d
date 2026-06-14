@@ -400,7 +400,7 @@ nothrow @nogc:
         // TODO: how to handle request cancellation? if we bail, then the client will try and call a dead delegate...
     }
 
-    void response_handler(ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time)
+    void response_handler(ref const ModbusPDU request, ref ModbusPDU response, MonoTime request_time, MonoTime response_time)
     {
         if (response.function_code & 0x80)
         {
@@ -479,7 +479,7 @@ nothrow @nogc:
         state = CommandCompletionState.finished;
     }
 
-    void error_handler(ModbusErrorType errorType, ref const ModbusPDU request, SysTime request_time)
+    void error_handler(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime request_time)
     {
         Duration reqDuration = getTime() - request_time;
         if (errorType == ModbusErrorType.Timeout)

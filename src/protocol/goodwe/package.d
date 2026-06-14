@@ -74,7 +74,7 @@ nothrow @nogc:
 
         while (true)
         {
-            SysTime now = getSysTime();
+            MonoTime now = getTime();
             Result r = aa55_socket.recvfrom(buffer, MsgFlags.none, &sender, &bytes);
             if (!r)
             {

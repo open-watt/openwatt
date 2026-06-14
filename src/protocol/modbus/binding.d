@@ -444,7 +444,7 @@ private:
 
     struct SampleElement
     {
-        SysTime lastUpdate;
+        MonoTime lastUpdate;
         ushort register;
         ubyte regKind;
         ubyte flags; // 1 - in-flight (poll), 2 - constant-sampled, 4 - dirty (write pending), 8 - in-flight (write)
@@ -516,7 +516,7 @@ private:
             restart();
     }
 
-    void response_handler(ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time)
+    void response_handler(ref const ModbusPDU request, ref ModbusPDU response, MonoTime request_time, MonoTime response_time)
     {
         const ubyte uni_addr = _slave_server.universal_address;
         ubyte kind = request.function_code == FunctionCode.read_holding_registers ? 4 :
@@ -594,7 +594,7 @@ private:
             else
             {
                 _writing_from_poll = true;
-                e.element.value(sample_value(data.ptr + byte_offset, e.desc), response_time);
+                e.element.value(sample_value(data.ptr + byte_offset, e.desc), cast(SysTime)response_time);
                 _writing_from_poll = false;
             }
 
@@ -603,7 +603,7 @@ private:
         }
     }
 
-    void error_handler(ModbusErrorType errorType, ref const ModbusPDU request, SysTime request_time)
+    void error_handler(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime request_time)
     {
         ubyte kind = request.function_code == FunctionCode.read_holding_registers ? 4 :
                      request.function_code == FunctionCode.read_input_registers ? 3 :
@@ -634,7 +634,7 @@ private:
         }
     }
 
-    void snoop_handler(ubyte server_addr, ref const ModbusPDU request, ref ModbusPDU response, SysTime request_time, SysTime response_time)
+    void snoop_handler(ubyte server_addr, ref const ModbusPDU request, ref ModbusPDU response, MonoTime request_time, MonoTime response_time)
     {
         if (server_addr != _slave_server.universal_address)
             return;
@@ -644,7 +644,7 @@ private:
 
     // server side: incoming request handling
 
-    void request_handler(ubyte master_addr, ushort seq, ref const ModbusPDU request, SysTime now)
+    void request_handler(ubyte master_addr, ushort seq, ref const ModbusPDU request, MonoTime now)
     {
         ModbusPDU response;
         ExceptionCode ex = handle_request(request, response);
@@ -1068,14 +1068,14 @@ private:
         }
     }
 
-    void write_response_handler(ref const ModbusPDU req, ref ModbusPDU resp, SysTime, SysTime)
+    void write_response_handler(ref const ModbusPDU req, ref ModbusPDU resp, MonoTime, MonoTime)
     {
         clear_write_in_flight(req);
         if (resp.function_code & 0x80)
             log.warning(name[], ": upstream write exception ", cast(ubyte)(resp.data.length >= 1 ? resp.data[0] : 0));
     }
 
-    void write_error_handler(ModbusErrorType ty, ref const ModbusPDU req, SysTime)
+    void write_error_handler(ModbusErrorType ty, ref const ModbusPDU req, MonoTime)
     {
         if (ty == ModbusErrorType.Failed || ty == ModbusErrorType.Timeout)
         {

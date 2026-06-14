@@ -400,7 +400,7 @@ protected:
                         }
 
                         Packet p;
-                        ref hdr = p.init!RawFrame(msg[offset .. msg_len], cast(SysTime)timestamp);
+                        ref hdr = p.init!RawFrame(msg[offset .. msg_len], timestamp);
                         hdr.is_text = _pending_message_type == WSMessageType.text;
                         _status.rx_bytes += _rx_overhead; // dispatch() counts the payload; we add framing
                         _rx_overhead = 0;
@@ -425,7 +425,7 @@ protected:
                                   _decoded_bytes > 200 ? ", ..." : "");
 
                     Packet p;
-                    ref hdr = p.init!RawFrame(buf[0 .. _decoded_bytes], cast(SysTime)timestamp);
+                    ref hdr = p.init!RawFrame(buf[0 .. _decoded_bytes], timestamp);
                     hdr.is_text = _pending_message_type == WSMessageType.text;
                     _status.rx_bytes += _rx_overhead;
                     _rx_overhead = 0;

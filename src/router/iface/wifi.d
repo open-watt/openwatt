@@ -232,7 +232,7 @@ nothrow @nogc:
         mark_set!(typeof(this), "secret")();
     }
 
-    final void on_radio_rx(const(ubyte)[] data, SysTime ts)
+    final void on_radio_rx(const(ubyte)[] data, MonoTime ts)
     {
         incoming_ethernet_frame(data, ts);
     }

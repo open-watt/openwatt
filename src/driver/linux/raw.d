@@ -205,7 +205,7 @@ nothrow @nogc:
     // returns:  1 = got a frame; data points into rx_buf, valid until next poll
     //           0 = no frame ready (EAGAIN / EWOULDBLOCK / EINTR)
     //          -1 = error -- caller can read last_recv_error.system_code for errno
-    int poll(out const(ubyte)[] data, out uint wire_len, out SysTime timestamp)
+    int poll(out const(ubyte)[] data, out uint wire_len, out MonoTime timestamp)
     {
         ptrdiff_t n = recv(fd, rx_buf.ptr, rx_buf.length, 0);
         if (n < 0)
@@ -220,14 +220,14 @@ nothrow @nogc:
             return 0;
         data = rx_buf[0 .. cast(size_t)n];
         wire_len = cast(uint)n;
-        timestamp = getSysTime();
+        timestamp = getTime();
         return 1;
     }
 
     // Like poll(), but exposes sll_pkttype so the caller can drop PACKET_OUTGOING
     // echoes of frames it injected (the CPU port of an offloaded bridge sees its
     // own sendto frames reflected back).
-    int poll_ll(out const(ubyte)[] data, out uint wire_len, out SysTime timestamp, out ubyte pkttype)
+    int poll_ll(out const(ubyte)[] data, out uint wire_len, out MonoTime timestamp, out ubyte pkttype)
     {
         sockaddr_ll sll;
         uint slen = sockaddr_ll.sizeof;
@@ -244,7 +244,7 @@ nothrow @nogc:
             return 0;
         data = rx_buf[0 .. cast(size_t)n];
         wire_len = cast(uint)n;
-        timestamp = getSysTime();
+        timestamp = getTime();
         pkttype = sll.sll_pkttype;
         return 1;
     }

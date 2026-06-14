@@ -96,7 +96,7 @@ bool is_network_multicast_address(ulong address) pure
 struct Packet
 {
 nothrow @nogc:
-    ref T init(T)(const(void)[] payload, SysTime create_time = getSysTime())
+    ref T init(T)(const(void)[] payload, MonoTime create_time = getTime())
     {
         static assert(T.sizeof <= embed.length);
         assert(payload.length <= ushort.max, "Payload too large");
@@ -109,7 +109,7 @@ nothrow @nogc:
         _ptr = payload.ptr;
         return *cast(T*)embed.ptr;
     }
-    ref T init(T)(void[] payload, SysTime create_time = getSysTime())
+    ref T init(T)(void[] payload, MonoTime create_time = getTime())
     {
         ref T r = init!T(cast(const)payload, create_time);
         _flags |= 0x01; // mutable
@@ -180,8 +180,8 @@ nothrow @nogc:
     ushort vid() const pure
         => vlan & 0x0FFF;
 
-    // TODO: should be MonoTime - a packet is a physical event, not a wall-clock label; project to SysTime at the pcap/display boundary
-    SysTime creation_time; // time received, or time of call to send
+    // monotonic; a packet is a physical event, not a wall-clock label. Project to SysTime only at record boundaries (element values, pcap, logs).
+    MonoTime creation_time; // time received, or time of call to send
     union {
         Ethernet eth;
         void[24] embed;
