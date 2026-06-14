@@ -34,6 +34,9 @@ import manager.base;
 import manager.collection;
 import manager.component;
 import manager.console;
+import manager.console.bitmap;
+import manager.console.graph;
+import manager.console.live_view;
 import manager.device;
 import manager.element;
 import manager.plugin;
@@ -447,31 +450,17 @@ private:
 
     void scan()
     {
-        MutableString!0 prefix;
-
-        void walk(Component c)
+        Array!(Element*) elements = g_app.find_elements(_filter[]);
+        char[256] buf = void;
+        foreach (e; elements[])
         {
-            size_t reset = prefix.length;
-            scope(exit) prefix.erase(reset, prefix.length - reset);
-            if (reset)
-                prefix ~= '.';
-            prefix ~= c.id[];
-
-            foreach (Element* e; c.elements)
-            {
-                size_t e_reset = prefix.length;
-                scope(exit) prefix.erase(e_reset, prefix.length - e_reset);
-                prefix.append('.', e.id[]);
-                if (prefix[] !in _streams && wildcard_match(_filter[], prefix[]))
-                    attach(e, prefix[]);
-            }
-
-            foreach (Component child; c.components)
-                walk(child);
+            ptrdiff_t len = e.full_path(buf);
+            if (len <= 0 || len > buf.length)
+                continue;
+            const(char)[] path = buf[0 .. len];
+            if (path !in _streams)
+                attach(e, path);
         }
-
-        foreach (device; g_app.devices.values)
-            walk(device);
     }
 
     void attach(Element* e, const(char)[] path)
@@ -556,6 +545,7 @@ nothrow @nogc:
     {
         g_app.console.register_collection!Recorder();
         g_app.console.register_command!query_cmd("/record", this, "query");
+        g_app.console.register_command!graph_cmd("/record", this, "graph");
     }
 
     override void update()
@@ -574,6 +564,141 @@ nothrow @nogc:
     }
 
     import urt.meta.nullable;
+    import manager.console.command : CommandState;
+
+    // expand element path patterns (wildcards and comma-lists allowed) into
+    // record streams; capped at the graph palette size
+    void find_streams(scope const(char)[][] patterns, ref Array!(RecordStream*) result)
+    {
+        static void add_unique(ref Array!(RecordStream*) arr, RecordStream* rs)
+        {
+            foreach (e; arr[])
+                if (e is rs)
+                    return;
+            arr ~= rs;
+        }
+
+        Array!(Element*) elements;
+        foreach (pattern; patterns)
+        {
+            const(char)[] rest = pattern;
+            while (!rest.empty)
+            {
+                const(char)[] tok = rest.split!',';
+                if (!tok.empty)
+                    g_app.find_elements(tok, elements);
+            }
+        }
+
+        char[256] buf = void;
+        foreach (e; elements[])
+        {
+            ptrdiff_t len = e.full_path(buf);
+            if (len <= 0 || len > buf.length)
+                continue;
+            if (RecordStream* rs = find_stream(buf[0 .. len]))
+                add_unique(result, rs);
+        }
+        if (result.length > graph_palette.length)
+            result.resize(graph_palette.length);
+    }
+
+    // shared by the static command and the live view: query every matched
+    // stream over [t0, t1] and render. `panels` mode renders one chart per
+    // series, stacked vertically with a shared time range.
+    void render_paths(ref Array!(MutableString!0) lines, scope const(char)[][] paths, ulong t0, ulong t1, uint cols, uint rows, ref GraphOptions opt)
+    {
+        lines.clear();
+
+        Array!(RecordStream*) streams;
+        find_streams(paths, streams);
+        if (streams.empty)
+        {
+            lines.pushBack() ~= "no record streams match";
+            return;
+        }
+
+        uint n = cast(uint)streams.length;
+        Array!(Array!Sample) data;
+        data.resize(n);
+        Array!(GraphSeries!Sample) series;
+        foreach (i; 0 .. n)
+        {
+            query_stream(*streams[i], t0, t1, cols * 2, data[][i]);
+            series ~= GraphSeries!Sample(data[][i][], 0, streams[i].path[]);
+        }
+
+        if (opt.mode == GraphMode.panels && n > 1)
+        {
+            uint per = rows / n;
+            if (per < 5)
+            {
+                lines.pushBack() ~= "graph: too many panels for the area";
+                return;
+            }
+
+            Array!(MutableString!0) sub;
+            foreach (i; 0 .. n)
+            {
+                bool last_panel = i + 1 == n;
+                uint panel_rows = per - 1 + (last_panel ? rows % n : 0);
+                Pixel c = graph_palette[i % graph_palette.length];
+
+                ref MutableString!0 title = lines.pushBack();
+                title.append("\x1b[38;2;", (c >> 16) & 0xFF, ';', (c >> 8) & 0xFF, ';', c & 0xFF, 'm');
+                append_utf8(title, 0x25A0);
+                title.append("\x1b[0m ", streams[i].path[]);
+
+                GraphOptions po = opt;
+                po.mode = GraphMode.overlay;
+                po.legend = false;
+                po.x_axis = last_panel;
+                po.color = c;
+                render_graph(sub, series[i].samples, t0, t1, cols, panel_rows, po);
+                foreach (ref l; sub[])
+                    lines ~= l.move;
+            }
+            return;
+        }
+
+        render_graph(lines, series[], t0, t1, cols, rows, opt);
+    }
+
+    // /record/graph path=<elem>[,<elem>...] [last=][from=][to=] [mode=] [style=] [height=] [live=yes]
+    CommandState graph_cmd(Session session, const(char)[][] path, Nullable!Duration last,
+                           Nullable!SysTime from, Nullable!SysTime to, Nullable!GraphMode mode,
+                           Nullable!bool live, Nullable!GraphStyle style, Nullable!uint height)
+    {
+        GraphOptions opt;
+        if (style)
+            apply_style(opt, style.value);
+        if (mode)
+            opt.mode = mode.value;
+
+        if (live && live.value)
+        {
+            Duration span = last ? last.value : 120.seconds;
+            Array!String paths;
+            foreach (p; path)
+                paths ~= p.makeString(defaultAllocator());
+            return defaultAllocator().allocT!GraphViewState(session, this, paths.move, span, opt, height ? height.value : 0);
+        }
+
+        ulong t1 = unixTimeNs(to ? to.value : getSysTime());
+        ulong span_ns = cast(ulong)(last ? last.value : 3600.seconds).as!"nsecs";
+        ulong t0 = from ? unixTimeNs(from.value) : (t1 > span_ns ? t1 - span_ns : 0);
+
+        uint w = session.width();
+        if (w == 0)
+            w = 80;
+        uint h = height ? height.value : 16;
+
+        Array!(MutableString!0) lines;
+        render_paths(lines, path, t0, t1, w, h, opt);
+        foreach (ref l; lines[])
+            session.write_line(l[]);
+        return null;
+    }
 
     void query_cmd(Session session, const(char)[] path, Nullable!Duration last, Nullable!uint max)
     {
@@ -593,6 +718,106 @@ nothrow @nogc:
         foreach (ref s; samples[])
             session.write_line(getDateTime(from_unix_time_ns(s.time)), "  ", s.value);
         session.write_line(samples.length, " samples");
+    }
+}
+
+
+// Live graph: re-queries a sliding [now - span, now] window a few times a
+// second, so short spans scroll in realtime. +/- halve/double the span.
+class GraphViewState : LiveViewState
+{
+    import urt.mem.temp : tconcat;
+    import manager.console.command : CommandCompletionState;
+nothrow @nogc:
+
+    this(Session session, RecordModule mod, Array!String paths, Duration span, GraphOptions opt, uint height)
+    {
+        super(session, null, height ? LiveViewMode.inline_ : LiveViewMode.fullscreen);
+        _mod = mod;
+        _paths = paths.move;
+        _span = span;
+        _opt = opt;
+        _height = height;
+    }
+
+    override uint content_height()
+        => cast(uint)_lines.length;
+
+    override void render_content(uint offset, uint count, uint width)
+    {
+        foreach (i; offset .. offset + count)
+        {
+            session.write_output("\r", false);
+            if (i < _lines.length)
+                session.write_output(_lines[i][], false);
+            session.write_output("\x1b[K\r\n", false);
+        }
+    }
+
+protected:
+    override CommandCompletionState update()
+    {
+        MonoTime now = getTime();
+        if (!_last_build || now - _last_build >= 250.msecs)
+        {
+            rebuild();
+            _last_build = now;
+        }
+        return super.update();
+    }
+
+    override bool handle_key(const(char)[] seq)
+    {
+        if (seq[] == "+" || seq[] == "=")
+        {
+            if (_span > 10.seconds)
+                _span = (_span.as!"msecs" / 2).msecs;
+            return true;
+        }
+        if (seq[] == "-")
+        {
+            if (_span < 86_400.seconds)
+                _span = (_span.as!"msecs" * 2).msecs;
+            return true;
+        }
+        return false;
+    }
+
+    override const(char)[] status_text()
+    {
+        const(char)[] first = _paths.length ? _paths[0][] : null;
+        if (_paths.length > 1)
+            return tconcat(first, " +", _paths.length - 1, " | span=", _span, " | +/- zoom");
+        return tconcat(first, " | span=", _span, " | +/- zoom");
+    }
+
+private:
+    RecordModule _mod;
+    Array!String _paths;
+    Duration _span;
+    GraphOptions _opt;
+    uint _height;
+    MonoTime _last_build;
+    Array!(MutableString!0) _lines;
+
+    void rebuild()
+    {
+        uint w = session.width();
+        uint h = session.height();
+        if (w == 0)
+            w = 80;
+        if (h == 0)
+            h = 24;
+        uint rows = _height ? _height : (h > 2 ? h - 1 : 1);
+
+        ulong t1 = unixTimeNs(getSysTime());
+        ulong span_ns = cast(ulong)_span.as!"nsecs";
+        ulong t0 = t1 > span_ns ? t1 - span_ns : 0;
+
+        Array!(const(char)[]) pats;
+        foreach (ref p; _paths[])
+            pats ~= p[];
+        _mod.render_paths(_lines, pats[], t0, t1, w, rows, _opt);
     }
 }
 
