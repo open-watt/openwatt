@@ -251,6 +251,7 @@ nothrow @nogc:
 
         console.register_command!device_add("/device", this, "add");
         console.register_command!device_print("/device", this, "print");
+        console.register_command!element_set("/element", this, "set");
         console.register_command!link_add("/element/link", this, "add");
         console.register_command!link_print("/element/link", this, "print");
 
@@ -357,6 +358,60 @@ nothrow @nogc:
         if (Device* d = device_name[] in devices)
             return name.empty ? null : (*d).find_element(name);
         return null;
+    }
+
+    // Collect every element whose full data-model path matches `pattern`.
+    // '*'/'?' wildcards match anywhere in the dotted path ('*' spans segment
+    // boundaries): "device.*.element", "dev*.*.voltage*", "*", etc.
+    //
+    // TODO: consolidate the HTTP API's element wildcard here. apps.api's
+    // collect_with_wildcard / collect_elements_from_component use *segment*
+    // semantics ('*' matches exactly one path segment, recursing) rather than
+    // the whole-path glob below. Unifying on this would be a behaviour change
+    // for existing API clients, so it needs a deliberate decision first.
+    Array!(Element*) find_elements(const(char)[] pattern, bool case_insensitive = false)
+    {
+        Array!(Element*) result;
+        find_elements(pattern, result, case_insensitive);
+        return result;
+    }
+
+    void find_elements(const(char)[] pattern, ref Array!(Element*) result, bool case_insensitive = false)
+    {
+        import urt.string : wildcard_match;
+
+        bool wild = pattern.findFirst('*') != pattern.length || pattern.findFirst('?') != pattern.length;
+        if (!wild)
+        {
+            if (Element* e = find_element(pattern))
+                result ~= e;
+            return;
+        }
+
+        MutableString!0 path;
+        void walk(Component c)
+        {
+            size_t reset = path.length;
+            scope(exit) path.erase(reset, path.length - reset);
+            if (reset)
+                path ~= '.';
+            path ~= c.id[];
+
+            foreach (Element* e; c.elements)
+            {
+                size_t e_reset = path.length;
+                scope(exit) path.erase(e_reset, path.length - e_reset);
+                path.append('.', e.id[]);
+                if (wildcard_match(pattern, path[], false, case_insensitive))
+                    result ~= e;
+            }
+
+            foreach (Component child; c.components)
+                walk(child);
+        }
+
+        foreach (device; devices.values)
+            walk(device);
     }
 
     void register_type(const(CollectionTypeInfo)* type_info, const(char)[] path)
@@ -795,6 +850,17 @@ nothrow @nogc:
             emit_node(dev, true, true);
         }
         return table;
+    }
+
+    void element_set(Session session, const(char)[] element, Variant value)
+    {
+        Element* e = find_element(element);
+        if (!e)
+        {
+            session.write_line("Element not found: ", element);
+            return;
+        }
+        e.value(value.move);
     }
 
     // element link API

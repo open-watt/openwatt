@@ -387,6 +387,9 @@
     <DCompile Include="src\manager\profile.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\manager\record.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
     <DCompile Include="src\manager\secret.d">
       <Filter>src\manager</Filter>
     </DCompile>
@@ -462,10 +465,16 @@
     <DCompile Include="src\manager\log.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\manager\console\bitmap.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
     <DCompile Include="src\manager\console\builtin_commands.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
     <DCompile Include="src\manager\console\command.d">
+      <Filter>src\manager\console</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\console\graph.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
     <DCompile Include="src\manager\console\live_view.d">

@@ -322,7 +322,7 @@ auto make_arg_tuple(alias F)(const Variant[] args, const NamedArgument[] paramet
 
     static foreach (i, P; Params)
     {
-        static if (ParamNames[i] != "named-args")
+        static if (ParamNames[i] == "named-args")
             has_named_args = true;
     }
 

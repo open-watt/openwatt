@@ -19,6 +19,7 @@ import urt.variant;
 
 import manager.base;
 import manager.collection;
+import manager.record : Sample;
 import manager.sync;
 import manager.sync.encoder;
 import manager.sync.peer;
@@ -226,6 +227,40 @@ nothrow @nogc:
         send_frame(peer);
     }
 
+    override void encode_history_req(SyncPeer peer, const(char)[] path, ulong from_ms, ulong to_ms, uint max_points, uint seq)
+    {
+        begin_frame("history_req");
+        _buf.append(",\"path\":");
+        write_str(path);
+        _buf.append(",\"from\":", from_ms);
+        if (to_ms)
+            _buf.append(",\"to\":", to_ms);
+        if (max_points)
+            _buf.append(",\"max\":", max_points);
+        _buf.append(",\"seq\":", seq);
+        send_frame(peer);
+    }
+
+    override void encode_history(SyncPeer peer, uint seq, const(char)[] path, const(Sample)[] samples)
+    {
+        begin_frame("history");
+        _buf.append(",\"seq\":", seq);
+        _buf.append(",\"path\":");
+        write_str(path);
+        _buf.append(",\"samples\":[");
+        foreach (i, ref s; samples)
+        {
+            if (i)
+                _buf ~= ',';
+            _buf.append('[', s.time / 1_000_000, ',');
+            const v = Variant(s.value);
+            write_variant(v);
+            _buf ~= ']';
+        }
+        _buf ~= ']';
+        send_frame(peer);
+    }
+
     override void encode_enum(SyncPeer peer, const(char)[] type_name, ref const Variant members, uint seq)
     {
         begin_frame("enum");
@@ -381,6 +416,26 @@ nothrow @nogc:
             case "enum_req":
                 sync.inbound_enum_req(peer, json.getMember("type").asString(),
                     cast(uint)json.getMember("seq").asLong());
+                break;
+
+            case "history_req":
+            {
+                Variant* from = json.getMember("from");
+                Variant* to = json.getMember("to");
+                Variant* max = json.getMember("max");
+                sync.inbound_history_req(peer,
+                    json.getMember("path").asString(),
+                    from ? cast(ulong)from.asLong() : 0,
+                    to ? cast(ulong)to.asLong() : 0,
+                    max ? cast(uint)max.asLong() : 0,
+                    cast(uint)json.getMember("seq").asLong());
+                break;
+            }
+
+            case "history":
+                // node-to-node history recall isn't wired up yet - no outbound
+                // requester exists to correlate this response with.
+                log.info("sync/json: inbound history frame from '", peer.name[], "' - ignored");
                 break;
 
             case "enum":
