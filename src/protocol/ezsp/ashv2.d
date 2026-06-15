@@ -38,6 +38,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!ASHInterface, id, flags);
+        _caps |= InterfaceCaps.unicast | InterfaceCaps.point_to_point;
     }
 
     // Properties...

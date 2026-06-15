@@ -264,6 +264,8 @@ nothrow @nogc:
             return;
 
         ModbusNode c = _node.get;
+        if (has_in_flight_poll())
+            return;
 
         enum MaxRegs = 128;
         enum MaxGapSize = 16;
@@ -632,6 +634,16 @@ private:
                 continue;
             e.flags &= 0xFE;
         }
+    }
+
+    bool has_in_flight_poll() const
+    {
+        foreach (ref e; elements)
+        {
+            if (e.flags & 1)
+                return true;
+        }
+        return false;
     }
 
     void snoop_handler(ubyte server_addr, ref const ModbusPDU request, ref ModbusPDU response, MonoTime request_time, MonoTime response_time)

@@ -27,6 +27,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!PPPServer, id, flags);
+        _caps |= InterfaceCaps.unicast | InterfaceCaps.point_to_point;
 
         // Default protocol is PPP
         mtu = 1500;

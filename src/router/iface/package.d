@@ -49,8 +49,16 @@ enum PacketDirection : ubyte
 
 enum InterfaceCaps : ushort
 {
-    none     = 0,
-    ethernet = 1 << 0, // attaches to an ethernet segment; marshals exotic packets over the OW ethertype
+    none           = 0,
+    ethernet       = 1 << 0, // attaches to an ethernet segment; marshals exotic packets over the OW ethertype
+    unicast        = 1 << 1, // can direct a frame at a single peer
+    multicast      = 1 << 2, // can deliver to a multicast group
+    broadcast      = 1 << 3, // can deliver to every peer on the segment
+    // TODO: promiscuous currently doubles as the bridge-ingress qualifier. Planned split:
+    // transit (RX through-traffic) + transparent (TX foreign-src), leaving promiscuous = sniff-only.
+    promiscuous    = 1 << 4, // can surface frames not addressed to it (bridge-member requirement)
+    vlan           = 1 << 5, // honours 802.1Q tags
+    point_to_point = 1 << 6, // exactly one peer; no L2 learning or flooding
 }
 
 enum MessageState

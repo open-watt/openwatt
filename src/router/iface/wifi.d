@@ -386,6 +386,7 @@ nothrow @nogc:
     protected this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(typeInfo, id, flags);
+        _caps |= InterfaceCaps.promiscuous;
     }
 
     // Properties

@@ -67,6 +67,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!ZigbeeInterface, id, flags);
+        _caps |= InterfaceCaps.unicast | InterfaceCaps.multicast | InterfaceCaps.broadcast;
     }
 
     // Properties...

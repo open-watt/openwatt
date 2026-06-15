@@ -153,7 +153,8 @@ nothrow @nogc:
     this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(typeInfo, id, flags);
-        _caps |= InterfaceCaps.ethernet;
+        _caps |= InterfaceCaps.ethernet | InterfaceCaps.unicast | InterfaceCaps.multicast |
+                 InterfaceCaps.broadcast | InterfaceCaps.vlan;
 
         // TODO: proper values?
 //        _mtu = 1500;

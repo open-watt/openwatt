@@ -41,6 +41,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!WindowsPcapEthernet, id, flags);
+        _caps |= InterfaceCaps.promiscuous;
     }
 
     final const(char)[] adapter() const pure

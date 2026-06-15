@@ -82,6 +82,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!CANInterface, id, flags);
+        _caps |= InterfaceCaps.unicast | InterfaceCaps.broadcast | InterfaceCaps.promiscuous;
 
         // this is the proper value for canbus, irrespective of the L2 MTU
         // can jumbo's are theoretically possible if all hops support it... (fragmentation is not possible (?))

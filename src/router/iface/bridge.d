@@ -54,6 +54,8 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!BridgeInterface, id, flags);
+        _caps |= InterfaceCaps.ethernet | InterfaceCaps.unicast | InterfaceCaps.multicast |
+                 InterfaceCaps.broadcast | InterfaceCaps.vlan;
         _address_table = AddressTable(32);
         _address_table.insert(mac.ul | (ulong(PacketType.ethernet) << 60), _local_port);
     }

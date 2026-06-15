@@ -36,6 +36,8 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!VLANInterface, id, flags);
+        _caps |= InterfaceCaps.ethernet | InterfaceCaps.unicast | InterfaceCaps.multicast |
+                 InterfaceCaps.broadcast | InterfaceCaps.vlan;
 
         // the super made a mac address, but we don't actually want one...
         remove_address(mac);

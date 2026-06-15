@@ -116,6 +116,7 @@ nothrow @nogc:
     protected this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(type_info, id, flags);
+        _caps |= InterfaceCaps.unicast | InterfaceCaps.broadcast;
         _mtu = 247; // BLE 5.x max ATT MTU (251 - 4 byte L2CAP header)
         _max_l2mtu = 251;
         _l2mtu = _max_l2mtu;

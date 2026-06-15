@@ -28,6 +28,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!PPPClient, id, flags);
+        _caps |= InterfaceCaps.unicast | InterfaceCaps.point_to_point;
 
         // Default protocol is PPP
         mtu = 1500;
@@ -199,6 +200,7 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!PPPoEClient, id, flags);
+        _caps |= InterfaceCaps.unicast | InterfaceCaps.point_to_point;
 
         // Default protocol is PPPoE
         mtu = 1492; // TODO: what about 'baby jumbo' (RFC 4638) which supports 1500 inside pppoe?
