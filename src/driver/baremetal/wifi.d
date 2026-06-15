@@ -52,6 +52,25 @@ nothrow @nogc:
 
     final ref Wifi wifi() pure { return _wifi; }
 
+    override bool scanning() const
+        => _scanning;
+
+    override void cancel_scan()
+    {
+        _scan_handler = null;
+    }
+
+    override bool start_scan(ref const WifiScanConfig cfg, ScanHandler done)
+    {
+        if (_scanning || !_wifi.is_open)
+            return false;
+        if (!wifi_scan_start(_wifi, cfg))
+            return false;
+        _scan_handler = done;
+        _scanning = true;
+        return true;
+    }
+
     final const(char)[] would_accept(const(WLANBaseInterface) candidate) const pure
     {
         bool candidate_is_ap = cast(const(APInterface))candidate !is null;
@@ -258,6 +277,8 @@ private:
     ubyte _num_client;
     bool _mode_update_pending;
     bool _mode_update_warned;
+    ScanHandler _scan_handler;
+    bool _scanning;
 
     __gshared BuiltinWiFi[num_wifi] _active_radios;
     shared uint _wifi_pump_pending;
@@ -415,7 +436,20 @@ private:
                 else
                     log.info("STA left AP");
                 break;
-            case WifiEvent.scan_done:           break;
+            case WifiEvent.scan_done:
+                if (_scanning)
+                {
+                    _scanning = false;
+                    ScanHandler h = _scan_handler;
+                    _scan_handler = null;
+                    if (h !is null)
+                    {
+                        WifiScanResult[32] buf = void;
+                        size_t n = wifi_scan_get_results(_wifi, buf[]);
+                        h(buf[0 .. n], true);
+                    }
+                }
+                break;
         }
     }
 

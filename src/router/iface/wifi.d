@@ -20,7 +20,14 @@ import manager.secret;
 import router.iface;
 import router.iface.ethernet;
 
+import urt.driver.wifi : WifiScanConfig, WifiScanResult;
+
 nothrow @nogc:
+
+
+// Invoked once when an async scan completes; `ok` is false on failure/abort.
+// The results slice is valid only for the duration of the call.
+alias ScanHandler = void delegate(scope const(WifiScanResult)[] results, bool ok) nothrow @nogc;
 
 
 enum WifiAuth : byte
@@ -137,6 +144,12 @@ nothrow @nogc:
             _bound_sta = remove ? null : wlan;
         on_wlan_bind_changed();
     }
+
+    bool start_scan(ref const WifiScanConfig cfg, ScanHandler done) { return false; }
+
+    void cancel_scan() {}
+
+    bool scanning() const { return false; }
 
 protected:
 

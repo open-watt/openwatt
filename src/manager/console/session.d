@@ -686,7 +686,8 @@ protected:
         _history_cursor = cast(uint)_history.length;
     }
 
-    final NoGCAllocator allocator() pure
+    // TODO: DELETE ALL THIS ALLOCATOR RUBBISH!
+    public final NoGCAllocator allocator() pure
         => _console._allocator;
     final NoGCAllocator tempAllocator() pure
         => _console._tempAllocator;

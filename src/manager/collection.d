@@ -733,12 +733,6 @@ private:
 
     void insert(size_t at, ref Entry e)
     {
-        import urt.mem : memmove;
-        // TODO: add an insert function!
-        size_t tail = _entries.length - at;
-        _entries.resize(_entries.length + 1);
-        if (tail > 0)
-            memmove(&_entries[at + 1], &_entries[at], Entry.sizeof * tail);
-        _entries.opIndex(at) = e;
+        _entries.insert(at, e);
     }
 }
