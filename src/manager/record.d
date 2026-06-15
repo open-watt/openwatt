@@ -44,9 +44,6 @@ import manager.plugin;
 nothrow @nogc:
 
 
-alias log = Log!"record";
-
-
 struct Sample
 {
     ulong time;   // unix ns
@@ -61,7 +58,6 @@ struct RecordFileHeader
     ulong reserved;
 }
 
-
 bool sample_value(ref const Variant v, out double value)
 {
     if (v.isBool)
@@ -74,7 +70,6 @@ bool sample_value(ref const Variant v, out double value)
         return false;
     return value == value; // don't record NaN
 }
-
 
 struct RecordStream
 {
@@ -144,7 +139,6 @@ nothrow @nogc:
     }
 }
 
-
 // Streaming time-bucket aggregator: emits one mean-value sample per bucket,
 // stamped with the bucket's last real timestamp. bucket_width == 0 passes
 // samples through unmodified.
@@ -195,6 +189,108 @@ private:
     }
 }
 
+// Sample-and-hold interval downsampler for graphs. Each emitted point is the
+// time-weighted mean value over one visible time bucket, which avoids the
+// aliasing/jitter caused by picking or averaging only change events.
+struct GraphIntervalSampler
+{
+nothrow @nogc:
+
+    Array!Sample* sink;
+    ulong from;
+    ulong to;
+    ulong bucket_width;
+
+    void seed(ref const Sample s)
+    {
+        _last_time = from;
+        _last_value = s.value;
+        _has_value = true;
+        _seeded = true;
+    }
+
+    void put(ref const Sample s)
+    {
+        if (!bucket_width)
+        {
+            *sink ~= s;
+            return;
+        }
+
+        ulong t = s.time;
+        if (t < from)
+            return;
+        if (t > to)
+            t = to;
+
+        if (_has_value)
+            accumulate(_last_time, t, _last_value);
+
+        _last_time = t;
+        _last_value = s.value;
+        _has_value = true;
+    }
+
+    void finish()
+    {
+        if (!bucket_width)
+            return;
+        if (_has_value)
+            accumulate(_last_time, to, _last_value);
+        emit();
+    }
+
+private:
+    ulong _bucket = ulong.max;
+    ulong _bucket_time;
+    double _sum;
+    ulong _duration;
+    ulong _last_time;
+    double _last_value;
+    bool _has_value;
+    bool _seeded;
+    bool _emitted;
+
+    void accumulate(ulong start, ulong end, double value)
+    {
+        if (end <= start)
+            return;
+        if (start < from)
+            start = from;
+        if (end > to)
+            end = to;
+
+        while (start < end)
+        {
+            ulong b = (start - from) / bucket_width;
+            if (b != _bucket)
+            {
+                emit();
+                _bucket = b;
+                ulong bucket_start = from + b * bucket_width;
+                _bucket_time = (_seeded || _emitted || start <= bucket_start)
+                    ? bucket_start : start;
+            }
+
+            ulong bucket_end = from + (b + 1) * bucket_width;
+            ulong stop = end < bucket_end ? end : bucket_end;
+            ulong dt = stop - start;
+            _sum += value * cast(double)dt;
+            _duration += dt;
+            start = stop;
+        }
+    }
+
+    void emit()
+    {
+        if (!_duration)
+            return;
+        *sink ~= Sample(_bucket_time, _sum / cast(double)_duration);
+        _sum = 0;
+        _duration = 0;
+        _emitted = true;
+    }
+}
 
 // Recall samples in [from_ns, to_ns] (inclusive). Anything older than the
 // in-memory ring is read from the stream's file; the ring serves the rest
@@ -225,6 +321,50 @@ void query_stream(ref RecordStream rs, ulong from_ns, ulong to_ns, uint max_poin
         agg.put(s);
     }
     agg.finish();
+}
+
+// Graphs render record streams as sample-and-hold signals. Seed the result
+// with the value already in effect at the left edge of the window.
+void query_stream_for_graph(ref RecordStream rs, ulong from_ns, ulong to_ns, uint max_points, ref Array!Sample result)
+{
+    if (to_ns <= from_ns)
+        return;
+
+    ulong bucket_width = max_points ? (to_ns - from_ns) / max_points + 1 : 0;
+    Sample held;
+    ulong hold_limit = bucket_width ? bucket_width : to_ns - from_ns;
+    bool has_held = find_sample_before(rs, from_ns, held) && from_ns - held.time <= hold_limit;
+
+    if (!max_points)
+    {
+        if (has_held)
+            result ~= Sample(from_ns, held.value);
+        query_stream(rs, from_ns, to_ns, 0, result);
+        return;
+    }
+
+    GraphIntervalSampler sampler;
+    sampler.sink = &result;
+    sampler.from = from_ns;
+    sampler.to = to_ns;
+    sampler.bucket_width = bucket_width;
+    if (has_held)
+        sampler.seed(held);
+
+    ulong ring_oldest = rs.oldest_time();
+    if (from_ns < ring_oldest && !rs.file_failed)
+        read_file_range(rs, from_ns, min(to_ns + 1, ring_oldest), sampler);
+
+    foreach (i; 0 .. rs.count)
+    {
+        ref const Sample s = rs.at(i);
+        if (s.time < from_ns)
+            continue;
+        if (s.time > to_ns)
+            break;
+        sampler.put(s);
+    }
+    sampler.finish();
 }
 
 
@@ -263,6 +403,63 @@ unittest
     assert(result.length == 2);
     assert(result[0].time == 5 && result[0].value == 2);
     assert(result[1].time == 12 && result[1].value == 10);
+
+    // graph query: seed with the held value before the visible range
+    result.clear();
+    query_stream_for_graph(rs, 4, 5, 0, result);
+    assert(result.length == 3);
+    assert(result[0].time == 4 && result[0].value == 20);
+    assert(result[1].time == 4 && result[1].value == 30);
+    assert(result[2].time == 5 && result[2].value == 40);
+
+    result.clear();
+    query_stream_for_graph(rs, 3, 3, 0, result);
+    assert(result.length == 0);
+
+    result.clear();
+    query_stream_for_graph(rs, 100, 101, 0, result);
+    assert(result.length == 0);
+
+    RecordStream old_seed;
+    old_seed.ring.resize(4);
+    old_seed.push(Sample(1, 999));
+    old_seed.push(Sample(15, 10));
+    result.clear();
+    query_stream_for_graph(old_seed, 10, 30, 5, result);
+    assert(result.length == 3);
+    assert(result[0].time == 15);
+
+    RecordStream late_start;
+    late_start.ring.resize(4);
+    late_start.push(Sample(1, 999));
+    late_start.push(Sample(12, 10));
+    result.clear();
+    query_stream_for_graph(late_start, 10, 30, 5, result);
+    assert(result.length == 4);
+    assert(result[0].time == 12);
+
+    result.clear();
+    query_stream_for_graph(rs, 3, 7, 4, result);
+    assert(result.length == 2);
+    assert(result[0].time == 3);
+    assert(result[1].time == 5);
+
+    result.clear();
+    GraphIntervalSampler graph_agg;
+    graph_agg.sink = &result;
+    graph_agg.from = 0;
+    graph_agg.to = 100;
+    graph_agg.bucket_width = 25;
+    Sample seed = Sample(0, 10);
+    graph_agg.seed(seed);
+    graph_agg.put(Sample(40, 20));
+    graph_agg.put(Sample(90, 30));
+    graph_agg.finish();
+    assert(result.length == 4);
+    assert(result[0].time == 0);
+    assert(result[1].time == 25);
+    assert(result[2].time == 50);
+    assert(result[3].time == 75);
 }
 
 
@@ -535,7 +732,6 @@ private:
     }
 }
 
-
 class RecordModule : Module
 {
     mixin DeclareModule!"record";
@@ -624,7 +820,7 @@ nothrow @nogc:
         Array!(GraphSeries!Sample) series;
         foreach (i; 0 .. n)
         {
-            query_stream(*streams[i], t0, t1, cols * 2, data[][i]);
+            query_stream_for_graph(*streams[i], t0, t1, cols * 2, data[][i]);
             series ~= GraphSeries!Sample(data[][i][], 0, streams[i].path[]);
         }
 
@@ -721,7 +917,6 @@ nothrow @nogc:
     }
 }
 
-
 // Live graph: re-queries a sliding [now - span, now] window a few times a
 // second, so short spans scroll in realtime. +/- halve/double the span.
 class GraphViewState : LiveViewState
@@ -755,15 +950,18 @@ nothrow @nogc:
     }
 
 protected:
-    override CommandCompletionState update()
+    override bool continuous_redraw()
+        => false;
+
+    override void poll()
     {
         MonoTime now = getTime();
         if (!_last_build || now - _last_build >= 250.msecs)
         {
             rebuild();
+            request_redraw();
             _last_build = now;
         }
-        return super.update();
     }
 
     override bool handle_key(const(char)[] seq)
@@ -771,13 +969,21 @@ protected:
         if (seq[] == "+" || seq[] == "=")
         {
             if (_span > 10.seconds)
+            {
                 _span = (_span.as!"msecs" / 2).msecs;
+                rebuild();
+                _last_build = getTime();
+            }
             return true;
         }
         if (seq[] == "-")
         {
             if (_span < 86_400.seconds)
+            {
                 _span = (_span.as!"msecs" * 2).msecs;
+                rebuild();
+                _last_build = getTime();
+            }
             return true;
         }
         return false;
@@ -821,8 +1027,64 @@ private:
     }
 }
 
+private bool find_sample_before(ref RecordStream rs, ulong time, out Sample result)
+{
+    if (time == 0)
+        return false;
 
-private void read_file_range(ref RecordStream rs, ulong from, ulong end, ref SampleAggregator agg)
+    for (uint i = rs.count; i > 0; --i)
+    {
+        ref const Sample s = rs.at(i - 1);
+        if (s.time < time)
+        {
+            result = s;
+            return true;
+        }
+    }
+
+    return read_file_sample_before(rs, time, result);
+}
+
+private bool read_file_sample_before(ref RecordStream rs, ulong time, out Sample result)
+{
+    if (rs.file_failed || time == 0)
+        return false;
+
+    File f;
+    if (!f.open(rs.filename[], FileOpenMode.ReadExisting, FileOpenFlags.Sequential))
+        return false;
+    scope(exit) f.close();
+
+    ulong size = f.get_size();
+    if (size < RecordFileHeader.sizeof + Sample.sizeof)
+        return false;
+    ulong num = (size - RecordFileHeader.sizeof) / Sample.sizeof;
+
+    // Binary search for the first record with time >= `time`; the previous
+    // record is the held value at the left edge of a graph window.
+    ulong lo = 0, hi = num;
+    while (lo < hi)
+    {
+        ulong mid = lo + (hi - lo) / 2;
+        Sample s;
+        size_t bytes;
+        if (!f.read_at((&s)[0 .. 1], RecordFileHeader.sizeof + mid * Sample.sizeof, bytes) || bytes != Sample.sizeof)
+            return false;
+        if (s.time < time)
+            lo = mid + 1;
+        else
+            hi = mid;
+    }
+
+    if (lo == 0)
+        return false;
+
+    size_t bytes;
+    return f.read_at((&result)[0 .. 1], RecordFileHeader.sizeof + (lo - 1) * Sample.sizeof, bytes) &&
+        bytes == Sample.sizeof;
+}
+
+private void read_file_range(A)(ref RecordStream rs, ulong from, ulong end, ref A agg)
 {
     File f;
     if (!f.open(rs.filename[], FileOpenMode.ReadExisting, FileOpenFlags.Sequential))
