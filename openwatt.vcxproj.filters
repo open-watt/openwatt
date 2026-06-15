@@ -264,11 +264,14 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <DCompile Include="src\db\package.d">
+    <DCompile Include="src\db\defs.d">
       <Filter>src\db</Filter>
     </DCompile>
-    <DCompile Include="src\main.d">
-      <Filter>src</Filter>
+    <DCompile Include="src\db\engine.d">
+      <Filter>src\db</Filter>
+    </DCompile>
+    <DCompile Include="src\db\package.d">
+      <Filter>src\db</Filter>
     </DCompile>
     <DCompile Include="src\db\selfrefptr.d">
       <Filter>src\db</Filter>
@@ -371,6 +374,9 @@
     </DCompile>
     <DCompile Include="src\driver\windows\wlanapi.d">
       <Filter>src\driver\windows</Filter>
+    </DCompile>
+    <DCompile Include="src\main.d">
+      <Filter>src</Filter>
     </DCompile>
     <DCompile Include="src\manager\component.d">
       <Filter>src\manager</Filter>

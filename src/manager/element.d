@@ -42,6 +42,24 @@ enum SamplingMode : ubyte
 
 alias OnChangeCallback = void delegate(ref Element e, ref const Variant val, SysTime timestamp, ref const Variant prev, SysTime prev_timestamp) nothrow @nogc;
 
+// Best-effort recent-sample cache: if it wraps before the recorder ships, those
+// samples are lost; the db is the authoritative store.
+enum uint recent_capacity = 16;
+
+struct ElementSample
+{
+nothrow @nogc:
+
+    MonoTime time;
+    Variant value;
+
+    this(ref const ElementSample rh)
+    {
+        time = rh.time;
+        value = rh.value;
+    }
+}
+
 
 void init_elements()
 {
@@ -76,6 +94,10 @@ nothrow @nogc:
 
     SysTime last_update;
     SysTime prev_update;
+
+    package Array!ElementSample recent;
+    package uint recent_head;
+    package uint recent_count;
 
     Array!Subscriber subscribers;
     Array!OnChangeCallback subscribers_2;
@@ -142,7 +164,38 @@ nothrow @nogc:
                 prev = latest.move;
             latest = forward!v;
             signal(latest, timestamp, prev, prev_update, who);
+            if (is_newer)
+                capture_sample(timestamp);
         }
+    }
+
+    ref const(ElementSample) recent_at(uint i) const pure
+        => recent[(recent_head + i) % cast(uint)recent.length];
+
+    ulong recent_oldest() const pure
+        => recent_count ? unixTimeNs(cast(SysTime)recent_at(0).time) : ulong.max;
+
+    ulong recent_newest() const pure
+        => recent_count ? unixTimeNs(cast(SysTime)recent_at(recent_count - 1).time) : 0;
+
+    private void capture_sample(SysTime timestamp)
+    {
+        if (recent.length == 0)
+            recent.resize(recent_capacity);
+        uint cap = cast(uint)recent.length;
+        uint idx;
+        if (recent_count == cap)
+        {
+            idx = recent_head;
+            recent_head = (recent_head + 1) % cap;
+        }
+        else
+        {
+            idx = (recent_head + recent_count) % cap;
+            ++recent_count;
+        }
+        recent[][idx].time = cast(MonoTime)timestamp;
+        recent[][idx].value = latest;
     }
 
     void signal(ref const Variant v, SysTime timestamp, ref const Variant prev, SysTime prev_timestamp, Subscriber who)
@@ -162,6 +215,7 @@ nothrow @nogc:
         last_update = timestamp;
         prev = latest;
         signal(latest, timestamp, prev, prev_update, null); // TODO: who made the change? so we can break cycles...
+        capture_sample(timestamp);
     }
 
     ptrdiff_t full_path(char[] buf) const nothrow @nogc
@@ -178,6 +232,42 @@ nothrow @nogc:
             buf[pos .. pos + id.length] = id[];
         return pos + id.length;
     }
+}
+
+
+bool sample_to_double(ref const Variant v, out double value)
+{
+    if (v.isBool)
+        value = v.asBool ? 1 : 0;
+    else if (v.isQuantity)
+        value = v.asQuantity!double().normalise().value;
+    else if (v.isNumber)
+        value = v.asDouble;
+    else
+        return false;
+    return value == value; // reject NaN
+}
+
+
+unittest
+{
+    import urt.time : from_unix_time_ns;
+
+    // value() captures into the recent buffer; it wraps, keeping the newest N
+    Element e;
+    foreach (i; 0 .. recent_capacity + 4)
+        e.value(Variant(cast(double)i), from_unix_time_ns((i + 1) * 1_000_000UL));
+
+    assert(e.recent_count == recent_capacity);
+    assert(e.recent_oldest() == 5 * 1_000_000UL); // i=0..3 dropped; oldest kept is i=4
+    assert(e.recent_at(recent_capacity - 1).value.asDouble == recent_capacity + 3);
+
+    // non-numeric values are still captured as raw Variants (db/graph skip them)
+    Element s;
+    s.value(Variant(StringLit!"hi"), from_unix_time_ns(1_000_000));
+    assert(s.recent_count == 1);
+    double d;
+    assert(!sample_to_double(s.recent_at(0).value, d));
 }
 
 
