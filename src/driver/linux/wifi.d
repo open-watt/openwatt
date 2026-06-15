@@ -1,21 +1,9 @@
 module driver.linux.wifi;
 
 // =====================================================================
-// Linux wifi backend. Packet path: AF_PACKET on the wlan netdev (managed-
-// mode delivers de-encapsulated ethernet frames). State + STA control:
-// wpa_supplicant control socket; AP control: hostapd control socket; both
-// daemons supervised externally. No direct nl80211 work.
-//
-// Outstanding:
-//
-// 1. Monitor mode / raw 802.11: a separate code path entirely. The radio
-//    holds the AF_PACKET socket on a monX VIF, frames are 802.11+radiotap
-//    not ethernet, so the EthernetInterface model doesn't fit -- needs the
-//    WiFi80211Interface base to grow an incoming_80211_frame() path and
-//    PacketType.wifi_80211. Worth doing only if a use case actually
-//    requires L2-promisc on the wireless side. Creating the monitor VIF
-//    needs a thin nl80211 binding (CMD_NEW_INTERFACE / SET_CHANNEL only --
-//    not the full surface).
+// Linux wifi backend. The physical adapter is the radio/STA netdev. APs and
+// monitor capture use sibling VIFs on the same phy so STA channel ownership can
+// coexist with AP beacons and radiotap capture.
 // =====================================================================
 
 version (linux):
@@ -28,19 +16,33 @@ import urt.mem.temp;
 import urt.string;
 import urt.time;
 
+import urt.driver.wifi : WifiScanResult, WifiScanConfig, WifiBand, DrvWifiAuth = WifiAuth;
+import urt.meta.nullable : Nullable;
+
 import manager;
 import manager.collection;
 import manager.console;
+import manager.console.command : CommandState, CommandCompletionState;
+import manager.console.live_view : LiveViewState;
+import manager.console.table : Table;
 import manager.plugin;
 
 import driver.linux.netlink;
 import driver.linux.nl80211;
 import driver.linux.sysfs;
+import driver.linux.fdwatch;
 
-import driver.linux.ctrl_iface;
-import driver.linux.hostapd;
-import driver.linux.raw;
-import driver.linux.wpa_supplicant;
+version (WifiStaKernel) import driver.linux.nl80211_sta;
+else                    import driver.linux.wpa_supplicant;
+version (WifiApKernel)  import driver.linux.nl80211_ap;
+else                    import driver.linux.hostapd;
+import driver.linux.raw : RawAdapter, PACKET_OUTGOING;
+import urt.internal.sys.posix : pollfd, POLLIN;
+
+// KernelMirror builds let the kernel own IP; an AP must publish its netdev
+// ifindex so the mirror can place the configured address/routes on it.
+version (KernelMirror)
+    import protocol.ip.linux_mirror : mirror_refresh_interface;
 
 import router.iface;
 import router.iface.ethernet;
@@ -82,22 +84,20 @@ nothrow @nogc:
     }
 
     override const(char)[] mode() const pure
-        => "sta";
+        => super.mode();
 
     // VIF lookup for a bound AP.
-    //   no STA bound:     bound_aps[0] uses the radio's netdev; rest get VIFs.
-    //   STA bound:        STA owns the netdev; ALL APs get VIFs.
+    // The physical adapter stays the radio/STA netdev; every AP gets a
+    // sibling AP-mode VIF. That makes AP/STA ownership independent of bind
+    // order and avoids flipping the station netdev into AP mode.
     // Returns empty slice if `target` isn't bound to this radio.
     final const(char)[] vif_for(const(APInterface) target) const
     {
         auto aps = bound_aps;
-        foreach (i, ap; aps)
+        foreach (ap; aps)
         {
             if (ap is target)
-            {
-                bool primary = (i == 0 && bound_sta is null);
-                return primary ? _adapter[] : tconcat(_adapter[], "-", target.name[]);
-            }
+                return tconcat(_adapter[], "-", target.name[]);
         }
         return null;
     }
@@ -105,6 +105,14 @@ nothrow @nogc:
     final void update_active_channel(ubyte ch)
     {
         set_active_channel(ch);
+        sync_bound_ap_channels();
+    }
+
+    final void clear_active_sta_channel()
+    {
+        if (active_channel != 0)
+            set_active_channel(0);
+        sync_bound_ap_channels();
     }
 
     // Binding policy gate. Called from LinuxAP.validate / LinuxWlan.validate;
@@ -114,15 +122,15 @@ nothrow @nogc:
     // bound_aps yet at validate time).
     final const(char)[] would_accept(const(WLANBaseInterface) candidate) const pure
     {
-        if (!_caps.valid)
+        if (!_phy_caps.valid)
             return null;  // chipset capabilities unknown -- be optimistic.
 
         bool candidate_is_ap = cast(const(APInterface))candidate !is null;
         bool candidate_is_sta = !candidate_is_ap && (cast(const(WLANInterface))candidate !is null);
 
-        if (candidate_is_ap && !_caps.supports_ap)
+        if (candidate_is_ap && !_phy_caps.supports_ap)
             return "driver does not support AP mode";
-        if (candidate_is_sta && !_caps.supports_sta)
+        if (candidate_is_sta && !_phy_caps.supports_sta)
             return "driver does not support STA mode";
 
         bool already_bound;
@@ -144,14 +152,93 @@ nothrow @nogc:
         size_t ap_count = bound_aps.length + (candidate_is_ap && !already_bound ? 1 : 0);
         bool has_sta = bound_sta !is null || candidate_is_sta;
 
-        if (has_sta && ap_count > 0 && !_caps.supports_sta_ap)
-            return "driver does not support simultaneous STA + AP";
+        if (monitor && !_phy_caps.supports_monitor)
+            return "driver does not support monitor mode";
 
-        if (ap_count > _caps.max_aps)
+        if (monitor && has_sta && ap_count > 0)
         {
-            if (_caps.max_aps <= 1)
+            if (!_phy_caps.supports_sta_ap_monitor)
+                return "driver does not support simultaneous STA + AP + monitor";
+            if (ap_count > _phy_caps.max_aps_with_sta_monitor)
+            {
+                if (_phy_caps.max_aps_with_sta_monitor <= 1)
+                    return "driver does not support STA + multi-AP + monitor";
+                return "too many APs configured with STA + monitor for this driver";
+            }
+        }
+        else if (monitor && has_sta)
+        {
+            if (!_phy_caps.supports_sta_monitor)
+                return "driver does not support simultaneous STA + monitor";
+        }
+        else if (monitor && ap_count > 0)
+        {
+            if (!_phy_caps.supports_ap_monitor)
+                return "driver does not support simultaneous AP + monitor";
+            if (ap_count > _phy_caps.max_aps_with_monitor)
+            {
+                if (_phy_caps.max_aps_with_monitor <= 1)
+                    return "driver does not support multi-AP + monitor";
+                return "too many APs configured with monitor for this driver";
+            }
+        }
+        else if (has_sta && ap_count > 0)
+        {
+            if (!_phy_caps.supports_sta_ap)
+                return "driver does not support simultaneous STA + AP";
+            if (ap_count > _phy_caps.max_aps_with_sta)
+            {
+                if (_phy_caps.max_aps_with_sta <= 1)
+                    return "driver does not support STA + multi-AP";
+                return "too many APs configured with STA for this driver";
+            }
+        }
+        else if (ap_count > _phy_caps.max_aps)
+        {
+            if (_phy_caps.max_aps <= 1)
                 return "driver does not support multi-AP";
             return "too many APs configured for this driver";
+        }
+
+        return null;
+    }
+
+    final const(char)[] would_accept_monitor() const pure
+    {
+        if (!_phy_caps.valid)
+            return null;
+        if (!_phy_caps.supports_monitor)
+            return "driver does not support monitor mode";
+
+        bool has_sta = bound_sta !is null;
+        size_t ap_count = bound_aps.length;
+
+        if (has_sta && ap_count > 0)
+        {
+            if (!_phy_caps.supports_sta_ap_monitor)
+                return "driver does not support simultaneous STA + AP + monitor";
+            if (ap_count > _phy_caps.max_aps_with_sta_monitor)
+            {
+                if (_phy_caps.max_aps_with_sta_monitor <= 1)
+                    return "driver does not support STA + multi-AP + monitor";
+                return "too many APs configured with STA + monitor for this driver";
+            }
+        }
+        else if (has_sta)
+        {
+            if (!_phy_caps.supports_sta_monitor)
+                return "driver does not support simultaneous STA + monitor";
+        }
+        else if (ap_count > 0)
+        {
+            if (!_phy_caps.supports_ap_monitor)
+                return "driver does not support simultaneous AP + monitor";
+            if (ap_count > _phy_caps.max_aps_with_monitor)
+            {
+                if (_phy_caps.max_aps_with_monitor <= 1)
+                    return "driver does not support multi-AP + monitor";
+                return "too many APs configured with monitor for this driver";
+            }
         }
 
         return null;
@@ -160,13 +247,38 @@ nothrow @nogc:
 protected:
 
     override bool validate() const
-        => !_adapter.empty;
+    {
+        if (_adapter.empty)
+            return false;
+        if (monitor && _phy_caps.valid && would_accept_monitor() !is null)
+            return false;
+        return true;
+    }
+
+    override const(char)[] status_message() const
+    {
+        if (monitor)
+        {
+            if (auto reason = would_accept_monitor())
+                return reason;
+            if (auto reason = monitor_failure_message(_monitor_failure))
+                return reason;
+        }
+        return super.status_message();
+    }
 
     override CompletionStatus startup()
     {
-        // ctrl_iface sockets are best-effort: each daemon may or may not
-        // be running. Packet path keeps working regardless.
-        try_open_daemons();
+        // We own the adapter outright: reset it to a clean station-mode slate --
+        // tearing down any AP/association/keys left by hostapd, NetworkManager,
+        // wpa_supplicant or a previous run -- before any STA/AP binds to it.
+        _ifindex = read_ifindex(_adapter[]);
+        if (_ifindex != 0)
+            reset_device(_adapter[], _ifindex);
+        apply_configured_mtu();
+
+        open_scan_sockets();
+        sync_monitor_vif();
 
         SysTime now = getSysTime();
         if (now - _last_refresh >= 1.seconds)
@@ -183,28 +295,36 @@ protected:
 
     override CompletionStatus shutdown()
     {
-        _wpa.close();
-        _hostapd.close();
+        close_monitor_vif();
+        close_scan_sockets();
         return CompletionStatus.complete;
     }
 
     override void on_wlan_bind_changed()
     {
-        // Any change to the bound set may shift VIF allocation (e.g. binding
-        // a STA evicts the primary AP off the radio's netdev) so always sync.
-        sync_hostapd_config();
+        sync_bound_ap_channels();
     }
 
     override void on_monitor_changed(bool enabled)
     {
-        if (enabled)
-            log.warning("monitor mode is not implemented on the Linux backend yet");
+        if (running)
+            sync_monitor_vif();
     }
 
     override void on_active_channel_changed(ubyte ch)
     {
-        // STA-driven channel updates land here. APs follow via RELOAD.
-        sync_hostapd_config();
+        sync_bound_ap_channels();
+    }
+
+    override void on_channel_changed(ubyte ch)
+    {
+        if (!sta_providing_channel())
+            sync_bound_ap_channels();
+    }
+
+    override void on_mtu_changed()
+    {
+        apply_configured_mtu();
     }
 
     override void update()
@@ -260,117 +380,40 @@ protected:
         _last_refresh = now;
         refresh_state();
 
-        // Track STA online/offline transitions for the channel-revert grace
-        // period, and re-sync hostapd if the target channel has changed
-        // (covers grace expiry where no other event would otherwise fire).
-        track_sta_channel_authority(now);
-        if (target_channel() != _last_synced_channel)
-            sync_hostapd_config();
     }
 
 private:
-    enum channel_revert_grace = 30.seconds;
-
     String _adapter;
     SysTime _last_refresh;
 
-    PhyCapabilities _caps;
+    PhyCapabilities _phy_caps;
     bool _caps_queried;
-
-    // Channel arbitration state. _last_synced_channel is the value last
-    // written to the hostapd config; sync_hostapd_config skips the RELOAD if
-    // it hasn't changed. _sta_offline_since holds the moment the bound STA
-    // last lost association so we can hold APs on its previous channel for
-    // a grace window before reverting to the radio's configured channel.
-    ubyte _last_synced_channel;
-    SysTime _sta_offline_since;
-    bool _sta_was_providing;
 
     bool sta_providing_channel() const
     {
         auto wlan = cast(const(LinuxWlan))bound_sta;
-        return wlan !is null && wlan._wpa_state == WpaState.completed;
+        return wlan !is null && wlan._sta.connected;
     }
 
-    void track_sta_channel_authority(SysTime now)
-    {
-        bool providing = sta_providing_channel();
-        if (_sta_was_providing && !providing)
-            _sta_offline_since = now;
-        _sta_was_providing = providing;
-    }
-
-    // Decide which channel hostapd should be on right now.
-    //   no STA bound:                       configured `channel`.
-    //   STA associated:                     STA's active_channel.
-    //   STA bound, recently disassociated:  hold the last known channel
-    //                                       through the grace window so
-    //                                       quick reassociation doesn't
-    //                                       interrupt connected AP clients.
-    //   STA bound, long-disassociated:      configured `channel`.
+    // Decide which channel AP VIFs should beacon on right now:
+    // connected STA wins; otherwise the configured radio channel wins.
     ubyte target_channel() const
     {
-        if (bound_sta is null)
-            return channel;
         if (sta_providing_channel())
             return active_channel != 0 ? active_channel : channel;
-        if (active_channel != 0 && getSysTime() - _sta_offline_since < channel_revert_grace)
-            return active_channel;
         return channel;
     }
 
-    // wpa_supplicant + hostapd ctrl_iface sockets, one per radio (= per
-    // netdev). Bound LinuxWlan / LinuxAP borrow these via cast access since
-    // they're in the same module. Matches the WindowsWifiRadio pattern (_wlan
-    // handle on the radio), and gives future radio-level uses (scan, channel
-    // queries) somewhere obvious to live.
-    CtrlIface _wpa;
-    CtrlIface _hostapd;
-    bool _wpa_open_failure_logged;
-    bool _hostapd_open_failure_logged;
-
-    // Open whichever ctrl sockets aren't already open. Failures log once per
-    // failure cycle (transition into the failed state) and once on recovery,
-    // since startup() / refresh_state() retry every tick or every second.
-    void try_open_daemons()
+    void sync_bound_ap_channels()
     {
-        if (!_wpa.valid)
+        ubyte desired = target_channel();
+        foreach (base; bound_aps)
         {
-            auto r = wpa_open(_wpa, _adapter[]);
-            if (r.failed)
-            {
-                if (!_wpa_open_failure_logged)
-                {
-                    log.warning("wpa_supplicant: ", r.message);
-                    _wpa_open_failure_logged = true;
-                }
-            }
-            else
-            {
-                if (_wpa_open_failure_logged)
-                    log.info("wpa_supplicant: ctrl socket connected");
-                _wpa_open_failure_logged = false;
-            }
+            auto ap = cast(LinuxAP)base;
+            if (ap && ap.running && ap._running_channel != desired)
+                ap.restart();
         }
-
-        if (!_hostapd.valid)
-        {
-            auto r = hostapd_open(_hostapd, _adapter[]);
-            if (r.failed)
-            {
-                if (!_hostapd_open_failure_logged)
-                {
-                    log.warning("hostapd: ", r.message);
-                    _hostapd_open_failure_logged = true;
-                }
-            }
-            else
-            {
-                if (_hostapd_open_failure_logged)
-                    log.info("hostapd: ctrl socket connected");
-                _hostapd_open_failure_logged = false;
-            }
-        }
+        sync_monitor_channel();
     }
 
     void refresh_state()
@@ -389,15 +432,20 @@ private:
             uint ifindex = read_ifindex(_adapter[]);
             if (ifindex != 0)
             {
-                query_phy_capabilities(ifindex, _caps);
+                query_phy_capabilities(ifindex, _phy_caps);
                 _caps_queried = true;
-                log.info("phy capabilities: valid=", _caps.valid, " sta=", _caps.supports_sta,
-                         " ap=", _caps.supports_ap, " sta+ap=", _caps.supports_sta_ap, " max-aps=", _caps.max_aps);
+                log.info("phy capabilities: valid=", _phy_caps.valid, " sta=", _phy_caps.supports_sta,
+                         " ap=", _phy_caps.supports_ap, " monitor=", _phy_caps.supports_monitor,
+                         " sta+ap=", _phy_caps.supports_sta_ap, " max-aps=", _phy_caps.max_aps,
+                         " max-aps-with-sta=", _phy_caps.max_aps_with_sta,
+                         " sta+monitor=", _phy_caps.supports_sta_monitor,
+                         " ap+monitor=", _phy_caps.supports_ap_monitor,
+                         " sta+ap+monitor=", _phy_caps.supports_sta_ap_monitor,
+                         " max-aps-with-monitor=", _phy_caps.max_aps_with_monitor,
+                         " max-aps-with-sta-monitor=", _phy_caps.max_aps_with_sta_monitor,
+                         " max-monitors=", _phy_caps.max_monitors);
             }
         }
-
-        // Retry ctrl_iface connections -- daemons may have launched after us.
-        try_open_daemons();
 
         OSAdapterInfo info;
         if (!query_adapter(_adapter[], info))
@@ -410,61 +458,535 @@ private:
         if (c & AdapterChange.rx_speed)  mark_set!(typeof(this), "rx-link-speed")();
     }
 
-    void sync_hostapd_config()
+    void apply_configured_mtu()
     {
-        if (!_hostapd.valid)
+        if (_mtu == 0 || _adapter.empty)
             return;
+        if (!set_adapter_mtu(_adapter[], actual_mtu))
+            log.warning("failed to set MTU ", actual_mtu, " on '", _adapter, "'");
+    }
 
-        if (bound_aps.length == 0)
+    // --- nl80211 scan (device-level: the radio owns the adapter) ---
+public:
+    override bool scanning() const
+        => _scanning;
+
+    override void cancel_scan()
+    {
+        _scan_handler = null;   // a late completion finds no handler and no-ops
+        _scanning = false;
+    }
+
+    override bool start_scan(ref const WifiScanConfig cfg, ScanHandler done)
+    {
+        if (_scanning || _scan_cmd_fd < 0 || _nl_family == 0 || !running)
+            return false;
+        NlBuilder b;
+        b.start(_nl_family, NLM_F_REQUEST | NLM_F_ACK, ++_scan_seq, NL80211_CMD_TRIGGER_SCAN);
+        b.put_u32(NL80211_ATTR_IFINDEX, _ifindex);
+        // One SSID entry: empty = wildcard (broadcast active probe); a specific
+        // SSID also probes hidden APs. Either way an active scan.
+        size_t nest = b.nest_start(NL80211_ATTR_SCAN_SSIDS);
+        b.put_bytes(1, cast(const(ubyte)[])cfg.ssid);
+        b.nest_end(nest);
+        if (!nl_ack(_scan_cmd_fd, b, "TRIGGER_SCAN"))
+            return false;
+        _scan_handler = done;
+        _scanning = true;
+        return true;
+    }
+
+private:
+    uint _ifindex;
+    int _scan_cmd_fd = -1;
+    int _scan_event_fd = -1;
+    ushort _nl_family;
+    uint _scan_seq;
+    ScanHandler _scan_handler;
+    bool _scanning;
+    bool _scan_fdwatch_registered;
+    RawAdapter _monitor_raw;
+    uint _monitor_ifindex;
+    bool _monitor_created;
+    ubyte _monitor_channel;
+    MonitorFailure _monitor_failure;
+
+    void open_scan_sockets()
+    {
+        if (_scan_cmd_fd >= 0)
+            return;
+        _scan_cmd_fd = nl_open_socket(false);
+        _scan_event_fd = nl_open_socket(true);
+        if (_scan_cmd_fd < 0 || _scan_event_fd < 0)
         {
-            auto r = hostapd_disable(_hostapd);
-            if (r.failed)
-                log.warning("hostapd disable: ", r.message);
-            _last_synced_channel = 0;
+            close_scan_sockets();
             return;
         }
-
-        // Cap is hostapd's typical compile-time MAX_BSS_PER_RADIO; keeping it
-        // local to v1 avoids a heap allocation. Bump alongside hostapd if a
-        // deployment ever needs more.
-        enum max_bsses = 8;
-        if (bound_aps.length > max_bsses)
+        uint scan_grp, mlme_grp;
+        if (resolve_nl80211(_scan_cmd_fd, _nl_family, scan_grp, mlme_grp) && scan_grp)
+            setsockopt(_scan_event_fd, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &scan_grp, scan_grp.sizeof);
+        if (!_scan_fdwatch_registered && add_fd_watcher(&service_scan_fds, &collect_scan_fds))
         {
-            log.error("too many APs bound (", bound_aps.length, ", max ", max_bsses, ")");
+            _scan_fdwatch_registered = true;
+            fd_watch_changed();
+        }
+    }
+
+    void close_scan_sockets()
+    {
+        if (_scan_fdwatch_registered)
+        {
+            remove_fd_watcher(&service_scan_fds);
+            _scan_fdwatch_registered = false;
+        }
+        if (_scanning)
+            finish_scan(null, false);
+        nl_close(_scan_cmd_fd);
+        nl_close(_scan_event_fd);
+        _nl_family = 0;
+        fd_watch_changed();
+    }
+
+    void collect_scan_fds(ref Array!pollfd fds)
+    {
+        if (_scan_event_fd >= 0)
+            fds ~= pollfd(_scan_event_fd, POLLIN);
+        if (_monitor_raw.valid)
+            fds ~= pollfd(_monitor_raw.fd, POLLIN);
+    }
+
+    void service_scan_fds()
+    {
+        pump_scan();
+        pump_monitor();
+    }
+
+    const(char)[] monitor_vif_name() const
+    {
+        return tconcat(_adapter[], "-mon");
+    }
+
+    void sync_monitor_vif()
+    {
+        if (!monitor)
+        {
+            close_monitor_vif();
             return;
         }
-
-        BssConfig[max_bsses] bss_storage;
-        foreach (i, base; bound_aps)
+        _monitor_failure = MonitorFailure.none;
+        if (_phy_caps.valid && !_phy_caps.supports_monitor)
         {
-            auto ap = cast(LinuxAP)base;
-            if (!ap)
+            log.warning("monitor mode requested but driver does not advertise monitor VIF support");
+            return;
+        }
+        if (_phy_caps.valid)
+        {
+            if (auto reason = would_accept_monitor())
+            {
+                log.warning("monitor mode requested but ", reason);
                 return;
-            ap.fill_bss_config(bss_storage[i], this);
+            }
         }
+        if (_ifindex == 0)
+            _ifindex = read_ifindex(_adapter[]);
+        if (_ifindex == 0)
+            return;
 
-        ApConfig cfg;
-        cfg.country = country;
-        cfg.channel = target_channel();
-        cfg.bsses = bss_storage[0 .. bound_aps.length];
-
-        auto rw = write_hostapd_config(cfg);
-        if (rw.failed)
+        const(char)[] vif = monitor_vif_name();
+        if (_monitor_ifindex == 0)
+            _monitor_ifindex = read_ifindex(vif);
+        if (_monitor_ifindex == 0)
         {
-            log.error("hostapd config: ", rw.message);
+            uint wiphy = read_wiphy(_ifindex);
+            if (wiphy == uint.max || !create_monitor_vif(wiphy, vif))
+            {
+                _monitor_failure = MonitorFailure.create_vif;
+                log.warning("failed to create monitor VIF '", vif, "'");
+                return;
+            }
+            _monitor_created = true;
+            _monitor_ifindex = read_ifindex(vif);
+        }
+        if (_monitor_ifindex == 0)
+            return;
+
+        if (!_monitor_raw.valid)
+        {
+            auto r = _monitor_raw.open(vif, false);
+            if (r.failed)
+            {
+                _monitor_failure = MonitorFailure.open_vif;
+                log.warning("failed to open monitor VIF '", vif, "': ", r.message);
+                return;
+            }
+            _monitor_failure = MonitorFailure.none;
+            fd_watch_changed();
+        }
+        sync_monitor_channel();
+    }
+
+    void close_monitor_vif()
+    {
+        bool changed = _monitor_raw.valid;
+        _monitor_raw.close();
+        if (_monitor_created && _monitor_ifindex != 0)
+            delete_vif(_monitor_ifindex);
+        _monitor_ifindex = 0;
+        _monitor_created = false;
+        _monitor_channel = 0;
+        _monitor_failure = MonitorFailure.none;
+        if (changed)
+            fd_watch_changed();
+    }
+
+    void sync_monitor_channel()
+    {
+        if (!_monitor_raw.valid || _monitor_ifindex == 0)
+            return;
+        ubyte ch = target_channel();
+        if (ch == 0 || ch == _monitor_channel)
+            return;
+        WifiBand band = ch <= 14 ? WifiBand.band_2g4 : WifiBand.band_5g;
+        if (set_vif_channel(_monitor_ifindex, channel_to_freq(ch, band)))
+        {
+            _monitor_channel = ch;
+            _monitor_failure = MonitorFailure.none;
+        }
+        else
+        {
+            _monitor_failure = MonitorFailure.set_channel;
+            log.warning("failed to set monitor VIF channel to ", ch);
+        }
+    }
+
+    void pump_monitor()
+    {
+        if (!_monitor_raw.valid)
+            return;
+
+        while (true)
+        {
+            const(ubyte)[] data;
+            uint wire_len;
+            MonoTime ts;
+            ubyte pkttype;
+            int r = _monitor_raw.poll_ll(data, wire_len, ts, pkttype);
+            if (r == 0)
+                break;
+            if (r < 0)
+            {
+                add_rx_drop();
+                break;
+            }
+            if (pkttype == PACKET_OUTGOING)
+                continue;
+            incoming_monitor_frame(data, ts);
+        }
+    }
+
+    void incoming_monitor_frame(const(ubyte)[] data, MonoTime ts)
+    {
+        if (data.length < 4)
+        {
+            add_rx_drop();
             return;
         }
 
-        // ENABLE is idempotent if already enabled; RELOAD picks up the new
-        // config-on-disk for any subsequent change. hostapd creates / destroys
-        // bss= VIFs as part of RELOAD via its nl80211 driver.
-        auto re = hostapd_enable(_hostapd);
-        if (re.failed)
-            log.warning("hostapd enable: ", re.message);
-        auto rr = hostapd_reload(_hostapd);
-        if (rr.failed)
-            log.warning("hostapd reload: ", rr.message);
-        _last_synced_channel = cfg.channel;
+        ushort radiotap_len = load_le16(data[2 .. 4]);
+        if (radiotap_len < 4 || radiotap_len > data.length)
+        {
+            add_rx_drop();
+            return;
+        }
+
+        Packet packet;
+        ref wifi = packet.init!Wifi80211(data, ts);
+        wifi.rssi = parse_radiotap_rssi(data[0 .. radiotap_len]);
+        wifi.channel = parse_radiotap_channel(data[0 .. radiotap_len]);
+        if (wifi.channel == 0)
+            wifi.channel = target_channel();
+
+        size_t h = radiotap_len;
+        if (data.length >= h + 24)
+        {
+            wifi.frame_control = load_le16(data[h .. h + 2]);
+            wifi.addr1 = MACAddress(data[h + 4], data[h + 5], data[h + 6],
+                                     data[h + 7], data[h + 8], data[h + 9]);
+            wifi.addr2 = MACAddress(data[h + 10], data[h + 11], data[h + 12],
+                                     data[h + 13], data[h + 14], data[h + 15]);
+            wifi.addr3 = MACAddress(data[h + 16], data[h + 17], data[h + 18],
+                                     data[h + 19], data[h + 20], data[h + 21]);
+            wifi.seq_ctrl = load_le16(data[h + 22 .. h + 24]);
+        }
+
+        dispatch(packet);
+    }
+
+    static ushort load_le16(const(ubyte)[] v) pure
+    {
+        return cast(ushort)(v[0] | (v[1] << 8));
+    }
+
+    static uint load_le32(const(ubyte)[] v) pure
+    {
+        return cast(uint)(v[0] | (v[1] << 8) | (v[2] << 16) | (v[3] << 24));
+    }
+
+    static size_t rtap_align(size_t off, size_t alignment) pure
+    {
+        return (off + alignment - 1) & ~(alignment - 1);
+    }
+
+    static ubyte parse_radiotap_channel(const(ubyte)[] rtap) pure
+    {
+        ushort freq;
+        byte rssi;
+        parse_radiotap_common(rtap, freq, rssi);
+        return freq_to_channel(freq);
+    }
+
+    static byte parse_radiotap_rssi(const(ubyte)[] rtap) pure
+    {
+        ushort freq;
+        byte rssi;
+        parse_radiotap_common(rtap, freq, rssi);
+        return rssi;
+    }
+
+    static void parse_radiotap_common(const(ubyte)[] rtap, ref ushort freq, ref byte rssi) pure
+    {
+        if (rtap.length < 8)
+            return;
+
+        size_t off = 8;
+        uint present = load_le32(rtap[4 .. 8]);
+        while (present & (1u << 31))
+        {
+            if (off + 4 > rtap.length)
+                return;
+            present = load_le32(rtap[off .. off + 4]);
+            off += 4;
+        }
+
+        present = load_le32(rtap[4 .. 8]);
+        foreach (bit; 0 .. 15)
+        {
+            size_t alignment = 1;
+            size_t len = 0;
+            switch (bit)
+            {
+                case 0:  alignment = 8; len = 8; break; // TSFT
+                case 1:  len = 1; break;            // flags
+                case 2:  len = 1; break;            // rate
+                case 3:  alignment = 2; len = 4; break; // channel
+                case 4:  alignment = 2; len = 2; break; // FHSS
+                case 5:  len = 1; break;            // antenna signal (dBm)
+                case 6:  len = 1; break;            // antenna noise (dBm)
+                case 7:  alignment = 2; len = 2; break; // lock quality
+                case 8:  alignment = 2; len = 2; break; // tx attenuation
+                case 9:  alignment = 2; len = 2; break; // db tx attenuation
+                case 10: len = 1; break;            // dbm tx power
+                case 11: len = 1; break;            // antenna
+                case 12: len = 1; break;            // db antenna signal
+                case 13: len = 1; break;            // db antenna noise
+                case 14: alignment = 2; len = 2; break; // rx flags
+                default: break;
+            }
+
+            if ((present & (1u << bit)) == 0)
+                continue;
+            off = rtap_align(off, alignment);
+            if (off + len > rtap.length)
+                return;
+            if (bit == 3)
+                freq = load_le16(rtap[off .. off + 2]);
+            else if (bit == 5)
+                rssi = cast(byte)rtap[off];
+            off += len;
+        }
+    }
+
+    // Drain scan-done notifications off the event socket; on completion pull the
+    // results with a GET_SCAN dump and hand them to the pending handler.
+    void pump_scan()
+    {
+        if (_scan_event_fd < 0)
+            return;
+        ubyte[8192] buf = void;
+        while (true)
+        {
+            ptrdiff_t n = recv(_scan_event_fd, buf.ptr, buf.length, 0);
+            if (n <= 0)
+                break;
+            const(ubyte)[] data = buf[0 .. cast(size_t)n];
+            while (data.length >= nlmsghdr.sizeof)
+            {
+                const nlmsghdr* mh = cast(const nlmsghdr*)data.ptr;
+                uint len = mh.nlmsg_len;
+                if (len < nlmsghdr.sizeof || len > data.length)
+                    break;
+                if (mh.nlmsg_type == _nl_family && len >= nlmsghdr.sizeof + genlmsghdr.sizeof)
+                {
+                    const genlmsghdr* gh = cast(const genlmsghdr*)(data.ptr + nlmsghdr.sizeof);
+                    if (gh.cmd == NL80211_CMD_NEW_SCAN_RESULTS)
+                        deliver_scan_results();
+                    else if (gh.cmd == NL80211_CMD_SCAN_ABORTED)
+                        finish_scan(null, false);
+                }
+                uint aligned = (len + 3) & ~3u;
+                if (aligned >= data.length)
+                    break;
+                data = data[aligned .. $];
+            }
+        }
+    }
+
+    void deliver_scan_results()
+    {
+        if (!_scanning)
+            return;
+        WifiScanResult[32] results = void;
+        size_t n = dump_scan_results(results[]);
+        finish_scan(results[0 .. n], true);
+    }
+
+    // Synchronous GET_SCAN dump of the kernel's cached BSS table -- fast (no
+    // trigger). Used by the scan-completion path and by the CLI scan command.
+    size_t dump_scan_results(WifiScanResult[] buf)
+    {
+        if (_scan_cmd_fd < 0 || _nl_family == 0)
+            return 0;
+        NlBuilder b;
+        b.start(_nl_family, NLM_F_REQUEST | NLM_F_DUMP, ++_scan_seq, NL80211_CMD_GET_SCAN);
+        b.put_u32(NL80211_ATTR_IFINDEX, _ifindex);
+        const(void)[] msg = b.finish();
+        sockaddr_nl k;
+        k.nl_family = AF_NETLINK;
+        if (sendto(_scan_cmd_fd, msg.ptr, msg.length, 0, &k, sockaddr_nl.sizeof) != cast(ptrdiff_t)msg.length)
+            return 0;
+
+        size_t count = 0;
+        bool done = false;
+        while (!done)
+        {
+            ubyte[16_384] reply = void;
+            ptrdiff_t n = recv(_scan_cmd_fd, reply.ptr, reply.length, 0);
+            if (n <= 0)
+                break;
+            const(ubyte)[] data = reply[0 .. cast(size_t)n];
+            while (data.length >= nlmsghdr.sizeof)
+            {
+                const nlmsghdr* mh = cast(const nlmsghdr*)data.ptr;
+                uint len = mh.nlmsg_len;
+                if (len < nlmsghdr.sizeof || len > data.length)
+                    break;
+                if (mh.nlmsg_type == NLMSG_DONE || mh.nlmsg_type == NLMSG_ERROR)
+                {
+                    done = true;
+                    break;
+                }
+                if (mh.nlmsg_type == _nl_family && len >= nlmsghdr.sizeof + genlmsghdr.sizeof && count < buf.length)
+                {
+                    if (parse_bss(data[nlmsghdr.sizeof + genlmsghdr.sizeof .. len], buf[count]))
+                        ++count;
+                }
+                uint aligned = (len + 3) & ~3u;
+                if (aligned >= data.length)
+                    break;
+                data = data[aligned .. $];
+            }
+        }
+        return count;
+    }
+
+    // Kick a fresh broadcast scan without a completion handler; results land in
+    // the kernel cache, readable later via dump_scan_results.
+    bool trigger_scan()
+    {
+        if (_scan_cmd_fd < 0 || _nl_family == 0 || !running)
+            return false;
+        NlBuilder b;
+        b.start(_nl_family, NLM_F_REQUEST | NLM_F_ACK, ++_scan_seq, NL80211_CMD_TRIGGER_SCAN);
+        b.put_u32(NL80211_ATTR_IFINDEX, _ifindex);
+        size_t nest = b.nest_start(NL80211_ATTR_SCAN_SSIDS);
+        b.put_bytes(1, null);   // wildcard SSID -> active broadcast probe
+        b.nest_end(nest);
+        return nl_ack(_scan_cmd_fd, b, "TRIGGER_SCAN", true);   // quiet: harmless if busy
+    }
+
+    void finish_scan(scope const(WifiScanResult)[] results, bool ok)
+    {
+        if (!_scanning)
+            return;
+        _scanning = false;
+        ScanHandler h = _scan_handler;
+        _scan_handler = null;
+        if (h !is null)
+            h(results, ok);
+    }
+
+    bool parse_bss(const(ubyte)[] attrs, out WifiScanResult r)
+    {
+        const(ubyte)[] bss = find_attr(attrs, NL80211_ATTR_BSS);
+        if (bss.length == 0)
+            return false;
+        const(ubyte)[] bssid = find_attr(bss, NL80211_BSS_BSSID);
+        if (bssid.length < 6)
+            return false;
+        r.bssid[] = bssid[0 .. 6];
+        const(ubyte)[] fr = find_attr(bss, NL80211_BSS_FREQUENCY);
+        uint freq = fr.length >= 4 ? *cast(const(uint)*)fr.ptr : 0;
+        r.channel = freq_to_channel(freq);
+        r.band = freq >= 5000 ? WifiBand.band_5g : WifiBand.band_2g4;
+        const(ubyte)[] sig = find_attr(bss, NL80211_BSS_SIGNAL_MBM);
+        if (sig.length >= 4)
+            r.rssi = cast(byte)(*cast(const(int)*)sig.ptr / 100);   // mBm -> dBm
+        r.auth = DrvWifiAuth.open;
+        parse_ies(find_attr(bss, NL80211_BSS_INFORMATION_ELEMENTS), r);
+        return true;
+    }
+
+    static void parse_ies(const(ubyte)[] ies, ref WifiScanResult r)
+    {
+        size_t i = 0;
+        while (i + 2 <= ies.length)
+        {
+            ubyte id = ies[i];
+            ubyte len = ies[i + 1];
+            if (i + 2 + len > ies.length)
+                break;
+            const(ubyte)[] payload = ies[i + 2 .. i + 2 + len];
+            if (id == 0)   // SSID
+            {
+                size_t c = len < r.ssid_buf.length ? len : r.ssid_buf.length;
+                r.ssid_buf[0 .. c] = cast(const(char)[])payload[0 .. c];
+                r.ssid_len = cast(ubyte)c;
+            }
+            else if (id == 48)  // RSN -> WPA2/WPA3 (treated as WPA2-PSK for now)
+                r.auth = DrvWifiAuth.wpa2_psk;
+            i += 2 + len;
+        }
+    }
+}
+
+
+enum MonitorFailure : ubyte
+{
+    none,
+    create_vif,
+    open_vif,
+    set_channel,
+}
+
+
+const(char)[] monitor_failure_message(MonitorFailure f) pure
+{
+    final switch (f)
+    {
+        case MonitorFailure.none:        return null;
+        case MonitorFailure.create_vif:  return "monitor: failed to create VIF";
+        case MonitorFailure.open_vif:    return "monitor: failed to open packet socket";
+        case MonitorFailure.set_channel: return "monitor: failed to set channel";
     }
 }
 
@@ -481,21 +1003,22 @@ nothrow @nogc:
         super(collection_type_info!LinuxWlan, id, flags);
     }
 
-    // Active state -- what wpa_supplicant says we're associated to right now.
-    // The configured SSID set via the ssid= property lives in the base under
-    // a different name; we kick off the connect flow with it on startup.
-
-    override const(char)[] ssid() const pure
-        => _current_ssid[];
+    // Active link state comes from the nl80211 session + in-process supplicant
+    // (driver.linux.nl80211_sta). The configured SSID lives in the base; we
+    // kick off the connect flow with it on startup.
 
     override MACAddress bssid() const
-        => _current_bssid;
+        => _sta.bssid;
 
     override int rssi() const
-        => _current_rssi;
+        => _sta.rssi;
 
     override ubyte signal_quality() const
-        => _signal_quality;
+        => _sta.signal_quality;
+
+    version (WifiStaDaemon)
+    override const(char)[] ssid() const pure
+        => _sta.active_ssid;
 
     override const(char)[] status_message() const
     {
@@ -508,11 +1031,16 @@ nothrow @nogc:
             return "Waiting for radio";
         if (auto reason = r.would_accept(this))
             return reason;
-        if (!r._wpa.valid)
-            return "wpa_supplicant unavailable";
-        if (_wpa_state != WpaState.completed)
-            return wpa_state_message(_wpa_state);
-        return super.status_message();
+        version (WifiStaKernel)
+        {
+            if (_scan_inflight)
+                return "scanning";
+            if (_scan_retry_armed)
+                return "waiting to rescan";
+        }
+        if (!_sta.valid)
+            return super.status_message();
+        return _sta.status_message();
     }
 
 protected:
@@ -536,6 +1064,9 @@ protected:
             return result;
 
         auto r = cast(LinuxWifiRadio)radio;
+        if (!r)
+            return CompletionStatus.error;
+
         if (!_raw.valid)
         {
             auto rr = _raw.open(r.adapter);
@@ -544,35 +1075,94 @@ protected:
                 log.error(rr.message);
                 return CompletionStatus.error;
             }
+            apply_configured_mtu();
+            refresh_os_state();
+            register_fdwatch();
         }
 
-        // wpa_supplicant lives on the radio (open in radio.startup, retried
-        // in radio.refresh_state). If it's available and we have a configured
-        // SSID, kick off association.
-        if (r._wpa.valid && super.ssid.length > 0)
-            connect_to_configured_network(r._wpa);
-
-        refresh_wpa_state();
-
-        // Without wpa_supplicant we have no association signal, so fall back
-        // to the kernel's carrier flag as the proxy for "ready to pass traffic".
-        if (!r._wpa.valid)
+        // Publish the netdev ifindex so the IP mirror can place an address on it
+        // -- e.g. a dhcp-client lease bound to this STA (the lease address is a
+        // dynamic IPAddress created after we're up, so it must resolve then).
+        version (KernelMirror)
         {
-            OSAdapterInfo info;
-            if (query_adapter(r.adapter, info) && info.connection != ConnectionStatus.connected)
-                return CompletionStatus.continue_;
+            if (kernel_ifindex() == 0)
+            {
+                set_kernel_ifindex(read_ifindex(r.adapter));
+                mirror_refresh_interface(this);
+            }
         }
-        else if (_wpa_state != WpaState.completed)
-            return CompletionStatus.continue_;
 
-        return CompletionStatus.complete;
+        version (WifiStaKernel)
+        {
+            // Open the nl80211 STA session; update() then scans and connects to
+            // the matching BSS (a concrete BSS lets cfg80211 install keys).
+            if (!_sta.valid)
+            {
+                auto rs = _sta.open(r.adapter, &_raw);
+                if (rs.failed)
+                {
+                    log.error(rs.message);
+                    return CompletionStatus.error;
+                }
+                fd_watch_changed();
+            }
+            service_io();
+            if (_sta.connected)
+                return CompletionStatus.complete;
+            if (_sta.failed)
+                return CompletionStatus.error;
+            ensure_scan_started();
+            return CompletionStatus.continue_;
+        }
+        else
+        {
+            // Open the wpa_supplicant ctrl socket, push the configured network,
+            // and wait until it reports an association before going Running.
+            if (!_sta.valid)
+            {
+                auto rs = _sta.open(r.adapter);
+                if (rs.failed)
+                {
+                    log.error(rs.message);
+                    return CompletionStatus.error;
+                }
+                if (super.ssid.length > 0)
+                    _sta.set_network(super.ssid, get_password());
+            }
+            _sta.update();
+            return _sta.connected ? CompletionStatus.complete : CompletionStatus.continue_;
+        }
     }
 
     override CompletionStatus shutdown()
     {
-        // _wpa belongs to the radio -- don't close it here.
+        version (WifiStaKernel)
+        {
+            if (_scan_inflight)
+            {
+                if (auto r = cast(LinuxWifiRadio)radio)
+                    r.cancel_scan();
+                _scan_inflight = false;
+            }
+            cancel_scan_retry();
+        }
+        unregister_fdwatch();
+        _sta.close();
         _raw.close();
-        clear_wpa_state();
+        version (WifiStaKernel)
+        {
+            if (auto r = cast(LinuxWifiRadio)radio)
+                r.clear_active_sta_channel();
+        }
+        // Drop our kernel netdev binding and withdraw any mirrored addresses.
+        version (KernelMirror)
+        {
+            if (kernel_ifindex() != 0)
+            {
+                set_kernel_ifindex(0);
+                mirror_refresh_interface(this);
+            }
+        }
         return super.shutdown();
     }
 
@@ -584,40 +1174,152 @@ protected:
         if (!r)
             return;
 
-        SysTime now = getSysTime();
-        if (now - _last_refresh >= 1.seconds)
+        version (WifiStaKernel)
         {
-            _last_refresh = now;
-            if (r._wpa.valid)
+            // Legacy heartbeat fallback. The real pump is fdwatch -> service_io.
+            service_io();
+        }
+        else
+        {
+            SysTime now = getSysTime();
+            // Daemon backend: poll wpa_supplicant; bounce the interface if the
+            // association drops so startup re-runs the connect.
+            if (now - _last_refresh >= 1.seconds)
             {
-                refresh_wpa_state();
-                if (_wpa_state != WpaState.completed)
+                _last_refresh = now;
+                _sta.update();
+                ubyte ch = freq_to_channel(_sta.freq);
+                if (_sta.connected && ch != 0)
+                    r.update_active_channel(ch);
+                mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality", "status" ])();
+                if (!_sta.connected)
                 {
                     restart();
                     return;
                 }
             }
-            else
+            pump_raw_frames();
+        }
+    }
+
+    override int wire_send(const(ubyte)[] frame)
+        => _raw.send(frame) ? 0 : -1;
+
+    override void on_mtu_changed()
+    {
+        apply_configured_mtu();
+    }
+
+private:
+    RawAdapter _raw;
+    SysTime _last_refresh;
+    bool _fdwatch_registered;
+
+    version (WifiStaKernel)
+    {
+        Nl80211Sta _sta;
+        bool _scan_inflight;
+        bool _scan_retry_armed;
+    }
+    else
+    {
+        WpaSupplicantSta _sta;
+    }
+
+    void apply_configured_mtu()
+    {
+        if (_mtu == 0)
+            return;
+        auto r = cast(LinuxWifiRadio)radio;
+        if (!r)
+            return;
+        if (!set_adapter_mtu(r.adapter, actual_mtu))
+            log.warning("failed to set MTU ", actual_mtu, " on '", r.adapter, "'");
+    }
+
+    void refresh_os_state()
+    {
+        auto r = cast(LinuxWifiRadio)radio;
+        if (!r)
+            return;
+        OSAdapterInfo info;
+        if (!query_adapter(r.adapter, info))
+            return;
+        AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
+        if (c & AdapterChange.mtu)     mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
+        if (c & AdapterChange.max_mtu) mark_set!(typeof(this), "max-l2mtu")();
+    }
+
+    void register_fdwatch()
+    {
+        if (!_fdwatch_registered && add_fd_watcher(&service_io, &collect_fds))
+        {
+            _fdwatch_registered = true;
+            fd_watch_changed();
+        }
+    }
+
+    void unregister_fdwatch()
+    {
+        if (_fdwatch_registered)
+        {
+            remove_fd_watcher(&service_io);
+            _fdwatch_registered = false;
+            fd_watch_changed();
+        }
+    }
+
+    void collect_fds(ref Array!pollfd fds)
+    {
+        if (_raw.valid)
+            fds ~= pollfd(_raw.fd, POLLIN);
+        version (WifiStaKernel)
+        {
+            if (_sta.event_fd >= 0)
+                fds ~= pollfd(_sta.event_fd, POLLIN);
+        }
+    }
+
+    void service_io()
+    {
+        version (WifiStaKernel)
+        {
+            bool was_connected = _sta.connected;
+            _sta.pump();
+            pump_raw_frames();
+
+            if (_sta.connected)
             {
-                OSAdapterInfo info;
-                if (query_adapter(r.adapter, info) && info.connection != ConnectionStatus.connected)
-                {
-                    restart();
-                    return;
-                }
+                refresh_connected_state();
+                if (!was_connected)
+                    post_progress_event();
+            }
+            else if (_sta.failed)
+            {
+                post_progress_event();
+            }
+            else if (_sta.disconnected)
+            {
+                if (auto r = cast(LinuxWifiRadio)radio)
+                    r.clear_active_sta_channel();
+                restart();
             }
         }
+        else
+            pump_raw_frames();
+    }
 
+    void pump_raw_frames()
+    {
         const(ubyte)[] data;
         uint wire_len;
         MonoTime ts;
+        ubyte pkttype;
 
         while (true)
         {
-            int res = _raw.poll(data, wire_len, ts);
-            if (res == 0)
-                break;
-            if (res < 0)
+            int res = _raw.poll_ll(data, wire_len, ts, pkttype);
+            if (res <= 0)
                 break;
 
             if (data.length < wire_len)
@@ -626,188 +1328,124 @@ protected:
                 continue;
             }
 
+            if (data.length >= 14 && data[12] == 0x88 && data[13] == 0x8e)
+            {
+                if (pkttype == PACKET_OUTGOING)
+                    continue;
+                ubyte[6] src = data[6 .. 12];
+                if (_sta.consume_eapol(src, data[14 .. $]))
+                    continue;
+            }
+
             incoming_ethernet_frame(data, ts);
         }
     }
 
-    override int wire_send(const(ubyte)[] frame)
-        => _raw.send(frame) ? 0 : -1;
-
-private:
-    RawAdapter _raw;
-    SysTime _last_refresh;
-
-    String _current_ssid;
-    MACAddress _current_bssid;
-    int _current_rssi;
-    ubyte _signal_quality;
-    WpaState _wpa_state = WpaState.unknown;
-    bool _wpa_status_failure_logged;
-
-    void clear_wpa_state()
+    version (WifiStaKernel)
     {
-        _current_ssid = String.init;
-        _current_bssid = MACAddress();
-        _current_rssi = 0;
-        _signal_quality = 0;
-        _wpa_state = WpaState.unknown;
-    }
-
-    void refresh_wpa_state()
-    {
-        auto r = cast(LinuxWifiRadio)radio;
-        if (!r || !r._wpa.valid)
+        void refresh_connected_state()
         {
-            clear_wpa_state();
-            return;
-        }
-
-        char[2048] buf = void;
-        size_t n;
-        auto rs = r._wpa.send_command("STATUS", buf[], n);
-        if (rs.failed)
-        {
-            if (!_wpa_status_failure_logged)
+            _sta.refresh_signal();
+            ubyte ch = freq_to_channel(_sta.freq);
+            if (ch != 0)
             {
-                log.warning("wpa STATUS: ", rs.message);
-                _wpa_status_failure_logged = true;
+                if (auto r = cast(LinuxWifiRadio)radio)
+                    r.update_active_channel(ch);
             }
-            clear_wpa_state();
-            mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality", "status" ])();
-            return;
-        }
-        _wpa_status_failure_logged = false;
-
-        WpaState new_state;
-        const(char)[] new_ssid_view;
-        bool got_ssid;
-        MACAddress new_bssid;
-        bool got_bssid;
-        ubyte new_channel;
-
-        foreach_kv(buf[0 .. n], (key, value) nothrow @nogc {
-            if (key == "wpa_state")
-                new_state = parse_wpa_state(value);
-            else if (key == "ssid")
-            {
-                new_ssid_view = value;
-                got_ssid = true;
-            }
-            else if (key == "bssid")
-            {
-                MACAddress mac;
-                if (mac.fromString(value) == MACAddress.StringLen)
-                {
-                    new_bssid = mac;
-                    got_bssid = true;
-                }
-            }
-            else if (key == "freq")
-            {
-                size_t consumed;
-                long freq_mhz = parse_int(value, &consumed);
-                if (consumed == value.length && consumed > 0 && freq_mhz > 0)
-                    new_channel = freq_to_channel(cast(uint)freq_mhz);
-            }
-        });
-
-        // The STA dictates the radio's channel while associated; push it up
-        // so the radio can fan it out to bound APs.
-        if (new_state == WpaState.completed && new_channel != 0)
-            r.update_active_channel(new_channel);
-
-        _wpa_state = new_state;
-        if (got_ssid)
-        {
-            if (_current_ssid[] != new_ssid_view)
-                _current_ssid = new_ssid_view.makeString(defaultAllocator);
-        }
-        else
-        {
-            _current_ssid = String.init;
-        }
-        _current_bssid = got_bssid ? new_bssid : MACAddress();
-
-        if (new_state == WpaState.completed && r._wpa.send_command("SIGNAL_POLL", buf[], n).succeeded)
-        {
-            int rssi_dbm;
-            bool got_rssi;
-            foreach_kv(buf[0 .. n], (key, value) nothrow @nogc {
-                if (key == "RSSI")
-                {
-                    size_t consumed;
-                    long v = parse_int(value, &consumed);
-                    if (consumed == value.length && consumed > 0)
-                    {
-                        rssi_dbm = cast(int)v;
-                        got_rssi = true;
-                    }
-                }
-            });
-            if (got_rssi)
-            {
-                _current_rssi = rssi_dbm;
-                _signal_quality = rssi_to_quality(rssi_dbm);
-            }
-        }
-        else
-        {
-            _current_rssi = 0;
-            _signal_quality = 0;
+            mark_set!(typeof(this), [ "bssid", "rssi", "signal-quality", "status" ])();
         }
 
-        mark_set!(typeof(this), [ "ssid", "bssid", "rssi", "signal-quality", "status" ])();
-    }
-
-    void connect_to_configured_network(ref CtrlIface wpa)
-    {
-        char[256] resp = void;
-        size_t n;
-
-        // Wipe any stale config from a previous run/restart so we don't
-        // accumulate duplicate networks across reconnect cycles.
-        wpa.send_command("REMOVE_NETWORK all", resp[], n);
-
-        auto ra = wpa.send_command("ADD_NETWORK", resp[], n);
-        if (ra.failed || n == 0)
+        void ensure_scan_started()
         {
-            log.error("wpa ADD_NETWORK: ", ra.failed ? ra.message : "empty response");
-            return;
-        }
-        size_t end = 0;
-        while (end < n && resp[end] >= '0' && resp[end] <= '9')
-            ++end;
-        const(char)[] id = resp[0 .. end];
-        if (id.length == 0)
-        {
-            log.error("wpa ADD_NETWORK: returned no id");
-            return;
-        }
-
-        char[512] cmd = void;
-        size_t l;
-
-        l = format_set_network(cmd[], id, "ssid", super.ssid, true);
-        if (l == 0 || wpa.send_command(cmd[0 .. l], resp[], n).failed)
-            return;
-
-        const(char)[] pwd = get_password();
-        if (pwd.length > 0)
-        {
-            l = format_set_network(cmd[], id, "psk", pwd, true);
-            if (l == 0 || wpa.send_command(cmd[0 .. l], resp[], n).failed)
+            if (!_sta.idle || _scan_inflight || super.ssid.length == 0)
                 return;
-        }
-        else
-        {
-            l = format_set_network(cmd[], id, "key_mgmt", "NONE", false);
-            if (l == 0 || wpa.send_command(cmd[0 .. l], resp[], n).failed)
+            auto r = cast(LinuxWifiRadio)radio;
+            if (!r || r.scanning)
+            {
+                schedule_scan_retry(1.seconds);
                 return;
+            }
+            WifiScanConfig sc;
+            sc.ssid = super.ssid;
+            if (r.start_scan(sc, &on_scan_done))
+            {
+                _scan_inflight = true;
+                mark_set!(typeof(this), "status")();
+            }
+            else
+                schedule_scan_retry(2.seconds);
         }
 
-        l = format_select_network(cmd[], id);
-        if (l > 0)
-            wpa.send_command(cmd[0 .. l], resp[], n);
+        void schedule_scan_retry(Duration delay)
+        {
+            if (_scan_retry_armed)
+                return;
+            _scan_retry_armed = true;
+            g_app.schedule(getTime() + delay, &scan_retry_event);
+            mark_set!(typeof(this), "status")();
+        }
+
+        void cancel_scan_retry()
+        {
+            if (_scan_retry_armed)
+            {
+                g_app.cancel(&scan_retry_event);
+                _scan_retry_armed = false;
+            }
+        }
+
+        void scan_retry_event(MonoTime)
+        {
+            _scan_retry_armed = false;
+            if (_state == State.starting || _state == State.running)
+                ensure_scan_started();
+        }
+
+        void post_progress_event()
+        {
+            g_app.post_event(&progress_event, getTime(), EventPriority.control);
+        }
+
+        void progress_event(MonoTime)
+        {
+            if (_state == State.starting)
+            {
+                if (_sta.connected)
+                    set_state(State.running);
+                else if (_sta.failed)
+                    set_state(State.failure);
+                else
+                    mark_set!(typeof(this), "status")();
+            }
+        }
+
+        // Scan completed: pick the strongest BSS for our SSID and connect to it.
+        void on_scan_done(scope const(WifiScanResult)[] results, bool ok)
+        {
+            _scan_inflight = false;
+            if (!ok)
+            {
+                schedule_scan_retry(2.seconds);
+                return;
+            }
+            const(WifiScanResult)* best;
+            foreach (ref res; results)
+            {
+                if (res.ssid != super.ssid)
+                    continue;
+                if (best is null || res.rssi > best.rssi)
+                    best = &res;
+            }
+            if (best is null)
+            {
+                log.warning("ssid '", super.ssid, "' not found in scan");
+                schedule_scan_retry(3.seconds);
+                return;
+            }
+            if (!_sta.connect(super.ssid, get_password(), best.bssid, channel_to_freq(best.channel, best.band)))
+                post_progress_event();
+            mark_set!(typeof(this), "status")();
+        }
     }
 }
 
@@ -815,12 +1453,10 @@ private:
 // ---------------------------------------------------------------------------
 // APInterface, multi-BSS aware.
 //
-// Each LinuxAP binds its packet path (RawAdapter) to its own netdev:
-//   bound_aps[0] (primary) -> radio's netdev (e.g. wlan0)
-//   bound_aps[N>0]         -> "<adapter>-<ap_name>" VIF created by hostapd
-//                             when it parses our bss= section on RELOAD.
-// VIFs for non-primary APs may not exist at startup() time -- we return
-// continue_ and retry on each update() until the kernel surfaces them.
+// Each LinuxAP binds its packet path (RawAdapter) to its own AP-mode VIF:
+//   "<adapter>-<ap_name>" created on the radio's wiphy.
+// VIFs may not exist at startup() time -- we create them and retry until the
+// kernel surfaces them.
 //
 // Each AP also opens its own hostapd ctrl_iface against /var/run/hostapd/<vif>;
 // per-BSS STATUS queries see themselves as ssid[0]/bssid[0]/num_sta[0], so no
@@ -837,19 +1473,6 @@ nothrow @nogc:
     this(CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(collection_type_info!LinuxAP, id, flags);
-    }
-
-    // Build the per-BSS slice of the radio's hostapd config. Called from
-    // sync_hostapd_config() once per bound AP.
-    void fill_bss_config(ref BssConfig bss, const(LinuxWifiRadio) r) const
-    {
-        bss.iface = r.vif_for(this);
-        bss.ssid = ssid;
-        bss.passphrase = get_password();
-        bss.auth = auth;
-        bss.hidden = hidden;
-        bss.client_isolation = client_isolation;
-        bss.max_clients = max_clients;
     }
 
 protected:
@@ -877,10 +1500,8 @@ protected:
             return "Waiting for radio";
         if (auto reason = r.would_accept(this))
             return reason;
-        if (!_hostapd.valid)
-            return "hostapd unavailable";
-        if (auto m = hostapd_state_message(_hostapd_state))
-            return m;
+        if (!_ap.running)
+            return _ap.status_message();
         return super.status_message();
     }
 
@@ -890,12 +1511,23 @@ protected:
         if (result != CompletionStatus.complete)
             return result;
 
+        auto r = cast(LinuxWifiRadio)radio;
+        if (!r)
+            return CompletionStatus.continue_;
         auto vif = current_vif();
         if (vif.length == 0)
             return CompletionStatus.continue_;
 
-        // For non-primary APs the VIF is created by hostapd on RELOAD; if it
-        // isn't there yet, retry on the next tick.
+        // Every AP gets a sibling AP-mode VIF; the physical adapter stays
+        // reserved for the radio/STA side.
+        if (read_ifindex(vif) == 0)
+        {
+            uint wiphy = read_wiphy(read_ifindex(r.adapter));
+            if (wiphy == uint.max || !create_ap_vif(wiphy, vif))
+                return CompletionStatus.continue_;
+            _created_vif_ifindex = read_ifindex(vif);
+        }
+
         if (!_raw.valid)
         {
             auto rr = _raw.open(vif);
@@ -909,18 +1541,89 @@ protected:
                 return CompletionStatus.continue_;
             }
             _raw_open_failure_logged = false;
+            apply_configured_mtu();
+            refresh_os_state(vif);
+            register_fdwatch();
         }
 
-        // Per-BSS hostapd ctrl socket; best-effort.
-        try_open_hostapd(vif);
+        version (WifiApKernel)
+        {
+            if (!_ap.valid)
+            {
+                auto ro = _ap.open(vif, &_raw);
+                if (ro.failed)
+                {
+                    log.warning(ro.message);
+                    return CompletionStatus.continue_;
+                }
+                fd_watch_changed();
+            }
+
+            if (!_ap.running)
+            {
+                ubyte ch = r.target_channel();
+                WifiBand band = ch <= 14 ? WifiBand.band_2g4 : WifiBand.band_5g;
+                if (!_ap.start(ssid, get_password(), channel_to_freq(ch, band), ch, hidden))
+                    return CompletionStatus.continue_;
+                _running_channel = ch;
+                arm_ap_timer_if_needed();
+            }
+        }
+        else
+        {
+            // hostapd backend: open its ctrl socket and (re)load a single-BSS
+            // config for this netdev. hostapd owns iftype + beaconing.
+            if (!_ap.valid)
+            {
+                auto ro = _ap.open(vif);
+                if (ro.failed)
+                {
+                    log.warning(ro.message);
+                    return CompletionStatus.continue_;
+                }
+            }
+            ubyte ch = r.target_channel();
+            if (!_ap.running || _running_channel != ch)
+            {
+                if (!_ap.start(ssid, get_password(), auth, ch, r.country, hidden, client_isolation, max_clients))
+                    return CompletionStatus.continue_;
+                _running_channel = ch;
+            }
+        }
+
+        // The BSS netdev is up; publish its kernel ifindex so the IP mirror
+        // places ap0's address/routes on it (addresses added before the AP
+        // started won't otherwise re-trigger a push).
+        version (KernelMirror)
+        {
+            set_kernel_ifindex(read_ifindex(vif));
+            mirror_refresh_interface(this);
+        }
 
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
-        _hostapd.close();
+        unregister_fdwatch();
+        cancel_ap_timer();
+        _ap.close();
         _raw.close();
+        _running_channel = 0;
+        if (_created_vif_ifindex != 0)
+        {
+            delete_vif(_created_vif_ifindex);
+            _created_vif_ifindex = 0;
+        }
+        // Drop our kernel netdev binding and withdraw the mirrored addresses.
+        version (KernelMirror)
+        {
+            if (kernel_ifindex() != 0)
+            {
+                set_kernel_ifindex(0);
+                mirror_refresh_interface(this);
+            }
+        }
         return super.shutdown();
     }
 
@@ -932,47 +1635,127 @@ protected:
         if (!r)
             return;
 
-        // Retry resources we couldn't grab at startup.
-        if (!_raw.valid || !_hostapd.valid)
+        version (WifiApKernel)
         {
-            auto vif = current_vif();
-            if (vif.length > 0)
+            // Legacy heartbeat fallback. The real pump is fdwatch -> service_io.
+            service_io();
+        }
+        else
+        {
+            // hostapd backend: poll STATUS for operational state + channel.
+            if (getSysTime() - _last_refresh >= 1.seconds)
             {
-                if (!_raw.valid)
-                {
-                    auto rr = _raw.open(vif);
-                    if (rr.failed)
-                    {
-                        if (!_raw_open_failure_logged)
-                        {
-                            log.warning(rr.message);
-                            _raw_open_failure_logged = true;
-                        }
-                    }
-                    else
-                        _raw_open_failure_logged = false;
-                }
-                try_open_hostapd(vif);
+                _last_refresh = getSysTime();
+                _ap.update();
+                if (_ap.channel != 0)
+                    r.update_active_channel(_ap.channel);
             }
+            pump_raw_frames();
         }
+    }
 
-        SysTime now = getSysTime();
-        if (now - _last_refresh >= 1.seconds)
+    override int wire_send(const(ubyte)[] frame)
+        => _raw.send(frame) ? 0 : -1;
+
+    override void on_mtu_changed()
+    {
+        apply_configured_mtu();
+    }
+
+private:
+
+    RawAdapter _raw;
+    bool _raw_open_failure_logged;
+    SysTime _last_refresh;
+    uint _created_vif_ifindex;      // secondary-AP VIF we created (0 = none)
+    ubyte _running_channel;
+    bool _fdwatch_registered;
+    bool _ap_timer_armed;
+
+    version (WifiApKernel)
+        Nl80211Ap _ap;
+    else
+        HostapdAp _ap;
+
+    void apply_configured_mtu()
+    {
+        if (_mtu == 0)
+            return;
+        auto vif = current_vif();
+        if (vif.length == 0)
+            return;
+        if (!set_adapter_mtu(vif, actual_mtu))
+            log.warning("failed to set MTU ", actual_mtu, " on '", vif, "'");
+    }
+
+    void refresh_os_state(const(char)[] vif)
+    {
+        OSAdapterInfo info;
+        if (!query_adapter(vif, info))
+            return;
+        AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
+        if (c & AdapterChange.mtu)     mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
+        if (c & AdapterChange.max_mtu) mark_set!(typeof(this), "max-l2mtu")();
+    }
+
+    void register_fdwatch()
+    {
+        if (!_fdwatch_registered && add_fd_watcher(&service_io, &collect_fds))
         {
-            _last_refresh = now;
-            refresh_ap_state();
+            _fdwatch_registered = true;
+            fd_watch_changed();
         }
+    }
 
+    void unregister_fdwatch()
+    {
+        if (_fdwatch_registered)
+        {
+            remove_fd_watcher(&service_io);
+            _fdwatch_registered = false;
+            fd_watch_changed();
+        }
+    }
+
+    void collect_fds(ref Array!pollfd fds)
+    {
+        if (_raw.valid)
+            fds ~= pollfd(_raw.fd, POLLIN);
+        version (WifiApKernel)
+        {
+            if (_ap.event_fd >= 0)
+                fds ~= pollfd(_ap.event_fd, POLLIN);
+        }
+    }
+
+    void service_io()
+    {
+        version (WifiApKernel)
+        {
+            _ap.pump();
+            pump_raw_frames();
+            if (_ap.failed)
+            {
+                restart();
+                return;
+            }
+            arm_ap_timer_if_needed();
+        }
+        else
+            pump_raw_frames();
+    }
+
+    void pump_raw_frames()
+    {
         const(ubyte)[] data;
         uint wire_len;
         MonoTime ts;
+        ubyte pkttype;
 
         while (true)
         {
-            int res = _raw.poll(data, wire_len, ts);
-            if (res == 0)
-                break;
-            if (res < 0)
+            int res = _raw.poll_ll(data, wire_len, ts, pkttype);
+            if (res <= 0)
                 break;
 
             if (data.length < wire_len)
@@ -981,22 +1764,56 @@ protected:
                 continue;
             }
 
+            if (data.length >= 14 && data[12] == 0x88 && data[13] == 0x8e)
+            {
+                if (pkttype == PACKET_OUTGOING)
+                    continue;
+                ubyte[6] src = data[6 .. 12];
+                if (_ap.consume_eapol(src, data[14 .. $]))
+                    continue;
+            }
+
             incoming_ethernet_frame(data, ts);
         }
     }
 
-    override int wire_send(const(ubyte)[] frame)
-        => _raw.send(frame) ? 0 : -1;
+    version (WifiApKernel)
+    {
+        void arm_ap_timer_if_needed()
+        {
+            if (_ap_timer_armed || !_ap.needs_tick())
+                return;
+            _ap_timer_armed = true;
+            g_app.schedule(getTime() + 250.msecs, &ap_timer_event);
+        }
 
-private:
+        void cancel_ap_timer()
+        {
+            if (_ap_timer_armed)
+            {
+                g_app.cancel(&ap_timer_event);
+                _ap_timer_armed = false;
+            }
+        }
 
-    RawAdapter _raw;
-    CtrlIface _hostapd;
-    HostapdHwState _hostapd_state;
-    SysTime _last_refresh;
-    bool _raw_open_failure_logged;
-    bool _hostapd_open_failure_logged;
-    bool _hostapd_status_failure_logged;
+        void ap_timer_event(MonoTime)
+        {
+            _ap_timer_armed = false;
+            if (_state != State.running && _state != State.starting)
+                return;
+            _ap.tick();
+            if (_ap.failed)
+            {
+                restart();
+                return;
+            }
+            arm_ap_timer_if_needed();
+        }
+    }
+    else
+    {
+        void cancel_ap_timer() {}
+    }
 
     // Returns empty slice if the radio isn't a LinuxWifiRadio or we aren't
     // bound (transitional states; caller should retry).
@@ -1004,59 +1821,6 @@ private:
     {
         auto r = cast(const(LinuxWifiRadio))radio;
         return r ? r.vif_for(this) : null;
-    }
-
-    void try_open_hostapd(const(char)[] vif)
-    {
-        if (_hostapd.valid)
-            return;
-        auto r = hostapd_open(_hostapd, vif);
-        if (r.failed)
-        {
-            if (!_hostapd_open_failure_logged)
-            {
-                log.warning("hostapd: ", r.message);
-                _hostapd_open_failure_logged = true;
-            }
-        }
-        else
-        {
-            if (_hostapd_open_failure_logged)
-                log.info("hostapd: ctrl socket connected");
-            _hostapd_open_failure_logged = false;
-        }
-    }
-
-    void refresh_ap_state()
-    {
-        if (!_hostapd.valid)
-        {
-            _hostapd_state = HostapdHwState.unknown;
-            return;
-        }
-
-        char[2048] buf = void;
-        HostapdStatus s;
-        auto rs = hostapd_query_status(_hostapd, s, buf[]);
-        if (rs.failed)
-        {
-            if (!_hostapd_status_failure_logged)
-            {
-                log.warning("hostapd STATUS: ", rs.message);
-                _hostapd_status_failure_logged = true;
-            }
-            _hostapd_state = HostapdHwState.unknown;
-            return;
-        }
-        _hostapd_status_failure_logged = false;
-
-        _hostapd_state = s.hw_state;
-
-        // All BSSes on a radio share the chip's channel; any one of them
-        // reporting it is enough to drive active_channel.
-        auto r = cast(LinuxWifiRadio)radio;
-        if (r && s.channel != 0)
-            r.update_active_channel(s.channel);
     }
 }
 
@@ -1074,35 +1838,87 @@ private ubyte freq_to_channel(uint freq_mhz) pure
     return 0;
 }
 
-
-private size_t format_set_network(char[] dst, const(char)[] id, const(char)[] key, const(char)[] value, bool quoted)
+private uint channel_to_freq(ubyte ch, WifiBand band) pure
 {
-    enum prefix = "SET_NETWORK ";
-    size_t total = prefix.length + id.length + 1 + key.length + 1 + (quoted ? 2 : 0) + value.length;
-    if (total > dst.length)
+    if (ch == 0)
         return 0;
-    size_t i = 0;
-    dst[i .. i + prefix.length] = prefix;     i += prefix.length;
-    dst[i .. i + id.length]     = id;         i += id.length;
-    dst[i++] = ' ';
-    dst[i .. i + key.length]    = key;        i += key.length;
-    dst[i++] = ' ';
-    if (quoted) dst[i++] = '"';
-    dst[i .. i + value.length]  = value;      i += value.length;
-    if (quoted) dst[i++] = '"';
-    return i;
+    if (band == WifiBand.band_5g || ch > 14)
+        return 5000 + ch * 5;
+    if (ch == 14)
+        return 2484;
+    return 2412 + (ch - 1) * 5;
 }
 
-private size_t format_select_network(char[] dst, const(char)[] id)
+
+// Live view of nearby APs: re-scans on a timer and redraws a table each poll.
+// Modelled on CollectionWatchState (the collection `print --watch` live view).
+private final class WifiScanView : LiveViewState
 {
-    enum prefix = "SELECT_NETWORK ";
-    if (prefix.length + id.length > dst.length)
-        return 0;
-    size_t i = 0;
-    dst[i .. i + prefix.length] = prefix;  i += prefix.length;
-    dst[i .. i + id.length]     = id;      i += id.length;
-    return i;
+nothrow @nogc:
+
+    this(Session session, LinuxWifiRadio radio)
+    {
+        super(session, null);
+        _radio = radio;
+        refresh();
+    }
+
+    override uint content_height()
+        => cast(uint)_count;
+
+    override uint header_rows()
+        => 1;
+
+    override CommandCompletionState update()
+    {
+        if (getSysTime() - _last_refresh >= 2.seconds)
+            refresh();
+        return super.update();
+    }
+
+    override void render_content(uint offset, uint count, uint width)
+    {
+        if (width != _prev_width)
+        {
+            _sticky_widths[] = 0;
+            _prev_width = width;
+        }
+
+        Table table;
+        table.add_column("BSSID");
+        table.add_column("CH", Table.TextAlign.right);
+        table.add_column("SIGNAL", Table.TextAlign.right);
+        table.add_column("SSID");
+        foreach (ref res; _results[0 .. _count])
+        {
+            table.add_row();
+            table.cell(tconcat(MACAddress(res.bssid)));
+            table.cell(tconcat(res.channel));
+            table.cell(tconcat(res.rssi, " dBm"));
+            table.cell(res.ssid);
+        }
+        table.render_viewport(session, offset, count, _sticky_widths[]);
+    }
+
+    override const(char)[] status_text()
+        => tconcat(_count, " APs | rescans every 2s");
+
+private:
+    LinuxWifiRadio _radio;
+    WifiScanResult[64] _results = void;
+    size_t _count;
+    SysTime _last_refresh;
+    size_t[Table.max_cols] _sticky_widths;
+    uint _prev_width;
+
+    void refresh()
+    {
+        _count = _radio.dump_scan_results(_results[]);
+        _radio.trigger_scan();
+        _last_refresh = getSysTime();
+    }
 }
+
 
 // ---------------------------------------------------------------------------
 // Driver module: discovers wifi adapters at startup, then receives async
@@ -1118,7 +1934,6 @@ nothrow @nogc:
     override void pre_init()
     {
         subscribe_link_changed(&on_link_changed);
-        sync_radios();
     }
 
     override void init()
@@ -1126,12 +1941,54 @@ nothrow @nogc:
         g_app.console.register_collection!LinuxWifiRadio();
         g_app.console.register_collection!LinuxWlan();
         g_app.console.register_collection!LinuxAP();
+        g_app.console.register_command!scan_cmd("/interface/wifi", this, "scan");
+    }
+
+    override void update()
+    {
+        // Defer the first adapter discovery until after startup.conf has run, so
+        // an operator-configured radio (e.g. `/interface/wifi/add adapter=wlan0`)
+        // claims its netdev before auto-discovery would create a duplicate radio
+        // for the same adapter -- two radios on one netdev fight over iftype and
+        // tear down each other's AP/association. Link-change events thereafter
+        // keep the (Radio, WLAN) pairs in sync.
+        if (!_initial_sync_done)
+        {
+            _initial_sync_done = true;
+            sync_radios();
+        }
+    }
+
+    // /interface/wifi/scan [radio] -- live view of nearby APs; re-scans every
+    // couple of seconds and redraws (q/Ctrl-C to quit). <radio> defaults to the
+    // first wifi radio.
+    CommandState scan_cmd(Session session, Nullable!String radio)
+    {
+        LinuxWifiRadio r;
+        foreach (rr; Collection!LinuxWifiRadio().values)
+        {
+            if (!radio) { r = rr; break; }
+            if (rr.name == radio.value[]) { r = rr; break; }
+        }
+        if (!r)
+        {
+            session.write_line("no wifi radio found");
+            return null;
+        }
+        return session.allocator.allocT!WifiScanView(session, r);
     }
 
 private:
 
+    bool _initial_sync_done;
+
     void on_link_changed(uint, const(char)[], bool, bool)
     {
+        // Hold off until the deferred initial discovery has run (post
+        // startup.conf); an early event could otherwise auto-create a duplicate
+        // radio before an operator radio claims the adapter.
+        if (!_initial_sync_done)
+            return;
         sync_radios();
     }
 
@@ -1156,12 +2013,16 @@ private:
                 auto base = next_radio_name();
                 log_info(ModuleName, "Found wifi interface: \"", description, "\" (", name, ")");
 
-                auto radio = Collection!LinuxWifiRadio().create(tconcat(base, "-radio"));
+                // dynamic: auto-discovery owns these and rediscovers them each
+                // boot, so they aren't persisted to config -- and only dynamic
+                // entries are reaped below when their netdev disappears.
+                // Operator/config radios (flags == none) are left alone.
+                auto radio = Collection!LinuxWifiRadio().create(tconcat(base, "-radio"), ObjectFlags.dynamic);
                 radio.adapter = name;
                 if (description.length > 0)
                     radio.comment = description.makeString(defaultAllocator);
 
-                auto wlan = Collection!LinuxWlan().create(base);
+                auto wlan = Collection!LinuxWlan().create(base, ObjectFlags.dynamic);
                 wlan.radio = radio;
             }
 
@@ -1171,6 +2032,11 @@ private:
         Array!LinuxWifiRadio gone;
         foreach (r; Collection!LinuxWifiRadio().values)
         {
+            // Only reap what auto-discovery created; an operator/config radio is
+            // not ours to remove even if its netdev momentarily disappears.
+            if (!(r.flags & ObjectFlags.dynamic))
+                continue;
+
             bool still_there = false;
             foreach (ref s; os_buf[])
             {

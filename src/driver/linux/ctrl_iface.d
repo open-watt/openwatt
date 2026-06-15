@@ -1,6 +1,10 @@
 module driver.linux.ctrl_iface;
 
 version (linux):
+// ctrl_iface backs both daemon backends; compile it when either is selected.
+version (WifiStaDaemon) version = WifiDaemonCtrl;
+version (WifiApDaemon)  version = WifiDaemonCtrl;
+version (WifiDaemonCtrl):
 
 import urt.conv;
 import urt.mem.temp;
@@ -193,18 +197,6 @@ void foreach_kv(const(char)[] response, scope void delegate(const(char)[] key, c
             continue;
         on_kv(line[0 .. eq], line[eq + 1 .. $]);
     }
-}
-
-
-// RSSI dBm -> 0..100 quality scale (Windows-style). -50 or better -> 100,
-// -100 or worse -> 0, linear in between.
-ubyte rssi_to_quality(int rssi_dbm) pure
-{
-    if (rssi_dbm >= -50)
-        return 100;
-    if (rssi_dbm <= -100)
-        return 0;
-    return cast(ubyte)(2 * (rssi_dbm + 100));
 }
 
 

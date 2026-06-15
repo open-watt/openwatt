@@ -52,6 +52,22 @@ ifeq ($(OS),linux)
   ifneq ($(USE_INTERNAL_IP_STACK),1)
     DFLAGS := $(DFLAGS) $(VERSION_FLAG)KernelMirror
   endif
+
+  # WiFi backend selection. Default: kernel (nl80211 + the in-process WPA
+  # supplicant/authenticator). Override to fall back to the external daemons,
+  # independently for STA and AP, e.g. WIFI_AP_BACKEND=hostapd.
+  WIFI_STA_BACKEND ?= kernel
+  WIFI_AP_BACKEND  ?= kernel
+  ifeq ($(WIFI_STA_BACKEND),kernel)
+    DFLAGS := $(DFLAGS) $(VERSION_FLAG)WifiStaKernel
+  else
+    DFLAGS := $(DFLAGS) $(VERSION_FLAG)WifiStaDaemon
+  endif
+  ifeq ($(WIFI_AP_BACKEND),kernel)
+    DFLAGS := $(DFLAGS) $(VERSION_FLAG)WifiApKernel
+  else
+    DFLAGS := $(DFLAGS) $(VERSION_FLAG)WifiApDaemon
+  endif
 endif
 
 # =======================================================================

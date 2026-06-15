@@ -32,8 +32,6 @@ nothrow @nogc:
         return 0;
     }
 
-protected:
-
     override ushort pcap_type() const
         => 1; // LINKTYPE_ETHERNET
 
@@ -155,6 +153,7 @@ protected:
     this(const CollectionTypeInfo* typeInfo, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(typeInfo, id, flags);
+        _caps |= InterfaceCaps.ethernet;
 
         // TODO: proper values?
 //        _mtu = 1500;

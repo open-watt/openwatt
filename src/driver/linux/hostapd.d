@@ -1,10 +1,13 @@
 module driver.linux.hostapd;
 
 version (linux):
+version (WifiApDaemon):
 
 import urt.conv;
+import urt.mem;
 import urt.mem.temp;
 import urt.result;
+import urt.string;
 
 import urt.internal.sys.posix;
 
@@ -147,6 +150,108 @@ StringResult hostapd_query_status(ref CtrlIface c, ref HostapdStatus out_status,
         }
     });
     return StringResult.success;
+}
+
+
+// AP session backed by an external hostapd via its ctrl_iface socket. Conforms
+// to the shape LinuxAP drives for the kernel Nl80211Ap -- open / start / stop /
+// close / update + accessors -- so the frontend stays backend-agnostic. hostapd
+// owns beaconing + the 4-way + EAPOL, so consume_eapol is a no-op. One BSS per
+// radio netdev (matching the kernel AP v1 scope).
+struct HostapdAp
+{
+nothrow @nogc:
+
+    bool valid() const pure    => _hostapd.valid;
+    bool running() const pure   => _state == HostapdHwState.enabled;
+    bool failed() const pure    => false;   // hostapd self-recovers; never force a restart
+    ubyte channel() const pure  => _channel;
+
+    const(char)[] status_message() const pure
+    {
+        if (auto m = hostapd_state_message(_state))
+            return m;
+        return null;
+    }
+
+    StringResult open(const(char)[] adapter)
+    {
+        _iface = adapter.makeString(defaultAllocator);
+        return hostapd_open(_hostapd, adapter);
+    }
+
+    void close()
+    {
+        if (_hostapd.valid)
+            hostapd_disable(_hostapd);
+        _hostapd.close();
+        _state = HostapdHwState.unknown;
+    }
+
+    void stop()
+    {
+        if (_hostapd.valid)
+            hostapd_disable(_hostapd);
+        _state = HostapdHwState.unknown;
+    }
+
+    bool consume_eapol(const(ubyte)[6] src, const(ubyte)[] payload)
+        => false;
+
+    // Write a single-BSS hostapd config for our netdev and (re)load it. The
+    // operator's hostapd service must be configured to read the generated file.
+    bool start(const(char)[] ssid, const(char)[] password, WifiAuth auth,
+               ubyte channel, const(char)[] country, bool hidden,
+               bool client_isolation, ubyte max_clients)
+    {
+        if (!_hostapd.valid)
+            return false;
+
+        BssConfig bss;
+        bss.iface = _iface[];
+        bss.ssid = ssid;
+        bss.passphrase = password;
+        bss.auth = auth;
+        bss.hidden = hidden;
+        bss.client_isolation = client_isolation;
+        bss.max_clients = max_clients;
+
+        ApConfig cfg;
+        cfg.country = country;
+        cfg.channel = channel;
+        cfg.bsses = (&bss)[0 .. 1];
+
+        if (write_hostapd_config(cfg).failed)
+            return false;
+        hostapd_enable(_hostapd);   // idempotent if already enabled
+        return hostapd_reload(_hostapd).succeeded;
+    }
+
+    // Poll hostapd STATUS for the operational state + channel.
+    void update()
+    {
+        if (!_hostapd.valid)
+        {
+            _state = HostapdHwState.unknown;
+            return;
+        }
+        char[2048] buf = void;
+        HostapdStatus s;
+        if (hostapd_query_status(_hostapd, s, buf[]).failed)
+        {
+            _state = HostapdHwState.unknown;
+            return;
+        }
+        _state = s.hw_state;
+        if (s.channel != 0)
+            _channel = s.channel;
+    }
+
+private:
+    CtrlIface _hostapd;
+    HostapdHwState _state;
+    ubyte _channel;
+    String _iface;
 }
 
 
