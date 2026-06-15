@@ -120,8 +120,8 @@ nothrow @nogc:
     {
         foreach (ref h; _handlers)
         {
-            if ((h.methods & (1 << method)) && uri_prefix[].startsWith(h.uri_prefix[]))
-                return false;
+            if ((h.methods & (1 << method)) && h.uri_prefix[] == uri_prefix[])
+                return false; // exact duplicate; overlapping prefixes are fine (longest match wins)
         }
         _handlers ~= Handler(1 << method, uri_prefix.makeString(defaultAllocator), request_handler);
         return true;
@@ -131,8 +131,8 @@ nothrow @nogc:
     {
         foreach (ref h; _handlers)
         {
-            if ((h.methods & (1 << method)) && uri_prefix[].startsWith(h.uri_prefix[]))
-                return false;
+            if ((h.methods & (1 << method)) && h.uri_prefix[] == uri_prefix[])
+                return false; // exact duplicate; overlapping prefixes are fine (longest match wins)
         }
         _handlers ~= Handler(1 << method, uri_prefix.makeString(defaultAllocator), begin_handler);
         return true;
@@ -306,6 +306,40 @@ private:
     Array!(ObjectRef!Certificate) _certificates;
     Array!Handler _handlers;
     Array!(Session*) _sessions;
+
+    // a prefix matches at a path boundary: the target must equal the prefix, or continue
+    // with '/'. The empty prefix (root) matches everything.
+    static bool uri_prefix_match(const(char)[] target, const(char)[] prefix) pure
+    {
+        if (prefix.length == 0)
+            return true;
+        if (!target.startsWith(prefix))
+            return false;
+        if (target.length == prefix.length)
+            return true;
+        return prefix[$-1] == '/' || target[prefix.length] == '/';
+    }
+
+    // pick the handler with the longest matching prefix, so more-specific routes
+    // (/api, /ws) take precedence over a broad one (/) regardless of registration order.
+    ptrdiff_t find_handler(const(char)[] target, HTTPMethod method, bool streaming)
+    {
+        ptrdiff_t best = -1;
+        size_t best_len = 0;
+        foreach (i, ref h; _handlers)
+        {
+            if (h.is_streaming != streaming || !(h.methods & (1 << method)))
+                continue;
+            if (!uri_prefix_match(target, h.uri_prefix[]))
+                continue;
+            if (best == -1 || h.uri_prefix.length > best_len)
+            {
+                best = i;
+                best_len = h.uri_prefix.length;
+            }
+        }
+        return best;
+    }
 
     void accept_http_connection(Stream stream, ref const InetAddress remote, void*)
     {
@@ -520,17 +554,13 @@ private:
 
         int headers_ready_callback(ref const HTTPMessage request, out StreamingChunkHandler chunk_handler)
         {
-            foreach (ref h; server._handlers)
+            ptrdiff_t idx = server.find_handler(request.request_target[], request.method, true);
+            if (idx >= 0)
             {
-                if (!h.is_streaming)
-                    continue;
-                if (((1 << request.method) & h.methods) && request.request_target[].startsWith(h.uri_prefix[]))
-                {
-                    chunk_handler = h.streaming(request, stream);
-                    if (chunk_handler is null)
-                        return -1;
-                    return 0;
-                }
+                StreamingRequestBegin begin = server._handlers[idx].streaming;
+                chunk_handler = begin(request, stream);
+                if (chunk_handler is null)
+                    return -1;
             }
             return 0;
         }
@@ -546,17 +576,14 @@ private:
                     return result;
             }
 
-            foreach (ref h; server._handlers)
+            ptrdiff_t idx = server.find_handler(request.request_target[], request.method, false);
+            if (idx >= 0)
             {
-                if (h.is_streaming)
-                    continue;
-                if (((1 << request.method) & h.methods) && request.request_target[].startsWith(h.uri_prefix[]))
-                {
-                    int result = h.buffered(request, stream, leftover);
-                    if (!stream)
-                        return 1;
-                    return result;
-                }
+                RequestHandler handler = server._handlers[idx].buffered;
+                int result = handler(request, stream, leftover);
+                if (!stream)
+                    return 1;
+                return result;
             }
 
             if (server._default_request_handler)
