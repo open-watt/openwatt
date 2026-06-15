@@ -79,8 +79,7 @@ nothrow @nogc:
             if (s.value.enable)
                 r.concat(r.length > 0 ? "," : "", s.key);
         }
-        // TODO: we should be able to promote MutableString to String!!
-        return r[].makeString(defaultAllocator());
+        return String(r.move);
     }
     void services(String[] value)
     {

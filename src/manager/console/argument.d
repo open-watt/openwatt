@@ -101,14 +101,14 @@ Array!String suggest_completion(T : const Component)(const(char)[] argument_text
         if (c.id[].startsWith(argument_text))
         {
             cid = i;
-            completions ~= String(MutableString!0(Concat, prefix, c.id)); // TODO: MOVE construct!
+            completions ~= String(MutableString!0(Concat, prefix, c.id));
         }
     }
     if (completions.length == 1)
     {
         cmp = cmp.components[cid];
         foreach (i, c; cmp.components)
-            completions ~= String(MutableString!0(Concat, completions[0], '.', c.id)); // TODO: MOVE construct!
+            completions ~= String(MutableString!0(Concat, completions[0], '.', c.id));
     }
     return completions;
 }

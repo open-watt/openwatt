@@ -104,8 +104,7 @@ nothrow @nogc:
                 r ~= enum_key_by_decl_index!NSProtocol(i);
             }
         }
-        // TODO: we should be able to promote MutableString to String!!
-        return r[].makeString(defaultAllocator());
+        return String(r.move);
     }
     void protocols(String[] value)
     {
@@ -137,10 +136,9 @@ nothrow @nogc:
 
     const(char)[] doh_uri() const pure
         => _doh_uri[];
-    const(char)[] doh_uri(const(char)[] value)
+    const(char)[] doh_uri(String value)
     {
-        // TODO: property should just accept a String!
-        _doh_uri = value.makeString(defaultAllocator);
+        _doh_uri = value.move;
         doh_subscribe(_doh_server, _doh_server);
         return null;
     }

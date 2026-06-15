@@ -96,7 +96,7 @@ protected:
             return CompletionStatus.error;
 
         _ws_server.http_server(_http_server);
-        _ws_server.uri(_uri[]);
+        _ws_server.uri(_uri);
         _ws_server.set_connection_callback(&on_ws_connect);
 
         return CompletionStatus.complete;

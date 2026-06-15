@@ -269,7 +269,7 @@ private:
         foreach (ref arg; _args)
         {
             if (arg.name[].startsWith(arg_prefix))
-                suggestions ~= String(MutableString!0(Concat, arg.name, '=')); // TODO: MOVE construct!
+                suggestions ~= String(MutableString!0(Concat, arg.name, '='));
         }
         return suggestions;
     }

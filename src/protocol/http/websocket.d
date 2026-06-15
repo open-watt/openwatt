@@ -686,10 +686,9 @@ nothrow @nogc:
 
     const(char)[] uri() const pure
         => _uri[];
-    const(char)[] uri(const(char)[] value)
+    const(char)[] uri(String value)
     {
-        // TODO: property should just accept a String!
-        _uri = value.makeString(defaultAllocator);
+        _uri = value.move;
         return null;
     }
 
