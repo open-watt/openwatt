@@ -43,6 +43,18 @@ protected:
     const(char)[] status_text()
         => null;
 
+    bool continuous_redraw()
+        => true;
+
+    void request_redraw()
+    {
+        _redraw_requested = true;
+    }
+
+    void poll()
+    {
+    }
+
     bool handle_key(const(char)[] seq)
         => false;
 
@@ -84,6 +96,11 @@ protected:
             return CommandCompletionState.finished;
         }
 
+        poll();
+
+        if (!continuous_redraw() && !_redraw_requested)
+            return CommandCompletionState.in_progress;
+
         if (_has_cursor)
         {
             if (_mode == LiveViewMode.fullscreen)
@@ -94,6 +111,7 @@ protected:
         else
             draw_dumb();
 
+        _redraw_requested = false;
         return CommandCompletionState.in_progress;
     }
 
@@ -111,6 +129,7 @@ private:
     bool _has_cursor;
     bool _cancelled;
     bool _deferred_auto;
+    bool _redraw_requested = true;
     uint _prev_inline_height;
     MonoTime _last_dumb_print;
 
@@ -139,7 +158,9 @@ private:
                 consumed = 1;
             }
 
-            if (!handle_key(seq))
+            if (handle_key(seq))
+                request_redraw();
+            else
             {
                 auto page = session.height() > 2 ? session.height() - 2 : 1;
                 if (seq[] == ANSI_ARROW_UP)
@@ -147,6 +168,7 @@ private:
                     if (_scroll_offset > 0)
                         --_scroll_offset;
                     _follow = false;
+                    request_redraw();
                 }
                 else if (seq[] == ANSI_ARROW_DOWN)
                 {
@@ -155,21 +177,30 @@ private:
                     uint dh = data_height();
                     if (ch > dh && _scroll_offset >= ch - dh)
                         _follow = true;
+                    request_redraw();
                 }
                 else if (seq[] == ANSI_PGUP)
                 {
                     _scroll_offset = _scroll_offset > page ? _scroll_offset - page : 0;
                     _follow = false;
+                    request_redraw();
                 }
                 else if (seq[] == ANSI_PGDN)
+                {
                     _scroll_offset += page;
+                    request_redraw();
+                }
                 else if (seq[] == ANSI_HOME1 || seq[] == ANSI_HOME2 || seq[] == ANSI_HOME3)
                 {
                     _scroll_offset = 0;
                     _follow = false;
+                    request_redraw();
                 }
                 else if (seq[] == ANSI_END1 || seq[] == ANSI_END2 || seq[] == ANSI_END3)
+                {
                     _follow = true;
+                    request_redraw();
+                }
             }
 
             i += consumed - 1;
@@ -287,12 +318,20 @@ private:
     void leave()
     {
         if (_mode == LiveViewMode.fullscreen && _has_cursor)
-            session.write_output("\x1b[?25h\x1b[?1049l", false);
+        {
+            import urt.string.format : tformat;
+
+            uint h = session.height();
+            if (h == 0)
+                h = 24;
+            session.write_output(tformat("\x1b[?1049l\x1b[{0};1H\x1b[K\r\n\x1b[?25h", h), false);
+        }
+        else if (_mode == LiveViewMode.inline_ && _has_cursor)
+            session.write_output("\r\n\x1b[?25h", false);
         else if (_has_cursor)
             session.write_output("\x1b[?25h", false);
     }
 }
-
 
 class TextViewState : LiveViewState
 {

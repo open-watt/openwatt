@@ -62,7 +62,7 @@ struct GraphOptions
 {
     BlitStyle style = BlitStyle.sextant;
     GraphMode mode = GraphMode.overlay;
-    bool smooth = true;          // wedge-smoothed fill boundary (sextant style only)
+    bool smooth = false;         // wedge-smoothed fill boundary (sextant style only)
     bool fill = true;            // area fill below the series; false = line only
     bool x_axis = true;          // time rule + labels at the bottom
     bool legend = true;          // colour-keyed legend row when more than one series
@@ -91,8 +91,7 @@ immutable Pixel[8] graph_palette = [
 
 
 // single-series convenience
-void render_graph(S)(ref Array!(MutableString!0) lines, const(S)[] samples,
-                     ulong t0, ulong t1, uint cols, uint rows, ref const GraphOptions opt)
+void render_graph(S)(ref Array!(MutableString!0) lines, const(S)[] samples, ulong t0, ulong t1, uint cols, uint rows, ref const GraphOptions opt)
 {
     GraphSeries!S[1] series = [GraphSeries!S(samples, opt.color ? opt.color : graph_palette[0], null)];
     render_graph(lines, series[], t0, t1, cols, rows, opt);
@@ -101,8 +100,7 @@ void render_graph(S)(ref Array!(MutableString!0) lines, const(S)[] samples,
 // Render `series` over [t0, t1] (unix ns) into `lines`, sized cols x rows
 // character cells including legend and axes. S needs `.time` (unix ns) and
 // `.value`.
-void render_graph(S)(ref Array!(MutableString!0) lines, GraphSeries!S[] series,
-                     ulong t0, ulong t1, uint cols, uint rows, ref const GraphOptions opt)
+void render_graph(S)(ref Array!(MutableString!0) lines, GraphSeries!S[] series, ulong t0, ulong t1, uint cols, uint rows, ref const GraphOptions opt)
 {
     static struct Cursor
     {
@@ -254,6 +252,11 @@ void render_graph(S)(ref Array!(MutableString!0) lines, GraphSeries!S[] series,
     Array!int prev_py;
     prev_py.resize(n);
     prev_py[][] = int.min;
+    Array!bool had_value;
+    had_value.resize(n);
+    foreach (i; 0 .. n)
+        had_value[][i] = cursors[][i].samples.length &&
+            cursors[][i].samples[0].time <= t0;
 
     foreach (x; 0 .. pw)
     {
@@ -279,11 +282,19 @@ void render_graph(S)(ref Array!(MutableString!0) lines, GraphSeries!S[] series,
             if (!cursors[][i].eval(t, v))
             {
                 prev_py[][i] = int.min;
+                had_value[][i] = false;
                 continue;
             }
             int py = value_to_py(v);
             if (opt.fill)
+            {
+                if (!had_value[i])
+                {
+                    had_value[][i] = true;
+                    continue;
+                }
                 bmp.vfill(x, py, ph - 1, colors[i], n > 1);
+            }
             else
             {
                 int prev = prev_py[i];
@@ -292,6 +303,7 @@ void render_graph(S)(ref Array!(MutableString!0) lines, GraphSeries!S[] series,
                 else
                     bmp.set(x, py < 0 ? 0 : py, colors[i]);
                 prev_py[][i] = py;
+                had_value[][i] = true;
             }
         }
     }
@@ -475,8 +487,18 @@ nothrow @nogc:
             double hr = edges[i * (plot_cols + 1) + col + 1];
             if (hl != hl || hr != hr)
                 return false;
-            lf = (hl - cell_bot) * plot_rows;
-            rf = (hr - cell_bot) * plot_rows;
+            double raw_lf = (hl - cell_bot) * plot_rows;
+            double raw_rf = (hr - cell_bot) * plot_rows;
+
+            // The diagonal block glyphs describe a boundary that crosses one
+            // character cell. If the sample jumps through multiple rows in a
+            // single column, leave the rasterised vertical/stepped edge alone.
+            double d = raw_lf - raw_rf;
+            if (d < -1 || d > 1)
+                return false;
+
+            lf = raw_lf;
+            rf = raw_rf;
             lf = lf < 0 ? 0 : (lf > 1 ? 1 : lf);
             rf = rf < 0 ? 0 : (rf > 1 ? 1 : rf);
             return true;
@@ -533,8 +555,19 @@ nothrow @nogc:
             ch = e == 0 ? ' ' : cast(dchar)(0x2580 + e);
         }
         else
-            ch = wedge_chars[l3 * 4 + r3];
+            ch = fill_below_wedge(l3, r3);
     }
+}
+
+dchar fill_below_wedge(uint left_thirds, uint right_thirds) pure
+{
+    static immutable dchar[16] chars = [
+        ' ',     0x1FB48, 0x1FB4A, 0x25E2,
+        0x1FB3D, 0x2581,  0x1FB46, 0x1FB44,
+        0x1FB3F, 0x1FB51, 0x2584,  0x1FB42,
+        0x25E3,  0x1FB4F, 0x1FB4D, 0x2588,
+    ];
+    return chars[left_thirds * 4 + right_thirds];
 }
 
 const(char)[] format_time(ulong unix_ns, char[] buf)
@@ -550,16 +583,6 @@ const(char)[] format_time(ulong unix_ns, char[] buf)
     buf[7] = cast(char)('0' + dt.second % 10);
     return buf[0 .. 8];
 }
-
-// fill-below diagonal wedges indexed [left_third * 4 + right_third]; the
-// equal-thirds diagonal entries are unused (flat cells use eighth blocks)
-immutable dchar[16] wedge_chars = [
-    ' ',     0x1FB48, 0x1FB4A, 0x25E2,
-    0x1FB3D, 0x2581,  0x1FB46, 0x1FB44,
-    0x1FB3F, 0x1FB51, 0x2584,  0x1FB42,
-    0x25E3,  0x1FB4F, 0x1FB4D, 0x2588,
-];
-
 
 unittest
 {
@@ -607,4 +630,29 @@ unittest
     // no data renders without crashing
     render_graph(lines, data[0 .. 0], 1_000, 4_000, 60, 16, opt);
     assert(lines.length == 16);
+
+    assert(fill_below_wedge(0, 1) == 0x1FB48); // rising shallow edge
+    assert(fill_below_wedge(1, 0) == 0x1FB3D); // falling shallow edge
+    assert(fill_below_wedge(0, 3) == 0x25E2);  // full-cell rising diagonal
+    assert(fill_below_wedge(3, 0) == 0x25E3);  // full-cell falling diagonal
+
+    SmoothBoundary boundary;
+    Pixel[1] bcolors = [rgb(110, 200, 255)];
+    boundary.colors = bcolors[];
+    boundary.n = 1;
+    boundary.plot_cols = 1;
+    boundary.plot_rows = 4;
+
+    dchar ch;
+    Pixel fg, bg;
+    double[2] gentle_edges = [0.25, 0.5];
+    boundary.edges = gentle_edges[];
+    assert(boundary.cell(0, 2, ch, fg, bg));
+    assert(ch == 0x25E2);
+
+    double[2] steep_edges = [0.0, 1.0];
+    boundary.edges = steep_edges[];
+    ch = 'x';
+    assert(!boundary.cell(0, 2, ch, fg, bg));
+    assert(ch == 'x');
 }
