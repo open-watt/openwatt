@@ -164,6 +164,7 @@
     <DCompile Include="src\protocol\http\message.d" />
     <DCompile Include="src\protocol\http\package.d" />
     <DCompile Include="src\protocol\http\server.d" />
+    <DCompile Include="src\protocol\http\staticfiles.d" />
     <DCompile Include="src\protocol\http\websocket.d" />
     <DCompile Include="src\protocol\ip\address.d" />
     <DCompile Include="src\protocol\ip\arp.d" />

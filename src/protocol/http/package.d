@@ -23,6 +23,7 @@ import protocol.http.client;
 import protocol.http.message;
 import protocol.http.binding;
 import protocol.http.server;
+import protocol.http.staticfiles;
 import protocol.http.websocket;
 
 import router.stream;
@@ -130,6 +131,7 @@ nothrow @nogc:
     {
         g_app.console.register_collection!HTTPClient();
         g_app.console.register_collection!HTTPServer();
+        g_app.console.register_collection!StaticFileServer();
         g_app.console.register_collection!WebSocketServer();
         g_app.console.register_collection!WebSocket();
         g_app.console.register_collection!HTTPClientBinding();
@@ -141,6 +143,7 @@ nothrow @nogc:
     {
         Collection!HTTPServer().update_all();
         Collection!HTTPClient().update_all();
+        Collection!StaticFileServer().update_all();
         Collection!WebSocketServer().update_all();
     }
 
