@@ -1,5 +1,6 @@
 module manager.plugin;
 
+import urt.log : Log;
 import urt.string;
 
 import manager;
@@ -12,6 +13,8 @@ nothrow @nogc:
 class Module
 {
 nothrow @nogc:
+
+    alias log = Log!module_name;
 
     String module_name;
     size_t module_id = -1;
