@@ -70,6 +70,7 @@ nothrow @nogc:
                 log.error(r.message);
                 return CompletionStatus.error;
             }
+            apply_configured_mtu();
         }
 
         SysTime now = getSysTime();
@@ -144,11 +145,24 @@ protected:
     override int wire_send(const(ubyte)[] frame)
         => _raw.send(frame) ? 0 : -1;
 
+    override void on_mtu_changed()
+    {
+        apply_configured_mtu();
+    }
+
 private:
     RawAdapter _raw;
     String _adapter;
     SysTime _last_refresh;
     bool _enslaved;
+
+    void apply_configured_mtu()
+    {
+        if (_mtu == 0 || _adapter.empty)
+            return;
+        if (!set_adapter_mtu(_adapter[], actual_mtu))
+            log.warning("failed to set MTU ", actual_mtu, " on '", _adapter, "'");
+    }
 
     void refresh_os_state()
     {

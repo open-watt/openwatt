@@ -182,6 +182,12 @@ protected:
     override ushort pcap_type() const
         => 127; // LINKTYPE_IEEE802_11_RADIOTAP
 
+    override void pcap_write(ref const Packet packet, PacketDirection dir, scope void delegate(scope const void[] packet_data) nothrow @nogc sink) const
+    {
+        if (packet.type == PacketType.wifi_80211)
+            sink(packet.data);
+    }
+
     override int transmit(ref const Packet packet, MessageCallback)
     {
         add_tx_drop();

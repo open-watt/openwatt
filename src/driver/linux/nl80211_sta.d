@@ -85,6 +85,7 @@ nothrow @nogc:
     bool failed() const pure       => _state == StaState.failed;
     bool disconnected() const pure => _state == StaState.disconnected;
     bool idle() const pure         => _state == StaState.idle;
+    int event_fd() const pure      => _event_fd;
     MACAddress bssid() const pure  => _bssid;
     int rssi() const pure          => _rssi;
     uint freq() const pure         => _freq;

@@ -1,21 +1,9 @@
 module driver.linux.wifi;
 
 // =====================================================================
-// Linux wifi backend. Packet path: AF_PACKET on the wlan netdev (managed-
-// mode delivers de-encapsulated ethernet frames). State + STA control:
-// wpa_supplicant control socket; AP control: hostapd control socket; both
-// daemons supervised externally. No direct nl80211 work.
-//
-// Outstanding:
-//
-// 1. Monitor mode / raw 802.11: a separate code path entirely. The radio
-//    holds the AF_PACKET socket on a monX VIF, frames are 802.11+radiotap
-//    not ethernet, so the EthernetInterface model doesn't fit -- needs the
-//    WiFi80211Interface base to grow an incoming_80211_frame() path and
-//    PacketType.wifi_80211. Worth doing only if a use case actually
-//    requires L2-promisc on the wireless side. Creating the monitor VIF
-//    needs a thin nl80211 binding (CMD_NEW_INTERFACE / SET_CHANNEL only --
-//    not the full surface).
+// Linux wifi backend. The physical adapter is the radio/STA netdev. APs and
+// monitor capture use sibling VIFs on the same phy so STA channel ownership can
+// coexist with AP beacons and radiotap capture.
 // =====================================================================
 
 version (linux):
@@ -42,12 +30,14 @@ import manager.plugin;
 import driver.linux.netlink;
 import driver.linux.nl80211;
 import driver.linux.sysfs;
+import driver.linux.fdwatch;
 
 version (WifiStaKernel) import driver.linux.nl80211_sta;
 else                    import driver.linux.wpa_supplicant;
 version (WifiApKernel)  import driver.linux.nl80211_ap;
 else                    import driver.linux.hostapd;
 import driver.linux.raw : RawAdapter, PACKET_OUTGOING;
+import urt.internal.sys.posix : pollfd, POLLIN;
 
 // KernelMirror builds let the kernel own IP; an AP must publish its netdev
 // ifindex so the mirror can place the configured address/routes on it.
@@ -94,22 +84,20 @@ nothrow @nogc:
     }
 
     override const(char)[] mode() const pure
-        => "sta";
+        => super.mode();
 
     // VIF lookup for a bound AP.
-    //   no STA bound:     bound_aps[0] uses the radio's netdev; rest get VIFs.
-    //   STA bound:        STA owns the netdev; ALL APs get VIFs.
+    // The physical adapter stays the radio/STA netdev; every AP gets a
+    // sibling AP-mode VIF. That makes AP/STA ownership independent of bind
+    // order and avoids flipping the station netdev into AP mode.
     // Returns empty slice if `target` isn't bound to this radio.
     final const(char)[] vif_for(const(APInterface) target) const
     {
         auto aps = bound_aps;
-        foreach (i, ap; aps)
+        foreach (ap; aps)
         {
             if (ap is target)
-            {
-                bool primary = (i == 0 && bound_sta is null);
-                return primary ? _adapter[] : tconcat(_adapter[], "-", target.name[]);
-            }
+                return tconcat(_adapter[], "-", target.name[]);
         }
         return null;
     }
@@ -117,6 +105,14 @@ nothrow @nogc:
     final void update_active_channel(ubyte ch)
     {
         set_active_channel(ch);
+        sync_bound_ap_channels();
+    }
+
+    final void clear_active_sta_channel()
+    {
+        if (active_channel != 0)
+            set_active_channel(0);
+        sync_bound_ap_channels();
     }
 
     // Binding policy gate. Called from LinuxAP.validate / LinuxWlan.validate;
@@ -126,15 +122,15 @@ nothrow @nogc:
     // bound_aps yet at validate time).
     final const(char)[] would_accept(const(WLANBaseInterface) candidate) const pure
     {
-        if (!_caps.valid)
+        if (!_phy_caps.valid)
             return null;  // chipset capabilities unknown -- be optimistic.
 
         bool candidate_is_ap = cast(const(APInterface))candidate !is null;
         bool candidate_is_sta = !candidate_is_ap && (cast(const(WLANInterface))candidate !is null);
 
-        if (candidate_is_ap && !_caps.supports_ap)
+        if (candidate_is_ap && !_phy_caps.supports_ap)
             return "driver does not support AP mode";
-        if (candidate_is_sta && !_caps.supports_sta)
+        if (candidate_is_sta && !_phy_caps.supports_sta)
             return "driver does not support STA mode";
 
         bool already_bound;
@@ -156,14 +152,93 @@ nothrow @nogc:
         size_t ap_count = bound_aps.length + (candidate_is_ap && !already_bound ? 1 : 0);
         bool has_sta = bound_sta !is null || candidate_is_sta;
 
-        if (has_sta && ap_count > 0 && !_caps.supports_sta_ap)
-            return "driver does not support simultaneous STA + AP";
+        if (monitor && !_phy_caps.supports_monitor)
+            return "driver does not support monitor mode";
 
-        if (ap_count > _caps.max_aps)
+        if (monitor && has_sta && ap_count > 0)
         {
-            if (_caps.max_aps <= 1)
+            if (!_phy_caps.supports_sta_ap_monitor)
+                return "driver does not support simultaneous STA + AP + monitor";
+            if (ap_count > _phy_caps.max_aps_with_sta_monitor)
+            {
+                if (_phy_caps.max_aps_with_sta_monitor <= 1)
+                    return "driver does not support STA + multi-AP + monitor";
+                return "too many APs configured with STA + monitor for this driver";
+            }
+        }
+        else if (monitor && has_sta)
+        {
+            if (!_phy_caps.supports_sta_monitor)
+                return "driver does not support simultaneous STA + monitor";
+        }
+        else if (monitor && ap_count > 0)
+        {
+            if (!_phy_caps.supports_ap_monitor)
+                return "driver does not support simultaneous AP + monitor";
+            if (ap_count > _phy_caps.max_aps_with_monitor)
+            {
+                if (_phy_caps.max_aps_with_monitor <= 1)
+                    return "driver does not support multi-AP + monitor";
+                return "too many APs configured with monitor for this driver";
+            }
+        }
+        else if (has_sta && ap_count > 0)
+        {
+            if (!_phy_caps.supports_sta_ap)
+                return "driver does not support simultaneous STA + AP";
+            if (ap_count > _phy_caps.max_aps_with_sta)
+            {
+                if (_phy_caps.max_aps_with_sta <= 1)
+                    return "driver does not support STA + multi-AP";
+                return "too many APs configured with STA for this driver";
+            }
+        }
+        else if (ap_count > _phy_caps.max_aps)
+        {
+            if (_phy_caps.max_aps <= 1)
                 return "driver does not support multi-AP";
             return "too many APs configured for this driver";
+        }
+
+        return null;
+    }
+
+    final const(char)[] would_accept_monitor() const pure
+    {
+        if (!_phy_caps.valid)
+            return null;
+        if (!_phy_caps.supports_monitor)
+            return "driver does not support monitor mode";
+
+        bool has_sta = bound_sta !is null;
+        size_t ap_count = bound_aps.length;
+
+        if (has_sta && ap_count > 0)
+        {
+            if (!_phy_caps.supports_sta_ap_monitor)
+                return "driver does not support simultaneous STA + AP + monitor";
+            if (ap_count > _phy_caps.max_aps_with_sta_monitor)
+            {
+                if (_phy_caps.max_aps_with_sta_monitor <= 1)
+                    return "driver does not support STA + multi-AP + monitor";
+                return "too many APs configured with STA + monitor for this driver";
+            }
+        }
+        else if (has_sta)
+        {
+            if (!_phy_caps.supports_sta_monitor)
+                return "driver does not support simultaneous STA + monitor";
+        }
+        else if (ap_count > 0)
+        {
+            if (!_phy_caps.supports_ap_monitor)
+                return "driver does not support simultaneous AP + monitor";
+            if (ap_count > _phy_caps.max_aps_with_monitor)
+            {
+                if (_phy_caps.max_aps_with_monitor <= 1)
+                    return "driver does not support multi-AP + monitor";
+                return "too many APs configured with monitor for this driver";
+            }
         }
 
         return null;
@@ -172,7 +247,25 @@ nothrow @nogc:
 protected:
 
     override bool validate() const
-        => !_adapter.empty;
+    {
+        if (_adapter.empty)
+            return false;
+        if (monitor && _phy_caps.valid && would_accept_monitor() !is null)
+            return false;
+        return true;
+    }
+
+    override const(char)[] status_message() const
+    {
+        if (monitor)
+        {
+            if (auto reason = would_accept_monitor())
+                return reason;
+            if (auto reason = monitor_failure_message(_monitor_failure))
+                return reason;
+        }
+        return super.status_message();
+    }
 
     override CompletionStatus startup()
     {
@@ -182,8 +275,10 @@ protected:
         _ifindex = read_ifindex(_adapter[]);
         if (_ifindex != 0)
             reset_device(_adapter[], _ifindex);
+        apply_configured_mtu();
 
         open_scan_sockets();
+        sync_monitor_vif();
 
         SysTime now = getSysTime();
         if (now - _last_refresh >= 1.seconds)
@@ -200,27 +295,36 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        close_monitor_vif();
         close_scan_sockets();
         return CompletionStatus.complete;
     }
 
     override void on_wlan_bind_changed()
     {
-        // Each bound AP/STA self-manages its own nl80211 session via its state
-        // machine (LinuxAP.startup starts the BSS; LinuxWlan connects), so the
-        // radio has nothing to orchestrate on a bind change.
+        sync_bound_ap_channels();
     }
 
     override void on_monitor_changed(bool enabled)
     {
-        if (enabled)
-            log.warning("monitor mode is not implemented on the Linux backend yet");
+        if (running)
+            sync_monitor_vif();
     }
 
     override void on_active_channel_changed(ubyte ch)
     {
-        // Telemetry only here; a running kernel AP stays on the channel it
-        // started on (retune would need an AP restart, not wired yet).
+        sync_bound_ap_channels();
+    }
+
+    override void on_channel_changed(ubyte ch)
+    {
+        if (!sta_providing_channel())
+            sync_bound_ap_channels();
+    }
+
+    override void on_mtu_changed()
+    {
+        apply_configured_mtu();
     }
 
     override void update()
@@ -268,8 +372,6 @@ protected:
             mark_set!(typeof(this), [ "rx-bytes", "tx-bytes", "rx-packets", "tx-packets",
                                       "rx-dropped", "tx-dropped" ])();
 
-        pump_scan();
-
         super.update();
 
         SysTime now = getSysTime();
@@ -278,26 +380,14 @@ protected:
         _last_refresh = now;
         refresh_state();
 
-        // Track STA online/offline transitions for the channel-revert grace
-        // period, and re-sync hostapd if the target channel has changed
-        // (covers grace expiry where no other event would otherwise fire).
-        track_sta_channel_authority(now);
     }
 
 private:
-    enum channel_revert_grace = 30.seconds;
-
     String _adapter;
     SysTime _last_refresh;
 
-    PhyCapabilities _caps;
+    PhyCapabilities _phy_caps;
     bool _caps_queried;
-
-    // Channel arbitration state. _sta_offline_since holds the moment the bound
-    // STA last lost association so we can hold the radio's channel through a
-    // grace window before reverting to the configured channel.
-    SysTime _sta_offline_since;
-    bool _sta_was_providing;
 
     bool sta_providing_channel() const
     {
@@ -305,31 +395,25 @@ private:
         return wlan !is null && wlan._sta.connected;
     }
 
-    void track_sta_channel_authority(SysTime now)
-    {
-        bool providing = sta_providing_channel();
-        if (_sta_was_providing && !providing)
-            _sta_offline_since = now;
-        _sta_was_providing = providing;
-    }
-
-    // Decide which channel hostapd should be on right now.
-    //   no STA bound:                       configured `channel`.
-    //   STA associated:                     STA's active_channel.
-    //   STA bound, recently disassociated:  hold the last known channel
-    //                                       through the grace window so
-    //                                       quick reassociation doesn't
-    //                                       interrupt connected AP clients.
-    //   STA bound, long-disassociated:      configured `channel`.
+    // Decide which channel AP VIFs should beacon on right now:
+    // connected STA wins; otherwise the configured radio channel wins.
     ubyte target_channel() const
     {
-        if (bound_sta is null)
-            return channel;
         if (sta_providing_channel())
             return active_channel != 0 ? active_channel : channel;
-        if (active_channel != 0 && getSysTime() - _sta_offline_since < channel_revert_grace)
-            return active_channel;
         return channel;
+    }
+
+    void sync_bound_ap_channels()
+    {
+        ubyte desired = target_channel();
+        foreach (base; bound_aps)
+        {
+            auto ap = cast(LinuxAP)base;
+            if (ap && ap.running && ap._running_channel != desired)
+                ap.restart();
+        }
+        sync_monitor_channel();
     }
 
     void refresh_state()
@@ -348,10 +432,18 @@ private:
             uint ifindex = read_ifindex(_adapter[]);
             if (ifindex != 0)
             {
-                query_phy_capabilities(ifindex, _caps);
+                query_phy_capabilities(ifindex, _phy_caps);
                 _caps_queried = true;
-                log.info("phy capabilities: valid=", _caps.valid, " sta=", _caps.supports_sta,
-                         " ap=", _caps.supports_ap, " sta+ap=", _caps.supports_sta_ap, " max-aps=", _caps.max_aps);
+                log.info("phy capabilities: valid=", _phy_caps.valid, " sta=", _phy_caps.supports_sta,
+                         " ap=", _phy_caps.supports_ap, " monitor=", _phy_caps.supports_monitor,
+                         " sta+ap=", _phy_caps.supports_sta_ap, " max-aps=", _phy_caps.max_aps,
+                         " max-aps-with-sta=", _phy_caps.max_aps_with_sta,
+                         " sta+monitor=", _phy_caps.supports_sta_monitor,
+                         " ap+monitor=", _phy_caps.supports_ap_monitor,
+                         " sta+ap+monitor=", _phy_caps.supports_sta_ap_monitor,
+                         " max-aps-with-monitor=", _phy_caps.max_aps_with_monitor,
+                         " max-aps-with-sta-monitor=", _phy_caps.max_aps_with_sta_monitor,
+                         " max-monitors=", _phy_caps.max_monitors);
             }
         }
 
@@ -366,6 +458,14 @@ private:
         if (c & AdapterChange.rx_speed)  mark_set!(typeof(this), "rx-link-speed")();
     }
 
+    void apply_configured_mtu()
+    {
+        if (_mtu == 0 || _adapter.empty)
+            return;
+        if (!set_adapter_mtu(_adapter[], actual_mtu))
+            log.warning("failed to set MTU ", actual_mtu, " on '", _adapter, "'");
+    }
+
     // --- nl80211 scan (device-level: the radio owns the adapter) ---
 public:
     override bool scanning() const
@@ -374,6 +474,7 @@ public:
     override void cancel_scan()
     {
         _scan_handler = null;   // a late completion finds no handler and no-ops
+        _scanning = false;
     }
 
     override bool start_scan(ref const WifiScanConfig cfg, ScanHandler done)
@@ -403,6 +504,12 @@ private:
     uint _scan_seq;
     ScanHandler _scan_handler;
     bool _scanning;
+    bool _scan_fdwatch_registered;
+    RawAdapter _monitor_raw;
+    uint _monitor_ifindex;
+    bool _monitor_created;
+    ubyte _monitor_channel;
+    MonitorFailure _monitor_failure;
 
     void open_scan_sockets()
     {
@@ -418,15 +525,285 @@ private:
         uint scan_grp, mlme_grp;
         if (resolve_nl80211(_scan_cmd_fd, _nl_family, scan_grp, mlme_grp) && scan_grp)
             setsockopt(_scan_event_fd, SOL_NETLINK, NETLINK_ADD_MEMBERSHIP, &scan_grp, scan_grp.sizeof);
+        if (!_scan_fdwatch_registered && add_fd_watcher(&service_scan_fds, &collect_scan_fds))
+        {
+            _scan_fdwatch_registered = true;
+            fd_watch_changed();
+        }
     }
 
     void close_scan_sockets()
     {
+        if (_scan_fdwatch_registered)
+        {
+            remove_fd_watcher(&service_scan_fds);
+            _scan_fdwatch_registered = false;
+        }
         if (_scanning)
             finish_scan(null, false);
         nl_close(_scan_cmd_fd);
         nl_close(_scan_event_fd);
         _nl_family = 0;
+        fd_watch_changed();
+    }
+
+    void collect_scan_fds(ref Array!pollfd fds)
+    {
+        if (_scan_event_fd >= 0)
+            fds ~= pollfd(_scan_event_fd, POLLIN);
+        if (_monitor_raw.valid)
+            fds ~= pollfd(_monitor_raw.fd, POLLIN);
+    }
+
+    void service_scan_fds()
+    {
+        pump_scan();
+        pump_monitor();
+    }
+
+    const(char)[] monitor_vif_name() const
+    {
+        return tconcat(_adapter[], "-mon");
+    }
+
+    void sync_monitor_vif()
+    {
+        if (!monitor)
+        {
+            close_monitor_vif();
+            return;
+        }
+        _monitor_failure = MonitorFailure.none;
+        if (_phy_caps.valid && !_phy_caps.supports_monitor)
+        {
+            log.warning("monitor mode requested but driver does not advertise monitor VIF support");
+            return;
+        }
+        if (_phy_caps.valid)
+        {
+            if (auto reason = would_accept_monitor())
+            {
+                log.warning("monitor mode requested but ", reason);
+                return;
+            }
+        }
+        if (_ifindex == 0)
+            _ifindex = read_ifindex(_adapter[]);
+        if (_ifindex == 0)
+            return;
+
+        const(char)[] vif = monitor_vif_name();
+        if (_monitor_ifindex == 0)
+            _monitor_ifindex = read_ifindex(vif);
+        if (_monitor_ifindex == 0)
+        {
+            uint wiphy = read_wiphy(_ifindex);
+            if (wiphy == uint.max || !create_monitor_vif(wiphy, vif))
+            {
+                _monitor_failure = MonitorFailure.create_vif;
+                log.warning("failed to create monitor VIF '", vif, "'");
+                return;
+            }
+            _monitor_created = true;
+            _monitor_ifindex = read_ifindex(vif);
+        }
+        if (_monitor_ifindex == 0)
+            return;
+
+        if (!_monitor_raw.valid)
+        {
+            auto r = _monitor_raw.open(vif, false);
+            if (r.failed)
+            {
+                _monitor_failure = MonitorFailure.open_vif;
+                log.warning("failed to open monitor VIF '", vif, "': ", r.message);
+                return;
+            }
+            _monitor_failure = MonitorFailure.none;
+            fd_watch_changed();
+        }
+        sync_monitor_channel();
+    }
+
+    void close_monitor_vif()
+    {
+        bool changed = _monitor_raw.valid;
+        _monitor_raw.close();
+        if (_monitor_created && _monitor_ifindex != 0)
+            delete_vif(_monitor_ifindex);
+        _monitor_ifindex = 0;
+        _monitor_created = false;
+        _monitor_channel = 0;
+        _monitor_failure = MonitorFailure.none;
+        if (changed)
+            fd_watch_changed();
+    }
+
+    void sync_monitor_channel()
+    {
+        if (!_monitor_raw.valid || _monitor_ifindex == 0)
+            return;
+        ubyte ch = target_channel();
+        if (ch == 0 || ch == _monitor_channel)
+            return;
+        WifiBand band = ch <= 14 ? WifiBand.band_2g4 : WifiBand.band_5g;
+        if (set_vif_channel(_monitor_ifindex, channel_to_freq(ch, band)))
+        {
+            _monitor_channel = ch;
+            _monitor_failure = MonitorFailure.none;
+        }
+        else
+        {
+            _monitor_failure = MonitorFailure.set_channel;
+            log.warning("failed to set monitor VIF channel to ", ch);
+        }
+    }
+
+    void pump_monitor()
+    {
+        if (!_monitor_raw.valid)
+            return;
+
+        while (true)
+        {
+            const(ubyte)[] data;
+            uint wire_len;
+            MonoTime ts;
+            ubyte pkttype;
+            int r = _monitor_raw.poll_ll(data, wire_len, ts, pkttype);
+            if (r == 0)
+                break;
+            if (r < 0)
+            {
+                add_rx_drop();
+                break;
+            }
+            if (pkttype == PACKET_OUTGOING)
+                continue;
+            incoming_monitor_frame(data, ts);
+        }
+    }
+
+    void incoming_monitor_frame(const(ubyte)[] data, MonoTime ts)
+    {
+        if (data.length < 4)
+        {
+            add_rx_drop();
+            return;
+        }
+
+        ushort radiotap_len = load_le16(data[2 .. 4]);
+        if (radiotap_len < 4 || radiotap_len > data.length)
+        {
+            add_rx_drop();
+            return;
+        }
+
+        Packet packet;
+        ref wifi = packet.init!Wifi80211(data, ts);
+        wifi.rssi = parse_radiotap_rssi(data[0 .. radiotap_len]);
+        wifi.channel = parse_radiotap_channel(data[0 .. radiotap_len]);
+        if (wifi.channel == 0)
+            wifi.channel = target_channel();
+
+        size_t h = radiotap_len;
+        if (data.length >= h + 24)
+        {
+            wifi.frame_control = load_le16(data[h .. h + 2]);
+            wifi.addr1 = MACAddress(data[h + 4], data[h + 5], data[h + 6],
+                                     data[h + 7], data[h + 8], data[h + 9]);
+            wifi.addr2 = MACAddress(data[h + 10], data[h + 11], data[h + 12],
+                                     data[h + 13], data[h + 14], data[h + 15]);
+            wifi.addr3 = MACAddress(data[h + 16], data[h + 17], data[h + 18],
+                                     data[h + 19], data[h + 20], data[h + 21]);
+            wifi.seq_ctrl = load_le16(data[h + 22 .. h + 24]);
+        }
+
+        dispatch(packet);
+    }
+
+    static ushort load_le16(const(ubyte)[] v) pure
+    {
+        return cast(ushort)(v[0] | (v[1] << 8));
+    }
+
+    static uint load_le32(const(ubyte)[] v) pure
+    {
+        return cast(uint)(v[0] | (v[1] << 8) | (v[2] << 16) | (v[3] << 24));
+    }
+
+    static size_t rtap_align(size_t off, size_t alignment) pure
+    {
+        return (off + alignment - 1) & ~(alignment - 1);
+    }
+
+    static ubyte parse_radiotap_channel(const(ubyte)[] rtap) pure
+    {
+        ushort freq;
+        byte rssi;
+        parse_radiotap_common(rtap, freq, rssi);
+        return freq_to_channel(freq);
+    }
+
+    static byte parse_radiotap_rssi(const(ubyte)[] rtap) pure
+    {
+        ushort freq;
+        byte rssi;
+        parse_radiotap_common(rtap, freq, rssi);
+        return rssi;
+    }
+
+    static void parse_radiotap_common(const(ubyte)[] rtap, ref ushort freq, ref byte rssi) pure
+    {
+        if (rtap.length < 8)
+            return;
+
+        size_t off = 8;
+        uint present = load_le32(rtap[4 .. 8]);
+        while (present & (1u << 31))
+        {
+            if (off + 4 > rtap.length)
+                return;
+            present = load_le32(rtap[off .. off + 4]);
+            off += 4;
+        }
+
+        present = load_le32(rtap[4 .. 8]);
+        foreach (bit; 0 .. 15)
+        {
+            size_t alignment = 1;
+            size_t len = 0;
+            switch (bit)
+            {
+                case 0:  alignment = 8; len = 8; break; // TSFT
+                case 1:  len = 1; break;            // flags
+                case 2:  len = 1; break;            // rate
+                case 3:  alignment = 2; len = 4; break; // channel
+                case 4:  alignment = 2; len = 2; break; // FHSS
+                case 5:  len = 1; break;            // antenna signal (dBm)
+                case 6:  len = 1; break;            // antenna noise (dBm)
+                case 7:  alignment = 2; len = 2; break; // lock quality
+                case 8:  alignment = 2; len = 2; break; // tx attenuation
+                case 9:  alignment = 2; len = 2; break; // db tx attenuation
+                case 10: len = 1; break;            // dbm tx power
+                case 11: len = 1; break;            // antenna
+                case 12: len = 1; break;            // db antenna signal
+                case 13: len = 1; break;            // db antenna noise
+                case 14: alignment = 2; len = 2; break; // rx flags
+                default: break;
+            }
+
+            if ((present & (1u << bit)) == 0)
+                continue;
+            off = rtap_align(off, alignment);
+            if (off + len > rtap.length)
+                return;
+            if (bit == 3)
+                freq = load_le16(rtap[off .. off + 2]);
+            else if (bit == 5)
+                rssi = cast(byte)rtap[off];
+            off += len;
+        }
     }
 
     // Drain scan-done notifications off the event socket; on completion pull the
@@ -593,6 +970,27 @@ private:
 }
 
 
+enum MonitorFailure : ubyte
+{
+    none,
+    create_vif,
+    open_vif,
+    set_channel,
+}
+
+
+const(char)[] monitor_failure_message(MonitorFailure f) pure
+{
+    final switch (f)
+    {
+        case MonitorFailure.none:        return null;
+        case MonitorFailure.create_vif:  return "monitor: failed to create VIF";
+        case MonitorFailure.open_vif:    return "monitor: failed to open packet socket";
+        case MonitorFailure.set_channel: return "monitor: failed to set channel";
+    }
+}
+
+
 class LinuxWlan : WLANInterface
 {
 nothrow @nogc:
@@ -633,6 +1031,13 @@ nothrow @nogc:
             return "Waiting for radio";
         if (auto reason = r.would_accept(this))
             return reason;
+        version (WifiStaKernel)
+        {
+            if (_scan_inflight)
+                return "scanning";
+            if (_scan_retry_armed)
+                return "waiting to rescan";
+        }
         if (!_sta.valid)
             return super.status_message();
         return _sta.status_message();
@@ -670,6 +1075,9 @@ protected:
                 log.error(rr.message);
                 return CompletionStatus.error;
             }
+            apply_configured_mtu();
+            refresh_os_state();
+            register_fdwatch();
         }
 
         // Publish the netdev ifindex so the IP mirror can place an address on it
@@ -696,8 +1104,15 @@ protected:
                     log.error(rs.message);
                     return CompletionStatus.error;
                 }
+                fd_watch_changed();
             }
-            return CompletionStatus.complete;
+            service_io();
+            if (_sta.connected)
+                return CompletionStatus.complete;
+            if (_sta.failed)
+                return CompletionStatus.error;
+            ensure_scan_started();
+            return CompletionStatus.continue_;
         }
         else
         {
@@ -729,9 +1144,16 @@ protected:
                     r.cancel_scan();
                 _scan_inflight = false;
             }
+            cancel_scan_retry();
         }
+        unregister_fdwatch();
         _sta.close();
         _raw.close();
+        version (WifiStaKernel)
+        {
+            if (auto r = cast(LinuxWifiRadio)radio)
+                r.clear_active_sta_channel();
+        }
         // Drop our kernel netdev binding and withdraw any mirrored addresses.
         version (KernelMirror)
         {
@@ -752,44 +1174,14 @@ protected:
         if (!r)
             return;
 
-        SysTime now = getSysTime();
-
         version (WifiStaKernel)
         {
-            _sta.pump();
-
-            if (_sta.connected)
-            {
-                if (now - _last_refresh >= 1.seconds)
-                {
-                    _last_refresh = now;
-                    _sta.refresh_signal();
-                    ubyte ch = freq_to_channel(_sta.freq);
-                    if (ch != 0)
-                        r.update_active_channel(ch);
-                    mark_set!(typeof(this), [ "bssid", "rssi", "signal-quality", "status" ])();
-                }
-            }
-            else if (_sta.failed || _sta.disconnected)
-            {
-                restart();
-                return;
-            }
-            else if (_sta.idle && !_scan_inflight && super.ssid.length > 0 && now >= _next_scan_time && !r.scanning)
-            {
-                // Scan first, then connect to the matching BSS. cfg80211 needs a
-                // concrete BSS in its table for the connection to fully register
-                // (otherwise pairwise NEW_KEY fails with -ENOLINK).
-                WifiScanConfig sc;
-                sc.ssid = super.ssid;
-                if (r.start_scan(sc, &on_scan_done))
-                    _scan_inflight = true;
-                else
-                    _next_scan_time = now + 2.seconds;
-            }
+            // Legacy heartbeat fallback. The real pump is fdwatch -> service_io.
+            service_io();
         }
         else
         {
+            SysTime now = getSysTime();
             // Daemon backend: poll wpa_supplicant; bounce the interface if the
             // association drops so startup re-runs the connect.
             if (now - _last_refresh >= 1.seconds)
@@ -806,8 +1198,119 @@ protected:
                     return;
                 }
             }
+            pump_raw_frames();
         }
+    }
 
+    override int wire_send(const(ubyte)[] frame)
+        => _raw.send(frame) ? 0 : -1;
+
+    override void on_mtu_changed()
+    {
+        apply_configured_mtu();
+    }
+
+private:
+    RawAdapter _raw;
+    SysTime _last_refresh;
+    bool _fdwatch_registered;
+
+    version (WifiStaKernel)
+    {
+        Nl80211Sta _sta;
+        bool _scan_inflight;
+        bool _scan_retry_armed;
+    }
+    else
+    {
+        WpaSupplicantSta _sta;
+    }
+
+    void apply_configured_mtu()
+    {
+        if (_mtu == 0)
+            return;
+        auto r = cast(LinuxWifiRadio)radio;
+        if (!r)
+            return;
+        if (!set_adapter_mtu(r.adapter, actual_mtu))
+            log.warning("failed to set MTU ", actual_mtu, " on '", r.adapter, "'");
+    }
+
+    void refresh_os_state()
+    {
+        auto r = cast(LinuxWifiRadio)radio;
+        if (!r)
+            return;
+        OSAdapterInfo info;
+        if (!query_adapter(r.adapter, info))
+            return;
+        AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
+        if (c & AdapterChange.mtu)     mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
+        if (c & AdapterChange.max_mtu) mark_set!(typeof(this), "max-l2mtu")();
+    }
+
+    void register_fdwatch()
+    {
+        if (!_fdwatch_registered && add_fd_watcher(&service_io, &collect_fds))
+        {
+            _fdwatch_registered = true;
+            fd_watch_changed();
+        }
+    }
+
+    void unregister_fdwatch()
+    {
+        if (_fdwatch_registered)
+        {
+            remove_fd_watcher(&service_io);
+            _fdwatch_registered = false;
+            fd_watch_changed();
+        }
+    }
+
+    void collect_fds(ref Array!pollfd fds)
+    {
+        if (_raw.valid)
+            fds ~= pollfd(_raw.fd, POLLIN);
+        version (WifiStaKernel)
+        {
+            if (_sta.event_fd >= 0)
+                fds ~= pollfd(_sta.event_fd, POLLIN);
+        }
+    }
+
+    void service_io()
+    {
+        version (WifiStaKernel)
+        {
+            bool was_connected = _sta.connected;
+            _sta.pump();
+            pump_raw_frames();
+
+            if (_sta.connected)
+            {
+                refresh_connected_state();
+                if (!was_connected)
+                    post_progress_event();
+            }
+            else if (_sta.failed)
+            {
+                post_progress_event();
+            }
+            else if (_sta.disconnected)
+            {
+                if (auto r = cast(LinuxWifiRadio)radio)
+                    r.clear_active_sta_channel();
+                restart();
+            }
+        }
+        else
+            pump_raw_frames();
+    }
+
+    void pump_raw_frames()
+    {
         const(ubyte)[] data;
         uint wire_len;
         MonoTime ts;
@@ -825,9 +1328,6 @@ protected:
                 continue;
             }
 
-            // EAPOL (802.1X): the kernel STA feeds it to the in-process
-            // supplicant; the daemon backend handles EAPOL itself, so
-            // consume_eapol returns false and the frame falls to the data path.
             if (data.length >= 14 && data[12] == 0x88 && data[13] == 0x8e)
             {
                 if (pkttype == PACKET_OUTGOING)
@@ -841,33 +1341,91 @@ protected:
         }
     }
 
-    override int wire_send(const(ubyte)[] frame)
-        => _raw.send(frame) ? 0 : -1;
-
-private:
-    RawAdapter _raw;
-    SysTime _last_refresh;
-
     version (WifiStaKernel)
     {
-        Nl80211Sta _sta;
-        SysTime _next_scan_time;
-        bool _scan_inflight;
-    }
-    else
-    {
-        WpaSupplicantSta _sta;
-    }
+        void refresh_connected_state()
+        {
+            _sta.refresh_signal();
+            ubyte ch = freq_to_channel(_sta.freq);
+            if (ch != 0)
+            {
+                if (auto r = cast(LinuxWifiRadio)radio)
+                    r.update_active_channel(ch);
+            }
+            mark_set!(typeof(this), [ "bssid", "rssi", "signal-quality", "status" ])();
+        }
 
-    version (WifiStaKernel)
-    {
+        void ensure_scan_started()
+        {
+            if (!_sta.idle || _scan_inflight || super.ssid.length == 0)
+                return;
+            auto r = cast(LinuxWifiRadio)radio;
+            if (!r || r.scanning)
+            {
+                schedule_scan_retry(1.seconds);
+                return;
+            }
+            WifiScanConfig sc;
+            sc.ssid = super.ssid;
+            if (r.start_scan(sc, &on_scan_done))
+            {
+                _scan_inflight = true;
+                mark_set!(typeof(this), "status")();
+            }
+            else
+                schedule_scan_retry(2.seconds);
+        }
+
+        void schedule_scan_retry(Duration delay)
+        {
+            if (_scan_retry_armed)
+                return;
+            _scan_retry_armed = true;
+            g_app.schedule(getTime() + delay, &scan_retry_event);
+            mark_set!(typeof(this), "status")();
+        }
+
+        void cancel_scan_retry()
+        {
+            if (_scan_retry_armed)
+            {
+                g_app.cancel(&scan_retry_event);
+                _scan_retry_armed = false;
+            }
+        }
+
+        void scan_retry_event(MonoTime)
+        {
+            _scan_retry_armed = false;
+            if (_state == State.starting || _state == State.running)
+                ensure_scan_started();
+        }
+
+        void post_progress_event()
+        {
+            g_app.post_event(&progress_event, getTime(), EventPriority.control);
+        }
+
+        void progress_event(MonoTime)
+        {
+            if (_state == State.starting)
+            {
+                if (_sta.connected)
+                    set_state(State.running);
+                else if (_sta.failed)
+                    set_state(State.failure);
+                else
+                    mark_set!(typeof(this), "status")();
+            }
+        }
+
         // Scan completed: pick the strongest BSS for our SSID and connect to it.
         void on_scan_done(scope const(WifiScanResult)[] results, bool ok)
         {
             _scan_inflight = false;
             if (!ok)
             {
-                _next_scan_time = getSysTime() + 2.seconds;
+                schedule_scan_retry(2.seconds);
                 return;
             }
             const(WifiScanResult)* best;
@@ -881,10 +1439,12 @@ private:
             if (best is null)
             {
                 log.warning("ssid '", super.ssid, "' not found in scan");
-                _next_scan_time = getSysTime() + 3.seconds;
+                schedule_scan_retry(3.seconds);
                 return;
             }
-            _sta.connect(super.ssid, get_password(), best.bssid, channel_to_freq(best.channel, best.band));
+            if (!_sta.connect(super.ssid, get_password(), best.bssid, channel_to_freq(best.channel, best.band)))
+                post_progress_event();
+            mark_set!(typeof(this), "status")();
         }
     }
 }
@@ -893,12 +1453,10 @@ private:
 // ---------------------------------------------------------------------------
 // APInterface, multi-BSS aware.
 //
-// Each LinuxAP binds its packet path (RawAdapter) to its own netdev:
-//   bound_aps[0] (primary) -> radio's netdev (e.g. wlan0)
-//   bound_aps[N>0]         -> "<adapter>-<ap_name>" VIF created by hostapd
-//                             when it parses our bss= section on RELOAD.
-// VIFs for non-primary APs may not exist at startup() time -- we return
-// continue_ and retry on each update() until the kernel surfaces them.
+// Each LinuxAP binds its packet path (RawAdapter) to its own AP-mode VIF:
+//   "<adapter>-<ap_name>" created on the radio's wiphy.
+// VIFs may not exist at startup() time -- we create them and retry until the
+// kernel surfaces them.
 //
 // Each AP also opens its own hostapd ctrl_iface against /var/run/hostapd/<vif>;
 // per-BSS STATUS queries see themselves as ssid[0]/bssid[0]/num_sta[0], so no
@@ -960,10 +1518,9 @@ protected:
         if (vif.length == 0)
             return CompletionStatus.continue_;
 
-        // Multi-BSS: the primary AP uses the radio's netdev; each secondary AP
-        // gets its own AP-mode VIF netdev created on the radio's phy.
-        bool primary = (vif == r.adapter);
-        if (!primary && read_ifindex(vif) == 0)
+        // Every AP gets a sibling AP-mode VIF; the physical adapter stays
+        // reserved for the radio/STA side.
+        if (read_ifindex(vif) == 0)
         {
             uint wiphy = read_wiphy(read_ifindex(r.adapter));
             if (wiphy == uint.max || !create_ap_vif(wiphy, vif))
@@ -984,6 +1541,9 @@ protected:
                 return CompletionStatus.continue_;
             }
             _raw_open_failure_logged = false;
+            apply_configured_mtu();
+            refresh_os_state(vif);
+            register_fdwatch();
         }
 
         version (WifiApKernel)
@@ -996,19 +1556,17 @@ protected:
                     log.warning(ro.message);
                     return CompletionStatus.continue_;
                 }
+                fd_watch_changed();
             }
 
             if (!_ap.running)
             {
-                // Beacon on the radio's channel. The primary AP reuses the
-                // radio netdev (flip it to AP mode); secondary VIFs were
-                // already created in AP mode by create_ap_vif.
                 ubyte ch = r.target_channel();
                 WifiBand band = ch <= 14 ? WifiBand.band_2g4 : WifiBand.band_5g;
-                if (primary)
-                    set_device_iftype(vif, read_ifindex(vif), NL80211_IFTYPE_AP);
                 if (!_ap.start(ssid, get_password(), channel_to_freq(ch, band), ch, hidden))
                     return CompletionStatus.continue_;
+                _running_channel = ch;
+                arm_ap_timer_if_needed();
             }
         }
         else
@@ -1023,8 +1581,13 @@ protected:
                     log.warning(ro.message);
                     return CompletionStatus.continue_;
                 }
-                if (!_ap.start(ssid, get_password(), auth, r.target_channel(), r.country, hidden, client_isolation, max_clients))
+            }
+            ubyte ch = r.target_channel();
+            if (!_ap.running || _running_channel != ch)
+            {
+                if (!_ap.start(ssid, get_password(), auth, ch, r.country, hidden, client_isolation, max_clients))
                     return CompletionStatus.continue_;
+                _running_channel = ch;
             }
         }
 
@@ -1042,8 +1605,11 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        unregister_fdwatch();
+        cancel_ap_timer();
         _ap.close();
         _raw.close();
+        _running_channel = 0;
         if (_created_vif_ifindex != 0)
         {
             delete_vif(_created_vif_ifindex);
@@ -1071,13 +1637,8 @@ protected:
 
         version (WifiApKernel)
         {
-            _ap.pump();
-            _ap.tick();
-            if (_ap.failed)
-            {
-                restart();
-                return;
-            }
+            // Legacy heartbeat fallback. The real pump is fdwatch -> service_io.
+            service_io();
         }
         else
         {
@@ -1089,8 +1650,103 @@ protected:
                 if (_ap.channel != 0)
                     r.update_active_channel(_ap.channel);
             }
+            pump_raw_frames();
         }
+    }
 
+    override int wire_send(const(ubyte)[] frame)
+        => _raw.send(frame) ? 0 : -1;
+
+    override void on_mtu_changed()
+    {
+        apply_configured_mtu();
+    }
+
+private:
+
+    RawAdapter _raw;
+    bool _raw_open_failure_logged;
+    SysTime _last_refresh;
+    uint _created_vif_ifindex;      // secondary-AP VIF we created (0 = none)
+    ubyte _running_channel;
+    bool _fdwatch_registered;
+    bool _ap_timer_armed;
+
+    version (WifiApKernel)
+        Nl80211Ap _ap;
+    else
+        HostapdAp _ap;
+
+    void apply_configured_mtu()
+    {
+        if (_mtu == 0)
+            return;
+        auto vif = current_vif();
+        if (vif.length == 0)
+            return;
+        if (!set_adapter_mtu(vif, actual_mtu))
+            log.warning("failed to set MTU ", actual_mtu, " on '", vif, "'");
+    }
+
+    void refresh_os_state(const(char)[] vif)
+    {
+        OSAdapterInfo info;
+        if (!query_adapter(vif, info))
+            return;
+        AdapterChange c = apply_os_adapter_info(this, _l2mtu, _max_l2mtu, _status, info);
+        if (c & AdapterChange.mtu)     mark_set!(typeof(this), [ "l2mtu", "actual-mtu" ])();
+        if (c & AdapterChange.max_mtu) mark_set!(typeof(this), "max-l2mtu")();
+    }
+
+    void register_fdwatch()
+    {
+        if (!_fdwatch_registered && add_fd_watcher(&service_io, &collect_fds))
+        {
+            _fdwatch_registered = true;
+            fd_watch_changed();
+        }
+    }
+
+    void unregister_fdwatch()
+    {
+        if (_fdwatch_registered)
+        {
+            remove_fd_watcher(&service_io);
+            _fdwatch_registered = false;
+            fd_watch_changed();
+        }
+    }
+
+    void collect_fds(ref Array!pollfd fds)
+    {
+        if (_raw.valid)
+            fds ~= pollfd(_raw.fd, POLLIN);
+        version (WifiApKernel)
+        {
+            if (_ap.event_fd >= 0)
+                fds ~= pollfd(_ap.event_fd, POLLIN);
+        }
+    }
+
+    void service_io()
+    {
+        version (WifiApKernel)
+        {
+            _ap.pump();
+            pump_raw_frames();
+            if (_ap.failed)
+            {
+                restart();
+                return;
+            }
+            arm_ap_timer_if_needed();
+        }
+        else
+            pump_raw_frames();
+    }
+
+    void pump_raw_frames()
+    {
         const(ubyte)[] data;
         uint wire_len;
         MonoTime ts;
@@ -1108,9 +1764,6 @@ protected:
                 continue;
             }
 
-            // EAPOL: the kernel AP feeds the authenticator; the hostapd backend
-            // handles EAPOL itself, so consume_eapol returns false and the frame
-            // falls to the data path. Skip our own TX echo.
             if (data.length >= 14 && data[12] == 0x88 && data[13] == 0x8e)
             {
                 if (pkttype == PACKET_OUTGOING)
@@ -1124,20 +1777,43 @@ protected:
         }
     }
 
-    override int wire_send(const(ubyte)[] frame)
-        => _raw.send(frame) ? 0 : -1;
-
-private:
-
-    RawAdapter _raw;
-    bool _raw_open_failure_logged;
-    SysTime _last_refresh;
-    uint _created_vif_ifindex;      // secondary-AP VIF we created (0 = none)
-
     version (WifiApKernel)
-        Nl80211Ap _ap;
+    {
+        void arm_ap_timer_if_needed()
+        {
+            if (_ap_timer_armed || !_ap.needs_tick())
+                return;
+            _ap_timer_armed = true;
+            g_app.schedule(getTime() + 250.msecs, &ap_timer_event);
+        }
+
+        void cancel_ap_timer()
+        {
+            if (_ap_timer_armed)
+            {
+                g_app.cancel(&ap_timer_event);
+                _ap_timer_armed = false;
+            }
+        }
+
+        void ap_timer_event(MonoTime)
+        {
+            _ap_timer_armed = false;
+            if (_state != State.running && _state != State.starting)
+                return;
+            _ap.tick();
+            if (_ap.failed)
+            {
+                restart();
+                return;
+            }
+            arm_ap_timer_if_needed();
+        }
+    }
     else
-        HostapdAp _ap;
+    {
+        void cancel_ap_timer() {}
+    }
 
     // Returns empty slice if the radio isn't a LinuxWifiRadio or we aren't
     // bound (transitional states; caller should retry).

@@ -58,6 +58,7 @@ nothrow @nogc:
     override void cancel_scan()
     {
         _scan_handler = null;
+        _scanning = false;
     }
 
     override bool start_scan(ref const WifiScanConfig cfg, ScanHandler done)

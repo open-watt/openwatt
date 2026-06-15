@@ -89,6 +89,8 @@ nothrow @nogc:
     bool valid() const pure   => _cmd_fd >= 0;
     bool running() const pure  => _state == ApState.running;
     bool failed() const pure   => _state == ApState.failed;
+    int event_fd() const pure  => _event_fd;
+    bool needs_tick() const pure => _secured && _auth.needs_tick();
 
     const(char)[] status_message() const pure
     {
@@ -275,7 +277,7 @@ nothrow @nogc:
     // Retransmit pump for outstanding handshake frames.
     void tick()
     {
-        if (!_secured)
+        if (!needs_tick())
             return;
         import urt.time : getTime, MonoTime;
         g_active_ap = &this;

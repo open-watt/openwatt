@@ -35,8 +35,16 @@ struct PhyCapabilities
     bool valid;             // false if the query failed -- caller should not gate on the rest.
     bool supports_sta;      // any combination allows the chipset to act as a STA.
     bool supports_ap;       // any combination allows the chipset to act as an AP.
-    bool supports_sta_ap;   // some single combination allows STA + AP simultaneously.
-    ubyte max_aps;          // largest AP count any combination admits (regardless of STA).
+    bool supports_monitor;  // any combination allows a monitor VIF.
+    bool supports_sta_ap;   // some single combination allows STA + at least one AP.
+    bool supports_sta_monitor;
+    bool supports_ap_monitor;
+    bool supports_sta_ap_monitor;
+    ubyte max_aps;          // largest AP count when no STA is present.
+    ubyte max_aps_with_sta; // largest AP count in a combination that also admits one STA.
+    ubyte max_aps_with_monitor;
+    ubyte max_aps_with_sta_monitor;
+    ubyte max_monitors;     // largest monitor count when no STA/AP constraints are applied.
 }
 
 
@@ -103,7 +111,6 @@ bool query_wifi_interfaces(scope WifiSink sink)
     return get_interfaces(fd, family_id, sink);
 }
 
-
 bool query_phy_capabilities(uint ifindex, out PhyCapabilities caps)
 {
     int fd = socket(AF_NETLINK, SOCK_RAW, NETLINK_GENERIC);
@@ -138,7 +145,6 @@ bool query_phy_capabilities(uint ifindex, out PhyCapabilities caps)
 
     return get_wiphy(fd, family_id, ifindex, caps);
 }
-
 
 // Reset a wifi netdev to a clean station-mode slate before any STA/AP logic uses
 // it. Tears down any AP or association left running by hostapd / wpa_supplicant /
@@ -179,7 +185,6 @@ void reset_device(const(char)[] adapter, uint ifindex)
     log_info("os.nl80211", "reset wifi device '", adapter, "' to clean station mode");
 }
 
-
 // Switch a wifi netdev to a specific iftype. The kernel requires the link
 // admin-down for an iftype change, so this cycles it down/up around the
 // SET_INTERFACE. AP bring-up calls this with NL80211_IFTYPE_AP before START_AP.
@@ -216,7 +221,6 @@ void set_device_iftype(const(char)[] adapter, uint ifindex, uint iftype)
     set_if_up(io_fd, adapter, true);
 }
 
-
 // The wiphy (phy) index a netdev belongs to, or uint.max on failure. Needed to
 // create sibling VIFs on the same radio (NL80211_CMD_NEW_INTERFACE).
 uint read_wiphy(uint ifindex)
@@ -246,11 +250,10 @@ uint read_wiphy(uint ifindex)
     return w.length >= 4 ? *cast(const(uint)*)w.ptr : uint.max;
 }
 
-
-// Create an admin-up AP-mode virtual interface `name` on `wiphy`. Used for
-// multi-BSS: each secondary AP gets its own netdev on the radio's phy. The
+// Create an admin-up virtual interface `name` on `wiphy`. Used for multi-BSS
+// and monitor capture: each peer gets its own netdev on the radio's phy. The
 // kernel assigns the VIF's MAC. Returns false on failure.
-bool create_ap_vif(uint wiphy, const(char)[] name)
+bool create_vif(uint wiphy, const(char)[] name, uint iftype)
 {
     if (name.length == 0 || name.length >= IFNAMSIZ)
         return false;
@@ -272,7 +275,7 @@ bool create_ap_vif(uint wiphy, const(char)[] name)
     b.start(family, NLM_F_REQUEST | NLM_F_ACK, ++g_seq, NL80211_CMD_NEW_INTERFACE);
     b.put_u32(NL80211_ATTR_WIPHY, wiphy);
     b.put_bytes(NL80211_ATTR_IFNAME, cast(const(ubyte)[])nbuf[0 .. name.length + 1]);
-    b.put_u32(NL80211_ATTR_IFTYPE, NL80211_IFTYPE_AP);
+    b.put_u32(NL80211_ATTR_IFTYPE, iftype);
     if (!nl_ack(fd, b, "NEW_INTERFACE"))
         return false;
 
@@ -285,8 +288,16 @@ bool create_ap_vif(uint wiphy, const(char)[] name)
     return true;
 }
 
+bool create_ap_vif(uint wiphy, const(char)[] name)
+{
+    return create_vif(wiphy, name, NL80211_IFTYPE_AP);
+}
 
-// Remove a virtual interface created by create_ap_vif (by its ifindex).
+bool create_monitor_vif(uint wiphy, const(char)[] name)
+{
+    return create_vif(wiphy, name, NL80211_IFTYPE_MONITOR);
+}
+
 void delete_vif(uint ifindex)
 {
     if (ifindex == 0)
@@ -301,12 +312,44 @@ void delete_vif(uint ifindex)
     nl_device_cmd(fd, family, NL80211_CMD_DEL_INTERFACE, ifindex, 0);
 }
 
+bool set_vif_channel(uint ifindex, uint freq_mhz)
+{
+    if (ifindex == 0 || freq_mhz == 0)
+        return false;
+
+    int fd = nl_open_socket(false);
+    if (fd < 0)
+        return false;
+    scope(exit) nl_close(fd);
+
+    ushort family; uint scan_grp, mlme_grp;
+    if (!resolve_nl80211(fd, family, scan_grp, mlme_grp))
+        return false;
+
+    NlBuilder b;
+    b.start(family, NLM_F_REQUEST | NLM_F_ACK, ++g_seq, NL80211_CMD_SET_CHANNEL);
+    b.put_u32(NL80211_ATTR_IFINDEX, ifindex);
+    b.put_u32(NL80211_ATTR_WIPHY_FREQ, freq_mhz);
+    return nl_ack(fd, b, "SET_CHANNEL");
+}
+
 
 private:
 
-
 __gshared uint g_seq;
 
+struct IfTypeSet
+{
+    bool sta;
+    bool ap;
+    bool monitor;
+}
+
+struct IfaceLimit
+{
+    uint max_count;
+    IfTypeSet types;
+}
 
 // Send an nl80211 command carrying IFINDEX (and IFTYPE when iftype != 0) and
 // drain its ACK. Used by reset_device / set_device_iftype; not-applicable
@@ -368,7 +411,6 @@ void set_if_up(int fd, const(char)[] adapter, bool up)
         req.ifru_flags &= ~IFF_UP;
     ioctl(fd, SIOCSIFFLAGS, &req);
 }
-
 
 bool resolve_family(int fd, const(char)[] name, out ushort family_id)
 {
@@ -542,7 +584,13 @@ bool get_wiphy(int fd, ushort family_id, uint ifindex, out PhyCapabilities caps)
         }
     }
 
-    caps.valid = caps.supports_sta || caps.supports_ap || caps.max_aps > 0;
+    if (caps.supports_ap && caps.max_aps == 0)
+        caps.max_aps = 1;
+    if (caps.supports_monitor && caps.max_monitors == 0)
+        caps.max_monitors = 1;
+
+    caps.valid = caps.supports_sta || caps.supports_ap || caps.supports_monitor ||
+                 caps.max_aps > 0 || caps.max_monitors > 0;
     return true;
 }
 
@@ -663,7 +711,13 @@ void parse_wiphy_attrs(const(ubyte)[] attrs, ref PhyCapabilities caps)
         const(ubyte)[] payload = attrs[nlattr.sizeof .. len];
 
         if (type == NL80211_ATTR_SUPPORTED_IFTYPES)
-            parse_iftype_set(payload, caps.supports_sta, caps.supports_ap);
+        {
+            IfTypeSet types;
+            parse_iftype_set(payload, types);
+            if (types.sta)     caps.supports_sta = true;
+            if (types.ap)      caps.supports_ap = true;
+            if (types.monitor) caps.supports_monitor = true;
+        }
         else if (type == NL80211_ATTR_INTERFACE_COMBINATIONS)
             parse_combinations(payload, caps);
 
@@ -675,7 +729,7 @@ void parse_wiphy_attrs(const(ubyte)[] attrs, ref PhyCapabilities caps)
 
 // Walks a SUPPORTED_IFTYPES- or LIMIT_TYPES-style nested attribute. Each child
 // has its TYPE field set to an NL80211_IFTYPE_* value and no payload (flag).
-void parse_iftype_set(const(ubyte)[] data, ref bool has_sta, ref bool has_ap)
+void parse_iftype_set(const(ubyte)[] data, ref IfTypeSet types)
 {
     while (data.length >= nlattr.sizeof)
     {
@@ -683,8 +737,9 @@ void parse_iftype_set(const(ubyte)[] data, ref bool has_sta, ref bool has_ap)
         ushort len = a.nla_len;
         if (len < nlattr.sizeof || len > data.length) break;
         ushort iftype = a.nla_type & NLA_TYPE_MASK;
-        if (iftype == NL80211_IFTYPE_STATION) has_sta = true;
-        if (iftype == NL80211_IFTYPE_AP)      has_ap = true;
+        if (iftype == NL80211_IFTYPE_STATION) types.sta = true;
+        if (iftype == NL80211_IFTYPE_AP)      types.ap = true;
+        if (iftype == NL80211_IFTYPE_MONITOR) types.monitor = true;
         uint aligned = (len + 3) & ~3u;
         if (aligned >= data.length) break;
         data = data[aligned .. $];
@@ -711,9 +766,8 @@ void parse_combinations(const(ubyte)[] data, ref PhyCapabilities caps)
 void parse_one_combination(const(ubyte)[] data, ref PhyCapabilities caps)
 {
     uint maxnum = 0;
-    bool combo_has_sta = false;
-    bool combo_has_ap = false;
-    uint sum_ap_max = 0;
+    IfaceLimit[16] limits;
+    size_t limit_count;
 
     while (data.length >= nlattr.sizeof)
     {
@@ -726,27 +780,161 @@ void parse_one_combination(const(ubyte)[] data, ref PhyCapabilities caps)
         if (type == NL80211_IFACE_COMB_MAXNUM && payload.length >= 4)
             maxnum = *cast(const(uint)*)payload.ptr;
         else if (type == NL80211_IFACE_COMB_LIMITS)
-            parse_limits(payload, combo_has_sta, combo_has_ap, sum_ap_max);
+            parse_limits(payload, limits, limit_count);
 
         uint aligned = (len + 3) & ~3u;
         if (aligned >= data.length) break;
         data = data[aligned .. $];
     }
 
+    bool combo_has_sta;
+    bool combo_has_ap;
+    bool combo_has_monitor;
+    uint sum_ap_max;
+    uint sum_monitor_max;
+
+    foreach (ref const limit; limits[0 .. limit_count])
+    {
+        if (limit.types.sta) combo_has_sta = true;
+        if (limit.types.ap)
+        {
+            combo_has_ap = true;
+            sum_ap_max += limit.max_count;
+        }
+        if (limit.types.monitor)
+        {
+            combo_has_monitor = true;
+            sum_monitor_max += limit.max_count;
+        }
+    }
+
+    if (combo_has_sta)     caps.supports_sta = true;
+    if (combo_has_ap)      caps.supports_ap = true;
+    if (combo_has_monitor) caps.supports_monitor = true;
+
     if (combo_has_ap)
     {
-        // sum_ap_max overcounts when a single limit covers {STA, AP, ...}, but
-        // that's a worst-case overestimate; cap by MAXNUM, which represents
-        // the combination's overall slot budget.
-        uint cap = sum_ap_max < maxnum ? sum_ap_max : maxnum;
+        uint cap = cap_by_maxnum(sum_ap_max, maxnum);
         if (cap > 0xFF) cap = 0xFF;
         if (cap > caps.max_aps) caps.max_aps = cast(ubyte)cap;
     }
-    if (combo_has_sta && combo_has_ap && maxnum >= 2)
-        caps.supports_sta_ap = true;
+    if (combo_has_monitor)
+    {
+        uint cap = cap_by_maxnum(sum_monitor_max, maxnum);
+        if (cap > 0xFF) cap = 0xFF;
+        if (cap > caps.max_monitors) caps.max_monitors = cast(ubyte)cap;
+    }
+
+    if (combo_has_sta && combo_has_ap && (maxnum == 0 || maxnum >= 2))
+    {
+        bool possible;
+        uint best_with_sta = max_aps_with_reserved(limits, limit_count, maxnum, true, false, possible);
+        if (best_with_sta > 0)
+        {
+            if (best_with_sta > 0xFF) best_with_sta = 0xFF;
+            caps.supports_sta_ap = true;
+            if (best_with_sta > caps.max_aps_with_sta)
+                caps.max_aps_with_sta = cast(ubyte)best_with_sta;
+        }
+    }
+
+    if (combo_has_sta && combo_has_monitor && (maxnum == 0 || maxnum >= 2))
+    {
+        bool possible;
+        max_aps_with_reserved(limits, limit_count, maxnum, true, true, possible);
+        if (possible)
+            caps.supports_sta_monitor = true;
+    }
+
+    if (combo_has_ap && combo_has_monitor && (maxnum == 0 || maxnum >= 2))
+    {
+        bool possible;
+        uint best_with_monitor = max_aps_with_reserved(limits, limit_count, maxnum, false, true, possible);
+        if (possible && best_with_monitor > 0)
+        {
+            if (best_with_monitor > 0xFF) best_with_monitor = 0xFF;
+            caps.supports_ap_monitor = true;
+            if (best_with_monitor > caps.max_aps_with_monitor)
+                caps.max_aps_with_monitor = cast(ubyte)best_with_monitor;
+        }
+    }
+
+    if (combo_has_sta && combo_has_ap && combo_has_monitor && (maxnum == 0 || maxnum >= 3))
+    {
+        bool possible;
+        uint best_with_sta_monitor = max_aps_with_reserved(limits, limit_count, maxnum, true, true, possible);
+        if (possible && best_with_sta_monitor > 0)
+        {
+            if (best_with_sta_monitor > 0xFF) best_with_sta_monitor = 0xFF;
+            caps.supports_sta_ap_monitor = true;
+            if (best_with_sta_monitor > caps.max_aps_with_sta_monitor)
+                caps.max_aps_with_sta_monitor = cast(ubyte)best_with_sta_monitor;
+        }
+    }
 }
 
-void parse_limits(const(ubyte)[] data, ref bool combo_has_sta, ref bool combo_has_ap, ref uint sum_ap_max)
+uint cap_by_maxnum(uint count, uint maxnum)
+{
+    return maxnum != 0 && count > maxnum ? maxnum : count;
+}
+
+uint max_aps_with_reserved(ref const IfaceLimit[16] limits, size_t limit_count, uint maxnum, bool need_sta, bool need_monitor, ref bool possible)
+{
+    uint best;
+    size_t sta_choices = need_sta ? limit_count : 1;
+    size_t monitor_choices = need_monitor ? limit_count : 1;
+
+    foreach (sta_choice; 0 .. sta_choices)
+    {
+        size_t sta_i = need_sta ? sta_choice : size_t.max;
+        if (need_sta && (!limits[sta_i].types.sta || limits[sta_i].max_count == 0))
+            continue;
+
+        foreach (monitor_choice; 0 .. monitor_choices)
+        {
+            size_t monitor_i = need_monitor ? monitor_choice : size_t.max;
+            if (need_monitor && (!limits[monitor_i].types.monitor || limits[monitor_i].max_count == 0))
+                continue;
+
+            uint reserved_total;
+            bool ok = true;
+            foreach (i; 0 .. limit_count)
+            {
+                uint reserved_here;
+                if (need_sta && i == sta_i) ++reserved_here;
+                if (need_monitor && i == monitor_i) ++reserved_here;
+                reserved_total += reserved_here;
+                if (reserved_here > limits[i].max_count)
+                {
+                    ok = false;
+                    break;
+                }
+            }
+            if (!ok || (maxnum > 0 && reserved_total > maxnum))
+                continue;
+
+            uint ap_count;
+            foreach (i; 0 .. limit_count)
+            {
+                if (!limits[i].types.ap)
+                    continue;
+                uint reserved_here;
+                if (need_sta && i == sta_i) ++reserved_here;
+                if (need_monitor && i == monitor_i) ++reserved_here;
+                ap_count += limits[i].max_count - reserved_here;
+            }
+            if (maxnum > 0)
+                ap_count = cap_by_maxnum(ap_count, maxnum - reserved_total);
+            possible = true;
+            if (ap_count > best)
+                best = ap_count;
+        }
+    }
+
+    return best;
+}
+
+void parse_limits(const(ubyte)[] data, ref IfaceLimit[16] limits, ref size_t limit_count)
 {
     while (data.length >= nlattr.sizeof)
     {
@@ -754,19 +942,19 @@ void parse_limits(const(ubyte)[] data, ref bool combo_has_sta, ref bool combo_ha
         ushort len = a.nla_len;
         if (len < nlattr.sizeof || len > data.length) break;
         const(ubyte)[] limit = data[nlattr.sizeof .. len];
-        parse_one_limit(limit, combo_has_sta, combo_has_ap, sum_ap_max);
+        if (limit_count < limits.length)
+        {
+            parse_one_limit(limit, limits[limit_count]);
+            ++limit_count;
+        }
         uint aligned = (len + 3) & ~3u;
         if (aligned >= data.length) break;
         data = data[aligned .. $];
     }
 }
 
-void parse_one_limit(const(ubyte)[] data, ref bool combo_has_sta, ref bool combo_has_ap, ref uint sum_ap_max)
+void parse_one_limit(const(ubyte)[] data, ref IfaceLimit limit)
 {
-    uint max_count = 0;
-    bool limit_has_sta = false;
-    bool limit_has_ap = false;
-
     while (data.length >= nlattr.sizeof)
     {
         const nlattr* a = cast(const nlattr*)data.ptr;
@@ -776,20 +964,13 @@ void parse_one_limit(const(ubyte)[] data, ref bool combo_has_sta, ref bool combo
         const(ubyte)[] payload = data[nlattr.sizeof .. len];
 
         if (type == NL80211_IFACE_LIMIT_MAX && payload.length >= 4)
-            max_count = *cast(const(uint)*)payload.ptr;
+            limit.max_count = *cast(const(uint)*)payload.ptr;
         else if (type == NL80211_IFACE_LIMIT_TYPES)
-            parse_iftype_set(payload, limit_has_sta, limit_has_ap);
+            parse_iftype_set(payload, limit.types);
 
         uint aligned = (len + 3) & ~3u;
         if (aligned >= data.length) break;
         data = data[aligned .. $];
-    }
-
-    if (limit_has_sta) combo_has_sta = true;
-    if (limit_has_ap)
-    {
-        combo_has_ap = true;
-        sum_ap_max += max_count;
     }
 }
 
@@ -837,6 +1018,7 @@ enum NL80211_CMD_NEW_INTERFACE           = 7;
 enum NL80211_CMD_DEL_INTERFACE           = 8;
 enum NL80211_CMD_STOP_AP                 = 16;
 enum NL80211_CMD_DISCONNECT              = 48;
+enum NL80211_CMD_SET_CHANNEL             = 65;
 enum NL80211_ATTR_WIPHY                  = 1;
 enum NL80211_ATTR_IFINDEX                = 3;
 enum NL80211_ATTR_IFNAME                 = 4;
@@ -992,7 +1174,6 @@ static immutable ubyte[22] wpa2_psk_ccmp_rsn_ie = [
     0x00, 0x00,             // RSN capabilities
 ];
 
-
 // Fixed-buffer generic-netlink message builder.
 struct NlBuilder
 {
@@ -1060,7 +1241,6 @@ nothrow @nogc:
         return buf[0 .. off];
     }
 }
-
 
 void foreach_attr(const(ubyte)[] attrs, scope void delegate(ushort type, const(ubyte)[] payload) nothrow @nogc fn)
 {

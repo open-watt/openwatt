@@ -47,6 +47,12 @@ enum PacketDirection : ubyte
     outgoing = 2
 }
 
+enum InterfaceCaps : ushort
+{
+    none     = 0,
+    ethernet = 1 << 0, // attaches to an ethernet segment; marshals exotic packets over the OW ethertype
+}
+
 enum MessageState
 {
     queued,
@@ -232,6 +238,7 @@ nothrow @nogc:
         _mtu = value;
         mark_set!(typeof(this), "mtu")();
         mark_set!(typeof(this), "actual-mtu")();
+        on_mtu_changed();
     }
     ushort actual_mtu() const pure
         => _mtu == 0 ? _l2mtu : _mtu;
@@ -471,6 +478,9 @@ nothrow @nogc:
         return MessageState.complete;
     }
 
+    final InterfaceCaps caps() const pure
+        => _caps;
+
     final void add_address(MACAddress mac, BaseInterface iface)
     {
         assert(mac !in macTable, "MAC address already in use!");
@@ -506,6 +516,7 @@ nothrow @nogc:
 
 protected:
     IfStatus _status;
+    InterfaceCaps _caps;
     ushort _mtu;        // 0 = auto
     ushort _l2mtu;
     ushort _max_l2mtu;  // 0 = unspecified/unknown
@@ -516,6 +527,8 @@ protected:
     MonoTime _last_bitrate_sample;
     ulong _last_tx_bytes;
     ulong _last_rx_bytes;
+
+    void on_mtu_changed() {}
 
     override void online()
     {
