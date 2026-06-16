@@ -432,7 +432,9 @@ Follow these conventions (from [CONTRIBUTING.md](CONTRIBUTING.md)):
       do_one_thing();
   ```
 - Increment operators: Prefer prefix (`++i`) over postfix (`i++`) where semantically equivalent
-- Comments: Avoid self-explanatory comments. Only add comments that explain WHY or provide context the code doesn't make obvious. Remove grouping comments like "// Schedule configuration" or "// Update counters" where the code is clear.
+- Comments: Avoid self-explanatory comments. *Only* add comments that explain WHY or provide context the code doesn't make obvious. Remove grouping comments like "// Schedule configuration" or "// Update counters" where the code is clear. You don't need function headers unless there's something surprising about the calling environment or the arguments/results. No need to narrate code (the code should do that itself!), function named and argument names should be obvious wherever possible.
+- Code is always ascii; only unicode inside string literals or where unicode is to be expected.
+- NO EM-DASH EVER.
 
 **Import order:**
 - uRT imports first (e.g., `import urt.string;`, `import urt.time;`)
@@ -440,8 +442,13 @@ Follow these conventions (from [CONTRIBUTING.md](CONTRIBUTING.md)):
 - Other imports follow
 
 **Code organization:**
-- Public API (properties, overrides) at top of class
-- `private:` section at bottom for private members and helper methods
+- Header is `module ...;`\n [imports]\n `version = DebugXXX;`\n `nothrow @nogc:`\n\n [public module stuff]...
+- Public API (properties, overrides) at top of class/module
+- `protected:` section at middle (of classes)
+- `package:` between protected/private, ONLY if it's absolutely needed, this should be rare!
+- `unittest { ... }` - for typical single-concern modules, place unit tests above the private section at module scope. One unit-test block is plenty, expand the existing block, no need to add several new blocks. Write a comment to header the new test section. For modules that are a collection if utility functions, it is okay to place a unit test for each function (or logical grouping) just below their definition.
+- `private:` section at bottom of class/module for private members and helper methods
+- DO ALWAYS move code around and keep the file in good logical flow order while refactoring. Once flow degrades, it's impossible to know where to add new code anymore, so it's important to maintain!
 
 **Platform/version conditionals:**
 - Keep one definition of each function and struct. Put `version` blocks *inside* at the exact point of divergence -- never duplicate the entire function or struct across version blocks.
@@ -482,9 +489,9 @@ Follow these conventions (from [CONTRIBUTING.md](CONTRIBUTING.md)):
 ### Third-Party Dependencies
 
 **uRT (Micro Runtime):** Located in `third_party/urt/`, this is a custom D runtime providing:
-- `@nogc` containers: Array, Map
-- String utilities with deduplication
-- I/O abstractions (streams, files)
+- `@nogc` containers: Array, Map, String, MutableString
+- Lots of string and array utilities
+- I/O abstractions and drivers (streams, files)
 - Async primitives
 - Time/system utilities
 - Memory allocators
@@ -587,3 +594,11 @@ The REPL method enables true interactive investigation: send a command, analyze 
 - Set `enum DebugType = "type_name"` to debug specific type
 - Console commands execute synchronously - use `/device/print` to inspect runtime state
 - PCAP logging available for packet capture/analysis
+
+## Remember...
+
+And remember,
+- NO GRATUITOUS COMMENTING! (see above)
+- NO EM-DASH EVER!
+- No unicode in source files unless it's string data that's meant to contain unicode.
+- Line-breaks at col 120 is fine, no need to break at 80! Use good taste, avoid gratuitous line breaking!
