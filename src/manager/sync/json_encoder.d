@@ -275,6 +275,33 @@ nothrow @nogc:
         send_frame(peer);
     }
 
+    // Outbound: time sync
+
+    override void encode_time_req(SyncPeer peer, uint seq)
+    {
+        begin_frame("time_req");
+        _buf.append(",\"seq\":", seq);
+        send_frame(peer);
+    }
+
+    override void encode_time_resp(SyncPeer peer, uint seq, ulong recv_ns, ulong xmit_ns, uint ver)
+    {
+        begin_frame("time_resp");
+        _buf.append(",\"seq\":", seq);
+        _buf.append(",\"recv\":", recv_ns);
+        _buf.append(",\"xmit\":", xmit_ns);
+        _buf.append(",\"ver\":", ver);
+        send_frame(peer);
+    }
+
+    override void encode_time_push(SyncPeer peer, uint ver, long delta_ns)
+    {
+        begin_frame("time_push");
+        _buf.append(",\"ver\":", ver);
+        _buf.append(",\"delta\":", delta_ns);
+        send_frame(peer);
+    }
+
     // Inbound
 
     override void decode_and_dispatch(SyncPeer peer, const(ubyte)[] frame)
@@ -448,6 +475,24 @@ nothrow @nogc:
                     members ? *members : empty, seq);
                 break;
             }
+
+            case "time_req":
+                sync.inbound_time_req(peer, cast(uint)json.getMember("seq").asLong());
+                break;
+
+            case "time_resp":
+                sync.inbound_time_resp(peer,
+                    cast(uint)json.getMember("seq").asLong(),
+                    cast(ulong)json.getMember("recv").asLong(),
+                    cast(ulong)json.getMember("xmit").asLong(),
+                    cast(uint)json.getMember("ver").asLong());
+                break;
+
+            case "time_push":
+                sync.inbound_time_push(peer,
+                    cast(uint)json.getMember("ver").asLong(),
+                    json.getMember("delta").asLong());
+                break;
 
             default:
                 log.warning("sync/json: unknown kind: ", kind_str);

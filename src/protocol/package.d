@@ -12,6 +12,7 @@ public static import protocol.http;
 public static import protocol.ip;
 public static import protocol.modbus;
 public static import protocol.mqtt;
+public static import protocol.ntp;
 public static import protocol.ppp;
 public static import protocol.snmp;
 public static import protocol.telnet;

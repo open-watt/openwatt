@@ -5,6 +5,7 @@ import urt.lifetime;
 import urt.log;
 import urt.meta : AliasSeq;
 import urt.string;
+import urt.time;
 
 import manager;
 import manager.base;
@@ -20,8 +21,9 @@ nothrow @nogc:
 
 class SyncPeer : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("transport", transport),
-                                 Prop!("encoder",   encoder));
+    alias Properties = AliasSeq!(Prop!("transport",      transport),
+                                 Prop!("encoder",        encoder),
+                                 Prop!("time-authority", time_authority));
 nothrow @nogc:
 
     enum type_name = "peer";
@@ -54,6 +56,16 @@ nothrow @nogc:
             return;
         _encoder = value;
         restart();
+    }
+
+    final bool time_authority() const pure
+        => _time_authority;
+    final void time_authority(bool value)
+    {
+        if (_time_authority == value)
+            return;
+        _time_authority = value;
+        _next_time_poll = getTime(); // (re)establish promptly
     }
 
     // API
@@ -99,6 +111,13 @@ package:
     Array!BaseObject _bound;             // objects we've sent bind{...} to this peer
     Array!BaseObject _authoritative;     // proxies we hold on this peer's behalf
     SyncEncoderKind  _encoder;
+
+    bool     _time_authority;
+    bool     _time_subordinate;
+    uint     _last_authority_version;
+    uint     _time_seq;                  // 0 = no pull in flight
+    MonoTime _time_t1;
+    MonoTime _next_time_poll;
 
 private:
     ObjectRef!BaseInterface _transport;

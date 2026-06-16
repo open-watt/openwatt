@@ -45,6 +45,7 @@ enum CollectionType : ubyte
     mb_node,
     mqtt_broker,
     mqtt_client,
+    ntp_client,
     ota,
     pcap_server,
     ppp_server,

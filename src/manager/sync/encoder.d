@@ -57,8 +57,7 @@ debug void assert_reset_matches_init(BaseObject obj, ref const Property p) nothr
         return;
     Variant cur = p.get(obj);
     Variant iv = p.init_val();
-    assert(cur == iv,
-        "encode_reset: prop value diverges from init_val - receiver assumes init");
+    assert(cur == iv, "encode_reset: prop value diverges from init_val - receiver assumes init");
 }
 
 
@@ -85,8 +84,7 @@ nothrow @nogc:
     // because object construction is atomic with validation; if any setter
     // fails the object is torn down. Creating then separately setting would
     // expose the object in a transiently-invalid state.
-    abstract void encode_create(SyncPeer peer, const(char)[] type,
-                                NamedArgument[] props, uint seq);
+    abstract void encode_create(SyncPeer peer, const(char)[] type, NamedArgument[] props, uint seq);
     abstract void encode_destroy(SyncPeer peer, CID target, uint seq);
 
     // Mirror protocol - state + property
@@ -96,40 +94,45 @@ nothrow @nogc:
     // Single-property update. For the fast path (dirty flush batched per object)
     // the encoder composes its own frame shape inside tick_dirty; these are the
     // per-event shape used for correlated echoes and request responses.
-    abstract void encode_set(SyncPeer peer, BaseObject obj,
-                             size_t prop_index, uint seq);
+    abstract void encode_set(SyncPeer peer, BaseObject obj, size_t prop_index, uint seq);
 
     // Forwarding variant - used when we're a mid-hub relaying a set to the
     // authoritative peer. We don't apply locally (authority might reject), so
     // the value has to travel as an explicit Variant rather than being read
     // from a local obj.
-    abstract void encode_set(SyncPeer peer, CID target, const(char)[] prop_name,
-                             ref const Variant value, uint seq);
+    abstract void encode_set(SyncPeer peer, CID target, const(char)[] prop_name, ref const Variant value, uint seq);
 
-    abstract void encode_reset(SyncPeer peer, CID target,
-                               const(char)[] prop_name, uint seq);
+    abstract void encode_reset(SyncPeer peer, CID target, const(char)[] prop_name, uint seq);
 
     // Commands + errors + enum schema
 
     abstract void encode_cmd(SyncPeer peer, uint seq, const(char)[] text);
-    abstract void encode_result(SyncPeer peer, uint seq,
-                                ref const Variant value, const(char)[] out_text);
+    abstract void encode_result(SyncPeer peer, uint seq, ref const Variant value, const(char)[] out_text);
     abstract void encode_error(SyncPeer peer, uint seq, const(char)[] text);
 
     abstract void encode_sub(SyncPeer peer, const(char)[] pattern);
     abstract void encode_unsub(SyncPeer peer, const(char)[] pattern);
 
     abstract void encode_enum_req(SyncPeer peer, const(char)[] type_name, uint seq);
-    abstract void encode_enum(SyncPeer peer, const(char)[] type_name,
-                              ref const Variant members, uint seq);
+    abstract void encode_enum(SyncPeer peer, const(char)[] type_name, ref const Variant members, uint seq);
 
     // Element history recall (record streams). Times are unix milliseconds
     // on the wire; samples are (time, value) pairs.
 
-    abstract void encode_history_req(SyncPeer peer, const(char)[] path,
-                                     ulong from_ms, ulong to_ms, uint max_points, uint seq);
-    abstract void encode_history(SyncPeer peer, uint seq, const(char)[] path,
-                                 const(Sample)[] samples);
+    abstract void encode_history_req(SyncPeer peer, const(char)[] path, ulong from_ms, ulong to_ms, uint max_points, uint seq);
+    abstract void encode_history(SyncPeer peer, uint seq, const(char)[] path, const(Sample)[] samples);
+
+    // Time sync (clock discipline over the channel)
+    //
+    // Pull: a remote sends time_req to its authority and stashes its own send
+    // time keyed by seq; the authority answers time_resp with its receive and
+    // transmit wall times (unix ns) plus its current timebase version. Push:
+    // when the authority's clock steps it sends time_push carrying the new
+    // version and the signed delta - latency-independent, so no round trip.
+
+    abstract void encode_time_req(SyncPeer peer, uint seq);
+    abstract void encode_time_resp(SyncPeer peer, uint seq, ulong recv_ns, ulong xmit_ns, uint ver);
+    abstract void encode_time_push(SyncPeer peer, uint ver, long delta_ns);
 
     // Inbound entry point
     //
