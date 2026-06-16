@@ -264,7 +264,7 @@ private:
         _fire_scheduled = true;
     }
 
-    void on_wallclock_change()
+    void on_wallclock_change(Duration)
     {
         if (_done_firing)
             return;

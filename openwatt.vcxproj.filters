@@ -118,6 +118,9 @@
     <Filter Include="src\protocol\dns">
       <UniqueIdentifier>{6b327823-23d1-49dc-a514-342b020a2613}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\ntp">
+      <UniqueIdentifier>{a7e3c1d4-2b59-4f80-9a16-6c4d8e2f1b03}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\protocol\http">
       <UniqueIdentifier>{072e997d-5dcf-4378-947a-4a665e1fd242}</UniqueIdentifier>
     </Filter>
@@ -620,6 +623,12 @@
     </DCompile>
     <DCompile Include="src\protocol\mqtt\topic.d">
       <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ntp\client.d">
+      <Filter>src\protocol\ntp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\ntp\package.d">
+      <Filter>src\protocol\ntp</Filter>
     </DCompile>
     <DCompile Include="src\router\iface\packet.d">
       <Filter>src\router\iface</Filter>

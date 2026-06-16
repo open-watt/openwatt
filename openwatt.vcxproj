@@ -199,6 +199,8 @@
     <DCompile Include="src\protocol\mqtt\package.d" />
     <DCompile Include="src\protocol\mqtt\session.d" />
     <DCompile Include="src\protocol\mqtt\topic.d" />
+    <DCompile Include="src\protocol\ntp\client.d" />
+    <DCompile Include="src\protocol\ntp\package.d" />
     <DCompile Include="src\protocol\package.d" />
     <DCompile Include="src\protocol\ppp\client.d" />
     <DCompile Include="src\protocol\ppp\package.d" />

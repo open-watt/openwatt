@@ -51,6 +51,7 @@ import urt.map;
 import urt.mem.allocator;
 import urt.meta.enuminfo : VoidEnumInfo;
 import urt.string;
+import urt.time;
 import urt.variant;
 
 import manager;
@@ -75,6 +76,11 @@ alias log = Log!"sync";
 
 // History responses must fit in one raw packet (64KB); JSON samples are ~25 bytes each.
 enum uint max_history_points = 2000;
+
+// Time-sync cadence for a remote pulling from its authority.
+enum Duration time_poll_interval    = seconds(17 * 60);
+enum Duration time_retry_interval   = seconds(30);
+enum Duration time_response_timeout = seconds(4);
 
 
 // Subscription pattern forms:
@@ -182,6 +188,8 @@ nothrow @nogc:
     Map!(uint, PendingForward) pending_forwards;
     Array!PendingInboundCmd    pending_inbound_cmds;
     uint                       next_seq;
+    uint                       _timebase_version;  // our version as a clock authority
+    SyncPeer                   _applying_push;     // peer whose delta push we're applying
 
     override void init()
     {
@@ -196,6 +204,12 @@ nothrow @nogc:
 
         register_object_lifecycle_handler(&on_object_lifecycle);
         register_object_state_handler(&on_object_state);
+        subscribe_clock_change(&on_clock_step);
+    }
+
+    override void deinit()
+    {
+        unsubscribe_clock_change(&on_clock_step);
     }
 
     override void update()
@@ -206,6 +220,8 @@ nothrow @nogc:
 
         foreach (p; peers[])
             encoder_for(p._encoder).tick_dirty(p);
+
+        poll_time_authorities();
 
         // Drain completed inbound commands and emit their results back.
         for (size_t i = 0; i < pending_inbound_cmds.length; )
@@ -888,6 +904,107 @@ nothrow @nogc:
         // TODO: resolve pending_forwards[seq] for PendingKind.enum_req (outbound
         // enum requests aren't yet wired - no callback mechanism on this side).
         log.info("sync: inbound enum '", type_name, "' from '", from.name[], "' seq=", seq);
+    }
+
+    // Inbound: time sync
+
+    void inbound_time_req(SyncPeer from, uint seq)
+    {
+        if (!wall_time_set())
+            return; // no authoritative time to serve yet; the remote will retry
+
+        from._time_subordinate = true; // pulled from us -> wants our delta pushes
+        ulong recv_ns = unixTimeNs(getSysTime());
+        ulong xmit_ns = unixTimeNs(getSysTime());
+        encoder_for(from._encoder).encode_time_resp(from, seq, recv_ns, xmit_ns, _timebase_version);
+    }
+
+    void inbound_time_resp(SyncPeer from, uint seq, ulong recv_ns, ulong xmit_ns, uint ver)
+    {
+        if (!from._time_authority)
+        {
+            log.warning("sync: time_resp from non-authority '", from.name[], "'");
+            return;
+        }
+        if (from._time_seq == 0 || seq != from._time_seq)
+            return; // unsolicited or stale
+
+        MonoTime t4 = getTime();
+
+        // Subtract the authority's processing (xmit - recv) from the round trip,
+        // halve for one-way, anchor to its transmit timestamp (xmit).
+        long t2 = cast(long)recv_ns, t3 = cast(long)xmit_ns;
+        long rtt = (t4 - from._time_t1).as!"nsecs";
+        long corrected = t3 + (rtt - (t3 - t2)) / 2;
+        from._time_seq = 0;
+        from._last_authority_version = ver;
+        from._next_time_poll = t4 + time_poll_interval;
+
+        set_utc_time(cast(ulong)corrected); // on_clock_step fans the resulting step to our subordinates
+        log.info("sync: clock synced from authority '", from.name[], "'");
+    }
+
+    void inbound_time_push(SyncPeer from, uint ver, long delta_ns)
+    {
+        if (!from._time_authority)
+        {
+            log.warning("sync: time_push from non-authority '", from.name[], "'");
+            return;
+        }
+        if (!wall_time_set() || ver > from._last_authority_version + 1)
+        {
+            // Never established, or we missed a correction: re-establish by pull.
+            send_time_req(from);
+            return;
+        }
+        if (ver <= from._last_authority_version)
+            return; // already accounted for (e.g. via a pull)
+
+        from._last_authority_version = ver;
+        _applying_push = from;
+        adjust_utc_time(delta_ns); // on_clock_step chains it to our own subordinates
+        _applying_push = null;
+    }
+
+    void on_clock_step(long delta_ns)
+    {
+        if (delta_ns == 0)
+            return;
+        ++_timebase_version;
+        foreach (p; peers[])
+        {
+            if (!p._time_subordinate || p is _applying_push)
+                continue;
+            encoder_for(p._encoder).encode_time_push(p, _timebase_version, delta_ns);
+        }
+    }
+
+    void poll_time_authorities()
+    {
+        MonoTime now = getTime();
+        foreach (p; peers[])
+        {
+            if (!p._time_authority)
+                continue;
+            if (p._time_seq != 0)
+            {
+                if (now - p._time_t1 > time_response_timeout)
+                {
+                    p._time_seq = 0;
+                    p._next_time_poll = now + time_retry_interval;
+                }
+                continue;
+            }
+            if (now >= p._next_time_poll)
+                send_time_req(p);
+        }
+    }
+
+    void send_time_req(SyncPeer p)
+    {
+        p._time_seq = alloc_seq();
+        p._time_t1 = getTime();
+        encoder_for(p._encoder).encode_time_req(p, p._time_seq);
     }
 
     // Fan-out helpers (internal)

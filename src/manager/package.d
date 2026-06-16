@@ -43,7 +43,7 @@ alias IntrinsicFunction = Variant function(Variant[] args) nothrow @nogc;
 
 alias TimerHandler      = void delegate(MonoTime scheduled) nothrow @nogc;
 alias EventHandler      = void delegate(MonoTime when) nothrow @nogc;
-alias WallclockHandler  = void delegate() nothrow @nogc;
+alias WallclockHandler  = void delegate(Duration delta) nothrow @nogc;
 alias HeartbeatHandler  = void delegate(MonoTime now) nothrow @nogc;
 
 enum EventPriority : ubyte
@@ -507,10 +507,11 @@ nothrow @nogc:
         }
     }
 
-    void notify_wallclock_change(long)
+    void notify_wallclock_change(long delta_ns)
     {
+        Duration delta = delta_ns.nsecs;
         foreach (h; _wallclock_handlers)
-            h();
+            h(delta);
     }
 
     bool post_event(EventHandler handler, MonoTime when, EventPriority priority = EventPriority.control)

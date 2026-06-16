@@ -140,6 +140,7 @@ void register_modules(Application app)
         register_module!(protocol.ip)(app);
         register_module!(protocol.modbus)(app);
         register_module!(protocol.mqtt)(app);
+        register_module!(protocol.ntp)(app);
         register_module!(protocol.ppp)(app);
 //        register_module!(protocol.snmp)(app);
         register_module!(protocol.telnet)(app);
