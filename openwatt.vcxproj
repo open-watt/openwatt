@@ -58,6 +58,8 @@
     <DCompile Include="src\apps\energy\meter.d" />
     <DCompile Include="src\apps\energy\package.d" />
     <DCompile Include="src\apps\ota\package.d" />
+    <DCompile Include="src\db\defs.d" />
+    <DCompile Include="src\db\engine.d" />
     <DCompile Include="src\db\package.d" />
     <DCompile Include="src\db\selfrefptr.d" />
     <DCompile Include="src\db\stream.d" />

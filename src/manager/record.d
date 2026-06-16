@@ -1,24 +1,22 @@
 module manager.record;
 
-// Element history recording ("record streams").
+// Element history recording.
 //
-// Each recorded element gets a RecordStream: a ring of recent samples in
-// memory, backed by an append-only file of fixed-size records so history
-// survives restarts. A Recorder walks the device tree and attaches a stream
-// to every element whose data-model path matches its filter.
+// A Recorder walks the device tree and attaches a RecordStream to every element
+// whose data-model path matches its filter. Each RecordStream keeps a *small*
+// local ring of recent samples (a hot cache for live graphing) and ships every
+// sample into the database world via the db client. The database owns
+// persistence and is the authoritative, complete store -- the frontend never
+// touches files and never blocks on disk.
 //
-// The on-disk format is a stop-gap: one file per element, a 16-byte header
-// followed by packed (timestamp, value) records. Timestamps are strictly
-// increasing within a file, so time ranges are located by binary search.
-// A future permanent store will re-encode this data into time blocks with
-// tighter encodings; this format only needs to be good enough to accumulate
-// data until then.
+// Queries are serviced asynchronously by the database. The local ring is only
+// consulted as a fast path when it fully covers the requested range (the common
+// "scroll the last minute, live" case); anything wider goes to the database.
 //
 // Values are recorded as doubles: quantities are normalised to base SI scale,
 // bools as 0/1. Non-numeric values (strings, maps) are not recorded.
 
 import urt.array;
-import urt.file;
 import urt.lifetime;
 import urt.log;
 import urt.map;
@@ -35,41 +33,22 @@ import manager.collection;
 import manager.component;
 import manager.console;
 import manager.console.bitmap;
+import manager.console.command : CommandState, CommandCompletionState;
 import manager.console.graph;
 import manager.console.live_view;
 import manager.device;
 import manager.element;
 import manager.plugin;
 
+import db;
+import db.engine : SampleAggregator, GraphIntervalSampler;
+
+public import db : Sample; // re-export: record streams produce db samples
+
 nothrow @nogc:
 
 
-struct Sample
-{
-    ulong time;   // unix ns
-    double value;
-}
-
-// Native-endian (all supported targets are little-endian).
-struct RecordFileHeader
-{
-    char[4] magic = "OWRS";
-    uint version_ = 1;
-    ulong reserved;
-}
-
-bool sample_value(ref const Variant v, out double value)
-{
-    if (v.isBool)
-        value = v.asBool ? 1 : 0;
-    else if (v.isQuantity)
-        value = v.asQuantity!double().normalise().value;
-    else if (v.isNumber)
-        value = v.asDouble;
-    else
-        return false;
-    return value == value; // don't record NaN
-}
+alias log = Log!"record";
 
 struct RecordStream
 {
@@ -77,389 +56,166 @@ nothrow @nogc:
 
     Recorder owner;
     Element* element;
-    String path;       // data-model path: "device.component.element"
-    String filename;
-    Array!Sample ring; // circular; oldest at `head`
-    uint head;
-    uint count;
-    uint unflushed;    // the newest `unflushed` ring entries are not yet on disk
-    ulong last_time;   // most recent recorded timestamp (unix ns)
-    bool file_failed;  // warn-once latch; also set when the file is unusable
+    String path;            // data-model path: "device.component.element"
+    SeriesId series;        // handle into the database world
+    ulong flush_watermark;  // newest element-sample time examined for the db
+    ulong last_flushed;     // time of the last sample shipped (min-period subsampling)
 
     this(this) @disable;
 
-    ref const(Sample) at(uint i) const pure
-        => ring[(head + i) % cast(uint)ring.length];
-
-    ulong oldest_time() const pure
-        => count ? at(0).time : ulong.max;
-
-    void on_change(ref Element e, ref const Variant val, SysTime timestamp, ref const Variant prev, SysTime prev_timestamp)
+    void flush()
     {
-        record(val, timestamp);
-    }
+        Element* e = element;
+        ulong newest = e.recent_newest();
+        if (e.recent_count == 0 || newest <= flush_watermark)
+            return;
 
-    void record(ref const Variant val, SysTime timestamp)
-    {
-        ulong t = unixTimeNs(timestamp);
-        if (t <= last_time)
-            return;
-        Duration throttle = owner.min_period;
-        if (throttle > Duration.zero && t - last_time < cast(ulong)throttle.as!"nsecs")
-            return;
-        double v;
-        if (!sample_value(val, v))
-            return;
-        push(Sample(t, v));
-        last_time = t;
-    }
+        ulong throttle = 0;
+        Duration mp = owner.min_period;
+        if (mp > Duration.zero)
+            throttle = cast(ulong)mp.as!"nsecs";
 
-    void push(ref const Sample s)
-    {
-        uint cap = cast(uint)ring.length;
-        if (count == cap)
+        Array!Sample block;
+        ulong cursor = last_flushed;
+        foreach (i; 0 .. e.recent_count)
         {
-            if (unflushed == count)
+            ref const ElementSample s = e.recent_at(i);
+            ulong t = unixTimeNs(cast(SysTime)s.time);
+            if (t <= flush_watermark)
+                continue;
+            double v;
+            if (!sample_to_double(s.value, v))
+                continue;
+            if (throttle && cursor && t - cursor < throttle)
+                continue;
+            block ~= Sample(t, v);
+            cursor = t;
+        }
+
+        if (block.length == 0)
+        {
+            flush_watermark = newest; // examined everything; min-period dropped it all
+            return;
+        }
+        if (database().push_block(series, block[]))
+        {
+            flush_watermark = newest;
+            last_flushed = cursor;
+        }
+    }
+}
+
+bool query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, QueryMode mode, ref Array!Sample result)
+{
+    Element* e = rs.element;
+    if (e.recent_count == 0 || e.recent_oldest() > from)
+        return false;
+
+    Array!Sample local;
+    foreach (i; 0 .. e.recent_count)
+    {
+        ref const ElementSample s = e.recent_at(i);
+        double v;
+        if (sample_to_double(s.value, v))
+            local ~= Sample(unixTimeNs(cast(SysTime)s.time), v);
+    }
+    if (local.length == 0 || local[0].time > from)
+        return false; // no numeric coverage back to `from`; let the db serve it
+
+    ulong bucket_width = max_points ? (to - from) / max_points + 1 : 0;
+
+    if (mode == QueryMode.graph)
+    {
+        Sample held;
+        bool has_held = false;
+        foreach (ref const Sample s; local[])
+        {
+            if (s.time >= from)
+                break;
+            held = s;
+            has_held = true;
+        }
+        ulong hold_limit = bucket_width ? bucket_width : to - from;
+        has_held = has_held && from - held.time <= hold_limit;
+
+        if (!bucket_width)
+        {
+            if (has_held)
+                result ~= Sample(from, held.value);
+            foreach (ref const Sample s; local[])
             {
-                // about to overwrite a sample that never reached disk
-                owner.flush_stream(this);
-                if (unflushed == count)
-                    --unflushed; // no filesystem or write failure; the sample is lost
+                if (s.time < from)
+                    continue;
+                if (s.time > to)
+                    break;
+                result ~= s;
             }
-            ring[][head] = s;
-            head = (head + 1) % cap;
-            ++unflushed;
         }
         else
         {
-            ring[][(head + count) % cap] = s;
-            ++count;
-            ++unflushed;
-        }
-    }
-}
-
-// Streaming time-bucket aggregator: emits one mean-value sample per bucket,
-// stamped with the bucket's last real timestamp. bucket_width == 0 passes
-// samples through unmodified.
-struct SampleAggregator
-{
-nothrow @nogc:
-
-    Array!Sample* sink;
-    ulong from;
-    ulong bucket_width;
-
-    void put(ref const Sample s)
-    {
-        if (!bucket_width)
-        {
-            *sink ~= s;
-            return;
-        }
-        ulong b = (s.time - from) / bucket_width;
-        if (b != _bucket)
-        {
-            emit();
-            _bucket = b;
-        }
-        _sum += s.value;
-        _last_time = s.time;
-        ++_n;
-    }
-
-    void finish()
-    {
-        emit();
-    }
-
-private:
-    ulong _bucket = ulong.max;
-    double _sum = 0;
-    ulong _last_time;
-    uint _n;
-
-    void emit()
-    {
-        if (!_n)
-            return;
-        *sink ~= Sample(_last_time, _sum / _n);
-        _sum = 0;
-        _n = 0;
-    }
-}
-
-// Sample-and-hold interval downsampler for graphs. Each emitted point is the
-// time-weighted mean value over one visible time bucket, which avoids the
-// aliasing/jitter caused by picking or averaging only change events.
-struct GraphIntervalSampler
-{
-nothrow @nogc:
-
-    Array!Sample* sink;
-    ulong from;
-    ulong to;
-    ulong bucket_width;
-
-    void seed(ref const Sample s)
-    {
-        _last_time = from;
-        _last_value = s.value;
-        _has_value = true;
-        _seeded = true;
-    }
-
-    void put(ref const Sample s)
-    {
-        if (!bucket_width)
-        {
-            *sink ~= s;
-            return;
-        }
-
-        ulong t = s.time;
-        if (t < from)
-            return;
-        if (t > to)
-            t = to;
-
-        if (_has_value)
-            accumulate(_last_time, t, _last_value);
-
-        _last_time = t;
-        _last_value = s.value;
-        _has_value = true;
-    }
-
-    void finish()
-    {
-        if (!bucket_width)
-            return;
-        if (_has_value)
-            accumulate(_last_time, to, _last_value);
-        emit();
-    }
-
-private:
-    ulong _bucket = ulong.max;
-    ulong _bucket_time;
-    double _sum;
-    ulong _duration;
-    ulong _last_time;
-    double _last_value;
-    bool _has_value;
-    bool _seeded;
-    bool _emitted;
-
-    void accumulate(ulong start, ulong end, double value)
-    {
-        if (end <= start)
-            return;
-        if (start < from)
-            start = from;
-        if (end > to)
-            end = to;
-
-        while (start < end)
-        {
-            ulong b = (start - from) / bucket_width;
-            if (b != _bucket)
+            GraphIntervalSampler g;
+            g.sink = &result;
+            g.from = from;
+            g.to = to;
+            g.bucket_width = bucket_width;
+            if (has_held)
+                g.seed(held);
+            foreach (ref const Sample s; local[])
             {
-                emit();
-                _bucket = b;
-                ulong bucket_start = from + b * bucket_width;
-                _bucket_time = (_seeded || _emitted || start <= bucket_start)
-                    ? bucket_start : start;
+                if (s.time < from)
+                    continue;
+                if (s.time > to)
+                    break;
+                g.put(s);
             }
-
-            ulong bucket_end = from + (b + 1) * bucket_width;
-            ulong stop = end < bucket_end ? end : bucket_end;
-            ulong dt = stop - start;
-            _sum += value * cast(double)dt;
-            _duration += dt;
-            start = stop;
+            g.finish();
         }
+        return true;
     }
-
-    void emit()
-    {
-        if (!_duration)
-            return;
-        *sink ~= Sample(_bucket_time, _sum / cast(double)_duration);
-        _sum = 0;
-        _duration = 0;
-        _emitted = true;
-    }
-}
-
-// Recall samples in [from_ns, to_ns] (inclusive). Anything older than the
-// in-memory ring is read from the stream's file; the ring serves the rest
-// (the file also holds the flushed portion of the ring, so the file read is
-// capped at the ring's oldest sample to avoid duplicates). If max_points is
-// non-zero the result is downsampled to at most that many bucket means.
-void query_stream(ref RecordStream rs, ulong from_ns, ulong to_ns, uint max_points, ref Array!Sample result)
-{
-    if (to_ns <= from_ns)
-        return;
 
     SampleAggregator agg;
     agg.sink = &result;
-    agg.from = from_ns;
-    agg.bucket_width = max_points ? (to_ns - from_ns) / max_points + 1 : 0;
-
-    ulong ring_oldest = rs.oldest_time();
-    if (from_ns < ring_oldest && !rs.file_failed)
-        read_file_range(rs, from_ns, min(to_ns + 1, ring_oldest), agg);
-
-    foreach (i; 0 .. rs.count)
+    agg.from = from;
+    agg.bucket_width = bucket_width;
+    foreach (ref const Sample s; local[])
     {
-        ref const Sample s = rs.at(i);
-        if (s.time < from_ns)
+        if (s.time < from)
             continue;
-        if (s.time > to_ns)
+        if (s.time > to)
             break;
         agg.put(s);
     }
     agg.finish();
-}
-
-// Graphs render record streams as sample-and-hold signals. Seed the result
-// with the value already in effect at the left edge of the window.
-void query_stream_for_graph(ref RecordStream rs, ulong from_ns, ulong to_ns, uint max_points, ref Array!Sample result)
-{
-    if (to_ns <= from_ns)
-        return;
-
-    ulong bucket_width = max_points ? (to_ns - from_ns) / max_points + 1 : 0;
-    Sample held;
-    ulong hold_limit = bucket_width ? bucket_width : to_ns - from_ns;
-    bool has_held = find_sample_before(rs, from_ns, held) && from_ns - held.time <= hold_limit;
-
-    if (!max_points)
-    {
-        if (has_held)
-            result ~= Sample(from_ns, held.value);
-        query_stream(rs, from_ns, to_ns, 0, result);
-        return;
-    }
-
-    GraphIntervalSampler sampler;
-    sampler.sink = &result;
-    sampler.from = from_ns;
-    sampler.to = to_ns;
-    sampler.bucket_width = bucket_width;
-    if (has_held)
-        sampler.seed(held);
-
-    ulong ring_oldest = rs.oldest_time();
-    if (from_ns < ring_oldest && !rs.file_failed)
-        read_file_range(rs, from_ns, min(to_ns + 1, ring_oldest), sampler);
-
-    foreach (i; 0 .. rs.count)
-    {
-        ref const Sample s = rs.at(i);
-        if (s.time < from_ns)
-            continue;
-        if (s.time > to_ns)
-            break;
-        sampler.put(s);
-    }
-    sampler.finish();
+    return true;
 }
 
 
 unittest
 {
-    // ring push: fill, wrap, and unflushed accounting
-    RecordStream rs;
-    rs.ring.resize(4);
+    import urt.time : from_unix_time_ns;
+
+    // an element capturing samples at 1ms .. 6ms (values 0,10,..,50)
+    Element e;
     foreach (i; 0 .. 6)
-    {
-        if (i == 4)
-            rs.unflushed = 0; // simulate a flush so a full ring never needs the owner
-        rs.push(Sample(i + 1, i * 10.0));
-    }
-    assert(rs.count == 4);
-    assert(rs.unflushed == 2);
-    assert(rs.at(0).time == 3);
-    assert(rs.at(3).time == 6);
+        e.value(Variant(i * 10.0), from_unix_time_ns((i + 1) * 1_000_000UL));
 
-    // in-memory range query (no file behind this stream)
+    RecordStream rs;
+    rs.element = &e;
+
+    // local query served from the element's recent buffer
     Array!Sample result;
-    query_stream(rs, 4, 5, 0, result);
+    assert(rs.query_local(4_000_000, 5_000_000, 0, QueryMode.raw, result));
     assert(result.length == 2);
-    assert(result[0].time == 4 && result[1].time == 5);
+    assert(result[0].time == 4_000_000 && result[1].time == 5_000_000);
 
-    // bucketed downsample: mean value, stamped with the bucket's last time
+    // can't reach back before the oldest sample
     result.clear();
-    SampleAggregator agg;
-    agg.sink = &result;
-    agg.from = 0;
-    agg.bucket_width = 10;
-    agg.put(Sample(1, 1));
-    agg.put(Sample(5, 3));
-    agg.put(Sample(12, 10));
-    agg.finish();
-    assert(result.length == 2);
-    assert(result[0].time == 5 && result[0].value == 2);
-    assert(result[1].time == 12 && result[1].value == 10);
+    assert(!rs.query_local(0, 6_000_000, 0, QueryMode.raw, result));
 
-    // graph query: seed with the held value before the visible range
+    // graph mode seeds the left edge with the value held before `from`
     result.clear();
-    query_stream_for_graph(rs, 4, 5, 0, result);
-    assert(result.length == 3);
-    assert(result[0].time == 4 && result[0].value == 20);
-    assert(result[1].time == 4 && result[1].value == 30);
-    assert(result[2].time == 5 && result[2].value == 40);
-
-    result.clear();
-    query_stream_for_graph(rs, 3, 3, 0, result);
-    assert(result.length == 0);
-
-    result.clear();
-    query_stream_for_graph(rs, 100, 101, 0, result);
-    assert(result.length == 0);
-
-    RecordStream old_seed;
-    old_seed.ring.resize(4);
-    old_seed.push(Sample(1, 999));
-    old_seed.push(Sample(15, 10));
-    result.clear();
-    query_stream_for_graph(old_seed, 10, 30, 5, result);
-    assert(result.length == 3);
-    assert(result[0].time == 15);
-
-    RecordStream late_start;
-    late_start.ring.resize(4);
-    late_start.push(Sample(1, 999));
-    late_start.push(Sample(12, 10));
-    result.clear();
-    query_stream_for_graph(late_start, 10, 30, 5, result);
-    assert(result.length == 4);
-    assert(result[0].time == 12);
-
-    result.clear();
-    query_stream_for_graph(rs, 3, 7, 4, result);
-    assert(result.length == 2);
-    assert(result[0].time == 3);
-    assert(result[1].time == 5);
-
-    result.clear();
-    GraphIntervalSampler graph_agg;
-    graph_agg.sink = &result;
-    graph_agg.from = 0;
-    graph_agg.to = 100;
-    graph_agg.bucket_width = 25;
-    Sample seed = Sample(0, 10);
-    graph_agg.seed(seed);
-    graph_agg.put(Sample(40, 20));
-    graph_agg.put(Sample(90, 30));
-    graph_agg.finish();
-    assert(result.length == 4);
-    assert(result[0].time == 0);
-    assert(result[1].time == 25);
-    assert(result[2].time == 50);
-    assert(result[3].time == 75);
+    assert(rs.query_local(4_000_000, 6_000_000, 0, QueryMode.graph, result));
+    assert(result[0].time == 4_000_000 && result[0].value == 20); // held from the 3ms sample
 }
 
 
@@ -467,8 +223,6 @@ class Recorder : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("dir", dir),
                                  Prop!("filter", filter),
-                                 Prop!("depth", depth),
-                                 Prop!("flush-interval", flush_interval),
                                  Prop!("min-period", min_period));
 nothrow @nogc:
 
@@ -503,23 +257,6 @@ nothrow @nogc:
         restart();
     }
 
-    final uint depth() const pure
-        => _depth;
-    final void depth(uint value)
-    {
-        if (_depth == value)
-            return;
-        _depth = value;
-        restart();
-    }
-
-    final Duration flush_interval() const pure
-        => _flush_interval;
-    final void flush_interval(Duration value)
-    {
-        _flush_interval = value;
-    }
-
     final Duration min_period() const pure
         => _min_period;
     final void min_period(Duration value)
@@ -548,14 +285,14 @@ protected:
     mixin RekeyHandler;
 
     override bool validate() const pure
-        => !_dir.empty && _depth >= 2;
+        => !_dir.empty;
 
     override CompletionStatus startup()
     {
-        create_directory(_dir[]); // best effort; file opens warn if it didn't work
+        import urt.file : create_directory;
+        create_directory(_dir[]); // best effort; the db warns if writes later fail
         scan();
-        _last_flush = getTime();
-        _last_scan = _last_flush;
+        _last_scan = getTime();
         return CompletionStatus.complete;
     }
 
@@ -563,8 +300,7 @@ protected:
     {
         foreach (rs; _streams.values)
         {
-            rs.element.remove_subscriber(&rs.on_change);
-            flush_stream(*rs);
+            database().close_series(rs.series);
             defaultAllocator().freeT(rs);
         }
         _streams.clear();
@@ -583,66 +319,16 @@ protected:
             _last_scan = now;
         }
 
-        bool flush_all = now - _last_flush >= _flush_interval;
         foreach (rs; _streams.values)
-        {
-            if (rs.unflushed && (flush_all || rs.unflushed >= _depth / 2))
-                flush_stream(*rs);
-        }
-        if (flush_all)
-            _last_flush = now;
-    }
-
-package:
-    void flush_stream(ref RecordStream rs)
-    {
-        if (!rs.unflushed || rs.file_failed)
-            return;
-
-        File f;
-        if (!f.open(rs.filename[], FileOpenMode.WriteAppend, FileOpenFlags.Sequential))
-        {
-            file_error(rs, "open");
-            return;
-        }
-        scope(exit) f.close();
-
-        size_t written;
-        if (f.get_size() == 0)
-        {
-            RecordFileHeader hdr;
-            if (!f.write((&hdr)[0 .. 1], written) || written != RecordFileHeader.sizeof)
-            {
-                file_error(rs, "write");
-                return;
-            }
-        }
-
-        uint cap = cast(uint)rs.ring.length;
-        uint start = (rs.head + rs.count - rs.unflushed) % cap;
-        while (rs.unflushed)
-        {
-            uint n = min(rs.unflushed, cap - start);
-            const(Sample)[] span = rs.ring[start .. start + n];
-            if (!f.write(span, written) || written != n * Sample.sizeof)
-            {
-                file_error(rs, "write");
-                return;
-            }
-            rs.unflushed -= n;
-            start = 0;
-        }
+            rs.flush();
     }
 
 private:
     String _dir = StringLit!"records";
     String _filter = StringLit!"*";
-    uint _depth = 256;
-    Duration _flush_interval = 10.seconds;
     Duration _min_period;
 
     Map!(const(char)[], RecordStream*) _streams; // keyed by the stream's own path string
-    MonoTime _last_flush;
     MonoTime _last_scan;
 
     void scan()
@@ -662,19 +348,17 @@ private:
 
     void attach(Element* e, const(char)[] path)
     {
+        SeriesId series = database().open_series(make_filename(path)[]);
+        if (series == invalid_series)
+            return; // db channel momentarily full; next scan retries
+
         RecordStream* rs = defaultAllocator().allocT!RecordStream();
         rs.owner = this;
         rs.element = e;
         rs.path = path.makeString(defaultAllocator());
-        rs.filename = make_filename(path);
-        rs.ring.resize(_depth);
-        seed_last_time(*rs);
-        e.add_subscriber(&rs.on_change);
+        rs.series = series;
         _streams.insert(rs.path[], rs);
-
-        // capture the element's standing value, if it has one
-        if (e.last_update)
-            rs.record(e.value, e.last_update);
+        // the element self-captures; the first flush ships its standing history
     }
 
     String make_filename(const(char)[] path)
@@ -692,45 +376,263 @@ private:
         fn ~= ".owr";
         return fn[].makeString(defaultAllocator());
     }
+}
 
-    // Resume appending after a restart: monotonic timestamps must continue
-    // from wherever the file left off.
-    void seed_last_time(ref RecordStream rs)
+
+struct SeriesFetch
+{
+nothrow @nogc:
+
+    Array!String labels;        // path label per series (owned copy; survives the async gap)
+    Array!uint tokens;          // db query token per series; 0 == nothing outstanding
+    Array!(Array!Sample) data;  // per-series samples
+    ulong t0, t1;
+    uint max_points;
+    QueryMode mode;
+    MonoTime started;
+    uint outstanding;           // queries still awaiting their callback
+    bool active;
+
+    void begin(RecordModule mod, scope const(char)[][] paths, ulong t0, ulong t1, uint max_points, QueryMode mode, bool allow_local)
     {
-        File f;
-        if (!f.open(rs.filename[], FileOpenMode.ReadExisting))
-            return; // no file yet
-        scope(exit) f.close();
+        reset();
+        this.t0 = t0;
+        this.t1 = t1;
+        this.max_points = max_points;
+        this.mode = mode;
 
-        ulong size = f.get_size();
-        if (size < RecordFileHeader.sizeof)
-            return;
-
-        RecordFileHeader hdr;
-        size_t bytes;
-        if (!f.read_at((&hdr)[0 .. 1], 0, bytes) || bytes != RecordFileHeader.sizeof ||
-            hdr.magic != RecordFileHeader.init.magic)
+        Array!(RecordStream*) streams;
+        mod.find_streams(paths, streams);
+        uint n = cast(uint)streams.length;
+        labels.resize(n);
+        tokens.resize(n);
+        data.resize(n);
+        foreach (i; 0 .. n)
         {
-            log.warning("'", rs.path[], "': '", rs.filename[], "' is not a record stream file - recording disabled");
-            rs.file_failed = true;
+            RecordStream* rs = streams[i];
+            labels[][i] = rs.path[].makeString(defaultAllocator());
+            tokens[][i] = 0;
+            data[][i].clear();
+            if (allow_local && query_local(*rs, t0, t1, max_points, mode, data[][i]))
+                continue;
+            data[][i].clear();
+            uint tk = database().query(rs.series, t0, t1, max_points, mode, &on_result);
+            if (tk)
+            {
+                tokens[][i] = tk;
+                ++outstanding;
+            }
+        }
+        started = getTime();
+        active = n > 0;
+    }
+
+    // True once every outstanding query has reported (or a timeout fired, so the
+    // caller never hangs on a lost completion). Abandons any stragglers.
+    bool done()
+    {
+        if (!active || outstanding == 0)
+            return true;
+        if (getTime() - started > 5.seconds)
+        {
+            cancel();
+            return true;
+        }
+        return false;
+    }
+
+    // db callback: match the token to its series and copy the samples in.
+    void on_result(uint token, scope const(Sample)[] samples)
+    {
+        foreach (i; 0 .. tokens.length)
+        {
+            if (tokens[][i] != token)
+                continue;
+            data[][i].clear();
+            if (samples.length)
+            {
+                data[][i].resize(samples.length);
+                data[][i][][] = samples[];
+            }
+            tokens[][i] = 0;
+            if (outstanding)
+                --outstanding;
+            break;
+        }
+    }
+
+    // Abandon any in-flight queries (owner torn down, or timed out).
+    void cancel()
+    {
+        if (DbModule db = database())
+        {
+            foreach (i; 0 .. tokens.length)
+            {
+                if (tokens[][i])
+                {
+                    db.cancel(tokens[][i]);
+                    tokens[][i] = 0;
+                }
+            }
+        }
+        outstanding = 0;
+    }
+
+    void reset()
+    {
+        cancel();
+        active = false;
+        labels.clear();
+        tokens.clear();
+        data.clear();
+    }
+}
+
+
+// Render already-fetched series into terminal lines. `panels` mode renders one
+// chart per series, stacked vertically with a shared time range.
+void render_fetch(ref Array!(MutableString!0) lines, ref SeriesFetch f, uint cols, uint rows, ref GraphOptions opt)
+{
+    lines.clear();
+    uint n = cast(uint)f.labels.length;
+    if (n == 0)
+    {
+        lines.pushBack() ~= "no record streams match";
+        return;
+    }
+
+    Array!(GraphSeries!Sample) series;
+    foreach (i; 0 .. n)
+        series ~= GraphSeries!Sample(f.data[][i][], 0, f.labels[][i][]);
+
+    if (opt.mode == GraphMode.panels && n > 1)
+    {
+        uint per = rows / n;
+        if (per < 5)
+        {
+            lines.pushBack() ~= "graph: too many panels for the area";
             return;
         }
 
-        ulong num = (size - RecordFileHeader.sizeof) / Sample.sizeof;
-        if (!num)
-            return;
-        Sample last;
-        if (f.read_at((&last)[0 .. 1], RecordFileHeader.sizeof + (num - 1) * Sample.sizeof, bytes) &&
-            bytes == Sample.sizeof)
-            rs.last_time = last.time;
+        Array!(MutableString!0) sub;
+        foreach (i; 0 .. n)
+        {
+            bool last_panel = i + 1 == n;
+            uint panel_rows = per - 1 + (last_panel ? rows % n : 0);
+            Pixel c = graph_palette[i % graph_palette.length];
+
+            ref MutableString!0 title = lines.pushBack();
+            title.append("\x1b[38;2;", (c >> 16) & 0xFF, ';', (c >> 8) & 0xFF, ';', c & 0xFF, 'm');
+            append_utf8(title, 0x25A0);
+            title.append("\x1b[0m ", f.labels[][i][]);
+
+            GraphOptions po = opt;
+            po.mode = GraphMode.overlay;
+            po.legend = false;
+            po.x_axis = last_panel;
+            po.color = c;
+            render_graph(sub, series[i].samples, f.t0, f.t1, cols, panel_rows, po);
+            foreach (ref l; sub[])
+                lines ~= l.move;
+        }
+        return;
     }
 
-    void file_error(ref RecordStream rs, const(char)[] op)
-    {
-        log.warning("'", rs.path[], "': file ", op, " failed for '", rs.filename[], "' - recording disabled");
-        rs.file_failed = true;
-    }
+    render_graph(lines, series[], f.t0, f.t1, cols, rows, opt);
 }
+
+
+// Base for the latent (async) record commands: submit a fetch, poll until the
+// database answers, then render once.
+abstract class RecordFetchCommand : CommandState
+{
+nothrow @nogc:
+
+    SeriesFetch fetch;
+
+    this(Session session)
+    {
+        super(session, null);
+    }
+
+    override CommandCompletionState update()
+    {
+        if (_cancel)
+        {
+            fetch.reset();
+            return CommandCompletionState.cancelled;
+        }
+        if (!fetch.done())
+            return CommandCompletionState.in_progress;
+        render();
+        return CommandCompletionState.finished;
+    }
+
+    override void request_cancel()
+    {
+        _cancel = true;
+        fetch.cancel(); // a session teardown may freeT us before update() runs again
+    }
+
+    abstract void render();
+
+private:
+    bool _cancel;
+}
+
+
+class RecordQueryCommand : RecordFetchCommand
+{
+nothrow @nogc:
+
+    this(Session session, const(char)[] path)
+    {
+        super(session);
+        _path = path.makeString(defaultAllocator());
+    }
+
+    override void render()
+    {
+        if (fetch.labels.length == 0)
+        {
+            session.write_line("No record stream for '", _path[], "'");
+            return;
+        }
+        foreach (ref s; fetch.data[][0][])
+            session.write_line(getDateTime(from_unix_time_ns(s.time)), "  ", s.value);
+        session.write_line(fetch.data[][0].length, " samples");
+    }
+
+private:
+    String _path;
+}
+
+
+class RecordGraphCommand : RecordFetchCommand
+{
+nothrow @nogc:
+
+    this(Session session, uint cols, uint rows, GraphOptions opt)
+    {
+        super(session);
+        _cols = cols;
+        _rows = rows;
+        _opt = opt;
+    }
+
+    override void render()
+    {
+        Array!(MutableString!0) lines;
+        render_fetch(lines, fetch, _cols, _rows, _opt);
+        foreach (ref l; lines[])
+            session.write_line(l[]);
+    }
+
+private:
+    uint _cols, _rows;
+    GraphOptions _opt;
+}
+
 
 class RecordModule : Module
 {
@@ -760,7 +662,6 @@ nothrow @nogc:
     }
 
     import urt.meta.nullable;
-    import manager.console.command : CommandState;
 
     // expand element path patterns (wildcards and comma-lists allowed) into
     // record streams; capped at the graph palette size
@@ -799,67 +700,6 @@ nothrow @nogc:
             result.resize(graph_palette.length);
     }
 
-    // shared by the static command and the live view: query every matched
-    // stream over [t0, t1] and render. `panels` mode renders one chart per
-    // series, stacked vertically with a shared time range.
-    void render_paths(ref Array!(MutableString!0) lines, scope const(char)[][] paths, ulong t0, ulong t1, uint cols, uint rows, ref GraphOptions opt)
-    {
-        lines.clear();
-
-        Array!(RecordStream*) streams;
-        find_streams(paths, streams);
-        if (streams.empty)
-        {
-            lines.pushBack() ~= "no record streams match";
-            return;
-        }
-
-        uint n = cast(uint)streams.length;
-        Array!(Array!Sample) data;
-        data.resize(n);
-        Array!(GraphSeries!Sample) series;
-        foreach (i; 0 .. n)
-        {
-            query_stream_for_graph(*streams[i], t0, t1, cols * 2, data[][i]);
-            series ~= GraphSeries!Sample(data[][i][], 0, streams[i].path[]);
-        }
-
-        if (opt.mode == GraphMode.panels && n > 1)
-        {
-            uint per = rows / n;
-            if (per < 5)
-            {
-                lines.pushBack() ~= "graph: too many panels for the area";
-                return;
-            }
-
-            Array!(MutableString!0) sub;
-            foreach (i; 0 .. n)
-            {
-                bool last_panel = i + 1 == n;
-                uint panel_rows = per - 1 + (last_panel ? rows % n : 0);
-                Pixel c = graph_palette[i % graph_palette.length];
-
-                ref MutableString!0 title = lines.pushBack();
-                title.append("\x1b[38;2;", (c >> 16) & 0xFF, ';', (c >> 8) & 0xFF, ';', c & 0xFF, 'm');
-                append_utf8(title, 0x25A0);
-                title.append("\x1b[0m ", streams[i].path[]);
-
-                GraphOptions po = opt;
-                po.mode = GraphMode.overlay;
-                po.legend = false;
-                po.x_axis = last_panel;
-                po.color = c;
-                render_graph(sub, series[i].samples, t0, t1, cols, panel_rows, po);
-                foreach (ref l; sub[])
-                    lines ~= l.move;
-            }
-            return;
-        }
-
-        render_graph(lines, series[], t0, t1, cols, rows, opt);
-    }
-
     // /record/graph path=<elem>[,<elem>...] [last=][from=][to=] [mode=] [style=] [height=] [live=yes]
     CommandState graph_cmd(Session session, const(char)[][] path, Nullable!Duration last,
                            Nullable!SysTime from, Nullable!SysTime to, Nullable!GraphMode mode,
@@ -889,35 +729,25 @@ nothrow @nogc:
             w = 80;
         uint h = height ? height.value : 16;
 
-        Array!(MutableString!0) lines;
-        render_paths(lines, path, t0, t1, w, h, opt);
-        foreach (ref l; lines[])
-            session.write_line(l[]);
-        return null;
+        auto cmd = defaultAllocator().allocT!RecordGraphCommand(session, w, h, opt);
+        cmd.fetch.begin(this, path, t0, t1, w * 2, QueryMode.graph, false);
+        return cmd;
     }
 
-    void query_cmd(Session session, const(char)[] path, Nullable!Duration last, Nullable!uint max)
+    CommandState query_cmd(Session session, const(char)[] path, Nullable!Duration last, Nullable!uint max)
     {
-        RecordStream* rs = find_stream(path);
-        if (!rs)
-        {
-            session.write_line("No record stream for '", path, "'");
-            return;
-        }
-
         ulong now = unixTimeNs(getSysTime());
         ulong span = cast(ulong)(last ? last.value : 3600.seconds).as!"nsecs";
         uint max_points = max ? max.value : 24;
 
-        Array!Sample samples;
-        query_stream(*rs, now > span ? now - span : 0, now, max_points, samples);
-        foreach (ref s; samples[])
-            session.write_line(getDateTime(from_unix_time_ns(s.time)), "  ", s.value);
-        session.write_line(samples.length, " samples");
+        auto cmd = defaultAllocator().allocT!RecordQueryCommand(session, path);
+        cmd.fetch.begin(this, (&path)[0 .. 1], now > span ? now - span : 0, now, max_points, QueryMode.raw, false);
+        return cmd;
     }
 }
 
-// Live graph: re-queries a sliding [now - span, now] window a few times a
+
+// Live graph: re-fetches a sliding [now - span, now] window a few times a
 // second, so short spans scroll in realtime. +/- halve/double the span.
 class GraphViewState : LiveViewState
 {
@@ -955,13 +785,29 @@ protected:
 
     override void poll()
     {
-        MonoTime now = getTime();
-        if (!_last_build || now - _last_build >= 250.msecs)
+        if (!_fetch.active && (!_last_build || getTime() - _last_build >= 250.msecs))
+            start_fetch();
+        if (_fetch.active && _fetch.done())
         {
-            rebuild();
+            build_lines();
             request_redraw();
-            _last_build = now;
+            _fetch.active = false;
+            _last_build = getTime();
         }
+    }
+
+    override CommandCompletionState update()
+    {
+        CommandCompletionState st = super.update();
+        if (st != CommandCompletionState.in_progress)
+            _fetch.cancel(); // the view is ending: abandon any in-flight query
+        return st;
+    }
+
+    override void request_cancel()
+    {
+        super.request_cancel();
+        _fetch.cancel(); // a session teardown may freeT us before update() runs again
     }
 
     override bool handle_key(const(char)[] seq)
@@ -971,8 +817,7 @@ protected:
             if (_span > 10.seconds)
             {
                 _span = (_span.as!"msecs" / 2).msecs;
-                rebuild();
-                _last_build = getTime();
+                start_fetch();
             }
             return true;
         }
@@ -981,8 +826,7 @@ protected:
             if (_span < 86_400.seconds)
             {
                 _span = (_span.as!"msecs" * 2).msecs;
-                rebuild();
-                _last_build = getTime();
+                start_fetch();
             }
             return true;
         }
@@ -1003,10 +847,12 @@ private:
     Duration _span;
     GraphOptions _opt;
     uint _height;
+    uint _cols, _rows;
     MonoTime _last_build;
+    SeriesFetch _fetch;
     Array!(MutableString!0) _lines;
 
-    void rebuild()
+    void start_fetch()
     {
         uint w = session.width();
         uint h = session.height();
@@ -1014,7 +860,8 @@ private:
             w = 80;
         if (h == 0)
             h = 24;
-        uint rows = _height ? _height : (h > 2 ? h - 1 : 1);
+        _cols = w;
+        _rows = _height ? _height : (h > 2 ? h - 1 : 1);
 
         ulong t1 = unixTimeNs(getSysTime());
         ulong span_ns = cast(ulong)_span.as!"nsecs";
@@ -1023,110 +870,12 @@ private:
         Array!(const(char)[]) pats;
         foreach (ref p; _paths[])
             pats ~= p[];
-        _mod.render_paths(_lines, pats[], t0, t1, w, rows, _opt);
-    }
-}
-
-private bool find_sample_before(ref RecordStream rs, ulong time, out Sample result)
-{
-    if (time == 0)
-        return false;
-
-    for (uint i = rs.count; i > 0; --i)
-    {
-        ref const Sample s = rs.at(i - 1);
-        if (s.time < time)
-        {
-            result = s;
-            return true;
-        }
+        _fetch.begin(_mod, pats[], t0, t1, _cols * 2, QueryMode.graph, true);
     }
 
-    return read_file_sample_before(rs, time, result);
-}
-
-private bool read_file_sample_before(ref RecordStream rs, ulong time, out Sample result)
-{
-    if (rs.file_failed || time == 0)
-        return false;
-
-    File f;
-    if (!f.open(rs.filename[], FileOpenMode.ReadExisting, FileOpenFlags.Sequential))
-        return false;
-    scope(exit) f.close();
-
-    ulong size = f.get_size();
-    if (size < RecordFileHeader.sizeof + Sample.sizeof)
-        return false;
-    ulong num = (size - RecordFileHeader.sizeof) / Sample.sizeof;
-
-    // Binary search for the first record with time >= `time`; the previous
-    // record is the held value at the left edge of a graph window.
-    ulong lo = 0, hi = num;
-    while (lo < hi)
+    void build_lines()
     {
-        ulong mid = lo + (hi - lo) / 2;
-        Sample s;
-        size_t bytes;
-        if (!f.read_at((&s)[0 .. 1], RecordFileHeader.sizeof + mid * Sample.sizeof, bytes) || bytes != Sample.sizeof)
-            return false;
-        if (s.time < time)
-            lo = mid + 1;
-        else
-            hi = mid;
-    }
-
-    if (lo == 0)
-        return false;
-
-    size_t bytes;
-    return f.read_at((&result)[0 .. 1], RecordFileHeader.sizeof + (lo - 1) * Sample.sizeof, bytes) &&
-        bytes == Sample.sizeof;
-}
-
-private void read_file_range(A)(ref RecordStream rs, ulong from, ulong end, ref A agg)
-{
-    File f;
-    if (!f.open(rs.filename[], FileOpenMode.ReadExisting, FileOpenFlags.Sequential))
-        return;
-    scope(exit) f.close();
-
-    ulong size = f.get_size();
-    if (size < RecordFileHeader.sizeof + Sample.sizeof)
-        return;
-    ulong num = (size - RecordFileHeader.sizeof) / Sample.sizeof;
-
-    // binary search for the first record with time >= from
-    ulong lo = 0, hi = num;
-    while (lo < hi)
-    {
-        ulong mid = lo + (hi - lo) / 2;
-        Sample s;
-        size_t bytes;
-        if (!f.read_at((&s)[0 .. 1], RecordFileHeader.sizeof + mid * Sample.sizeof, bytes) || bytes != Sample.sizeof)
-            return;
-        if (s.time < from)
-            lo = mid + 1;
-        else
-            hi = mid;
-    }
-
-    Sample[256] buf = void;
-    for (ulong i = lo; i < num; )
-    {
-        size_t want = cast(size_t)min(num - i, buf.length);
-        size_t bytes;
-        if (!f.read_at(buf[0 .. want], RecordFileHeader.sizeof + i * Sample.sizeof, bytes))
-            return;
-        size_t got = bytes / Sample.sizeof;
-        if (!got)
-            return;
-        foreach (ref s; buf[0 .. got])
-        {
-            if (s.time >= end)
-                return;
-            agg.put(s);
-        }
-        i += got;
+        GraphOptions po = _opt;
+        render_fetch(_lines, _fetch, _cols, _rows, po);
     }
 }
