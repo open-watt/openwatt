@@ -7,6 +7,7 @@ import urt.map;
 import urt.mem;
 import urt.string;
 import urt.string.format;
+import urt.time : MonoTime;
 import urt.util;
 
 import manager : g_app;
@@ -317,6 +318,12 @@ nothrow @nogc:
     void register_collection(Type)()
     {
         register_collection(collection_type_info!Type);
+
+        static if (is(Type == CollectionRoot!Type) && is(Type : ActiveObject) &&
+                   is(typeof((Type t) => t.heartbeat(MonoTime.init))))
+        {
+            g_app.register_heartbeat_handler((MonoTime now) { Collection!Type().heartbeat(now); });
+        }
     }
 
     void unregister_command(const(char)[] _scope, const(char)[] command)

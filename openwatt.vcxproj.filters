@@ -279,6 +279,9 @@
     <DCompile Include="src\driver\baremetal\system.d">
       <Filter>src\driver\baremetal</Filter>
     </DCompile>
+    <DCompile Include="src\driver\baremetal\watchdog.d">
+      <Filter>src\driver\baremetal</Filter>
+    </DCompile>
     <DCompile Include="src\driver\baremetal\wifi.d">
       <Filter>src\driver\baremetal</Filter>
     </DCompile>
@@ -286,6 +289,9 @@
       <Filter>src\driver</Filter>
     </DCompile>
     <DCompile Include="src\driver\esp32\system.d">
+      <Filter>src\driver\esp32</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\esp32\watchdog.d">
       <Filter>src\driver\esp32</Filter>
     </DCompile>
     <DCompile Include="src\driver\ethernet.d">
@@ -315,6 +321,9 @@
     <DCompile Include="src\driver\linux\raw.d">
       <Filter>src\driver\linux</Filter>
     </DCompile>
+    <DCompile Include="src\driver\linux\supervisor.d">
+      <Filter>src\driver\linux</Filter>
+    </DCompile>
     <DCompile Include="src\driver\linux\sysfs.d">
       <Filter>src\driver\linux</Filter>
     </DCompile>
@@ -328,6 +337,9 @@
       <Filter>src\driver\linux</Filter>
     </DCompile>
     <DCompile Include="src\driver\system.d">
+      <Filter>src\driver</Filter>
+    </DCompile>
+    <DCompile Include="src\driver\watchdog.d">
       <Filter>src\driver</Filter>
     </DCompile>
     <DCompile Include="src\driver\wifi.d">

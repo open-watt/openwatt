@@ -64,9 +64,11 @@
     <DCompile Include="src\devices\goodwe\scanner.d" />
     <DCompile Include="src\driver\baremetal\ble.d" />
     <DCompile Include="src\driver\baremetal\system.d" />
+    <DCompile Include="src\driver\baremetal\watchdog.d" />
     <DCompile Include="src\driver\baremetal\wifi.d" />
     <DCompile Include="src\driver\ble.d" />
     <DCompile Include="src\driver\esp32\system.d" />
+    <DCompile Include="src\driver\esp32\watchdog.d" />
     <DCompile Include="src\driver\ethernet.d" />
     <DCompile Include="src\driver\linux\ble.d" />
     <DCompile Include="src\driver\linux\ctrl_iface.d" />
@@ -76,11 +78,13 @@
     <DCompile Include="src\driver\linux\netlink.d" />
     <DCompile Include="src\driver\linux\nl80211.d" />
     <DCompile Include="src\driver\linux\raw.d" />
+    <DCompile Include="src\driver\linux\supervisor.d" />
     <DCompile Include="src\driver\linux\sysfs.d" />
     <DCompile Include="src\driver\linux\system.d" />
     <DCompile Include="src\driver\linux\wifi.d" />
     <DCompile Include="src\driver\linux\wpa_supplicant.d" />
     <DCompile Include="src\driver\system.d" />
+    <DCompile Include="src\driver\watchdog.d" />
     <DCompile Include="src\driver\wifi.d" />
     <DCompile Include="src\driver\windows\adapter_watcher.d" />
     <DCompile Include="src\driver\windows\ethernet.d" />

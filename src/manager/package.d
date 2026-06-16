@@ -44,6 +44,7 @@ alias IntrinsicFunction = Variant function(Variant[] args) nothrow @nogc;
 alias TimerHandler      = void delegate(MonoTime scheduled) nothrow @nogc;
 alias EventHandler      = void delegate(MonoTime when) nothrow @nogc;
 alias WallclockHandler  = void delegate() nothrow @nogc;
+alias HeartbeatHandler  = void delegate(MonoTime now) nothrow @nogc;
 
 enum EventPriority : ubyte
 {
@@ -418,7 +419,11 @@ nothrow @nogc:
     {
         assert(type_info.type !in types, "Type already registered!");
         types.insert(type_info.type, RegisteredType(type_info, path));
-        note_heartbeat_collection(type_info);
+    }
+
+    void register_heartbeat_handler(HeartbeatHandler handler)
+    {
+        _heartbeat_handlers ~= handler;
     }
 
     void register_enum(E)()
@@ -502,7 +507,7 @@ nothrow @nogc:
         }
     }
 
-    void notify_wallclock_change()
+    void notify_wallclock_change(long)
     {
         foreach (h; _wallclock_handlers)
             h();
@@ -992,7 +997,7 @@ private:
 
         if (++_tick_count >= update_rate_hz)
         {
-            run_heartbeats(getTime());
+            run_heartbeat(getTime());
             _tick_count = 0;
 
             version (Embedded)
@@ -1009,10 +1014,17 @@ private:
 
     void heartbeat(MonoTime scheduled)
     {
-        run_heartbeats(getTime());
+        run_heartbeat(getTime());
         schedule(scheduled + 1.seconds, &heartbeat);
     }
 
+    void run_heartbeat(MonoTime now)
+    {
+        foreach (handler; _heartbeat_handlers)
+            handler(now);
+    }
+
+    Array!HeartbeatHandler _heartbeat_handlers;
     uint _tick_count;
     version (Embedded)
         uint _tick_seconds;

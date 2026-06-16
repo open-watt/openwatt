@@ -13,21 +13,32 @@ import manager.collection;
 import manager.console.session;
 import manager.log : format_log_line;
 
+import driver.watchdog;
+
 import router.stream : Stream;
 import router.stream.console : ConsoleStream;
 
-version (Embedded) version = ImportSystemConf;
+import driver.system : reboot_pending;
 
-version (ESP32_S3)
-    private extern(C) void ow_watchdog_feed() nothrow @nogc;
-version (BL808_M0)
-    private extern(C) void ow_hang_watchdog_feed() nothrow @nogc;
+version (Embedded) version = ImportSystemConf;
 
 nothrow @nogc:
 
 
 int main(string[] args)
 {
+    version (linux)
+    {
+        foreach (a; args.length > 1 ? args[1 .. $] : null)
+        {
+            if (a == "--supervise")
+            {
+                import driver.linux.supervisor : run_supervisor;
+                return run_supervisor(args);
+            }
+        }
+    }
+
     // parse command line arguments
     bool interactive_mode = false;
     const(char)[] config_path = "conf/startup.conf";
@@ -65,6 +76,9 @@ int main(string[] args)
     }
 
     create_application();
+
+    watchdog_init(5.seconds);
+    g_app.register_heartbeat_handler((MonoTime) { watchdog_feed(); });
 
     ConsoleStream console_stream;
     version (Embedded) {}
@@ -160,10 +174,8 @@ int main(string[] args)
         // handle any expired timers (heartbeat-driven update() lives in here).
         MonoTime next_deadline = g_app.process_due();
 
-        version (BL808_M0)
-            ow_hang_watchdog_feed();
-        version (ESP32_S3)
-            ow_watchdog_feed();
+        if (reboot_pending())
+            break;
 
         if (startup_pending && session.is_idle())
         {
@@ -201,7 +213,18 @@ int main(string[] args)
         g_app.process_events();
     }
 
+    watchdog_stop();
+
     shutdown_application();
+
+    if (reboot_pending())
+    {
+        version (linux)
+        {
+            import driver.linux.system : exit_restart;
+            return exit_restart;
+        }
+    }
 
     return 0;
 }

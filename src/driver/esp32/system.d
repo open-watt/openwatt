@@ -10,6 +10,8 @@ void system_reboot()
     esp_restart();
 }
 
+bool reboot_pending() => false;
+
 bool ota_supported() => true;
 
 size_t ota_partition_size()
@@ -41,6 +43,13 @@ void ota_abort(uint handle)
     esp_ota_abort(handle);
 }
 
+void ota_commit()
+{
+    esp_ota_mark_app_valid_cancel_rollback();
+}
+
+void ota_push_policy(uint commit_secs, uint watchdog_ms, uint max_fail) {}
+
 
 private:
 
@@ -66,4 +75,5 @@ private extern (C)
     int esp_ota_end(uint handle);
     int esp_ota_abort(uint handle);
     int esp_ota_set_boot_partition(const(esp_partition_t)* p);
+    int esp_ota_mark_app_valid_cancel_rollback();
 }
