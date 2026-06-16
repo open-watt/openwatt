@@ -13,17 +13,14 @@ import manager.collection;
 import manager.console.session;
 import manager.log : format_log_line;
 
+import driver.watchdog;
+
 import router.stream : Stream;
 import router.stream.console : ConsoleStream;
 
 import driver.system : reboot_pending;
 
 version (Embedded) version = ImportSystemConf;
-
-version (ESP32_S3)
-    private extern(C) void ow_watchdog_feed() nothrow @nogc;
-version (BL808_M0)
-    private extern(C) void ow_hang_watchdog_feed() nothrow @nogc;
 
 nothrow @nogc:
 
@@ -79,6 +76,9 @@ int main(string[] args)
     }
 
     create_application();
+
+    watchdog_init(5.seconds);
+    g_app.register_heartbeat_handler((MonoTime) { watchdog_feed(); });
 
     ConsoleStream console_stream;
     version (Embedded) {}
@@ -166,12 +166,6 @@ int main(string[] args)
     // stop the computer from sleeping while this application is running...
     set_system_idle_params(IdleParams.system_required);
 
-    version (linux)
-    {
-        import driver.linux.system : ota_watchdog_init;
-        ota_watchdog_init();
-    }
-
     version (Embedded)
         log_info("system", "Entering main loop");
 
@@ -179,16 +173,6 @@ int main(string[] args)
     {
         // handle any expired timers (heartbeat-driven update() lives in here).
         MonoTime next_deadline = g_app.process_due();
-
-        version (BL808_M0)
-            ow_hang_watchdog_feed();
-        version (ESP32_S3)
-            ow_watchdog_feed();
-        version (linux)
-        {
-            import driver.linux.system : ota_watchdog_feed;
-            ota_watchdog_feed();
-        }
 
         if (reboot_pending())
             break;
@@ -228,6 +212,8 @@ int main(string[] args)
         g_app.wait_for_wake(next_deadline);
         g_app.process_events();
     }
+
+    watchdog_stop();
 
     shutdown_application();
 

@@ -138,18 +138,12 @@ const(CollectionTypeInfo)* collection_type_info(Type)() nothrow @nogc
         else
             enum bool _syncable = true;
 
-        static if (is(Type : ActiveObject) && is(typeof((Type t) => t.heartbeat(MonoTime.init))))
-            enum CollectionTypeInfo.HeartbeatFn heartbeat_fn = &Type.heartbeat;
-        else
-            enum CollectionTypeInfo.HeartbeatFn heartbeat_fn = null;
-
         __gshared const CollectionTypeInfo ti = CollectionTypeInfo(StringLit!(Type.type_name),
                                                                    StringLit!_path,
                                                                    Type.collection_id,
                                                                    all_properties!Type(),
                                                                    create_instance,
                                                                    get_super_fn,
-                                                                   heartbeat_fn,
                                                                    _syncable);
         return &ti;
     }
@@ -159,7 +153,6 @@ struct CollectionTypeInfo
 {
     alias CreateFun = BaseObject function(ref BaseCollection collection, CID id, ObjectFlags flags = ObjectFlags.none) nothrow @nogc;
     alias GetSuperFn = const(CollectionTypeInfo)* function() nothrow @nogc;
-    alias HeartbeatFn = void function(MonoTime now) nothrow @nogc;
 
     String type;
     String path;
@@ -167,7 +160,6 @@ struct CollectionTypeInfo
     const(Property*)[] properties;
     CreateFun create;
     GetSuperFn get_super;
-    HeartbeatFn heartbeat;
     bool syncable = true;
 
     bool is_abstract() const pure nothrow @nogc
@@ -397,6 +389,16 @@ nothrow @nogc:
         r.advance();
         return r;
     }
+
+    static if (is(Type : ActiveObject) && is(typeof((Type t) => t.heartbeat(MonoTime.init))))
+    {
+        void heartbeat(MonoTime now)
+        {
+            foreach (obj; values)
+                if (obj.running)
+                    obj.heartbeat(now);
+        }
+    }
 }
 
 bool type_matches(const(CollectionTypeInfo)* filter, const(CollectionTypeInfo)* element_type) nothrow @nogc
@@ -462,35 +464,6 @@ void foreach_object(scope void delegate(BaseObject obj) nothrow @nogc fn)
             if (e.value !is null)
                 fn(e.value);
 }
-
-package void note_heartbeat_collection(const(CollectionTypeInfo)* type_info)
-{
-    if (type_info.heartbeat && type_info.get_super is null)
-        g_heartbeat_collections ~= type_info;
-}
-
-void run_heartbeats(MonoTime now)
-{
-    void delegate(MonoTime) nothrow @nogc hb;
-    foreach (type_info; g_heartbeat_collections[])
-    {
-        auto entries = item_table(type_info.collection_id)._entries[];
-        foreach (ref e; entries)
-        {
-            if (e.value is null)
-                continue;
-            if (auto ae = cast(ActiveObject)e.value)
-            {
-                if (!ae.running)
-                    continue;
-                hb.funcptr = ae._typeInfo.heartbeat;
-                hb.ptr = cast(void*)ae;
-                hb(now);
-            }
-        }
-    }
-}
-
 
 mixin template RekeyHandler()
 {
@@ -565,8 +538,6 @@ private:
 
 // HACK: is this satisfactory?
 __gshared Array!ObjectLifecycleHandler _on_object_lifecycle;
-
-__gshared Array!(const(CollectionTypeInfo)*) g_heartbeat_collections;
 
 @fast_data __gshared CollectionTable[CollectionType.count] g_item_tables;
 

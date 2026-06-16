@@ -129,15 +129,7 @@ void ota_abort(uint handle)
     }
 }
 
-void ota_commit() {}
-
-void ota_push_policy(uint commit_secs, uint watchdog_ms, uint max_fail)
-{
-    watchdog_write(tconcat("cfg commit=", commit_secs, " watchdog=", watchdog_ms, " maxfail=", max_fail, "\n"));
-}
-
-
-void ota_watchdog_init()
+void supervisor_attach()
 {
     char* s = getenv("OW_WATCHDOG_FD");
     if (!s)
@@ -146,7 +138,7 @@ void ota_watchdog_init()
     signal_ignore_sigpipe();
 }
 
-void ota_watchdog_feed()
+void supervisor_heartbeat()
 {
     if (g_watchdog_fd < 0)
         return;
@@ -155,6 +147,13 @@ void ota_watchdog_feed()
         return;
     g_last_feed = now;
     watchdog_write("h\n");
+}
+
+void ota_commit() {}
+
+void ota_push_policy(uint commit_secs, uint watchdog_ms, uint max_fail)
+{
+    watchdog_write(tconcat("cfg commit=", commit_secs, " watchdog=", watchdog_ms, " maxfail=", max_fail, "\n"));
 }
 
 

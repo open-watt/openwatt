@@ -8,6 +8,7 @@ import urt.internal.sys.posix : open, close, read, write, fsync, unlink,
                                 stat, stat_t;
 import urt.io : writeln;
 import urt.string.format : tconcat;
+import urt.time : getTime, MonoTime, seconds;
 
 import driver.linux.system : install_dir, exit_restart, mode_0755;
 
@@ -74,7 +75,7 @@ int run_supervisor(string[] args)
         int pending = read_next();
         bool probation = false;
         int target;
-        if (pending >= 0 && fail < max_fail)
+        if (pending >= 0 && fail < g_max_fail)
         {
             target = pending;
             probation = true;
@@ -196,17 +197,32 @@ EndKind launch_and_monitor(int target, bool probation, ref int good, ref int fai
 
 EndKind monitor_child(pid_t pid, int rd, int target, bool probation, ref int good, ref int fail, ref bool committed)
 {
+    MonoTime start = getTime();
+    char[256] line = void;
+    size_t linelen = 0;
+
     for (;;)
     {
         pollfd pfd;
         pfd.fd = rd;
         pfd.events = POLLIN;
-        int pr = poll(&pfd, 1, watchdog_ms);
+        int pr = poll(&pfd, 1, g_watchdog_ms);
+
+        if (probation && !committed && getTime() - start >= seconds(g_commit_secs))
+        {
+            committed = true;
+            good = target;
+            fail = 0;
+            clear_next();
+            write_state(good, fail);
+            slog(tconcat("slot ", target, " soaked ", g_commit_secs, "s; now good"));
+        }
+
         if (pr < 0)
             continue; // EINTR; retry
         if (pr == 0)
         {
-            slog(tconcat("no heartbeat for ", watchdog_ms, "ms; killing app"));
+            slog(tconcat("no heartbeat for ", g_watchdog_ms, "ms; killing app"));
             kill(pid, SIGKILL);
             reap(pid);
             return EndKind.failed;
@@ -218,23 +234,16 @@ EndKind monitor_child(pid_t pid, int rd, int target, bool probation, ref int goo
             ssize_t n = read(rd, buf.ptr, buf.length);
             if (n > 0)
             {
+                // any byte is liveness; complete lines may carry a policy push ("cfg ...")
                 foreach (b; buf[0 .. n])
                 {
-                    if (b == 'c' && !committed)
+                    if (b == '\n')
                     {
-                        committed = true;
-                        // promote a probationary slot to good the moment it proves
-                        // healthy. A redundant 'c' from an already-good slot must NOT
-                        // clear a freshly-staged next-file from a concurrent OTA.
-                        if (probation)
-                        {
-                            good = target;
-                            fail = 0;
-                            clear_next();
-                            write_state(good, fail);
-                            slog(tconcat("slot ", target, " committed; now good"));
-                        }
+                        apply_cfg(line[0 .. linelen]);
+                        linelen = 0;
                     }
+                    else if (linelen < line.length)
+                        line[linelen++] = cast(char)b;
                 }
                 continue;
             }
@@ -243,6 +252,21 @@ EndKind monitor_child(pid_t pid, int rd, int target, bool probation, ref int goo
             break; // EAGAIN: nothing more right now
         }
     }
+}
+
+void apply_cfg(const(char)[] line)
+{
+    if (line.length < 4 || line[0 .. 4] != "cfg ")
+        return;
+    int c = parse_field(line, "commit=");
+    int w = parse_field(line, "watchdog=");
+    int m = parse_field(line, "maxfail=");
+    bool changed;
+    if (c > 0 && c != g_commit_secs) { g_commit_secs = c; changed = true; }
+    if (w > 0 && w != g_watchdog_ms) { g_watchdog_ms = w; changed = true; }
+    if (m > 0 && m != g_max_fail)    { g_max_fail = m;    changed = true; }
+    if (changed)
+        slog(tconcat("adopted policy: commit=", g_commit_secs, "s watchdog=", g_watchdog_ms, "ms maxfail=", g_max_fail));
 }
 
 EndKind reap_status(pid_t pid)
