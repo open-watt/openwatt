@@ -520,20 +520,45 @@ private:
             parser = HTTPParser(&request_callback);
             parser.headers_ready_handler = &headers_ready_callback;
             parser.max_buffered_body = server._max_request_body;
+            // registered last: rx_handler immediately flushes any already-buffered bytes
+            stream.rx_handler(&on_data);
         }
 
         void close()
         {
             if (!stream)
                 return;
+            stream.rx_handler(null);
             stream.destroy();
             stream = null;
+        }
+
+        // never close here: that would free the stream inside its own recv callback.
+        // Terminal conditions flag _finished; the tick sweep in update() reaps.
+        void on_data(Stream s, const(void)[] data, MonoTime)
+        {
+            if (_finished || !stream)
+                return;
+            int result = parser.feed(cast(const(ubyte)[])data, s);
+            if (result < 0)
+                _finished = true;
+            else if (!stream)
+            {
+                // stream claimed (e.g. ws upgrade): drop our handler so the new owner reads it
+                s.rx_handler(null);
+                _finished = true;
+            }
         }
 
         int update()
         {
             if (!stream)
                 return -1;
+            if (_finished)
+            {
+                close();
+                return -1;
+            }
             // `stream` may be nulled out by signal_handler or by a request handler
             // that claims the stream, so pin the reference for the final unsubscribe.
             Stream s = stream;
@@ -609,6 +634,7 @@ private:
     private:
         HTTPParser parser;
         bool _signal_unsubscribed;
+        bool _finished;
 
         void signal_handler(ActiveObject object, StateSignal signal)
         {

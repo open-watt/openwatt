@@ -27,7 +27,10 @@ class OTAUpdater : ActiveObject
     alias Properties = AliasSeq!(Prop!("http-server", http_server),
                                  Prop!("uri", uri),
                                  Prop!("method", method),
-                                 Prop!("reboot-delay", reboot_delay));
+                                 Prop!("reboot-delay", reboot_delay),
+                                 Prop!("commit-time", commit_time),
+                                 Prop!("watchdog", watchdog),
+                                 Prop!("max-fail", max_fail));
 nothrow @nogc:
 
     enum type_name = "ota";
@@ -38,6 +41,9 @@ nothrow @nogc:
     {
         super(collection_type_info!OTAUpdater, id, flags);
         _reboot_delay = 500.msecs;
+        _commit_time = 30.seconds;
+        _watchdog = 5.seconds;
+        _max_fail = 3;
     }
 
     inout(HTTPServer) http_server() inout pure
@@ -80,6 +86,27 @@ nothrow @nogc:
         _reboot_delay = value;
     }
 
+    Duration commit_time() const pure
+        => _commit_time;
+    void commit_time(Duration value)
+    {
+        _commit_time = value;
+    }
+
+    Duration watchdog() const pure
+        => _watchdog;
+    void watchdog(Duration value)
+    {
+        _watchdog = value;
+    }
+
+    uint max_fail() const pure
+        => _max_fail;
+    void max_fail(uint value)
+    {
+        _max_fail = value;
+    }
+
 protected:
     mixin RekeyHandler;
 
@@ -99,7 +126,20 @@ protected:
         _registered = true;
         _http_server.subscribe(&server_state_change);
         _subscribed = true;
+
+        // hand the policy to the supervisor (Linux); arm the soak->mark-valid timer (ESP).
+        ota_push_policy(cast(uint)_commit_time.as!"seconds", cast(uint)_watchdog.as!"msecs", _max_fail);
+        _committed = false;
         return CompletionStatus.complete;
+    }
+
+    override void update()
+    {
+        if (!_committed && getAppTime() >= _commit_time)
+        {
+            ota_commit();
+            _committed = true;
+        }
     }
 
     override CompletionStatus shutdown()
@@ -129,6 +169,10 @@ private:
     String _uri;
     HTTPMethod _method = HTTPMethod.PUT;
     Duration _reboot_delay;
+    Duration _commit_time;
+    Duration _watchdog;
+    uint _max_fail;
+    bool _committed;
     bool _registered;
     bool _subscribed;
     uint _handle;

@@ -2,21 +2,210 @@ module driver.linux.system;
 
 version (linux):
 
+import urt.internal.sys.posix : open, close, write, fsync, unlink, readlink,
+                                ssize_t, mode_t, O_WRONLY, O_CREAT, O_TRUNC;
 import urt.log;
+import urt.string.format : tconcat;
+import urt.time : MonoTime, getTime, msecs;
 
 nothrow @nogc:
 
 
-void system_reboot()
+enum mode_t mode_0755 = 0x1ED;
+enum int exit_restart = 42; // child exit code that asks the supervisor to relaunch
+
+const(char)[] install_dir()
 {
-    import core.stdc.stdlib : exit;
-    log_notice("system", "system_reboot: exiting process");
-    exit(0);
+    if (g_dir_len == 0)
+    {
+        ssize_t n = readlink("/proc/self/exe", g_dir.ptr, g_dir.length);
+        if (n <= 0)
+            return null;
+        size_t end = cast(size_t)n;
+        while (end > 0 && g_dir[end - 1] != '/')
+            --end;
+        g_dir_len = end;
+    }
+    return g_dir[0 .. g_dir_len];
 }
 
-bool   ota_supported() => false;
-size_t ota_partition_size() => 0;
-int    ota_begin(size_t image_size, ref uint handle) { handle = 0; return -1; }
-int    ota_write(uint handle, const(ubyte)[] data) => -1;
-int    ota_end(uint handle) => -1;
-void   ota_abort(uint handle) {}
+int current_slot()
+{
+    char* s = getenv("OW_SLOT");
+    return s ? atoi(s) : -1;
+}
+
+void system_reboot()
+{
+    g_reboot = true;
+}
+
+bool reboot_pending() => g_reboot;
+
+bool ota_supported() => true;
+
+size_t ota_partition_size() => 256 * 1024 * 1024;
+
+int ota_begin(size_t image_size, ref uint handle)
+{
+    if (g_ota_fd >= 0)
+        return -1;
+    const(char)[] dir = install_dir();
+    if (!dir.length)
+        return -1;
+
+    int slot = current_slot();
+    g_ota_slot = (slot >= 0 ? slot : 0) + 1;
+
+    const(char)* part = zpath(g_ota_part, tconcat("openwatt.", g_ota_slot, ".part"));
+    if (!part)
+        return -1;
+    g_ota_fd = open(part, O_WRONLY | O_CREAT | O_TRUNC, mode_0755);
+    if (g_ota_fd < 0)
+    {
+        log_error("ota", "open ", g_ota_part.ptr[0 .. cstrlen(g_ota_part.ptr)], " failed");
+        return -1;
+    }
+    handle = cast(uint)(g_ota_slot);
+    return 0;
+}
+
+int ota_write(uint handle, const(ubyte)[] data)
+{
+    if (g_ota_fd < 0)
+        return -1;
+    size_t off = 0;
+    while (off < data.length)
+    {
+        ssize_t n = write(g_ota_fd, data.ptr + off, data.length - off);
+        if (n <= 0)
+            return -1;
+        off += n;
+    }
+    return 0;
+}
+
+int ota_end(uint handle)
+{
+    if (g_ota_fd < 0)
+        return -1;
+    fsync(g_ota_fd);
+    close(g_ota_fd);
+    g_ota_fd = -1;
+
+    char[4096] final_buf = void;
+    const(char)* final_path = zpath(final_buf, tconcat("openwatt.", g_ota_slot));
+    if (!final_path || rename(g_ota_part.ptr, final_path) != 0)
+    {
+        log_error("ota", "rename to slot ", g_ota_slot, " failed");
+        return -1;
+    }
+
+    // hand the staged slot to the supervisor; it launches it on the next restart.
+    char[4096] next_buf = void;
+    const(char)* next_path = zpath(next_buf, "openwatt.next");
+    if (next_path)
+    {
+        int fd = open(next_path, O_WRONLY | O_CREAT | O_TRUNC, mode_0755);
+        if (fd >= 0)
+        {
+            const(char)[] txt = tconcat(g_ota_slot, '\n');
+            write(fd, txt.ptr, txt.length);
+            fsync(fd);
+            close(fd);
+        }
+    }
+    log_notice("ota", "staged slot ", g_ota_slot, "; restart to apply");
+    return 0;
+}
+
+void ota_abort(uint handle)
+{
+    if (g_ota_fd >= 0)
+    {
+        close(g_ota_fd);
+        g_ota_fd = -1;
+        unlink(g_ota_part.ptr);
+    }
+}
+
+void ota_commit() {}
+
+void ota_push_policy(uint commit_secs, uint watchdog_ms, uint max_fail)
+{
+    watchdog_write(tconcat("cfg commit=", commit_secs, " watchdog=", watchdog_ms, " maxfail=", max_fail, "\n"));
+}
+
+
+void ota_watchdog_init()
+{
+    char* s = getenv("OW_WATCHDOG_FD");
+    if (!s)
+        return;
+    g_watchdog_fd = atoi(s);
+    signal_ignore_sigpipe();
+}
+
+void ota_watchdog_feed()
+{
+    if (g_watchdog_fd < 0)
+        return;
+    MonoTime now = getTime();
+    if (g_last_feed != MonoTime.init && now - g_last_feed < msecs(500))
+        return;
+    g_last_feed = now;
+    watchdog_write("h\n");
+}
+
+
+private:
+
+enum int SIGPIPE = 13;
+
+__gshared char[4096] g_dir;
+__gshared size_t g_dir_len; // length incl. trailing '/'; 0 until resolved
+__gshared int g_ota_fd = -1;
+__gshared int g_ota_slot;
+__gshared char[4096] g_ota_part; // null-terminated ".part" path of the in-progress write
+__gshared int g_watchdog_fd = -1;
+__gshared MonoTime g_last_feed;
+__gshared bool g_reboot;
+
+extern(C) nothrow @nogc
+{
+    void* signal(int signum, void* handler);
+    char* getenv(scope const(char)* name);
+    int chmod(scope const(char)* path, mode_t mode);
+    int rename(scope const(char)* oldp, scope const(char)* newp);
+    int atoi(scope const(char)* s);
+}
+
+void signal_ignore_sigpipe()
+{
+    signal(SIGPIPE, cast(void*)1); // SIG_IGN: a dead supervisor must not kill us via the pipe
+}
+
+void watchdog_write(const(char)[] s)
+{
+    if (g_watchdog_fd >= 0)
+        write(g_watchdog_fd, s.ptr, s.length);
+}
+
+size_t cstrlen(const(char)* s)
+{
+    size_t n = 0;
+    while (s[n])
+        ++n;
+    return n;
+}
+
+const(char)* zpath(char[] buf, const(char)[] name)
+{
+    const(char)[] dir = install_dir();
+    if (dir.length + name.length + 1 > buf.length)
+        return null;
+    buf[0 .. dir.length] = dir[];
+    buf[dir.length .. dir.length + name.length] = name[];
+    buf[dir.length + name.length] = '\0';
+    return buf.ptr;
+}

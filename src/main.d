@@ -16,6 +16,8 @@ import manager.log : format_log_line;
 import router.stream : Stream;
 import router.stream.console : ConsoleStream;
 
+import driver.system : reboot_pending;
+
 version (Embedded) version = ImportSystemConf;
 
 version (ESP32_S3)
@@ -28,6 +30,18 @@ nothrow @nogc:
 
 int main(string[] args)
 {
+    version (linux)
+    {
+        foreach (a; args.length > 1 ? args[1 .. $] : null)
+        {
+            if (a == "--supervise")
+            {
+                import driver.linux.supervisor : run_supervisor;
+                return run_supervisor(args);
+            }
+        }
+    }
+
     // parse command line arguments
     bool interactive_mode = false;
     const(char)[] config_path = "conf/startup.conf";
@@ -152,6 +166,12 @@ int main(string[] args)
     // stop the computer from sleeping while this application is running...
     set_system_idle_params(IdleParams.system_required);
 
+    version (linux)
+    {
+        import driver.linux.system : ota_watchdog_init;
+        ota_watchdog_init();
+    }
+
     version (Embedded)
         log_info("system", "Entering main loop");
 
@@ -164,6 +184,14 @@ int main(string[] args)
             ow_hang_watchdog_feed();
         version (ESP32_S3)
             ow_watchdog_feed();
+        version (linux)
+        {
+            import driver.linux.system : ota_watchdog_feed;
+            ota_watchdog_feed();
+        }
+
+        if (reboot_pending())
+            break;
 
         if (startup_pending && session.is_idle())
         {
@@ -202,6 +230,15 @@ int main(string[] args)
     }
 
     shutdown_application();
+
+    if (reboot_pending())
+    {
+        version (linux)
+        {
+            import driver.linux.system : exit_restart;
+            return exit_restart;
+        }
+    }
 
     return 0;
 }
