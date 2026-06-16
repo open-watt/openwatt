@@ -402,9 +402,9 @@ protected:
                         Packet p;
                         ref hdr = p.init!RawFrame(msg[offset .. msg_len], timestamp);
                         hdr.is_text = _pending_message_type == WSMessageType.text;
-                        _status.rx_bytes += _rx_overhead; // dispatch() counts the payload; we add framing
+                        _status.rx_bytes += _rx_overhead; // incoming_packet() counts the payload; we add framing
                         _rx_overhead = 0;
-                        dispatch(p);
+                        incoming_packet(p);
 
                         frame_start += msg_len;
                         _pending_message_type = WSMessageType.unknown;
@@ -429,7 +429,7 @@ protected:
                     hdr.is_text = _pending_message_type == WSMessageType.text;
                     _status.rx_bytes += _rx_overhead;
                     _rx_overhead = 0;
-                    dispatch(p);
+                    incoming_packet(p);
 
                     _pending_message_type = WSMessageType.unknown;
                     _decoded_bytes = 0;

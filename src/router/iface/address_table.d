@@ -82,6 +82,21 @@ nothrow @nogc:
             _backing.remove(key);
     }
 
+    int opApply(scope int delegate(ulong address, ubyte port) nothrow @nogc dg)
+    {
+        foreach (i; 0 .. _len)
+        {
+            if (int r = dg(_keys[i], _values[i]))
+                return r;
+        }
+        foreach (ref kvp; _backing)
+        {
+            if (int r = dg(kvp.key, kvp.value))
+                return r;
+        }
+        return 0;
+    }
+
     void remove_port(ubyte port_index)
     {
         ulong[64] remove_buf = void;

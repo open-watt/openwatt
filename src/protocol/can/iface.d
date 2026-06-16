@@ -54,8 +54,33 @@ struct CANFrame
         return addr;
     }
 
-    static bool is_broadcast(ulong address) pure nothrow @nogc
+    static bool is_multicast(ulong address) pure nothrow @nogc
         => true; // CAN is always broadcast
+
+    // OW encapsulation wire codec: [id:4 BE][flags:1] (bit0 = extended, bit1 = rtr)
+    static ptrdiff_t encode_ow_header(ref const Packet p, ubyte[] buffer) nothrow @nogc
+    {
+        import urt.endian : nativeToBigEndian;
+        if (buffer.length < 5)
+            return -1;
+        ref const f = p.hdr!CANFrame;
+        buffer[0 .. 4] = f.id.nativeToBigEndian;
+        buffer[4] = (f.extended ? 1 : 0) | (f.remote_transmission_request ? 2 : 0);
+        return 5;
+    }
+
+    static ptrdiff_t decode_ow_header(ref Packet p, const(ubyte)[] header) nothrow @nogc
+    {
+        import urt.endian : bigEndianToNative;
+        if (header.length < 5)
+            return -1;
+        p.type = PacketType.can;
+        ref f = p.hdr!CANFrame;
+        f.id = header[0 .. 4].bigEndianToNative!uint;
+        f.extended = (header[4] & 1) != 0;
+        f.remote_transmission_request = (header[4] & 2) != 0;
+        return 5;
+    }
 }
 
 
@@ -330,7 +355,7 @@ protected:
                 version (DebugCANInterface)
                     writeDebug("CAN packet received from interface '", name, "': id=", can.id, " (", packet.length , ")[ ", packet.data, " - ", packet.data.bin_to_ascii(), " ]");
 
-                dispatch(packet);
+                incoming_packet(packet);
             }
 
             // shuffle remaining unparsed bytes to the front for the next read
@@ -347,11 +372,6 @@ protected:
         // can only handle can packets
         if (packet.type != PacketType.can)
         {
-            if (packet.type == PacketType.ethernet && packet.eth.ether_type == EtherType.ow && packet.eth.ow_sub_type == OW_SubType.can)
-            {
-                // de-frame CANoE...
-                assert(false, "TODO");
-            }
             add_tx_drop();
             return -1;
         }
@@ -482,7 +502,7 @@ private:
             can.id = hw.id;
             can.extended = hw.extended;
             can.remote_transmission_request = hw.rtr;
-            dispatch(packet);
+            incoming_packet(packet);
         }
     }
 }

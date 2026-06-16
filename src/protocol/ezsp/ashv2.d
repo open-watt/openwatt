@@ -423,7 +423,7 @@ private:
         {
             Packet p;
             p.init!RawFrame(data, timestamp);
-            dispatch(p);
+            incoming_packet(p);
         }
 
         ack_in_flight(ack_num, timestamp);

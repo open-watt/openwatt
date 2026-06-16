@@ -16,6 +16,7 @@ import manager.plugin;
 
 import router.iface;
 import router.iface.address_table;
+import router.iface.ethernet;
 import router.iface.vlan;
 
 nothrow @nogc:
@@ -40,7 +41,13 @@ void register_bridge_offload_hooks(MemberAddedHook member_added, CpuPromiscHook 
 }
 
 
-class BridgeInterface : BaseInterface
+// Bridge switches two domains, split by InterfaceCaps.ethernet:
+//  - the ethernet domain: ethernet members, the kernel-offloaded segment via the
+//    CPU conduit, and the attachment (frames addressed to the bridge itself)
+//  - the exotic domain: exotic members, local delivery, and the attachment
+//    (exotic packets crossing the ethernet domain OW-encapsulated)
+// The attachment appears in both: it is where the domains meet.
+class BridgeInterface : EthernetStation
 {
     alias Properties = AliasSeq!(Prop!("vlan-filtering", vlan_filtering),
                                  Prop!("pvid", pvid),
@@ -133,7 +140,7 @@ nothrow @nogc:
     bool add_member(BaseInterface iface, ushort pvid = 1, bool ingress_filtering = true, bool untagged_egress = true)
     {
         assert(iface !is this, "Cannot add a bridge to itself!");
-        assert(_members.length < 256, "Too many _members in the bridge!");
+        assert(_members.length < _cpu_port, "Too many _members in the bridge!"); // member indices live below the pseudo-ports
         assert(!(iface.flags & ObjectFlags.slave), "Interface is already slaved!");
 
         ubyte port = cast(ubyte)_members.length;
@@ -157,6 +164,10 @@ nothrow @nogc:
                     _address_table.insert(ulong(map.universal_address) | (ulong(vlan) << 48) | (ulong(PacketType.modbus) << 60), port);
             }
         }
+
+        // a new ethernet member extends the segment: re-prime the neighbour table
+        if (running && (iface.caps & InterfaceCaps.ethernet))
+            station_link_up();
 
         // Member added to a running bridge: let the backend (re-)evaluate offload --
         // a second netdev member may newly qualify it, or an already-offloaded
@@ -235,29 +246,31 @@ nothrow @nogc:
     }
 
     // Ingress from the kernel-switched ethernet segment (the offload module drains
-    // the CPU-port socket and feeds frames here).
+    // the CPU-port socket and feeds frames here). This is a switching ingress like
+    // any member port, with src = _cpu_port.
     void cpu_port_incoming(ref Packet packet)
     {
         if (!running || !_cpu.active)
             return;
 
-        // Intra-segment unicast the kernel already switched can still surface here
-        // when the CPU port is promiscuous (a sniffer is attached). The kernel has
-        // delivered it among the netdev members -- nothing for OW to do.
+        // Promisc surfaces frames the kernel already switched among its own ports
+        // (a sniffer is attached): feed subscribers, nothing else to do.
         ulong dst = get_network_dst_address(packet);
         if (!dst.is_multicast_address)
         {
             int dp = _address_table.get(dst);
-            if (dp >= 0 && dp != _local_port && _members[dp].offloaded)
+            if (dp >= 0 && (dp == _cpu_port || (dp < _members.length && _members[dp].offloaded)))
+            {
+                fire_subscribers(packet);
                 return;
+            }
         }
 
-        // dispatch() fires bridge subscribers (sniff) and delivers bridge-addressed
-        // frames to OW's L3 handlers. Forwarding kernel-segment frames on to
-        // non-netdev members is the (today-inert) cross-domain seam: PacketType
-        // sub-domains don't share frames yet. TODO: wrap-and-forward once an
-        // OW-ethertype carrier exists.
-        dispatch(packet);
+        ulong src = get_network_src_address(packet);
+        if (!src.is_multicast_address)
+            _address_table.insert(src, _cpu_port);
+
+        send(packet, _cpu_port);
     }
 
     // The CPU port only needs promiscuous mode to feed a sniffer; bridge-addressed
@@ -387,7 +400,7 @@ protected:
                 cb(entry.bridge_tag, MessageState.aborted);
             recycle_tracking(entry);
         }
-        return CompletionStatus.complete;
+        return super.shutdown();
     }
 
     override void update()
@@ -407,6 +420,46 @@ protected:
         else
             _address_table.insert(key, _local_port);
         return true;
+    }
+
+    // The medium is the switched ethernet domain: wrapped frames from the station
+    // enter switching at the attachment.
+    final override void medium_tx(ref Packet packet)
+    {
+        send(packet, _attach_port);
+    }
+
+    // Decapped exotic traffic enters the exotic switching domain at the attachment.
+    final override void station_deliver(ref Packet inner)
+    {
+        ulong src_address = get_network_src_address(inner);
+        if (!src_address.is_multicast_address)
+            _address_table.insert(src_address, _attach_port);
+
+        send(inner, _attach_port);
+    }
+
+    final override bool station_owns(ulong address)
+    {
+        if (cast(PacketType)(address >> 60) == PacketType.ethernet)
+            return false;
+        int port = _address_table.get(address);
+        return port >= 0 && software_domain_port(cast(ubyte)port);
+    }
+
+    final override void station_list(PacketType type, scope void delegate(ulong address) nothrow @nogc sink)
+    {
+        foreach (ulong address, ubyte port; _address_table)
+        {
+            if (!software_domain_port(port))
+                continue;
+            PacketType t = cast(PacketType)(address >> 60);
+            if (t == PacketType.ethernet)
+                continue;
+            if (type != PacketType.unknown && t != type)
+                continue;
+            sink(address);
+        }
     }
 
     final override void slave_incoming(ref Packet packet, byte slave_id)
@@ -452,14 +505,6 @@ protected:
                     // TODO: check if port is a member of tag_vlan...
                     assert(false, "TODO");
                 }
-
-                if (packet.eth.ether_type == EtherType.ow)
-                {
-                    if (packet.data.length < 2)
-                        goto drop_packet;
-                    packet.eth.ow_sub_type = loadBigEndian(++tag);
-                    packet._offset += 2;
-                }
             }
             else
                 src_vlan = (packet.vlan & 0xF000) | port.pvid;
@@ -484,7 +529,7 @@ protected:
                 int dst_port = _address_table.get(dst_address);
                 if (dst_port >= 0)
                 {
-                    if (dst_port != src_port && dst_port != _local_port)
+                    if (dst_port != src_port && dst_port < _members.length)
                         log.trace("forward: ", packet.eth.src, " -> ", _members[dst_port].iface.name, "(", packet.eth.dst, ") [", packet.data, "]");
                 }
                 else
@@ -499,8 +544,9 @@ protected:
 
 private:
 
-    enum ubyte _local_port = 0xFE;
-    enum ubyte _cpu_port = 0xFD;    // kernel-offloaded ethernet segment, reached via the CPU-port AF_PACKET on br-<name>
+    enum ubyte _local_port  = 0xFE;
+    enum ubyte _attach_port = 0xFD; // the station (EthernetStation): where the exotic and ethernet domains meet
+    enum ubyte _cpu_port    = 0xFC; // kernel-offloaded ethernet segment, reached via the CPU-port AF_PACKET on br-<name>
     enum _tracking_batch_size = 4;
 
     struct CpuPort
@@ -591,11 +637,22 @@ private:
     TagTracking* _tracking_active;
     TagAllocator _bridge_tags;
 
+    // an exotic address is ours if it lives behind a software-domain port (a local
+    // endpoint or an exotic member), not across the ethernet domain
+    bool software_domain_port(ubyte port)
+    {
+        if (port == _attach_port || port == _cpu_port)
+            return false;
+        if (port == _local_port)
+            return true;
+        return port < _members.length && !(_members[port].iface.caps & InterfaceCaps.ethernet);
+    }
+
     void local_dispatch(ref Packet packet)
     {
         if (!_vlan_filtering)
         {
-            dispatch(packet);
+            incoming_packet(packet);
             return;
         }
 
@@ -604,7 +661,7 @@ private:
         {
             if (_bridge_port.untagged_egress)
                 packet.vlan &= 0xF000;
-            dispatch(packet);
+            incoming_packet(packet);
             return;
         }
         // walk inherited _vlans Array for the matching sub-iface
@@ -624,6 +681,8 @@ private:
         if (!running)
             return;
 
+        bool is_eth = packet.type == PacketType.ethernet;
+
         ulong address = get_network_dst_address(packet);
         if (!address.is_multicast_address)
         {
@@ -636,6 +695,18 @@ private:
                 if (dst_port == _local_port)
                 {
                     local_dispatch(packet);
+                }
+                else if (dst_port == _attach_port)
+                {
+                    // exotic packet crossing to the ethernet domain
+                    if (!is_eth && !station_egress(packet))
+                        add_tx_drop();
+                }
+                else if (dst_port == _cpu_port)
+                {
+                    // host across the kernel-switched segment; inject via the CPU port
+                    if (_cpu.active && is_eth)
+                        _cpu.send(packet);
                 }
                 else if (_members[dst_port].offloaded)
                 {
@@ -666,35 +737,51 @@ private:
             }
         }
 
-        // broadcast, or unknown sender...
+        // broadcast, or unknown destination: flood within the packet's switching domain
         foreach (i, ref member; _members)
         {
-            if (i != src_port && !member.offloaded && member.iface.running)
-            {
-                if (_vlan_filtering)
-                {
-                    if (packet.vlan == member.pvid)
-                    {
-                        if (member.untagged_egress)
-                            packet.vlan &= 0xF000; // should we leave the pcp bits in-tact?
-                    }
-                    else
-                    {
-                        // check if bridge port is a vlan member?
-                        assert(false);
-                    }
-                }
+            if (i == src_port || member.offloaded || !member.iface.running)
+                continue;
+            bool eth_member = (member.iface.caps & InterfaceCaps.ethernet) != 0;
+            if (eth_member != is_eth)
+                continue;
 
-                if (member.iface.forward(packet) < 0)
-                    add_tx_drop();
+            if (_vlan_filtering)
+            {
+                if (packet.vlan == member.pvid)
+                {
+                    if (member.untagged_egress)
+                        packet.vlan &= 0xF000; // should we leave the pcp bits in-tact?
+                }
+                else
+                {
+                    // check if bridge port is a vlan member?
+                    assert(false);
+                }
             }
+
+            if (member.iface.forward(packet) < 0)
+                add_tx_drop();
         }
-        // flood once into the kernel-switched ethernet segment (split-horizon: not
-        // when the frame came from there). The kernel floods among the netdev members.
-        if (_cpu.active && src_port != _cpu_port)
-            _cpu.send(packet);
-        if (src_port != _local_port)
-            local_dispatch(packet);
+
+        if (is_eth)
+        {
+            // flood once into the kernel-switched ethernet segment (split-horizon: not
+            // when the frame came from there). The kernel floods among the netdev members.
+            if (_cpu.active && src_port != _cpu_port)
+                _cpu.send(packet);
+            // ethernet local delivery is the attachment itself
+            if (src_port != _local_port && src_port != _attach_port)
+                local_dispatch(packet);
+        }
+        else
+        {
+            // exotic floods cross the attachment once; the wrapped frame floods the ethernet domain
+            if (src_port != _attach_port)
+                station_egress(packet);
+            if (src_port != _local_port)
+                local_dispatch(packet);
+        }
     }
 
     TagTracking* alloc_tracking()
@@ -756,6 +843,8 @@ private:
         if (!running)
             return -1;
 
+        bool is_eth = packet.type == PacketType.ethernet;
+
         TagTracking* tracking = alloc_tracking();
         bool any_succeeded = false;
 
@@ -772,7 +861,17 @@ private:
                     return 0;
                 }
 
-                if (_members[dst_port].offloaded)
+                if (dst_port == _attach_port)
+                {
+                    // crossing to the ethernet domain is synchronous
+                    recycle_tracking(tracking);
+                    if (is_eth || !station_egress(packet))
+                        return -1;
+                    add_tx_frame(packet.data.length);
+                    return 0;
+                }
+
+                if (dst_port == _cpu_port || _members[dst_port].offloaded)
                 {
                     // kernel switches the ethernet segment; inject via the CPU port
                     // (fire-and-forget -- AF_PACKET sendto has no ack to track).
@@ -816,10 +915,11 @@ private:
             }
         }
 
-        // broadcast / unknown destination
+        // broadcast / unknown destination: flood within the packet's switching domain
         foreach (i, ref member; _members)
         {
-            if (!member.iface.running || member.offloaded)
+            bool eth_member = (member.iface.caps & InterfaceCaps.ethernet) != 0;
+            if (!member.iface.running || member.offloaded || eth_member != is_eth)
                 continue;
 
             if (_vlan_filtering)
@@ -843,12 +943,21 @@ private:
                 any_succeeded = true;
         }
 
-        // flood into the kernel-switched ethernet segment (send_tracked is only
-        // called for the bridge's own egress, so src is never the CPU port).
-        if (_cpu.active)
+        if (is_eth)
         {
-            _cpu.send(packet);
-            any_succeeded = true;
+            // flood into the kernel-switched ethernet segment (send_tracked is only
+            // called for the bridge's own egress, so src is never the CPU port).
+            if (_cpu.active)
+            {
+                _cpu.send(packet);
+                any_succeeded = true;
+            }
+        }
+        else
+        {
+            // exotic floods cross the attachment; the wrapped frame floods the ethernet domain
+            if (station_egress(packet))
+                any_succeeded = true;
         }
 
         if (tracking.pending == 0)

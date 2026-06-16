@@ -62,6 +62,55 @@ struct ModbusFrame
     ubyte src_address;
     ubyte dst_address;
     ubyte function_code;
+
+    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    {
+        ulong addr = p.hdr!ModbusFrame().src_address;
+        addr |= ulong(p.vlan & 0xFFF) << 48;
+        addr |= ulong(PacketType.modbus) << 60;
+        return addr;
+    }
+
+    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    {
+        ulong addr = p.hdr!ModbusFrame().dst_address;
+        addr |= ulong(p.vlan & 0xFFF) << 48;
+        addr |= ulong(PacketType.modbus) << 60;
+        return addr;
+    }
+
+    static bool is_multicast(ulong addr) pure nothrow @nogc
+        => (addr & 0x7F) == 0;
+
+    // OW encapsulation wire codec: [seq:2 BE][type:1][src:1][dst:1][fnc:1]
+    static ptrdiff_t encode_ow_header(ref const Packet p, ubyte[] buffer) nothrow @nogc
+    {
+        import urt.endian : nativeToBigEndian;
+        if (buffer.length < 6)
+            return -1;
+        ref const f = p.hdr!ModbusFrame;
+        buffer[0 .. 2] = f.sequence_number.nativeToBigEndian;
+        buffer[2] = f.type;
+        buffer[3] = f.src_address;
+        buffer[4] = f.dst_address;
+        buffer[5] = f.function_code;
+        return 6;
+    }
+
+    static ptrdiff_t decode_ow_header(ref Packet p, const(ubyte)[] header) nothrow @nogc
+    {
+        import urt.endian : bigEndianToNative;
+        if (header.length < 6)
+            return -1;
+        p.type = PacketType.modbus;
+        ref f = p.hdr!ModbusFrame;
+        f.sequence_number = header[0 .. 2].bigEndianToNative!ushort;
+        f.type = cast(ModbusFrameType)header[2];
+        f.src_address = header[3];
+        f.dst_address = header[4];
+        f.function_code = header[5];
+        return 6;
+    }
 }
 
 
@@ -643,7 +692,7 @@ private:
                     break;
                 }
                 offset += taken;
-                incoming_packet(message, rx_time, frame_info);
+                incoming_frame(message, rx_time, frame_info);
             }
             if (!partial)
                 length = 0;
@@ -865,7 +914,7 @@ private:
         log.info("estimated remote baud rate: ", closest);
     }
 
-    final void incoming_packet(const(void)[] message, MonoTime recvTime, ref ModbusFrameInfo frame_info)
+    final void incoming_frame(const(void)[] message, MonoTime recvTime, ref ModbusFrameInfo frame_info)
     {
         debug assert(running, "Shouldn't receive packets while not running...?");
 
@@ -962,7 +1011,7 @@ private:
                     hdr.src_address = address;
                     hdr.dst_address = pm.request_from_address;
                     hdr.sequence_number = pm.sequence_number;
-                    dispatch(p);
+                    incoming_packet(p);
                     _queue.complete(matched_tag, MessageState.complete);
                 }
 
@@ -981,7 +1030,7 @@ private:
                     hdr.src_address = address;
                     hdr.dst_address = pm.request_from_address;
                     hdr.sequence_number = pm.sequence_number;
-                    dispatch(p);
+                    incoming_packet(p);
                     _queue.complete(tag, MessageState.complete);
                 }
                 else
@@ -1017,7 +1066,7 @@ private:
             }
             hdr.sequence_number = seq;
 
-            dispatch(p);
+            incoming_packet(p);
 
             _expect_message_type = type == ModbusFrameType.request ? ModbusFrameType.response : ModbusFrameType.request;
         }

@@ -102,6 +102,53 @@ struct BLEFrame
         => cast(BLEAdvPDU)code;
     BLEControl control() const pure nothrow @nogc
         => cast(BLEControl)code;
+
+    static ulong extract_src(ref const Packet p) pure nothrow @nogc
+    {
+        ulong addr = p.hdr!BLEFrame().src.ul;
+        addr |= ulong(p.vlan & 0xFFF) << 48;
+        addr |= ulong(PacketType.ble) << 60;
+        return addr;
+    }
+
+    static ulong extract_dst(ref const Packet p) pure nothrow @nogc
+    {
+        ulong addr = p.hdr!BLEFrame().dst.ul;
+        addr |= ulong(p.vlan & 0xFFF) << 48;
+        addr |= ulong(PacketType.ble) << 60;
+        return addr;
+    }
+
+    static bool is_multicast(ulong address) pure nothrow @nogc
+        => (address & 0xFFFF_FFFF_FFFF) == 0xFFFF_FFFF_FFFF;
+
+    // OW encapsulation wire codec: [src:6][dst:6][kind:1][code:1][rssi:1]
+    static ptrdiff_t encode_ow_header(ref const Packet p, ubyte[] buffer) nothrow @nogc
+    {
+        if (buffer.length < 15)
+            return -1;
+        ref const f = p.hdr!BLEFrame;
+        buffer[0 .. 6] = f.src.b[];
+        buffer[6 .. 12] = f.dst.b[];
+        buffer[12] = f.kind;
+        buffer[13] = f.code;
+        buffer[14] = cast(ubyte)f.rssi;
+        return 15;
+    }
+
+    static ptrdiff_t decode_ow_header(ref Packet p, const(ubyte)[] header) nothrow @nogc
+    {
+        if (header.length < 15)
+            return -1;
+        p.type = PacketType.ble;
+        ref f = p.hdr!BLEFrame;
+        f.src = MACAddress(header[0 .. 6]);
+        f.dst = MACAddress(header[6 .. 12]);
+        f.kind = cast(BLEFrameKind)header[12];
+        f.code = header[13];
+        f.rssi = cast(byte)header[14];
+        return 15;
+    }
 }
 static assert(BLEFrame.sizeof <= 24);
 
@@ -113,12 +160,15 @@ abstract class BLEInterface : BaseInterface
     alias Properties = AliasSeq!(Prop!("max-in-flight", max_in_flight));
 nothrow @nogc:
 
+    MACAddress _bd_addr; // synthetic local BD_ADDR; the radio's real address is below this layer
+
     protected this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(type_info, id, flags);
         _mtu = 247; // BLE 5.x max ATT MTU (251 - 4 byte L2CAP header)
         _max_l2mtu = 251;
         _l2mtu = _max_l2mtu;
+        _bd_addr = generate_mac_address(name[]);
 
         mark_set!(typeof(this), "max-l2mtu")();
     }
@@ -357,7 +407,7 @@ protected:
             log_frame(f, cast(const(ubyte)[])p.data, PacketDirection.incoming);
 
         _status.rx_bytes += 14;
-        dispatch(p);
+        incoming_packet(p);
     }
 
     // --- session lifecycle ---

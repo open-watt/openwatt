@@ -7,6 +7,7 @@ import urt.time;
 import protocol.ip : IPv4Header, IPProtocol;
 
 import router.iface;
+import router.iface.ethernet;
 import router.iface.mac;
 import router.iface.packet;
 
@@ -248,7 +249,7 @@ nothrow @nogc:
 
     // Frame the IP+UDP+DHCP payload and hand it to the interface for transmission.
     // src_port/dst_port choose the BOOTP direction (server -> client uses 67->68).
-    void transmit(BaseInterface iface, IPAddr src, IPAddr dst, MACAddress eth_dst, ushort src_port, ushort dst_port)
+    void transmit(EthernetStation iface, IPAddr src, IPAddr dst, MACAddress eth_dst, ushort src_port, ushort dst_port)
     {
         ubyte[] frame = buf[0 .. total_len];
         size_t udp_len = total_len - IPv4Header.sizeof;

@@ -528,7 +528,7 @@ private:
 
                 Packet p;
                 ref f = p.init!BLEFrame(null);
-                f.src = mac;
+                f.src = _bd_addr;
                 f.dst = session.client;
                 f.kind = BLEFrameKind.control;
                 f.code = BLEControl.disconnected;
