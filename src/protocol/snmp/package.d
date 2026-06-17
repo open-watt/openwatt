@@ -21,6 +21,8 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.register_enum!SNMPVersion();
+
         g_app.console.register_collection!SNMPClient();
         g_app.console.register_collection!SNMPAgent();
     }

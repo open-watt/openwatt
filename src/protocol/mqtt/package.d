@@ -8,6 +8,7 @@ import manager.plugin;
 import protocol.mqtt.binding;
 import protocol.mqtt.broker;
 import protocol.mqtt.client;
+import protocol.mqtt.codec;
 
 nothrow @nogc:
 
@@ -19,6 +20,8 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.register_enum!ProtocolLevel();
+
         g_app.console.register_collection!MQTTBroker();
         g_app.console.register_collection!MQTTClient();
         g_app.console.register_collection!MQTTBinding();

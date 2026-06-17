@@ -129,6 +129,8 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.register_enum!HTTPMethod();
+
         g_app.console.register_collection!HTTPClient();
         g_app.console.register_collection!HTTPServer();
         g_app.console.register_collection!StaticFileServer();
