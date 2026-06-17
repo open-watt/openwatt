@@ -2,8 +2,8 @@ module driver.linux.system;
 
 version (linux):
 
-import urt.internal.sys.posix : open, close, write, fsync, unlink, readlink,
-                                ssize_t, mode_t, O_WRONLY, O_CREAT, O_TRUNC;
+import urt.endian : LittleEndian;
+import urt.internal.sys.posix : open, close, write, fsync, unlink, readlink, pread, ssize_t, mode_t, O_WRONLY, O_RDWR, O_CREAT, O_TRUNC;
 import urt.log;
 import urt.string.format : tconcat;
 import urt.time : MonoTime, getTime, msecs;
@@ -60,7 +60,7 @@ int ota_begin(size_t image_size, ref uint handle)
     const(char)* part = zpath(g_ota_part, tconcat("openwatt.", g_ota_slot, ".part"));
     if (!part)
         return -1;
-    g_ota_fd = open(part, O_WRONLY | O_CREAT | O_TRUNC, mode_0755);
+    g_ota_fd = open(part, O_RDWR | O_CREAT | O_TRUNC, mode_0755);
     if (g_ota_fd < 0)
     {
         log_error("ota", "open ", g_ota_part.ptr[0 .. cstrlen(g_ota_part.ptr)], " failed");
@@ -90,6 +90,14 @@ int ota_end(uint handle)
     if (g_ota_fd < 0)
         return -1;
     fsync(g_ota_fd);
+    if (!validate_elf(g_ota_fd))
+    {
+        log_error("ota", "uploaded image is not a compatible Linux ELF executable");
+        close(g_ota_fd);
+        g_ota_fd = -1;
+        unlink(g_ota_part.ptr);
+        return -1;
+    }
     close(g_ota_fd);
     g_ota_fd = -1;
 
@@ -207,4 +215,53 @@ const(char)* zpath(char[] buf, const(char)[] name)
     buf[dir.length .. dir.length + name.length] = name[];
     buf[dir.length + name.length] = '\0';
     return buf.ptr;
+}
+
+bool validate_elf(int fd)
+{
+    enum ubyte elf_class_32 = 1;
+    enum ubyte elf_class_64 = 2;
+    enum ubyte elf_data_lsb = 1;
+    enum ubyte elf_data_msb = 2;
+    enum ushort et_exec = 2;
+    enum ushort et_dyn = 3;
+
+    ubyte[64] hdr = void;
+    ssize_t n = pread(fd, hdr.ptr, hdr.length, 0);
+    if (n < 24)
+        return false;
+    if (hdr[0] != 0x7f || hdr[1] != 'E' || hdr[2] != 'L' || hdr[3] != 'F')
+        return false;
+
+    ubyte expected_class = size_t.sizeof == 8 ? elf_class_64 : elf_class_32;
+    if (hdr[4] != expected_class)
+        return false;
+
+    ubyte expected_data = LittleEndian ? elf_data_lsb : elf_data_msb;
+    if (hdr[5] != expected_data || hdr[6] != 1)
+        return false;
+
+    ushort type = elf_u16(hdr, 16);
+    if (type != et_exec && type != et_dyn)
+        return false;
+
+    return elf_u16(hdr, 18) == expected_elf_machine;
+}
+
+ushort elf_u16(ref const ubyte[64] hdr, size_t off)
+{
+    if (hdr[5] == 1)
+        return cast(ushort)(hdr[off] | (hdr[off + 1] << 8));
+    return cast(ushort)((hdr[off] << 8) | hdr[off + 1]);
+}
+
+ushort expected_elf_machine()
+{
+    version (X86)        return 3;   // EM_386
+    else version (X86_64) return 62;  // EM_X86_64
+    else version (ARM)    return 40;  // EM_ARM
+    else version (AArch64) return 183; // EM_AARCH64
+    else version (RISCV32) return 243; // EM_RISCV
+    else version (RISCV64) return 243; // EM_RISCV
+    else static assert(false, "Linux OTA ELF validation does not know this architecture");
 }
