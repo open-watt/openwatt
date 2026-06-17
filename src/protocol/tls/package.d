@@ -18,6 +18,9 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.register_enum!CertType();
+        g_app.register_enum!CertStatus();
+
         g_app.console.register_collection!Certificate();
         g_app.console.register_collection!TLSStream();
         g_app.console.register_collection!TLSServer();

@@ -29,6 +29,8 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.register_enum!TelnetRole();
+
         g_app.console.register_collection!TelnetStream();
         g_app.console.register_command!add_server("/protocol/telnet/server", this, "add");
         g_app.console.register_command!telnet("/tools", this);
