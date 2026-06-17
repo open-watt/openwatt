@@ -327,7 +327,7 @@ private:
             session.write_output(tformat("\x1b[?1049l\x1b[{0};1H\x1b[K\r\n\x1b[?25h", h), false);
         }
         else if (_mode == LiveViewMode.inline_ && _has_cursor)
-            session.write_output("\r\n\x1b[?25h", false);
+            session.write_output("\r\x1b[?25h", false);
         else if (_has_cursor)
             session.write_output("\x1b[?25h", false);
     }
