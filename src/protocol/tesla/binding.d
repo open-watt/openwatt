@@ -113,10 +113,10 @@ nothrow @nogc:
         {
             switch (e.id[])
             {
-                case "target_current":  e.value(CentiAmps(charger.target_current));                                       break;
+                case "setpoint":        e.value(CentiAmps(charger.target_current));                                       break;
                 case "state":           e.value(charger.charger_state);                                                   break;
                 case "twc_state":       e.value(charger.state);                                                           break;
-                case "max_current":     e.value(CentiAmps(charger.max_current));                                          break;
+                case "max":             e.value(CentiAmps(charger.max_current));                                          break;
                 case "current":         e.value(CentiAmps((charger.flags & 2) ? charger.current : 0));                    break;
                 case "voltage1":        e.value(Volts((charger.flags & 2) ? charger.voltage1 : 0));                       break;
                 case "voltage2":        e.value(Volts((charger.flags & 2) ? charger.voltage2 : 0));                       break;
@@ -159,12 +159,19 @@ protected:
         _elements ~= find_or_create_element(info, "lifetime_energy");
         _elements ~= find_or_create_element(info, "vin");
 
-        Component cc = find_or_create_component(device, "charge_control", "ChargeControl");
-        _elements ~= find_or_create_element(cc, "state");
-        _elements ~= find_or_create_element(cc, "twc_state");
-        _target_current = find_or_create_element(cc, "target_current", Access.read_write);
+        Component evse = find_or_create_component(device, "evse", "EVSE");
+        _elements ~= find_or_create_element(evse, "state");
+        _elements ~= find_or_create_element(evse, "twc_state");
+
+        Component control = find_or_create_component(evse, "control", "PowerControl");
+        set_constant(find_or_create_element(control, "kind"), "continuous");
+        set_constant(find_or_create_element(control, "direction"), "consume");
+        set_constant(find_or_create_element(control, "unit"), "A");
+        set_constant(find_or_create_element(control, "step"), 1);
+        set_constant(find_or_create_element(control, "min"), CentiAmps(500));
+        _target_current = find_or_create_element(control, "setpoint", Access.read_write);
         _elements ~= _target_current;
-        _elements ~= find_or_create_element(cc, "max_current");
+        _elements ~= find_or_create_element(control, "max");
 
         Component meter = find_or_create_component(device, "meter", "EnergyMeter");
         set_constant(find_or_create_element(meter, "type"), "three-phase");

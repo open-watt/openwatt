@@ -4,6 +4,7 @@ import urt.array;
 import urt.lifetime;
 import urt.map;
 import urt.meta.enuminfo;
+import urt.si.quantity : VarQuantity;
 import urt.string;
 import urt.time;
 
@@ -53,14 +54,10 @@ enum AutonomousMode : ubyte
 }
 
 
-// Backend's view of an actuator. Synthesized by ControlRegistry from one or
-// more Appliances. Lifecycle is managed entirely by the registry; nothing
-// outside the registry should construct or destroy a Control directly.
 struct Control
 {
 nothrow @nogc:
 
-    // The actuator-bearing appliance (where setpoint lives).
     Appliance owner;
 
     // Optional contributing partner — e.g. a paired car appliance whose BLE
@@ -68,8 +65,6 @@ nothrow @nogc:
     // setpoint. Null for non-composite controls.
     Appliance partner;
 
-    // Convenience refs to the actuator component (within owner.device_ref or
-    // partner.device_ref). Used by allocator for path-headroom etc.
     Device device;
     Component source;
 
@@ -106,7 +101,6 @@ nothrow @nogc:
     // owner.state_ref, partner.state_ref, or discovered on owner.device_ref.
     Element* state_e;
 
-    // Allocator-owned runtime state; no upstream source.
     MonoTime last_transition;
     float current_setpoint = float.nan;
 
@@ -161,6 +155,10 @@ nothrow @nogc:
     float step()            const => read_float(step_e);
     float nameplate_power() const => read_float(nameplate_power_e);
     float ramp_rate()       const => read_float(ramp_rate_e);
+
+    VarQuantity min_q()       const => read_quantity(min_e);
+    VarQuantity max_q()       const => read_quantity(max_e);
+    VarQuantity nameplate_q() const => read_quantity(nameplate_power_e);
 
     Duration min_on_time()      const => read_duration(min_on_time_e);
     Duration min_off_time()     const => read_duration(min_off_time_e);
@@ -279,9 +277,9 @@ private:
             return null;
         if (root.template_[] == "PowerControl" || root.template_[] == "Switch")
             return root;
-        if (Component pc = root.get_first_component_by_template("PowerControl"))
+        if (Component pc = root.find_first_component_by_template_recursive("PowerControl"))
             return pc;
-        if (Component sw = root.get_first_component_by_template("Switch"))
+        if (Component sw = root.find_first_component_by_template_recursive("Switch"))
             return sw;
         return null;
     }
@@ -429,11 +427,23 @@ private:
 
 private:
 
+// Normalise to SI base units so the scalar accessors (used for display and for
+// scalar comparison against meter-derived values) are unit-consistent regardless
+// of how the device stores them — e.g. the TWC's CentiAmps and the SmartEVSE's Amps
+// both read back as amps.
 float read_float(const(Element)* e)
 {
     if (e is null || !e.value.isNumber)
         return float.nan;
-    return e.value.asFloat();
+    return cast(float)e.normalised_value();
+}
+
+// Dimensioned read: the value with its unit/scale intact (NaN-valued if absent).
+VarQuantity read_quantity(const(Element)* e)
+{
+    if (e is null || !e.value.isNumber)
+        return VarQuantity.nan;
+    return e.value.asQuantity();
 }
 
 Duration read_duration(const(Element)* e)

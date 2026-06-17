@@ -3,6 +3,7 @@ module apps.energy.allocator;
 import urt.array;
 import urt.lifetime;
 import urt.mem.temp : tconcat;
+import urt.si.quantity : Amps, VarQuantity;
 import urt.string;
 import urt.time;
 
@@ -83,10 +84,10 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                 // TODO: drive full-rate is a strawman. Should consult planner's
                 //       required_kwh + time_to_deadline to pick a smarter setpoint
                 //       (modulate down when slack is large; conserve battery for higher tiers).
-                float setpoint = ctl.max;
-                if (setpoint != setpoint)
-                    setpoint = ctl.nameplate_power;
-                if (setpoint != setpoint)
+                VarQuantity setpoint = ctl.max_q;
+                if (setpoint.value != setpoint.value)
+                    setpoint = ctl.nameplate_q;
+                if (setpoint.value != setpoint.value)
                 {
                     record_decision(energy_device, p, "no max/nameplate", float.nan, now);
                     continue;
@@ -96,7 +97,7 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                 {
                     Circuit* circuit = find_circuit_for_appliance(p.target_appliance);
                     float headroom = path_headroom_amps(circuit);
-                    if (headroom == headroom && setpoint > headroom)
+                    if (headroom == headroom && setpoint.normalise().value > headroom)
                     {
                         float min_amps = ctl.min;
                         if (headroom < (min_amps == min_amps ? min_amps : 0))
@@ -104,7 +105,7 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                             record_decision(energy_device, p, "no path headroom", float.nan, now);
                             continue;
                         }
-                        setpoint = headroom;
+                        setpoint = Amps(headroom);
                         reason = "drive (headroom-clamped)";
                     }
                 }
@@ -112,9 +113,10 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                 //       convert headroom_amps -> headroom_W. Boolean needs nameplate_power
                 //       to decide if turning on would breach the circuit budget.
                 ctl.setpoint.value(setpoint, now);
-                ctl.current_setpoint = setpoint;
+                float commanded = cast(float)setpoint.normalise().value;
+                ctl.current_setpoint = commanded;
                 ctl.last_transition = mt;
-                record_decision(energy_device, p, reason, setpoint, now);
+                record_decision(energy_device, p, reason, commanded, now);
                 break;
             case expression:
                 // TODO: expression goals shouldn't always drive `true`. The right shape is
@@ -185,6 +187,24 @@ float path_headroom_amps(Circuit* circuit)
     return any ? min_headroom : float.nan;
 }
 
+// A value carrying the control's unit, borrowed from a known numeric element, so a
+// written setpoint keeps its dimension and the actuator's handler can cast it to its
+// native scale. Falls back to dimensionless only if nothing on the control is numeric.
+VarQuantity unit_quantity(ref Control ctl, double value)
+{
+    const(Element)*[3] refs = [ctl.setpoint, ctl.max_e, ctl.min_e];
+    foreach (e; refs)
+    {
+        if (e !is null && e.value.isNumber)
+        {
+            VarQuantity q = e.value.asQuantity();
+            q.value = value;
+            return q;
+        }
+    }
+    return VarQuantity(value);
+}
+
 void release_control(ref Control ctl, SysTime now, MonoTime mt)
 {
     if (ctl.setpoint is null)
@@ -198,12 +218,12 @@ void release_control(ref Control ctl, SysTime now, MonoTime mt)
     }
     else if (ctl.can_disable)
     {
-        ctl.setpoint.value(0.0f, now);
+        ctl.setpoint.value(unit_quantity(ctl, 0), now);
     }
     else
     {
-        float mn = ctl.min;
-        if (mn == mn)
+        VarQuantity mn = ctl.min_q;
+        if (mn.value == mn.value)
             ctl.setpoint.value(mn, now);
         // TODO: !can_disable && no min — silently leave the previous setpoint. Could write
         //       0 anyway and let the device clamp, or surface a warning. Decide once we hit
