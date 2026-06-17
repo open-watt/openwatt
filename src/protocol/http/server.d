@@ -517,6 +517,7 @@ private:
             this.stream = stream;
             this.redirect_handler = redirect_handler;
             stream.subscribe(&signal_handler);
+            _subscribed = true;
             parser = HTTPParser(&request_callback);
             parser.headers_ready_handler = &headers_ready_callback;
             parser.max_buffered_body = server._max_request_body;
@@ -529,6 +530,7 @@ private:
             if (!stream)
                 return;
             stream.rx_handler(null);
+            unsubscribe_signal(stream);
             stream.destroy();
             stream = null;
         }
@@ -544,13 +546,9 @@ private:
                 _finished = true;
             else if (!stream)
             {
-                // stream claimed (e.g. ws upgrade): drop our handler so the new owner reads it
+                // stream claimed (e.g. ws upgrade): drop our hooks so the new owner reads it
                 s.rx_handler(null);
-                if (!_signal_unsubscribed)
-                {
-                    s.unsubscribe(&signal_handler);
-                    _signal_unsubscribed = true;
-                }
+                unsubscribe_signal(s);
                 _finished = true;
             }
         }
@@ -575,8 +573,7 @@ private:
             }
             if (!stream)
             {
-                if (!_signal_unsubscribed)
-                    s.unsubscribe(&signal_handler);
+                unsubscribe_signal(s);
                 return -1;
             }
             return 0;
@@ -638,15 +635,22 @@ private:
 
     private:
         HTTPParser parser;
-        bool _signal_unsubscribed;
+        bool _subscribed;
         bool _finished;
+
+        void unsubscribe_signal(Stream s)
+        {
+            if (!_subscribed)
+                return;
+            s.unsubscribe(&signal_handler);
+            _subscribed = false;
+        }
 
         void signal_handler(ActiveObject object, StateSignal signal)
         {
             if (signal != StateSignal.online)
             {
-                stream.unsubscribe(&signal_handler);
-                _signal_unsubscribed = true;
+                unsubscribe_signal(stream);
                 stream = null;
             }
         }
