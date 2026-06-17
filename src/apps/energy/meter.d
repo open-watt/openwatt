@@ -937,10 +937,14 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         }
     }
 
-    if (r.voltage[0] > Volts(300))
+    if (r.type != CircuitType.dc)
     {
         import urt.log;
-        writeWarning("High voltage detected on meter ", meter.id, ": ", r.voltage[0]);
+        const float v = r.voltage[0].value;
+        if (v > 260)
+            writeWarning("High voltage detected on meter ", meter.id, ": ", r.voltage[0]);
+        else if (v > 40 && v < 80)  // >40 floor: 0V means the meter is offline, not a brownout
+            writeWarning("Low voltage detected on meter ", meter.id, ": ", r.voltage[0]);
     }
 
     return r;

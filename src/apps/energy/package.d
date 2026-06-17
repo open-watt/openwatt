@@ -450,19 +450,31 @@ nothrow @nogc:
         enum tPipe   = "│  ";
         enum tBlank  = "   ";
 
+        // "--" for absent (NaN) readings; only stringify live values.
+        static const(char)[] fmt(T)(T v, const(char)[] suffix = "")
+        {
+            static if (is(typeof(v.value) : double))
+                const double f = v.value;
+            else
+                const double f = v;
+            return f != f ? "--" : tconcat(v, suffix);
+        }
+
         void add_meter_row(ref Table t, const(char)[] prefix, const(char)[] name, ref MeterData data)
         {
             t.add_row();
             t.cell(tconcat(prefix, name));
-            t.cell(tconcat(data.active[0]));
-            t.cell(tconcat(data.total_import_active[0] * 0.001f, "kWh"));
-            t.cell(tconcat(data.total_export_active[0] * 0.001f, "kWh"));
-            t.cell(tconcat(data.apparent[0], "VA"));
-            t.cell(tconcat(data.reactive[0], "var"));
-            t.cell(tconcat(data.voltage[0]));
-            t.cell(tconcat(data.current[0]));
-            t.cell(tconcat(data.pf[0], " (", data.phase[0] * 360, "°)"));
-            t.cell(tconcat(data.freq, "Hz"));
+            t.cell(fmt(data.active[0]));
+            t.cell(fmt(data.total_import_active[0] * 0.001f, "kWh"));
+            t.cell(fmt(data.total_export_active[0] * 0.001f, "kWh"));
+            t.cell(fmt(data.apparent[0], "VA"));
+            t.cell(fmt(data.reactive[0], "var"));
+            t.cell(fmt(data.voltage[0]));
+            t.cell(fmt(data.current[0]));
+            t.cell(data.pf[0] != data.pf[0] ? "--"
+                 : data.phase[0] != data.phase[0] ? tconcat(data.pf[0])
+                 : tconcat(data.pf[0], " (", data.phase[0], "°)"));
+            t.cell(fmt(data.freq, "Hz"));
         }
 
         void add_span_row(ref Table t, const(char)[] prefix, const(char)[] name, const(char)[] detail)
@@ -528,8 +540,9 @@ nothrow @nogc:
                             detail ~= "  ";
                         }
                     }
-                    detail.append(sub_data.active[0], "  ", sub_data.voltage[0], "  ", sub_data.current[0], "  (",
-                        sub_data.total_import_active[0] * 0.001f, "/", sub_data.total_export_active[0] * 0.001f, "kWh)");
+                    detail.append(fmt(sub_data.active[0]), "  ", fmt(sub_data.voltage[0]), "  ",
+                        fmt(sub_data.current[0]), "  (", fmt(sub_data.total_import_active[0] * 0.001f), "/",
+                        fmt(sub_data.total_export_active[0] * 0.001f), "kWh)");
                     add_span_row(t, tconcat(a_prefix, last_drill ? tLast : tBranch), sub.id[], detail[]);
                 }
                 if (a.paired_with !is null)
@@ -790,11 +803,14 @@ void collect_drilldown(Component device, ref Array!Component into)
 {
     if (device is null)
         return;
-    Component solar_root = device.get_first_component_by_template("Solar");
+
+    Component root = device.get_first_component_by_template("Inverter");
+    if (root is null)
+        root = device;
+
+    Component solar_root = root.get_first_component_by_template("Solar");
     if (solar_root !is null)
     {
-        // If there's an outer Solar wrapper with nested Solar children, list
-        // the children; otherwise list the wrapper itself.
         Array!Component nested = solar_root.find_components_by_template("Solar");
         if (nested.length > 0)
         {
@@ -806,7 +822,7 @@ void collect_drilldown(Component device, ref Array!Component into)
             into ~= solar_root;
         }
     }
-    if (Component battery = device.get_first_component_by_template("Battery"))
+    if (Component battery = root.get_first_component_by_template("Battery"))
         into ~= battery;
 }
 

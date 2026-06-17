@@ -87,16 +87,19 @@ nothrow @nogc:
         foreach (c; sub_circuits)
             c.update();
 
-        // Update attached appliances' meter_data
         foreach (a; appliances)
         {
             Component am = a.meter_ref;
+            if (am is null && a.device_ref !is null)
+                am = a.device_ref.get_first_component_by_template("EnergyMeter");
             if (am)
             {
                 MeterData raw = get_meter_data(am);
                 CircuitType atype = a.meter_phase != 0 ? CircuitType.single_phase : raw.type;
                 a.meter_data = extract_phase(raw, atype, a.meter_phase);
             }
+            else
+                a.meter_data.reset_to_missing();
         }
 
         meter_data.reset_to_missing();
