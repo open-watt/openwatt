@@ -119,6 +119,13 @@ Can be nested for grouped parameters. Standard network sub-components:
 
 Electrical and energy measurements.
 
+A device's **top-level `meter`** is its energy exchange with the circuit it is
+attached to: the device's own load, or for a source (e.g. an inverter) its
+contribution, measured at its connection point. This is the meter the energy app
+attributes to the device's circuit. A meter that measures a *different* node, such
+as an inverter's export-limiting CT at the property gateway, belongs on a
+sub-component (e.g. `inverter.export_meter`), not the device root.
+
 ### Required
 - `type: string` - "single-phase", "three-phase", or "dc"
 
@@ -351,13 +358,17 @@ Solar/battery/hybrid inverter with optional grid, battery, renewable inputs, and
 - `efficiency: %` - Current conversion efficiency
 - `bus_voltage: V` - DC bus voltage
 
+The inverter's AC output (its exchange with the circuit it is wired to) is the
+**device-root `meter`**, a sibling of the `inverter` component, not a sub-component
+below. The sub-components below describe the inverter's other ports and references.
+
 ### Sub-components
 - `solar: Solar` - Solar PV input(s)
 - `battery: Battery` - Connected battery system
 - `charge_control: ChargeControl` - Battery charge controller (for managing battery charging)
-- `load: EnergyMeter` - Inverter load
+- `export_meter: EnergyMeter` - Export-limiting / self-consumption reference meter at the property gateway (point of common coupling); measures the whole-site grid interface, not the inverter's own output
+- `load: EnergyMeter` - A dedicated load port the inverter meters (e.g. controlled-load / on-grid load output)
 - `backup: EnergyMeter` - Backup/EPS output
-- `export_meter: EnergyMeter` - External energy meter for self-consumption reference
 - `evse: EVSE` - Integrated EV charger (for inverters with built-in EVSE)
 - `config: InverterConfig` - Static inverter ratings and capabilities
 
@@ -613,16 +624,24 @@ device-template:
         id: meter
         template: EnergyMeter
         element: type, "single-phase"
-        element-map: voltage, @grid_voltage
-        element-map: current, @grid_current
-        element-map: power, @grid_power
-        element-map: frequency, @grid_frequency
+        element-map: voltage, @inv_ac_voltage
+        element-map: current, @inv_ac_current
+        element-map: power, @inv_ac_power
+        element-map: frequency, @inv_ac_frequency
     component:
         id: inverter
         template: Inverter
         element-map: state, @inv_state
         element-map: temp, @inv_temp
         element-map: bus_voltage, @dc_bus_voltage
+        component:
+            id: export_meter
+            template: EnergyMeter
+            element: type, "single-phase"
+            element-map: voltage, @grid_voltage
+            element-map: current, @grid_current
+            element-map: power, @grid_power
+            element-map: frequency, @grid_frequency
         component:
             id: solar
             template: Solar
