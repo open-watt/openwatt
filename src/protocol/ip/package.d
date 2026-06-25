@@ -554,8 +554,6 @@ nothrow @nogc:
                 total += b.length;
             if (total == 0)
                 return 0;
-            if (_tx.length + total > max_tx)
-                return 0;
             foreach (b; data)
                 _tx ~= cast(const(ubyte)[])b;
             flush_tx();
@@ -607,7 +605,7 @@ nothrow @nogc:
             size_t total = 0;
             foreach (b; data)
                 total += b.length;
-            if (total == 0 || total > max_tx)
+            if (total == 0)
                 return 0;
             // overlapped send owns its buffer until completion; copy and hand to the worker
             ubyte[] owned = cast(ubyte[])defaultAllocator().alloc(total);
@@ -641,6 +639,8 @@ nothrow @nogc:
             if (_closing)
                 return;
             _closing = true;
+            _on_recv = null;
+            _on_event = null;
             _worker.destroy_ep(EntryKind.tcp_conn, cast(size_t)&this);
         }
     }
@@ -757,8 +757,11 @@ private:
         if (_phase == Phase.dead)
             return;
         _phase = Phase.dead;
-        if (_on_event)
-            _on_event(&this, ev);
+        TCPEventHandler handler = _on_event;
+        _on_recv = null;
+        _on_event = null;
+        if (handler)
+            handler(&this, ev);
     }
 
     version (UseInternalIPStack)
@@ -775,12 +778,7 @@ private:
             {
                 case Phase.connecting:
                     if (_pcb.state == TcpState.established)
-                    {
-                        _phase = Phase.open;
-                        _remote = InetAddress(_pcb.remote_addr, _pcb.remote_port);
-                        if (_on_event)
-                            _on_event(&this, IPEvent.connected);
-                    }
+                        mark_connected();
                     else if (_pcb.error_event || _pcb.state == TcpState.closed)
                         fail(IPEvent.error);
                     break;
@@ -797,8 +795,18 @@ private:
             }
         }
 
+        void mark_connected()
+        {
+            _phase = Phase.open;
+            _remote = InetAddress(_pcb.remote_addr, _pcb.remote_port);
+            if (_on_event)
+                _on_event(&this, IPEvent.connected);
+        }
+
         package(protocol.ip) void deliver(const(ubyte)[] data, MonoTime rx_time)
         {
+            if (_phase == Phase.connecting && _pcb && _pcb.state == TcpState.established)
+                mark_connected();
             if (_on_recv)
                 _on_recv(&this, data, rx_time);
         }
@@ -1314,6 +1322,14 @@ __gshared Array!(TCPConnection*) _tcp_conns;
 __gshared Array!(TCPListener*)   _tcp_listeners;
 __gshared Array!(UDPEndpoint*)   _udp_eps;
 
+
+bool tcp_conn_registered(TCPConnection* c)
+{
+    foreach (conn; _tcp_conns[])
+        if (conn is c)
+            return true;
+    return false;
+}
 
 IPAddr v4_addr(ref const InetAddress a) pure
     => a.family == AddressFamily.ipv4 ? a._a.ipv4.addr : IPAddr.any;
@@ -2046,11 +2062,11 @@ else version (Windows)
                         if (!u._closing && u._on_recv)
                             u._on_recv(u, ev.buffer, ev.from, ev.rx_time);
                     }
-                    else if (!c._closing && c._on_recv)
+                    else if (tcp_conn_registered(c) && !c._closing && c._on_recv)
                         c._on_recv(c, ev.buffer, ev.rx_time);
                     break;
                 case EvKind.connected:
-                    if (!c._closing && c._phase == TCPConnection.Phase.connecting)
+                    if (tcp_conn_registered(c) && !c._closing && c._phase == TCPConnection.Phase.connecting)
                     {
                         c._phase = TCPConnection.Phase.open;
                         if (c._on_event)
@@ -2058,11 +2074,11 @@ else version (Windows)
                     }
                     break;
                 case EvKind.peer_closed:
-                    if (!c._closing)
+                    if (tcp_conn_registered(c) && !c._closing)
                         c.fail(IPEvent.closed);
                     break;
                 case EvKind.error:
-                    if (!c._closing)
+                    if (tcp_conn_registered(c) && !c._closing)
                         c.fail(IPEvent.error);
                     break;
                 case EvKind.accepted:
@@ -2426,11 +2442,13 @@ else
                 Result r = e.socket.accept(child, &remote);
                 if (r.failed)
                 {
-                    if (r.socket_result == SocketResult.would_block)
-                        return true;
-                    e.dead = true;
-                    posted = true;
-                    return push(Ev(EvKind.error, e.kind, e.ep));
+                    if (r.socket_result == SocketResult.invalid_socket || r.socket_result == SocketResult.invalid_argument)
+                    {
+                        e.dead = true;
+                        posted = true;
+                        return push(Ev(EvKind.error, e.kind, e.ep));
+                    }
+                    return true;
                 }
                 child.set_socket_option(SocketOption.non_blocking, true);
 
@@ -2540,7 +2558,7 @@ else
                     else
                     {
                         TCPConnection* c = cast(TCPConnection*)ev.ep;
-                        if (!c._closing && c._on_recv)
+                        if (tcp_conn_registered(c) && !c._closing && c._on_recv)
                             c._on_recv(c, ev.buffer, ev.rx_time);
                     }
                     break;
@@ -2548,7 +2566,7 @@ else
                 case EvKind.connected:
                 {
                     TCPConnection* c = cast(TCPConnection*)ev.ep;
-                    if (!c._closing && c._phase == TCPConnection.Phase.connecting)
+                    if (tcp_conn_registered(c) && !c._closing && c._phase == TCPConnection.Phase.connecting)
                     {
                         c._phase = TCPConnection.Phase.open;
                         c._socket.get_peer_name(c._remote);
@@ -2564,14 +2582,14 @@ else
                 case EvKind.peer_closed:
                 {
                     TCPConnection* c = cast(TCPConnection*)ev.ep;
-                    if (!c._closing)
+                    if (tcp_conn_registered(c) && !c._closing)
                         c.fail(IPEvent.closed);
                     break;
                 }
                 case EvKind.error:
                 {
                     TCPConnection* c = cast(TCPConnection*)ev.ep;
-                    if (!c._closing)
+                    if (tcp_conn_registered(c) && !c._closing)
                         c.fail(IPEvent.error);
                     break;
                 }
