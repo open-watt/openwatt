@@ -22,6 +22,9 @@ import driver.system : reboot_pending;
 
 version (Embedded) version = ImportSystemConf;
 
+version (Windows)    version = SoftwareWatchdogFeed;
+else version (linux) version = SoftwareWatchdogFeed;
+
 nothrow @nogc:
 
 
@@ -29,6 +32,9 @@ int main(string[] args)
 {
     version (linux)
     {
+        import driver.linux.system : ignore_sigpipe;
+        ignore_sigpipe();
+
         foreach (a; args.length > 1 ? args[1 .. $] : null)
         {
             if (a == "--supervise")
@@ -77,8 +83,16 @@ int main(string[] args)
 
     create_application();
 
+    version (SoftwareWatchdogFeed)
+    {
+        watchdog_set_feed_request(() {
+            g_app.post_event((MonoTime) { watchdog_feed(); }, getTime(), EventPriority.control);
+        });
+    }
+    else
+        g_app.register_heartbeat_handler((MonoTime) { watchdog_feed(); });
+
     watchdog_init(5.seconds);
-    g_app.register_heartbeat_handler((MonoTime) { watchdog_feed(); });
 
     ConsoleStream console_stream;
     version (Embedded) {}
