@@ -546,6 +546,11 @@ private:
             {
                 // stream claimed (e.g. ws upgrade): drop our handler so the new owner reads it
                 s.rx_handler(null);
+                if (!_signal_unsubscribed)
+                {
+                    s.unsubscribe(&signal_handler);
+                    _signal_unsubscribed = true;
+                }
                 _finished = true;
             }
         }
