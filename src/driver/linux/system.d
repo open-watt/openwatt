@@ -137,13 +137,17 @@ void ota_abort(uint handle)
     }
 }
 
+void ignore_sigpipe()
+{
+    signal(SIGPIPE, cast(void*)1); // SIG_IGN
+}
+
 void supervisor_attach()
 {
     char* s = getenv("OW_WATCHDOG_FD");
     if (!s)
         return;
     g_watchdog_fd = atoi(s);
-    signal_ignore_sigpipe();
 }
 
 void supervisor_heartbeat()
@@ -185,11 +189,6 @@ extern(C) nothrow @nogc
     int chmod(scope const(char)* path, mode_t mode);
     int rename(scope const(char)* oldp, scope const(char)* newp);
     int atoi(scope const(char)* s);
-}
-
-void signal_ignore_sigpipe()
-{
-    signal(SIGPIPE, cast(void*)1); // SIG_IGN: a dead supervisor must not kill us via the pipe
 }
 
 void watchdog_write(const(char)[] s)

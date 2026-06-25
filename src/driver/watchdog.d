@@ -22,6 +22,7 @@ private __gshared uint _timeout_ms;
 private __gshared MonoTime _start;
 private shared bool _running;
 private __gshared Thread _thread;
+private __gshared void delegate() nothrow @nogc _request_feed;
 
 private uint elapsed_ms()
     => cast(uint)((getTime() - _start).as!"msecs");
@@ -51,6 +52,11 @@ void watchdog_feed()
         supervisor_heartbeat();
 }
 
+void watchdog_set_feed_request(void delegate() nothrow @nogc request)
+{
+    _request_feed = request;
+}
+
 void watchdog_stop()
 {
     if (!_thread)
@@ -65,6 +71,8 @@ private void monitor()
     while (atomicLoad(_running))
     {
         sleep(1.seconds);
+        if (_request_feed !is null)
+            _request_feed();     // ask the main thread to feed itself, then check
         if (elapsed_ms() - atomicLoad(_last_feed) > _timeout_ms)
             abort();
     }
