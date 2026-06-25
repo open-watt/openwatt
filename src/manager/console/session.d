@@ -156,18 +156,7 @@ nothrow @nogc:
                 CommandState commandData = _current_command;
                 _current_command = null;
 
-                // echo the result (since it wasn't captured)
-                if (!commandData.result.isNull)
-                {
-                    ptrdiff_t l = commandData.result.toString(null, null, null);
-                    if (l > 0)
-                    {
-                        Array!char buffer;
-                        l = commandData.result.toString(buffer.extend(l), null, null);
-                        write_line(buffer[0..l]);
-                    }
-                }
-
+                echo_result(commandData.result);
                 command_finished(commandData, state);
                 allocator.freeT(commandData);
 
@@ -571,17 +560,6 @@ protected:
                     if (!is_attached())
                         return;
 
-                    // echo the result (since it wasn't captured)
-                    if (!result.isNull)
-                    {
-                        ptrdiff_t l = result.toString(null, null, null);
-                        if (l <= 0)
-                            return;
-                        Array!char buffer;
-                        l = result.toString(buffer.extend(l), null, null);
-                        write_line(buffer[0..l]);
-                    }
-
                     // command was instantaneous; take leftover input and continue
                     input_backup = take_input();
                     input = input_backup[];
@@ -712,8 +690,23 @@ protected:
         }
 
         if (!_current_command)
+        {
+            echo_result(result);
             command_finished(null, CommandCompletionState.finished);
+        }
         return _current_command is null;
+    }
+
+    final void echo_result(ref const Variant result)
+    {
+        if (result.isNull)
+            return;
+        ptrdiff_t l = result.toString(null, null, null);
+        if (l <= 0)
+            return;
+        Array!char buffer;
+        l = result.toString(buffer.extend(l), null, null);
+        write_line(buffer[0..l]);
     }
 
 private:
