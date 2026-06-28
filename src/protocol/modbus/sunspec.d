@@ -165,23 +165,27 @@ private immutable FieldDef[] m1_fields = [
 //   0: inverter              (Inverter)         - top-level inverter component
 //   1: inverter.solar        (Solar)            - PV input
 //   2: inverter.solar.meter  (EnergyMeter dc)   - DC measurements at the inverter's PV input
-//   3: inverter.load         (EnergyMeter ac)   - inverter's own AC output measurements
+//   3: meter                 (EnergyMeter ac)   - inverter's AC output; the device's primary meter
+// The AC output is the device's top-level `meter`: the inverter's exchange with the
+// circuit it is attached to (what the energy app attributes to that circuit). A
+// coexisting CT (model 201/203) is the property-gateway export meter and is mounted
+// at inverter.export_meter below, not here.
 
 private immutable ComponentDef[] inverter_components_single = [
     ComponentDef("inverter",             "Inverter",    null),
     ComponentDef("inverter.solar",       "Solar",       null),
     ComponentDef("inverter.solar.meter", "EnergyMeter", "dc"),
-    ComponentDef("inverter.load",        "EnergyMeter", "single-phase"),
+    ComponentDef("meter",                "EnergyMeter", "single-phase"),
 ];
 private immutable ComponentDef[] inverter_components_three = [
     ComponentDef("inverter",             "Inverter",    null),
     ComponentDef("inverter.solar",       "Solar",       null),
     ComponentDef("inverter.solar.meter", "EnergyMeter", "dc"),
-    ComponentDef("inverter.load",        "EnergyMeter", "three-phase"),
+    ComponentDef("meter",                "EnergyMeter", "three-phase"),
 ];
 
 private immutable FieldDef[] m101_fields = [
-    // AC output -> inverter.load
+    // AC output -> meter
     FieldDef(3, "current",        "A",     0,  4, FieldType.u16,   0, Frequency.realtime),
     FieldDef(3, "voltage",        "V",     8, 11, FieldType.u16,   0, Frequency.realtime),
     FieldDef(3, "power",          "W",    12, 13, FieldType.i16,   0, Frequency.realtime),
@@ -330,10 +334,10 @@ private immutable FieldDef[] m113_fields = [
 
 // Models 201/203: AC Meter (integer with scale factors).
 //
-// Placed at device root as `meter`. For SolarEdge installs this is the grid-side
-// CT meter sitting behind the inverter; for standalone meter devices it's just
-// the meter. Either reading is "the external AC measurement", so a top-level
-// `meter` component is the right home.
+// Standalone meter device: the meter is the device's primary measurement, placed
+// at device root as `meter`. When a meter coexists with an inverter on the same
+// device it is remapped to `inverter.export_meter` below (the inverter's own AC
+// output already owns the top-level `meter`).
 
 private immutable ComponentDef[] meter_single_components = [
     ComponentDef("meter", "EnergyMeter", "single-phase"),
@@ -343,9 +347,9 @@ private immutable ComponentDef[] meter_three_components = [
 ];
 
 // When a meter model coexists with an inverter on the same physical device
-// (e.g. SolarEdge with its grid CT), the meter is the inverter's external
-// export reference, not the device's primary meter. Place it under the
-// Inverter component as `export_meter` per the COMPONENT_TEMPLATES spec.
+// (e.g. SolarEdge with its grid CT), that meter sits at the property gateway and
+// is the export-limiting / self-consumption reference, not the inverter's exchange
+// with its own circuit. It mounts under the Inverter component as `export_meter`.
 private immutable ComponentDef[] inverter_export_meter_single_components = [
     ComponentDef("inverter.export_meter", "EnergyMeter", "single-phase"),
 ];
