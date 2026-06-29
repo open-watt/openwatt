@@ -71,6 +71,7 @@ import router.iface.ethernet;
 import router.iface.mac;
 import router.iface.packet;
 import router.iface.wifi;
+import router.port;
 
 nothrow @nogc:
 
@@ -492,6 +493,7 @@ private:
                 // the WLANBaseInterface.radio setter clears adapter as a side-effect).
                 auto base = next_radio_name();
                 log_info(ModuleName, "Found wifi interface: \"", ev.description, "\" (", ev.name, ")");
+                port_add(PortKind.wifi, tconcat("windows:wifi:", ev.name), ev.name, ev.name, ModuleName, ev.description);
 
                 auto radio = Collection!WindowsWifiRadio().create(tconcat(base, "-radio"));
                 radio.adapter = ev.name;
@@ -506,6 +508,7 @@ private:
                     if (r.adapter != ev.name)
                         continue;
                     writeInfo("Wifi adapter gone: ", r.adapter);
+                    port_remove(PortKind.wifi, tconcat("windows:wifi:", ev.name));
                     Array!WindowsWlan paired;
                     foreach (w; Collection!WindowsWlan().values)
                         if (cast(WindowsWifiRadio)w.radio is r)

@@ -83,6 +83,9 @@ void register_modules(Application app)
     register_module!(manager.record)(app);
     register_module!(manager.sync)(app);
 
+    import router.port;
+    register_module!(router.port)(app);
+
     static if (has_switch)
     {
         version (linux)

@@ -22,6 +22,7 @@ import driver.windows.pcap;
 import router.iface;
 import router.iface.ethernet;
 import router.iface.mac;
+import router.port;
 
 nothrow @nogc:
 
@@ -201,6 +202,7 @@ private:
             case added:
                 auto iface_name = next_iface_name();
                 log_info(ModuleName, "Found ethernet interface: \"", ev.description, "\" (", ev.name, ")");
+                port_add(PortKind.ethernet, tconcat("windows:ethernet:", ev.name), ev.name, ev.name, ModuleName, ev.description);
                 auto iface = Collection!WindowsPcapEthernet().create(iface_name);
                 iface.adapter = ev.name;
                 iface.comment = ev.description.makeString(defaultAllocator);
@@ -212,6 +214,7 @@ private:
                     if (e.adapter == ev.name)
                     {
                         writeInfo("Ethernet adapter gone: ", e.adapter);
+                        port_remove(PortKind.ethernet, tconcat("windows:ethernet:", ev.name));
                         Collection!WindowsPcapEthernet().remove(e);
                         return;
                     }

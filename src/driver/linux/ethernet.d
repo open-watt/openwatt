@@ -21,6 +21,7 @@ import driver.linux.raw;
 import router.iface;
 import router.iface.ethernet;
 import router.iface.mac;
+import router.port;
 
 nothrow @nogc:
 
@@ -214,6 +215,8 @@ private:
     {
         Array!String os_buf;
         enumerate_adapters((const(char)[] name, const(char)[] description) nothrow @nogc {
+            port_add(PortKind.ethernet, tconcat("linux:ethernet:", name), name, name, ModuleName, description);
+
             bool present = false;
             foreach (e; Collection!LinuxRawEthernet().values)
             {
@@ -264,6 +267,7 @@ private:
         foreach (e; gone[])
         {
             log_info(ModuleName, "Ethernet adapter gone: ", e.adapter);
+            port_remove(PortKind.ethernet, tconcat("linux:ethernet:", e.adapter[]));
             Collection!LinuxRawEthernet().remove(e);
         }
     }
