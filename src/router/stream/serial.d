@@ -23,6 +23,7 @@ else version(Posix)
 {
     import urt.internal.sys.posix;
     import urt.internal.sys.posix.termios;
+    import urt.internal.stdc.errno : EAGAIN, EWOULDBLOCK, EINTR;
 }
 else version (Embedded)
 {
@@ -164,8 +165,12 @@ nothrow @nogc:
         => _params.data_bits;
     StringResult data_bits(uint value)
     {
-        if (value < 5 || value > 9)
-            return StringResult("data bits must be between 5 and 9");
+        version (Embedded)
+            enum uint max_data_bits = 9;
+        else
+            enum uint max_data_bits = 8;
+        if (value < 5 || value > max_data_bits)
+            return StringResult(max_data_bits == 9 ? "data bits must be between 5 and 9" : "data bits must be between 5 and 8");
         if (_params.data_bits == cast(ubyte)value)
             return StringResult.success;
         _params.data_bits = cast(ubyte)value;
@@ -376,37 +381,111 @@ nothrow @nogc:
             }
 
             termios tty;
-            tcgetattr(_fd, &tty);
+            if (tcgetattr(_fd, &tty) != 0)
+                return fail_posix_startup();
 
-            cfsetospeed(&tty, _params.baud_rate);
-            cfsetispeed(&tty, _params.baud_rate);
+            speed_t speed;
+            bool custom_baud = !posix_baud(_params.baud_rate, speed);
+            if (custom_baud)
+            {
+                version (linux) {}
+                else
+                {
+                    writeln("Unsupported serial baud rate ", _params.baud_rate);
+                    return fail_posix_startup();
+                }
+            }
+            else
+            {
+                if (cfsetospeed(&tty, speed) != 0 || cfsetispeed(&tty, speed) != 0)
+                    return fail_posix_startup();
+            }
 
-            tty.c_cflag &= ~PARENB; // Clear parity bit
-            tty.c_cflag &= ~CSTOPB; // Clear stop field
-            tty.c_cflag &= ~CSIZE;  // Clear size bits
-            tty.c_cflag |= CS8;     // 8 bits per byte
-            tty.c_cflag &= ~CRTSCTS;// Disable RTS/CTS hardware flow control
-            tty.c_cflag |= CREAD | CLOCAL; // Turn on READ & ignore ctrl lines
+            tty.c_cflag &= ~(PARENB | PARODD | CMSPAR);
+            final switch (_params.parity)
+            {
+                case Parity.none:
+                    break;
+                case Parity.even:
+                    tty.c_cflag |= PARENB;
+                    break;
+                case Parity.odd:
+                    tty.c_cflag |= PARENB | PARODD;
+                    break;
+                case Parity.mark:
+                    tty.c_cflag |= PARENB | PARODD | CMSPAR;
+                    break;
+                case Parity.space:
+                    tty.c_cflag |= PARENB | CMSPAR;
+                    break;
+            }
+
+            tty.c_cflag &= ~CSTOPB;
+            if (_params.stop_bits == StopBits.two)
+                tty.c_cflag |= CSTOPB;
+            else if (_params.stop_bits == StopBits.one_point_five)
+            {
+                writeln("POSIX serial does not support 1.5 stop bits");
+                return fail_posix_startup();
+            }
+
+            tty.c_cflag &= ~CSIZE;
+            switch (_params.data_bits)
+            {
+                case 5: tty.c_cflag |= CS5; break;
+                case 6: tty.c_cflag |= CS6; break;
+                case 7: tty.c_cflag |= CS7; break;
+                case 8: tty.c_cflag |= CS8; break;
+                default:
+                    writeln("POSIX serial does not support ", _params.data_bits, " data bits");
+                    return fail_posix_startup();
+            }
+
+            tty.c_cflag &= ~CRTSCTS;
+            tty.c_cflag |= CREAD | CLOCAL;
+            tty.c_iflag &= ~(IXON | IXOFF | IXANY);
+            final switch (_params.flow_control)
+            {
+                case FlowControl.none:
+                    break;
+                case FlowControl.hardware:
+                    tty.c_cflag |= CRTSCTS;
+                    break;
+                case FlowControl.software:
+                    tty.c_iflag |= IXON | IXOFF;
+                    break;
+                case FlowControl.dsr_dtr:
+                    writeln("POSIX serial does not support DSR/DTR flow control");
+                    return fail_posix_startup();
+            }
 
             tty.c_lflag &= ~ICANON;
             tty.c_lflag &= ~ECHO;   // Disable echo
             tty.c_lflag &= ~ECHOE;  // Disable erasure
             tty.c_lflag &= ~ECHONL; // Disable new-line echo
             tty.c_lflag &= ~ISIG;   // Disable interpretation of INTR, QUIT and SUSP
-            tty.c_iflag &= ~(IXON | IXOFF | IXANY); // Turn off s/w flow ctrl
             tty.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL); // Disable any special handling of received bytes
 
             tty.c_oflag &= ~OPOST; // Prevent special interpretation of output bytes (e.g. newline chars)
             tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
 
-            tty.c_cc[VTIME] = 1;    // Wait for up to 1 deciseconds, return as soon as any data is received
+            tty.c_cc[VTIME] = 0;
             tty.c_cc[VMIN] = 0;
 
             if (tcsetattr(_fd, TCSANOW, &tty) != 0)
+                return fail_posix_startup();
+            if (custom_baud)
             {
-                // Handle error ???
-                return CompletionStatus.error;
+                version (linux)
+                {
+                    if (!set_linux_custom_baud(_fd, _params.baud_rate))
+                    {
+                        writeln("Unsupported serial baud rate ", _params.baud_rate);
+                        return fail_posix_startup();
+                    }
+                }
             }
+            tcflush(_fd, TCIOFLUSH);
         }
         else version (Embedded)
         {
@@ -502,12 +581,22 @@ nothrow @nogc:
             }
         }
         else version(Posix)
+        {
             ssize_t bytes_read = urt.internal.sys.posix.read(_fd, buffer.ptr, buffer.length);
+            if (bytes_read < 0)
+            {
+                if (is_transient_errno())
+                    return 0;
+                restart();
+                return -1;
+            }
+        }
         else version (Embedded)
             ptrdiff_t bytes_read = uart_read(_uart, buffer);
 
-        add_rx_bytes(bytes_read);
-        if (_logging)
+        if (bytes_read > 0)
+            add_rx_bytes(bytes_read);
+        if (_logging && bytes_read > 0)
             write_to_log(true, buffer[0 .. bytes_read]);
         return bytes_read;
     }
@@ -557,31 +646,28 @@ nothrow @nogc:
         }
         else version(Posix)
         {
-            if (data.length > 1)
+            foreach (d; data)
             {
-                iovec[32] iov = null;
-                assert(data.length <= iov.length, "Too many buffers!");
-                foreach (i, d; data)
+                const(ubyte)[] buf = cast(const(ubyte)[])d;
+                while (buf.length)
                 {
-                    iov[i].iov_base = cast(void*)d.ptr;
-                    iov[i].iov_len = d.length;
-                }
-                bytes_written = writev(_fd, iov.ptr, cast(int)data.length);
-            }
-            else
-                bytes_written = urt.internal.sys.posix.write(_fd, data[0].ptr, data[0].length);
-
-            if (_logging)
-            {
-                import urt.util : min;
-                size_t remain = bytes_written;
-                for (size_t i = 0; remain > 0; ++i)
-                {
-                    size_t len = min(data[i].length, remain);
-                    write_to_log(false, data[i][0 .. len]);
-                    remain -= len;
+                    ssize_t n = urt.internal.sys.posix.write(_fd, buf.ptr, buf.length);
+                    if (n < 0)
+                    {
+                        if (is_transient_errno())
+                            goto posix_write_done;
+                        restart();
+                        return bytes_written > 0 ? bytes_written : -1;
+                    }
+                    if (n == 0)
+                        goto posix_write_done;
+                    bytes_written += n;
+                    if (_logging)
+                        write_to_log(false, buf[0 .. n]);
+                    buf = buf[n .. $];
                 }
             }
+        posix_write_done:
         }
         else version (Embedded)
         {
@@ -598,27 +684,53 @@ nothrow @nogc:
                 }
             }
         }
-        add_tx_bytes(bytes_written);
+        if (bytes_written > 0)
+            add_tx_bytes(bytes_written);
         return bytes_written;
     }
 
     override ptrdiff_t pending()
     {
+        version (Windows)
+        {
+            DWORD errors;
+            COMSTAT stat;
+            if (!ClearCommError(_h_com, &errors, &stat))
+                return 0;
+            return stat.cbInQue;
+        }
+        else version (Posix)
+        {
+            int avail;
+            if (ioctl(_fd, FIONREAD, &avail) < 0)
+                return 0;
+            return avail;
+        }
+        else
+        {
         version (Embedded)
             return cast(ptrdiff_t)uart_rx_available(_uart);
-        else
-            assert(0, "TODO: pending() not implemented");
+        }
     }
 
     override ptrdiff_t flush()
     {
-        version (Embedded)
+        version (Windows)
+        {
+            PurgeComm(_h_com, PURGE_TXABORT | PURGE_RXABORT | PURGE_TXCLEAR | PURGE_RXCLEAR);
+            return 0;
+        }
+        else version (Posix)
+        {
+            tcdrain(_fd);
+            tcflush(_fd, TCIOFLUSH);
+            return 0;
+        }
+        else version (Embedded)
         {
             uart_tx_flush(_uart);
             return 0;
         }
-        else
-            assert(0, "TODO: flush() not implemented");
     }
 
 private:
@@ -642,6 +754,19 @@ private:
         byte _cts_gpio = -1;
         byte _de_gpio = -1;
     }
+
+    version (Posix)
+    {
+        CompletionStatus fail_posix_startup()
+        {
+            if (_fd != -1)
+            {
+                urt.internal.sys.posix.close(_fd);
+                _fd = -1;
+            }
+            return CompletionStatus.error;
+        }
+    }
 }
 
 
@@ -657,6 +782,8 @@ nothrow @nogc:
         g_app.register_enum!FlowControl();
 
         g_app.console.register_collection!SerialStream();
+        version (Posix)
+            g_app.console.register_command!serial_devices("/stream/serial", this, "devices");
     }
 }
 
@@ -683,5 +810,197 @@ version(Posix)
         size_t  iov_len;
     }
 
+    enum FIONREAD = 0x541B;
+
     extern(C) ssize_t writev(int fd, const iovec* iov, int iovcnt);
+    version (D_LP64)
+        alias c_ulong = ulong;
+    else
+        alias c_ulong = uint;
+    extern(C) int ioctl(int fd, c_ulong request, ...);
+
+    bool is_transient_errno()
+    {
+        uint e = errno_result().system_code;
+        return e == EAGAIN || e == EWOULDBLOCK || e == EINTR;
+    }
+
+    version (linux)
+    bool set_linux_custom_baud(int fd, uint baud)
+    {
+        termios2 tty;
+        if (ioctl(fd, TCGETS2, &tty) < 0)
+            return false;
+
+        tty.c_cflag &= ~CBAUD;
+        tty.c_cflag |= BOTHER;
+        tty.c_ispeed = baud;
+        tty.c_ospeed = baud;
+        return ioctl(fd, TCSETS2, &tty) == 0;
+    }
+
+    bool posix_baud(uint baud, out speed_t speed)
+    {
+        switch (baud)
+        {
+            case 0:       speed = B0;       return true;
+            case 50:      speed = B50;      return true;
+            case 75:      speed = B75;      return true;
+            case 110:     speed = B110;     return true;
+            case 134:     speed = B134;     return true;
+            case 150:     speed = B150;     return true;
+            case 200:     speed = B200;     return true;
+            case 300:     speed = B300;     return true;
+            case 600:     speed = B600;     return true;
+            case 1200:    speed = B1200;    return true;
+            case 1800:    speed = B1800;    return true;
+            case 2400:    speed = B2400;    return true;
+            case 4800:    speed = B4800;    return true;
+            case 9600:    speed = B9600;    return true;
+            case 19200:   speed = B19200;   return true;
+            case 38400:   speed = B38400;   return true;
+            case 57600:   speed = B57600;   return true;
+            case 115200:  speed = B115200;  return true;
+            case 230400:  speed = B230400;  return true;
+            case 460800:  speed = B460800;  return true;
+            case 500000:  speed = B500000;  return true;
+            case 576000:  speed = B576000;  return true;
+            case 921600:  speed = B921600;  return true;
+            case 1000000: speed = B1000000; return true;
+            case 1152000: speed = B1152000; return true;
+            case 1500000: speed = B1500000; return true;
+            case 2000000: speed = B2000000; return true;
+            case 2500000: speed = B2500000; return true;
+            case 3000000: speed = B3000000; return true;
+            case 3500000: speed = B3500000; return true;
+            case 4000000: speed = B4000000; return true;
+            default:      return false;
+        }
+    }
+
+    void serial_devices(Session session)
+    {
+        uint count;
+        count += list_serial_dir(session, "/dev/serial/by-id", null);
+        count += list_serial_ttys(session);
+        if (count == 0)
+            session.write_line("No serial devices found");
+    }
+
+    uint list_serial_ttys(Session session)
+    {
+        uint count;
+        walk_dir("/sys/class/tty", (const(char)[] name) nothrow @nogc {
+            if (!is_serial_tty(name))
+                return;
+            char[320] path = void;
+            size_t n = make_path(path[], "/dev/", name);
+            if (n)
+            {
+                session.write_line(path[0 .. n]);
+                ++count;
+            }
+        });
+        return count;
+    }
+
+    uint list_serial_dir(Session session, const(char)[] dir, const(char)[] prefix)
+    {
+        uint count;
+        walk_dir(dir, (const(char)[] name) nothrow @nogc {
+            if (prefix && !name.startsWith(prefix))
+                return;
+            char[512] path = void;
+            size_t n = make_path(path[], dir, "/", name);
+            if (n)
+            {
+                session.write_line(path[0 .. n]);
+                ++count;
+            }
+        });
+        return count;
+    }
+
+    bool is_serial_tty(const(char)[] name)
+    {
+        if (name.startsWith("ttyUSB") || name.startsWith("ttyACM") ||
+            name.startsWith("ttyAMA") || name.startsWith("ttyS") ||
+            name.startsWith("ttyTHS") || name.startsWith("rfcomm"))
+            return true;
+
+        char[320] path = void;
+        size_t n = make_path(path[], "/sys/class/tty/", name, "/device");
+        return n != 0 && access(path.ptr, F_OK) == 0;
+    }
+
+    void walk_dir(const(char)[] path, scope void delegate(const(char)[] name) nothrow @nogc visitor)
+    {
+        char[320] z = void;
+        size_t len = copy_z(z[], path);
+        if (len == 0)
+            return;
+        DIR* dir = opendir(z.ptr);
+        if (dir is null)
+            return;
+        scope(exit) closedir(dir);
+
+        while (true)
+        {
+            dirent* ent = readdir(dir);
+            if (ent is null)
+                break;
+            size_t n;
+            while (n < ent.d_name.length && ent.d_name[n] != 0)
+                ++n;
+            if (n == 0)
+                continue;
+            const(char)[] name = ent.d_name[0 .. n];
+            if (name == "." || name == "..")
+                continue;
+            visitor(name);
+        }
+    }
+
+    size_t make_path(Parts...)(char[] dst, Parts parts)
+    {
+        size_t n;
+        foreach (part; parts)
+        {
+            if (n + part.length + 1 > dst.length)
+                return 0;
+            dst[n .. n + part.length] = part[];
+            n += part.length;
+        }
+        dst[n] = '\0';
+        return n;
+    }
+
+    size_t copy_z(char[] dst, const(char)[] src)
+    {
+        if (src.length + 1 > dst.length)
+            return 0;
+        dst[0 .. src.length] = src[];
+        dst[src.length] = '\0';
+        return src.length;
+    }
+
+    extern(C) nothrow @nogc
+    {
+        struct DIR;
+        struct dirent
+        {
+            ulong d_ino;
+            long  d_off;
+            ushort d_reclen;
+            ubyte  d_type;
+            char[256] d_name;
+        }
+
+        DIR* opendir(const(char)* name);
+        int closedir(DIR* dir);
+        dirent* readdir(DIR* dir);
+        int access(const(char)* pathname, int mode);
+    }
+
+    enum F_OK = 0;
 }

@@ -31,6 +31,7 @@ import driver.linux.netlink;
 import driver.linux.nl80211;
 import driver.linux.sysfs;
 import driver.linux.fdwatch;
+import router.port;
 
 version (WifiStaKernel) import driver.linux.nl80211_sta;
 else                    import driver.linux.wpa_supplicant;
@@ -1999,6 +2000,8 @@ private:
         // -- the WLANBaseInterface.radio setter clears adapter as a side-effect).
         Array!String os_buf;
         enumerate_wifi_adapters((const(char)[] name, const(char)[] description) nothrow @nogc {
+            port_add(PortKind.wifi, tconcat("linux:wifi:", name), name, name, ModuleName, description);
+
             bool present = false;
             foreach (r; Collection!LinuxWifiRadio().values)
             {
@@ -2052,6 +2055,7 @@ private:
         foreach (r; gone[])
         {
             log_info(ModuleName, "Wifi adapter gone: ", r.adapter);
+            port_remove(PortKind.wifi, tconcat("linux:wifi:", r.adapter[]));
             Array!LinuxWlan paired;
             foreach (w; Collection!LinuxWlan().values)
                 if (cast(LinuxWifiRadio)w.radio is r)
