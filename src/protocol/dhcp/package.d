@@ -20,6 +20,8 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.register_enum!DHCPOptionType();
+
         g_app.console.register_collection!DHCPClient();
         g_app.console.register_collection!DHCPLease();
         g_app.console.register_collection!DHCPOption();
