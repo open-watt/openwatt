@@ -208,6 +208,10 @@ nothrow @nogc:
         if (!running || _conn is null)
             return 0;
 
+        size_t total = 0;
+        foreach (b; data)
+            total += b.length;
+
         ptrdiff_t n = _conn.send(data);
         if (n > 0)
         {
@@ -224,6 +228,8 @@ nothrow @nogc:
                 }
             }
         }
+        if (n < cast(ptrdiff_t)total)
+            log.warning("stream '", name[], "': short write -- ", n, " of ", total, " bytes sent, ", total - n, " dropped");
         return n;
     }
 
