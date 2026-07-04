@@ -92,10 +92,11 @@ nothrow @nogc:
         refresh_device_subscriptions();
         log_slow_phase("refresh_device_subscriptions", getTime() - t);
         t = getTime();
-        if (!topology_dirty && manager.graph.circuit_drift())
+        if (manager.graph.shape_dirty)
+        {
+            manager.graph.shape_dirty = false;
             topology_dirty = true;
-        log_slow_phase("circuit_drift", getTime() - t);
-        t = getTime();
+        }
         bool rebuild_topology = consume_topology_rebuild_request();
         manager.update(rebuild_topology);
         if (rebuild_topology)
@@ -158,6 +159,7 @@ nothrow @nogc:
         {
             d.unsubscribe(&on_device_event);
             subscribed_devices.removeFirstSwapLast(d);
+            manager.graph.release_shape_watches();
             topology_dirty = true;
             // TODO: matching appliances should clear their device_ref or fail
             //       resolution on next validate. For now registry.resync_all

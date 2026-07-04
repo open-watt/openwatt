@@ -7,6 +7,8 @@ import urt.map;
 import urt.mem;
 import urt.mem.temp : tconcat;
 import urt.string;
+import urt.time : SysTime;
+import urt.variant : Variant;
 
 import apps.energy.appliance;
 import apps.energy.battery_store;
@@ -99,16 +101,6 @@ nothrow @nogc:
     MeterSign sign;
     uint capacity_amps;
     bool closed = true;
-}
-
-// dynamic Port circuits (EVSE car port carries the VIN) are polled for drift; element writes raise no tree event
-struct CircuitWatch
-{
-nothrow @nogc:
-    Appliance owner;
-    Component component;
-    String path;
-    String circuit;
 }
 
 struct ControlPath
@@ -272,7 +264,8 @@ nothrow @nogc:
     Array!(Bus*) bus_list;
     Array!(Port*) ports;
     Array!(Link*) links;
-    Array!CircuitWatch circuit_watch;
+    Array!(Element*) shape_elements;
+    bool shape_dirty;
     CircuitKernel kernel;
     Array!BatteryStoreContribution battery_store_contributions;
     Array!BatteryStore battery_stores;
@@ -300,7 +293,14 @@ nothrow @nogc:
         links.clear();
         bus_list.clear();
         buses.clear();
-        circuit_watch.clear();
+        release_shape_watches();
+    }
+
+    void release_shape_watches()
+    {
+        foreach (e; shape_elements[])
+            e.remove_subscriber(&on_shape_change);
+        shape_elements.clear();
     }
 
     Bus* find_bus(const(char)[] name)
@@ -541,9 +541,6 @@ nothrow @nogc:
 
         foreach (a; Collection!Appliance().values)
         {
-            if (a.device_ref !is null)
-                watch_device_ports(a, a.device_ref, null);
-
             Array!DevicePort device_ports;
             collect_device_ports(a, device_ports);
             if (device_ports.length != 0)
@@ -580,18 +577,12 @@ nothrow @nogc:
         rebuild_productions();
     }
 
-    bool circuit_drift()
+private:
+    void on_shape_change(ref Element, ref const Variant, SysTime, ref const Variant, SysTime)
     {
-        foreach (ref w; circuit_watch[])
-        {
-            const(char)[] circuit = read_port_circuit(w.owner, w.component, w.path[]);
-            if (circuit[] != w.circuit[])
-                return true;
-        }
-        return false;
+        shape_dirty = true;
     }
 
-private:
     void refresh_meters()
     {
         foreach (p; ports[])
@@ -736,6 +727,12 @@ private:
     {
         if (c.template_[] == "Port")
         {
+            foreach (e; c.elements[])
+            {
+                e.add_subscriber(&on_shape_change);
+                shape_elements ~= e;
+            }
+
             DevicePort spec;
             spec.component = c;
             spec.path = path.makeString(defaultAllocator());
@@ -796,25 +793,6 @@ private:
         if (spec.component is null)
             spec.component = vehicle_for(a.vin);
         into ~= spec;
-    }
-
-    // watches circuit-less ports too, so a dark car port is noticed when a VIN appears
-    void watch_device_ports(Appliance a, Component c, const(char)[] path)
-    {
-        if (c.template_[] == "Port")
-        {
-            CircuitWatch w;
-            w.owner = a;
-            w.component = c;
-            w.path = path.makeString(defaultAllocator());
-            w.circuit = read_port_circuit(a, c, path).makeString(defaultAllocator());
-            circuit_watch ~= w.move;
-        }
-        foreach (child; c.components[])
-        {
-            const(char)[] child_path = path.length ? tconcat(path, ".", child.id[]) : child.id[];
-            watch_device_ports(a, child, child_path);
-        }
     }
 
     void apply_appliance_meter(Appliance a, ref Array!DevicePort specs)
