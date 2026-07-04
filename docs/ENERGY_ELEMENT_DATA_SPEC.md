@@ -465,6 +465,8 @@ Fields include:
 
 ```text
 target
+via
+device
 reason
 commanded
 target_bus
@@ -480,6 +482,11 @@ path_voltage
 limiting_link
 ```
 
+`via` is the appliance whose actuator the command is routed through when the
+policy target itself has no control surface (a car driven through its paired
+EVSE). Empty string for direct controls. `device` is the device id carrying
+the actuator element.
+
 `path_headroom_*` is measured/derived headroom before this allocation pass.
 `available_headroom_*` subtracts higher-priority commands already accepted in
 the same allocator tick. `committed_*` is the estimated capacity reserved by an
@@ -494,6 +501,7 @@ drive
 drive (headroom-clamped)
 expression
 no control
+not connected
 no setpoint element
 no max/nameplate
 no path headroom
@@ -502,6 +510,34 @@ min dwell
 min on time
 min off time
 ```
+
+`not connected` is reported for vehicle targets that currently have no
+control: the car is not plugged into any known EVSE. Render it as status,
+not as an error.
+
+## Vehicle Pairing
+
+A car appliance configured with a `vin` is attached to the circuit named by
+its VIN: it publishes a `connection` terminal with `circuit == <VIN>`. An
+EVSE that can identify the connected car (e.g. Tesla Wall Connector) reports
+the same VIN as the circuit of its `car` port. The pairing is therefore an
+ordinary circuit join, no bespoke association endpoint:
+
+```text
+circuit.terminal.<evse>.car.circuit == "<VIN>"
+circuit.terminal.<car>.connection.circuit == "<VIN>"
+```
+
+When the car is not plugged in (or the EVSE cannot read a VIN), the EVSE's
+`car` terminal is absent and the car's `connection` terminal sits alone on
+its VIN circuit. The graph reshapes automatically on plug/unplug; use the
+generation protocol as usual.
+
+Decoded vehicle identity (make/model/year from the VIN, plus NHTSA
+enrichment) is published on the hidden `vehicles` device as
+`vehicles.<VIN>.info.*`; battery state will appear at
+`vehicles.<VIN>.battery.*` and reconciled per-circuit at
+`circuit.battery_store.<VIN>.*` once vehicle telemetry sources land.
 
 ## Reconstructing The Circuit Graph
 
