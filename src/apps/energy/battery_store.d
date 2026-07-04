@@ -216,23 +216,24 @@ enum soc_tolerance = 5.0f;
 
 struct ContributionTotals
 {
-    float soc_weighted;
-    float soc_weight;
-    float soc_plain;
+    // accumulators must zero-init; float.init NaN poisons +=
+    float soc_weighted = 0;
+    float soc_weight = 0;
+    float soc_plain = 0;
     uint soc_count;
-    float soh_sum;
+    float soh_sum = 0;
     uint soh_count;
-    float remain_sum;
+    float remain_sum = 0;
     uint remain_count;
-    float full_sum;
+    float full_sum = 0;
     uint full_count;
-    float max_charge_current_sum;
+    float max_charge_current_sum = 0;
     uint max_charge_current_count;
-    float max_discharge_current_sum;
+    float max_discharge_current_sum = 0;
     uint max_discharge_current_count;
-    float max_charge_power_sum;
+    float max_charge_power_sum = 0;
     uint max_charge_power_count;
-    float max_discharge_power_sum;
+    float max_discharge_power_sum = 0;
     uint max_discharge_power_count;
 }
 
