@@ -369,7 +369,7 @@ private:
 
         // Walk up to find the owning Device.
         Component c = source;
-        while (c !is null && cast(Device)c is null)
+        while (c !is null && !c.is_device)
             c = c.parent;
         ctl.device = cast(Device)c;
 

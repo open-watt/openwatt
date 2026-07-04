@@ -147,9 +147,9 @@ nothrow @nogc:
 
     void on_device_event(Component c, ComponentEvent event)
     {
-        Device d = cast(Device)c;
-        if (d is null)
+        if (c is null || !c.is_device)
             return;
+        Device d = cast(Device)c;
         if (event == ComponentEvent.destroyed)
         {
             d.unsubscribe(&on_device_event);
