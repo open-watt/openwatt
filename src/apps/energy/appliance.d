@@ -8,6 +8,7 @@ import urt.result;
 import urt.string;
 import urt.variant;
 
+import apps.energy : EnergyAppModule;
 import apps.energy.meter;
 import apps.energy.model;
 import apps.energy.reference;
@@ -202,11 +203,13 @@ protected:
 
     override CompletionStatus startup()
     {
+        get_module!EnergyAppModule.request_topology_rebuild();
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
+        get_module!EnergyAppModule.request_topology_rebuild();
         return CompletionStatus.complete;
     }
 

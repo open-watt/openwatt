@@ -280,7 +280,24 @@ nothrow @nogc:
                 to_remove ~= k;
         }
         foreach (key; to_remove)
+        {
+            // car left mid-drive: hand drive state to the actuator so the release pass winds the setpoint down
+            if (Control* dying = key in by_target)
+            {
+                if (dying.current_setpoint == dying.current_setpoint && dying.partner !is null)
+                {
+                    if (Control* actuator = dying.partner in by_owner)
+                    {
+                        if (actuator.current_setpoint != actuator.current_setpoint)
+                        {
+                            actuator.current_setpoint = dying.current_setpoint;
+                            actuator.last_transition = dying.last_transition;
+                        }
+                    }
+                }
+            }
             by_target.remove(key);
+        }
     }
 
 private:
@@ -293,10 +310,17 @@ private:
             Control* actuator = link.owner in by_owner;
             if (actuator is null)
                 continue;
-            if (link.b is null)
+
+            // only project across the delivery side; the grid-side bus carries unrelated peers
+            Bus* far;
+            if (link.port_b !is null && link.port_b.role == PortRole.car)
+                far = link.b;
+            else if (link.port_a !is null && link.port_a.role == PortRole.car)
+                far = link.a;
+            if (far is null)
                 continue;
 
-            foreach (p; link.b.ports[])
+            foreach (p; far.ports[])
             {
                 Appliance target = p.owner;
                 if (target is null || target is link.owner)

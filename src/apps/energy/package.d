@@ -92,6 +92,10 @@ nothrow @nogc:
         refresh_device_subscriptions();
         log_slow_phase("refresh_device_subscriptions", getTime() - t);
         t = getTime();
+        if (!topology_dirty && manager.graph.circuit_drift())
+            topology_dirty = true;
+        log_slow_phase("circuit_drift", getTime() - t);
+        t = getTime();
         bool rebuild_topology = consume_topology_rebuild_request();
         manager.update(rebuild_topology);
         if (rebuild_topology)
@@ -177,6 +181,12 @@ nothrow @nogc:
         return last_topology_rebuild == MonoTime.init;
     }
 
+    // appliance/link property edits reshape the graph without raising a device tree event
+    void request_topology_rebuild()
+    {
+        topology_dirty = true;
+    }
+
     CommandState live(Session session, const(Variant)[] args)
     {
         return defaultAllocator.allocT!EnergyLiveView(session, this);
@@ -232,6 +242,7 @@ nothrow @nogc:
         Table table;
         table.add_column("policy");
         table.add_column("target");
+        table.add_column("via");
         table.add_column("tier");
         table.add_column("goal");
         table.add_column("current", Table.TextAlign.right);
@@ -247,10 +258,12 @@ nothrow @nogc:
             table.add_row();
             table.cell(p.name[]);
             table.cell(p.target);
+
+            Control* ctl = registry.lookup(p.target_appliance);
+            table.cell(ctl !is null && ctl.partner !is null ? ctl.partner.name[] : "-");
             table.cell(enum_key_from_value!PolicyTier(p.tier));
             table.cell(p.goal);
 
-            Control* ctl = registry.lookup(p.target_appliance);
             float cv = current_value(p, ctl);
             table.cell(cv == cv ? tconcat(cv) : "-");
             table.cell(satisfied(p, ctl) ? "yes" : "no");

@@ -4,6 +4,7 @@ import urt.lifetime;
 import urt.meta : AliasSeq;
 import urt.string;
 
+import apps.energy : EnergyAppModule;
 import apps.energy.model;
 import apps.energy.reference;
 
@@ -153,11 +154,13 @@ protected:
 
     override CompletionStatus startup()
     {
+        get_module!EnergyAppModule.request_topology_rebuild();
         return CompletionStatus.complete;
     }
 
     override CompletionStatus shutdown()
     {
+        get_module!EnergyAppModule.request_topology_rebuild();
         return CompletionStatus.complete;
     }
 

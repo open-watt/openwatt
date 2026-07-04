@@ -14,6 +14,7 @@ import apps.energy.kernel;
 import apps.energy.link;
 import apps.energy.meter;
 import apps.energy.production;
+import apps.energy.vehicle : vehicle_for;
 public import apps.energy.model;
 
 import manager;
@@ -98,6 +99,16 @@ nothrow @nogc:
     MeterSign sign;
     uint capacity_amps;
     bool closed = true;
+}
+
+// dynamic Port circuits (EVSE car port carries the VIN) are polled for drift; element writes raise no tree event
+struct CircuitWatch
+{
+nothrow @nogc:
+    Appliance owner;
+    Component component;
+    String path;
+    String circuit;
 }
 
 struct ControlPath
@@ -261,6 +272,7 @@ nothrow @nogc:
     Array!(Bus*) bus_list;
     Array!(Port*) ports;
     Array!(Link*) links;
+    Array!CircuitWatch circuit_watch;
     CircuitKernel kernel;
     Array!BatteryStoreContribution battery_store_contributions;
     Array!BatteryStore battery_stores;
@@ -288,6 +300,7 @@ nothrow @nogc:
         links.clear();
         bus_list.clear();
         buses.clear();
+        circuit_watch.clear();
     }
 
     Bus* find_bus(const(char)[] name)
@@ -441,12 +454,17 @@ nothrow @nogc:
             seen ~= bus;
 
             Link* link = upstream_physical_link(bus);
+            Bus* next = link ? link.a : null;
             if (link is null)
-                break;
+            {
+                link = upstream_delivery_link(bus, next);
+                if (link is null)
+                    break;
+            }
             path.links ~= link;
-            path.source_bus = link.a;
+            path.source_bus = next;
             update_path_limit(path, link);
-            bus = link.a;
+            bus = next;
         }
         finalize_path_power(path);
     }
@@ -458,6 +476,29 @@ nothrow @nogc:
         foreach (link; bus.links[])
             if (link.owner is null && link.closed && link.b is bus)
                 return link;
+        return null;
+    }
+
+    // follow the EVSE's internal delivery link upstream so car policies see the breaker chain
+    Link* upstream_delivery_link(Bus* bus, out Bus* upstream)
+    {
+        if (bus is null)
+            return null;
+        foreach (link; bus.links[])
+        {
+            if (link.owner is null || !link.closed)
+                continue;
+            if (link.b is bus && link.port_b !is null && link.port_b.role == PortRole.car)
+            {
+                upstream = link.a;
+                return link;
+            }
+            if (link.a is bus && link.port_a !is null && link.port_a.role == PortRole.car)
+            {
+                upstream = link.b;
+                return link;
+            }
+        }
         return null;
     }
 
@@ -500,6 +541,9 @@ nothrow @nogc:
 
         foreach (a; Collection!Appliance().values)
         {
+            if (a.device_ref !is null)
+                watch_device_ports(a, a.device_ref, null);
+
             Array!DevicePort device_ports;
             collect_device_ports(a, device_ports);
             if (device_ports.length != 0)
@@ -512,6 +556,8 @@ nothrow @nogc:
 
             Array!DevicePort virtual_ports;
             collect_bound_ports(a, virtual_ports);
+            if (virtual_ports.length == 0)
+                collect_vehicle_port(a, virtual_ports);
             if (virtual_ports.length != 0)
             {
                 add_device_ports(a, virtual_ports);
@@ -532,6 +578,17 @@ nothrow @nogc:
         build_kernel();
         rebuild_stores();
         rebuild_productions();
+    }
+
+    bool circuit_drift()
+    {
+        foreach (ref w; circuit_watch[])
+        {
+            const(char)[] circuit = read_port_circuit(w.owner, w.component, w.path[]);
+            if (circuit[] != w.circuit[])
+                return true;
+        }
+        return false;
     }
 
 private:
@@ -716,6 +773,47 @@ private:
             spec.sign = attach_meter && a.meter_sign_set ? a.meter_sign : MeterSign.normal;
             spec.closed = true;
             into ~= spec;
+        }
+    }
+
+    // a VIN-only car attaches to the circuit named by its VIN; the EVSE reading the same VIN lands on the same bus
+    void collect_vehicle_port(Appliance a, ref Array!DevicePort into)
+    {
+        if (a.vin.length == 0)
+            return;
+        if (a.kind != "car" && a.kind != "vehicle")
+            return;
+        DevicePort spec;
+        spec.path = StringLit!"connection";
+        spec.circuit = a.vin;
+        spec.role = PortRole.connection;
+        spec.flow = FlowDomain.consume;
+        spec.meter = a.meter_ref;
+        spec.sign = a.meter_sign_set ? a.meter_sign : MeterSign.normal;
+        spec.component = a.state_ref;
+        if (spec.component is null)
+            spec.component = a.device_ref;
+        if (spec.component is null)
+            spec.component = vehicle_for(a.vin);
+        into ~= spec;
+    }
+
+    // watches circuit-less ports too, so a dark car port is noticed when a VIN appears
+    void watch_device_ports(Appliance a, Component c, const(char)[] path)
+    {
+        if (c.template_[] == "Port")
+        {
+            CircuitWatch w;
+            w.owner = a;
+            w.component = c;
+            w.path = path.makeString(defaultAllocator());
+            w.circuit = read_port_circuit(a, c, path).makeString(defaultAllocator());
+            circuit_watch ~= w.move;
+        }
+        foreach (child; c.components[])
+        {
+            const(char)[] child_path = path.length ? tconcat(path, ".", child.id[]) : child.id[];
+            watch_device_ports(a, child, child_path);
         }
     }
 

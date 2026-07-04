@@ -48,17 +48,17 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
         Control* ctl = registry.lookup(p.target_appliance);
         if (ctl is null)
         {
-            record_decision(energy_device, p, "no control", float.nan, now);
+            record_decision(energy_device, p, no_control_reason(p.target_appliance), float.nan, now);
             continue;
         }
         if (ctl.setpoint is null)
         {
-            record_decision(energy_device, p, "no setpoint element", float.nan, now);
+            record_decision(energy_device, p, "no setpoint element", float.nan, now, null, ctl);
             continue;
         }
         if (control_already_driven(driven, ctl))
         {
-            record_decision(energy_device, p, "shadowed by higher-tier policy", float.nan, now);
+            record_decision(energy_device, p, "shadowed by higher-tier policy", float.nan, now, null, ctl);
             continue;
         }
         driven ~= ctl;
@@ -75,31 +75,31 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                 const(char)[] block_on = setpoint_change_block_reason(*ctl, 1, mt);
                 if (block_on.length != 0)
                 {
-                    record_decision(energy_device, p, block_on, float.nan, now, &ctx);
+                    record_decision(energy_device, p, block_on, float.nan, now, &ctx, ctl);
                     continue;
                 }
                 if (would_exceed_path_headroom(*ctl, ctx))
                 {
-                    record_decision(energy_device, p, "no path headroom", float.nan, now, &ctx);
+                    record_decision(energy_device, p, "no path headroom", float.nan, now, &ctx, ctl);
                     continue;
                 }
                 ctl.setpoint.value(true, now);
                 ctl.current_setpoint = 1;
                 ctl.last_transition = mt;
                 reserve_path_commitment(commitments, ctx, estimated_control_amps(*ctl, ctx, 1));
-                record_decision(energy_device, p, "on", 1, now, &ctx);
+                record_decision(energy_device, p, "on", 1, now, &ctx, ctl);
                 break;
             case off:
                 const(char)[] block_off = setpoint_change_block_reason(*ctl, 0, mt);
                 if (block_off.length != 0)
                 {
-                    record_decision(energy_device, p, block_off, float.nan, now, &ctx);
+                    record_decision(energy_device, p, block_off, float.nan, now, &ctx, ctl);
                     continue;
                 }
                 ctl.setpoint.value(false, now);
                 ctl.current_setpoint = 0;
                 ctl.last_transition = mt;
-                record_decision(energy_device, p, "off", 0, now, &ctx);
+                record_decision(energy_device, p, "off", 0, now, &ctx, ctl);
                 break;
             case soc:
             case temp:
@@ -112,7 +112,7 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                     setpoint = ctl.nameplate_q;
                 if (setpoint.value != setpoint.value)
                 {
-                    record_decision(energy_device, p, "no max/nameplate", float.nan, now, &ctx);
+                    record_decision(energy_device, p, "no max/nameplate", float.nan, now, &ctx, ctl);
                     continue;
                 }
                 const(char)[] reason = "drive";
@@ -124,7 +124,7 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                         float min_amps = ctl.min;
                         if (headroom < (min_amps == min_amps ? min_amps : 0))
                         {
-                            record_decision(energy_device, p, "no path headroom", float.nan, now, &ctx);
+                            record_decision(energy_device, p, "no path headroom", float.nan, now, &ctx, ctl);
                             continue;
                         }
                         setpoint = Amps(headroom);
@@ -139,7 +139,7 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                         float min_watts = ctl.min;
                         if (headroom < (min_watts == min_watts ? min_watts : 0))
                         {
-                            record_decision(energy_device, p, "no path headroom", float.nan, now, &ctx);
+                            record_decision(energy_device, p, "no path headroom", float.nan, now, &ctx, ctl);
                             continue;
                         }
                         setpoint = Watts(headroom);
@@ -148,21 +148,21 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                 }
                 else if (ctl.unit == ControlUnit.boolean && would_exceed_path_headroom(*ctl, ctx))
                 {
-                    record_decision(energy_device, p, "no path headroom", float.nan, now, &ctx);
+                    record_decision(energy_device, p, "no path headroom", float.nan, now, &ctx, ctl);
                     continue;
                 }
                 float commanded = cast(float)setpoint.normalise().value;
                 const(char)[] block_drive = setpoint_change_block_reason(*ctl, commanded, mt);
                 if (block_drive.length != 0)
                 {
-                    record_decision(energy_device, p, block_drive, float.nan, now, &ctx);
+                    record_decision(energy_device, p, block_drive, float.nan, now, &ctx, ctl);
                     continue;
                 }
                 ctl.setpoint.value(setpoint, now);
                 ctl.current_setpoint = commanded;
                 ctl.last_transition = mt;
                 reserve_path_commitment(commitments, ctx, estimated_control_amps(*ctl, ctx, commanded));
-                record_decision(energy_device, p, reason, commanded, now, &ctx);
+                record_decision(energy_device, p, reason, commanded, now, &ctx, ctl);
                 break;
             case expression:
                 // TODO: expression goals shouldn't always drive `true`. The right shape is
@@ -173,19 +173,19 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                 const(char)[] block_expr = setpoint_change_block_reason(*ctl, 1, mt);
                 if (block_expr.length != 0)
                 {
-                    record_decision(energy_device, p, block_expr, float.nan, now, &ctx);
+                    record_decision(energy_device, p, block_expr, float.nan, now, &ctx, ctl);
                     continue;
                 }
                 if (would_exceed_path_headroom(*ctl, ctx))
                 {
-                    record_decision(energy_device, p, "no path headroom", float.nan, now, &ctx);
+                    record_decision(energy_device, p, "no path headroom", float.nan, now, &ctx, ctl);
                     continue;
                 }
                 ctl.setpoint.value(true, now);
                 ctl.current_setpoint = 1;
                 ctl.last_transition = mt;
                 reserve_path_commitment(commitments, ctx, estimated_control_amps(*ctl, ctx, 1));
-                record_decision(energy_device, p, "expression", 1, now, &ctx);
+                record_decision(energy_device, p, "expression", 1, now, &ctx, ctl);
                 break;
         }
     }
@@ -228,6 +228,13 @@ struct AllocationContext
     float available_headroom_watts = float.nan;
     float committed_amps = float.nan;
     float committed_watts = float.nan;
+}
+
+const(char)[] no_control_reason(Appliance target)
+{
+    if (target !is null && (target.kind == "car" || target.kind == "vehicle" || target.vin.length != 0))
+        return "not connected";
+    return "no control";
 }
 
 bool control_already_driven(ref Array!(Control*) driven, Control* ctl)
@@ -471,7 +478,7 @@ void release_control(ref Control ctl, SysTime now, MonoTime mt)
 }
 
 void record_decision(Device energy_device, Policy p, const(char)[] reason, float commanded,
-                     SysTime now, const(AllocationContext)* ctx = null)
+                     SysTime now, const(AllocationContext)* ctx = null, const(Control)* ctl = null)
 {
     if (energy_device is null || p is null)
         return;
@@ -481,6 +488,10 @@ void record_decision(Device energy_device, Policy p, const(char)[] reason, float
         e.value(reason, now);
     if (Element* e = energy_device.find_or_create_element(tconcat(base, ".target")))
         e.value(p.target, now);
+    if (Element* e = energy_device.find_or_create_element(tconcat(base, ".via")))
+        e.value((ctl !is null && ctl.partner !is null ? ctl.partner.name[] : "").makeString(defaultAllocator()), now);
+    if (Element* e = energy_device.find_or_create_element(tconcat(base, ".device")))
+        e.value((ctl !is null && ctl.device !is null ? ctl.device.id[] : "").makeString(defaultAllocator()), now);
     if (commanded == commanded)
     {
         if (Element* e = energy_device.find_or_create_element(tconcat(base, ".commanded")))
