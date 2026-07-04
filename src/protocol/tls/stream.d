@@ -331,7 +331,7 @@ nothrow @nogc:
         _selected_cert = null;
         _handshake_start = SysTime();
 
-        if (_conn.get !is null)
+        if (_conn.has_remote())
             _conn.stop();
         else if (_stream)
             _stream.destroy();
