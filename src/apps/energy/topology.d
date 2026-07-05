@@ -1342,6 +1342,7 @@ private:
         b.anomaly = false;
 
         float signed_power = 0;
+        float flow_scale = 0;
         foreach (p; b.ports[])
         {
             if (!p.meter_data.has(MeterField.power))
@@ -1351,6 +1352,8 @@ private:
             }
             ++b.metered_ports;
             signed_power += p.meter_data.active[0].value;
+            if (absf(p.meter_data.active[0].value) > flow_scale)
+                flow_scale = absf(p.meter_data.active[0].value);
             b.balance.write_value(MeterField.power, 0, signed_power);
             b.balance.mark(MeterField.power, 0, Provenance.inferred_sum);
             if (p.meter_data.has(MeterField.voltage) && !b.balance.has(MeterField.voltage))
@@ -1367,30 +1370,34 @@ private:
         }
 
         b.accounted_power = signed_power;
-        classify_bus_coverage(b, signed_power);
+        classify_bus_coverage(b, signed_power, flow_scale);
     }
 
-    void classify_bus_coverage(Bus* b, float signed_power)
+    void classify_bus_coverage(Bus* b, float signed_power, float flow_scale)
     {
-        enum noise_floor_w = 50.0f;
         if (b.metered_ports == 0)
         {
             b.coverage = Coverage.unknown;
             return;
         }
 
-        b.residual_power = absf(signed_power) <= noise_floor_w ? 0 : signed_power;
-        b.unaccounted_load_power = b.residual_power > 0 ? b.residual_power : 0;
-        b.unaccounted_source_power = b.residual_power < 0 ? -b.residual_power : 0;
+        b.residual_power = signed_power;
+        b.unaccounted_load_power = signed_power > 0 ? signed_power : 0;
+        b.unaccounted_source_power = signed_power < 0 ? -signed_power : 0;
+
+        // health classification needs a tolerance: bracketing meters always disagree slightly by
+        // stacked calibration + wiring loss, and that is not power appearing from nowhere
+        float noise_floor_w = flow_scale * 0.02f > 50 ? flow_scale * 0.02f : 50;
+        bool balanced = absf(signed_power) <= noise_floor_w;
 
         if (b.dark_ports == 0)
         {
-            if (b.residual_power == 0)
+            if (balanced)
                 b.coverage = Coverage.measured;
             else
             {
                 b.coverage = Coverage.rogue_value;
-                if (b.residual_power < 0)
+                if (signed_power < 0)
                     b.anomaly = true;
                 b.balance.mark(MeterField.power, 0, Provenance.rogue);
             }
@@ -1398,12 +1405,12 @@ private:
         }
 
         b.coverage = Coverage.bounded;
-        if (b.residual_power < 0)
-            b.dark_power_bound = -b.residual_power;
+        if (signed_power < 0)
+            b.dark_power_bound = -signed_power;
         else
         {
             b.dark_power_bound = 0;
-            if (b.residual_power > 0)
+            if (!balanced)
                 b.anomaly = true;
         }
     }

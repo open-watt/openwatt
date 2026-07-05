@@ -142,9 +142,9 @@ Fields:
 | `id` | string | Circuit id. Same as `<circuit_id>`. |
 | `coverage` | string | `unknown`, `bounded`, `rogue-value`, `measured`, or `estimated`. |
 | `accounted_power` | number W | Signed balance from known/inferred terminals before residual classification. |
-| `residual_power` | number W | Noise-gated signed residual. |
-| `unaccounted_load_power` | number W | Positive residual exposed as unknown load. |
-| `unaccounted_source_power` | number W | Negative residual exposed as unknown source/generation. |
+| `residual_power` | number W | Raw signed residual (ungated). Bracketing meters always disagree slightly (stacked calibration + wiring loss), so small values are measurement noise, not a real load. The renderer decides the display threshold and should apply hysteresis so `?` nodes do not flicker near it. `coverage`/`anomaly` already apply the backend's own tolerance. |
+| `unaccounted_load_power` | number W | Positive part of `residual_power` (ungated). |
+| `unaccounted_source_power` | number W | Negative part of `residual_power` (ungated). |
 | `dark_power_bound` | number W | Conservative bound when one or more terminals are dark. |
 | `source_power` | number W | Instantaneous source pool visible at this circuit, `local_source_power + grid_source_power`. |
 | `local_source_power` | number W | Portion of the current source pool attributed to local generation/storage flow. |
@@ -162,9 +162,13 @@ Fields:
 | `parent` | number | Parent bus index in the backend spanning tree, or `-1`. |
 | meter fields | mixed | Synthetic balance fields calculated for this bus. |
 
-Render a synthetic `?` row when `unaccounted_load_power > 0` or
-`unaccounted_source_power > 0`. Use `residual_power` only when a signed display
-is useful.
+Render a synthetic `?` row when the unaccounted power is worth showing. These
+values are ungated, so pick a display threshold (a small absolute floor plus a
+fraction of bus flow is a reasonable start) and apply hysteresis on node
+create/destroy so the row does not flicker as the value crosses it. On a leaf
+bus whose only meter is its feed, the residual just restates the bus load;
+prefer showing it inline on the bus rather than as a separate `?` child. Use
+`residual_power` for a signed display.
 
 ## Circuit Terminals
 

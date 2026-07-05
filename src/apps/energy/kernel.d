@@ -188,6 +188,7 @@ private:
         bus.anomaly = false;
 
         float signed_power = 0;
+        float flow_scale = 0;
         bool any_metered;
         bool dark_nonsink;
         foreach (ref t; terminals[])
@@ -206,6 +207,8 @@ private:
             any_metered = true;
             ++bus.metered_count;
             signed_power += t.contribution;
+            if (absf(t.contribution) > flow_scale)
+                flow_scale = absf(t.contribution);
             bus.balance.write_value(MeterField.power, 0, signed_power);
             bus.balance.mark(MeterField.power, 0, Provenance.inferred_sum);
             if (t.meter.has(MeterField.voltage) && !bus.balance.has(MeterField.voltage))
@@ -225,24 +228,28 @@ private:
             return;
 
         bus.accounted_power = signed_power;
-        classify_bus(bus, signed_power, dark_nonsink);
+        classify_bus(bus, signed_power, flow_scale, dark_nonsink);
     }
 
-    void classify_bus(ref Bus bus, float signed_power, bool dark_nonsink)
+    void classify_bus(ref Bus bus, float signed_power, float flow_scale, bool dark_nonsink)
     {
-        enum noise_floor_w = 50.0f;
-        bus.residual_power = absf(signed_power) <= noise_floor_w ? 0 : signed_power;
-        bus.unaccounted_load_power = bus.residual_power > 0 ? bus.residual_power : 0;
-        bus.unaccounted_source_power = bus.residual_power < 0 ? -bus.residual_power : 0;
+        bus.residual_power = signed_power;
+        bus.unaccounted_load_power = signed_power > 0 ? signed_power : 0;
+        bus.unaccounted_source_power = signed_power < 0 ? -signed_power : 0;
+
+        // health classification needs a tolerance: bracketing meters always disagree slightly by
+        // stacked calibration + wiring loss, and that is not power appearing from nowhere
+        float noise_floor_w = flow_scale * 0.02f > 50 ? flow_scale * 0.02f : 50;
+        bool balanced = absf(signed_power) <= noise_floor_w;
 
         if (bus.dark_count == 0)
         {
-            if (bus.residual_power == 0)
+            if (balanced)
                 bus.coverage = Coverage.measured;
             else
             {
                 bus.coverage = Coverage.rogue_value;
-                if (bus.residual_power < 0 && !dark_nonsink)
+                if (signed_power < 0 && !dark_nonsink)
                     bus.anomaly = true;
                 bus.balance.mark(MeterField.power, 0, Provenance.rogue);
             }
@@ -250,12 +257,12 @@ private:
         }
 
         bus.coverage = Coverage.bounded;
-        if (bus.residual_power < 0)
-            bus.dark_power_bound = dark_nonsink ? -bus.residual_power : 0;
+        if (signed_power < 0)
+            bus.dark_power_bound = dark_nonsink ? -signed_power : 0;
         else
         {
             bus.dark_power_bound = 0;
-            if (bus.residual_power > 0)
+            if (!balanced)
                 bus.anomaly = true;
         }
     }
