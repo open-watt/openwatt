@@ -1256,7 +1256,9 @@ private:
         bool changed;
         foreach (link; links[])
         {
-            if (link.owner !is null || !link.closed)
+            if (!link.closed)
+                continue;
+            if (link.owner !is null && !is_passthrough(link.owner))
                 continue;
             if (copy_inferred_meter_data(link.port_b, link.port_a))
                 changed = true;
@@ -1264,6 +1266,17 @@ private:
                 changed = true;
         }
         return changed;
+    }
+
+    // a 2-port appliance (EVSE, inline charger) conserves power across its single internal link;
+    // 3+ ports (inverters, multi-outlet) split flow between links, so no per-link mirror is valid
+    bool is_passthrough(Appliance a)
+    {
+        size_t n;
+        foreach (p; ports[])
+            if (p.owner is a)
+                ++n;
+        return n == 2;
     }
 
     bool copy_inferred_meter_data(Port* dst, Port* src)
