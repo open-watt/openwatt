@@ -1341,7 +1341,7 @@ private:
         b.dark_ports = 0;
         b.anomaly = false;
 
-        float signed_power;
+        float signed_power = 0;
         foreach (p; b.ports[])
         {
             if (!p.meter_data.has(MeterField.power))

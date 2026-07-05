@@ -364,7 +364,7 @@ float absf(float value) pure
 
 float committed_amps_for(Link* link, ref Array!PathCommitment commitments)
 {
-    float total;
+    float total = 0;
     foreach (ref c; commitments[])
         if (c.link is link)
             total += c.amps;

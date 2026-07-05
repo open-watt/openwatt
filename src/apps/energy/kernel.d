@@ -187,7 +187,7 @@ private:
         bus.dark_count = 0;
         bus.anomaly = false;
 
-        float signed_power;
+        float signed_power = 0;
         bool any_metered;
         bool dark_nonsink;
         foreach (ref t; terminals[])
@@ -460,7 +460,7 @@ private:
 
     float local_terminal_source(int bus_index) pure
     {
-        float source;
+        float source = 0;
         foreach (i, ref terminal; terminals[])
         {
             if (terminal.circuit != buses[cast(size_t)bus_index].circuit || is_branch_terminal(cast(int)i))
@@ -474,7 +474,7 @@ private:
 
     float terminal_load(int bus_index) pure
     {
-        float load;
+        float load = 0;
         foreach (ref terminal; terminals[])
         {
             if (terminal.circuit != buses[cast(size_t)bus_index].circuit)
