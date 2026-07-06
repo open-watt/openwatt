@@ -33,6 +33,7 @@ class Appliance : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("kind", kind),
                                  Prop!("vin", vin),
+                                 Prop!("capacity", capacity),
                                  Prop!("root", root),
                                  Prop!("device", device),
                                  Prop!("meter", meter),
@@ -77,6 +78,14 @@ nothrow @nogc:
         if (_vin[] == value)
             return;
         _vin = value.makeString(g_app.allocator);
+    }
+
+    // usable battery capacity in kWh; fallback for SOC estimation when the
+    // vehicle can't report its own and no empirical estimate exists yet
+    float capacity() const pure { return _capacity; }
+    void capacity(float value)
+    {
+        _capacity = value;
     }
 
     bool root() const pure { return _root; }
@@ -238,6 +247,7 @@ private:
 
     String _kind;
     String _vin;
+    float _capacity = float.nan;
     bool _root;
     Array!PortCircuitBinding _port_bindings;
     String _device_path;

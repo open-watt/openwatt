@@ -177,8 +177,17 @@ nothrow @nogc:
     // graph controls may later add a separate enable_e to bridge split actuators.
     bool can_disable() const
     {
-        if (can_disable_e && can_disable_e.value.isBool)
-            return can_disable_e.value.asBool || enable_e !is null;
+        if (can_disable_e)
+        {
+            if (can_disable_e.value.isBool)
+                return can_disable_e.value.asBool || enable_e !is null;
+            if (can_disable_e.value.isString)
+            {
+                const(char)[] s = can_disable_e.value.asString;
+                if (s.ieq("false") || s[] == "0")
+                    return enable_e !is null;
+            }
+        }
         return true;
     }
 }
@@ -473,6 +482,9 @@ private:
         if (Component bat = c.get_first_component_by_template("Battery"))
         {
             if (Element* e = bat.find_element("soc"))
+                return e;
+            // pessimistic session-delta estimate; stands in for soc until real telemetry exists
+            if (Element* e = bat.find_element("soc_floor"))
                 return e;
             if (Element* e = bat.find_element("state"))
                 return e;

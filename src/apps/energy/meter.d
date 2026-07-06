@@ -638,7 +638,7 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         }
     }
 
-    // if we have an incomplete primary set (V,I,P), then we can calculate the missing values
+    // complete the primary set (V,I,P) from whichever members are measured, and seed S for the triangle pass
     // (per-phase: NaN propagates where inputs are absent; provenance is set only where both inputs existed)
     enum primary_fields = FieldFlags.voltage | FieldFlags.current | FieldFlags.power;
     if (r.type == BusType.dc)
@@ -673,22 +673,25 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
     }
     else
     {
-        if ((r.fields & primary_fields) == (FieldFlags.voltage | FieldFlags.current))
+        if ((r.fields & (FieldFlags.voltage | FieldFlags.current)) == (FieldFlags.voltage | FieldFlags.current))
         {
-            // S = V*I; P only recoverable with PF; Q only with PF too (sign assumed)
-            const bool has_pf = (r.fields & FieldFlags.power_factor) != 0;
+            // S = V*I wherever both are known, even when P was also measured; this seeds the
+            // P/Q/S triangle below so PF/Q/phase complete for meters reporting only primaries.
+            // P itself is only recoverable with PF; Q only with PF too (sign assumed)
             foreach (i; 0..4)
             {
-                float s = r.voltage[i].value * r.current[i].value;
-                r.apparent[i] = s;
                 const bool vi_present = r.has(MeterField.voltage, cast(ubyte)i) && r.has(MeterField.current, cast(ubyte)i);
-                if (vi_present)
-                    r.mark(MeterField.apparent, cast(ubyte)i, Provenance.synthesized);
-                if (has_pf)
+                if (!vi_present)
+                    continue;
+                if (!r.has(MeterField.apparent, cast(ubyte)i))
                 {
-                    r.active[i].value = s * r.pf[i];
-                    if (vi_present && r.has(MeterField.power_factor, cast(ubyte)i))
-                        r.mark(MeterField.power, cast(ubyte)i, Provenance.synthesized);
+                    r.apparent[i] = r.voltage[i].value * r.current[i].value;
+                    r.mark(MeterField.apparent, cast(ubyte)i, Provenance.synthesized);
+                }
+                if (!r.has(MeterField.power, cast(ubyte)i) && r.has(MeterField.power_factor, cast(ubyte)i))
+                {
+                    r.active[i].value = r.apparent[i] * r.pf[i];
+                    r.mark(MeterField.power, cast(ubyte)i, Provenance.synthesized);
                 }
             }
         }

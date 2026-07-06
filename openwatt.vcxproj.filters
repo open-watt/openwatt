@@ -810,6 +810,9 @@
     <DCompile Include="src\apps\energy\reference.d">
       <Filter>src\apps\energy</Filter>
     </DCompile>
+    <DCompile Include="src\apps\energy\session.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
     <DCompile Include="src\apps\energy\state.d">
       <Filter>src\apps\energy</Filter>
     </DCompile>

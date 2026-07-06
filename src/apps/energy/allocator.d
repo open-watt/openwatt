@@ -42,6 +42,7 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
 
     Array!(Control*) driven;
     Array!PathCommitment commitments;
+    Array!SurplusPool surplus_pools;
     foreach (ref r; queue)
     {
         Policy p = r.p;
@@ -104,9 +105,9 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
             case soc:
             case temp:
             case duty:
-                // TODO: drive full-rate is a strawman. Should consult planner's
-                //       required_kwh + time_to_deadline to pick a smarter setpoint
-                //       (modulate down when slack is large; conserve battery for higher tiers).
+                // TODO: floor/essential/important still drive full-rate. Should consult
+                //       planner's required_kwh + time_to_deadline to modulate down when
+                //       slack is large / conserve battery for higher tiers.
                 VarQuantity setpoint = ctl.max_q;
                 if (setpoint.value != setpoint.value)
                     setpoint = ctl.nameplate_q;
@@ -116,6 +117,60 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                     continue;
                 }
                 const(char)[] reason = "drive";
+
+                // Opportunistic policies are entitled to local surplus only: cap the target at
+                // the appliance's present draw plus this island's remaining export. Skipping the
+                // drive (no surplus) leaves the control to the release pass, which settles it at
+                // its minimum / disables it.
+                float draw_watts = float.nan;
+                if (p.tier == PolicyTier.opportunistic)
+                {
+                    draw_watts = appliance_draw_watts(graph, p.target_appliance);
+                    float surplus = surplus_remaining(surplus_pools, ctx.path.source_bus);
+                    if (surplus == surplus)
+                    {
+                        float budget_watts = (draw_watts == draw_watts ? draw_watts : 0) + surplus;
+                        if (ctl.unit == ControlUnit.A && ctx.path.voltage == ctx.path.voltage && ctx.path.voltage > 0)
+                        {
+                            float cap_amps = budget_watts / ctx.path.voltage;
+                            float min_amps = ctl.min;
+                            if (cap_amps < (min_amps == min_amps ? min_amps : 0))
+                            {
+                                record_decision(energy_device, p, "no surplus", float.nan, now, &ctx, ctl);
+                                continue;
+                            }
+                            if (setpoint.normalise().value > cap_amps)
+                            {
+                                setpoint = Amps(cap_amps);
+                                reason = "drive (surplus-limited)";
+                            }
+                        }
+                        else if (ctl.unit == ControlUnit.W)
+                        {
+                            float min_watts = ctl.min;
+                            if (budget_watts < (min_watts == min_watts ? min_watts : 0))
+                            {
+                                record_decision(energy_device, p, "no surplus", float.nan, now, &ctx, ctl);
+                                continue;
+                            }
+                            if (setpoint.normalise().value > budget_watts)
+                            {
+                                setpoint = Watts(budget_watts);
+                                reason = "drive (surplus-limited)";
+                            }
+                        }
+                        else if (ctl.unit == ControlUnit.boolean)
+                        {
+                            float nameplate = ctl.nameplate_power;
+                            if (nameplate == nameplate && nameplate > budget_watts)
+                            {
+                                record_decision(energy_device, p, "no surplus", float.nan, now, &ctx, ctl);
+                                continue;
+                            }
+                        }
+                    }
+                }
+
                 if (ctl.unit == ControlUnit.A)
                 {
                     float headroom = ctx.available_headroom_amps;
@@ -151,6 +206,19 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                     record_decision(energy_device, p, "no path headroom", float.nan, now, &ctx, ctl);
                     continue;
                 }
+                // quantize continuous setpoints down to the control's step so meter jitter
+                // doesn't churn the actuator every tick
+                if (ctl.unit == ControlUnit.A || ctl.unit == ControlUnit.W)
+                {
+                    float step = ctl.step;
+                    if (step == step && step > 0)
+                    {
+                        float v = cast(float)setpoint.normalise().value;
+                        float q = cast(float)(cast(long)(v / step) * step);
+                        if (q != v)
+                            setpoint = ctl.unit == ControlUnit.A ? VarQuantity(Amps(q)) : VarQuantity(Watts(q));
+                    }
+                }
                 float commanded = cast(float)setpoint.normalise().value;
                 const(char)[] block_drive = setpoint_change_block_reason(*ctl, commanded, mt);
                 if (block_drive.length != 0)
@@ -158,10 +226,19 @@ void run_allocator(Device energy_device, ControlRegistry registry, ref Planner p
                     record_decision(energy_device, p, block_drive, float.nan, now, &ctx, ctl);
                     continue;
                 }
+                if (ctl.enable_e !is null && ctl.enable_e !is ctl.setpoint)
+                    ctl.enable_e.value(true, now);
                 ctl.setpoint.value(setpoint, now);
                 ctl.current_setpoint = commanded;
                 ctl.last_transition = mt;
                 reserve_path_commitment(commitments, ctx, estimated_control_amps(*ctl, ctx, commanded));
+                if (p.tier == PolicyTier.opportunistic)
+                {
+                    float commanded_watts = commanded_watts_for(*ctl, ctx, commanded);
+                    float increase = commanded_watts - (draw_watts == draw_watts ? draw_watts : 0);
+                    if (increase == increase && increase > 0)
+                        consume_surplus(surplus_pools, ctx.path.source_bus, increase);
+                }
                 record_decision(energy_device, p, reason, commanded, now, &ctx, ctl);
                 break;
             case expression:
@@ -219,6 +296,89 @@ struct PathCommitment
 {
     Link* link;
     float amps;
+}
+
+// Remaining exportable watts per source bus this tick; opportunistic policies
+// consume from it in rank order.
+struct SurplusPool
+{
+    Bus* bus;
+    float remaining;
+}
+
+float surplus_remaining(ref Array!SurplusPool pools, Bus* source)
+{
+    if (source is null)
+        return float.nan;
+    foreach (ref sp; pools[])
+        if (sp.bus is source)
+            return sp.remaining;
+    float export_watts = bus_export_watts(source);
+    pools ~= SurplusPool(source, export_watts);
+    return export_watts;
+}
+
+void consume_surplus(ref Array!SurplusPool pools, Bus* source, float watts)
+{
+    if (source is null || watts != watts || watts <= 0)
+        return;
+    foreach (ref sp; pools[])
+    {
+        if (sp.bus is source)
+        {
+            sp.remaining = sp.remaining > watts ? sp.remaining - watts : 0;
+            return;
+        }
+    }
+}
+
+// Signed surplus at the island's grid connection: positive when the site is
+// exporting, NEGATIVE when importing. The sign matters for ramp-down: an
+// opportunistic load's entitlement is its present draw plus this value, so
+// grid import actively pulls the cap below what the load is drawing now.
+float bus_export_watts(Bus* bus)
+{
+    if (bus is null)
+        return float.nan;
+    foreach (p; bus.ports[])
+    {
+        if (p.role != PortRole.grid)
+            continue;
+        if (!p.meter_data.has(MeterField.power))
+            return float.nan;
+        return -p.meter_data.active[0].value;
+    }
+    return float.nan;
+}
+
+float appliance_draw_watts(ref TopologyGraph graph, Appliance target)
+{
+    if (target is null)
+        return float.nan;
+    foreach (p; graph.ports[])
+        if (p.owner is target && p.meter_data.has(MeterField.power))
+            return absf(p.meter_data.active[0].value);
+    return float.nan;
+}
+
+float commanded_watts_for(ref const Control ctl, ref AllocationContext ctx, float commanded)
+{
+    final switch (ctl.unit) with (ControlUnit)
+    {
+        case A:
+            if (ctx.path.voltage == ctx.path.voltage && ctx.path.voltage > 0)
+                return commanded * ctx.path.voltage;
+            return float.nan;
+        case W:
+            return commanded;
+        case boolean:
+            return commanded > 0 ? ctl.nameplate_power : 0;
+        case percent:
+        case nameplate_fraction:
+            return ctl.nameplate_power * commanded;
+        case unknown:
+            return float.nan;
+    }
 }
 
 struct AllocationContext
@@ -456,9 +616,18 @@ void release_control(ref Control ctl, SysTime now, MonoTime mt)
     }
     if (setpoint_change_block_reason(ctl, 0, mt).length != 0)
         return;
+    bool separate_enable = ctl.enable_e !is null && ctl.enable_e !is ctl.setpoint;
     if (ctl.unit == ControlUnit.boolean)
     {
         ctl.setpoint.value(false, now);
+    }
+    else if (separate_enable)
+    {
+        // stop via the enable surface; the actuator itself settles at its minimum
+        ctl.enable_e.value(false, now);
+        VarQuantity mn = ctl.min_q;
+        if (mn.value == mn.value)
+            ctl.setpoint.value(mn, now);
     }
     else if (ctl.can_disable)
     {

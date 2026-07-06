@@ -71,6 +71,26 @@ nothrow @nogc:
     MeterSign meter_sign;
     MeterData meter_data;
     bool root;
+    bool implicit;
+}
+
+// Terminal vs boundary: a class terminal IS the battery/pv itself (a battery or
+// pv appliance's own connection, or a synthesized implicit terminal standing in
+// for unmodeled equipment); a boundary port (inverter port, declared breaker
+// child) merely faces the bus that equipment lives on. Terminals source the
+// island accounts; boundary meters are bus-balance and cross-check only.
+// See the metering convention comment in accounts.d.
+bool class_terminal(Port* p) pure
+{
+    if (p.implicit)
+        return true;
+    if (p.owner is null)
+        return false;
+    if (p.role == PortRole.battery)
+        return p.owner.kind == "battery";
+    if (p.role == PortRole.pv)
+        return p.owner.kind == "pv" || p.owner.kind == "solar";
+    return false;
 }
 
 struct Link
@@ -564,7 +584,42 @@ nothrow @nogc:
             a.meter_data.reset_to_missing();
         }
 
+        synthesise_implicit_terminals();
+
         refresh();
+    }
+
+    // A role-declared boundary port (an inverter's battery/pv port, or a breaker
+    // child declared role=pv) states what lives on the bus it faces. When nothing
+    // of that class is actually modeled there, stand in an implicit dark terminal:
+    // node-balance inference assigns it the bus residual, so the equipment the
+    // boundary meter can only see in aggregate becomes an accountable terminal,
+    // and the bus reads healthy instead of rogue. Modeling the real thing (a BMS,
+    // a DC MPPT appliance) displaces the implicit terminal automatically.
+    void synthesise_implicit_terminals()
+    {
+        foreach (b; bus_list[])
+        {
+            synthesise_class_terminal(b, PortRole.battery, FlowDomain.bidirectional);
+            synthesise_class_terminal(b, PortRole.pv, FlowDomain.supply);
+        }
+    }
+
+    void synthesise_class_terminal(Bus* b, PortRole role, FlowDomain flow)
+    {
+        bool declared;
+        foreach (p; b.ports[])
+        {
+            if (p.role != role)
+                continue;
+            if (class_terminal(p))
+                return;
+            declared = true;
+        }
+        if (!declared)
+            return;
+        Port* p = add_port(null, b, role, flow, null, 0, MeterSign.normal, null, b.id[]);
+        p.implicit = true;
     }
 
     void refresh()
@@ -676,8 +731,18 @@ private:
         {
             Bus* ba = ensure_bus(left.length ? left : "grid");
             Bus* bb = ensure_bus(right);
+            // only the contents-declaration roles are meaningful on a breaker child
+            PortRole child_role = PortRole.child;
+            if (link.role.length != 0)
+            {
+                PortRole declared = port_role_from_name(link.role);
+                if (declared == PortRole.pv || declared == PortRole.battery)
+                    child_role = declared;
+                else
+                    log.warning("link '", link.name[], "': role '", link.role, "' is not a downstream contents declaration; expected pv or battery");
+            }
             Port* pa = add_port(null, ba, PortRole.parent, FlowDomain.bidirectional, meter, link.meter_phase, link.meter_sign, "parent", link.name[]);
-            Port* pb = add_port(null, bb, PortRole.child, FlowDomain.bidirectional, null, 0, MeterSign.normal, "child", link.name[]);
+            Port* pb = add_port(null, bb, child_role, FlowDomain.bidirectional, null, 0, MeterSign.normal, "child", link.name[]);
             add_link(null, ba, bb, pa, pb, link.capacity, link.closed, link.name[], link.kind);
         }
         else
@@ -1013,6 +1078,7 @@ private:
             t.meter = p.meter_data;
             t.soc = read_battery_soc(battery_store_source(p));
             t.root = p.root;
+            t.implicit = p.implicit;
             kernel.add_terminal(t);
         }
 
@@ -1090,21 +1156,37 @@ private:
         production_strings.clear();
         foreach (p; ports[])
         {
-            if (p.owner is null || p.bus is null || p.role != PortRole.pv)
+            if (p.bus is null || p.role != PortRole.pv || p.implicit)
+                continue;
+
+            // terminal-first: a boundary pv port (inverter MPPT, declared breaker child)
+            // yields to a real pv appliance modeled on the same bus
+            if (!class_terminal(p) && bus_has_real_class_terminal(p.bus, PortRole.pv))
+                continue;
+
+            const(char)[] owner_name = p.owner ? p.owner.name[] : p.label;
+            if (owner_name.length == 0)
                 continue;
 
             const(char)[] group = production_group(p);
             ProductionContribution member;
-            member.owner = retain_production_string(p.owner.name[]);
+            member.owner = retain_production_string(owner_name);
             member.group = retain_production_string(group);
             member.port = retain_production_string(p.path.length ? p.path[] : port_role_name(p.role));
             member.circuit = retain_production_string(p.bus.id[]);
             member.kind = ProductionContributionKind.member;
             member.component = p.component;
             member.meter = p.meter_data;
+            if (p.owner is null && member.meter.has(MeterField.power) && member.meter.active[0].value < 0)
+            {
+                // a declared breaker child is net-metered: negative means downstream load
+                // exceeds the micros right now, so the visible generation floor is zero
+                member.meter.write_value(MeterField.power, 0, 0);
+            }
             production_contributions ~= member;
 
-            add_production_aggregate_once(p.owner, group);
+            if (p.owner !is null)
+                add_production_aggregate_once(p.owner, group);
         }
 
         foreach (a; Collection!Appliance().values)
@@ -1160,6 +1242,14 @@ private:
             const(char)[] child_path = path.length ? tconcat(path, ".", child.id[]) : child.id[];
             collect_device_production_ports(owner, child, child_path, into);
         }
+    }
+
+    bool bus_has_real_class_terminal(Bus* b, PortRole role) pure
+    {
+        foreach (p; b.ports[])
+            if (p.role == role && !p.implicit && class_terminal(p))
+                return true;
+        return false;
     }
 
     bool production_contribution_exists(Appliance owner, const(char)[] port) pure
@@ -1317,6 +1407,13 @@ private:
         if (dark is null)
             return false;
 
+        // only assign a residual the dark port could physically carry: a positive
+        // residual needs a source, a negative one needs a sink
+        if (b.residual_power > 0 && dark.flow == FlowDomain.consume)
+            return false;
+        if (b.residual_power < 0 && dark.flow == FlowDomain.supply)
+            return false;
+
         dark.meter_data.reset_to_missing();
         dark.meter_data.write_value(MeterField.power, 0, -b.residual_power);
         dark.meter_data.mark(MeterField.power, 0, Provenance.inferred_subtraction);
@@ -1343,11 +1440,16 @@ private:
 
         float signed_power = 0;
         float flow_scale = 0;
+        bool dark_can_sink, dark_can_source;
         foreach (p; b.ports[])
         {
             if (!p.meter_data.has(MeterField.power))
             {
                 ++b.dark_ports;
+                if (p.flow != FlowDomain.supply)
+                    dark_can_sink = true;
+                if (p.flow != FlowDomain.consume)
+                    dark_can_source = true;
                 continue;
             }
             ++b.metered_ports;
@@ -1370,10 +1472,15 @@ private:
         }
 
         b.accounted_power = signed_power;
-        classify_bus_coverage(b, signed_power, flow_scale);
+        classify_bus_coverage(b, signed_power, flow_scale, dark_can_sink, dark_can_source);
     }
 
-    void classify_bus_coverage(Bus* b, float signed_power, float flow_scale)
+    // Residual frame: signed_power sums port draw (positive = drawn from the bus).
+    // A positive residual means known ports draw more than known ports inject, so an
+    // unmetered SOURCE must make up the difference (rogue generation); a negative
+    // residual means unmetered LOAD is absorbing the surplus (the common case:
+    // GPO circuits, cabling loss between bracketing meters).
+    void classify_bus_coverage(Bus* b, float signed_power, float flow_scale, bool dark_can_sink, bool dark_can_source)
     {
         if (b.metered_ports == 0)
         {
@@ -1382,8 +1489,8 @@ private:
         }
 
         b.residual_power = signed_power;
-        b.unaccounted_load_power = signed_power > 0 ? signed_power : 0;
-        b.unaccounted_source_power = signed_power < 0 ? -signed_power : 0;
+        b.unaccounted_source_power = signed_power > 0 ? signed_power : 0;
+        b.unaccounted_load_power = signed_power < 0 ? -signed_power : 0;
 
         // health classification needs a tolerance: bracketing meters always disagree slightly by
         // stacked calibration + wiring loss, and that is not power appearing from nowhere
@@ -1397,7 +1504,8 @@ private:
             else
             {
                 b.coverage = Coverage.rogue_value;
-                if (signed_power < 0)
+                // rogue load is everyday reality; power appearing from nowhere is not
+                if (signed_power > 0)
                     b.anomaly = true;
                 b.balance.mark(MeterField.power, 0, Provenance.rogue);
             }
@@ -1406,11 +1514,15 @@ private:
 
         b.coverage = Coverage.bounded;
         if (signed_power < 0)
-            b.dark_power_bound = -signed_power;
+        {
+            b.dark_power_bound = dark_can_sink ? -signed_power : 0;
+            if (!balanced && !dark_can_sink)
+                b.anomaly = true;
+        }
         else
         {
-            b.dark_power_bound = 0;
-            if (!balanced)
+            b.dark_power_bound = dark_can_source ? signed_power : 0;
+            if (!balanced && !dark_can_source)
                 b.anomaly = true;
         }
     }

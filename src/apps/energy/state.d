@@ -869,6 +869,7 @@ private void publish_circuit_terminal(Device energy, uint generation, ref const 
     energy.find_or_create_element(tconcat(base, "local_fraction")).value = terminal.local_fraction;
     energy.find_or_create_element(tconcat(base, "soc")).value = terminal.soc;
     energy.find_or_create_element(tconcat(base, "root")).value = terminal.root;
+    energy.find_or_create_element(tconcat(base, "implicit")).value = terminal.implicit;
     publish_meter(energy, base, terminal.meter);
 }
 

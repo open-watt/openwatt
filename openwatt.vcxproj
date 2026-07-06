@@ -70,6 +70,7 @@
     <DCompile Include="src\apps\energy\policy.d" />
     <DCompile Include="src\apps\energy\production.d" />
     <DCompile Include="src\apps\energy\reference.d" />
+    <DCompile Include="src\apps\energy\session.d" />
     <DCompile Include="src\apps\energy\state.d" />
     <DCompile Include="src\apps\energy\topology.d" />
     <DCompile Include="src\apps\energy\vehicle.d" />

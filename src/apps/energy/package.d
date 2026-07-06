@@ -21,6 +21,7 @@ import apps.energy.meter;
 import apps.energy.model;
 import apps.energy.planner;
 import apps.energy.policy;
+import apps.energy.session;
 import apps.energy.state;
 import apps.energy.topology;
 import apps.energy.vehicle;
@@ -54,6 +55,7 @@ nothrow @nogc:
     Planner planner;
     ControlRegistry registry;
     TopologyPublisher topology_publisher;
+    ChargeSessionTracker sessions;
 
     Array!Device subscribed_devices;
     bool topology_dirty = true;
@@ -111,6 +113,9 @@ nothrow @nogc:
         t = getTime();
         registry.resync_all(manager.graph);
         log_slow_phase("registry.resync_all", getTime() - t);
+        t = getTime();
+        sessions.tick(manager.graph);
+        log_slow_phase("sessions.tick", getTime() - t);
         t = getTime();
         Collection!Policy().update_all();
         log_slow_phase("policy.update_all", getTime() - t);
@@ -206,8 +211,10 @@ nothrow @nogc:
         table.add_column("solar", Table.TextAlign.right);
         table.add_column("battery", Table.TextAlign.right);
         table.add_column("grid", Table.TextAlign.right);
+        table.add_column("rogue-gen", Table.TextAlign.right);
         table.add_column("generation", Table.TextAlign.right);
         table.add_column("load", Table.TextAlign.right);
+        table.add_column("rogue-load", Table.TextAlign.right);
 
         foreach (island; this.manager.islands[])
         {
@@ -217,8 +224,10 @@ nothrow @nogc:
             table.cell(read_account_cell(island.id[], "account.solar.power"));
             table.cell(read_account_cell(island.id[], "account.battery.power"));
             table.cell(read_account_cell(island.id[], "account.grid.power"));
+            table.cell(read_account_cell(island.id[], "account.rogue.generation.power"));
             table.cell(read_account_cell(island.id[], "account.generation.power"));
             table.cell(read_account_cell(island.id[], "account.load.total.power"));
+            table.cell(read_account_cell(island.id[], "account.rogue.load.power"));
         }
         return table;
     }

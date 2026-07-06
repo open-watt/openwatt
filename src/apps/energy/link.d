@@ -24,6 +24,7 @@ class EnergyLink : ActiveObject
                                  Prop!("parent", parent_circuit),
                                  Prop!("child", child_circuit),
                                  Prop!("circuit", circuit),
+                                 Prop!("role", role),
                                  Prop!("capacity", capacity),
                                  Prop!("closed", closed),
                                  Prop!("meter-phase", meter_phase),
@@ -83,6 +84,17 @@ nothrow @nogc:
         if (_circuit[] == value)
             return;
         _circuit = value.makeString(g_app.allocator);
+        restart();
+    }
+
+    // declares what lives on the child circuit when it isn't otherwise modeled;
+    // e.g. role=pv on a breaker feeding microinverters books its backfeed as solar
+    const(char)[] role() const pure { return _role[]; }
+    void role(const(char)[] value)
+    {
+        if (_role[] == value)
+            return;
+        _role = value.makeString(g_app.allocator);
         restart();
     }
 
@@ -171,6 +183,7 @@ private:
     String _parent_circuit;
     String _child_circuit;
     String _circuit;
+    String _role;
     uint _capacity;
     bool _closed;
     ubyte _meter_phase;

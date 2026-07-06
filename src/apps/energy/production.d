@@ -173,6 +173,12 @@ void add_power(ref float total, ref const MeterData meter) pure
     total += meter.active[0].value;
 }
 
+// Terminal-vs-boundary selection (which ports contribute at all) happens upstream
+// at topology.rebuild_productions per the metering convention in accounts.d. This
+// site only reconciles WITHIN one source: the aggregate Solar meter is
+// authoritative when present, else the per-input members (MPPT strings, optimiser
+// or micro reports sharing the owner's group) are summed, with a mismatch flag as
+// the cross-check.
 void finalise_production(ref Production p)
 {
     p.data.reset_to_missing();

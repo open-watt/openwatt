@@ -142,10 +142,10 @@ Fields:
 | `id` | string | Circuit id. Same as `<circuit_id>`. |
 | `coverage` | string | `unknown`, `bounded`, `rogue-value`, `measured`, or `estimated`. |
 | `accounted_power` | number W | Signed balance from known/inferred terminals before residual classification. |
-| `residual_power` | number W | Raw signed residual (ungated). Bracketing meters always disagree slightly (stacked calibration + wiring loss), so small values are measurement noise, not a real load. The renderer decides the display threshold and should apply hysteresis so `?` nodes do not flicker near it. `coverage`/`anomaly` already apply the backend's own tolerance. |
-| `unaccounted_load_power` | number W | Positive part of `residual_power` (ungated). |
-| `unaccounted_source_power` | number W | Negative part of `residual_power` (ungated). |
-| `dark_power_bound` | number W | Conservative bound when one or more terminals are dark. |
+| `residual_power` | number W | Raw signed residual (ungated), in the terminal draw frame: positive means known terminals draw more than they inject (an unmetered source must exist), negative means unmetered load is absorbing the surplus. Bracketing meters always disagree slightly (stacked calibration + wiring loss), so small values are measurement noise, not a real load. The renderer decides the display threshold and should apply hysteresis so `?` nodes do not flicker near it. `coverage`/`anomaly` already apply the backend's own tolerance. |
+| `unaccounted_load_power` | number W | Magnitude of the negative part of `residual_power` (ungated): unmetered load on this circuit. The common case (GPO circuits, cabling loss between bracketing meters). |
+| `unaccounted_source_power` | number W | Positive part of `residual_power` (ungated): unmetered generation/backfeed on this circuit (rogue generation). |
+| `dark_power_bound` | number W | Conservative bound on the residual assignable to dark terminals, respecting their flow domains (a dark source cannot explain missing load, and vice versa). |
 | `source_power` | number W | Instantaneous source pool visible at this circuit, `local_source_power + grid_source_power`. |
 | `local_source_power` | number W | Portion of the current source pool attributed to local generation/storage flow. |
 | `grid_source_power` | number W | Portion of the current source pool attributed to utility-grid import. |
@@ -154,7 +154,7 @@ Fields:
 | `terminal_count` | number | Terminals attached to this circuit. |
 | `metered_count` | number | Terminals with power data after inference. |
 | `dark_count` | number | Terminals still missing power data. |
-| `anomaly` | bool | Backend detected a suspicious balance condition. |
+| `anomaly` | bool | Backend detected a suspicious balance condition: unaccounted source power (power appearing from nowhere), or a residual no dark terminal could physically carry. Ordinary unmetered load is NOT an anomaly. |
 | `contains_grid` | bool | This bus is the implicit `grid` circuit. |
 | `explicit_root` | bool | This circuit was marked as an explicit source/root anchor. |
 | `island` | number | Connected island index. |
@@ -182,6 +182,21 @@ A terminal is a Port projected into the role-blind circuit kernel. Terminals are
 the electrical connection points that carry owner, port role, flow domain, meter
 data, and explicit root/source hints.
 
+Terminals divide into two kinds. A terminal belonging to a battery/pv appliance
+(or synthesized implicitly, below) measures the thing itself and sources the
+island accounts. A boundary terminal (an inverter's port, a breaker link end)
+measures the net of the circuit it faces and only feeds the bus balance.
+
+When a role-declared boundary port (an inverter's `battery`/`pv` port, or a
+link configured with `role=pv`) faces a circuit where nothing of that class is
+modelled, the backend synthesizes an **implicit terminal** on that circuit:
+`implicit == true`, `owner == ""`, id `<circuit>.<role>`, meter data assigned
+by node-balance inference (provenance `inferred-subtraction`) when the circuit
+has exactly one dark terminal the residual could physically flow through.
+Renderers should draw implicit terminals as attributed equipment nodes (this is
+what used to surface as the `?` residual row on such circuits), styled by
+provenance.
+
 Fields:
 
 | Field | Type | Meaning |
@@ -202,6 +217,7 @@ Fields:
 | `grid_power` | number W | Portion of this terminal's current consuming flow attributed to utility-grid energy. Supplying terminals publish `0`. |
 | `local_fraction` | number 0..1 | Local share for this terminal's flow. Use this directly to color terminal/edge flow. |
 | `root` | bool | This terminal is an explicit render/source root. |
+| `implicit` | bool | Synthesized stand-in for unmodelled equipment behind a role-declared boundary port. |
 | meter fields | mixed | Meter data for this terminal. May be measured or inferred. |
 
 Role and domain are descriptive. They do not imply sign by themselves. Effective
@@ -295,6 +311,14 @@ currently PV/solar. A single PV input may be the top-level `solar` port.
 Multiple MPPT ports such as `solar.mppt1` and `solar.mppt2` group under
 `solar`. If an aggregate Solar meter exists it is published directly; otherwise
 the aggregate is calculated from member ports.
+
+Contribution selection is terminal-first per circuit: a boundary pv port (an
+inverter MPPT input, or a breaker link declared `role=pv`) yields to a real pv
+appliance modelled on the same circuit, and implicit terminals never contribute
+(their declaring boundary port already does). A declared breaker child is
+net-metered, so its contribution is floored at zero when downstream load
+exceeds the generation behind it. Ownerless declared links contribute under
+their link name as `owner`.
 
 Fields:
 
@@ -400,11 +424,13 @@ Important fields:
 | --- | --- | --- | --- |
 | `mode` | string | - | `on_grid`, `off_grid`, or `unknown`. |
 | `members` | string | - | Comma-separated circuit ids in the island. |
-| `account.solar.power` | number | W | Solar generation aggregate. |
-| `account.battery.power` | number | W | Positive = discharging. |
-| `account.grid.power` | number | W | Positive = importing. |
-| `account.generation.power` | number | W | Derived source aggregate. |
-| `account.load.total.power` | number | W | Derived load aggregate. |
+| `account.solar.power` | number | W | Sum of pv terminal flows (reconciled per source; see Production Groups). |
+| `account.battery.power` | number | W | Sum of battery terminal flows. Positive = discharging. |
+| `account.grid.power` | number | W | Island root balance. Positive = importing. |
+| `account.rogue.generation.power` | number | W | Unattributed source residual summed across member circuits (excluding the root). Real generation with no solar/battery attribution. |
+| `account.rogue.load.power` | number | W | Unattributed load residual summed across member circuits (excluding the root). Includes conversion losses between bracketing meters. |
+| `account.generation.power` | number | W | Net on-site supply: solar + battery (signed) + rogue generation. Grid is NOT included. Can go negative when battery charging exceeds on-site production. `generation - battery` is pure production (solar + rogue). |
+| `account.load.total.power` | number | W | Derived load: `generation + grid` (signed identity), clamped at zero. Battery/solar terminals are DC-side, so inverter conversion losses land here (in both charge and discharge directions). |
 | `account.solar.today.energy` | number | kWh | Since local midnight snapshot. |
 | `account.battery.today.charge` | number | kWh | Since local midnight snapshot. |
 | `account.battery.today.discharge` | number | kWh | Since local midnight snapshot. |

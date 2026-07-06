@@ -49,6 +49,7 @@ struct CircuitTerminal
     float local_fraction = float.nan;
     float soc = float.nan;
     bool root;
+    bool implicit;
 
     bool metered() const pure nothrow @nogc
     {
@@ -190,7 +191,7 @@ private:
         float signed_power = 0;
         float flow_scale = 0;
         bool any_metered;
-        bool dark_nonsink;
+        bool dark_can_sink, dark_can_source;
         foreach (ref t; terminals[])
         {
             if (t.circuit != bus.circuit)
@@ -199,8 +200,10 @@ private:
             if (!t.metered)
             {
                 ++bus.dark_count;
+                if (t.domain != SignDomain.source)
+                    dark_can_sink = true;
                 if (t.domain != SignDomain.sink)
-                    dark_nonsink = true;
+                    dark_can_source = true;
                 continue;
             }
 
@@ -228,14 +231,17 @@ private:
             return;
 
         bus.accounted_power = signed_power;
-        classify_bus(bus, signed_power, flow_scale, dark_nonsink);
+        classify_bus(bus, signed_power, flow_scale, dark_can_sink, dark_can_source);
     }
 
-    void classify_bus(ref Bus bus, float signed_power, float flow_scale, bool dark_nonsink)
+    // Residual frame: positive = known terminals draw more than they inject, so an
+    // unmetered SOURCE is missing (rogue generation); negative = an unmetered LOAD
+    // absorbs the surplus (the common case). Mirrors topology.classify_bus_coverage.
+    void classify_bus(ref Bus bus, float signed_power, float flow_scale, bool dark_can_sink, bool dark_can_source)
     {
         bus.residual_power = signed_power;
-        bus.unaccounted_load_power = signed_power > 0 ? signed_power : 0;
-        bus.unaccounted_source_power = signed_power < 0 ? -signed_power : 0;
+        bus.unaccounted_source_power = signed_power > 0 ? signed_power : 0;
+        bus.unaccounted_load_power = signed_power < 0 ? -signed_power : 0;
 
         // health classification needs a tolerance: bracketing meters always disagree slightly by
         // stacked calibration + wiring loss, and that is not power appearing from nowhere
@@ -249,7 +255,8 @@ private:
             else
             {
                 bus.coverage = Coverage.rogue_value;
-                if (signed_power < 0 && !dark_nonsink)
+                // rogue load is everyday reality; power appearing from nowhere is not
+                if (signed_power > 0)
                     bus.anomaly = true;
                 bus.balance.mark(MeterField.power, 0, Provenance.rogue);
             }
@@ -258,11 +265,15 @@ private:
 
         bus.coverage = Coverage.bounded;
         if (signed_power < 0)
-            bus.dark_power_bound = dark_nonsink ? -signed_power : 0;
+        {
+            bus.dark_power_bound = dark_can_sink ? -signed_power : 0;
+            if (!balanced && !dark_can_sink)
+                bus.anomaly = true;
+        }
         else
         {
-            bus.dark_power_bound = 0;
-            if (!balanced)
+            bus.dark_power_bound = dark_can_source ? signed_power : 0;
+            if (!balanced && !dark_can_source)
                 bus.anomaly = true;
         }
     }

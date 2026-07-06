@@ -27,11 +27,13 @@ nothrow @nogc:
 // production groups, battery terminals, grid/root flow, and derived load.
 //
 // Current set of accounts published per island:
-//   account.solar.power           (W, sum of Solar EnergyMeter active power)
+//   account.solar.power           (W, sum of reconciled pv productions)
 //   account.battery.power         (W, signed: positive = discharging)
 //   account.grid.power            (W, signed: positive = importing)
-//   account.generation.power      (W, derived: solar + max(battery,0) + max(grid,0))
-//   account.load.total.power      (W, derived from balance)
+//   account.rogue.generation.power (W, unattributed source residual across buses)
+//   account.rogue.load.power      (W, unattributed load residual across buses)
+//   account.generation.power      (W, net on-site supply: solar + battery signed + rogue generation)
+//   account.load.total.power      (W, generation + grid, clamped at zero)
 //   account.solar.today.energy    (kWh since local midnight; HACK -- see below)
 //   account.battery.today.charge  (kWh since local midnight; HACK)
 //   account.battery.today.discharge (kWh since local midnight; HACK)
@@ -121,6 +123,8 @@ struct IslandTotals
     float solar_power = 0;
     float battery_power = 0;          // signed: positive = discharging
     float grid_power = 0;             // signed: positive = importing
+    float rogue_generation_power = 0; // unattributed source residual across member buses
+    float rogue_load_power = 0;       // unattributed load residual across member buses
     float generation_power = 0;
     float load_power = 0;
 
@@ -142,6 +146,8 @@ nothrow @nogc:
     AccountFloatCell solar_power;
     AccountFloatCell battery_power;
     AccountFloatCell grid_power;
+    AccountFloatCell rogue_generation_power;
+    AccountFloatCell rogue_load_power;
     AccountFloatCell generation_power;
     AccountFloatCell load_power;
     AccountFloatCell solar_today_energy;
@@ -158,6 +164,8 @@ nothrow @nogc:
         solar_power.bind(account_element(energy_device, island_id, "account.solar.power"));
         battery_power.bind(account_element(energy_device, island_id, "account.battery.power"));
         grid_power.bind(account_element(energy_device, island_id, "account.grid.power"));
+        rogue_generation_power.bind(account_element(energy_device, island_id, "account.rogue.generation.power"));
+        rogue_load_power.bind(account_element(energy_device, island_id, "account.rogue.load.power"));
         generation_power.bind(account_element(energy_device, island_id, "account.generation.power"));
         load_power.bind(account_element(energy_device, island_id, "account.load.total.power"));
         solar_today_energy.bind(account_element(energy_device, island_id, "account.solar.today.energy"));
@@ -250,6 +258,8 @@ void update_island_accounts(ref IslandAccountPublisher publisher, Island* island
     publisher.solar_power.publish(t.solar_power, ts);
     publisher.battery_power.publish(t.battery_power, ts);
     publisher.grid_power.publish(t.grid_power, ts);
+    publisher.rogue_generation_power.publish(t.rogue_generation_power, ts);
+    publisher.rogue_load_power.publish(t.rogue_load_power, ts);
     publisher.generation_power.publish(t.generation_power, ts);
     publisher.load_power.publish(t.load_power, ts);
 
@@ -284,59 +294,114 @@ IslandTotals compute_island_totals(Island* island, ref TopologyGraph graph, ref 
             t.solar_power += production.data.active[0].value;
     add_production_today(t, graph, island, daily);
 
-    bool have_battery_member;
-    foreach (p; graph.ports[])
-    {
-        if (p.role != PortRole.battery || !bus_in_island(island, p.bus))
-            continue;
-        if (p.owner && p.owner.kind == "battery")
-        {
-            have_battery_member = true;
-            break;
-        }
-    }
+    add_island_battery(t, island, daily);
+    add_island_rogue(t, island);
 
-    foreach (p; graph.ports[])
-    {
-        if (p.role != PortRole.battery || !bus_in_island(island, p.bus))
-            continue;
-        bool member = p.owner && p.owner.kind == "battery";
-        if (have_battery_member && !member)
-            continue;
-        if (p.meter_data.has(MeterField.power))
-            t.battery_power += member ? -p.meter_data.active[0].value
-                                      : p.meter_data.active[0].value;
-        if (p.meter)
-        {
-            Element* import_energy = p.meter.find_element("import");
-            Element* export_energy = p.meter.find_element("export");
-            if (member)
-            {
-                t.battery_charge_today_kwh += today_delta(daily, import_energy);
-                t.battery_discharge_today_kwh += today_delta(daily, export_energy);
-            }
-            else
-            {
-                t.battery_charge_today_kwh += today_delta(daily, export_energy);
-                t.battery_discharge_today_kwh += today_delta(daily, import_energy);
-            }
-        }
-    }
+    // Generation is net on-site supply: solar + battery (signed) + rogue
+    // generation. Grid is deliberately NOT part of it: grid has its own
+    // account, and this definition gives consumers the exact identity
+    // LOAD = GENERATION + GRID (signed, before the zero clamp), with
+    // GENERATION - BATTERY = solar + rogue as the pure production figure.
+    t.generation_power = t.solar_power + t.battery_power + t.rogue_generation_power;
 
-    // Generation: positive sources side of the energy bus.
-    float bat_src = t.battery_power > 0 ? t.battery_power : 0;
-    float grid_src = t.grid_power > 0 ? t.grid_power : 0;
-    t.generation_power = t.solar_power + bat_src + grid_src;
-
-    // Load: derived from balance. Sources flow into the bus; battery-charging
-    // and grid-export drain off it; the rest is house load.
-    float bat_sink = t.battery_power < 0 ? -t.battery_power : 0;
-    float grid_sink = t.grid_power < 0 ? -t.grid_power : 0;
-    t.load_power = t.generation_power - bat_sink - grid_sink;
+    t.load_power = t.generation_power + t.grid_power;
     if (t.load_power < 0)
         t.load_power = 0;
 
     return t;
+}
+
+// ==========================================================================
+// METERING CONVENTION: terminal-first, boundary-as-balance.
+//
+// Two kinds of metered object exist on a bus:
+//
+//   TERMINAL appliances (one port: a battery/BMS, a DC MPPT, a micro, a load)
+//   measure their own flow and nothing else. They are authoritative, always,
+//   and are bucketed into the accounts by class: battery -> BATTERY,
+//   pv -> SOLAR, everything else -> (implicit) LOAD.
+//
+//   BOUNDARY ports (an inverter's battery/pv/grid ports, every breaker link)
+//   measure a place, not a thing: the net of everything on the bus they face.
+//   They never source a generation/storage account directly; they provide the
+//   bus balance that reconciliation and health run on.
+//
+// A role-declared boundary port facing a bus with nothing of that class
+// modeled gets an implicit dark terminal synthesized beside it (see
+// topology.synthesise_implicit_terminals); node-balance inference assigns it
+// the residual, so accounts still only ever read terminals. Modeling the real
+// equipment (a BMS, a DC MPPT appliance) displaces the implicit terminal and
+// the leftover residual becomes honest rogue load/generation on that bus
+// (e.g. DC cabling loss between a BMS and its inverter).
+//
+// All of these meters are DC-side for battery/pv, so BOTH charge and discharge
+// conversion losses fall on the AC side. LOAD is derived as (sources - sinks),
+// so those losses land in household LOAD in both directions: an inverter
+// drawing 1 kW AC to store 0.9 kW DC books the 0.1 kW loss as load, exactly as
+// a 0.9 kW DC discharge feeding 0.8 kW AC books its loss as load. LOAD is thus
+// an honest "household + conversion" figure, with conversion loss reading as
+// one more rogue load (of which there are already plenty).
+//
+// Rogue generation (positive bus residual: unattributed backfeed) is still
+// generation: it sums into GENERATION but not into SOLAR or BATTERY, because
+// we know it exists without knowing what it is.
+//
+// Solar contribution selection follows the same rule at the collection site
+// (topology.rebuild_productions): boundary pv ports yield to real pv terminal
+// appliances per bus; production.d only reconciles aggregate-vs-member within
+// each source. Change all three sites together.
+// ==========================================================================
+void add_island_battery(ref IslandTotals t, Island* island, ref DailySnapshot daily)
+{
+    foreach (bus; island.members[])
+    {
+        bool implicit_terminal;
+        foreach (p; bus.ports[])
+            if (p.role == PortRole.battery && p.implicit)
+                implicit_terminal = true;
+
+        foreach (p; bus.ports[])
+        {
+            if (p.role != PortRole.battery)
+                continue;
+            if (class_terminal(p))
+            {
+                // terminal frame: positive = charging, negative = discharging
+                if (p.meter_data.has(MeterField.power))
+                    t.battery_power += -p.meter_data.active[0].value;
+                if (p.meter)
+                {
+                    t.battery_charge_today_kwh += today_delta(daily, p.meter.find_element("import"));
+                    t.battery_discharge_today_kwh += today_delta(daily, p.meter.find_element("export"));
+                }
+            }
+            else if (implicit_terminal && p.meter)
+            {
+                // the bank is only visible through this boundary meter; its energy
+                // counters are the sole source for the daily tallies (frame flipped:
+                // the boundary imports from the bus what the bank discharges)
+                t.battery_charge_today_kwh += today_delta(daily, p.meter.find_element("export"));
+                t.battery_discharge_today_kwh += today_delta(daily, p.meter.find_element("import"));
+            }
+        }
+    }
+}
+
+void add_island_rogue(ref IslandTotals t, Island* island)
+{
+    foreach (bus; island.members[])
+    {
+        // the root bus balance IS the grid account; its flow is not rogue
+        if (bus is island.root)
+            continue;
+        // measured means balanced within the noise floor; unknown means no data
+        if (bus.coverage != Coverage.rogue_value && bus.coverage != Coverage.bounded)
+            continue;
+        if (bus.unaccounted_source_power == bus.unaccounted_source_power)
+            t.rogue_generation_power += bus.unaccounted_source_power;
+        if (bus.unaccounted_load_power == bus.unaccounted_load_power)
+            t.rogue_load_power += bus.unaccounted_load_power;
+    }
 }
 
 bool production_belongs_to_island(ref const Production production, ref TopologyGraph graph, Island* island)
@@ -390,9 +455,4 @@ bool circuit_in_island(Island* island, const(char)[] circuit)
         if (b.id[] == circuit)
             return true;
     return false;
-}
-
-bool bus_in_island(Island* island, Bus* bus)
-{
-    return bus !is null && circuit_in_island(island, bus.id[]);
 }
