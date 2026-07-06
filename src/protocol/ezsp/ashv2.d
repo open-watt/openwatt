@@ -50,6 +50,7 @@ nothrow @nogc:
             return;
         if (_subscribed)
         {
+            _stream.rx_handler = null;
             _stream.unsubscribe(&stream_state_change);
             _subscribed = false;
         }
@@ -68,9 +69,15 @@ protected:
         if (!_stream || !_stream.running)
             return CompletionStatus.continue_;
 
-        MonoTime now = getTime();
+        if (!_subscribed)
+        {
+            _stream.rx_handler = &on_bytes;
+            _stream.subscribe(&stream_state_change);
+            _subscribed = true;
+        }
 
-        // periodically send RST until we get RSTACK
+        // periodically send RST until the NCP answers RSTACK (delivered via on_bytes)
+        MonoTime now = getTime();
         if (!_connected && now - _last_event > T_RSTACK_MAX.msecs)
         {
             log.debug_("connecting on '", _stream.name, "'...");
@@ -84,17 +91,7 @@ protected:
             _last_event = now;
         }
 
-        // poll for incoming RSTACK response
-        service_stream();
-
-        if (_connected)
-        {
-            _stream.subscribe(&stream_state_change);
-            _subscribed = true;
-            return CompletionStatus.complete;
-        }
-
-        return CompletionStatus.continue_;
+        return _connected ? CompletionStatus.complete : CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()
@@ -104,6 +101,7 @@ protected:
         _tx_seq = _rx_seq = 0;
         _tx_ack = 0;
         _rx_offset = 0;
+        _rx_accum = 0;
 
         Message* next;
         while (_tx_in_flight)
@@ -123,6 +121,7 @@ protected:
 
         if (_subscribed)
         {
+            _stream.rx_handler = null;
             _stream.unsubscribe(&stream_state_change);
             _subscribed = false;
         }
@@ -134,9 +133,7 @@ protected:
     {
         super.update();
 
-        service_stream();
-
-        // retransmit timeout
+        // rx arrives via on_bytes (the stream's rx_handler); only the retransmit timer remains
         MonoTime now = getTime();
         if (_tx_in_flight && now - _tx_in_flight.send_time >= 250.msecs)
         {
@@ -224,6 +221,7 @@ private:
     Message* _free_list;
 
     ubyte _rx_offset;
+    uint _rx_accum;     // stream bytes seen since the last completed frame (rx-rate stats)
     ubyte[128] _rx_buffer;
 
     void stream_state_change(ActiveObject, StateSignal signal)
@@ -232,103 +230,113 @@ private:
             restart();
     }
 
-    void service_stream()
+    void on_bytes(Stream, const(void)[] data, MonoTime rx_time)
     {
-        size_t rx_bytes = 0;
-        do
+        const(ubyte)[] input = cast(const(ubyte)[])data;
+        while (input.length)
         {
-            MonoTime now = getTime();
-            ptrdiff_t r = _stream.read(_rx_buffer[_rx_offset..$]);
-            if (r <= 0)
-                break;
-
-            rx_bytes += r;
-
-            // skip any XON/XOFF bytes
-            ubyte rxLen = _rx_offset;
-            for (ubyte i = _rx_offset; i < _rx_offset + r; ++i)
+            size_t space = _rx_buffer.length - _rx_offset;
+            if (space == 0)
             {
-                if (_rx_buffer[i] == ASH_XON_BYTE || _rx_buffer[i] == ASH_XOFF_BYTE)
-                    continue;
-                _rx_buffer[rxLen++] = _rx_buffer[i];
+                // a frame longer than the buffer with no delimiter: resync rather than stall
+                add_rx_drop();
+                _rx_offset = 0;
+                space = _rx_buffer.length;
             }
+            size_t take = input.length < space ? input.length : space;
+            _rx_buffer[_rx_offset .. _rx_offset + take] = input[0 .. take];
+            input = input[take .. $];
+            parse_buffer(cast(ubyte)take, rx_time);
+        }
+    }
 
-            // parse frames from stream delimited by 0x7E bytes
-            ubyte start = 0;
-            ubyte end = 0;
-            bool inputError = false;
-            outer: for (; end < rxLen; ++end)
-            {
-                if (_rx_buffer[end] == ASH_SUBSTITUTE_BYTE)
-                    inputError = true;
-                else if (_rx_buffer[end] == ASH_CANCEL_BYTE)
-                    start = cast(ubyte)(end + 1);
+    void parse_buffer(ubyte new_bytes, MonoTime now)
+    {
+        _rx_accum += new_bytes;
 
-                if (_rx_buffer[end] != ASH_FLAG_BYTE)
-                    continue;
+        // skip any XON/XOFF bytes
+        ubyte rxLen = _rx_offset;
+        for (ubyte i = _rx_offset; i < _rx_offset + new_bytes; ++i)
+        {
+            if (_rx_buffer[i] == ASH_XON_BYTE || _rx_buffer[i] == ASH_XOFF_BYTE)
+                continue;
+            _rx_buffer[rxLen++] = _rx_buffer[i];
+        }
 
-                if (inputError)
-                {
-                    inputError = false;
-                    start = cast(ubyte)(end + 1);
-                    add_rx_drop();
-                    continue;
-                }
-
-                // remove byte-stuffing from the frame
-                ubyte frameLen = 0;
-                for (ubyte i = start; i < end; ++i)
-                {
-                    ubyte b = _rx_buffer[i];
-                    if (b == ASH_ESCAPE_BYTE)
-                    {
-                        if (++i == end)
-                        {
-                            start = cast(ubyte)(end + 1);
-                            continue outer;
-                        }
-                        _rx_buffer[start + frameLen++] = _rx_buffer[i] ^ 0x20;
-                    }
-                    else
-                        _rx_buffer[start + frameLen++] = b;
-                }
-
-                ubyte frameStart = start;
+        // parse frames from stream delimited by 0x7E bytes
+        ubyte start = 0;
+        ubyte end = 0;
+        bool inputError = false;
+        outer: for (; end < rxLen; ++end)
+        {
+            if (_rx_buffer[end] == ASH_SUBSTITUTE_BYTE)
+                inputError = true;
+            else if (_rx_buffer[end] == ASH_CANCEL_BYTE)
                 start = cast(ubyte)(end + 1);
 
-                if (frameLen < 2)
-                {
-                    if (frameLen != 0)
-                        add_rx_drop();
-                    continue;
-                }
+            if (_rx_buffer[end] != ASH_FLAG_BYTE)
+                continue;
 
-                // validate the frame
-                int frameEnd = frameStart + frameLen - 2;
-                ubyte[] frame = _rx_buffer[frameStart .. frameEnd];
-
-                // check the crc
-                const ushort crc = frame.ezsp_crc();
-                if (_rx_buffer[frameEnd .. frameEnd + 2][0..2].bigEndianToNative!ushort != crc)
-                {
-                    add_rx_drop();
-                    continue;
-                }
-
-                add_rx_frame(rx_bytes);
-                rx_bytes = 0;
-                process_frame(frame, now);
-            }
-
-            // shuffle any tail bytes (incomplete frames) to the start of the buffer...
-            _rx_offset = cast(ubyte)(rxLen - start);
-            if (start > 0)
+            if (inputError)
             {
-                import urt.mem : memmove;
-                memmove(_rx_buffer.ptr, _rx_buffer.ptr + start, _rx_offset);
+                inputError = false;
+                start = cast(ubyte)(end + 1);
+                add_rx_drop();
+                continue;
             }
+
+            // remove byte-stuffing from the frame
+            ubyte frameLen = 0;
+            for (ubyte i = start; i < end; ++i)
+            {
+                ubyte b = _rx_buffer[i];
+                if (b == ASH_ESCAPE_BYTE)
+                {
+                    if (++i == end)
+                    {
+                        start = cast(ubyte)(end + 1);
+                        continue outer;
+                    }
+                    _rx_buffer[start + frameLen++] = _rx_buffer[i] ^ 0x20;
+                }
+                else
+                    _rx_buffer[start + frameLen++] = b;
+            }
+
+            ubyte frameStart = start;
+            start = cast(ubyte)(end + 1);
+
+            if (frameLen < 2)
+            {
+                if (frameLen != 0)
+                    add_rx_drop();
+                continue;
+            }
+
+            // validate the frame
+            int frameEnd = frameStart + frameLen - 2;
+            ubyte[] frame = _rx_buffer[frameStart .. frameEnd];
+
+            // check the crc
+            const ushort crc = frame.ezsp_crc();
+            if (_rx_buffer[frameEnd .. frameEnd + 2][0..2].bigEndianToNative!ushort != crc)
+            {
+                add_rx_drop();
+                continue;
+            }
+
+            add_rx_frame(_rx_accum);
+            _rx_accum = 0;
+            process_frame(frame, now);
         }
-        while(true);
+
+        // shuffle any tail bytes (incomplete frames) to the start of the buffer...
+        _rx_offset = cast(ubyte)(rxLen - start);
+        if (start > 0)
+        {
+            import urt.mem : memmove;
+            memmove(_rx_buffer.ptr, _rx_buffer.ptr + start, _rx_offset);
+        }
     }
 
     void process_frame(ubyte[] frame, MonoTime timestamp)

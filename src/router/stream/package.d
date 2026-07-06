@@ -267,6 +267,11 @@ protected:
     RecvHandler _incoming;
     Array!ubyte _rx_buffer;
 
+    // When no rx_handler is installed, pushed bytes buffer here until a consumer polls read().
+    // A stream that is actively drained by a producer (e.g. the serial reader thread) but has no
+    // consumer would otherwise grow this without bound, so cap it and drop like a full device FIFO.
+    enum max_unread_rx = 256 * 1024;
+
     final void incoming(const(void)[] data, MonoTime rx_time)
     {
         if (data.length == 0)
@@ -275,7 +280,7 @@ protected:
         write_to_log(true, data);
         if (_incoming)
             _incoming(this, data, rx_time);
-        else
+        else if (_rx_buffer.length < max_unread_rx)
             _rx_buffer ~= cast(const(ubyte)[])data;
     }
 

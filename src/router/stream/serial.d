@@ -1,5 +1,6 @@
 module router.stream.serial;
 
+import urt.array;
 import urt.io;
 import urt.lifetime;
 import urt.log;
@@ -7,6 +8,7 @@ import urt.meta.nullable;
 import urt.result;
 import urt.string;
 import urt.string.format;
+import urt.time;
 
 import manager;
 import manager.collection;
@@ -515,6 +517,19 @@ nothrow @nogc:
             if (!uart_open(_uart, cast(ubyte)_uart_port, cfg))
                 return CompletionStatus.error;
         }
+
+        version (linux)
+        {
+            if (!_serial_reader.register(cast(size_t)cast(void*)this, _fd))
+            {
+                // reader thread could not start; don't run with an fd nobody drains or frees
+                log.error("failed to start serial reader thread");
+                urt.internal.sys.posix.close(_fd);
+                _fd = -1;
+                return CompletionStatus.error;
+            }
+        }
+
         return CompletionStatus.complete;
     }
 
@@ -530,7 +545,10 @@ nothrow @nogc:
         {
             if (_fd != -1)
             {
-                urt.internal.sys.posix.close(_fd);
+                version (linux)
+                    _serial_reader.deregister(cast(size_t)cast(void*)this); // worker owns the fd close
+                else
+                    urt.internal.sys.posix.close(_fd);
                 _fd = -1;
             }
         }
@@ -558,47 +576,77 @@ nothrow @nogc:
             }
             else
                 restart();
+            poll_os_rx();
+        }
+        else version (linux)
+        {
+            // rx is delivered by the shared serial reader thread via incoming()
+        }
+        else version (Posix)
+        {
+            poll_os_rx();
         }
         else version (Embedded)
         {
             uart_poll(_uart);
             if (uart_check_errors(_uart) != UartError.none)
                 restart();
+            else
+                poll_os_rx();
         }
 
         super.update();
     }
 
-    override ptrdiff_t read(void[] buffer)
+    // On linux the shared reader thread owns rx and pushes via incoming(); every
+    // other platform drains the device here in update() and pushes the same way.
+    // Both routes converge on the base Stream _rx_buffer / rx_handler, so read()
+    // and pending() use the base (buffer-backed) implementations.
+    version (linux) {} else
+    private void poll_os_rx()
     {
-        version(Windows)
+        MonoTime now = getTime();
+        ubyte[512] buf = void;
+        while (true)
         {
-            DWORD bytes_read;
-            if (!ReadFile(_h_com, buffer.ptr, cast(DWORD)buffer.length, &bytes_read, null))
+            version(Windows)
             {
-                restart();
-                return -1;
+                DWORD n;
+                if (!ReadFile(_h_com, buf.ptr, cast(DWORD)buf.length, &n, null))
+                {
+                    restart();
+                    return;
+                }
+                if (n == 0)
+                    return;
             }
-        }
-        else version(Posix)
-        {
-            ssize_t bytes_read = urt.internal.sys.posix.read(_fd, buffer.ptr, buffer.length);
-            if (bytes_read < 0)
+            else version(Posix)
             {
-                if (is_transient_errno())
-                    return 0;
-                restart();
-                return -1;
+                ssize_t n = urt.internal.sys.posix.read(_fd, buf.ptr, buf.length);
+                if (n < 0)
+                {
+                    if (is_transient_errno())
+                        return;
+                    restart();
+                    return;
+                }
+                if (n == 0)
+                    return;
             }
+            else version (Embedded)
+            {
+                ptrdiff_t n = uart_read(_uart, buf[]);
+                if (n <= 0)
+                    return;
+            }
+            incoming(buf[0 .. n], now);
         }
-        else version (Embedded)
-            ptrdiff_t bytes_read = uart_read(_uart, buffer);
+    }
 
-        if (bytes_read > 0)
-            add_rx_bytes(bytes_read);
-        if (_logging && bytes_read > 0)
-            write_to_log(true, buffer[0 .. bytes_read]);
-        return bytes_read;
+    version (linux)
+    private void deliver_rx(const(void)[] data, MonoTime rx_time)
+    {
+        incoming(data, rx_time);
     }
 
     override ptrdiff_t write(const(void[])[] data...)
@@ -689,30 +737,6 @@ nothrow @nogc:
         return bytes_written;
     }
 
-    override ptrdiff_t pending()
-    {
-        version (Windows)
-        {
-            DWORD errors;
-            COMSTAT stat;
-            if (!ClearCommError(_h_com, &errors, &stat))
-                return 0;
-            return stat.cbInQue;
-        }
-        else version (Posix)
-        {
-            int avail;
-            if (ioctl(_fd, FIONREAD, &avail) < 0)
-                return 0;
-            return avail;
-        }
-        else
-        {
-        version (Embedded)
-            return cast(ptrdiff_t)uart_rx_available(_uart);
-        }
-    }
-
     override ptrdiff_t flush()
     {
         version (Windows)
@@ -784,6 +808,12 @@ nothrow @nogc:
         g_app.console.register_collection!SerialStream();
         version (Posix)
             g_app.console.register_command!serial_devices("/stream/serial", this, "devices");
+    }
+
+    version (linux)
+    override void deinit()
+    {
+        _serial_reader.stop();
     }
 }
 
@@ -1003,4 +1033,337 @@ version(Posix)
     }
 
     enum F_OK = 0;
+}
+
+
+version (linux)
+{
+    import urt.atomic;
+    import urt.sync.semaphore;
+    import urt.sync.spsc;
+    import urt.thread;
+    import urt.mem.allocator : defaultAllocator;
+
+    extern(C) int eventfd(uint initval, int flags) nothrow @nogc;
+    enum EFD_NONBLOCK = 0x800;
+
+    __gshared SerialReader _serial_reader;
+
+    // A single poll() thread owns every serial fd plus an eventfd wake, does the
+    // blocking reads, and marshals each read to the main thread via g_app.post_event
+    // so SerialStream.incoming() only ever runs on the main loop. The fd is handed
+    // over on register and closed by the worker on deregister, which keeps a stale
+    // fd from being polled (or reused) after the stream closes.
+    //
+    // This mirrors the protocol.ip SocketWorker; see TODO.md about folding both onto
+    // a shared manager-level fd reactor so serial has no bespoke reader plumbing.
+    struct SerialReader
+    {
+    nothrow @nogc:
+        // The ep (a SerialStream address) can be recycled by the Collection: a freed stream's
+        // slot may be reused by a new stream that re-registers the same address. A per-registration
+        // generation disambiguates them so a data event enqueued for the old stream is dropped
+        // rather than delivered to the new one at the same address.
+        bool register(size_t ep, int fd)
+        {
+            if (!_started)
+                start();
+            if (!_started)
+                return false;
+            uint gen = ++_gen;
+            bool present = false;
+            foreach (ref e; _live[])
+                if (e.ep == ep) { e.gen = gen; present = true; break; }
+            if (!present)
+                _live ~= Live(ep, gen);
+            post_req(Req(ReqKind.register, ep, fd, gen));
+            return true;
+        }
+
+        void deregister(size_t ep)
+        {
+            foreach (i; 0 .. _live.length)
+                if (_live[i].ep == ep) { _live.removeSwapLast(i); break; }
+            post_req(Req(ReqKind.destroy, ep, -1, 0));
+        }
+
+        void stop()
+        {
+            if (_thread)
+            {
+                atomicStore!(MemoryOrder.release)(_stop, true);
+                wake();
+                _space.signal();
+                thread_join(_thread);
+                _thread = null;
+            }
+            if (_wake_fd >= 0)
+            {
+                urt.internal.sys.posix.close(_wake_fd);
+                _wake_fd = -1;
+            }
+            Ev ev;
+            while (_ring.pop((&ev)[0 .. 1]) == 1)
+                if (ev.buffer.length)
+                    defaultAllocator().free(cast(void[])ev.buffer);
+            _live.clear();
+            if (_started)
+                _space.destroy();
+            _started = false;
+        }
+
+    private:
+        enum ReqKind : ubyte { register, destroy }
+        struct Req { ReqKind kind; size_t ep; int fd; uint gen; }
+
+        enum EvKind : ubyte { data, error }
+        struct Ev { EvKind kind; size_t ep; const(ubyte)[] buffer; MonoTime rx_time; uint gen; }
+
+        struct Entry { size_t ep; int fd; uint gen; bool dead; }
+
+        struct Live { size_t ep; uint gen; }
+
+        bool _started;
+        Thread _thread;
+        Semaphore _space;               // backpressure: dispatch signals as event slots free
+        shared bool _stop;
+        shared bool _dispatch_pending;
+        int _wake_fd = -1;
+        uint _gen;                      // main-thread only: monotonic registration generation
+        Array!Live _live;               // main-thread only: registered (SerialStream key, generation)
+
+        SPSCRing!(Req, 64) _reqs;       // main -> worker
+        SPSCRing!(Ev, 512) _ring;       // worker -> main
+
+        void start()
+        {
+            if (!_space.init())
+                return;
+            _wake_fd = eventfd(0, EFD_NONBLOCK);
+            if (_wake_fd < 0)
+            {
+                _space.destroy();
+                return;
+            }
+            atomicStore!(MemoryOrder.release)(_stop, false);
+            _thread = thread_spawn(&run);
+            if (!_thread)
+            {
+                urt.internal.sys.posix.close(_wake_fd);
+                _wake_fd = -1;
+                _space.destroy();
+                return;
+            }
+            _started = true;
+        }
+
+        void post_req(Req r)
+        {
+            if (!_thread)
+                return;
+            Req* slot = _reqs.reserve();
+            while (slot is null)
+            {
+                wake();
+                slot = _reqs.reserve();
+            }
+            *slot = r;
+            _reqs.commit();
+            wake();
+        }
+
+        void wake()
+        {
+            if (_wake_fd < 0)
+                return;
+            ulong one = 1;
+            urt.internal.sys.posix.write(_wake_fd, &one, one.sizeof);
+        }
+
+        // worker thread ----------------------------------------------------
+
+        void run()
+        {
+            Array!Entry entries;
+            Array!pollfd fds;
+            bool stopping = false;
+
+            while (!stopping && !atomicLoad!(MemoryOrder.acquire)(_stop))
+            {
+                apply_requests(entries);
+
+                fds.clear();
+                { pollfd p; p.fd = _wake_fd; p.events = POLLIN; fds ~= p; }
+                foreach (ref e; entries[])
+                {
+                    if (e.dead)
+                        continue;
+                    pollfd p; p.fd = e.fd; p.events = POLLIN;
+                    fds ~= p;
+                }
+
+                int n = poll(fds.ptr, fds.length, 1000);
+                if (n <= 0)
+                    continue;
+
+                if (fds[0].revents & POLLIN)
+                    drain_wake();
+
+                bool posted = false;
+                size_t ei = 0;
+                for (size_t f = 1; f < fds.length; ++f)
+                {
+                    while (ei < entries.length && entries[ei].dead)
+                        ++ei;
+                    if (ei >= entries.length)
+                        break;
+                    Entry* e = &entries[ei++];
+                    short re = fds[f].revents;
+                    if (re == 0)
+                        continue;
+                    if (re & (POLLERR | POLLHUP | POLLNVAL))
+                    {
+                        // device removed / hung up: restart the stream, stop polling this fd
+                        e.dead = true;
+                        posted = true;
+                        if (!push(Ev(EvKind.error, e.ep, null, getTime(), e.gen)))
+                        {
+                            stopping = true;
+                            break;
+                        }
+                        continue;
+                    }
+                    if (!read_ready(e, posted))
+                    {
+                        stopping = true;
+                        break;
+                    }
+                }
+
+                if (posted)
+                    request_dispatch();
+            }
+
+            foreach (ref e; entries[])
+                if (e.fd >= 0)
+                    urt.internal.sys.posix.close(e.fd);
+        }
+
+        void apply_requests(ref Array!Entry entries)
+        {
+            Req r;
+            while (_reqs.pop((&r)[0 .. 1]) == 1)
+            {
+                final switch (r.kind)
+                {
+                    case ReqKind.register:
+                        entries ~= Entry(r.ep, r.fd, r.gen, false);
+                        break;
+                    case ReqKind.destroy:
+                        foreach (i; 0 .. entries.length)
+                        {
+                            if (entries[i].ep == r.ep)
+                            {
+                                if (entries[i].fd >= 0)
+                                    urt.internal.sys.posix.close(entries[i].fd);
+                                entries.removeSwapLast(i);
+                                break;
+                            }
+                        }
+                        break;
+                }
+            }
+        }
+
+        void drain_wake()
+        {
+            ulong tmp;
+            while (urt.internal.sys.posix.read(_wake_fd, &tmp, tmp.sizeof) == tmp.sizeof) {}
+        }
+
+        // service one ready fd. returns false only when shutting down.
+        bool read_ready(Entry* e, ref bool posted)
+        {
+            while (true)
+            {
+                void[] buf = defaultAllocator().alloc(2048);
+                ssize_t got = urt.internal.sys.posix.read(e.fd, buf.ptr, buf.length);
+                if (got > 0)
+                {
+                    posted = true;
+                    if (!push(Ev(EvKind.data, e.ep, cast(const(ubyte)[])buf[0 .. got], getTime(), e.gen)))
+                    {
+                        defaultAllocator().free(buf);
+                        return false;
+                    }
+                    continue;
+                }
+                defaultAllocator().free(buf);
+                // VMIN=0/VTIME=0 ttys return 0 (not EAGAIN) when no data is ready: not an error.
+                if (got == 0 || is_transient_errno())
+                    return true;
+                // genuine read error (device removed etc.): ask the stream to restart, go quiet
+                e.dead = true;
+                posted = true;
+                return push(Ev(EvKind.error, e.ep, null, getTime(), e.gen));
+            }
+        }
+
+        bool push(Ev ev)
+        {
+            Ev* slot = _ring.reserve();
+            while (slot is null)
+            {
+                request_dispatch();
+                _space.wait(msecs(50));
+                if (atomicLoad!(MemoryOrder.acquire)(_stop))
+                    return false;
+                slot = _ring.reserve();
+            }
+            *slot = ev;
+            _ring.commit();
+            return true;
+        }
+
+        void request_dispatch()
+        {
+            if (cas(&_dispatch_pending, false, true))
+            {
+                if (!g_app.post_event(&dispatch, getTime()))
+                    atomicStore!(MemoryOrder.release)(_dispatch_pending, false);
+            }
+        }
+
+        // main thread ------------------------------------------------------
+
+        void dispatch(MonoTime)
+        {
+            Ev ev;
+            while (_ring.pop((&ev)[0 .. 1]) == 1)
+            {
+                handle(ev);
+                _space.signal();
+            }
+            atomicStore!(MemoryOrder.release)(_dispatch_pending, false);
+            if (!_ring.empty())
+                request_dispatch();
+        }
+
+        void handle(ref Ev ev)
+        {
+            bool live = false;
+            foreach (ref e; _live[])
+                if (e.ep == ev.ep && e.gen == ev.gen) { live = true; break; }
+
+            if (ev.kind == EvKind.data)
+            {
+                if (live && ev.buffer.length)
+                    (cast(SerialStream)cast(void*)ev.ep).deliver_rx(ev.buffer, ev.rx_time);
+                if (ev.buffer.length)
+                    defaultAllocator().free(cast(void[])ev.buffer);
+            }
+            else if (live)
+                (cast(SerialStream)cast(void*)ev.ep).restart();
+        }
+    }
 }

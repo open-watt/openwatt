@@ -46,6 +46,22 @@ cross-cutting issues that need a design decision or touch multiple systems.
 
 ## Infrastructure
 
+- **Serial rx reader -> shared fd reactor**: SerialStream rx is now event-driven. On linux a
+  bespoke `SerialReader` poll() thread in `router/stream/serial.d` owns the tty fds + an eventfd
+  wake, reads them, and marshals each read to the main thread via `g_app.post_event` ->
+  `SerialStream.incoming()`. It is a near-copy of the `protocol.ip` `SocketWorker` (SPSC rings +
+  backpressure semaphore + `post_event` coalescing). Fold both onto ONE shared main-thread fd
+  reactor - the natural home is the manager layer (it already owns `schedule`/`post_event`/the
+  event queue): expose something like `g_app.watch_fd(fd, &on_readable)` and register both serial
+  tty fds and the IP sockets with it, so neither subsystem carries its own reader-thread plumbing.
+  Until then: non-linux platforms (Windows/other-Posix/Embedded) still get rx via an interim
+  drain-in-`update()` -> `incoming()` (a poll at the serial layer only, kept so `rx_handler`
+  works everywhere); Windows/embedded true push (overlapped-IOCP / UART rx-IRQ) is the follow-up.
+  Note: this pass was data-path-only, so the genuine timers left in `update()` are intentional -
+  ASH retransmit (250ms) + RST retry (`ashv2.d`), EZSP request timeout (200ms, `client.d`), and
+  the Zigbee NCP counter poll (`iface.d`); moving those onto `g_app.schedule`/the 1s heartbeat is
+  a separate cleanup.
+
 - **API response truncation**: /api/get responses truncate around 140KB (seen querying
   `energy.*`); clients get invalid JSON with no error.
 
