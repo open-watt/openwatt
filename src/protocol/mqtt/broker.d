@@ -12,13 +12,14 @@ import urt.time;
 
 import manager;
 import manager.base;
-import protocol.tls : Certificate;
 import manager.collection;
+import manager.console.session : ConsoleSession = Session;
+import manager.console.table : Table;
 import manager.expression : NamedArgument;
 
 import router.stream;
 import protocol.ip.tcp_stream;
-import protocol.tls : TLSServer;
+import protocol.tls : Certificate, TLSServer;
 
 import protocol.mqtt.codec;
 import protocol.mqtt.connection;
@@ -116,6 +117,129 @@ nothrow @nogc:
             timestamp = getTime();
         bool retain = (flags & 0x01) != 0;
         publish_internal(null, client_id, topic, payload, properties, retain, timestamp);
+    }
+
+    void print_retained(ConsoleSession session, const(char)[] filter = "#")
+    {
+        import urt.mem.temp : tconcat;
+
+        if (!filter)
+            filter = "#";
+        if (!validate_topic_filter(filter))
+        {
+            session.write_line("Invalid MQTT topic filter");
+            return;
+        }
+
+        Table table;
+        table.add_column("broker");
+        table.add_column("topic");
+        table.add_column("bytes", Table.TextAlign.right);
+        table.add_column("props", Table.TextAlign.right);
+        table.add_column("payload");
+
+        uint count;
+        _trie.match_retained(filter, (ref const RetainedMessage rm) nothrow @nogc {
+            table.add_row();
+            table.cell(name[]);
+            table.cell(rm.topic[]);
+            table.cell(tconcat(rm.payload.length));
+            table.cell(tconcat(rm.properties.length));
+            add_payload_cell(table, rm.payload[]);
+            ++count;
+        });
+
+        if (count == 0)
+        {
+            session.write_line("No retained MQTT messages");
+            return;
+        }
+        table.render(session);
+    }
+
+    void print_sessions(ConsoleSession session)
+    {
+        import urt.mem.temp : tconcat;
+
+        if (_sessions.empty)
+        {
+            session.write_line("No MQTT sessions");
+            return;
+        }
+
+        Table table;
+        table.add_column("broker");
+        table.add_column("client");
+        table.add_column("state");
+        table.add_column("stream");
+        table.add_column("proto");
+        table.add_column("expiry");
+        table.add_column("subs", Table.TextAlign.right);
+        table.add_column("in", Table.TextAlign.right);
+        table.add_column("out", Table.TextAlign.right);
+        table.add_column("will");
+
+        MonoTime now = getTime();
+        foreach (kvp; _sessions)
+        {
+            Session* s = kvp.value;
+            Connection* c = s.connection ? cast(Connection*)s.connection : null;
+            table.add_row();
+            table.cell(name[]);
+            table.cell(s.client_id[]);
+            table.cell(c ? "connected" : "detached");
+            table.cell(c ? c.stream_name() : "-");
+            table.cell(protocol_level_name(s.protocol_level));
+            table.cell(session_expiry_cell(s, now));
+            table.cell(tconcat(s.subscriptions.length));
+            table.cell(tconcat(s.pending_inbound.length));
+            table.cell(tconcat(s.pending_outbound.length));
+            table.cell(s.will.present ? (s.will.sent ? "sent" : "pending") : "-");
+        }
+        table.render(session);
+    }
+
+    void print_subscriptions(ConsoleSession session)
+    {
+        import urt.mem.temp : tconcat;
+
+        Table table;
+        table.add_column("broker");
+        table.add_column("client");
+        table.add_column("state");
+        table.add_column("filter");
+        table.add_column("qos", Table.TextAlign.right);
+        table.add_column("no-local");
+        table.add_column("rap");
+        table.add_column("retain");
+        table.add_column("sub-id", Table.TextAlign.right);
+
+        uint count;
+        foreach (kvp; _sessions)
+        {
+            Session* s = kvp.value;
+            foreach (ref sub; s.subscriptions)
+            {
+                table.add_row();
+                table.cell(name[]);
+                table.cell(s.client_id[]);
+                table.cell(s.connection ? "connected" : "detached");
+                table.cell(sub.filter[]);
+                table.cell(tconcat(sub.qos));
+                table.cell(sub.no_local ? "yes" : "no");
+                table.cell(sub.retain_as_published ? "yes" : "no");
+                table.cell(retain_handling_name(sub.retain_handling));
+                table.cell(sub.subscription_id == 0 ? "-" : tconcat(sub.subscription_id));
+                ++count;
+            }
+        }
+
+        if (count == 0)
+        {
+            session.write_line("No MQTT session subscriptions");
+            return;
+        }
+        table.render(session);
     }
 
     package Session* claim_or_create_session(const(char)[] client_id, bool clean_start, ProtocolLevel level, ref bool present)
@@ -315,6 +439,89 @@ private:
     Map!(const(char)[], Session*) _sessions;
     Array!(Connection*) _connections;
     TopicTrie _trie;
+    static void add_payload_cell(ref Table table, const(ubyte)[] payload)
+    {
+        enum max_preview = 80;
+
+        if (payload.length == 0)
+        {
+            table.cell("");
+            return;
+        }
+
+        size_t n = payload.length < max_preview ? payload.length : max_preview;
+        bool text = true;
+        foreach (b; payload[0 .. n])
+        {
+            if (b < 0x20 || b > 0x7e)
+            {
+                text = false;
+                break;
+            }
+        }
+
+        MutableString!0 buf;
+        if (text)
+        {
+            buf.append(cast(const(char)[])payload[0 .. n]);
+            if (payload.length > n)
+                buf.append("...");
+            table.cell(buf[]);
+            return;
+        }
+
+        foreach (i, b; payload[0 .. n])
+        {
+            if (i > 0)
+                buf.append(' ');
+            buf.append(hex_digit(b >> 4), hex_digit(b & 0x0f));
+        }
+        if (payload.length > n)
+            buf.append(" ...");
+        table.cell(buf[]);
+    }
+
+    static char hex_digit(uint value) pure
+        => cast(char)(value < 10 ? '0' + value : 'a' + value - 10);
+
+    static const(char)[] protocol_level_name(ProtocolLevel level)
+    {
+        final switch (level) with (ProtocolLevel)
+        {
+            case _3_1:   return "3.1";
+            case _3_1_1: return "3.1.1";
+            case _5:     return "5";
+        }
+    }
+
+    static const(char)[] retain_handling_name(ubyte value)
+    {
+        switch (value)
+        {
+            case 0:  return "always";
+            case 1:  return "new";
+            case 2:  return "never";
+            default: return "?";
+        }
+    }
+
+    static const(char)[] session_expiry_cell(Session* s, MonoTime now)
+    {
+        import urt.mem.temp : tconcat;
+
+        if (s.connection)
+            return "-";
+        if (s.expiry_interval == expiry_never)
+            return "never";
+        if (s.expiry_interval == 0)
+            return "now";
+
+        Duration limit = s.expiry_interval.seconds;
+        Duration elapsed = now - s.disconnect_time;
+        if (elapsed >= limit)
+            return "expired";
+        return tconcat((limit - elapsed).as!"seconds", "s");
+    }
 
     void publish_internal(Session* publisher, const(char)[] sender_id, const(char)[] topic,
                           const(ubyte)[] payload, const(ubyte)[] properties, bool retain, MonoTime timestamp)
