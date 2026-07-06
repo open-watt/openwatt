@@ -98,6 +98,7 @@ nothrow @nogc:
         _master = null;
         _target_current = null;
         _elements.clear();
+        _built = false;    // materialise() must rebuild _elements next startup
         return CompletionStatus.complete;
     }
 
@@ -158,7 +159,7 @@ protected:
         set_constant(find_or_create_element(info, "name"), "Tesla Wall Charger Gen2");
         _elements ~= find_or_create_element(info, "serial_number");
 
-        Component status = find_or_create_component(device, "status", "DeviceInfo");
+        Component status = find_or_create_component(device, "status", "DeviceStatus");
         set_constant(find_or_create_element(status, "address"), slave_id); // id? slave-id? what's a good element name?
         _elements ~= find_or_create_element(status, "lifetime_energy");
         _elements ~= find_or_create_element(status, "vin");
@@ -182,6 +183,7 @@ protected:
         set_constant(find_or_create_element(control, "unit"), "A");
         set_constant(find_or_create_element(control, "step"), 1);
         set_constant(find_or_create_element(control, "min"), CentiAmps(500));
+        set_constant(find_or_create_element(control, "can_disable"), false);
         _target_current = find_or_create_element(control, "setpoint", Access.read_write);
         _elements ~= _target_current;
         _elements ~= find_or_create_element(control, "max");
