@@ -140,7 +140,7 @@ nothrow @nogc:
             _client.unsubscribe(&state_change);
             _subscribed = false;
         }
-        // Unsubscribe element write-back delegates before super.shutdown frees the profile
+        // Unsubscribe element write-back delegates before super.shutdown releases the profile
         if (_profile_data)
         {
             foreach (ref se; _elements[])

@@ -96,6 +96,8 @@ protected:
 
     override bool materialise()
     {
+        // set only on full success; startup() may poll materialise() while
+        // waiting on dependencies, and must not repeat the work
         if (_profile_data)
             return true;
 
@@ -106,24 +108,15 @@ protected:
             return false;
         }
 
-        import urt.file : load_file;
-
-        void[] file = load_file(tconcat(profile_dir(), pname, ".conf"), g_app.allocator);
-        scope (exit) g_app.allocator.free(file);
-        if (!file)
+        Profile* profile = g_app.acquire_profile(tconcat(profile_dir(), pname, ".conf"));
+        if (!profile)
         {
             writeWarning(name, ": failed to load profile '", pname, "'");
             return false;
         }
-        _profile_data = parse_profile(cast(char[])file, g_app.allocator);
-        if (!_profile_data)
-        {
-            writeWarning(name, ": failed to parse profile '", pname, "'");
-            return false;
-        }
 
         bool bad = false;
-        foreach (declared; _profile_data.get_parameters())
+        foreach (declared; profile.get_parameters())
         {
             if (declared[] !in _params)
             {
@@ -134,7 +127,7 @@ protected:
         foreach (k; _params.keys)
         {
             bool declared = false;
-            foreach (d; _profile_data.get_parameters())
+            foreach (d; profile.get_parameters())
             {
                 if (d[] == k[])
                 {
@@ -149,12 +142,19 @@ protected:
             }
         }
         if (bad)
+        {
+            g_app.release_profile(profile);
             return false;
+        }
 
+        // add_handler reads _profile_data during device creation
+        _profile_data = profile;
         Device device = create_device_from_profile(*_profile_data, model_name(), _device[], null, &add_handler);
         if (!device)
         {
             writeWarning(name, ": failed to materialise device '", _device, "'");
+            g_app.release_profile(_profile_data);
+            _profile_data = null;
             return false;
         }
 
@@ -163,9 +163,12 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        // release, don't free: the registry retains the parse (element descs and
+        // samplers on surviving devices borrow its strings), and the next startup
+        // re-acquires the live copy and re-materialises subclass element state
         if (_profile_data)
         {
-            g_app.allocator.freeT(_profile_data);
+            g_app.release_profile(_profile_data);
             _profile_data = null;
         }
         return CompletionStatus.complete;

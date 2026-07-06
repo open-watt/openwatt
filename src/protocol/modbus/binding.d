@@ -247,7 +247,7 @@ nothrow @nogc:
 
         if (_serve_profile_data)
         {
-            g_app.allocator.freeT(_serve_profile_data);
+            g_app.release_profile(_serve_profile_data);
             _serve_profile_data = null;
         }
         return super.shutdown();
@@ -382,19 +382,11 @@ protected:
 
         if (!_serve_profile_data && _serve && _slave_server && _profile_name_explicit.length > 0 && _profile_name_explicit[] != _slave_server.profile[])
         {
-            import urt.file : load_file;
             const(char)[] pname = _profile_name_explicit[];
-            void[] file = load_file(tconcat(profile_dir(), pname, ".conf"), g_app.allocator);
-            scope (exit) g_app.allocator.free(file);
-            if (!file)
-            {
-                log.warning(name[], ": failed to load serve profile '", pname, "'");
-                return false;
-            }
-            _serve_profile_data = parse_profile(cast(char[])file, g_app.allocator);
+            _serve_profile_data = g_app.acquire_profile(tconcat(profile_dir(), pname, ".conf"));
             if (!_serve_profile_data)
             {
-                log.warning(name[], ": failed to parse serve profile '", pname, "'");
+                log.warning(name[], ": failed to load serve profile '", pname, "'");
                 return false;
             }
             const(char)[] serve_model = _model_name_explicit[];

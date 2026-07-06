@@ -125,11 +125,8 @@ nothrow @nogc:
     ~this()
     {
         clear_computations();
-        if (profile)
-            g_app.allocator.freeT(profile);
     }
 
-    Profile* profile;
     Array!Computation computations;
 
     bool finalise()
@@ -473,6 +470,8 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     break;
 
                 case map:
+                    if (!is_new_element)
+                        break;
                     create_element_handler(device, e, el.get_element_desc(profile), el.index);
                     break;
 

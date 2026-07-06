@@ -103,7 +103,7 @@ protected:
     override CompletionStatus startup() nothrow
     {
         if (!_zigbee_profile)
-            _zigbee_profile = load_profile("conf/zigbee_profiles/zigbee.conf", defaultAllocator());
+            _zigbee_profile = g_app.acquire_profile("conf/zigbee_profiles/zigbee.conf");
 
         return _endpoint.running ? CompletionStatus.complete : CompletionStatus.continue_;
     }
@@ -119,9 +119,10 @@ protected:
             freePromise(p);
         }
 
+        // release, don't free: devices created from this profile borrow its strings
         if (_zigbee_profile)
         {
-            defaultAllocator().freeT(_zigbee_profile);
+            g_app.release_profile(_zigbee_profile);
             _zigbee_profile = null;
         }
 
