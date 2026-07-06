@@ -4,6 +4,7 @@ import urt.array;
 import urt.io;
 import urt.lifetime;
 import urt.log;
+import urt.mem;
 import urt.meta.nullable;
 import urt.result;
 import urt.string;
@@ -15,6 +16,7 @@ import manager.collection;
 import manager.console.session;
 import manager.plugin;
 
+import router.port;
 public import router.stream;
 
 version (Windows)
@@ -378,7 +380,7 @@ nothrow @nogc:
             _fd = urt.internal.sys.posix.open(device[].tstringz, O_RDWR | O_NOCTTY | O_NDELAY);
             if (_fd == -1)
             {
-                writeln("Failed to open device ", this.device);
+                log.error("failed to open device ", this.device);
                 return CompletionStatus.error;
             }
 
@@ -386,19 +388,17 @@ nothrow @nogc:
             if (tcgetattr(_fd, &tty) != 0)
                 return fail_posix_startup();
 
-            speed_t speed;
-            bool custom_baud = !posix_baud(_params.baud_rate, speed);
-            if (custom_baud)
-            {
-                version (linux) {}
-                else
-                {
-                    writeln("Unsupported serial baud rate ", _params.baud_rate);
-                    return fail_posix_startup();
-                }
-            }
+            // on Linux the baud is set after tcsetattr via termios2/BOTHER (set_linux_custom_baud)
+            version (linux) {}
             else
             {
+                // other Posix: standard rates only, via the classic cfsetospeed/Bxxx path.
+                speed_t speed;
+                if (!posix_baud(_params.baud_rate, speed))
+                {
+                    log.error("unsupported serial baud rate ", _params.baud_rate);
+                    return fail_posix_startup();
+                }
                 if (cfsetospeed(&tty, speed) != 0 || cfsetispeed(&tty, speed) != 0)
                     return fail_posix_startup();
             }
@@ -427,7 +427,7 @@ nothrow @nogc:
                 tty.c_cflag |= CSTOPB;
             else if (_params.stop_bits == StopBits.one_point_five)
             {
-                writeln("POSIX serial does not support 1.5 stop bits");
+                log.error("1.5 stop bits are not supported on Posix");
                 return fail_posix_startup();
             }
 
@@ -439,7 +439,7 @@ nothrow @nogc:
                 case 7: tty.c_cflag |= CS7; break;
                 case 8: tty.c_cflag |= CS8; break;
                 default:
-                    writeln("POSIX serial does not support ", _params.data_bits, " data bits");
+                    log.error("unsupported data bits: ", _params.data_bits);
                     return fail_posix_startup();
             }
 
@@ -457,7 +457,7 @@ nothrow @nogc:
                     tty.c_iflag |= IXON | IXOFF;
                     break;
                 case FlowControl.dsr_dtr:
-                    writeln("POSIX serial does not support DSR/DTR flow control");
+                    log.error("DSR/DTR flow control is not supported on Posix");
                     return fail_posix_startup();
             }
 
@@ -476,17 +476,33 @@ nothrow @nogc:
 
             if (tcsetattr(_fd, TCSANOW, &tty) != 0)
                 return fail_posix_startup();
-            if (custom_baud)
+            version (linux)
             {
-                version (linux)
+                if (!set_linux_custom_baud(_fd, _params.baud_rate))
                 {
-                    if (!set_linux_custom_baud(_fd, _params.baud_rate))
-                    {
-                        writeln("Unsupported serial baud rate ", _params.baud_rate);
-                        return fail_posix_startup();
-                    }
+                    log.error("failed to set baud rate ", _params.baud_rate);
+                    return fail_posix_startup();
                 }
             }
+
+            int dtr_bit = TIOCM_DTR, rts_bit = TIOCM_RTS;
+            final switch (_params.flow_control)
+            {
+                case FlowControl.none:
+                    ioctl(_fd, TIOCMBIC, &dtr_bit);
+                    ioctl(_fd, TIOCMBIC, &rts_bit);
+                    break;
+                case FlowControl.hardware:
+                    ioctl(_fd, TIOCMBIS, &dtr_bit);     // RTS is owned by CRTSCTS
+                    break;
+                case FlowControl.software:
+                    ioctl(_fd, TIOCMBIS, &dtr_bit);
+                    ioctl(_fd, TIOCMBIC, &rts_bit);
+                    break;
+                case FlowControl.dsr_dtr:
+                    break;                              // unreachable: rejected earlier
+            }
+
             tcflush(_fd, TCIOFLUSH);
         }
         else version (Embedded)
@@ -799,6 +815,15 @@ class SerialStreamModule : Module
     mixin DeclareModule!"stream.serial";
 nothrow @nogc:
 
+    override void pre_init()
+    {
+        version (Posix)
+        {
+            sync_serial_ports();
+            _last_port_sync = getSysTime();
+        }
+    }
+
     override void init()
     {
         g_app.register_enum!StopBits();
@@ -810,11 +835,27 @@ nothrow @nogc:
             g_app.console.register_command!serial_devices("/stream/serial", this, "devices");
     }
 
+    override void update()
+    {
+        version (Posix)
+        {
+            SysTime now = getSysTime();
+            if (now - _last_port_sync < 2.seconds)
+                return;
+            sync_serial_ports();
+            _last_port_sync = now;
+        }
+    }
+
     version (linux)
     override void deinit()
     {
         _serial_reader.stop();
     }
+
+private:
+    version (Posix)
+        SysTime _last_port_sync;
 }
 
 
@@ -841,6 +882,10 @@ version(Posix)
     }
 
     enum FIONREAD = 0x541B;
+    enum TIOCMBIS = 0x5416;     // set the indicated modem control bits
+    enum TIOCMBIC = 0x5417;     // clear the indicated modem control bits
+    enum TIOCM_DTR = 0x002;
+    enum TIOCM_RTS = 0x004;
 
     extern(C) ssize_t writev(int fd, const iovec* iov, int iovcnt);
     version (D_LP64)
@@ -917,38 +962,101 @@ version(Posix)
             session.write_line("No serial devices found");
     }
 
+    void sync_serial_ports()
+    {
+        // One port per kernel node (/dev/ttyUSB0 etc.). USB devices also appear under
+        // /dev/serial/by-id, but that's just a symlink to the same node, so we don't
+        // list it; we read the USB identity straight from sysfs instead.
+        Array!String seen;
+        scan_serial_ttys((const(char)[] name, const(char)[] path) nothrow @nogc {
+            char[64] desc = void;
+            char[64] manuf = void;
+            char[96] product = void;
+            char[64] serial = void;
+            PortUsb usb = read_usb_ident(name, manuf[], product[], serial[]);
+            publish_serial_port(seen, name, path, read_tty_driver_name(name, desc[]), serial_port_flags(name), usb);
+        });
+
+        Array!String gone;
+        foreach (ref p; port_list())
+        {
+            if (p.kind != PortKind.serial || p.driver[] != SerialStreamModule.ModuleName)
+                continue;
+
+            bool still_there;
+            foreach (ref id; seen[])
+            {
+                if (p.id[] == id[])
+                {
+                    still_there = true;
+                    break;
+                }
+            }
+            if (!still_there)
+                gone ~= p.id[].makeString(defaultAllocator);
+        }
+        foreach (ref id; gone[])
+            port_remove(PortKind.serial, id[]);
+    }
+
     uint list_serial_ttys(Session session)
     {
-        uint count;
-        walk_dir("/sys/class/tty", (const(char)[] name) nothrow @nogc {
-            if (!is_serial_tty(name))
-                return;
-            char[320] path = void;
-            size_t n = make_path(path[], "/dev/", name);
-            if (n)
-            {
-                session.write_line(path[0 .. n]);
-                ++count;
-            }
+        uint count = 0;
+        scan_serial_ttys((const(char)[], const(char)[] path) nothrow @nogc {
+            session.write_line(path);
+            ++count;
         });
         return count;
     }
 
     uint list_serial_dir(Session session, const(char)[] dir, const(char)[] prefix)
     {
-        uint count;
+        uint count = 0;
+        scan_serial_dir(dir, prefix, (const(char)[], const(char)[] path) nothrow @nogc {
+            session.write_line(path);
+            ++count;
+        });
+        return count;
+    }
+
+    void scan_serial_ttys(scope void delegate(const(char)[] name, const(char)[] path) nothrow @nogc visitor)
+    {
+        walk_dir("/sys/class/tty", (const(char)[] name) nothrow @nogc {
+            if (!is_serial_tty(name))
+                return;
+            char[320] path = void;
+            size_t n = make_path(path[], "/dev/", name);
+            if (n)
+                visitor(name, path[0 .. n]);
+        });
+    }
+
+    void scan_serial_dir(const(char)[] dir, const(char)[] prefix,
+                         scope void delegate(const(char)[] name, const(char)[] path) nothrow @nogc visitor)
+    {
         walk_dir(dir, (const(char)[] name) nothrow @nogc {
             if (prefix && !name.startsWith(prefix))
                 return;
             char[512] path = void;
             size_t n = make_path(path[], dir, "/", name);
             if (n)
-            {
-                session.write_line(path[0 .. n]);
-                ++count;
-            }
+                visitor(name, path[0 .. n]);
         });
-        return count;
+    }
+
+    void publish_serial_port(ref Array!String seen, const(char)[] name, const(char)[] path,
+                             const(char)[] description, PortFlags flags, PortUsb usb = PortUsb.init)
+    {
+        auto id = tconcat("linux:serial:", path);
+        port_add(PortKind.serial, id, name, path, SerialStreamModule.ModuleName, description, flags, usb);
+        seen ~= id.makeString(defaultAllocator);
+    }
+
+    PortFlags serial_port_flags(const(char)[] name) pure
+    {
+        if (name.startsWith("ttyUSB") || name.startsWith("ttyACM") || name.startsWith("rfcomm"))
+            return PortFlags.removable;
+        return PortFlags.none;
     }
 
     bool is_serial_tty(const(char)[] name)
@@ -961,6 +1069,128 @@ version(Posix)
         char[320] path = void;
         size_t n = make_path(path[], "/sys/class/tty/", name, "/device");
         return n != 0 && access(path.ptr, F_OK) == 0;
+    }
+
+    const(char)[] read_tty_driver_name(const(char)[] name, char[] buf)
+    {
+        char[320] path = void;
+        size_t len = make_path(path[], "/sys/class/tty/", name, "/device/driver");
+        if (!len)
+            return null;
+        return link_target_basename(path[0 .. len], buf);
+    }
+
+    const(char)[] link_target_basename(const(char)[] link_path, char[] buf)
+    {
+        char[320] z = void;
+        if (!copy_z(z[], link_path))
+            return null;
+        char[256] link = void;
+        ssize_t n = readlink(z.ptr, link.ptr, link.length);
+        if (n <= 0)
+            return null;
+
+        auto target = link[0 .. cast(size_t)n];
+        size_t slash = 0;
+        foreach_reverse (i, c; target)
+        {
+            if (c == '/')
+            {
+                slash = i + 1;
+                break;
+            }
+        }
+
+        auto base = target[slash .. $];
+        if (base.length == 0 || base.length > buf.length)
+            return null;
+        buf[0 .. base.length] = base;
+        return buf[0 .. base.length];
+    }
+
+    PortUsb read_usb_ident(const(char)[] tty_name, char[] manuf, char[] product, char[] serial)
+    {
+        PortUsb u;
+        char[384] dir = void;
+        size_t dn = usb_device_dir(tty_name, dir[]);
+        if (!dn)
+            return u;
+        u.vid = read_sysfs_hex(dir[0 .. dn], "idVendor");
+        u.pid = read_sysfs_hex(dir[0 .. dn], "idProduct");
+        u.manufacturer = read_sysfs_str(dir[0 .. dn], "manufacturer", manuf);
+        u.product = read_sysfs_str(dir[0 .. dn], "product", product);
+        u.serial = read_sysfs_str(dir[0 .. dn], "serial", serial);
+        return u;
+    }
+
+    // The tty's /device link points at the usb-serial port; idVendor lives a few levels up
+    // on the USB device. Walk up via /.. until a level exposes it.
+    size_t usb_device_dir(const(char)[] tty_name, char[] out_dir)
+    {
+        foreach (up; 0 .. 5)
+        {
+            char[384] dir = void;
+            size_t n = make_path(dir[], "/sys/class/tty/", tty_name, "/device");
+            if (!n)
+                return 0;
+            foreach (_; 0 .. up)
+            {
+                if (n + 3 > dir.length)
+                    return 0;
+                dir[n .. n + 3] = "/..";
+                n += 3;
+            }
+            char[400] probe = void;
+            size_t pn = make_path(probe[], dir[0 .. n], "/idVendor");
+            if (pn && access(probe.ptr, F_OK) == 0)
+            {
+                if (n > out_dir.length)
+                    return 0;
+                out_dir[0 .. n] = dir[0 .. n];
+                return n;
+            }
+        }
+        return 0;
+    }
+
+    const(char)[] read_sysfs_str(const(char)[] dir, const(char)[] file, char[] buf)
+    {
+        char[400] path = void;
+        size_t n = make_path(path[], dir, "/", file);
+        if (!n)
+            return null;
+        int fd = urt.internal.sys.posix.open(path.ptr, urt.internal.sys.posix.O_RDONLY);
+        if (fd < 0)
+            return null;
+        scope(exit) urt.internal.sys.posix.close(fd);
+        ssize_t rn = urt.internal.sys.posix.read(fd, buf.ptr, buf.length);
+        if (rn <= 0)
+            return null;
+        size_t len = cast(size_t)rn;
+        while (len && (buf[len - 1] == '\n' || buf[len - 1] == '\r'))
+            --len;
+        return buf[0 .. len];
+    }
+
+    ushort read_sysfs_hex(const(char)[] dir, const(char)[] file)
+    {
+        char[16] buf = void;
+        const(char)[] s = read_sysfs_str(dir, file, buf[]);
+        ushort v = 0;
+        foreach (c; s)
+        {
+            uint d;
+            if (c >= '0' && c <= '9')
+                d = c - '0';
+            else if (c >= 'a' && c <= 'f')
+                d = c - 'a' + 10;
+            else if (c >= 'A' && c <= 'F')
+                d = c - 'A' + 10;
+            else
+                break;
+            v = cast(ushort)((v << 4) | d);
+        }
+        return v;
     }
 
     void walk_dir(const(char)[] path, scope void delegate(const(char)[] name) nothrow @nogc visitor)

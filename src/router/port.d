@@ -32,6 +32,18 @@ enum PortFlags : ubyte
     configured = 1 << 2,
 }
 
+struct PortUsb
+{
+    ushort vid;
+    ushort pid;
+    const(char)[] manufacturer;
+    const(char)[] product;
+    const(char)[] serial;
+
+    bool valid() const pure
+        => vid != 0 || pid != 0;
+}
+
 struct PortInfo
 {
     PortKind kind;
@@ -51,6 +63,13 @@ struct PortInfo
 
     // Optional user-facing details such as USB serial description or NIC driver.
     String description;
+
+    // Bus identity (USB vid:pid and descriptor strings), zero/empty when not applicable.
+    ushort vid;
+    ushort pid;
+    String manufacturer;
+    String product;
+    String serial;
 }
 
 class PortModule : Module
@@ -77,7 +96,8 @@ nothrow @nogc:
 
     PortInfo* add(PortKind kind, const(char)[] id, const(char)[] name,
                   const(char)[] path = null, const(char)[] driver = null,
-                  const(char)[] description = null, PortFlags flags = PortFlags.none)
+                  const(char)[] description = null, PortFlags flags = PortFlags.none,
+                  PortUsb usb = PortUsb.init)
     {
         if (!id.length)
             return null;
@@ -102,6 +122,11 @@ nothrow @nogc:
         assign(p.path, path);
         assign(p.driver, driver);
         assign(p.description, description);
+        p.vid = usb.vid;
+        p.pid = usb.pid;
+        assign(p.manufacturer, usb.manufacturer);
+        assign(p.product, usb.product);
+        assign(p.serial, usb.serial);
         ++_generation;
         return p;
     }
@@ -139,6 +164,7 @@ nothrow @nogc:
 
     void port_print(Session session, Nullable!PortKind kind)
     {
+        import urt.string.format : tformat;
         bool any;
         foreach (ref p; _ports[])
         {
@@ -149,7 +175,10 @@ nothrow @nogc:
                                "  id=", p.id[],
                                p.path.length ? tconcat("  path=", p.path[]) : "",
                                p.driver.length ? tconcat("  driver=", p.driver[]) : "",
-                               p.description.length ? tconcat("  ", p.description[]) : "");
+                               p.description.length ? tconcat("  ", p.description[]) : "",
+                               (p.vid || p.pid) ? tformat("  usb={0,04x}:{1,04x}", p.vid, p.pid) : "",
+                               p.product.length ? tconcat("  product=\"", p.product[], "\"") : "",
+                               p.serial.length ? tconcat("  serial=", p.serial[]) : "");
         }
         if (!any)
             session.write_line("No ports found");
@@ -167,10 +196,11 @@ private:
 
 PortInfo* port_add(PortKind kind, const(char)[] id, const(char)[] name,
                    const(char)[] path = null, const(char)[] driver = null,
-                   const(char)[] description = null, PortFlags flags = PortFlags.none)
+                   const(char)[] description = null, PortFlags flags = PortFlags.none,
+                   PortUsb usb = PortUsb.init)
 {
     PortModule mod = get_module!PortModule;
-    return mod ? mod.add(kind, id, name, path, driver, description, flags) : null;
+    return mod ? mod.add(kind, id, name, path, driver, description, flags, usb) : null;
 }
 
 bool port_remove(PortKind kind, const(char)[] id)
