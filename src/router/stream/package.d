@@ -5,6 +5,7 @@ import urt.conv;
 import urt.file;
 import urt.inet;
 import urt.lifetime;
+import urt.log;
 import urt.map;
 import urt.mem.string;
 import urt.meta.nullable;
@@ -36,6 +37,9 @@ nothrow @nogc:
 
 
 alias RecvHandler = void delegate(Stream source, const(void)[] data, MonoTime rx_time) nothrow @nogc;
+
+// Passive observer of a stream's raw byte traffic in both directions; does not consume the data.
+alias TapHandler = void delegate(Stream source, bool tx, const(void)[] data, MonoTime time) nothrow @nogc;
 
 
 enum StreamOptions : ubyte
@@ -190,6 +194,18 @@ nothrow @nogc:
     final RecvHandler rx_handler() const pure
         => _incoming;
 
+    // Passive taps observe raw traffic without consuming it (unlike the single-owner rx_handler),
+    // so any number can attach - used by the /stream/tap sniffer.
+    final void add_tap(TapHandler h)
+    {
+        if (_taps[].findFirst(h) == _taps.length)
+            _taps ~= h;
+    }
+    final void remove_tap(TapHandler h)
+        => _taps.removeFirstSwapLast(h);
+    final bool has_tap() const pure
+        => _taps.length != 0;
+
     ptrdiff_t read(void[] buffer)
     {
         size_t n = _rx_buffer.length < buffer.length ? _rx_buffer.length : buffer.length;
@@ -266,6 +282,12 @@ protected:
 
     RecvHandler _incoming;
     Array!ubyte _rx_buffer;
+    Array!TapHandler _taps;
+
+    // When no rx_handler is installed, pushed bytes buffer here until a consumer polls read().
+    // A stream that is actively drained by a producer (e.g. the serial reader thread) but has no
+    // consumer would otherwise grow this without bound, so cap it and drop like a full device FIFO.
+    enum max_unread_rx = 256 * 1024;
 
     final void incoming(const(void)[] data, MonoTime rx_time)
     {
@@ -275,7 +297,7 @@ protected:
         write_to_log(true, data);
         if (_incoming)
             _incoming(this, data, rx_time);
-        else
+        else if (_rx_buffer.length < max_unread_rx)
             _rx_buffer ~= cast(const(ubyte)[])data;
     }
 
@@ -293,6 +315,15 @@ protected:
 
     final void write_to_log(bool rx, const void[] buffer)
     {
+        // both directions funnel through here (incoming() for rx, subclass write() for tx), so this
+        // is the single point taps observe. rx==true here means received, i.e. tx==false for the tap.
+        if (_taps.length && buffer.length)
+        {
+            MonoTime t = getTime();
+            foreach (h; _taps[])
+                h(this, !rx, buffer, t);
+        }
+
         version (SupportLogging)
         {
             if (!_logging || !_log[rx].is_open)
@@ -315,9 +346,62 @@ nothrow @nogc:
         g_app.console.register_collection!Stream();
     }
 
+    override void init()
+    {
+        g_app.console.register_command!stream_tap("/stream", this, "tap");
+        g_app.console.register_command!stream_rts("/stream", this, "rts");
+    }
+
     override void pre_update()
     {
         Collection!Stream().update_all();
+    }
+
+    // /stream/tap <name> [on|off] - attach a passive sniffer that logs the raw byte traffic of a
+    // stream in both directions. Watch it live with: /log print match=tap
+    void stream_tap(Session session, const(char)[] name, Nullable!bool enable)
+    {
+        Stream s = Collection!Stream().get(name);
+        if (!s)
+        {
+            session.write_line(tconcat("no such stream: ", name));
+            return;
+        }
+
+        bool on = enable ? enable.value : !s.has_tap;
+        if (on)
+        {
+            s.add_tap(&tap_log);
+            session.write_line(tconcat("tapping '", name, "' - watch with: /log print match=tap"));
+        }
+        else
+        {
+            s.remove_tap(&tap_log);
+            session.write_line(tconcat("stopped tapping '", name, "'"));
+        }
+    }
+
+    void tap_log(Stream s, bool tx, const(void)[] data, MonoTime time)
+    {
+        log_infof("tap", "{0} {1} ({2,3}B): {3}", s.name, tx ? "TX" : "RX", data.length, cast(void[])data);
+    }
+
+    // /stream/rts <name> <on|off> - drive the RTS line of a serial stream by hand. Used to probe
+    // whether asserting RTS actually resets a device (Silabs NCPs wire RTS to nRESET), by watching
+    // the link recover (or not) after a manual assert/release cycle.
+    void stream_rts(Session session, const(char)[] name, bool assert_line)
+    {
+        import router.stream.serial : SerialStream;
+
+        SerialStream ss = cast(SerialStream)Collection!Stream().get(name);
+        if (!ss)
+        {
+            session.write_line(tconcat("no such serial stream: ", name));
+            return;
+        }
+
+        bool ok = ss.set_rts(assert_line);
+        session.write_line(tconcat("RTS ", assert_line ? "asserted" : "released", " on '", name, "': ", ok ? "ok" : "FAILED (hardware flow control?)"));
     }
 }
 
