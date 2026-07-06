@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to coding agents (Codex, Claude Code, etc.) when working with code in this repository.
 
 ## Project Overview
 
@@ -334,9 +334,9 @@ Core runtime providing:
 
 **Entry point:** [src/main.d](src/main.d) - Creates Application, loads `conf/startup.conf`, runs main loop
 
-##### Cron System
+##### Automation System
 
-Runs a `do={...}` script body on a schedule. Schedule kinds (mutually exclusive, last one set wins): `schedule=<duration>` (every N), `at=<HH:MM>` with optional `days=mon,wed,fri` (daily/weekly), `when=<datetime>` (absolute one-shot). `repeat=false` makes any kind one-shot. Times are local (currently UTC; no timezone offset yet). Example: `/system/cron/add name=poll schedule=5m do={ /device/print }`. See [src/manager/cron/job.d](src/manager/cron/job.d).
+An automation runs a `do={...}` action when a signal fires. It is a `Collection` object under `/automation`. Triggers are `on=<uri>,<uri>` signal URIs of the form `[provider:|@]body[?k=v&k=v]` -- e.g. `on="@door.open"` (element change; `@` is the element sentinel), `on="every:5m"`, `on="at:18:00?days=mon,fri"`, `on="when:2027-01-01T00:00:00"`, `on="mqtt:/topic?qos=1"`. URIs containing `?` `=` `@` must be quoted at the CLI (the parser reserves them). An optional `if=<expr>` (a quoted boolean expression) gates the action; a falsey result skips it. The time shorthands `schedule=`/`at=`/`when=` are thin write-only sugar that translate to `every:`/`at:`/`when:` URIs (finer detail like `?days=`/`?repeat=false` lives in the URI, not as sugar). Signals come from `ISignalProvider`s registered on the `Application` (general capability, [src/manager/signal.d](src/manager/signal.d)); the built-ins are the Application itself (the `element:` provider) and cron ([src/manager/cron.d](src/manager/cron.d), the `every:`/`at:`/`when:` time provider -- the former `/system/cron` collection is gone). Example: `/automation/add name=poll schedule=5m do={ /device/print }`. See [src/apps/automation/automation.d](src/apps/automation/automation.d). Not yet built (design in [docs/AUTOMATION.draft.md](docs/AUTOMATION.draft.md)): shaping (debounce/throttle), execution policy, and typed `$trigger.*` context.
 
 #### Router Layer (src/router/)
 
