@@ -52,6 +52,8 @@
   </ItemGroup>
   <ItemGroup>
     <DCompile Include="src\apps\api\package.d" />
+    <DCompile Include="src\apps\automation\automation.d" />
+    <DCompile Include="src\apps\automation\package.d" />
     <DCompile Include="src\apps\energy\accounts.d" />
     <DCompile Include="src\apps\energy\allocator.d" />
     <DCompile Include="src\apps\energy\appliance.d" />
@@ -129,8 +131,7 @@
     <DCompile Include="src\manager\console\session.d" />
     <DCompile Include="src\manager\console\table.d" />
     <DCompile Include="src\manager\console\tree_view.d" />
-    <DCompile Include="src\manager\cron\job.d" />
-    <DCompile Include="src\manager\cron\package.d" />
+    <DCompile Include="src\manager\cron.d" />
     <DCompile Include="src\manager\device.d" />
     <DCompile Include="src\manager\element.d" />
     <DCompile Include="src\manager\expression.d" />
@@ -143,6 +144,7 @@
     <DCompile Include="src\manager\record.d" />
     <DCompile Include="src\manager\sampler.d" />
     <DCompile Include="src\manager\secret.d" />
+    <DCompile Include="src\manager\signal.d" />
     <DCompile Include="src\manager\subscriber.d" />
     <DCompile Include="src\manager\sync\encoder.d" />
     <DCompile Include="src\manager\sync\json_encoder.d" />

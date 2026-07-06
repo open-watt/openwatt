@@ -5,7 +5,9 @@ import urt.lifetime : move;
 import urt.map;
 import urt.mem.allocator;
 import urt.mem.string;
+import urt.mem.temp : tconcat;
 import urt.meta.enuminfo : VoidEnumInfo;
+import urt.result : StringResult;
 import urt.si.quantity;
 import urt.si.unit;
 import urt.string;
@@ -25,6 +27,7 @@ import manager.id;
 import manager.plugin;
 import manager.profile : Profile, load_profile;
 import manager.secret;
+import manager.signal;
 import manager.system;
 
 nothrow @nogc:
@@ -171,7 +174,26 @@ Mod get_module(Mod)()
 }
 
 
-class Application
+// Handle for an `element:` signal subscription owned by the Application.
+private class ElementSignalSub : SignalSub
+{
+nothrow @nogc:
+    SignalSink sink;
+    String path;
+    Element* element;
+
+    override ISignalProvider provider()
+        => g_app;
+
+    void on_change(ref Element e, ref const Variant val, SysTime timestamp, ref const Variant prev, SysTime prev_timestamp)
+    {
+        SignalEvent ev = { source: path[] };
+        ev.value = val;   // owned snapshot at change-time, so $value can't race a later live re-read
+        sink(getTime(), ev);
+    }
+}
+
+class Application : ISignalProvider
 {
 nothrow @nogc:
 
@@ -190,6 +212,7 @@ nothrow @nogc:
 
     Console console;
     Map!(String, IntrinsicFunction) intrinsic_functions;
+    Map!(String, ISignalProvider) signal_providers;
 
     Map!(const(char)[], Device) devices;
 
@@ -226,6 +249,8 @@ nothrow @nogc:
         register_enum!Boolean();
         register_enum!ObjectFlags();
         register_enum!HashFunction();
+
+        register_signal_provider(StringLit!"element", this);
 
         register_intrinsic(StringLit!"select", &select);
         import urt.math : pow, sqrt, sin, cos, tan, asin, acos, atan, atan2;
@@ -452,6 +477,56 @@ nothrow @nogc:
         assert(identifier[] !in intrinsic_functions, "Intrinsic function already registered!");
         intrinsic_functions.insert(identifier.move, func);
     }
+
+    void register_signal_provider(String scheme, ISignalProvider provider)
+    {
+        assert(scheme[] !in signal_providers, "Signal provider already registered!");
+        signal_providers.insert(scheme.move, provider);
+    }
+
+    ISignalProvider find_signal_provider(const(char)[] scheme)
+    {
+        if (ISignalProvider* p = scheme in signal_providers)
+            return *p;
+        return null;
+    }
+
+    // The Application is the built-in `element:` signal provider (the `@` sentinel maps to it).
+    StringResult validate(ref const SignalUri uri) const
+    {
+        if (uri.body.length == 0)
+            return StringResult("element signal needs an element path");
+        return StringResult.success;   // whether the element exists yet is a subscribe-time concern
+    }
+
+    StringResult subscribe(ref const SignalUri uri, SignalSink sink, out SignalSub handle)
+    {
+        if (uri.body.length == 0)
+            return StringResult("element signal needs an element path");
+
+        Element* e = find_element(uri.body);
+        if (!e)
+            return StringResult(tconcat("element not found: ", uri.body));
+
+        ElementSignalSub s = allocator.allocT!ElementSignalSub();
+        s.sink = sink;
+        s.path = uri.body.makeString(allocator);
+        s.element = e;
+        e.add_subscriber(&s.on_change);
+        handle = s;
+        return StringResult.success;
+    }
+
+    void unsubscribe(SignalSub handle)
+    {
+        ElementSignalSub s = cast(ElementSignalSub)handle;
+        if (s.element)
+            s.element.remove_subscriber(&s.on_change);
+        allocator.freeT(s);
+    }
+
+    SysTime next_run(SignalSub handle) const
+        => SysTime();
 
     // MAIN THREAD ONLY; off-thread/ISR callers post a message to schedule a new event
     void schedule(MonoTime when, TimerHandler handler)

@@ -9,7 +9,7 @@ import urt.time;
 import manager;
 import manager.base;
 import manager.collection;
-import manager.cron : CronModule;
+import apps.automation : AutomationModule;
 import manager.plugin;
 
 import driver.system;
@@ -260,7 +260,7 @@ private:
 
             send_response(stream, req, 200, "OTA accepted, rebooting");
             log.notice("complete, rebooting in ", _reboot_delay);
-            get_module!CronModule.schedule_oneshot(_reboot_delay, "/system/reboot");
+            get_module!AutomationModule.schedule_oneshot(_reboot_delay, "/system/reboot");
         }
         return 0;
     }

@@ -37,6 +37,9 @@
     <Filter Include="src\apps\api">
       <UniqueIdentifier>{8e7eb135-c8b1-4d1c-9b24-0b1b9e1f0f07}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\apps\automation">
+      <UniqueIdentifier>{c7a2f1b3-9d64-4e28-8a51-2f6b7c0d9e34}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\apps\energy">
       <UniqueIdentifier>{64b88f6a-915f-4210-b838-b7905c8455ad}</UniqueIdentifier>
     </Filter>
@@ -69,9 +72,6 @@
     </Filter>
     <Filter Include="src\manager\sync">
       <UniqueIdentifier>{c1a8b20f-4e2d-4f1a-9b5a-8b6e1f9c3a4d}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="src\manager\cron">
-      <UniqueIdentifier>{24a67829-ea5b-41cb-8fb9-ccc6c1b10293}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\devices">
       <UniqueIdentifier>{84643f1c-1a0e-42b4-a548-df49e1005d4f}</UniqueIdentifier>
@@ -387,11 +387,8 @@
     <DCompile Include="src\manager\id.d">
       <Filter>src\manager</Filter>
     </DCompile>
-    <DCompile Include="src\manager\cron\job.d">
-      <Filter>src\manager\cron</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\cron\package.d">
-      <Filter>src\manager\cron</Filter>
+    <DCompile Include="src\manager\cron.d">
+      <Filter>src\manager</Filter>
     </DCompile>
     <DCompile Include="src\manager\device.d">
       <Filter>src\manager</Filter>
@@ -412,6 +409,9 @@
       <Filter>src\manager</Filter>
     </DCompile>
     <DCompile Include="src\manager\secret.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\signal.d">
       <Filter>src\manager</Filter>
     </DCompile>
     <DCompile Include="src\manager\sync\encoder.d">
@@ -755,6 +755,12 @@
     </DCompile>
     <DCompile Include="src\apps\api\package.d">
       <Filter>src\apps\api</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\automation\automation.d">
+      <Filter>src\apps\automation</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\automation\package.d">
+      <Filter>src\apps\automation</Filter>
     </DCompile>
     <DCompile Include="src\apps\energy\accounts.d">
       <Filter>src\apps\energy</Filter>
