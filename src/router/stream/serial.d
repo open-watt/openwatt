@@ -70,6 +70,14 @@ enum FlowControl : ubyte
     xon_xoff = software
 }
 
+struct ModemLines
+{
+    bool valid;         // port open and query succeeded
+    bool outputs_valid; // rts/dtr are readable (posix only; windows can't read back outputs)
+    bool rts, dtr;      // what we assert
+    bool cts, dsr, dcd, ri; // what the peer presents
+}
+
 struct SerialParams
 {
     this(int baud)
@@ -219,7 +227,16 @@ nothrow @nogc:
             return;
         _params.flow_control = value;
         mark_set!(typeof(this), "flow-control");
-        restart();
+        // reconfigure the open port in place rather than restart(): a close/reopen cycles the modem
+        // lines the peer sees, which both disturbs flow-control-sensitive devices (Silabs NCPs stop
+        // transmitting) and makes runtime flow-control experiments unrepresentative
+        version (Embedded)
+            restart();
+        else
+        {
+            if (!running || !configure_port(false))
+                restart();
+        }
     }
 
     version (Embedded)
@@ -283,100 +300,7 @@ nothrow @nogc:
             if (_h_com == INVALID_HANDLE_VALUE)
                 return CompletionStatus.error;
 
-            DCB dcb = void;
-            ZeroMemory(&dcb, DCB.sizeof);
-            dcb.DCBlength = DCB.sizeof;
-            if (!GetCommState(_h_com, &dcb))
-                return CompletionStatus.error;
-
-            dcb._bf = 1;
-
-            dcb.BaudRate = DWORD(_params.baud_rate);
-            dcb.ByteSize = _params.data_bits;
-
-            if (_params.stop_bits == StopBits.one)
-                dcb.StopBits = ONESTOPBIT;
-            else if (_params.stop_bits == StopBits.one_point_five)
-                dcb.StopBits = ONE5STOPBITS;
-            else if (_params.stop_bits == StopBits.two)
-                dcb.StopBits = TWOSTOPBITS;
-
-            switch (_params.parity)
-            {
-                case Parity.none:   dcb.Parity = NOPARITY;      break;
-                case Parity.even:   dcb.Parity = EVENPARITY;    break;
-                case Parity.odd:    dcb.Parity = ODDPARITY;     break;
-                case Parity.mark:   dcb.Parity = MARKPARITY;    break;
-                case Parity.space:  dcb.Parity = SPACEPARITY;   break;
-                default: assert(false);
-            }
-            if (_params.parity != Parity.none)
-                dcb._bf |= 2; // fParity: set to enable parity checking?
-
-            switch (_params.flow_control)
-            {
-                case FlowControl.none:
-                    dcb._bf &= ~4; // fOutxCtsFlow
-                    dcb._bf &= ~8; // fOutxDsrFlow
-                    dcb._bf &= ~0x40; // fDsrSensitivity
-                    dcb._bf &= ~0x100; // fOutX
-                    dcb._bf &= ~0x200; // fInX
-                    dcb._bf &= ~0x3030;
-                    dcb._bf |= RTSControl.disable << 12; // fRtsControl
-                    dcb._bf |= DTRControl.disable << 4; // fDtrControl
-                    break;
-                case FlowControl.hardware:
-                    dcb._bf |= 4; // fOutxCtsFlow
-                    dcb._bf &= ~8; // fOutxDsrFlow
-                    dcb._bf &= ~0x100; // fOutX
-                    dcb._bf &= ~0x200; // fInX
-                    dcb._bf &= ~0x3030;
-                    dcb._bf |= RTSControl.handshake << 12; // fRtsControl
-//                    dcb._bf |= RTSControl.enable << 12; // fRtsControl
-                    dcb._bf |= DTRControl.enable << 4; // fDtrControl
-                    break;
-                case FlowControl.software:
-                    dcb._bf &= ~4; // fOutxCtsFlow
-                    dcb._bf &= ~8; // fOutxDsrFlow
-                    dcb._bf &= ~0x40; // fDsrSensitivity
-                    dcb._bf |= 0x100; // fOutX
-                    dcb._bf |= 0x200; // fInX
-                    dcb.XonChar = 0x11;
-                    dcb.XoffChar = 0x13;
-                    dcb.XonLim = 200;
-                    dcb.XoffLim = 200;
-                    dcb._bf &= ~0x3030;
-                    dcb._bf |= RTSControl.disable << 12; // fRtsControl
-                    dcb._bf |= DTRControl.enable << 4; // fDtrControl
-                    break;
-                case FlowControl.dsr_dtr:
-                    dcb._bf &= ~4; // fOutxCtsFlow
-                    dcb._bf |= 8; // fOutxDsrFlow
-                    dcb._bf |= 0x40; // fDsrSensitivity
-                    dcb._bf &= ~0x100; // fOutX
-                    dcb._bf &= ~0x200; // fInX
-                    dcb._bf &= ~0x3030;
-                    dcb._bf |= RTSControl.disable << 12; // fRtsControl
-                    dcb._bf |= DTRControl.handshake << 4; // fDtrControl
-                    break;
-                default:
-                    assert(false);
-            }
-
-            if (!SetCommState(_h_com, &dcb))
-                return CompletionStatus.error;
-
-            COMMTIMEOUTS timeouts = {};
-            timeouts.ReadIntervalTimeout = -1;
-            timeouts.ReadTotalTimeoutConstant = 0;
-            timeouts.ReadTotalTimeoutMultiplier = 0;
-            // A synchronous WriteFile with no write timeout blocks forever when hardware flow control
-            // gates output on CTS and the peer deasserts it - a whole-loop lockup. Bound it so WriteFile
-            // returns a short count instead (fed to the same partial-write recovery as the Posix path).
-            // Multiplier scales with size so a legitimately slow/large write at low baud never trips it.
-            timeouts.WriteTotalTimeoutConstant = 100;
-            timeouts.WriteTotalTimeoutMultiplier = 2;
-            if (!SetCommTimeouts(_h_com, &timeouts))
+            if (!configure_port(true))
                 return CompletionStatus.error;
         }
         else version(Posix)
@@ -388,126 +312,8 @@ nothrow @nogc:
                 return CompletionStatus.error;
             }
 
-            termios tty;
-            if (tcgetattr(_fd, &tty) != 0)
+            if (!configure_port(true))
                 return fail_posix_startup();
-
-            // on Linux the baud is set after tcsetattr via termios2/BOTHER (set_linux_custom_baud)
-            version (linux) {}
-            else
-            {
-                // other Posix: standard rates only, via the classic cfsetospeed/Bxxx path.
-                speed_t speed;
-                if (!posix_baud(_params.baud_rate, speed))
-                {
-                    log.error("unsupported serial baud rate ", _params.baud_rate);
-                    return fail_posix_startup();
-                }
-                if (cfsetospeed(&tty, speed) != 0 || cfsetispeed(&tty, speed) != 0)
-                    return fail_posix_startup();
-            }
-
-            tty.c_cflag &= ~(PARENB | PARODD | CMSPAR);
-            final switch (_params.parity)
-            {
-                case Parity.none:
-                    break;
-                case Parity.even:
-                    tty.c_cflag |= PARENB;
-                    break;
-                case Parity.odd:
-                    tty.c_cflag |= PARENB | PARODD;
-                    break;
-                case Parity.mark:
-                    tty.c_cflag |= PARENB | PARODD | CMSPAR;
-                    break;
-                case Parity.space:
-                    tty.c_cflag |= PARENB | CMSPAR;
-                    break;
-            }
-
-            tty.c_cflag &= ~CSTOPB;
-            if (_params.stop_bits == StopBits.two)
-                tty.c_cflag |= CSTOPB;
-            else if (_params.stop_bits == StopBits.one_point_five)
-            {
-                log.error("1.5 stop bits are not supported on Posix");
-                return fail_posix_startup();
-            }
-
-            tty.c_cflag &= ~CSIZE;
-            switch (_params.data_bits)
-            {
-                case 5: tty.c_cflag |= CS5; break;
-                case 6: tty.c_cflag |= CS6; break;
-                case 7: tty.c_cflag |= CS7; break;
-                case 8: tty.c_cflag |= CS8; break;
-                default:
-                    log.error("unsupported data bits: ", _params.data_bits);
-                    return fail_posix_startup();
-            }
-
-            tty.c_cflag &= ~CRTSCTS;
-            tty.c_cflag |= CREAD | CLOCAL;
-            tty.c_iflag &= ~(IXON | IXOFF | IXANY);
-            final switch (_params.flow_control)
-            {
-                case FlowControl.none:
-                    break;
-                case FlowControl.hardware:
-                    tty.c_cflag |= CRTSCTS;
-                    break;
-                case FlowControl.software:
-                    tty.c_iflag |= IXON | IXOFF;
-                    break;
-                case FlowControl.dsr_dtr:
-                    log.error("DSR/DTR flow control is not supported on Posix");
-                    return fail_posix_startup();
-            }
-
-            tty.c_lflag &= ~ICANON;
-            tty.c_lflag &= ~ECHO;   // Disable echo
-            tty.c_lflag &= ~ECHOE;  // Disable erasure
-            tty.c_lflag &= ~ECHONL; // Disable new-line echo
-            tty.c_lflag &= ~ISIG;   // Disable interpretation of INTR, QUIT and SUSP
-            tty.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL); // Disable any special handling of received bytes
-
-            tty.c_oflag &= ~OPOST; // Prevent special interpretation of output bytes (e.g. newline chars)
-            tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
-
-            tty.c_cc[VTIME] = 0;
-            tty.c_cc[VMIN] = 0;
-
-            if (tcsetattr(_fd, TCSANOW, &tty) != 0)
-                return fail_posix_startup();
-            version (linux)
-            {
-                if (!set_linux_custom_baud(_fd, _params.baud_rate))
-                {
-                    log.error("failed to set baud rate ", _params.baud_rate);
-                    return fail_posix_startup();
-                }
-            }
-
-            int dtr_bit = TIOCM_DTR, rts_bit = TIOCM_RTS;
-            final switch (_params.flow_control)
-            {
-                case FlowControl.none:
-                    ioctl(_fd, TIOCMBIC, &dtr_bit);
-                    ioctl(_fd, TIOCMBIC, &rts_bit);
-                    break;
-                case FlowControl.hardware:
-                    ioctl(_fd, TIOCMBIS, &dtr_bit);     // RTS is owned by CRTSCTS
-                    break;
-                case FlowControl.software:
-                    ioctl(_fd, TIOCMBIS, &dtr_bit);
-                    ioctl(_fd, TIOCMBIC, &rts_bit);
-                    break;
-                case FlowControl.dsr_dtr:
-                    break;                              // unreachable: rejected earlier
-            }
-
-            tcflush(_fd, TCIOFLUSH);
         }
         else version (Embedded)
         {
@@ -551,6 +357,249 @@ nothrow @nogc:
         }
 
         return CompletionStatus.complete;
+    }
+
+    // Applies framing, baud, flow control and modem-line state to the open port. Called at startup,
+    // and again in place when flow-control is reconfigured at runtime (buffers preserved, no reopen).
+    version (Embedded) {} else
+    private bool configure_port(bool flush_buffers)
+    {
+        version(Windows)
+        {
+            if (_h_com == INVALID_HANDLE_VALUE)
+                return false;
+
+            DCB dcb = void;
+            ZeroMemory(&dcb, DCB.sizeof);
+            dcb.DCBlength = DCB.sizeof;
+            if (!GetCommState(_h_com, &dcb))
+                return false;
+
+            dcb._bf = 1;
+
+            dcb.BaudRate = DWORD(_params.baud_rate);
+            dcb.ByteSize = _params.data_bits;
+
+            if (_params.stop_bits == StopBits.one)
+                dcb.StopBits = ONESTOPBIT;
+            else if (_params.stop_bits == StopBits.one_point_five)
+                dcb.StopBits = ONE5STOPBITS;
+            else if (_params.stop_bits == StopBits.two)
+                dcb.StopBits = TWOSTOPBITS;
+
+            switch (_params.parity)
+            {
+                case Parity.none:   dcb.Parity = NOPARITY;      break;
+                case Parity.even:   dcb.Parity = EVENPARITY;    break;
+                case Parity.odd:    dcb.Parity = ODDPARITY;     break;
+                case Parity.mark:   dcb.Parity = MARKPARITY;    break;
+                case Parity.space:  dcb.Parity = SPACEPARITY;   break;
+                default: assert(false);
+            }
+            if (_params.parity != Parity.none)
+                dcb._bf |= 2; // fParity: set to enable parity checking?
+
+            // RTS idles asserted ("host ready") in the non-hardware modes: we always have receive
+            // buffer, and peers that honor RTS/CTS (Silabs NCPs) stop transmitting if it idles low
+            switch (_params.flow_control)
+            {
+                case FlowControl.none:
+                    dcb._bf &= ~4; // fOutxCtsFlow
+                    dcb._bf &= ~8; // fOutxDsrFlow
+                    dcb._bf &= ~0x40; // fDsrSensitivity
+                    dcb._bf &= ~0x100; // fOutX
+                    dcb._bf &= ~0x200; // fInX
+                    dcb._bf &= ~0x3030;
+                    dcb._bf |= RTSControl.enable << 12; // fRtsControl
+                    dcb._bf |= DTRControl.disable << 4; // fDtrControl
+                    break;
+                case FlowControl.hardware:
+                    dcb._bf |= 4; // fOutxCtsFlow
+                    dcb._bf &= ~8; // fOutxDsrFlow
+                    dcb._bf &= ~0x100; // fOutX
+                    dcb._bf &= ~0x200; // fInX
+                    dcb._bf &= ~0x3030;
+                    dcb._bf |= RTSControl.handshake << 12; // fRtsControl
+                    dcb._bf |= DTRControl.enable << 4; // fDtrControl
+                    break;
+                case FlowControl.software:
+                    dcb._bf &= ~4; // fOutxCtsFlow
+                    dcb._bf &= ~8; // fOutxDsrFlow
+                    dcb._bf &= ~0x40; // fDsrSensitivity
+                    dcb._bf |= 0x100; // fOutX
+                    dcb._bf |= 0x200; // fInX
+                    dcb.XonChar = 0x11;
+                    dcb.XoffChar = 0x13;
+                    dcb.XonLim = 200;
+                    dcb.XoffLim = 200;
+                    dcb._bf &= ~0x3030;
+                    dcb._bf |= RTSControl.enable << 12; // fRtsControl
+                    dcb._bf |= DTRControl.enable << 4; // fDtrControl
+                    break;
+                case FlowControl.dsr_dtr:
+                    dcb._bf &= ~4; // fOutxCtsFlow
+                    dcb._bf |= 8; // fOutxDsrFlow
+                    dcb._bf |= 0x40; // fDsrSensitivity
+                    dcb._bf &= ~0x100; // fOutX
+                    dcb._bf &= ~0x200; // fInX
+                    dcb._bf &= ~0x3030;
+                    dcb._bf |= RTSControl.disable << 12; // fRtsControl
+                    dcb._bf |= DTRControl.handshake << 4; // fDtrControl
+                    break;
+                default:
+                    assert(false);
+            }
+
+            if (!SetCommState(_h_com, &dcb))
+                return false;
+
+            COMMTIMEOUTS timeouts = {};
+            timeouts.ReadIntervalTimeout = -1;
+            timeouts.ReadTotalTimeoutConstant = 0;
+            timeouts.ReadTotalTimeoutMultiplier = 0;
+            // A synchronous WriteFile with no write timeout blocks forever when hardware flow control
+            // gates output on CTS and the peer deasserts it - a whole-loop lockup. Bound it so WriteFile
+            // returns a short count instead (fed to the same partial-write recovery as the Posix path).
+            // Multiplier scales with size so a legitimately slow/large write at low baud never trips it.
+            timeouts.WriteTotalTimeoutConstant = 100;
+            timeouts.WriteTotalTimeoutMultiplier = 2;
+            if (!SetCommTimeouts(_h_com, &timeouts))
+                return false;
+
+            if (flush_buffers)
+                PurgeComm(_h_com, PURGE_TXCLEAR | PURGE_RXCLEAR);
+            return true;
+        }
+        else version(Posix)
+        {
+            if (_fd == -1)
+                return false;
+
+            termios tty;
+            if (tcgetattr(_fd, &tty) != 0)
+                return false;
+
+            // on Linux the baud is set after tcsetattr via termios2/BOTHER (set_linux_custom_baud)
+            version (linux) {}
+            else
+            {
+                // other Posix: standard rates only, via the classic cfsetospeed/Bxxx path.
+                speed_t speed;
+                if (!posix_baud(_params.baud_rate, speed))
+                {
+                    log.error("unsupported serial baud rate ", _params.baud_rate);
+                    return false;
+                }
+                if (cfsetospeed(&tty, speed) != 0 || cfsetispeed(&tty, speed) != 0)
+                    return false;
+            }
+
+            tty.c_cflag &= ~(PARENB | PARODD | CMSPAR);
+            final switch (_params.parity)
+            {
+                case Parity.none:
+                    break;
+                case Parity.even:
+                    tty.c_cflag |= PARENB;
+                    break;
+                case Parity.odd:
+                    tty.c_cflag |= PARENB | PARODD;
+                    break;
+                case Parity.mark:
+                    tty.c_cflag |= PARENB | PARODD | CMSPAR;
+                    break;
+                case Parity.space:
+                    tty.c_cflag |= PARENB | CMSPAR;
+                    break;
+            }
+
+            tty.c_cflag &= ~CSTOPB;
+            if (_params.stop_bits == StopBits.two)
+                tty.c_cflag |= CSTOPB;
+            else if (_params.stop_bits == StopBits.one_point_five)
+            {
+                log.error("1.5 stop bits are not supported on Posix");
+                return false;
+            }
+
+            tty.c_cflag &= ~CSIZE;
+            switch (_params.data_bits)
+            {
+                case 5: tty.c_cflag |= CS5; break;
+                case 6: tty.c_cflag |= CS6; break;
+                case 7: tty.c_cflag |= CS7; break;
+                case 8: tty.c_cflag |= CS8; break;
+                default:
+                    log.error("unsupported data bits: ", _params.data_bits);
+                    return false;
+            }
+
+            tty.c_cflag &= ~CRTSCTS;
+            tty.c_cflag |= CREAD | CLOCAL;
+            tty.c_iflag &= ~(IXON | IXOFF | IXANY);
+            final switch (_params.flow_control)
+            {
+                case FlowControl.none:
+                    break;
+                case FlowControl.hardware:
+                    tty.c_cflag |= CRTSCTS;
+                    break;
+                case FlowControl.software:
+                    tty.c_iflag |= IXON | IXOFF;
+                    break;
+                case FlowControl.dsr_dtr:
+                    log.error("DSR/DTR flow control is not supported on Posix");
+                    return false;
+            }
+
+            tty.c_lflag &= ~ICANON;
+            tty.c_lflag &= ~ECHO;   // Disable echo
+            tty.c_lflag &= ~ECHOE;  // Disable erasure
+            tty.c_lflag &= ~ECHONL; // Disable new-line echo
+            tty.c_lflag &= ~ISIG;   // Disable interpretation of INTR, QUIT and SUSP
+            tty.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL); // Disable any special handling of received bytes
+
+            tty.c_oflag &= ~OPOST; // Prevent special interpretation of output bytes (e.g. newline chars)
+            tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
+
+            tty.c_cc[VTIME] = 0;
+            tty.c_cc[VMIN] = 0;
+
+            if (tcsetattr(_fd, TCSANOW, &tty) != 0)
+                return false;
+            version (linux)
+            {
+                if (!set_linux_custom_baud(_fd, _params.baud_rate))
+                {
+                    log.error("failed to set baud rate ", _params.baud_rate);
+                    return false;
+                }
+            }
+
+            // RTS idles asserted ("host ready") in the non-hardware modes: we always have receive
+            // buffer, and peers that honor RTS/CTS (Silabs NCPs) stop transmitting if it idles low
+            int dtr_bit = TIOCM_DTR, rts_bit = TIOCM_RTS;
+            final switch (_params.flow_control)
+            {
+                case FlowControl.none:
+                    ioctl(_fd, TIOCMBIC, &dtr_bit);
+                    ioctl(_fd, TIOCMBIS, &rts_bit);
+                    break;
+                case FlowControl.hardware:
+                    ioctl(_fd, TIOCMBIS, &dtr_bit);     // RTS is owned by CRTSCTS
+                    break;
+                case FlowControl.software:
+                    ioctl(_fd, TIOCMBIS, &dtr_bit);
+                    ioctl(_fd, TIOCMBIS, &rts_bit);
+                    break;
+                case FlowControl.dsr_dtr:
+                    break;                              // unreachable: rejected earlier
+            }
+
+            if (flush_buffers)
+                tcflush(_fd, TCIOFLUSH);
+            return true;
+        }
     }
 
     override CompletionStatus shutdown()
@@ -822,6 +871,51 @@ nothrow @nogc:
             return false;
     }
 
+    // Live modem-line state: what we assert (RTS/DTR) and what the peer presents (CTS/DSR/DCD/RI).
+    // Windows can only read the input lines; outputs_valid is false there.
+    final ModemLines modem_lines()
+    {
+        ModemLines l;
+        version (Windows)
+        {
+            if (_h_com == INVALID_HANDLE_VALUE)
+                return l;
+            DWORD status;
+            if (!GetCommModemStatus(_h_com, &status))
+                return l;
+            l.valid = true;
+            l.cts = (status & 0x10) != 0;   // MS_CTS_ON
+            l.dsr = (status & 0x20) != 0;   // MS_DSR_ON
+            l.ri  = (status & 0x40) != 0;   // MS_RING_ON
+            l.dcd = (status & 0x80) != 0;   // MS_RLSD_ON
+        }
+        else version (Posix)
+        {
+            if (_fd == -1)
+                return l;
+            int bits;
+            if (ioctl(_fd, TIOCMGET, &bits) != 0)
+                return l;
+            l.valid = true;
+            l.outputs_valid = true;
+            l.rts = (bits & TIOCM_RTS) != 0;
+            l.dtr = (bits & TIOCM_DTR) != 0;
+            l.cts = (bits & TIOCM_CTS) != 0;
+            l.dsr = (bits & TIOCM_DSR) != 0;
+            l.dcd = (bits & TIOCM_CAR) != 0;
+            l.ri  = (bits & TIOCM_RNG) != 0;
+        }
+        return l;
+    }
+
+    version (linux)
+    {
+        // kernel line-event counters (CTS transitions, overruns, ...); false if the driver
+        // doesn't implement TIOCGICOUNT (varies by usb-serial driver)
+        final bool line_counters(out serial_icounter_struct counters)
+            => _fd != -1 && ioctl(_fd, TIOCGICOUNT, &counters) == 0;
+    }
+
 private:
     version (Windows)
         HANDLE _h_com = INVALID_HANDLE_VALUE;
@@ -880,8 +974,46 @@ nothrow @nogc:
         g_app.register_enum!FlowControl();
 
         g_app.console.register_collection!SerialStream();
+        g_app.console.register_command!serial_lines("/stream/serial", this, "lines");
         version (Posix)
             g_app.console.register_command!serial_devices("/stream/serial", this, "devices");
+    }
+
+    // /stream/serial/lines <name> - live modem-line state (and kernel line-event counters where the
+    // driver supports them); the observability layer for flow-control experiments.
+    void serial_lines(Session session, const(char)[] name)
+    {
+        SerialStream s = Collection!SerialStream().get(name);
+        if (!s)
+        {
+            session.write_line(tconcat("no such serial stream: ", name));
+            return;
+        }
+
+        ModemLines l = s.modem_lines();
+        if (!l.valid)
+        {
+            session.write_line(tconcat("'", name, "': port not open or line query unsupported"));
+            return;
+        }
+
+        if (l.outputs_valid)
+            session.write_line(tconcat("'", name, "': RTS=", cast(int)l.rts, " DTR=", cast(int)l.dtr,
+                                       "  <-  CTS=", cast(int)l.cts, " DSR=", cast(int)l.dsr, " DCD=", cast(int)l.dcd, " RI=", cast(int)l.ri));
+        else
+            session.write_line(tconcat("'", name, "': CTS=", cast(int)l.cts, " DSR=", cast(int)l.dsr,
+                                       " DCD=", cast(int)l.dcd, " RI=", cast(int)l.ri, " (outputs not readable on this platform)"));
+
+        version (linux)
+        {
+            serial_icounter_struct c;
+            if (s.line_counters(c))
+                session.write_line(tconcat("counters: cts=", c.cts, " dsr=", c.dsr, " rx=", c.rx, " tx=", c.tx,
+                                           " frame=", c.frame, " overrun=", c.overrun, " parity=", c.parity,
+                                           " brk=", c.brk, " buf_overrun=", c.buf_overrun));
+            else
+                session.write_line("counters: not supported by driver");
+        }
     }
 
     override void update()
@@ -931,10 +1063,28 @@ version(Posix)
     }
 
     enum FIONREAD = 0x541B;
+    enum TIOCMGET = 0x5415;     // read the modem control/status bits
     enum TIOCMBIS = 0x5416;     // set the indicated modem control bits
     enum TIOCMBIC = 0x5417;     // clear the indicated modem control bits
     enum TIOCM_DTR = 0x002;
     enum TIOCM_RTS = 0x004;
+    enum TIOCM_CTS = 0x020;
+    enum TIOCM_CAR = 0x040;
+    enum TIOCM_RNG = 0x080;
+    enum TIOCM_DSR = 0x100;
+
+    version (linux)
+    {
+        enum TIOCGICOUNT = 0x545D;  // kernel line-event counters; not all usb-serial drivers support it
+        struct serial_icounter_struct
+        {
+            int cts, dsr, rng, dcd;
+            int rx, tx;
+            int frame, overrun, parity, brk;
+            int buf_overrun;
+            int[9] reserved;
+        }
+    }
 
     extern(C) ssize_t writev(int fd, const iovec* iov, int iovcnt);
     version (D_LP64)
