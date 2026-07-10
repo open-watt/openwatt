@@ -955,7 +955,7 @@ private:
         {
             req_buffer[0] = 0;
             req_buffer[1..3] = node.id.nativeToLittleEndian;
-            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.node_desc_req, req_buffer[0..3], zdo_res, PCP.vo));
+            r = try_thrice(() => _endpoint.zdo_request(node.id, ZDOCluster.node_desc_req, req_buffer[0..3], zdo_res, PCP.ee));
             if (r != ZigbeeResult.success || zdo_res.status != ZDOStatus.success)
                 return fail("node_desc_req failed");
 
