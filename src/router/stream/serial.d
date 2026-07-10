@@ -370,8 +370,12 @@ nothrow @nogc:
             timeouts.ReadIntervalTimeout = -1;
             timeouts.ReadTotalTimeoutConstant = 0;
             timeouts.ReadTotalTimeoutMultiplier = 0;
-            timeouts.WriteTotalTimeoutConstant = 0;
-            timeouts.WriteTotalTimeoutMultiplier = 0;
+            // A synchronous WriteFile with no write timeout blocks forever when hardware flow control
+            // gates output on CTS and the peer deasserts it - a whole-loop lockup. Bound it so WriteFile
+            // returns a short count instead (fed to the same partial-write recovery as the Posix path).
+            // Multiplier scales with size so a legitimately slow/large write at low baud never trips it.
+            timeouts.WriteTotalTimeoutConstant = 100;
+            timeouts.WriteTotalTimeoutMultiplier = 2;
             if (!SetCommTimeouts(_h_com, &timeouts))
                 return CompletionStatus.error;
         }
@@ -564,7 +568,10 @@ nothrow @nogc:
                 version (linux)
                     _serial_reader.deregister(cast(size_t)cast(void*)this); // worker owns the fd close
                 else
+                {
+                    tcflush(_fd, TCIOFLUSH); // discard un-drainable output so close() can't block (see close_serial_fd)
                     urt.internal.sys.posix.close(_fd);
+                }
                 _fd = -1;
             }
         }
@@ -705,7 +712,7 @@ nothrow @nogc:
             }
 
             bytes_written = _bytes_written;
-            if (_logging)
+            if (_logging || has_tap)
                 write_to_log(false, send_buffer[0 .. bytes_written]);
         }
         else version(Posix)
@@ -726,7 +733,7 @@ nothrow @nogc:
                     if (n == 0)
                         goto posix_write_done;
                     bytes_written += n;
-                    if (_logging)
+                    if (_logging || has_tap)
                         write_to_log(false, buf[0 .. n]);
                     buf = buf[n .. $];
                 }
@@ -736,7 +743,7 @@ nothrow @nogc:
         else version (Embedded)
         {
             bytes_written = uart_writev(_uart, data);
-            if (_logging && bytes_written > 0)
+            if ((_logging || has_tap) && bytes_written > 0)
             {
                 import urt.util : min;
                 size_t remain = bytes_written;
@@ -762,7 +769,8 @@ nothrow @nogc:
         }
         else version (Posix)
         {
-            tcdrain(_fd);
+            // discard buffered I/O; never tcdrain() here - under RTS/CTS with CTS deasserted it
+            // blocks until the peer lets output through, which would freeze the caller indefinitely
             tcflush(_fd, TCIOFLUSH);
             return 0;
         }
@@ -771,6 +779,47 @@ nothrow @nogc:
             uart_tx_flush(_uart);
             return 0;
         }
+    }
+
+    // Manually drive the modem control lines. Only meaningful when flow-control doesn't own the
+    // line; gives callers hardware reset agency over devices with reset wired to RTS/DTR
+    // (e.g. Silabs radio dongles, which some boots leave held in reset).
+    final bool set_rts(bool asserted)
+    {
+        // RTS is owned by the UART under hardware (RTS/CTS) flow control; refuse rather than fight it
+        assert(_params.flow_control != FlowControl.hardware, "cannot drive RTS manually while hardware flow control owns it");
+        if (_params.flow_control == FlowControl.hardware)
+            return false;
+        version (Windows)
+            return _h_com != INVALID_HANDLE_VALUE && EscapeCommFunction(_h_com, asserted ? SETRTS : CLRRTS) != 0;
+        else version (Posix)
+        {
+            if (_fd == -1)
+                return false;
+            int bit = TIOCM_RTS;
+            return ioctl(_fd, asserted ? TIOCMBIS : TIOCMBIC, &bit) == 0;
+        }
+        else
+            return false;
+    }
+
+    final bool set_dtr(bool asserted)
+    {
+        // DTR is owned by the UART under DSR/DTR flow control
+        assert(_params.flow_control != FlowControl.dsr_dtr, "cannot drive DTR manually while DSR/DTR flow control owns it");
+        if (_params.flow_control == FlowControl.dsr_dtr)
+            return false;
+        version (Windows)
+            return _h_com != INVALID_HANDLE_VALUE && EscapeCommFunction(_h_com, asserted ? SETDTR : CLRDTR) != 0;
+        else version (Posix)
+        {
+            if (_fd == -1)
+                return false;
+            int bit = TIOCM_DTR;
+            return ioctl(_fd, asserted ? TIOCMBIS : TIOCMBIC, &bit) == 0;
+        }
+        else
+            return false;
     }
 
 private:
@@ -1476,7 +1525,16 @@ version (linux)
 
             foreach (ref e; entries[])
                 if (e.fd >= 0)
-                    urt.internal.sys.posix.close(e.fd);
+                    close_serial_fd(e.fd);
+        }
+
+        // Closing a serial port under RTS/CTS while the peer holds CTS low blocks in the kernel
+        // draining output that can never leave, hanging this worker (and the main thread's reopen
+        // waiting behind it on the port) until the watchdog kills us. Discard the buffers first.
+        static void close_serial_fd(int fd)
+        {
+            tcflush(fd, TCIOFLUSH);
+            urt.internal.sys.posix.close(fd);
         }
 
         void apply_requests(ref Array!Entry entries)
@@ -1495,7 +1553,7 @@ version (linux)
                             if (entries[i].ep == r.ep)
                             {
                                 if (entries[i].fd >= 0)
-                                    urt.internal.sys.posix.close(entries[i].fd);
+                                    close_serial_fd(entries[i].fd);
                                 entries.removeSwapLast(i);
                                 break;
                             }
