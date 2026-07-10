@@ -54,7 +54,7 @@ nothrow @nogc:
             return;
         if (_subscribed)
         {
-            _stream.rx_handler = null;
+            _stream.release_rx_handler(&on_bytes);
             _stream.unsubscribe(&stream_state_change);
             _subscribed = false;
         }
@@ -189,7 +189,7 @@ protected:
 
         if (_subscribed)
         {
-            _stream.rx_handler = null;
+            _stream.release_rx_handler(&on_bytes);
             _stream.unsubscribe(&stream_state_change);
             _subscribed = false;
         }

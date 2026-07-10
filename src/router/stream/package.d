@@ -194,6 +194,14 @@ nothrow @nogc:
     final RecvHandler rx_handler() const pure
         => _incoming;
 
+    // Single-owner release: only the current owner may clear the handler, so a consumer tearing
+    // down late (deferred through the state machine) can't strip a successor that already took over.
+    final void release_rx_handler(RecvHandler handler)
+    {
+        if (_incoming is handler)
+            _incoming = null;
+    }
+
     // Passive taps observe raw traffic without consuming it (unlike the single-owner rx_handler),
     // so any number can attach - used by the /stream/tap sniffer.
     final void add_tap(TapHandler h)
