@@ -21,6 +21,7 @@ nothrow @nogc:
 
     override void init()
     {
+        g_app.register_enum!Edge();
         g_app.console.register_collection!Automation();
     }
 

@@ -53,8 +53,25 @@ vice-versa (they share one slot), so a rule mixing time + events uses `on=` for 
 /automation/add name=cond on="@site.power" if="@site.power > 2000W" do={ /notify "over 2kW" }
 /automation/add name=dark on="@pir.motion"  if="@sun.down"          do={ /element/set element=porch.light value=1 }
 
+# edge/for operate on the if= resolutions (both require if=).
+# edge=rising fires once as the condition becomes true, not on every sample above the threshold.
+/automation/add name=peak on="@site.power" if="@site.power > 2000W" edge=rising do={ /notify "crossed 2kW" }
+# for=: the condition must hold for the window; one run per qualifying episode, cancelled if it drops.
+/automation/add name=ajar on="@door.open" if="@door.open" for=5m do={ /notify "door left open 5 min" }
+# edge=falling + for= holds the FALSE state: "closed for an hour".
+/automation/add name=shut on="@door.open" if="@door.open" edge=falling for=1h do={ /notify "long closed" }
+
 # Multiple triggers (comma-separated, each quoted if it has special chars).
 /automation/add name=multi on="@door.open","every:1h" do={ /device/print }
+
+# Temporal shaping. All three hot-apply to a running rule (no restart).
+# debounce: act once the trigger stream settles; $value is the settled datum.
+/automation/add name=motion on="@pir.motion" debounce=500ms do={ /element/set element=porch.light value=$value }
+# throttle: act now, then lock out for the window.
+/automation/add name=chatty on="@noisy.sensor" throttle=10s do={ /notify "event" }
+# rate + burst: token bucket; sustained ceiling with a burst allowance.
+# rate takes any per-time quantity (12/h, 4/min, 0.2/s); it is canonicalised to /s.
+/automation/add name=cycles on="@hws.demand" rate=12/h burst=3 do={ /element/set element=hws.enable value=1 }
 ```
 
 Notes on what's live:
@@ -70,6 +87,10 @@ Notes on what's live:
   value at run time when you want the current value of some *other* element.
 - The `if=` expression is evaluated on every fire; a falsey result skips the action. It can read any
   element by `@path` and use comparisons/operators (`>`, `<`, `&&`, `||`, units like `2000W`).
+- Shaping order is peek-early / commit-late: throttle/rate drop bursts before `if=` is evaluated, but
+  the lockout / token spend only commits when the action actually runs, so a false condition costs
+  nothing. Unit spelling notes: per-minute is `/min` (`/m` is per-metre), numeric denominators like
+  `3/1h` are not a thing (pick a unit), and `Hz` is angular (Cycle/Second) so it is rejected here.
 
 ## 2. Managing them
 
@@ -89,14 +110,6 @@ illustrative and would be rejected today.
 /automation/add name=wow  on="mqtt:/wow/+/#?qos=1"        do={ /log $trigger.payload }
 /automation/add name=dusk on="sun:sunset?offset=-15m"     do={ /element/set element=garden.lights value=1 }
 
-# Condition edge / sustain - only a level gate exists today (if=).
-/automation/add name=peak on="@site.power" if="@site.power > 2000W" edge=rising do={ /notify "crossed 2kW" }
-/automation/add name=ajar on="@door.open"  if="@door.open" for=5m               do={ /notify "left open" }
-
-# Temporal shaping - none implemented.
-/automation/add name=motion on="@pir.motion" debounce=500ms do={ /element/set element=porch.light value=@pir.motion }
-/automation/add name=chatty on="mqtt:/sensors/#" throttle=10s do={ /notify "event" }
-
 # Execution policy - none implemented.
 /automation/add name=setpoint on="@target.power" overrun=coalesce catch_up=skip on_error=disable \
     do={ /element/set element=inverter.limit value=@target.power }
@@ -105,6 +118,6 @@ illustrative and would be rejected today.
 /automation/add name=echo on="mqtt:/sensors/#" do={ /log "got " .. $trigger.topic .. " = " .. $trigger.payload }
 ```
 
-Planned building blocks, in order (see the design doc's Phasing): event-driven element attach,
-`if=` edge/`for=`, the `on` completer, shaping (`debounce`/`throttle`/`rate`), execution policy
-(`overrun`/`catch_up`/`on_error`), and typed `$trigger.*` context.
+Planned building blocks, in order (see the design doc's Phasing): execution policy
+(`overrun`/`catch_up`/`on_error`), the `on` completer, typed `$trigger.*` context, and more
+providers (mqtt/zigbee/sun/http).

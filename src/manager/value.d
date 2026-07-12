@@ -89,8 +89,13 @@ template type_for(T, Extra...)
         enum type_for = "num";
     else static if (is(U == Quantity!(V, unit), V, ScaledUnit unit))
     {
-        enum string unit_str = unit.toString();
-        enum type_for = "q_" ~ unit_str;
+        static if (unit.pack == uint.max)
+            enum type_for = "q";        // dynamic quantity; the unit travels with the value
+        else
+        {
+            enum string unit_str = unit.toString();
+            enum type_for = "q_" ~ unit_str;
+        }
     }
     else static if (is(U : const(char)[]) || is(U == String))
         enum type_for = "str";
@@ -306,9 +311,14 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
         if (v.isQuantity)
         {
             VarQuantity q = v.asQuantity;
-            if (!q.isCompatible(r))
-                return "Incompatible units";
-            r = cast(T)q;
+            static if (T.Dynamic)
+                r = T(q);   // dynamic target carries any unit through as written
+            else
+            {
+                if (!q.isCompatible(r))
+                    return "Incompatible units";
+                r = cast(T)q;
+            }
         }
         else if (v.isNumber)
         {

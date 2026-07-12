@@ -64,6 +64,43 @@ cross-cutting issues that need a design decision or touch multiple systems.
   announce (believed true from TWCManager lore); if wrong, the failure mode is just unanswered
   heartbeats until the slave re-announces on its own timeout - same as the old behaviour.
 
+## Data model
+
+- **Element deadband (settled design, build when needed)**: per-point change-event conditioning,
+  standard SCADA/OPC report-by-exception. ONE mechanism, three surfaces: the filter itself lives in
+  the element's subscription machinery - each subscriber record carries an effective band plus an
+  anchor (last value DELIVERED to that subscriber); deliver when the move from the anchor meets the
+  band, then re-anchor. Non-numeric values ignore the band. `Element.latest` always stores truth
+  (live reads/`@path`/API stay exact); only event delivery is gated. Band selection: (1) element
+  metadata (profile field `deadband: 5W`) is the DEFAULT, the "signal modelling plan" = noise floor;
+  (2) any subscription may override - coarser, finer, or 0 for raw realtime; (3) the automation
+  surface is just a trigger URI param (`on="@motor.power?deadband=100W"`) that the element provider
+  passes through as the subscription override - no rule-side reimplementation, works on unmodeled
+  elements. Default-following subscribers resolve the element default at DELIVERY time, so
+  retrofitting a band onto a raw element immediately benefits them; explicit overriders are pinned.
+  Composition rule for docs: element default = measurement noise floor, overrides = consumer intent
+  (don't crank the element band "for the recorder"; that's the recorder's own override). Caveats:
+  the recorder may capture inline rather than subscribe - it needs to consult the same band (ties
+  into the record-flag follow-up); percent deadband (OPC-style) is a later variant, absolute first.
+  KNOWN DEADBAND PATHOLOGY (Manu, 2026-07-12) + required companion: crossing-triggered delivery is
+  selection-biased toward extremes - (1) a transient trips delivery at its peak and the anchor
+  latches that extreme while the signal settles to nominal INSIDE the band (delivered value wrong
+  by up to the band, indefinitely, always toward the extreme); (2) warble marginally wider than the
+  band delivers ONLY alternating boundary crossings, never a central sample, so the delivered
+  stream sits farther from the rolling mean than raw would. Fix (1) and bound staleness with the
+  standard historian companion knob, a max-report interval (`refresh=<dur>`, cf. PI exception-max-
+  time / OPC keep-alive): after a quiet refresh period, deliver the current CLOCK-sampled value and
+  re-anchor (clock samples are excursion-uncorrelated, so the anchor migrates to nominal). Deadband
+  without refresh is half a mechanism - ship them together. Fully killing (2) needs the band
+  decision made on a cheap EMA of the signal (decide on smoothed, deliver raw-current so consumers
+  never see synthetic values) - optional third param, adds a time-constant knob; swinging-door
+  compression is the heavyweight endpoint we don't need. Damage is consumer-dependent: `latest` is
+  truth, so use-time re-readers (live `@path`, encode-time sync reads) suffer only timing bias;
+  delivered-sample ingesters (recorder, `$value`) latch extremes and are who `refresh=` is for.
+  Motivation: makes analog debounce coherent (motor inrush exceeds band and re-arms the automation's
+  settle window, steady-state ripple is quiet -> `on="@motor.power?deadband=100W" debounce=5s` fires
+  once when the motor stabilises) and cuts sync/record traffic from jittery samples at the source.
+
 ## Infrastructure
 
 - **Serial rx reader -> shared fd reactor**: SerialStream rx is now event-driven. On linux a

@@ -3,20 +3,45 @@
 Status: partially implemented. This document is the full design vision; the section below records
 what is actually built so the rest reads as intent, not fact.
 
-## Implementation status (2026-07-06)
+## Implementation status (2026-07-12)
 
 **Built + runtime-verified** (incl. a live Zigbee door->light on the production Pi):
 - The general **signal** framework in [src/manager/signal.d](../src/manager/signal.d): `ISignalProvider`
-  (subscribe / unsubscribe / next_run), the opaque `SignalSub` handle (with a `provider()` method),
-  `SignalEvent`, `SignalSink` (carries a `MonoTime`), `SignalUri` + `parse_signal_uri`. Errors are
-  `StringResult`. **The registry lives on the `Application`** (`g_app.register_signal_provider` /
-  `find_signal_provider`), so any subsystem can provide or consume signals.
+  (validate / subscribe / unsubscribe / next_run), the opaque `SignalSub` handle (with a `provider()`
+  method), `SignalEvent` (`.source` + `.value`), `SignalSink` (carries a `MonoTime`), `SignalUri` +
+  `parse_signal_uri`. Errors are `StringResult`. **The registry lives on the `Application`**
+  (`g_app.register_signal_provider` / `find_signal_provider`), so any subsystem can provide or consume
+  signals.
 - Providers: **cron** ([src/manager/cron.d](../src/manager/cron.d)) is the time provider (`every:` /
   `at:` / `when:`); the **`Application` itself** is the `element:` provider (`@` sentinel).
 - The `Automation` object ([src/apps/automation/automation.d](../src/apps/automation/automation.d)):
   `on=<uri>,<uri>` (comma-separated signal URIs), `if=<expr>` (a quoted boolean gate), `do={...}`,
   and the write-only time sugar `schedule=` / `at=` / `when=`. Observability: `last_run`, `next_run`
-  (min across triggers), `run_count`.
+  (min across triggers, including a pending debounce settle), `run_count`.
+- **Three-outcome arming**: a bad URI is rejected at the CLI (provider `validate()`); a reference to a
+  not-yet-created element parks the rule in Starting, re-trying each frame with the reason shown in
+  `status_message` ("element not found: ..."), and arms the moment the element appears. No backoff, no
+  log spam. (True event-driven attach, subscribing on element creation, remains future work.)
+- **Trigger context**: the element provider snapshots the changed value into `SignalEvent.value`, and
+  the action sees it as `$value` (owned copy at change time; null for value-less triggers like time).
+- **Condition leg complete**: `edge=level|rising|falling` and `for=<dur>`, operating on the
+  *resolutions* of `if=` (both require it; validated). Each settled trigger evaluates the condition
+  once; `edge=` fires on the chosen transition between consecutive observations, `for=` requires the
+  qualifying polarity (truth, or falseness for `edge=falling`) to hold for the window -- armed when it
+  begins, cancelled the moment an observation finds it dropped, **one run per qualifying episode**,
+  with a final live re-evaluation at the deadline so silent drops can't slip through. Seeding: on arm
+  the tracker is primed so an already-true condition is not an edge; a `level` `for=` arms from state
+  at boot ("open for 5m" spans a restart) while rising/falling arm only from an observed transition.
+  Both hot-apply; a pending `for=` deadline folds into `next_run`. Caveat: the condition is observed
+  at trigger times (plus the deadline check), not continuously monitored.
+- **Temporal shaping**, all three knobs, hot-applied on a running rule (setters do not restart):
+  - `debounce=<dur>`: trailing edge; each trigger (re)starts the settle window, holding an owned
+    snapshot of the latest event; the action runs once on settle, so `$value` is the settled datum.
+  - `throttle=<dur>`: leading edge; act, then lock out for the window.
+  - `rate=<per-time>` + `burst=<n>`: token bucket; capacity `burst` (default 1), refill `rate`.
+  - Ordering is **peek early, commit late**: throttle/rate drop bursts before the `if=` condition is
+    evaluated (cheap), but the lockout stamp / token spend commits only when the action actually runs,
+    so a false condition never consumes the budget. All shaping timing is `MonoTime`.
 - **Cutover done**: `CronJob` and the `/system/cron` collection are deleted; cron collapsed to the
   single-file time provider; OTA's one-shot uses `AutomationModule.schedule_oneshot`.
 
@@ -25,16 +50,23 @@ what is actually built so the rest reads as intent, not fact.
 / `SignalSink` / `SignalEvent`**, and the registry is `signal_providers` on the `Application`. Read
 "trigger" below as "signal".
 
-**Not yet built** (design only, below): condition `edge=`/`for=`; temporal shaping
-(`debounce`/`throttle`/`rate`); execution policy (`overrun`/`catch_up`/`on_error`); the per-property
-`on` completer; typed `$trigger.*` context (`SignalEvent` carries only `.source` today); providers
-beyond element+time (mqtt/zigbee/sun/http); and event-driven element attach (today a missing element
-makes the rule retry on backoff until it appears).
+**Not yet built** (design only, below): execution policy (`overrun`/`catch_up`/`on_error`); the
+per-property `on` completer; the wider typed `$trigger.*` context (only the flat `$value` exists
+today); providers beyond element+time (mqtt/zigbee/sun/http); event-driven element attach (see the
+arming note above); and the element `?deadband=` subscription param (settled design in
+[TODO.md](../TODO.md) "Data model" - pass-through to the element subscription, see the `on=` URI
+section).
 
 **Syntax reality** vs earlier drafts in this doc: the condition keyword is `if=` (not `condition=`);
 triggers are `on=` URIs of form `[provider:|@]body[?k=v&k=v]` (not the `mqtt(...)` call form) and must
 be **quoted** at the CLI when they contain `?` `=` `@`; `days=`/`repeat=` are not sugar (use the URI
-`?days=`/`?repeat=false`); `/element/set` takes named args `element=` / `value=`.
+`?days=`/`?repeat=false`); `/element/set` takes named args `element=` / `value=`. Shaping deltas from
+the design below: the doc's `rate=<n>/<dur>` is split into `rate=` (a per-time quantity: `12/h`,
+`4/min`, `0.2/s` all convert to canonical `/s` at the property boundary) plus `burst=<n>` (bucket
+capacity, default 1) because canonicalisation discards the as-written numerator. Numeric denominators
+(`3/1h`) are not a unit spelling; use `0.05/min` or pick a unit. `/m` is per-METRE (SI), per-minute is
+`/min`. `Hz` is rejected: as defined it is `Cycle/Second`, an angular frequency (1 Hz normalises to
+2*pi rad/s), dimensionally distinct from plain per-time.
 
 ## Summary
 
@@ -422,7 +454,16 @@ on=at:18:00     on=every:5m   # built-in time providers
 on=mqtt:/wow/+/#?qos=1         # provider:body?params
 on=zigbee:0x1234/onoff/state
 on=sun:sunset?offset=-15m
+on=@motor.power?deadband=100W  # element param: value-domain filter on this subscription
 ```
+
+The `?deadband=` param above is the automation surface of the element deadband design (settled,
+parked in [TODO.md](../TODO.md) "Data model"): the filter itself is per-subscription state in the
+element's subscriber machinery, with element metadata supplying the default band; the automation
+never implements it - the element provider just passes the param through as the override on the
+subscription the rule was already creating. This is what makes debounce meaningful on analog
+signals: sub-band ripple generates no events, so `on="@motor.power?deadband=100W" debounce=5s`
+fires once when the motor settles after its inrush.
 
 The `on=` argument is **raw-captured** (grabbed as source text, never expression-parsed), which
 is what lets the body use `: / + # ? =` freely without quotes - they are bytes the provider
