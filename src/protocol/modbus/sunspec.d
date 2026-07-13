@@ -563,6 +563,7 @@ nothrow @nogc:
         teardown_node();
         _node = value;
         _slave_server = null;
+        mark_set!(typeof(this), "node")();
         restart();
     }
 
@@ -574,6 +575,7 @@ nothrow @nogc:
             return;
         _slave_name = value.move;
         _slave_server = null;
+        mark_set!(typeof(this), "slave")();
         restart();
     }
 

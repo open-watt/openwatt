@@ -102,6 +102,7 @@ nothrow @nogc:
         if (_stream is value)
             return null;
         _stream = value;
+        mark_set!(typeof(this), "stream")();
 
         restart();
         return null;

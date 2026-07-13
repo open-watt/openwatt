@@ -105,6 +105,7 @@ nothrow @nogc:
     void vlan_filtering(bool value)
     {
         _vlan_filtering = value;
+        mark_set!(typeof(this), "vlan-filtering")();
     }
 
     ushort pvid() const
@@ -112,12 +113,14 @@ nothrow @nogc:
     void pvid(typeof(null))
     {
         _bridge_port.pvid = 0;
+        mark_set!(typeof(this), "pvid")();
     }
     const(char)[] pvid(ushort value)
     {
         if (value == 0 || value > 4094)
             return "invalid vlan id";
         _bridge_port.pvid = value;
+        mark_set!(typeof(this), "pvid")();
         return null;
     }
 
@@ -126,6 +129,7 @@ nothrow @nogc:
     void ingress_filtering(bool value)
     {
         _bridge_port.ingress_filtering = value;
+        mark_set!(typeof(this), "ingress-filtering")();
     }
 
     bool untagged_egress() const
@@ -133,6 +137,7 @@ nothrow @nogc:
     void untagged_egress(bool value)
     {
         _bridge_port.untagged_egress = value;
+        mark_set!(typeof(this), "untagged-egress")();
     }
 
     // API...

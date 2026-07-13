@@ -43,6 +43,7 @@ nothrow @nogc:
         if (_stream is value)
             return null;
         _stream = value;
+        mark_set!(typeof(this), "stream")();
 
         restart();
         return null;
@@ -57,6 +58,7 @@ nothrow @nogc:
         if (value >= TunnelProtocol.PPPoE)
             return "invalid PPP server protocol";
         _protocol = value;
+        mark_set!(typeof(this), "protocol")();
 
         restart();
         return null;
@@ -140,6 +142,7 @@ nothrow @nogc:
 
         _interface = value;
         _interface.subscribe(&incoming_packet, PacketFilter(ether_type: EtherType.pppoes, ether_type_2: EtherType.pppoed), null);
+        mark_set!(typeof(this), "interface")();
 
         restart();
         return null;
@@ -154,6 +157,7 @@ nothrow @nogc:
         if (value < TunnelProtocol.PPPoE)
             return "invalid PPPoE server protocol";
         _protocol = value;
+        mark_set!(typeof(this), "protocol")();
 
         restart();
         return null;

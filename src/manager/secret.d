@@ -55,7 +55,10 @@ nothrow @nogc:
     void algorithm(HashFunction value)
     {
         if (_function == value)
+        {
+            mark_set!(typeof(this), "algorithm")();
             return;
+        }
         if (_function == HashFunction.plain_text)
         {
             // we can re-hash a plaintext password
@@ -67,6 +70,7 @@ nothrow @nogc:
             _function = value;
             _salt[] = 0;
             _hash = null;
+            mark_set!(typeof(this), [ "algorithm", "password" ])();
         }
     }
 
@@ -106,6 +110,7 @@ nothrow @nogc:
                 //       can our map remove while iterating?
             }
         }
+        mark_set!(typeof(this), "services")();
     }
     void services(ref Array!String value)
         => services(value[]);
@@ -213,6 +218,7 @@ private:
         }
         _function = hash_function;
         _hash = hash_password(password, _salt[], hash_function);
+        mark_set!(typeof(this), [ "password", "algorithm" ])();
     }
 }
 

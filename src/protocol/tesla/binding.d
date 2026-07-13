@@ -47,6 +47,7 @@ nothrow @nogc:
         if (_slave_id == value)
             return;
         _slave_id = value;
+        mark_set!(typeof(this), "slave_id")();
         restart();
     }
 

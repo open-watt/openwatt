@@ -39,6 +39,7 @@ nothrow @nogc:
         m_streams.reserve(value.length);
         foreach (s; value)
             m_streams.emplaceBack(s);
+        mark_set!(typeof(this), "streams")();
     }
 
     // API...

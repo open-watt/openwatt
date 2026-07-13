@@ -91,6 +91,7 @@ nothrow @nogc:
 
         _ezsp_client = value;
         _network_status = EmberStatus.NETWORK_DOWN;
+        mark_set!(typeof(this), "ezsp-client")();
 
         restart();
         return StringResult.success;
@@ -106,6 +107,7 @@ nothrow @nogc:
             return StringResult.success;
 
         _max_in_flight = value;
+        mark_set!(typeof(this), "max-in-flight")();
         if (running)
         {
             _queue.set_capacity(value, value > 1 ? 1 : 0, PCP.vo);
@@ -149,7 +151,13 @@ nothrow @nogc:
     void attach_coordiantor(ZigbeeCoordinator coordinator)
     {
         _coordinator = coordinator;
+        mark_set!(typeof(this), "pan-id")();
         restart();
+    }
+
+    package void network_state_changed()
+    {
+        mark_set!(typeof(this), "pan-id")();
     }
 
 protected:

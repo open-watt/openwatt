@@ -131,6 +131,7 @@ nothrow @nogc:
         if (_stream is value)
             return null;
         _stream = value;
+        mark_set!(typeof(this), "stream")();
 
         if (!_stream || !_stream.running)
             restart();
@@ -146,6 +147,7 @@ nothrow @nogc:
             return tconcat("Invalid CAN protocol '", protocol, "': expect 'ebyte|??'.");
         _protocol = value;
         _device = String();
+        mark_set!(typeof(this), [ "protocol", "device" ])();
         return null;
     }
 
@@ -159,6 +161,7 @@ nothrow @nogc:
             _stream = null;
             _protocol = CANInterfaceProtocol.unknown;
         }
+        mark_set!(typeof(this), [ "device", "stream", "protocol" ])();
     }
 
     final uint baud_rate() const pure
@@ -166,6 +169,7 @@ nothrow @nogc:
     final void baud_rate(uint value)
     {
         _baud_rate = value;
+        mark_set!(typeof(this), "baud-rate")();
     }
 
     version(HasGPIO)
@@ -175,6 +179,7 @@ nothrow @nogc:
         final void tx_gpio(ubyte value)
         {
             _tx_gpio = value;
+            mark_set!(typeof(this), "tx-gpio")();
         }
 
         final ubyte rx_gpio() const pure
@@ -182,6 +187,7 @@ nothrow @nogc:
         final void rx_gpio(ubyte value)
         {
             _rx_gpio = value;
+            mark_set!(typeof(this), "rx-gpio")();
         }
     }
 

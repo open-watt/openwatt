@@ -57,6 +57,7 @@ nothrow @nogc:
         if (_kind[] == value)
             return;
         _kind = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "kind")();
         restart();
     }
 
@@ -66,6 +67,7 @@ nothrow @nogc:
         if (_parent_circuit[] == value)
             return;
         _parent_circuit = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "parent")();
         restart();
     }
 
@@ -75,6 +77,7 @@ nothrow @nogc:
         if (_child_circuit[] == value)
             return;
         _child_circuit = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "child")();
         restart();
     }
 
@@ -84,6 +87,7 @@ nothrow @nogc:
         if (_circuit[] == value)
             return;
         _circuit = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "circuit")();
         restart();
     }
 
@@ -95,6 +99,7 @@ nothrow @nogc:
         if (_role[] == value)
             return;
         _role = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "role")();
         restart();
     }
 
@@ -104,6 +109,7 @@ nothrow @nogc:
         if (_capacity == value)
             return;
         _capacity = value;
+        mark_set!(typeof(this), [ "capacity", "kind" ])();
         restart();
     }
 
@@ -113,6 +119,7 @@ nothrow @nogc:
         if (_closed == value)
             return;
         _closed = value;
+        mark_set!(typeof(this), "closed")();
         restart();
     }
 
@@ -122,6 +129,7 @@ nothrow @nogc:
         if (_meter_phase == value)
             return;
         _meter_phase = value;
+        mark_set!(typeof(this), "meter-phase")();
         restart();
     }
 
@@ -131,6 +139,7 @@ nothrow @nogc:
         if (_meter_sign == value)
             return;
         _meter_sign = value;
+        mark_set!(typeof(this), "meter-sign")();
         restart();
     }
 
@@ -141,11 +150,13 @@ nothrow @nogc:
         {
             _meter_path = String();
             _meter = null;
+            mark_set!(typeof(this), [ "meter", "kind" ])();
             restart();
             return null;
         }
         _meter_path = value.makeString(g_app.allocator);
         _meter = resolve_component_path(value);
+        mark_set!(typeof(this), [ "meter", "kind" ])();
         restart();
         return null;
     }

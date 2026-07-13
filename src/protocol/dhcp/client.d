@@ -64,6 +64,7 @@ nothrow @nogc:
             _subscribed = false;
         }
         _iface = value;
+        mark_set!(typeof(this), "interface")();
         restart();
         return null;
     }
@@ -75,6 +76,7 @@ nothrow @nogc:
         if (_add_default_route == value)
             return;
         _add_default_route = value;
+        mark_set!(typeof(this), "add-default-route")();
         restart();
     }
 

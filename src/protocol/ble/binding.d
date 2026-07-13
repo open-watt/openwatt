@@ -50,6 +50,7 @@ nothrow @nogc:
             _subscribed = false;
         }
         _client = value;
+        mark_set!(typeof(this), "client")();
         restart();
     }
 
@@ -60,6 +61,7 @@ nothrow @nogc:
         if (value == _profile_name)
             return;
         _profile_name = value.move;
+        mark_set!(typeof(this), "profile")();
         restart();
     }
 
@@ -70,6 +72,7 @@ nothrow @nogc:
         if (value == _model_name)
             return;
         _model_name = value.move;
+        mark_set!(typeof(this), "model")();
         restart();
     }
 

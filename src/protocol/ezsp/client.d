@@ -66,11 +66,11 @@ class EZSPClient : ActiveObject
     alias Properties = AliasSeq!(Prop!("ash-stream", ash_stream),
                                  Prop!("ash-interface", ash_interface),
                                  Prop!("concurrency", concurrency),
-                                 Prop!("stack-type", stack_type),
-                                 Prop!("stack-version", stack_version),
-                                 Prop!("protocol-version", protocol_version),
-                                 Prop!("queued", queued_count),
-                                 Prop!("peak-queue", peak_queue));
+                                 Prop!("stack-type", stack_type, "status"),
+                                 Prop!("stack-version", stack_version, "status"),
+                                 Prop!("protocol-version", protocol_version, "status"),
+                                 Prop!("queued", queued_count, "status"),
+                                 Prop!("peak-queue", peak_queue, "status"));
 @nogc:
 
     enum type_name = "ezsp";
@@ -92,6 +92,7 @@ class EZSPClient : ActiveObject
             return;
         _stream = stream;
         _ash_ext = null;
+        mark_set!(typeof(this), [ "ash-stream", "ash-interface" ])();
         restart();
     }
 
@@ -103,11 +104,10 @@ class EZSPClient : ActiveObject
             return;
         _ash_ext = iface;
         _stream = null;
+        mark_set!(typeof(this), [ "ash-interface", "ash-stream" ])();
         restart();
     }
 
-    // Maximum complete EZSP transactions allowed to be outstanding. ASH remains an independent
-    // transport, but its transmit window follows the client using it so the two queues cannot drift.
     final ubyte concurrency() const pure nothrow
         => _concurrency;
     final StringResult concurrency(ubyte value) nothrow
@@ -117,13 +117,18 @@ class EZSPClient : ActiveObject
         if (_concurrency == value)
             return StringResult.success;
 
+        ubyte previous = _concurrency;
         _concurrency = value;
         if (_ash)
         {
             StringResult result = _ash.window(value);
             if (!result)
+            {
+                _concurrency = previous;
                 return result;
+            }
         }
+        mark_set!(typeof(this), "concurrency")();
         if (running)
             send_queued_message();
         return StringResult.success;
@@ -402,6 +407,7 @@ protected:
         _sequence_number = 0;
         _stack_type = EZSPStackType.unknown;
         _stack_version = null;
+        mark_set!(typeof(this), [ "stack-type", "stack-version", "protocol-version" ])();
 
         // complete every outstanding request as failed; nothing may be left waiting on a
         // response that can never arrive (send_command rejects new requests while not running)
@@ -411,6 +417,7 @@ protected:
                 req.fail_shim(req.cb_funcptr, req.cb_instance, req.user_data);
         }
         _queued_requests.clear();
+        mark_set!(typeof(this), "queued")();
         _in_flight = 0;
 
         if (_ash)
@@ -438,6 +445,7 @@ protected:
             auto fail = _queued_requests[0].fail_shim;
             void* cb = _queued_requests[0].cb_funcptr, inst = _queued_requests[0].cb_instance, ud = _queued_requests[0].user_data;
             _queued_requests.popFront();
+            mark_set!(typeof(this), "queued")();
             --_in_flight;
             if (fail)
                 fail(cb, inst, ud);
@@ -632,6 +640,8 @@ private:
                 _known_version = _requested_version;
                 _requested_version = 0;
 
+                mark_set!(typeof(this), [ "stack-type", "stack-version", "protocol-version" ])();
+
                 log.noticef("connected: {0} V{1} - protocol version {2}", r.stackType == 1 ? "ROUTER" : r.stackType == 2 ? "COORDINATOR" : "UNKNOWN", _stack_version, _known_version);
                 break;
 
@@ -675,6 +685,7 @@ private:
                     version (DebugZigbeeLatency)
                         Duration rtt = getTime() - _queued_requests[0].ts;
                     _queued_requests.popFront();
+                    mark_set!(typeof(this), "queued")();
                     --_in_flight;
 
                     version (DebugZigbeeLatency)
@@ -741,9 +752,11 @@ private:
             dropped_inst = _queued_requests[drop].cb_instance;
             dropped_ud = _queued_requests[drop].user_data;
             _queued_requests.remove(drop);
+            mark_set!(typeof(this), "queued")();
         }
 
         ref QueuedRequest req = _queued_requests.pushBack();
+        mark_set!(typeof(this), "queued")();
         req.cmd = cmd;
         req.priority = priority;
         req.dei = dei;
@@ -756,7 +769,10 @@ private:
         req.data[0 .. data.length] = data[];
 
         if (_queued_requests.length > _peak_queue)
+        {
             _peak_queue = cast(ushort)_queued_requests.length;
+            mark_set!(typeof(this), "peak-queue")();
+        }
 
         version (DebugZigbeeLatency)
         {
@@ -805,6 +821,7 @@ private:
                 auto fail = req.fail_shim;
                 void* cb = req.cb_funcptr, inst = req.cb_instance, ud = req.user_data;
                 _queued_requests.remove(_in_flight);
+                mark_set!(typeof(this), "queued")();
                 if (fail)
                     fail(cb, inst, ud);
                 continue;

@@ -68,6 +68,7 @@ nothrow @nogc:
         if (_kind[] == value)
             return;
         _kind = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "kind")();
     }
 
     // Optional metadata. When a vehicle is modelled without a device profile,
@@ -78,6 +79,7 @@ nothrow @nogc:
         if (_vin[] == value)
             return;
         _vin = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "vin")();
     }
 
     // usable battery capacity in kWh; fallback for SOC estimation when the
@@ -86,6 +88,7 @@ nothrow @nogc:
     void capacity(float value)
     {
         _capacity = value;
+        mark_set!(typeof(this), "capacity")();
     }
 
     bool root() const pure { return _root; }
@@ -94,6 +97,7 @@ nothrow @nogc:
         if (_root == value)
             return;
         _root = value;
+        mark_set!(typeof(this), "root")();
         restart();
     }
 
@@ -118,6 +122,7 @@ nothrow @nogc:
         {
             _device_path = String();
             _device = null;
+            mark_set!(typeof(this), [ "device", "kind" ])();
             restart();
             return null;
         }
@@ -126,6 +131,7 @@ nothrow @nogc:
             return tconcat("device not found: ", value);
         _device_path = value.makeString(g_app.allocator);
         _device = c;
+        mark_set!(typeof(this), [ "device", "kind" ])();
         restart();
         return null;
     }
@@ -139,6 +145,7 @@ nothrow @nogc:
         {
             _meter_path = String();
             _meter = null;
+            mark_set!(typeof(this), "meter")();
             restart();
             return null;
         }
@@ -147,6 +154,7 @@ nothrow @nogc:
             return tconcat("meter not found: ", value);
         _meter_path = value.makeString(g_app.allocator);
         _meter = c;
+        mark_set!(typeof(this), "meter")();
         restart();
         return null;
     }
@@ -158,6 +166,7 @@ nothrow @nogc:
             return;
         _meter_sign = value;
         _meter_sign_set = true;
+        mark_set!(typeof(this), "meter-sign")();
         restart();
     }
 
@@ -173,6 +182,7 @@ nothrow @nogc:
         {
             _state_path = String();
             _state = null;
+            mark_set!(typeof(this), "state")();
             restart();
             return null;
         }
@@ -181,6 +191,7 @@ nothrow @nogc:
             return tconcat("state not found: ", value);
         _state_path = value.makeString(g_app.allocator);
         _state = c;
+        mark_set!(typeof(this), "state")();
         restart();
         return null;
     }

@@ -61,6 +61,7 @@ nothrow @nogc:
         if (value == _remote)
             return;
         _remote = value;
+        mark_set!(typeof(this), "remote")();
 
         restart();
     }
@@ -73,6 +74,7 @@ nothrow @nogc:
 
         _host = value.move;
         _remote = InetAddress();
+        mark_set!(typeof(this), "remote")();
 
         restart();
         return StringResult();
@@ -91,6 +93,7 @@ nothrow @nogc:
             return;
 
         _port = value;
+        mark_set!(typeof(this), "port")();
         if ((_remote.family == AddressFamily.ipv4 && _remote._a.ipv4.port == value) ||
             (_remote.family == AddressFamily.ipv6 && _remote._a.ipv6.port == value))
             return;
@@ -205,6 +208,7 @@ protected:
         _major = _minor = 0;
         _server_info = null;
         _server_name = null;
+        mark_set!(typeof(this), [ "server_name", "server_info" ])();
         _state = 0;
         _tail.clear();
 
@@ -378,6 +382,7 @@ private:
                 _minor = res.api_version_minor;
                 _server_info = res.server_info.move;
                 _server_name = res.name.move;
+                mark_set!(typeof(this), [ "server_name", "server_info" ])();
 
                 version (DebugESPHomeClient)
                     writeDebug("esphome ", name[], " - received hello response from server: ", _server_name[], " (", _server_info[], ") with API version ", _major, ".", _minor);

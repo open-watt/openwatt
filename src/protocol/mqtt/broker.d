@@ -35,7 +35,7 @@ class MQTTBroker : ActiveObject
                                  Prop!("tls-port", tls_port),
                                  Prop!("certificates", certificates),
                                  Prop!("allow-anonymous", allow_anonymous),
-                                 Prop!("client-timeout", _client_timeout));
+                                 Prop!("client-timeout", client_timeout));
 nothrow @nogc:
 
     enum type_name = "mqtt-broker";
@@ -54,6 +54,7 @@ nothrow @nogc:
         if (_port == value)
             return;
         _port = value;
+        mark_set!(typeof(this), "port")();
         if (_server)
             _server.port = _port;
     }
@@ -65,6 +66,7 @@ nothrow @nogc:
         if (_tls_port == value)
             return;
         _tls_port = value;
+        mark_set!(typeof(this), "tls-port")();
         if (_tls_server)
             _tls_server.port = _tls_port;
     }
@@ -82,11 +84,24 @@ nothrow @nogc:
         _certificates.reserve(value.length);
         foreach (c; value)
             _certificates.emplaceBack(c);
+        mark_set!(typeof(this), "certificates")();
         restart();
     }
 
     bool allow_anonymous() const pure => _allow_anonymous;
-    void allow_anonymous(bool value) { _allow_anonymous = value; }
+    void allow_anonymous(bool value)
+    {
+        _allow_anonymous = value;
+        mark_set!(typeof(this), "allow-anonymous")();
+    }
+
+    Duration client_timeout() const pure
+        => _client_timeout;
+    void client_timeout(Duration value)
+    {
+        _client_timeout = value;
+        mark_set!(typeof(this), "client-timeout")();
+    }
 
     alias subscribe = ActiveObject.subscribe;
     alias unsubscribe = ActiveObject.unsubscribe;

@@ -68,6 +68,7 @@ class ZigbeeCoordinator : ZigbeeRouter
         zigbee_iface.attach_coordiantor(this);
         if (auto ezsp = get_ezsp())
             subscribe_client(ezsp, true);
+        mark_set!(typeof(this), "interface")();
         return StringResult.success;
     }
 
@@ -82,6 +83,7 @@ class ZigbeeCoordinator : ZigbeeRouter
         if (value > 26)
             return StringResult("invalid channel");
         _channel = cast(ubyte)value;
+        mark_set!(typeof(this), "channel")();
         return StringResult.success;
     }
     final StringResult channel(const(char)[] value) nothrow
@@ -90,6 +92,7 @@ class ZigbeeCoordinator : ZigbeeRouter
             _channel = 0xFF;
         else
             return StringResult("invalid channel specification");
+        mark_set!(typeof(this), "channel")();
         return StringResult.success;
     }
 
@@ -471,7 +474,9 @@ private:
         _network_params.radio_channel = nwk_params.parameters.radioChannel;
         _network_params.radio_tx_power = nwk_params.parameters.radioTxPower;
 
-        _node_id = ezsp.request!EZSP_GetNodeId();
+        set_node_id(ezsp.request!EZSP_GetNodeId());
+        mark_set!(typeof(this), [ "pan-eui", "pan-id", "node-id", "channel" ])();
+        zigbee_iface().network_state_changed();
         if (_node_id != nwk_params.parameters.nwkManagerId || _node_id != 0x0000)
         {
             log.errorf("Zigbee NCP reported invalid coordinator node IDs: local={0,04x}, manager={1,04x}", _node_id, nwk_params.parameters.nwkManagerId);

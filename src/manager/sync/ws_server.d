@@ -59,6 +59,7 @@ nothrow @nogc:
         if (_http_server is value)
             return;
         _http_server = value;
+        mark_set!(typeof(this), "http-server")();
         restart();
     }
 
@@ -69,6 +70,7 @@ nothrow @nogc:
         if (_uri[] == value)
             return;
         _uri = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "uri")();
         restart();
     }
 
@@ -79,6 +81,7 @@ nothrow @nogc:
         if (_encoder == value)
             return;
         _encoder = value;
+        mark_set!(typeof(this), "encoder")();
         restart();
     }
 

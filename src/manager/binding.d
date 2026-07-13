@@ -39,6 +39,7 @@ nothrow @nogc:
         if (value == _device)
             return;
         _device = value.move;
+        mark_set!(typeof(this), "device")();
         if (!_device.empty && _device[] !in g_app.devices)
         {
             Device d = g_app.allocator.allocT!Device(_device[].makeString(g_app.allocator));

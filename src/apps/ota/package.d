@@ -58,6 +58,7 @@ nothrow @nogc:
             _subscribed = false;
         }
         _http_server = value;
+        mark_set!(typeof(this), "http-server")();
         restart();
     }
 
@@ -66,6 +67,7 @@ nothrow @nogc:
     void uri(const(char)[] value)
     {
         _uri = value.makeString(defaultAllocator);
+        mark_set!(typeof(this), "uri")();
         restart();
     }
 
@@ -76,6 +78,7 @@ nothrow @nogc:
         if (_method == value)
             return;
         _method = value;
+        mark_set!(typeof(this), "method")();
         restart();
     }
 
@@ -84,6 +87,7 @@ nothrow @nogc:
     void reboot_delay(Duration value)
     {
         _reboot_delay = value;
+        mark_set!(typeof(this), "reboot-delay")();
     }
 
     Duration commit_time() const pure
@@ -91,6 +95,7 @@ nothrow @nogc:
     void commit_time(Duration value)
     {
         _commit_time = value;
+        mark_set!(typeof(this), "commit-time")();
     }
 
     Duration watchdog() const pure
@@ -98,6 +103,7 @@ nothrow @nogc:
     void watchdog(Duration value)
     {
         _watchdog = value;
+        mark_set!(typeof(this), "watchdog")();
     }
 
     uint max_fail() const pure
@@ -105,6 +111,7 @@ nothrow @nogc:
     void max_fail(uint value)
     {
         _max_fail = value;
+        mark_set!(typeof(this), "max-fail")();
     }
 
 protected:

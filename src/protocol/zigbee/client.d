@@ -94,6 +94,7 @@ class ZigbeeNode : ActiveObject
         }
         _interface = value;
         _interface.subscribe(&incoming_packet, PacketFilter(type: PacketType.zigbee_aps));
+        mark_set!(typeof(this), "interface")();
         return StringResult.success;
     }
 
@@ -555,6 +556,18 @@ class ZigbeeNode : ActiveObject
 
 protected:
     mixin RekeyHandler;
+
+    final void set_eui(EUI64 value) nothrow
+    {
+        _eui = value;
+        mark_set!(typeof(this), "eui")();
+    }
+
+    final void set_node_id(ushort value) nothrow
+    {
+        _node_id = value;
+        mark_set!(typeof(this), "node-id")();
+    }
 
     struct Endpoint
     {
@@ -1028,6 +1041,7 @@ class ZigbeeEndpoint : ActiveObject
         _node = value;
         if (_endpoint != 0)
             _node.add_endpoint(this);
+        mark_set!(typeof(this), "node")();
         return null;
     }
 
@@ -1042,6 +1056,7 @@ class ZigbeeEndpoint : ActiveObject
         _endpoint = value;
         if (_node)
             _node.add_endpoint(this);
+        mark_set!(typeof(this), "endpoint-id")();
         return null;
     }
 
@@ -1075,6 +1090,7 @@ class ZigbeeEndpoint : ActiveObject
                     return tconcat("unknown zigbee profile: ", value);
                 _profile = cast(ushort)ul;
         }
+        mark_set!(typeof(this), [ "profile", "profile-id" ])();
         return null;
     }
 
@@ -1086,6 +1102,7 @@ class ZigbeeEndpoint : ActiveObject
     final void device(ushort value) nothrow
     {
         _device = value;
+        mark_set!(typeof(this), "device")();
     }
 
     final const(ushort)[] in_clusters() inout pure nothrow
@@ -1093,10 +1110,12 @@ class ZigbeeEndpoint : ActiveObject
     final void in_clusters(const(ushort)[] value) nothrow
     {
         _in_clusters = value;
+        mark_set!(typeof(this), "in-clusters")();
     }
     final void in_clusters(Array!ushort value) nothrow
     {
         _in_clusters = value.move;
+        mark_set!(typeof(this), "in-clusters")();
     }
 
     final const(ushort)[] out_clusters() inout pure nothrow
@@ -1104,10 +1123,12 @@ class ZigbeeEndpoint : ActiveObject
     final void out_clusters(const(ushort)[] value) nothrow
     {
         _out_clusters = value;
+        mark_set!(typeof(this), "out-clusters")();
     }
     final void out_clusters(Array!ushort value) nothrow
     {
         _out_clusters = value.move;
+        mark_set!(typeof(this), "out-clusters")();
     }
 
 

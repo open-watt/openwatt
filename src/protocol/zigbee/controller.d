@@ -82,6 +82,7 @@ class ZigbeeController : ActiveObject, Subscriber
         _endpoint = value;
         if (_endpoint)
             _endpoint.set_message_handler(&message_handler);
+        mark_set!(typeof(this), "endpoint")();
         return StringResult.success;
     }
 
@@ -90,6 +91,7 @@ class ZigbeeController : ActiveObject, Subscriber
     final void auto_create(bool value) nothrow
     {
         _auto_create_devices = value;
+        mark_set!(typeof(this), "auto-create")();
     }
 
     // API...

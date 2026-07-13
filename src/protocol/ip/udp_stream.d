@@ -38,6 +38,7 @@ nothrow @nogc:
         if (value == _local_host)
             return;
         _local_host = value.move;
+        mark_set!(typeof(this), "local-host")();
         restart();
     }
 
@@ -47,6 +48,7 @@ nothrow @nogc:
         if (value == _local_port)
             return;
         _local_port = value;
+        mark_set!(typeof(this), "local-port")();
         restart();
     }
 
@@ -56,6 +58,7 @@ nothrow @nogc:
         if (value == _remote_host)
             return;
         _remote_host = value.move;
+        mark_set!(typeof(this), "remote-host")();
         restart();
     }
 
@@ -65,6 +68,7 @@ nothrow @nogc:
         if (value == _remote_port)
             return;
         _remote_port = value;
+        mark_set!(typeof(this), "remote-port")();
         restart();
     }
 

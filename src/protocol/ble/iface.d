@@ -183,6 +183,7 @@ nothrow @nogc:
         if (value == 0)
             return StringResult("max-in-flight must be non-zero");
         _max_in_flight = value;
+        mark_set!(typeof(this), "max-in-flight")();
         return StringResult.success;
     }
 
