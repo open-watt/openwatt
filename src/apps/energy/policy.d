@@ -49,7 +49,6 @@ enum GoalKind : ubyte
     expression,
 }
 
-
 struct Goal
 {
 nothrow @nogc:
@@ -91,6 +90,7 @@ nothrow @nogc:
             return tconcat("appliance not found: ", value);
         _target_name = value.makeString(g_app.allocator);
         _target_appliance = a;
+        mark_set!(typeof(this), "target")();
         restart();
         return null;
     }
@@ -101,6 +101,7 @@ nothrow @nogc:
         if (_tier == value)
             return;
         _tier = value;
+        mark_set!(typeof(this), "tier")();
     }
 
     const(char)[] goal() const pure { return _goal_text[]; }
@@ -113,6 +114,7 @@ nothrow @nogc:
             free_expression(_goal.expression);
         _goal_text = value.makeString(g_app.allocator);
         _goal = parsed;
+        mark_set!(typeof(this), "goal")();
         restart();
         return null;
     }
@@ -129,6 +131,7 @@ nothrow @nogc:
         if (_deadline == value)
             return;
         _deadline = value;
+        mark_set!(typeof(this), "deadline")();
     }
 
     PolicyShape shape() const pure { return _shape; }
@@ -137,6 +140,7 @@ nothrow @nogc:
         if (_shape == value)
             return;
         _shape = value;
+        mark_set!(typeof(this), "shape")();
     }
 
     ref const(Goal) parsed_goal() const pure { return _goal; }
@@ -159,20 +163,6 @@ protected:
         // here  - the appliance's Control may not yet exist (placeholder/unconnected
         // car). satisfied() returns false at runtime when the witness is missing.
         return true;
-    }
-
-    override CompletionStatus startup()
-    {
-        return CompletionStatus.complete;
-    }
-
-    override CompletionStatus shutdown()
-    {
-        return CompletionStatus.complete;
-    }
-
-    override void update()
-    {
     }
 
 private:
