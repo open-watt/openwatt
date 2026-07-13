@@ -17,13 +17,14 @@ struct QueuedFrame
     MessageCallback callback;
     MonoTime enqueue_time;
     MonoTime dispatch_time;
-    MonoTime deadline;
-    MonoTime priority_escalation;
+    uint deadline_after;
+    uint priority_escalation_after;
     ubyte tag;
     PCP pcp;
     PCP urgent_pcp;
     bool dei;
     bool in_flight;
+    bool priority_escalated;
 }
 
 struct PriorityPacketQueue
@@ -118,8 +119,8 @@ nothrow @nogc:
         frame.packet = packet.clone();
         frame.callback = callback;
         frame.enqueue_time = getTime();
-        frame.deadline = policy ? policy.deadline : MonoTime();
-        frame.priority_escalation = policy ? policy.priority_escalation : MonoTime();
+        frame.deadline_after = policy ? policy.deadline_after : 0;
+        frame.priority_escalation_after = policy ? policy.priority_escalation_after : 0;
         int tag = _tags.alloc();
         if (tag < 0)
         {
@@ -132,6 +133,7 @@ nothrow @nogc:
         frame.urgent_pcp = policy ? policy.urgent_pcp : PCP.be;
         frame.dei = dei;
         frame.in_flight = false;
+        frame.priority_escalated = false;
 
         ubyte rank = pcp_priority_map[pcp];
         _buckets[rank].pushBack(frame);
@@ -258,7 +260,7 @@ nothrow @nogc:
             while (i < bucket.length)
             {
                 QueuedFrame* frame = bucket[i];
-                if ((frame.deadline != MonoTime() && now >= frame.deadline) ||
+                if ((frame.deadline_after != 0 && packet_age_ms(frame, now) >= frame.deadline_after) ||
                     (_queue_timeout != Duration() && (now - frame.enqueue_time) > _queue_timeout))
                 {
                     if (frame.callback)
@@ -335,11 +337,11 @@ private:
             {
                 QueuedFrame* frame = _buckets[rank][i];
                 ubyte urgent_rank = pcp_priority_map[frame.urgent_pcp];
-                if (frame.priority_escalation != MonoTime() &&
-                    now >= frame.priority_escalation && urgent_rank > rank)
+                if (frame.deadline_after != 0 && !frame.priority_escalated &&
+                    packet_age_ms(frame, now) >= frame.priority_escalation_after && urgent_rank > rank)
                 {
                     _buckets[rank].remove(i);
-                    frame.priority_escalation = MonoTime();
+                    frame.priority_escalated = true;
                     frame.pcp = frame.urgent_pcp;
                     _buckets[urgent_rank].pushBack(frame);
                 }
@@ -348,6 +350,9 @@ private:
             }
         }
     }
+
+    uint packet_age_ms(const QueuedFrame* frame, MonoTime now) pure
+        => cast(uint)(now - frame.packet.creation_time).as!"msecs";
 
     bool drop_lowest_dei()
     {
@@ -415,12 +420,12 @@ unittest
     queue.abort_all();
 
     Packet deadline_packet;
-    deadline_packet.init!RawFrame(data[]);
+    deadline_packet.init!RawFrame(data[], MonoTime());
     deadline_packet.pcp = PCP.ca;
     QueuePolicy deadline;
     deadline.urgent_pcp = PCP.ic;
-    deadline.priority_escalation = MonoTime(100);
-    deadline.deadline = MonoTime(200);
+    deadline.priority_escalation_after = 100;
+    deadline.deadline_after = 200;
 
     int deadline_tag = queue.enqueue(deadline_packet, null, &deadline);
     assert(deadline_tag > 0);
@@ -432,8 +437,8 @@ unittest
     assert(promoted.packet.pcp == PCP.ca);
     queue.complete(promoted.tag);
 
-    deadline.priority_escalation = MonoTime(300);
-    deadline.deadline = MonoTime(400);
+    deadline.priority_escalation_after = 300;
+    deadline.deadline_after = 400;
     deadline_tag = queue.enqueue(deadline_packet, null, &deadline);
     assert(queue.is_queued(cast(ubyte)deadline_tag));
     queue.timeout_stale(MonoTime(400));

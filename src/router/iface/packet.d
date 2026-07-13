@@ -82,14 +82,15 @@ nothrow @nogc:
         assert(timeout > Duration.zero, "Queue deadline must be positive");
         assert(escalation_percent <= 100, "Escalation percentage must be at most 100");
 
-        MonoTime now = getTime();
-        deadline = now + timeout;
-        priority_escalation = now + msecs(timeout.as!"msecs" * escalation_percent / 100);
+        long timeout_ms = timeout.as!"msecs";
+        assert(timeout_ms <= uint.max, "Queue deadline must fit in milliseconds");
+        deadline_after = cast(uint)timeout_ms;
+        priority_escalation_after = cast(uint)(timeout_ms * escalation_percent / 100);
         urgent_pcp = urgent;
     }
 
-    MonoTime deadline;
-    MonoTime priority_escalation;
+    uint deadline_after;
+    uint priority_escalation_after;
     PCP urgent_pcp = PCP.be;
 }
 
