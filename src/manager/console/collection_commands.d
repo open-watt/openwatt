@@ -149,7 +149,7 @@ nothrow @nogc:
         super(console, StringLit!"remove");
     }
 
-    override CommandState execute(Session session, Scope*, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
+    override CommandState execute(Session session, Scope* _scope, const Variant[] args, const NamedArgument[] namedArgs, out Variant result)
     {
         if (args.length != 1 || namedArgs.length != 0)
         {
@@ -157,9 +157,17 @@ nothrow @nogc:
             return null;
         }
 
-        // gotta destroy the item, clean it up from everywhere it's referenced...
+        BaseObject item = _scope.collection.get(args[0].asString());
+        if (!item)
+        {
+            session.write_line("No such item: ", args[0].asString());
+            return null;
+        }
 
-        assert(false, "TODO: lots of work to delete things!");
+        // destroy() routes a running object through shutdown, fires offline+destroyed (ObjectRefs tombstone,
+        // subscribers detach), and frees it -- the same path dynamic/temporary objects use.
+        item.destroy();
+        return null;
     }
 
     final override MutableString!0 complete(const(char)[] cmdLine, Scope* _scope, Scope* user_scope = null)
