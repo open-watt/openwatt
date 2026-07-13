@@ -351,8 +351,8 @@ private:
         }
     }
 
-    uint packet_age_ms(const QueuedFrame* frame, MonoTime now) pure
-        => cast(uint)(now - frame.packet.creation_time).as!"msecs";
+    long packet_age_ms(const QueuedFrame* frame, MonoTime now) pure
+        => (now - frame.packet.creation_time).as!"msecs";
 
     bool drop_lowest_dei()
     {
