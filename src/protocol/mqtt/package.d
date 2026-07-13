@@ -31,6 +31,7 @@ nothrow @nogc:
         g_app.console.register_collection!MQTTBinding();
 
         g_app.console.register_command!retained("/protocol/mqtt/broker", this, "retained");
+        g_app.console.register_command!cache("/protocol/mqtt/broker", this, "cache");
         g_app.console.register_command!read("/protocol/mqtt/broker", this, "read");
         g_app.console.register_command!sessions("/protocol/mqtt/broker", this, "sessions");
         g_app.console.register_command!subscriptions("/protocol/mqtt/broker", this, "subscriptions");
@@ -48,13 +49,22 @@ nothrow @nogc:
         b.print_retained(session, filter ? filter.value[] : "#");
     }
 
+    void cache(Session session, Nullable!MQTTBroker broker, Nullable!String filter)
+    {
+        MQTTBroker b = resolve_broker(session, broker);
+        if (!b)
+            return;
+
+        b.print_cache(session, filter ? filter.value[] : "#");
+    }
+
     void read(Session session, String topic, Nullable!MQTTBroker broker)
     {
         MQTTBroker b = resolve_broker(session, broker);
         if (!b)
             return;
 
-        b.print_retained(session, topic[]);
+        b.print_cache(session, topic[]);
     }
 
     void sessions(Session session, Nullable!MQTTBroker broker)
