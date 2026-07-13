@@ -261,6 +261,28 @@ nothrow @nogc:
         send_frame(peer);
     }
 
+    // Outbound: log streaming
+
+    override void encode_log_sub(SyncPeer peer, Severity max_severity, bool off, const(char)[] tag)
+    {
+        begin_frame("log_sub");
+        _buf.append(",\"severity\":\"", off ? "off" : enum_key_from_value!Severity(max_severity), "\"");
+        if (tag.length)
+        {
+            _buf.append(",\"tag\":");
+            write_str(tag);
+        }
+        send_frame(peer);
+    }
+
+    override void encode_log(SyncPeer peer, const(char)[] line)
+    {
+        begin_frame("log");
+        _buf.append(",\"msg\":");
+        write_str(line);
+        send_frame(peer);
+    }
+
     override void encode_enum(SyncPeer peer, const(char)[] type_name, ref const Variant members, uint seq)
     {
         begin_frame("enum");
@@ -473,6 +495,53 @@ nothrow @nogc:
                 sync.inbound_enum(peer,
                     json.getMember("type").asString(),
                     members ? *members : empty, seq);
+                break;
+            }
+
+            case "log_sub":
+            {
+                Variant* sev_v = json.getMember("severity");
+                if (!sev_v || !sev_v.isString)
+                {
+                    log.warning("sync/json: log_sub missing string 'severity'");
+                    break;
+                }
+
+                const(char)[] sev_str = sev_v.asString();
+                bool off = sev_str == "off";
+                Severity sev = Severity.info;
+                if (!off)
+                {
+                    const(Severity)* s = enum_from_key!Severity(sev_str);
+                    if (!s)
+                    {
+                        log.warning("sync/json: unknown log_sub severity: ", sev_str);
+                        break;
+                    }
+                    sev = *s;
+                }
+
+                Variant* tag_v = json.getMember("tag");
+                if (tag_v && !tag_v.isNull && !tag_v.isString)
+                {
+                    log.warning("sync/json: log_sub 'tag' is not a string");
+                    break;
+                }
+                sync.inbound_log_sub(peer, sev, off, tag_v && tag_v.isString ? tag_v.asString() : null);
+                break;
+            }
+
+            case "log":
+            {
+                Variant* msg_v = json.getMember("msg");
+                if (!msg_v)
+                    msg_v = json.getMember("payload"); // tolerate older browser clients
+                if (!msg_v || !msg_v.isString)
+                {
+                    log.warning("sync/json: log missing string 'msg'");
+                    break;
+                }
+                sync.inbound_log(peer, msg_v.asString());
                 break;
             }
 

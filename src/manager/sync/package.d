@@ -50,6 +50,7 @@ import urt.log;
 import urt.map;
 import urt.mem.allocator;
 import urt.meta.enuminfo : VoidEnumInfo;
+import urt.meta.nullable;
 import urt.string;
 import urt.time;
 import urt.variant;
@@ -64,6 +65,8 @@ import manager.console.command : CommandState, CommandCompletionState;
 import manager.console.session;
 import manager.plugin;
 import manager.features;
+import manager.syslog;
+import manager.system : hostname;
 import manager.sync.encoder;
 import manager.sync.json_encoder;
 import manager.sync.peer;
@@ -75,6 +78,12 @@ nothrow @nogc:
 
 
 alias log = Log!"sync";
+
+// Set to the peer a log frame arrived on, for the duration of its local
+// re-injection, so the fan-out's tap back toward that peer is suppressed
+// (split-horizon). Keyed on peer identity, not hostname, so it survives relay
+// chains (msg.hostname is the original emitter) and duplicate hostnames.
+__gshared SyncPeer g_log_reinject_source;
 
 // History responses must fit in one raw packet (64KB); JSON samples are ~25 bytes each.
 enum uint max_history_points = 2000;
@@ -219,6 +228,10 @@ nothrow @nogc:
         static if (has_http)
             g_app.console.register_collection!WebSocketSyncServer();
 
+        g_app.console.register_command!sync_log_sub("/sync", this, "log-sub");
+
+        set_log_hostname(hostname[]);
+
         register_object_lifecycle_handler(&on_object_lifecycle);
         register_object_state_handler(&on_object_state);
         subscribe_clock_change(&on_clock_step);
@@ -236,7 +249,10 @@ nothrow @nogc:
         Collection!SyncPeer().update_all();
 
         foreach (p; peers[])
+        {
             encoder_for(p._encoder).tick_dirty(p);
+            p.flush_logs();
+        }
 
         poll_time_authorities();
 
@@ -803,6 +819,30 @@ nothrow @nogc:
         echo_reset(obj, prop_idx, prop, from, seq);
     }
 
+    // Inbound: log streaming
+
+    void inbound_log_sub(SyncPeer from, Severity max_severity, bool off, const(char)[] tag)
+    {
+        from.set_log_sub(max_severity, off, tag);
+    }
+
+    void inbound_log(SyncPeer from, const(char)[] line)
+    {
+        LogMessage msg;
+        if (!parse_syslog(line, msg))
+        {
+            log.warning("sync: malformed log frame from '", from.name[], "'");
+            return;
+        }
+        // Re-inject into local logging. Split-horizon: mark the arrival peer so
+        // the fan-out's tap back toward `from` skips it. Keying on `from` (not
+        // msg.hostname) is what makes relays correct - msg.hostname is the
+        // original emitter, possibly several hops upstream of `from`.
+        g_log_reinject_source = from;
+        write_log(msg);
+        g_log_reinject_source = null;
+    }
+
     // Inbound: commands, errors, enums, subscriptions
 
     void inbound_cmd(SyncPeer from, uint seq, const(char)[] text)
@@ -1347,4 +1387,32 @@ nothrow @nogc:
         if (s == 0) s = ++next_seq;  // skip reserved zero on wrap
         return s;
     }
+}
+
+
+// /sync/log-sub peer=<name> [severity=<sev>] [tag=<prefix>]
+// Ask a peer to stream us its logs; omit severity to unsubscribe. The remote
+// registers a fan-out sink toward us and matching lines arrive as `log` frames
+// that re-enter our local logging.
+CommandState sync_log_sub(Session session, const(char)[] peer, Nullable!Severity severity, Nullable!(const(char)[]) tag)
+{
+    SyncModule mod = get_module!SyncModule;
+    SyncPeer target;
+    foreach (p; mod.peers[])
+    {
+        if (p.name[] == peer)
+        {
+            target = p;
+            break;
+        }
+    }
+    if (!target)
+    {
+        session.write_line("no such sync peer: ", peer);
+        return null;
+    }
+
+    bool off = !severity;
+    target.request_logs(off ? Severity.info : severity.value, off, tag ? tag.value : null);
+    return null;
 }

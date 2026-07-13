@@ -32,6 +32,7 @@ void log_level(Session session, Severity severity)
 void set_hostname(Session session, const(char)[] hostname)
 {
     .hostname = hostname.makeString(defaultAllocator());
+    set_log_hostname(.hostname[]);   // keep log HOSTNAME stamping in sync
 }
 
 void get_hostname(Session session)
