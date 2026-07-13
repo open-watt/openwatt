@@ -957,6 +957,7 @@ void deep_merge(ref Variant target, ref Variant source)
 void apply_value(Element* element, ref Variant val, ref const TextValueDesc desc, SysTime timestamp)
 {
     import urt.inet;
+    import router.iface.mac : MACAddress;
 
     if (val.isNull)
     {
@@ -1046,6 +1047,11 @@ void apply_value(Element* element, ref Variant val, ref const TextValueDesc desc
 
         case dt:
             if (!val.isUser!DateTime && !val.isUser!SysTime)
+                return;
+            goto set_value;
+
+        case macaddr:
+            if (!val.isUser!MACAddress)
                 return;
             goto set_value;
 
