@@ -139,6 +139,7 @@ private:
         }
         peer.transport(ws);
         peer.encoder(_encoder);
+        peer.subscribe_transport();
         _peers ~= peer;
 
         debug log.info("client connected -> ", peer.name[]);
