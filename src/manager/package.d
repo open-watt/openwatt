@@ -11,7 +11,6 @@ import urt.result : StringResult;
 import urt.si.quantity;
 import urt.si.unit;
 import urt.string;
-import urt.sync.event;
 import urt.sync.mpsc;
 import urt.time;
 import urt.traits : is_enum, Unqual;
@@ -25,6 +24,7 @@ import manager.device;
 import manager.element;
 import manager.id;
 import manager.plugin;
+import manager.reactor;
 import manager.secret;
 import manager.signal;
 import manager.system;
@@ -628,12 +628,32 @@ nothrow @nogc:
     {
         MonoTime now = getTime();
         if (deadline <= now)
+        {
+            _wake_event.wait(Duration.zero);    // no sleep, but still dispatch any ready I/O
             return;
+        }
         _wake_event.wait(deadline - now);
 
         // count the system idle time to get a sense of load
         import urt.system : count_system_load;
         count_system_load(now);
+    }
+
+    static if (has_reactor_io)
+    {
+        // register a byte source with the main loop's I/O wait; delivery happens on the main
+        // thread from inside wait_for_wake. the owner closes the file AFTER unwatch_io.
+        bool watch_io(OsFile file, IoDataHandler on_data, IoErrorHandler on_error)
+            => _wake_event.watch_io(file, on_data, on_error);
+
+        void unwatch_io(OsFile file)
+        {
+            _wake_event.unwatch_io(file);
+        }
+
+        // the layer under watch_io: IoOp parking and watch_fd readiness
+        ref Reactor reactor()
+            => _wake_event;
     }
 
     void process_events()
@@ -1119,7 +1139,7 @@ private:
     Array!MonoTime _timer_when;
     Array!TimerHandler _timer_handler;
 
-    Event _wake_event;
+    Reactor _wake_event;
 
     MpscQueue!(PendingEvent, 32)  _priority_events;
     MpscQueue!(PendingEvent, 256) _bulk_events;

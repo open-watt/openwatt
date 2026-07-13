@@ -15,6 +15,7 @@ import manager;
 import manager.collection;
 import manager.console.session;
 import manager.plugin;
+import manager.reactor;
 
 import router.port;
 public import router.stream;
@@ -22,12 +23,15 @@ public import router.stream;
 version (Windows)
 {
     import urt.internal.sys.windows;
+    version = ReactorRx;
 }
 else version(Posix)
 {
     import urt.internal.sys.posix;
     import urt.internal.sys.posix.termios;
     import urt.internal.stdc.errno : EAGAIN, EWOULDBLOCK, EINTR;
+    version (linux)
+        version = ReactorRx;
 }
 else version (Embedded)
 {
@@ -233,16 +237,7 @@ nothrow @nogc:
             return;
         _params.flow_control = value;
         mark_set!(typeof(this), "flow-control");
-        // reconfigure the open port in place rather than restart(): a close/reopen cycles the modem
-        // lines the peer sees, which both disturbs flow-control-sensitive devices (Silabs NCPs stop
-        // transmitting) and makes runtime flow-control experiments unrepresentative
-        version (Embedded)
-            restart();
-        else
-        {
-            if (!running || !configure_port(false))
-                restart();
-        }
+        restart();
     }
 
     version (Embedded)
@@ -302,12 +297,17 @@ nothrow @nogc:
     {
         version(Windows)
         {
-            _h_com = CreateFile(_device[].twstringz, GENERIC_READ | GENERIC_WRITE, 0, null, OPEN_EXISTING, 0, null);
+            _h_com = CreateFile(_device[].twstringz, GENERIC_READ | GENERIC_WRITE, 0, null, OPEN_EXISTING, FILE_FLAG_OVERLAPPED, null);
             if (_h_com == INVALID_HANDLE_VALUE)
                 return CompletionStatus.error;
 
             if (!configure_port(true))
-                return CompletionStatus.error;
+                return fail_windows_startup();
+
+            // manual-reset event for the main thread's synchronous overlapped writes
+            _write_ev = CreateEvent(null, true, false, null);
+            if (_write_ev is null)
+                return fail_windows_startup();
         }
         else version(Posix)
         {
@@ -350,15 +350,24 @@ nothrow @nogc:
                 return CompletionStatus.error;
         }
 
-        version (linux)
+        version (ReactorRx)
         {
-            if (!_serial_reader.register(cast(size_t)cast(void*)this, _fd))
+            version (Windows)
+                OsFile os_file = _h_com;
+            else
+                OsFile os_file = _fd;
+            if (!g_app.watch_io(os_file, &deliver_rx, &io_error))
             {
-                // reader thread could not start; don't run with an fd nobody drains or frees
-                log.error("failed to start serial reader thread");
-                urt.internal.sys.posix.close(_fd);
-                _fd = -1;
-                return CompletionStatus.error;
+                // don't run with a port nobody drains
+                log.error("failed to register serial port with the reactor");
+                version (Windows)
+                    return fail_windows_startup();
+                else
+                {
+                    urt.internal.sys.posix.close(_fd);
+                    _fd = -1;
+                    return CompletionStatus.error;
+                }
             }
         }
 
@@ -460,9 +469,12 @@ nothrow @nogc:
                 return false;
 
             COMMTIMEOUTS timeouts = {};
+            // The reactor parks one overlapped read per port. MAXDWORD interval+multiplier with a
+            // bounded constant is the documented "complete on the first available byte(s)" mode;
+            // the 1s constant is an idle tick so the op never pends unbounded.
             timeouts.ReadIntervalTimeout = -1;
-            timeouts.ReadTotalTimeoutConstant = 0;
-            timeouts.ReadTotalTimeoutMultiplier = 0;
+            timeouts.ReadTotalTimeoutMultiplier = -1;
+            timeouts.ReadTotalTimeoutConstant = 1000;
             // A synchronous WriteFile with no write timeout blocks forever when hardware flow control
             // gates output on CTS and the peer deasserts it - a whole-loop lockup. Bound it so WriteFile
             // returns a short count instead (fed to the same partial-write recovery as the Posix path).
@@ -613,20 +625,28 @@ nothrow @nogc:
         version (Windows)
         {
             if (_h_com != INVALID_HANDLE_VALUE)
+            {
+                g_app.unwatch_io(_h_com);
+                // discard buffered tx before closing: a close that tries to drain output the
+                // peer's flow control will never accept can block in the driver
+                PurgeComm(_h_com, PURGE_TXABORT | PURGE_RXABORT | PURGE_TXCLEAR | PURGE_RXCLEAR);
                 CloseHandle(_h_com);
-            _h_com = INVALID_HANDLE_VALUE;
+                _h_com = INVALID_HANDLE_VALUE;
+            }
+            if (_write_ev !is null)
+            {
+                CloseHandle(_write_ev);
+                _write_ev = null;
+            }
         }
         else version (Posix)
         {
             if (_fd != -1)
             {
                 version (linux)
-                    _serial_reader.deregister(cast(size_t)cast(void*)this); // worker owns the fd close
-                else
-                {
-                    tcflush(_fd, TCIOFLUSH); // discard un-drainable output so close() can't block (see close_serial_fd)
-                    urt.internal.sys.posix.close(_fd);
-                }
+                    g_app.unwatch_io(_fd);
+                tcflush(_fd, TCIOFLUSH); // discard un-drainable output so close() can't block
+                urt.internal.sys.posix.close(_fd);
                 _fd = -1;
             }
         }
@@ -640,25 +660,9 @@ nothrow @nogc:
 
     override void update()
     {
-        version(Windows)
+        version (ReactorRx)
         {
-            DWORD errors;
-            COMSTAT stat;
-            if (ClearCommError(_h_com, &errors, &stat))
-            {
-                if (errors != 0)
-                {
-                    assert(false, "TODO: test this case");
-                    restart();
-                }
-            }
-            else
-                restart();
-            poll_os_rx();
-        }
-        else version (linux)
-        {
-            // rx is delivered by the shared serial reader thread via incoming()
+            // rx and read errors are delivered by the reactor via incoming()/restart()
         }
         else version (Posix)
         {
@@ -676,29 +680,18 @@ nothrow @nogc:
         super.update();
     }
 
-    // On linux the shared reader thread owns rx and pushes via incoming(); every
-    // other platform drains the device here in update() and pushes the same way.
+    // On linux and windows the reactor delivers rx via incoming(); every other
+    // platform drains the device here in update() and pushes the same way.
     // Both routes converge on the base Stream _rx_buffer / rx_handler, so read()
     // and pending() use the base (buffer-backed) implementations.
-    version (linux) {} else
+    version (ReactorRx) {} else
     private void poll_os_rx()
     {
         MonoTime now = getTime();
         ubyte[512] buf = void;
         while (true)
         {
-            version(Windows)
-            {
-                DWORD n;
-                if (!ReadFile(_h_com, buf.ptr, cast(DWORD)buf.length, &n, null))
-                {
-                    restart();
-                    return;
-                }
-                if (n == 0)
-                    return;
-            }
-            else version(Posix)
+            version(Posix)
             {
                 ssize_t n = urt.internal.sys.posix.read(_fd, buf.ptr, buf.length);
                 if (n < 0)
@@ -721,10 +714,17 @@ nothrow @nogc:
         }
     }
 
-    version (linux)
-    private void deliver_rx(const(void)[] data, MonoTime rx_time)
+    version (ReactorRx)
     {
-        incoming(data, rx_time);
+        private void deliver_rx(const(void)[] data, MonoTime rx_time)
+        {
+            incoming(data, rx_time);
+        }
+
+        private void io_error()
+        {
+            restart();
+        }
     }
 
     override ptrdiff_t write(const(void[])[] data...)
@@ -759,8 +759,21 @@ nothrow @nogc:
             else
                 send_buffer = data[0];
 
+            // Overlapped handle, so the write must be overlapped too; the set low bit on hEvent
+            // keeps the completion off the reactor's completion port (the kernel ignores a
+            // handle's low tag bits). GetOverlappedResult blocks until the write completes or the
+            // comm write timeout expires with a short count, same as the old synchronous path.
             DWORD _bytes_written;
-            if (!WriteFile(_h_com, send_buffer.ptr, cast(DWORD)send_buffer.length, &_bytes_written, null))
+            OVERLAPPED ov;
+            ov.hEvent = cast(HANDLE)(cast(size_t)_write_ev | 1);
+            if (!WriteFile(_h_com, send_buffer.ptr, cast(DWORD)send_buffer.length, null, &ov) &&
+                GetLastError() != ERROR_IO_PENDING)
+            {
+                restart();
+                return -1;
+            }
+            if (!GetOverlappedResult(_h_com, &ov, &_bytes_written, true) &&
+                GetLastError() != ERROR_SEM_TIMEOUT)   // comm write timeout: a short count, not an error
             {
                 restart();
                 return -1;
@@ -819,14 +832,12 @@ nothrow @nogc:
     {
         version (Windows)
         {
-            PurgeComm(_h_com, PURGE_TXABORT | PURGE_RXABORT | PURGE_TXCLEAR | PURGE_RXCLEAR);
+            PurgeComm(_h_com, PURGE_RXABORT | PURGE_RXCLEAR);
             return 0;
         }
         else version (Posix)
         {
-            // discard buffered I/O; never tcdrain() here - under RTS/CTS with CTS deasserted it
-            // blocks until the peer lets output through, which would freeze the caller indefinitely
-            tcflush(_fd, TCIOFLUSH);
+            tcflush(_fd, TCIFLUSH);
             return 0;
         }
         else version (Embedded)
@@ -924,7 +935,10 @@ nothrow @nogc:
 
 private:
     version (Windows)
+    {
         HANDLE _h_com = INVALID_HANDLE_VALUE;
+        HANDLE _write_ev;
+    }
     else version (Posix)
         int _fd = -1;
     else version (Embedded)
@@ -944,7 +958,24 @@ private:
         byte _de_gpio = -1;
     }
 
-    version (Posix)
+    version (Windows)
+    {
+        CompletionStatus fail_windows_startup()
+        {
+            if (_h_com != INVALID_HANDLE_VALUE)
+            {
+                CloseHandle(_h_com);
+                _h_com = INVALID_HANDLE_VALUE;
+            }
+            if (_write_ev !is null)
+            {
+                CloseHandle(_write_ev);
+                _write_ev = null;
+            }
+            return CompletionStatus.error;
+        }
+    }
+    else version (Posix)
     {
         CompletionStatus fail_posix_startup()
         {
@@ -1032,12 +1063,6 @@ nothrow @nogc:
             sync_serial_ports();
             _last_port_sync = now;
         }
-    }
-
-    version (linux)
-    override void deinit()
-    {
-        _serial_reader.stop();
     }
 
 private:
@@ -1470,344 +1495,3 @@ version(Posix)
     enum F_OK = 0;
 }
 
-
-version (linux)
-{
-    import urt.atomic;
-    import urt.sync.semaphore;
-    import urt.sync.spsc;
-    import urt.thread;
-    import urt.mem.allocator : defaultAllocator;
-
-    extern(C) int eventfd(uint initval, int flags) nothrow @nogc;
-    enum EFD_NONBLOCK = 0x800;
-
-    __gshared SerialReader _serial_reader;
-
-    // A single poll() thread owns every serial fd plus an eventfd wake, does the
-    // blocking reads, and marshals each read to the main thread via g_app.post_event
-    // so SerialStream.incoming() only ever runs on the main loop. The fd is handed
-    // over on register and closed by the worker on deregister, which keeps a stale
-    // fd from being polled (or reused) after the stream closes.
-    //
-    // This mirrors the protocol.ip SocketWorker; see TODO.md about folding both onto
-    // a shared manager-level fd reactor so serial has no bespoke reader plumbing.
-    struct SerialReader
-    {
-    nothrow @nogc:
-        // The ep (a SerialStream address) can be recycled by the Collection: a freed stream's
-        // slot may be reused by a new stream that re-registers the same address. A per-registration
-        // generation disambiguates them so a data event enqueued for the old stream is dropped
-        // rather than delivered to the new one at the same address.
-        bool register(size_t ep, int fd)
-        {
-            if (!_started)
-                start();
-            if (!_started)
-                return false;
-            uint gen = ++_gen;
-            bool present = false;
-            foreach (ref e; _live[])
-                if (e.ep == ep) { e.gen = gen; present = true; break; }
-            if (!present)
-                _live ~= Live(ep, gen);
-            post_req(Req(ReqKind.register, ep, fd, gen));
-            return true;
-        }
-
-        void deregister(size_t ep)
-        {
-            foreach (i; 0 .. _live.length)
-                if (_live[i].ep == ep) { _live.removeSwapLast(i); break; }
-            post_req(Req(ReqKind.destroy, ep, -1, 0));
-        }
-
-        void stop()
-        {
-            if (_thread)
-            {
-                atomicStore!(MemoryOrder.release)(_stop, true);
-                wake();
-                _space.signal();
-                thread_join(_thread);
-                _thread = null;
-            }
-            if (_wake_fd >= 0)
-            {
-                urt.internal.sys.posix.close(_wake_fd);
-                _wake_fd = -1;
-            }
-            Ev ev;
-            while (_ring.pop((&ev)[0 .. 1]) == 1)
-                if (ev.buffer.length)
-                    defaultAllocator().free(cast(void[])ev.buffer);
-            _live.clear();
-            if (_started)
-                _space.destroy();
-            _started = false;
-        }
-
-    private:
-        enum ReqKind : ubyte { register, destroy }
-        struct Req { ReqKind kind; size_t ep; int fd; uint gen; }
-
-        enum EvKind : ubyte { data, error }
-        struct Ev { EvKind kind; size_t ep; const(ubyte)[] buffer; MonoTime rx_time; uint gen; }
-
-        struct Entry { size_t ep; int fd; uint gen; bool dead; }
-
-        struct Live { size_t ep; uint gen; }
-
-        bool _started;
-        Thread _thread;
-        Semaphore _space;               // backpressure: dispatch signals as event slots free
-        shared bool _stop;
-        shared bool _dispatch_pending;
-        int _wake_fd = -1;
-        uint _gen;                      // main-thread only: monotonic registration generation
-        Array!Live _live;               // main-thread only: registered (SerialStream key, generation)
-
-        SPSCRing!(Req, 64) _reqs;       // main -> worker
-        SPSCRing!(Ev, 512) _ring;       // worker -> main
-
-        void start()
-        {
-            if (!_space.init())
-                return;
-            _wake_fd = eventfd(0, EFD_NONBLOCK);
-            if (_wake_fd < 0)
-            {
-                _space.destroy();
-                return;
-            }
-            atomicStore!(MemoryOrder.release)(_stop, false);
-            _thread = thread_spawn(&run);
-            if (!_thread)
-            {
-                urt.internal.sys.posix.close(_wake_fd);
-                _wake_fd = -1;
-                _space.destroy();
-                return;
-            }
-            _started = true;
-        }
-
-        void post_req(Req r)
-        {
-            if (!_thread)
-                return;
-            Req* slot = _reqs.reserve();
-            while (slot is null)
-            {
-                wake();
-                slot = _reqs.reserve();
-            }
-            *slot = r;
-            _reqs.commit();
-            wake();
-        }
-
-        void wake()
-        {
-            if (_wake_fd < 0)
-                return;
-            ulong one = 1;
-            urt.internal.sys.posix.write(_wake_fd, &one, one.sizeof);
-        }
-
-        // worker thread ----------------------------------------------------
-
-        void run()
-        {
-            Array!Entry entries;
-            Array!pollfd fds;
-            bool stopping = false;
-
-            while (!stopping && !atomicLoad!(MemoryOrder.acquire)(_stop))
-            {
-                apply_requests(entries);
-
-                fds.clear();
-                { pollfd p; p.fd = _wake_fd; p.events = POLLIN; fds ~= p; }
-                foreach (ref e; entries[])
-                {
-                    if (e.dead)
-                        continue;
-                    pollfd p; p.fd = e.fd; p.events = POLLIN;
-                    fds ~= p;
-                }
-
-                int n = poll(fds.ptr, fds.length, 1000);
-                if (n <= 0)
-                    continue;
-
-                if (fds[0].revents & POLLIN)
-                    drain_wake();
-
-                bool posted = false;
-                size_t ei = 0;
-                for (size_t f = 1; f < fds.length; ++f)
-                {
-                    while (ei < entries.length && entries[ei].dead)
-                        ++ei;
-                    if (ei >= entries.length)
-                        break;
-                    Entry* e = &entries[ei++];
-                    short re = fds[f].revents;
-                    if (re == 0)
-                        continue;
-                    if (re & (POLLERR | POLLHUP | POLLNVAL))
-                    {
-                        // device removed / hung up: restart the stream, stop polling this fd
-                        e.dead = true;
-                        posted = true;
-                        if (!push(Ev(EvKind.error, e.ep, null, getTime(), e.gen)))
-                        {
-                            stopping = true;
-                            break;
-                        }
-                        continue;
-                    }
-                    if (!read_ready(e, posted))
-                    {
-                        stopping = true;
-                        break;
-                    }
-                }
-
-                if (posted)
-                    request_dispatch();
-            }
-
-            foreach (ref e; entries[])
-                if (e.fd >= 0)
-                    close_serial_fd(e.fd);
-        }
-
-        // Closing a serial port under RTS/CTS while the peer holds CTS low blocks in the kernel
-        // draining output that can never leave, hanging this worker (and the main thread's reopen
-        // waiting behind it on the port) until the watchdog kills us. Discard the buffers first.
-        static void close_serial_fd(int fd)
-        {
-            tcflush(fd, TCIOFLUSH);
-            urt.internal.sys.posix.close(fd);
-        }
-
-        void apply_requests(ref Array!Entry entries)
-        {
-            Req r;
-            while (_reqs.pop((&r)[0 .. 1]) == 1)
-            {
-                final switch (r.kind)
-                {
-                    case ReqKind.register:
-                        entries ~= Entry(r.ep, r.fd, r.gen, false);
-                        break;
-                    case ReqKind.destroy:
-                        foreach (i; 0 .. entries.length)
-                        {
-                            if (entries[i].ep == r.ep)
-                            {
-                                if (entries[i].fd >= 0)
-                                    close_serial_fd(entries[i].fd);
-                                entries.removeSwapLast(i);
-                                break;
-                            }
-                        }
-                        break;
-                }
-            }
-        }
-
-        void drain_wake()
-        {
-            ulong tmp;
-            while (urt.internal.sys.posix.read(_wake_fd, &tmp, tmp.sizeof) == tmp.sizeof) {}
-        }
-
-        // service one ready fd. returns false only when shutting down.
-        bool read_ready(Entry* e, ref bool posted)
-        {
-            while (true)
-            {
-                void[] buf = defaultAllocator().alloc(2048);
-                ssize_t got = urt.internal.sys.posix.read(e.fd, buf.ptr, buf.length);
-                if (got > 0)
-                {
-                    posted = true;
-                    if (!push(Ev(EvKind.data, e.ep, cast(const(ubyte)[])buf[0 .. got], getTime(), e.gen)))
-                    {
-                        defaultAllocator().free(buf);
-                        return false;
-                    }
-                    continue;
-                }
-                defaultAllocator().free(buf);
-                // VMIN=0/VTIME=0 ttys return 0 (not EAGAIN) when no data is ready: not an error.
-                if (got == 0 || is_transient_errno())
-                    return true;
-                // genuine read error (device removed etc.): ask the stream to restart, go quiet
-                e.dead = true;
-                posted = true;
-                return push(Ev(EvKind.error, e.ep, null, getTime(), e.gen));
-            }
-        }
-
-        bool push(Ev ev)
-        {
-            Ev* slot = _ring.reserve();
-            while (slot is null)
-            {
-                request_dispatch();
-                _space.wait(msecs(50));
-                if (atomicLoad!(MemoryOrder.acquire)(_stop))
-                    return false;
-                slot = _ring.reserve();
-            }
-            *slot = ev;
-            _ring.commit();
-            return true;
-        }
-
-        void request_dispatch()
-        {
-            if (cas(&_dispatch_pending, false, true))
-            {
-                if (!g_app.post_event(&dispatch, getTime()))
-                    atomicStore!(MemoryOrder.release)(_dispatch_pending, false);
-            }
-        }
-
-        // main thread ------------------------------------------------------
-
-        void dispatch(MonoTime)
-        {
-            Ev ev;
-            while (_ring.pop((&ev)[0 .. 1]) == 1)
-            {
-                handle(ev);
-                _space.signal();
-            }
-            atomicStore!(MemoryOrder.release)(_dispatch_pending, false);
-            if (!_ring.empty())
-                request_dispatch();
-        }
-
-        void handle(ref Ev ev)
-        {
-            bool live = false;
-            foreach (ref e; _live[])
-                if (e.ep == ev.ep && e.gen == ev.gen) { live = true; break; }
-
-            if (ev.kind == EvKind.data)
-            {
-                if (live && ev.buffer.length)
-                    (cast(SerialStream)cast(void*)ev.ep).deliver_rx(ev.buffer, ev.rx_time);
-                if (ev.buffer.length)
-                    defaultAllocator().free(cast(void[])ev.buffer);
-            }
-            else if (live)
-                (cast(SerialStream)cast(void*)ev.ep).restart();
-        }
-    }
-}
