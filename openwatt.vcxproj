@@ -149,6 +149,7 @@
     <DCompile Include="src\protocol\can\binding.d" />
     <DCompile Include="src\protocol\can\iface.d" />
     <DCompile Include="src\protocol\can\package.d" />
+    <DCompile Include="src\protocol\cpc\package.d" />
     <DCompile Include="src\protocol\dhcp\client.d" />
     <DCompile Include="src\protocol\dhcp\lease.d" />
     <DCompile Include="src\protocol\dhcp\message.d" />

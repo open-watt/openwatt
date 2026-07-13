@@ -468,10 +468,12 @@ void foreach_object(scope void delegate(BaseObject obj) nothrow @nogc fn)
 
 mixin template RekeyHandler()
 {
-    import manager.collection : CID, has_cid, rekey_field;
+    import manager.collection : CID;
 
     protected override void rekey(CID old_id, CID new_id)
     {
+        import manager.collection : has_cid, rekey_field;
+
         super.rekey(old_id, new_id);
 
         alias Self = typeof(this);
@@ -481,7 +483,7 @@ mixin template RekeyHandler()
             {{
                 alias Ty = typeof(__traits(getMember, this, field));
                 static if (has_cid!Ty)
-                    __traits(getMember, this, field).rekey_field(old_id, new_id);
+                    rekey_field(__traits(getMember, this, field), old_id, new_id);
             }}
         }
     }

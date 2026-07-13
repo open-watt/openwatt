@@ -85,6 +85,9 @@
     <Filter Include="src\protocol\can">
       <UniqueIdentifier>{9922e1c0-3780-4a00-9212-478d66443f98}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\cpc">
+      <UniqueIdentifier>{1e97b903-cdaf-485b-9fc2-991e83ab1036}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\protocol\esphome">
       <UniqueIdentifier>{03c25b68-9fb8-42a5-875f-998be53670a9}</UniqueIdentifier>
     </Filter>
@@ -548,6 +551,9 @@
     </DCompile>
     <DCompile Include="src\protocol\can\package.d">
       <Filter>src\protocol\can</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\cpc\package.d">
+      <Filter>src\protocol\cpc</Filter>
     </DCompile>
     <DCompile Include="src\protocol\esphome\binding.d">
       <Filter>src\protocol\esphome</Filter>
