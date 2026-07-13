@@ -73,8 +73,6 @@ enum PCP : ubyte
 
 immutable ubyte[8] pcp_priority_map = [1, 0, 2, 3, 4, 5, 6, 7];
 
-// Admission and scheduling policy for one egress queue. This is deliberately separate
-// from Packet: it expires when that queue has delivered or dropped the frame.
 struct QueuePolicy
 {
 nothrow @nogc:

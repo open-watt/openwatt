@@ -64,6 +64,55 @@ cross-cutting issues that need a design decision or touch multiple systems.
   announce (believed true from TWCManager lore); if wrong, the failure mode is just unanswered
   heartbeats until the slave re-announces on its own timeout - same as the old behaviour.
 
+## Zigbee latency and robustness
+
+1. [ ] **Validation metrics**: expose queue wait by PCP, deadline promotions and expiries,
+    queue rejection and DEI eviction counts, reserved-slot dispatches, user-command
+    submission-to-completion latency, and reactive receive-to-dispatch latency.
+
+## Automation
+
+The as-built record lives in [docs/AUTOMATION.draft.md](docs/AUTOMATION.draft.md) (implementation
+status block). Remaining legs, roughly in order:
+
+1. [ ] **Execution policy**: `overrun=skip|queue|restart|coalesce`, `catch_up=skip|once|all`
+   (+ grace window), `on_error=ignore|retry|disable`. Today concurrent runs simply stack in
+   `_running_commands` (inherited accidental cron behaviour), and the only catch-up semantic is
+   cron's hard-coded fire-once clamp on a missed deadline plus wall-clock re-anchoring - neither
+   suppressible nor multipliable.
+
+2. [ ] **Typed `$trigger.*` context**: only the flat `$value` exists. Decide flat locals ($prev,
+   $topic, ...) vs a `$trigger` object local (expression getMember walk already supports it) when
+   the first provider with rich payloads (mqtt) lands.
+
+3. [ ] **More providers**: mqtt (filtered publish), zigbee (attribute report), sun
+   (sunset/sunrise with offsets - needs an astronomical calc), http. Each is a module-registered
+   ISignalProvider; the engine needs no changes.
+
+4. [ ] **`on=` completer**: 5th `Prop!` param + `Property.completer` + the collection_commands
+   hook; ISignalProvider gains a complete/suggest capability (scheme completed from the registry,
+   body and param values by the provider). Deliberately last.
+
+5. [ ] **Event-driven element attach**: a rule referencing a not-yet-created element parks in
+   Starting re-running startup() each frame until subscribe succeeds - observable and correct,
+   but true event attach means notify_element_created revisits signal subscriptions instead of
+   frame polling.
+
+6. [ ] **Re-entrancy / loop guard**: automations both subscribe to and write elements; only
+   value-change damping breaks cycles today. The `who` cookie exists on `Element.value()` but no
+   caller passes it and the OnChangeCallback subscriber list never filters by it (element.d has
+   the TODO). Design doc wants writes tagged with the originating rule plus a bounded re-entrancy
+   guard. Related: `/element/set` silently updates the local value of a read-only element - it
+   should surface "target is not writable".
+
+7. [ ] **`?deadband=` trigger param**: the automation surface of the element deadband design -
+   see Data model below.
+
+8. [ ] **Energy pivot**: the propose/dispose action surface - rules express intent to a
+   `Control`'s request surface and the allocator arbitrates contended outputs; energy `Policy`
+   goals then migrate onto automations while the allocator keeps ownership of contended
+   setpoints.
+
 ## Data model
 
 - **Element deadband (settled design, build when needed)**: per-point change-event conditioning,
@@ -103,21 +152,109 @@ cross-cutting issues that need a design decision or touch multiple systems.
 
 ## Infrastructure
 
-- **Serial rx reader -> shared fd reactor**: SerialStream rx is now event-driven. On linux a
-  bespoke `SerialReader` poll() thread in `router/stream/serial.d` owns the tty fds + an eventfd
-  wake, reads them, and marshals each read to the main thread via `g_app.post_event` ->
-  `SerialStream.incoming()`. It is a near-copy of the `protocol.ip` `SocketWorker` (SPSC rings +
-  backpressure semaphore + `post_event` coalescing). Fold both onto ONE shared main-thread fd
-  reactor - the natural home is the manager layer (it already owns `schedule`/`post_event`/the
-  event queue): expose something like `g_app.watch_fd(fd, &on_readable)` and register both serial
-  tty fds and the IP sockets with it, so neither subsystem carries its own reader-thread plumbing.
-  Until then: non-linux platforms (Windows/other-Posix/Embedded) still get rx via an interim
-  drain-in-`update()` -> `incoming()` (a poll at the serial layer only, kept so `rx_handler`
-  works everywhere); Windows/embedded true push (overlapped-IOCP / UART rx-IRQ) is the follow-up.
-  Note: this pass was data-path-only, so the genuine timers left in `update()` are intentional -
-  ASH retransmit (250ms) + RST retry (`ashv2.d`), EZSP request timeout (200ms, `client.d`), and
-  the Zigbee NCP counter poll (`iface.d`); moving those onto `g_app.schedule`/the 1s heartbeat is
-  a separate cleanup.
+- **Async I/O end-state: the main loop's wait primitive IS the reactor** (decided 2026-07-12;
+  supersedes the earlier "fold the workers onto one shared worker-thread reactor" plan).
+  Today there are three standing I/O thread backends: `SerialReader` (`router/stream/serial.d`,
+  linux poll+eventfd / windows IOCP with one parked overlapped read per port), `SocketWorker` /
+  `IOCPWorker` (`protocol/ip/package.d`), and the `fdwatch` readiness waiter
+  (`driver/linux/fdwatch.d`). All of them exist for ONE reason: the main loop sleeps on
+  `_wake_event` (futex / win32 event), which cannot be waited on together with I/O handles - so
+  each subsystem runs a thread whose whole job is converting I/O readiness into a wake. The
+  destination is to delete that layer entirely: make the main loop's sleep the I/O wait itself.
+  - linux: `wait_for_wake` becomes `epoll_wait` (the wake is an eventfd in the set; `post_event`
+    writes it, gated by an already-signaled atomic so it costs one syscall per sleep cycle).
+    epoll, NOT poll: poll() re-does O(n) waitqueue setup/teardown on every call - fine for a
+    parked worker, wrong for a loop waking at 20Hz+ - while epoll registration is persistent
+    (`epoll_ctl` once per fd lifecycle = config-time churn) and `epoll_wait` is O(ready) with
+    zero per-fd work on re-entry. Level-triggered, drain on main, same semantics as fdwatch's
+    service hooks. (At our fd counts poll would actually survive - ~10us per wake for 50 fds -
+    but epoll makes the concern structurally impossible; don't relitigate.)
+  - windows: `wait_for_wake` becomes `GetQueuedCompletionStatus[Ex]` with the timer deadline as
+    the timeout; the wake is `PostQueuedCompletionStatus`. IOCP registration is persistent by
+    construction. Completions (serial reads, socket ops) are handled inline on main.
+  - The single-threaded dataplane then needs NO SPSC rings, NO backpressure semaphores, NO
+    generation/ABA tags, NO worker-owned closes - all of that machinery exists only because I/O
+    currently happens off-main. Everything deletes rather than merges.
+  - Public API stays completion-shaped ("here are your bytes" via `g_app.watch_io(key, handle,
+    &on_data, &on_error)`), never readiness-shaped: readiness is unimplementable on IOCP, and a
+    completion contract lets an io_uring backend slot in later without touching clients.
+  - io_uring: considered and REJECTED for now - needs recent kernels, is commonly blocked by
+    container seccomp defaults (Docker denies it; the RouterOS container target is directly at
+    risk), would still require the epoll fallback, and its wins only appear at op rates far
+    above ours. Revisit only if a workload demands it; the API above is already shaped for it.
+  - Migration passes, each independently shippable:
+    1. DONE (2026-07-12): wake-primitive swap - `manager/reactor.d` `Reactor` replaces the
+       Application's `_wake_event` Event with the same latch semantics (set/reset/wait) on an
+       eventfd (linux) / an IO completion port (windows); one kernel signal per latch cycle via
+       an atomic gate. Embedded/other keep the Event arm. Unit-tested both platforms.
+    2. DONE (2026-07-13): `g_app.watch_io(file, &on_data, &on_error)` - registration is
+       `epoll_ctl` / `CreateIoCompletionPort` association; delivery happens inline on the main
+       thread from inside `wait_for_wake` (`Reactor.wait` sweeps ready I/O before and after the
+       sleep so it never starves behind a latched wake, and a busy loop still sweeps via a
+       zero-timeout wait). Serial folded on; the whole `SerialReader` block is DELETED - no
+       rings, no backpressure, no generation tags, owner closes its own handle after
+       unwatch_io. Windows: one overlapped read parked per watch with an entry-embedded buffer
+       (MAXDWORD/MAXDWORD/1000ms COMMTIMEOUTS = complete-on-first-bytes + 1s idle tick),
+       cancelled reads reaped via entry retention until their completion drains;
+       ERROR_OPERATION_ABORTED (a flush purge) re-arms quietly; serial's purge-before-close and
+       low-bit-tagged write-event suppression carry over unchanged (see notes below). linux:
+       level-triggered epoll, reads on main into a stack buffer; errored/hup'd fds are DEL'd
+       from the set immediately so they can't spin the loop while the owner's restart works
+       through the state machine.
+    3. DONE (2026-07-13): OS sockets folded onto the reactor's layer-1 primitive and
+       `SocketWorker` + `IOCPWorker` DELETED (~1140 lines out of `protocol/ip/package.d`). The
+       layer under `watch_io` (see `manager/reactor.d`): linux exposes `watch_fd(fd, want_write,
+       &on_ready)` / `modify_fd` (raw level-triggered readiness; the endpoint does its own
+       recv/accept/send on the main thread and unwatches on error); windows exposes
+       `associate(handle)` + a public `IoOp` struct (OVERLAPPED + an on_complete delegate) that
+       callers park themselves (`WSARecv`/`WSASend`/`ConnectEx`/`AcceptEx`/`WSARecvFrom`), with
+       completions delivered on the main thread from `Reactor.wait`. TCPConnection/TCPListener/
+       UDPEndpoint each carry their own embedded ops; endpoints are freed by `pump_ip_endpoints`
+       once `reclaimable` (windows: all cancelled overlapped ops drained; else immediately).
+       Connect readiness = EPOLLOUT (linux) / ConnectEx completion (windows); accept re-arms
+       itself. No SPSC rings, no wake socket, no `post_event` marshalling, no `EntryKind`/`Ev`/
+       `Req` vocabulary. Verified: win 88/88 + linux 89/89 UT, full builds both platforms, and a
+       live loopback that drove all four IOCP op types (ConnectEx outbound -> AcceptEx inbound ->
+       WSASend banner -> WSARecv) plus rapid accept/close cycles with no leak.
+    4. DONE (2026-07-13): fdwatch's waiter thread DELETED - the LAST standing I/O thread on linux.
+       `driver/linux/fdwatch.d` is now a thread-free adapter: its watchers (BLE + 3 wifi) keep the
+       collect/service API unchanged, and it registers their fds as a "pool" in the reactor's epoll
+       set sharing ONE coalesced drain (`Reactor.set_pool_drain`/`set_pool_fds`, linux). All pool
+       fds carry a single epoll data sentinel (`&_pool_tag`) - membership is reconciled by fd number
+       (ADD/DEL/MOD diff), no per-fd allocation. When any pool fd is ready, dispatch() sets
+       `_pool_pending` and runs the drain (= every watcher's service() + a re-collect) ONCE after
+       the batch, at most once per wait() cycle - exactly the old "any readiness -> service all,
+       then rebuild" semantics, minus the thread/semaphore/wake-eventfd. Adversarially reviewed
+       (0 confirmed defects); unit-tested (coalesced multi-fd drain, drain-to-empty, mid-flight
+       set shrink) + full builds both platforms. The whole 4-pass migration is COMPLETE: no
+       standing I/O threads remain (SerialReader, SocketWorker, IOCPWorker, fdwatch waiter all
+       deleted); the main loop's epoll (linux) / IOCP (windows) wait IS the reactor.
+       Known contract (see reactor.d dispatch pool branch): a pool fd stuck in persistent
+       EPOLLERR/EPOLLHUP that its watcher keeps collecting would keep the loop from idling (the
+       shared sentinel gives the reactor no fd to DEL). Not a regression - the old poll() waiter
+       burned a core on the same case - and the drain still runs so the watcher can react. The
+       real gap is client-side: wifi `pump_raw_frames`/`pump_monitor` (`driver/linux/wifi.d`)
+       `break` on a genuine (non-transient) `poll_ll` error WITHOUT clearing `_raw.fd` or
+       restarting, so `collect_fds` keeps re-including the dead fd. Harden those to drop the fd /
+       restart on persistent error (pre-existing; only made loop-visible by the single-thread fold).
+  - Embedded is the same contract: UART rx-IRQ fills a ring and wakes the main loop (wire the
+    already-declared-but-dropped `UartRxCallback`/`buf_size` through `uart_open` -> uart_hw).
+    This design makes desktop/server behave like embedded, not the other way around.
+  - Known refinements INSIDE the model, only when a real device makes them hurt: async serial
+    writes (EPOLLOUT armed on demand / write completions through the port) to remove the bounded
+    ~100-200ms main-thread stall a flow-control-blocked write can cause; and storage I/O, which
+    epoll cannot async (regular files are always "ready") - recorder flushes to a stalled SD
+    card remain the one legitimate helper-thread (or future io_uring) candidate.
+  Until pass 2 lands: serial rx is event-driven on linux+windows via `SerialReader`;
+  other-Posix/Embedded still drain in `update()` -> `incoming()` (kept so `rx_handler` works
+  everywhere).
+  Windows note: comm WRITE timeouts on the overlapped path complete with ERROR_SEM_TIMEOUT and a
+  short count (the old sync path returned TRUE + short count); `write()` maps it back to the
+  partial-write contract - don't "simplify" that check away.
+  Note: the serial pass was data-path-only, so the genuine timers left in `update()` are
+  intentional - ASH retransmit (250ms) + RST retry (`ashv2.d`), EZSP request timeout (200ms,
+  `client.d`), and the Zigbee NCP counter poll (`iface.d`); moving those onto
+  `g_app.schedule`/the 1s heartbeat is a separate cleanup.
 
 - **Port discovery completeness and eventing**: /port is meant to be the unified hardware
   inventory, but discovery is still uneven. Ethernet and WiFi publish ports today; serial
