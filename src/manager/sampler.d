@@ -94,6 +94,7 @@ enum TextType : ubyte
     enum_,
     bf,
     dt,
+    macaddr,
     inetaddr,
     ipaddr,
     ip6addr,
@@ -562,6 +563,13 @@ Variant sample_value(const(char)[] data, ref const TextValueDesc desc)
                 return Variant(SysTime());
             return Variant(t);
 
+        case macaddr:
+            import router.iface.mac;
+            MACAddress addr;
+            if (addr.fromString(data) <= 0)
+                return Variant(MACAddress());
+            return Variant(addr);
+
         case inetaddr:
             import urt.inet;
             InetAddress addr;
@@ -618,6 +626,7 @@ const(char)[] format_value(ref const Variant val, ref const TextValueDesc desc)
             return tstring(val.asLong);
 
         case dt:
+        case macaddr:
         case inetaddr:
         case ipaddr:
         case ip6addr:
