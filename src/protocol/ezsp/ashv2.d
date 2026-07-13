@@ -62,8 +62,8 @@ nothrow @nogc:
         restart();
     }
 
-    // ASH sliding-window depth: unacked DATA frames we'll keep on the wire (1-7). Some NCP
-    // firmwares misbehave above 1; tune at runtime to find this dongle's tolerance.
+    // ASH sliding-window depth: unacked DATA frames we'll keep on the wire (1-7). Reducing it
+    // below the current flight count simply prevents new DATA until enough frames are acknowledged.
     final ubyte window() const pure
         => _max_in_flight;
     final StringResult window(ubyte value)
@@ -78,8 +78,8 @@ nothrow @nogc:
         => _max_retransmits;
     final StringResult retransmits(ubyte value)
     {
-        if (value < 1)
-            return StringResult("retransmits must be at least 1");
+        if (value < 1 || value > 4)
+            return StringResult("retransmits must be between 1 and 4");
         _max_retransmits = value;
         return StringResult.success;
     }
@@ -88,8 +88,8 @@ nothrow @nogc:
         => _ack_timeout_ms;
     final StringResult ack_timeout(ushort value)
     {
-        if (value < 50)
-            return StringResult("ack-timeout must be at least 50ms");
+        if (value < 50 || value > 3200)
+            return StringResult("ack-timeout must be between 50ms and 3200ms");
         _ack_timeout_ms = value;
         return StringResult.success;
     }
@@ -151,6 +151,16 @@ protected:
                 add_tx_frame(5);
 
             _last_event = now;
+
+            // The reference protocol makes five reset attempts before declaring the serial path
+            // unusable. Restart the stream as well as ASH: an ASH-only restart leaves a stopped or
+            // saturated tty output queue intact and every later RST fails behind the same bytes.
+            if (_rst_attempts >= 5)
+            {
+                log.error("no RSTACK after five attempts; restarting stream '", _stream.name, "'");
+                _stream.restart();
+                return CompletionStatus.continue_;
+            }
         }
 
         return _connected ? CompletionStatus.complete : CompletionStatus.continue_;
@@ -184,8 +194,9 @@ protected:
         _rst_attempts = 0;
         _rx_since_rst = 0;
         _rx_sample_len = 0;
-        _last_resend = MonoTime();
         _pending_cancel = false;
+        _tx_stall_since = MonoTime();
+        _reject_condition = false;
 
         if (_subscribed)
         {
@@ -210,14 +221,23 @@ protected:
             if (_tx_in_flight.retries >= _max_retransmits)
             {
                 log.error("link failed: no ack for seq ", _tx_in_flight.seq, " after ", _max_retransmits, " retransmits");
-                restart();
+                _stream.restart();
                 return;
             }
             resend_in_flight(now);
         }
+
+        if (_tx_stall_since != MonoTime() && now - _tx_stall_since >= T_RSTACK_MAX.msecs)
+        {
+            log.error("serial output remained saturated; restarting stream '", _stream.name, "'");
+            _stream.restart();
+            return;
+        }
+
+        send_queued_messages();
     }
 
-    override int transmit(ref Packet packet, MessageCallback)
+    override int transmit(ref Packet packet, MessageCallback, QueuePolicy)
     {
         if (packet.type != PacketType.raw)
             return -1;
@@ -269,12 +289,24 @@ private:
     enum ASH_TIMEOUT            = -1;
     enum ASH_MAX_LENGTH         = 131;
     enum ASH_MAX_MSG_LENGTH     = 128;
+    enum ASH_MAX_ENCODED_LENGTH = ASH_MAX_LENGTH * 2 + 1;
 
     enum max_tx_queue = 64;
 
-    // T_RX_ACK base timeout with binary backoff per attempt (base, 2x, 4x, ...)
+    enum DataAction : ubyte
+    {
+        accept,
+        acknowledge_duplicate,
+        reject
+    }
+
     Duration retransmit_timeout(ubyte retries) const
-        => msecs(_ack_timeout_ms << retries);
+    {
+        uint timeout = cast(uint)_ack_timeout_ms << retries;
+        if (timeout > 3200)
+            timeout = 3200;
+        return msecs(timeout);
+    }
 
     struct Message
     {
@@ -292,6 +324,7 @@ private:
 
     ObjectRef!Stream _stream;
     MonoTime _last_event;
+    MonoTime _tx_stall_since;
     uint _rst_attempts;     // RST frames sent without an RSTACK; surfaced in status_message
     uint _rx_since_rst;     // bytes received since the last RST while still unconnected
     ubyte _rx_sample_len;
@@ -303,7 +336,7 @@ private:
 
     ubyte _max_in_flight = 3; // how many frames we will send without being ack-ed (1-7)
     ubyte _max_retransmits = 3; // resend attempts before declaring the link dead
-    ushort _ack_timeout_ms = 400; // base T_RX_ACK; backs off 2x per retry
+    ushort _ack_timeout_ms = 800; // base T_RX_ACK; backs off 2x per retry
 
     ubyte _tx_seq; // the next frame to be sent
     ubyte _tx_ack = 0; // the next frame we expect an ack for
@@ -317,13 +350,13 @@ private:
     Message* _tx_queue;    // frames waiting to be sent
     Message* _free_list;
     ushort _tx_queue_len;
-    MonoTime _last_resend;  // rate-limits NAK-driven resends
     bool _pending_cancel;   // a prior frame was truncated by CTS backpressure; prepend a CANCEL to
                             // the next frame so the NCP discards the leaked partial before parsing it
+    bool _reject_condition;
 
-    ubyte _rx_offset;
+    size_t _rx_offset;
     uint _rx_accum;     // stream bytes seen since the last completed frame (rx-rate stats)
-    ubyte[128] _rx_buffer;
+    ubyte[ASH_MAX_ENCODED_LENGTH] _rx_buffer;
 
     void stream_state_change(ActiveObject, StateSignal signal)
     {
@@ -352,25 +385,25 @@ private:
             size_t space = _rx_buffer.length - _rx_offset;
             if (space == 0)
             {
-                // a frame longer than the buffer with no delimiter: resync rather than stall
                 add_rx_drop();
+                reject_frame();
                 _rx_offset = 0;
                 space = _rx_buffer.length;
             }
             size_t take = input.length < space ? input.length : space;
             _rx_buffer[_rx_offset .. _rx_offset + take] = input[0 .. take];
             input = input[take .. $];
-            parse_buffer(cast(ubyte)take, rx_time);
+            parse_buffer(take, rx_time);
         }
     }
 
-    void parse_buffer(ubyte new_bytes, MonoTime now)
+    void parse_buffer(size_t new_bytes, MonoTime now)
     {
-        _rx_accum += new_bytes;
+        _rx_accum += cast(uint)new_bytes;
 
         // skip any XON/XOFF bytes
-        ubyte rxLen = _rx_offset;
-        for (ubyte i = _rx_offset; i < _rx_offset + new_bytes; ++i)
+        size_t rxLen = _rx_offset;
+        for (size_t i = _rx_offset; i < _rx_offset + new_bytes; ++i)
         {
             if (_rx_buffer[i] == ASH_XON_BYTE || _rx_buffer[i] == ASH_XOFF_BYTE)
                 continue;
@@ -378,15 +411,18 @@ private:
         }
 
         // parse frames from stream delimited by 0x7E bytes
-        ubyte start = 0;
-        ubyte end = 0;
+        size_t start = 0;
+        size_t end = 0;
         bool inputError = false;
         outer: for (; end < rxLen; ++end)
         {
             if (_rx_buffer[end] == ASH_SUBSTITUTE_BYTE)
                 inputError = true;
             else if (_rx_buffer[end] == ASH_CANCEL_BYTE)
-                start = cast(ubyte)(end + 1);
+            {
+                start = end + 1;
+                inputError = false;
+            }
 
             if (_rx_buffer[end] != ASH_FLAG_BYTE)
                 continue;
@@ -394,33 +430,26 @@ private:
             if (inputError)
             {
                 inputError = false;
-                start = cast(ubyte)(end + 1);
+                start = end + 1;
                 add_rx_drop();
+                reject_frame();
                 continue;
             }
 
             // remove byte-stuffing from the frame
-            ubyte frameLen = 0;
-            for (ubyte i = start; i < end; ++i)
+            size_t frameLen = unstuff_bytes(_rx_buffer[], start, end);
+            if (frameLen == size_t.max)
             {
-                ubyte b = _rx_buffer[i];
-                if (b == ASH_ESCAPE_BYTE)
-                {
-                    if (++i == end)
-                    {
-                        start = cast(ubyte)(end + 1);
-                        continue outer;
-                    }
-                    _rx_buffer[start + frameLen++] = _rx_buffer[i] ^ 0x20;
-                }
-                else
-                    _rx_buffer[start + frameLen++] = b;
+                start = end + 1;
+                add_rx_drop();
+                reject_frame();
+                continue outer;
             }
 
-            ubyte frameStart = start;
-            start = cast(ubyte)(end + 1);
+            size_t frameStart = start;
+            start = end + 1;
 
-            if (frameLen < 2)
+            if (frameLen < 3)
             {
                 if (frameLen != 0)
                     add_rx_drop();
@@ -428,7 +457,7 @@ private:
             }
 
             // validate the frame
-            int frameEnd = frameStart + frameLen - 2;
+            size_t frameEnd = frameStart + frameLen - 2;
             ubyte[] frame = _rx_buffer[frameStart .. frameEnd];
 
             // check the crc
@@ -436,6 +465,7 @@ private:
             if (_rx_buffer[frameEnd .. frameEnd + 2][0..2].bigEndianToNative!ushort != crc)
             {
                 add_rx_drop();
+                reject_frame();
                 continue;
             }
 
@@ -445,7 +475,7 @@ private:
         }
 
         // shuffle any tail bytes (incomplete frames) to the start of the buffer...
-        _rx_offset = cast(ubyte)(rxLen - start);
+        _rx_offset = rxLen - start;
         if (start > 0)
         {
             import urt.mem : memmove;
@@ -492,55 +522,71 @@ private:
                 ubyte code = frame[1];
                 log.warning("received ERROR frame, code=", code);
             }
-            restart();
+            _stream.restart();
+            return;
+        }
+
+        bool data_frame = (control & 0x80) == 0;
+        bool ack_frame = (control & 0xE0) == 0x80;
+        bool nak_frame = (control & 0xE0) == 0xA0;
+        if (!data_frame && !ack_frame && !nak_frame)
+        {
+            reject_frame();
             return;
         }
 
         ubyte ack_num = control & 7;
         int ack_ahead = ack_num >= _tx_ack ? ack_num - _tx_ack : ack_num - _tx_ack + 8;
         if (ack_ahead > tx_ahead())
-            return; // discard frames with invalid ack_num
-
-        // check for other control codes
-        if (control & 0x80)
         {
-            if ((control & 0x60) == 0)
+            reject_frame();
+            return;
+        }
+
+        // ackNum is independent from the DATA payload and frmNum. It remains valid even when the
+        // payload is a duplicate or out of sequence, so process it before DATA disposition.
+        ack_in_flight(ack_num, timestamp);
+
+        if (ack_frame)
+        {
+            version (DebugASHMessageFlow)
+                log.tracef("<-- ACK [{0,02x}]", control);
+            send_queued_messages();
+            return;
+        }
+        if (nak_frame)
+        {
+            version (DebugASHMessageFlow)
+                log.tracef("<-- NAK [{0,02x}]", control);
+            if (_tx_in_flight)
             {
-                // ACK
-                version (DebugASHMessageFlow)
-                    log.tracef("<-- ACK [{0,02x}]", control);
-                ack_in_flight(ack_num, timestamp);
+                log.debug_("NAK received; resending from seq ", _tx_in_flight.seq);
+                resend_in_flight(getTime());
             }
-            else if ((control & 0x60) == 0x20)
-            {
-                // NAK: frames before ack_num are acknowledged; everything from ack_num on must be
-                // resent. The NCP also NAKs under buffer pressure, so pace resends: blasting frames
-                // back at a full NCP just feeds the pressure that caused the NAK.
-                version (DebugASHMessageFlow)
-                    log.tracef("<-- NAK [{0,02x}]", control);
-                ack_in_flight(ack_num, timestamp);
-                MonoTime now = getTime();
-                if (_tx_in_flight && now - _last_resend >= 100.msecs)
-                {
-                    log.debug_("NAK received; resending from seq ", _tx_in_flight.seq);
-                    resend_in_flight(now);
-                }
-            }
-            else
-            {
-                debug assert(false, "TODO: should we do anything here, or just return?");
-            }
+            send_queued_messages();
             return;
         }
 
         // DATA frame
-        ubyte frm_num = control >> 4;
+        if (frame.length < 3 || frame.length > ASH_MAX_MSG_LENGTH)
+        {
+            reject_frame();
+            return;
+        }
+
+        ubyte frm_num = (control >> 4) & 7;
         bool retransmit = (control & 0x08) != 0;
 
-        if (frm_num != _rx_seq)
+        final switch (data_action(frm_num, _rx_seq, retransmit))
         {
-            ash_nak(_rx_seq, false);
-            return;
+            case DataAction.acknowledge_duplicate:
+                ash_ack(_rx_seq, false);
+                return;
+            case DataAction.reject:
+                reject_frame();
+                return;
+            case DataAction.accept:
+                break;
         }
 
         ubyte[] data = void;
@@ -553,7 +599,9 @@ private:
             log.tracef("<-- [x{0, 02x}]: {1}", control, cast(void[])data);
 
         _rx_seq = (_rx_seq + 1) & 7;
+        _reject_condition = false;
         ash_ack(_rx_seq, false);
+        send_queued_messages();
 
         if (data.length > 0)
         {
@@ -561,21 +609,26 @@ private:
             p.init!RawFrame(data, timestamp);
             incoming_packet(p);
         }
-
-        ack_in_flight(ack_num, timestamp);
     }
 
     void resend_in_flight(MonoTime now)
     {
-        _last_resend = now;
         for (Message* m = _tx_in_flight; m; m = m.next)
         {
             log.warning("retransmit seq ", m.seq, " (attempt ", m.retries + 1, " of ", _max_retransmits, ")");
+            m.send_time = now;
             if (!ash_send(m.payload(), m.seq, _rx_seq, true))
                 break;
             ++m.retries;
-            m.send_time = now;
         }
+    }
+
+    void reject_frame()
+    {
+        if (!_connected || _reject_condition)
+            return;
+        _reject_condition = true;
+        ash_nak(_rx_seq, false);
     }
 
     void ack_in_flight(ubyte ack_num, MonoTime timestamp)
@@ -584,7 +637,9 @@ private:
         {
             if (!_tx_in_flight || _tx_in_flight.seq != _tx_ack)
             {
-                assert(false, "We've gone off the rails!");
+                log.errorf("ASH acknowledgement stream corrupt: expected seq {0}, got ack {1}; restarting link", _tx_ack, ack_num);
+                restart();
+                return;
             }
 
             Message* msg = _tx_in_flight;
@@ -595,7 +650,10 @@ private:
             _tx_ack = (_tx_ack + 1) & 7;
         }
 
-        // we can send any queued frames here...
+    }
+
+    void send_queued_messages()
+    {
         while (_tx_queue && tx_ahead < _max_in_flight)
         {
             Message* next = _tx_queue.next;
@@ -686,20 +744,8 @@ private:
         ushort crc = frame[0 .. 1 + msg.length].ezsp_crc();
         frame[1 + msg.length .. 3 + msg.length][0..2] = crc.nativeToBigEndian;
 
-        // byte-stuffing
-        ubyte[256] stuffed = void;
-        size_t len = 0;
-        foreach (i, b; frame[0 .. 1 + msg.length + 2])
-        {
-            if (b == 0x7E || b == 0x7D || b == 0x11 || b == 0x13 || b == 0x18 || b == 0x1A)
-            {
-                stuffed[len++] = ASH_ESCAPE_BYTE;
-                stuffed[len++] = b ^ 0x20;
-            }
-            else
-                stuffed[len++] = b;
-        }
-
+        ubyte[ASH_MAX_ENCODED_LENGTH] stuffed = void;
+        size_t len = stuff_bytes(frame[0 .. 1 + msg.length + 2], stuffed[]);
         stuffed[len++] = 0x7E;
 
         version (DebugASHMessageFlow)
@@ -715,7 +761,7 @@ private:
     // so a truncated CANCEL just re-arms for the following frame.
     bool ash_emit(const(ubyte)[] frame)
     {
-        ubyte[264] buf = void;
+        ubyte[ASH_MAX_ENCODED_LENGTH + 1] buf = void;
         size_t n = 0;
         if (_pending_cancel)
             buf[n++] = ASH_CANCEL_BYTE;
@@ -725,13 +771,57 @@ private:
         if (_stream.write(buf[0 .. n]) != n)
         {
             _pending_cancel = true;
+            if (_tx_stall_since == MonoTime())
+                _tx_stall_since = getTime();
             add_tx_drop();
             return false;
         }
 
         _pending_cancel = false;
+        _tx_stall_since = MonoTime();
         add_tx_frame(frame.length);
         return true;
+    }
+
+    static size_t stuff_bytes(const(ubyte)[] input, ubyte[] output) pure
+    {
+        size_t len;
+        foreach (b; input)
+        {
+            if (b == ASH_FLAG_BYTE || b == ASH_ESCAPE_BYTE || b == ASH_XON_BYTE ||
+                b == ASH_XOFF_BYTE || b == ASH_SUBSTITUTE_BYTE || b == ASH_CANCEL_BYTE)
+            {
+                output[len++] = ASH_ESCAPE_BYTE;
+                output[len++] = b ^ 0x20;
+            }
+            else
+                output[len++] = b;
+        }
+        return len;
+    }
+
+    static DataAction data_action(ubyte frame_number, ubyte expected, bool retransmit) pure
+    {
+        if (frame_number == expected)
+            return DataAction.accept;
+        return retransmit ? DataAction.acknowledge_duplicate : DataAction.reject;
+    }
+
+    static size_t unstuff_bytes(ubyte[] buffer, size_t start, size_t end) pure
+    {
+        size_t len;
+        for (size_t i = start; i < end; ++i)
+        {
+            ubyte b = buffer[i];
+            if (b == ASH_ESCAPE_BYTE)
+            {
+                if (++i == end)
+                    return size_t.max;
+                b = buffer[i] ^ 0x20;
+            }
+            buffer[start + len++] = b;
+        }
+        return len;
     }
 
     static void randomise(const(ubyte)[] data, ubyte[] buffer) pure
@@ -744,4 +834,27 @@ private:
             rand = (rand >> 1) ^ b1;
         }
     }
+}
+
+unittest
+{
+    immutable ubyte[6] reserved = [ 0x7E, 0x7D, 0x11, 0x13, 0x18, 0x1A ];
+    ubyte[131] original;
+    foreach (i, ref b; original)
+        b = reserved[i % reserved.length];
+
+    ubyte[263] encoded = void;
+    size_t encoded_len = ASHInterface.stuff_bytes(original[], encoded[]);
+    assert(encoded_len == original.length * 2);
+
+    size_t decoded_len = ASHInterface.unstuff_bytes(encoded[], 0, encoded_len);
+    assert(decoded_len == original.length);
+    assert(encoded[0 .. decoded_len] == original[]);
+
+    encoded[0] = 0x7D;
+    assert(ASHInterface.unstuff_bytes(encoded[], 0, 1) == size_t.max);
+
+    assert(ASHInterface.data_action(3, 3, false) == ASHInterface.DataAction.accept);
+    assert(ASHInterface.data_action(2, 3, true) == ASHInterface.DataAction.acknowledge_duplicate);
+    assert(ASHInterface.data_action(4, 3, false) == ASHInterface.DataAction.reject);
 }

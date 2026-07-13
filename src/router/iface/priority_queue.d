@@ -17,8 +17,11 @@ struct QueuedFrame
     MessageCallback callback;
     MonoTime enqueue_time;
     MonoTime dispatch_time;
+    MonoTime deadline;
+    MonoTime priority_escalation;
     ubyte tag;
     PCP pcp;
+    PCP urgent_pcp;
     bool dei;
     bool in_flight;
 }
@@ -29,11 +32,18 @@ nothrow @nogc:
 
     void init(ubyte max_in_flight, ubyte reserved_slots = 0, PCP reserved_min_pcp = PCP.vo, BaseInterface iface = null)
     {
+        set_capacity(max_in_flight, reserved_slots, reserved_min_pcp);
+        _if = iface;
+    }
+
+    // Live capacity changes preserve queued and in-flight frames. Reducing the limit merely
+    // prevents dequeue until enough existing work completes.
+    void set_capacity(ubyte max_in_flight, ubyte reserved_slots = 0, PCP reserved_min_pcp = PCP.vo)
+    {
         assert(max_in_flight > 0, "max_in_flight must be greater than 0");
         assert(reserved_slots < max_in_flight, "Reserved slots cannot exceed total capacity");
 
         _max_in_flight = max_in_flight;
-        _if = iface;
         _reserved_slots = reserved_slots;
         _reserved_min_rank = pcp_priority_map[reserved_min_pcp];
     }
@@ -90,7 +100,7 @@ nothrow @nogc:
         return null;
     }
 
-    int enqueue(ref Packet packet, MessageCallback callback = null)
+    int enqueue(ref Packet packet, MessageCallback callback = null, ref const QueuePolicy policy = QueuePolicy.init)
     {
         PCP pcp = packet.pcp;
         bool dei = packet.dei;
@@ -98,17 +108,18 @@ nothrow @nogc:
         // check total queue capacity
         if (_queued_count >= _max_queue_depth)
         {
-            // try to drop a DEI=1 frame if this frame is DEI=0
             if (!dei && !drop_lowest_dei())
                 return -1;
             else if (dei)
-                return -1; // drop the new DEI=1 frame
+                return -1;
         }
 
         QueuedFrame* frame = _pool.alloc();
         frame.packet = packet.clone();
         frame.callback = callback;
         frame.enqueue_time = getTime();
+        frame.deadline = policy.deadline;
+        frame.priority_escalation = policy.priority_escalation;
         int tag = _tags.alloc();
         if (tag < 0)
         {
@@ -118,6 +129,7 @@ nothrow @nogc:
         }
         frame.tag = cast(ubyte)tag;
         frame.pcp = pcp;
+        frame.urgent_pcp = policy.urgent_pcp;
         frame.dei = dei;
         frame.in_flight = false;
 
@@ -238,25 +250,25 @@ nothrow @nogc:
 
     void timeout_stale(MonoTime now)
     {
-        if (_queue_timeout != Duration())
+        promote_due(now);
+
+        foreach (ref bucket; _buckets)
         {
-            foreach (ref bucket; _buckets)
+            size_t i = 0;
+            while (i < bucket.length)
             {
-                size_t i = 0;
-                while (i < bucket.length)
+                QueuedFrame* frame = bucket[i];
+                if ((frame.deadline != MonoTime() && now >= frame.deadline) ||
+                    (_queue_timeout != Duration() && (now - frame.enqueue_time) > _queue_timeout))
                 {
-                    QueuedFrame* frame = bucket[i];
-                    if ((now - frame.enqueue_time) > _queue_timeout)
-                    {
-                        if (frame.callback)
-                            frame.callback(frame.tag, MessageState.expired);
-                        free_frame(frame);
-                        bucket.remove(i);
-                        --_queued_count;
-                    }
-                    else
-                        ++i;
+                    if (frame.callback)
+                        frame.callback(frame.tag, MessageState.expired);
+                    free_frame(frame);
+                    bucket.remove(i);
+                    --_queued_count;
                 }
+                else
+                    ++i;
             }
         }
 
@@ -314,6 +326,29 @@ private:
         _if.queue_update_service_times(wait_us, service_us);
     }
 
+    void promote_due(MonoTime now)
+    {
+        for (int rank = 0; rank <= 7; ++rank)
+        {
+            size_t i = 0;
+            while (i < _buckets[rank].length)
+            {
+                QueuedFrame* frame = _buckets[rank][i];
+                ubyte urgent_rank = pcp_priority_map[frame.urgent_pcp];
+                if (frame.priority_escalation != MonoTime() &&
+                    now >= frame.priority_escalation && urgent_rank > rank)
+                {
+                    _buckets[rank].remove(i);
+                    frame.priority_escalation = MonoTime();
+                    frame.pcp = frame.urgent_pcp;
+                    _buckets[urgent_rank].pushBack(frame);
+                }
+                else
+                    ++i;
+            }
+        }
+    }
+
     bool drop_lowest_dei()
     {
         for (int rank = 0; rank <= 7; ++rank)
@@ -347,4 +382,89 @@ private:
         frame.callback = null;
         _pool.free(frame);
     }
+}
+
+unittest
+{
+    ubyte[1] data;
+    Packet low;
+    low.init!RawFrame(data[]);
+    low.pcp = PCP.be;
+
+    Packet urgent;
+    urgent.init!RawFrame(data[]);
+    urgent.pcp = PCP.vo;
+
+    PriorityPacketQueue queue;
+    queue.init(3, 1, PCP.vo);
+
+    assert(queue.enqueue(low) >= 0);
+    assert(queue.enqueue(low) >= 0);
+    assert(queue.dequeue() !is null);
+    assert(queue.dequeue() !is null);
+
+    assert(queue.enqueue(low) >= 0);
+    assert(queue.dequeue() is null);
+
+    assert(queue.enqueue(urgent) >= 0);
+    assert(queue.dequeue() !is null);
+
+    queue.set_capacity(5, 1, PCP.vo);
+    assert(queue.dequeue() !is null);
+
+    queue.abort_all();
+
+    Packet deadline_packet;
+    deadline_packet.init!RawFrame(data[]);
+    deadline_packet.pcp = PCP.ca;
+    QueuePolicy deadline;
+    deadline.urgent_pcp = PCP.ic;
+    deadline.priority_escalation = MonoTime(100);
+    deadline.deadline = MonoTime(200);
+
+    int deadline_tag = queue.enqueue(deadline_packet, null, deadline);
+    assert(deadline_tag > 0);
+    queue.timeout_stale(MonoTime(100));
+    QueuedFrame* promoted = queue.dequeue();
+    assert(promoted !is null);
+    assert(promoted.tag == deadline_tag);
+    assert(promoted.pcp == PCP.ic);
+    assert(promoted.packet.pcp == PCP.ca);
+    queue.complete(promoted.tag);
+
+    deadline.priority_escalation = MonoTime(300);
+    deadline.deadline = MonoTime(400);
+    deadline_tag = queue.enqueue(deadline_packet, null, deadline);
+    assert(queue.is_queued(cast(ubyte)deadline_tag));
+    queue.timeout_stale(MonoTime(400));
+    assert(!queue.is_queued(cast(ubyte)deadline_tag));
+
+    Packet background;
+    background.init!RawFrame(data[]);
+    background.pcp = PCP.bk;
+    background.dei = true;
+
+    int newest_background_tag;
+    int next_background_tag;
+    foreach (i; 0 .. 32)
+    {
+        int tag = queue.enqueue(background);
+        assert(tag > 0);
+        next_background_tag = newest_background_tag;
+        newest_background_tag = tag;
+    }
+
+    Packet routine;
+    routine.init!RawFrame(data[]);
+    routine.pcp = PCP.be;
+    assert(queue.enqueue(routine) > 0);
+    assert(!queue.is_queued(cast(ubyte)newest_background_tag));
+
+    Packet important;
+    important.init!RawFrame(data[]);
+    important.pcp = PCP.vo;
+    assert(queue.enqueue(important) > 0);
+    assert(!queue.is_queued(cast(ubyte)next_background_tag));
+
+    queue.abort_all();
 }

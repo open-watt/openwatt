@@ -113,9 +113,8 @@ protected:
 
     final void id_conflict_handler(EmberNodeId id)
     {
-        // TODO: this is called when the NCP detects multiple nodes using the same id
-        //       the stack will remove references to this id, and we should also remove the ID from our records
-        assert(false, "TODO");
+        log.warningf("Zigbee: NCP detected an address conflict for node {0,04x}; dropping its local mapping", id);
+        get_module!ZigbeeProtocolModule.detach_node(pan_id, id);
     }
 
     final void incoming_route_error_handler(EmberStatus status, EmberNodeId target)
@@ -133,43 +132,53 @@ protected:
     }
 
 
-    override bool handle_zdo_frame(ref const APSFrame aps, ref const Packet p)
+    override ZDOReply handle_zdo_frame(ref const APSFrame aps, ref const Packet p)
     {
         bool response_required = (aps.flags & APSFlags.zdo_response_required) != 0;
 
-        ubyte[] req_data = cast(ubyte[])p.data[];
+        const(ubyte)[] req_data = cast(const(ubyte)[])p.data[];
         ubyte[256] buffer = void;
 
         switch (aps.cluster_id) with (ZDOCluster)
         {
             case nwk_addr_req:
                 if (!response_required)
-                    return false; // handled by the NCP
+                    return super.handle_zdo_frame(aps, p);
+                if (req_data.length == 0)
+                    return ZDOReply.impossible;
                 if (req_data.length < 11)
-                    return false; // malformed
+                    return send_zdo_status(aps, req_data[0], ZDOStatus.inv_requesttype);
 
                 auto addr = EUI64(req_data[1..9]);
                 NodeMap* n = get_module!ZigbeeProtocolModule.find_node(addr);
                 if (!n)
-                    return true; // we don't know the guy we're being asked about
+                    return ZDOReply.intentionally_none;
 
-                assert(req_data[9] == 0, "TODO: only supporting single address requests for now");
+                if (req_data[9] != 0)
+                    return send_zdo_status(aps, req_data[0], ZDOStatus.not_supported);
 
                 buffer[0] = req_data[0]; // sequence
                 buffer[1] = ZDOStatus.success;
                 buffer[2..10] = n.eui.b[]; // is this meant to be little-endian?
                 buffer[10..12] = n.id.nativeToLittleEndian!ushort;
-                send_zdo_message(aps.src, aps.cluster_id | 0x8000, buffer[0..12]);
-                return true;
+                return send_zdo_payload(aps, buffer[0..12]);
 
             case device_annce:
-                const ubyte[] data = cast(ubyte[])p.data[];
-                ubyte seq = data[0];
-                ushort id = data[1..3].littleEndianToNative!ushort;
-                EUI64 eui = EUI64(data[3..11]);
-                ubyte caps = data[11];
+                if (req_data.length < 12)
+                {
+                    log.warningf("malformed device announce from {0,04x}: {1} bytes", aps.src, req_data.length);
+                    return ZDOReply.intentionally_none;
+                }
 
-                assert(eui != EUI64.broadcast, "TODO: node EUI is not valid... we're meant to do something with this?");
+                ushort id = req_data[1..3].littleEndianToNative!ushort;
+                EUI64 eui = EUI64(req_data[3..11]);
+                ubyte caps = req_data[11];
+
+                if (eui == EUI64.broadcast)
+                {
+                    log.warningf("device announce from {0,04x} has invalid broadcast EUI", aps.src);
+                    return ZDOReply.intentionally_none;
+                }
 
                 ZigbeeProtocolModule mod_zb = get_module!ZigbeeProtocolModule;
 
@@ -205,11 +214,10 @@ protected:
                             if (0xFFFE in basic.attributes)
                                 n.initialised &= ~0xC0;
                 }
-                break;
+                return ZDOReply.intentionally_none;
 
             default:
                 return super.handle_zdo_frame(aps, p);
         }
-        return false;
     }
 }

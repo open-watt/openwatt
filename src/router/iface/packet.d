@@ -72,6 +72,27 @@ enum PCP : ubyte
 
 immutable ubyte[8] pcp_priority_map = [1, 0, 2, 3, 4, 5, 6, 7];
 
+// Admission and scheduling policy for one egress queue. This is deliberately separate
+// from Packet: it expires when that queue has delivered or dropped the frame.
+struct QueuePolicy
+{
+nothrow @nogc:
+    void set_deadline(Duration timeout, PCP urgent, ubyte escalation_percent = 50)
+    {
+        assert(timeout > Duration.zero, "Queue deadline must be positive");
+        assert(escalation_percent <= 100, "Escalation percentage must be at most 100");
+
+        MonoTime now = getTime();
+        deadline = now + timeout;
+        priority_escalation = now + msecs(timeout.as!"msecs" * escalation_percent / 100);
+        urgent_pcp = urgent;
+    }
+
+    MonoTime deadline;
+    MonoTime priority_escalation;
+    PCP urgent_pcp = PCP.be;
+}
+
 
 alias AddressExtract = ulong function(ref const Packet) pure nothrow @nogc;
 alias IsMulticastAddress = bool function(ulong address) pure nothrow @nogc;

@@ -433,7 +433,7 @@ nothrow @nogc:
     {
     }
 
-    int forward(ref Packet packet, MessageCallback callback = null)
+    int forward(ref Packet packet, MessageCallback callback = null, QueuePolicy queue_policy = QueuePolicy.init)
     {
         if (!running)
         {
@@ -448,7 +448,7 @@ nothrow @nogc:
                 subscriber.recv_packet(packet, this, PacketDirection.outgoing, subscriber.user_data);
         }
 
-        int result = transmit(packet, callback);
+        int result = transmit(packet, callback, queue_policy);
         if (result <= 0 && callback)
             callback(result, result == 0 ? MessageState.complete : MessageState.failed);
         return result;
@@ -521,7 +521,7 @@ protected:
                                   "avg-queue-time", "avg-service-time", "max-service-time" ])();
     }
 
-    abstract int transmit(ref Packet packet, MessageCallback callback = null);
+    abstract int transmit(ref Packet packet, MessageCallback callback = null, QueuePolicy queue_policy = QueuePolicy.init);
 
     final void incoming_packet(ref Packet packet)
     {

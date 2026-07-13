@@ -25,6 +25,7 @@ import protocol.ezsp.ashv2;
 public import protocol.ezsp.commands;
 
 //version = DebugMessageFlow;
+//version = DebugZigbeeLatency;
 
 nothrow @nogc:
 
@@ -62,9 +63,9 @@ template EZSPResult(T)
 
 class EZSPClient : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("ash_stream", ash_stream),
-                                 Prop!("ash_interface", ash_interface),
-                                 Prop!("pipeline", pipeline),
+    alias Properties = AliasSeq!(Prop!("ash-stream", ash_stream),
+                                 Prop!("ash-interface", ash_interface),
+                                 Prop!("concurrency", concurrency),
                                  Prop!("stack-type", stack_type),
                                  Prop!("stack-version", stack_version),
                                  Prop!("protocol-version", protocol_version),
@@ -105,6 +106,29 @@ class EZSPClient : ActiveObject
         restart();
     }
 
+    // Maximum complete EZSP transactions allowed to be outstanding. ASH remains an independent
+    // transport, but its transmit window follows the client using it so the two queues cannot drift.
+    final ubyte concurrency() const pure nothrow
+        => _concurrency;
+    final StringResult concurrency(ubyte value) nothrow
+    {
+        if (value < 1 || value > 5)
+            return StringResult("concurrency must be between 1 and 5");
+        if (_concurrency == value)
+            return StringResult.success;
+
+        _concurrency = value;
+        if (_ash)
+        {
+            StringResult result = _ash.window(value);
+            if (!result)
+                return result;
+        }
+        if (running)
+            send_queued_message();
+        return StringResult.success;
+    }
+
     final EZSPStackType stack_type() const pure nothrow
         => _stack_type;
 
@@ -118,17 +142,6 @@ class EZSPClient : ActiveObject
         => _queued_requests.length;
     final ushort peak_queue() const pure nothrow
         => _peak_queue;
-
-    // max concurrent in-flight EZSP commands; drop to 1 at runtime if an NCP misbehaves with 2
-    final ubyte pipeline() const pure nothrow
-        => _pipeline;
-    final StringResult pipeline(ubyte value) nothrow
-    {
-        if (value < 1 || value > 4)
-            return StringResult("pipeline must be between 1 and 4");
-        _pipeline = value;
-        return StringResult.success;
-    }
 
     // API...
 
@@ -235,7 +248,8 @@ nothrow:
         alias RequestParams = typeof(EZSP_Command.Request.tupleof);
         alias ResponseParams = typeof(EZSP_Command.Response.tupleof);
 
-        final bool send_command(Callback)(Callback response_handler, auto ref RequestParams args, void* user_data = null, ubyte priority = 1)
+        final bool send_command(Callback)(Callback response_handler, auto ref RequestParams args,
+                                          void* user_data = null, ubyte priority = 1, bool dei = false)
         {
             if (!running)
                 return false;
@@ -262,11 +276,11 @@ nothrow:
             size_t offset = tr.ezsp_serialise(buffer[]);
 
             static if (is(Callback == typeof(null)))
-                return send_command_impl(EZSP_Command.Command, buffer[0..offset], null, null, null, null, null, priority);
+                return send_command_impl(EZSP_Command.Command, buffer[0..offset], null, null, null, null, null, priority, dei);
             else static if (is_delegate!Callback)
-                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), &fail_shim!(HasUserData, ResponseParams), response_handler.funcptr, response_handler.ptr, HasUserData ? user_data : null, priority);
+                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), &fail_shim!(HasUserData, ResponseParams), response_handler.funcptr, response_handler.ptr, HasUserData ? user_data : null, priority, dei);
             else
-                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), &fail_shim!(HasUserData, ResponseParams), response_handler, null, HasUserData ? user_data : null, priority);
+                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), &fail_shim!(HasUserData, ResponseParams), response_handler, null, HasUserData ? user_data : null, priority, dei);
         }
     }
 
@@ -351,6 +365,15 @@ protected:
             _ash.subscribe(&ash_state_change);
         }
 
+        // Apply on every startup as an externally supplied ASH interface may have been tuned while
+        // this client was stopped. This is a live limit change and does not restart or drop ASH.
+        StringResult window_result = _ash.window(_concurrency);
+        if (!window_result)
+        {
+            log.error("failed to configure ASH window: ", window_result.message);
+            return CompletionStatus.error;
+        }
+
         if (_known_version)
             return CompletionStatus.complete;
 
@@ -404,8 +427,9 @@ protected:
 
     override void update()
     {
-        // a healthy NCP responds in milliseconds and ASH escalates link loss itself (~2.8s worst
-        // case), so a request timing out here means the NCP accepted the frame and went mute:
+        // A healthy NCP responds in milliseconds. This timeout is deliberately longer than ASH's
+        // complete retry cycle so the transport owns link-loss recovery rather than being torn down
+        // while it still has retransmissions in progress.
         // fail the request and restart for a clean slate
         MonoTime now = getTime();
         if (_in_flight > 0 && now - _queued_requests[0].ts > request_timeout)
@@ -435,6 +459,7 @@ private:
         MonoTime ts;
         ubyte sequence_number;
         ubyte priority;         // pcp rank; higher jumps ahead of pending lower-priority commands
+        bool dei;
         ushort cmd;
         ushort data_len;
         void function(const(ubyte)[], void*, void*, void*) nothrow @nogc response_shim;
@@ -457,14 +482,12 @@ private:
 
     enum max_queued_requests = 32;
 
-    // must exceed ASH's worst-case retransmit cycle (~2.8s) so link loss escalates from below
-    enum request_timeout = 4.seconds;
+    enum request_timeout = 20.seconds;
 
     MonoTime _last_event;
 
-    ubyte _in_flight;       // requests [0 .. _in_flight) are transmitted, awaiting ordered responses
-    ubyte _pipeline = 1;    // max concurrent in-flight commands; 1 is the safe default, some NCP
-                            // firmwares wedge with >1. raise at runtime via /set pipeline=2 to test.
+    ubyte _in_flight;
+    ubyte _concurrency = 1;
 
     ubyte _requested_version;
     ubyte _known_version;
@@ -547,8 +570,6 @@ private:
 
             if (msg[2] == 0xff)
             {
-                assert(false); // TODO: we don't understand this case!
-
                 if (msg.length < 5)
                 {
                     log.warning("invalid frame; frame is too short!");
@@ -565,7 +586,11 @@ private:
             }
         }
 
-        assert(control & 0x80); // responses always have the high bit set
+        if (!(control & 0x80))
+        {
+            log.warning("invalid EZSP frame; response bit is not set");
+            return;
+        }
 
         bool overflow = (control & 0x1) != 0;
         bool truncated = (control & 0x2) != 0;
@@ -623,10 +648,7 @@ private:
                 }
 
                 if (cb_type == 1)
-                {
-                    // TODO: can we confirm when and why this is sent? does it need special handling?
-                    assert(false); // this is a solicited callback, or something?
-                }
+                    log.warningf("TODO: EZSP solicited callback received: seq={0}, command=x{1,04x}", seq, command);
 
                 if (cb_type == 0)
                 {
@@ -650,12 +672,16 @@ private:
                     // which can grow (reallocate) the array under us
                     auto shim = _queued_requests[0].response_shim;
                     void* cb = _queued_requests[0].cb_funcptr, inst = _queued_requests[0].cb_instance, ud = _queued_requests[0].user_data;
-                    Duration rtt = getTime() - _queued_requests[0].ts;
+                    version (DebugZigbeeLatency)
+                        Duration rtt = getTime() - _queued_requests[0].ts;
                     _queued_requests.popFront();
                     --_in_flight;
 
-                    if (rtt > 100.msecs)
-                        log.debugf("slow response: cmd x{0,04x} took {1}ms", command, rtt.as!"msecs");
+                    version (DebugZigbeeLatency)
+                    {
+                        if (rtt > 100.msecs)
+                            log.debugf("slow response: cmd x{0,04x} took {1}ms", command, rtt.as!"msecs");
+                    }
 
                     if (shim)
                         shim(msg, cb, inst, ud);
@@ -682,19 +708,45 @@ private:
     bool send_command_impl(ushort cmd, ubyte[] data,
                            void function(const(ubyte)[], void*, void*, void*) nothrow @nogc response_handler,
                            void function(void*, void*, void*) nothrow @nogc failure_handler,
-                           void* cb, void* inst, void* user_data, ubyte priority = 1)
+                           void* cb, void* inst, void* user_data, ubyte priority = 1, bool dei = false)
     {
         if (data.length > QueuedRequest.data.length)
             return false;
+
+        void function(void*, void*, void*) nothrow @nogc dropped_fail;
+        void* dropped_cb;
+        void* dropped_inst;
+        void* dropped_ud;
         if (_queued_requests.length >= max_queued_requests)
         {
-            log.warningf("command queue full ({0}); rejecting cmd x{1,04x} pri {2}", max_queued_requests, cmd, priority);
-            return false;
+            size_t drop = _queued_requests.length;
+            if (!dei)
+            {
+                foreach (i; _in_flight .. _queued_requests.length)
+                {
+                    if (_queued_requests[i].dei && _queued_requests[i].priority <= priority &&
+                        (drop == _queued_requests.length || _queued_requests[i].priority < _queued_requests[drop].priority))
+                        drop = i;
+                }
+            }
+
+            if (drop == _queued_requests.length)
+            {
+                log.warningf("command queue full ({0}); rejecting cmd x{1,04x} pri {2}", max_queued_requests, cmd, priority);
+                return false;
+            }
+
+            dropped_fail = _queued_requests[drop].fail_shim;
+            dropped_cb = _queued_requests[drop].cb_funcptr;
+            dropped_inst = _queued_requests[drop].cb_instance;
+            dropped_ud = _queued_requests[drop].user_data;
+            _queued_requests.remove(drop);
         }
 
         ref QueuedRequest req = _queued_requests.pushBack();
         req.cmd = cmd;
         req.priority = priority;
+        req.dei = dei;
         req.response_shim = response_handler;
         req.fail_shim = failure_handler;
         req.cb_funcptr = cb;
@@ -706,21 +758,28 @@ private:
         if (_queued_requests.length > _peak_queue)
             _peak_queue = cast(ushort)_queued_requests.length;
 
-        // back-pressure visibility: surfaces how deep the queue backs up (enable with /log debug)
-        if (_queued_requests.length >= 4)
-            log.debugf("queue depth {0} peak {1} (submitting cmd x{2,04x} pri {3})", _queued_requests.length, _peak_queue, cmd, priority);
+        version (DebugZigbeeLatency)
+        {
+            if (_queued_requests.length >= 4)
+                log.debugf("queue depth {0} peak {1} (submitting cmd x{2,04x} pri {3})", _queued_requests.length, _peak_queue, cmd, priority);
+        }
+
+        if (dropped_fail)
+            dropped_fail(dropped_cb, dropped_inst, dropped_ud);
 
         send_queued_message();
         return true;
     }
 
-    // Requests [0 .. _in_flight) have been transmitted and await responses (in order); the rest are
-    // pending. Send the highest-priority pending request whenever a pipeline slot is free. An
-    // in-flight request can't be preempted, so worst case a high-priority command waits one
-    // round-trip rather than the whole backlog.
+    // Requests [0 .. _in_flight) have been transmitted and await ordered responses. The ASH window
+    // is kept equal to this limit, so changing concurrency live changes admission without dropping
+    // frames already on the wire.
     void send_queued_message()
     {
-        while (_in_flight < _pipeline && _in_flight < _queued_requests.length)
+        if (_in_flight >= _concurrency || _queued_requests.length == 0)
+            return;
+
+        while (_in_flight < _concurrency && _in_flight < _queued_requests.length)
         {
             size_t best = _in_flight;
             foreach (i; _in_flight + 1 .. _queued_requests.length)

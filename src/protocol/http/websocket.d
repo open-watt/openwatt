@@ -477,7 +477,7 @@ protected:
             _message[] = tmp[0 .. read];
     }
 
-    override int transmit(ref Packet packet, MessageCallback)
+    override int transmit(ref Packet packet, MessageCallback, QueuePolicy)
     {
         if (packet.type != PacketType.raw)
         {

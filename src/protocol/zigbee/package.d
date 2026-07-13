@@ -554,7 +554,7 @@ nothrow @nogc:
         buffer[3] = dp_type;
         buffer[4..6] = (cast(ushort)data_len).nativeToBigEndian;
 
-        source.send_zcl_message(nm.id, endpoint, source.profile_id, 0xEF00, ZCLCommand.tuya_data_request, 0, buffer[0 .. 6 + data_len], PCP.be);
+        source.send_zcl_message(nm.id, endpoint, source.profile_id, 0xEF00, ZCLCommand.tuya_data_request, 0, buffer[0 .. 6 + data_len], PCP.vo);
         session.writef("Sent Tuya DP {0} = {1}\n", attribute, value);
         return null;
     }
@@ -1101,7 +1101,7 @@ nothrow @nogc:
 
         pending_tag = source.send_zcl_message(node.id, endpoint_id, source.profile_id, cluster_id,
             ZCLCommand.write_attributes, 0, write_buffer[0 .. 3 + val_len],
-            PCP.be, &write_response_handler, null);
+            PCP.vo, &write_response_handler, null);
     }
 
     void read_response_handler(ZigbeeResult result, const ZCLHeader* hdr, const(ubyte)[] message, void*)
