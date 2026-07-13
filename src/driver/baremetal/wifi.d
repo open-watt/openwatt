@@ -256,7 +256,7 @@ protected:
         apply_channel(ch);
     }
 
-    override int transmit(ref const Packet packet, MessageCallback callback, QueuePolicy)
+    override int transmit(ref const Packet packet, MessageCallback callback, const(QueuePolicy)*)
     {
         if (packet.type != PacketType.wifi_80211 || !_wifi.is_open)
         {

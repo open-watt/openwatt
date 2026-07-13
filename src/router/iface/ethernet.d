@@ -52,7 +52,7 @@ protected:
         dispatch(inner);
     }
 
-    override int transmit(ref Packet packet, MessageCallback, QueuePolicy)
+    override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
     {
         switch (packet.type)
         {

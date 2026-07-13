@@ -190,7 +190,7 @@ protected:
         }
     }
 
-    override int transmit(ref const Packet packet, MessageCallback, QueuePolicy) nothrow @nogc
+    override int transmit(ref const Packet packet, MessageCallback, const(QueuePolicy)*) nothrow @nogc
     {
         if (packet.type != PacketType.tesla_twc)
         {

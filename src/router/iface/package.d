@@ -433,7 +433,7 @@ nothrow @nogc:
     {
     }
 
-    int forward(ref Packet packet, MessageCallback callback = null, QueuePolicy queue_policy = QueuePolicy.init)
+    int forward(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
     {
         if (!running)
         {
@@ -521,7 +521,7 @@ protected:
                                   "avg-queue-time", "avg-service-time", "max-service-time" ])();
     }
 
-    abstract int transmit(ref Packet packet, MessageCallback callback = null, QueuePolicy queue_policy = QueuePolicy.init);
+    abstract int transmit(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null);
 
     final void incoming_packet(ref Packet packet)
     {

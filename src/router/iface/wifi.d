@@ -188,7 +188,7 @@ protected:
             sink(packet.data);
     }
 
-    override int transmit(ref const Packet packet, MessageCallback, QueuePolicy)
+    override int transmit(ref const Packet packet, MessageCallback, const(QueuePolicy)*)
     {
         add_tx_drop();
         return -1;

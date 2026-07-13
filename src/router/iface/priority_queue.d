@@ -100,7 +100,7 @@ nothrow @nogc:
         return null;
     }
 
-    int enqueue(ref Packet packet, MessageCallback callback = null, ref const QueuePolicy policy = QueuePolicy.init)
+    int enqueue(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* policy = null)
     {
         PCP pcp = packet.pcp;
         bool dei = packet.dei;
@@ -118,8 +118,8 @@ nothrow @nogc:
         frame.packet = packet.clone();
         frame.callback = callback;
         frame.enqueue_time = getTime();
-        frame.deadline = policy.deadline;
-        frame.priority_escalation = policy.priority_escalation;
+        frame.deadline = policy ? policy.deadline : MonoTime();
+        frame.priority_escalation = policy ? policy.priority_escalation : MonoTime();
         int tag = _tags.alloc();
         if (tag < 0)
         {
@@ -129,7 +129,7 @@ nothrow @nogc:
         }
         frame.tag = cast(ubyte)tag;
         frame.pcp = pcp;
-        frame.urgent_pcp = policy.urgent_pcp;
+        frame.urgent_pcp = policy ? policy.urgent_pcp : PCP.be;
         frame.dei = dei;
         frame.in_flight = false;
 
@@ -422,7 +422,7 @@ unittest
     deadline.priority_escalation = MonoTime(100);
     deadline.deadline = MonoTime(200);
 
-    int deadline_tag = queue.enqueue(deadline_packet, null, deadline);
+    int deadline_tag = queue.enqueue(deadline_packet, null, &deadline);
     assert(deadline_tag > 0);
     queue.timeout_stale(MonoTime(100));
     QueuedFrame* promoted = queue.dequeue();
@@ -434,7 +434,7 @@ unittest
 
     deadline.priority_escalation = MonoTime(300);
     deadline.deadline = MonoTime(400);
-    deadline_tag = queue.enqueue(deadline_packet, null, deadline);
+    deadline_tag = queue.enqueue(deadline_packet, null, &deadline);
     assert(queue.is_queued(cast(ubyte)deadline_tag));
     queue.timeout_stale(MonoTime(400));
     assert(!queue.is_queued(cast(ubyte)deadline_tag));

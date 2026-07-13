@@ -162,10 +162,14 @@ class ZigbeeNode : ActiveObject
         p.pcp = pcp;
         p.dei = pcp == PCP.bk;
         QueuePolicy queue_policy;
+        const(QueuePolicy)* queue_policy_ptr;
         if (deadline != Duration.zero)
+        {
             queue_policy.set_deadline(deadline, urgent_pcp);
+            queue_policy_ptr = &queue_policy;
+        }
 
-        return _interface.forward(p, progress_callback, queue_policy);
+        return _interface.forward(p, progress_callback, queue_policy_ptr);
     }
 
     final ZigbeeResult send_message_async(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, PCP pcp = PCP.be, bool group = false)

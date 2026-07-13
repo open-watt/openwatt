@@ -175,7 +175,7 @@ protected:
         }
     }
 
-    override int transmit(ref const Packet packet, MessageCallback, QueuePolicy)
+    override int transmit(ref const Packet packet, MessageCallback, const(QueuePolicy)*)
     {
         assert(false, "TODO: frame and transmit");
     }
@@ -271,7 +271,7 @@ nothrow @nogc:
 protected:
     mixin RekeyHandler;
 
-    override int transmit(ref const Packet packet, MessageCallback, QueuePolicy)
+    override int transmit(ref const Packet packet, MessageCallback, const(QueuePolicy)*)
     {
         assert(false, "TODO: frame and transmit");
     }

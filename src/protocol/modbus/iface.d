@@ -446,7 +446,7 @@ protected:
         }
     }
 
-    override int transmit(ref const Packet packet, MessageCallback callback = null, QueuePolicy queue_policy = QueuePolicy.init) nothrow @nogc
+    override int transmit(ref const Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null) nothrow @nogc
     {
         if (packet.type != PacketType.modbus)
         {
