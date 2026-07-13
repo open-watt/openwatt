@@ -109,6 +109,9 @@
     <Filter Include="src\protocol\snmp">
       <UniqueIdentifier>{f9e366d8-35ce-4a70-9f0e-3ab303fb1bdb}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\spinel">
+      <UniqueIdentifier>{de2b8a23-1c8e-4e5b-a990-af9fd13f8355}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\protocol\telnet">
       <UniqueIdentifier>{f9218558-feb4-40d3-b5bb-db924d553f6a}</UniqueIdentifier>
     </Filter>
@@ -671,6 +674,12 @@
     </DCompile>
     <DCompile Include="src\protocol\snmp\pdu.d">
       <Filter>src\protocol\snmp</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\spinel\client.d">
+      <Filter>src\protocol\spinel</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\spinel\package.d">
+      <Filter>src\protocol\spinel</Filter>
     </DCompile>
     <DCompile Include="src\protocol\tesla\binding.d">
       <Filter>src\protocol\tesla</Filter>

@@ -55,6 +55,7 @@ enum CollectionType : ubyte
     secret,
     snmp_agent,
     snmp_client,
+    spinel,
     stream, // all streams
     sync_channel,
     sync_peer,

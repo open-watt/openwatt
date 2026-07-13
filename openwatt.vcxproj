@@ -233,6 +233,8 @@
     <DCompile Include="src\protocol\snmp\oid.d" />
     <DCompile Include="src\protocol\snmp\package.d" />
     <DCompile Include="src\protocol\snmp\pdu.d" />
+    <DCompile Include="src\protocol\spinel\client.d" />
+    <DCompile Include="src\protocol\spinel\package.d" />
     <DCompile Include="src\protocol\telnet\client.d" />
     <DCompile Include="src\protocol\telnet\package.d" />
     <DCompile Include="src\protocol\telnet\server.d" />
