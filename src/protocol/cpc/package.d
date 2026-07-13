@@ -32,8 +32,8 @@ module protocol.cpc;
 // endpoint. First consumer is Thread / 802.15.4.
 //
 // TODO:
-//   [ ] SpinelClient (commit 1b105431): split into transport-agnostic codec + framing consumer so it
-//       rides either HDLC-over-serial or a CPCEndpoint. Bind /protocol/spinel/client to an endpoint.
+//   [x] SpinelClient: split into transport-agnostic codec + a consumer that binds a CPCEndpoint (protocol/spinel).
+//       Native HDLC-over-serial transport is still future work; spinel currently rides a CPCEndpoint only.
 //   [ ] Bluetooth HCI endpoint feeding protocol/ble
 //   [ ] CPC security sessions (AES-GCM over endpoint 1): detected and refused today
 //   [ ] protocol v4 secondaries (different endpoint-state values); v5 only today
@@ -115,6 +115,7 @@ class CPCInterface : BaseInterface
     alias Properties = AliasSeq!(Prop!("stream", stream),
                                  Prop!("retransmits", retransmits),
                                  Prop!("ack-timeout", ack_timeout),
+                                 Prop!("trace-frames", trace_frames),
                                  Prop!("protocol-version", protocol_version, "status"),
                                  Prop!("secondary-version", secondary_version, "status"),
                                  Prop!("app-version", app_version, "status"));
@@ -133,6 +134,8 @@ nothrow @nogc:
         _max_l2mtu = cpc_max_payload;
         l2mtu = _max_l2mtu;
         mark_set!(typeof(this), "max-l2mtu")();
+        retransmits(10);
+        ack_timeout(500);
     }
 
     // Properties...
@@ -150,6 +153,7 @@ nothrow @nogc:
             _subscribed = false;
         }
         _stream = stream;
+        mark_set!(typeof(this), "stream")();
         restart();
     }
 
@@ -160,6 +164,7 @@ nothrow @nogc:
         if (value < 1 || value > 15)
             return StringResult("retransmits must be between 1 and 15");
         _max_retransmits = value;
+        mark_set!(typeof(this), "retransmits")();
         return StringResult.success;
     }
 
@@ -170,6 +175,7 @@ nothrow @nogc:
         if (value < 50 || value > 5000)
             return StringResult("ack-timeout must be between 50ms and 5000ms");
         _ack_timeout_ms = value;
+        mark_set!(typeof(this), "ack-timeout")();
         return StringResult.success;
     }
 
@@ -181,6 +187,16 @@ nothrow @nogc:
 
     final const(char)[] app_version() const pure
         => _app_version[0 .. _app_version_len];
+
+    // runtime wire trace: hexdump every emitted/received frame at trace level. off by default; toggled live
+    // on the running instance so an incident can be captured without a rebuild.
+    final bool trace_frames() const pure
+        => _trace_frames;
+    final void trace_frames(bool value)
+    {
+        _trace_frames = value;
+        mark_set!(typeof(this), "trace-frames")();
+    }
 
 
 protected:
@@ -217,6 +233,8 @@ protected:
             return super.status_message();
         if (!_stream || !_stream.running)
             return "Waiting for stream";
+        if (_unresponsive)
+            return "Secondary unresponsive (may need power cycle)";
         final switch (_phase)
         {
             case Phase.reboot_mode:
@@ -269,10 +287,13 @@ protected:
             {
                 if (++_ucmd_retries > max_ucmd_retries)
                 {
+                    // secondary silent on this step. don't thrash the (healthy) transport; give up this
+                    // handshake cycle and let the state machine back off (100ms..60s) before the next attempt.
+                    if (++_handshake_attempts >= unresponsive_threshold)
+                        _unresponsive = true;
                     log.warning("no response from CPC secondary (handshake step ", cast(int)_phase,
-                                "); restarting stream '", _stream.name, "'");
-                    _stream.restart();
-                    return CompletionStatus.continue_;
+                                "); backing off (give-up ", _handshake_attempts, ")");
+                    return CompletionStatus.error;
                 }
                 emit_frame(0, uframe_control(UFrameType.poll_final), _ucmd_buffer[0 .. _ucmd_len]);
                 _ucmd_sent = now;
@@ -286,9 +307,11 @@ protected:
             {
                 if (++_reset_attempts >= 3)
                 {
-                    log.error("secondary never announced its reset; restarting stream '", _stream.name, "'");
                     _reset_attempts = 0;
-                    _stream.restart();
+                    if (++_handshake_attempts >= unresponsive_threshold)
+                        _unresponsive = true;
+                    log.warning("secondary never announced its reset; backing off (give-up ", _handshake_attempts, ")");
+                    return CompletionStatus.error;
                 }
                 else
                     _phase = Phase.reset;
@@ -318,6 +341,7 @@ protected:
         _capabilities = 0;
         _secondary_version_len = 0;
         _app_version_len = 0;
+        mark_set!(typeof(this), [ "protocol-version", "secondary-version", "app-version" ])();
 
         channel_clear(_ep0);
         _pending_cmds.clear();
@@ -354,7 +378,7 @@ protected:
 
         if (!channel_service(_ep0, 0, now))
         {
-            log.error("system endpoint unresponsive: no ack after ", _max_retransmits, " retransmits");
+            log_channel_death("system endpoint", _ep0, now);
             restart();
             return;
         }
@@ -365,7 +389,7 @@ protected:
             // endpoint is still in _endpoints, and restart() on it would trip the destroyed assert
             if (ep.running && ep._connected && !channel_service(ep._channel, ubyte(ep._endpoint), now))
             {
-                log.error("endpoint ", ep._endpoint, " unresponsive: no ack after retransmits");
+                log_channel_death(tconcat("endpoint ", ep._endpoint), ep._channel, now);
                 ep.restart();
             }
         }
@@ -376,10 +400,25 @@ protected:
             if (now - _pending_cmds[i].sent < icmd_timeout)
                 continue;
             CPCEndpoint requester = _pending_cmds[i].requester;
+            ubyte seq = _pending_cmds[i].seq;
             _pending_cmds.remove(i);
+            // the reply never came: drop the command's still-queued ep0 frame so it can't flush as a stale
+            // backlog on recovery. an already in-flight frame may have reached the secondary, so leave it.
+            cancel_queued_command(_ep0, seq);
             if (requester)
                 requester.on_connect_timeout();
         }
+    }
+
+    void log_channel_death(const(char)[] who, ref Channel ch, MonoTime now)
+    {
+        Message* m = ch.in_flight;
+        if (m)
+            log.errorf("{0} unresponsive: no ack after {1} retransmits; in-flight seq {2} len {3} age {4}ms first: {5}",
+                       who, _max_retransmits, m.seq, m.length, cast(uint)(now - m.enqueue_time).as!"msecs",
+                       cast(void[])m.buffer[0 .. m.length < 8 ? m.length : 8]);
+        else
+            log.error(who, " unresponsive: no ack after ", _max_retransmits, " retransmits");
     }
 
     // ingress: trunk accounting + observability, then ARQ and demux. A CPCFrame terminates here (ep0
@@ -398,6 +437,8 @@ protected:
 
         version (DebugCPCMessageFlow)
             log.tracef("<-- ep {0} ctrl [{1,02x}] {2} bytes", endpoint, control, payload.length);
+        if (_trace_frames)
+            log.debugf("<-- ep {0} ctrl [{1,02x}] {2}B: {3}", endpoint, control, payload.length, cast(void[])payload);
 
         ubyte ftype = control >> 6;
         if (ftype <= 1) // information frame: only bit 7 identifies it; seq occupies bits 6..4
@@ -500,6 +541,7 @@ private:
     enum max_ucmd_retries = 5;
     enum reset_reason_timeout = 5.seconds;
     enum icmd_timeout = 2.seconds;
+    enum unresponsive_threshold = 2; // handshake give-ups before we surface "may need power cycle" in status
 
     ObjectRef!Stream _stream;
     bool _subscribed;
@@ -526,8 +568,11 @@ private:
     char[16] _secondary_version;
     char[32] _app_version;
 
-    ushort _ack_timeout_ms = 500;
-    ubyte _max_retransmits = 10;
+    ushort _ack_timeout_ms;
+    ubyte _max_retransmits;
+    ubyte _handshake_attempts;          // consecutive handshake give-ups; persists across backoff, cleared on sign of life
+    bool _unresponsive;                 // secondary went silent long enough to warrant a power cycle (status only)
+    bool _trace_frames;
 
     Channel _ep0;                       // the SYSTEM channel is the trunk's own (no endpoint object)
     Array!CPCEndpoint _endpoints;
@@ -625,6 +670,11 @@ private:
     {
         if (_pending_cmds.length >= 8)
             return false;
+        // don't stack endpoint control onto a struggling system channel: a retransmitting ep0 means the
+        // secondary isn't acking, and piling connect/terminate frames just fills the queue (the amplification
+        // that turned one endpoint's failure into a trunk-wide outage). the endpoint retries under its backoff.
+        if (_ep0.in_flight && _ep0.in_flight.retries >= 1)
+            return false;
         ubyte seq = _command_seq++;
         uint prop = SystemProperty.endpoint_state_0 | endpoint;
         ubyte[1] value = [ state ];
@@ -712,6 +762,7 @@ private:
             }
             case Phase.protocol_version:
                 _protocol_version = value.length ? value[0] : 0;
+                mark_set!(typeof(this), "protocol-version")();
                 if (_protocol_version != 5)
                 {
                     log.error("secondary speaks CPC protocol v", _protocol_version, "; only v5 is supported");
@@ -738,6 +789,7 @@ private:
                                               value[8 .. 12][0 .. 4].littleEndianToNative!uint);
                     _secondary_version_len = cast(ubyte)(v.length < _secondary_version.length ? v.length : _secondary_version.length);
                     _secondary_version[0 .. _secondary_version_len] = v[0 .. _secondary_version_len];
+                    mark_set!(typeof(this), "secondary-version")();
                 }
                 _phase = Phase.app_version;
                 break;
@@ -749,6 +801,7 @@ private:
                     len = _app_version.length;
                 _app_version[0 .. len] = cast(const(char)[])value[0 .. len];
                 _app_version_len = cast(ubyte)len;
+                mark_set!(typeof(this), "app-version")();
                 _phase = Phase.done;
                 log.info("secondary CPC ", secondary_version, " (", app_version, "), protocol v", _protocol_version,
                          ", max payload ", actual_mtu);
@@ -767,6 +820,8 @@ private:
     {
         version (DebugCPCMessageFlow)
             log.tracef("--> ep {0} ctrl [{1,02x}] {2} bytes", endpoint, control, payload.length);
+        if (_trace_frames)
+            log.debugf("--> ep {0} ctrl [{1,02x}] {2}B: {3}", endpoint, control, payload.length, cast(void[])payload);
 
         ubyte[cpc_header_size] header = void;
         build_frame_header(header, endpoint, payload.length ? cast(ushort)(payload.length + 2) : 0, control);
@@ -972,6 +1027,8 @@ private:
                             channel_clear(_ep0);
                             _pending_cmds.clear();
                             _reset_attempts = 0;
+                            _handshake_attempts = 0; // sign of life: clear the give-up tally and unresponsive flag
+                            _unresponsive = false;
                             _phase = Phase.rx_capability;
                         }
                         else
@@ -1160,6 +1217,28 @@ private:
         return true;
     }
 
+    // drop a not-yet-emitted command frame from a channel's queue by its system-command seq (buffer[1]).
+    // only walks the queue, never in_flight -- an emitted frame may already have reached the secondary.
+    void cancel_queued_command(ref Channel ch, ubyte seq)
+    {
+        Message* prev = null;
+        for (Message* m = ch.queue; m; prev = m, m = m.next)
+        {
+            if (m.length >= 2 && m.buffer[1] == seq)
+            {
+                if (prev)
+                    prev.next = m.next;
+                else
+                    ch.queue = m.next;
+                if (ch.queue_tail is m)
+                    ch.queue_tail = prev;
+                --ch.queue_len;
+                release_message(m);
+                return;
+            }
+        }
+    }
+
     void channel_clear(ref Channel ch)
     {
         Message* next;
@@ -1218,6 +1297,7 @@ nothrow @nogc:
             return;
         detach();
         _cpc = value;
+        mark_set!(typeof(this), "cpc")();
         restart();
     }
 
@@ -1229,6 +1309,7 @@ nothrow @nogc:
             return;
         detach();
         _endpoint = value;
+        mark_set!(typeof(this), "endpoint")();
         restart();
     }
 
@@ -1306,7 +1387,18 @@ protected:
         MonoTime now = getTime();
         if (!_connect_pending && (_last_attempt == MonoTime() || now - _last_attempt >= connect_retry_interval))
         {
-            _connect_pending = trunk.submit_connect(this);
+            // only count an attempt that actually reached the wire; a submit refused because the trunk is
+            // congested (ep0 struggling) isn't the endpoint's failure, so it shouldn't burn its budget.
+            if (trunk.submit_connect(this))
+            {
+                _connect_pending = true;
+                if (++_connect_attempts >= max_connect_attempts)
+                {
+                    log.warning("endpoint ", _endpoint, " not connecting after ", _connect_attempts,
+                                " attempts; backing off");
+                    return CompletionStatus.error;
+                }
+            }
             _last_attempt = now;
         }
         return CompletionStatus.continue_;
@@ -1357,6 +1449,7 @@ package:
             // the secondary zeroes the endpoint's seq/ack window when it accepts the connection
             _channel = Channel();
             _refused = false;
+            _connect_attempts = 0;
             _connected = true;
             // adopt the trunk's learned payload limit as our L2 cap (the trunk finished its handshake before
             // we could connect); l2mtu follows down only if it was still pinned at the old max
@@ -1394,9 +1487,11 @@ private:
     bool _bound;
     bool _connect_pending;
     bool _refused;
+    ubyte _connect_attempts;
     MonoTime _last_attempt;
 
     enum connect_retry_interval = 1.seconds;
+    enum max_connect_attempts = 5; // connects issued per startup episode before erroring into the backoff
 
     void detach()
     {
@@ -1404,6 +1499,7 @@ private:
         _connected = false;
         _connect_pending = false;
         _refused = false;
+        _connect_attempts = 0;
         _last_attempt = MonoTime();
         clear_channel(trunk);
         if (_bound)
