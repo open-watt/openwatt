@@ -420,7 +420,8 @@ unittest
     queue.abort_all();
 
     Packet deadline_packet;
-    deadline_packet.init!RawFrame(data[], MonoTime());
+    MonoTime base = MonoTime(1);
+    deadline_packet.init!RawFrame(data[], base);
     deadline_packet.pcp = PCP.ca;
     QueuePolicy deadline;
     deadline.urgent_pcp = PCP.ic;
@@ -429,7 +430,7 @@ unittest
 
     int deadline_tag = queue.enqueue(deadline_packet, null, &deadline);
     assert(deadline_tag > 0);
-    queue.timeout_stale(MonoTime(100));
+    queue.timeout_stale(base + 100.msecs);
     QueuedFrame* promoted = queue.dequeue();
     assert(promoted !is null);
     assert(promoted.tag == deadline_tag);
@@ -441,7 +442,7 @@ unittest
     deadline.deadline_after = 400;
     deadline_tag = queue.enqueue(deadline_packet, null, &deadline);
     assert(queue.is_queued(cast(ubyte)deadline_tag));
-    queue.timeout_stale(MonoTime(400));
+    queue.timeout_stale(base + 400.msecs);
     assert(!queue.is_queued(cast(ubyte)deadline_tag));
 
     Packet background;
