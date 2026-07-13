@@ -12,18 +12,22 @@ import urt.time;
 
 import manager;
 import manager.base;
-import protocol.tls : Certificate;
 import manager.collection;
+import manager.console.session : ConsoleSession = Session;
+import manager.console.table : Table;
 import manager.expression : NamedArgument;
+import manager.features : is_tiny;
 
 import router.stream;
 import protocol.ip.tcp_stream;
-import protocol.tls : TLSServer;
+import protocol.tls : Certificate, TLSServer;
 
 import protocol.mqtt.codec;
 import protocol.mqtt.connection;
 import protocol.mqtt.session;
 import protocol.mqtt.topic;
+
+enum bool has_message_cache = !is_tiny;
 
 nothrow @nogc:
 
@@ -118,6 +122,181 @@ nothrow @nogc:
         publish_internal(null, client_id, topic, payload, properties, retain, timestamp);
     }
 
+    void print_retained(ConsoleSession session, const(char)[] filter = "#")
+    {
+        if (!filter)
+            filter = "#";
+        if (!validate_topic_filter(filter))
+        {
+            session.write_line("Invalid MQTT topic filter");
+            return;
+        }
+
+        Table table;
+        table.add_column("broker");
+        table.add_column("topic");
+        table.add_column("bytes", Table.TextAlign.right);
+        table.add_column("props", Table.TextAlign.right);
+        table.add_column("payload");
+
+        uint count;
+        _trie.match_retained(filter, (ref const RetainedMessage rm) nothrow @nogc {
+            table.add_row();
+            table.cell(name[]);
+            table.cell(rm.topic[]);
+            table.cell(tconcat(rm.payload.length));
+            table.cell(tconcat(rm.properties.length));
+            add_payload_cell(table, rm.payload[]);
+            ++count;
+        });
+
+        if (count == 0)
+        {
+            session.write_line("No retained MQTT messages");
+            return;
+        }
+        table.render(session);
+    }
+
+    static if (has_message_cache)
+    void print_cache(ConsoleSession session, const(char)[] filter = "#")
+    {
+        if (!filter)
+            filter = "#";
+        if (!validate_topic_filter(filter))
+        {
+            session.write_line("Invalid MQTT topic filter");
+            return;
+        }
+
+        if (_cache.empty)
+        {
+            session.write_line("No cached MQTT messages");
+            return;
+        }
+
+        Table table;
+        table.add_column("broker");
+        table.add_column("topic");
+        table.add_column("age", Table.TextAlign.right);
+        table.add_column("retained");
+        table.add_column("sender");
+        table.add_column("bytes", Table.TextAlign.right);
+        table.add_column("props", Table.TextAlign.right);
+        table.add_column("payload");
+
+        MonoTime now = getTime();
+        uint count;
+        foreach (kvp; _cache)
+        {
+            if (!topic_matches_filter(kvp.key[], filter))
+                continue;
+
+            table.add_row();
+            table.cell(name[]);
+            table.cell(kvp.key[]);
+            table.cell(age_cell(kvp.value.timestamp, now));
+            table.cell(kvp.value.retained ? "yes" : "no");
+            table.cell(kvp.value.sender[]);
+            table.cell(tconcat(kvp.value.payload.length));
+            table.cell(tconcat(kvp.value.properties.length));
+            add_payload_cell(table, kvp.value.payload[]);
+            ++count;
+        }
+
+        if (count == 0)
+        {
+            session.write_line("No cached MQTT messages");
+            return;
+        }
+        table.render(session);
+    }
+
+    void print_sessions(ConsoleSession session)
+    {
+        import urt.mem.temp : tconcat;
+
+        if (_sessions.empty)
+        {
+            session.write_line("No MQTT sessions");
+            return;
+        }
+
+        Table table;
+        table.add_column("broker");
+        table.add_column("client");
+        table.add_column("state");
+        table.add_column("stream");
+        table.add_column("proto");
+        table.add_column("expiry");
+        table.add_column("subs", Table.TextAlign.right);
+        table.add_column("in", Table.TextAlign.right);
+        table.add_column("out", Table.TextAlign.right);
+        table.add_column("will");
+
+        MonoTime now = getTime();
+        foreach (kvp; _sessions)
+        {
+            Session* s = kvp.value;
+            Connection* c = s.connection ? cast(Connection*)s.connection : null;
+            table.add_row();
+            table.cell(name[]);
+            table.cell(s.client_id[]);
+            table.cell(c ? "connected" : "detached");
+            table.cell(c ? c.stream_name() : "-");
+            table.cell(protocol_level_name(s.protocol_level));
+            table.cell(session_expiry_cell(s, now));
+            table.cell(tconcat(s.subscriptions.length));
+            table.cell(tconcat(s.pending_inbound.length));
+            table.cell(tconcat(s.pending_outbound.length));
+            table.cell(s.will.present ? (s.will.sent ? "sent" : "pending") : "-");
+        }
+        table.render(session);
+    }
+
+    void print_subscriptions(ConsoleSession session)
+    {
+        import urt.mem.temp : tconcat;
+
+        Table table;
+        table.add_column("broker");
+        table.add_column("client");
+        table.add_column("state");
+        table.add_column("filter");
+        table.add_column("qos", Table.TextAlign.right);
+        table.add_column("no-local");
+        table.add_column("rap");
+        table.add_column("retain");
+        table.add_column("sub-id", Table.TextAlign.right);
+
+        uint count;
+        foreach (kvp; _sessions)
+        {
+            Session* s = kvp.value;
+            foreach (ref sub; s.subscriptions)
+            {
+                table.add_row();
+                table.cell(name[]);
+                table.cell(s.client_id[]);
+                table.cell(s.connection ? "connected" : "detached");
+                table.cell(sub.filter[]);
+                table.cell(tconcat(sub.qos));
+                table.cell(sub.no_local ? "yes" : "no");
+                table.cell(sub.retain_as_published ? "yes" : "no");
+                table.cell(retain_handling_name(sub.retain_handling));
+                table.cell(sub.subscription_id == 0 ? "-" : tconcat(sub.subscription_id));
+                ++count;
+            }
+        }
+
+        if (count == 0)
+        {
+            session.write_line("No MQTT session subscriptions");
+            return;
+        }
+        table.render(session);
+    }
+
     package Session* claim_or_create_session(const(char)[] client_id, bool clean_start, ProtocolLevel level, ref bool present)
     {
         Session** existing = client_id in _sessions;
@@ -152,16 +331,13 @@ nothrow @nogc:
         return s;
     }
 
-    package ubyte subscribe_session(Session* s, const(char)[] filter, ubyte requested_qos, bool no_local,
-                                    bool retain_as_published, ubyte retain_handling, uint subscription_id)
+    package ubyte subscribe_session(Session* s, const(char)[] filter, ubyte requested_qos, bool no_local, bool retain_as_published, ubyte retain_handling, uint subscription_id)
     {
         // Cap granted QoS until outbound QoS 1/2 ships.
         ubyte granted = 0;
 
         String filter_str = filter.makeString(defaultAllocator());
-        bool was_new = s.record_subscription(filter_str, granted, no_local,
-                                             retain_as_published, retain_handling,
-                                             subscription_id);
+        bool was_new = s.record_subscription(filter_str, granted, no_local, retain_as_published, retain_handling, subscription_id);
 
         Subscription sub;
         sub.subscriber = s;
@@ -192,8 +368,7 @@ nothrow @nogc:
         return removed_from_trie || removed_from_session;
     }
 
-    package void publish(Session* publisher, const(char)[] topic, const(ubyte)[] payload,
-                         const(ubyte)[] properties, bool retain, MonoTime timestamp)
+    package void publish(Session* publisher, const(char)[] topic, const(ubyte)[] payload, const(ubyte)[] properties, bool retain, MonoTime timestamp)
     {
         const(char)[] sender_id = publisher ? publisher.client_id[] : null;
         publish_internal(publisher, sender_id, topic, payload, properties, retain, timestamp);
@@ -264,6 +439,11 @@ protected:
         _sessions.clear();
 
         _trie.clear();
+        static if (has_message_cache)
+        {
+            _cache.clear();
+            _cache_order.clear();
+        }
         return CompletionStatus.complete;
     }
 
@@ -316,9 +496,161 @@ private:
     Array!(Connection*) _connections;
     TopicTrie _trie;
 
-    void publish_internal(Session* publisher, const(char)[] sender_id, const(char)[] topic,
-                          const(ubyte)[] payload, const(ubyte)[] properties, bool retain, MonoTime timestamp)
+    static if (has_message_cache)
     {
+        enum max_cached_messages = 512;
+        Map!(String, CachedMessage) _cache;
+        Array!String _cache_order;
+
+        struct CachedMessage
+        {
+            @disable this(this);
+
+            String sender;
+            Array!ubyte payload;
+            Array!ubyte properties;
+            MonoTime timestamp;
+            bool retained;
+        }
+    }
+
+    static void add_payload_cell(ref Table table, const(ubyte)[] payload)
+    {
+        enum max_preview = 80;
+
+        if (payload.length == 0)
+        {
+            table.cell("");
+            return;
+        }
+
+        size_t n = payload.length < max_preview ? payload.length : max_preview;
+        bool text = true;
+        foreach (b; payload[0 .. n])
+        {
+            if (b < 0x20 || b > 0x7e)
+            {
+                text = false;
+                break;
+            }
+        }
+
+        MutableString!0 buf;
+        if (text)
+        {
+            buf.append(cast(const(char)[])payload[0 .. n]);
+            if (payload.length > n)
+                buf.append("...");
+            table.cell(buf[]);
+            return;
+        }
+
+        foreach (i, b; payload[0 .. n])
+        {
+            if (i > 0)
+                buf.append(' ');
+            buf.append(hex_digit(b >> 4), hex_digit(b & 0x0f));
+        }
+        if (payload.length > n)
+            buf.append(" ...");
+        table.cell(buf[]);
+    }
+
+    static char hex_digit(uint value) pure
+        => cast(char)(value < 10 ? '0' + value : 'a' + value - 10);
+
+    static const(char)[] protocol_level_name(ProtocolLevel level)
+    {
+        final switch (level) with (ProtocolLevel)
+        {
+            case _3_1:   return "3.1";
+            case _3_1_1: return "3.1.1";
+            case _5:     return "5";
+        }
+    }
+
+    static const(char)[] retain_handling_name(ubyte value)
+    {
+        switch (value)
+        {
+            case 0:  return "always";
+            case 1:  return "new";
+            case 2:  return "never";
+            default: return "?";
+        }
+    }
+
+    static const(char)[] session_expiry_cell(Session* s, MonoTime now)
+    {
+        import urt.mem.temp : tconcat;
+
+        if (s.connection)
+            return "-";
+        if (s.expiry_interval == expiry_never)
+            return "never";
+        if (s.expiry_interval == 0)
+            return "now";
+
+        Duration limit = s.expiry_interval.seconds;
+        Duration elapsed = now - s.disconnect_time;
+        if (elapsed >= limit)
+            return "expired";
+        return tconcat((limit - elapsed).as!"seconds", "s");
+    }
+
+    static if (has_message_cache)
+    static const(char)[] age_cell(MonoTime timestamp, MonoTime now)
+    {
+        if (timestamp == MonoTime.init)
+            return "-";
+        Duration age = now - timestamp;
+        if (age.as!"seconds" < 120)
+            return tconcat(age.as!"seconds", "s");
+        if (age.as!"minutes" < 120)
+            return tconcat(age.as!"minutes", "m");
+        return tconcat(age.as!"hours", "h");
+    }
+
+    static if (has_message_cache)
+    void store_cache(const(char)[] sender_id, const(char)[] topic, const(ubyte)[] payload, const(ubyte)[] properties, bool retain, MonoTime timestamp)
+    {
+        CachedMessage* existing = topic in _cache;
+        if (existing)
+        {
+            update_cached_message(*existing, sender_id, payload, properties, retain, timestamp);
+            return;
+        }
+
+        while (_cache_order.length >= max_cached_messages)
+        {
+            String evict = _cache_order[0].move;
+            _cache_order.remove(0);
+            _cache.remove(evict[]);
+        }
+
+        String key = topic.makeString(defaultAllocator());
+        String order_key = topic.makeString(defaultAllocator());
+        CachedMessage msg;
+        update_cached_message(msg, sender_id, payload, properties, retain, timestamp);
+        _cache.insert(key.move, msg.move);
+        _cache_order ~= order_key.move;
+    }
+
+    static if (has_message_cache)
+    static void update_cached_message(ref CachedMessage msg, const(char)[] sender_id, const(ubyte)[] payload, const(ubyte)[] properties, bool retain, MonoTime timestamp)
+    {
+        msg.sender = sender_id ? sender_id.makeString(defaultAllocator()) : String();
+        msg.payload = payload;
+        msg.properties = properties;
+        msg.retained = retain;
+        msg.timestamp = timestamp;
+    }
+
+    void publish_internal(Session* publisher, const(char)[] sender_id, const(char)[] topic, const(ubyte)[] payload, const(ubyte)[] properties, bool retain, MonoTime timestamp)
+    {
+        static if (has_message_cache)
+            store_cache(sender_id, topic, payload, properties, retain, timestamp);
+
         if (retain)
             _trie.store_retained(topic, payload, properties, 0x01);
 
@@ -400,8 +732,7 @@ private:
                 certs[num_certs++] = cert;
 
         const(char)[] tls_name = Collection!TLSServer().generate_name(tconcat(name[], "_tls"));
-        _tls_server = Collection!TLSServer().create(tls_name, ObjectFlags.dynamic,
-            NamedArgument("port", _tls_port), NamedArgument("certificates", certs[0 .. num_certs]));
+        _tls_server = Collection!TLSServer().create(tls_name, ObjectFlags.dynamic, NamedArgument("port", _tls_port), NamedArgument("certificates", certs[0 .. num_certs]));
         if (!_tls_server)
         {
             log.error("failed to create MQTTS listener");
