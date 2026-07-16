@@ -244,7 +244,6 @@ nothrow @nogc:
 
         id_init();
         init_collections();
-        init_elements();
 
         register_enum!Boolean();
         register_enum!ObjectFlags();

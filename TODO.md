@@ -115,6 +115,51 @@ status block). Remaining legs, roughly in order:
 
 ## Data model
 
+- **Commands / device logic in profiles (design 2026-07-16; the ancient "commands" TODO's
+  answer)**: the missing write/control facet - how a state-element write becomes a transmitted/
+  written protocol action, INCLUDING stateful logic (toggles: only fire if desired != current).
+  Today this would live as per-device binding code. Proposal: **bring the automation/expression
+  engine down into profiles** so device behaviour is data-driven. Invents almost nothing - reuses
+  the expression evaluator (`@`-refs, arithmetic, funcs; expression.d), the automation `on/if/do`
+  shape, and Element2 change events. Three layers:
+  1. **Actions as generative expressions**, not static captures. An action computes its payload
+     from managed state:
+     `action light = ook(addr=df258, button=7, counter=$seq, check=$seq ^ 7 ^ 7)`
+     `action speed = ook(addr=df258, button=$b, counter=$seq, check=$seq ^ $b ^ 7)`
+     where `$seq` is a per-device managed counter the binding advances each emit (protocol-
+     specific rolling counter), and the checksum is deterministic. Captures the whole protocol
+     once; every transmission generated fresh (not replay).
+  2. **Elements in the component template** = the state model (fan.speed, light.on, ...).
+  3. **Element-change scripts carry the logic** - the automation `if/do` scoped to a device:
+     `on fan.speed : play(speed[$value])`                         # absolute
+     `on light.on  : if $value != @light.on then play(light)`     # toggle: fire only to change
+     Solves the toggle problem (know current state before commanding a toggle) in two profile
+     lines, no binding code.
+  GENERALISES past RF: "on element change, invoke a named action with logic" is protocol-
+  agnostic - the action is an OOK expression for RF, a topic-write for MQTT, a register-write for
+  Modbus. So `action`/`play` IS the general commands primitive the write-binding/sink model lacks;
+  profiles become where device control is authored regardless of transport. SYMMETRIC for RX:
+  `on rx(button=7): @light.on = !@light.on` expresses decode->state (physical-remote-follows-us
+  sync) in the profile too. Scope: profile parser grows an expression/script layer; define a
+  DEVICE-SCRIPT EXECUTION CONTEXT (access to `@`-elements, the `play(action)` primitive, per-device
+  managed state like `$seq`). Less "new subsystem" than "point the automation engine at the device
+  layer". First customer: the RF433 fan (drafts conf/rf_profiles/brilliant_22034.conf +
+  src/protocol/rf433/package.d; Brilliant 22034 protocol fully reverse-engineered - see
+  memory/pi_433_wiring). Ties to: profile FUNCTIONS facet in the data-model redesign, automation
+  Phase 3 ($trigger context / typed action surface), and the GpioBinding signal-generator (TX).
+
+- **Data model / observation fabric redesign (settled 2026-07-15; full design in
+  [docs/DATA_MODEL.draft.md](docs/DATA_MODEL.draft.md), identity in
+  [src/manager/id.d](src/manager/id.d) header)**: typed element series (buckets, observers +
+  cursors, retention tiers, clock domains), series contract module shared by elements and
+  taps, operators absorbing Map/Sum/Alias (fixes accumulator integrating blind across gaps),
+  property projection (every Prop! semantically an element, physically lazy), Event! and
+  profile FUNCTIONS as the missing facets, Device-as-BaseObject via composition (kills
+  is_device trap), mesh trajectory (config authority is the new subsystem). Build order in the
+  doc; ID migration is the prerequisite step. Revert router/stream's provisional
+  SampleChannel/Seekable/SignalStream when starting. Draft: src/manager/element2.d (not in
+  vcxproj).
+
 - **Element deadband (settled design, build when needed)**: per-point change-event conditioning,
   standard SCADA/OPC report-by-exception. ONE mechanism, three surfaces: the filter itself lives in
   the element's subscription machinery - each subscriber record carries an effective band plus an
@@ -151,6 +196,25 @@ status block). Remaining legs, roughly in order:
   once when the motor stabilises) and cuts sync/record traffic from jittery samples at the source.
 
 ## Infrastructure
+
+- **ID strategy migration (settled 2026-07-15; full design in the header of
+  [src/manager/id.d](src/manager/id.d))**: replace hash-derived EIDs/CIDs with permanent
+  monotonic handles bound to objects, with names as the parking/rebind fallback. Ids are
+  two-part: EID = (container id, element part) - the container level is ONE id space with
+  per-type tables (CID type bits); Devices register as a type WITHOUT becoming BaseObjects
+  (g_app.devices Map dissolves into it), the data plane shards per container, device rename is
+  O(1) with no full-path interning, and property projections compute their EID as
+  (obj CID, Prop! index) with no lookup or cache. Kills ALL rekey
+  machinery: `rehash()`, `ElementTable.rekey`, `CollectionTable.rekey`, `do_rekey`,
+  `broadcast_rekey`, `rekey_field` all delete - rename-following becomes intrinsic (ids don't
+  move when objects rename) instead of repaired by reflection broadcast. Gains: forward
+  references and recreation-rebind via a parked-id claim state machine in insert(); O(1) rename/
+  death/claim regardless of ref count; no hash-collision concept; EID and CID unify on identical
+  semantics (ObjectRef and element refs share one follow-forwards + self-heal deref helper).
+  Rules that must hold system-wide: ids never persisted, never on the wire (sync exchanges names
+  once per session, binds varint session handles), no blind `hash_id` of a name to fabricate an
+  id. Prerequisite for the Element2/series work (element2.d draft holds `Element2*` in Cursor -
+  becomes an EID under this scheme).
 
 - **Async I/O end-state: the main loop's wait primitive IS the reactor** (decided 2026-07-12;
   supersedes the earlier "fold the workers onto one shared worker-thread reactor" plan).

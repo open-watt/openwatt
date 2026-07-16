@@ -1,5 +1,91 @@
 module manager.id;
 
+// ===========================================================================================
+// ID STRATEGY (settled 2026-07-15) - migration pending, see TODO.md "ID strategy migration"
+// ===========================================================================================
+//
+// Identity is the NAME. Ids are permanent, monotonic, process-local handles: never derived by
+// hashing a name, never persisted, never sent on the wire. The hash-based scheme below
+// (fnv1a ids + rehash chains + rekey repair) is to be deleted and replaced with:
+//
+// Ids are TWO-PART: EID = (container id, element part). The container level is ONE id space
+// with per-type tables (the CID type bits): collection objects and Devices are both registered
+// types in it, but only collection types carry BaseObject machinery - a Device is NOT a
+// BaseObject (no state machine; passive container materialized by bindings) and the ad-hoc
+// g_app.devices Map dissolves into the device type's table. The data plane shards per
+// container. Element part 0 may denote the container itself, unifying object refs and element
+// refs into one type. Packed 64-bit in RAM (acceptable: ids never persist and never wire).
+//
+//   container level: collection tables map name -> CID -> object; a rename touches ONE name
+//                    entry - children resolve by composition, so device rename is O(1) and
+//                    full element paths are never stored or interned
+//   element level:   each container owns a dense element-part table, one tagged word per part
+//                      bound   -> Element*   the part belongs to a live element
+//                      dormant -> null       parked, waiting for a claimant
+//                      forward -> part       permanent alias of another part (write-once)
+//                    relative paths resolve through the component tree
+//   hard-wired parts: property projections COMPUTE their EID as (obj CID, Prop! index) - a
+//                    compile-time literal index, no lookup, no cache; profile elements take
+//                    their template index, deterministic per profile version
+//
+// Lifecycle:
+//   - first mention of a name (a forward reference) parks a fresh id on the name
+//   - creation at a name claims the parked id as the object's primary
+//   - rename moves the OBJECT between name entries; ids do not move, so every held ref follows
+//     the object for free; the old name becomes an empty tombstone
+//   - rename onto a name holding parked id J: the claimant keeps its primary I and writes
+//     J = forward(I); both the followers and the waiters now reach the object
+//   - death parks the primary on the object's final name; refs deref to null
+//   - the next object created at that name claims the parked id and every ref resurrects
+//   - the machine instantiates at BOTH levels: container ids park on collection names, element
+//     parts park within their container's table; a forward reference under an absent container
+//     reserves the container id plus a stub element table, and each level claims independently
+//
+// Invariants:
+//   - every name resolves to at most one live object; every object has exactly one live name
+//     and one primary id
+//   - a forward slot is write-once: a forwarded id can never re-bind or park, so forwarding is
+//     permanent, transitive, immutable
+//   - no operation ever rewrites an id held in a ref. deref follows forward chains (they can
+//     grow through park-then-claim-by-rename cycles) and holders self-heal by writing the
+//     terminal id back through their own field - lossless at any time, from any thread
+//   - ids are not reclaimed in v1; a forward costs one immortal word
+//
+// Costs: deref is an array index plus forward hops until healed; rename, death, claim and
+// forward are each O(1) single-word writes. No broadcasts, no lists, no allocation, and no
+// collision concept (string hashing is internal to the name map).
+//
+// Reclamation (designed-for extension; unbounded DISTINCT NAMES are the exhaustion vector -
+// renames alone mint nothing, and empty tombstones are deleted eagerly): id slots carry a
+// count of durable holders (RAII wrapper for struct fields; hoisted locals are uncounted
+// borrows, safe because release defers to the frame boundary). Release at zero holders; zero
+// makes freelist reuse ABA-safe with no generation tags. Self-healing drains forwards to zero
+// through ordinary use, so rename-merge forwards self-collect. Name entries and their strings
+// (refcounted String, not the append-only intern table) release when no object, no parked id,
+// no holders. Nothing observable changes, so v1 ships without it; add when churn metrics
+// (id high-watermark in sysinfo) justify.
+//
+// CID is not merely unified with EID - it IS the EID's container part (type bits kept, slot
+// as a dense per-type index). The wire shares none of this: peers exchange names once per
+// session and bind session-local varint handles (introducer allocates, parity bit for
+// direction, never reused); config and containers persist names only.
+//
+// Migration:
+//   1. replace ElementTable (element.d) with per-container element-part tables owned by their
+//      containers; insert() becomes the claim state machine (absent -> reserve/new,
+//      parked/tombstone -> claim, live -> duplicate error); full-path interning deleted
+//   2. element destruction parks the primary part instead of nulling in place
+//   3. delete rehash(); hash_id survives only inside the collection name maps' string hashing
+//   4. CollectionTable becomes the container level of the same scheme; delete rekey(),
+//      do_rekey(), broadcast_rekey() and rekey_field() - rename-following becomes intrinsic
+//      instead of repaired
+//   5. ObjectRef and element refs converge on one EID ref type (element part 0 = the container
+//      itself), deref via a shared follow-forwards + self-heal helper
+//   6. audit holders: no persisted ids, no wire ids, no blind hashing - every id enters a
+//      holder through the table (property projections excepted: (obj CID, Prop! index) is
+//      computed, which is safe because both parts are table-issued identities)
+// ===========================================================================================
+
 import urt.algorithm : binary_search;
 import urt.array;
 import urt.hash : fnv1a;
@@ -7,6 +93,7 @@ import urt.mem.alloc : alloc, free;
 import urt.string.string;
 
 import manager.base;
+import manager.collection : CID;
 import manager.element : Element;
 
 nothrow @nogc:
@@ -46,9 +133,46 @@ struct ID(uint _type_bits)
         uint type_index() const pure
             => raw >> id_bits;
 
+        // the two-part EID (strategy above): this container id + an element part
+        EID element(ushort part) const pure
+            => EID(this, part);
+
         uint slot() const pure
             => raw & id_mask;
     }
+}
+
+// The two-part element id from the strategy above: container CID in the low 32 bits, element
+// part above it, top 16 bits spare. Element part 0 denotes the container itself, so object
+// refs and element refs converge on one type. The resolution tables land with the migration;
+// the handle's shape is settled now. Never persisted, never on the wire.
+struct EID
+{
+nothrow @nogc:
+
+    ulong raw;
+
+    enum EID invalid = EID();
+
+    this(CID container, ushort part = 0) pure
+    {
+        raw = container.raw | (ulong(part) << 32);
+    }
+
+    CID container() const pure
+        => CID(cast(uint)raw);
+
+    ushort part() const pure
+        => cast(ushort)(raw >> 32);
+
+    bool opCast(T : bool)() const pure
+        => raw != 0;
+
+    bool opEquals(EID rhs) const pure
+        => raw == rhs.raw;
+
+    size_t toHash() const pure
+        => cast(size_t)(raw ^ (raw >> 32));
 }
 
 void id_init()
