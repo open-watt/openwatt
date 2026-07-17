@@ -68,6 +68,7 @@ enum CollectionType : ubyte
     zigbee, // node, router, coordinator
     link,
     automation,
+    device, // NOT BaseObjects: the device type's table is g_app.devices, sharing the CID space
     count
 }
 

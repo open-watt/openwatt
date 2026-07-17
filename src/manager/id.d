@@ -316,6 +316,53 @@ nothrow @nogc:
         return p ? *p : 0;
     }
 
+    // `in`-operator style: transient pointer to the bound ref, or null; invalidated by the
+    // next mint (the slot array may move)
+    T* lookup(const(char)[] name)
+    {
+        uint t = terminal(find(name));
+        if (!t)
+            return null;
+        size_t* w = &_slots[][t];
+        return (*w && !(*w & 1)) ? cast(T*)w : null;
+    }
+
+    // iterate bound objects in slot order
+    auto values()
+    {
+        struct Range
+        {
+        nothrow @nogc:
+            IdMachine* m;
+            uint slot;
+            bool empty() const pure => slot > m.slot_count;
+            T front() pure => m.at(slot);
+            void popFront() { ++slot; advance(); }
+            private void advance() { while (slot <= m.slot_count && m.at(slot) is null) ++slot; }
+        }
+        auto r = Range(&this, 1);
+        r.advance();
+        return r;
+    }
+
+    // iterate the names of bound objects in slot order
+    auto names()
+    {
+        struct Range
+        {
+        nothrow @nogc:
+            IdMachine* m;
+            uint slot;
+            bool empty() const pure => slot > m.slot_count;
+            String front() pure => m.name_string(slot);
+            void popFront() { ++slot; advance(); }
+            private void advance() { while (slot <= m.slot_count && m.at(slot) is null) ++slot; }
+        }
+        auto r = Range(&this, 1);
+        r.advance();
+        return r;
+    }
+
     // the slot's name (terminal name for forwarded slots). the slice borrows the name entry's
     // storage: stable until that slot renames
     const(char)[] name_of(uint id) const pure

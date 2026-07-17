@@ -214,7 +214,7 @@ nothrow @nogc:
     Map!(String, IntrinsicFunction) intrinsic_functions;
     Map!(String, ISignalProvider) signal_providers;
 
-    Map!(const(char)[], Device) devices;
+    DeviceTable devices;
 
     uint update_rate_hz = 20;
 

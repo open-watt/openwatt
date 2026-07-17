@@ -11,12 +11,45 @@ import manager;
 import manager.component;
 import manager.element;
 import manager.expression;
+import manager.id : IdMachine;
 import manager.profile;
 
 nothrow @nogc:
 
 
 alias CreateElementHandler = void delegate(Device device, Element* e, ref const ElementDesc desc, ubyte index) nothrow @nogc;
+
+// The device type's table in the container id space: devices register as a type WITHOUT
+// becoming BaseObjects (no state machine; passive containers materialized by bindings).
+// Map-flavoured surface so lookup sites read naturally; slots are the device CIDs-to-be
+// (CollectionType.device carries the type bits).
+struct DeviceTable
+{
+nothrow @nogc:
+
+    Device* opBinaryRight(string op : "in")(const(char)[] name)
+        => _machine.lookup(name);
+
+    void insert(const(char)[] name, Device device)
+    {
+        uint slot = _machine.claim(name, device);
+        debug assert(slot, "device name already in use");
+    }
+
+    auto values() => _machine.values();
+    auto keys() => _machine.names();
+
+    size_t length()
+    {
+        size_t n = 0;
+        foreach (d; _machine.values())
+            ++n;
+        return n;
+    }
+
+package:
+    IdMachine!Device _machine;
+}
 
 enum ComputationKind : ubyte
 {
