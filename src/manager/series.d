@@ -9,6 +9,7 @@ module manager.series;
 // vocabulary, boxed through Variant only at the console/API edges.
 
 import urt.array;
+import urt.meta.enuminfo : VoidEnumInfo;
 import urt.si.quantity : Quantity;
 import urt.si.unit : ScaledUnit;
 import urt.time;
@@ -150,6 +151,7 @@ nothrow @nogc:
     uint rate;                     // frames/sec; 0 = irregular, records carry explicit timestamps
     ClockDomain* clock;            // null = wall-native; regular device series index in their own domain
     const(Constraint)* constraint; // null = unconstrained; write-path validation + UI/schema metadata
+    const(VoidEnumInfo)* enum_info; // integer types box as enum Variants when set
 
     bool regular() const pure => rate != 0;
     bool domain_native() const pure => rate == 0 && clock !is null;
@@ -286,7 +288,11 @@ bool unbox_scalar(ref const Variant v, ref const DataFormat fmt, out Scalar s)
 }
 
 private Variant box_int(long v, ref const DataFormat fmt)
-    => fmt.unit == ScaledUnit() ? Variant(v) : Variant(Quantity!long(v, fmt.unit));
+{
+    if (fmt.enum_info)
+        return Variant(cast(ulong)v, fmt.enum_info);
+    return fmt.unit == ScaledUnit() ? Variant(v) : Variant(Quantity!long(v, fmt.unit));
+}
 
 private Variant box_float(double v, ref const DataFormat fmt)
     => fmt.unit == ScaledUnit() ? Variant(v) : Variant(Quantity!double(v, fmt.unit));

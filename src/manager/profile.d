@@ -476,10 +476,25 @@ nothrow @nogc:
     // null = no native representation until the type registry lands (enums, strings, dates, ...)
     const(DataFormat)* series_format(ref const ValueDesc desc)
     {
-        if (desc.is_custom || desc.is_enum || desc.is_bitfield || desc.is_string || desc.is_date_time)
+        if (desc.is_custom || desc.is_string || desc.is_date_time)
             return null;
         if (desc.data_type & DataType.array)
             return null;
+
+        if (desc.is_enum)
+        {
+            // the sampled value is the integer raw regardless of wire kind (enumf32 casts)
+            ValueType et;
+            switch (desc.data_length)
+            {
+                case 1:  et = ValueType.u8;  break;
+                case 2:  et = ValueType.u16; break;
+                case 4:  et = ValueType.u32; break;
+                case 8:  et = ValueType.u64; break;
+                default: return null;
+            }
+            return mint_series_format(et, ScaledUnit(), desc.enum_info);
+        }
 
         ValueType vt;
         if (desc.is_bool)
@@ -512,6 +527,8 @@ nothrow @nogc:
             return mint_series_format(ValueType.bool_, desc.unit);
         if (desc.type == TextType.num)
             return mint_series_format(ValueType.f64, desc.unit);
+        if (desc.type == TextType.enum_ || desc.type == TextType.bf)
+            return mint_series_format(ValueType.s64, ScaledUnit(), desc.enum_info);
         return null;
     }
 
@@ -623,17 +640,18 @@ nothrow @nogc:
     }
 
 private:
-    const(DataFormat)* mint_series_format(ValueType vt, ScaledUnit unit)
+    const(DataFormat)* mint_series_format(ValueType vt, ScaledUnit unit, const(VoidEnumInfo)* enum_info = null)
     {
         foreach (DataFormat* f; _series_formats)
         {
-            if (f.type == vt && f.unit == unit)
+            if (f.type == vt && f.unit == unit && f.enum_info is enum_info)
                 return f;
         }
         DataFormat* f = defaultAllocator().allocT!DataFormat();
         f.type = vt;
         f.semantics = Semantics.held;   // matches legacy change-only delivery; profiles grow a semantics field later
         f.unit = unit;
+        f.enum_info = enum_info;
         _series_formats ~= f;
         return f;
     }
@@ -712,9 +730,18 @@ unittest
     const(DataFormat)* g = p.series_format(raw);
     assert(g && g.type == ValueType.s16 && g !is f);
 
-    // enums have no native representation until the type registry lands
-    ValueDesc en = ValueDesc(cast(DataType)(DataType.u16 | DataType.enumeration), null);
-    assert(p.series_format(en) is null);
+    // enums store the raw integer natively and box through the descriptor
+    import urt.meta.enuminfo : enum_info;
+    import urt.variant : Variant;
+    import manager.series : box_record;
+    enum TestMode { off, on, auto_ }
+    ValueDesc en = ValueDesc(cast(DataType)(DataType.u16 | DataType.enumeration), enum_info!TestMode.make_void());
+    const(DataFormat)* h = p.series_format(en);
+    assert(h && h.type == ValueType.u16 && h.enum_info !is null);
+    assert(p.series_format(en) is h);
+    ushort raw16 = 1;
+    Variant bv = box_record(&raw16, *h);
+    assert(bv.is_enum && bv.asLong == 1);
 
     // text twin: numerics and bools map, and share the mint cache with the binary path
     TextValueDesc tnum = TextValueDesc(TextType.num, ScaledUnit(Volt));
