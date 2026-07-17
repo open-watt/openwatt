@@ -409,6 +409,11 @@ protected:
         Profile* prof = _current_pass == Pass.serve ? _serve_profile_data : _profile_data;
         ref const ElementDesc_Modbus mb = prof.get_mb(desc.element);
 
+        // client-pass elements decode through this binding's static descs; serve-pass
+        // elements are produced elsewhere with shapes this profile doesn't govern
+        if (_current_pass != Pass.serve && !e.series.format)
+            e.series.format = prof.series_format(mb.value_desc);
+
         ubyte[256] tmp = void;
         tmp[0 .. mb.value_desc.data_length] = 0;
         e.value = sample_value(tmp.ptr, mb.value_desc);
