@@ -25,10 +25,7 @@ enum ValueType : ubyte
     u32, s32,
     u64, s64,
     f32, f64,
-    enum_,
-    string_embed,
-    object,
-    // embedded types...
+    // indirect types...
     string_,
     variant
 }
@@ -37,12 +34,14 @@ ubyte value_stride(ValueType t) pure
 {
     final switch (t) with (ValueType)
     {
-        case bool_, u8, s8:        return 1;
-        case u16, s16:             return 2;
-        case u32, s32, f32, enum_: return 4;
-        case u64, s64, f64:        return 8;
-        case string_:              return 0; // TODO: variable-stride records
-        case variant:              return cast(ubyte)Variant.sizeof;
+        case bool_, u8, s8:     return 1;
+        case u16, s16:          return 2;
+        case u32, s32, f32:     return 4;
+        case u64, s64, f64:     return 8;
+        // indirect types are just pointers
+        case string_:           return size_t.sizeof;
+        // this one is special; `Scalar` will be indirect, but buffers will be by-value
+        case variant:           return Variant.sizeof;
     }
 }
 
@@ -143,6 +142,7 @@ nothrow @nogc:
     const(Constraint)* constraint; // null = unconstrained; write-path validation + UI/schema metadata
 
     bool regular() const pure => rate != 0;
+    bool domain_native() const pure => rate == 0 && clock !is null;
     ubyte stride() const pure => value_stride(type);
 }
 
@@ -183,25 +183,25 @@ nothrow @nogc:
     }
 }
 
-// Storage and delivery are one shape: the block an observer receives, the block a cursor
-// returns, and the bucket's memory layout. times is null iff the series is regular; blocks
-// never span buckets.
 struct RecordBlock
 {
 nothrow @nogc:
 
-    const(DataFormat)* format;
-    const(void)* data;
-    const(SysTime)* times;
-    SysTime t0;                 // regular only
     ulong first_index;
+    ulong t0;           // time base
+    const(uint)* ts;    // null if the series is regular
+    const(void)* data;
+    const(DataFormat)* format;
     uint count;
 
     const(void)[] records() const pure
         => data[0 .. count * format.stride];
 
-    SysTime time(uint i) const pure
-        => times ? times[i] : t0 + nsecs(i * 1_000_000_000L / format.rate);
+    SysTime time(size_t i) const
+        => format.clock ? format.clock.to_wall(tick(i)) : SysTime(tick(i) * 1000);
+
+    ulong tick(size_t i) const pure
+        => t0 + (ts ? ts[i] : i);
 
     ref const(T) get(T)(uint i) const pure
         => (cast(const(T)*)data)[i];
@@ -252,17 +252,21 @@ nothrow @nogc:
 struct Bucket
 {
     ulong first_index;
-    SysTime first_time;
-    SysTime last_time;
+    ulong first_tick;
+    uint last_offset;
     uint count;
     uint capacity;
-    bool follows_gap;
+    bool follows_gap;  // <- we should steal a bit for this!
     void* samples;
-    SysTime* times;     // null when regular
+    uint* offsets;     // null when regular
+
+pure nothrow @nogc:
+    ulong last_tick() const => first_tick + last_offset;
+    SysTime first_time() const => SysTime(first_tick * 1000);
+    SysTime last_time() const => SysTime(last_tick * 1000);
+    SysTime get_time(size_t i) const => SysTime((first_tick + (offsets ? offsets[i] : i)) * 1000);
 }
 
-// Everything retention costs lives here; a retention=none element carries only the null
-// pointer. Cursors are meaningless without history, so their registry lives here too.
 struct SeriesStore
 {
 nothrow @nogc:
@@ -318,12 +322,8 @@ nothrow @nogc:
             n = max_records;
         r.data = cast(const(ubyte)*)b.samples + offset*fmt.stride;
         r.count = n;
-        if (b.times)
-            r.times = b.times + offset;
-        else if (fmt.clock)
-            r.t0 = fmt.clock.to_wall(from_index);
-        else
-            r.t0 = b.first_time + nsecs(offset * 1_000_000_000L / fmt.rate);
+        r.ts = b.offsets ? b.offsets + offset : null;
+        r.t0 = b.offsets ? b.first_tick : b.first_tick + offset;
         r.first_index = from_index;
         return r;
     }
@@ -365,7 +365,7 @@ nothrow @nogc:
         _latest = s;
         _last_update = t;
         SysTime[1] time = t;
-        append(s.raw[0 .. format.stride], time[], t, who);
+        append(s.raw[0 .. format.stride], time[], who);
     }
 
     void observe_record(const(void)[] record, SysTime t = getSysTime(), Observer who = null)
@@ -383,17 +383,32 @@ nothrow @nogc:
         _latest.raw[] = 0;
         _latest.raw[0 .. format.stride] = (cast(const(ubyte)[])samples)[$ - format.stride .. $];
         _last_update = times[$-1];
-        append(samples, times, times[0], who);
+        append(samples, times, who);
     }
 
-    void append_block(const(void)[] samples, SysTime t0, Observer who = null)
+    void observe_block(const(void)[] samples, const(ulong)[] ticks, Observer who = null)
     {
-        debug assert(format.regular);
+        debug assert(format.domain_native);
+        uint n = cast(uint)ticks.length;
+        if (n == 0)
+            return;
+        debug assert(samples.length == n * format.stride);
         _latest.raw[] = 0;
         _latest.raw[0 .. format.stride] = (cast(const(ubyte)[])samples)[$ - format.stride .. $];
-        _last_update = t0 + nsecs((samples.length / format.stride - 1) * 1_000_000_000L / format.rate);
-        append(samples, null, t0, who);
+        _last_update = format.clock.to_wall(ticks[$-1]);
+        append(samples, ticks, ticks[0], who);
     }
+
+    // TODO: we meed to rethink appending regular samples API; adding data, the api might assume the samples follow the last sample
+    //       but if we're adding after a gap, then we need to synthesise a gap...
+//    void append_block(const(void)[] samples, SysTime t0, Observer who = null)
+//    {
+//        debug assert(format.regular);
+//        _latest.raw[] = 0;
+//        _latest.raw[0 .. format.stride] = (cast(const(ubyte)[])samples)[$ - format.stride .. $];
+//        _last_update = t0 + nsecs((samples.length / format.stride - 1) * 1_000_000_000L / format.rate);
+//        append(samples, null, t0, who);
+//    }
 
     void mark_gap(Observer who = null)
     {
@@ -491,33 +506,46 @@ private:
 
     enum bucket_capacity = 256; // TODO: scale with rate (target a time span, not a record count)
 
-    void append(const(void)[] samples, const(SysTime)[] times, SysTime t0, Observer who)
+    void append(const(void)[] samples, const(SysTime)[] times, Observer who)
     {
+        import urt.mem : alloca;
+
         ubyte stride = format.stride;
         uint n = cast(uint)(samples.length / stride);
+        assert(times is null || times.length == n, "times array must match sample count");
+
+        uint[] ts;
+        if (times.length <= 512)
+            ts = (cast(uint*)alloca(times.length * uint.sizeof))[0 .. times.length];
+        else
+            ts = cast(uint[])alloc(times.length * uint.sizeof, uint.sizeof, MemFlags.fastest);
+        scope(exit) { if (times.length > 512) free(ts); }
 
         RecordBlock blk;
         blk.format = format;
         blk.data = samples.ptr;
-        blk.times = times.ptr;
-        blk.t0 = t0;
+        blk.ts = ts.ptr;
+        blk.t0 = times[0].ticks / 1000;
         blk.count = n;
+        foreach (i, t; times)
+            ts[i] = cast(uint)((t - times[0]).ticks / 1000);
 
         bool follows_gap = (_flags & Flags.gap_open) != 0;
         _flags &= ~Flags.gap_open;
 
         if (_history)
         {
-            Bucket* b = writable_bucket(n, follows_gap);
+            Bucket* b = writable_bucket(n, follows_gap, blk.t0 + ts[n - 1]);
             (cast(ubyte*)b.samples)[b.count*stride .. (b.count + n)*stride] = cast(const(ubyte)[])samples[];
-            if (b.times)
-                b.times[b.count .. b.count + n] = times[];
             if (b.count == 0)
-                b.first_time = times.length ? times[0] : t0;
-            b.last_time = times.length ? times[$-1] : t0 + nsecs((n - 1) * 1_000_000_000L / format.rate);
+                b.first_tick = blk.t0;
+            uint offset = cast(uint)(blk.t0 - b.first_tick);
+            for (uint i = 0; i < n; ++i)
+                b.offsets[b.count + i] = offset + ts[i];
+            b.count += n;
+            b.last_offset = b.offsets[b.count - 1];
 
             blk.first_index = _history.head;
-            b.count += n;
             _history.head += n;
         }
 
@@ -529,10 +557,66 @@ private:
         // TODO: reactor-thread producers must defer observer dispatch and dirty marking to the main loop
     }
 
-    Bucket* writable_bucket(uint n, bool follows_gap)
+    void append(const(void)[] samples, const(ulong)[] times, ulong t0, Observer who)
+    {
+        import urt.mem : alloca;
+
+        ubyte stride = format.stride;
+        uint n = cast(uint)(samples.length / stride);
+        assert(times is null || times.length == n, "times array must match sample count");
+
+        uint[] ts;
+        if (times.length <= 512)
+            ts = (cast(uint*)alloca(times.length * uint.sizeof))[0 .. times.length];
+        else
+            ts = cast(uint[])alloc(times.length * uint.sizeof, uint.sizeof, MemFlags.fastest);
+        scope(exit) { if (times.length > 512) free(ts); }
+
+        RecordBlock blk;
+        blk.format = format;
+        blk.data = samples.ptr;
+        blk.ts = ts.ptr;
+        blk.t0 = times.length ? times[0] : t0;
+        blk.count = n;
+        foreach (i, t; times)
+            ts[i] = cast(uint)(t - t0);
+
+        bool follows_gap = (_flags & Flags.gap_open) != 0;
+        _flags &= ~Flags.gap_open;
+
+        if (_history)
+        {
+            Bucket* b = writable_bucket(n, follows_gap, times.length ? times[n - 1] : t0);
+            (cast(ubyte*)b.samples)[b.count*stride .. (b.count + n)*stride] = cast(const(ubyte)[])samples[];
+            if (b.count == 0)
+                b.first_tick = blk.t0;
+            if (b.offsets)
+            {
+                for (uint i = 0; i < n; ++i)
+                    b.offsets[b.count + i] = cast(uint)(times[i] - b.first_tick);
+            }
+            b.count += n;
+            b.last_offset = times.length ? b.offsets[b.count - 1] : b.count - 1;
+
+            blk.first_index = _history.head;
+            _history.head += n;
+        }
+
+        for (Subscription* s = _subs; s; s = s.next)
+            if (s.observer !is who)
+                s.observer.on_records(this, blk, who);
+        mark_dirty();
+
+        // TODO: reactor-thread producers must defer observer dispatch and dirty marking to the main loop
+    }
+
+    Bucket* writable_bucket(uint n, bool follows_gap, ulong max_tick)
     {
         Bucket* b = _history.buckets.length ? _history.buckets[$-1] : null;
-        if (!b || b.count + n > b.capacity || follows_gap)
+        // roll when the new block's offset from this bucket's base would exceed the uint offset field:
+        // a slow stream spanning >~71 min at 1 MHz, or a base discontinuity that would underflow it
+        bool overflow = b && b.offsets && b.count && max_tick - b.first_tick > uint.max;
+        if (!b || b.count + n > b.capacity || follows_gap || overflow)
         {
             b = alloc_bucket(n > bucket_capacity ? n : bucket_capacity);
             b.first_index = _history.head;
@@ -549,7 +633,7 @@ private:
         b.capacity = capacity;
         b.samples = alloc(capacity * format.stride).ptr;
         if (!format.regular)
-            b.times = cast(SysTime*)alloc(capacity * SysTime.sizeof).ptr;
+            b.offsets = cast(uint*)alloc(capacity * uint.sizeof).ptr;
         return b;
     }
 
@@ -578,7 +662,6 @@ unittest
     import urt.time : from_unix_time_ns;
 
     static immutable DataFormat f64_held = DataFormat(ValueType.f64, Semantics.held);
-    static immutable DataFormat s16_sampled = DataFormat(ValueType.s16, Semantics.sampled, ScaledUnit.init, 1000);
 
     // retention=none: latest and last_update track, nothing is stored
     Element2 n;
@@ -620,23 +703,10 @@ unittest
     assert(e.record_count == 6);
     assert(e.latest.f64_ == 6.0);
     b = c.next(16);
-    assert(b.count == 3 && b.times !is null && b.time(2) == from_unix_time_ns(13_000));
+    assert(b.count == 3 && b.ts !is null && b.time(2) == from_unix_time_ns(13_000));
     e.close_cursor(c);
 
-    // regular series: no time storage, timestamps derived from rate
-    Element2 r;
-    r.format = &s16_sampled;
-    r.ensure_history();
-    short[4] s = [10, 20, 30, 40];
-    r.append_block(s[], from_unix_time_ns(1_000_000));
-    assert(r.record_count == 4);
-    assert(r.latest.raw[0 .. 2] == [cast(ubyte)40, 0]);
-    Cursor rc = r.open_cursor(0);
-    RecordBlock rb = rc.next(16);
-    assert(rb.count == 4 && rb.times is null);
-    assert(rb.get!short(2) == 30);
-    assert(rb.time(3) == from_unix_time_ns(1_000_000 + 3_000_000));
-    r.close_cursor(rc);
+    // TODO: regular-series test returns once append_block is rebuilt and tick() is rate-aware
 }
 
 
