@@ -269,7 +269,8 @@ status block). Remaining legs, roughly in order:
   refactor; (1) the park/claim/forward machine standalone + unit-tested (dense per-type slot
   arrays, next_slot++ allocator, separate name map holding parked ids); (2) container cutover
   (CollectionTable, delete ALL rekey machinery, then Devices as a container type); (3) element
-  index tables + Cursor->EID; (4) unified EID ref type; (5) holder audit.
+  index tables + Cursor->EID; (4) element ref type (EID + self-heal; ObjectRef stays CID -
+  a reference to a root, never an element; amended 2026-07-18); (5) holder audit.
   Step 2 LANDED 2026-07-17 (both halves): (2a) CollectionTable reimplemented over
   IdMachine!BaseObject - CID = type bits + dense slot, name setter calls table.rename (the id
   never moves, held refs follow intrinsically), and ALL rekey machinery deleted (hash_id/rehash

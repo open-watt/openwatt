@@ -13,8 +13,10 @@ module manager.id;
 // types in it, but only collection types carry BaseObject machinery - a Device is NOT a
 // BaseObject (no state machine; passive container materialized by bindings) and the ad-hoc
 // g_app.devices Map dissolves into the device type's table. The data plane shards per
-// container. Element index 0 may denote the container itself, unifying object refs and element
-// refs into one type. Packed 64-bit in RAM (acceptable: ids never persist and never wire).
+// container. Element index 0 may denote the container itself, so value-level handles (ref_
+// boxing, automation targets, mesh addressing) can address objects and elements with one EID;
+// TYPED refs stay distinct - ObjectRef is a CID (a reference to a root, never an element),
+// element refs hold EIDs. Packed 64-bit in RAM (acceptable: ids never persist and never wire).
 //
 //   container level: collection tables map name -> CID -> object; a rename touches ONE name
 //                    entry - children resolve by composition, so device rename is O(1) and
@@ -91,8 +93,10 @@ module manager.id;
 //      destruction parks the primary index instead of nulling in place; full-path interning
 //      stays deleted (legacy ElementTable + hash-EIDs already removed from element.d);
 //      Cursor trades its Element2* for an EID
-//   4. ObjectRef and element refs converge on one EID ref type (element index 0 = the container
-//      itself), deref via a shared follow-forwards + self-heal helper
+//   4. element refs get their own EID-holding ref type with the same follow-forwards +
+//      self-heal discipline as ObjectRef; ObjectRef stays CID (don't widen every object ref
+//      by an always-zero index, and don't make index != 0 representable in a ref that can
+//      never mean it). EID with index 0 remains the value-level either-kind handle
 //   5. audit holders: no persisted ids, no wire ids, no blind hashing - every id enters a
 //      holder through the table (property projections excepted: (obj CID, Prop! index) is
 //      computed, which is safe because both components are table-issued identities)
@@ -152,9 +156,9 @@ struct ID(uint _type_bits)
 }
 
 // The two-level element id from the strategy above: container CID in the low 32 bits, element
-// index above it, top 16 bits spare. Element index 0 denotes the container itself, so object
-// refs and element refs converge on one type. The resolution tables land with the migration;
-// the handle's shape is settled now. Never persisted, never on the wire.
+// index above it, top 16 bits spare. Element index 0 denotes the container itself, letting
+// value-level handles address either kind; typed refs keep CID vs EID distinct. Never
+// persisted, never on the wire.
 struct EID
 {
 nothrow @nogc:
