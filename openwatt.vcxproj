@@ -136,6 +136,7 @@
     <DCompile Include="src\manager\device.d" />
     <DCompile Include="src\manager\element.d" />
     <DCompile Include="src\manager\element2.d" />
+    <DCompile Include="src\manager\series.d" />
     <DCompile Include="src\manager\expression.d" />
     <DCompile Include="src\manager\features.d" />
     <DCompile Include="src\manager\id.d" />

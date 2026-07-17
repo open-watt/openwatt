@@ -32,7 +32,12 @@ The unification is one level up: **no plane IS a series, but every plane is OBSE
 one.** A tap observes a byte stream as records (`set_log_file`); pcap observes packet transit;
 a waveform tap observes a capture; property projection observes object state. The series
 contract (DataFormat, RecordBlock, timeline events, owsig codec) factors into a shared
-module with multiple hosts. Observation demands nothing of its subject; the data model is the
+module with multiple hosts (landed 2026-07-17 as [src/manager/series.d](../src/manager/series.d);
+Element2 keeps only the mount-point machinery). The module is organised for the full three-facet
+device surface (section 6), not just attributes: Event! payloads and device-function
+params/results will describe themselves with the same DataFormat vocabulary - code-based
+objects exposed as devices present their callbacks as subscribable events and API functions as
+commands, shimmed through Variant only at the console/API edges. Observation demands nothing of its subject; the data model is the
 universal witness, not the universal substrate.
 
 Chains may span planes: 433 OOK is waveform -> packets -> elements. The seams are owned:

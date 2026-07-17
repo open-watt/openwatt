@@ -156,9 +156,14 @@ status block). Remaining legs, roughly in order:
   property projection (every Prop! semantically an element, physically lazy), Event! and
   profile FUNCTIONS as the missing facets, Device-as-BaseObject via composition (kills
   is_device trap), mesh trajectory (config authority is the new subsystem). Build order in the
-  doc; ID migration is the prerequisite step and STARTED 2026-07-17 (sequencing below and in the
-  id.d header; provisional router/stream SampleChannel/Seekable/SignalStream already reverted).
-  Draft: src/manager/element2.d (in both build systems, unit-tested).
+  doc; ID migration steps 0-2 LANDED 2026-07-17 (see Infrastructure entry below). Series
+  contract module EXTRACTED 2026-07-17: manager/series.d holds the host-agnostic vocabulary
+  (DataFormat/ValueType/Semantics, Constraint, ClockDomain, Scalar, RecordBlock, SeriesEvent,
+  Bucket/SeriesStore), organised for all three facets (Event! payloads and device-function
+  params/results will use the same DataFormat vocabulary); element2.d keeps the mount-point
+  machinery (Element2, Observer/Subscription, Cursor, dirty list). Both build systems updated.
+  NEXT in this entry: Element2 replaces Element (Component holds Element2, Variant boxing at
+  console/SNMP/expression edges, producers migrate per-protocol, Modbus last).
 
 - **Element deadband (settled design, build when needed)**: per-point change-event conditioning,
   standard SCADA/OPC report-by-exception. ONE mechanism, three surfaces: the filter itself lives in
