@@ -269,8 +269,17 @@ status block). Remaining legs, roughly in order:
   refactor; (1) the park/claim/forward machine standalone + unit-tested (dense per-type slot
   arrays, next_slot++ allocator, separate name map holding parked ids); (2) container cutover
   (CollectionTable, delete ALL rekey machinery, then Devices as a container type); (3) element
-  index tables + Cursor->EID; (4) element ref type (EID + self-heal; ObjectRef stays CID -
-  a reference to a root, never an element; amended 2026-07-18); (5) holder audit.
+  index tables + Cursor->EID; (4) deref on the handles; (5) holder audit.
+  Steps 4+5 LANDED 2026-07-18, MIGRATION COMPLETE: deref/self-heal lives on the handles -
+  CollectionTable.deref(ref CID) container-side, healing deref(ref EID) (device.d, UFCS)
+  element-side (heals both levels through the holder's field; ElementCursor uses it).
+  ObjectRef stays CID (a reference to a root, never an element) and was already thin table
+  sugar; NO ElementRef type - element holders keep a bare EID (the reclamation extension's
+  RAII wrapper is where counting would attach, both levels). Holder audit clean: hash_id
+  gone, no raw id construction outside the tables (one documented test-mock dummy in
+  ble/client.d), sync translates wire handles at the encoder seam, db keys by name.
+  Remaining id work rides other entries: deterministic indices + destruction-parks
+  (producer migration), reclamation (when churn metrics justify).
   Step 2 LANDED 2026-07-17 (both halves): (2a) CollectionTable reimplemented over
   IdMachine!BaseObject - CID = type bits + dense slot, name setter calls table.rename (the id
   never moves, held refs follow intrinsically), and ALL rekey machinery deleted (hash_id/rehash
