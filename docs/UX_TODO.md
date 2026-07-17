@@ -49,10 +49,11 @@ text), `sub`/`unsub` (pattern string), `enum_req`/`enum`, `history_req`/`history
 
 ## Upcoming instance work with NO client impact (for orientation)
 
-- ID migration step 1 (park/claim/forward id machine) LANDED 2026-07-17 - in-process only,
-  no wire change. Step 2 (container CID cutover, Devices as a container type) is next and
-  equally invisible: the wire already speaks names + handles. Entries will appear here only
-  if a verb or field moves.
+- ID migration steps 1 and 2 (park/claim/forward id machine; container CID cutover including
+  Devices as a container type) LANDED 2026-07-17 - in-process only, no wire change: the wire
+  already speaks names + handles. One behavioural nicety you may surface in UI: renaming an
+  object no longer breaks anything that referenced it, and its OLD name becomes immediately
+  reusable. Entries will appear here only if a verb or field moves.
 - Heads-up for later steps (will get their own dated sections when they land): typed element
   series (Element2) will eventually reshape element value delivery and history recall
   (cursors/record blocks instead of `history` sample pairs), and device functions / Event!
