@@ -198,9 +198,14 @@ status block). Remaining legs, roughly in order:
   optimisation once more protocols carry formats. CAN validated on prod (Pi slot 85, live
   traffic + frontend render - also the first two-node exercise of the reshaped sync wire).
   GoodWe/BLE/Zigbee assign formats too (same two-liner; zigbee's report path decodes via
-  get_zcl_value into the same Variant shapes, so the unbox path covers it). NEXT: TextValueDesc
-  twin of series_format for MQTT/HTTP/ESPHome, then Modbus last; consumers then leave the
-  boxed mirror; recorder-as-cursor waits for retention tiers (build order step 3); the prev
+  get_zcl_value into the same Variant shapes, so the unbox path covers it), and the
+  TextValueDesc twin covers MQTT/HTTP (num/bool; shares the mint cache, so a text V-series and
+  a binary V-series share one format). Modbus client-pass DONE; deliberately still boxed:
+  modbus serve pass (element shapes governed by their real producers, not the serve profile),
+  SunSpec (runtime scale-factor registers - static descs can't describe the decoded shape;
+  correct mapping is probably force-f64, decide in the value-handling audit), and ESPHome
+  (typed proto, no ValueDesc; add_handler is a stub - also the audit). NEXT: consumers leave
+  the boxed mirror; recorder-as-cursor waits for retention tiers (build order step 3); the prev
   pair dies when operators absorb the accumulator (step 4).
 
 - **Element deadband (settled design, build when needed)**: per-point change-event conditioning,
