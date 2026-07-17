@@ -47,6 +47,13 @@ Unchanged by this step: `create` (props carry the name), `cmd`/`result`/`error` 
 text), `sub`/`unsub` (pattern string), `enum_req`/`enum`, `history_req`/`history` (path string),
 `log_sub`/`log`, `time_req`/`time_resp`/`time_push`, and the per-property `set` flush shape.
 
+## 2026-07-18 - schema type tags: ipv4netwk/ipv6netwk renamed (BREAKING if parsed)
+
+- [ ] **`ipv4netwk` -> `ipv4nwk`, `ipv6netwk` -> `ipv6nwk`**: the property/element schema type
+      tags for network-address (CIDR) values. All other tags are unchanged (they now source
+      from `type_name` markup on the types themselves, byte-identical: ipv4, ipv6, inetaddr,
+      mac, eui, dt, tod, ...). If the client switches on these two tags, update the strings.
+
 ## Upcoming instance work with NO client impact (for orientation)
 
 - ID migration steps 1 and 2 (park/claim/forward id machine; container CID cutover including
