@@ -1551,6 +1551,9 @@
     <DCompile Include="third_party\urt\src\urt\uuid.d">
       <Filter>third_party\urt</Filter>
     </DCompile>
+    <DCompile Include="third_party\urt\src\urt\typereg.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
     <DCompile Include="third_party\urt\src\urt\variant.d">
       <Filter>third_party\urt</Filter>
     </DCompile>
