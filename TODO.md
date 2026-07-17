@@ -164,7 +164,18 @@ status block). Remaining legs, roughly in order:
   Enum slice LANDED 2026-07-18: DataFormat carries the enum descriptor (one pointer, becomes
   the enum_/user_/string_ union with the registry), series_format maps enums/bitfields to
   their raw integer width (enumf32 casts at sample time), boxing goes through
-  Variant(raw, enum_info) so names survive; text enum_/bf ride the same path (s64). the missing write/control facet - how a state-element write becomes a transmitted/
+  Variant(raw, enum_info) so names survive; text enum_/bf ride the same path (s64).
+  Bitfields LANDED 2026-07-18: flag-ness is a property of the ENUMERATION, declared at the
+  declaration site (@bitfield UDA for D enums, read by enum_info!E so Variant auto-boxing
+  stays consistent; profile << shift syntax stamps it, explicit bitfield: keyword forces it;
+  register_bitfield!E asserts the UDA). VoidEnumInfo.bitfield drives everything: shared
+  parse_flags/format_flags (exact key wins so compound keys like all=0x7 print as
+  themselves, then bitwise decomposition, hex residue for unknown bits; parse accepts
+  key1|key2|0x8), Variant.toString now prints enum keys and flag combinations (console-only
+  change - JSON wire keeps numbers), table.d's linear-scan HACK deleted, sampler's inline bf
+  loop deleted. Usage kinds (bf16, TextType.bf) are no longer sources of truth. Deliberately
+  NOT done: synthesising flag combinations for UNdeclared enums (an unknown scalar value 3
+  printed as one|two would mislead; honest number instead). the missing write/control facet - how a state-element write becomes a transmitted/
   written protocol action, INCLUDING stateful logic (toggles: only fire if desired != current).
   Today this would live as per-device binding code. Proposal: **bring the automation/expression
   engine down into profiles** so device behaviour is data-driven. Invents almost nothing - reuses
