@@ -15,6 +15,7 @@ alias EUI64 = EUI!64;
 struct EUI(int width)
 {
     static assert(width == 48 || width == 64, "Invalid EUI width");
+    enum type_name = width == 48 ? "mac" : "eui";
     enum bytes = width / 8;
 nothrow @nogc:
 
