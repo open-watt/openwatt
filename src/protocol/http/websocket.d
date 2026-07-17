@@ -135,7 +135,6 @@ nothrow @nogc:
     // API...
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
     {
@@ -707,7 +706,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _server !is null;

@@ -69,7 +69,6 @@ nothrow @nogc:
         => _last_offset;
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _server.length > 0;

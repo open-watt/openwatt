@@ -232,7 +232,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _transport !is null;

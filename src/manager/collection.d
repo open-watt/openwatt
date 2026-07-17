@@ -72,18 +72,10 @@ enum CollectionType : ubyte
 }
 
 const(char)[] get_id_dstring(CID id) pure
-{
-    if (auto e = item_table(id.type_index).find_entry(id))
-        return id_table().get_dstring(e.name);
-    return null;
-}
+    => item_table(id.type_index).name_of(id);
 
 String get_id(CID id) pure
-{
-    if (auto e = item_table(id.type_index).find_entry(id))
-        return id_table().get_string(e.name);
-    return String();
-}
+    => item_table(id.type_index).name_string(id);
 
 BaseObject get_item(CID id) pure
 {
@@ -177,7 +169,7 @@ nothrow @nogc:
     const CollectionTypeInfo* type_info;
 
     CID allocate_id(const(char)[] name)
-        => item_table(type_info.collection_id).insert(name, type_info.collection_id, null);
+        => item_table(type_info.collection_id).allocate(name, type_info.collection_id);
 
     BaseObject create(const(char)[] name, ObjectFlags flags = ObjectFlags.none, in NamedArgument[] named_args...)
     {
@@ -211,10 +203,14 @@ nothrow @nogc:
 
     uint item_count()
     {
+        ref t = table;
         uint n = 0;
-        foreach (ref e; table._entries)
-            if (e.value !is null && type_matches(type_info, e.value._typeInfo))
+        for (uint slot = 1; slot <= t.slot_count; ++slot)
+        {
+            BaseObject o = t.at(slot);
+            if (o !is null && type_matches(type_info, o._typeInfo))
                 ++n;
+        }
         return n;
     }
 
@@ -223,15 +219,15 @@ nothrow @nogc:
         assert(type_info.get_super is null, "update_all should only be called on root collections");
 
         enum SlowObjectUpdateMs = 50;
-        size_t i = 0;
-        outer: while (i < table._entries.length)
+        ref t = table;
+        // slots are stable and append-only, so items added mid-update are reached too
+        for (uint slot = 1; slot <= t.slot_count; ++slot)
         {
-            CID just_processed = table._entries[i].id;
-            if (auto active = cast(ActiveObject)table._entries[i].value)
+            if (auto active = cast(ActiveObject)t.at(slot))
             {
-                MonoTime t = getTime();
+                MonoTime start = getTime();
                 active.do_update();
-                Duration d = getTime() - t;
+                Duration d = getTime() - start;
                 if (d.as!"msecs" >= SlowObjectUpdateMs)
                 {
                     import urt.log : writeWarning;
@@ -239,16 +235,9 @@ nothrow @nogc:
                                  ": ", d.as!"msecs", "ms");
                 }
             }
-
-            // skip to the entry after the one we just did (array may have grown)
-            while (table._entries[i++].id != just_processed)
-            {
-                if (i >= table._entries.length)
-                    break outer;
-            }
         }
 
-        table.free_pending();
+        t.free_pending();
     }
 
     BaseObject alloc(const(char)[] name, ObjectFlags flags = ObjectFlags.none)
@@ -266,10 +255,7 @@ nothrow @nogc:
     void add(BaseObject item)
     {
         assert(cast(bool)item._id, "item must have a valid CID");
-        auto entry = table.find_entry(item._id);
-        assert(entry !is null, "CID not in table");
-        debug assert(entry.value is null, "add() called twice!");
-        entry.value = item;
+        table.bind(item._id, item);
         signal_object_lifecycle(item, ObjectLifecycleEvent.created);
     }
 
@@ -292,18 +278,23 @@ nothrow @nogc:
         struct Range
         {
         nothrow @nogc:
-            CollectionTable.Entry[] entries;
+            CollectionTable* table;
             const(CollectionTypeInfo)* filter;
-            bool empty() const pure => entries.length == 0;
-            String front() => id_table().get_string(entries[0].name);
-            void popFront() { entries = entries[1 .. $]; advance(); }
+            uint slot;
+            bool empty() const pure => slot > table.slot_count;
+            String front() => table.name_at(slot);
+            void popFront() { ++slot; advance(); }
             private void advance()
             {
-                while (entries.length > 0 && (entries[0].value is null || !type_matches(filter, entries[0].value._typeInfo)))
-                    entries = entries[1 .. $];
+                for (; slot <= table.slot_count; ++slot)
+                {
+                    BaseObject o = table.at(slot);
+                    if (o !is null && type_matches(filter, o._typeInfo))
+                        return;
+                }
             }
         }
-        auto r = Range(table._entries[], type_info);
+        auto r = Range(&table(), type_info, 1);
         r.advance();
         return r;
     }
@@ -313,18 +304,23 @@ nothrow @nogc:
         struct Range
         {
         nothrow @nogc:
-            CollectionTable.Entry[] entries;
+            CollectionTable* table;
             const(CollectionTypeInfo)* filter;
-            bool empty() const pure => entries.length == 0;
-            BaseObject front() pure => entries[0].value;
-            void popFront() { entries = entries[1 .. $]; advance(); }
+            uint slot;
+            bool empty() const pure => slot > table.slot_count;
+            BaseObject front() pure => table.at(slot);
+            void popFront() { ++slot; advance(); }
             private void advance()
             {
-                while (entries.length > 0 && (entries[0].value is null || !type_matches(filter, entries[0].value._typeInfo)))
-                    entries = entries[1 .. $];
+                for (; slot <= table.slot_count; ++slot)
+                {
+                    BaseObject o = table.at(slot);
+                    if (o !is null && type_matches(filter, o._typeInfo))
+                        return;
+                }
             }
         }
-        auto r = Range(table._entries[], type_info);
+        auto r = Range(&table(), type_info, 1);
         r.advance();
         return r;
     }
@@ -379,29 +375,34 @@ nothrow @nogc:
         struct Range
         {
         nothrow @nogc:
-            CollectionTable.Entry[] entries;
+            CollectionTable* table;
             const(CollectionTypeInfo)* filter;
+            uint slot;
 
             bool empty() const pure
-                => entries.length == 0;
+                => slot > table.slot_count;
 
             Type front() pure
-                => cast(Type)entries[0].value;
+                => cast(Type)cast(void*)table.at(slot);
 
             void popFront()
             {
-                entries = entries[1 .. $];
+                ++slot;
                 advance();
             }
 
             void advance()
             {
-                while (entries.length > 0 && (entries[0].value is null || !type_matches(filter, entries[0].value._typeInfo)))
-                    entries = entries[1 .. $];
+                for (; slot <= table.slot_count; ++slot)
+                {
+                    BaseObject o = table.at(slot);
+                    if (o !is null && type_matches(filter, o._typeInfo))
+                        return;
+                }
             }
         }
 
-        auto r = Range(_base.table._entries[], _base.type_info);
+        auto r = Range(&_base.table(), _base.type_info, 1);
         r.advance();
         return r;
     }
@@ -452,14 +453,6 @@ template CollectionSuper(T)
 }
 
 
-void broadcast_rekey(CID old_id, CID new_id)
-{
-    foreach (ref table; g_item_tables)
-        foreach (ref e; table._entries)
-            if (e.value !is null)
-                e.value.do_rekey(old_id, new_id);
-}
-
 enum ObjectLifecycleEvent : ubyte
 {
     created,
@@ -476,79 +469,9 @@ void register_object_lifecycle_handler(ObjectLifecycleHandler handler) nothrow @
 void foreach_object(scope void delegate(BaseObject obj) nothrow @nogc fn)
 {
     foreach (ref table; g_item_tables)
-        foreach (ref e; table._entries)
-            if (e.value !is null)
-                fn(e.value);
-}
-
-mixin template RekeyHandler()
-{
-    import manager.collection : CID;
-
-    protected override void rekey(CID old_id, CID new_id)
-    {
-        import manager.collection : has_cid, rekey_field;
-
-        super.rekey(old_id, new_id);
-
-        alias Self = typeof(this);
-        static foreach (field; __traits(derivedMembers, Self))
-        {
-            static if (__traits(compiles, &__traits(getMember, this, field)))
-            {{
-                alias Ty = typeof(__traits(getMember, this, field));
-                static if (has_cid!Ty)
-                    rekey_field(__traits(getMember, this, field), old_id, new_id);
-            }}
-        }
-    }
-}
-
-template has_cid(T)
-{
-    static if (is(T == CID))
-        enum has_cid = true;
-    else static if (is(T == struct))
-    {
-        alias has = void;
-        static foreach (i; 0 .. T.tupleof.length)
-        {
-            static if (has_cid!(typeof(T.tupleof[i])))
-                has = int;
-        }
-        enum has_cid = is(has == int);
-    }
-    else static if (is(T == E[], E))
-        enum has_cid = has_cid!E;
-    else static if (is(T == Array!E, E))
-        enum has_cid = has_cid!E;
-    else
-        enum has_cid = false;
-}
-
-void rekey_field(T)(ref T field, CID old_id, CID new_id)
-{
-    static if (is(T == CID))
-    {
-        if (field == old_id)
-            field = new_id;
-    }
-    else static if (is(T == struct))
-    {
-        static foreach (i; 0 .. T.tupleof.length)
-            static if (has_cid!(typeof(T.tupleof[i])))
-                rekey_field(field.tupleof[i], old_id, new_id);
-    }
-    else static if (is(T == E[], E))
-    {
-        foreach (ref e; field)
-            rekey_field(e, old_id, new_id);
-    }
-    else static if (is(T == Array!E, E))
-    {
-        foreach (ref e; field[])
-            rekey_field(e, old_id, new_id);
-    }
+        for (uint slot = 1; slot <= table.slot_count; ++slot)
+            if (BaseObject o = table.at(slot))
+                fn(o);
 }
 
 
@@ -558,12 +481,6 @@ private:
 __gshared Array!ObjectLifecycleHandler _on_object_lifecycle;
 
 @fast_data __gshared CollectionTable[CollectionType.count] g_item_tables;
-
-package void init_collections()
-{
-    foreach (ref t; g_item_tables)
-        t.init();
-}
 
 package void signal_object_lifecycle(BaseObject obj, ObjectLifecycleEvent event) nothrow @nogc
 {
@@ -577,122 +494,84 @@ package ref CollectionTable item_table(uint collection) pure
     return *(cast(CollectionTable* function(uint i) pure nothrow @nogc)&hack)(collection);
 }
 
+// Per-type table over the park/claim/forward machine: dense slots, name map, no hashing, no
+// rekeying. A CID is (type bits | machine slot); renames move nothing, so held CIDs follow the
+// object intrinsically.
 struct CollectionTable
 {
-    import urt.algorithm : binary_search;
 nothrow @nogc:
 
-    struct Entry
-    {
-        CID id;
-        uint name;
-        BaseObject value;
-    }
-
-    void init()
-    {
-        insert(0, Entry(CID(0), 2, null));
-    }
-
     inout(BaseObject) get(CID id) inout pure
+        => _machine.get(id.slot);
+
+    // deref with self-heal for holders with a mutable field
+    BaseObject deref(ref CID id)
     {
-        if (auto e = find_entry(id))
-            return e.value;
-        return null;
+        uint slot = id.slot;
+        BaseObject o = _machine.deref(slot);
+        if (slot != id.slot)
+            id = make_cid(id.type_index, slot);
+        return o;
     }
 
     inout(BaseObject) get_by_name(const(char)[] name, ubyte type_idx) inout pure
-    {
-        CID id = hash_id!CID(name, type_idx);
-        for (uint d = 0; d <= _max_depth; ++d)
-        {
-            if (auto e = find_entry(id))
-            {
-                if (id_table().get_dstring(e.name)[] == name[])
-                    return e.value;
-            }
-            id = rehash(id);
-        }
-        return null;
-    }
+        => _machine.get(_machine.find(name));
 
     CID get_id(const(char)[] name, ubyte type_idx) const pure
     {
-        CID id = hash_id!CID(name, type_idx);
-        for (uint d = 0; d <= _max_depth; ++d)
-        {
-            if (auto e = find_entry(id))
-            {
-                if (id_table().get_dstring(e.name)[] == name[])
-                    return id;
-            }
-            id = .rehash(id);
-        }
-        return CID.invalid;
+        uint slot = _machine.find(name);
+        return slot ? make_cid(type_idx, slot) : CID.invalid;
     }
 
-    CID insert(const(char)[] name, ubyte type_idx, BaseObject value)
+    // get-or-park: forward references (sync reservations, ObjectRef by name)
+    CID reserve(const(char)[] name, ubyte type_idx)
+        => make_cid(type_idx, _machine.reserve(name));
+
+    // park-or-fail: id allocation ahead of object construction; fails if the name is live
+    CID allocate(const(char)[] name, ubyte type_idx)
     {
-        CID id = hash_id!CID(name, type_idx);
-        uint depth = 0;
-
-        while (true)
-        {
-            auto idx = find_insert_pos(id);
-            if (idx < _entries.length && _entries[idx].id == id)
-            {
-                if (id_table().get_dstring(_entries[idx].name)[] == name[])
-                {
-                    assert(_entries[idx].value is null, "Item already exists!");
-                    _entries[idx].value = value;
-                    return id;
-                }
-
-                id = rehash(id);
-                ++depth;
-                continue;
-            }
-
-            insert(idx, Entry(id, id_table().insert(name), value));
-            if (depth > _max_depth)
-                _max_depth = depth;
-            return id;
-        }
+        uint slot = _machine.reserve(name);
+        if (_machine.get(slot) !is null)
+            return CID.invalid;
+        return make_cid(type_idx, slot);
     }
+
+    package void bind(CID id, BaseObject value)
+        => _machine.bind(id.slot, value);
+
+    bool rename(CID id, const(char)[] old_name, const(char)[] new_name)
+        => _machine.rename(id.slot, old_name, new_name);
 
     bool remove(CID id)
     {
-        if (auto e = find_entry(id))
-        {
-            e.value = null; // tombstone
-            return true;
-        }
-        return false;
-    }
-
-    bool rekey(CID old_id, CID new_id)
-    {
-        assert(old_id.type_index == new_id.type_index, "rekey across different collection types");
-        auto idx = binary_search!_cmp_id(_entries[], old_id);
-        if (idx >= _entries.length)
+        uint slot = id.slot;
+        if (_machine.deref(slot) is null)
             return false;
-
-        Entry e = _entries[idx];
-        _entries.remove(idx);
-        e.id = new_id;
-        auto new_idx = find_insert_pos(new_id);
-        insert(new_idx, e);
+        _machine.release(slot);
         return true;
     }
 
-    uint count() const pure => cast(uint)_entries.length;
-    uint max_depth() const pure => _max_depth;
+    const(char)[] name_of(CID id) const pure
+        => _machine.name_of(id.slot);
+
+    String name_string(CID id) const pure
+        => _machine.name_string(id.slot);
+
+    // dense iteration: slots 1 .. slot_count; dormant and forwarded slots yield null
+    uint slot_count() const pure
+        => _machine.slot_count();
+
+    inout(BaseObject) at(uint slot) inout pure
+        => _machine.at(slot);
+
+    String name_at(uint slot) const pure
+        => _machine.name_string(slot);
 
     package void defer_free(BaseObject item)
     {
-        auto entry = find_entry(item._id);
-        assert(entry !is null && entry.value is item, "defer_free on stray or already-freed object");
-        entry.value = null;
+        uint slot = item._id.slot;
+        debug assert(_machine.get(slot) is item, "defer_free on stray or already-freed object");
+        _machine.release(slot);
         _pending_free ~= item;
     }
 
@@ -704,26 +583,12 @@ nothrow @nogc:
     }
 
 private:
-    Array!Entry _entries; // sorted by id
+    IdMachine!BaseObject _machine;
     Array!BaseObject _pending_free;
-    uint _max_depth;
+}
 
-    static long _cmp_id(ref const Entry e, CID id) pure
-        => e.id.opCmp(id);
-
-    inout(Entry)* find_entry(CID id) inout pure
-    {
-        auto idx = binary_search!_cmp_id(_entries[], id);
-        if (idx < _entries.length)
-            return &_entries.ptr[idx];
-        return null;
-    }
-
-    size_t find_insert_pos(CID id) const pure
-        => binary_search!(_cmp_id, true)(_entries[], id);
-
-    void insert(size_t at, ref Entry e)
-    {
-        _entries.insert(at, e);
-    }
+CID make_cid(uint type_idx, uint slot) pure
+{
+    debug assert(slot && slot <= CID.id_mask, "invalid collection slot");
+    return CID((type_idx << CID.id_bits) | slot);
 }

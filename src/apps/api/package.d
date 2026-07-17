@@ -67,7 +67,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _server_id.get_item!HTTPServer !is null;

@@ -13,7 +13,6 @@ import urt.time;
 import urt.traits;
 
 import manager.base;
-import manager.collection : RekeyHandler;
 import manager.plugin;
 
 import router.iface;
@@ -337,7 +336,6 @@ nothrow:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => (_stream !is null) != (_ash_ext !is null);

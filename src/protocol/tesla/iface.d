@@ -111,7 +111,6 @@ nothrow @nogc:
     // API...
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const
         => _stream !is null;

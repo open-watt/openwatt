@@ -124,7 +124,6 @@ nothrow @nogc:
 
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _conn.has_remote() != !!_stream; // URL xor external stream

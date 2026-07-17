@@ -107,7 +107,6 @@ nothrow @nogc:
         => (_rx && _rx.running) ? _rx.flush() : 0;
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _tx !is null || _rx !is null;

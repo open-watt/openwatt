@@ -101,7 +101,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure nothrow @nogc
         => _blackhole || _iface !is null || _gateway != IPAddr.any;

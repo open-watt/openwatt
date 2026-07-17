@@ -179,7 +179,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const
         => _iface !is null && cast(bool)_peer && (cast(const(BLEInterface))_iface.get) !is null;

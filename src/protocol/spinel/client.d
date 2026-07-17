@@ -8,7 +8,7 @@ import urt.string;
 import urt.time;
 
 import manager.base;
-import manager.collection : RekeyHandler, CollectionType;
+import manager.collection : CollectionType;
 import manager.plugin;
 
 import router.iface;
@@ -78,7 +78,6 @@ nothrow @nogc:
         => _ncp_version;
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _iface !is null;

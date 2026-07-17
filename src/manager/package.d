@@ -242,9 +242,6 @@ nothrow @nogc:
         import urt.time : subscribe_clock_change;
         subscribe_clock_change(&notify_wallclock_change);
 
-        id_init();
-        init_collections();
-
         register_enum!Boolean();
         register_enum!ObjectFlags();
         register_enum!HashFunction();

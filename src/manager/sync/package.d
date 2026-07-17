@@ -360,7 +360,7 @@ nothrow @nogc:
             return;
         }
         ubyte type_idx = cast(ubyte)rt.type_info.collection_id;
-        CID local = item_table(type_idx).insert(name, type_idx, null);
+        CID local = item_table(type_idx).reserve(name, type_idx);
         from.adopt(handle, local);
     }
 

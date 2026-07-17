@@ -86,7 +86,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _http_server !is null

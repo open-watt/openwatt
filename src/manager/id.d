@@ -98,17 +98,12 @@ module manager.id;
 //      computed, which is safe because both parts are table-issued identities)
 // ===========================================================================================
 
-import urt.algorithm : binary_search;
 import urt.array;
-import urt.hash : fnv1a;
 import urt.map;
-import urt.mem.alloc : alloc, free;
 import urt.mem.allocator : defaultAllocator;
 import urt.string.string;
 
-import manager.base;
 import manager.collection : CID;
-import manager.element : Element;
 
 nothrow @nogc:
 
@@ -208,9 +203,7 @@ nothrow @nogc:
     {
         if (uint* p = name in _names)
             return *p;
-        uint id = mint();
-        _names.insert(name.makeString(defaultAllocator), id);
-        return id;
+        return mint(name);
     }
 
     // create at a name: absent mints, parked claims, live is a duplicate (returns 0)
@@ -227,10 +220,18 @@ nothrow @nogc:
             _slots[][id] = cast(size_t)cast(void*)obj;
             return id;
         }
-        uint id = mint();
+        uint id = mint(name);
         _slots[][id] = cast(size_t)cast(void*)obj;
-        _names.insert(name.makeString(defaultAllocator), id);
         return id;
+    }
+
+    // bind an object to a reserved id: the claim's second half when reserve and creation are
+    // separate steps (collections allocate the id before the object constructs with it)
+    void bind(uint id, T obj)
+    {
+        debug assert(obj !is null);
+        debug assert(id && id < _slots.length && _slots[][id] == 0, "bind to a live or forwarded id");
+        _slots[][id] = cast(size_t)cast(void*)obj;
     }
 
     // move the object between name entries; ids don't move, so every held ref follows for
@@ -250,9 +251,14 @@ nothrow @nogc:
                 _slots[][j] = (size_t(id) << 1) | 1;
                 *p = id;
             }
+            _slot_names[][id] = _slot_names[][j];
         }
         else
-            _names.insert(new_name.makeString(defaultAllocator), id);
+        {
+            String s = new_name.makeString(defaultAllocator);
+            _slot_names[][id] = s;
+            _names.insert(s.move, id);
+        }
         if (old_name[] != new_name[])
             _names.remove(old_name);
         return true;
@@ -283,13 +289,48 @@ nothrow @nogc:
         return cast(T)cast(void*)w;
     }
 
-    uint find(const(char)[] name)
+    // follow forwards without healing (const contexts)
+    inout(T) get(uint id) inout pure
     {
-        uint* p = name in _names;
+        if (!id || id >= _slots.length)
+            return null;
+        size_t w = _slots[][id];
+        while (w & 1)
+            w = _slots[][w >> 1];
+        return cast(inout(T))cast(void*)w;
+    }
+
+    // raw slot accessor for dense iteration: dormant and forwarded slots yield null, so a
+    // forwarded object is visited only at its terminal slot
+    inout(T) at(uint id) inout pure
+    {
+        if (!id || id >= _slots.length)
+            return null;
+        size_t w = _slots[][id];
+        return (w & 1) ? null : cast(inout(T))cast(void*)w;
+    }
+
+    uint find(const(char)[] name) const pure
+    {
+        const(uint)* p = name in _names;
         return p ? *p : 0;
     }
 
-    uint high_watermark() const
+    // the slot's name (terminal name for forwarded slots). the slice borrows the name entry's
+    // storage: stable until that slot renames
+    const(char)[] name_of(uint id) const pure
+    {
+        uint t = terminal(id);
+        return t ? _slot_names[t][] : null;
+    }
+
+    String name_string(uint id) const pure
+    {
+        uint t = terminal(id);
+        return t ? _slot_names[t] : String();
+    }
+
+    uint slot_count() const pure
     {
         uint n = cast(uint)_slots.length;
         return n ? n - 1 : 0;
@@ -297,14 +338,34 @@ nothrow @nogc:
 
 private:
     Array!size_t _slots;        // slot 0 reserved as the invalid id
+    Array!String _slot_names;   // parallel: the slot's name entry (shared refcount with _names)
     Map!(String, uint) _names;
 
-    uint mint()
+    uint mint(const(char)[] name)
     {
         if (_slots.empty)
+        {
             _slots ~= 0;
+            _slot_names ~= String();
+        }
         uint id = cast(uint)_slots.length;
         _slots ~= 0;
+        String s = name.makeString(defaultAllocator);
+        _slot_names ~= s;
+        _names.insert(s.move, id);
+        return id;
+    }
+
+    uint terminal(uint id) const pure
+    {
+        if (!id || id >= _slots.length)
+            return 0;
+        size_t w = _slots[][id];
+        while (w & 1)
+        {
+            id = cast(uint)(w >> 1);
+            w = _slots[][id];
+        }
         return id;
     }
 }
@@ -359,113 +420,18 @@ unittest
     uint stale = waiter & ~0u;   // a copy that still holds the pre-merge id value
     assert(m.deref(stale) is &a && stale == held);
     assert(m.deref(chain) is &a && chain == held);
-}
 
+    // split reserve/bind (collections allocate the id before the object constructs)
+    uint pre = m.reserve("relay");
+    assert(m.deref(pre) is null);
+    m.bind(pre, &c);
+    assert(m.get(pre) is &c && m.at(pre) is &c);
 
-void id_init()
-{
-    id_table().init();
-}
-
-ref StringTable!12 id_table() pure
-{
-    static StringTable!12* hack() => &g_id_table;
-    return *(cast(StringTable!12* function() pure nothrow @nogc)&hack)();
-}
-
-_ID hash_id(_ID : ID!n, size_t n)(const(char)[] name, ubyte type_idx = 0) pure
-{
-    static if (is(_ID : ID!n, size_t n) && n == 0)
-        return _ID(fnv1a(cast(ubyte[])name));
-    else
-        return _ID((uint(type_idx) << _ID.id_bits) | (fnv1a(cast(ubyte[])name) & _ID.id_mask));
-}
-
-_ID rehash(_ID : ID!n, size_t n)(_ID id) pure
-{
-    static if (n > 0)
-    {
-        uint ty = id.raw & ~_ID.id_mask;
-        return _ID(ty | ((id.slot * 0x01000193) & _ID.id_mask));
-    }
-    else
-        return _ID(id.raw * 0x01000193);
-}
-
-
-private:
-
-__gshared StringTable!12 g_id_table;
-
-struct StringTable(uint page_bits)
-{
-    import urt.string.string;
-nothrow @nogc:
-
-    static assert(page_size <= ushort.max);
-    enum uint page_size = 1u << page_bits;
-    enum uint offset_mask = page_size - 1;
-
-    ~this()
-    {
-        free_all();
-    }
-
-    void init()
-    {
-        auto page = cast(char*)alloc(page_size);
-        assert(page !is null);
-        _pages ~= page;
-        _pages[0][0..2] = 0;
-        _fill = 2;
-    }
-
-    uint insert(const(char)[] s)
-    {
-        if (s.length == 0)
-            return 0;
-        assert(s.length <= page_size);
-
-        uint needed = 2 + cast(uint)(s.length + (s.length & 1));
-
-        if (_fill + needed > page_size)
-        {
-            auto page = cast(char*)alloc(page_size);
-            assert(page !is null);
-            _pages ~= page;
-            _fill = 0;
-        }
-
-        _fill += 2;
-        writeString(_pages[$-1] + _fill, s);
-        uint offset = (cast(uint)(_pages.length - 1) << page_bits) | _fill;
-        _fill += cast(uint)(s.length + (s.length & 1));
-        return offset;
-    }
-
-    const(char)[] get_dstring(uint offset) const pure
-    {
-        if (!offset)
-            return null;
-        const(char)* p = _pages[offset >> page_bits] + (offset & offset_mask);
-        return p[0 .. (cast(ushort*)p)[-1]];
-    }
-
-    String get_string(uint offset) const pure
-    {
-        debug assert(offset != 0, "Invalid string offset");
-        return as_string(_pages[offset >> page_bits] + (offset & offset_mask));
-    }
-
-    void free_all()
-    {
-        foreach (page; _pages[])
-            free(page[0..page_size]);
-        _pages.clear();
-        _fill = 0;
-    }
-
-private:
-    Array!(char*) _pages;
-    uint _fill;
+    // name recovery: bound, parked, and forwarded slots all resolve; forwarded slots are
+    // skipped by the raw iteration accessor
+    assert(m.name_of(pre) == "relay");
+    assert(m.name_string(held)[] == "gate");
+    uint parked = m.reserve("spare");
+    assert(m.name_of(parked) == "spare");
+    assert(m.slot_count >= 6);
 }
