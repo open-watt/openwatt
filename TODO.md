@@ -132,7 +132,23 @@ status block). Remaining legs, roughly in order:
   sunspec's decoder, HTTP's apply_value) either justify themselves or dissolve into the one
   module. Natural sequencing: fold in as the per-protocol native-producer migration completes
   (text protocols + modbus are the remaining producers; do the consolidation as/after they
-  migrate rather than bolting a ninth machine alongside the eight). the missing write/control facet - how a state-element write becomes a transmitted/
+  migrate rather than bolting a ninth machine alongside the eight).
+  TARGET SHAPE (settled 2026-07-18): three orthogonal axes replace the tangled structs -
+  (1) WIRE LAYOUT, binary only (width/sign/endian/word-order/count; text is self-delimiting),
+  stays profile syntax; (2) INTERPRETATION OVERLAY (pre-scale+unit, enum/bitfield descriptor,
+  date format, or a registered type via as=<name>) - all references converge on si units,
+  VoidEnumInfo and urt.typereg TypeDetails, so TextType dissolves to {bool,num,str}+registry
+  names; (3) TARGET SHAPE = DataFormat (+descriptor slot). Pipeline: wire layout -> raw value
+  -> overlay -> native record; sample_record() is the one decode fn, box_record the only
+  Variant edge, encode mirrors through the same descriptors. value.d folds in three ways:
+  struct_name_override deletes (terse names become type_name members on the types; typereg
+  resolves explicit > member > stringof), type_for!T becomes the compile-time projection of
+  the registry namespace (arrays/quantities/#refs are naming combinators over registry atoms),
+  and from_variant's typed string-parse arms merge with text sample_value onto one set of
+  per-type primitives (registry stringify/parse + unit machinery), leaving from_variant as
+  the argument-conversion veneer. Sampling STRATEGY (batching/timing/poll policy) stays with
+  bindings. Serialisation contract (landed in typereg): LE memory image is the default binary
+  form; an aggregate's serialise/deserialise pair overrides, and is mandatory for non-pod. the missing write/control facet - how a state-element write becomes a transmitted/
   written protocol action, INCLUDING stateful logic (toggles: only fire if desired != current).
   Today this would live as per-device binding code. Proposal: **bring the automation/expression
   engine down into profiles** so device behaviour is data-driven. Invents almost nothing - reuses
