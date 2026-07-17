@@ -222,6 +222,15 @@ status block). Remaining legs, roughly in order:
   arrays, next_slot++ allocator, separate name map holding parked ids); (2) container cutover
   (CollectionTable, delete ALL rekey machinery, then Devices as a container type); (3) element
   part tables + Cursor->EID; (4) unified EID ref type; (5) holder audit.
+  Step 1 LANDED 2026-07-17: IdMachine(T) in manager.id - dense tagged slots (0 = dormant,
+  bit0=0 = bound, bit0=1 = write-once forward), reserve/claim/rename/release/deref with
+  self-healing forward chains, separate String-keyed name map; unit-tested through the full
+  park/claim/rename-merge/resurrect cycle. En route: urt map.d heterogeneous remove was broken
+  (search compare reinterpreted the search key as K - segfault on remove-by-slice from a
+  String-keyed map); fixed in urt with a regression test. NEXT: step 2, the container cutover
+  (CollectionTable over IdMachine!BaseObject, CID = type bits + dense slot, delete
+  rehash/rekey/broadcast_rekey/rekey_field, name setter calls table.rename; then 2b Devices
+  as a container type).
   Step 0 LANDED 2026-07-17 (compiles, unit-green; sync end-to-end smoke test remains an open
   gap it already had): add_name = {handle, name, type} introducer, SyncPeer carries the
   session handle tables (_introduced objects / _adopted local CIDs; wire handle low bit =
