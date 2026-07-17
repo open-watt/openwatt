@@ -29,7 +29,7 @@ struct Cursor
 {
 nothrow @nogc:
 
-    Element2* element;  // TODO: becomes manager.id.EID (type exists at target shape) once resolution lands
+    Element2* element;  // transient storage-level form; durable holders use manager.element.ElementCursor (EID)
     ulong position;
     ubyte bit;
 
@@ -63,17 +63,21 @@ nothrow @nogc:
 
     Variant value() const
     {
-        Variant r;
-        // TODO: box _latest per format.type, attach format.unit
-        return r;
+        // TODO: wide latest (stride > 8) reads the open bucket tail once the type registry lands
+        if (format && is_scalar_type(format.type))
+            return box_record(_latest.raw.ptr, *format);
+        return Variant();
     }
 
     void observe(T)(T v, SysTime t = getSysTime(), Observer who = null)
     {
         static assert(is(typeof(value_type_of!T)));
         debug assert(value_type_of!T == format.type);
+        observe_scalar(Scalar.of(v), t, who);
+    }
 
-        Scalar s = Scalar.of(v);
+    void observe_scalar(Scalar s, SysTime t = getSysTime(), Observer who = null)
+    {
         if (format.semantics == Semantics.held && _last_update != SysTime() && s.raw == _latest.raw)
         {
             _last_update = t;

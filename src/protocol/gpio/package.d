@@ -10,6 +10,8 @@ import manager;
 import manager.base;
 import manager.binding;
 import manager.collection;
+import manager.device;
+import manager.element;
 import manager.element2;
 import manager.plugin;
 
@@ -21,6 +23,7 @@ class GpioBinding : ProtocolBinding
     alias Properties = AliasSeq!(Prop!("chip", chip),
                                  Prop!("rx-line", rx_line),
                                  Prop!("tx-line", tx_line),
+                                 Prop!("element", element_path),
                                  Prop!("pull", pull),
                                  Prop!("debounce", debounce),
                                  Prop!("records", records, "status", "d"),
@@ -42,7 +45,6 @@ nothrow @nogc:
         _fmt.type = ValueType.bool_;
         _fmt.semantics = Semantics.held;
         _fmt.clock = &_clock;
-        _series.format = &_fmt;
     }
 
     final uint chip() const pure
@@ -79,6 +81,17 @@ nothrow @nogc:
         restart();
     }
 
+    final ref const(String) element_path() const pure
+        => _element_path;
+    final void element_path(String value)
+    {
+        if (value == _element_path)
+            return;
+        _element_path = value.move;
+        mark_set!(typeof(this), "element")();
+        restart();
+    }
+
     final Pull pull() const pure
         => _pull;
     final void pull(Pull value)
@@ -102,16 +115,16 @@ nothrow @nogc:
     }
 
     final ulong records() const pure
-        => _series.record_count;
+        => _element ? _element.series.record_count : 0;
 
     final uint buckets() const pure
-        => _series.bucket_count;
+        => _element ? _element.series.bucket_count : 0;
 
     final uint edge_rate() const pure
         => _edge_rate;
 
     final SysTime last_edge() const pure
-        => _series.last_update;
+        => _element ? _element.series.last_update : SysTime();
 
     final const(char)[] backend() const pure
     {
@@ -130,11 +143,34 @@ nothrow @nogc:
     final Duration anchor_error() const pure
         => _anchor_err;
 
-    final ref inout(Element2) series() inout pure
-        => _series;
+    final inout(Element)* element() inout pure
+        => _element;
 
     final override bool validate() const pure
         => _rx_line != uint.max && !_device.empty;
+
+    override bool materialise()
+    {
+        Device* dev = _device[] in g_app.devices;
+        if (!dev)
+            return false;
+        Element* e = (*dev).find_or_create_element(_element_path.empty ? "state" : _element_path[]);
+        if (!e.series.format)
+        {
+            // the binding owns the format and its clock domain; the mount points at them
+            // TODO: the mount outlives binding destruction; formats need a durable home
+            e.series.format = &_fmt;
+            e.access = Access.read;
+            e.sampling_mode = SamplingMode.report;
+        }
+        else if (e.series.format !is &_fmt)
+        {
+            log.error("element '", _element_path.empty ? "state" : _element_path[], "' is already mounted with a different format");
+            return false;
+        }
+        _element = e;
+        return true;
+    }
 
     static if (has_gpio_sampler)
     {
@@ -157,8 +193,8 @@ nothrow @nogc:
             }
             _watched = true;
             log.info("gpio sampler backend=", _sampler.backend_name(), " chip=", _chip, " line=", _rx_line);
-            _series.ensure_history();   // scaffold retains everything; retention policy TODO
-            _edges_at_window = _series.record_count;
+            _element.series.ensure_history();   // scaffold retains everything; retention policy TODO
+            _edges_at_window = _element.series.record_count;
             _window_start = getTime();
             _last_anchor = _window_start;
             _stream_start = SysTime();
@@ -176,6 +212,8 @@ nothrow @nogc:
                 _watched = false;
             }
             _sampler.close();
+            if (_element)
+                _element.mark_gap();
             return CompletionStatus.complete;
         }
 
@@ -184,7 +222,7 @@ nothrow @nogc:
             MonoTime now = getTime();
             if (now - _window_start >= 1.seconds)
             {
-                ulong count = _series.record_count;
+                ulong count = _element.series.record_count;
                 uint rate = cast(uint)(count - _edges_at_window);
                 if (rate != _edge_rate)
                 {
@@ -218,7 +256,8 @@ nothrow @nogc:
     }
 
 private:
-    Element2 _series;
+    Element* _element;          // device tree mount; series lives there
+    String _element_path;
     ClockDomain _clock;         // owned by this binding; _fmt.clock points at it
     DataFormat _fmt;
     Duration _debounce;
@@ -255,7 +294,7 @@ private:
                     levels[i] = edges[i].level;
                     ticks[i] = edges[i].tick - _stream_first_tick;
                 }
-                _series.observe_block(levels[0 .. n], ticks[0 .. n]);
+                _element.observe_block(levels[0 .. n], ticks[0 .. n]);
             }
             mark_set!(typeof(this), ["records", "buckets", "last-edge"])();
         }
@@ -269,8 +308,8 @@ private:
 
             // a restart resumes into the retained series; force a fresh bucket so the new stream's low
             // relative ticks can't underflow the old bucket's offset base (cross-segment wall: TODO)
-            if (_series.record_count > 0)
-                _series.mark_gap();
+            if (_element.series.record_count > 0)
+                _element.mark_gap();
 
             ulong tick_c;
             SysTime wall_c;

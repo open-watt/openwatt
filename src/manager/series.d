@@ -9,6 +9,7 @@ module manager.series;
 // vocabulary, boxed through Variant only at the console/API edges.
 
 import urt.array;
+import urt.si.quantity : Quantity;
 import urt.si.unit : ScaledUnit;
 import urt.time;
 import urt.variant;
@@ -35,6 +36,11 @@ enum ValueType : ubyte
     string_,
     variant
 }
+
+// scalar types store by value in an 8-byte Scalar; indirect types live behind pointers
+// (or inline Variants) and never take the native fast paths
+bool is_scalar_type(ValueType t) pure
+    => t <= ValueType.f64;
 
 ubyte value_stride(ValueType t) pure
 {
@@ -213,11 +219,97 @@ nothrow @nogc:
         => (cast(const(T)*)data)[i];
 
     Variant box(uint i) const
+        => box_record(cast(const(ubyte)*)data + i*format.stride, *format);
+}
+
+
+// Variant boxing at the edges (console, SNMP, expressions): storage and delivery stay
+// native-typed; only edge consumers pay for a box. Indirect types (string_, variant)
+// box at their mount, not here.
+Variant box_record(const(void)* record, ref const DataFormat fmt)
+{
+    final switch (fmt.type) with (ValueType)
     {
-        Variant r;
-        // TODO: switch on format.type, wrap numeric types with format.unit as a quantity
-        return r;
+        case bool_: return Variant(*cast(const(bool)*)record);
+        case u8:    return box_int(*cast(const(ubyte)*)record, fmt);
+        case s8:    return box_int(*cast(const(byte)*)record, fmt);
+        case u16:   return box_int(*cast(const(ushort)*)record, fmt);
+        case s16:   return box_int(*cast(const(short)*)record, fmt);
+        case u32:   return box_int(*cast(const(uint)*)record, fmt);
+        case s32:   return box_int(*cast(const(int)*)record, fmt);
+        case u64:   return box_int(cast(long)*cast(const(ulong)*)record, fmt);
+        case s64:   return box_int(*cast(const(long)*)record, fmt);
+        case f32:   return box_float(*cast(const(float)*)record, fmt);
+        case f64:   return box_float(*cast(const(double)*)record, fmt);
+        case string_:
+        case variant:
+            assert(false, "indirect types box at the mount, not the record");
     }
+}
+
+// Inverse of box_record for the write path: converts an edge Variant into the format's
+// native scalar. False when the value can't represent in the format; the caller decides
+// what an unrepresentable write means.
+bool unbox_scalar(ref const Variant v, ref const DataFormat fmt, out Scalar s)
+{
+    final switch (fmt.type) with (ValueType)
+    {
+        case bool_:
+            if (!v.isBool)
+                return false;
+            s = Scalar.of(v.asBool);
+            return true;
+
+        case u8, u16, u32, u64:
+        case s8, s16, s32, s64:
+        {
+            double d;
+            if (!unbox_double(v, fmt, d))
+                return false;
+            s = Scalar.of(cast(long)d);
+            return true;
+        }
+        case f32:
+        {
+            double d;
+            if (!unbox_double(v, fmt, d))
+                return false;
+            s = Scalar.of(cast(float)d);
+            return true;
+        }
+        case f64:
+        {
+            double d;
+            if (!unbox_double(v, fmt, d))
+                return false;
+            s = Scalar.of(d);
+            return true;
+        }
+
+        case string_:
+        case variant:
+            return false;
+    }
+}
+
+private Variant box_int(long v, ref const DataFormat fmt)
+    => fmt.unit == ScaledUnit() ? Variant(v) : Variant(Quantity!long(v, fmt.unit));
+
+private Variant box_float(double v, ref const DataFormat fmt)
+    => fmt.unit == ScaledUnit() ? Variant(v) : Variant(Quantity!double(v, fmt.unit));
+
+private bool unbox_double(ref const Variant v, ref const DataFormat fmt, out double d)
+{
+    if (v.isQuantity)
+        d = fmt.unit == ScaledUnit() ? v.asQuantity!double().normalise().value
+                                     : v.asQuantity!double().adjust_scale(fmt.unit).value;
+    else if (v.isBool)
+        d = v.asBool ? 1 : 0;
+    else if (v.isNumber)
+        d = v.asDouble;
+    else
+        return false;
+    return d == d; // reject NaN
 }
 
 

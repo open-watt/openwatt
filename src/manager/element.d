@@ -11,6 +11,7 @@ import urt.variant;
 
 import manager.component;
 import manager.device;
+import manager.element2;
 import manager.subscriber;
 
 nothrow @nogc:
@@ -61,6 +62,11 @@ nothrow @nogc:
 struct Element
 {
 nothrow @nogc:
+
+    // the typed series core (format, native latest, observers, history); a null or
+    // indirect format means this mount is legacy: the boxed Variant below stays
+    // authoritative and the core lies dormant until a producer assigns a format
+    Element2 series;
 
     package Variant latest;
     package Variant prev;
@@ -127,8 +133,23 @@ nothrow @nogc:
     ref inout(Variant) value() @property inout pure
         => latest;
 
+    // native mounts have a live series core; legacy mounts run the boxed path alone
+    bool native() const pure
+        => series.format !is null && is_scalar_type(series.format.type);
+
     void value(T)(auto ref T v, SysTime timestamp = getSysTime(), Subscriber who = null)
     {
+        if (native)
+        {
+            static if (is(immutable T == immutable Variant))
+                feed_native(v, timestamp);
+            else
+            {
+                Variant boxed = Variant(v);
+                feed_native(boxed, timestamp);
+            }
+        }
+
         bool is_newer = timestamp > last_update;
         if (is_newer)
         {
@@ -147,6 +168,31 @@ nothrow @nogc:
         }
     }
 
+    // native producer surface: the series takes the observation, then the boxed legacy
+    // path mirrors it so Variant-era consumers see the same timeline
+    void observe(T)(T v, SysTime t = getSysTime(), Observer who = null)
+    {
+        series.observe(v, t, who);
+        sync_from_series();
+    }
+
+    void observe_block(const(void)[] samples, const(SysTime)[] times, Observer who = null)
+    {
+        series.observe_block(samples, times, who);
+        sync_from_series();
+    }
+
+    void observe_block(const(void)[] samples, const(ulong)[] ticks, Observer who = null)
+    {
+        series.observe_block(samples, ticks, who);
+        sync_from_series();
+    }
+
+    void mark_gap(Observer who = null)
+    {
+        series.mark_gap(who);
+    }
+
     ref const(ElementSample) recent_at(uint i) const pure
         => recent[(recent_head + i) % cast(uint)recent.length];
 
@@ -155,6 +201,36 @@ nothrow @nogc:
 
     ulong recent_newest() const pure
         => recent_count ? unixTimeNs(cast(SysTime)recent_at(recent_count - 1).time) : 0;
+
+    private void feed_native(ref const Variant v, SysTime timestamp)
+    {
+        Scalar s;
+        if (unbox_scalar(v, *series.format, s))
+            series.observe_scalar(s, timestamp);
+        // else: a write the format can't represent; the boxed side still takes it and the
+        // core diverges until the next native observation (transitional shim behaviour)
+    }
+
+    private void sync_from_series()
+    {
+        Variant v = series.value();
+        SysTime t = series.last_update;
+        bool is_newer = t > last_update;
+        if (is_newer)
+        {
+            prev_update = last_update;
+            last_update = t;
+        }
+        if (latest != v)
+        {
+            if (is_newer)
+                prev = latest.move;
+            latest = v.move;
+            signal(latest, t, prev, prev_update, null);
+            if (is_newer)
+                capture_sample(t);
+        }
+    }
 
     private void capture_sample(SysTime timestamp)
     {
@@ -246,4 +322,23 @@ unittest
     assert(s.recent_count == 1);
     double d;
     assert(!sample_to_double(s.recent_at(0).value, d));
+
+    // native mount: observations feed the series and mirror into the boxed legacy path
+    static immutable DataFormat bool_held = DataFormat(ValueType.bool_, Semantics.held);
+    Element n;
+    n.series.format = &bool_held;
+    n.series.ensure_history();
+    bool[2] lv = [true, false];
+    SysTime[2] tm = [from_unix_time_ns(1_000_000), from_unix_time_ns(2_000_000)];
+    n.observe_block(lv[], tm[]);
+    assert(n.series.record_count == 2);
+    assert(n.value.isBool && !n.value.asBool);
+    assert(n.last_update == from_unix_time_ns(2_000_000));
+    assert(n.recent_count == 1);
+
+    // a boxed write to a native mount lands in the series too
+    n.value(Variant(true), from_unix_time_ns(3_000_000));
+    assert(n.series.record_count == 3);
+    assert(n.series.latest.b);
+    assert(n.value.asBool);
 }
