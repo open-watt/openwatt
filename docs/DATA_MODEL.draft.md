@@ -101,6 +101,65 @@ default), ring (bounded recent), history (buckets under budget, recorder tailing
 budgets win; a cursor lapped by eviction takes a records_lost gap (the drop site marks the
 loss). Bucket capacity scales with rate (target time-span, not record count).
 
+**Storage lifecycle: bucket states, one codec** (design 2026-07-16). A bucket is append-only and
+only the tail is ever written, so aging is a state machine already latent in the code: **open**
+(tail, raw, writable) -> **sealed** (raw, immutable) -> **packed** (compressed stripe, immutable)
+-> **archived/evicted** (in the owsig container, or dropped). Seal fires when the tail retires (on
+capacity or a wall-aligned boundary, below); it shrinks-to-fit first (gap-forced boundaries strand
+up to a bucket of capacity) then packs. A sealed bucket IS the compression stripe: blocks never
+span buckets, so read granularity and codec granularity are one unit, compressed once at seal and
+never touched again. Zero-copy degrades exactly where it should - live observers get the producer's
+own block (never touch storage), a caught-up cursor reads the raw open tail, and only backfill /
+time-window queries reach packed buckets, where read() decodes one stripe into a per-store scratch
+and points the RecordBlock at it. So RecordBlock gains one rule: it is a TRANSIENT VIEW, valid until
+the next read on the same store (cursors already consume immediately). The hot 99% never decodes.
+
+**One codec, three residencies.** The packed in-RAM stripe is byte-identical to the owsig container
+stripe payload, so: the recorder stops re-encoding (it appends packed stripes, cursor work becomes
+memcpy); evicting a recorded series drops the RAM copy of something already on disk (the tiny
+directory entry can stay resident pointing at a container offset); the read stack is uniform whether
+a stripe is in RAM or on disk (locate by time/index, ensure resident+decoded, slice). The codec
+keeps the columnar split: time plane (irregular only) delta or delta-of-delta zigzag varint; value
+plane by ValueType (bool bitpack; int/enum zigzag-delta varint, near-free on held runs; float
+Gorilla-style XOR-with-previous). A per-plane codec byte in the stripe header with a mandatory RAW
+fallback (noisy floats pack larger than raw: store raw, flag it) is also the forward-compat and
+multi-channel hook. Pack synchronously at seal (amortizes to ns/record at bucket granularity),
+falling back to the heartbeat service only if slow cores spike. NOT done: lossless coalescing of
+small stripes - merging across gaps breaks the within-bucket continuity invariant that lets regular
+series store zero time bytes, and shrink-to-fit makes fragmentation cheap enough not to need it.
+
+**Decimation ladder** (design 2026-07-16). Wall-aligned bucket boundaries are what make cheap
+decimation possible: a stripe whose span coincides with an aggregation window closes that window at
+seal, from hot data, with zero carry state. A decimated level is not a new storage concept - it is
+another SERIES with a compound record, reusing buckets/seal/pack/codec/owsig/cursors and (being
+regular) storing zero time bytes.
+- **Store sum+count, not mean** (mean doesn't compose). Cascade raw -> 1s -> 1min -> 1h is exact
+  (min of mins, max of maxs, sum of sums), each level built from the one below, never rescanning
+  raw: a few ops per raw record across the whole ladder.
+- Aggregate record shape lives in the LEVEL's DataFormat, keyed by the raw semantics: sampled
+  numeric {min,max,sum,count}; held numeric time-weighted {min,max,tw_sum,coverage} (coverage is
+  the partial-window honesty signal across gaps); held bool {duty,transitions}; point {count} (an
+  edge series decimates to an event-rate histogram); enums/strings get no levels (viz reads raw).
+- **Epoch-aligned grids**: wall-native series align to Unix-epoch multiples, so every element's
+  minute level shares one grid - multi-series charts and cross-element arithmetic align
+  sample-for-sample with no resampling (the alignment the raw clock-domain rules refuse, delivered
+  at the dashboard tier). Domain-clocked series align in INDEX space (rate*span records/stripe);
+  their levels are where query-time wall mapping happens.
+- Span comes from rate, rounded to a FIXED ladder (1s/10s/1min/10min/1h/1d): only rungs meaningfully
+  coarser than raw exist per element. Seal on boundary OR capacity (bursty irregular overflows a
+  window into sibling stripes; window-close aggregates the 1..k stripes it intersects, usually one).
+- **Read stack**: query is (time range, target point count); the resolver picks the coarsest
+  materialized level with >= target points, ELSE reduces raw on the fly (min/max envelope). The
+  ladder is a pure ACCELERATOR, never a correctness dependency - an element with levels disabled
+  answers identically, just paying more. Live dashboards tail the 1s level's cursor (a laggy UI
+  backpressures nothing, decodes nothing).
+- **Realtime/capture series opt OUT**, and the default writes itself from DataFormat: domain-clocked,
+  or ring/none retention, or point-at-extreme-rate -> no ladder (a waveform's zoomed-out view is an
+  ENVELOPE not a statistic, and bounded ring retention makes query-time reduction cheap); wall-native
+  control-rate trend series -> ladder on. Levels hang off SeriesStore as
+  `Level { window, DataFormat*, SeriesStore }[]`, populated by the seal path; the 48-byte core does
+  not move. Deep rungs can be built offline from the container by an aggregator.
+
 **Recorder**: a cursor consumer serializing series to owsig containers (one per series, keyed
 by NAME; ids never persist). Element history and waveform capture share the container format.
 Record counters, not rates: counter deltas are gap-proof, rates derive at query time; restart
@@ -116,7 +175,13 @@ the migration); RAM buckets + on-disk container need one time-keyed, decimation-
 stack (index is process-local, TIME is the archival axis). Done since first draft: irregular
 block append (observe_block); compact core layout (identity out, format shared, history
 behind a pointer, intrusive subscriptions); legacy hash-EID + ElementTable deleted from
-element.d (they were unused - a slice of migration step 1 done by removal).
+element.d (they were unused - a slice of migration step 1 done by removal). Designed this session
+(2026-07-16, above and in section 6): the bucket lifecycle, one-codec-three-residencies, and the
+fixed decimation ladder (these ARE the time-keyed decimation-aware read stack) plus the type
+registry. Open from this session: ValueType gained `string_embed`/`object` members whose
+stride/storage are undecided, so `value_stride`'s final switch is INCOMPLETE and element2.d does not
+currently compile; and Scalar's 8-byte width cannot hold wide embedded types (IPv6/16B) - both are
+detailed under section 6's type registry.
 
 ## 3. Identity
 
@@ -206,6 +271,41 @@ code). Async via CommandState (progress/cancel). Functions take element parts in
 (kind bit), so they are name-addressed, reservable, automation-callable from do={}, and
 mesh-invocable. Actuation needs provenance (who), stricter access, and arbitration (the energy
 propose/dispose pivot is the arbitration story; functions are its addressable target).
+
+**Type registry: one table for DataFormat, samplers, and Variant** (design 2026-07-16). The
+higher-level-type problem (an IP address in Modbus registers - today only text-parseable, not
+extensible) resolves by promoting Variant's existing per-type vtable (TypeDetails + g_type_details in
+variant.d: copy/destroy/stringify-both-ways/compare, self-labelled "a hack") into a first-class
+urt.typereg registry that Variant CONSUMES. DataFormat, ValueDesc and TextValueDesc then all point at
+the same records (DataFormat's missing enum-info/type-detail slot is one pointer serving
+enum_/user_/string_; ValueDesc already has the union arm). Identity follows the id.d doctrine exactly:
+the record carries the canonical NAME (not raw T.stringof); the fnv1a hash stays a process-local
+lookup accelerator only, never on wire or disk (an owsig header writes name+size once and binds a
+local id; mesh sessions bind names the same way). One TypeDetails per type, zero per-callsite
+expansion.
+
+Stored values are LIVE T's: bucket records are memcpy'd at stride=td.size, so get!IPAddr stays a
+pointer cast. Eligibility is therefore stricter than Variant's user types - POD only, no
+pointers/dtors (a `pod` flag on the record); anything else stays behind ValueType.variant. Archival
+needs no serializer (a POD's memory image IS its encoding), with an optional serialize/deserialize
+pair in TypeDetails where null = memcpy-is-canonical (the cross-arch mesh hook, unimplemented until a
+real mismatch appears). Payoff is one definition site -> six capabilities: define the struct + one
+registry line and it is text-parseable, register-decodable (profile `as=<typename>` at load time,
+plumbed by ValueDesc), bucket-storable, console-printable, JSON-encodable (string form is correct for
+addresses/times: one user-type case, not new machinery), and container-safe. TextType's
+macaddr/inetaddr/ipaddr/ip6addr members DISSOLVE - they are the hard-coded ancestors of exactly this.
+The two description LANGUAGES (ValueDesc vs TextValueDesc parsers) can stay two; it is the two runtime
+TARGETS that converge on wire-desc + DataFormat, decoding via a Variant-free
+`sample_record(wire, ValueDesc, out_bytes, DataFormat)` path.
+
+**Open (this session)**: Scalar is 8 bytes; IPv6Addr (16) and future composites do not fit. Options:
+grow Scalar to 16 (blows the 48-byte core to ~56, paid per projected property), side-allocate latest
+for wide types, or define latest for stride>8 as the tail record of the open bucket (leaning this
+way: wide types are rare and cold, costs the core nothing, but makes history non-optional for them).
+Also unresolved and BLOCKING: the newly-added `ValueType.string_embed` and `ValueType.object` have no
+decided stride/storage anywhere in the tree, so `value_stride`'s final switch is incomplete and
+element2.d does not compile - the next session must settle their semantics (an inline fixed-width
+string? a boxed handle/EID?) before element2.d builds.
 
 ## 7. Structural direction: Device becomes a BaseObject (composition)
 

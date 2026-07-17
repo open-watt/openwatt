@@ -320,6 +320,17 @@ status block). Remaining legs, roughly in order:
   `client.d`), and the Zigbee NCP counter poll (`iface.d`); moving those onto
   `g_app.schedule`/the 1s heartbeat is a separate cleanup.
 
+- **GPIO sampler backend upgrades** (baseline landed 2026-07-15: urt gpio sampler API +
+  posix cdev v2 backend + /binding/gpio (GpioBinding) populating an Element2 series):
+  (1) pigpiod runtime detection on linux, preferred over cdev when present (decided: cdev
+  stays the portable default; pigpio = DMA sample-clock timestamps + the only honest TX;
+  no Pi 5 support, so detect, never assume) - same GpioSampler surface, mode tag inside;
+  (2) map cdev `line_seqno` gaps to `mark_gap()` on the series so kernel event-buffer
+  overflow marks the loss at the drop site; (3) bucket eviction is now LIVE-urgent: an open
+  squelch on a 433 receiver grows the series unboundedly (~16 B/edge at hundreds-thousands
+  edges/sec); (4) TX (waveform generator API) when 433 transmit lands - forces the pigpio
+  backend.
+
 - **Port discovery completeness and eventing**: /port is meant to be the unified hardware
   inventory, but discovery is still uneven. Ethernet and WiFi publish ports today; serial
   discovery needs to be event-driven instead of periodically rescanning; CAN devices are not
@@ -343,6 +354,14 @@ status block). Remaining legs, roughly in order:
 
 - **API response truncation**: /api/get responses truncate around 140KB (seen querying
   `energy.*`); clients get invalid JSON with no error.
+
+- **/device/print over /api/cli/execute CRASHES the instance** (found 2026-07-15, pre-existing):
+  every invocation resets the connection (http 000 at ~1.4s), the child dies (defunct under the
+  supervisor) and respawns. The same command over a piped --interactive console session prints
+  NOTHING but survives. Suspect: DeviceTreeView (and live views generally) assume a terminal
+  channel the API/pipe sessions don't have. Severity: any web/API user typing it restarts prod.
+  Reproduce locally with the piped-console for the silent case; the crash case needs an API
+  session against a populated tree. See console-session skill when investigating.
 
 - **TLS server-mode transport ownership**: shutdown destroys the handed-in listener stream;
   if a server-side TCP ever takes multiple ticks to shut down after going offline, the same
