@@ -178,10 +178,10 @@ behind a pointer, intrusive subscriptions); legacy hash-EID + ElementTable delet
 element.d (they were unused - a slice of migration step 1 done by removal). Designed this session
 (2026-07-16, above and in section 6): the bucket lifecycle, one-codec-three-residencies, and the
 fixed decimation ladder (these ARE the time-keyed decimation-aware read stack) plus the type
-registry. Open from this session: ValueType gained `string_embed`/`object` members whose
-stride/storage are undecided, so `value_stride`'s final switch is INCOMPLETE and element2.d does not
-currently compile; and Scalar's 8-byte width cannot hold wide embedded types (IPv6/16B) - both are
-detailed under section 6's type registry.
+registry. (A `string_embed`/`object` ValueType experiment from that session was backed out of the tree; the
+enum holds only the settled members and element2.d compiles. The embedded-string / object-handle
+question is deferred to the type-registry work, where it belongs; Scalar width for wide types is
+decided - see section 6.)
 
 ## 3. Identity
 
@@ -298,14 +298,12 @@ The two description LANGUAGES (ValueDesc vs TextValueDesc parsers) can stay two;
 TARGETS that converge on wire-desc + DataFormat, decoding via a Variant-free
 `sample_record(wire, ValueDesc, out_bytes, DataFormat)` path.
 
-**Open (this session)**: Scalar is 8 bytes; IPv6Addr (16) and future composites do not fit. Options:
-grow Scalar to 16 (blows the 48-byte core to ~56, paid per projected property), side-allocate latest
-for wide types, or define latest for stride>8 as the tail record of the open bucket (leaning this
-way: wide types are rare and cold, costs the core nothing, but makes history non-optional for them).
-Also unresolved and BLOCKING: the newly-added `ValueType.string_embed` and `ValueType.object` have no
-decided stride/storage anywhere in the tree, so `value_stride`'s final switch is incomplete and
-element2.d does not compile - the next session must settle their semantics (an inline fixed-width
-string? a boxed handle/EID?) before element2.d builds.
+**Wide `latest` (decided 2026-07-17)**: Scalar stays 8 bytes. For stride > 8 types (IPv6Addr, future
+composites), `latest` IS the tail record of the open bucket - wide types are rare and cold, the
+48-byte core doesn't move, and the cost is that history becomes non-optional for them (acceptable:
+anything wide enough to overflow Scalar is registry-typed and observation-shaped, not a hot
+projected property). New ValueType members (embedded strings, object handles) land WITH the type
+registry, not speculatively - a member with undecided stride never enters the enum again.
 
 ## 7. Structural direction: Device becomes a BaseObject (composition)
 
@@ -353,8 +351,21 @@ optimizer over declared timing constraints.
 binding exist as a scaffold to harden the storage/delivery design against a real producer.
 The scaffold is binding-owned and touches no identity machinery, so the order below stands.)
 
-1. ID migration (id.d header steps 1-6) - prerequisite for everything.
+1. ID migration (id.d header steps 0-5) - prerequisite for everything. Sequenced 2026-07-17:
+   a. ids OFF THE WIRE first (sync exchanges names once per session, binds varint handles;
+      pulled forward from the mesh step because sync currently ships raw CIDs and leans on
+      cross-peer hash agreement - the wire must stop carrying ids BEFORE ids change shape,
+      converting the cutover from a protocol+internals event into a pure internal refactor);
+   b. the generic park/claim/forward table as a standalone unit-tested component (it
+      instantiates at both levels, so build it once, integration-free);
+   c. container cutover: CollectionTable over dense per-type arrays (CID = type bits + slot,
+      allocator = next_slot++), delete rehash/rekey/broadcast_rekey/rekey_field; then Devices
+      register as a container type and g_app.devices dissolves;
+   d. element level: per-container part tables, Cursor holds EID, GPIO series mounts on device.
 2. Series contract module (DataFormat/RecordBlock/events/owsig) + Element2 replaces Element.
+   Phased: extract contract module; Component holds Element2 with Variant boxing at the edges
+   (console, SNMP, expressions) so consumers migrate gradually; producers migrate per-protocol
+   to native observe!T (Modbus last, deepest); delete Element when the last consumer moves.
 3. Retention tiers + recorder-as-cursor + container read stack.
 4. Operators absorb Map/Sum/Alias (gap-aware accumulator).
 5. Property projection; Prop! unit/desc fields.

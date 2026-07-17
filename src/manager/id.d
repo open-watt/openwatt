@@ -70,18 +70,30 @@ module manager.id;
 // session and bind session-local varint handles (introducer allocates, parity bit for
 // direction, never reused); config and containers persist names only.
 //
-// Migration:
-//   1. replace ElementTable (element.d) with per-container element-part tables owned by their
-//      containers; insert() becomes the claim state machine (absent -> reserve/new,
-//      parked/tombstone -> claim, live -> duplicate error); full-path interning deleted
-//   2. element destruction parks the primary part instead of nulling in place
-//   3. delete rehash(); hash_id survives only inside the collection name maps' string hashing
-//   4. CollectionTable becomes the container level of the same scheme; delete rekey(),
-//      do_rekey(), broadcast_rekey() and rekey_field() - rename-following becomes intrinsic
-//      instead of repaired
-//   5. ObjectRef and element refs converge on one EID ref type (element part 0 = the container
+// Migration (execution order settled 2026-07-17; container level lands BEFORE element level:
+// EIDs embed the CID, so durable element refs are worthless until CIDs stop rekeying):
+//   0. ids off the wire: sync exchanges names once per session and binds varint session
+//      handles (introducer allocates, parity bit per direction, never reused). Sync today
+//      ships raw CIDs and leans on cross-peer hash agreement, so this lands FIRST - it turns
+//      the id cutover from a protocol+internals event into a pure internal refactor
+//   1. the park/claim/forward machine as a standalone unit-tested component. Per-type id
+//      tables are DENSE ARRAYS indexed by slot - one tagged word each (bound/dormant/forward),
+//      allocator is next_slot++, no binary search, no collision concept; name -> id (where
+//      parking lives) is a separate string map touched only on lookup/create/rename/death.
+//      insert() is the claim state machine (absent -> reserve/new, parked/tombstone -> claim,
+//      live -> duplicate error)
+//   2. container cutover: CollectionTable becomes the container level of the scheme (sorted
+//      entries, binary search and rehash chains die); delete rehash(), rekey(), do_rekey(),
+//      broadcast_rekey() and rekey_field() - rename-following becomes intrinsic instead of
+//      repaired; hash_id survives only inside the name maps' string hashing. Then Devices
+//      register as a container type and the ad-hoc g_app.devices Map dissolves
+//   3. element level: per-container element-part tables owned by their containers; element
+//      destruction parks the primary part instead of nulling in place; full-path interning
+//      stays deleted (legacy ElementTable + hash-EIDs already removed from element.d);
+//      Cursor trades its Element2* for an EID
+//   4. ObjectRef and element refs converge on one EID ref type (element part 0 = the container
 //      itself), deref via a shared follow-forwards + self-heal helper
-//   6. audit holders: no persisted ids, no wire ids, no blind hashing - every id enters a
+//   5. audit holders: no persisted ids, no wire ids, no blind hashing - every id enters a
 //      holder through the table (property projections excepted: (obj CID, Prop! index) is
 //      computed, which is safe because both parts are table-issued identities)
 // ===========================================================================================

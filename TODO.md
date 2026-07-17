@@ -156,9 +156,9 @@ status block). Remaining legs, roughly in order:
   property projection (every Prop! semantically an element, physically lazy), Event! and
   profile FUNCTIONS as the missing facets, Device-as-BaseObject via composition (kills
   is_device trap), mesh trajectory (config authority is the new subsystem). Build order in the
-  doc; ID migration is the prerequisite step. Revert router/stream's provisional
-  SampleChannel/Seekable/SignalStream when starting. Draft: src/manager/element2.d (not in
-  vcxproj).
+  doc; ID migration is the prerequisite step and STARTED 2026-07-17 (sequencing below and in the
+  id.d header; provisional router/stream SampleChannel/Seekable/SignalStream already reverted).
+  Draft: src/manager/element2.d (in both build systems, unit-tested).
 
 - **Element deadband (settled design, build when needed)**: per-point change-event conditioning,
   standard SCADA/OPC report-by-exception. ONE mechanism, three surfaces: the filter itself lives in
@@ -214,7 +214,23 @@ status block). Remaining legs, roughly in order:
   Rules that must hold system-wide: ids never persisted, never on the wire (sync exchanges names
   once per session, binds varint session handles), no blind `hash_id` of a name to fabricate an
   id. Prerequisite for the Element2/series work (element2.d draft holds `Element2*` in Cursor -
-  becomes an EID under this scheme).
+  becomes an EID under this scheme). STARTED 2026-07-17; execution order (full steps 0-5 in the
+  id.d header): (0) ids off the wire FIRST - sync today ships raw CIDs and leans on cross-peer
+  hash agreement (json_encoder rekey verbs + the rehash-divergence patch in sync/package.d), so
+  session name/handle binding lands before ids change shape, making the cutover a pure internal
+  refactor; (1) the park/claim/forward machine standalone + unit-tested (dense per-type slot
+  arrays, next_slot++ allocator, separate name map holding parked ids); (2) container cutover
+  (CollectionTable, delete ALL rekey machinery, then Devices as a container type); (3) element
+  part tables + Cursor->EID; (4) unified EID ref type; (5) holder audit.
+  Step 0 LANDED 2026-07-17 (compiles, unit-green; sync end-to-end smoke test remains an open
+  gap it already had): add_name = {handle, name, type} introducer, SyncPeer carries the
+  session handle tables (_introduced objects / _adopted local CIDs; wire handle low bit =
+  allocated-by-sender, flips crossing the wire; slots never rebind, object death voids them
+  via the destroyed lifecycle hook), every other verb cites handles, translation confined to
+  the encoder seam (package.d handlers still speak local CIDs). Deleted: the rekey verb both
+  directions, the fan_out_rekey/on_object_rekeyed stubs, and #/$ raw-CID subscription
+  patterns. Rename propagation (never wired) is now one {handle, new_name} verb + a global
+  renamed hook, deliberately deferred.
 
 - **Async I/O end-state: the main loop's wait primitive IS the reactor** (decided 2026-07-12;
   supersedes the earlier "fold the workers onto one shared worker-thread reactor" plan).
