@@ -8,23 +8,23 @@ module manager.id;
 // hashing a name, never persisted, never sent on the wire. The hash-based scheme below
 // (fnv1a ids + rehash chains + rekey repair) is to be deleted and replaced with:
 //
-// Ids are TWO-PART: EID = (container id, element part). The container level is ONE id space
+// Ids are TWO-LEVEL: EID = (container id, element index). The container level is ONE id space
 // with per-type tables (the CID type bits): collection objects and Devices are both registered
 // types in it, but only collection types carry BaseObject machinery - a Device is NOT a
 // BaseObject (no state machine; passive container materialized by bindings) and the ad-hoc
 // g_app.devices Map dissolves into the device type's table. The data plane shards per
-// container. Element part 0 may denote the container itself, unifying object refs and element
+// container. Element index 0 may denote the container itself, unifying object refs and element
 // refs into one type. Packed 64-bit in RAM (acceptable: ids never persist and never wire).
 //
 //   container level: collection tables map name -> CID -> object; a rename touches ONE name
 //                    entry - children resolve by composition, so device rename is O(1) and
 //                    full element paths are never stored or interned
-//   element level:   each container owns a dense element-part table, one tagged word per part
-//                      bound   -> Element*   the part belongs to a live element
+//   element level:   each container owns a dense element-index table, one tagged word per index
+//                      bound   -> Element*   the index is bound to a live element
 //                      dormant -> null       parked, waiting for a claimant
-//                      forward -> part       permanent alias of another part (write-once)
+//                      forward -> index      permanent alias of another index (write-once)
 //                    relative paths resolve through the component tree
-//   hard-wired parts: property projections COMPUTE their EID as (obj CID, Prop! index) - a
+//   hard-wired indices: property projections COMPUTE their EID as (obj CID, Prop! index) - a
 //                    compile-time literal index, no lookup, no cache; profile elements take
 //                    their template index, deterministic per profile version
 //
@@ -38,7 +38,7 @@ module manager.id;
 //   - death parks the primary on the object's final name; refs deref to null
 //   - the next object created at that name claims the parked id and every ref resurrects
 //   - the machine instantiates at BOTH levels: container ids park on collection names, element
-//     parts park within their container's table; a forward reference under an absent container
+//     indices park within their container's table; a forward reference under an absent container
 //     reserves the container id plus a stub element table, and each level claims independently
 //
 // Invariants:
@@ -65,7 +65,7 @@ module manager.id;
 // no holders. Nothing observable changes, so v1 ships without it; add when churn metrics
 // (id high-watermark in sysinfo) justify.
 //
-// CID is not merely unified with EID - it IS the EID's container part (type bits kept, slot
+// CID is not merely unified with EID - it IS the EID's container level (type bits kept, slot
 // as a dense per-type index). The wire shares none of this: peers exchange names once per
 // session and bind session-local varint handles (introducer allocates, parity bit for
 // direction, never reused); config and containers persist names only.
@@ -87,15 +87,15 @@ module manager.id;
 //      broadcast_rekey() and rekey_field() - rename-following becomes intrinsic instead of
 //      repaired; hash_id survives only inside the name maps' string hashing. Then Devices
 //      register as a container type and the ad-hoc g_app.devices Map dissolves
-//   3. element level: per-container element-part tables owned by their containers; element
-//      destruction parks the primary part instead of nulling in place; full-path interning
+//   3. element level: per-container element-index tables owned by their containers; element
+//      destruction parks the primary index instead of nulling in place; full-path interning
 //      stays deleted (legacy ElementTable + hash-EIDs already removed from element.d);
 //      Cursor trades its Element2* for an EID
-//   4. ObjectRef and element refs converge on one EID ref type (element part 0 = the container
+//   4. ObjectRef and element refs converge on one EID ref type (element index 0 = the container
 //      itself), deref via a shared follow-forwards + self-heal helper
 //   5. audit holders: no persisted ids, no wire ids, no blind hashing - every id enters a
 //      holder through the table (property projections excepted: (obj CID, Prop! index) is
-//      computed, which is safe because both parts are table-issued identities)
+//      computed, which is safe because both components are table-issued identities)
 // ===========================================================================================
 
 import urt.array;
@@ -142,17 +142,17 @@ struct ID(uint _type_bits)
         uint type_index() const pure
             => raw >> id_bits;
 
-        // the two-part EID (strategy above): this container id + an element part
-        EID element(ushort part) const pure
-            => EID(this, part);
+        // the two-level EID (strategy above): this container id + an element index
+        EID element(ushort index) const pure
+            => EID(this, index);
 
         uint slot() const pure
             => raw & id_mask;
     }
 }
 
-// The two-part element id from the strategy above: container CID in the low 32 bits, element
-// part above it, top 16 bits spare. Element part 0 denotes the container itself, so object
+// The two-level element id from the strategy above: container CID in the low 32 bits, element
+// index above it, top 16 bits spare. Element index 0 denotes the container itself, so object
 // refs and element refs converge on one type. The resolution tables land with the migration;
 // the handle's shape is settled now. Never persisted, never on the wire.
 struct EID
@@ -163,15 +163,15 @@ nothrow @nogc:
 
     enum EID invalid = EID();
 
-    this(CID container, ushort part = 0) pure
+    this(CID container, ushort index = 0) pure
     {
-        raw = container.raw | (ulong(part) << 32);
+        raw = container.raw | (ulong(index) << 32);
     }
 
     CID container() const pure
         => CID(cast(uint)raw);
 
-    ushort part() const pure
+    ushort index() const pure
         => cast(ushort)(raw >> 32);
 
     bool opCast(T : bool)() const pure
@@ -185,7 +185,7 @@ nothrow @nogc:
 }
 
 // The park/claim/forward machine (migration step 1). One instantiation per id space: the
-// container level is per-type tables over BaseObject; each container's element-part table is
+// container level is per-type tables over BaseObject; each container's element-index table is
 // the same machine over its element type. Slots are dense and immortal (v1: no reclamation),
 // one tagged word each:
 //     0              dormant - parked on a name, waiting for a claimant
@@ -417,6 +417,83 @@ private:
     }
 }
 
+// The element level of the id scheme: a container's dense index table. Same tagged-word
+// encoding as IdMachine, but NAMELESS - relative paths resolve through the component tree,
+// so the tree is the name map: an index parks positionally on release and the next element
+// bound at the same mount rebinds it (bind); deterministic indices (profile template index,
+// Prop! index) claim their slot directly. Index 0 denotes the container itself (the EID
+// convention), so slots start at 1.
+struct IndexTable(T) if (is(T == class) || is(T == U*, U))
+{
+nothrow @nogc:
+
+    ushort mint(T obj)
+    {
+        debug assert(obj !is null);
+        if (_slots.empty)
+            _slots ~= 0;
+        debug assert(_slots.length <= ushort.max, "index space exhausted");
+        ushort index = cast(ushort)_slots.length;
+        _slots ~= cast(size_t)cast(void*)obj;
+        return index;
+    }
+
+    void bind(ushort index, T obj)
+    {
+        debug assert(obj !is null);
+        debug assert(index && index < _slots.length && _slots[][index] == 0, "bind to a live or forwarded index");
+        _slots[][index] = cast(size_t)cast(void*)obj;
+    }
+
+    void release(ushort index)
+    {
+        debug assert(index && index < _slots.length && !(_slots[][index] & 1), "release of invalid or forwarded index");
+        _slots[][index] = 0;
+    }
+
+    void forward(ushort from, ushort to)
+    {
+        debug assert(from && from < _slots.length && _slots[][from] == 0, "forward of a live or forwarded index");
+        debug assert(to && to < _slots.length);
+        _slots[][from] = (size_t(to) << 1) | 1;
+    }
+
+    T deref(ref ushort index)
+    {
+        ushort i = index;
+        if (!i || i >= _slots.length)
+            return null;
+        size_t w = _slots[][i];
+        while (w & 1)
+        {
+            i = cast(ushort)(w >> 1);
+            w = _slots[][i];
+        }
+        if (i != index)
+            index = i;
+        return cast(T)cast(void*)w;
+    }
+
+    inout(T) get(ushort index) inout pure
+    {
+        if (!index || index >= _slots.length)
+            return null;
+        size_t w = _slots[][index];
+        while (w & 1)
+            w = _slots[][w >> 1];
+        return cast(inout(T))cast(void*)w;
+    }
+
+    ushort index_count() const pure
+    {
+        uint n = cast(uint)_slots.length;
+        return cast(ushort)(n ? n - 1 : 0);
+    }
+
+private:
+    Array!size_t _slots;    // slot 0 reserved: index 0 denotes the container itself
+}
+
 unittest
 {
     static struct Thing { int x; }
@@ -481,4 +558,25 @@ unittest
     uint parked = m.reserve("spare");
     assert(m.name_of(parked) == "spare");
     assert(m.slot_count >= 6);
+
+    // index table: the nameless element level; index 0 is the container itself
+    IndexTable!(Thing*) it;
+    ushort i1 = it.mint(&a);
+    ushort i2 = it.mint(&b);
+    assert(i1 == 1 && i2 == 2);
+    assert(it.get(i1) is &a && it.get(i2) is &b);
+
+    // release parks positionally; bind rebinds the same index
+    it.release(i1);
+    assert(it.get(i1) is null);
+    it.bind(i1, &c);
+    assert(it.get(i1) is &c);
+
+    // forwards chase to the terminal and heal the held index
+    it.release(i2);
+    it.forward(i2, i1);
+    ushort held_index = i2;
+    assert(it.deref(held_index) is &c && held_index == i1);
+    assert(it.get(i2) is &c);
+    assert(it.index_count == 2);
 }

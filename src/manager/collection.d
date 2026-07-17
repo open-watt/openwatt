@@ -588,7 +588,8 @@ private:
     Array!BaseObject _pending_free;
 }
 
-CID make_cid(uint type_idx, uint slot) pure
+// container tables mint CIDs (CollectionTable and DeviceTable share the id space)
+package(manager) CID make_cid(uint type_idx, uint slot) pure
 {
     debug assert(slot && slot <= CID.id_mask, "invalid collection slot");
     return CID((type_idx << CID.id_bits) | slot);

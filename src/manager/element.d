@@ -12,6 +12,7 @@ import urt.variant;
 import manager.component;
 import manager.device;
 import manager.element2;
+import manager.id : EID;
 import manager.subscriber;
 
 nothrow @nogc:
@@ -86,6 +87,8 @@ nothrow @nogc:
     Array!Subscriber subscribers;
     Array!OnChangeCallback subscribers_2;
     ushort subscribers_dirty;
+
+    package EID _eid;
 
     Component parent;
 
@@ -193,6 +196,37 @@ nothrow @nogc:
         series.mark_gap(who);
     }
 
+    // durable identity: (device CID, element index), minted lazily against the owning
+    // device's table on first demand. Unmounted elements (no device ancestor, or a device
+    // not yet registered) have none
+    EID eid() const pure
+        => _eid;
+
+    EID ensure_eid()
+    {
+        if (_eid)
+            return _eid;
+        Component c = parent;
+        while (c && !c.is_device)
+            c = c.parent;
+        if (!c)
+            return EID.invalid;
+        Device d = cast(Device)cast(void*)c;    // extern(C++) has no dynamic cast; is_device checked above
+        if (!d.cid)
+            return EID.invalid;
+        _eid = d.cid.element(d.element_ids.mint(&this));
+        return _eid;
+    }
+
+    ElementCursor open_cursor(ulong from_index = ulong.max)
+    {
+        EID handle = ensure_eid();
+        if (!handle)
+            return ElementCursor();     // unmounted elements have no durable identity to cursor
+        Cursor c = series.open_cursor(from_index);
+        return ElementCursor(handle, c.position, c.bit);
+    }
+
     ref const(ElementSample) recent_at(uint i) const pure
         => recent[(recent_head + i) % cast(uint)recent.length];
 
@@ -285,6 +319,53 @@ nothrow @nogc:
         if (pos + id.length <= buf.length)
             buf[pos .. pos + id.length] = id[];
         return pos + id.length;
+    }
+}
+
+
+// The durable cursor: holds an EID, never a pointer, so long-lived polling consumers
+// (recorder, sync sweepers) survive element death - resolution fails and the cursor goes
+// quiet. Storage-level cursoring stays in manager.element2.Cursor; this resolves per call
+// and delegates.
+struct ElementCursor
+{
+nothrow @nogc:
+
+    EID eid;
+    ulong position;
+    ubyte bit;
+
+    bool opCast(T : bool)() const pure
+        => eid != EID.invalid;
+
+    bool pending()
+    {
+        Element* e = resolve_element(eid);
+        if (!e)
+            return false;
+        auto c = Cursor(&e.series, position, bit);
+        return c.pending;
+    }
+
+    RecordBlock next(uint max_records)
+    {
+        Element* e = resolve_element(eid);
+        if (!e)
+            return RecordBlock();
+        auto c = Cursor(&e.series, position, bit);
+        RecordBlock r = c.next(max_records);
+        position = c.position;
+        return r;
+    }
+
+    void close()
+    {
+        if (Element* e = resolve_element(eid))
+        {
+            auto c = Cursor(&e.series, position, bit);
+            e.series.close_cursor(c);
+        }
+        eid = EID.invalid;
     }
 }
 

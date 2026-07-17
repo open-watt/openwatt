@@ -8,10 +8,11 @@ import urt.time;
 import urt.variant;
 
 import manager;
+import manager.collection : CID, CollectionType, make_cid;
 import manager.component;
 import manager.element;
 import manager.expression;
-import manager.id : IdMachine;
+import manager.id : EID, IdMachine, IndexTable;
 import manager.profile;
 
 nothrow @nogc:
@@ -34,6 +35,17 @@ nothrow @nogc:
     {
         uint slot = _machine.claim(name, device);
         debug assert(slot, "device name already in use");
+        device.cid = make_cid(CollectionType.device, slot);
+    }
+
+    // EID resolution for the device container type: index 0 is the device itself (resolves
+    // through the container level, not here), other indices hit the device's element table
+    inout(Element)* resolve(EID eid) inout pure
+    {
+        if (eid.container.type_index != CollectionType.device)
+            return null;
+        inout Device d = _machine.get(eid.container.slot);
+        return d ? d.element_ids.get(eid.index) : null;
     }
 
     auto values() => _machine.values();
@@ -50,6 +62,11 @@ nothrow @nogc:
 package:
     IdMachine!Device _machine;
 }
+
+// deref an element EID against the live tables; null when unresolvable (dead element,
+// unregistered container, or a non-device container type)
+Element* resolve_element(EID eid)
+    => g_app ? g_app.devices.resolve(eid) : null;
 
 enum ComputationKind : ubyte
 {
@@ -159,6 +176,9 @@ nothrow @nogc:
     {
         clear_computations();
     }
+
+    CID cid;                            // container id; stamped when the device registers
+    IndexTable!(Element*) element_ids;  // the element level of the id scheme, sharded per container
 
     Array!Computation computations;
 
@@ -571,4 +591,22 @@ unittest
     assert(!c.is_device);
     Component as_comp = d;
     assert(as_comp.is_device);
+
+    // element identity: indices mint lazily against the device's table once it registers
+    DeviceTable table;
+    table.insert(d.id[], d);
+    assert(d.cid);
+
+    Element* e = defaultAllocator.allocT!Element();
+    e.parent = c;
+    assert(!e.eid);
+    EID handle = e.ensure_eid();
+    assert(handle && handle.container == d.cid && handle.index == 1);
+    assert(e.ensure_eid() == handle);
+    assert(table.resolve(handle) is e);
+    assert(table.resolve(EID(d.cid, 2)) is null);
+
+    // unmounted elements have no identity to mint
+    Element* stray = defaultAllocator.allocT!Element();
+    assert(stray.ensure_eid() == EID.invalid);
 }
