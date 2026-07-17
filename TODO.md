@@ -179,10 +179,13 @@ status block). Remaining legs, roughly in order:
   numerics and bool only - enums/bitfields/strings/dates wait on the type registry) and CAN's
   add_handler assigns them, so CAN elements store natively via the boxed-setter unbox path.
   Variant-free decode (sample_record straight to observe, skipping the box) is the follow-up
-  optimisation once more protocols carry formats. NEXT: remaining producers per-protocol
-  (Modbus last), consumers then leave the boxed mirror; recorder-as-cursor waits for
-  retention tiers (build order step 3); the prev pair dies when operators absorb the
-  accumulator (step 4).
+  optimisation once more protocols carry formats. CAN validated on prod (Pi slot 85, live
+  traffic + frontend render - also the first two-node exercise of the reshaped sync wire).
+  GoodWe/BLE/Zigbee assign formats too (same two-liner; zigbee's report path decodes via
+  get_zcl_value into the same Variant shapes, so the unbox path covers it). NEXT: TextValueDesc
+  twin of series_format for MQTT/HTTP/ESPHome, then Modbus last; consumers then leave the
+  boxed mirror; recorder-as-cursor waits for retention tiers (build order step 3); the prev
+  pair dies when operators absorb the accumulator (step 4).
 
 - **Element deadband (settled design, build when needed)**: per-point change-event conditioning,
   standard SCADA/OPC report-by-exception. ONE mechanism, three surfaces: the filter itself lives in
