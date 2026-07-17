@@ -101,7 +101,9 @@ module manager.id;
 import urt.algorithm : binary_search;
 import urt.array;
 import urt.hash : fnv1a;
+import urt.map;
 import urt.mem.alloc : alloc, free;
+import urt.mem.allocator : defaultAllocator;
 import urt.string.string;
 
 import manager.base;
@@ -186,6 +188,179 @@ nothrow @nogc:
     size_t toHash() const pure
         => cast(size_t)(raw ^ (raw >> 32));
 }
+
+// The park/claim/forward machine (migration step 1). One instantiation per id space: the
+// container level is per-type tables over BaseObject; each container's element-part table is
+// the same machine over its element type. Slots are dense and immortal (v1: no reclamation),
+// one tagged word each:
+//     0              dormant - parked on a name, waiting for a claimant
+//     T   (bit0 = 0) bound to a live object
+//     fwd (bit0 = 1) permanent forward to slot (word >> 1), write-once
+// Names are a separate map, touched only on lookup/create/rename/death. A name entry always
+// holds a terminal (never forwarded) id: rename-merge rewrites the entry to the claimant's
+// primary at the moment it writes the forward.
+struct IdMachine(T) if (is(T == class) || is(T == U*, U))
+{
+nothrow @nogc:
+
+    // park a fresh id on the name (forward reference), or return whatever it already holds
+    uint reserve(const(char)[] name)
+    {
+        if (uint* p = name in _names)
+            return *p;
+        uint id = mint();
+        _names.insert(name.makeString(defaultAllocator), id);
+        return id;
+    }
+
+    // create at a name: absent mints, parked claims, live is a duplicate (returns 0)
+    uint claim(const(char)[] name, T obj)
+    {
+        debug assert(obj !is null);
+        if (uint* p = name in _names)
+        {
+            uint id = *p;
+            size_t w = _slots[][id];
+            debug assert(!(w & 1), "name entry holds a forwarded id");
+            if (w)
+                return 0;
+            _slots[][id] = cast(size_t)cast(void*)obj;
+            return id;
+        }
+        uint id = mint();
+        _slots[][id] = cast(size_t)cast(void*)obj;
+        _names.insert(name.makeString(defaultAllocator), id);
+        return id;
+    }
+
+    // move the object between name entries; ids don't move, so every held ref follows for
+    // free. renaming onto a parked name forwards the waiter's id to the primary; onto a live
+    // name fails. the old entry becomes an empty tombstone, deleted eagerly.
+    bool rename(uint id, const(char)[] old_name, const(char)[] new_name)
+    {
+        if (uint* p = new_name in _names)
+        {
+            uint j = *p;
+            if (j != id)
+            {
+                size_t w = _slots[][j];
+                debug assert(!(w & 1), "name entry holds a forwarded id");
+                if (w)
+                    return false;
+                _slots[][j] = (size_t(id) << 1) | 1;
+                *p = id;
+            }
+        }
+        else
+            _names.insert(new_name.makeString(defaultAllocator), id);
+        if (old_name[] != new_name[])
+            _names.remove(old_name);
+        return true;
+    }
+
+    // death parks the primary on the object's final name; refs deref null until the next
+    // object created at that name claims it
+    void release(uint id)
+    {
+        debug assert(id && id < _slots.length && !(_slots[][id] & 1), "release of invalid or forwarded id");
+        _slots[][id] = 0;
+    }
+
+    // follow forwards to the terminal slot, healing the held id in place
+    T deref(ref uint id)
+    {
+        uint i = id;
+        if (!i || i >= _slots.length)
+            return null;
+        size_t w = _slots[][i];
+        while (w & 1)
+        {
+            i = cast(uint)(w >> 1);
+            w = _slots[][i];
+        }
+        if (i != id)
+            id = i;
+        return cast(T)cast(void*)w;
+    }
+
+    uint find(const(char)[] name)
+    {
+        uint* p = name in _names;
+        return p ? *p : 0;
+    }
+
+    uint high_watermark() const
+    {
+        uint n = cast(uint)_slots.length;
+        return n ? n - 1 : 0;
+    }
+
+private:
+    Array!size_t _slots;        // slot 0 reserved as the invalid id
+    Map!(String, uint) _names;
+
+    uint mint()
+    {
+        if (_slots.empty)
+            _slots ~= 0;
+        uint id = cast(uint)_slots.length;
+        _slots ~= 0;
+        return id;
+    }
+}
+
+unittest
+{
+    static struct Thing { int x; }
+    Thing a, b, c;
+
+    IdMachine!(Thing*) m;
+
+    // forward reference parks; creation claims; the parked id resurrects
+    uint held = m.reserve("motor");
+    assert(held && m.deref(held) is null);
+    assert(m.claim("motor", &a) == held);
+    assert(m.deref(held) is &a);
+
+    // creating at a live name is a duplicate error
+    assert(m.claim("motor", &b) == 0);
+
+    // rename: held ids follow the object with no repair; the old name dies
+    assert(m.rename(held, "motor", "pump"));
+    assert(m.deref(held) is &a);
+    assert(m.find("motor") == 0 && m.find("pump") == held);
+
+    // death parks on the final name; recreation rebinds every old ref
+    m.release(held);
+    assert(m.deref(held) is null);
+    assert(m.claim("pump", &b) == held);
+    assert(m.deref(held) is &b);
+
+    // rename onto a parked name: the waiter's id forwards to the primary and self-heals
+    uint waiter = m.reserve("valve");
+    assert(waiter != held);
+    assert(m.rename(held, "pump", "valve"));
+    assert(m.deref(waiter) is &b);
+    assert(waiter == held);
+    assert(m.find("valve") == held);
+
+    // rename onto a live name fails
+    uint other = m.claim("fan", &c);
+    assert(other != 0);
+    assert(!m.rename(held, "valve", "fan"));
+
+    // a forwarded slot never rebinds: creating at the merged name claims the primary
+    m.release(held);
+    assert(m.claim("valve", &a) == held);
+
+    // forward chains survive park-then-claim-by-rename cycles and heal to the terminal
+    uint chain = m.reserve("gate");
+    assert(m.rename(held, "valve", "gate"));
+    uint stale = waiter & ~0u;   // a copy that still holds the pre-merge id value
+    assert(m.deref(stale) is &a && stale == held);
+    assert(m.deref(chain) is &a && chain == held);
+}
+
 
 void id_init()
 {
