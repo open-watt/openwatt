@@ -187,6 +187,9 @@ protected:
 
     final void add_element(Element* element, ref const ElementDesc desc, ref const ElementDesc_HTTP http_desc, const(char)[][] param_names, const(char)[][] param_values)
     {
+        if (!element.series.format)
+            element.series.format = _profile_data.series_format(http_desc.value_desc);
+
         HTTPSampleElement* e = &_elements.pushBack();
         e.element = element;
         e.http_index = cast(ushort)desc.element;

@@ -160,6 +160,9 @@ protected:
         assert(desc.type == ElementType.mqtt);
         ref const ElementDesc_MQTT mqtt = _profile_data.get_mqtt(desc.element);
 
+        if (!e.series.format)
+            e.series.format = _profile_data.series_format(mqtt.value_desc);
+
         bool sub_failed;
         const(char)[] get_substitute(size_t, const(char)[] param)
         {

@@ -9,6 +9,7 @@ import urt.map;
 import urt.mem;
 import urt.mem.string;
 import urt.meta.enuminfo;
+import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.string.format;
 
@@ -504,17 +505,18 @@ nothrow @nogc:
             }
         }
 
-        foreach (DataFormat* f; _series_formats)
-        {
-            if (f.type == vt && f.unit == desc.unit)
-                return f;
-        }
-        DataFormat* f = defaultAllocator().allocT!DataFormat();
-        f.type = vt;
-        f.semantics = Semantics.held;   // matches legacy change-only delivery; profiles grow a semantics field later
-        f.unit = desc.unit;
-        _series_formats ~= f;
-        return f;
+        return mint_series_format(vt, desc.unit);
+    }
+
+    // text twin: MQTT/HTTP shapes. Text numerics parse to reals; everything else (strings,
+    // enums, bitfields, dates, address types) waits on the type registry.
+    const(DataFormat)* series_format(ref const TextValueDesc desc)
+    {
+        if (desc.type == TextType.bool_)
+            return mint_series_format(ValueType.bool_, desc.unit);
+        if (desc.type == TextType.num)
+            return mint_series_format(ValueType.f64, desc.unit);
+        return null;
     }
 
     ref inout(ComponentTemplate) get_component(ref const(DeviceTemplate) device, size_t index) inout pure
@@ -625,6 +627,21 @@ nothrow @nogc:
     }
 
 private:
+    const(DataFormat)* mint_series_format(ValueType vt, ScaledUnit unit)
+    {
+        foreach (DataFormat* f; _series_formats)
+        {
+            if (f.type == vt && f.unit == unit)
+                return f;
+        }
+        DataFormat* f = defaultAllocator().allocT!DataFormat();
+        f.type = vt;
+        f.semantics = Semantics.held;   // matches legacy change-only delivery; profiles grow a semantics field later
+        f.unit = unit;
+        _series_formats ~= f;
+        return f;
+    }
+
     struct Lookup
     {
         ushort hash;
@@ -702,6 +719,12 @@ unittest
     // enums have no native representation until the type registry lands
     ValueDesc en = ValueDesc(cast(DataType)(DataType.u16 | DataType.enumeration), null);
     assert(p.series_format(en) is null);
+
+    // text twin: numerics and bools map, and share the mint cache with the binary path
+    TextValueDesc tnum = TextValueDesc(TextType.num, ScaledUnit(Volt));
+    assert(p.series_format(tnum) is f);
+    TextValueDesc tstr = TextValueDesc(TextType.str, ScaledUnit());
+    assert(p.series_format(tstr) is null);
 }
 
 Profile* load_profile(const(char)[] filename, NoGCAllocator allocator = defaultAllocator())
