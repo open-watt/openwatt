@@ -148,7 +148,23 @@ status block). Remaining legs, roughly in order:
   per-type primitives (registry stringify/parse + unit machinery), leaving from_variant as
   the argument-conversion veneer. Sampling STRATEGY (batching/timing/poll policy) stays with
   bindings. Serialisation contract (landed in typereg): LE memory image is the default binary
-  form; an aggregate's serialise/deserialise pair overrides, and is mandatory for non-pod. the missing write/control facet - how a state-element write becomes a transmitted/
+  form; an aggregate's serialise/deserialise pair overrides, and is mandatory for non-pod.
+  Refinements (Manu, 2026-07-18): (a) TEXT sampling has almost no wire description - the token
+  is self-delimiting, so TextValueDesc's members are mostly OVERLAY wearing a text costume;
+  the overlay struct should be ONE shape shared by both wires, and the residual text-specific
+  detail (quoting/locale/format nuances, if any) is tiny. (b) For REGISTERED user types the
+  binary pipeline composes: wire-layout rules run FIRST (endian/word-order swizzle to the
+  canonical LE byte image), THEN the type's binary form consumes that image (memcpy for pods,
+  deserialise for overriders); encode mirrors. (c) value.d is Variant MARSHALLING and the name
+  should say so when it reshapes; lean into self-marshalling - types that carry fromString/
+  formatValue/serialise marshal themselves, and the module shrinks to dispatch + the
+  structural cases (arrays, Nullable, collection-name resolution). (d) Normalise the profile
+  text language as part of the audit: one grammar for value-type parse specs across protocol
+  sections (binary: layout+overlay; text: overlay only), documented once.
+  Enum slice LANDED 2026-07-18: DataFormat carries the enum descriptor (one pointer, becomes
+  the enum_/user_/string_ union with the registry), series_format maps enums/bitfields to
+  their raw integer width (enumf32 casts at sample time), boxing goes through
+  Variant(raw, enum_info) so names survive; text enum_/bf ride the same path (s64). the missing write/control facet - how a state-element write becomes a transmitted/
   written protocol action, INCLUDING stateful logic (toggles: only fire if desired != current).
   Today this would live as per-device binding code. Proposal: **bring the automation/expression
   engine down into profiles** so device behaviour is data-driven. Invents almost nothing - reuses
