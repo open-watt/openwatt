@@ -174,9 +174,14 @@ status block). Remaining legs, roughly in order:
   "state"; materialise() hangs it, shutdown marks a gap) - first native producer through the
   tree; binding still owns the DataFormat+ClockDomain (mount outlives binding destruction -
   formats need a durable home, noted inline). 92/92 unit tests (native-mount coverage added)
-  + boot smoke. NEXT: producers migrate per-protocol to typed formats (profile wiring assigns
-  DataFormat; Modbus last), consumers then leave the boxed mirror; recorder-as-cursor waits
-  for retention tiers (build order step 3); the prev pair dies when operators absorb the
+  + boot smoke. First protocol LANDED 2026-07-17 (CAN): Profile.series_format(ValueDesc)
+  mints shared per-shape DataFormats (held semantics, profile-owned/borrowed like enum_info;
+  numerics and bool only - enums/bitfields/strings/dates wait on the type registry) and CAN's
+  add_handler assigns them, so CAN elements store natively via the boxed-setter unbox path.
+  Variant-free decode (sample_record straight to observe, skipping the box) is the follow-up
+  optimisation once more protocols carry formats. NEXT: remaining producers per-protocol
+  (Modbus last), consumers then leave the boxed mirror; recorder-as-cursor waits for
+  retention tiers (build order step 3); the prev pair dies when operators absorb the
   accumulator (step 4).
 
 - **Element deadband (settled design, build when needed)**: per-point change-event conditioning,
