@@ -23,6 +23,7 @@ import urt.array;
 import urt.meta : AliasSeq;
 import urt.string;
 import urt.time;
+import urt.variant;
 
 import manager;
 import manager.base;
@@ -32,6 +33,7 @@ import manager.device;
 import manager.element;
 import manager.plugin;
 import manager.profile;
+import manager.subscriber;
 
 import protocol.gpio : GpioBinding;
 
@@ -91,7 +93,7 @@ protected:
     {
         // Bind the state elements (fan.speed, fan.direction, fan.timer, light.on). Writable ones
         // subscribe so a write drives the radio (TX). All are updated by the RX decoder below.
-        if (e.access & Access.write)
+        if (e.access & manager.element.Access.write)
             e.add_subscriber(&on_element_change);
         // TODO: remember which element is which (speed/direction/timer/light) for the mapping.
     }
@@ -125,15 +127,16 @@ private:
 
     struct BoundElement { Element* element; ubyte kind; }   // speed / direction / timer / light
     Array!BoundElement _bound;
+    bool _self_write;   // set while the RX decoder updates elements, so TX doesn't echo
 
     // TX: someone wrote a state element. Work out the command to reach that state and send it.
     // Absolute controls (speed) map value->code directly. TOGGLES (light.on, direction) send a
     // press ONLY if the current (inferred) state differs from the requested one - hence we must
     // trust our state model, which is why RX sync matters.
-    void on_element_change(Element* e, ref const Variant val, SysTime, Subscriber who)
+    void on_element_change(ref Element e, ref const Variant val, SysTime, ref const Variant, SysTime)
     {
         GpioBinding r = _radio.get;
-        if (!r || who is cast(Subscriber)this)   // ignore our own RX-driven state updates
+        if (!r || _self_write)   // ignore our own RX-driven state updates
             return;
         // TODO (model-specific "command" logic, the unsolved bit):
         //   speed:     code = codes["speed"~val] (or fan_off);           send
@@ -146,9 +149,9 @@ private:
     // model tracks reality. Speed codes set speed; reverse toggles direction; light toggles on.
     void on_rx_code(ulong code, ubyte nbits)
     {
-        // TODO: split code -> button nibble -> function; update the matching element with
-        //       who=this so on_element_change ignores it (no re-transmit). Toggle buttons flip
-        //       the tracked state; absolute buttons set it. Also stamp status.last_command.
+        // TODO: split code -> button nibble -> function; update the matching element under
+        //       _self_write so on_element_change ignores it (no re-transmit). Toggle buttons
+        //       flip the tracked state; absolute buttons set it. Also stamp status.last_command.
     }
 }
 
