@@ -162,8 +162,22 @@ status block). Remaining legs, roughly in order:
   Bucket/SeriesStore), organised for all three facets (Event! payloads and device-function
   params/results will use the same DataFormat vocabulary); element2.d keeps the mount-point
   machinery (Element2, Observer/Subscription, Cursor, dirty list). Both build systems updated.
-  NEXT in this entry: Element2 replaces Element (Component holds Element2, Variant boxing at
-  console/SNMP/expression edges, producers migrate per-protocol, Modbus last).
+  Mount step LANDED 2026-07-17: Element embeds Element2 - the mount keeps identity/metadata
+  (id/name/desc/display_unit/access/sampling_mode/parent) plus the boxed Variant mirror
+  (latest/prev/recent/subscribers); a null or indirect format means legacy (bit-identical
+  behaviour for every existing consumer), a scalar format makes the mount native: boxed
+  writes unbox into the core (series.unbox_scalar), native observe!T/observe_block/mark_gap
+  on Element feed the series then mirror the tail into the boxed path (legacy subscribers,
+  prev pair, recent ring see the same timeline). Boxing edge implemented in series.d
+  (box_record/unbox_scalar, RecordBlock.box, Element2.value; ints/floats wrap format.unit as
+  Quantity). GpioBinding mounts its series on the device element (element= prop, default
+  "state"; materialise() hangs it, shutdown marks a gap) - first native producer through the
+  tree; binding still owns the DataFormat+ClockDomain (mount outlives binding destruction -
+  formats need a durable home, noted inline). 92/92 unit tests (native-mount coverage added)
+  + boot smoke. NEXT: producers migrate per-protocol to typed formats (profile wiring assigns
+  DataFormat; Modbus last), consumers then leave the boxed mirror; recorder-as-cursor waits
+  for retention tiers (build order step 3); the prev pair dies when operators absorb the
+  accumulator (step 4).
 
 - **Element deadband (settled design, build when needed)**: per-point change-event conditioning,
   standard SCADA/OPC report-by-exception. ONE mechanism, three surfaces: the filter itself lives in
@@ -205,7 +219,7 @@ status block). Remaining legs, roughly in order:
 - **ID strategy migration (settled 2026-07-15; full design in the header of
   [src/manager/id.d](src/manager/id.d))**: replace hash-derived EIDs/CIDs with permanent
   monotonic handles bound to objects, with names as the parking/rebind fallback. Ids are
-  two-part: EID = (container id, element part) - the container level is ONE id space with
+  two-level: EID = (container id, element index) - the container level is ONE id space with
   per-type tables (CID type bits); Devices register as a type WITHOUT becoming BaseObjects
   (g_app.devices Map dissolves into it), the data plane shards per container, device rename is
   O(1) with no full-path interning, and property projections compute their EID as
@@ -226,7 +240,7 @@ status block). Remaining legs, roughly in order:
   refactor; (1) the park/claim/forward machine standalone + unit-tested (dense per-type slot
   arrays, next_slot++ allocator, separate name map holding parked ids); (2) container cutover
   (CollectionTable, delete ALL rekey machinery, then Devices as a container type); (3) element
-  part tables + Cursor->EID; (4) unified EID ref type; (5) holder audit.
+  index tables + Cursor->EID; (4) unified EID ref type; (5) holder audit.
   Step 2 LANDED 2026-07-17 (both halves): (2a) CollectionTable reimplemented over
   IdMachine!BaseObject - CID = type bits + dense slot, name setter calls table.rename (the id
   never moves, held refs follow intrinsically), and ALL rekey machinery deleted (hash_id/rehash
@@ -235,9 +249,20 @@ status block). Remaining legs, roughly in order:
   type: g_app.devices Map dissolved into DeviceTable (device.d) over IdMachine!Device with a
   map-flavoured surface (in/insert/values/keys), CollectionType.device carries the type bits.
   Verified: 92/92 unit tests + runtime smoke via --config script (duplicate-name rejection,
-  rename, old-name reuse, rename-onto-live rejection) + full dev-conf boot clean. NEXT: steps
-  3-5 (element part tables + Cursor->EID, unified EID ref type, holder audit) interleave with
-  the Element2-mounts-under-Components work (data-model build order step 2).
+  rename, old-name reuse, rename-onto-live rejection) + full dev-conf boot clean.
+  Step 3 core LANDED 2026-07-17: IndexTable(T) in manager.id (the nameless element-level
+  machine - same tagged-word encoding as IdMachine, no name map: relative paths resolve
+  through the component tree, indices park positionally on release and rebind at the same
+  mount); Device carries cid (stamped by DeviceTable.insert via make_cid, now
+  package(manager)) + IndexTable!(Element*) element_ids; Element.ensure_eid() mints lazily on first
+  demand (walk to device ancestor; unmounted elements have no identity);
+  DeviceTable.resolve(EID) + resolve_element() free function; ElementCursor {EID, position,
+  bit} in element.d is the durable cursor (resolves per call, delegates to the storage-level
+  element2.Cursor, goes quiet on dead elements); Element.open_cursor returns it. Unit-tested
+  (IndexTable cycle, lazy mint/resolve, stray-element refusal). Step 3 remainder rides later
+  work: deterministic indices (profile template index / Prop! index) land with per-protocol
+  producer migration; destruction-parks wiring lands when anything actually destroys
+  elements. NEXT: step 4 (unified EID ref type) + step 5 (holder audit).
   Step 1 LANDED 2026-07-17: IdMachine(T) in manager.id - dense tagged slots (0 = dormant,
   bit0=0 = bound, bit0=1 = write-once forward), reserve/claim/rename/release/deref with
   self-healing forward chains, separate String-keyed name map; unit-tested through the full

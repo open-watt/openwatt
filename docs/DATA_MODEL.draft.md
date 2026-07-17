@@ -9,10 +9,11 @@ Implementation status (2026-07-15): [src/manager/element2.d](../src/manager/elem
 beside Element in both build systems, unit-tested (held dedup, gap-forced bucket boundaries,
 cursor backfill+tail across buckets, irregular block append, regular time derivation). First
 real producer: the urt GPIO realtime sampler API (gpio-cdev v2 backend; pigpiod detected at
-runtime and preferred when present - decided, not yet built) feeding an irregular held bool
-series through /binding/gpio (GpioBinding : ProtocolBinding; instance models the sampled
-equipment via device=; series is binding-owned until Element2 mounts under Components, then
-materialise() hangs it on the device). Hardware sampler APIs live in the urt
+runtime and preferred when present) feeding an irregular held bool series through /binding/gpio
+(GpioBinding : ProtocolBinding; instance models the sampled equipment via device=). Mounted
+2026-07-17: Element embeds Element2 (the mount keeps identity/metadata and a boxed Variant
+mirror; legacy consumers are untouched), GpioBinding's materialise() hangs the series on the
+device element (element=, default "state") - the first native producer through the tree. Hardware sampler APIs live in the urt
 driver layer behind capability flags (has_gpio_sampler); bindings stay platform-blind.
 
 ## 1. Planes: three transport disciplines, one observation discipline
@@ -165,6 +166,39 @@ regular) storing zero time bytes.
   `Level { window, DataFormat*, SeriesStore }[]`, populated by the seal path; the 48-byte core does
   not move. Deep rungs can be built offline from the container by an aggregator.
 
+**Value shapes (settled 2026-07-17): Scalar is the fast path, not the ceiling.** Scalar never
+grows past 8 bytes. Expressiveness lives in escape valves with graded costs, and every shape a
+value can take has exactly one row here. Storage type and interpretation are separate axes:
+overlay metadata (unit, enum descriptor, type details) rides DataFormat's descriptor slot, never
+the record. Every Prop! type in the tree today maps onto a row, which is the check that property
+projection ("every Prop! is semantically an element") demands.
+
+| shape | ValueType | stride | latest | history | boxing (edge) | at rest / wire |
+|---|---|---|---|---|---|---|
+| native scalar | bool_..f64 | 1-8 | Scalar | yes | number, or Quantity via format.unit | raw records |
+| enum | u8/u16/u32 + enum-info overlay | 1-4 | Scalar | yes | enum Variant via descriptor | numeric + name binding in header |
+| registered POD | via type registry | td.size (may be >8) | Scalar if <=8, else tail record | yes (mandatory if wide) | td stringify/box | memory image; optional serialize pair (cross-arch) |
+| reference | ref_ (object AND element; index 0 = container) | 8 (packed EID in Scalar.u) | Scalar | yes | NAME via table lookup, never id bits | NAME (wire: session handle) |
+| string | string_ (storage undecided: embed vs intern; registry work) | - | mount-boxed Variant | none until decided | identity | text |
+| small blob | variable-stride flag (shared mechanism with strings) | varies | tail record | yes | opaque/hex | length-prefixed records |
+| composite / multi-channel | compound record (correlated quantities, fixed-shape arrays) | sum of channels | tail record | yes | per-channel | columnar planes (codec already per-plane) |
+| dynamic | variant | Variant.sizeof inline | mount-boxed Variant | discouraged | identity | Variant codec |
+
+Rules that bind the rows:
+- **Registry PODs**: POD only - no pointers, no dtors (a `pod` flag on the record); anything else
+  stays behind ValueType.variant. One definition site buys text-parse, register-decode, storage,
+  print, JSON, container (section 6).
+- **References store EIDs but never emit them**: box_record for ref_ is a table lookup, not a bit
+  copy - the boxed, recorded, and synced forms are all the name (id.d doctrine: ids never persist,
+  never wire). Bucket-resident EIDs are UNCOUNTED borrows under future reclamation: deref of a
+  dead, never-recreated id yields null (the record honestly says "was X; X is gone"); parked-name
+  resurrection reaching the new object is correct because identity is the name. A ref series is
+  meaningful history ("which meter sourced this circuit over time").
+- **Bulk binary is a tap, not an element** (decision rule 3). Only small blob VALUES get records;
+  the variable-stride mechanism is built once and serves strings and blobs both.
+- **New ValueType members land with their storage decision**, never speculatively (the
+  string_embed lesson): a member with undecided stride does not enter the enum.
+
 **Recorder**: a cursor consumer serializing series to owsig containers (one per series, keyed
 by NAME; ids never persist). Element history and waveform capture share the container format.
 Record counters, not rates: counter deltas are gap-proof, rates derive at query time; restart
@@ -175,7 +209,7 @@ hundreds-thousands edges/sec grows ~16 B/edge unbounded, tens of MB/hour); clock
 in Bucket.times (the GPIO backend sidesteps it for now by requesting CLOCK_REALTIME kernel
 stamps); cdev line_seqno gaps must call mark_gap() (drop site marks the loss);
 reactor-thread producers defer dispatch to main loop; Cursor holds Element2* pending EID
-resolution (the two-part EID TYPE now exists at target shape in manager.id; the tables are
+resolution (the two-level EID TYPE now exists at target shape in manager.id; the tables are
 the migration); RAM buckets + on-disk container need one time-keyed, decimation-aware read
 stack (index is process-local, TIME is the archival axis). Done since first draft: irregular
 block append (observe_block); compact core layout (identity out, format shared, history
@@ -191,8 +225,8 @@ decided - see section 6.)
 ## 3. Identity
 
 Canonical: [src/manager/id.d](../src/manager/id.d) header. Summary: names are the only durable
-identity; ids are permanent monotonic process-local handles, two-part
-(container id, element part), issued by tables, bound to things, parked on names, forwarded on
+identity; ids are permanent monotonic process-local handles, two-level
+(container id, element index), issued by tables, bound to things, parked on names, forwarded on
 merges, self-healed by holders. No rekey machinery of any kind. Ids never persist, never wire:
 peers exchange names once per session and bind varint handles (introducer allocates, parity
 bit per direction, never reused). Device rename is O(1); full element paths are never
@@ -272,7 +306,7 @@ schema fingerprints. Undeclared callbacks do not exist outside the process.
 **Device functions (to design)**: profiles gain function declarations
 (name, ValueDesc params, result, protocol mapping); the binding is the executor (register
 recipes, ZCL commands, HTTP requests - mappings stay declarative; logic stays in binding
-code). Async via CommandState (progress/cancel). Functions take element parts in the id scheme
+code). Async via CommandState (progress/cancel). Functions take element indices in the id scheme
 (kind bit), so they are name-addressed, reservable, automation-callable from do={}, and
 mesh-invocable. Actuation needs provenance (who), stricter access, and arbitration (the energy
 propose/dispose pivot is the arbitration story; functions are its addressable target).
@@ -366,7 +400,7 @@ The scaffold is binding-owned and touches no identity machinery, so the order be
    c. container cutover: CollectionTable over dense per-type arrays (CID = type bits + slot,
       allocator = next_slot++), delete rehash/rekey/broadcast_rekey/rekey_field; then Devices
       register as a container type and g_app.devices dissolves;
-   d. element level: per-container part tables, Cursor holds EID, GPIO series mounts on device.
+   d. element level: per-container index tables, Cursor holds EID, GPIO series mounts on device.
 2. Series contract module (DataFormat/RecordBlock/events/owsig) + Element2 replaces Element.
    Phased: extract contract module; Component holds Element2 with Variant boxing at the edges
    (console, SNMP, expressions) so consumers migrate gradually; producers migrate per-protocol
