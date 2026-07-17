@@ -28,30 +28,6 @@ import manager.element;
 nothrow @nogc:
 
 
-template struct_name_override(T)
-{
-    static if (is(T == IPAddr))
-        enum struct_name_override = "ipv4";
-    else static if (is(T == IPv6Addr))
-        enum struct_name_override = "ipv6";
-    else static if (is(T == IPNetworkAddress))
-        enum struct_name_override = "ipv4netwk";
-    else static if (is(T == IPv6NetworkAddress))
-        enum struct_name_override = "ipv6netwk";
-    else static if (is(T == InetAddress))
-        enum struct_name_override = "inetaddr";
-    else static if (is(T == MACAddress))
-        enum struct_name_override = "mac";
-    else static if (is(T == EUI64))
-        enum struct_name_override = "eui";
-    else static if (is(T == DateTime) || is(T == SysTime))
-        enum struct_name_override = "dt";
-    else static if (is(T == TimeOfDay))
-        enum struct_name_override = "tod";
-    else
-        enum struct_name_override = T.stringof;
-}
-
 template type_for(T, Extra...)
 {
     private alias U = Unqual!T;
@@ -110,7 +86,7 @@ template type_for(T, Extra...)
     else static if (is(U : BaseObject))
         enum type_for = "#" ~ U.type_name;
     else static if (is(U == struct))
-        enum type_for = struct_name_override!U;
+        enum type_for = type_name_of!U;
     else
     {
         static assert(false, "type_for!(" ~ T.stringof ~ ") not supported!");
