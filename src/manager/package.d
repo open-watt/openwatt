@@ -654,8 +654,8 @@ nothrow @nogc:
     {
         // register a byte source with the main loop's I/O wait; delivery happens on the main
         // thread from inside wait_for_wake. the owner closes the file AFTER unwatch_io.
-        bool watch_io(OsFile file, IoDataHandler on_data, IoErrorHandler on_error)
-            => _wake_event.watch_io(file, on_data, on_error);
+        bool watch_io(OsFile file, IoDataHandler on_data, IoErrorHandler on_error, bool eof_on_zero = false)
+            => _wake_event.watch_io(file, on_data, on_error, eof_on_zero);
 
         void unwatch_io(OsFile file)
         {

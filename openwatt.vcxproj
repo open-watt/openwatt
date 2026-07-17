@@ -186,6 +186,7 @@
     <DCompile Include="src\protocol\goodwe\aa55.d" />
     <DCompile Include="src\protocol\goodwe\binding.d" />
     <DCompile Include="src\protocol\goodwe\package.d" />
+    <DCompile Include="src\protocol\gpio\package.d" />
     <DCompile Include="src\protocol\http\binding.d" />
     <DCompile Include="src\protocol\http\client.d" />
     <DCompile Include="src\protocol\http\message.d" />

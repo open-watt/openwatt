@@ -9,6 +9,7 @@ public static import protocol.dns;
 public static import protocol.esphome;
 public static import protocol.ezsp;
 public static import protocol.goodwe;
+public static import protocol.gpio;
 public static import protocol.http;
 public static import protocol.ip;
 public static import protocol.modbus;

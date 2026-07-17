@@ -286,7 +286,9 @@ nothrow @nogc:
 
     static if (has_reactor_io)
     {
-        bool watch_io(OsFile file, IoDataHandler on_data, IoErrorHandler on_error)
+        // eof_on_zero flips the read-of-0 meaning: on a byte device 0 means drained (VMIN=0 tty),
+        // on a stream socket it means the peer closed - fire on_error so the owner can recover.
+        bool watch_io(OsFile file, IoDataHandler on_data, IoErrorHandler on_error, bool eof_on_zero = false)
         {
             version (Windows)
             {
@@ -300,6 +302,7 @@ nothrow @nogc:
                 e.file = file;
                 e.on_data = on_data;
                 e.on_error = on_error;
+                e.eof_on_zero = eof_on_zero;
                 if (!e.post_read())
                 {
                     defaultAllocator().freeT(e);
@@ -318,6 +321,7 @@ nothrow @nogc:
                 e.file = file;
                 e.on_data = on_data;
                 e.on_error = on_error;
+                e.eof_on_zero = eof_on_zero;
                 epoll_event ev;
                 ev.events = EPOLLIN;
                 ev.data.ptr = e;
@@ -486,6 +490,7 @@ private:
             IoErrorHandler on_error;
             bool outstanding;
             bool dead;
+            bool eof_on_zero;
             ubyte[2048] buf;
 
             // park (or re-park) the persistent overlapped read. a synchronous success still
@@ -518,6 +523,11 @@ private:
                     on_data(buf[0 .. bytes], getTime());
                     if (!dead && !post_read())
                         on_error();
+                }
+                else if (ok && bytes == 0 && eof_on_zero)
+                {
+                    // stream socket peer closed: stop reading, let the owner recover
+                    on_error();
                 }
                 else if (ok || err == ERROR_OPERATION_ABORTED)
                 {
@@ -553,6 +563,7 @@ private:
             IoErrorHandler on_error;
             IoReadyHandler on_ready;    // set for raw readiness watches; on_data/on_error unused
             bool dead;
+            bool eof_on_zero;
         }
 
         struct PoolFd { int fd; uint events; }
@@ -673,8 +684,11 @@ private:
                     e.on_data(buf[0 .. n], now);
                     continue;
                 }
-                // VMIN=0/VTIME=0 ttys return 0 (not EAGAIN) when no data is ready: not an error
-                if (n == 0 || is_transient_errno())
+                // VMIN=0/VTIME=0 ttys return 0 (not EAGAIN) when no data is ready: not an error.
+                // A stream socket returns 0 on peer close, which eof_on_zero routes to on_error.
+                if (n == 0 && !e.eof_on_zero)
+                    return;
+                if (n < 0 && is_transient_errno())
                     return;
                 epoll_ctl(_epoll, EPOLL_CTL_DEL, e.file, null);
                 e.on_error();

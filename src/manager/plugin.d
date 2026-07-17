@@ -142,6 +142,7 @@ void register_modules(Application app)
         register_module!(protocol.esphome)(app);
         register_module!(protocol.ezsp)(app);
         register_module!(protocol.goodwe)(app);
+        register_module!(protocol.gpio)(app);
         register_module!(protocol.http)(app);
         register_module!(protocol.ip)(app);
         register_module!(protocol.modbus)(app);

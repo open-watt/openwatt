@@ -97,6 +97,9 @@
     <Filter Include="src\protocol\goodwe">
       <UniqueIdentifier>{45765f37-2305-4031-b32b-a2c3b88bebe0}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\protocol\gpio">
+      <UniqueIdentifier>{8d1f7c1a-433e-4b2e-9a76-5b0c2f9d5a21}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\protocol\modbus">
       <UniqueIdentifier>{aba64285-47d8-4af3-a4bf-5284dbbeea44}</UniqueIdentifier>
     </Filter>
@@ -581,6 +584,9 @@
     </DCompile>
     <DCompile Include="src\protocol\goodwe\package.d">
       <Filter>src\protocol\goodwe</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\gpio\package.d">
+      <Filter>src\protocol\gpio</Filter>
     </DCompile>
     <DCompile Include="src\protocol\http\binding.d">
       <Filter>src\protocol\http</Filter>
