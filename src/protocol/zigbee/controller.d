@@ -886,6 +886,8 @@ private:
                 Device device = create_device_from_profile(*_zigbee_profile, fingerprint[], id, null, (Device device, Element* e, ref const ElementDesc desc, ubyte endpoint) {
                     assert(desc.type == ElementType.zigbee);
                     ref const ElementDesc_Zigbee zb = _zigbee_profile.get_zb(desc.element);
+                    if (!e.series.format)
+                        e.series.format = _zigbee_profile.series_format(zb.value_desc);
                     add_sample_element(e, node.eui, desc, zb, endpoint);
 
                     if (zb.cluster_id == 0x0000) // basic cluster

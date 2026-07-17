@@ -186,6 +186,9 @@ protected:
         assert(desc.type == ElementType.aa55);
         ref const ElementDesc_AA55 aa55 = _profile_data.get_aa55(desc.element);
 
+        if (!e.series.format)
+            e.series.format = _profile_data.series_format(aa55.value_desc);
+
         ubyte[256] tmp = void;
         tmp[0 .. aa55.value_desc.data_length] = 0;
         e.value = sample_value(tmp.ptr, aa55.value_desc);

@@ -124,6 +124,9 @@ protected:
         assert(desc.type == ElementType.ble);
         ref const ElementDesc_BLE ble = _profile_data.get_ble(desc.element);
 
+        if (!e.series.format)
+            e.series.format = _profile_data.series_format(ble.value_desc);
+
         ubyte[256] tmp = void;
         tmp[0 .. ble.value_desc.data_length] = 0;
         e.value = sample_value(tmp.ptr, ble.value_desc);
