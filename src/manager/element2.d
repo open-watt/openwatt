@@ -198,7 +198,7 @@ nothrow @nogc:
         => data[0 .. count * format.stride];
 
     SysTime time(size_t i) const
-        => format.clock ? format.clock.to_wall(tick(i)) : SysTime(tick(i) * 1000);
+        => format.clock ? format.clock.to_wall(tick(i)) : from_unix_time_ns(tick(i) * 1000);
 
     ulong tick(size_t i) const pure
         => t0 + (ts ? ts[i] : i);
@@ -262,9 +262,9 @@ struct Bucket
 
 pure nothrow @nogc:
     ulong last_tick() const => first_tick + last_offset;
-    SysTime first_time() const => SysTime(first_tick * 1000);
-    SysTime last_time() const => SysTime(last_tick * 1000);
-    SysTime get_time(size_t i) const => SysTime((first_tick + (offsets ? offsets[i] : i)) * 1000);
+    SysTime first_time() const => from_unix_time_ns(first_tick * 1000);
+    SysTime last_time() const => from_unix_time_ns(last_tick * 1000);
+    SysTime get_time(size_t i) const => from_unix_time_ns((first_tick + (offsets ? offsets[i] : i)) * 1000);
 }
 
 struct SeriesStore
@@ -525,10 +525,10 @@ private:
         blk.format = format;
         blk.data = samples.ptr;
         blk.ts = ts.ptr;
-        blk.t0 = times[0].ticks / 1000;
+        blk.t0 = unix_time_ns(times[0]) / 1000;
         blk.count = n;
         foreach (i, t; times)
-            ts[i] = cast(uint)((t - times[0]).ticks / 1000);
+            ts[i] = cast(uint)((t - times[0]).as!"usecs");
 
         bool follows_gap = (_flags & Flags.gap_open) != 0;
         _flags &= ~Flags.gap_open;
