@@ -157,8 +157,8 @@ nothrow @nogc:
         Element* e = (*dev).find_or_create_element(_element_path.empty ? "state" : _element_path[]);
         if (!e.series.format)
         {
-            // the binding owns the format and its clock domain; the mount points at them
-            // TODO: the mount outlives binding destruction; formats need a durable home
+            // TODO: binding owns _fmt/_clock but the mount outlives binding destruction;
+            //       formats need a durable home
             e.series.format = &_fmt;
             e.access = Access.read;
             e.sampling_mode = SamplingMode.report;

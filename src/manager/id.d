@@ -417,12 +417,9 @@ private:
     }
 }
 
-// The element level of the id scheme: a container's dense index table. Same tagged-word
-// encoding as IdMachine, but NAMELESS - relative paths resolve through the component tree,
-// so the tree is the name map: an index parks positionally on release and the next element
-// bound at the same mount rebinds it (bind); deterministic indices (profile template index,
-// Prop! index) claim their slot directly. Index 0 denotes the container itself (the EID
-// convention), so slots start at 1.
+// the element level of the id scheme: IdMachine's nameless twin - the component tree is
+// the name map, so indices park positionally and rebind at the same mount. Index 0 denotes
+// the container itself; slots start at 1.
 struct IndexTable(T) if (is(T == class) || is(T == U*, U))
 {
 nothrow @nogc:

@@ -472,10 +472,8 @@ nothrow @nogc:
         return *enum_info;
     }
 
-    // The shared series format for a decoded wire shape (one instance per shape, owned by
-    // the profile; mounts borrow it for the profile registry's lifetime). Null when the
-    // shape has no native representation yet: enums, bitfields, strings, dates, arrays and
-    // custom samplers ride the boxed Variant path until the type registry lands.
+    // one shared instance per shape, owned by the profile (mounts borrow it, like enum_info);
+    // null = no native representation until the type registry lands (enums, strings, dates, ...)
     const(DataFormat)* series_format(ref const ValueDesc desc)
     {
         if (desc.is_custom || desc.is_enum || desc.is_bitfield || desc.is_string || desc.is_date_time)
@@ -508,8 +506,6 @@ nothrow @nogc:
         return mint_series_format(vt, desc.unit);
     }
 
-    // text twin: MQTT/HTTP shapes. Text numerics parse to reals; everything else (strings,
-    // enums, bitfields, dates, address types) waits on the type registry.
     const(DataFormat)* series_format(ref const TextValueDesc desc)
     {
         if (desc.type == TextType.bool_)

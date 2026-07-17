@@ -37,8 +37,6 @@ enum ValueType : ubyte
     variant
 }
 
-// scalar types store by value in an 8-byte Scalar; indirect types live behind pointers
-// (or inline Variants) and never take the native fast paths
 bool is_scalar_type(ValueType t) pure
     => t <= ValueType.f64;
 
@@ -223,9 +221,6 @@ nothrow @nogc:
 }
 
 
-// Variant boxing at the edges (console, SNMP, expressions): storage and delivery stay
-// native-typed; only edge consumers pay for a box. Indirect types (string_, variant)
-// box at their mount, not here.
 Variant box_record(const(void)* record, ref const DataFormat fmt)
 {
     final switch (fmt.type) with (ValueType)
@@ -247,9 +242,7 @@ Variant box_record(const(void)* record, ref const DataFormat fmt)
     }
 }
 
-// Inverse of box_record for the write path: converts an edge Variant into the format's
-// native scalar. False when the value can't represent in the format; the caller decides
-// what an unrepresentable write means.
+// inverse of box_record; false when the format can't represent the value
 bool unbox_scalar(ref const Variant v, ref const DataFormat fmt, out Scalar s)
 {
     final switch (fmt.type) with (ValueType)

@@ -38,8 +38,7 @@ nothrow @nogc:
         device.cid = make_cid(CollectionType.device, slot);
     }
 
-    // EID resolution for the device container type: index 0 is the device itself (resolves
-    // through the container level, not here), other indices hit the device's element table
+    // index 0 is the device itself: that resolves through the container level, not here
     inout(Element)* resolve(EID eid) inout pure
     {
         if (eid.container.type_index != CollectionType.device)
@@ -63,8 +62,6 @@ package:
     IdMachine!Device _machine;
 }
 
-// deref an element EID against the live tables; null when unresolvable (dead element,
-// unregistered container, or a non-device container type)
 Element* resolve_element(EID eid)
     => g_app ? g_app.devices.resolve(eid) : null;
 
@@ -177,8 +174,8 @@ nothrow @nogc:
         clear_computations();
     }
 
-    CID cid;                            // container id; stamped when the device registers
-    IndexTable!(Element*) element_ids;  // the element level of the id scheme, sharded per container
+    CID cid;                            // unset until DeviceTable.insert stamps it
+    IndexTable!(Element*) element_ids;
 
     Array!Computation computations;
 

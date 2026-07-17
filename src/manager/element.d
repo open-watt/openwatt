@@ -64,9 +64,8 @@ struct Element
 {
 nothrow @nogc:
 
-    // the typed series core (format, native latest, observers, history); a null or
-    // indirect format means this mount is legacy: the boxed Variant below stays
-    // authoritative and the core lies dormant until a producer assigns a format
+    // null or indirect format = legacy mount: the boxed Variant below is authoritative
+    // and the core lies dormant until a producer assigns a format
     Element2 series;
 
     package Variant latest;
@@ -136,7 +135,6 @@ nothrow @nogc:
     ref inout(Variant) value() @property inout pure
         => latest;
 
-    // native mounts have a live series core; legacy mounts run the boxed path alone
     bool native() const pure
         => series.format !is null && is_scalar_type(series.format.type);
 
@@ -171,8 +169,6 @@ nothrow @nogc:
         }
     }
 
-    // native producer surface: the series takes the observation, then the boxed legacy
-    // path mirrors it so Variant-era consumers see the same timeline
     void observe(T)(T v, SysTime t = getSysTime(), Observer who = null)
     {
         series.observe(v, t, who);
@@ -196,9 +192,7 @@ nothrow @nogc:
         series.mark_gap(who);
     }
 
-    // durable identity: (device CID, element index), minted lazily against the owning
-    // device's table on first demand. Unmounted elements (no device ancestor, or a device
-    // not yet registered) have none
+    // minted lazily on first demand; unmounted elements have none
     EID eid() const pure
         => _eid;
 
@@ -222,7 +216,7 @@ nothrow @nogc:
     {
         EID handle = ensure_eid();
         if (!handle)
-            return ElementCursor();     // unmounted elements have no durable identity to cursor
+            return ElementCursor();
         Cursor c = series.open_cursor(from_index);
         return ElementCursor(handle, c.position, c.bit);
     }
@@ -241,8 +235,8 @@ nothrow @nogc:
         Scalar s;
         if (unbox_scalar(v, *series.format, s))
             series.observe_scalar(s, timestamp);
-        // else: a write the format can't represent; the boxed side still takes it and the
-        // core diverges until the next native observation (transitional shim behaviour)
+        // else the boxed side still takes it and the core diverges until the next
+        // representable observation (transitional)
     }
 
     private void sync_from_series()
@@ -323,10 +317,8 @@ nothrow @nogc:
 }
 
 
-// The durable cursor: holds an EID, never a pointer, so long-lived polling consumers
-// (recorder, sync sweepers) survive element death - resolution fails and the cursor goes
-// quiet. Storage-level cursoring stays in manager.element2.Cursor; this resolves per call
-// and delegates.
+// the durable cursor: holds an EID, never a pointer - resolves per call and goes quiet
+// when the element dies
 struct ElementCursor
 {
 nothrow @nogc:
