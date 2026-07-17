@@ -115,8 +115,24 @@ status block). Remaining legs, roughly in order:
 
 ## Data model
 
-- **Commands / device logic in profiles (design 2026-07-16; the ancient "commands" TODO's
-  answer)**: the missing write/control facet - how a state-element write becomes a transmitted/
+- **Audit binding sampling strategies; consolidate value handling into ONE module (noted
+  2026-07-17)**: every protocol grew its own decode/convert/apply machinery and the sprawl is
+  now countable: `sample_value(void*, ValueDesc)` (modbus/can/goodwe/ble), `sample_value(char[],
+  TextValueDesc)` + `format_value` + `apply_value` (mqtt/http), `get_zcl_value` + `adjust_value`
+  (zigbee's parallel decoder), `sample_sunspec_value` (sunspec), ESPHome's typed proto decode,
+  Tesla TWC's direct field push, expression `evaluate` -> Variant, and now `box_record` /
+  `unbox_scalar` at the series edge. Review ALL bindings' sampling strategies (batching/timing
+  policy too, not just decode) and converge the value path on a single value-handling module:
+  wire shape descriptor in, native record out, one boxing edge, one write/format inverse
+  (encode/decode symmetry in one place instead of eight). The type registry design (see
+  DATA_MODEL.draft.md section 6) already points here - two description LANGUAGES (binary vs
+  text profiles) may remain, but the runtime TARGETS converge on wire-desc + DataFormat with a
+  Variant-free `sample_record(wire, desc, out_bytes, DataFormat)` path; this entry widens that
+  to an explicit audit of every binding so per-protocol special cases (zigbee's adjust_value,
+  sunspec's decoder, HTTP's apply_value) either justify themselves or dissolve into the one
+  module. Natural sequencing: fold in as the per-protocol native-producer migration completes
+  (text protocols + modbus are the remaining producers; do the consolidation as/after they
+  migrate rather than bolting a ninth machine alongside the eight). the missing write/control facet - how a state-element write becomes a transmitted/
   written protocol action, INCLUDING stateful logic (toggles: only fire if desired != current).
   Today this would live as per-device binding code. Proposal: **bring the automation/expression
   engine down into profiles** so device behaviour is data-driven. Invents almost nothing - reuses
