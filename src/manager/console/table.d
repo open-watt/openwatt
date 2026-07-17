@@ -504,17 +504,7 @@ const(char)[] enum_key_for(ref const Variant value)
     const(VoidEnumInfo)* info = value.get_enum_info();
     if (info is null)
         return null;
-
-    // HACK: iterate all entries, we should fix the lookup to make it variant-compatible somehow...
-    long v = value.asLong;
-    foreach (i; 0 .. info.count)
-    {
-        const(char)[] key = info.key_by_sorted_index(i);
-        Variant kv = info.value_for(key);
-        if (!kv.isNull && kv.asLong == v)
-            return key;
-    }
-    return null;
+    return info.key_for_raw(value.asLong);
 }
 
 

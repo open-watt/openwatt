@@ -47,8 +47,9 @@ template type_for(T, Extra...)
     }
     else static if (is_enum!U)
     {
-        // Extra[0]: bool is_bitfield
-        static if (Extra.length == 1 && is(typeof(Extra[0]) == bool) && Extra[0])
+        import urt.meta.enuminfo : is_bitfield_enum;
+        // Extra[0]: bool is_bitfield (runtime-desc knowledge; @bitfield covers declared types)
+        static if ((Extra.length == 1 && is(typeof(Extra[0]) == bool) && Extra[0]) || is_bitfield_enum!U)
             enum type_for = "bf_" ~ U.stringof;
         else
             enum type_for = "enum_" ~ U.stringof;

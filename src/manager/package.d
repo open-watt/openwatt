@@ -468,6 +468,14 @@ nothrow @nogc:
         enum_templates.insert(StringLit!(E.stringof), enum_info!E.make_void());
     }
 
+    void register_bitfield(E)()
+        if (is_enum!E)
+    {
+        import urt.meta.enuminfo : is_bitfield_enum;
+        static assert(is_bitfield_enum!E, E.stringof ~ " must be declared @bitfield");
+        register_enum!E();
+    }
+
     void register_intrinsic(String identifier, IntrinsicFunction func)
     {
         assert(identifier[] !in intrinsic_functions, "Intrinsic function already registered!");
