@@ -93,10 +93,13 @@ module manager.id;
 //      destruction parks the primary index instead of nulling in place; full-path interning
 //      stays deleted (legacy ElementTable + hash-EIDs already removed from element.d);
 //      Cursor trades its Element2* for an EID
-//   4. element refs get their own EID-holding ref type with the same follow-forwards +
-//      self-heal discipline as ObjectRef; ObjectRef stays CID (don't widen every object ref
-//      by an always-zero index, and don't make index != 0 representable in a ref that can
-//      never mean it). EID with index 0 remains the value-level either-kind handle
+//   4. deref/self-heal lives on the HANDLES, not on wrapper types: CollectionTable.deref(ref
+//      CID) is the container surface, deref(ref EID) (device.d, UFCS) the element surface.
+//      ObjectRef stays CID and is typed sugar over the table (static type + null ergonomics;
+//      no machinery of its own); there is NO ElementRef - element holders keep a bare EID.
+//      Bare ids in fields are the v1 answer: if the reclamation extension lands, its RAII
+//      holder wrapper is where counting attaches, at both levels. EID with index 0 remains
+//      the value-level either-kind handle
 //   5. audit holders: no persisted ids, no wire ids, no blind hashing - every id enters a
 //      holder through the table (property projections excepted: (obj CID, Prop! index) is
 //      computed, which is safe because both components are table-issued identities)

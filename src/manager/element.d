@@ -332,7 +332,7 @@ nothrow @nogc:
 
     bool pending()
     {
-        Element* e = resolve_element(eid);
+        Element* e = eid.deref;
         if (!e)
             return false;
         auto c = Cursor(&e.series, position, bit);
@@ -341,7 +341,7 @@ nothrow @nogc:
 
     RecordBlock next(uint max_records)
     {
-        Element* e = resolve_element(eid);
+        Element* e = eid.deref;
         if (!e)
             return RecordBlock();
         auto c = Cursor(&e.series, position, bit);
@@ -352,7 +352,7 @@ nothrow @nogc:
 
     void close()
     {
-        if (Element* e = resolve_element(eid))
+        if (Element* e = eid.deref)
         {
             auto c = Cursor(&e.series, position, bit);
             e.series.close_cursor(c);

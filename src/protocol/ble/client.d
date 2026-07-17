@@ -902,7 +902,7 @@ unittest
 
         this()
         {
-            super(CID(1));
+            super(CID(1));      // dummy id for the mock; never registered in a table
         }
 
         override bool att_send(const(ubyte)[] pdu)

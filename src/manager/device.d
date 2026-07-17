@@ -62,8 +62,21 @@ package:
     IdMachine!Device _machine;
 }
 
-Element* resolve_element(EID eid)
-    => g_app ? g_app.devices.resolve(eid) : null;
+// the element-level deref surface: follows forwards at both levels and heals the held EID
+Element* deref(ref EID eid)
+{
+    if (!g_app || eid.container.type_index != CollectionType.device)
+        return null;
+    uint slot = eid.container.slot;
+    Device d = g_app.devices._machine.deref(slot);
+    if (!d)
+        return null;
+    ushort index = eid.index;
+    Element* e = d.element_ids.deref(index);
+    if (e && (slot != eid.container.slot || index != eid.index))
+        eid = EID(make_cid(CollectionType.device, slot), index);
+    return e;
+}
 
 enum ComputationKind : ubyte
 {
@@ -606,4 +619,14 @@ unittest
     // unmounted elements have no identity to mint
     Element* stray = defaultAllocator.allocT!Element();
     assert(stray.ensure_eid() == EID.invalid);
+
+    // deref follows element-level forwards and heals the held EID
+    Element* e2 = defaultAllocator.allocT!Element();
+    e2.parent = c;
+    EID handle2 = e2.ensure_eid();
+    assert(handle2.index == 2);
+    d.element_ids.release(1);
+    d.element_ids.forward(1, 2);
+    ushort idx = handle.index;          // a stale holder still at index 1
+    assert(d.element_ids.deref(idx) is e2 && idx == 2);
 }
