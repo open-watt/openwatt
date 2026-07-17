@@ -20,6 +20,7 @@ import manager.device;
 import manager.element;
 import manager.features;
 import manager.sampler;
+import manager.series : DataFormat, Semantics, ValueType;
 
 static if (has_http)
     import protocol.http.message : HTTPMethod;
@@ -437,6 +438,8 @@ nothrow @nogc:
             defaultAllocator().freeArray(mqtt_elements);
         if(ble_elements)
             defaultAllocator().freeArray(ble_elements);
+        foreach (f; _series_formats)
+            defaultAllocator().freeT(f);
     }
 
     inout(DeviceTemplate)* get_model_template(const(char)[] model) inout pure
@@ -466,6 +469,52 @@ nothrow @nogc:
         if (!enum_info)
             return null;
         return *enum_info;
+    }
+
+    // The shared series format for a decoded wire shape (one instance per shape, owned by
+    // the profile; mounts borrow it for the profile registry's lifetime). Null when the
+    // shape has no native representation yet: enums, bitfields, strings, dates, arrays and
+    // custom samplers ride the boxed Variant path until the type registry lands.
+    const(DataFormat)* series_format(ref const ValueDesc desc)
+    {
+        if (desc.is_custom || desc.is_enum || desc.is_bitfield || desc.is_string || desc.is_date_time)
+            return null;
+        if (desc.data_type & DataType.array)
+            return null;
+
+        ValueType vt;
+        if (desc.is_bool)
+            vt = ValueType.bool_;
+        else if (desc.data_type.data_kind == DataKind.floating)
+            vt = desc.data_type.data_bytes == 4 ? ValueType.f32 : ValueType.f64;
+        else if (desc.pre_scale != 1)
+            vt = ValueType.f64;     // decode applies the scale; the observed value is real-valued
+        else
+        {
+            DataKind kind = desc.data_type.data_kind;
+            ubyte bytes = kind == DataKind.low_byte || kind == DataKind.high_byte ? 1 : desc.data_type.data_bytes;
+            bool is_signed = (desc.data_type & DataType.signed) != 0;
+            switch (bytes)
+            {
+                case 1:  vt = is_signed ? ValueType.s8  : ValueType.u8;  break;
+                case 2:  vt = is_signed ? ValueType.s16 : ValueType.u16; break;
+                case 4:  vt = is_signed ? ValueType.s32 : ValueType.u32; break;
+                case 8:  vt = is_signed ? ValueType.s64 : ValueType.u64; break;
+                default: return null;
+            }
+        }
+
+        foreach (DataFormat* f; _series_formats)
+        {
+            if (f.type == vt && f.unit == desc.unit)
+                return f;
+        }
+        DataFormat* f = defaultAllocator().allocT!DataFormat();
+        f.type = vt;
+        f.semantics = Semantics.held;   // matches legacy change-only delivery; profiles grow a semantics field later
+        f.unit = desc.unit;
+        _series_formats ~= f;
+        return f;
     }
 
     ref inout(ComponentTemplate) get_component(ref const(DeviceTemplate) device, size_t index) inout pure
@@ -629,6 +678,30 @@ private:
     ushort _mqtt_subs, _mqtt_sub_count;
 
     Map!(String, const(VoidEnumInfo)*) enum_templates;
+
+    Array!(DataFormat*) _series_formats;
+}
+
+unittest
+{
+    import urt.si.unit : Ampere, ScaledUnit, Volt;
+
+    Profile p;
+
+    // scaled integers decode to reals; equal shapes share one instance
+    ValueDesc scaled = ValueDesc(DataType.u16, ScaledUnit(Volt), 0.1);
+    const(DataFormat)* f = p.series_format(scaled);
+    assert(f && f.type == ValueType.f64 && f.unit == ScaledUnit(Volt));
+    assert(p.series_format(scaled) is f);
+
+    // unscaled integers keep their width and sign
+    ValueDesc raw = ValueDesc(DataType.i16, ScaledUnit(Ampere));
+    const(DataFormat)* g = p.series_format(raw);
+    assert(g && g.type == ValueType.s16 && g !is f);
+
+    // enums have no native representation until the type registry lands
+    ValueDesc en = ValueDesc(cast(DataType)(DataType.u16 | DataType.enumeration), null);
+    assert(p.series_format(en) is null);
 }
 
 Profile* load_profile(const(char)[] filename, NoGCAllocator allocator = defaultAllocator())

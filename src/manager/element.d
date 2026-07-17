@@ -422,4 +422,15 @@ unittest
     assert(n.series.record_count == 3);
     assert(n.series.latest.b);
     assert(n.value.asBool);
+
+    // quantity writes to a typed mount store natively in the format's unit scale (the
+    // profile-binding write shape: sample_value produces unit-carrying Variants)
+    import urt.si.quantity : Quantity;
+    import urt.si.unit : Volt;
+    static immutable DataFormat volts_held = DataFormat(ValueType.f64, Semantics.held, ScaledUnit(Volt));
+    Element q;
+    q.series.format = &volts_held;
+    q.value(Variant(Quantity!double(23.05, ScaledUnit(Volt))), from_unix_time_ns(1_000_000));
+    assert(q.series.latest.f64_ == 23.05);
+    assert(q.value.isQuantity);
 }

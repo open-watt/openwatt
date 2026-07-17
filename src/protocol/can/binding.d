@@ -128,6 +128,10 @@ protected:
         assert(desc.type == ElementType.can);
         ref const ElementDesc_CAN can = _profile_data.get_can(desc.element);
 
+        // native mount: writes below flow through the boxed setter into the typed core
+        if (!e.series.format)
+            e.series.format = _profile_data.series_format(can.value_desc);
+
         ubyte[256] tmp = void;
         tmp[0 .. can.value_desc.data_length] = 0;
         e.value = sample_value(tmp.ptr, can.value_desc);
