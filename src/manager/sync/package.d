@@ -939,15 +939,15 @@ nothrow @nogc:
 
     void inbound_enum_req(SyncPeer from, const(char)[] type_name, uint seq)
     {
-        auto pe = type_name in g_app.enum_templates;
-        if (!pe)
+        import manager.sample : find_enum_info;
+        const(VoidEnumInfo)* e = find_enum_info(type_name);
+        if (!e)
         {
             encoder_for(from._encoder).encode_error(from, seq, "unknown enum");
             return;
         }
 
         Variant members;
-        const(VoidEnumInfo)* e = *pe;
         foreach (i; 0 .. e.count)
         {
             const(char)[] key = e.key_by_decl_index(i);

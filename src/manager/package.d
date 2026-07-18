@@ -221,7 +221,6 @@ nothrow @nogc:
     Array!(ElementLink*) links;
 
     Map!(String, RegisteredType) types;
-    Map!(String, const(VoidEnumInfo)*) enum_templates;
 
     // database...
 
@@ -291,6 +290,9 @@ nothrow @nogc:
 
         console.register_collection!Secret();
         console.register_collection!ProtocolBinding();
+
+        import manager.codec : register_builtin_encodings;
+        register_builtin_encodings();
 
         register_modules(this);
 
@@ -465,7 +467,8 @@ nothrow @nogc:
         static assert(is(E == Unqual!E), "Enum type must not be qualified!");
 
         import urt.meta.enuminfo : enum_info;
-        enum_templates.insert(StringLit!(E.stringof), enum_info!E.make_void());
+        import manager.sample : register_enum_info;
+        register_enum_info(StringLit!(E.stringof)[], enum_info!E.make_void(), false);
     }
 
     void register_bitfield(E)()

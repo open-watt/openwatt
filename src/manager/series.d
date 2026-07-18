@@ -3,27 +3,33 @@ module manager.series;
 // The series contract: the typed record vocabulary shared by every host of observed data.
 // Element2 (the device tree's mount points) is the first host; the recorder's owsig
 // containers and waveform/byte/packet taps host the same shapes without becoming elements.
-// The three-facet device surface (attributes / commands / events) converges here too:
-// elements and property projections carry these formats today, and Event! payloads and
-// device-function params/results will describe themselves with the same DataFormat
-// vocabulary, boxed through Variant only at the console/API edges.
+// Event! payloads and device-function params/results will describe themselves with the
+// same DataFormat vocabulary, boxed through Variant only at the console/API edges.
+//
+// The factoring principle: a series factors each value into the part that is constant
+// across the series (the DataFormat: atom, count, unit, names, clock) and the part that
+// varies per sample (the record bytes). Records are context-free; the format is their
+// context. Boxing is the reunion: box_record marries bytes back to their format to make a
+// self-describing Variant, unboxing factors the format back out.
+//
+// A value is atom x extent. The atoms are machine scalars, char, and `user` (a registered
+// type, identity in the format's descriptor slot); extent is one (count == 1), a fixed
+// vector (count == N, stride multiplies), or dynamic (count == 0, the length rides in the
+// record). string is char x dynamic; blob is u8 x dynamic with opaque display; neither is
+// an atom. Storage rule: a record is memcpy iff its record type is trivial - dynamic
+// records hold immutable refcounted handles (String for text), non-pod user types copy
+// and drop through their registry hooks.
 
 import urt.array;
 import urt.meta.enuminfo : VoidEnumInfo;
 import urt.si.quantity : Quantity;
 import urt.si.unit : ScaledUnit;
 import urt.time;
+import urt.typereg : TypeDetails;
 import urt.variant;
 
 nothrow @nogc:
 
-
-enum Semantics : ubyte
-{
-    held,
-    sampled,
-    point
-}
 
 enum ValueType : ubyte
 {
@@ -33,42 +39,19 @@ enum ValueType : ubyte
     u32, s32,
     u64, s64,
     f32, f64,
-    // indirect types...
-    string_,
-    variant
+    char_,
+    user
 }
 
+// machine numerics: fits the Scalar register when extent is one
 bool is_scalar_type(ValueType t) pure
     => t <= ValueType.f64;
 
-ubyte value_stride(ValueType t) pure
+enum Semantics : ubyte
 {
-    final switch (t) with (ValueType)
-    {
-        case bool_, u8, s8:     return 1;
-        case u16, s16:          return 2;
-        case u32, s32, f32:     return 4;
-        case u64, s64, f64:     return 8;
-        // indirect types are just pointers
-        case string_:           return size_t.sizeof;
-        // this one is special; `Scalar` will be indirect, but buffers will be by-value
-        case variant:           return Variant.sizeof;
-    }
-}
-
-template value_type_of(T)
-{
-    static if (is(T == bool))        enum value_type_of = ValueType.bool_;
-    else static if (is(T == ubyte))  enum value_type_of = ValueType.u8;
-    else static if (is(T == byte))   enum value_type_of = ValueType.s8;
-    else static if (is(T == ushort)) enum value_type_of = ValueType.u16;
-    else static if (is(T == short))  enum value_type_of = ValueType.s16;
-    else static if (is(T == uint))   enum value_type_of = ValueType.u32;
-    else static if (is(T == int))    enum value_type_of = ValueType.s32;
-    else static if (is(T == ulong))  enum value_type_of = ValueType.u64;
-    else static if (is(T == long))   enum value_type_of = ValueType.s64;
-    else static if (is(T == float))  enum value_type_of = ValueType.f32;
-    else static if (is(T == double)) enum value_type_of = ValueType.f64;
+    held,
+    sampled,
+    point
 }
 
 struct ClockAnchor
@@ -109,11 +92,6 @@ nothrow @nogc:
     }
 }
 
-// Validation beside the format: shared immutable per declaration, like DataFormat itself, so
-// constraint metadata costs nothing per element. The declarative range is machine-readable
-// (UI clamps before submit, API exports schema); the function is the escape hatch for rules
-// data can't express. Constraints gate WRITES (setpoints, config, sinks) - observations are
-// never validated or clamped, a measurement is truth even when out of spec.
 struct Constraint
 {
 nothrow @nogc:
@@ -139,33 +117,87 @@ nothrow @nogc:
     }
 }
 
-// One shared immutable instance per declared shape: a Prop! declaration, a profile element
-// template, or a collector's static format. Elements point at it; they never own one.
 struct DataFormat
 {
 nothrow @nogc:
 
+    enum Desc : ubyte
+    {
+        none,
+        quantity,
+        enum_
+    }
+
     ValueType type;
     Semantics semantics;
-    ScaledUnit unit;
+    Desc desc;
+    ubyte count = 1;               // extent: 1 = one, N = fixed vector, 0 = dynamic (length in the record)
     uint rate;                     // frames/sec; 0 = irregular, records carry explicit timestamps
     ClockDomain* clock;            // null = wall-native; regular device series index in their own domain
     const(Constraint)* constraint; // null = unconstrained; write-path validation + UI/schema metadata
-    const(VoidEnumInfo)* enum_info; // integer types box as enum Variants when set
+    union
+    {
+        ScaledUnit unit;                // desc == quantity
+        const(VoidEnumInfo)* enum_info; // desc == enum_
+        const(TypeDetails)* user_type;  // type == user
+    }
+
+    this(ValueType t, Semantics s) pure
+    {
+        type = t;
+        semantics = s;
+    }
+
+    this(ValueType t, Semantics s, ScaledUnit u) pure
+    {
+        type = t;
+        semantics = s;
+        if (u != ScaledUnit())
+        {
+            unit = u;
+            desc = Desc.quantity;
+        }
+    }
+
+    this(ValueType t, Semantics s, const(VoidEnumInfo)* ei) pure
+    {
+        type = t;
+        semantics = s;
+        if (ei)
+        {
+            enum_info = ei;
+            desc = Desc.enum_;
+        }
+    }
+
+    this(ValueType t, Semantics s, const(TypeDetails)* td) pure
+    {
+        assert(t == ValueType.user, "user_type requires the user atom");
+        type = t;
+        semantics = s;
+        user_type = td;
+    }
 
     bool regular() const pure => rate != 0;
     bool domain_native() const pure => rate == 0 && clock !is null;
-    ubyte stride() const pure => value_stride(type);
+
+    // fits the 8-byte Scalar register: machine numerics or trivial user pods
+    bool is_scalar() const pure
+        => count == 1 && (is_scalar_type(type) || (type == ValueType.user && user_type.pod && user_type.size <= 8));
+
+    ubyte stride() const pure
+    {
+        if (count == 0)
+            return size_t.sizeof; // dynamic records hold a refcounted handle (String for text)
+        uint s = type == ValueType.user ? user_type.size : g_atom_stride[type];
+        s *= count;
+        assert(s <= ubyte.max, "record stride exceeds 255 bytes");
+        return cast(ubyte)s;
+    }
 }
 
-enum SeriesEvent : ubyte
-{
-    online,
-    offline,
-    gap,
-    format_change
-}
-
+// the 8-byte fast-path register: single records of scalar formats pass through here; wider
+// records travel as (format, void[])
 union Scalar
 {
 nothrow @nogc:
@@ -222,95 +254,13 @@ nothrow @nogc:
         => box_record(cast(const(ubyte)*)data + i*format.stride, *format);
 }
 
-
-Variant box_record(const(void)* record, ref const DataFormat fmt)
+enum SeriesEvent : ubyte
 {
-    final switch (fmt.type) with (ValueType)
-    {
-        case bool_: return Variant(*cast(const(bool)*)record);
-        case u8:    return box_int(*cast(const(ubyte)*)record, fmt);
-        case s8:    return box_int(*cast(const(byte)*)record, fmt);
-        case u16:   return box_int(*cast(const(ushort)*)record, fmt);
-        case s16:   return box_int(*cast(const(short)*)record, fmt);
-        case u32:   return box_int(*cast(const(uint)*)record, fmt);
-        case s32:   return box_int(*cast(const(int)*)record, fmt);
-        case u64:   return box_int(cast(long)*cast(const(ulong)*)record, fmt);
-        case s64:   return box_int(*cast(const(long)*)record, fmt);
-        case f32:   return box_float(*cast(const(float)*)record, fmt);
-        case f64:   return box_float(*cast(const(double)*)record, fmt);
-        case string_:
-        case variant:
-            assert(false, "indirect types box at the mount, not the record");
-    }
+    online,
+    offline,
+    gap,
+    format_change
 }
-
-// inverse of box_record; false when the format can't represent the value
-bool unbox_scalar(ref const Variant v, ref const DataFormat fmt, out Scalar s)
-{
-    final switch (fmt.type) with (ValueType)
-    {
-        case bool_:
-            if (!v.isBool)
-                return false;
-            s = Scalar.of(v.asBool);
-            return true;
-
-        case u8, u16, u32, u64:
-        case s8, s16, s32, s64:
-        {
-            double d;
-            if (!unbox_double(v, fmt, d))
-                return false;
-            s = Scalar.of(cast(long)d);
-            return true;
-        }
-        case f32:
-        {
-            double d;
-            if (!unbox_double(v, fmt, d))
-                return false;
-            s = Scalar.of(cast(float)d);
-            return true;
-        }
-        case f64:
-        {
-            double d;
-            if (!unbox_double(v, fmt, d))
-                return false;
-            s = Scalar.of(d);
-            return true;
-        }
-
-        case string_:
-        case variant:
-            return false;
-    }
-}
-
-private Variant box_int(long v, ref const DataFormat fmt)
-{
-    if (fmt.enum_info)
-        return Variant(cast(ulong)v, fmt.enum_info);
-    return fmt.unit == ScaledUnit() ? Variant(v) : Variant(Quantity!long(v, fmt.unit));
-}
-
-private Variant box_float(double v, ref const DataFormat fmt)
-    => fmt.unit == ScaledUnit() ? Variant(v) : Variant(Quantity!double(v, fmt.unit));
-
-private bool unbox_double(ref const Variant v, ref const DataFormat fmt, out double d)
-{
-    if (v.isQuantity)
-        d = fmt.unit == ScaledUnit() ? v.asQuantity!double().normalise().value
-                                     : v.asQuantity!double().adjust_scale(fmt.unit).value;
-    else if (v.isBool)
-        d = v.asBool ? 1 : 0;
-    else if (v.isNumber)
-        d = v.asDouble;
-    else
-        return false;
-    return d == d; // reject NaN
-}
-
 
 struct Bucket
 {
@@ -390,4 +340,153 @@ nothrow @nogc:
         r.first_index = from_index;
         return r;
     }
+}
+
+
+// the reunion: records are context-free bytes, the format is their context, a Variant is
+// self-describing; this edge is the only place the three meet
+Variant box_record(const(void)* record, ref const DataFormat fmt)
+{
+    assert(fmt.count == 1, "vectors and dynamic records box at the mount, not the record"); // TODO: Variant arrays with the first vector producer
+    final switch (fmt.type) with (ValueType)
+    {
+        case bool_: return Variant(*cast(const(bool)*)record);
+        case u8:    return box_int(*cast(const(ubyte)*)record, fmt);
+        case s8:    return box_int(*cast(const(byte)*)record, fmt);
+        case u16:   return box_int(*cast(const(ushort)*)record, fmt);
+        case s16:   return box_int(*cast(const(short)*)record, fmt);
+        case u32:   return box_int(*cast(const(uint)*)record, fmt);
+        case s32:   return box_int(*cast(const(int)*)record, fmt);
+        case u64:   return box_int(cast(long)*cast(const(ulong)*)record, fmt);
+        case s64:   return box_int(*cast(const(long)*)record, fmt);
+        case f32:   return box_float(*cast(const(float)*)record, fmt);
+        case f64:   return box_float(*cast(const(double)*)record, fmt);
+        case char_:
+            assert(false, "indirect types box at the mount, not the record");
+        case user:
+        {
+            const(TypeDetails)* td = fmt.user_type;
+            if (td.variant)
+            {
+                Variant var;
+                if (td.variant(cast(void*)record, var, true))
+                    return var;
+            }
+            assert(false, "TODO: structural user boxing lands with the gateway");
+        }
+    }
+}
+
+// inverse of box_record; false when the format can't represent the value
+bool unbox_scalar(ref const Variant v, ref const DataFormat fmt, out Scalar s)
+{
+    if (!fmt.is_scalar)
+        return false;
+    final switch (fmt.type) with (ValueType)
+    {
+        case bool_:
+            if (!v.isBool)
+                return false;
+            s = Scalar.of(v.asBool);
+            return true;
+
+        case u8, u16, u32, u64:
+        case s8, s16, s32, s64:
+        {
+            double d;
+            if (!unbox_double(v, fmt, d))
+                return false;
+            s = Scalar.of(cast(long)d);
+            return true;
+        }
+        case f32:
+        {
+            double d;
+            if (!unbox_double(v, fmt, d))
+                return false;
+            s = Scalar.of(cast(float)d);
+            return true;
+        }
+        case f64:
+        {
+            double d;
+            if (!unbox_double(v, fmt, d))
+                return false;
+            s = Scalar.of(d);
+            return true;
+        }
+
+        case user:
+        {
+            const(TypeDetails)* td = fmt.user_type;
+            if (!td.variant)
+                return false;
+            s.raw[] = 0;
+            return td.variant(s.raw.ptr, *cast(Variant*)&v, false);
+        }
+
+        case char_:
+            return false;
+    }
+}
+
+
+unittest
+{
+    // extent: count multiplies stride, 0 = dynamic handle, scalar-ness needs count == 1
+    DataFormat f = DataFormat(ValueType.s32, Semantics.held);
+    assert(f.stride == 4 && f.is_scalar);
+    f.count = 8;
+    assert(f.stride == 32 && !f.is_scalar);
+    DataFormat s = DataFormat(ValueType.char_, Semantics.held);
+    s.count = 0;
+    assert(s.stride == size_t.sizeof && !s.is_scalar);
+
+    int v = -5;
+    assert(box_record(&v, DataFormat(ValueType.s32, Semantics.held)).asLong == -5);
+
+    // trivial user pods ride the Scalar register and box through their variant marshal
+    import urt.time : from_unix_time_ns, SysTime;
+    import urt.typereg : find_type_by_name;
+    const(TypeDetails)* dt = find_type_by_name("dt");
+    assert(dt && dt.pod && dt.size == 8 && dt.variant);
+    DataFormat fdt = DataFormat(ValueType.user, Semantics.held, dt);
+    assert(fdt.is_scalar && fdt.stride == 8);
+    SysTime t = from_unix_time_ns(1_700_000_000_000_000_000);
+    Variant bt = box_record(&t, fdt);
+    assert(bt.isUser!SysTime && bt.as!SysTime == t);
+    Scalar sc;
+    assert(unbox_scalar(bt, fdt, sc));
+    assert(*cast(SysTime*)sc.raw.ptr == t);
+}
+
+
+private:
+
+package immutable ubyte[ValueType.max + 1] g_atom_stride = [ 1, 1, 1, 2, 2, 4, 4, 8, 8, 4, 8, 1, 0 ];
+
+Variant box_int(long v, ref const DataFormat fmt)
+{
+    if (fmt.desc == DataFormat.Desc.enum_)
+        return Variant(cast(ulong)v, fmt.enum_info);
+    if (fmt.desc == DataFormat.Desc.quantity)
+        return Variant(Quantity!long(v, fmt.unit));
+    return Variant(v);
+}
+
+Variant box_float(double v, ref const DataFormat fmt)
+    => fmt.desc == DataFormat.Desc.quantity ? Variant(Quantity!double(v, fmt.unit)) : Variant(v);
+
+bool unbox_double(ref const Variant v, ref const DataFormat fmt, out double d)
+{
+    if (v.isQuantity)
+        d = fmt.desc == DataFormat.Desc.quantity ? v.asQuantity!double().adjust_scale(fmt.unit).value
+                                                 : v.asQuantity!double().normalise().value;
+    else if (v.isBool)
+        d = v.asBool ? 1 : 0;
+    else if (v.isNumber)
+        d = v.asDouble;
+    else
+        return false;
+    return d == d; // reject NaN
 }

@@ -136,7 +136,7 @@ nothrow @nogc:
         => latest;
 
     bool native() const pure
-        => series.format !is null && is_scalar_type(series.format.type);
+        => series.format !is null && series.format.is_scalar;
 
     void value(T)(auto ref T v, SysTime timestamp = getSysTime(), Subscriber who = null)
     {
@@ -172,6 +172,12 @@ nothrow @nogc:
     void observe(T)(T v, SysTime t = getSysTime(), Observer who = null)
     {
         series.observe(v, t, who);
+        sync_from_series();
+    }
+
+    void observe_record(const(void)[] record, SysTime t = getSysTime(), Observer who = null)
+    {
+        series.observe_record(record, t, who);
         sync_from_series();
     }
 

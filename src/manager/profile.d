@@ -16,12 +16,15 @@ import urt.string.format;
 import manager.component;
 import urt.uuid;
 
+import manager.codec : Encoding;
 import manager.config;
 import manager.device;
 import manager.element;
 import manager.features;
+import manager.sample : find_enum_info, mint_desc, register_enum_info, SampleDesc;
 import manager.sampler;
 import manager.series : DataFormat, Semantics, ValueType;
+import manager.spec : compile_spec, LayoutContext, stream_le_context;
 
 static if (has_http)
     import protocol.http.message : HTTPMethod;
@@ -58,7 +61,6 @@ enum Frequency : ubyte
 enum ElementType : ubyte
 {
     modbus,
-    can,
     zigbee,
     http,
     aa55,
@@ -103,16 +105,20 @@ pure nothrow @nogc:
     Frequency update_frequency = Frequency.medium;
 
     ElementType type() const
-        => cast(ElementType)(_element_index >> 13);
+        => cast(ElementType)_kind;
+
+    uint kind() const
+        => _kind;
 
     size_t element() const
-        => _element_index & 0x1FFF;
+        => _index;
 
     const(char)[] get_description(ref const(Profile) profile) const
         => _description.cache_string(profile.desc_strings);
 
 private:
-    ushort _element_index; // bits 0-12: index, bits 13-15: type
+    ubyte _kind;
+    ushort _index;
     ushort _description;
 }
 
@@ -124,13 +130,6 @@ struct ElementDesc_Modbus
     ushort reg;
     RegisterType reg_type = RegisterType.holding_register;
     ValueDesc value_desc = ValueDesc(modbus_data_type!"u16");
-}
-
-struct ElementDesc_CAN
-{
-    uint message_id;
-    ubyte offset;
-    ValueDesc value_desc;
 }
 
 struct ElementDesc_Zigbee
@@ -240,6 +239,109 @@ struct ElementDesc_BLE
     GUID char_uuid;
     ubyte offset;
     ValueDesc value_desc;
+}
+
+struct ProfileCosts
+{
+    size_t string_bytes;
+}
+
+struct ProfileBuilder
+{
+nothrow @nogc:
+
+    Profile* profile;
+    const(char)[] element_id;
+
+    bool compile_value(const(char)[] type, const(char)[] units, ref const LayoutContext ctx,
+                       out ushort desc_index, out ubyte span)
+    {
+        const(VoidEnumInfo)* resolve(const(char)[] name)
+            => profile.find_enum_template(name);
+
+        bool has_ref = false;
+        foreach (c; type)
+            has_ref |= c == ':';
+
+        ScaledUnit unit;
+        float pre_scale = 1;
+        const(VoidEnumInfo)* ei = null;
+        SampleDesc desc;
+        if (units.length && !has_ref)
+        {
+            // legacy two-column spellings: enum names and dt formats ride the units column
+            if (type.startsWith("enum") || type.startsWith("bf"))
+            {
+                ei = profile.find_enum_template(units);
+                if (!ei)
+                    writeWarning("Unknown enum type: ", units);
+                units = null;
+            }
+            else if (type.startsWith("dt"))
+            {
+                char[64] spelled = void;
+                size_t len = type.length + 1 + units.length;
+                if (len <= spelled.length)
+                {
+                    spelled[0 .. type.length] = type[];
+                    spelled[type.length] = ':';
+                    spelled[type.length + 1 .. len] = units[];
+                    if (compile_spec(spelled[0 .. len], ctx, unit, 1, null, &resolve, desc))
+                    {
+                        desc_index = mint_desc(desc);
+                        span = desc.enc.wire_bytes;
+                        return true;
+                    }
+                }
+                writeWarning("Invalid date_time format: ", units);
+                return false;
+            }
+        }
+        if (units.length)
+        {
+            ptrdiff_t taken = unit.parseUnit(units, pre_scale);
+            if (taken != units.length)
+                writeWarning("Invalid units '", units, "' for element: ", element_id);
+        }
+        if (!compile_spec(type, ctx, unit, pre_scale, ei, &resolve, desc))
+        {
+            writeWarning("Invalid data type '", type, "' for element: ", element_id);
+            return false;
+        }
+        desc_index = mint_desc(desc);
+        span = wire_span(desc, type);
+        return true;
+    }
+
+    const(VoidEnumInfo)* find_enum(const(char)[] name)
+        => profile.find_enum_template(name);
+
+    ushort intern(const(char)[] s)
+        => _strings ? _strings.add_string(s) : 0;
+
+private:
+    StringCacheBuilder* _strings;
+}
+
+interface ProfileSections
+{
+nothrow @nogc:
+    uint element_size(uint kind);
+    void count_element(uint kind, const(char)[] tail, ref ProfileCosts costs);
+    // slot is element_size bytes; the handler emplaces its own struct's init before filling
+    bool parse_element(uint kind, const(char)[] tail, void[] slot, ref ProfileBuilder b);
+}
+
+enum uint first_section_kind = 16;
+
+uint register_profile_section(const(char)[] name, ProfileSections handler)
+{
+    debug foreach (ref s; g_profile_sections)
+        assert(s.name != name, "profile section already registered");
+    uint kind = cast(uint)(first_section_kind + g_profile_sections.length);
+    assert(kind <= ubyte.max, "too many profile sections");
+    g_profile_sections ~= ProfileSectionReg(name, handler, kind);
+    return kind;
 }
 
 struct ElementTemplate
@@ -421,8 +523,6 @@ nothrow @nogc:
             defaultAllocator().freeArray(mqtt_strings);
         if(mb_elements)
             defaultAllocator().freeArray(mb_elements);
-        if(can_elements)
-            defaultAllocator().freeArray(can_elements);
         if(zb_elements)
             defaultAllocator().freeArray(zb_elements);
         if(http_elements)
@@ -439,8 +539,13 @@ nothrow @nogc:
             defaultAllocator().freeArray(mqtt_elements);
         if(ble_elements)
             defaultAllocator().freeArray(ble_elements);
-        foreach (f; _series_formats)
-            defaultAllocator().freeT(f);
+        foreach (ref b; section_blocks)
+            if (b.data)
+                defaultAllocator().free(b.data);
+        if(section_blocks)
+            defaultAllocator().freeArray(section_blocks);
+        if(section_strings)
+            defaultAllocator().freeArray(section_strings);
     }
 
     inout(DeviceTemplate)* get_model_template(const(char)[] model) inout pure
@@ -462,14 +567,9 @@ nothrow @nogc:
 
     const(VoidEnumInfo)* find_enum_template(const(char)[] name)
     {
-        import manager;
-
-        const(VoidEnumInfo)** enum_info = name in enum_templates;
-        if (!enum_info)
-            enum_info = name in g_app.enum_templates;
-        if (!enum_info)
-            return null;
-        return *enum_info;
+        if (const(VoidEnumInfo)** enum_info = name in enum_templates)
+            return *enum_info;
+        return find_enum_info(name);
     }
 
     // one shared instance per shape, owned by the profile (mounts borrow it, like enum_info);
@@ -590,8 +690,18 @@ nothrow @nogc:
     ref const(ElementDesc_Modbus) get_mb(size_t i) const pure
         => mb_elements[i];
 
-    ref const(ElementDesc_CAN) get_can(size_t i) const pure
-        => can_elements[i];
+    ref const(T) get_section(T)(uint kind, size_t i) const pure
+    {
+        foreach (ref b; section_blocks)
+        {
+            if (b.kind == kind)
+            {
+                assert(T.sizeof <= b.esize && i < b.count);
+                return *cast(const(T)*)(b.data.ptr + i*b.esize);
+            }
+        }
+        assert(false, "no such profile section");
+    }
 
     ref const(ElementDesc_Zigbee) get_zb(size_t i) const pure
         => zb_elements[i];
@@ -642,18 +752,11 @@ nothrow @nogc:
 private:
     const(DataFormat)* mint_series_format(ValueType vt, ScaledUnit unit, const(VoidEnumInfo)* enum_info = null)
     {
-        foreach (DataFormat* f; _series_formats)
-        {
-            if (f.type == vt && f.unit == unit && f.enum_info is enum_info)
-                return f;
-        }
-        DataFormat* f = defaultAllocator().allocT!DataFormat();
-        f.type = vt;
-        f.semantics = Semantics.held;   // matches legacy change-only delivery; profiles grow a semantics field later
-        f.unit = unit;
-        f.enum_info = enum_info;
-        _series_formats ~= f;
-        return f;
+        import manager.sample : format_by_index, mint_format;
+        // Semantics.held matches legacy change-only delivery; profiles grow a semantics field later
+        DataFormat target = enum_info ? DataFormat(vt, Semantics.held, enum_info)
+                                      : DataFormat(vt, Semantics.held, unit);
+        return format_by_index(mint_format(target));
     }
 
     struct Lookup
@@ -683,13 +786,21 @@ private:
 
     String name;
 
+    struct SectionBlock
+    {
+        uint kind;
+        ushort esize;
+        ushort count;
+        void[] data;
+    }
+
     DeviceTemplate[] device_templates;
     ComponentTemplate[] component_templates;
     ElementTemplate[] element_templates;
     ElementDesc[] elements;
     Lookup[] lookup_table;
+    SectionBlock[] section_blocks;
     ElementDesc_Modbus[] mb_elements;
-    ElementDesc_CAN[] can_elements;
     ElementDesc_Zigbee[] zb_elements;
     ElementDesc_HTTP[] http_elements;
     RequestDesc[] request_descs;
@@ -705,12 +816,11 @@ private:
     char[] param_strings;
     char[] http_strings;
     char[] mqtt_strings;
+    char[] section_strings;
     ushort _params, _param_count;
     ushort _mqtt_subs, _mqtt_sub_count;
 
     Map!(String, const(VoidEnumInfo)*) enum_templates;
-
-    Array!(DataFormat*) _series_formats;
 }
 
 unittest
@@ -748,6 +858,93 @@ unittest
     assert(p.series_format(tnum) is f);
     TextValueDesc tstr = TextValueDesc(TextType.str, ScaledUnit());
     assert(p.series_format(tstr) is null);
+
+    // wire spans for byte-stream maps (CAN): derived per family from the compiled desc
+    {
+        import manager.codec : find_encoding, register_builtin_encodings;
+        import manager.series : ValueType;
+        SampleDesc d;
+        assert(compile_spec("u16", stream_le_context, ScaledUnit(), 1, null, null, d));
+        assert(wire_span(d, "u16") == 2);
+        assert(compile_spec("str8", stream_le_context, ScaledUnit(), 1, null, null, d));
+        assert(d.fmt.type == ValueType.char_ && wire_span(d, "str8") == 8);
+        assert(compile_spec("u8[8]", stream_le_context, ScaledUnit(), 1, null, null, d));
+        assert(wire_span(d, "u8[8]") == 8);
+        if (!find_encoding("yymmddhhmmss"))
+            register_builtin_encodings();
+        assert(compile_spec("dt48:yymmddhhmmss", stream_le_context, ScaledUnit(), 1, null, null, d));
+        assert(wire_span(d, "dt48:yymmddhhmmss") == 6);
+    }
+
+    // registered-section parse: handler fills its slots through ProfileBuilder; legacy
+    // two-column spellings, one-token `u16:0.1V`, and enum templates all resolve
+    {
+        static struct TDesc
+        {
+            ubyte addr;
+            ubyte length;
+            ushort desc = 0xFFFF;
+        }
+        static class TestSections : ProfileSections
+        {
+        nothrow @nogc:
+            uint element_size(uint)
+                => cast(uint)TDesc.sizeof;
+            void count_element(uint, const(char)[], ref ProfileCosts) {}
+            bool parse_element(uint kind, const(char)[] tail, void[] slot, ref ProfileBuilder b)
+            {
+                TDesc* d = cast(TDesc*)slot.ptr;
+                *d = TDesc.init;
+                const(char)[] addr = tail.split!',';
+                const(char)[] type = tail.split!','.unQuote;
+                const(char)[] units = tail.split!','.unQuote;
+                size_t taken;
+                d.addr = cast(ubyte)addr.parse_uint_with_base(&taken);
+                return b.compile_value(type, units, stream_le_context, d.desc, d.length);
+            }
+        }
+        uint tsec = register_profile_section("tsec", defaultAllocator().allocT!TestSections());
+
+        static immutable string conf_text =
+            "enum: Mode\n" ~
+            "\toff: 0\n" ~
+            "\teco: 1\n" ~
+            "\n" ~
+            "registers:\n" ~
+            "\ttsec: 1, u16, 0.1V\tdesc: chargeVoltage\n" ~
+            "\ttsec: 2, enum8, Mode\tdesc: mode\n" ~
+            "\ttsec: 3, u16:0.1V\tdesc: singleTokenVolts\n" ~
+            "\ttsec: 4, str8\tdesc: name\n";
+        Profile* prof = parse_profile(conf_text, "tprof");
+        assert(prof !is null);
+
+        import manager.sample : desc_by_index;
+
+        // the compiled format is the same instance the legacy path mints for the same spelling
+        ref const TDesc cv = prof.get_section!TDesc(tsec, 0);
+        assert(cv.desc != 0xFFFF && cv.length == 2 && cv.addr == 1);
+        SampleDesc cvd = desc_by_index(cv.desc);
+        ValueDesc legacy_cv = ValueDesc(DataType.u16);
+        legacy_cv.parse_units("0.1V");
+        assert(cvd.fmt is prof.series_format(legacy_cv));
+        assert(cvd.pre_scale == legacy_cv.pre_scale);
+
+        // profile enums register qualified and resolve locally by bare name
+        ref const TDesc md = prof.get_section!TDesc(tsec, 1);
+        assert(md.desc != 0xFFFF && md.length == 1);
+        assert(desc_by_index(md.desc).fmt.enum_info is prof.find_enum_template("Mode"));
+        assert(find_enum_info("tprof.Mode") is prof.find_enum_template("Mode"));
+
+        // the one-token spelling mints the same desc as the two-column form
+        ref const TDesc st = prof.get_section!TDesc(tsec, 2);
+        assert(st.desc == cv.desc);
+
+        ref const TDesc nm = prof.get_section!TDesc(tsec, 3);
+        assert(desc_by_index(nm.desc).fmt.type == ValueType.char_ && nm.length == 8);
+
+        assert(prof.elements.length == 4);
+        assert(prof.elements[0].kind == tsec && prof.elements[1].element == 1);
+    }
 }
 
 Profile* load_profile(const(char)[] filename, NoGCAllocator allocator = defaultAllocator())
@@ -758,16 +955,34 @@ Profile* load_profile(const(char)[] filename, NoGCAllocator allocator = defaultA
     scope (exit) { allocator.free(file); }
     if (!file)
         return null;
-    return parse_profile(cast(const char[])file, allocator);
+
+    const(char)[] name = filename;
+    foreach_reverse (i, c; name)
+    {
+        if (c == '/' || c == '\\')
+        {
+            name = name[i+1 .. $];
+            break;
+        }
+    }
+    foreach_reverse (i, c; name)
+    {
+        if (c == '.')
+        {
+            name = name[0 .. i];
+            break;
+        }
+    }
+    return parse_profile(cast(const char[])file, name, allocator);
 }
 
-Profile* parse_profile(const(char)[] conf, NoGCAllocator allocator = defaultAllocator())
+Profile* parse_profile(const(char)[] conf, const(char)[] profile_name = null, NoGCAllocator allocator = defaultAllocator())
 {
     ConfItem root = parse_config(conf);
-    return parse_profile(root);
+    return parse_profile(root, profile_name, allocator);
 }
 
-Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator())
+Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAllocator allocator = defaultAllocator())
 {
     Profile* profile = allocator.allocT!Profile();
 
@@ -787,12 +1002,15 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     size_t num_element_templates = 0;
     size_t num_indirections = 0;
     size_t mb_count = 0;
-    size_t can_count = 0;
     size_t zb_count = 0;
     size_t http_count = 0;
     size_t aa55_count = 0;
     size_t mqtt_count = 0;
     size_t ble_count = 0;
+
+    ProfileCosts section_costs;
+    Array!ushort section_counts;
+    section_counts.resize(g_profile_sections.length);
 
     // we need to count the items and buffer lengths
     foreach (ref root_item; conf.sub_items) switch (root_item.name)
@@ -810,14 +1028,21 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 writeWarning("Duplicate enum definition: ", enum_name);
                 break;
             }
-            const(VoidEnumInfo)* enum_info = parse_enum(root_item, root_item.name == "bitfield");
+            VoidEnumInfo* enum_info = parse_enum(root_item, root_item.name == "bitfield");
             if (!enum_info)
             {
                 writeWarning("Failed to parse enum: ", enum_name);
                 break;
             }
 
-            profile.enum_templates.insert(enum_name.makeString(allocator), enum_info);
+            char[128] qualified = void;
+            size_t qlen = profile_name.length + 1 + enum_name.length;
+            assert(qlen <= qualified.length, "qualified enum name too long");
+            qualified[0 .. profile_name.length] = profile_name[];
+            qualified[profile_name.length] = '.';
+            qualified[profile_name.length + 1 .. qlen] = enum_name[];
+            const(VoidEnumInfo)* canonical = register_enum_info(qualified[0 .. qlen], enum_info);
+            profile.enum_templates.insert(enum_name.makeString(allocator), canonical);
             break;
 
         case "parameters":
@@ -930,7 +1155,6 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 switch (reg_item.name)
                 {
                     case "mb", "reg": ++mb_count; break;
-                    case "can": ++can_count; break;
                     case "zb": ++zb_count; break;
                     case "http":
                         ++http_count;
@@ -974,7 +1198,13 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         break;
                     case "ble": ++ble_count; break;
                     default:
-                        writeWarning("Unknown element type: ", reg_item.name);
+                        if (ProfileSectionReg* s = find_profile_section(reg_item.name))
+                        {
+                            ++section_counts[s.kind - first_section_kind];
+                            s.handler.count_element(s.kind, reg_item.value, section_costs);
+                        }
+                        else
+                            writeWarning("Unknown element type: ", reg_item.name);
                         break;
                 }
             }
@@ -1132,13 +1362,30 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     profile.param_strings = allocator.allocArray!char(2 + param_string_len);
 
     profile.mb_elements = allocator.allocArray!ElementDesc_Modbus(mb_count);
-    profile.can_elements = allocator.allocArray!ElementDesc_CAN(can_count);
     profile.zb_elements = allocator.allocArray!ElementDesc_Zigbee(zb_count);
     profile.http_elements = allocator.allocArray!ElementDesc_HTTP(http_count);
     profile.request_descs = allocator.allocArray!RequestDesc(request_count);
     profile.aa55_elements = allocator.allocArray!ElementDesc_AA55(aa55_count);
     profile.mqtt_elements = allocator.allocArray!ElementDesc_MQTT(mqtt_count);
     profile.ble_elements = allocator.allocArray!ElementDesc_BLE(ble_count);
+
+    size_t active_sections = 0;
+    foreach (n; section_counts)
+        if (n)
+            ++active_sections;
+    profile.section_blocks = allocator.allocArray!(Profile.SectionBlock)(active_sections);
+    profile.section_strings = allocator.allocArray!char(2 + section_costs.string_bytes);
+    {
+        size_t sb = 0;
+        foreach (ref s; g_profile_sections)
+        {
+            ushort n = section_counts[s.kind - first_section_kind];
+            if (!n)
+                continue;
+            uint esz = s.handler.element_size(s.kind);
+            profile.section_blocks[sb++] = Profile.SectionBlock(s.kind, cast(ushort)esz, n, allocator.allocArray!ubyte(n * esz));
+        }
+    }
 
     StringCacheBuilder id_cache, name_cache, lookup_cache, expr_cache, desc_cache, mqtt_string_cache, http_string_cache, param_string_cache;
     if (profile.name_strings)
@@ -1158,18 +1405,26 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     if (profile.param_strings)
         param_string_cache = StringCacheBuilder(profile.param_strings);
 
+    StringCacheBuilder section_string_cache;
+    if (profile.section_strings)
+        section_string_cache = StringCacheBuilder(profile.section_strings);
+
+    ProfileBuilder builder;
+    builder.profile = profile;
+    builder._strings = profile.section_strings ? &section_string_cache : null;
+
     num_device_templates = 0;
     num_component_templates = 0;
     num_element_templates = 0;
     num_indirections = 0;
     item_count = 0;
     mb_count = 0;
-    can_count = 0;
     zb_count = 0;
     http_count = 0;
     request_count = 0;
     aa55_count = 0;
     mqtt_count = 0;
+    section_counts[][] = 0;
 
     // parse the elements
     foreach (ref root_item; conf.sub_items) switch (root_item.name)
@@ -1380,7 +1635,8 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         const(char)[] type = tail.split!','.unQuote;
                         const(char)[] units = tail.split!','.unQuote;
 
-                        e._element_index = cast(ushort)((ElementType.modbus << 13) | mb_count);
+                        e._kind = ElementType.modbus;
+                        e._index = cast(ushort)mb_count;
                         ref ElementDesc_Modbus mb = profile.mb_elements[mb_count++];
 
                         // TODO: MOVE THIS CODE!
@@ -1428,37 +1684,6 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         parse_value_desc(mb.value_desc, ty, units);
                         break;
 
-                    case "can":
-                        const(char)[] tail = reg_item.value;
-                        tail = tail.split_element_and_desc();
-
-                        const(char)[] msg_id = tail.split!',';
-                        const(char)[] offset = tail.split!',';
-                        const(char)[] type = tail.split!','.unQuote;
-                        const(char)[] units = tail.split!','.unQuote;
-
-                        e._element_index = cast(ushort)((ElementType.can << 13) | can_count);
-                        ref ElementDesc_CAN can = profile.can_elements[can_count++];
-
-                        size_t taken;
-                        ulong ti = msg_id.parse_uint_with_base(&taken);
-                        if (taken != msg_id.length || ti > 0x1FFFFFFF) // 29 bits for CAN2.0B
-                        {
-                            writeWarning("Invalid CAN message id: ", msg_id);
-                            break;
-                        }
-                        can.message_id = cast(uint)ti;
-                        ti = offset.parse_uint_with_base(&taken);
-                        if (taken != offset.length || ti >= 64)
-                        {
-                            writeWarning("Invalid CAN message offset: ", offset);
-                            break;
-                        }
-                        can.offset = cast(ubyte)ti;
-
-                        parse_value_desc(can.value_desc, type.parse_data_type(), units);
-                        break;
-
                     case "zb":
                         const(char)[] tail = reg_item.value;
                         tail = tail.split_element_and_desc();
@@ -1469,7 +1694,8 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         const(char)[] type = tail.split!','.unQuote;
                         const(char)[] units = tail.split!','.unQuote;
 
-                        e._element_index = cast(ushort)((ElementType.zigbee << 13) | zb_count);
+                        e._kind = ElementType.zigbee;
+                        e._index = cast(ushort)zb_count;
                         ref ElementDesc_Zigbee zb = profile.zb_elements[zb_count++];
 
                         size_t taken;
@@ -1542,7 +1768,8 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         break;
 
                     case "http":
-                        e._element_index = cast(ushort)((ElementType.http << 13) | http_count);
+                        e._kind = ElementType.http;
+                        e._index = cast(ushort)http_count;
                         ref ElementDesc_HTTP http = profile.http_elements[http_count++];
 
                         const(char)[] htail = reg_item.value;
@@ -1622,7 +1849,8 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                             const(char)[] type = tail.split!','.unQuote;
                             const(char)[] units = tail.split!','.unQuote;
 
-                            e._element_index = cast(ushort)((ElementType.aa55 << 13) | aa55_count);
+                            e._kind = ElementType.aa55;
+                            e._index = cast(ushort)aa55_count;
                             ref ElementDesc_AA55 aa55 = profile.aa55_elements[aa55_count++];
 
                             size_t taken;
@@ -1653,7 +1881,8 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         const(char)[] type = tail.split!','.unQuote;
                         const(char)[] units = tail.split!','.unQuote;
 
-                        e._element_index = cast(ushort)((ElementType.mqtt << 13) | mqtt_count);
+                        e._kind = ElementType.mqtt;
+                        e._index = cast(ushort)mqtt_count;
                         ref ElementDesc_MQTT mqtt = profile.mqtt_elements[mqtt_count++];
 
                         mqtt.read_topic = mqtt_string_cache.add_string(topic);
@@ -1694,7 +1923,8 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         const(char)[] type = tail.split!','.unQuote;
                         const(char)[] units = tail.split!','.unQuote;
 
-                        e._element_index = cast(ushort)((ElementType.ble << 13) | ble_count);
+                        e._kind = ElementType.ble;
+                        e._index = cast(ushort)ble_count;
                         ref ElementDesc_BLE ble = profile.ble_elements[ble_count++];
 
                         if (!parse_ble_uuid(service, ble.service_uuid))
@@ -1736,7 +1966,17 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                         break;
 
                     default:
-                        writeWarning("Unknown element type: ", reg_item.name);
+                        if (ProfileSectionReg* s = find_profile_section(reg_item.name))
+                        {
+                            ref Profile.SectionBlock blk = section_block(profile, s.kind);
+                            ushort idx = section_counts[s.kind - first_section_kind]++;
+                            e._kind = cast(ubyte)s.kind;
+                            e._index = idx;
+                            builder.element_id = id;
+                            s.handler.parse_element(s.kind, reg_item.value, blk.data[idx*blk.esize .. (idx+1)*blk.esize], builder);
+                        }
+                        else
+                            writeWarning("Unknown element type: ", reg_item.name);
                         break;
                 }
             }
@@ -2175,6 +2415,53 @@ MutableString!0 substitute_parameters(const(char)[] pattern, scope const(char)[]
 
 
 private:
+
+struct ProfileSectionReg
+{
+    const(char)[] name;
+    ProfileSections handler;
+    uint kind;
+}
+
+__gshared Array!ProfileSectionReg g_profile_sections;
+
+ProfileSectionReg* find_profile_section(const(char)[] name)
+{
+    foreach (ref s; g_profile_sections)
+    {
+        if (s.name == name)
+            return &s;
+    }
+    return null;
+}
+
+ref Profile.SectionBlock section_block(Profile* p, uint kind)
+{
+    foreach (ref b; p.section_blocks)
+    {
+        if (b.kind == kind)
+            return b;
+    }
+    assert(false, "no such profile section");
+}
+
+// the wire byte span a compiled desc reads; strN's numeral is the field's char count
+ubyte wire_span(ref const SampleDesc desc, const(char)[] spec)
+{
+    if (const(Encoding)* enc = desc.enc)
+        return enc.wire_bytes;
+    const(DataFormat)* fmt = desc.fmt;
+    if (fmt.type == ValueType.char_)
+    {
+        uint n = 0;
+        size_t i = 3;   // char_ only compiles from the str family
+        while (i < spec.length && spec[i] >= '0' && spec[i] <= '9')
+            n = n*10 + (spec[i++] - '0');
+        return cast(ubyte)n;
+    }
+    uint count = fmt.count ? fmt.count : 1;
+    return cast(ubyte)(desc.layout.container_bytes * count);
+}
 
 ushort find_request_index(ref const Profile profile, const(char)[] name) pure nothrow @nogc
 {

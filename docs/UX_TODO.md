@@ -54,6 +54,13 @@ text), `sub`/`unsub` (pattern string), `enum_req`/`enum`, `history_req`/`history
       from `type_name` markup on the types themselves, byte-identical: ipv4, ipv6, inetaddr,
       mac, eui, dt, tod, ...). If the client switches on these two tags, update the strings.
 
+## 2026-07-18 - date-time element values are UTC instants (format change if parsed)
+
+- [ ] **dt-typed element values render as SysTime**: previously a bare calendar face
+      (`2026-07-18T13:45:30`), now the UTC instant with suffix (`2026-07-18T13:45:30Z`).
+      Affects elements sourced from `dt48` registers (device RTCs). If the client parses
+      these strings, accept the trailing `Z`. The `dt` schema tag is unchanged.
+
 ## Upcoming instance work with NO client impact (for orientation)
 
 - ID migration steps 1 and 2 (park/claim/forward id machine; container CID cutover including

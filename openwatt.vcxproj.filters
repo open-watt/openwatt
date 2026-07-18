@@ -738,6 +738,18 @@
     <DCompile Include="src\manager\sampler.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\manager\wire.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\codec.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\sample.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
+    <DCompile Include="src\manager\spec.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
     <DCompile Include="src\manager\binding.d">
       <Filter>src\manager</Filter>
     </DCompile>

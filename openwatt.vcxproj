@@ -116,6 +116,7 @@
     <DCompile Include="src\main.d" />
     <DCompile Include="src\manager\base.d" />
     <DCompile Include="src\manager\binding.d" />
+    <DCompile Include="src\manager\codec.d" />
     <DCompile Include="src\manager\collection.d" />
     <DCompile Include="src\manager\component.d" />
     <DCompile Include="src\manager\config.d" />
@@ -146,9 +147,11 @@
     <DCompile Include="src\manager\profile.d" />
     <DCompile Include="src\manager\reactor.d" />
     <DCompile Include="src\manager\record.d" />
+    <DCompile Include="src\manager\sample.d" />
     <DCompile Include="src\manager\sampler.d" />
     <DCompile Include="src\manager\secret.d" />
     <DCompile Include="src\manager\signal.d" />
+    <DCompile Include="src\manager\spec.d" />
     <DCompile Include="src\manager\subscriber.d" />
     <DCompile Include="src\manager\sync\encoder.d" />
     <DCompile Include="src\manager\sync\json_encoder.d" />
@@ -158,6 +161,7 @@
     <DCompile Include="src\manager\syslog.d" />
     <DCompile Include="src\manager\system.d" />
     <DCompile Include="src\manager\value.d" />
+    <DCompile Include="src\manager\wire.d" />
     <DCompile Include="src\protocol\ble\att.d" />
     <DCompile Include="src\protocol\ble\binding.d" />
     <DCompile Include="src\protocol\ble\client.d" />

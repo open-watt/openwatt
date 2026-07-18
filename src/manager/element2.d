@@ -64,7 +64,7 @@ nothrow @nogc:
     Variant value() const
     {
         // TODO: wide latest (stride > 8) reads the open bucket tail once the type registry lands
-        if (format && is_scalar_type(format.type))
+        if (format && format.is_scalar)
             return box_record(_latest.raw.ptr, *format);
         return Variant();
     }
@@ -89,9 +89,15 @@ nothrow @nogc:
         append(s.raw[0 .. format.stride], time[], who);
     }
 
+    // untemplated path for samplers decoding at a runtime-known format
     void observe_record(const(void)[] record, SysTime t = getSysTime(), Observer who = null)
     {
-        // TODO: untemplated path for samplers decoding at runtime-known format; same flow as observe()
+        assert(format.is_scalar, "TODO: wide records need copy_emplace through the format's hooks");
+        debug assert(record.length >= format.stride);
+        Scalar s;
+        s.raw[] = 0;
+        s.raw[0 .. format.stride] = (cast(const(ubyte)[])record)[0 .. format.stride];
+        observe_scalar(s, t, who);
     }
 
     void observe_block(const(void)[] samples, const(SysTime)[] times, Observer who = null)
@@ -427,6 +433,12 @@ unittest
     assert(b.count == 3 && b.ts !is null && b.time(2) == from_unix_time_ns(13_000));
     e.close_cursor(c);
 
+    // untemplated record write: same flow as observe(), format known only at runtime
+    double rv = 7.0;
+    e.observe_record((cast(const(void)*)&rv)[0 .. 8], from_unix_time_ns(14_000));
+    assert(e.record_count == 7);
+    assert(e.latest.f64_ == 7.0);
+
     // TODO: regular-series test returns once append_block is rebuilt and tick() is rate-aware
 }
 
@@ -440,4 +452,24 @@ void sweep_dirty(scope void delegate(ref Element2) nothrow @nogc visit)
     foreach (e; g_dirty_elements)
         visit(*e);
     g_dirty_elements.clear();
+}
+
+
+private:
+
+// compile-time twin of ValueType for the typed observe() entry
+template value_type_of(T)
+{
+    static if (is(T == bool))        enum value_type_of = ValueType.bool_;
+    else static if (is(T == ubyte))  enum value_type_of = ValueType.u8;
+    else static if (is(T == byte))   enum value_type_of = ValueType.s8;
+    else static if (is(T == ushort)) enum value_type_of = ValueType.u16;
+    else static if (is(T == short))  enum value_type_of = ValueType.s16;
+    else static if (is(T == uint))   enum value_type_of = ValueType.u32;
+    else static if (is(T == int))    enum value_type_of = ValueType.s32;
+    else static if (is(T == ulong))  enum value_type_of = ValueType.u64;
+    else static if (is(T == long))   enum value_type_of = ValueType.s64;
+    else static if (is(T == float))  enum value_type_of = ValueType.f32;
+    else static if (is(T == double)) enum value_type_of = ValueType.f64;
+    else static if (is(T == char))   enum value_type_of = ValueType.char_;
 }

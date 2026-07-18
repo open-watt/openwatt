@@ -1821,8 +1821,9 @@ private ValueDesc make_value_desc(ref const FieldDef fd)
     {
         if (fd.unit)
         {
-            if (const(VoidEnumInfo)** ei = fd.unit in g_app.enum_templates)
-                return ValueDesc(dt, *ei);
+            import manager.sample : find_enum_info;
+            if (const(VoidEnumInfo)* ei = find_enum_info(fd.unit))
+                return ValueDesc(dt, ei);
         }
         return ValueDesc(dt);
     }

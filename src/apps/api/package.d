@@ -340,8 +340,8 @@ private:
             }
             name = name[1..$];
 
-            if (auto pe = name in g_app.enum_templates)
-                e = *pe;
+            import manager.sample : find_enum_info;
+            e = find_enum_info(name);
         }
         else
         {

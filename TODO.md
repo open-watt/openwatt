@@ -133,34 +133,189 @@ status block). Remaining legs, roughly in order:
   module. Natural sequencing: fold in as the per-protocol native-producer migration completes
   (text protocols + modbus are the remaining producers; do the consolidation as/after they
   migrate rather than bolting a ninth machine alongside the eight).
-  TARGET SHAPE (settled 2026-07-18): three orthogonal axes replace the tangled structs -
-  (1) WIRE LAYOUT, binary only (width/sign/endian/word-order/count; text is self-delimiting),
-  stays profile syntax; (2) INTERPRETATION OVERLAY (pre-scale+unit, enum/bitfield descriptor,
-  date format, or a registered type via as=<name>) - all references converge on si units,
-  VoidEnumInfo and urt.typereg TypeDetails, so TextType dissolves to {bool,num,str}+registry
-  names; (3) TARGET SHAPE = DataFormat (+descriptor slot). Pipeline: wire layout -> raw value
-  -> overlay -> native record; sample_record() is the one decode fn, box_record the only
-  Variant edge, encode mirrors through the same descriptors. value.d folds in three ways:
-  struct_name_override deletes (terse names become type_name members on the types; typereg
-  resolves explicit > member > stringof), type_for!T becomes the compile-time projection of
-  the registry namespace (arrays/quantities/#refs are naming combinators over registry atoms),
-  and from_variant's typed string-parse arms merge with text sample_value onto one set of
-  per-type primitives (registry stringify/parse + unit machinery), leaving from_variant as
-  the argument-conversion veneer. Sampling STRATEGY (batching/timing/poll policy) stays with
-  bindings. Serialisation contract (landed in typereg): LE memory image is the default binary
-  form; an aggregate's serialise/deserialise pair overrides, and is mandatory for non-pod.
-  Refinements (Manu, 2026-07-18): (a) TEXT sampling has almost no wire description - the token
-  is self-delimiting, so TextValueDesc's members are mostly OVERLAY wearing a text costume;
-  the overlay struct should be ONE shape shared by both wires, and the residual text-specific
-  detail (quoting/locale/format nuances, if any) is tiny. (b) For REGISTERED user types the
-  binary pipeline composes: wire-layout rules run FIRST (endian/word-order swizzle to the
-  canonical LE byte image), THEN the type's binary form consumes that image (memcpy for pods,
-  deserialise for overriders); encode mirrors. (c) value.d is Variant MARSHALLING and the name
-  should say so when it reshapes; lean into self-marshalling - types that carry fromString/
-  formatValue/serialise marshal themselves, and the module shrinks to dispatch + the
-  structural cases (arrays, Nullable, collection-name resolution). (d) Normalise the profile
-  text language as part of the audit: one grammar for value-type parse specs across protocol
-  sections (binary: layout+overlay; text: overlay only), documented once.
+  SETTLED SHAPE 2026-07-18 (scrutinised to fixpoint with Manu; supersedes the earlier axes
+  sketch). MODEL: value = atom x extent. atoms = machine scalars (bool, u8..s64, f32, f64,
+  char_) + user (registered type; identity via TypeDetails* in the format's descriptor slot,
+  which becomes the enum_info|TypeDetails* union). extent = one | fixed N | dynamic; count
+  lives in DataFormat (stride = count x atom), dynamic extent's length rides IN the record.
+  ValueType.variant and string_ DELETE: string = char[] (char_ x dynamic), blob = u8[]
+  dynamic with opaque display - grammar spellings, not atoms; vectors are format-count, not
+  atoms. FACTORING PRINCIPLE (becomes series.d's header): a series factors each value into
+  the constant part (DataFormat) and the per-sample part (record bytes); records are
+  context-free, boxing is the REUNION (box_record marries bytes back to their format -> self-
+  describing Variant). f32 voltage = f32 atom + unit-in-format; Quantity/enum names
+  materialise only at edges; a dynamic-unit quantity would be user (no customer). STORAGE
+  RULE: a record is memcpy iff its record type is trivial, else copy_emplace/destroy hooks -
+  dynamic records hold immutable refcounted handles (String for text: decode mints ONCE,
+  series record + boxed mirror + observers + sync all share refs; compare-before-mint so
+  steady-state repeats never allocate; blob's RC-buffer twin waits for a customer). Scalar =
+  <=8-byte fast-path register only; the gateway currency is (const DataFormat*, void[])
+  record views; RecordBlock stays storage furniture. series.d REORGANISED in the same pass,
+  reading order: principle header -> ValueType + storage rules -> interpretation vocab
+  (Semantics/ClockDomain/Constraint) -> DataFormat -> Scalar -> RecordBlock -> retention ->
+  Variant edge last. TYPEREG: stringify is already bidirectional (do_format flag) - no parse
+  slot needed; ADD a variant-marshal override slot (one slot, both directions), default null
+  = structural boxing ((type_id, payload) via copy_emplace, which Variant already does);
+  override for types whose Variant surface differs from their payload - CID/EID box as the
+  object/element NAME string and unbox by hashing it back (keeps ids off Variant-visible
+  surfaces); handlers registered by manager code may reach collection context. JSON stays
+  derived (numbers/bools raw, else stringified+quoted, arrays structural); no per-type slot
+  until the RPC consolidation forces one. ALSO ADD byte_swap (member-recursive endian flip;
+  urt.endian's endianToNative/nativeToEndian ALREADY synthesise this for arbitrary pod T -
+  tupleof recursion, static arrays element-wise, pointers/classes static-assert - so the
+  slot is a thin per-T instantiation, no new reflection; null for non-pods/serialise-
+  overriders = "type owns its encoding", _be on those is a grammar error; union-bearing
+  pods should static-assert into declaring a serialise pair rather than flat-flipping the
+  union blob). This is the endian axis's
+  SECOND EXECUTOR: scalar atoms byte-reverse via the flat swizzle, user atoms via td.
+  byte_swap (flat reverse would scramble member boundaries) - one grammar axis, two
+  executors picked by atom kind; composes AFTER transport swizzle (wire_image -> memcpy ->
+  flip), since register presentation and member endianness are physically independent
+  vendor behaviours. wire.d stays bytes-only and closed. NO LE-HOST ASSUMPTION: the flip
+  condition is wire-member-endianness XOR host-endianness (not "_be present"); wire.d is
+  value-space via loadLittleEndian/store so arch-neutral; gateway + pod-serialise sites
+  pick memcpy vs byte_swap with a static version branch (byte_swap fuses copy+reverse, so
+  BE hosts pay one op either way). ENCODINGS: named codec registry
+  per wire class,
+  seeded by registered types (pod LE image / serialise pair; stringify pair for text),
+  extended by bespoke encodings that output values of REAL types - dt48_yymmddhhmmss decodes
+  to a genuine timestamp; encoding names live only in grammar + compiled desc, never produce
+  shim types in Scalar/Variant. Kills CustomSample's Variant signature, DateFormat-as-
+  mechanism, and TextType's macaddr/inetaddr/ipaddr/ip6addr arms (registered urt.inet types).
+  WIRE LAYOUT: mechanical, closed, BIT-GRANULAR. Compiled word (as built in wire.d):
+  {kind(3), bit_width-1(6), bit_offset(6, container-relative so 64 caps it), flags(3:
+  swap_words/swap_word_bytes/reverse, all involutions sharing one index mapping),
+  word_shift(2), container(4)} + count(u16) + pre_scale(f32) + DataFormat* + codec ref
+  beside it (~20-24B/point: profiles with thousands of elements pay no strings, no
+  re-parse). Any width 1..64 (u3@5 legal, s12@4 sign-extends); pipeline = context+overrides
+  swizzle to canonical LE image FIRST, then extract [offset, offset+width),
+  so bit numbering is LSB=0 of the logical value, datasheet-style. Subsumes low_byte/
+  high_byte (u8@8/u8@0), coils (bool@n), DBC-style signals. CONTAINER (discovered by T3's
+  first test failure): a bit slice's span does not reveal the storage unit it slices - bits
+  5..7 of a BE register live in the SECOND wire byte, so reversed containers need explicit
+  extent; WireLayout carries container_bytes (0 = derive minimal span, word-rounded when
+  worded), and the grammar compiler defaults sliced fields to the context word. DECOMPOSED-REGISTER idiom:
+  several elements each carry their own desc over the SAME wire window (batcher already reads
+  once) - a status register is ONE bf element or decomposed bool@3/u3@5 elements, author's
+  choice, same grammar. LayoutContext per protocol {byte order, word size, word order},
+  profile-section overridable; grammar is type-first, deviation-only mods, with STRICT
+  separator semantics: `_` = closed layout-mod vocabulary (mechanical, layer 1, never
+  user-extended; mods are CONTEXT-GATED and name PHYSICAL device behaviours, not abstract
+  endianness coordinates - WORDED contexts (modbus: payload = byte array of normally-BE
+  words, multi-word order undefined per device) offer exactly _bs (byte-swap within word)
+  and _wr (word order swapped vs context), so the quartet = u32/u32_wr/u32_bs/u32_bs_wr =
+  ABCD/CDAB/BADC/DCBA and true-LE-value is honestly spelled _bs_wr (LE memory image,
+  lo-word first); _le/_be are ILLEGAL in worded contexts. BYTE-STREAM contexts (CAN/BLE/
+  flat) offer only _le/_be (value endianness vs context default); _bs/_wr illegal there.
+  _sp (space-padded strings) valid anywhere; max one mod per axis, any parse order; decode
+  = word order -> byte swap -> canonical LE image -> interpretation. str8_bs = the
+  swapped-chars-in-words device (EHLL!O -> HELLO!, the old str8_r); str8_bs_sp /
+  str8_bs_wr_sp compose), `:` = open registry-name reference (semantic: enum/bf
+  sections, encodings, registered types, layer 2), `@` = bit position, [N] = count. Shape:
+  <family><width>[_mods][@bit][:name][[N]] - s16, u32_wr, u32_bs_wr (modbus), u32_le
+  (byte-stream), bool@3, u8@8, str8,
+  enum16:mode, bf16:alarms, dt48:yymmddhhmmss (parallel to enum16:mode; dt48_wr:yymmddhhmmss
+  composes), u8[8]; bare registered types sit in TYPE position (macaddr, macaddr_wr) since
+  the type owns its wire form - `:` attaches interpretation to a raw field, absent when the
+  type is the meaning; bless s* over i* (i* parses as alias until T9 sweep).
+  value.d folds: struct_name_override deletes, type_for!T = registry-namespace projection,
+  parse/format arms delegate to typereg via the gateway; residue = collection-context lookups
+  + structural combinators (arrays, Nullable), renamed as the marshalling veneer it is.
+  Sampling STRATEGY (batching/timing/poll) stays with bindings. Serialisation contract
+  (landed in typereg): LE memory image default, serialise pair overrides, mandatory non-pod.
+  TRANSFORMATION SEQUENCE (each shippable; T1-T4 parallel foundations; ALL FOUR LANDED
+  2026-07-18, 98/98 unit tests): T1 typereg variant-marshal + byte_swap slots (byte_swap =
+  fused copy-and-reverse via urt.endian reverse_endian(src,dst), aliasing-tolerant); T2
+  series.d re-founding (atom x extent + reorg, above; ValueType.variant/string_ deleted,
+  char_/user + descriptor union + count landed, box_record user arm dispatches td.variant,
+  element/element2 scalar checks moved to fmt.is_scalar; DESCRIPTOR FOLD: unit joins the
+  union - unit/enum_info/user_type are mutually exclusive - user_type selected by
+  type==user (atom = storage truth, keeps type-driven predicates total), unit-vs-enum by a
+  Desc kind byte {none,quantity,enum_}; count is ubyte (the 255-byte stride cap already bounds
+  it) so type/semantics/desc/count/rate pack the first 8 bytes exactly: 48->32B, zero
+  padding; ctors stamp the kind so construction is self-discriminating and dimensionless =
+  none; typereg slot named byte_reverse); T3
+  WireLayout+LayoutContext module (port sampler.d's test vectors); T4 codec registry
+  (manager/codec.d: Encoding table {name, wire_bytes, DataFormat, binary decode/encode +
+  text parse/format slots}; register_builtin_encodings() called once from Application
+  startup before module init - no lazy flag, double-registration asserts by name;
+  registered types get NO entries - grammar resolves bare names via typereg, the
+  table holds only non-canonical wire forms; first customer yymmddhhmmss -> DateTime
+  records as user atom, proving T1+T2 end-to-end; structural runtime user boxing still
+  gateway work - Variant has no (td, payload) ctor yet); T5 gateway LANDED 2026-07-18
+  (99/99): manager/sample.d - SampleDesc {WireLayout, mutable pre_scale, ushort format +
+  encoding indices} = 12B/point (par with old ValueDesc); GLOBAL format mint (dedupe
+  config-time-cold linear scan, runtime O(1) by index, formats' durable home - resolves
+  the mount-outlives-binding note; profile mint delegates, per-profile format ownership
+  deleted); sample_record/emit_record three arms (scalar hot path via wire_extract +
+  pre_scale, encoding arm via wire_image + codec, user arm via fused
+  memcpy-or-td.byte_reverse chosen by members_be XOR host), parse_record/format_record
+  text mirrors (legacy semantics: bool true/1/on, enum name-or-number in / number out),
+  sample_text transient view (padding strip, mount mints the String); WireFlags grew
+  members_be + space_padded (flags 5 bits); wire_image generalised to shift/mask index
+  map incl whole reverse (encodings need it; text still never does). REMAINING in-flight:
+  Variant (td,payload) structural ctor; vectors return false pending first producer.
+  T6 grammar compiler LANDED 2026-07-18 (100/100): manager/spec.d compile_spec(spec, ctx,
+  unit, pre_scale, enum_info, resolver) -> SampleDesc; LayoutContext {word_bytes, word_be,
+  words_hi_first, stream_be} with modbus/stream presets, context base flags via rev =
+  word_be, sw = word_be XOR hi_first; families bool/u/s/f/enum/bf/enumf/str/dt/bare-name,
+  slices, counts, legacy aliases (i* = s*, glued le/be = ABSOLUTE endianness, _r =
+  word-swap on scalars but byte-swap-in-word on strings - old DataType.word_reverse meant
+  DIFFERENT ops per kind). REFINEMENT discovered in the build: byte-image families
+  (str/dt/user) have NO value endianness - reading order IS canonical for byte data, so
+  encodings read fields at absolute positions (codec image convention flipped to reading
+  order) and the context's BE-ness never touches them; enumf32 = float wire feeding
+  integer records, gateway grew the cast branch. NEXT: T7 per-protocol cutover (bindings
+  swap ValueDesc -> compile_spec/SampleDesc, easiest->deepest) ->
+  compact descs, old spellings as aliases (no conf changes); T7 per-protocol cutover
+  easiest->deepest: CAN -> GoodWe -> BLE -> zigbee (ZCL table -> compiled descs, adjust_value
+  folds in) -> MQTT/HTTP (encode mirror absorbs format_value/apply_value) -> SunSpec (runtime
+  pre_scale wrapper, f64 records) -> ESPHome (typed values: DataFormat + native observe, stub
+  resolved) -> modbus client -> modbus serve; CAN LANDED 2026-07-18 (ElementDesc_CAN =
+  SampleDesc + span byte - byte-stream maps carry the wire span the desc doesn't;
+  legacy two-column spellings [enum name / dt format in the units column] translate to
+  `:name` refs at the parse site; Element/Element2 grew the untemplated observe_record
+  scalar path; packet path decodes via the gateway - native record when the mount is the
+  binding's format, boxed otherwise; strings stay boxed via sample_text until dynamic
+  records land). DT SETTLED 2026-07-18: DateTime is a presentation face - no typereg
+  entry, never serialises; Variant's user-ctor gate converts DateTime -> SysTime on entry
+  and as!DateTime converts back at display; the "dt" registry name is solely SysTime's
+  (was doubly claimed, order-dependent); SysTime grew a unix-ns LE serialise pair (tick
+  image is platform-epoch: FILETIME on Windows) and a to_variant/from_variant marshal;
+  the yymmddhhmmss codec outputs SysTime records; is_scalar widened to trivial user pods
+  <= 8 bytes so dt elements mount and record natively through the Scalar register
+  (unbox_scalar user arm via the marshal); the structural (td, payload) Variant ctor
+  stays deferred - still no customer. Visible delta: dt values print the SysTime face
+  (trailing Z). Bare-dtN rule (settled 2026-07-18, UNWIRED - no profile customer):
+  width implies the unit - dt32 = unix seconds (only sane 32-bit reading), dt64 =
+  unix-ns = SysTime's canonical image (serialise pair, no encoding entry); deviations
+  are named encodings when customers arrive (dt64:unixms, 2000-epoch seconds e.g.
+  Zigbee UTCTime); CAVEAT dt32 is value-shaped (seconds count takes context value
+  endianness, scalar flags) unlike dt48's byte-image fields - Encoding grows a
+  value/byte-image discriminator when wired. PROFILE EXTENSIBILITY CORE LANDED
+  2026-07-18: three central type-spec tables - formats (T5), descs (mint_desc/
+  desc_by_index: immutable 12-byte SampleDescs content-deduped, elements hold a ushort),
+  enums (register_enum_info/find_enum_info: name-keyed `profilename.MyEnum`, registry
+  OWNS allocations = the durable home; unchanged reload frees the duplicate via
+  enum_info_size/enum_info_equal, changed content rebinds while the old block stays
+  alive for mounts; g_app.enum_templates DELETED, D-native enums register owned=false,
+  profile parse no longer touches g_app so enum profiles unittest). ProfileSections
+  interface + register_profile_section(name, handler) -> kind (>= 16; ElementType lost
+  `can`, ElementDesc unpacked to kind/index fields), two-pass count_element/
+  parse_element against ProfileBuilder {compile_value = the shared language incl the
+  legacy two-column translation, find_enum, intern -> section_strings}; Profile grew
+  SectionBlock storage + get_section!T; parse_profile takes the profile name (file
+  basename) for qualified enum registration. Grammar grew unit-in-colon (`u16:0.1V` -
+  the family selects the `:` namespace, so unit/enum collision is structurally
+  impossible). CAN retrofitted as the first registered section (ElementDesc_CAN lives
+  in protocol.can.binding, the module implements the interface, profile.d's arm
+  deleted). REMAINING: mb/zb/http/aa55/mqtt/ble arms move out as their T7 stops land;
+  http `requests:` / mqtt subscribe lists need the root-section method pair when those
+  two migrate; sampler.d EMPTIES at T7's end (sample_value x2,
+  format_value, ValueDesc, TextValueDesc, DataType, DataKind, DateFormat, CustomSample,
+  TextType, bool both-endian hack all delete); T8 value.d fold + rename; T9 conf sweep + one
+  grammar doc (the bitfield-index convention decision lands here). NOT in scope: boxed-
+  mirror/consumer migration (separate track), retention tiers (build step 3), RecordBlock.
   Enum slice LANDED 2026-07-18: DataFormat carries the enum descriptor (one pointer, becomes
   the enum_/user_/string_ union with the registry), series_format maps enums/bitfields to
   their raw integer width (enumf32 casts at sample time), boxing goes through
