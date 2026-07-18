@@ -247,7 +247,7 @@ nothrow @nogc:
         init_elements();
 
         register_enum!Boolean();
-        register_enum!ObjectFlags();
+        register_bitfield!ObjectFlags();
         register_enum!HashFunction();
 
         register_signal_provider(StringLit!"element", this);

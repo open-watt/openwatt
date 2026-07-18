@@ -408,6 +408,18 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
             default:
                 break;
         }
+
+        import urt.meta.enuminfo : enum_info, is_bitfield_enum;
+        static if (is_bitfield_enum!T)
+        {
+            bool ok;
+            long combined = enum_info!T.make_void().parse_flags(s, ok);
+            if (ok)
+            {
+                r = cast(T)combined;
+                return null;
+            }
+        }
     }
 
     // else parse the base type?
