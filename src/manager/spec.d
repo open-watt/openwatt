@@ -258,7 +258,7 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
             if (width < 1)
                 return false;
             DataFormat fmt = DataFormat(ValueType.char_, Semantics.held);
-            fmt.count = 0; // dynamic: the record is a String handle; wire span is the field width
+            fmt.count = 0; // dynamic: the record is a TextRecord; wire span is the field width
             // width is per-char; the field's byte span comes from the register map
             desc = SampleDesc(WireLayout(WireKind.char_, 8, 0, image_flags(), wb), pre_scale, mint_format(fmt));
             return true;

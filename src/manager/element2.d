@@ -1,7 +1,9 @@
 module manager.element2;
 
 import urt.array;
+import urt.lifetime : move;
 import urt.mem.alloc;
+import urt.mem.allocator : defaultAllocator;
 import urt.string;
 import urt.time;
 import urt.variant;
@@ -64,7 +66,7 @@ nothrow @nogc:
     Variant value() const
     {
         // TODO: wide latest (stride > 8) reads the open bucket tail once the type registry lands
-        if (format && format.is_scalar)
+        if (format && (format.is_scalar || format.is_text))
             return box_record(_latest.raw.ptr, *format);
         return Variant();
     }
@@ -87,6 +89,34 @@ nothrow @nogc:
         _last_update = t;
         SysTime[1] time = t;
         append(s.raw[0 .. format.stride], time[], who);
+    }
+
+    void observe_text(String v, SysTime t = getSysTime(), Observer who = null)
+    {
+        debug assert(format.is_text);
+        TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
+        if (format.semantics == Semantics.held && _last_update != SysTime() && slot.view == v[])
+        {
+            _last_update = t;
+            return;
+        }
+        slot.set(v.move);
+        _last_update = t;
+        append_text_record(t, who);
+    }
+
+    void observe_text(const(char)[] v, SysTime t = getSysTime(), Observer who = null)
+    {
+        debug assert(format.is_text);
+        TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
+        if (format.semantics == Semantics.held && _last_update != SysTime() && slot.view == v)
+        {
+            _last_update = t;
+            return;
+        }
+        slot.set(v);
+        _last_update = t;
+        append_text_record(t, who);
     }
 
     // untemplated path for samplers decoding at a runtime-known format
@@ -218,6 +248,37 @@ nothrow @nogc:
     uint bucket_count() const pure
         => _history ? cast(uint)_history.buckets.length : 0;
 
+    void teardown()
+    {
+        if (format && format.is_text)
+        {
+            (cast(TextRecord*)_latest.raw.ptr).release();
+            if (_history)
+                foreach (b; _history.buckets)
+                    foreach (i; 0 .. b.count)
+                        (cast(TextRecord*)b.samples)[i].release();
+        }
+        if (_history)
+        {
+            foreach (b; _history.buckets)
+            {
+                free(b.samples[0 .. b.capacity * format.stride]);
+                if (b.offsets)
+                    free((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof]);
+                free((cast(void*)b)[0 .. Bucket.sizeof]);
+            }
+            destroy!false(*_history);
+            free((cast(void*)_history)[0 .. SeriesStore.sizeof]);
+            _history = null;
+        }
+        while (_subs)
+        {
+            Subscription* dead = _subs;
+            _subs = dead.next;
+            free((cast(void*)dead)[0 .. Subscription.sizeof]);
+        }
+    }
+
 private:
     enum Flags : ubyte
     {
@@ -232,6 +293,20 @@ private:
     ubyte _flags;
 
     enum bucket_capacity = 256; // TODO: scale with rate (target a time span, not a record count)
+
+    void append_text_record(SysTime t, Observer who)
+    {
+        SysTime[1] time = t;
+        if (_history)
+        {
+            // the ref settled here is owned by the bucket once append memcpys the bits
+            TextRecord rec;
+            rec.copy_from(*cast(const(TextRecord)*)_latest.raw.ptr);
+            append(rec.raw[0 .. format.stride], time[], who);
+        }
+        else
+            append(_latest.raw[0 .. format.stride], time[], who);
+    }
 
     void append(const(void)[] samples, const(SysTime)[] times, Observer who)
     {
@@ -438,6 +513,47 @@ unittest
     e.observe_record((cast(const(void)*)&rv)[0 .. 8], from_unix_time_ns(14_000));
     assert(e.record_count == 7);
     assert(e.latest.f64_ == 7.0);
+
+    // text: short strings embed in the record, long strings mint a String; held-dedup never re-mints
+    DataFormat text_fmt = DataFormat(ValueType.char_, Semantics.held);
+    text_fmt.count = 0;
+    Element2 te;
+    te.format = &text_fmt;
+    te.ensure_history();
+    te.observe_text("run", from_unix_time_ns(500));
+    assert(te.record_count == 1);
+    assert((cast(const(TextRecord)*)te.latest.raw.ptr).embedded);
+    assert(te.value().asString == "run");
+
+    te.observe_text("a string too long to embed anywhere", from_unix_time_ns(1_000));
+    assert(te.record_count == 2);
+    assert(!(cast(const(TextRecord)*)te.latest.raw.ptr).embedded);
+    assert(te.value().asString == "a string too long to embed anywhere");
+    const(char)* mint = (cast(const(String)*)te.latest.raw.ptr).ptr;
+    te.observe_text("a string too long to embed anywhere", from_unix_time_ns(2_000));
+    assert(te.record_count == 2);
+    assert((cast(const(String)*)te.latest.raw.ptr).ptr is mint);
+    assert(te.last_update == from_unix_time_ns(2_000));
+
+    // String overload adopts the handle; refs = caller + latest slot + bucket record
+    String src = "second value arriving as a shared handle".makeString(defaultAllocator());
+    static ushort rc(ref const String s) => (cast(const(ushort)*)s.ptr)[-2] & 0x3FFF;
+    assert(rc(src) == 0);
+    te.observe_text(src, from_unix_time_ns(3_000));
+    assert(te.record_count == 3);
+    assert(rc(src) == 2);
+    assert(te.value().asString == src[]);
+
+    Cursor tcur = te.open_cursor(0);
+    RecordBlock tblk = tcur.next(16);
+    assert(tblk.count == 3);
+    assert(tblk.box(0).asString == "run");
+    assert(tblk.box(1).asString == "a string too long to embed anywhere");
+    assert(tblk.box(2).asString == src[]);
+    te.close_cursor(tcur);
+
+    te.teardown();
+    assert(rc(src) == 0);
 
     // TODO: regular-series test returns once append_block is rebuilt and tick() is rate-aware
 }

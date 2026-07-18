@@ -21,9 +21,12 @@ module manager.series;
 // and drop through their registry hooks.
 
 import urt.array;
+import urt.lifetime : move;
+import urt.mem.allocator : defaultAllocator;
 import urt.meta.enuminfo : VoidEnumInfo;
 import urt.si.quantity : Quantity;
 import urt.si.unit : ScaledUnit;
+import urt.string : makeString, String;
 import urt.time;
 import urt.typereg : TypeDetails;
 import urt.variant;
@@ -185,10 +188,13 @@ nothrow @nogc:
     bool is_scalar() const pure
         => count == 1 && (is_scalar_type(type) || (type == ValueType.user && user_type.pod && user_type.size <= 8));
 
+    bool is_text() const pure
+        => type == ValueType.char_ && count == 0;
+
     ubyte stride() const pure
     {
         if (count == 0)
-            return size_t.sizeof; // dynamic records hold a refcounted handle (String for text)
+            return 8; // dynamic records are TextRecords on all targets
         uint s = type == ValueType.user ? user_type.size : g_atom_stride[type];
         s *= count;
         assert(s <= ubyte.max, "record stride exceeds 255 bytes");
@@ -226,6 +232,71 @@ nothrow @nogc:
         return s;
     }
 }
+
+// text record: a String handle in the low bytes, or <=7 chars embedded with the length in
+// the top byte - a canonical user pointer never has its top byte set, and 32-bit handles
+// leave the high half zeroed
+struct TextRecord
+{
+nothrow @nogc:
+
+    version (BigEndian) static assert(false, "embedded text discriminant assumes little-endian");
+
+    enum embed_capacity = 7;
+
+    ubyte[8] raw;
+
+    bool embedded() const pure
+        => raw[7] != 0;
+
+    const(char)[] view() const pure return
+        => embedded ? cast(const(char)[])raw[0 .. raw[7]] : (*cast(const(String)*)raw.ptr)[];
+
+    void set(String s)
+    {
+        if (s.length <= embed_capacity)
+            set(s[]);
+        else
+        {
+            release();
+            *cast(String*)raw.ptr = s.move;
+        }
+    }
+
+    void set(const(char)[] s)
+    {
+        if (s.length <= embed_capacity)
+        {
+            release();
+            raw[0 .. s.length] = cast(const(ubyte)[])s;
+            raw[7] = cast(ubyte)s.length;
+        }
+        else
+        {
+            release();
+            *cast(String*)raw.ptr = s.makeString(defaultAllocator());
+        }
+    }
+
+    // target must be initialised; the ref taken here is owned by whoever memcpys the bits away
+    void copy_from(ref const TextRecord src)
+    {
+        release();
+        if (src.embedded)
+            raw = src.raw;
+        else
+            *cast(String*)raw.ptr = *cast(String*)src.raw.ptr;
+    }
+
+    void release()
+    {
+        if (!embedded)
+            *cast(String*)raw.ptr = null;
+        raw[] = 0;
+    }
+}
+
+static assert(TextRecord.sizeof == 8);
 
 struct RecordBlock
 {
@@ -347,7 +418,7 @@ nothrow @nogc:
 // self-describing; this edge is the only place the three meet
 Variant box_record(const(void)* record, ref const DataFormat fmt)
 {
-    assert(fmt.count == 1, "vectors and dynamic records box at the mount, not the record"); // TODO: Variant arrays with the first vector producer
+    assert(fmt.count == 1 || fmt.is_text, "vectors box at the mount, not the record"); // TODO: Variant arrays with the first vector producer
     final switch (fmt.type) with (ValueType)
     {
         case bool_: return Variant(*cast(const(bool)*)record);
@@ -362,7 +433,13 @@ Variant box_record(const(void)* record, ref const DataFormat fmt)
         case f32:   return box_float(*cast(const(float)*)record, fmt);
         case f64:   return box_float(*cast(const(double)*)record, fmt);
         case char_:
-            assert(false, "indirect types box at the mount, not the record");
+        {
+            assert(fmt.count == 0, "fixed char vectors box at the mount, not the record");
+            const(TextRecord)* tr = cast(const(TextRecord)*)record;
+            if (tr.embedded)
+                return Variant(tr.view);
+            return Variant(*cast(String*)record);
+        }
         case user:
         {
             const(TypeDetails)* td = fmt.user_type;
@@ -440,7 +517,7 @@ unittest
     assert(f.stride == 32 && !f.is_scalar);
     DataFormat s = DataFormat(ValueType.char_, Semantics.held);
     s.count = 0;
-    assert(s.stride == size_t.sizeof && !s.is_scalar);
+    assert(s.stride == 8 && !s.is_scalar && s.is_text);
 
     int v = -5;
     assert(box_record(&v, DataFormat(ValueType.s32, Semantics.held)).asLong == -5);

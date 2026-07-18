@@ -64,7 +64,7 @@ struct Element
 {
 nothrow @nogc:
 
-    // null or indirect format = legacy mount: the boxed Variant below is authoritative
+    // null or wide format = legacy mount: the boxed Variant below is authoritative
     // and the core lies dormant until a producer assigns a format
     Element2 series;
 
@@ -136,7 +136,7 @@ nothrow @nogc:
         => latest;
 
     bool native() const pure
-        => series.format !is null && series.format.is_scalar;
+        => series.format !is null && (series.format.is_scalar || series.format.is_text);
 
     void value(T)(auto ref T v, SysTime timestamp = getSysTime(), Subscriber who = null)
     {
@@ -178,6 +178,18 @@ nothrow @nogc:
     void observe_record(const(void)[] record, SysTime t = getSysTime(), Observer who = null)
     {
         series.observe_record(record, t, who);
+        sync_from_series();
+    }
+
+    void observe_text(String v, SysTime t = getSysTime(), Observer who = null)
+    {
+        series.observe_text(v.move, t, who);
+        sync_from_series();
+    }
+
+    void observe_text(const(char)[] v, SysTime t = getSysTime(), Observer who = null)
+    {
+        series.observe_text(v, t, who);
         sync_from_series();
     }
 
@@ -238,6 +250,12 @@ nothrow @nogc:
 
     private void feed_native(ref const Variant v, SysTime timestamp)
     {
+        if (series.format.is_text)
+        {
+            if (v.isString)
+                series.observe_text(v.asString(), timestamp);
+            return;
+        }
         Scalar s;
         if (unbox_scalar(v, *series.format, s))
             series.observe_scalar(s, timestamp);
