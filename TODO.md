@@ -284,8 +284,15 @@ status block). Remaining legs, roughly in order:
   image is platform-epoch: FILETIME on Windows) and a to_variant/from_variant marshal;
   the yymmddhhmmss codec outputs SysTime records; is_scalar widened to trivial user pods
   <= 8 bytes so dt elements mount and record natively through the Scalar register
-  (unbox_scalar user arm via the marshal); the structural (td, payload) Variant ctor
-  stays deferred - still no customer. Visible delta: dt values print the SysTime face
+  (unbox_scalar user arm via the marshal). Structural boxing RESOLVED 2026-07-19:
+  TypeRecordFor synthesises the variant slot for value-pure payloads (ValidUserType,
+  no indirections, copyable - the guard must not instantiate Variant machinery, records
+  build from inside Variant's own ctor and an eager compiles-check collapses under the
+  cycle), so no runtime (td, payload) ctor is needed and SysTime carries no hand-written
+  marshal; to_variant/from_variant members remain the OVERRIDE for
+  surface-differs-from-payload types (CID/EID); indirection-bearing types keep a null
+  slot (they need the copy-hook story to ride records at all). Visible delta:
+  dt values print the SysTime face
   (trailing Z). Bare-dtN rule (settled 2026-07-18, UNWIRED - no profile customer):
   width implies the unit - dt32 = unix seconds (only sane 32-bit reading), dt64 =
   unix-ns = SysTime's canonical image (serialise pair, no encoding entry); deviations
