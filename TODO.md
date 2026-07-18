@@ -175,7 +175,27 @@ status block). Remaining legs, roughly in order:
   change - JSON wire keeps numbers), table.d's linear-scan HACK deleted, sampler's inline bf
   loop deleted. Usage kinds (bf16, TextType.bf) are no longer sources of truth. Deliberately
   NOT done: synthesising flag combinations for UNdeclared enums (an unknown scalar value 3
-  printed as one|two would mislead; honest number instead). the missing write/control facet - how a state-element write becomes a transmitted/
+  printed as one|two would mislead; honest number instead).
+
+- **Bitfield profile conventions (proposed 2026-07-18, Manu to resolve)**: survey found TWO
+  authoring conventions in conf/ - mask-valued members (pylon, gwxx48es: `1 << n`, stamped
+  correctly) and BIT-INDEXED members (pace_bms WarningFlags/ProtectionFlags/StatusFaultFlags/
+  BalanceStatus, smartevse ErrorFlags: `cell_ov: 0, pack_ov: 2` = datasheet bit numbers). The
+  indexed ones have been semantically dead all along: raw register values never match
+  index-valued keys, so display always fell back to the bare number. Proposal: (1) `bitfield:`
+  sections declare members BY BIT INDEX (plain integer = bit number, the datasheet
+  transcription convention; parser converts to masks and sets the flag; `1 << n` inside a
+  bitfield: section remains a literal mask for compound members); (2) `enum:` sections
+  unchanged (values are values; shift syntax stamps); (3) migrate pace_bms + smartevse to
+  `bitfield:` - CAVEAT: changes those members' VALUES (index -> mask), so grep profiles/conf/
+  automations for key references before touching (expressions comparing against those keys
+  would shift meaning); (4) parse-time warning when a bf-kind register references an enum not
+  flagged bitfield (covers literal-mask-under-enum: declarations without value heuristics that
+  would misfire on scalar power-of-two enums). Taste call to bless: bitfield: reading plain
+  values as indices makes the two section types read values differently.
+
+- **Commands / device logic in profiles (design 2026-07-16; the ancient "commands" TODO's
+  answer)**: the missing write/control facet - how a state-element write becomes a transmitted/
   written protocol action, INCLUDING stateful logic (toggles: only fire if desired != current).
   Today this would live as per-device binding code. Proposal: **bring the automation/expression
   engine down into profiles** so device behaviour is data-driven. Invents almost nothing - reuses
