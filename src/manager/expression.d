@@ -61,6 +61,7 @@ enum Flags : ubyte
     command_eval = 1 << 2,
     constant = 1 << 3,
     no_quotes = 1 << 4,
+    allocated = 1 << 5,
 }
 
 struct NamedArgument
@@ -218,13 +219,12 @@ nothrow @nogc:
     this(S : MutableString!0)(auto ref S s)
     {
         ty = Type.str;
-        flags = 0; // TODO: we might need to scan for variable references...
+        flags = Flags.allocated; // TODO: we might need to scan for variable references...
         new(str) typeof(str)(forward!s);
     }
 
     ~this()
     {
-        // strings with pointer and zero length are actually a `String` and that needs to be destroyed
         if (is_string())
             str.destroy!false();
         else if (ty == Type.arr)
@@ -246,15 +246,16 @@ nothrow @nogc:
         this.destroy!false();
         ty = e.ty;
         flags = e.flags;
-        s = e.s; // this copies the largest type
-        e.s = null;
+        _reserve = e._reserve;
+        e._reserve[] = 0;
+        e.flags &= ~Flags.allocated;
     }
 
     void opAssign(S : String)(auto ref S s)
     {
         this.destroy!false();
         ty = Type.str;
-        flags = 0; // TODO: we might need to scan for variable references...
+        flags = Flags.allocated; // TODO: we might need to scan for variable references...
         new(str) typeof(str)(forward!s);
         s.length = 0;
     }
@@ -267,7 +268,7 @@ nothrow @nogc:
     }
 
     bool is_string() const
-        => (ty == Type.str || ty == Type.var || ty == Type.elem) && s.length == 0 && s.ptr !is null;
+        => (ty == Type.str || ty == Type.var || ty == Type.elem) && (flags & Flags.allocated) != 0;
 
     bool is_command_eval() const
         => ty == Type.cmd_list && (flags & Flags.command_eval) != 0;
@@ -342,7 +343,7 @@ nothrow @nogc:
     const(char)[] get_str() const
     {
         if (ty == Type.str || ty == Type.var || ty == Type.elem)
-            return (s.length == 0 && s.ptr !is null) ? str[] : s;
+            return (flags & Flags.allocated) ? str[] : s;
         assert(false);
     }
 
@@ -568,6 +569,8 @@ private:
         MutableString!0 str;
         Array!(Expression*) arr;
         CmdList cmds;
+
+        size_t[3] _reserve;
     }
 
     void gather_elements(ref Array!(const(char)[]) elements, ref bool has_var_ref) const
@@ -727,13 +730,14 @@ ScriptCommand parse_command(ref const(char)[] text)
     ScriptCommand c;
     c.command = e.get_str();
 
+    bool in_args = false;
     while (text.length > 0)
     {
         skip_whitespace(text);
         if (text.length == 0 || text[0].is_newline || text[0] == ';' || text[0] == '}' || text[0] == ']')
             break;
 
-        ScriptCommand.Argument a = parse_argument(text);
+        ScriptCommand.Argument a = parse_argument(text, in_args);
         if (a.name)
             c.named_args ~= a;
         else
@@ -743,17 +747,17 @@ ScriptCommand parse_command(ref const(char)[] text)
     return c;
 }
 
-ScriptCommand.Argument parse_argument(ref const(char)[] text)
+ScriptCommand.Argument parse_argument(ref const(char)[] text, ref bool in_args)
 {
     ScriptCommand.Argument a;
 
-    static parse_arg_element(ref const(char)[] text)
+    static parse_arg_element(ref const(char)[] text, bool allow_slash)
     {
         Array!(Expression*) arr;
         Expression* arg;
         while (true)
         {
-            arg = parse_primary_exp(text);
+            arg = parse_primary_exp(text, allow_slash);
             if (text.length == 0 || text[0] != ',')
                 break;
 
@@ -772,13 +776,14 @@ ScriptCommand.Argument parse_argument(ref const(char)[] text)
         return arg;
     }
 
-    Expression* arg = parse_arg_element(text);
+    Expression* arg = parse_arg_element(text, in_args);
     if (text.length > 0 && text[0] == '=')
     {
         if (arg.ty != Type.str || !(arg.flags & Flags.identifier))
             syntax_error("Expected identifier left of '='");
         text = text[1 .. $];
-        a.value = parse_arg_element(text);
+        in_args = true;
+        a.value = parse_arg_element(text, true);
         a.name = arg;
     }
     else
@@ -968,7 +973,7 @@ Expression* parse_postfix_exp(ref const(char)[] text)
     return left;
 }
 
-Expression* parse_primary_exp(ref const(char)[] text)
+Expression* parse_primary_exp(ref const(char)[] text, bool allow_slash = false)
 {
     if (text.length == 0)
         syntax_error("Expected expression");
@@ -1040,7 +1045,7 @@ Expression* parse_primary_exp(ref const(char)[] text)
             r = alloc_expression(Type.str);
             r.s = text[0 .. len];
         }
-        r.flags = Flags.constant;
+        r.flags |= Flags.constant;
         if (interpolated)
             r.flags |= Flags.interpolated_string;
 
@@ -1076,7 +1081,11 @@ Expression* parse_primary_exp(ref const(char)[] text)
         foreach (d; string_delimiters)
         {
             if (c == d)
+            {
+                if (allow_slash && c == '/')
+                    break;
                 break scan_string;
+            }
         }
 
         if (identifier && !c.is_alpha_numeric && c != '_' && c != '-' && !(is_var || is_element && c == '.'))
@@ -1119,7 +1128,7 @@ Expression* parse_primary_exp(ref const(char)[] text)
         r.s = text[0 .. len];
 
         version (ExpressionDebug)
-            writeDebug(is_var ? "VAR: " : is_element ? "ELEMENT: " : "STR: ", r.s);
+            writeDebug(is_var ? "VAR: " : is_element ? "ELEMENT: " : "STR: ", r.get_str());
     }
     text = text[len .. $];
 
@@ -1328,4 +1337,16 @@ unittest
     assert(cmds[0].command == ":set");
     assert(cmds[0].named_args.length == 1);
     assert(cmds[0].named_args[0].name.get_str() == "x");
+
+    // path/command tokens split on '/', but an argument value keeps '/' literal (device paths)
+    text = "/stream/serial/add name=com3 device=/dev/ttyUSB0";
+    cmds = parse_commands(text);
+    assert(cmds.length == 1);
+    assert(cmds[0].command == "/stream");
+    assert(cmds[0].args.length == 2);
+    assert(cmds[0].args[0].get_str() == "/serial");
+    assert(cmds[0].args[1].get_str() == "/add");
+    assert(cmds[0].named_args.length == 2);
+    assert(cmds[0].named_args[1].name.get_str() == "device");
+    assert(cmds[0].named_args[1].value.get_str() == "/dev/ttyUSB0");
 }
