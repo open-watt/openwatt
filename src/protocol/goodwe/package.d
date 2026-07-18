@@ -1,13 +1,17 @@
 module protocol.goodwe;
 
+import urt.conv;
 import urt.inet;
 import urt.log;
 import urt.result;
 import urt.socket;
+import urt.string;
 
 import manager;
 import manager.collection;
 import manager.plugin;
+import manager.profile;
+import manager.spec : stream_be_context;
 
 import protocol.goodwe.aa55;
 import protocol.goodwe.binding;
@@ -15,7 +19,9 @@ import protocol.goodwe.binding;
 nothrow @nogc:
 
 
-class GoodWeModule : Module
+package __gshared uint aa55_section_kind;
+
+class GoodWeModule : Module, ProfileSections
 {
     mixin DeclareModule!"protocol.goodwe";
 nothrow @nogc:
@@ -24,6 +30,8 @@ nothrow @nogc:
 
     override void init()
     {
+        aa55_section_kind = register_profile_section("aa55", this);
+
         g_app.console.register_collection!AA55Client();
         g_app.console.register_collection!GoodWeBinding();
 
@@ -54,6 +62,40 @@ nothrow @nogc:
         }
 
         aa55_socket = socket;
+    }
+
+    uint element_size(uint)
+        => cast(uint)ElementDesc_AA55.sizeof;
+
+    void count_element(uint, const(char)[], ref ProfileCosts) {}
+
+    bool parse_element(uint kind, const(char)[] tail, void[] slot, ref ProfileBuilder b)
+    {
+        ElementDesc_AA55* aa55 = cast(ElementDesc_AA55*)slot.ptr;
+        *aa55 = ElementDesc_AA55.init;
+
+        const(char)[] fn = tail.split!',';
+        const(char)[] offset = tail.split!',';
+        const(char)[] type = tail.split!','.unQuote;
+        const(char)[] units = tail.split!','.unQuote;
+
+        size_t taken;
+        ulong ti = fn.parse_uint_with_base(&taken);
+        if (taken != fn.length || ti > ubyte.max)
+        {
+            writeWarning("Invalid AA55 function code: ", fn);
+            return false;
+        }
+        aa55.function_code = cast(ubyte)ti;
+        ti = offset.parse_uint_with_base(&taken);
+        if (taken != offset.length || ti > ubyte.max)
+        {
+            writeWarning("Invalid AA55 value offset: ", offset);
+            return false;
+        }
+        aa55.offset = cast(ubyte)ti;
+
+        return b.compile_value(type, units, stream_be_context, aa55.desc, aa55.length);
     }
 
     override void pre_update()

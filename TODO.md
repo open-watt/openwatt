@@ -277,7 +277,19 @@ status block). Remaining legs, roughly in order:
   `:name` refs at the parse site; Element/Element2 grew the untemplated observe_record
   scalar path; packet path decodes via the gateway - native record when the mount is the
   binding's format, boxed otherwise; strings stay boxed via sample_text until dynamic
-  records land). DT SETTLED 2026-07-18: DateTime is a presentation face - no typereg
+  records land). GoodWe LANDED 2026-07-19: GoodWeModule owns the registered `aa55` section,
+  ElementDesc_AA55 lives with the binding, and the response path decodes through SampleDesc;
+  the AA55 context is big-endian by default, so the normalized gwxx48es profile carries only
+  deviations and folds units/enum/encoding names into the type token. The conf sweep exposed
+  and fixed split_element_and_desc treating the first colon as `desc:` rather than recognizing
+  the actual whitespace-delimited field. Legacy and normalized profiles both passed runtime
+  materialisation; 101/101 unit tests. BLE LANDED 2026-07-19: BLEModule owns the registered
+  `ble` section, UUID/offset parsing and ElementDesc_BLE moved into the protocol, and notification
+  sampling runs through SampleDesc with the byte-stream little-endian default. Bare standard
+  UUIDs (`180F`, `2A19`) now parse as hexadecimal, matching normal BLE profile spelling. Legacy
+  two-column and normalized numeric profiles both passed runtime materialisation; the speculative
+  Xiaomi profile is normalized, with its unsized variable GATT strings deferred until real `strN`
+  bounds are known. DT SETTLED 2026-07-18: DateTime is a presentation face - no typereg
   entry, never serialises; Variant's user-ctor gate converts DateTime -> SysTime on entry
   and as!DateTime converts back at display; the "dt" registry name is solely SysTime's
   (was doubly claimed, order-dependent); SysTime grew a unix-ns LE serialise pair (tick
@@ -308,7 +320,7 @@ status block). Remaining legs, roughly in order:
   alive for mounts; g_app.enum_templates DELETED, D-native enums register owned=false,
   profile parse no longer touches g_app so enum profiles unittest). ProfileSections
   interface + register_profile_section(name, handler) -> kind (>= 16; ElementType lost
-  `can`, ElementDesc unpacked to kind/index fields), two-pass count_element/
+  `can`, `aa55` and `ble`, ElementDesc unpacked to kind/index fields), two-pass count_element/
   parse_element against ProfileBuilder {compile_value = the shared language incl the
   legacy two-column translation, find_enum, intern -> section_strings}; Profile grew
   SectionBlock storage + get_section!T; parse_profile takes the profile name (file
@@ -316,12 +328,16 @@ status block). Remaining legs, roughly in order:
   the family selects the `:` namespace, so unit/enum collision is structurally
   impossible). CAN retrofitted as the first registered section (ElementDesc_CAN lives
   in protocol.can.binding, the module implements the interface, profile.d's arm
-  deleted). REMAINING: mb/zb/http/aa55/mqtt/ble arms move out as their T7 stops land;
+  deleted). REMAINING: mb/zb/http/mqtt arms move out as their T7 stops land;
   http `requests:` / mqtt subscribe lists need the root-section method pair when those
   two migrate; sampler.d EMPTIES at T7's end (sample_value x2,
   format_value, ValueDesc, TextValueDesc, DataType, DataKind, DateFormat, CustomSample,
-  TextType, bool both-endian hack all delete); T8 value.d fold + rename; T9 conf sweep + one
-  grammar doc (the bitfield-index convention decision lands here). NOT in scope: boxed-
+  TextType, bool both-endian hack all delete). The column following type is repurposed as
+  access (`R`/`W`/`RW`, omitted = read): ProfileBuilder recognizes those exact tokens first,
+  otherwise temporarily translates the old units/enum meaning; after the final profile sweep,
+  delete that translation and the legacy `/R`/`W`/`RW` suffix. T8 value.d fold + rename;
+  T9 conf sweep + one grammar doc
+  (the bitfield-index convention decision lands here). NOT in scope: boxed-
   mirror/consumer migration (separate track), retention tiers (build step 3), RecordBlock.
   Enum slice LANDED 2026-07-18: DataFormat carries the enum descriptor (one pointer, becomes
   the enum_/user_/string_ union with the registry), series_format maps enums/bitfields to

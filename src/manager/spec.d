@@ -7,6 +7,8 @@ module manager.spec;
 // Separator semantics: `_` introduces closed layout-mod vocabulary (context-gated), `:` an
 // open registry-name reference (enum/bitfield declarations, encodings), `@` a bit position
 // within the context word, [N] a count. Bare registered type names sit in type position.
+// Element access is outside this grammar: profiles carry optional R/W/RW in the following
+// column, with omitted access meaning read.
 //
 // Contexts gate the mods: worded contexts (word_bytes > 1) offer _bs (byte-swap within
 // word) and _wr (word order swapped); byte-stream contexts offer _le/_be (value
@@ -317,6 +319,12 @@ unittest
     assert(compile_spec("u32_be", stream_le_context, ScaledUnit(), 1, null, null, d));
     assert(fl(d) == WF.reverse);
     assert(!compile_spec("u32_bs", stream_le_context, ScaledUnit(), 1, null, null, d));
+
+    // big-endian byte-stream protocols carry their default in the context
+    assert(compile_spec("u32", stream_be_context, ScaledUnit(), 1, null, null, d));
+    assert(fl(d) == WF.reverse);
+    assert(compile_spec("u32_le", stream_be_context, ScaledUnit(), 1, null, null, d));
+    assert(fl(d) == 0);
 
     // legacy aliases: i* = s*, glued le/be absolute, _r word-swap
     assert(compile_spec("i16be", modbus_context, ScaledUnit(), 1, null, null, d));

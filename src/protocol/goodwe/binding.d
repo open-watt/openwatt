@@ -15,7 +15,8 @@ import manager.collection;
 import manager.device;
 import manager.element;
 import manager.profile;
-import manager.sampler;
+import manager.sample;
+import manager.series;
 
 import protocol.goodwe.aa55;
 
@@ -23,6 +24,14 @@ import protocol.goodwe.aa55;
 
 nothrow @nogc:
 
+
+struct ElementDesc_AA55
+{
+    ubyte function_code;
+    ubyte offset;
+    ubyte length;
+    ushort desc = 0xFFFF;
+}
 
 class GoodWeBinding : ProfileBinding
 {
@@ -183,22 +192,32 @@ protected:
             address.value(Variant(_client.get_address()));
         }
 
-        assert(desc.type == ElementType.aa55);
-        ref const ElementDesc_AA55 aa55 = _profile_data.get_aa55(desc.element);
+        import protocol.goodwe : aa55_section_kind;
 
-        if (!e.series.format)
-            e.series.format = _profile_data.series_format(aa55.value_desc);
+        assert(desc.kind == aa55_section_kind);
+        ref const ElementDesc_AA55 aa55 = _profile_data.get_section!ElementDesc_AA55(aa55_section_kind, desc.element);
+        if (aa55.desc == 0xFFFF)
+            return;
 
-        ubyte[256] tmp = void;
-        tmp[0 .. aa55.value_desc.data_length] = 0;
-        e.value = sample_value(tmp.ptr, aa55.value_desc);
+        SampleDesc sd = desc_by_index(aa55.desc);
+        const(DataFormat)* fmt = sd.fmt;
+        if (!e.series.format && fmt.is_scalar)
+            e.series.format = fmt;
+
+        if (fmt.is_scalar)
+        {
+            Scalar z;
+            z.raw[] = 0;
+            e.value = box_record(z.raw.ptr, *fmt);
+        }
 
         SampleElement* se = &elements.pushBack();
         se.element = e;
         se.control = GoodWeControlCode.read;
         se.fn = cast(GoodWeFunctionCode)aa55.function_code;
         se.offset = aa55.offset;
-        se.desc = aa55.value_desc;
+        se.length = aa55.length;
+        se.desc = sd;
         switch (desc.update_frequency)
         {
             case Frequency.realtime:       se.sample_time_ms = 400;         break;
@@ -234,7 +253,8 @@ private:
         ubyte flags; // 1 - in-flight, 2 - constant-sampled, 4 - ...
         ushort sample_time_ms;
         Element* element;
-        ValueDesc desc;
+        ubyte length;
+        SampleDesc desc;
     }
 
     void state_change(ActiveObject obj, StateSignal signal)
@@ -270,17 +290,37 @@ private:
             if (e.sample_time_ms == 0)
                 e.flags |= 2;
 
-            assert(e.offset + e.desc.data_length <= response.length, "response too small for element data?!");
+            assert(e.offset + e.length <= response.length, "response too small for element data?!");
+            const(void)[] wire = response[e.offset .. e.offset + e.length];
+            SysTime t = cast(SysTime)response_time;
 
-            Variant sample = sample_value(response.ptr + e.offset, e.desc);
-            e.element.value(sample.move, cast(SysTime)response_time);
+            Element* el = e.element;
+            const(DataFormat)* fmt = e.desc.fmt;
+            if (fmt.is_scalar)
+            {
+                Scalar s;
+                s.raw[] = 0;
+                if (!sample_record(wire, e.desc, s.raw[0 .. fmt.stride]))
+                    continue;
+                if (el.series.format is fmt)
+                    el.observe_record(s.raw[0 .. fmt.stride], t);
+                else
+                    el.value(box_record(s.raw.ptr, *fmt), t);
+            }
+            else if (fmt.type == ValueType.char_)
+            {
+                char[256] buf = void;
+                el.value(Variant(sample_text(wire, e.desc, buf)), t);
+            }
+            else
+            {
+                ubyte[256] rec = void;
+                if (fmt.stride <= rec.length && sample_record(wire, e.desc, rec[0 .. fmt.stride]))
+                    el.value(box_record(rec.ptr, *fmt), t);
+            }
 
             version (DebugGoodWeBinding)
-            {
-                ValueDesc raw_desc = ValueDesc(e.desc.data_type);
-                Variant raw = sample_value(response.ptr + e.offset, raw_desc);
-                log.debugf("sample - offset: {0} value: {1} = {2} (raw: {3} - 0x{4,x})", e.offset, e.element.id, e.element.value, raw, raw.isLong() ? cast(uint)cast(ulong)raw.asLong() : 0);
-            }
+                log.debugf("sample - offset: {0} element: {1} = {2}", e.offset, el.id, el.value);
         }
     }
 }

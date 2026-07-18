@@ -14,7 +14,6 @@ import urt.string;
 import urt.string.format;
 
 import manager.component;
-import urt.uuid;
 
 import manager.codec : Encoding;
 import manager.config;
@@ -63,9 +62,7 @@ enum ElementType : ubyte
     modbus,
     zigbee,
     http,
-    aa55,
-    mqtt,
-    ble
+    mqtt
 }
 
 enum SumType : ubyte
@@ -212,13 +209,6 @@ private:
     ushort _response_path; // override parse path, 0 if same as identifier
 }
 
-struct ElementDesc_AA55
-{
-    ubyte function_code;
-    ubyte offset;
-    ValueDesc value_desc;
-}
-
 struct ElementDesc_MQTT
 {
     ushort read_topic;
@@ -233,14 +223,6 @@ pure nothrow @nogc:
         => write_topic.cache_string(profile.mqtt_strings);
 }
 
-struct ElementDesc_BLE
-{
-    GUID service_uuid;
-    GUID char_uuid;
-    ubyte offset;
-    ValueDesc value_desc;
-}
-
 struct ProfileCosts
 {
     size_t string_bytes;
@@ -253,9 +235,23 @@ nothrow @nogc:
     Profile* profile;
     const(char)[] element_id;
 
-    bool compile_value(const(char)[] type, const(char)[] units, ref const LayoutContext ctx,
+    bool compile_value(const(char)[] type, const(char)[] following, ref const LayoutContext ctx,
                        out ushort desc_index, out ubyte span)
     {
+        const(char)[] units = following;
+        const(char)[] value_type = type.split!('/', false);
+        Access access = type.parse_access();
+        // The following column is access in normalized profiles; other values are the
+        // legacy units/enum column until the profile sweep is complete.
+        if (units == "R" || units == "W" || units == "RW")
+        {
+            access = units.parse_access();
+            units = null;
+        }
+        if (_element)
+            _element.access = access;
+        type = value_type;
+
         const(VoidEnumInfo)* resolve(const(char)[] name)
             => profile.find_enum_template(name);
 
@@ -321,6 +317,7 @@ nothrow @nogc:
 
 private:
     StringCacheBuilder* _strings;
+    ElementDesc* _element;
 }
 
 interface ProfileSections
@@ -533,12 +530,8 @@ nothrow @nogc:
             defaultAllocator().freeArray(http_strings);
         if(param_strings)
             defaultAllocator().freeArray(param_strings);
-        if(aa55_elements)
-            defaultAllocator().freeArray(aa55_elements);
         if(mqtt_elements)
             defaultAllocator().freeArray(mqtt_elements);
-        if(ble_elements)
-            defaultAllocator().freeArray(ble_elements);
         foreach (ref b; section_blocks)
             if (b.data)
                 defaultAllocator().free(b.data);
@@ -712,14 +705,8 @@ nothrow @nogc:
     ref const(RequestDesc) get_request(size_t i) const pure
         => request_descs[i];
 
-    ref const(ElementDesc_AA55) get_aa55(size_t i) const pure
-        => aa55_elements[i];
-
     ref const(ElementDesc_MQTT) get_mqtt(size_t i) const pure
         => mqtt_elements[i];
-
-    ref const(ElementDesc_BLE) get_ble(size_t i) const pure
-        => ble_elements[i];
 
     auto get_parameters() const pure
         => StringRange(param_strings, indirections[_params .. _params + _param_count]);
@@ -804,9 +791,7 @@ private:
     ElementDesc_Zigbee[] zb_elements;
     ElementDesc_HTTP[] http_elements;
     RequestDesc[] request_descs;
-    ElementDesc_AA55[] aa55_elements;
     ElementDesc_MQTT[] mqtt_elements;
-    ElementDesc_BLE[] ble_elements;
     ushort[] indirections;
     char[] id_strings;
     char[] name_strings;
@@ -879,6 +864,10 @@ unittest
     // registered-section parse: handler fills its slots through ProfileBuilder; legacy
     // two-column spellings, one-token `u16:0.1V`, and enum templates all resolve
     {
+        const(char)[] joined = "3, u16:0.1V\tdesc: singleTokenVolts";
+        assert(joined.split_element_and_desc() == "3, u16:0.1V");
+        assert(joined == "desc: singleTokenVolts");
+
         static struct TDesc
         {
             ubyte addr;
@@ -914,7 +903,8 @@ unittest
             "\ttsec: 1, u16, 0.1V\tdesc: chargeVoltage\n" ~
             "\ttsec: 2, enum8, Mode\tdesc: mode\n" ~
             "\ttsec: 3, u16:0.1V\tdesc: singleTokenVolts\n" ~
-            "\ttsec: 4, str8\tdesc: name\n";
+            "\ttsec: 4, str8, W\tdesc: name\n" ~
+            "\ttsec: 5, str8/W\tdesc: legacyName\n";
         Profile* prof = parse_profile(conf_text, "tprof");
         assert(prof !is null);
 
@@ -941,8 +931,11 @@ unittest
 
         ref const TDesc nm = prof.get_section!TDesc(tsec, 3);
         assert(desc_by_index(nm.desc).fmt.type == ValueType.char_ && nm.length == 8);
+        assert(prof.elements[3].access == Access.write);
+        assert(prof.get_section!TDesc(tsec, 4).desc == nm.desc);
+        assert(prof.elements[4].access == Access.write);
 
-        assert(prof.elements.length == 4);
+        assert(prof.elements.length == 5);
         assert(prof.elements[0].kind == tsec && prof.elements[1].element == 1);
     }
 }
@@ -1004,9 +997,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     size_t mb_count = 0;
     size_t zb_count = 0;
     size_t http_count = 0;
-    size_t aa55_count = 0;
     size_t mqtt_count = 0;
-    size_t ble_count = 0;
 
     ProfileCosts section_costs;
     Array!ushort section_counts;
@@ -1179,7 +1170,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                             }
                         }
                         break;
-                    case "aa55": ++aa55_count; break;
                     case "mqtt":
                         ++mqtt_count;
                         tail = reg_item.value;
@@ -1196,7 +1186,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                             break;
                         }
                         break;
-                    case "ble": ++ble_count; break;
                     default:
                         if (ProfileSectionReg* s = find_profile_section(reg_item.name))
                         {
@@ -1365,9 +1354,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     profile.zb_elements = allocator.allocArray!ElementDesc_Zigbee(zb_count);
     profile.http_elements = allocator.allocArray!ElementDesc_HTTP(http_count);
     profile.request_descs = allocator.allocArray!RequestDesc(request_count);
-    profile.aa55_elements = allocator.allocArray!ElementDesc_AA55(aa55_count);
     profile.mqtt_elements = allocator.allocArray!ElementDesc_MQTT(mqtt_count);
-    profile.ble_elements = allocator.allocArray!ElementDesc_BLE(ble_count);
 
     size_t active_sections = 0;
     foreach (n; section_counts)
@@ -1422,7 +1409,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     zb_count = 0;
     http_count = 0;
     request_count = 0;
-    aa55_count = 0;
     mqtt_count = 0;
     section_counts[][] = 0;
 
@@ -1836,43 +1822,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                             e.access = Access.read;
                         break;
 
-                    case "aa55":
-                        static if (has_all)
-                        {
-                            import protocol.goodwe.aa55;
-
-                            const(char)[] tail = reg_item.value;
-                            tail = tail.split_element_and_desc();
-
-                            const(char)[] fn = tail.split!',';
-                            const(char)[] offset = tail.split!',';
-                            const(char)[] type = tail.split!','.unQuote;
-                            const(char)[] units = tail.split!','.unQuote;
-
-                            e._kind = ElementType.aa55;
-                            e._index = cast(ushort)aa55_count;
-                            ref ElementDesc_AA55 aa55 = profile.aa55_elements[aa55_count++];
-
-                            size_t taken;
-                            ulong ti = fn.parse_uint_with_base(&taken);
-                            if (taken != fn.length || ti > ubyte.max)
-                            {
-                                writeWarning("Invalid AA55 function code: ", fn);
-                                break;
-                            }
-                            aa55.function_code = cast(ubyte)ti;
-                            ti = offset.parse_uint_with_base(&taken);
-                            if (taken != offset.length || ti > ubyte.max)
-                            {
-                                writeWarning("Invalid AA55 value offset: ", offset);
-                                break;
-                            }
-                            aa55.offset = cast(ubyte)ti;
-
-                            parse_value_desc(aa55.value_desc, type.parse_data_type(), units);
-                        }
-                        break;
-
                     case "mqtt":
                         const(char)[] tail = reg_item.value;
                         tail = tail.split_element_and_desc();
@@ -1913,58 +1862,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                         }
                         break;
 
-                    case "ble":
-                        const(char)[] tail = reg_item.value;
-                        tail = tail.split_element_and_desc();
-
-                        const(char)[] service = tail.split!',';
-                        const(char)[] char_field = tail.split!',';
-                        const(char)[] char_uuid_str = char_field.split!'(';
-                        const(char)[] type = tail.split!','.unQuote;
-                        const(char)[] units = tail.split!','.unQuote;
-
-                        e._kind = ElementType.ble;
-                        e._index = cast(ushort)ble_count;
-                        ref ElementDesc_BLE ble = profile.ble_elements[ble_count++];
-
-                        if (!parse_ble_uuid(service, ble.service_uuid))
-                        {
-                            writeWarning("Invalid BLE service UUID: ", service);
-                            break;
-                        }
-
-                        if (!parse_ble_uuid(char_uuid_str, ble.char_uuid))
-                        {
-                            writeWarning("Invalid BLE characteristic UUID: ", char_uuid_str);
-                            break;
-                        }
-
-                        if (char_field.length > 0)
-                        {
-                            if (char_field[$-1] != ')')
-                            {
-                                writeWarning("Invalid BLE characteristic offset: ", char_field);
-                                break;
-                            }
-                            char_field = char_field[0 .. $-1].trimBack;
-                            size_t taken;
-                            ulong ti = char_field.parse_uint_with_base(&taken);
-                            if (taken != char_field.length || ti >= 256)
-                            {
-                                writeWarning("Invalid BLE characteristic offset: ", char_field);
-                                break;
-                            }
-                            ble.offset = cast(ubyte)ti;
-                        }
-                        else
-                            ble.offset = 0;
-
-                        DataType ty = type.split!('/', false).parse_data_type(DataType.little_endian);
-                        e.access = type.parse_access();
-
-                        parse_value_desc(ble.value_desc, ty, units);
-                        break;
-
                     default:
                         if (ProfileSectionReg* s = find_profile_section(reg_item.name))
                         {
@@ -1973,6 +1870,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                             e._kind = cast(ubyte)s.kind;
                             e._index = idx;
                             builder.element_id = id;
+                            builder._element = &e;
                             s.handler.parse_element(s.kind, reg_item.value, blk.data[idx*blk.esize .. (idx+1)*blk.esize], builder);
                         }
                         else
@@ -2488,17 +2386,20 @@ const(char)[] split_element_and_desc(ref const(char)[] line) pure
 {
     import urt.util : swap;
 
-    size_t colon = line.findFirst(':');
-    if (colon == line.length)
+    size_t desc = line.length;
+    for (size_t i = 0; i + 5 <= line.length; ++i)
+    {
+        if ((i == 0 || is_whitespace(line[i - 1])) && line[i .. i + 5] == "desc:")
+        {
+            desc = i;
+            break;
+        }
+    }
+    if (desc == line.length)
         return line.swap(null);
 
-    // seek back to beginning of token before the colon...
-    while (colon > 0 && is_whitespace(line[colon - 1]))
-        --colon;
-    while (colon > 0 && !is_whitespace(line[colon - 1]))
-        --colon;
-    const(char)[] element = line[0 .. colon].trimBack;
-    line = line[colon .. $];
+    const(char)[] element = line[0 .. desc].trimBack;
+    line = line[desc .. $];
     return element;
 }
 
@@ -2515,30 +2416,6 @@ Access parse_access(ref const(char)[] access) pure
             return Access.write;
     }
     return Access.read;
-}
-
-bool parse_ble_uuid(const(char)[] str, out GUID guid) pure
-{
-    // full GUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-    if (guid.fromString(str) == 36)
-        return str.length == 36;
-
-    // short GUID (2 or 4 hex bytes): embed in BLE base GUID
-    // strip optional 0x prefix
-    const(char)[] hex = str;
-    if (hex.length >= 2 && hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X'))
-        hex = hex[2 .. $];
-
-    size_t taken;
-    ulong val = parse_uint_with_base(hex, &taken);
-    if ((taken != 4 && taken != 8) || taken != hex.length)
-        return false;
-
-    guid.data1 = cast(uint)val;
-    guid.data2 = 0x0000;
-    guid.data3 = 0x1000;
-    guid.data4 = [0x80, 0x00, 0x00, 0x80, 0x5F, 0x9B, 0x34, 0xFB];
-    return true;
 }
 
 template make_element_template(string id, string units, string name, string desc, Frequency update_frequency)
