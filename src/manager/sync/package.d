@@ -909,6 +909,15 @@ nothrow @nogc:
         else if (max_points > max_history_points)
             max_points = max_history_points;
 
+        // native series answer synchronously from RAM buckets + owsig container; the db
+        // serves legacy ring-fed streams
+        Array!Sample local;
+        if (query_local(*rs, from_ms * 1_000_000, to_ms * 1_000_000, max_points, QueryMode.raw, local))
+        {
+            encoder_for(from._encoder).encode_history(from, seq, path, local[]);
+            return;
+        }
+
         uint ticket = database().query(rs.series, from_ms * 1_000_000, to_ms * 1_000_000, max_points, QueryMode.raw, &on_history_result);
         if (!ticket)
         {
