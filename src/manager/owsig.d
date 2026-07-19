@@ -63,6 +63,7 @@ nothrow @nogc:
 
     ulong next;          // file offset of the next block; 0 = tail
     ulong prev;          // file offset of the previous block; 0 = head
+    ulong format_block;  // first block of this format run (holds the extended descriptor data); 0 = this block
     ulong first_index;
     ulong last_index;    // inclusive
     ulong first_tick;    // usecs; also the time base of the offsets plane
@@ -91,7 +92,7 @@ nothrow @nogc:
     uint raw_bytes() const pure
         => cast(uint)(((flags & Flags.irregular) ? count * uint.sizeof : 0) + count * stride);
 }
-static assert(BlockHeader.sizeof == 80);
+static assert(BlockHeader.sizeof == 88);
 
 struct BlockEntry
 {
@@ -150,6 +151,18 @@ nothrow @nogc:
             _end = offset + h.header_bytes + h.payload_bytes;
             offset = h.next;
         }
+        if (dir.length)
+        {
+            _fmt_anchor = dir[$-1].hdr.format_block ? dir[$-1].hdr.format_block : _tail;
+            foreach_reverse (ref const BlockEntry e; dir[])
+            {
+                if (e.offset == _fmt_anchor)
+                {
+                    _anchor = e.hdr;
+                    break;
+                }
+            }
+        }
         return true;
     }
 
@@ -160,6 +173,7 @@ nothrow @nogc:
         _open = false;
         _tail = 0;
         _end = 0;
+        _fmt_anchor = 0;
         dir.clear();
     }
 
@@ -207,6 +221,11 @@ nothrow @nogc:
             (cast(ubyte*)&h.unit)[0 .. ScaledUnit.sizeof] = (cast(const(ubyte)*)&f.unit)[0 .. ScaledUnit.sizeof];
         }
 
+        if (_fmt_anchor && same_format(h, _anchor))
+            h.format_block = _fmt_anchor;
+        // else this block anchors a new format run; extended descriptor data (enum/user
+        // names) lands behind header_bytes here when identity binding is built
+
         foreach (i; 0 .. g_num_codecs)
         {
             if (!g_codecs[i].match || !g_codecs[i].match(f, blk))
@@ -237,6 +256,11 @@ nothrow @nogc:
         dir ~= BlockEntry(offset, h);
         _tail = offset;
         _end = offset + _wbuf.length;
+        if (h.format_block == 0)
+        {
+            _fmt_anchor = offset;
+            _anchor = h;
+        }
         return true;
     }
 
@@ -309,9 +333,15 @@ private:
     Array!ubyte _wbuf;
     Array!ubyte _pbuf;
     DataFormat _fmt;
+    BlockHeader _anchor;
+    ulong _fmt_anchor;
     ulong _tail;
     ulong _end;
     bool _open;
+
+    static bool same_format(ref const BlockHeader a, ref const BlockHeader b) pure
+        => a.type == b.type && a.semantics == b.semantics && a.extent == b.extent
+        && a.stride == b.stride && a.rate == b.rate && a.unit == b.unit;
 }
 
 
@@ -364,6 +394,10 @@ unittest
         assert(c.dir.length == 2);
         assert(c.dir[0].hdr.first_index == 0 && c.dir[1].hdr.last_index == 3);
 
+        // format run: the first block anchors, followers point at it
+        assert(c.dir[0].hdr.format_block == 0);
+        assert(c.dir[1].hdr.format_block == c.dir[0].offset);
+
         RecordBlock blk;
         assert(c.load(0, blk));
         assert(blk.count == 2 && blk.get!double(0) == 0.0 && blk.get!double(1) == 1.5);
@@ -382,6 +416,7 @@ unittest
         assert(nb.count == 1 && c.put(nb));
         e.close_cursor(cur);
         assert(c.dir.length == 3 && c.dir[2].hdr.prev == c.dir[1].offset);
+        assert(c.dir[2].hdr.format_block == c.dir[0].offset); // anchor survives reopen
         c.close_();
     }
 
@@ -392,6 +427,21 @@ unittest
         RecordBlock blk;
         assert(c.load(2, blk));
         assert(blk.count == 1 && blk.get!double(0) == 9.0);
+
+        // a format change anchors a new run
+        DataFormat s32_fmt = DataFormat(ValueType.s32, Semantics.held);
+        int rv = 42;
+        uint[1] rts = 0;
+        RecordBlock rb;
+        rb.format = &s32_fmt;
+        rb.count = 1;
+        rb.first_index = 5;
+        rb.t0 = 6_000_000 / 1000;
+        rb.ts = rts.ptr;
+        rb.data = &rv;
+        assert(c.put(rb));
+        assert(c.dir[3].hdr.format_block == 0);
+        assert(c.load(3, blk) && blk.get!int(0) == 42);
         c.close_();
     }
 
