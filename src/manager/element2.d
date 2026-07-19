@@ -293,6 +293,38 @@ nothrow @nogc:
         h.max_age = cast(ulong)max_age.as!"usecs";
     }
 
+    // cursor-less block read of retained records; count 0 at/after head
+    RecordBlock read_records(ulong from_index, uint max_records)
+    {
+        if (!_history)
+        {
+            RecordBlock r;
+            r.format = format;
+            return r;
+        }
+        return _history.read(*format, from_index, max_records);
+    }
+
+    // first retained index of the bucket covering wall time t, stepped back one bucket so
+    // held state before t is included; ulong.max = nothing retained
+    ulong index_for_time(SysTime t) const
+    {
+        if (!_history || !_history.buckets.length)
+            return ulong.max;
+        size_t lo = 0, hi = _history.buckets.length;
+        while (lo < hi)
+        {
+            size_t mid = (lo + hi) / 2;
+            if (_history.buckets[mid].last_time < t)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        if (lo)
+            --lo;
+        return _history.buckets[lo].first_index;
+    }
+
     Cursor open_cursor(ulong from_index = ulong.max, bool pin = false)
     {
         SeriesStore* s = ensure_history();

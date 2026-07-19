@@ -161,16 +161,47 @@ nothrow @nogc:
 bool query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, QueryMode mode, ref Array!Sample result)
 {
     Element* e = rs.element;
-    if (e.recent_count == 0 || e.recent_oldest() > from)
-        return false;
-
     Array!Sample local;
-    foreach (i; 0 .. e.recent_count)
+    if (e.native && e.series.record_count)
     {
-        ref const ElementSample s = e.recent_at(i);
-        double v;
-        if (sample_to_double(s.value, v))
-            local ~= Sample(unixTimeNs(cast(SysTime)s.time), v);
+        ulong idx = e.series.index_for_time(from_unix_time_ns(from));
+        if (idx == ulong.max)
+            return false;
+        for (;;)
+        {
+            RecordBlock blk = e.series.read_records(idx, 256);
+            if (blk.count == 0)
+                break;
+            bool past = false;
+            foreach (i; 0 .. blk.count)
+            {
+                ulong t = unixTimeNs(blk.time(i));
+                if (t > to)
+                {
+                    past = true;
+                    break;
+                }
+                double v;
+                Variant val = blk.box(i);
+                if (sample_to_double(val, v))
+                    local ~= Sample(t, v);
+            }
+            if (past)
+                break;
+            idx += blk.count;
+        }
+    }
+    else
+    {
+        if (e.recent_count == 0 || e.recent_oldest() > from)
+            return false;
+        foreach (i; 0 .. e.recent_count)
+        {
+            ref const ElementSample s = e.recent_at(i);
+            double v;
+            if (sample_to_double(s.value, v))
+                local ~= Sample(unixTimeNs(cast(SysTime)s.time), v);
+        }
     }
     if (local.length == 0 || local[0].time > from)
         return false; // no numeric coverage back to `from`; let the db serve it
@@ -269,6 +300,26 @@ unittest
     result.clear();
     assert(rs.query_local(4_000_000, 6_000_000, 0, QueryMode.graph, result));
     assert(result[0].time == 4_000_000 && result[0].value == 20); // held from the 3ms sample
+
+    // native element: query_local serves from the full bucket history, not the ring
+    static immutable DataFormat qfmt = DataFormat(ValueType.f64, Semantics.held);
+    Element en;
+    en.series.format = &qfmt;
+    en.series.ensure_history();
+    foreach (i; 0 .. 6)
+        en.observe(i * 10.0, from_unix_time_ns((i + 1) * 1_000_000UL));
+
+    RecordStream rn;
+    rn.element = &en;
+    result.clear();
+    assert(rn.query_local(4_000_000, 5_000_000, 0, QueryMode.raw, result));
+    assert(result.length == 2 && result[0].time == 4_000_000 && result[0].value == 30);
+    result.clear();
+    assert(!rn.query_local(0, 6_000_000, 0, QueryMode.raw, result)); // no coverage back to 0
+    result.clear();
+    assert(rn.query_local(4_000_000, 6_000_000, 0, QueryMode.graph, result));
+    assert(result[0].time == 4_000_000 && result[0].value == 20);
+    en.series.teardown();
 }
 
 
