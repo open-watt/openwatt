@@ -7,7 +7,6 @@ import urt.map;
 import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
 import urt.si.unit;
-import urt.si.quantity;
 import urt.string;
 import urt.time;
 import urt.variant;
@@ -20,7 +19,8 @@ import manager.component;
 import manager.device;
 import manager.element;
 import manager.profile;
-import manager.sampler;
+import manager.sample;
+import manager.series;
 
 import protocol.esphome;
 import protocol.esphome.client;
@@ -161,9 +161,8 @@ private:
     {
         uint key;
         Element* element;
-        ScaledUnit unit;
+        const(DataFormat)* format;
         float pre_scale = 1;
-        String custom_unit;
     }
 
     ObjectRef!ESPHomeClient _client;
@@ -340,6 +339,12 @@ private:
                 SampleElement entry;
                 entry.key = res.key;
                 entry.element = e;
+                bool known_unit;
+                entry.format = sensor_format(res.unit_of_measurement[], entry.pre_scale, known_unit);
+                if (!e.series.format)
+                    e.series.format = entry.format;
+                if (!known_unit)
+                    e.display_unit = res.unit_of_measurement.move;
                 SampleElement* el = _elements.insert(res.key, entry);
                 if (!el)
                 {
@@ -349,19 +354,6 @@ private:
 
                 // TODO: assert device_class (ie: "voltage") is matching to the units and/or is respected?
 
-                if (res.unit_of_measurement)
-                {
-                    ScaledUnit unit;
-                    float pre_scale = 1;
-                    ptrdiff_t taken = unit.parse_unit(res.unit_of_measurement[], pre_scale, false);
-                    if (taken == res.unit_of_measurement.length)
-                    {
-                        el.unit = unit;
-                        el.pre_scale = pre_scale;
-                    }
-                    else
-                        el.custom_unit = res.unit_of_measurement.move;
-                }
                 break;
 
             case ListEntitiesSwitchResponse.id:
@@ -519,7 +511,7 @@ private:
                     break;
                 if (SampleElement* el = res.key in _elements)
                 {
-                    el.element.value = Quantity!float(res.state * el.pre_scale, el.unit);
+                    observe_sensor(el.element, el.format, el.pre_scale, res.state, getSysTime());
                     version (DebugESPHomeBinding)
                         log.trace("sample: ", el.element.id, " = ", el.element.value);
                 }
@@ -528,5 +520,68 @@ private:
             default:
                 break;
         }
+    }
+}
+
+unittest
+{
+    import urt.si.unit : Ampere, ScaledUnit, Volt;
+
+    float pre_scale;
+    bool known_unit;
+    const(DataFormat)* volts = sensor_format("V", pre_scale, known_unit);
+    assert(known_unit && pre_scale == 1 && volts.type == ValueType.f32);
+
+    Element voltage;
+    voltage.series.format = volts;
+    observe_sensor(&voltage, volts, pre_scale, 230.5f, getSysTime());
+    double observed_volts = voltage.scaled_value(ScaledUnit(Volt));
+    assert(observed_volts > 230.49 && observed_volts < 230.51);
+
+    const(DataFormat)* scaled = format_by_index(mint_format(
+        DataFormat(ValueType.f64, Semantics.held, ScaledUnit(Ampere))));
+    Element current;
+    current.series.format = scaled;
+    observe_sensor(&current, scaled, 0.1f, 123, getSysTime());
+    double observed_amps = current.scaled_value(ScaledUnit(Ampere));
+    assert(observed_amps > 12.299 && observed_amps < 12.301);
+
+    const(DataFormat)* custom = sensor_format("dBm", pre_scale, known_unit);
+    assert(!known_unit && pre_scale == 1 && custom.type == ValueType.f32);
+    assert(custom.desc == DataFormat.Desc.none);
+}
+
+private:
+
+const(DataFormat)* sensor_format(const(char)[] unit_text, out float pre_scale, out bool known_unit)
+{
+    ScaledUnit unit;
+    ptrdiff_t taken = unit.parse_unit(unit_text, pre_scale, false);
+    known_unit = taken == unit_text.length;
+    if (!known_unit)
+    {
+        unit = ScaledUnit();
+        pre_scale = 1;
+    }
+    ValueType type = pre_scale == 1 ? ValueType.f32 : ValueType.f64;
+    return format_by_index(mint_format(DataFormat(type, Semantics.held, unit)));
+}
+
+void observe_sensor(Element* element, const(DataFormat)* format, float pre_scale, float state, SysTime timestamp)
+{
+    if (format.type == ValueType.f32)
+    {
+        if (element.series.format is format)
+            element.observe_record((cast(const(void)*)&state)[0 .. float.sizeof], timestamp);
+        else
+            element.value(box_record(&state, *format), timestamp);
+    }
+    else
+    {
+        double value = state * pre_scale;
+        if (element.series.format is format)
+            element.observe_record((cast(const(void)*)&value)[0 .. double.sizeof], timestamp);
+        else
+            element.value(box_record(&value, *format), timestamp);
     }
 }
