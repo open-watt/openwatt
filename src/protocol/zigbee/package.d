@@ -14,6 +14,7 @@ import urt.variant;
 
 import manager;
 import manager.collection;
+import manager.config : ConfItem;
 import manager.console.command;
 import manager.console.session;
 import manager.device;
@@ -327,10 +328,11 @@ nothrow @nogc:
     uint element_size(uint)
         => cast(uint)ElementDesc_Zigbee.sizeof;
 
-    void count_element(uint, const(char)[], ref ProfileCosts) {}
+    void count_element(uint, ref const ConfItem, ref ProfileCosts) {}
 
-    bool parse_element(uint, const(char)[] tail, void[] slot, ref ProfileBuilder b)
+    bool parse_element(uint, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
     {
+        const(char)[] tail = item.value;
         ElementDesc_Zigbee* zb = cast(ElementDesc_Zigbee*)slot.ptr;
         *zb = ElementDesc_Zigbee.init;
 

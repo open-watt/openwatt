@@ -98,15 +98,37 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
         }
     }
 
-    // family letters, then width digits
-    size_t fl = 0;
-    while (fl < spec.length && (spec[fl] < '0' || spec[fl] > '9') && spec[fl] != '_')
-        ++fl;
-    const(char)[] family = spec[0 .. fl];
-    size_t dl = fl;
-    while (dl < spec.length && spec[dl] >= '0' && spec[dl] <= '9')
-        ++dl;
-    uint width = fl < dl ? parse_uint(spec[fl .. dl]) : 0;
+    // A registered name is an atom even when it contains digits (`ipv4`). Otherwise
+    // split a built-in family into its letters and width digits.
+    size_t atom_len = spec.length;
+    foreach (i, c; spec)
+    {
+        if (c == '_')
+        {
+            atom_len = i;
+            break;
+        }
+    }
+    const(TypeDetails)* named_type = find_type_by_name(spec[0 .. atom_len]);
+    const(char)[] family;
+    size_t dl;
+    uint width;
+    if (named_type)
+    {
+        family = spec[0 .. atom_len];
+        dl = atom_len;
+    }
+    else
+    {
+        size_t fl = 0;
+        while (fl < spec.length && (spec[fl] < '0' || spec[fl] > '9') && spec[fl] != '_')
+            ++fl;
+        family = spec[0 .. fl];
+        dl = fl;
+        while (dl < spec.length && spec[dl] >= '0' && spec[dl] <= '9')
+            ++dl;
+        width = fl < dl ? parse_uint(spec[fl .. dl]) : 0;
+    }
     const(char)[] tail = spec[dl .. $];
 
     // mods: glued le/be first (legacy), then underscore tokens
@@ -265,6 +287,15 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
 
         case "dt":
         {
+            if (!width && !name.length)
+            {
+                const(TypeDetails)* td = find_type_by_name("dt");
+                if (!td)
+                    return false;
+                DataFormat fmt = DataFormat(ValueType.user, Semantics.held, td);
+                desc = SampleDesc(WireLayout(WireKind.char_, 8, 0, image_flags(), wb), pre_scale, mint_format(fmt));
+                return true;
+            }
             const(Encoding)* enc = name.length ? find_encoding(name) : null;
             if (!enc || !width || enc.wire_bytes * 8 != width)
                 return false;
@@ -276,7 +307,7 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
         default:
         {
             // bare registered type name
-            const(TypeDetails)* td = find_type_by_name(family);
+            const(TypeDetails)* td = named_type ? named_type : find_type_by_name(family);
             if (!td || width)
                 return false;
             DataFormat fmt = DataFormat(ValueType.user, Semantics.held, td);
@@ -363,6 +394,8 @@ unittest
     assert(compile_spec("dt48:yymmddhhmmss", modbus_context, ScaledUnit(), 1, null, null, d));
     assert(d.enc !is null && d.fmt.type == ValueType.user);
     assert(!compile_spec("dt32:yymmddhhmmss", modbus_context, ScaledUnit(), 1, null, null, d));
+    assert(compile_spec("dt", stream_le_context, ScaledUnit(), 1, null, null, d));
+    assert(d.enc is null && d.fmt.type == ValueType.user && d.fmt.user_type.name == "dt");
 
     // strings: dynamic char records, reading-order canonical (no value endianness);
     // _r aliases _bs on byte data; _sp pads with spaces
@@ -381,6 +414,8 @@ unittest
     assert(d.fmt.type == ValueType.user && d.fmt.user_type.name == "pt");
     assert(compile_spec("pt_be", modbus_context, ScaledUnit(), 1, null, null, d));
     assert(fl(d) == WF.members_be);
+    assert(compile_spec("ipv4", stream_le_context, ScaledUnit(), 1, null, null, d));
+    assert(d.fmt.type == ValueType.user && d.fmt.user_type.name == "ipv4");
 
     // counts
     assert(compile_spec("u8[8]", modbus_context, ScaledUnit(), 1, null, null, d));

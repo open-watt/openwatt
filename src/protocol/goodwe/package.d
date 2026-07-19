@@ -9,6 +9,7 @@ import urt.string;
 
 import manager;
 import manager.collection;
+import manager.config : ConfItem;
 import manager.plugin;
 import manager.profile;
 import manager.spec : stream_be_context;
@@ -67,10 +68,11 @@ nothrow @nogc:
     uint element_size(uint)
         => cast(uint)ElementDesc_AA55.sizeof;
 
-    void count_element(uint, const(char)[], ref ProfileCosts) {}
+    void count_element(uint, ref const ConfItem, ref ProfileCosts) {}
 
-    bool parse_element(uint kind, const(char)[] tail, void[] slot, ref ProfileBuilder b)
+    bool parse_element(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
     {
+        const(char)[] tail = item.value;
         ElementDesc_AA55* aa55 = cast(ElementDesc_AA55*)slot.ptr;
         *aa55 = ElementDesc_AA55.init;
 

@@ -9,6 +9,7 @@ import urt.time;
 
 import manager;
 import manager.collection;
+import manager.config : ConfItem;
 import manager.plugin;
 import manager.profile;
 import manager.spec : stream_le_context;
@@ -44,11 +45,13 @@ nothrow @nogc:
     uint element_size(uint)
         => cast(uint)ElementDesc_CAN.sizeof;
 
-    void count_element(uint, const(char)[], ref ProfileCosts) {}
+    void count_element(uint, ref const ConfItem, ref ProfileCosts) {}
 
-    bool parse_element(uint kind, const(char)[] tail, void[] slot, ref ProfileBuilder b)
+    bool parse_element(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
     {
         import urt.log : writeWarning;
+
+        const(char)[] tail = item.value;
 
         ElementDesc_CAN* can = cast(ElementDesc_CAN*)slot.ptr;
         *can = ElementDesc_CAN.init;

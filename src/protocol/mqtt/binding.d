@@ -16,7 +16,8 @@ import manager.device;
 import manager.element;
 import manager.profile;
 private alias Access = manager.element.Access;
-import manager.sampler;
+import manager.sample;
+import manager.series;
 
 import protocol.mqtt.broker;
 import protocol.mqtt.client;
@@ -25,6 +26,51 @@ import protocol.mqtt.topic : PublishCallback;
 //version = DebugMQTTBinding;
 
 nothrow @nogc:
+
+package __gshared uint mqtt_section_kind;
+package __gshared uint mqtt_subscribe_kind;
+
+struct ElementDesc_MQTT
+{
+    ushort read_topic;
+    ushort write_topic;
+    ushort desc = ushort.max;
+
+pure nothrow @nogc:
+    const(char)[] get_read_topic(ref const Profile profile) const pure
+        => profile.get_section_string(read_topic);
+
+    const(char)[] get_write_topic(ref const Profile profile) const pure
+        => profile.get_section_string(write_topic);
+}
+
+private struct MQTTSubscriptionRange
+{
+    const(Profile)* profile;
+    const(ushort)[] strings;
+
+pure nothrow @nogc:
+    bool empty() const pure
+        => strings.length == 0;
+    const(char)[] front() const pure
+        => profile.get_section_string(strings[0]);
+    void popFront() pure
+    {
+        strings = strings[1 .. $];
+    }
+}
+
+private MQTTSubscriptionRange mqtt_subscriptions(ref const Profile profile) nothrow @nogc
+{
+    const(void)[] root = profile.get_root_section(mqtt_subscribe_kind);
+    if (root.length < ushort.sizeof)
+        return MQTTSubscriptionRange(&profile, null);
+    const(ushort)[] words = (cast(const(ushort)*)root.ptr)[0 .. root.length / ushort.sizeof];
+    size_t count = words[0];
+    if (count + 1 > words.length)
+        return MQTTSubscriptionRange(&profile, null);
+    return MQTTSubscriptionRange(&profile, words[1 .. count + 1]);
+}
 
 
 class MQTTBinding : ProfileBinding
@@ -117,7 +163,7 @@ nothrow @nogc:
             return v;
         }
 
-        foreach (s; _profile_data.get_mqtt_subs)
+        foreach (s; mqtt_subscriptions(*_profile_data))
         {
             sub_failed = false;
             String sub = String(s.substitute_parameters(&get_substitute, sub_failed));
@@ -157,11 +203,12 @@ protected:
 
     final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
-        assert(desc.type == ElementType.mqtt);
-        ref const ElementDesc_MQTT mqtt = _profile_data.get_mqtt(desc.element);
+        assert(desc.kind == mqtt_section_kind);
+        ref const ElementDesc_MQTT mqtt = _profile_data.get_section!ElementDesc_MQTT(mqtt_section_kind, desc.element);
+        SampleDesc sample_desc = desc_by_index(mqtt.desc);
 
         if (!e.series.format)
-            e.series.format = _profile_data.series_format(mqtt.value_desc);
+            e.series.format = sample_desc.fmt;
 
         bool sub_failed;
         const(char)[] get_substitute(size_t, const(char)[] param)
@@ -200,7 +247,7 @@ protected:
         se.element = e;
         se.read_topic = read_topic.move;
         se.write_topic = write_topic.move;
-        se.desc = mqtt.value_desc;
+        se.desc = sample_desc;
 
         if (e.access & Access.write)
             e.add_subscriber(&on_element_change);
@@ -223,7 +270,7 @@ private:
     struct SampleElement
     {
         Element* element;
-        TextValueDesc desc;
+        SampleDesc desc;
         String read_topic;
         String write_topic;
     }
@@ -285,16 +332,27 @@ private:
                 continue;
 
             const(char)[] payload_str = cast(const(char)[])payload;
-            Variant value = sample_value(payload_str, e.desc);
-
-            if (value != Variant())
+            const(DataFormat)* fmt = e.desc.fmt;
+            bool sampled;
+            _self_write = true;
+            scope(exit) _self_write = false;
+            if (fmt.is_text)
             {
-                _self_write = true;
-                scope(exit) _self_write = false;
-                e.element.value(value, cast(SysTime)timestamp);
+                e.element.observe_text(payload_str, cast(SysTime)timestamp);
+                sampled = true;
+            }
+            else if (fmt.is_scalar)
+            {
+                Scalar scalar;
+                sampled = parse_record(payload_str, e.desc, scalar.raw[0 .. fmt.stride]);
+                if (sampled)
+                    e.element.observe_record(scalar.raw[0 .. fmt.stride], cast(SysTime)timestamp);
+            }
 
+            if (sampled)
+            {
                 version (DebugMQTTBinding)
-                    writeDebugf("mqtt: sample - topic: {0} value: {1} = {2} (raw: {3})", topic, e.element.id, e.element.value, cast(const(char)[])payload);
+                    writeDebugf("mqtt: sample - topic: {0} value: {1} = {2} (raw: {3})", topic, e.element.id, e.element.value, payload_str);
             }
             else
                 log.warning("failed to parse MQTT payload for topic ", topic, ": ", payload_str);
@@ -313,8 +371,26 @@ private:
                 continue;
             if (!se.write_topic.empty)
             {
-                const(char)[] text = format_value(val, se.desc);
-                publish_value(se.write_topic[], cast(const(ubyte)[])text, cast(MonoTime)ts);
+                const(DataFormat)* fmt = se.desc.fmt;
+                if (fmt.is_text)
+                {
+                    if (val.isString)
+                        publish_value(se.write_topic[], cast(const(ubyte)[])(val.asString[]), cast(MonoTime)ts);
+                }
+                else if (fmt.is_scalar)
+                {
+                    Scalar scalar;
+                    char[256] buffer;
+                    bool converted = unbox_scalar(val, *fmt, scalar);
+                    if (!converted && val.isString)
+                        converted = parse_record(val.asString[], se.desc, scalar.raw[0 .. fmt.stride]);
+                    if (converted)
+                    {
+                        ptrdiff_t len = format_record(scalar.raw[0 .. fmt.stride], se.desc, buffer);
+                        if (len > 0)
+                            publish_value(se.write_topic[], cast(const(ubyte)[])buffer[0 .. len], cast(MonoTime)ts);
+                    }
+                }
             }
             return;
         }

@@ -115,6 +115,16 @@ status block). Remaining legs, roughly in order:
 
 ## Data model
 
+- **Unit model gaps exposed by profile normalization (2026-07-19)**: decide how the type/unit
+  language represents logarithmic reference-relative quantities such as dBm. dBm is power
+  relative to 1 mW with a logarithmic encoding, not an ordinary milliwatt scale prefix, so it
+  needs an explicit conversion and arithmetic story rather than being accepted as a cosmetic
+  unit string. Also support distinct arbitrary units for counters so unrelated counts cannot
+  mathematically combine merely because both are dimensionless. Bytes (`B`) are an important
+  first case: settle byte versus bit identity and SI decimal prefixes (1000) versus IEC binary
+  prefixes (1024), including unambiguous spellings such as kB versus KiB, before folding these
+  units into normalized profile type descriptors.
+
 - **Audit binding sampling strategies; consolidate value handling into ONE module (noted
   2026-07-17)**: every protocol grew its own decode/convert/apply machinery and the sprawl is
   now countable: `sample_value(void*, ValueDesc)` (modbus/can/goodwe/ble), `sample_value(char[],

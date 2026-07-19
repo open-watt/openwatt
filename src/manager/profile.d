@@ -60,8 +60,7 @@ enum Frequency : ubyte
 enum ElementType : ubyte
 {
     modbus,
-    http,
-    mqtt
+    http
 }
 
 enum SumType : ubyte
@@ -200,23 +199,15 @@ private:
     ushort _response_path; // override parse path, 0 if same as identifier
 }
 
-struct ElementDesc_MQTT
-{
-    ushort read_topic;
-    ushort write_topic;
-    TextValueDesc value_desc;
-
-pure nothrow @nogc:
-    const(char)[] get_read_topic(ref const(Profile) profile) const
-        => read_topic.cache_string(profile.mqtt_strings);
-
-    const(char)[] get_write_topic(ref const(Profile) profile) const
-        => write_topic.cache_string(profile.mqtt_strings);
-}
-
 struct ProfileCosts
 {
     size_t string_bytes;
+
+    void add_string(const(char)[] value) pure nothrow @nogc
+    {
+        if (value.length)
+            string_bytes += 2 + value.length + (value.length & 1);
+    }
 }
 
 struct ProfileBuilder
@@ -306,6 +297,12 @@ nothrow @nogc:
     ushort intern(const(char)[] s)
         => _strings ? _strings.add_string(s) : 0;
 
+    void access(Access value)
+    {
+        if (_element)
+            _element.access = value;
+    }
+
 private:
     StringCacheBuilder* _strings;
     ElementDesc* _element;
@@ -315,9 +312,18 @@ interface ProfileSections
 {
 nothrow @nogc:
     uint element_size(uint kind);
-    void count_element(uint kind, const(char)[] tail, ref ProfileCosts costs);
+    void count_element(uint kind, ref const ConfItem item, ref ProfileCosts costs);
     // slot is element_size bytes; the handler emplaces its own struct's init before filling
-    bool parse_element(uint kind, const(char)[] tail, void[] slot, ref ProfileBuilder b);
+    bool parse_element(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b);
+}
+
+interface ProfileRootSections
+{
+nothrow @nogc:
+    uint root_size(uint kind, ref const ConfItem item);
+    void count_root(uint kind, ref const ConfItem item, ref ProfileCosts costs);
+    // slot is root_size bytes and belongs to this parsed Profile
+    bool parse_root(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b);
 }
 
 enum uint first_section_kind = 16;
@@ -329,6 +335,17 @@ uint register_profile_section(const(char)[] name, ProfileSections handler)
     uint kind = cast(uint)(first_section_kind + g_profile_sections.length);
     assert(kind <= ubyte.max, "too many profile sections");
     g_profile_sections ~= ProfileSectionReg(name, handler, kind);
+    return kind;
+}
+
+enum uint first_root_section_kind = 1;
+
+uint register_profile_root_section(const(char)[] name, ProfileRootSections handler)
+{
+    debug foreach (ref s; g_profile_root_sections)
+        assert(s.name != name, "profile root section already registered");
+    uint kind = cast(uint)(first_root_section_kind + g_profile_root_sections.length);
+    g_profile_root_sections ~= ProfileRootSectionReg(name, handler, kind);
     return kind;
 }
 
@@ -507,8 +524,6 @@ nothrow @nogc:
            defaultAllocator().freeArray(desc_strings);
         if (expression_strings)
             defaultAllocator().freeArray(expression_strings);
-        if(mqtt_strings)
-            defaultAllocator().freeArray(mqtt_strings);
         if(mb_elements)
             defaultAllocator().freeArray(mb_elements);
         if(http_elements)
@@ -519,13 +534,16 @@ nothrow @nogc:
             defaultAllocator().freeArray(http_strings);
         if(param_strings)
             defaultAllocator().freeArray(param_strings);
-        if(mqtt_elements)
-            defaultAllocator().freeArray(mqtt_elements);
         foreach (ref b; section_blocks)
             if (b.data)
                 defaultAllocator().free(b.data);
         if(section_blocks)
             defaultAllocator().freeArray(section_blocks);
+        foreach (ref b; root_blocks)
+            if (b.data)
+                defaultAllocator().free(b.data);
+        if(root_blocks)
+            defaultAllocator().freeArray(root_blocks);
         if(section_strings)
             defaultAllocator().freeArray(section_strings);
     }
@@ -691,14 +709,19 @@ nothrow @nogc:
     ref const(RequestDesc) get_request(size_t i) const pure
         => request_descs[i];
 
-    ref const(ElementDesc_MQTT) get_mqtt(size_t i) const pure
-        => mqtt_elements[i];
+    const(void)[] get_root_section(uint kind) const pure
+    {
+        foreach (ref b; root_blocks)
+            if (b.kind == kind)
+                return b.data;
+        return null;
+    }
+
+    const(char)[] get_section_string(ushort offset) const pure
+        => offset.cache_string(section_strings);
 
     auto get_parameters() const pure
         => StringRange(param_strings, indirections[_params .. _params + _param_count]);
-
-    auto get_mqtt_subs() const pure
-        => StringRange(mqtt_strings, indirections[_mqtt_subs .. _mqtt_subs + _mqtt_sub_count]);
 
     void drop_lookup_strings()
     {
@@ -767,16 +790,22 @@ private:
         void[] data;
     }
 
+    struct RootBlock
+    {
+        uint kind;
+        void[] data;
+    }
+
     DeviceTemplate[] device_templates;
     ComponentTemplate[] component_templates;
     ElementTemplate[] element_templates;
     ElementDesc[] elements;
     Lookup[] lookup_table;
     SectionBlock[] section_blocks;
+    RootBlock[] root_blocks;
     ElementDesc_Modbus[] mb_elements;
     ElementDesc_HTTP[] http_elements;
     RequestDesc[] request_descs;
-    ElementDesc_MQTT[] mqtt_elements;
     ushort[] indirections;
     char[] id_strings;
     char[] name_strings;
@@ -785,10 +814,8 @@ private:
     char[] desc_strings;
     char[] param_strings;
     char[] http_strings;
-    char[] mqtt_strings;
     char[] section_strings;
     ushort _params, _param_count;
-    ushort _mqtt_subs, _mqtt_sub_count;
 
     Map!(String, const(VoidEnumInfo)*) enum_templates;
 }
@@ -864,11 +891,12 @@ unittest
         nothrow @nogc:
             uint element_size(uint)
                 => cast(uint)TDesc.sizeof;
-            void count_element(uint, const(char)[], ref ProfileCosts) {}
-            bool parse_element(uint kind, const(char)[] tail, void[] slot, ref ProfileBuilder b)
+            void count_element(uint, ref const ConfItem, ref ProfileCosts) {}
+            bool parse_element(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
             {
                 TDesc* d = cast(TDesc*)slot.ptr;
                 *d = TDesc.init;
+                const(char)[] tail = item.value;
                 const(char)[] addr = tail.split!',';
                 const(char)[] type = tail.split!','.unQuote;
                 const(char)[] units = tail.split!','.unQuote;
@@ -877,12 +905,40 @@ unittest
                 return b.compile_value(type, units, stream_le_context, d.desc, d.length);
             }
         }
+        static struct TRoot
+        {
+            ushort first;
+            ushort second;
+        }
+        static class TestRoots : ProfileRootSections
+        {
+        nothrow @nogc:
+            uint root_size(uint, ref const ConfItem)
+                => cast(uint)TRoot.sizeof;
+            void count_root(uint, ref const ConfItem item, ref ProfileCosts costs)
+            {
+                const(char)[] tail = item.value;
+                costs.add_string(tail.split!','.unQuote);
+                costs.add_string(tail.split!','.unQuote);
+            }
+            bool parse_root(uint, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
+            {
+                TRoot* root = cast(TRoot*)slot.ptr;
+                const(char)[] tail = item.value;
+                root.first = b.intern(tail.split!','.unQuote);
+                root.second = b.intern(tail.split!','.unQuote);
+                return true;
+            }
+        }
         uint tsec = register_profile_section("tsec", defaultAllocator().allocT!TestSections());
+        uint troot = register_profile_root_section("troot", defaultAllocator().allocT!TestRoots());
 
         static immutable string conf_text =
             "enum: Mode\n" ~
             "\toff: 0\n" ~
             "\teco: 1\n" ~
+            "\n" ~
+            "troot: alpha, beta\n" ~
             "\n" ~
             "registers:\n" ~
             "\ttsec: 1, u16, 0.1V\tdesc: chargeVoltage\n" ~
@@ -922,6 +978,12 @@ unittest
 
         assert(prof.elements.length == 5);
         assert(prof.elements[0].kind == tsec && prof.elements[1].element == 1);
+
+        const(void)[] root_data = prof.get_root_section(troot);
+        assert(root_data.length == TRoot.sizeof);
+        ref const TRoot root = *cast(const(TRoot)*)root_data.ptr;
+        assert(prof.get_section_string(root.first) == "alpha");
+        assert(prof.get_section_string(root.second) == "beta");
     }
 }
 
@@ -971,7 +1033,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     size_t lookup_string_len = 0;
     size_t expression_string_len = 0;
     size_t desc_string_len = 0;
-    size_t mqtt_string_len = 0;
     size_t http_string_len = 0;
     size_t param_string_len = 0;
     size_t request_count = 0;
@@ -981,11 +1042,12 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     size_t num_indirections = 0;
     size_t mb_count = 0;
     size_t http_count = 0;
-    size_t mqtt_count = 0;
 
     ProfileCosts section_costs;
     Array!ushort section_counts;
     section_counts.resize(g_profile_sections.length);
+    Array!uint root_sizes;
+    root_sizes.resize(g_profile_root_sections.length);
 
     // we need to count the items and buffer lengths
     foreach (ref root_item; conf.sub_items) switch (root_item.name)
@@ -1021,20 +1083,14 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
             break;
 
         case "parameters":
-        case "mqtt-variables":
-        case "mqtt-subscribe":
             const(char)[] tail = root_item.value;
-            bool is_params = root_item.name[] == "parameters" || root_item.name[] == "mqtt-variables";
             while (!tail.empty)
             {
                 const(char)[] value = tail.split!','.unQuote;
                 if (value.empty)
                     continue;
 
-                if (is_params)
-                    param_string_len += cache_len(value.length);
-                else
-                    mqtt_string_len += cache_len(value.length);
+                param_string_len += cache_len(value.length);
                 ++num_indirections;
             }
             break;
@@ -1153,27 +1209,11 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                             }
                         }
                         break;
-                    case "mqtt":
-                        ++mqtt_count;
-                        tail = reg_item.value;
-                        const(char)[] topic = tail.split!','.unQuote;
-                        mqtt_string_len += cache_len(topic.length);
-
-                        foreach (ref reg_conf; reg_item.sub_items)
-                        {
-                            if (reg_conf.name != "write")
-                                continue;
-                            tail = reg_conf.value;
-                            const(char)[] write_topic = tail.split!','.unQuote;
-                            mqtt_string_len += cache_len(write_topic.length);
-                            break;
-                        }
-                        break;
                     default:
                         if (ProfileSectionReg* s = find_profile_section(reg_item.name))
                         {
                             ++section_counts[s.kind - first_section_kind];
-                            s.handler.count_element(s.kind, reg_item.value, section_costs);
+                            s.handler.count_element(s.kind, reg_item, section_costs);
                         }
                         else
                             writeWarning("Unknown element type: ", reg_item.name);
@@ -1310,7 +1350,21 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
             break;
 
         default:
-            writeWarning("Invalid token: ", root_item.name);
+            if (ProfileRootSectionReg* s = find_profile_root_section(root_item.name))
+            {
+                size_t i = s.kind - first_root_section_kind;
+                if (root_sizes[i])
+                    writeWarning("Duplicate ", root_item.name, " definition");
+                else
+                {
+                    uint bytes = s.handler.root_size(s.kind, root_item);
+                    assert(bytes > 0, "profile root sections must allocate storage");
+                    root_sizes[][i] = bytes;
+                    s.handler.count_root(s.kind, root_item, section_costs);
+                }
+            }
+            else
+                writeWarning("Invalid token: ", root_item.name);
     }
 
     assert(item_count < ushort.max, "Too many register entries!");
@@ -1329,15 +1383,12 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     profile.lookup_strings = allocator.allocArray!char(2 + lookup_string_len);
     profile.expression_strings = allocator.allocArray!char(2 + expression_string_len);
     profile.desc_strings = allocator.allocArray!char(2 + desc_string_len);
-    profile.mqtt_strings = allocator.allocArray!char(2 + mqtt_string_len);
     profile.http_strings = allocator.allocArray!char(2 + http_string_len);
     profile.param_strings = allocator.allocArray!char(2 + param_string_len);
 
     profile.mb_elements = allocator.allocArray!ElementDesc_Modbus(mb_count);
     profile.http_elements = allocator.allocArray!ElementDesc_HTTP(http_count);
     profile.request_descs = allocator.allocArray!RequestDesc(request_count);
-    profile.mqtt_elements = allocator.allocArray!ElementDesc_MQTT(mqtt_count);
-
     size_t active_sections = 0;
     foreach (n; section_counts)
         if (n)
@@ -1356,7 +1407,22 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
         }
     }
 
-    StringCacheBuilder id_cache, name_cache, lookup_cache, expr_cache, desc_cache, mqtt_string_cache, http_string_cache, param_string_cache;
+    size_t active_roots = 0;
+    foreach (n; root_sizes)
+        if (n)
+            ++active_roots;
+    profile.root_blocks = allocator.allocArray!(Profile.RootBlock)(active_roots);
+    {
+        size_t rb = 0;
+        foreach (i, ref s; g_profile_root_sections)
+        {
+            uint n = root_sizes[i];
+            if (n)
+                profile.root_blocks[rb++] = Profile.RootBlock(s.kind, allocator.allocArray!ubyte(n));
+        }
+    }
+
+    StringCacheBuilder id_cache, name_cache, lookup_cache, expr_cache, desc_cache, http_string_cache, param_string_cache;
     if (profile.name_strings)
         id_cache = StringCacheBuilder(profile.id_strings);
     if (profile.name_strings)
@@ -1367,8 +1433,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
         expr_cache = StringCacheBuilder(profile.expression_strings);
     if (profile.desc_strings)
         desc_cache = StringCacheBuilder(profile.desc_strings);
-    if (profile.mqtt_strings)
-        mqtt_string_cache = StringCacheBuilder(profile.mqtt_strings);
     if (profile.http_strings)
         http_string_cache = StringCacheBuilder(profile.http_strings);
     if (profile.param_strings)
@@ -1390,43 +1454,28 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     mb_count = 0;
     http_count = 0;
     request_count = 0;
-    mqtt_count = 0;
     section_counts[][] = 0;
+    Array!bool root_parsed;
+    root_parsed.resize(g_profile_root_sections.length);
 
     // parse the elements
     foreach (ref root_item; conf.sub_items) switch (root_item.name)
     {
         case "parameters":
-        case "mqtt-variables":
-        case "mqtt-subscribe":
-            bool is_params = root_item.name == "parameters" || root_item.name == "mqtt-variables";
-            if (is_params ? profile._param_count : profile._mqtt_sub_count > 0)
+            if (profile._param_count > 0)
             {
-                writeWarning("Duplicate ", root_item.name, " definition");
+                writeWarning("Duplicate parameters definition");
                 break;
             }
-
-            if (is_params)
-                profile._params = cast(ushort)num_indirections;
-            else
-                profile._mqtt_subs = cast(ushort)num_indirections;
-
+            profile._params = cast(ushort)num_indirections;
             const(char)[] tail = root_item.value;
             while (!tail.empty)
             {
                 const(char)[] value = tail.split!','.unQuote;
                 if (value.empty)
                     continue;
-
-                if (is_params)
-                    profile.indirections[num_indirections++] = param_string_cache.add_string(value);
-                else
-                    profile.indirections[num_indirections++] = mqtt_string_cache.add_string(value);
-
-                if (is_params)
-                    ++profile._param_count;
-                else
-                    ++profile._mqtt_sub_count;
+                profile.indirections[num_indirections++] = param_string_cache.add_string(value);
+                ++profile._param_count;
             }
             break;
 
@@ -1720,46 +1769,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                             e.access = Access.read;
                         break;
 
-                    case "mqtt":
-                        const(char)[] tail = reg_item.value;
-                        tail = tail.split_element_and_desc();
-
-                        const(char)[] topic = tail.split!','.unQuote;
-                        const(char)[] type = tail.split!','.unQuote;
-                        const(char)[] units = tail.split!','.unQuote;
-
-                        e._kind = ElementType.mqtt;
-                        e._index = cast(ushort)mqtt_count;
-                        ref ElementDesc_MQTT mqtt = profile.mqtt_elements[mqtt_count++];
-
-                        mqtt.read_topic = mqtt_string_cache.add_string(topic);
-
-                        TextType ty = type.split!('/', false).parse_text_type();
-                        mqtt.value_desc = TextValueDesc(ty);
-                        if (!mqtt.value_desc.parse_units(units))
-                            writeWarning("Invalid units '", units, "' for MQTT element: ", id);
-
-                        foreach (ref reg_conf; reg_item.sub_items)
-                        {
-                            if (reg_conf.name != "write")
-                                continue;
-                            tail = reg_conf.value;
-                            const(char)[] write_topic = tail.split!','.unQuote;
-                            mqtt.write_topic = mqtt_string_cache.add_string(write_topic);
-                            break;
-                        }
-
-                        if (!type.empty)
-                            e.access = type.parse_access();
-                        else if (mqtt.write_topic)
-                        {
-                            if (mqtt.read_topic)
-                                e.access = Access.read_write;
-                            else
-                                e.access = Access.write;
-                        }
-                        break;
-
                     default:
                         if (ProfileSectionReg* s = find_profile_section(reg_item.name))
                         {
@@ -1769,7 +1778,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                             e._index = idx;
                             builder.element_id = id;
                             builder._element = &e;
-                            s.handler.parse_element(s.kind, reg_item.value, blk.data[idx*blk.esize .. (idx+1)*blk.esize], builder);
+                            s.handler.parse_element(s.kind, reg_item, blk.data[idx*blk.esize .. (idx+1)*blk.esize], builder);
                         }
                         else
                             writeWarning("Unknown element type: ", reg_item.name);
@@ -1815,7 +1824,17 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
             break;
 
         default:
-            continue;
+            if (ProfileRootSectionReg* s = find_profile_root_section(root_item.name))
+            {
+                size_t i = s.kind - first_root_section_kind;
+                if (!root_parsed[][i])
+                {
+                    root_parsed[][i] = true;
+                    ref Profile.RootBlock blk = root_block(profile, s.kind);
+                    s.handler.parse_root(s.kind, root_item, blk.data, builder);
+                }
+            }
+            break;
     }
 
     // sort the lookup table so the lookup function works...
@@ -2221,9 +2240,28 @@ struct ProfileSectionReg
 
 __gshared Array!ProfileSectionReg g_profile_sections;
 
+struct ProfileRootSectionReg
+{
+    const(char)[] name;
+    ProfileRootSections handler;
+    uint kind;
+}
+
+__gshared Array!ProfileRootSectionReg g_profile_root_sections;
+
 ProfileSectionReg* find_profile_section(const(char)[] name)
 {
     foreach (ref s; g_profile_sections)
+    {
+        if (s.name == name)
+            return &s;
+    }
+    return null;
+}
+
+ProfileRootSectionReg* find_profile_root_section(const(char)[] name)
+{
+    foreach (ref s; g_profile_root_sections)
     {
         if (s.name == name)
             return &s;
@@ -2239,6 +2277,16 @@ ref Profile.SectionBlock section_block(Profile* p, uint kind)
             return b;
     }
     assert(false, "no such profile section");
+}
+
+ref Profile.RootBlock root_block(Profile* p, uint kind)
+{
+    foreach (ref b; p.root_blocks)
+    {
+        if (b.kind == kind)
+            return b;
+    }
+    assert(false, "no such profile root section");
 }
 
 // the wire byte span a compiled desc reads; strN's numeral is the field's char count

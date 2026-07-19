@@ -11,6 +11,7 @@ import urt.util;
 
 import manager;
 import manager.collection;
+import manager.config : ConfItem;
 import manager.console;
 import manager.plugin;
 import manager.profile;
@@ -55,10 +56,11 @@ nothrow @nogc:
     uint element_size(uint)
         => cast(uint)ElementDesc_BLE.sizeof;
 
-    void count_element(uint, const(char)[], ref ProfileCosts) {}
+    void count_element(uint, ref const ConfItem, ref ProfileCosts) {}
 
-    bool parse_element(uint kind, const(char)[] tail, void[] slot, ref ProfileBuilder b)
+    bool parse_element(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
     {
+        const(char)[] tail = item.value;
         ElementDesc_BLE* ble = cast(ElementDesc_BLE*)slot.ptr;
         *ble = ElementDesc_BLE.init;
 
