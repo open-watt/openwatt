@@ -304,6 +304,7 @@ nothrow @nogc:
 
     ulong first_index;
     ulong t0;           // time base
+    ulong lost;         // records evicted between the reader's position and this block
     const(uint)* ts;    // null if the series is regular
     const(void)* data;
     const(DataFormat)* format;
@@ -341,6 +342,7 @@ struct Bucket
     uint count;
     uint capacity;
     bool follows_gap;  // <- we should steal a bit for this!
+    bool sealed;       // tail retired: shrunk to fit, immutable (packing lands here)
     void* samples;
     uint* offsets;     // null when regular
 
@@ -355,12 +357,33 @@ struct SeriesStore
 {
 nothrow @nogc:
 
+    // retention model, min/max per axis: floors (min_*) KEEP records even after consumption
+    // (for rendering), pins EXTEND retention until the consumer advances past, ceilings (max_*)
+    // FORCE eviction regardless of pins (stalled or undriven consumers get lapped and the
+    // cursor reports records_lost); between floor and ceiling, consumption governs
     Array!(Bucket*) buckets;
     ulong head;
+    ulong min_age;      // usecs (converted to domain ticks at evict time); 0 = none
+    ulong max_age;      // usecs; 0 = no ceiling
+    uint min_records;   // 0 = none
+    uint max_records;   // 0 = no ceiling
     ushort cursor_mask;
+    ushort pin_mask;    // cursors voluntary eviction must not pass; consumption = advancing the cursor
+    ulong[16] pin_position;
 
-    // TODO: retention policy (ring vs history, record/byte/age budgets) and eviction; a
-    //       cursor lapped by eviction takes a records_lost gap
+    ulong first_index() const pure
+        => buckets.length ? buckets[0].first_index : head;
+
+    ulong pin_floor() const pure
+    {
+        ulong floor = ulong.max;
+        foreach (bit; 0 .. 16)
+            if ((pin_mask & (1 << bit)) && pin_position[bit] < floor)
+                floor = pin_position[bit];
+        return floor;
+    }
+
+    // TODO: byte budgets (== records * stride until variable-stride records land) and ring tier
 
     Bucket* find_by_time(SysTime t)
     {

@@ -230,12 +230,12 @@ nothrow @nogc:
         return _eid;
     }
 
-    ElementCursor open_cursor(ulong from_index = ulong.max)
+    ElementCursor open_cursor(ulong from_index = ulong.max, bool pin = false)
     {
         EID handle = ensure_eid();
         if (!handle)
             return ElementCursor();
-        Cursor c = series.open_cursor(from_index);
+        Cursor c = series.open_cursor(from_index, pin);
         return ElementCursor(handle, c.position, c.bit);
     }
 

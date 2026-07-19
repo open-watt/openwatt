@@ -40,8 +40,19 @@ nothrow @nogc:
 
     RecordBlock next(uint max_records)
     {
-        RecordBlock r = element._history.read(*element.format, position, max_records);
+        SeriesStore* h = element._history;
+        ulong first = h.first_index;
+        ulong lost = 0;
+        if (position < first)
+        {
+            lost = first - position;
+            position = first;
+        }
+        RecordBlock r = h.read(*element.format, position, max_records);
+        r.lost = lost;
         position += r.count;
+        if (h.pin_mask & (1 << bit))
+            h.pin_position[bit] = position;
         if (!pending)
             element._dirty &= ~cast(ushort)(1 << bit);
         return r;
@@ -221,7 +232,21 @@ nothrow @nogc:
         return _history;
     }
 
-    Cursor open_cursor(ulong from_index = ulong.max)
+    void retention(uint min_records, uint max_records = 0)
+    {
+        SeriesStore* h = ensure_history();
+        h.min_records = min_records;
+        h.max_records = max_records;
+    }
+
+    void retention(Duration min_age, Duration max_age = Duration())
+    {
+        SeriesStore* h = ensure_history();
+        h.min_age = cast(ulong)min_age.as!"usecs";
+        h.max_age = cast(ulong)max_age.as!"usecs";
+    }
+
+    Cursor open_cursor(ulong from_index = ulong.max, bool pin = false)
     {
         SeriesStore* s = ensure_history();
         foreach (ubyte bit; 0 .. 16)
@@ -229,7 +254,13 @@ nothrow @nogc:
             if (s.cursor_mask & (1 << bit))
                 continue;
             s.cursor_mask |= cast(ushort)(1 << bit);
-            return Cursor(&this, from_index > s.head ? s.head : from_index, bit);
+            ulong position = from_index > s.head ? s.head : from_index;
+            if (pin)
+            {
+                s.pin_mask |= cast(ushort)(1 << bit);
+                s.pin_position[bit] = position;
+            }
+            return Cursor(&this, position, bit);
         }
         assert(false, "out of cursors");
     }
@@ -237,10 +268,16 @@ nothrow @nogc:
     void close_cursor(ref Cursor c)
     {
         if (_history)
+        {
             _history.cursor_mask &= ~cast(ushort)(1 << c.bit);
+            _history.pin_mask &= ~cast(ushort)(1 << c.bit);
+        }
         _dirty &= ~cast(ushort)(1 << c.bit);
         c.element = null;
     }
+
+    bool has_history() const pure
+        => _history !is null;
 
     ulong record_count() const pure
         => _history ? _history.head : 0;
@@ -251,22 +288,11 @@ nothrow @nogc:
     void teardown()
     {
         if (format && format.is_text)
-        {
             (cast(TextRecord*)_latest.raw.ptr).release();
-            if (_history)
-                foreach (b; _history.buckets)
-                    foreach (i; 0 .. b.count)
-                        (cast(TextRecord*)b.samples)[i].release();
-        }
         if (_history)
         {
             foreach (b; _history.buckets)
-            {
-                free(b.samples[0 .. b.capacity * format.stride]);
-                if (b.offsets)
-                    free((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof]);
-                free((cast(void*)b)[0 .. Bucket.sizeof]);
-            }
+                free_bucket(b);
             destroy!false(*_history);
             free((cast(void*)_history)[0 .. SeriesStore.sizeof]);
             _history = null;
@@ -349,6 +375,7 @@ private:
 
             blk.first_index = _history.head;
             _history.head += n;
+            evict_over_budget();
         }
 
         for (Subscription* s = _subs; s; s = s.next)
@@ -402,6 +429,7 @@ private:
 
             blk.first_index = _history.head;
             _history.head += n;
+            evict_over_budget();
         }
 
         for (Subscription* s = _subs; s; s = s.next)
@@ -420,12 +448,72 @@ private:
         bool overflow = b && b.offsets && b.count && max_tick - b.first_tick > uint.max;
         if (!b || b.count + n > b.capacity || follows_gap || overflow)
         {
+            if (b)
+                seal(b);
             b = alloc_bucket(n > bucket_capacity ? n : bucket_capacity);
             b.first_index = _history.head;
             b.follows_gap = follows_gap;
             _history.buckets ~= b;
         }
         return b;
+    }
+
+    void seal(Bucket* b)
+    {
+        if (b.sealed)
+            return;
+        b.sealed = true;
+        if (b.count && b.count < b.capacity)
+        {
+            b.samples = realloc(b.samples[0 .. b.capacity * format.stride], b.count * format.stride).ptr;
+            if (b.offsets)
+                b.offsets = cast(uint*)realloc((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof], b.count * uint.sizeof).ptr;
+            b.capacity = b.count;
+        }
+        // TODO: pack (columnar codec) lands here
+    }
+
+    void evict_over_budget()
+    {
+        SeriesStore* h = _history;
+        if (!h.min_records && !h.min_age && !h.max_records && !h.max_age)
+            return;
+        ulong to_ticks(ulong usecs)
+            => format.clock ? usecs * format.clock.nominal_rate / 1_000_000 : usecs;
+        ulong min_age_ticks = h.min_age ? to_ticks(h.min_age) : 0;
+        ulong max_age_ticks = h.max_age ? to_ticks(h.max_age) : 0;
+        ulong floor = h.pin_floor;
+        while (h.buckets.length > 1)
+        {
+            Bucket* front = h.buckets[0];
+            ulong newest = h.buckets[$-1].last_tick;
+            bool forced = (h.max_records && h.head - front.first_index > h.max_records)
+                       || (max_age_ticks && newest - front.last_tick > max_age_ticks);
+            if (!forced)
+            {
+                if (!h.min_records && !h.min_age)
+                    break;
+                if (front.first_index + front.count > floor)
+                    break;
+                if (h.min_records && h.head - front.first_index - front.count < h.min_records)
+                    break;
+                if (min_age_ticks && newest - front.last_tick <= min_age_ticks)
+                    break;
+            }
+            free_bucket(front);
+            h.buckets.remove(0);
+        }
+    }
+
+    void free_bucket(Bucket* b)
+    {
+        if (format.is_text)
+            foreach (i; 0 .. b.count)
+                (cast(TextRecord*)b.samples)[i].release();
+        free(b.samples[0 .. b.capacity * format.stride]);
+        if (b.offsets)
+            free((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof]);
+        free((cast(void*)b)[0 .. Bucket.sizeof]);
     }
 
     Bucket* alloc_bucket(uint capacity)
@@ -554,6 +642,84 @@ unittest
 
     te.teardown();
     assert(rc(src) == 0);
+
+    // retention: sealed buckets shrink to fit, the budget evicts from the front, lapped cursors report loss
+    Element2 r;
+    r.format = &f64_held;
+    r.retention(4);
+    Cursor lap = r.open_cursor(0);
+    foreach (i; 0 .. 6)
+    {
+        r.observe(double(i), from_unix_time_ns(1_000 * (i + 1)));
+        r.mark_gap();   // force one-record buckets
+    }
+    assert(r.record_count == 6);
+    assert(r._history.first_index == 2);
+    assert(r._history.buckets[0].sealed && r._history.buckets[0].capacity == 1);
+    RecordBlock rb = lap.next(16);
+    assert(rb.lost == 2 && rb.count == 1 && rb.get!double(0) == 2.0);
+    r.close_cursor(lap);
+    r.teardown();
+
+    // pinned cursor: holds retention past the floor until consumed; consumption releases
+    Element2 p;
+    p.format = &f64_held;
+    p.retention(2);
+    Cursor pinc = p.open_cursor(0, true);
+    foreach (i; 0 .. 6)
+    {
+        p.observe(double(i), from_unix_time_ns(1_000 * (i + 1)));
+        p.mark_gap();
+    }
+    assert(p._history.first_index == 0);
+    foreach (_; 0 .. 4)
+        pinc.next(1);
+    p.observe(6.0, from_unix_time_ns(7_000));
+    assert(p._history.first_index == 4);
+    p.close_cursor(pinc);
+    p.teardown();
+
+    // ceiling: max_records evicts past a stalled pin; the lapped cursor reports the loss
+    Element2 x;
+    x.format = &f64_held;
+    x.retention(0, 3);
+    Cursor stall = x.open_cursor(0, true);
+    foreach (i; 0 .. 6)
+    {
+        x.observe(double(i), from_unix_time_ns(1_000 * (i + 1)));
+        x.mark_gap();
+    }
+    assert(x._history.first_index == 3);
+    RecordBlock xb = stall.next(16);
+    assert(xb.lost == 3 && xb.count == 1 && xb.get!double(0) == 3.0);
+    x.close_cursor(stall);
+    x.teardown();
+
+    // age floor: consumed-or-unpinned records older than the window evict
+    Element2 a;
+    a.format = &f64_held;
+    a.retention(1.seconds);
+    foreach (i; 0 .. 3)
+    {
+        a.observe(double(i), from_unix_time_ns(1_000_000L * (i + 1)));
+        a.mark_gap();
+    }
+    assert(a._history.first_index == 0);
+    a.observe(9.0, from_unix_time_ns(3_000_000_000L));
+    assert(a._history.first_index == 3);
+    a.teardown();
+
+    // eviction releases text records
+    Element2 tv;
+    tv.format = &text_fmt;
+    tv.retention(1);
+    String evictee = "the first long string, soon evicted".makeString(defaultAllocator());
+    tv.observe_text(evictee, from_unix_time_ns(1_000));
+    assert(rc(evictee) == 2);
+    tv.mark_gap();
+    tv.observe_text("replacement value, also quite long", from_unix_time_ns(2_000));
+    assert(rc(evictee) == 0);   // slot replaced, bucket evicted
+    tv.teardown();
 
     // TODO: regular-series test returns once append_block is rebuilt and tick() is rate-aware
 }

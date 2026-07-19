@@ -582,12 +582,37 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
     if (is_new_device)
         g_app.devices.insert(device.id[], device);
 
+    apply_default_retention(device);
+
     g_app.request_rebind();
 
     device.notify(ComponentEvent.tree_changed);
     device.notify(ComponentEvent.online);
 
     return device;
+}
+
+// recording intent default: every native-mounted element that isn't a constant or config
+// value gets history; profiles will grow explicit record/retention overrides (grammar TODO)
+void apply_default_retention(Component c)
+{
+    import urt.time : seconds;
+
+    enum default_min_records = 256;      // rendering floor even when older than the window
+    enum default_max_records = 16_384;   // RAM ceiling; laps stalled consumers
+    enum default_window = 3600.seconds;
+
+    foreach (Element* e; c.elements)
+    {
+        if (!e.native || e.series.has_history)
+            continue;
+        if (e.sampling_mode == SamplingMode.constant || e.sampling_mode == SamplingMode.config)
+            continue;
+        e.series.retention(default_min_records, default_max_records);
+        e.series.retention(default_window);
+    }
+    foreach (Component child; c.components)
+        apply_default_retention(child);
 }
 
 unittest
