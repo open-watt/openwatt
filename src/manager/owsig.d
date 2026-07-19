@@ -1,18 +1,21 @@
 module manager.owsig;
 
 // owsig v0: raw-image series container. The file is a doubly-linked block list: each block
-// header carries next/prev file offsets, its index and timestamp span, and its own data
-// format, so a format change just starts a new block. The runtime keeps the headers as an
-// in-memory directory (offset + span), so time-seek is a binary search and recall is: load
-// one block's payload, view it in place as a RecordBlock (byte-identical to the RAM image).
+// header carries next/prev file offsets and its index/timestamp span; the first block of a
+// format run additionally carries a BlockFormatHeader (and, later, name-binding data for
+// enum/user/codec identity) behind it, and followers point at that anchor via format_block,
+// so a format change just starts a new run and stable runs skip the repeat noise. The
+// runtime keeps the headers as an in-memory directory with the format resolved per entry,
+// so time-seek is a binary search and recall is: load one block's payload, view it in place
+// as a RecordBlock (byte-identical to the RAM image).
 //
 // Codecs are registered with a selection predicate; the first match packs the payload and
 // RAW is the mandatory fallback (a codec that doesn't beat raw is ignored). Codec ids 0/1
 // are reserved (raw, zlib); zlib waits on a deflate encoder in urt. Registered codec ids
-// are process-local: TODO bind them by NAME in the file before any ships (id.d doctrine).
+// are process-local: TODO bind them by NAME in the anchor block before any ships.
 //
 // Not serialisable yet: text (String handles need a flattening codec), user types and enum
-// identity (need name binding), domain-clocked series (need anchor blocks).
+// identity (need name binding), domain-clocked series (need anchor blocks for the clock).
 
 import urt.array;
 import urt.file;
@@ -34,7 +37,7 @@ struct SeriesCodec
     // pack the raw payload image into dst; bytes written, or -1 to decline (raw applies)
     ptrdiff_t function(ref const RecordBlock blk, const(void)[] raw, void[] dst) nothrow @nogc pack;
     // unpack a payload into the raw image; false = corrupt
-    bool function(const(void)[] src, ref const BlockHeader hdr, void[] dst) nothrow @nogc unpack;
+    bool function(const(void)[] src, ref const BlockEntry blk, void[] dst) nothrow @nogc unpack;
 }
 
 ubyte register_series_codec(ref const SeriesCodec codec)
@@ -63,22 +66,15 @@ nothrow @nogc:
 
     ulong next;          // file offset of the next block; 0 = tail
     ulong prev;          // file offset of the previous block; 0 = head
-    ulong format_block;  // first block of this format run (holds the extended descriptor data); 0 = this block
+    ulong format_block;  // first block of this format run; 0 = this block anchors (BlockFormatHeader follows)
     ulong first_index;
     ulong last_index;    // inclusive
     ulong first_tick;    // usecs; also the time base of the offsets plane
     ulong last_tick;     // inclusive
-    ulong unit;          // ScaledUnit image; 0 = none
     uint payload_bytes;
-    uint rate;
-    ushort header_bytes; // offset from block start to the payload; readers skip unknown extensions
-    ushort stride;
-    ubyte type;          // ValueType
-    ubyte semantics;
-    ubyte extent;        // DataFormat.count
+    ushort header_bytes; // offset from block start to the payload; covers any format header and extensions
     ubyte flags;         // Flags
     ubyte codec;
-    ubyte[7] reserved;
 
     enum Flags : ubyte
     {
@@ -88,16 +84,35 @@ nothrow @nogc:
 
     uint count() const pure
         => cast(uint)(last_index - first_index + 1);
-
-    uint raw_bytes() const pure
-        => cast(uint)(((flags & Flags.irregular) ? count * uint.sizeof : 0) + count * stride);
 }
-static assert(BlockHeader.sizeof == 88);
+static assert(BlockHeader.sizeof == 64);
+
+// follows BlockHeader on format-anchor blocks; name-binding data (enum/user/codec identity)
+// follows the fixed part, all within BlockHeader.header_bytes
+struct BlockFormatHeader
+{
+    ulong unit;          // ScaledUnit image; 0 = none
+    uint rate;
+    ushort header_bytes = BlockFormatHeader.sizeof;  // fixed part; names follow
+    ushort stride;
+    ubyte type;          // ValueType
+    ubyte semantics;
+    ubyte extent;        // DataFormat.count
+    ubyte[5] reserved;
+}
+static assert(BlockFormatHeader.sizeof == 24);
 
 struct BlockEntry
 {
+nothrow @nogc:
+
     ulong offset;
     BlockHeader hdr;
+    BlockFormatHeader fmt;  // resolved for every entry; anchors own it, followers copy their run's
+
+    uint raw_bytes() const pure
+        => cast(uint)(((hdr.flags & BlockHeader.Flags.irregular) ? hdr.count * uint.sizeof : 0)
+                      + hdr.count * fmt.stride);
 }
 
 struct SeriesContainer
@@ -137,31 +152,43 @@ nothrow @nogc:
             return false;
         }
 
-        // walk the chain to rebuild the directory
+        // walk the chain to rebuild the directory, resolving each entry's format run
         ulong offset = fh.header_bytes;
         _end = fh.header_bytes;
+        BlockFormatHeader run_fmt;
         while (offset)
         {
-            BlockHeader h;
-            if (read_at(_file, (cast(void*)&h)[0 .. BlockHeader.sizeof], offset, bytes) != Result.success
+            BlockEntry e;
+            if (read_at(_file, (cast(void*)&e.hdr)[0 .. BlockHeader.sizeof], offset, bytes) != Result.success
                 || bytes < BlockHeader.sizeof)
                 break;
-            dir ~= BlockEntry(offset, h);
-            _tail = offset;
-            _end = offset + h.header_bytes + h.payload_bytes;
-            offset = h.next;
-        }
-        if (dir.length)
-        {
-            _fmt_anchor = dir[$-1].hdr.format_block ? dir[$-1].hdr.format_block : _tail;
-            foreach_reverse (ref const BlockEntry e; dir[])
+            e.offset = offset;
+            if (e.hdr.format_block == 0)
             {
-                if (e.offset == _fmt_anchor)
-                {
-                    _anchor = e.hdr;
+                if (read_at(_file, (cast(void*)&run_fmt)[0 .. BlockFormatHeader.sizeof],
+                            offset + BlockHeader.sizeof, bytes) != Result.success
+                    || bytes < BlockFormatHeader.sizeof)
                     break;
+                _fmt_anchor = offset;
+                _afmt = run_fmt;
+            }
+            else if (e.hdr.format_block != _fmt_anchor)
+            {
+                // referenced run isn't the walking one (future compaction); resolve backwards
+                foreach_reverse (ref const BlockEntry p; dir[])
+                {
+                    if (p.offset == e.hdr.format_block)
+                    {
+                        run_fmt = p.fmt;
+                        break;
+                    }
                 }
             }
+            e.fmt = run_fmt;
+            dir ~= e;
+            _tail = offset;
+            _end = offset + e.hdr.header_bytes + e.hdr.payload_bytes;
+            offset = e.hdr.next;
         }
         return true;
     }
@@ -188,8 +215,33 @@ nothrow @nogc:
         uint offs_bytes = irregular ? count * cast(uint)uint.sizeof : 0;
         uint raw_bytes = offs_bytes + count * f.stride;
 
-        _wbuf.resize(BlockHeader.sizeof + raw_bytes);
-        ubyte[] raw = _wbuf[BlockHeader.sizeof .. $];
+        BlockFormatHeader bf;
+        bf.rate = f.rate;
+        bf.stride = f.stride;
+        bf.type = f.type;
+        bf.semantics = f.semantics;
+        bf.extent = f.count;
+        if (f.desc == DataFormat.Desc.quantity)
+        {
+            static assert(ScaledUnit.sizeof <= 8);
+            (cast(ubyte*)&bf.unit)[0 .. ScaledUnit.sizeof] = (cast(const(ubyte)*)&f.unit)[0 .. ScaledUnit.sizeof];
+        }
+        bool anchor = !(_fmt_anchor && same_format(bf, _afmt));
+
+        BlockHeader h;
+        h.header_bytes = cast(ushort)(BlockHeader.sizeof + (anchor ? BlockFormatHeader.sizeof : 0));
+        h.format_block = anchor ? 0 : _fmt_anchor;
+        h.prev = _tail;
+        h.first_index = blk.first_index;
+        h.last_index = blk.first_index + count - 1;
+        h.first_tick = blk.tick(0);
+        h.last_tick = blk.tick(count - 1);
+        h.payload_bytes = raw_bytes;
+        h.flags = irregular ? BlockHeader.Flags.irregular : 0;
+        h.codec = owsig_codec_raw;
+
+        _wbuf.resize(h.header_bytes + raw_bytes);
+        ubyte[] raw = _wbuf[h.header_bytes .. $];
         if (irregular)
         {
             // rebase the offsets plane so first_tick doubles as the block's time base
@@ -199,32 +251,6 @@ nothrow @nogc:
                 offs[i] = blk.ts[i] - base;
         }
         raw[offs_bytes .. $] = cast(const(ubyte)[])blk.records();
-
-        BlockHeader h;
-        h.header_bytes = BlockHeader.sizeof;
-        h.prev = _tail;
-        h.first_index = blk.first_index;
-        h.last_index = blk.first_index + count - 1;
-        h.first_tick = blk.tick(0);
-        h.last_tick = blk.tick(count - 1);
-        h.payload_bytes = raw_bytes;
-        h.rate = f.rate;
-        h.stride = f.stride;
-        h.type = f.type;
-        h.semantics = f.semantics;
-        h.extent = f.count;
-        h.flags = irregular ? BlockHeader.Flags.irregular : 0;
-        h.codec = owsig_codec_raw;
-        if (f.desc == DataFormat.Desc.quantity)
-        {
-            static assert(ScaledUnit.sizeof <= 8);
-            (cast(ubyte*)&h.unit)[0 .. ScaledUnit.sizeof] = (cast(const(ubyte)*)&f.unit)[0 .. ScaledUnit.sizeof];
-        }
-
-        if (_fmt_anchor && same_format(h, _anchor))
-            h.format_block = _fmt_anchor;
-        // else this block anchors a new format run; extended descriptor data (enum/user
-        // names) lands behind header_bytes here when identity binding is built
 
         foreach (i; 0 .. g_num_codecs)
         {
@@ -236,13 +262,15 @@ nothrow @nogc:
             {
                 h.codec = cast(ubyte)(first_registered_codec + i);
                 h.payload_bytes = cast(uint)packed;
-                _wbuf.resize(BlockHeader.sizeof + packed);
-                _wbuf[BlockHeader.sizeof .. $] = _pbuf[0 .. packed];
+                _wbuf.resize(h.header_bytes + packed);
+                _wbuf[h.header_bytes .. $] = _pbuf[0 .. packed];
             }
             break;
         }
 
         *cast(BlockHeader*)_wbuf.ptr = h;
+        if (anchor)
+            *cast(BlockFormatHeader*)(_wbuf.ptr + BlockHeader.sizeof) = bf;
 
         ulong offset = _end;
         size_t written;
@@ -253,13 +281,13 @@ nothrow @nogc:
                 return false; // next-link patch failed; directory still knows the block
         if (dir.length)
             dir[$-1].hdr.next = offset;
-        dir ~= BlockEntry(offset, h);
+        dir ~= BlockEntry(offset, h, bf);
         _tail = offset;
         _end = offset + _wbuf.length;
-        if (h.format_block == 0)
+        if (anchor)
         {
             _fmt_anchor = offset;
-            _anchor = h;
+            _afmt = bf;
         }
         return true;
     }
@@ -268,7 +296,7 @@ nothrow @nogc:
     bool load(size_t i, out RecordBlock blk)
     {
         ref const BlockEntry e = dir[i];
-        uint raw_bytes = e.hdr.raw_bytes;
+        uint raw_bytes = e.raw_bytes;
         _buf.resize(raw_bytes);
 
         size_t bytes;
@@ -285,21 +313,19 @@ nothrow @nogc:
             if (read_at(_file, _pbuf[], e.offset + e.hdr.header_bytes, bytes) != Result.success
                 || bytes < e.hdr.payload_bytes)
                 return false;
-            if (!g_codecs[e.hdr.codec - first_registered_codec].unpack(_pbuf[], e.hdr, _buf[]))
+            if (!g_codecs[e.hdr.codec - first_registered_codec].unpack(_pbuf[], e, _buf[]))
                 return false;
         }
 
-        _fmt = DataFormat(cast(ValueType)e.hdr.type, cast(Semantics)e.hdr.semantics);
-        _fmt.count = e.hdr.extent;
-        _fmt.rate = e.hdr.rate;
-        if (e.hdr.unit)
+        _fmt = DataFormat(cast(ValueType)e.fmt.type, cast(Semantics)e.fmt.semantics);
+        if (e.fmt.unit)
         {
             ScaledUnit u;
-            (cast(ubyte*)&u)[0 .. ScaledUnit.sizeof] = (cast(const(ubyte)*)&e.hdr.unit)[0 .. ScaledUnit.sizeof];
-            _fmt = DataFormat(cast(ValueType)e.hdr.type, cast(Semantics)e.hdr.semantics, u);
-            _fmt.count = e.hdr.extent;
-            _fmt.rate = e.hdr.rate;
+            (cast(ubyte*)&u)[0 .. ScaledUnit.sizeof] = (cast(const(ubyte)*)&e.fmt.unit)[0 .. ScaledUnit.sizeof];
+            _fmt = DataFormat(cast(ValueType)e.fmt.type, cast(Semantics)e.fmt.semantics, u);
         }
+        _fmt.count = e.fmt.extent;
+        _fmt.rate = e.fmt.rate;
 
         bool irregular = (e.hdr.flags & BlockHeader.Flags.irregular) != 0;
         uint offs_bytes = irregular ? e.hdr.count * cast(uint)uint.sizeof : 0;
@@ -333,22 +359,16 @@ private:
     Array!ubyte _wbuf;
     Array!ubyte _pbuf;
     DataFormat _fmt;
-    BlockHeader _anchor;
+    BlockFormatHeader _afmt;
     ulong _fmt_anchor;
     ulong _tail;
     ulong _end;
     bool _open;
 
-    static bool same_format(ref const BlockHeader a, ref const BlockHeader b) pure
+    static bool same_format(ref const BlockFormatHeader a, ref const BlockFormatHeader b) pure
         => a.type == b.type && a.semantics == b.semantics && a.extent == b.extent
         && a.stride == b.stride && a.rate == b.rate && a.unit == b.unit;
 }
-
-
-private:
-
-__gshared SeriesCodec[8] g_codecs;
-__gshared ubyte g_num_codecs;
 
 
 unittest
@@ -394,9 +414,12 @@ unittest
         assert(c.dir.length == 2);
         assert(c.dir[0].hdr.first_index == 0 && c.dir[1].hdr.last_index == 3);
 
-        // format run: the first block anchors, followers point at it
+        // format run: the anchor carries the format header, followers point and stay slim
         assert(c.dir[0].hdr.format_block == 0);
+        assert(c.dir[0].hdr.header_bytes == BlockHeader.sizeof + BlockFormatHeader.sizeof);
         assert(c.dir[1].hdr.format_block == c.dir[0].offset);
+        assert(c.dir[1].hdr.header_bytes == BlockHeader.sizeof);
+        assert(c.dir[1].fmt.stride == 8); // follower resolved its run's format
 
         RecordBlock blk;
         assert(c.load(0, blk));
@@ -448,3 +471,9 @@ unittest
     delete_file(path);
     e.teardown();
 }
+
+
+private:
+
+__gshared SeriesCodec[8] g_codecs;
+__gshared ubyte g_num_codecs;
