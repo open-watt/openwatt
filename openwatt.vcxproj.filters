@@ -411,6 +411,9 @@
     <DCompile Include="src\manager\series.d">
       <Filter>src\manager</Filter>
     </DCompile>
+    <DCompile Include="src\manager\owsig.d">
+      <Filter>src\manager</Filter>
+    </DCompile>
     <DCompile Include="src\manager\package.d">
       <Filter>src\manager</Filter>
     </DCompile>

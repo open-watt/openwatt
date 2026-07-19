@@ -39,6 +39,7 @@ import manager.console.live_view;
 import manager.device;
 import manager.element;
 import manager.element2;
+import manager.owsig;
 import manager.plugin;
 
 import db;
@@ -58,8 +59,9 @@ nothrow @nogc:
     Recorder owner;
     Element* element;
     Cursor cursor;          // native intake: pinned, never lapped (element holder predates EIDs, so this rides along)
+    SeriesContainer container;
     String path;            // data-model path: "device.component.element"
-    SeriesId series;        // handle into the database world
+    SeriesId series;        // handle into the database world (ring intake only)
     ulong flush_watermark;  // newest element-sample time examined for the db (ring intake only)
     ulong last_flushed;     // time of the last sample shipped (min-period subsampling)
 
@@ -76,45 +78,29 @@ nothrow @nogc:
 
         if (e.native)
         {
+            const(DataFormat)* f = e.series.format;
+            if (!container_serialisable(*f))
+                return; // stays in RAM; text/user/domain series wait on their codecs
+
             // ring samples shipped before the element went native mustn't re-ship: tail from head
             if (cursor.element is null)
                 cursor = e.series.open_cursor(last_flushed ? ulong.max : 0, true);
             if (!cursor.pending)
                 return;
+            if (!container.is_open && !container.open_(owner.make_filename(path[], ".owsig")[]))
+                return; // disk trouble; records stay pinned, retry next flush
 
-            bool numeric = e.series.format.is_scalar;
-            Array!Sample block;
-            ulong start = cursor.position;
-            ulong cur = last_flushed;
             while (cursor.pending)
             {
-                RecordBlock blk = cursor.next(64);
+                RecordBlock blk = cursor.next(256);
                 if (blk.count == 0)
                     break;
-                if (!numeric)
-                    continue; // consume so retention can move; nothing to ship
-                foreach (i; 0 .. blk.count)
+                if (!container.put(blk))
                 {
-                    double v;
-                    Variant val = blk.box(i);
-                    if (!sample_to_double(val, v))
-                        continue;
-                    ulong t = unixTimeNs(blk.time(i));
-                    if (throttle && cur && t - cur < throttle)
-                        continue;
-                    block ~= Sample(t, v);
-                    cur = t;
+                    cursor.seek(blk.first_index); // rewind just this block; earlier puts are on disk
+                    break;
                 }
             }
-            if (block.length == 0)
-            {
-                last_flushed = cur;
-                return;
-            }
-            if (database().push_block(series, block[]))
-                last_flushed = cur;
-            else
-                cursor.seek(start); // db channel full: re-drain the same records next flush
             return;
         }
 
@@ -155,6 +141,7 @@ nothrow @nogc:
     {
         if (cursor.element)
             element.series.close_cursor(cursor);
+        container.close_();
     }
 }
 
@@ -162,12 +149,10 @@ bool query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, Que
 {
     Element* e = rs.element;
     Array!Sample local;
-    if (e.native && e.series.record_count)
+    if (e.native)
     {
         ulong idx = e.series.index_for_time(from_unix_time_ns(from));
-        if (idx == ulong.max)
-            return false;
-        for (;;)
+        for (; idx != ulong.max;)
         {
             RecordBlock blk = e.series.read_records(idx, 256);
             if (blk.count == 0)
@@ -189,6 +174,39 @@ bool query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, Que
             if (past)
                 break;
             idx += blk.count;
+        }
+
+        if ((local.length == 0 || local[0].time > from) && rs.container.is_open && rs.container.dir.length)
+        {
+            // the container reaches further back than RAM retention
+            Array!Sample merged;
+            ulong ram_start = local.length ? local[0].time : ulong.max;
+            size_t bi = rs.container.find_by_time(from / 1000);
+            if (bi == rs.container.dir.length)
+                --bi;       // everything ends before `from`: the last block holds the seed
+            else if (bi)
+                --bi;       // step back one block for held state
+            outer: for (; bi < rs.container.dir.length; ++bi)
+            {
+                if (rs.container.dir[bi].hdr.first_tick * 1000 > to)
+                    break;
+                RecordBlock blk;
+                if (!rs.container.load(bi, blk))
+                    break;
+                foreach (i; 0 .. blk.count)
+                {
+                    ulong t = unixTimeNs(blk.time(i));
+                    if (t >= ram_start || t > to)
+                        break outer;
+                    double v;
+                    Variant val = blk.box(i);
+                    if (sample_to_double(val, v))
+                        merged ~= Sample(t, v);
+                }
+            }
+            foreach (ref const Sample s; local[])
+                merged ~= s;
+            local = merged.move;
         }
     }
     else
@@ -468,7 +486,7 @@ private:
         // the element self-captures; the first flush ships its standing history
     }
 
-    String make_filename(const(char)[] path)
+    String make_filename(const(char)[] path, const(char)[] ext = ".owr")
     {
         MutableString!0 fn;
         fn.append(_dir[], '/');
@@ -480,7 +498,7 @@ private:
             else
                 fn ~= c;
         }
-        fn ~= ".owr";
+        fn ~= ext;
         return fn[].makeString(defaultAllocator());
     }
 }
