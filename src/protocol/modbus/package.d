@@ -51,7 +51,7 @@ nothrow @nogc:
 
         g_app.register_enum!ModbusProtocol();
         g_app.register_enum!SunSpecInverterState();
-        g_app.register_enum!SunSpecInverterEvent();
+        g_app.register_bitfield!SunSpecInverterEvent();
 
         g_app.console.register_collection!ModbusInterface();
         g_app.console.register_collection!ModbusNode();
