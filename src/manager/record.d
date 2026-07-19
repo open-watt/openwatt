@@ -38,6 +38,7 @@ import manager.console.graph;
 import manager.console.live_view;
 import manager.device;
 import manager.element;
+import manager.element2;
 import manager.plugin;
 
 import db;
@@ -56,9 +57,10 @@ nothrow @nogc:
 
     Recorder owner;
     Element* element;
+    Cursor cursor;          // native intake: pinned, never lapped (element holder predates EIDs, so this rides along)
     String path;            // data-model path: "device.component.element"
     SeriesId series;        // handle into the database world
-    ulong flush_watermark;  // newest element-sample time examined for the db
+    ulong flush_watermark;  // newest element-sample time examined for the db (ring intake only)
     ulong last_flushed;     // time of the last sample shipped (min-period subsampling)
 
     this(this) @disable;
@@ -66,17 +68,62 @@ nothrow @nogc:
     void flush()
     {
         Element* e = element;
-        ulong newest = e.recent_newest();
-        if (e.recent_count == 0 || newest <= flush_watermark)
-            return;
 
         ulong throttle = 0;
         Duration mp = owner.min_period;
         if (mp > Duration.zero)
             throttle = cast(ulong)mp.as!"nsecs";
 
+        if (e.native)
+        {
+            // ring samples shipped before the element went native mustn't re-ship: tail from head
+            if (cursor.element is null)
+                cursor = e.series.open_cursor(last_flushed ? ulong.max : 0, true);
+            if (!cursor.pending)
+                return;
+
+            bool numeric = e.series.format.is_scalar;
+            Array!Sample block;
+            ulong start = cursor.position;
+            ulong cur = last_flushed;
+            while (cursor.pending)
+            {
+                RecordBlock blk = cursor.next(64);
+                if (blk.count == 0)
+                    break;
+                if (!numeric)
+                    continue; // consume so retention can move; nothing to ship
+                foreach (i; 0 .. blk.count)
+                {
+                    double v;
+                    Variant val = blk.box(i);
+                    if (!sample_to_double(val, v))
+                        continue;
+                    ulong t = unixTimeNs(blk.time(i));
+                    if (throttle && cur && t - cur < throttle)
+                        continue;
+                    block ~= Sample(t, v);
+                    cur = t;
+                }
+            }
+            if (block.length == 0)
+            {
+                last_flushed = cur;
+                return;
+            }
+            if (database().push_block(series, block[]))
+                last_flushed = cur;
+            else
+                cursor.seek(start); // db channel full: re-drain the same records next flush
+            return;
+        }
+
+        ulong newest = e.recent_newest();
+        if (e.recent_count == 0 || newest <= flush_watermark)
+            return;
+
         Array!Sample block;
-        ulong cursor = last_flushed;
+        ulong cur = last_flushed;
         foreach (i; 0 .. e.recent_count)
         {
             ref const ElementSample s = e.recent_at(i);
@@ -86,10 +133,10 @@ nothrow @nogc:
             double v;
             if (!sample_to_double(s.value, v))
                 continue;
-            if (throttle && cursor && t - cursor < throttle)
+            if (throttle && cur && t - cur < throttle)
                 continue;
             block ~= Sample(t, v);
-            cursor = t;
+            cur = t;
         }
 
         if (block.length == 0)
@@ -100,8 +147,14 @@ nothrow @nogc:
         if (database().push_block(series, block[]))
         {
             flush_watermark = newest;
-            last_flushed = cursor;
+            last_flushed = cur;
         }
+    }
+
+    void close()
+    {
+        if (cursor.element)
+            element.series.close_cursor(cursor);
     }
 }
 
@@ -302,6 +355,7 @@ protected:
     {
         foreach (rs; _streams.values)
         {
+            rs.close();
             database().close_series(rs.series);
             defaultAllocator().freeT(rs);
         }

@@ -38,6 +38,16 @@ nothrow @nogc:
     bool pending() const
         => element._history && element._history.head > position;
 
+    void seek(ulong pos)
+    {
+        SeriesStore* h = element._history;
+        if (pos > h.head)
+            pos = h.head;
+        position = pos;
+        if (h.pin_mask & (1 << bit))
+            h.pin_position[bit] = pos;
+    }
+
     RecordBlock next(uint max_records)
     {
         SeriesStore* h = element._history;
