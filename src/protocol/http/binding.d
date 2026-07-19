@@ -20,7 +20,8 @@ import manager.device;
 import manager.element;
 import manager.expression;
 import manager.profile;
-import manager.sampler;
+import manager.sample;
+import manager.series;
 
 import protocol.http.client;
 import protocol.http.message : HTTPMessage, HTTPMethod, HTTPParam;
@@ -33,6 +34,7 @@ nothrow @nogc:
 struct HTTPSampleElement
 {
     Element* element;
+    SampleDesc desc;
     ushort http_index;
     ushort sample_time_ms;
     MonoTime last_sample;
@@ -187,11 +189,15 @@ protected:
 
     final void add_element(Element* element, ref const ElementDesc desc, ref const ElementDesc_HTTP http_desc, const(char)[][] param_names, const(char)[][] param_values)
     {
+        if (http_desc.desc == ushort.max)
+            return;
+        SampleDesc sample_desc = desc_by_index(http_desc.desc);
         if (!element.series.format)
-            element.series.format = _profile_data.series_format(http_desc.value_desc);
+            element.series.format = sample_desc.fmt;
 
         HTTPSampleElement* e = &_elements.pushBack();
         e.element = element;
+        e.desc = sample_desc;
         e.http_index = cast(ushort)desc.element;
 
         switch (desc.update_frequency)
@@ -619,9 +625,19 @@ private:
 
     const(char)[] format_element_value(ref const HTTPSampleElement se)
     {
-        ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
         const Variant v = se.element.value;
-        return format_value(v, http.value_desc);
+        const(DataFormat)* fmt = se.desc.fmt;
+        if (fmt.is_text)
+            return v.isString ? v.asString : null;
+        if (!fmt.is_scalar)
+            return null;
+
+        Scalar scalar;
+        if (!unbox_scalar(v, *fmt, scalar))
+            return null;
+        char[] buffer = cast(char[])talloc(256);
+        ptrdiff_t length = format_record(scalar.raw[0 .. fmt.stride], se.desc, buffer);
+        return length >= 0 ? buffer[0 .. length] : null;
     }
 
     int on_response(ref const HTTPMessage response)
@@ -720,9 +736,11 @@ private:
                     continue;
 
                 const(char)[] capture = rmatch.num_captures > 0 ? rmatch.captures[0] : rmatch.full;
-                se.element.value(sample_value(capture, http.value_desc), response.timestamp);
-                se.last_sample = getTime();
-                se.sampled = true;
+                if (apply_text_value(se.element, capture, se.desc, response.timestamp))
+                {
+                    se.last_sample = getTime();
+                    se.sampled = true;
+                }
             }
             return 0;
         }
@@ -782,7 +800,8 @@ private:
             if (val is null)
                 continue;
 
-            apply_value(se.element, *val, http.value_desc, response.timestamp);
+            if (!apply_value(se.element, *val, se.desc, response.timestamp))
+                continue;
             se.last_sample = getTime();
             se.sampled = true;
 
@@ -960,132 +979,62 @@ void deep_merge(ref Variant target, ref Variant source)
         target = source;
 }
 
-void apply_value(Element* element, ref Variant val, ref const TextValueDesc desc, SysTime timestamp)
+bool apply_text_value(Element* element, const(char)[] token, ref const SampleDesc desc, SysTime timestamp)
 {
-    import urt.inet;
-    import router.iface.mac : MACAddress;
+    const(DataFormat)* fmt = desc.fmt;
+    if (fmt.is_text)
+    {
+        if (element.series.format is fmt)
+            element.observe_text(token, timestamp);
+        else
+            element.value(token, timestamp);
+        return true;
+    }
 
+    ubyte[64] record = void;
+    if (fmt.stride > record.length || !parse_record(token, desc, record[0 .. fmt.stride]))
+        return false;
+    if (element.series.format is fmt)
+        element.observe_record(record[0 .. fmt.stride], timestamp);
+    else
+        element.value(box_record(record.ptr, *fmt), timestamp);
+    return true;
+}
+
+bool apply_value(Element* element, ref const Variant val, ref const SampleDesc desc, SysTime timestamp)
+{
     if (val.isNull)
     {
         // clear the element value; is this the correct thing to do?
         element.value(Variant(), timestamp);
-        return;
+        return true;
     }
 
-    // push strings through `sample_value`
     if (val.isString)
+        return apply_text_value(element, val.asString(), desc, timestamp);
+
+    const(DataFormat)* fmt = desc.fmt;
+    char[128] token_buffer = void;
+    const(char)[] token;
+    if (val.isBool && fmt.type != ValueType.bool_)
+        token = val.asBool ? "1" : "0";
+    else
     {
-        val = sample_value(val.asString(), desc);
-        element.value(val, timestamp);
-        return;
+        ptrdiff_t length = write_json(val, token_buffer[], true);
+        if (length <= 0)
+            return false;
+        token = token_buffer[0 .. length];
     }
-
-    final switch (desc.type) with (TextType)
-    {
-        case bool_:
-            bool b = false;
-            if (val.isBool)
-                b = val.asBool;
-            else if (val.isNumber)
-                b = val.asInt != 0;
-            element.value(Variant(b), timestamp);
-            break;
-
-        case num:
-            import urt.si.quantity;
-
-            if (val.isBool)
-                element.value(Variant(val.asBool ? 1 : 0), timestamp);
-            else if (!val.isNumber)
-                return; // is there anything more we can do?
-            else if (val.isQuantity)
-            {
-                // confirm compatible quantities
-                VarQuantity q = val.asQuantity();
-                if (q.unit.unit != desc.unit.unit)
-                    return;
-                q.adjust_scale(desc.unit);
-                if (desc.pre_scale != 1)
-                    q *= desc.pre_scale;
-                element.value(Variant(q), timestamp);
-            }
-            else if (desc.pre_scale != 1)
-            {
-                double raw = val.asDouble;
-                element.value(Variant(VarQuantity(raw * desc.pre_scale, desc.unit)), timestamp);
-            }
-            else if (desc.unit.pack)
-            {
-                Variant t = val;
-                t.set_unit(desc.unit);
-                element.value(t, timestamp);
-            }
-            else
-                goto set_value;
-            break;
-
-        case str:
-            assert(false, "TODO: should have been caught by the isString case above; do we want to do stringification?");
-            break;
-
-        case enum_:
-        case bf:
-            assert(desc.enum_info, "What case is there an enum without an enum type specified?");
-
-            if (val.is_enum)
-                goto set_value;
-            else if (val.isUlong)
-                element.value(Variant(val.asUlong, desc.enum_info), timestamp);
-            else if (val.isLong)
-                element.value(Variant(val.asLong, desc.enum_info), timestamp);
-            else if (val.isBool)
-                element.value(Variant(val.asBool ? 1 : 0, desc.enum_info), timestamp);
-            else if (val.isDouble)
-            {
-                double d = val.asDouble;
-                long l = cast(long)d;
-                if (l == d)
-                    element.value(Variant(l, desc.enum_info), timestamp);
-            }
-            else
-                assert(false, "TODO: what other kind of thing can arrive here?");
-            break;
-
-        case dt:
-            if (!val.isUser!DateTime && !val.isUser!SysTime)
-                return;
-            goto set_value;
-
-        case macaddr:
-            if (!val.isUser!MACAddress)
-                return;
-            goto set_value;
-
-        case inetaddr:
-            if (!val.isUser!InetAddress)
-                return;
-            goto set_value;
-
-        case ipaddr:
-            if (!val.isUser!IPAddr)
-                return;
-            goto set_value;
-
-        case ip6addr:
-            if (!val.isUser!IPv6Addr)
-                return;
-            goto set_value;
-
-        set_value:
-            element.value(val, timestamp);
-            break;
-    }
+    return apply_text_value(element, token, desc, timestamp);
 }
 
 
 unittest
 {
     import urt.format.json : parse_json;
+    import urt.meta.enuminfo : enum_info, VoidEnumInfo;
+    import urt.si.unit : Ampere, ScaledUnit;
+    import manager.spec : compile_spec, stream_le_context;
 
     // walk_json_path
 
@@ -1155,6 +1104,45 @@ unittest
     assert(paths.length == 2);
     assert((*paths)[0] == Variant("inv.battery.voltage"));
     assert((*paths)[1] == Variant("inv.battery.current"));
+
+    // JSON tokens use the same native descriptor path in both directions.
+    SampleDesc amps;
+    assert(compile_spec("f64:100mA", stream_le_context, ScaledUnit(), 1, null, null, amps));
+    Element current;
+    current.series.format = amps.fmt;
+    Variant raw_current = Variant(123);
+    assert(apply_value(&current, raw_current, amps, getSysTime()));
+    double current_amps = current.scaled_value(ScaledUnit(Ampere));
+    assert(current_amps > 12.299 && current_amps < 12.301);
+
+    Scalar current_record;
+    assert(unbox_scalar(current.value, *amps.fmt, current_record));
+    char[32] current_text = void;
+    ptrdiff_t current_length = format_record(current_record.raw[0 .. amps.fmt.stride], amps, current_text[]);
+    assert(current_length > 0);
+    Scalar current_round_trip;
+    assert(parse_record(current_text[0 .. current_length], amps, current_round_trip.raw[0 .. amps.fmt.stride]));
+    assert(current_round_trip.raw == current_record.raw);
+
+    enum TestMode : ubyte { off, on, automatic }
+    const(VoidEnumInfo)* mode_info = enum_info!TestMode.make_void();
+    const(VoidEnumInfo)* resolve_mode(const(char)[] name) nothrow @nogc
+        => name == "TestMode" ? mode_info : null;
+    SampleDesc mode_desc;
+    assert(compile_spec("enum8:TestMode", stream_le_context, ScaledUnit(), 1, null, &resolve_mode, mode_desc));
+    Element mode;
+    mode.series.format = mode_desc.fmt;
+    Variant raw_mode = Variant(2);
+    assert(apply_value(&mode, raw_mode, mode_desc, getSysTime()));
+    assert(mode.value.is_enum && mode.value.asLong == 2);
+
+    SampleDesc text_desc;
+    assert(compile_spec("str", stream_le_context, ScaledUnit(), 1, null, null, text_desc));
+    Element text;
+    text.series.format = text_desc.fmt;
+    Variant raw_text = Variant("native");
+    assert(apply_value(&text, raw_text, text_desc, getSysTime()));
+    assert(text.value == "native");
 
     // evaluate_success
 

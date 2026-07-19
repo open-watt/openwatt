@@ -190,8 +190,8 @@ pure nothrow @nogc:
 
     ushort request_index;        // index into request_descs[]
     ushort write_request_index;  // index for write, ushort.max if read-only
+    ushort desc = ushort.max;    // compiled SampleDesc
     bool identifier_quoted;      // true = literal string key, false = walk path
-    TextValueDesc value_desc;
 
 private:
     ushort _identifier;    // "evse.temp" or quoted literal
@@ -621,17 +621,6 @@ nothrow @nogc:
         return mint_series_format(vt, desc.unit);
     }
 
-    const(DataFormat)* series_format(ref const TextValueDesc desc)
-    {
-        if (desc.type == TextType.bool_)
-            return mint_series_format(ValueType.bool_, desc.unit);
-        if (desc.type == TextType.num)
-            return mint_series_format(ValueType.f64, desc.unit);
-        if (desc.type == TextType.enum_ || desc.type == TextType.bf)
-            return mint_series_format(ValueType.s64, ScaledUnit(), desc.enum_info);
-        return null;
-    }
-
     ref inout(ComponentTemplate) get_component(ref const(DeviceTemplate) device, size_t index) inout pure
     {
         assert(index < device._num_components, "Component index out of range");
@@ -850,12 +839,6 @@ unittest
     Variant bv = box_record(&raw16, *h);
     assert(bv.is_enum && bv.asLong == 1);
 
-    // text twin: numerics and bools map, and share the mint cache with the binary path
-    TextValueDesc tnum = TextValueDesc(TextType.num, ScaledUnit(Volt));
-    assert(p.series_format(tnum) is f);
-    TextValueDesc tstr = TextValueDesc(TextType.str, ScaledUnit());
-    assert(p.series_format(tstr) is null);
-
     // wire spans for byte-stream maps (CAN): derived per family from the compiled desc
     {
         import manager.codec : find_encoding, register_builtin_encodings;
@@ -940,16 +923,23 @@ unittest
             "\n" ~
             "troot: alpha, beta\n" ~
             "\n" ~
+            "requests:\n" ~
+            "\trequest: status, GET, /status\n" ~
+            "\n" ~
             "registers:\n" ~
             "\ttsec: 1, u16, 0.1V\tdesc: chargeVoltage\n" ~
             "\ttsec: 2, enum8, Mode\tdesc: mode\n" ~
             "\ttsec: 3, u16:0.1V\tdesc: singleTokenVolts\n" ~
             "\ttsec: 4, str8, W\tdesc: name\n" ~
-            "\ttsec: 5, str8/W\tdesc: legacyName\n";
+            "\ttsec: 5, str8/W\tdesc: legacyName\n" ~
+            "\thttp: status, current, f64:100mA\tdesc: httpCurrent\n" ~
+            "\thttp: status, mode, enum8:Mode\tdesc: httpMode\n" ~
+            "\thttp: status, label, str\tdesc: httpLabel\n";
         Profile* prof = parse_profile(conf_text, "tprof");
         assert(prof !is null);
 
-        import manager.sample : desc_by_index;
+        import manager.sample : desc_by_index, parse_record;
+        import manager.series : box_record, Scalar;
 
         // the compiled format is the same instance the legacy path mints for the same spelling
         ref const TDesc cv = prof.get_section!TDesc(tsec, 0);
@@ -976,7 +966,23 @@ unittest
         assert(prof.get_section!TDesc(tsec, 4).desc == nm.desc);
         assert(prof.elements[4].access == Access.write);
 
-        assert(prof.elements.length == 5);
+        // HTTP uses the same compiled descriptor vocabulary without a parallel unit/enum field.
+        ref const ElementDesc_HTTP hc = prof.get_http(0);
+        SampleDesc hcd = desc_by_index(hc.desc);
+        assert(hcd.fmt.type == ValueType.f64);
+        Scalar http_current;
+        assert(parse_record("1", hcd, http_current.raw[0 .. hcd.fmt.stride]));
+        import urt.si.quantity : VarQuantity;
+        import urt.si.unit : Ampere;
+        VarQuantity http_current_value = box_record(http_current.raw.ptr, *hcd.fmt).asQuantity();
+        double http_amps = http_current_value.adjust_scale(ScaledUnit(Ampere)).value;
+        assert(http_amps > 0.099 && http_amps < 0.101);
+        ref const ElementDesc_HTTP hm = prof.get_http(1);
+        assert(desc_by_index(hm.desc).fmt.enum_info is prof.find_enum_template("Mode"));
+        ref const ElementDesc_HTTP ht = prof.get_http(2);
+        assert(desc_by_index(ht.desc).fmt.is_text);
+
+        assert(prof.elements.length == 8);
         assert(prof.elements[0].kind == tsec && prof.elements[1].element == 1);
 
         const(void)[] root_data = prof.get_root_section(troot);
@@ -1704,6 +1710,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                         e._kind = ElementType.http;
                         e._index = cast(ushort)http_count;
                         ref ElementDesc_HTTP http = profile.http_elements[http_count++];
+                        http = ElementDesc_HTTP.init;
 
                         const(char)[] htail = reg_item.value;
                         htail = htail.split_element_and_desc();
@@ -1713,7 +1720,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                         http.identifier_quoted = raw_identifier.length >= 2 && raw_identifier[0] == '"' && raw_identifier[$-1] == '"';
                         const(char)[] identifier = raw_identifier.unQuote;
                         const(char)[] type = htail.split!','.unQuote;
-                        const(char)[] units = htail.split!','.unQuote;
+                        const(char)[] access = htail.split!','.unQuote;
 
                         http._identifier = http_string_cache.add_string(identifier);
 
@@ -1722,22 +1729,10 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                         if (http.request_index == ushort.max && !req_name.empty)
                             writeWarning("Unknown request '", req_name, "' for http element: ", id);
 
-                        TextType ty = type.parse_text_type();
-                        if (ty == TextType.enum_ || ty == TextType.bf)
-                        {
-                            const(VoidEnumInfo)* ei = profile.find_enum_template(units);
-                            if (ei)
-                                http.value_desc = TextValueDesc(ty, ei);
-                            else
-                                writeWarning("Unknown enum/bitfield type: ", units);
-                            units = htail.split!','.unQuote;
-                        }
-                        else
-                        {
-                            http.value_desc = TextValueDesc(ty);
-                            if (!http.value_desc.parse_units(units))
-                                writeWarning("Invalid units '", units, "' for http element: ", id);
-                        }
+                        builder.element_id = id;
+                        builder._element = &e;
+                        ubyte span;
+                        builder.compile_value(type, access, stream_le_context, http.desc, span);
 
                         foreach (ref sub; reg_item.sub_items)
                         {
