@@ -136,7 +136,7 @@ nothrow @nogc:
         => latest;
 
     bool native() const pure
-        => series.format !is null && (series.format.is_scalar || series.format.is_text);
+        => series.format !is null && (series.format.is_scalar || series.format.is_text || series.format.is_wide);
 
     void value(T)(auto ref T v, SysTime timestamp = getSysTime(), Subscriber who = null)
     {
@@ -254,6 +254,17 @@ nothrow @nogc:
         {
             if (v.isString)
                 series.observe_text(v.asString(), timestamp);
+            return;
+        }
+        if (series.format.is_wide)
+        {
+            if (v.isBuffer)
+            {
+                const(void)[] b = v.asBuffer;
+                if (b.length == series.format.stride)
+                    series.observe_record(b, timestamp);
+            }
+            // wide user types stay boxed until a producer needs the unbox (transitional)
             return;
         }
         Scalar s;

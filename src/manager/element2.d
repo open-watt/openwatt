@@ -76,10 +76,29 @@ nothrow @nogc:
 
     Variant value() const
     {
-        // TODO: wide latest (stride > 8) reads the open bucket tail once the type registry lands
-        if (format && (format.is_scalar || format.is_text))
-            return box_record(_latest.raw.ptr, *format);
+        if (format)
+        {
+            if (format.is_scalar || format.is_text)
+                return box_record(_latest.raw.ptr, *format);
+            if (format.is_wide)
+            {
+                const(void)[] tail = tail_record();
+                if (tail)
+                    return box_record(tail.ptr, *format);
+            }
+        }
         return Variant();
+    }
+
+    // wide records don't fit the Scalar register: latest IS the tail record of the open bucket
+    const(void)[] tail_record() const pure
+    {
+        if (!_history || !_history.buckets.length)
+            return null;
+        const(Bucket)* b = _history.buckets[$-1];
+        if (!b.count)
+            return null;
+        return (cast(const(ubyte)*)b.samples)[(b.count - 1) * format.stride .. b.count * format.stride];
     }
 
     void observe(T)(T v, SysTime t = getSysTime(), Observer who = null)
@@ -133,12 +152,30 @@ nothrow @nogc:
     // untemplated path for samplers decoding at a runtime-known format
     void observe_record(const(void)[] record, SysTime t = getSysTime(), Observer who = null)
     {
-        assert(format.is_scalar, "TODO: wide records need copy_emplace through the format's hooks");
         debug assert(record.length >= format.stride);
-        Scalar s;
-        s.raw[] = 0;
-        s.raw[0 .. format.stride] = (cast(const(ubyte)[])record)[0 .. format.stride];
-        observe_scalar(s, t, who);
+        if (format.is_scalar)
+        {
+            Scalar s;
+            s.raw[] = 0;
+            s.raw[0 .. format.stride] = (cast(const(ubyte)[])record)[0 .. format.stride];
+            observe_scalar(s, t, who);
+            return;
+        }
+        assert(format.is_wide, "dynamic and non-pod records need their own entry");
+        const(void)[] rec = record[0 .. format.stride];
+        if (format.semantics == Semantics.held && _last_update != SysTime())
+        {
+            const(void)[] tail = tail_record();
+            if (tail && cast(const(ubyte)[])tail == cast(const(ubyte)[])rec)
+            {
+                _last_update = t;
+                return;
+            }
+        }
+        ensure_history();
+        _last_update = t;
+        SysTime[1] time = t;
+        append(rec, time[], who);
     }
 
     void observe_block(const(void)[] samples, const(SysTime)[] times, Observer who = null)
@@ -708,6 +745,34 @@ unittest
     a.observe(9.0, from_unix_time_ns(3_000_000_000L));
     assert(a._history.first_index == 3);
     a.teardown();
+
+    // wide records: fixed vectors don't fit the Scalar register; latest is the open bucket tail
+    DataFormat key_fmt = DataFormat(ValueType.u8, Semantics.held);
+    key_fmt.count = 32;
+    assert(!key_fmt.is_scalar && !key_fmt.is_text && key_fmt.is_wide && key_fmt.stride == 32);
+    Element2 k;
+    k.format = &key_fmt;
+    ubyte[32] key1;
+    foreach (i, ref byt; key1)
+        byt = cast(ubyte)i;
+    k.observe_record(key1[], from_unix_time_ns(1_000));
+    assert(k.record_count == 1);
+    assert(cast(const(ubyte)[])k.value().asBuffer == key1[]);
+    k.observe_record(key1[], from_unix_time_ns(2_000));
+    assert(k.record_count == 1 && k.last_update == from_unix_time_ns(2_000));   // held dedup vs the tail
+    ubyte[32] key2 = key1;
+    key2[0] = 0xFF;
+    k.observe_record(key2[], from_unix_time_ns(3_000));
+    assert(k.record_count == 2);
+    assert(cast(const(ubyte)[])k.value().asBuffer == key2[]);
+    assert(cast(const(ubyte)[])k.tail_record() == key2[]);
+    Cursor kc = k.open_cursor(0);
+    RecordBlock kb = kc.next(16);
+    assert(kb.count == 2);
+    assert(cast(const(ubyte)[])kb.box(0).asBuffer == key1[]);
+    assert(cast(const(ubyte)[])kb.box(1).asBuffer == key2[]);
+    k.close_cursor(kc);
+    k.teardown();
 
     // eviction releases text records
     Element2 tv;

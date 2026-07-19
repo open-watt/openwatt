@@ -191,6 +191,10 @@ nothrow @nogc:
     bool is_text() const pure
         => type == ValueType.char_ && count == 0;
 
+    // fixed-extent trivial records wider than the Scalar register; latest reads the open bucket tail
+    bool is_wide() const pure
+        => count != 0 && !is_scalar && (type != ValueType.user || user_type.pod);
+
     ubyte stride() const pure
     {
         if (count == 0)
@@ -441,7 +445,15 @@ nothrow @nogc:
 // self-describing; this edge is the only place the three meet
 Variant box_record(const(void)* record, ref const DataFormat fmt)
 {
-    assert(fmt.count == 1 || fmt.is_text, "vectors box at the mount, not the record"); // TODO: Variant arrays with the first vector producer
+    if (fmt.count > 1)
+    {
+        // fixed vectors: u8 = blob, char = text; other atoms await Variant arrays
+        if (fmt.type == ValueType.u8)
+            return Variant(cast(const(void)[])record[0 .. fmt.count]);
+        if (fmt.type == ValueType.char_)
+            return Variant(cast(const(char)[])record[0 .. fmt.count]);
+        assert(false, "TODO: vector records box as Variant arrays");
+    }
     final switch (fmt.type) with (ValueType)
     {
         case bool_: return Variant(*cast(const(bool)*)record);
