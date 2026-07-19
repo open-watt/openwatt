@@ -420,6 +420,20 @@ const(char)[] sample_text(const(void)[] wire, ref const SampleDesc desc, char[] 
     return s;
 }
 
+// text -> fixed wire field; truncates to the field width and pads the remainder
+bool emit_text(const(char)[] text, ref const SampleDesc desc, void[] wire)
+{
+    if (wire.length > 256)
+        return false;
+    ubyte[256] image = void;
+    ubyte pad = desc.layout.flags & WireFlags.space_padded ? ' ' : 0;
+    image[0 .. wire.length] = pad;
+    size_t n = text.length < wire.length ? text.length : wire.length;
+    image[0 .. n] = cast(const(ubyte)[])text[0 .. n];
+    wire_image_encode(image[0 .. wire.length], desc.layout, wire);
+    return true;
+}
+
 
 unittest
 {

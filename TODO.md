@@ -467,23 +467,17 @@ status block). Remaining legs, roughly in order:
   "state"; materialise() hangs it, shutdown marks a gap) - first native producer through the
   tree; binding still owns the DataFormat+ClockDomain (mount outlives binding destruction -
   formats need a durable home, noted inline). 92/92 unit tests (native-mount coverage added)
-  + boot smoke. First protocol LANDED 2026-07-17 (CAN): Profile.series_format(ValueDesc)
-  mints shared per-shape DataFormats (held semantics, profile-owned/borrowed like enum_info;
-  numerics and bool only - enums/bitfields/strings/dates wait on the type registry) and CAN's
-  add_handler assigns them, so CAN elements store natively via the boxed-setter unbox path.
-  Variant-free decode (sample_record straight to observe, skipping the box) is the follow-up
-  optimisation once more protocols carry formats. CAN validated on prod (Pi slot 85, live
-  traffic + frontend render - also the first two-node exercise of the reshaped sync wire).
-  GoodWe/BLE/Zigbee assign formats too (same two-liner; zigbee's report path decodes via
-  get_zcl_value into the same Variant shapes, so the unbox path covers it), and the
-  TextValueDesc twin covers MQTT/HTTP (num/bool; shares the mint cache, so a text V-series and
-  a binary V-series share one format). Modbus client-pass DONE; deliberately still boxed:
-  modbus serve pass (element shapes governed by their real producers, not the serve profile),
-  SunSpec (runtime scale-factor registers - static descs can't describe the decoded shape;
-  correct mapping is probably force-f64, decide in the value-handling audit), and ESPHome
-  (typed proto, no ValueDesc; add_handler is a stub - also the audit). NEXT: consumers leave
-  the boxed mirror; recorder-as-cursor waits for retention tiers (build order step 3); the prev
-  pair dies when operators absorb the accumulator (step 4).
+  + boot smoke. Protocol profile migration LANDED through Modbus 2026-07-19: CAN, GoodWe, BLE,
+  Zigbee, MQTT, HTTP, SunSpec, Tesla TWC, ESPHome and Modbus now converge on SampleDesc and
+  DataFormat. Modbus owns its registered `reg`/`mb` profile section, all repository Modbus
+  profiles use the normalized type/access columns, and client reads, upstream writes, serving
+  reads/writes and fixed strings pass through the record codec. Register span remains explicit
+  map data, so `strN` is bytes rather than the legacy word count. Byte-exact tests cover the
+  Modbus `_bs`/`_wr` quartet. Serve profiles still correctly avoid declaring the shape of
+  elements produced elsewhere, converting only at their wire boundary. NEXT: delete the now
+  unused ValueDesc profile-format bridge and the temporary legacy profile grammar after the
+  remaining non-profile consumers are audited; recorder-as-cursor waits for retention tiers
+  (build order step 3); the prev pair dies when operators absorb the accumulator (step 4).
 
 - **Element deadband (settled design, build when needed)**: per-point change-event conditioning,
   standard SCADA/OPC report-by-exception. ONE mechanism, three surfaces: the filter itself lives in

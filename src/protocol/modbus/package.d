@@ -1,5 +1,6 @@
 module protocol.modbus;
 
+import urt.conv;
 import urt.endian;
 import urt.map;
 import urt.mem;
@@ -10,11 +11,13 @@ import urt.variant;
 
 import manager;
 import manager.collection;
+import manager.config : ConfItem;
 import manager.console.command;
 import manager.console.session;
 import manager.plugin;
 import manager.profile;
 import manager.sampler;
+import manager.spec : modbus_context;
 
 import protocol.modbus.iface;
 import protocol.modbus.node;
@@ -37,7 +40,19 @@ struct ServerMap
     String model;
 }
 
-class ModbusProtocolModule : Module
+package __gshared uint modbus_reg_section_kind;
+package __gshared uint modbus_mb_section_kind;
+
+unittest
+{
+    char[16] buffer = void;
+    size_t length;
+    assert(translate_legacy_byte_type("u8h", buffer, length) && buffer[0 .. length] == "u8@8");
+    assert(translate_legacy_byte_type("i8l/RW", buffer, length) && buffer[0 .. length] == "s8@0/RW");
+    assert(!translate_legacy_byte_type("u16", buffer, length));
+}
+
+class ModbusProtocolModule : Module, ProfileSections
 {
     mixin DeclareModule!"protocol.mb";
 nothrow @nogc:
@@ -48,6 +63,9 @@ nothrow @nogc:
     override void init()
     {
         register_packet_codec!ModbusFrame();
+
+        modbus_reg_section_kind = register_profile_section("reg", this);
+        modbus_mb_section_kind = register_profile_section("mb", this);
 
         g_app.register_enum!ModbusProtocol();
         g_app.register_enum!SunSpecInverterState();
@@ -65,6 +83,72 @@ nothrow @nogc:
         g_app.console.register_command!request_read("/protocol/modbus/node/request", this, "read");
         g_app.console.register_command!request_write("/protocol/modbus/node/request", this, "write");
         g_app.console.register_command!request_read_device_id("/protocol/modbus/node/request", this, "read-device-id");
+    }
+
+    uint element_size(uint)
+        => cast(uint)ElementDesc_Modbus.sizeof;
+
+    void count_element(uint, ref const ConfItem, ref ProfileCosts) {}
+
+    bool parse_element(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
+    {
+        import urt.log : writeWarning;
+
+        ElementDesc_Modbus* mb = cast(ElementDesc_Modbus*)slot.ptr;
+        *mb = ElementDesc_Modbus.init;
+
+        const(char)[] tail = item.value;
+        const(char)[] address = tail.split!',';
+        const(char)[] type = tail.split!','.unQuote;
+        const(char)[] following = tail.split!','.unQuote;
+
+        size_t taken;
+        ulong reg = address.parse_uint_with_base(&taken);
+        if (taken != address.length || reg > 105535)
+        {
+            writeWarning("Invalid Modbus register: ", address);
+            return false;
+        }
+        if (reg < 10000)
+        {
+            mb.reg_type = RegisterType.coil;
+            mb.reg = cast(ushort)reg;
+        }
+        else if (reg < 20000)
+        {
+            mb.reg_type = RegisterType.discrete_input;
+            mb.reg = cast(ushort)(reg - 10000);
+        }
+        else if (reg < 30000)
+        {
+            writeWarning("Invalid Modbus register range: ", address);
+            return false;
+        }
+        else if (reg < 40000)
+        {
+            mb.reg_type = RegisterType.input_register;
+            mb.reg = cast(ushort)(reg - 30000);
+        }
+        else
+        {
+            mb.reg_type = RegisterType.holding_register;
+            mb.reg = cast(ushort)(reg - 40000);
+        }
+
+        char[16] legacy = void;
+        size_t legacy_length;
+        if (translate_legacy_byte_type(type, legacy, legacy_length))
+            type = legacy[0 .. legacy_length];
+
+        if (!b.compile_value(type, following, modbus_context, mb.desc, mb.length))
+            return false;
+        if (mb.reg_type >= RegisterType.input_register && (mb.length == 0 || (mb.length & 1)))
+        {
+            writeWarning("Modbus register values require a non-zero whole-word span: ", b.element_id);
+            mb.desc = ushort.max;
+            return false;
+        }
+        return true;
     }
 
     override void update()
@@ -473,4 +557,32 @@ nothrow @nogc:
         else
             state = CommandCompletionState.error;
     }
+}
+
+private:
+
+bool translate_legacy_byte_type(const(char)[] type, char[] output, out size_t length)
+{
+    const(char)[] value_type = type;
+    foreach (i, c; value_type)
+    {
+        if (c == '/')
+        {
+            value_type = value_type[0 .. i];
+            break;
+        }
+    }
+    if (value_type != "u8h" && value_type != "i8h" && value_type != "u8l" && value_type != "i8l")
+        return false;
+
+    length = 4 + type.length - value_type.length;
+    if (length > output.length)
+        return false;
+    output[0] = value_type[0] == 'i' ? 's' : 'u';
+    output[1] = '8';
+    output[2] = '@';
+    output[3] = value_type[2] == 'h' ? '8' : '0';
+    if (type.length > value_type.length)
+        output[4 .. length] = type[value_type.length .. $];
+    return true;
 }

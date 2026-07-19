@@ -59,8 +59,7 @@ enum Frequency : ubyte
 
 enum ElementType : ubyte
 {
-    modbus,
-    http
+    http = 1
 }
 
 enum SumType : ubyte
@@ -115,16 +114,6 @@ private:
     ubyte _kind;
     ushort _index;
     ushort _description;
-}
-
-struct ElementDesc_Modbus
-{
-    import protocol.modbus.message : RegisterType;
-    import protocol.modbus.binding : modbus_data_type;
-
-    ushort reg;
-    RegisterType reg_type = RegisterType.holding_register;
-    ValueDesc value_desc = ValueDesc(modbus_data_type!"u16");
 }
 
 struct RequestDesc
@@ -524,8 +513,6 @@ nothrow @nogc:
            defaultAllocator().freeArray(desc_strings);
         if (expression_strings)
             defaultAllocator().freeArray(expression_strings);
-        if(mb_elements)
-            defaultAllocator().freeArray(mb_elements);
         if(http_elements)
             defaultAllocator().freeArray(http_elements);
         if(request_descs)
@@ -676,9 +663,6 @@ nothrow @nogc:
         return -1;
     }
 
-    ref const(ElementDesc_Modbus) get_mb(size_t i) const pure
-        => mb_elements[i];
-
     ref const(T) get_section(T)(uint kind, size_t i) const pure
     {
         foreach (ref b; section_blocks)
@@ -792,7 +776,6 @@ private:
     Lookup[] lookup_table;
     SectionBlock[] section_blocks;
     RootBlock[] root_blocks;
-    ElementDesc_Modbus[] mb_elements;
     ElementDesc_HTTP[] http_elements;
     RequestDesc[] request_descs;
     ushort[] indirections;
@@ -1046,7 +1029,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     size_t num_component_templates = 0;
     size_t num_element_templates = 0;
     size_t num_indirections = 0;
-    size_t mb_count = 0;
     size_t http_count = 0;
 
     ProfileCosts section_costs;
@@ -1191,7 +1173,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
 
                 switch (reg_item.name)
                 {
-                    case "mb", "reg": ++mb_count; break;
                     case "http":
                         ++http_count;
                         {
@@ -1392,7 +1373,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     profile.http_strings = allocator.allocArray!char(2 + http_string_len);
     profile.param_strings = allocator.allocArray!char(2 + param_string_len);
 
-    profile.mb_elements = allocator.allocArray!ElementDesc_Modbus(mb_count);
     profile.http_elements = allocator.allocArray!ElementDesc_HTTP(http_count);
     profile.request_descs = allocator.allocArray!RequestDesc(request_count);
     size_t active_sections = 0;
@@ -1457,7 +1437,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     num_element_templates = 0;
     num_indirections = 0;
     item_count = 0;
-    mb_count = 0;
     http_count = 0;
     request_count = 0;
     section_counts[][] = 0;
@@ -1613,99 +1592,9 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                 e.update_frequency = frequency;
                 e.display_units = addString(display_units);
 
-                void parse_value_desc(ref ValueDesc desc, DataType type, const(char)[] units)
-                {
-                    if ((type & DataType.enumeration) && units)
-                    {
-                        const(VoidEnumInfo)* enum_info = profile.find_enum_template(units);
-                        if (enum_info)
-                            desc = ValueDesc(type, enum_info);
-                        else
-                        {
-                            writeWarning("Unknown enum type: ", units);
-                            desc = ValueDesc(type);
-                        }
-                    }
-                    else if (type.data_kind == DataKind.date_time)
-                    {
-                        switch (units)
-                        {
-                            case "yymmddhhmmss":
-                                desc = ValueDesc(type, DateFormat.yymmddhhmmss);
-                                break;
-                            default:
-                                writeWarning("Invalid date_time format: ", units);
-                                break;
-                        }
-                    }
-                    else
-                    {
-                        desc = ValueDesc(type);
-                        if (!desc.parse_units(units))
-                            writeWarning("Invalid units '", units, "' for element: ", id);
-                    }
-                }
-
                 // the actual element data...
                 switch (reg_item.name)
                 {
-                    case "mb", "reg":
-                        const(char)[] tail = reg_item.value;
-                        tail = tail.split_element_and_desc();
-
-                        const(char)[] register = tail.split!',';
-                        const(char)[] type = tail.split!','.unQuote;
-                        const(char)[] units = tail.split!','.unQuote;
-
-                        e._kind = ElementType.modbus;
-                        e._index = cast(ushort)mb_count;
-                        ref ElementDesc_Modbus mb = profile.mb_elements[mb_count++];
-
-                        // TODO: MOVE THIS CODE!
-                        import protocol.modbus.message : RegisterType;
-                        import protocol.modbus.binding : parse_modbus_data_type;
-
-                        size_t taken;
-                        ulong reg = register.parse_uint_with_base(&taken);
-                        if (taken != register.length || reg > 105535)
-                        {
-                            writeWarning("Invalid Modbus register: ", register);
-                            break;
-                        }
-                        if (reg < 10000)
-                        {
-                            mb.reg_type = RegisterType.coil;
-                            mb.reg = cast(ushort)reg;
-                        }
-                        else if (reg < 20000)
-                        {
-                            mb.reg_type = RegisterType.discrete_input;
-                            mb.reg = cast(ushort)(reg - 10000);
-                        }
-                        else if (reg < 30000)
-                            break;
-                        else if (reg < 40000)
-                        {
-                            mb.reg_type = RegisterType.input_register;
-                            mb.reg = cast(ushort)(reg - 30000);
-                        }
-                        else
-                        {
-                            mb.reg_type = RegisterType.holding_register;
-                            mb.reg = cast(ushort)(reg - 40000);
-                        }
-
-                        DataType ty = type.split!('/', false).parse_modbus_data_type();
-                        if (ty == DataType.invalid)
-                        {
-                            writeWarning("Invalid Modbus data type '", type, "' for element: ", id);
-                            break;
-                        }
-                        e.access = type.parse_access();
-
-                        parse_value_desc(mb.value_desc, ty, units);
-                        break;
-
                     case "http":
                         e._kind = ElementType.http;
                         e._index = cast(ushort)http_count;

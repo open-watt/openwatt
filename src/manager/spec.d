@@ -343,6 +343,32 @@ unittest
     assert(compile_spec("u32_bs_wr", modbus_context, ScaledUnit(), 1, null, null, d));
     assert(fl(d) == (WF.reverse | WF.swap_words | WF.swap_word_bytes));
 
+    // byte-exact Modbus quartet: every layout decodes the same value and re-emits unchanged
+    static void round_trip(const(char)[] spelling, ubyte[4] wire)
+    {
+        SampleDesc sd;
+        assert(compile_spec(spelling, modbus_context, ScaledUnit(), 1, null, null, sd));
+        uint record;
+        assert(sample_record(wire, sd, (cast(void*)&record)[0 .. uint.sizeof]));
+        assert(record == 0x12345678);
+        ubyte[4] emitted;
+        assert(emit_record((cast(const(void)*)&record)[0 .. uint.sizeof], sd, emitted));
+        assert(emitted == wire);
+    }
+    round_trip("u32",       [0x12, 0x34, 0x56, 0x78]);
+    round_trip("u32_wr",    [0x56, 0x78, 0x12, 0x34]);
+    round_trip("u32_bs",    [0x34, 0x12, 0x78, 0x56]);
+    round_trip("u32_bs_wr", [0x78, 0x56, 0x34, 0x12]);
+
+    // legacy high/low-byte register aliases translate to these slices in the protocol hook
+    assert(compile_spec("u8@8", modbus_context, ScaledUnit(), 1, null, null, d));
+    ubyte high;
+    ubyte[2] word = [0xAB, 0xCD];
+    assert(sample_record(word, d, (cast(void*)&high)[0 .. 1]) && high == 0xAB);
+    assert(compile_spec("u8@0", modbus_context, ScaledUnit(), 1, null, null, d));
+    ubyte low;
+    assert(sample_record(word, d, (cast(void*)&low)[0 .. 1]) && low == 0xCD);
+
     // byte-stream context: value endianness only; worded mods illegal
     assert(compile_spec("u32", stream_le_context, ScaledUnit(), 1, null, null, d));
     assert(fl(d) == 0);
@@ -404,6 +430,12 @@ unittest
         && fl(d) == (WF.swap_word_bytes | WF.space_padded));
     assert(compile_spec("str8_bs", modbus_context, ScaledUnit(), 1, null, null, d));
     assert(fl(d) == WF.swap_word_bytes);
+    char[8] textbuf = void;
+    ubyte[8] swapped_text = ['B', 'A', 'D', 'C', 'F', 'E', 0, 'G'];
+    assert(sample_text(swapped_text, d, textbuf) == "ABCDEFG");
+    ubyte[8] emitted_text;
+    assert(emit_text("ABCDEFG", d, emitted_text));
+    assert(emitted_text == swapped_text);
     assert(compile_spec("str", stream_le_context, ScaledUnit(), 1, null, null, d));
     assert(d.fmt.is_text);
 
