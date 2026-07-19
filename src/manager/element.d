@@ -175,22 +175,22 @@ nothrow @nogc:
         sync_from_series();
     }
 
-    void observe_record(const(void)[] record, SysTime t = getSysTime(), Observer who = null)
+    void observe_record(const(void)[] record, SysTime t = getSysTime(), Observer who = null, Subscriber legacy_who = null)
     {
         series.observe_record(record, t, who);
-        sync_from_series();
+        sync_from_series(legacy_who);
     }
 
-    void observe_text(String v, SysTime t = getSysTime(), Observer who = null)
+    void observe_text(String v, SysTime t = getSysTime(), Observer who = null, Subscriber legacy_who = null)
     {
         series.observe_text(v.move, t, who);
-        sync_from_series();
+        sync_from_series(legacy_who);
     }
 
-    void observe_text(const(char)[] v, SysTime t = getSysTime(), Observer who = null)
+    void observe_text(const(char)[] v, SysTime t = getSysTime(), Observer who = null, Subscriber legacy_who = null)
     {
         series.observe_text(v, t, who);
-        sync_from_series();
+        sync_from_series(legacy_who);
     }
 
     void observe_block(const(void)[] samples, const(SysTime)[] times, Observer who = null)
@@ -263,7 +263,7 @@ nothrow @nogc:
         // representable observation (transitional)
     }
 
-    private void sync_from_series()
+    private void sync_from_series(Subscriber who = null)
     {
         Variant v = series.value();
         SysTime t = series.last_update;
@@ -278,7 +278,7 @@ nothrow @nogc:
             if (is_newer)
                 prev = latest.move;
             latest = v.move;
-            signal(latest, t, prev, prev_update, null);
+            signal(latest, t, prev, prev_update, who);
             if (is_newer)
                 capture_sample(t);
         }

@@ -20,7 +20,8 @@ import manager.component;
 import manager.device;
 import manager.element;
 import manager.profile;
-import manager.sampler;
+import manager.sample;
+import manager.series;
 import manager.subscriber;
 
 import protocol.zigbee;
@@ -243,12 +244,17 @@ protected:
     {
         ulong[2] key = make_sample_key(eui, endpoint, zb.cluster_id, zb.attribute_id, zb.manufacturer_code);
         assert(key !in _sample_elements, "TODO: support element duplicates?");
-        SampleElement* se = _sample_elements.insert(key, SampleElement(element, zb.value_desc));
+        SampleDesc sd;
+        if (zb.desc != ushort.max)
+            sd = desc_by_index(zb.desc);
+        SampleElement* se = _sample_elements.insert(key, SampleElement(element, sd));
         se.eui = eui;
         se.endpoint = endpoint;
         se.cluster = zb.cluster_id;
         se.attribute = zb.attribute_id;
         se.manufacturer = zb.manufacturer_code;
+        se.length = zb.length;
+        se.tuya_type = zb.tuya_type;
         _sample_elements_by_element.insert(element, se);
 
         if (element.access & manager.element.Access.write)
@@ -276,12 +282,14 @@ private:
     struct SampleElement
     {
         Element* element;
-        ValueDesc desc;
+        SampleDesc desc;
         EUI64 eui;
         ubyte endpoint;
         ushort cluster;
         ushort attribute;
         ushort manufacturer;
+        ubyte length;
+        TuyaDataType tuya_type;
     }
 
     struct TuyaDedup
@@ -324,6 +332,46 @@ private:
 
     ulong[2] make_sample_key_tuya(EUI64 eui, ubyte endpoint, ubyte dp) nothrow
         => make_sample_key(eui, endpoint, 0xEF00, dp);
+
+    void observe_sample(ref SampleElement e, ref const Variant decoded, const(void)[] wire,
+                        SysTime timestamp) nothrow
+    {
+        if (!e.desc.valid)
+        {
+            e.element.value(decoded, timestamp, this);
+            return;
+        }
+
+        const(DataFormat)* fmt = e.desc.fmt;
+        if (fmt.is_text)
+        {
+            if (decoded.isString)
+            {
+                if (e.element.series.format is fmt)
+                    e.element.observe_text(decoded.asString, timestamp, null, this);
+                else
+                    e.element.value(decoded, timestamp, this);
+            }
+            return;
+        }
+
+        if (fmt.is_scalar)
+        {
+            Scalar s;
+            s.raw[] = 0;
+            if (!sample_record(wire, e.desc, s.raw[0 .. fmt.stride]))
+                return;
+            if (e.element.series.format is fmt)
+                e.element.observe_record(s.raw[0 .. fmt.stride], timestamp, null, this);
+            else
+                e.element.value(box_record(s.raw.ptr, *fmt), timestamp, this);
+            return;
+        }
+
+        ubyte[256] record = void;
+        if (fmt.stride <= record.length && sample_record(wire, e.desc, record[0 .. fmt.stride]))
+            e.element.value(box_record(record.ptr, *fmt), timestamp, this);
+    }
 
     ZigbeeResult ieee_request(ushort dst, out EUI64 eui, PCP pcp = PCP.be)
     {
@@ -607,8 +655,7 @@ private:
                         if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, attr_id, zcl.manufacturer_code))
                         {
                             Variant v = attr.value;
-                            adjust_value(v, e.desc);
-                            e.element.value(v.move, cast(SysTime)timestamp, this);
+                            observe_sample(*e, v, payload[3 .. 3 + taken], cast(SysTime)timestamp);
                         }
 
                         payload = payload[3 + taken .. $];
@@ -774,10 +821,7 @@ private:
                             {
                                 nm.tuya_datapoints[dp.dp_id] = v;
                                 if (SampleElement* e = find_sample_element_tuya(nm.eui, aps.src_endpoint, dp.dp_id))
-                                {
-                                    adjust_value(v, e.desc);
-                                    e.element.value(v.move, cast(SysTime)timestamp, this);
-                                }
+                                    observe_sample(*e, v, dp.dp_data, cast(SysTime)timestamp);
                             }
                             return;
 
@@ -851,7 +895,8 @@ private:
                 tuya_txn_id += tuya_txn_id == 0;
 
                 assert(e.attribute < 256, "Invalid Tuya DP id!");
-                ptrdiff_t len = encode_dp(cast(ubyte)e.attribute, val, e.desc, buffer[2 .. $]);
+                ptrdiff_t len = encode_dp(cast(ubyte)e.attribute, val, e.tuya_type,
+                                          e.desc, e.length, buffer[2 .. $]);
                 if (len <= 0)
                     break; // failed?!
 
@@ -884,10 +929,16 @@ private:
 
                 // see if we can create one for this fingerprint
                 Device device = create_device_from_profile(*_zigbee_profile, fingerprint[], id, null, (Device device, Element* e, ref const ElementDesc desc, ubyte endpoint) {
-                    assert(desc.type == ElementType.zigbee);
-                    ref const ElementDesc_Zigbee zb = _zigbee_profile.get_zb(desc.element);
-                    if (!e.series.format)
-                        e.series.format = _zigbee_profile.series_format(zb.value_desc);
+                    import protocol.zigbee : zb_section_kind;
+
+                    assert(desc.kind == zb_section_kind);
+                    ref const ElementDesc_Zigbee zb = _zigbee_profile.get_section!ElementDesc_Zigbee(zb_section_kind, desc.element);
+                    if (zb.desc != ushort.max)
+                    {
+                        const(DataFormat)* fmt = desc_by_index(zb.desc).fmt;
+                        if (!e.series.format && (fmt.is_scalar || fmt.is_text))
+                            e.series.format = fmt;
+                    }
                     add_sample_element(e, node.eui, desc, zb, endpoint);
 
                     if (zb.cluster_id == 0x0000) // basic cluster
@@ -1393,19 +1444,33 @@ private:
     }
 }
 
+unittest
+{
+    import urt.si.unit : ScaledUnit;
+    import manager.spec : compile_spec, stream_be_context;
+
+    SampleDesc desc;
+    assert(compile_spec("u32", stream_be_context, ScaledUnit(), 1, null, null, desc));
+
+    ubyte[12] buffer;
+    Variant number = Variant(uint(0x0102_0304));
+    assert(encode_dp(7, number, TuyaDataType.value, desc, 4, buffer) == 8);
+    assert(buffer[0] == 7);
+    assert(buffer[1] == TuyaDataType.value);
+    assert(buffer[2] == 0 && buffer[3] == 4);
+    assert(buffer[4] == 1 && buffer[5] == 2 && buffer[6] == 3 && buffer[7] == 4);
+
+    Variant text = Variant("on");
+    assert(encode_dp(3, text, TuyaDataType.string, SampleDesc(), 0, buffer) == 6);
+    assert(buffer[0] == 3);
+    assert(buffer[1] == TuyaDataType.string);
+    assert(buffer[2] == 0 && buffer[3] == 2);
+    assert(buffer[4] == 'o' && buffer[5] == 'n');
+}
+
 private:
 
 __gshared immutable ubyte[4] g_power_levels = [ 0, 33, 66, 100 ];
-
-enum TuyaDataType : ubyte
-{
-    raw = 0,
-    bool_ = 1,
-    value = 2,
-    string = 3,
-    enum_ = 4,
-    bitmap = 5
-}
 
 struct TuyaDP
 {
@@ -1466,25 +1531,11 @@ bool decode_dp(ref const TuyaDP dp, ref Variant result)
     }
 }
 
-TuyaDataType type_from_desc(ref const ValueDesc desc)
+ptrdiff_t encode_dp(ubyte datapoint, ref const Variant value, TuyaDataType type,
+                    ref const SampleDesc desc, ubyte length, ubyte[] buffer)
 {
-    // TODO: how do we determine a RAW?
-
-    if (desc.is_string)
-        return TuyaDataType.string;
-    if (desc.is_bitfield)
-        return TuyaDataType.bitmap;
-    else if (desc.is_enum)
-        return TuyaDataType.enum_;
-    else if (desc.is_bool)
-        return TuyaDataType.bool_;
-    else
-        return TuyaDataType.value;
-}
-
-ptrdiff_t encode_dp(ubyte datapoint, ref const Variant value, ValueDesc desc, ubyte[] buffer)
-{
-    TuyaDataType type = desc.type_from_desc();
+    if (buffer.length < 4)
+        return -1;
 
     buffer[0] = datapoint;
     buffer[1] = type;
@@ -1494,20 +1545,23 @@ ptrdiff_t encode_dp(ubyte datapoint, ref const Variant value, ValueDesc desc, ub
         if (!value.isString)
             return -1;
         const(char)[] str = value.asString[];
-        if (str.length > 0xFFFF)
+        if (str.length > 0xFFFF || buffer.length < 4 + str.length)
             return -1;
         buffer[2..4] = (cast(ushort)str.length).nativeToBigEndian;
         buffer[4..4 + str.length] = cast(ubyte[])str[];
         return 4 + str.length;
     }
-    if (!value.isNumber && !value.isBool)
+    if (!desc.valid || length == 0 || buffer.length < 4 + length)
         return -1;
 
-    ptrdiff_t len = buffer[4..$].write_value(value, desc);
-    if (len <= 0)
+    const(DataFormat)* fmt = desc.fmt;
+    Scalar scalar;
+    if (!fmt.is_scalar || !unbox_scalar(value, *fmt, scalar))
         return -1;
-    buffer[2..4] = (cast(ushort)len).nativeToBigEndian;
-    return 4 + len;
+    if (!emit_record(scalar.raw[0 .. fmt.stride], desc, buffer[4 .. 4 + length]))
+        return -1;
+    buffer[2..4] = (cast(ushort)length).nativeToBigEndian;
+    return 4 + length;
 }
 
 uint get_zigbee_time()

@@ -95,7 +95,15 @@ nothrow @nogc:
         }
         aa55.offset = cast(ubyte)ti;
 
-        return b.compile_value(type, units, stream_be_context, aa55.desc, aa55.length);
+        if (!b.compile_value(type, units, stream_be_context, aa55.desc, aa55.length))
+            return false;
+        if (aa55.length == 0)
+        {
+            writeWarning("Unsized string requires a framed AA55 profile hook: ", b.element_id);
+            aa55.desc = ushort.max;
+            return false;
+        }
+        return true;
     }
 
     override void pre_update()

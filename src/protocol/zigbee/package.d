@@ -18,6 +18,8 @@ import manager.console.command;
 import manager.console.session;
 import manager.device;
 import manager.plugin;
+import manager.profile;
+import manager.spec : stream_be_context, stream_le_context;
 
 import protocol.ezsp;
 import protocol.ezsp.client;
@@ -32,6 +34,28 @@ import protocol.zigbee.iface;
 
 nothrow @nogc:
 
+
+package __gshared uint zb_section_kind;
+
+enum TuyaDataType : ubyte
+{
+    raw = 0,
+    bool_ = 1,
+    value = 2,
+    string = 3,
+    enum_ = 4,
+    bitmap = 5
+}
+
+struct ElementDesc_Zigbee
+{
+    ushort cluster_id;
+    ushort attribute_id;
+    ushort manufacturer_code;
+    ushort desc = ushort.max;
+    ubyte length;
+    TuyaDataType tuya_type;
+}
 
 enum NodeType : ubyte
 {
@@ -261,7 +285,7 @@ nothrow @nogc:
     }
 }
 
-class ZigbeeProtocolModule : Module
+class ZigbeeProtocolModule : Module, ProfileSections
 {
     mixin DeclareModule!"protocol.zigbee";
 nothrow @nogc:
@@ -286,6 +310,8 @@ nothrow @nogc:
 //        register_packet_codec!NWKFrame();
         register_packet_codec!APSFrame();
 
+        zb_section_kind = register_profile_section("zb", this);
+
         g_app.console.register_collection!ZigbeeInterface();
         g_app.console.register_collection!ZigbeeNode();
         g_app.console.register_collection!ZigbeeRouter();
@@ -296,6 +322,103 @@ nothrow @nogc:
         g_app.console.register_command!scan("/protocol/zigbee", this);
         g_app.console.register_command!zcl_read("/protocol/zigbee", this, "read");
         g_app.console.register_command!zcl_write("/protocol/zigbee", this, "write");
+    }
+
+    uint element_size(uint)
+        => cast(uint)ElementDesc_Zigbee.sizeof;
+
+    void count_element(uint, const(char)[], ref ProfileCosts) {}
+
+    bool parse_element(uint, const(char)[] tail, void[] slot, ref ProfileBuilder b)
+    {
+        ElementDesc_Zigbee* zb = cast(ElementDesc_Zigbee*)slot.ptr;
+        *zb = ElementDesc_Zigbee.init;
+
+        const(char)[] cluster = tail.split!',';
+        const(char)[] attr_field = tail.split!',';
+        const(char)[] attribute = attr_field.split!'(';
+        const(char)[] type = tail.split!','.unQuote;
+        const(char)[] following = tail.split!','.unQuote;
+
+        size_t taken;
+        ulong value = cluster.parse_uint_with_base(&taken);
+        if (taken != cluster.length || value > ushort.max)
+        {
+            writeWarning("Invalid Zigbee cluster ID: ", cluster);
+            return false;
+        }
+        zb.cluster_id = cast(ushort)value;
+
+        value = attribute.parse_uint_with_base(&taken);
+        if (taken != attribute.length || value > ushort.max)
+        {
+            writeWarning("Invalid Zigbee attribute ID: ", attribute);
+            return false;
+        }
+        zb.attribute_id = cast(ushort)value;
+
+        if (attr_field.length)
+        {
+            if (attr_field[$-1] != ')')
+            {
+                writeWarning("Invalid Zigbee manufacturer code: ", attr_field);
+                return false;
+            }
+            attr_field = attr_field[0 .. $-1].trimBack;
+            value = attr_field.parse_uint_with_base(&taken);
+            if (taken != attr_field.length || value > ushort.max)
+            {
+                writeWarning("Invalid Zigbee manufacturer code: ", attr_field);
+                return false;
+            }
+            zb.manufacturer_code = cast(ushort)value;
+        }
+
+        if (type.empty)
+            return true;
+
+        const(char)[] value_type = type;
+        const(char)[] family = value_type.split!('/', false);
+        if (family.startsWith("str"))
+            zb.tuya_type = TuyaDataType.string;
+        else if (family.startsWith("bf"))
+            zb.tuya_type = TuyaDataType.bitmap;
+        else if (family.startsWith("enum"))
+            zb.tuya_type = TuyaDataType.enum_;
+        else if (family.startsWith("bool"))
+            zb.tuya_type = TuyaDataType.bool_;
+        else
+            zb.tuya_type = TuyaDataType.value;
+
+        if (zb.cluster_id == 0xEF00)
+        {
+            if (!b.compile_value(type, following, stream_be_context, zb.desc, zb.length))
+                return false;
+        }
+        else if (!b.compile_value(type, following, stream_le_context, zb.desc, zb.length))
+            return false;
+
+        if (zb.cluster_id == 0xEF00)
+        {
+            if (zb.tuya_type == TuyaDataType.bitmap)
+            {
+                if (!(zb.length == 1 || zb.length == 2 || zb.length == 4))
+                    writeWarning("Tuya bitmap datapoint '", b.element_id, "' must be 1, 2, 4 bytes");
+            }
+            else if (zb.tuya_type == TuyaDataType.enum_)
+            {
+                if (zb.length != 1)
+                    writeWarning("Tuya enum datapoint '", b.element_id, "' must be 1 byte");
+            }
+            else if (zb.tuya_type == TuyaDataType.bool_)
+            {
+                if (zb.length != 1)
+                    writeWarning("Tuya bool datapoint '", b.element_id, "' must be 1 byte");
+            }
+            else if (zb.tuya_type == TuyaDataType.value && zb.length != 4)
+                writeWarning("Tuya value datapoint '", b.element_id, "' must be 4 bytes");
+        }
+        return true;
     }
 
     override void update()

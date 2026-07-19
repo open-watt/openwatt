@@ -60,7 +60,6 @@ enum Frequency : ubyte
 enum ElementType : ubyte
 {
     modbus,
-    zigbee,
     http,
     mqtt
 }
@@ -127,14 +126,6 @@ struct ElementDesc_Modbus
     ushort reg;
     RegisterType reg_type = RegisterType.holding_register;
     ValueDesc value_desc = ValueDesc(modbus_data_type!"u16");
-}
-
-struct ElementDesc_Zigbee
-{
-    ushort cluster_id;
-    ushort attribute_id;
-    ushort manufacturer_code;
-    ValueDesc value_desc;
 }
 
 struct RequestDesc
@@ -520,8 +511,6 @@ nothrow @nogc:
             defaultAllocator().freeArray(mqtt_strings);
         if(mb_elements)
             defaultAllocator().freeArray(mb_elements);
-        if(zb_elements)
-            defaultAllocator().freeArray(zb_elements);
         if(http_elements)
             defaultAllocator().freeArray(http_elements);
         if(request_descs)
@@ -696,9 +685,6 @@ nothrow @nogc:
         assert(false, "no such profile section");
     }
 
-    ref const(ElementDesc_Zigbee) get_zb(size_t i) const pure
-        => zb_elements[i];
-
     ref const(ElementDesc_HTTP) get_http(size_t i) const pure
         => http_elements[i];
 
@@ -788,7 +774,6 @@ private:
     Lookup[] lookup_table;
     SectionBlock[] section_blocks;
     ElementDesc_Modbus[] mb_elements;
-    ElementDesc_Zigbee[] zb_elements;
     ElementDesc_HTTP[] http_elements;
     RequestDesc[] request_descs;
     ElementDesc_MQTT[] mqtt_elements;
@@ -995,7 +980,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     size_t num_element_templates = 0;
     size_t num_indirections = 0;
     size_t mb_count = 0;
-    size_t zb_count = 0;
     size_t http_count = 0;
     size_t mqtt_count = 0;
 
@@ -1146,7 +1130,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                 switch (reg_item.name)
                 {
                     case "mb", "reg": ++mb_count; break;
-                    case "zb": ++zb_count; break;
                     case "http":
                         ++http_count;
                         {
@@ -1351,7 +1334,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     profile.param_strings = allocator.allocArray!char(2 + param_string_len);
 
     profile.mb_elements = allocator.allocArray!ElementDesc_Modbus(mb_count);
-    profile.zb_elements = allocator.allocArray!ElementDesc_Zigbee(zb_count);
     profile.http_elements = allocator.allocArray!ElementDesc_HTTP(http_count);
     profile.request_descs = allocator.allocArray!RequestDesc(request_count);
     profile.mqtt_elements = allocator.allocArray!ElementDesc_MQTT(mqtt_count);
@@ -1406,7 +1388,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     num_indirections = 0;
     item_count = 0;
     mb_count = 0;
-    zb_count = 0;
     http_count = 0;
     request_count = 0;
     mqtt_count = 0;
@@ -1668,89 +1649,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                         e.access = type.parse_access();
 
                         parse_value_desc(mb.value_desc, ty, units);
-                        break;
-
-                    case "zb":
-                        const(char)[] tail = reg_item.value;
-                        tail = tail.split_element_and_desc();
-
-                        const(char)[] cluster = tail.split!',';
-                        const(char)[] mfg = tail.split!',';
-                        const(char)[] attrib = mfg.split!'(';
-                        const(char)[] type = tail.split!','.unQuote;
-                        const(char)[] units = tail.split!','.unQuote;
-
-                        e._kind = ElementType.zigbee;
-                        e._index = cast(ushort)zb_count;
-                        ref ElementDesc_Zigbee zb = profile.zb_elements[zb_count++];
-
-                        size_t taken;
-                        ulong t = cluster.parse_uint_with_base(&taken);
-                        if (taken != cluster.length || t > 0xFFFF)
-                        {
-                            writeWarning("Invalid Zigbee cluster ID: ", cluster);
-                            break;
-                        }
-                        zb.cluster_id = cast(ushort)t;
-
-                        t = attrib.parse_uint_with_base(&taken);
-                        if (taken != attrib.length || t > 0xFFFF)
-                        {
-                            writeWarning("Invalid Zigbee attribute ID: ", attrib);
-                            break;
-                        }
-                        zb.attribute_id = cast(ushort)t;
-
-                        if (mfg.length > 0)
-                        {
-                            if (mfg[$-1] != ')')
-                            {
-                                writeWarning("Invalid Zigbee manufacturer code: ", mfg);
-                                break;
-                            }
-                            mfg = mfg[0.. $-1].trimBack;
-
-                            t = mfg.parse_uint_with_base(&taken);
-                            if (taken != mfg.length || t > 0xFFFF)
-                            {
-                                writeWarning("Invalid Zigbee manufacturer code: ", mfg);
-                                break;
-                            }
-                            zb.manufacturer_code = cast(ushort)t;
-                        }
-                        else
-                            zb.manufacturer_code = 0;
-
-                        DataType ty = type.split!('/', false).parse_data_type(zb.cluster_id == 0xEF00 ? DataType.big_endian : DataType.little_endian);
-                        e.access = type.parse_access();
-
-                        parse_value_desc(zb.value_desc, ty, units);
-
-                        if (zb.cluster_id == 0xEF00)
-                        {
-                            // confirm that the tuya data types are valid
-                            ushort len = zb.value_desc.data_length;
-                            if (zb.value_desc.is_bitfield)
-                            {
-                                if (!(len == 1 || len == 2 || len == 4))
-                                    writeWarning("Tuya bitmap datapoint '", id, "' must be 1, 2, 4 bytes");
-                            }
-                            else if (zb.value_desc.is_enum)
-                            {
-                                if (len != 1)
-                                    writeWarning("Tuya enum datapoint '", id, "' must be 1 byte");
-                            }
-                            else if (zb.value_desc.is_bool)
-                            {
-                                if (len != 1)
-                                    writeWarning("Tuya bool datapoint '", id, "' must be 1 byte");
-                            }
-                            else if (zb.value_desc.is_numeric)
-                            {
-                                if (len != 4)
-                                    writeWarning("Tuya value datapoint '", id, "' must be 4 bytes");
-                            }
-                        }
                         break;
 
                     case "http":

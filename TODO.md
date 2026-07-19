@@ -276,8 +276,8 @@ status block). Remaining legs, roughly in order:
   legacy two-column spellings [enum name / dt format in the units column] translate to
   `:name` refs at the parse site; Element/Element2 grew the untemplated observe_record
   scalar path; packet path decodes via the gateway - native record when the mount is the
-  binding's format, boxed otherwise; strings stay boxed via sample_text until dynamic
-  records land). GoodWe LANDED 2026-07-19: GoodWeModule owns the registered `aa55` section,
+  binding's format, boxed otherwise). GoodWe LANDED 2026-07-19: GoodWeModule owns the
+  registered `aa55` section,
   ElementDesc_AA55 lives with the binding, and the response path decodes through SampleDesc;
   the AA55 context is big-endian by default, so the normalized gwxx48es profile carries only
   deviations and folds units/enum/encoding names into the type token. The conf sweep exposed
@@ -289,7 +289,15 @@ status block). Remaining legs, roughly in order:
   UUIDs (`180F`, `2A19`) now parse as hexadecimal, matching normal BLE profile spelling. Legacy
   two-column and normalized numeric profiles both passed runtime materialisation; the speculative
   Xiaomi profile is normalized, with its unsized variable GATT strings deferred until real `strN`
-  bounds are known. DT SETTLED 2026-07-18: DateTime is a presentation face - no typereg
+  bounds are known. Zigbee LANDED 2026-07-19: ZigbeeProtocolModule owns the registered `zb`
+  section; ZCL compiles in the byte-stream little-endian context and Tuya datapoints in the
+  big-endian context. Attribute reports and Tuya reads/writes now pass through SampleDesc, while
+  the Tuya wire type remains in ElementDesc_Zigbee because an anonymous enum8 and u8 otherwise
+  have the same DataFormat. Bare `str` is protocol-framed dynamic text with zero descriptor wire
+  span: the ZCL/Tuya hook removes its framing and observes the character payload into the native
+  String record. Fixed-layout CAN/GoodWe/BLE profiles reject bare strings and require `strN`.
+  Both the legacy and normalized Zigbee profiles passed runtime materialisation. DT SETTLED
+  2026-07-18: DateTime is a presentation face - no typereg
   entry, never serialises; Variant's user-ctor gate converts DateTime -> SysTime on entry
   and as!DateTime converts back at display; the "dt" registry name is solely SysTime's
   (was doubly claimed, order-dependent); SysTime grew a unix-ns LE serialise pair (tick

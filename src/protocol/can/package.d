@@ -74,6 +74,14 @@ nothrow @nogc:
         }
         can.offset = cast(ubyte)ti;
 
-        return b.compile_value(type, units, stream_le_context, can.desc, can.length);
+        if (!b.compile_value(type, units, stream_le_context, can.desc, can.length))
+            return false;
+        if (can.length == 0)
+        {
+            writeWarning("Unsized string requires a framed CAN profile hook: ", b.element_id);
+            can.desc = ushort.max;
+            return false;
+        }
+        return true;
     }
 }

@@ -18,6 +18,7 @@ module manager.spec;
 // Legacy spellings parse as aliases until the conf sweep: i* = s*, glued or underscored
 // le/be = ABSOLUTE value endianness (overrides context), _r = byte-swap-within-word on
 // strings and word-swap on scalars, matching the old parse_data_type semantics.
+// Bare `str` is protocol-framed dynamic text (zero wire span); fixed binary maps use strN.
 
 import urt.meta.enuminfo : VoidEnumInfo;
 import urt.si.unit : ScaledUnit;
@@ -255,8 +256,6 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
 
         case "str":
         {
-            if (width < 1)
-                return false;
             DataFormat fmt = DataFormat(ValueType.char_, Semantics.held);
             fmt.count = 0; // dynamic: the record is a TextRecord; wire span is the field width
             // width is per-char; the field's byte span comes from the register map
@@ -372,6 +371,8 @@ unittest
         && fl(d) == (WF.swap_word_bytes | WF.space_padded));
     assert(compile_spec("str8_bs", modbus_context, ScaledUnit(), 1, null, null, d));
     assert(fl(d) == WF.swap_word_bytes);
+    assert(compile_spec("str", stream_le_context, ScaledUnit(), 1, null, null, d));
+    assert(d.fmt.is_text);
 
     // bare registered type; _be marks member endianness
     static struct Pt { ushort x; ushort y; }

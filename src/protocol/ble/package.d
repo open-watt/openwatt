@@ -97,7 +97,15 @@ nothrow @nogc:
             ble.offset = cast(ubyte)offset;
         }
 
-        return b.compile_value(type, units, stream_le_context, ble.desc, ble.length);
+        if (!b.compile_value(type, units, stream_le_context, ble.desc, ble.length))
+            return false;
+        if (ble.length == 0)
+        {
+            writeWarning("Unsized string requires a framed BLE profile hook: ", b.element_id);
+            ble.desc = ushort.max;
+            return false;
+        }
+        return true;
     }
 
     override void update()
