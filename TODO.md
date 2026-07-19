@@ -390,6 +390,24 @@ status block). Remaining legs, roughly in order:
   would misfire on scalar power-of-two enums). Taste call to bless: bitfield: reading plain
   values as indices makes the two section types read values differently.
 
+- **Element retention/recording profile grammar (proposed 2026-07-19, Manu to resolve token
+  shape)**: the retention CORE is built (series.d/element2.d): min/max per axis - floors
+  (min_records/min_age) keep records even after consumption, for rendering; PINNED cursors
+  (open_cursor(from, pin=true)) extend retention until the consumer advances past (consumption
+  IS the discard mark - a 433 signal processor just reads); ceilings (max_records/max_age)
+  force eviction past stalled/undriven pins, lapped cursors report RecordBlock.lost.
+  Element2.retention(min_records, max_records) + retention(min_age, max_age). Byte budgets
+  TODO (== records * stride until variable-stride records land). DEFAULT RULE implemented in
+  device.d apply_default_retention: every native-mounted element that is not constant/config
+  sampling gets history (min 256 records, 1h window, 16k ceiling; named constants) unless a
+  binding already configured it. REMAINING - profile agency: (1) element-level override tokens,
+  proposal: named k=v trailer on the element line or desc, `keep=` floor / `cap=` ceiling,
+  value type by suffix (bare int = records, duration suffix = age, repeatable for both axes),
+  `record=none` opts out; (2) component/profile-level defaults inherited by children;
+  (3) recorder tie-in: record-to-disk intent is a SEPARATE flag from RAM retention (recorder
+  becomes a pinned cursor consumer at step-3 slice 4). Token shape should land with the T9
+  grammar doc, not before (T7 agents own that grammar surface right now).
+
 - **Commands / device logic in profiles (design 2026-07-16; the ancient "commands" TODO's
   answer)**: the missing write/control facet - how a state-element write becomes a transmitted/
   written protocol action, INCLUDING stateful logic (toggles: only fire if desired != current).
