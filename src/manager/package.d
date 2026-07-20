@@ -1,6 +1,7 @@
 module manager;
 
 import urt.array;
+import urt.conv : parse_float;
 import urt.lifetime : move;
 import urt.log : writeWarning;
 import urt.map;
@@ -264,6 +265,21 @@ nothrow @nogc:
         register_signal_provider(StringLit!"element", this);
 
         register_intrinsic(StringLit!"select", &select);
+        register_intrinsic(StringLit!"to_int", &to_int);
+        register_intrinsic(StringLit!"to_float", &to_float);
+        register_intrinsic(StringLit!"to_bool", &to_bool);
+        register_intrinsic(StringLit!"to_string", &to_string);
+        register_intrinsic(StringLit!"is_number", &is_number);
+        register_intrinsic(StringLit!"abs", &intrinsic_abs);
+        register_intrinsic(StringLit!"round", &intrinsic_round);
+        register_intrinsic(StringLit!"min", &intrinsic_min);
+        register_intrinsic(StringLit!"max", &intrinsic_max);
+        register_intrinsic(StringLit!"is_null", &intrinsic_is_null);
+        register_intrinsic(StringLit!"truthy", &intrinsic_truthy);
+        register_intrinsic(StringLit!"lower", &intrinsic_lower);
+        register_intrinsic(StringLit!"upper", &intrinsic_upper);
+        register_intrinsic(StringLit!"trim", &intrinsic_trim);
+        register_intrinsic(StringLit!"length", &intrinsic_length);
         import urt.math : pow, sqrt, sin, cos, tan, asin, acos, atan, atan2;
         register_intrinsic(StringLit!"math.pow", &intrin_shim_2!pow);
         register_intrinsic(StringLit!"math.sqrt", &intrin_shim_1!sqrt);
@@ -331,9 +347,11 @@ nothrow @nogc:
 
     ~this()
     {
+        import manager.codec : clear_encoding_registry;
         import urt.time : unsubscribe_clock_change;
         unsubscribe_clock_change(&notify_wallclock_change);
         _wake_event.destroy();
+        clear_encoding_registry();
         g_app = null;
     }
 
@@ -1900,6 +1918,276 @@ Variant select(Variant[] args)
     else
         return Variant();
     return b ? args[1] : args[2];
+}
+
+Variant to_int(Variant[] args)
+{
+    if (args.length < 1 || args.length > 2)
+        return Variant();
+    if (args[0].isBool)
+        return Variant(cast(ubyte)args[0].asBool);
+    if (args[0].isNumber)
+    {
+        if (args[0].isQuantity)
+            return Variant();
+        return Variant(cast(long)args[0].asDouble);
+    }
+    if (args[0].isString)
+    {
+        const(char)[] text = args[0].asString.trim();
+        size_t taken;
+        double value = text.parse_float(&taken);
+        if (!text.empty && taken == text.length)
+            return Variant(cast(long)value);
+    }
+    return args.length == 2 ? args[1] : Variant();
+}
+
+Variant to_float(Variant[] args)
+{
+    if (args.length < 1 || args.length > 2)
+        return Variant();
+    if (args[0].isBool)
+        return Variant(args[0].asBool ? 1.0 : 0.0);
+    if (args[0].isNumber)
+    {
+        if (args[0].isQuantity)
+            return Variant();
+        if (args[0].isDouble)
+            return args[0];
+        return Variant(args[0].asDouble);
+    }
+    if (args[0].isString)
+    {
+        const(char)[] text = args[0].asString.trim();
+        size_t taken;
+        double value = text.parse_float(&taken);
+        if (!text.empty && taken == text.length)
+            return Variant(value);
+    }
+    return args.length == 2 ? args[1] : Variant();
+}
+
+Variant to_bool(Variant[] args)
+{
+    if (args.length < 1 || args.length > 2)
+        return Variant();
+    if (args[0].isBool)
+        return args[0];
+    if (args[0].isNumber && !args[0].isQuantity)
+    {
+        double value = args[0].asDouble;
+        if (value == 0 || value == 1)
+            return Variant(value != 0);
+    }
+    else if (args[0].isString)
+    {
+        import urt.string.ascii : cmp;
+        const(char)[] text = args[0].asString.trim();
+        if (!cmp!true(text, "true") || !cmp!true(text, "yes") ||
+            !cmp!true(text, "on") || !cmp!true(text, "enable") || text == "1")
+            return Variant(true);
+        if (!cmp!true(text, "false") || !cmp!true(text, "no") ||
+            !cmp!true(text, "off") || !cmp!true(text, "disable") || text == "0")
+            return Variant(false);
+    }
+    return args.length == 2 ? args[1] : Variant();
+}
+
+Variant to_string(Variant[] args)
+{
+    if (args.length != 1)
+        return Variant();
+    if (args[0].isString)
+        return args[0];
+    MutableString!0 text;
+    text.format("{0}", args[0]);
+    return Variant(String(text.move));
+}
+
+Variant is_number(Variant[] args)
+{
+    if (args.length != 1)
+        return Variant(false);
+    if (args[0].isNumber)
+    {
+        double value = args[0].asDouble;
+        return Variant(value == value && value != double.infinity && value != -double.infinity);
+    }
+    if (!args[0].isString)
+        return Variant(false);
+    const(char)[] text = args[0].asString.trim();
+    size_t taken;
+    double value = text.parse_float(&taken);
+    return Variant(!text.empty && taken == text.length && value == value && value != double.infinity && value != -double.infinity);
+}
+
+Variant intrinsic_abs(Variant[] args)
+{
+    if (args.length != 1 || !args[0].isNumber || args[0].is_enum)
+        return Variant();
+    import urt.math : fabs;
+    if (args[0].isUlong)
+        return args[0];
+    if (args[0].isLong)
+    {
+        const q = args[0].asQuantity!long;
+        ulong value = ulong(-q.value); // handle the case of long.min
+        return Variant(Quantity!ulong(value, q.unit));
+    }
+    VarQuantity value = args[0].asQuantity;
+    value.value = fabs(value.value);
+    return Variant(value);
+}
+
+Variant intrinsic_round(Variant[] args)
+{
+    if (args.length < 1 || args.length > 4 ||
+        (args.length >= 2 && !args[1].isLong))
+        return Variant();
+
+    double value;
+    if (args[0].isNumber)
+        value = args[0].asDouble;
+    else if (args[0].isString)
+    {
+        const(char)[] text = args[0].asString.trim();
+        size_t taken;
+        value = text.parse_float(&taken);
+        if (text.empty || taken != text.length)
+            return args.length == 4 ? args[3] : Variant();
+    }
+    else
+        return args.length == 4 ? args[3] : Variant();
+
+    int precision = args.length >= 2 ? args[1].asInt : 0;
+    if (precision < -15 || precision > 15)
+        return Variant();
+    double scale = 1;
+    foreach (_; 0 .. (precision < 0 ? -precision : precision))
+        scale *= 10;
+    double scaled = precision < 0 ? value / scale : value * scale;
+
+    const(char)[] method = "common";
+    if (args.length >= 3)
+    {
+        if (!args[2].isString)
+            return Variant();
+        method = args[2].asString;
+    }
+    if (method == "half")
+        scaled *= 2;
+
+    long truncated = cast(long)scaled;
+    if (method == "common" || method == "half")
+    {
+        import urt.math : fabs;
+        double remainder = fabs(scaled - truncated);
+        if (remainder > 0.5 || (remainder == 0.5 && (truncated & 1)))
+            truncated += scaled < 0 ? -1 : 1;
+    }
+    else if (method == "floor")
+    {
+        if (scaled < truncated)
+            --truncated;
+    }
+    else if (method == "ceil")
+    {
+        if (scaled > truncated)
+            ++truncated;
+    }
+    else
+        return Variant();
+
+    double result = precision < 0 ? truncated * scale : truncated / scale;
+    if (method == "half")
+        result /= 2;
+    return Variant(result);
+}
+
+Variant intrinsic_min(Variant[] args)
+    => numeric_extreme(args, false);
+
+Variant intrinsic_max(Variant[] args)
+    => numeric_extreme(args, true);
+
+Variant numeric_extreme(Variant[] args, bool greatest)
+{
+    Variant[] values = args;
+    if (args.length == 1 && args[0].isArray)
+        values = args[0].asArray[];
+    if (values.empty || !values[0].isNumber || values[0].is_enum)
+        return Variant();
+    size_t best;
+    VarQuantity extreme = values[0].asQuantity;
+    foreach (i; 1 .. values.length)
+    {
+        if (!values[i].isNumber || values[i].is_enum)
+            return Variant();
+        VarQuantity value = values[i].asQuantity;
+        if (!value.isCompatible(extreme))
+            return Variant();
+        if ((greatest && value > extreme) || (!greatest && value < extreme))
+        {
+            best = i;
+            extreme = value;
+        }
+    }
+    return values[best];
+}
+
+Variant intrinsic_is_null(Variant[] args)
+{
+    return Variant(args.length == 1 && args[0].isNull);
+}
+
+Variant intrinsic_truthy(Variant[] args)
+{
+    if (args.length != 1)
+        return Variant(false);
+    ref Variant value = args[0];
+    if (value.isBool)
+        return Variant(value.asBool);
+    if (value.isNumber)
+        return Variant(value.asDouble != 0);
+    if (value.isString || value.isArray || value.isObject || value.isBuffer)
+        return Variant(value.length != 0);
+    return Variant(false);
+}
+
+Variant intrinsic_lower(Variant[] args)
+{
+    if (args.length != 1 || !args[0].isString)
+        return Variant();
+    import urt.string.ascii : to_lower;
+    MutableString!0 result = MutableString!0(args[0].asString);
+    result[].to_lower;
+    return Variant(String(result.move));
+}
+
+Variant intrinsic_upper(Variant[] args)
+{
+    if (args.length != 1 || !args[0].isString)
+        return Variant();
+    import urt.string.ascii : to_upper;
+    MutableString!0 result = MutableString!0(args[0].asString);
+    result[].to_upper;
+    return Variant(String(result.move));
+}
+
+Variant intrinsic_trim(Variant[] args)
+{
+    if (args.length != 1 || !args[0].isString)
+        return Variant();
+    return Variant(args[0].asString.trim());
+}
+
+Variant intrinsic_length(Variant[] args)
+{
+    if (args.length != 1 ||
+        !(args[0].isString || args[0].isArray || args[0].isObject || args[0].isBuffer))
+        return Variant();
+    return Variant(args[0].length);
 }
 
 Variant apparent(Variant[] args)

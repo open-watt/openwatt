@@ -116,14 +116,6 @@ protected:
         }
 
         bool bad = false;
-        foreach (declared; profile.get_parameters())
-        {
-            if (declared[] !in _params)
-            {
-                writeWarning(name, ": missing required parameter '", declared, "' for profile '", pname, "'");
-                bad = true;
-            }
-        }
         foreach (k; _params.keys)
         {
             bool declared = false;

@@ -65,7 +65,7 @@ private MQTTSubscriptionRange mqtt_subscriptions(ref const Profile profile) noth
     const(void)[] root = profile.get_root_section(mqtt_subscribe_kind);
     if (root.length < ushort.sizeof)
         return MQTTSubscriptionRange(&profile, null);
-    const(ushort)[] words = (cast(const(ushort)*)root.ptr)[0 .. root.length / ushort.sizeof];
+    const(ushort)[] words = cast(ushort[])root;
     size_t count = words[0];
     if (count + 1 > words.length)
         return MQTTSubscriptionRange(&profile, null);
@@ -154,22 +154,29 @@ nothrow @nogc:
         if (!src || !src.running)
             return CompletionStatus.continue_;
 
-        bool sub_failed;
+        const(char)[] missing_param;
         const(char)[] get_substitute(size_t, const(char)[] param)
         {
-            const(char)[] v = get_param(param);
-            if (v is null)
-                sub_failed = true;
-            return v;
+            if (auto value = param in _params)
+                return (*value)[];
+            if (missing_param is null)
+                missing_param = param;
+            return null;
         }
 
         foreach (s; mqtt_subscriptions(*_profile_data))
         {
-            sub_failed = false;
-            String sub = String(s.substitute_parameters(&get_substitute, sub_failed));
-            if (sub_failed || !sub)
+            bool unclosed_token;
+            missing_param = null;
+            String sub = String(s.substitute_parameters(&get_substitute, unclosed_token));
+            if (missing_param !is null)
             {
-                log.warning("failed to substitute variables in subscription '", s, "'");
+                log.warning(name, ": MQTT subscription '", s, "' uses profile parameter '", missing_param, "', but it is not set");
+                continue;
+            }
+            if (unclosed_token || !sub)
+            {
+                log.warning(name, ": invalid MQTT subscription '", s, "'");
                 continue;
             }
             subscribe_filter(sub.move);
@@ -201,42 +208,56 @@ protected:
 
     final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
-        assert(desc.kind == mqtt_section_kind);
+        if (desc.kind != mqtt_section_kind)
+            return;
         ref const ElementDesc_MQTT mqtt = _profile_data.get_section!ElementDesc_MQTT(mqtt_section_kind, desc.element);
         SampleDesc sample_desc = desc_by_index(mqtt.desc);
 
         if (!e.series.format)
             e.series.format = sample_desc.fmt;
 
-        bool sub_failed;
+        const(char)[] missing_param;
         const(char)[] get_substitute(size_t, const(char)[] param)
         {
-            const(char)[] v = get_param(param);
-            if (v is null)
-                sub_failed = true;
-            return v;
+            if (auto value = param in _params)
+                return (*value)[];
+            if (missing_param is null)
+                missing_param = param;
+            return null;
         }
 
         String read_topic, write_topic;
         const(char)[] raw = mqtt.get_read_topic(*_profile_data);
         if (raw.length > 0)
         {
-            sub_failed = false;
-            read_topic = String(raw.substitute_parameters(&get_substitute, sub_failed));
-            if (sub_failed)
+            bool unclosed_token;
+            missing_param = null;
+            read_topic = String(raw.substitute_parameters(&get_substitute, unclosed_token));
+            if (missing_param !is null)
             {
-                log.warning("failed to substitute variables in topic '", raw, "'");
+                log.warning(name, ": MQTT read topic '", raw, "' uses profile parameter '", missing_param, "', but it is not set");
+                return;
+            }
+            if (unclosed_token)
+            {
+                log.warning(name, ": unclosed placeholder token in MQTT read topic '", raw, "'");
                 return;
             }
         }
         raw = mqtt.get_write_topic(*_profile_data);
         if (raw.length > 0)
         {
-            sub_failed = false;
-            write_topic = String(raw.substitute_parameters(&get_substitute, sub_failed));
-            if (sub_failed)
+            bool unclosed_token;
+            missing_param = null;
+            write_topic = String(raw.substitute_parameters(&get_substitute, unclosed_token));
+            if (missing_param !is null)
             {
-                log.warning("failed to substitute variables in topic '", raw, "'");
+                log.warning(name, ": MQTT write topic '", raw, "' uses profile parameter '", missing_param, "', but it is not set");
+                return;
+            }
+            if (unclosed_token)
+            {
+                log.warning(name, ": unclosed placeholder token in MQTT write topic '", raw, "'");
                 return;
             }
         }

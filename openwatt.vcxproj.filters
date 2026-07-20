@@ -630,6 +630,12 @@
     <DCompile Include="src\protocol\mqtt\connection.d">
       <Filter>src\protocol\mqtt</Filter>
     </DCompile>
+    <DCompile Include="src\protocol\mqtt\ha_discovery.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
+    <DCompile Include="src\protocol\mqtt\ha_jinja.d">
+      <Filter>src\protocol\mqtt</Filter>
+    </DCompile>
     <DCompile Include="src\protocol\mqtt\package.d">
       <Filter>src\protocol\mqtt</Filter>
     </DCompile>

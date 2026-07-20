@@ -62,6 +62,19 @@ ushort mint_format(DataFormat shape)
     return cast(ushort)(g_formats.length - 1);
 }
 
+const(Constraint)* intern_constraint(Constraint shape)
+{
+    foreach (constraint; g_constraints)
+    {
+        if (constraint_equal(*constraint, shape))
+            return constraint;
+    }
+    Constraint* constraint = defaultAllocator().allocT!Constraint();
+    *constraint = shape;
+    g_constraints ~= constraint;
+    return constraint;
+}
+
 const(DataFormat)* format_by_index(ushort i)
 {
     assert(i < g_formats.length, "invalid format index");
@@ -445,6 +458,10 @@ unittest
     alias WK = WireKind;
     alias WF = WireFlags;
 
+    assert(!find_encoding("yymmddhhmmss"));
+    register_builtin_encodings();
+    scope(exit) clear_encoding_registry();
+
     // mint dedupe: same shape same index, different shape different index
     ushort fa = mint_format(DataFormat(ValueType.f64, Semantics.held, ScaledUnit(Volt)));
     ushort fb = mint_format(DataFormat(ValueType.f64, Semantics.held, ScaledUnit(Volt)));
@@ -483,8 +500,6 @@ unittest
     assert(format_record((cast(const(void)*)&m)[0 .. 2], mode, txt) == 1 && txt[0] == '1');
 
     // dt48 encoding: byte-image path, reading-order canonical
-    if (!find_encoding("yymmddhhmmss"))
-        register_builtin_encodings();
     const(Encoding)* dt48 = find_encoding("yymmddhhmmss");
     ubyte[6] dtw = [26, 7, 18, 13, 45, 30];  // wire yy MM dd hh mm ss
     SampleDesc when_be = SampleDesc(WireLayout(WK.char_, 8, 0, WF.none), 1,
@@ -522,6 +537,7 @@ private:
 import urt.array : Array;
 
 __gshared Array!(DataFormat*) g_formats;
+__gshared Array!(Constraint*) g_constraints;
 __gshared Array!SampleDesc g_descs;
 __gshared Map!(String, const(VoidEnumInfo)*) g_enums;
 
@@ -548,6 +564,19 @@ bool format_equal(ref const DataFormat a, ref const DataFormat b) pure
         case quantity: return a.unit == b.unit;
         case enum_:    return a.enum_info is b.enum_info;
     }
+}
+
+bool constraint_equal(ref const Constraint a, ref const Constraint b) pure
+{
+    if (a.has != b.has || a.check_fn != b.check_fn)
+        return false;
+    if ((a.has & Constraint.Has.min) && a.min.raw != b.min.raw)
+        return false;
+    if ((a.has & Constraint.Has.max) && a.max.raw != b.max.raw)
+        return false;
+    if ((a.has & Constraint.Has.step) && a.step.raw != b.step.raw)
+        return false;
+    return true;
 }
 
 void store_int(void* p, ValueType t, ulong v) pure

@@ -24,6 +24,7 @@ enum Type : ubyte
     // primary
     str = 0,
     num,
+    null_,
     var,
     elem,
     arr,
@@ -391,6 +392,8 @@ nothrow @nogc:
 
         final switch (ty)
         {
+            case Type.null_:
+                return Variant();
             case Type.num:
                 return Variant(f);
             case Type.str:
@@ -1107,30 +1110,39 @@ Expression* parse_primary_exp(ref const(char)[] text, bool allow_slash = false)
             syntax_error("Invalid token");
     }
 
-    size_t taken = 0;
-    VarQuantity q = text[0..len].parse_quantity(&taken);
-    if (taken == len)
+    const(char)[] token = text[0 .. len];
+    if (!is_var && !is_element && token == "null")
     {
-        // we parsed a number!
-        r = alloc_expression(Type.num);
+        r = alloc_expression(Type.null_);
         r.flags = Flags.constant;
-        r.f = q;
-
-        version (ExpressionDebug)
-            writeDebug("NUM: ", r.f);
     }
     else
     {
-        if ((is_var || is_element) && !identifier)
-            syntax_error("Expected identifier");
-        r = alloc_expression(is_var ? Type.var : is_element ? Type.elem : Type.str);
-        r.flags = Flags.no_quotes;
-        if (identifier)
-            r.flags |= Flags.identifier;
-        r.s = text[0 .. len];
+        size_t taken = 0;
+        VarQuantity q = token.parse_quantity(&taken);
+        if (taken == len)
+        {
+            // we parsed a number!
+            r = alloc_expression(Type.num);
+            r.flags = Flags.constant;
+            r.f = q;
 
-        version (ExpressionDebug)
-            writeDebug(is_var ? "VAR: " : is_element ? "ELEMENT: " : "STR: ", r.get_str());
+            version (ExpressionDebug)
+                writeDebug("NUM: ", r.f);
+        }
+        else
+        {
+            if ((is_var || is_element) && !identifier)
+                syntax_error("Expected identifier");
+            r = alloc_expression(is_var ? Type.var : is_element ? Type.elem : Type.str);
+            r.flags = Flags.no_quotes;
+            if (identifier)
+                r.flags |= Flags.identifier;
+            r.s = token;
+
+            version (ExpressionDebug)
+                writeDebug(is_var ? "VAR: " : is_element ? "ELEMENT: " : "STR: ", r.get_str());
+        }
     }
     text = text[len .. $];
 
@@ -1160,60 +1172,11 @@ Expression* fold(Type ty, Expression* l, Expression* r)
     // attempt constant folding...
 
     if (ty == Type.call)
-    {
-        import manager;
-
-        // find intrinsic
-        const(char)[] name = l.get_str();
-        IntrinsicFunction* fn = name[] in g_app.intrinsic_functions;
-        if (!fn)
-            return null;
-
-        // TODO: handle intrinsic function constant folding...
         return null;
-/+
-        // gather args
-        Variant[16] args;
-        size_t i = args.length - 1;
-        while (r)
-        {
-            if (r.ty == Type.exp_list)
-            {
-                args[i--] = r.right.evaluate();
-                r = r.left;
-            }
-            else
-            {
-                args[i] = r.evaluate();
-                r = null;
-            }
-        }
-
-        // massage result
-        Variant result = (*fn)(args[i .. $]);
-        if (result.isBool)
-        {
-            *l = Expression(Type.num);
-            l.f = result.asBool() ? 1 : 0;
-        }
-        else if (result.isNumber || result.isQuantity)
-        {
-            *l = Expression(Type.num);
-            l.f = result.asDouble();
-            // TODO: capture the unit!
-        }
-        else if (result.isString)
-        {
-            *l = Expression(Type.str);
-            l.s = result.asString();
-        }
-        else
-            return null;
-        return l;
-+/
-    }
 
     // can only fold if both sides are constant...
+    if (l.ty == Type.null_ || (r && r.ty == Type.null_))
+        return null;
     if (l.ty >= Type.var || (ty >= Type.idx && r.ty >= Type.var))
         return null;
 

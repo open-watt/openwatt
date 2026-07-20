@@ -55,6 +55,12 @@ void register_builtin_encodings()
     register_encoding(e);
 }
 
+void clear_encoding_registry()
+{
+    g_encodings[0 .. g_num_encodings] = Encoding.init;
+    g_num_encodings = 0;
+}
+
 void register_encoding(Encoding e)
 {
     assert(g_num_encodings < g_encodings.length, "too many encodings");
@@ -66,7 +72,9 @@ void register_encoding(Encoding e)
 
 unittest
 {
+    assert(g_num_encodings == 0);
     register_builtin_encodings();
+    scope(exit) clear_encoding_registry();
     const(Encoding)* e = find_encoding("yymmddhhmmss");
     assert(e && e.wire_bytes == 6);
     assert(e.format.type == ValueType.user && e.format.user_type.name == "dt");

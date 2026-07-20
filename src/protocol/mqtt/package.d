@@ -135,7 +135,7 @@ nothrow @nogc:
 
     bool parse_root(uint, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
     {
-        ushort[] words = (cast(ushort*)slot.ptr)[0 .. slot.length / ushort.sizeof];
+        ushort[] words = cast(ushort[])slot;
         words[0] = 0;
         const(char)[] tail = item.value;
         while (!tail.empty)
@@ -172,7 +172,7 @@ nothrow @nogc:
         if (!b)
             return;
 
-        b.print_cache(session, topic[]);
+        b.read_payload(session, topic[]);
     }
 
     void sessions(Session session, Nullable!MQTTBroker broker)

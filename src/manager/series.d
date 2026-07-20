@@ -110,6 +110,7 @@ nothrow @nogc:
 
     Scalar min;
     Scalar max;
+    Scalar step;
     CheckFn check_fn;   // null = range only
     ubyte has;
 

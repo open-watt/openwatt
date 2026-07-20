@@ -795,6 +795,11 @@ private:
 unittest
 {
     import urt.si.unit : Ampere, ScaledUnit, Volt;
+    import manager.codec : clear_encoding_registry, find_encoding, register_builtin_encodings;
+
+    assert(!find_encoding("yymmddhhmmss"));
+    register_builtin_encodings();
+    scope(exit) clear_encoding_registry();
 
     Profile p;
 
@@ -824,7 +829,6 @@ unittest
 
     // wire spans for byte-stream maps (CAN): derived per family from the compiled desc
     {
-        import manager.codec : find_encoding, register_builtin_encodings;
         import manager.series : ValueType;
         SampleDesc d;
         assert(compile_spec("u16", stream_le_context, ScaledUnit(), 1, null, null, d));
@@ -833,8 +837,6 @@ unittest
         assert(d.fmt.type == ValueType.char_ && wire_span(d, "str8") == 8);
         assert(compile_spec("u8[8]", stream_le_context, ScaledUnit(), 1, null, null, d));
         assert(wire_span(d, "u8[8]") == 8);
-        if (!find_encoding("yymmddhhmmss"))
-            register_builtin_encodings();
         assert(compile_spec("dt48:yymmddhhmmss", stream_le_context, ScaledUnit(), 1, null, null, d));
         assert(wire_span(d, "dt48:yymmddhhmmss") == 6);
     }

@@ -326,6 +326,10 @@ unittest
 
     alias WF = WireFlags;
 
+    assert(!find_encoding("yymmddhhmmss"));
+    register_builtin_encodings();
+    scope(exit) clear_encoding_registry();
+
     static uint fl(ref const SampleDesc d) pure
         => d.layout.flags;
 
@@ -415,8 +419,6 @@ unittest
     assert(!compile_spec("enum16:nope", modbus_context, ScaledUnit(), 1, null, &resolver, d));
 
     // dt48 encoding: family + width validated against the entry
-    if (!find_encoding("yymmddhhmmss"))
-        register_builtin_encodings();
     assert(compile_spec("dt48:yymmddhhmmss", modbus_context, ScaledUnit(), 1, null, null, d));
     assert(d.enc !is null && d.fmt.type == ValueType.user);
     assert(!compile_spec("dt32:yymmddhhmmss", modbus_context, ScaledUnit(), 1, null, null, d));

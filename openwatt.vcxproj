@@ -226,6 +226,8 @@
     <DCompile Include="src\protocol\mqtt\client.d" />
     <DCompile Include="src\protocol\mqtt\codec.d" />
     <DCompile Include="src\protocol\mqtt\connection.d" />
+    <DCompile Include="src\protocol\mqtt\ha_discovery.d" />
+    <DCompile Include="src\protocol\mqtt\ha_jinja.d" />
     <DCompile Include="src\protocol\mqtt\package.d" />
     <DCompile Include="src\protocol\mqtt\session.d" />
     <DCompile Include="src\protocol\mqtt\topic.d" />

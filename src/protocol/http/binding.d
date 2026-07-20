@@ -316,27 +316,43 @@ private:
         rs.request_index = req_idx;
         rs.min_sample_ms = sample_ms > 0 ? sample_ms : ushort.max;
 
-        bool sub_failed, unclosed_token;
+        bool unclosed_token;
         bool has_singular, has_plural;
         int is_body = 0;
+        const(char)[] missing_param;
+        const(char)[] missing_use;
+        const(char)[] current_use;
 
-        const(char)[] get_substitute(size_t, const(char)[] param)
+        bool find_substitute(const(char)[] param, out const(char)[] value)
         {
             foreach (i, v; param_names)
             {
                 if (v[] != param[])
                     continue;
-                return param_values[i];
+                value = param_values[i];
+                return true;
             }
-            sub_failed = true;
+            return false;
+        }
+
+        const(char)[] get_substitute(size_t, const(char)[] param)
+        {
+            const(char)[] value;
+            if (find_substitute(param, value))
+                return value;
+            if (missing_param is null)
+            {
+                missing_param = param;
+                missing_use = current_use;
+            }
             return null;
         }
 
         const(char)[] get_sub_with_kv(size_t offset, const(char)[] param)
         {
-            const(char)[] sub = get_substitute(offset, param);
-            if (!sub_failed)
-                return sub;
+            const(char)[] value;
+            if (find_substitute(param, value))
+                return value;
             int is_val = 0;
             if (param[] == "key")
                 has_singular = true;
@@ -348,14 +364,17 @@ private:
                 has_plural = true, is_val = 2;
             else
             {
-                log.warning("no parameter '", param, "' for substitution");
+                if (missing_param is null)
+                {
+                    missing_param = param;
+                    missing_use = current_use;
+                }
                 return null;
             }
             ref ushort sub_offset = rs.sub_offsets[is_val | is_body];
             if (sub_offset != ushort.max)
                 return null;
             sub_offset = cast(ushort)offset;
-            sub_failed = false;
             return null;
         }
 
@@ -367,16 +386,24 @@ private:
             return subbed;
         }
 
+        current_use = "path";
         rs.resolved_path = String(do_sub(req.get_path(*_profile_data), &get_sub_with_kv));
         is_body = 1;
+        current_use = "body template";
         rs.resolved_body_template = String(do_sub(req.get_body_template(*_profile_data), &get_sub_with_kv));
+        current_use = "root path";
         rs.resolved_root_path = String(do_sub(req.get_root_path(*_profile_data), &get_substitute));
+        current_use = "parse template";
         rs.resolved_parse_template = String(do_sub(req.get_parse_template(*_profile_data), &get_substitute));
+        current_use = "success expression";
         auto success_expr = substitute_parameters(req.get_success_expr(*_profile_data), &get_substitute, unclosed_token);
 
-        if (sub_failed || unclosed_token)
+        if (missing_param !is null || unclosed_token)
         {
-            if (unclosed_token)
+            if (missing_param !is null)
+                log.warning(name, ": HTTP request '", req.get_name(*_profile_data), "' ", missing_use,
+                    " uses profile parameter '", missing_param, "', but it is not set");
+            else
                 log.warning("un-closed placeholder token in request '", req.get_name(*_profile_data), '\'');
             _request_states.popBack();
         }
