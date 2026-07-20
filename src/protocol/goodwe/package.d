@@ -12,7 +12,7 @@ import manager.collection;
 import manager.config : ConfItem;
 import manager.plugin;
 import manager.profile;
-import manager.spec : stream_be_context;
+import manager.sample.spec : stream_be_context;
 
 import protocol.goodwe.aa55;
 import protocol.goodwe.binding;

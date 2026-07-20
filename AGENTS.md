@@ -299,7 +299,7 @@ Bindings are the bridge between a protocol client/interface and the Device/Compo
 
 The base hierarchy (`src/manager/binding.d`):
 - **`ProtocolBinding`** — abstract base, holds the bound `device` name, creates the Device in `g_app.devices` if missing.
-- **`ProfileBinding`** — adds profile loading: `profile_dir()` / `profile_name()` / `model_name()` are overridden by subclasses, `materialise()` loads the profile file and calls `create_device_from_profile()` with an `add_handler` delegate that the subclass uses to wire elements to its sampling/event logic.
+- **`ProfileBinding`** — adds profile loading: `profile_name()` / `model_name()` are overridden by subclasses, `materialise()` resolves the profile basename recursively below the configured profile path and calls `create_device_from_profile()` with an `add_handler` delegate that the subclass uses to wire elements to its sampling/event logic.
 
 Bindings support two operating modes per protocol:
 - **Active polling** (Modbus, HTTP): `update()` drives requests; smart batching where applicable. Modbus groups adjacent registers (max 128-register span, max 16-register gap) and assigns PCP priority based on sample frequency.
@@ -307,7 +307,7 @@ Bindings support two operating modes per protocol:
 
 Other features:
 - **Adaptive sampling**: Frequencies: Realtime (400ms), High (1s), Medium (10s), Low (60s), Constant (once), OnDemand (never)
-- **Type-aware decoding**: `ValueDesc` (binary) + `TextValueDesc` (text) via `sample_value()` / `format_value()` in [src/manager/sampler.d](src/manager/sampler.d) (shared descriptor/codec utilities).
+- **Type-aware decoding**: protocol profile sections compile the shared descriptor language in [src/manager/sample/spec.d](src/manager/sample/spec.d) into `SampleDesc`; [src/manager/sample/package.d](src/manager/sample/package.d) applies those descriptors to binary and textual records.
 - **Bidirectional**: Bindings that implement `Subscriber` (HTTP, MQTT) get notified of element changes for write-back
 
 **Data flow (active polling):**
@@ -582,7 +582,7 @@ The REPL method enables true interactive investigation: send a command, analyze 
 
 ### Adding a New Device Type
 
-1. Create a profile file in the appropriate location (e.g. `conf/modbus_profiles/`, `conf/rest_profiles/`)
+1. Create a profile in the `conf/profiles` submodule's appropriate directory (e.g. `modbus_profiles/`, `rest_profiles/`)
 2. If the protocol doesn't yet have a Binding, implement one (subclass `ProfileBinding` or `ProtocolBinding`)
 3. Register the binding's Collection in the protocol's Module `init()`
 4. The user creates an instance at runtime: `/binding/<proto>/add name=... device=... profile=... ...`

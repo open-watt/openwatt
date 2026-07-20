@@ -157,7 +157,6 @@ protected:
         se.length = can.length;
         se.desc = sd;
 
-        device.sample_elements ~= e; // TODO: remove this?
     }
 
 private:

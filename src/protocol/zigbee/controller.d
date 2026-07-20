@@ -1447,7 +1447,7 @@ private:
 unittest
 {
     import urt.si.unit : ScaledUnit;
-    import manager.spec : compile_spec, stream_be_context;
+    import manager.sample.spec : compile_spec, stream_be_context;
 
     SampleDesc desc;
     assert(compile_spec("u32", stream_be_context, ScaledUnit(), 1, null, null, desc));

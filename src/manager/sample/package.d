@@ -1,7 +1,7 @@
 module manager.sample;
 
-// The value gateway: the one decode/encode surface, composing wire layout (manager.wire),
-// bespoke encodings (manager.codec), registered types (urt.typereg) and record formats
+// The value gateway: the one decode/encode surface, composing wire layout (manager.sample.wire),
+// bespoke encodings (manager.sample.codec), registered types (urt.typereg) and record formats
 // (manager.series). All traffic is (DataFormat, void[]) records; Variant appears only at
 // the mount's boxing edge. The gateway never allocates: dynamic values (text) return
 // transient views and mint their String at the mount, where latest lives.
@@ -16,9 +16,9 @@ import urt.string.format : formatValue;
 import urt.typereg : TypeDetails;
 import urt.variant : Variant;
 
-import manager.codec;
-import manager.series;
-import manager.wire;
+import manager.sample.codec;
+import manager.sample.wire;
+public import manager.series;
 
 nothrow @nogc:
 

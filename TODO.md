@@ -346,11 +346,9 @@ status block). Remaining legs, roughly in order:
   the family selects the `:` namespace, so unit/enum collision is structurally
   impossible). CAN retrofitted as the first registered section (ElementDesc_CAN lives
   in protocol.can.binding, the module implements the interface, profile.d's arm
-  deleted). REMAINING: mb/zb/http/mqtt arms move out as their T7 stops land;
-  http `requests:` / mqtt subscribe lists need the root-section method pair when those
-  two migrate; sampler.d EMPTIES at T7's end (sample_value x2,
-  format_value, ValueDesc, TextValueDesc, DataType, DataKind, DateFormat, CustomSample,
-  TextType, bool both-endian hack all delete). The column following type is repurposed as
+  deleted). Modbus, Zigbee and MQTT section arms have since moved out. REMAINING: the HTTP
+  arm and `requests:` root move into protocol.http. The retired sampler.d compatibility
+  layer was deleted after its final consumers migrated. The column following type is repurposed as
   access (`R`/`W`/`RW`, omitted = read): ProfileBuilder recognizes those exact tokens first,
   otherwise temporarily translates the old units/enum meaning; after the final profile sweep,
   delete that translation and the legacy `/R`/`W`/`RW` suffix. T8 value.d fold + rename;
@@ -455,7 +453,7 @@ status block). Remaining legs, roughly in order:
   sync) in the profile too. Scope: profile parser grows an expression/script layer; define a
   DEVICE-SCRIPT EXECUTION CONTEXT (access to `@`-elements, the `play(action)` primitive, per-device
   managed state like `$seq`). Less "new subsystem" than "point the automation engine at the device
-  layer". First customer: the RF433 fan (drafts conf/rf_profiles/brilliant_22034.conf +
+  layer". First customer: the RF433 fan (drafts conf/profiles/rf_profiles/brilliant_22034.conf +
   src/protocol/rf433/package.d; Brilliant 22034 protocol fully reverse-engineered - see
   memory/pi_433_wiring). Ties to: profile FUNCTIONS facet in the data-model redesign, automation
   Phase 3 ($trigger context / typed action surface), and the GpioBinding signal-generator (TX).

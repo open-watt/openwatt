@@ -15,15 +15,14 @@ import urt.string.format;
 
 import manager.component;
 
-import manager.codec : Encoding;
+import manager.sample.codec : Encoding;
 import manager.config;
 import manager.device;
 import manager.element;
 import manager.features;
 import manager.sample : find_enum_info, mint_desc, register_enum_info, SampleDesc;
-import manager.sampler;
-import manager.series : DataFormat, Semantics, ValueType;
-import manager.spec : compile_spec, LayoutContext, stream_le_context;
+import manager.series : DataFormat, ValueType;
+import manager.sample.spec : compile_spec, LayoutContext, stream_le_context;
 
 static if (has_http)
     import protocol.http.message : HTTPMethod;
@@ -559,55 +558,6 @@ nothrow @nogc:
         return find_enum_info(name);
     }
 
-    // one shared instance per shape, owned by the profile (mounts borrow it, like enum_info);
-    // null = no native representation until the type registry lands (enums, strings, dates, ...)
-    const(DataFormat)* series_format(ref const ValueDesc desc)
-    {
-        if (desc.is_custom || desc.is_string || desc.is_date_time)
-            return null;
-        if (desc.data_type & DataType.array)
-            return null;
-
-        if (desc.is_enum)
-        {
-            // the sampled value is the integer raw regardless of wire kind (enumf32 casts)
-            ValueType et;
-            switch (desc.data_length)
-            {
-                case 1:  et = ValueType.u8;  break;
-                case 2:  et = ValueType.u16; break;
-                case 4:  et = ValueType.u32; break;
-                case 8:  et = ValueType.u64; break;
-                default: return null;
-            }
-            return mint_series_format(et, ScaledUnit(), desc.enum_info);
-        }
-
-        ValueType vt;
-        if (desc.is_bool)
-            vt = ValueType.bool_;
-        else if (desc.data_type.data_kind == DataKind.floating)
-            vt = desc.data_type.data_bytes == 4 ? ValueType.f32 : ValueType.f64;
-        else if (desc.pre_scale != 1)
-            vt = ValueType.f64;     // decode applies the scale; the observed value is real-valued
-        else
-        {
-            DataKind kind = desc.data_type.data_kind;
-            ubyte bytes = kind == DataKind.low_byte || kind == DataKind.high_byte ? 1 : desc.data_type.data_bytes;
-            bool is_signed = (desc.data_type & DataType.signed) != 0;
-            switch (bytes)
-            {
-                case 1:  vt = is_signed ? ValueType.s8  : ValueType.u8;  break;
-                case 2:  vt = is_signed ? ValueType.s16 : ValueType.u16; break;
-                case 4:  vt = is_signed ? ValueType.s32 : ValueType.u32; break;
-                case 8:  vt = is_signed ? ValueType.s64 : ValueType.u64; break;
-                default: return null;
-            }
-        }
-
-        return mint_series_format(vt, desc.unit);
-    }
-
     ref inout(ComponentTemplate) get_component(ref const(DeviceTemplate) device, size_t index) inout pure
     {
         assert(index < device._num_components, "Component index out of range");
@@ -719,15 +669,6 @@ nothrow @nogc:
     }
 
 private:
-    const(DataFormat)* mint_series_format(ValueType vt, ScaledUnit unit, const(VoidEnumInfo)* enum_info = null)
-    {
-        import manager.sample : format_by_index, mint_format;
-        // Semantics.held matches legacy change-only delivery; profiles grow a semantics field later
-        DataFormat target = enum_info ? DataFormat(vt, Semantics.held, enum_info)
-                                      : DataFormat(vt, Semantics.held, unit);
-        return format_by_index(mint_format(target));
-    }
-
     struct Lookup
     {
         ushort hash;
@@ -794,38 +735,12 @@ private:
 
 unittest
 {
-    import urt.si.unit : Ampere, ScaledUnit, Volt;
-    import manager.codec : clear_encoding_registry, find_encoding, register_builtin_encodings;
+    import urt.si.unit : Ampere, ScaledUnit;
+    import manager.sample.codec : clear_encoding_registry, find_encoding, register_builtin_encodings;
 
     assert(!find_encoding("yymmddhhmmss"));
     register_builtin_encodings();
     scope(exit) clear_encoding_registry();
-
-    Profile p;
-
-    // scaled integers decode to reals; equal shapes share one instance
-    ValueDesc scaled = ValueDesc(DataType.u16, ScaledUnit(Volt), 0.1);
-    const(DataFormat)* f = p.series_format(scaled);
-    assert(f && f.type == ValueType.f64 && f.unit == ScaledUnit(Volt));
-    assert(p.series_format(scaled) is f);
-
-    // unscaled integers keep their width and sign
-    ValueDesc raw = ValueDesc(DataType.i16, ScaledUnit(Ampere));
-    const(DataFormat)* g = p.series_format(raw);
-    assert(g && g.type == ValueType.s16 && g !is f);
-
-    // enums store the raw integer natively and box through the descriptor
-    import urt.meta.enuminfo : enum_info;
-    import urt.variant : Variant;
-    import manager.series : box_record;
-    enum TestMode { off, on, auto_ }
-    ValueDesc en = ValueDesc(cast(DataType)(DataType.u16 | DataType.enumeration), enum_info!TestMode.make_void());
-    const(DataFormat)* h = p.series_format(en);
-    assert(h && h.type == ValueType.u16 && h.enum_info !is null);
-    assert(p.series_format(en) is h);
-    ushort raw16 = 1;
-    Variant bv = box_record(&raw16, *h);
-    assert(bv.is_enum && bv.asLong == 1);
 
     // wire spans for byte-stream maps (CAN): derived per family from the compiled desc
     {
@@ -926,14 +841,12 @@ unittest
         import manager.sample : desc_by_index, parse_record;
         import manager.series : box_record, Scalar;
 
-        // the compiled format is the same instance the legacy path mints for the same spelling
+        // The normalized descriptor carries the scaling and native format directly.
         ref const TDesc cv = prof.get_section!TDesc(tsec, 0);
         assert(cv.desc != 0xFFFF && cv.length == 2 && cv.addr == 1);
         SampleDesc cvd = desc_by_index(cv.desc);
-        ValueDesc legacy_cv = ValueDesc(DataType.u16);
-        legacy_cv.parse_units("0.1V");
-        assert(cvd.fmt is prof.series_format(legacy_cv));
-        assert(cvd.pre_scale == legacy_cv.pre_scale);
+        assert(cvd.fmt.type == ValueType.f64);
+        assert(cvd.pre_scale == 0.1);
 
         // profile enums register qualified and resolve locally by bare name
         ref const TDesc md = prof.get_section!TDesc(tsec, 1);

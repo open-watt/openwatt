@@ -324,7 +324,7 @@ nothrow @nogc:
         console.register_collection!Secret();
         console.register_collection!ProtocolBinding();
 
-        import manager.codec : register_builtin_encodings;
+        import manager.sample.codec : register_builtin_encodings;
         register_builtin_encodings();
 
         register_modules(this);
@@ -347,7 +347,7 @@ nothrow @nogc:
 
     ~this()
     {
-        import manager.codec : clear_encoding_registry;
+        import manager.sample.codec : clear_encoding_registry;
         import urt.time : unsubscribe_clock_change;
         unsubscribe_clock_change(&notify_wallclock_change);
         _wake_event.destroy();
@@ -1267,7 +1267,7 @@ private:
         MonoTime     when;
     }
 
-    // Zero-ref profiles are retained: element descs, samplers, and expressions
+    // Zero-ref profiles are retained: element descs and expressions
     // on surviving devices borrow the profile's string caches, so freeing needs
     // device-side ownership first. TODO: free when the last borrower dies.
     struct ProfileCacheEntry

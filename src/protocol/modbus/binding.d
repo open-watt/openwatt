@@ -388,7 +388,6 @@ protected:
         }
 
         add_register_entry(e, desc, mb, sample_desc);
-        device.sample_elements ~= e;
     }
 
 

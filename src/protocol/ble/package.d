@@ -15,7 +15,7 @@ import manager.config : ConfItem;
 import manager.console;
 import manager.plugin;
 import manager.profile;
-import manager.spec : stream_le_context;
+import manager.sample.spec : stream_le_context;
 
 import router.iface;
 import router.iface.mac;

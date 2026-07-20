@@ -23,8 +23,8 @@ import manager.plugin;
 import manager.profile : Frequency, freq_to_element_mode, find_known_element, KnownElementTemplate;
 import manager.sample;
 import manager.series;
-import manager.spec : compile_spec, modbus_context;
-import manager.wire : WireKind;
+import manager.sample.spec : compile_spec, modbus_context;
+import manager.sample.wire : WireKind;
 
 import protocol.modbus;
 import protocol.modbus.iface : ModbusProtocol;

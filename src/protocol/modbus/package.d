@@ -16,8 +16,7 @@ import manager.console.command;
 import manager.console.session;
 import manager.plugin;
 import manager.profile;
-import manager.sampler;
-import manager.spec : modbus_context;
+import manager.sample.spec : modbus_context;
 
 import protocol.modbus.iface;
 import protocol.modbus.node;

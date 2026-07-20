@@ -49,6 +49,9 @@
     <Filter Include="src\manager">
       <UniqueIdentifier>{a7edf0a4-cbca-4a75-bf4f-548fe4b7764d}</UniqueIdentifier>
     </Filter>
+    <Filter Include="src\manager\sample">
+      <UniqueIdentifier>{4f6d2b1a-8c73-4e9f-a051-6d2c8b4e7f90}</UniqueIdentifier>
+    </Filter>
     <Filter Include="src\manager\console">
       <UniqueIdentifier>{5b7f73d6-de14-482f-86a8-89a77e2af436}</UniqueIdentifier>
     </Filter>
@@ -726,20 +729,17 @@
     <DCompile Include="src\manager\console\console.d">
       <Filter>src\manager\console</Filter>
     </DCompile>
-    <DCompile Include="src\manager\sampler.d">
-      <Filter>src\manager</Filter>
+    <DCompile Include="src\manager\sample\wire.d">
+      <Filter>src\manager\sample</Filter>
     </DCompile>
-    <DCompile Include="src\manager\wire.d">
-      <Filter>src\manager</Filter>
+    <DCompile Include="src\manager\sample\codec.d">
+      <Filter>src\manager\sample</Filter>
     </DCompile>
-    <DCompile Include="src\manager\codec.d">
-      <Filter>src\manager</Filter>
+    <DCompile Include="src\manager\sample\package.d">
+      <Filter>src\manager\sample</Filter>
     </DCompile>
-    <DCompile Include="src\manager\sample.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\spec.d">
-      <Filter>src\manager</Filter>
+    <DCompile Include="src\manager\sample\spec.d">
+      <Filter>src\manager\sample</Filter>
     </DCompile>
     <DCompile Include="src\manager\binding.d">
       <Filter>src\manager</Filter>
@@ -1583,9 +1583,6 @@
       <Filter>docs</Filter>
     </None>
     <None Include="docs\OVERVIEW.md">
-      <Filter>docs</Filter>
-    </None>
-    <None Include="docs\PROFILE_FILE_FORMAT.md">
       <Filter>docs</Filter>
     </None>
     <None Include="Makefile" />

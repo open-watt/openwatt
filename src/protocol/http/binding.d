@@ -1059,7 +1059,7 @@ unittest
     import urt.format.json : parse_json;
     import urt.meta.enuminfo : enum_info, VoidEnumInfo;
     import urt.si.unit : Ampere, ScaledUnit;
-    import manager.spec : compile_spec, stream_le_context;
+    import manager.sample.spec : compile_spec, stream_le_context;
 
     // walk_json_path
 

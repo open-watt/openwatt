@@ -1,4 +1,4 @@
-module manager.codec;
+module manager.sample.codec;
 
 // Bespoke wire encodings: named decode/encode pairs that produce values of REAL types.
 // An encoding name appears in profile grammar (dt48:yymmddhhmmss) and compiled descs only;

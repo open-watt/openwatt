@@ -20,7 +20,7 @@ import manager.console.session;
 import manager.device;
 import manager.plugin;
 import manager.profile;
-import manager.spec : stream_be_context, stream_le_context;
+import manager.sample.spec : stream_be_context, stream_le_context;
 
 import protocol.ezsp;
 import protocol.ezsp.client;

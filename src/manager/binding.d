@@ -156,7 +156,7 @@ protected:
     override CompletionStatus shutdown()
     {
         // release, don't free: the registry retains the parse (element descs and
-        // samplers on surviving devices borrow its strings), and the next startup
+        // expressions on surviving devices borrow its strings), and the next startup
         // re-acquires the live copy and re-materialises subclass element state
         if (_profile_data)
         {

@@ -227,7 +227,6 @@ protected:
             default: assert(false);
         }
 
-        device.sample_elements ~= e; // TODO: remove this?
     }
 
 private:

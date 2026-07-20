@@ -271,7 +271,6 @@ protected:
         if (e.access & Access.write)
             e.add_subscriber(&on_element_change);
 
-        device.sample_elements ~= e; // TODO: remove this?
     }
 
 private:

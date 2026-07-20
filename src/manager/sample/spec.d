@@ -1,4 +1,4 @@
-module manager.spec;
+module manager.sample.spec;
 
 // The value-spec grammar compiler: profile type spellings -> compiled SampleDesc.
 //
@@ -24,10 +24,10 @@ import urt.meta.enuminfo : VoidEnumInfo;
 import urt.si.unit : ScaledUnit;
 import urt.typereg : find_type_by_name, TypeDetails;
 
-import manager.codec;
+import manager.sample.codec;
 import manager.sample;
 import manager.series;
-import manager.wire;
+import manager.sample.wire;
 
 nothrow @nogc:
 

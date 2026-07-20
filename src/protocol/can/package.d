@@ -12,7 +12,7 @@ import manager.collection;
 import manager.config : ConfItem;
 import manager.plugin;
 import manager.profile;
-import manager.spec : stream_le_context;
+import manager.sample.spec : stream_le_context;
 
 import protocol.can.iface;
 import protocol.can.binding;

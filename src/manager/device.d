@@ -192,23 +192,6 @@ nothrow @nogc:
 
     Array!Computation computations;
 
-    bool finalise()
-    {
-//        // walk all elements in all components and collect the sampler components into a list, sorted by update frequency
-//        foreach (c; components)
-//        {
-//            foreach (ref Element e; c.elements)
-//            {
-//                if (e.method == Element.Method.Sample)
-//                    sample_elements ~= &e;
-//            }
-//        }
-//
-//        last_poll = getTime();
-
-        return true;
-    }
-
     void clear_computations()
     {
         foreach (ref c; computations)
@@ -264,57 +247,7 @@ nothrow @nogc:
                 src.force_update(now);
         }
 
-//        MonoTime now = getTime();
-//        Duration elapsed = now - last_poll;
-//        last_poll = now;
-//
-//        // gather all elements that need to be sampled
-//        Element*[] elements;
-//        foreach (Element* e; sample_elements)
-//        {
-//            if (e.sampler.updateIntervalMs == 0)
-//            {
-//                // sample constants just once
-//                if (!e.sampler.constantSampled && !e.sampler.in_flight)
-//                    elements ~= e;
-//                continue;
-//            }
-//            else
-//            {
-//                // sample regular values
-//                e.sampler.nextSample -= elapsed;
-//                if (e.sampler.nextSample <= Duration.zero && !e.sampler.in_flight)
-//                    elements ~= e;
-//            }
-//        }
-//
-//        if (!elements)
-//            return;
-//
-//        // sort the elements by server and register
-//        auto work = elements.sort!((a, b) {
-//            Sampler* as = a.sampler;
-//            Sampler* bs = b.sampler;
-//            if (as.server !is bs.server)
-//                return as.server < bs.server;
-//            if (as.lessThan)
-//                return as.lessThan(as, bs);
-//            return a.id < b.id;
-//        }).chunkBy!((a, b) => a.sampler.server is b.sampler.server);
-//
-//        // issue requests
-//        foreach (serverElements; work)
-//        {
-//            assert(!serverElements.empty);
-//
-//            // TODO: i'd love it if this module didn't reference the router!
-////            Server server = serverElements.front.sampler.server;
-////            server.requestElements(serverElements.array);
-//        }
     }
-
-    Array!(Element*) sample_elements;
-    MonoTime last_poll;
 
 package:
     int try_bind_pending()

@@ -1,4 +1,4 @@
-module manager.wire;
+module manager.sample.wire;
 
 import urt.endian : loadLittleEndian, storeLittleEndian;
 import urt.util : byte_reverse;
@@ -193,7 +193,7 @@ unittest
     static WireFlags wf(uint f) pure
         => cast(WireFlags)f;
 
-    // byte-stream widths, both endians (vectors carried from sampler.d)
+    // byte-stream widths, both endians
     immutable ubyte[8] buf = [0x80, 0x81, 0x82, 0x83, 0x84, 0x85, 0x86, 0x87];
     assert(wire_extract(buf, WireLayout(WK.unsigned_, 8)) == 0x80);
     assert(wire_extract(buf, WireLayout(WK.signed_, 8)) == cast(ulong)long(-0x80));
