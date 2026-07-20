@@ -966,7 +966,7 @@ nothrow @nogc:
 
         Device device = create_device_from_profile(*profile, model ? model.value : null, id, name ? name.value : null,
             (Device, Element* e, ref const ElementDesc desc, ubyte) {
-                session.write_line("Element '", e.id, "' is protocol-coupled (", desc.type, "); not allowed in a naked device profile");
+                session.write_line("Element '", e.id, "' is protocol-coupled (", desc.kind, "); not allowed in a naked device profile");
             });
         if (!device)
             session.write_line("Failed to create device '", id, "'");

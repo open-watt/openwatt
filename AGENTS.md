@@ -446,7 +446,7 @@ Follow these conventions (from [CONTRIBUTING.md](CONTRIBUTING.md)):
 - Public API (properties, overrides) at top of class/module
 - `protected:` section at middle (of classes)
 - `package:` between protected/private, ONLY if it's absolutely needed, this should be rare!
-- `unittest { ... }` - for typical single-concern modules, place unit tests above the private section at module scope. One unit-test block is plenty, expand the existing block, no need to add several new blocks. Write a comment to header the new test section. For modules that are a collection if utility functions, it is okay to place a unit test for each function (or logical grouping) just below their definition.
+- `unittest { ... }` - place module-scale tests at the bottom of the file so they do not interrupt the implementation's reading flow. Inline tests are only for small tests of a specific function and may sit directly below that function. Prefer one module-scale test block over several scattered blocks.
 - `private:` section at bottom of class/module for private members and helper methods
 - DO ALWAYS move code around and keep the file in good logical flow order while refactoring. Once flow degrades, it's impossible to know where to add new code anymore, so it's important to maintain!
 

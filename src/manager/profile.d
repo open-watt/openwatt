@@ -19,15 +19,9 @@ import manager.sample.codec : Encoding;
 import manager.config;
 import manager.device;
 import manager.element;
-import manager.features;
 import manager.sample : find_enum_info, mint_desc, register_enum_info, SampleDesc;
 import manager.series : DataFormat, ValueType;
-import manager.sample.spec : compile_spec, LayoutContext, stream_le_context;
-
-static if (has_http)
-    import protocol.http.message : HTTPMethod;
-else
-    enum HTTPMethod : ubyte { unknown }  // stub: HTTP profile requests need has_http
+import manager.sample.spec : compile_spec, LayoutContext;
 
 version = IncludeDescription;
 
@@ -54,11 +48,6 @@ enum Frequency : ubyte
     on_demand,
     report,
     configuration
-}
-
-enum ElementType : ubyte
-{
-    http = 1
 }
 
 enum SumType : ubyte
@@ -97,9 +86,6 @@ pure nothrow @nogc:
     Access access = Access.read;
     Frequency update_frequency = Frequency.medium;
 
-    ElementType type() const
-        => cast(ElementType)_kind;
-
     uint kind() const
         => _kind;
 
@@ -113,78 +99,6 @@ private:
     ubyte _kind;
     ushort _index;
     ushort _description;
-}
-
-struct RequestDesc
-{
-pure nothrow @nogc:
-
-    enum FormatType : ubyte
-    {
-        none,       // no body formatting (static URL or URL placeholders)
-        json,       // JSON body template with {key}/{value} expand-and-merge
-        form,       // key=val&key=val body template with {key}/{value}
-    }
-
-    enum ParseMode : ubyte
-    {
-        json,       // walk JSON response by element paths (default)
-        regex,      // element identifier is a regex capture pattern
-        none,       // don't parse response
-    }
-
-    const(char)[] get_name(ref const(Profile) profile) const
-        => _name.cache_string(profile.http_strings);
-
-    const(char)[] get_path(ref const(Profile) profile) const
-        => _path.cache_string(profile.http_strings);
-
-    const(char)[] get_body_template(ref const(Profile) profile) const
-        => _body_template.cache_string(profile.http_strings);
-
-    const(char)[] get_parse_template(ref const(Profile) profile) const
-        => _parse_template.cache_string(profile.http_strings);
-
-    const(char)[] get_root_path(ref const(Profile) profile) const
-        => _root_path.cache_string(profile.http_strings);
-
-    const(char)[] get_success_expr(ref const(Profile) profile) const
-        => _success_expr.cache_string(profile.http_strings);
-
-    FormatType format_type;
-    HTTPMethod method;
-    ParseMode parse_mode;
-
-private:
-    ushort _name;
-    ushort _path;
-    ushort _body_template;
-    ushort _parse_template;
-    ushort _root_path;
-    ushort _success_expr;
-}
-
-struct ElementDesc_HTTP
-{
-pure nothrow @nogc:
-    const(char)[] get_identifier(ref const(Profile) profile) const
-        => _identifier.cache_string(profile.http_strings);
-
-    const(char)[] get_write_key(ref const(Profile) profile) const
-        => _write_key.cache_string(profile.http_strings);
-
-    const(char)[] get_response_path(ref const(Profile) profile) const
-        => _response_path.cache_string(profile.http_strings);
-
-    ushort request_index;        // index into request_descs[]
-    ushort write_request_index;  // index for write, ushort.max if read-only
-    ushort desc = ushort.max;    // compiled SampleDesc
-    bool identifier_quoted;      // true = literal string key, false = walk path
-
-private:
-    ushort _identifier;    // "evse.temp" or quoted literal
-    ushort _write_key;     // override key for write, 0 if same as identifier
-    ushort _response_path; // override parse path, 0 if same as identifier
 }
 
 struct ProfileCosts
@@ -512,12 +426,6 @@ nothrow @nogc:
            defaultAllocator().freeArray(desc_strings);
         if (expression_strings)
             defaultAllocator().freeArray(expression_strings);
-        if(http_elements)
-            defaultAllocator().freeArray(http_elements);
-        if(request_descs)
-            defaultAllocator().freeArray(request_descs);
-        if(http_strings)
-            defaultAllocator().freeArray(http_strings);
         if(param_strings)
             defaultAllocator().freeArray(param_strings);
         foreach (ref b; section_blocks)
@@ -626,12 +534,6 @@ nothrow @nogc:
         assert(false, "no such profile section");
     }
 
-    ref const(ElementDesc_HTTP) get_http(size_t i) const pure
-        => http_elements[i];
-
-    ref const(RequestDesc) get_request(size_t i) const pure
-        => request_descs[i];
-
     const(void)[] get_root_section(uint kind) const pure
     {
         foreach (ref b; root_blocks)
@@ -717,8 +619,6 @@ private:
     Lookup[] lookup_table;
     SectionBlock[] section_blocks;
     RootBlock[] root_blocks;
-    ElementDesc_HTTP[] http_elements;
-    RequestDesc[] request_descs;
     ushort[] indirections;
     char[] id_strings;
     char[] name_strings;
@@ -726,7 +626,6 @@ private:
     char[] expression_strings;
     char[] desc_strings;
     char[] param_strings;
-    char[] http_strings;
     char[] section_strings;
     ushort _params, _param_count;
 
@@ -735,8 +634,9 @@ private:
 
 unittest
 {
-    import urt.si.unit : Ampere, ScaledUnit;
+    import urt.si.unit : ScaledUnit;
     import manager.sample.codec : clear_encoding_registry, find_encoding, register_builtin_encodings;
+    import manager.sample.spec : stream_le_context;
 
     assert(!find_encoding("yymmddhhmmss"));
     register_builtin_encodings();
@@ -823,23 +723,16 @@ unittest
             "\n" ~
             "troot: alpha, beta\n" ~
             "\n" ~
-            "requests:\n" ~
-            "\trequest: status, GET, /status\n" ~
-            "\n" ~
             "registers:\n" ~
             "\ttsec: 1, u16, 0.1V\tdesc: chargeVoltage\n" ~
             "\ttsec: 2, enum8, Mode\tdesc: mode\n" ~
             "\ttsec: 3, u16:0.1V\tdesc: singleTokenVolts\n" ~
             "\ttsec: 4, str8, W\tdesc: name\n" ~
-            "\ttsec: 5, str8/W\tdesc: legacyName\n" ~
-            "\thttp: status, current, f64:100mA\tdesc: httpCurrent\n" ~
-            "\thttp: status, mode, enum8:Mode\tdesc: httpMode\n" ~
-            "\thttp: status, label, str\tdesc: httpLabel\n";
+            "\ttsec: 5, str8/W\tdesc: legacyName\n";
         Profile* prof = parse_profile(conf_text, "tprof");
         assert(prof !is null);
 
-        import manager.sample : desc_by_index, parse_record;
-        import manager.series : box_record, Scalar;
+        import manager.sample : desc_by_index;
 
         // The normalized descriptor carries the scaling and native format directly.
         ref const TDesc cv = prof.get_section!TDesc(tsec, 0);
@@ -864,23 +757,7 @@ unittest
         assert(prof.get_section!TDesc(tsec, 4).desc == nm.desc);
         assert(prof.elements[4].access == Access.write);
 
-        // HTTP uses the same compiled descriptor vocabulary without a parallel unit/enum field.
-        ref const ElementDesc_HTTP hc = prof.get_http(0);
-        SampleDesc hcd = desc_by_index(hc.desc);
-        assert(hcd.fmt.type == ValueType.f64);
-        Scalar http_current;
-        assert(parse_record("1", hcd, http_current.raw[0 .. hcd.fmt.stride]));
-        import urt.si.quantity : VarQuantity;
-        import urt.si.unit : Ampere;
-        VarQuantity http_current_value = box_record(http_current.raw.ptr, *hcd.fmt).asQuantity();
-        double http_amps = http_current_value.adjust_scale(ScaledUnit(Ampere)).value;
-        assert(http_amps > 0.099 && http_amps < 0.101);
-        ref const ElementDesc_HTTP hm = prof.get_http(1);
-        assert(desc_by_index(hm.desc).fmt.enum_info is prof.find_enum_template("Mode"));
-        ref const ElementDesc_HTTP ht = prof.get_http(2);
-        assert(desc_by_index(ht.desc).fmt.is_text);
-
-        assert(prof.elements.length == 8);
+        assert(prof.elements.length == 5);
         assert(prof.elements[0].kind == tsec && prof.elements[1].element == 1);
 
         const(void)[] root_data = prof.get_root_section(troot);
@@ -937,14 +814,11 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     size_t lookup_string_len = 0;
     size_t expression_string_len = 0;
     size_t desc_string_len = 0;
-    size_t http_string_len = 0;
     size_t param_string_len = 0;
-    size_t request_count = 0;
     size_t num_device_templates = 0;
     size_t num_component_templates = 0;
     size_t num_element_templates = 0;
     size_t num_indirections = 0;
-    size_t http_count = 0;
 
     ProfileCosts section_costs;
     Array!ushort section_counts;
@@ -998,62 +872,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
             }
             break;
 
-        case "requests":
-            requests: foreach (ref req_item; root_item.sub_items)
-            {
-                if (req_item.name != "request")
-                {
-                    writeWarning("Expected 'request:' in requests block, got: ", req_item.name);
-                    continue;
-                }
-                const(char)[] tail = req_item.value;
-                const(char)[] req_name = tail.split!','.unQuote;
-
-                auto p_method = enum_from_key!HTTPMethod(tail.split!','.unQuote);
-                if (p_method == null)
-                {
-                    writeWarning("Unknown HTTP method in request '", req_name, "'");
-                    continue;
-                }
-
-                const(char)[] path = tail.split!','.unQuote;
-                size_t sub_string_len = 0;
-
-                foreach (ref sub; req_item.sub_items)
-                {
-                    switch (sub.name)
-                    {
-                        case "success":
-                            sub_string_len += cache_len(sub.value.length);
-                            break;
-                        case "root":
-                            sub_string_len += cache_len(sub.value.unQuote.length);
-                            break;
-                        case "parse":
-                            sub_string_len += cache_len(sub.value.unQuote.length);
-                            break;
-                        case "format":
-                            const(char)[] fmt_tail = sub.value;
-                            const(char)[] fmt_type = fmt_tail.split!','.unQuote;
-                            if (fmt_type == "json" || fmt_type == "form")
-                                sub_string_len += cache_len(fmt_tail.unQuote.length);
-                            else
-                            {
-                                writeWarning("Unknown format type '", fmt_type, "' in request '", req_name, "'");
-                                continue requests;
-                            }
-                            break;
-                        default:
-                            writeWarning("Unknown sub-item '", sub.name, "' in request '", req_name, "'");
-                            continue requests;
-                    }
-                }
-
-                ++request_count;
-                http_string_len += cache_len(req_name.length) + cache_len(path.length) + sub_string_len;
-            }
-            break;
-
         case "elements", "registers":
             item_count += root_item.sub_items.length;
 
@@ -1086,41 +904,13 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                     desc_string_len += cache_len(desc.length);
                 }
 
-                switch (reg_item.name)
+                if (ProfileSectionReg* s = find_profile_section(reg_item.name))
                 {
-                    case "http":
-                        ++http_count;
-                        {
-                            const(char)[] htail = reg_item.value;
-                            htail = htail.split_element_and_desc();
-                            const(char)[] req_name = htail.split!','.unQuote;
-                            const(char)[] identifier = htail.split!','.unQuote;
-                            http_string_len += cache_len(identifier.length);
-
-                            foreach (ref sub; reg_item.sub_items)
-                            {
-                                if (sub.name == "write")
-                                {
-                                    const(char)[] wt = sub.value;
-                                    const(char)[] w_req = wt.split!','.unQuote;
-                                    const(char)[] w_key = wt.split!','.unQuote;
-                                    http_string_len += cache_len(w_key.length);
-                                }
-                                else if (sub.name == "response")
-                                    http_string_len += cache_len(sub.value.unQuote.length);
-                            }
-                        }
-                        break;
-                    default:
-                        if (ProfileSectionReg* s = find_profile_section(reg_item.name))
-                        {
-                            ++section_counts[s.kind - first_section_kind];
-                            s.handler.count_element(s.kind, reg_item, section_costs);
-                        }
-                        else
-                            writeWarning("Unknown element type: ", reg_item.name);
-                        break;
+                    ++section_counts[s.kind - first_section_kind];
+                    s.handler.count_element(s.kind, reg_item, section_costs);
                 }
+                else
+                    writeWarning("Unknown element type: ", reg_item.name);
             }
             break;
 
@@ -1285,11 +1075,8 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     profile.lookup_strings = allocator.allocArray!char(2 + lookup_string_len);
     profile.expression_strings = allocator.allocArray!char(2 + expression_string_len);
     profile.desc_strings = allocator.allocArray!char(2 + desc_string_len);
-    profile.http_strings = allocator.allocArray!char(2 + http_string_len);
     profile.param_strings = allocator.allocArray!char(2 + param_string_len);
 
-    profile.http_elements = allocator.allocArray!ElementDesc_HTTP(http_count);
-    profile.request_descs = allocator.allocArray!RequestDesc(request_count);
     size_t active_sections = 0;
     foreach (n; section_counts)
         if (n)
@@ -1323,7 +1110,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
         }
     }
 
-    StringCacheBuilder id_cache, name_cache, lookup_cache, expr_cache, desc_cache, http_string_cache, param_string_cache;
+    StringCacheBuilder id_cache, name_cache, lookup_cache, expr_cache, desc_cache, param_string_cache;
     if (profile.name_strings)
         id_cache = StringCacheBuilder(profile.id_strings);
     if (profile.name_strings)
@@ -1334,8 +1121,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
         expr_cache = StringCacheBuilder(profile.expression_strings);
     if (profile.desc_strings)
         desc_cache = StringCacheBuilder(profile.desc_strings);
-    if (profile.http_strings)
-        http_string_cache = StringCacheBuilder(profile.http_strings);
     if (profile.param_strings)
         param_string_cache = StringCacheBuilder(profile.param_strings);
 
@@ -1352,113 +1137,48 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     num_element_templates = 0;
     num_indirections = 0;
     item_count = 0;
-    http_count = 0;
-    request_count = 0;
     section_counts[][] = 0;
     Array!bool root_parsed;
     root_parsed.resize(g_profile_root_sections.length);
+
+    foreach (ref root_item; conf.sub_items)
+    {
+        if (root_item.name != "parameters")
+            continue;
+        if (profile._param_count > 0)
+        {
+            writeWarning("Duplicate parameters definition");
+            continue;
+        }
+        profile._params = cast(ushort)num_indirections;
+        const(char)[] tail = root_item.value;
+        while (!tail.empty)
+        {
+            const(char)[] value = tail.split!','.unQuote;
+            if (value.empty)
+                continue;
+            profile.indirections[num_indirections++] = param_string_cache.add_string(value);
+            ++profile._param_count;
+        }
+    }
+
+    foreach (ref root_item; conf.sub_items)
+    {
+        ProfileRootSectionReg* s = find_profile_root_section(root_item.name);
+        if (!s)
+            continue;
+        size_t i = s.kind - first_root_section_kind;
+        if (root_parsed[][i])
+            continue;
+        root_parsed[][i] = true;
+        ref Profile.RootBlock blk = root_block(profile, s.kind);
+        s.handler.parse_root(s.kind, root_item, blk.data, builder);
+    }
 
     // parse the elements
     foreach (ref root_item; conf.sub_items) switch (root_item.name)
     {
         case "parameters":
-            if (profile._param_count > 0)
-            {
-                writeWarning("Duplicate parameters definition");
-                break;
-            }
-            profile._params = cast(ushort)num_indirections;
-            const(char)[] tail = root_item.value;
-            while (!tail.empty)
-            {
-                const(char)[] value = tail.split!','.unQuote;
-                if (value.empty)
-                    continue;
-                profile.indirections[num_indirections++] = param_string_cache.add_string(value);
-                ++profile._param_count;
-            }
-            break;
-
-        case "requests":
-            requests2: foreach (ref req_item; root_item.sub_items)
-            {
-                if (req_item.name != "request")
-                    continue;
-
-                const(char)[] tail = req_item.value;
-                const(char)[] req_name = tail.split!','.unQuote;
-
-                auto p_method = enum_from_key!HTTPMethod(tail.split!','.unQuote);
-                if (p_method == null)
-                    continue;
-
-                const(char)[] path = tail.split!','.unQuote;
-
-                const(char)[] success_expr, root_path, parse_template, body_template;
-                RequestDesc.FormatType format_type;
-                RequestDesc.ParseMode parse_mode;
-
-                foreach (ref sub; req_item.sub_items)
-                {
-                    switch (sub.name)
-                    {
-                        case "success":
-                            success_expr = sub.value;
-                            break;
-                        case "root":
-                            root_path = sub.value.unQuote;
-                            break;
-                        case "parse":
-                        {
-                            const(char)[] parse_val = sub.value.unQuote;
-                            if (parse_val == "regex")
-                                parse_mode = RequestDesc.ParseMode.regex;
-                            else if (parse_val == "none")
-                                parse_mode = RequestDesc.ParseMode.none;
-                            else
-                            {
-                                // "json" or "json, {key}.subpath"
-                                const(char)[] parse_tail = sub.value;
-                                const(char)[] first = parse_tail.split!','.unQuote;
-                                if (first == "json" && !parse_tail.empty)
-                                    parse_template = parse_tail.unQuote;
-                                else if (first != "json")
-                                    parse_template = sub.value.unQuote;
-                            }
-                            break;
-                        }
-                        case "format":
-                            const(char)[] fmt_tail = sub.value;
-                            const(char)[] fmt_type = fmt_tail.split!','.unQuote;
-                            if (fmt_type == "json")
-                            {
-                                format_type = RequestDesc.FormatType.json;
-                                body_template = fmt_tail.unQuote;
-                            }
-                            else if (fmt_type == "form")
-                            {
-                                format_type = RequestDesc.FormatType.form;
-                                body_template = fmt_tail.unQuote;
-                            }
-                            else
-                                continue requests2;
-                            break;
-                        default:
-                            continue requests2;
-                    }
-                }
-
-                ref RequestDesc req = profile.request_descs[request_count++];
-                req.method = *p_method;
-                req._name = http_string_cache.add_string(req_name);
-                req._path = http_string_cache.add_string(path);
-                req.format_type = format_type;
-                req.parse_mode = parse_mode;
-                req._success_expr = http_string_cache.add_string(success_expr);
-                req._root_path = http_string_cache.add_string(root_path);
-                req._parse_template = http_string_cache.add_string(parse_template);
-                req._body_template = http_string_cache.add_string(body_template);
-            }
             break;
 
         case "elements", "registers":
@@ -1507,82 +1227,18 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                 e.update_frequency = frequency;
                 e.display_units = addString(display_units);
 
-                // the actual element data...
-                switch (reg_item.name)
+                if (ProfileSectionReg* s = find_profile_section(reg_item.name))
                 {
-                    case "http":
-                        e._kind = ElementType.http;
-                        e._index = cast(ushort)http_count;
-                        ref ElementDesc_HTTP http = profile.http_elements[http_count++];
-                        http = ElementDesc_HTTP.init;
-
-                        const(char)[] htail = reg_item.value;
-                        htail = htail.split_element_and_desc();
-
-                        const(char)[] req_name = htail.split!','.unQuote;
-                        const(char)[] raw_identifier = htail.split!',';
-                        http.identifier_quoted = raw_identifier.length >= 2 && raw_identifier[0] == '"' && raw_identifier[$-1] == '"';
-                        const(char)[] identifier = raw_identifier.unQuote;
-                        const(char)[] type = htail.split!','.unQuote;
-                        const(char)[] access = htail.split!','.unQuote;
-
-                        http._identifier = http_string_cache.add_string(identifier);
-
-                        http.write_request_index = ushort.max;
-                        http.request_index = find_request_index(*profile, req_name);
-                        if (http.request_index == ushort.max && !req_name.empty)
-                            writeWarning("Unknown request '", req_name, "' for http element: ", id);
-
-                        builder.element_id = id;
-                        builder._element = &e;
-                        ubyte span;
-                        builder.compile_value(type, access, stream_le_context, http.desc, span);
-
-                        foreach (ref sub; reg_item.sub_items)
-                        {
-                            if (sub.name == "write")
-                            {
-                                const(char)[] wt = sub.value;
-                                const(char)[] w_req = wt.split!','.unQuote;
-                                const(char)[] w_key = wt.split!','.unQuote;
-
-                                http.write_request_index = find_request_index(*profile, w_req);
-                                if (http.write_request_index == ushort.max)
-                                    writeWarning("Unknown write request '", w_req, "' for http element: ", id);
-
-                                if (!w_key.empty)
-                                    http._write_key = http_string_cache.add_string(w_key);
-
-                            }
-                            else if (sub.name == "response")
-                                http._response_path = http_string_cache.add_string(sub.value.unQuote);
-                        }
-
-                        bool has_read = http.request_index != ushort.max;
-                        bool has_write = http.write_request_index != ushort.max;
-                        if (has_read && has_write)
-                            e.access = Access.read_write;
-                        else if (has_write)
-                            e.access = Access.write;
-                        else
-                            e.access = Access.read;
-                        break;
-
-                    default:
-                        if (ProfileSectionReg* s = find_profile_section(reg_item.name))
-                        {
-                            ref Profile.SectionBlock blk = section_block(profile, s.kind);
-                            ushort idx = section_counts[s.kind - first_section_kind]++;
-                            e._kind = cast(ubyte)s.kind;
-                            e._index = idx;
-                            builder.element_id = id;
-                            builder._element = &e;
-                            s.handler.parse_element(s.kind, reg_item, blk.data[idx*blk.esize .. (idx+1)*blk.esize], builder);
-                        }
-                        else
-                            writeWarning("Unknown element type: ", reg_item.name);
-                        break;
+                    ref Profile.SectionBlock blk = section_block(profile, s.kind);
+                    ushort idx = section_counts[s.kind - first_section_kind]++;
+                    e._kind = cast(ubyte)s.kind;
+                    e._index = idx;
+                    builder.element_id = id;
+                    builder._element = &e;
+                    s.handler.parse_element(s.kind, reg_item, blk.data[idx*blk.esize .. (idx+1)*blk.esize], builder);
                 }
+                else
+                    writeWarning("Unknown element type: ", reg_item.name);
             }
             break;
 
@@ -1623,16 +1279,6 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
             break;
 
         default:
-            if (ProfileRootSectionReg* s = find_profile_root_section(root_item.name))
-            {
-                size_t i = s.kind - first_root_section_kind;
-                if (!root_parsed[][i])
-                {
-                    root_parsed[][i] = true;
-                    ref Profile.RootBlock blk = root_block(profile, s.kind);
-                    s.handler.parse_root(s.kind, root_item, blk.data, builder);
-                }
-            }
             break;
     }
 
@@ -2037,8 +1683,6 @@ struct ProfileSectionReg
     uint kind;
 }
 
-__gshared Array!ProfileSectionReg g_profile_sections;
-
 struct ProfileRootSectionReg
 {
     const(char)[] name;
@@ -2046,6 +1690,7 @@ struct ProfileRootSectionReg
     uint kind;
 }
 
+__gshared Array!ProfileSectionReg g_profile_sections;
 __gshared Array!ProfileRootSectionReg g_profile_root_sections;
 
 ProfileSectionReg* find_profile_section(const(char)[] name)
@@ -2104,18 +1749,6 @@ ubyte wire_span(ref const SampleDesc desc, const(char)[] spec)
     }
     uint count = fmt.count ? fmt.count : 1;
     return cast(ubyte)(desc.layout.container_bytes * count);
-}
-
-ushort find_request_index(ref const Profile profile, const(char)[] name) pure nothrow @nogc
-{
-    if (name.empty)
-        return ushort.max;
-    foreach (i, ref req; profile.request_descs)
-    {
-        if (req.get_name(profile) == name)
-            return cast(ushort)i;
-    }
-    return ushort.max;
 }
 
 size_t cache_len(size_t str_len) pure

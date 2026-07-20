@@ -25,6 +25,7 @@ import manager.series;
 
 import protocol.http.client;
 import protocol.http.message : HTTPMessage, HTTPMethod, HTTPParam;
+import protocol.http : get_http_request, http_section_kind, HTTPElementDesc, HTTPRequestDesc;
 
 //version = DebugHTTPClientBinding;
 
@@ -150,7 +151,7 @@ nothrow @nogc:
         {
             foreach (ref se; _elements[])
             {
-                ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
+                ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
                 if (http.write_request_index != ushort.max)
                     se.element.remove_subscriber(&on_element_change);
             }
@@ -168,9 +169,9 @@ protected:
 
     final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
-        if (desc.type != ElementType.http)
+        if (desc.kind != http_section_kind)
             return;
-        ref const ElementDesc_HTTP http = _profile_data.get_http(desc.element);
+        ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, desc.element);
 
         const(char)[][32] names = void, values = void;
         size_t n = 0;
@@ -185,7 +186,7 @@ protected:
         add_element(e, desc, http, names[0 .. n], values[0 .. n]);
     }
 
-    final void add_element(Element* element, ref const ElementDesc desc, ref const ElementDesc_HTTP http_desc, const(char)[][] param_names, const(char)[][] param_values)
+    final void add_element(Element* element, ref const ElementDesc desc, ref const HTTPElementDesc http_desc, const(char)[][] param_names, const(char)[][] param_values)
     {
         if (http_desc.desc == ushort.max)
             return;
@@ -229,7 +230,7 @@ protected:
             if (se.element !is &e)
                 continue;
 
-            ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
+            ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
             if (http.write_request_index == ushort.max)
                 continue;
 
@@ -310,7 +311,7 @@ private:
             }
         }
 
-        ref const RequestDesc req = _profile_data.get_request(req_idx);
+        ref const HTTPRequestDesc req = get_http_request(*_profile_data, req_idx);
 
         RequestState* rs = &_request_states.pushBack();
         rs.request_index = req_idx;
@@ -440,7 +441,7 @@ private:
             // per-element request
             foreach (i, ref se; _elements[])
             {
-                ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
+                ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
                 ushort match_idx = is_write ? http.write_request_index : http.request_index;
                 if (match_idx != rs.request_index)
                     continue;
@@ -460,7 +461,7 @@ private:
 
     void send_batch(ref RequestState rs, MonoTime now, bool is_write, HTTPSampleElement[] elements)
     {
-        ref const RequestDesc req = _profile_data.get_request(rs.request_index);
+        ref const HTTPRequestDesc req = get_http_request(*_profile_data, rs.request_index);
 
         const(char)[] path_tmpl = rs.resolved_path ? rs.resolved_path[] : req.get_path(*_profile_data);
         const(char)[] body_tmpl = rs.resolved_body_template ? rs.resolved_body_template[] : req.get_body_template(*_profile_data);
@@ -475,7 +476,7 @@ private:
         else if (rs.path_val_offset < ushort.max)
             merged_path = path_tmpl[0 .. rs.path_val_offset];
 
-        if (req.format_type == RequestDesc.FormatType.form)
+        if (req.format_type == HTTPRequestDesc.FormatType.form)
         {
             if (rs.body_key_offset < ushort.max)
                 form_buf = body_tmpl[0 .. rs.body_key_offset];
@@ -485,7 +486,7 @@ private:
 
         foreach (ref se; elements)
         {
-            ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
+            ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
             ushort match_idx = is_write ? http.write_request_index : http.request_index;
             if (match_idx != rs.request_index)
                 continue;
@@ -528,9 +529,9 @@ private:
             url_append(merged_path, rs.path_key_offset, rs.path_val_offset, path_tmpl);
 
             // body aggregation
-            if (req.format_type == RequestDesc.FormatType.form)
+            if (req.format_type == HTTPRequestDesc.FormatType.form)
                 url_append(form_buf, rs.body_key_offset, rs.body_val_offset, body_tmpl);
-            else if (req.format_type == RequestDesc.FormatType.json)
+            else if (req.format_type == HTTPRequestDesc.FormatType.json)
             {
                 if (rs.body_key_offset < ushort.max || rs.body_val_offset < ushort.max)
                 {
@@ -576,7 +577,7 @@ private:
 
         const(char)[] body;
         Array!char body_buf;
-        if (req.format_type == RequestDesc.FormatType.form)
+        if (req.format_type == HTTPRequestDesc.FormatType.form)
         {
             if (rs.body_val_offset < ushort.max)
                 form_buf ~= body_tmpl[rs.body_val_offset .. $];
@@ -584,7 +585,7 @@ private:
                 form_buf ~= body_tmpl[rs.body_key_offset .. $];
             body = form_buf[];
         }
-        else if (req.format_type == RequestDesc.FormatType.json)
+        else if (req.format_type == HTTPRequestDesc.FormatType.json)
         {
             if (!merged_body.isNull)
             {
@@ -603,7 +604,7 @@ private:
         submit_request(rs.request_index, req.method, path, body, req.format_type);
     }
 
-    void submit_request(ushort req_idx, HTTPMethod method, const(char)[] path, const(char)[] body = null, RequestDesc.FormatType fmt = RequestDesc.FormatType.none)
+    void submit_request(ushort req_idx, HTTPMethod method, const(char)[] path, const(char)[] body = null, HTTPRequestDesc.FormatType fmt = HTTPRequestDesc.FormatType.none)
     {
         if (_in_flight_count >= _in_flight_queue.length)
             return;
@@ -611,9 +612,9 @@ private:
         HTTPParam[1] ct_header;
         if (body.length > 0)
         {
-            if (fmt == RequestDesc.FormatType.json)
+            if (fmt == HTTPRequestDesc.FormatType.json)
                 ct_header[0] = HTTPParam(StringLit!"Content-Type", StringLit!"application/json");
-            else if (fmt == RequestDesc.FormatType.form)
+            else if (fmt == HTTPRequestDesc.FormatType.form)
                 ct_header[0] = HTTPParam(StringLit!"Content-Type", StringLit!"application/x-www-form-urlencoded");
             else
                 ct_header[0] = HTTPParam(StringLit!"Content-Type", StringLit!"text/plain");
@@ -738,16 +739,16 @@ private:
         if (response.content.length == 0 || rs is null)
             return 0;
 
-        ref const RequestDesc req = _profile_data.get_request(req_idx);
+        ref const HTTPRequestDesc req = get_http_request(*_profile_data, req_idx);
 
-        if (req.parse_mode == RequestDesc.ParseMode.none)
+        if (req.parse_mode == HTTPRequestDesc.ParseMode.none)
             return 0;
 
-        if (req.parse_mode == RequestDesc.ParseMode.regex)
+        if (req.parse_mode == HTTPRequestDesc.ParseMode.regex)
         {
             foreach (ref se; _elements[])
             {
-                ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
+                ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
                 if (http.request_index != req_idx)
                     continue;
 
@@ -798,7 +799,7 @@ private:
 
         foreach (ref se; _elements[])
         {
-            ref const ElementDesc_HTTP http = _profile_data.get_http(se.http_index);
+            ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
             if (http.request_index != req_idx)
                 continue;
 
