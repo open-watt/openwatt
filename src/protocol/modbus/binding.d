@@ -3,7 +3,6 @@ module protocol.modbus.binding;
 import urt.array;
 import urt.endian;
 import urt.log;
-import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
 import urt.si;
 import urt.string;
@@ -328,9 +327,6 @@ nothrow @nogc:
     }
 
 protected:
-    final override const(char)[] profile_dir() const pure
-        => "conf/modbus_profiles/";
-
     final override const(char)[] profile_name() const pure
     {
         if (_slave_server)
@@ -353,7 +349,7 @@ protected:
         if (!_serve_profile_data && _serve && _slave_server && _profile_name_explicit.length > 0 && _profile_name_explicit[] != _slave_server.profile[])
         {
             const(char)[] pname = _profile_name_explicit[];
-            _serve_profile_data = g_app.acquire_profile(tconcat(profile_dir(), pname, ".conf"));
+            _serve_profile_data = g_app.acquire_profile(pname);
             if (!_serve_profile_data)
             {
                 log.warning(name[], ": failed to load serve profile '", pname, "'");

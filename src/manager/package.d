@@ -2,6 +2,7 @@ module manager;
 
 import urt.array;
 import urt.lifetime : move;
+import urt.log : writeWarning;
 import urt.map;
 import urt.mem.allocator;
 import urt.mem.string;
@@ -15,6 +16,18 @@ import urt.sync.mpsc;
 import urt.time;
 import urt.traits : is_enum, Unqual;
 import urt.variant;
+
+version (Windows)
+{
+    import urt.internal.sys.windows;
+    import urt.internal.sys.windows.winbase;
+    import urt.internal.sys.windows.winnt;
+    import urt.string.uni : uni_convert;
+}
+else version (Posix)
+{
+    import urt.internal.sys.posix : stat, stat_t;
+}
 
 import manager.binding;
 import manager.collection;
@@ -218,6 +231,9 @@ nothrow @nogc:
 
     uint update_rate_hz = 20;
 
+    ref const(String) profile_path() const pure
+        => _profile_path;
+
     Array!(ElementLink*) links;
 
     Map!(String, RegisteredType) types;
@@ -269,6 +285,7 @@ nothrow @nogc:
         console.register_command!set_hostname("/system", this);
         console.register_command!get_hostname("/system", this, "hostname");
         console.register_command!set_update_rate("/system", this, "update-rate");
+        console.register_command!set_profile_path("/system", this, "profile-path");
         console.register_command!uptime("/system", this);
         console.register_command!sysinfo("/system", this);
         console.register_command!show_time("/system", this, "time");
@@ -323,6 +340,25 @@ nothrow @nogc:
     void set_update_rate(Session, Quantity!(uint, Hertz) rate)
     {
         update_rate_hz = rate.value;
+    }
+
+    void set_profile_path(Session session, const(char)[] path)
+    {
+        if (_profile_path_overridden)
+        {
+            session.write_line("Profile path remains '", _profile_path, "' (command-line override)");
+            return;
+        }
+        if (!apply_profile_path(path))
+            session.write_line("Profile path must be set before profiles are loaded and cannot be empty");
+    }
+
+    bool override_profile_path(const(char)[] path)
+    {
+        if (!apply_profile_path(path))
+            return false;
+        _profile_path_overridden = true;
+        return true;
     }
 
     void register_module(Module mod)
@@ -846,20 +882,30 @@ nothrow @nogc:
     }
 
 
-    // Shared profile registry: one parse per file, shared by every consumer.
+    // Shared profile registry: one parse per name, shared by every consumer.
     // Restarting objects release on shutdown and re-acquire on startup, binding
     // to the live parse with no file reload.
-    Profile* acquire_profile(const(char)[] filename)
+    Profile* acquire_profile(const(char)[] name)
     {
-        if (ProfileCacheEntry* e = filename in _profiles)
+        const(char)[] basename = profile_basename(name);
+        if (!basename)
+        {
+            writeWarning("Invalid profile name '", name, "': expected a basename");
+            return null;
+        }
+        if (ProfileCacheEntry* e = basename in _profiles)
         {
             ++e.refs;
             return e.profile;
         }
-        Profile* p = load_profile(filename, allocator);
+
+        String filename = resolve_profile_path(_profile_path[], basename, allocator);
+        if (filename.empty)
+            return null;
+        Profile* p = load_profile(filename[], allocator);
         if (!p)
             return null;
-        _profiles.insert(filename.makeString(allocator), ProfileCacheEntry(p, 1));
+        _profiles.insert(basename.makeString(allocator), ProfileCacheEntry(p, 1));
         return p;
     }
 
@@ -882,7 +928,6 @@ nothrow @nogc:
 
     void device_add(Session session, const(char)[] id, const(char)[] _profile, Nullable!(const(char)[]) name, Nullable!(const(char)[]) model)
     {
-        import urt.mem.temp : tconcat;
         import manager.profile : ElementDesc;
         import manager.device : create_device_from_profile;
         import manager.element : Element;
@@ -894,7 +939,7 @@ nothrow @nogc:
         }
 
         // acquired for the device's lifetime; never released
-        Profile* profile = acquire_profile(tconcat("conf/device_profiles/", _profile, ".conf"));
+        Profile* profile = acquire_profile(_profile);
         if (!profile)
         {
             session.write_line("Failed to load profile '", _profile, "'");
@@ -1214,6 +1259,16 @@ private:
     }
 
     Map!(String, ProfileCacheEntry) _profiles;
+    String _profile_path = StringLit!"conf/profiles";
+    bool _profile_path_overridden;
+
+    bool apply_profile_path(const(char)[] path)
+    {
+        if (path.length == 0 || !_profiles.empty)
+            return false;
+        _profile_path = path.makeString(allocator);
+        return true;
+    }
 
     Array!WallclockHandler _wallclock_handlers;
 
@@ -1558,6 +1613,237 @@ Array!String device_print_suggest(bool is_value, const(char)[] name, const(char)
 
 
 private:
+
+enum MaxProfilePath = 1024;
+
+struct ProfileSearch
+{
+nothrow @nogc:
+    const(char)[] target;
+    NoGCAllocator allocator;
+    String first;
+    String second;
+    bool incomplete;
+    bool overflow;
+
+    void found(const(char)[] path)
+    {
+        if (first.empty)
+            first = path.makeString(allocator);
+        else if (second.empty)
+            second = path.makeString(allocator);
+    }
+}
+
+const(char)[] profile_basename(const(char)[] name) pure
+{
+    if (name.length >= 5 && name[$ - 5 .. $] == ".conf")
+        name = name[0 .. $ - 5];
+    if (name.length == 0)
+        return null;
+    foreach (c; name)
+    {
+        if (c == '/' || c == '\\' || c == '\0')
+            return null;
+    }
+    return name;
+}
+
+String resolve_profile_path(const(char)[] root, const(char)[] basename, NoGCAllocator allocator)
+{
+    if (root.length == 0 || root.length >= MaxProfilePath)
+    {
+        writeWarning("Invalid profile path '", root, "'");
+        return String(null);
+    }
+
+    ProfileSearch search;
+    search.target = tconcat(basename, ".conf");
+    search.allocator = allocator;
+
+    char[MaxProfilePath] path = void;
+    path[0 .. root.length] = root[];
+    path[root.length] = '\0';
+    if (!walk_profile_directory(search, path, root.length))
+        search.incomplete = true;
+
+    if (search.overflow)
+    {
+        writeWarning("Profile catalogue contains a path longer than ", MaxProfilePath - 1, " bytes");
+        return String(null);
+    }
+    if (search.incomplete)
+    {
+        writeWarning("Profile catalogue '", root, "' could not be searched completely");
+        return String(null);
+    }
+    if (!search.second.empty)
+    {
+        writeWarning("Profile name '", basename, "' is ambiguous: ", search.first, " and ", search.second);
+        return String(null);
+    }
+    if (search.first.empty)
+    {
+        writeWarning("Profile '", basename, "' was not found beneath '", root, "'");
+        return String(null);
+    }
+    return search.first;
+}
+
+bool append_profile_path(ref char[MaxProfilePath] path, ref size_t length, const(char)[] name)
+{
+    size_t new_length = length + 1 + name.length;
+    if (new_length >= path.length)
+        return false;
+    path[length] = '/';
+    path[length + 1 .. new_length] = name[];
+    path[new_length] = '\0';
+    length = new_length;
+    return true;
+}
+
+version (Windows)
+{
+    bool walk_profile_directory(ref ProfileSearch search, ref char[MaxProfilePath] path, size_t length)
+    {
+        char[MaxProfilePath] pattern = void;
+        if (length + 2 >= pattern.length)
+        {
+            search.overflow = true;
+            return false;
+        }
+        pattern[0 .. length] = path[0 .. length];
+        pattern[length .. length + 3] = "/*\0";
+
+        WIN32_FIND_DATAW data;
+        HANDLE handle = FindFirstFileW(pattern[0 .. length + 2].twstringz, &data);
+        if (handle == INVALID_HANDLE_VALUE)
+            return false;
+        scope(exit) FindClose(handle);
+
+        bool more = true;
+        while (more && search.second.empty)
+        {
+            char[MaxProfilePath] name_buffer = void;
+            size_t wide_length;
+            while (wide_length < data.cFileName.length && data.cFileName[wide_length] != 0)
+                ++wide_length;
+            size_t name_length = data.cFileName[0 .. wide_length].uni_convert(name_buffer[]);
+            if (name_length != 0)
+            {
+                const(char)[] name = name_buffer[0 .. name_length];
+                if (name != "." && name != ".." && name != ".git")
+                {
+                    bool reparse = (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0;
+                    if (!reparse)
+                    {
+                        size_t child_length = length;
+                        if (!append_profile_path(path, child_length, name))
+                            search.overflow = true;
+                        else if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0)
+                        {
+                            if (!walk_profile_directory(search, path, child_length))
+                                search.incomplete = true;
+                        }
+                        else if (name == search.target)
+                            search.found(path[0 .. child_length]);
+                        path[length] = '\0';
+                    }
+                }
+            }
+            more = FindNextFileW(handle, &data) != 0;
+        }
+        return true;
+    }
+}
+else version (Posix)
+{
+    bool walk_profile_directory(ref ProfileSearch search, ref char[MaxProfilePath] path, size_t length)
+    {
+        DIR* dir = opendir(path.ptr);
+        if (dir is null)
+            return false;
+        scope(exit) closedir(dir);
+
+        while (search.second.empty)
+        {
+            dirent* entry = readdir(dir);
+            if (entry is null)
+                break;
+            size_t name_length;
+            while (name_length < entry.d_name.length && entry.d_name[name_length] != 0)
+                ++name_length;
+            if (name_length == 0)
+                continue;
+            const(char)[] name = entry.d_name[0 .. name_length];
+            if (name == "." || name == ".." || name == ".git" || entry.d_type == DT_LNK)
+                continue;
+
+            size_t child_length = length;
+            if (!append_profile_path(path, child_length, name))
+            {
+                search.overflow = true;
+                continue;
+            }
+
+            bool is_directory = entry.d_type == DT_DIR;
+            bool is_file = entry.d_type == DT_REG;
+            if (entry.d_type == DT_UNKNOWN)
+            {
+                stat_t info;
+                if (stat(path.ptr, &info) != 0)
+                    search.incomplete = true;
+                else
+                {
+                    is_directory = (info.st_mode & S_IFMT) == S_IFDIR;
+                    is_file = (info.st_mode & S_IFMT) == S_IFREG;
+                }
+            }
+
+            if (is_directory)
+            {
+                if (!walk_profile_directory(search, path, child_length))
+                    search.incomplete = true;
+            }
+            else if (is_file && name == search.target)
+                search.found(path[0 .. child_length]);
+            path[length] = '\0';
+        }
+        return true;
+    }
+
+    extern(C) nothrow @nogc
+    {
+        struct DIR;
+        struct dirent
+        {
+            ulong d_ino;
+            long d_off;
+            ushort d_reclen;
+            ubyte d_type;
+            char[256] d_name;
+        }
+
+        DIR* opendir(const(char)* name);
+        int closedir(DIR* dir);
+        dirent* readdir(DIR* dir);
+    }
+
+    enum DT_UNKNOWN = 0;
+    enum DT_DIR = 4;
+    enum DT_REG = 8;
+    enum DT_LNK = 10;
+    enum S_IFMT = 0xF000;
+    enum S_IFDIR = 0x4000;
+    enum S_IFREG = 0x8000;
+}
+else
+{
+    bool walk_profile_directory(ref ProfileSearch, ref char[MaxProfilePath], size_t)
+    {
+        return false;
+    }
+}
 
 enum Boolean : ubyte
 {

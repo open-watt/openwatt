@@ -34,6 +34,7 @@ Each of these top-level commands has its own set of sub-commands for more specif
 Here are some of the common commands used in the `conf/startup.conf` file:
 
 - `/system/log-level`: Sets the system's log level.
+- `/system/profile-path`: Sets the root directory searched recursively for device profiles.
 - `/stream/tcp-client`: Configures TCP client streams for connecting to remote devices.
 - `/interface/modbus`: Creates and configures Modbus interfaces.
 - `/interface/bridge`: Creates bridges between interfaces.
@@ -65,7 +66,7 @@ add bridge=modbus_bridge interface=goodwe_meter
 
 # populate the meter bus interface with a remote device, making the meter known to the application
 /interface/modbus/remote-server
-add name=gw_meter interface=goodwe_meter address=2 profile=gm1000 # from conf/modbus_profiles/
+add name=gw_meter interface=goodwe_meter address=2 profile=gm1000
 ```
 
 Configuring the remote server will populate the runtime with a `Device` representing the data sampled from the meter, which can be used by local program logic. This bridge configuration solves the problem where a modbus appliance (the meter) on a single hardware bus can not receive requests from multiple masters.

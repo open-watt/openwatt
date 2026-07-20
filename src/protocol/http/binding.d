@@ -161,8 +161,6 @@ nothrow @nogc:
     }
 
 protected:
-    final override const(char)[] profile_dir() const pure
-        => "conf/rest_profiles/";
     final override const(char)[] profile_name() const pure
         => _profile_name[];
     final override const(char)[] model_name() const pure

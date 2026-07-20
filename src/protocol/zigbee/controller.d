@@ -105,7 +105,7 @@ protected:
     override CompletionStatus startup() nothrow
     {
         if (!_zigbee_profile)
-            _zigbee_profile = g_app.acquire_profile("conf/zigbee_profiles/zigbee.conf");
+            _zigbee_profile = g_app.acquire_profile("zigbee");
 
         return _endpoint.running ? CompletionStatus.complete : CompletionStatus.continue_;
     }

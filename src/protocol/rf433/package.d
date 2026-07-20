@@ -17,7 +17,7 @@ module protocol.rf433;
 // is exactly why the RX/decode side is load-bearing, not optional.
 //
 // Radio is NOT a new object: reference the existing GpioBinding (a signal sampler/generator,
-// e.g. rx433 with tx-line=17). See conf/rf_profiles/brilliant_22034.conf.
+// e.g. rx433 with tx-line=17). See the brilliant_22034 profile in conf/profiles.
 
 import urt.array;
 import urt.meta : AliasSeq;
@@ -85,7 +85,6 @@ nothrow @nogc:
         => _radio.get !is null && !_profile_name.empty && !_device.empty;
 
 protected:
-    final override const(char)[] profile_dir() const pure => "conf/rf_profiles/";
     final override const(char)[] profile_name() const pure => _profile_name[];
     final override const(char)[] model_name() const pure => _model_name[];
 

@@ -1270,22 +1270,8 @@
   <ItemGroup>
     <None Include=".editorconfig" />
     <None Include=".gitignore" />
-    <None Include="conf\can_profiles\pylon.conf" />
-    <None Include="conf\goodwe_profiles\gwxx48es.conf" />
-    <None Include="conf\ha_profiles\emporia.conf" />
-    <None Include="conf\modbus_profiles\eastron_sdm120.conf" />
-    <None Include="conf\modbus_profiles\eastron_sdm630.conf" />
-    <None Include="conf\modbus_profiles\gm1000.conf" />
-    <None Include="conf\modbus_profiles\goodwe_ems.conf" />
-    <None Include="conf\modbus_profiles\pace_bms.conf" />
-    <None Include="conf\modbus_profiles\se_meter.conf" />
-    <None Include="conf\modbus_profiles\shelly.conf" />
-    <None Include="conf\modbus_profiles\smartevse.conf" />
-    <None Include="conf\modbus_profiles\tac1100.conf" />
-    <None Include="conf\mqtt_profiles\open_beken.conf" />
-    <None Include="conf\rest_profiles\smartevse.conf" />
     <None Include="conf\startup.conf" />
-    <None Include="conf\zigbee_profiles\zigbee.conf" />
+    <None Include="conf\wireshark\openwatt.lua" />
     <None Include="docs\CLI.md" />
     <None Include="docs\COMPONENT_TEMPLATES.md" />
     <None Include="docs\FEATURES.md" />

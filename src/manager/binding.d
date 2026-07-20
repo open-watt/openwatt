@@ -79,7 +79,6 @@ protected:
     Profile* _profile_data;
     Map!(String, String) _params;
 
-    abstract const(char)[] profile_dir() const pure;
     abstract const(char)[] profile_name() const pure;
     abstract const(char)[] model_name() const pure;
     abstract void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte index);
@@ -109,7 +108,7 @@ protected:
             return false;
         }
 
-        Profile* profile = g_app.acquire_profile(tconcat(profile_dir(), pname, ".conf"));
+        Profile* profile = g_app.acquire_profile(pname);
         if (!profile)
         {
             writeWarning(name, ": failed to load profile '", pname, "'");

@@ -390,6 +390,25 @@ status block). Remaining legs, roughly in order:
   would misfire on scalar power-of-two enums). Taste call to bless: bitfield: reading plain
   values as indices makes the two section types read values differently.
 
+- **Multi-protocol device profiles (design backlog; SmartEVSE is the first test case)**:
+  profiles should describe a device rather than one transport, so the same logical elements can
+  be populated through REST, MQTT, Modbus, or another source without acquiring protocol-specific
+  identities. SmartEVSE currently has a REST profile, prefers MQTT in normal operation, and should
+  become the first combined profile with MQTT primary and REST available as fallback/redundancy.
+  Required machinery:
+
+  1. Add an enum-remap sampling codec. Decode the wire value, pass it through a profile-defined
+     lookup table, then stamp the canonical registered enum on the result. Writes must apply the
+     inverse lookup and reject canonical values the source cannot represent. Bitfield remapping
+     may need a distinct map because flags can combine rather than select one value.
+  2. Add protocol/source filters to component templates and elements, independent of the model
+     mask. A combined profile needs one shared semantic tree plus protocol-specific source
+     descriptions and capabilities, without materialising another protocol's elements.
+  3. Add explicit source preference when multiple protocols are active against one Device. Do not
+     let materialisation order choose the owner. Track provenance and source health, rank sources
+     (SmartEVSE: MQTT before REST), define failover/freshness behaviour, and select write authority
+     separately from read preference so a fallback reader does not accidentally become the writer.
+
 - **Element retention/recording profile grammar (proposed 2026-07-19, Manu to resolve token
   shape)**: the retention CORE is built (series.d/element2.d): min/max per axis - floors
   (min_records/min_age) keep records even after consumption, for rendering; PINNED cursors

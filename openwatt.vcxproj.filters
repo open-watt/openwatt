@@ -4,26 +4,8 @@
     <Filter Include="conf">
       <UniqueIdentifier>{7f37cbda-422d-4bb4-a2b2-d913b4cf3ba9}</UniqueIdentifier>
     </Filter>
-    <Filter Include="conf\can_profiles">
-      <UniqueIdentifier>{d95372bd-f45e-43d1-af10-cfe897b11623}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf\goodwe_profiles">
-      <UniqueIdentifier>{a5e82299-0fc3-4ab5-be5b-974362653f16}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf\ha_profiles">
-      <UniqueIdentifier>{70705f6a-320d-456c-bb7e-04d00818d619}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf\modbus_profiles">
-      <UniqueIdentifier>{44799e0d-95be-4f50-83d3-bb8473558560}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf\mqtt_profiles">
-      <UniqueIdentifier>{4f846ad0-fba7-4420-8cea-b3a91e8585d6}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf\rest_profiles">
-      <UniqueIdentifier>{adb46336-8e98-41fa-9701-bcda31f4d3ec}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="conf\zigbee_profiles">
-      <UniqueIdentifier>{93769be7-b621-4abb-87b0-29e9db81fbc9}</UniqueIdentifier>
+    <Filter Include="conf\wireshark">
+      <UniqueIdentifier>{8fa21274-c2dc-4460-b829-3bad42ed9146}</UniqueIdentifier>
     </Filter>
     <Filter Include="docs">
       <UniqueIdentifier>{8b262c04-bc01-4af0-ab2c-8678c8779f0c}</UniqueIdentifier>
@@ -1582,50 +1564,8 @@
     <None Include="conf\startup.conf">
       <Filter>conf</Filter>
     </None>
-    <None Include="conf\can_profiles\pylon.conf">
-      <Filter>conf\can_profiles</Filter>
-    </None>
-    <None Include="conf\goodwe_profiles\gwxx48es.conf">
-      <Filter>conf\goodwe_profiles</Filter>
-    </None>
-    <None Include="conf\ha_profiles\emporia.conf">
-      <Filter>conf\ha_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\eastron_sdm120.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\eastron_sdm630.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\gm1000.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\goodwe_ems.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\pace_bms.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\se_meter.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\shelly.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\smartevse.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\modbus_profiles\tac1100.conf">
-      <Filter>conf\modbus_profiles</Filter>
-    </None>
-    <None Include="conf\mqtt_profiles\open_beken.conf">
-      <Filter>conf\mqtt_profiles</Filter>
-    </None>
-    <None Include="conf\rest_profiles\smartevse.conf">
-      <Filter>conf\rest_profiles</Filter>
-    </None>
-    <None Include="conf\zigbee_profiles\zigbee.conf">
-      <Filter>conf\zigbee_profiles</Filter>
+    <None Include="conf\wireshark\openwatt.lua">
+      <Filter>conf\wireshark</Filter>
     </None>
     <None Include="docs\CLI.md">
       <Filter>docs</Filter>
