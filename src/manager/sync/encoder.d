@@ -122,6 +122,9 @@ nothrow @nogc:
     abstract void encode_history_req(SyncPeer peer, const(char)[] path, ulong from_ms, ulong to_ms, uint max_points, uint seq);
     abstract void encode_history(SyncPeer peer, uint seq, const(char)[] path, const(Sample)[] samples);
 
+    abstract void encode_log_sub(SyncPeer peer, Severity max_severity, bool off, const(char)[] tag);
+    abstract void encode_log(SyncPeer peer, const(char)[] line);
+
     // Time sync (clock discipline over the channel)
     //
     // Pull: a remote sends time_req to its authority and stashes its own send

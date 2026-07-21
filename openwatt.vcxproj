@@ -135,6 +135,7 @@
     <DCompile Include="src\manager\sync\package.d" />
     <DCompile Include="src\manager\sync\peer.d" />
     <DCompile Include="src\manager\sync\ws_server.d" />
+    <DCompile Include="src\manager\syslog.d" />
     <DCompile Include="src\manager\system.d" />
     <DCompile Include="src\manager\value.d" />
     <DCompile Include="src\protocol\ble\att.d" />
