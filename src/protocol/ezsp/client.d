@@ -7,6 +7,7 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.meta : AliasSeq;
+import urt.result;
 import urt.string;
 import urt.time;
 import urt.traits;
@@ -24,6 +25,7 @@ import protocol.ezsp.ashv2;
 public import protocol.ezsp.commands;
 
 //version = DebugMessageFlow;
+//version = DebugZigbeeLatency;
 
 nothrow @nogc:
 
@@ -61,11 +63,14 @@ template EZSPResult(T)
 
 class EZSPClient : ActiveObject
 {
-    alias Properties = AliasSeq!(Prop!("ash_stream", ash_stream),
-                                 Prop!("ash_interface", ash_interface),
-                                 Prop!("stack-type", stack_type),
-                                 Prop!("stack-version", stack_version),
-                                 Prop!("protocol-version", protocol_version));
+    alias Properties = AliasSeq!(Prop!("ash-stream", ash_stream),
+                                 Prop!("ash-interface", ash_interface),
+                                 Prop!("concurrency", concurrency),
+                                 Prop!("stack-type", stack_type, "status"),
+                                 Prop!("stack-version", stack_version, "status"),
+                                 Prop!("protocol-version", protocol_version, "status"),
+                                 Prop!("queued", queued_count, "status"),
+                                 Prop!("peak-queue", peak_queue, "status"));
 @nogc:
 
     enum type_name = "ezsp";
@@ -87,6 +92,7 @@ class EZSPClient : ActiveObject
             return;
         _stream = stream;
         _ash_ext = null;
+        mark_set!(typeof(this), [ "ash-stream", "ash-interface" ])();
         restart();
     }
 
@@ -98,7 +104,34 @@ class EZSPClient : ActiveObject
             return;
         _ash_ext = iface;
         _stream = null;
+        mark_set!(typeof(this), [ "ash-interface", "ash-stream" ])();
         restart();
+    }
+
+    final ubyte concurrency() const pure nothrow
+        => _concurrency;
+    final StringResult concurrency(ubyte value) nothrow
+    {
+        if (value < 1 || value > 5)
+            return StringResult("concurrency must be between 1 and 5");
+        if (_concurrency == value)
+            return StringResult.success;
+
+        ubyte previous = _concurrency;
+        _concurrency = value;
+        if (_ash)
+        {
+            StringResult result = _ash.window(value);
+            if (!result)
+            {
+                _concurrency = previous;
+                return result;
+            }
+        }
+        mark_set!(typeof(this), "concurrency")();
+        if (running)
+            send_queued_message();
+        return StringResult.success;
     }
 
     final EZSPStackType stack_type() const pure nothrow
@@ -109,6 +142,11 @@ class EZSPClient : ActiveObject
 
     final ubyte protocol_version() const pure nothrow
         => _known_version;
+
+    final size_t queued_count() const pure nothrow
+        => _queued_requests.length;
+    final ushort peak_queue() const pure nothrow
+        => _peak_queue;
 
     // API...
 
@@ -215,7 +253,8 @@ nothrow:
         alias RequestParams = typeof(EZSP_Command.Request.tupleof);
         alias ResponseParams = typeof(EZSP_Command.Response.tupleof);
 
-        final bool send_command(Callback)(Callback response_handler, auto ref RequestParams args, void* user_data = null)
+        final bool send_command(Callback)(Callback response_handler, auto ref RequestParams args,
+                                          void* user_data = null, ubyte priority = 1, bool dei = false)
         {
             if (!running)
                 return false;
@@ -242,11 +281,11 @@ nothrow:
             size_t offset = tr.ezsp_serialise(buffer[]);
 
             static if (is(Callback == typeof(null)))
-                return send_command_impl(EZSP_Command.Command, buffer[0..offset], null, null, null, null);
+                return send_command_impl(EZSP_Command.Command, buffer[0..offset], null, null, null, null, null, priority, dei);
             else static if (is_delegate!Callback)
-                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), response_handler.funcptr, response_handler.ptr, HasUserData ? user_data : null);
+                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), &fail_shim!(HasUserData, ResponseParams), response_handler.funcptr, response_handler.ptr, HasUserData ? user_data : null, priority, dei);
             else
-                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), response_handler, null, HasUserData ? user_data : null);
+                return send_command_impl(EZSP_Command.Command, buffer[0..offset], &response_shim!(HasUserData, ResponseParams), &fail_shim!(HasUserData, ResponseParams), response_handler, null, HasUserData ? user_data : null, priority, dei);
         }
     }
 
@@ -315,8 +354,12 @@ protected:
             else
             {
                 auto ash_coll = Collection!ASHInterface();
-                const(char)[] ash_name = ash_coll.generate_name(name[]);
-                _ash = cast(ASHInterface)ash_coll.create(ash_name, ObjectFlags.dynamic, NamedArgument("stream", cast(Stream)_stream));
+                // our previous instance may still be tearing down (destroy defers through the state
+                // machine); wait for it to vanish rather than spawn a suffixed duplicate that fights
+                // it for the stream's rx_handler
+                if (ash_coll.get(name[]))
+                    return CompletionStatus.continue_;
+                _ash = cast(ASHInterface)ash_coll.create(name[], ObjectFlags.dynamic, NamedArgument("stream", cast(Stream)_stream));
                 if (!_ash)
                     return CompletionStatus.error;
             }
@@ -325,6 +368,15 @@ protected:
             filter.direction = PacketDirection.incoming;
             _ash.subscribe(&incoming_packet, filter);
             _ash.subscribe(&ash_state_change);
+        }
+
+        // Apply on every startup as an externally supplied ASH interface may have been tuned while
+        // this client was stopped. This is a live limit change and does not restart or drop ASH.
+        StringResult window_result = _ash.window(_concurrency);
+        if (!window_result)
+        {
+            log.error("failed to configure ASH window: ", window_result.message);
+            return CompletionStatus.error;
         }
 
         if (_known_version)
@@ -355,7 +407,18 @@ protected:
         _sequence_number = 0;
         _stack_type = EZSPStackType.unknown;
         _stack_version = null;
+        mark_set!(typeof(this), [ "stack-type", "stack-version", "protocol-version" ])();
+
+        // complete every outstanding request as failed; nothing may be left waiting on a
+        // response that can never arrive (send_command rejects new requests while not running)
+        foreach (ref req; _queued_requests)
+        {
+            if (req.fail_shim)
+                req.fail_shim(req.cb_funcptr, req.cb_instance, req.user_data);
+        }
         _queued_requests.clear();
+        mark_set!(typeof(this), "queued")();
+        _in_flight = 0;
 
         if (_ash)
         {
@@ -371,13 +434,22 @@ protected:
 
     override void update()
     {
+        // A healthy NCP responds in milliseconds. This timeout is deliberately longer than ASH's
+        // complete retry cycle so the transport owns link-loss recovery rather than being torn down
+        // while it still has retransmissions in progress.
+        // fail the request and restart for a clean slate
         MonoTime now = getTime();
-        if (_queued_requests.length > 0 && now - _queued_requests[0].ts > 200.msecs)
+        if (_in_flight > 0 && now - _queued_requests[0].ts > request_timeout)
         {
-            log.warningf("request {0,02x} timed out", _queued_requests[0].sequence_number);
+            log.errorf("cmd x{0,04x} (seq {1}) timed out after {2}ms; restarting NCP link", _queued_requests[0].cmd, _queued_requests[0].sequence_number, (now - _queued_requests[0].ts).as!"msecs");
+            auto fail = _queued_requests[0].fail_shim;
+            void* cb = _queued_requests[0].cb_funcptr, inst = _queued_requests[0].cb_instance, ud = _queued_requests[0].user_data;
             _queued_requests.popFront();
-
-            send_queued_message();
+            mark_set!(typeof(this), "queued")();
+            --_in_flight;
+            if (fail)
+                fail(cb, inst, ud);
+            restart();
         }
     }
 
@@ -394,12 +466,16 @@ private:
     {
         MonoTime ts;
         ubyte sequence_number;
+        ubyte priority;         // pcp rank; higher jumps ahead of pending lower-priority commands
+        bool dei;
         ushort cmd;
-        Array!ubyte data;
+        ushort data_len;
         void function(const(ubyte)[], void*, void*, void*) nothrow @nogc response_shim;
+        void function(void*, void*, void*) nothrow @nogc fail_shim;
         void* cb_funcptr;
         void* cb_instance;
         void* user_data;
+        ubyte[256] data;        // stashed request payload (inline so entries stay POD/swappable)
     }
 
     struct CommandHandler
@@ -412,7 +488,14 @@ private:
 
     enum PREFERRED_VERSION = 13;
 
+    enum max_queued_requests = 32;
+
+    enum request_timeout = 20.seconds;
+
     MonoTime _last_event;
+
+    ubyte _in_flight;
+    ubyte _concurrency = 1;
 
     ubyte _requested_version;
     ubyte _known_version;
@@ -428,6 +511,7 @@ private:
     void delegate(ubyte, ushort, const(ubyte)[]) nothrow @nogc _message_handler;
     Map!(ushort, CommandHandler) _command_handlers;
     Array!QueuedRequest _queued_requests;
+    ushort _peak_queue;         // high-water mark of the command queue, for back-pressure visibility
 
     version(DebugMessageFlow)
     {
@@ -494,8 +578,6 @@ private:
 
             if (msg[2] == 0xff)
             {
-                assert(false); // TODO: we don't understand this case!
-
                 if (msg.length < 5)
                 {
                     log.warning("invalid frame; frame is too short!");
@@ -512,7 +594,11 @@ private:
             }
         }
 
-        assert(control & 0x80); // responses always have the high bit set
+        if (!(control & 0x80))
+        {
+            log.warning("invalid EZSP frame; response bit is not set");
+            return;
+        }
 
         bool overflow = (control & 0x1) != 0;
         bool truncated = (control & 0x2) != 0;
@@ -554,6 +640,8 @@ private:
                 _known_version = _requested_version;
                 _requested_version = 0;
 
+                mark_set!(typeof(this), [ "stack-type", "stack-version", "protocol-version" ])();
+
                 log.noticef("connected: {0} V{1} - protocol version {2}", r.stackType == 1 ? "ROUTER" : r.stackType == 2 ? "COORDINATOR" : "UNKNOWN", _stack_version, _known_version);
                 break;
 
@@ -570,38 +658,44 @@ private:
                 }
 
                 if (cb_type == 1)
-                {
-                    // TODO: can we confirm when and why this is sent? does it need special handling?
-                    assert(false); // this is a solicited callback, or something?
-                }
+                    log.warningf("TODO: EZSP solicited callback received: seq={0}, command=x{1,04x}", seq, command);
 
                 if (cb_type == 0)
                 {
-                    // message is a response to a queued request...
-
-                    if (_queued_requests.length == 0 || seq < _queued_requests[0].sequence_number)
+                    // responses arrive strictly in order on the reliable ASH link, so each one must
+                    // match the oldest in-flight request exactly; equality is wraparound-immune,
+                    // unlike ordered comparisons on the ubyte sequence
+                    if (_in_flight == 0)
                     {
-                        // stale response?
-                        log.debug_("received stale response - seq: ", seq);
+                        // response to a request we already failed (timeout/restart raced it)
+                        log.debug_("stale response - seq: ", seq, " cmd: ", command);
                         return;
                     }
-                    if (seq > _queued_requests[0].sequence_number)
+                    if (seq != _queued_requests[0].sequence_number || command != _queued_requests[0].cmd)
                     {
-                        // out-of-order response? (this could be because the seq counter wrapped?)
-                        log.warning("received unsolicited or out-of-order response - seq: ", seq);
-                        return;
-                    }
-                    if (command != _queued_requests[0].cmd)
-                    {
-                        // mismatched response?
-                        log.warningf("received mismatched response - expected cmd x{0,04x} but got x{1,04x}", _queued_requests[0].cmd, command);
+                        log.errorf("response stream corrupt: got seq {0}/cmd x{1,04x}, expected seq {2}/cmd x{3,04x}; restarting", seq, command, _queued_requests[0].sequence_number, _queued_requests[0].cmd);
+                        restart();
                         return;
                     }
 
-                    debug assert(_queued_requests[0].response_shim);
-
-                    _queued_requests[0].response_shim(msg, _queued_requests[0].cb_funcptr, _queued_requests[0].cb_instance, _queued_requests[0].user_data);
+                    // copy out and pop before invoking; the callback may enqueue new requests,
+                    // which can grow (reallocate) the array under us
+                    auto shim = _queued_requests[0].response_shim;
+                    void* cb = _queued_requests[0].cb_funcptr, inst = _queued_requests[0].cb_instance, ud = _queued_requests[0].user_data;
+                    version (DebugZigbeeLatency)
+                        Duration rtt = getTime() - _queued_requests[0].ts;
                     _queued_requests.popFront();
+                    mark_set!(typeof(this), "queued")();
+                    --_in_flight;
+
+                    version (DebugZigbeeLatency)
+                    {
+                        if (rtt > 100.msecs)
+                            log.debugf("slow response: cmd x{0,04x} took {1}ms", command, rtt.as!"msecs");
+                    }
+
+                    if (shim)
+                        shim(msg, cb, inst, ud);
 
                     send_queued_message();
                 }
@@ -622,47 +716,154 @@ private:
         }
     }
 
-    bool send_command_impl(ushort cmd, ubyte[] data, void function(const(ubyte)[], void*, void*, void*) nothrow @nogc response_handler, void* cb, void* inst, void* user_data)
+    bool send_command_impl(ushort cmd, ubyte[] data,
+                           void function(const(ubyte)[], void*, void*, void*) nothrow @nogc response_handler,
+                           void function(void*, void*, void*) nothrow @nogc failure_handler,
+                           void* cb, void* inst, void* user_data, ubyte priority = 1, bool dei = false)
     {
+        if (data.length > QueuedRequest.data.length)
+            return false;
+
+        void function(void*, void*, void*) nothrow @nogc dropped_fail;
+        void* dropped_cb;
+        void* dropped_inst;
+        void* dropped_ud;
+        if (_queued_requests.length >= max_queued_requests)
+        {
+            size_t drop = _queued_requests.length;
+            if (!dei)
+            {
+                foreach (i; _in_flight .. _queued_requests.length)
+                {
+                    if (_queued_requests[i].dei && _queued_requests[i].priority <= priority &&
+                        (drop == _queued_requests.length || _queued_requests[i].priority < _queued_requests[drop].priority))
+                        drop = i;
+                }
+            }
+
+            if (drop == _queued_requests.length)
+            {
+                log.warningf("command queue full ({0}); rejecting cmd x{1,04x} pri {2}", max_queued_requests, cmd, priority);
+                return false;
+            }
+
+            dropped_fail = _queued_requests[drop].fail_shim;
+            dropped_cb = _queued_requests[drop].cb_funcptr;
+            dropped_inst = _queued_requests[drop].cb_instance;
+            dropped_ud = _queued_requests[drop].user_data;
+            _queued_requests.remove(drop);
+            mark_set!(typeof(this), "queued")();
+        }
+
         ref QueuedRequest req = _queued_requests.pushBack();
+        mark_set!(typeof(this), "queued")();
         req.cmd = cmd;
+        req.priority = priority;
+        req.dei = dei;
         req.response_shim = response_handler;
+        req.fail_shim = failure_handler;
         req.cb_funcptr = cb;
         req.cb_instance = inst;
         req.user_data = user_data;
+        req.data_len = cast(ushort)data.length;
+        req.data[0 .. data.length] = data[];
 
-        if (_queued_requests.length == 1)
+        if (_queued_requests.length > _peak_queue)
         {
-            int seq = send_message(cmd, data);
-            if (seq < 0)
-            {
-                _queued_requests.popFront();
-                return false;
-            }
-            req.sequence_number = cast(ubyte)seq;
-            req.ts = getTime();
+            _peak_queue = cast(ushort)_queued_requests.length;
+            mark_set!(typeof(this), "peak-queue")();
         }
-        else
-            req.data = data[];
 
+        version (DebugZigbeeLatency)
+        {
+            if (_queued_requests.length >= 4)
+                log.debugf("queue depth {0} peak {1} (submitting cmd x{2,04x} pri {3})", _queued_requests.length, _peak_queue, cmd, priority);
+        }
+
+        if (dropped_fail)
+            dropped_fail(dropped_cb, dropped_inst, dropped_ud);
+
+        send_queued_message();
         return true;
     }
 
+    // Requests [0 .. _in_flight) have been transmitted and await ordered responses. The ASH window
+    // is kept equal to this limit, so changing concurrency live changes admission without dropping
+    // frames already on the wire.
     void send_queued_message()
     {
-        while (_queued_requests.length > 0)
+        if (_in_flight >= _concurrency || _queued_requests.length == 0)
+            return;
+
+        while (_in_flight < _concurrency && _in_flight < _queued_requests.length)
         {
-            ref QueuedRequest req = _queued_requests[0];
-            int seq = send_message(req.cmd, req.data[]);
+            size_t best = _in_flight;
+            foreach (i; _in_flight + 1 .. _queued_requests.length)
+            {
+                if (_queued_requests[i].priority > _queued_requests[best].priority)
+                    best = i;
+            }
+            if (best != _in_flight)
+            {
+                QueuedRequest* a = &_queued_requests[_in_flight];
+                QueuedRequest* b = &_queued_requests[best];
+                QueuedRequest tmp = *a;
+                *a = *b;
+                *b = tmp;
+            }
+
+            ref QueuedRequest req = _queued_requests[_in_flight];
+            int seq = send_message(req.cmd, req.data[0 .. req.data_len]);
             if (seq < 0)
             {
-                _queued_requests.popFront();
+                // transport rejected the frame; complete the request as failed
+                log.warningf("transport rejected cmd x{0,04x}; completing as failed", req.cmd);
+                auto fail = req.fail_shim;
+                void* cb = req.cb_funcptr, inst = req.cb_instance, ud = req.user_data;
+                _queued_requests.remove(_in_flight);
+                mark_set!(typeof(this), "queued")();
+                if (fail)
+                    fail(cb, inst, ud);
                 continue;
             }
             req.sequence_number = cast(ubyte)seq;
             req.ts = getTime();
-            break;
+            ++_in_flight;
+
+            log.tracef("--> cmd x{0,04x} seq {1} pri {2} (in-flight {3}, queued {4})", req.cmd, req.sequence_number, req.priority, _in_flight, _queued_requests.length - _in_flight);
         }
+    }
+}
+
+// Completion contract: every queued request completes exactly once. When no response will ever
+// arrive (timeout, transport rejection, shutdown), this delivers the callback with default args,
+// substituting a synthetic failure for a leading status field so callers observe !SUCCESS.
+void fail_shim(bool withUserdata, Args...)(void* cb, void* inst, void* user_data)
+{
+    import urt.meta.tuple;
+
+    Tuple!Args args;
+    static if (Args.length > 0 && is(Args[0] == EmberStatus))
+        args[0] = cast(EmberStatus)0xFF; // synthetic host-side failure; reads as !SUCCESS
+    else static if (Args.length > 0 && is(Args[0] == EzspStatus))
+        args[0] = cast(EzspStatus)0xFF;
+
+    if (inst)
+    {
+        void delegate() callback;
+        callback.ptr = inst;
+        callback.funcptr = cast(void function())cb;
+        static if (withUserdata)
+            (cast(void delegate(void*, Args) nothrow @nogc)callback)(user_data, args.expand);
+        else
+            (cast(void delegate(Args) nothrow @nogc)callback)(args.expand);
+    }
+    else
+    {
+        static if (withUserdata)
+            (cast(void function(void*, Args) nothrow @nogc)cb)(user_data, args.expand);
+        else
+            (cast(void function(Args) nothrow @nogc)cb)(args.expand);
     }
 }
 

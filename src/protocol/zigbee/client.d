@@ -31,10 +31,21 @@ version = DebugZigbee;
 
 nothrow @nogc:
 
+enum Duration zigbee_response_timeout = 2.seconds;
+enum Duration zigbee_delivery_deadline = 200.msecs;
+
 
 alias ZigbeeMessageHandler = void delegate(ref const APSFrame header, const(void)[] message, MonoTime timestamp) nothrow @nogc;
 alias ZDOResponseHandler = void delegate(ZigbeeResult result, ZDOStatus status, const(ubyte)[] message, void* user_data) nothrow @nogc;
 alias ZCLResponseHandler = void delegate(ZigbeeResult result, const ZCLHeader* hdr, const(ubyte)[] message, void* user_data) nothrow @nogc;
+
+enum ZDOReply : ubyte
+{
+    ncp,
+    sent,
+    intentionally_none,
+    impossible,
+}
 
 struct ZDOResponse
 {
@@ -114,16 +125,24 @@ class ZigbeeNode : ActiveObject
             return send_message(cast(ushort)((eui.b[6] << 8) | eui.b[7]), dst_endpoint, src_endpoint, profile_id, cluster, message, pcp, true);
 
         NodeMap* n = get_module!ZigbeeProtocolModule.find_node(eui);
-        assert(n, "TODO: what to do if we don't know where it's going? just drop it?");
+        if (!n)
+        {
+            log.warningf("Zigbee: cannot send to unknown EUI {0}", eui);
+            return ZigbeeResult.failed;
+        }
         return send_message(n.id, dst_endpoint, src_endpoint, profile_id, cluster, message, pcp);
     }
 
-    final int send_message(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, MessageCallback progress_callback, PCP pcp = PCP.be, bool group = false) nothrow
+    final int send_message(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id,
+        ushort cluster_id, const(void)[] message, MessageCallback progress_callback,
+        PCP pcp = PCP.be, bool group = false, Duration deadline = Duration.zero,
+        PCP urgent_pcp = PCP.ic) nothrow
     {
         if (!running)
             return ZigbeeResult.no_network;
 
-        assert(message.length <= 256, "TODO: what actually is the maximum zigbee payload?");
+        if (message.length > 256)
+            return ZigbeeResult.insufficient_buffer;
 
         Packet p;
         ref aps = p.init!APSFrame(message);
@@ -142,8 +161,16 @@ class ZigbeeNode : ActiveObject
         aps.cluster_id = cluster_id;
 
         p.pcp = pcp;
+        p.dei = pcp == PCP.bk;
+        QueuePolicy queue_policy;
+        const(QueuePolicy)* queue_policy_ptr;
+        if (deadline != Duration.zero)
+        {
+            queue_policy.set_deadline(deadline, urgent_pcp);
+            queue_policy_ptr = &queue_policy;
+        }
 
-        return _interface.forward(p, progress_callback);
+        return _interface.forward(p, progress_callback, queue_policy_ptr);
     }
 
     final ZigbeeResult send_message_async(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile_id, ushort cluster_id, const(void)[] message, PCP pcp = PCP.be, bool group = false)
@@ -201,7 +228,11 @@ class ZigbeeNode : ActiveObject
             return send_message_async(cast(ushort)((eui.b[6] << 8) | eui.b[7]), dst_endpoint, src_endpoint, profile_id, cluster, message, pcp, true);
 
         NodeMap* n = get_module!ZigbeeProtocolModule.find_node(eui);
-        assert(n, "TODO: what to do if we don't know where it's going? should we ask the network if anyone has this EUI?");
+        if (!n)
+        {
+            log.warningf("Zigbee: cannot send to unknown EUI {0}", eui);
+            return ZigbeeResult.failed;
+        }
         return send_message_async(n.id, dst_endpoint, src_endpoint, profile_id, cluster, message, pcp);
     }
 
@@ -222,7 +253,8 @@ class ZigbeeNode : ActiveObject
             progress = &req.progress_callback;
         }
 
-        int tag = send_message(dst, 0, 0, 0, cluster, message, progress, pcp);
+        Duration deadline = (cluster & 0x8000) != 0 ? zigbee_delivery_deadline : Duration.zero;
+        int tag = send_message(dst, 0, 0, 0, cluster, message, progress, pcp, false, deadline, PCP.ic);
         if (req)
         {
             if (tag < 0)
@@ -239,13 +271,14 @@ class ZigbeeNode : ActiveObject
         return tag;
     }
 
-    final int send_zdo_response(ushort dst, ushort cluster, ubyte tsn, ZDOStatus status, void[] message, PCP pcp = PCP.be) nothrow
+    final int send_zdo_response(ushort dst, ushort cluster, ubyte tsn, ZDOStatus status, void[] message, PCP pcp = PCP.ca) nothrow
     {
         ubyte[256] buffer = void;
         buffer[0] = tsn;
         buffer[1] = status;
         buffer[2 .. 2 + message.length] = cast(ubyte[])message[];
-        return send_message(dst, 0, 0, 0, cluster, buffer[0 .. 2 + message.length], pcp);
+        return send_message(dst, 0, 0, 0, cluster, buffer[0 .. 2 + message.length], null,
+            pcp, false, zigbee_delivery_deadline, PCP.ic);
     }
 
     final void abort_zdo_request(int tag, ZigbeeResult reason = ZigbeeResult.aborted) nothrow
@@ -254,15 +287,7 @@ class ZigbeeNode : ActiveObject
         {
             if (_zdo_requests[i].tag == tag)
             {
-                ZDORequest* req = _zdo_requests[i];
-                _aborted_zdo[_aborted_zdo_pos++ & 7] = AbortedZDOMsg(req.seq, req.cluster);
-                _zdo_requests.remove(i);
-                if (req.response_handler)
-                    req.response_handler(reason, ZDOStatus.success, null, req.user_data);
-                req.response_handler = null;
-                if (req.tag >= 0)
-                    req.iface.abort(tag);
-                _zdo_request_pool.free(req);
+                abort_zdo_request_at(i, reason);
                 return;
             }
         }
@@ -319,7 +344,6 @@ class ZigbeeNode : ActiveObject
             version (DebugZigbee)
                 log.tracef("zdo TIMEOUT ->{0,04x} [zdo:{1,04x}] at {2}", dst, cluster, ev.timeout.elapsed);
             abort_zdo_request(tag, ZigbeeResult.timeout);
-            abort_zdo_request(tag, ZigbeeResult.timeout);
             return ZigbeeResult.timeout;
         }
         else if (data.result != ZigbeeResult.success)
@@ -340,7 +364,11 @@ class ZigbeeNode : ActiveObject
             return send_zcl_message(cast(ushort)((eui.b[6] << 8) | eui.b[7]), dst_endpoint, src_endpoint, profile, cluster, command, flags, payload, pcp, response_handler, user_data);
 
         NodeMap* n = get_module!ZigbeeProtocolModule.find_node(eui);
-        assert(n, "TODO: what to do if we don't know where it's going? should we ask the network if anyone has this EUI?");
+        if (!n)
+        {
+            log.warningf("Zigbee: cannot send ZCL command to unknown EUI {0}", eui);
+            return ZigbeeResult.failed;
+        }
         return send_zcl_message(n.id, dst_endpoint, src_endpoint, profile, cluster, command, flags, payload, pcp, response_handler, user_data);
     }
 
@@ -349,11 +377,7 @@ class ZigbeeNode : ActiveObject
         ZCLHeader hdr;
         hdr.control = flags;
         if (command >= 0x8000)
-        {
-            hdr.control |= ZCLControlFlags.manufacturer_specific;
-            assert(false, "TODO: lookup manufacturer code from table");
-//            hdr.manufacturer_code = table[command - 0x8000];
-        }
+            return ZigbeeResult.unsupported;
         else
             hdr.command = command & 0xFF;
         hdr.cluster_local = (command & 0x4000) != 0;
@@ -374,7 +398,8 @@ class ZigbeeNode : ActiveObject
         if (offset < 0)
             return ZigbeeResult.insufficient_buffer;
 
-        assert(offset + payload.length <= buffer.length, "ZCL message too large!");
+        if (offset + payload.length > buffer.length)
+            return ZigbeeResult.insufficient_buffer;
         buffer[offset .. offset + payload.length] = payload[];
 
         int tag = send_message(dst, dst_endpoint, src_endpoint, profile, cluster, buffer[0 .. offset + payload.length], progress, pcp);
@@ -394,31 +419,22 @@ class ZigbeeNode : ActiveObject
         return tag;
     }
 
-    final int send_zcl_response(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile, ushort cluster, ZCLCommand command, ref const ZCLHeader req, const(void)[] payload, PCP pcp = PCP.be) nothrow
+    final int send_zcl_response(ushort dst, ubyte dst_endpoint, ubyte src_endpoint, ushort profile, ushort cluster, ZCLCommand command, ref const ZCLHeader req, const(void)[] payload, PCP pcp = PCP.ca) nothrow
     {
-        ZCLHeader hdr;
-        hdr.control = (req.control & ZCLControlFlags.response) | ZCLControlFlags.disable_default_response;
-        hdr.control ^= ZCLControlFlags.response;
-        if (command >= 0x8000)
-        {
-            hdr.control |= ZCLControlFlags.manufacturer_specific;
-            assert(false, "TODO: lookup manufacturer code from table");
-//            hdr.manufacturer_code = table[command - 0x8000];
-        }
-        else
-            hdr.command = cast(ubyte)command;
-        hdr.cluster_local = req.cluster_local || (command & 0x4000) != 0;
-        hdr.seq = req.seq;
+        ZCLHeader hdr = make_zcl_response_header(command, req);
 
         void[256] buffer = void;
         ptrdiff_t offset = hdr.format_zcl_header(buffer);
         if (offset < 0)
             return ZigbeeResult.insufficient_buffer;
 
-        assert(offset + payload.length <= buffer.length, "ZCL message too large!");
+        if (offset + payload.length > buffer.length)
+            return ZigbeeResult.insufficient_buffer;
         buffer[offset .. offset + payload.length] = payload[];
 
-        return send_message(dst, dst_endpoint, src_endpoint, profile, cluster, buffer[0 .. offset + payload.length], pcp);
+        return send_message(dst, dst_endpoint, src_endpoint, profile, cluster,
+            buffer[0 .. offset + payload.length], null, pcp, false,
+            zigbee_delivery_deadline, PCP.ic);
     }
 
     final void abort_zcl_request(int tag, ZigbeeResult reason = ZigbeeResult.aborted) nothrow
@@ -427,15 +443,7 @@ class ZigbeeNode : ActiveObject
         {
             if (_zcl_requests[i].tag == tag)
             {
-                ZCLRequest* req = _zcl_requests[i];
-                _aborted_zcl[_aborted_zcl_pos++ & 7] = AbortedZCLMsg(req.seq, req.endpoint, req.cluster);
-                _zcl_requests.remove(i);
-                if (req.response_handler)
-                    req.response_handler(reason, null, null, req.user_data);
-                req.response_handler = null;
-                if (req.tag >= 0)
-                    req.iface.abort(tag);
-                _zcl_request_pool.free(req);
+                abort_zcl_request_at(i, reason);
                 return;
             }
         }
@@ -492,7 +500,6 @@ class ZigbeeNode : ActiveObject
         {
             version (DebugZigbee)
                 log.tracef("zcl TIMEOUT ->{0,04x}:{1} [:{2,04x}] after {3}", dst, dst_endpoint, cluster, ev.timeout.elapsed);
-            abort_zcl_request(tag, ZigbeeResult.timeout);
             abort_zcl_request(tag, ZigbeeResult.timeout);
             return ZigbeeResult.timeout;
         }
@@ -602,19 +609,22 @@ protected:
 
     override void update() nothrow
     {
-        // TODO: the timeouts should probably work in 2 phases;
-        //       1) timeout waiting for message to be sent
-        //       2) timeout waiting for response after message sent
+        MonoTime now = getTime();
 
         for (size_t i = 0; i < _zdo_requests.length; )
         {
             ZDORequest* req = _zdo_requests[i];
-            if (getTime() - req.request_time > 2.seconds)
+            if (!req.response_handler)
+            {
+                _zdo_requests.remove(i);
+                _zdo_request_pool.free(req);
+            }
+            else if (req.awaiting_response && now - req.request_time > zigbee_response_timeout)
             {
                 version (DebugZigbee)
                     log.warningf("ZDO request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
 
-                abort_zdo_request(req.tag, ZigbeeResult.timeout);
+                abort_zdo_request_at(i, ZigbeeResult.timeout);
             }
             else
                 ++i;
@@ -623,12 +633,17 @@ protected:
         for (size_t i = 0; i < _zcl_requests.length; )
         {
             ZCLRequest* req = _zcl_requests[i];
-            if (getTime() - req.request_time > 2.seconds)
+            if (!req.response_handler)
+            {
+                _zcl_requests.remove(i);
+                _zcl_request_pool.free(req);
+            }
+            else if (req.awaiting_response && now - req.request_time > zigbee_response_timeout)
             {
                 version (DebugZigbee)
                     log.warningf("ZCL request {0, 04x} with seq {1} timed out", req.cluster, req.seq);
 
-                abort_zcl_request(req.tag, ZigbeeResult.timeout);
+                abort_zcl_request_at(i, ZigbeeResult.timeout);
             }
             else
                 ++i;
@@ -682,10 +697,15 @@ protected:
                 return;
             }
 
-            bool response_sent = handle_zdo_frame(aps, p);
+            ZDOReply reply = handle_zdo_frame(aps, p);
 
-            if ((aps.flags & APSFlags.zdo_response_required) && !response_sent)
-                log.warningf("ZDO request {0, 04x} from {1, 04x} requires a response but none was sent!", aps.cluster_id, aps.src);
+            if (aps.flags & APSFlags.zdo_response_required)
+            {
+                if (reply == ZDOReply.impossible)
+                    log.warningf("ZDO request {0, 04x} from {1, 04x} requires a response but none was sent!", aps.cluster_id, aps.src);
+                else if (reply == ZDOReply.ncp)
+                    log.errorf("ZDO request {0, 04x} from {1, 04x} was incorrectly left to the NCP", aps.cluster_id, aps.src);
+            }
             return;
         }
         else if (aps.src_endpoint == 0 || aps.profile_id == 0)
@@ -739,85 +759,58 @@ protected:
         }
     }
 
-    bool handle_zdo_frame(ref const APSFrame aps, ref const Packet p) nothrow
+    ZDOReply handle_zdo_frame(ref const APSFrame aps, ref const Packet p) nothrow
     {
         bool response_required = (aps.flags & APSFlags.zdo_response_required) != 0;
 
-        ubyte[] req_data = cast(ubyte[])p.data[];
+        const(ubyte)[] req_data = cast(const(ubyte)[])p.data[];
         ubyte[256] buffer = void;
+
+        if (!response_required)
+            return ZDOReply.ncp;
+        if (req_data.length == 0)
+            return ZDOReply.impossible;
 
         switch (aps.cluster_id) with (ZDOCluster)
         {
             case nwk_addr_req:
-                if (!response_required)
-                    return false; // handled by the NCP
                 if (req_data.length < 11)
-                    return false; // malformed
+                    return send_zdo_status(aps, req_data[0], ZDOStatus.inv_requesttype);
 
                 auto addr = EUI64(req_data[1..9]);
                 if (addr != _eui)
-                    return true; // asking about some other EUI... (not for me?)
+                    return ZDOReply.intentionally_none;
 
-                assert(req_data[9] == 0, "TODO: only supporting single address requests for now");
+                if (req_data[9] != 0)
+                    return send_zdo_status(aps, req_data[0], ZDOStatus.not_supported);
 
                 buffer[0] = req_data[0]; // sequence
                 buffer[1] = ZDOStatus.success;
                 buffer[2..10] = _eui.b[]; // is this meant to be little-endian?
                 buffer[10..12] = _node_id.nativeToLittleEndian!ushort;
-                send_zdo_message(aps.src, aps.cluster_id | 0x8000, buffer[0..12]);
-                return true;
+                return send_zdo_payload(aps, buffer[0..12]);
 
             case ieee_addr_req:
-                if (!response_required)
-                    return false; // handled by the NCP
                 if (req_data.length < 5)
-                    return false; // malformed
+                    return send_zdo_status(aps, req_data[0], ZDOStatus.inv_requesttype);
 
                 ushort addr = req_data[1..3].littleEndianToNative!ushort;
                 if (_node_id != addr)
-                    return true; // not for us!
+                    return ZDOReply.intentionally_none;
 
-                assert(req_data[3] == 0, "TODO: only supporting single address requests for now");
+                if (req_data[3] != 0)
+                    return send_zdo_status(aps, req_data[0], ZDOStatus.not_supported);
 
                 buffer[0] = req_data[0]; // sequence
                 buffer[1] = ZDOStatus.success;
                 buffer[2..10] = _eui.b[]; // is this meant to be little-endian?
                 buffer[10..12] = _node_id.nativeToLittleEndian!ushort;
-                send_zdo_message(aps.src, aps.cluster_id | 0x8000, buffer[0..12]);
-                return true;
+                return send_zdo_payload(aps, buffer[0..12]);
 
             case node_desc_req:
-                if (!response_required)
-                    return false; // handled by the NCP
-                assert(false, "TODO");
-//                if (req_data.length < 5)
-//                    return false; // malformed
-                return false;
-
             case power_desc_req:
-                if (!response_required)
-                    return false; // handled by the NCP
-                assert(false, "TODO");
-//                if (req_data.length < 5)
-//                    return false; // malformed
-                return false;
-
             case simple_desc_req:
-                if (!response_required)
-                    return false; // handled by the NCP
-                assert(false, "TODO");
-//                if (req_data.length < 5)
-//                    return false; // malformed
-                return false;
-
             case active_ep_req:
-                if (!response_required)
-                    return false; // handled by the NCP
-                assert(false, "TODO");
-//                if (req_data.length < 5)
-//                    return false; // malformed
-                return false;
-
             case match_desc_req,
                  parent_annce,
                  system_server_discovery_req,
@@ -833,22 +826,56 @@ protected:
                  mgmt_nwk_enhanced_update_req,
                  mgmt_nwk_ieee_joining_list_req,
                  mgmt_nwk_beacon_survey_req:
-                if (!response_required)
-                    return false; // handled by the NCP
-                assert(false, "TODO");
+                return send_zdo_status(aps, req_data[0], ZDOStatus.not_supported);
 
             case device_annce:
-                // these messages are only of interest to routers/coordinators (?)
-                return false;
+                return ZDOReply.intentionally_none;
 
             default:
-                // TODO: unknown (or deprecated) ZDO request
-                return false;
+                return send_zdo_status(aps, req_data[0], ZDOStatus.not_supported);
         }
+    }
+
+    ZDOReply send_zdo_status(ref const APSFrame aps, ubyte seq, ZDOStatus status) nothrow
+    {
+        int tag = send_zdo_response(aps.src, aps.cluster_id | 0x8000, seq, status, null);
+        return tag > 0 ? ZDOReply.sent : ZDOReply.impossible;
+    }
+
+    ZDOReply send_zdo_payload(ref const APSFrame aps, void[] payload) nothrow
+    {
+        int tag = send_zdo_message(aps.src, aps.cluster_id | 0x8000, payload, PCP.ca);
+        return tag > 0 ? ZDOReply.sent : ZDOReply.impossible;
     }
 
 
 private:
+
+    void abort_zdo_request_at(size_t index, ZigbeeResult reason) nothrow
+    {
+        ZDORequest* req = _zdo_requests[index];
+        _aborted_zdo[_aborted_zdo_pos++ & 7] = AbortedZDOMsg(req.seq, req.cluster);
+        _zdo_requests.remove(index);
+        if (req.response_handler)
+            req.response_handler(reason, ZDOStatus.success, null, req.user_data);
+        req.response_handler = null;
+        if (req.tag >= 0)
+            req.iface.abort(req.tag);
+        _zdo_request_pool.free(req);
+    }
+
+    void abort_zcl_request_at(size_t index, ZigbeeResult reason) nothrow
+    {
+        ZCLRequest* req = _zcl_requests[index];
+        _aborted_zcl[_aborted_zcl_pos++ & 7] = AbortedZCLMsg(req.seq, req.endpoint, req.cluster);
+        _zcl_requests.remove(index);
+        if (req.response_handler)
+            req.response_handler(reason, null, null, req.user_data);
+        req.response_handler = null;
+        if (req.tag >= 0)
+            req.iface.abort(req.tag);
+        _zcl_request_pool.free(req);
+    }
 
     struct ZDORequest
     {
@@ -859,6 +886,7 @@ private:
         ZDOResponseHandler response_handler;
         void* user_data;
         BaseInterface iface;
+        bool awaiting_response;
 
     private:
         void progress_callback(int, MessageState state) nothrow @nogc
@@ -866,11 +894,16 @@ private:
             if (state <= MessageState.in_flight)
                 return;
             tag = -1;
-            if (state != MessageState.complete)
+            if (state == MessageState.complete)
+            {
+                request_time = getTime();
+                awaiting_response = true;
+            }
+            else
             {
                 if (response_handler)
                 {
-                    ZigbeeResult r = state == MessageState.timeout ? ZigbeeResult.timeout :
+                    ZigbeeResult r = state == MessageState.timeout || state == MessageState.expired ? ZigbeeResult.timeout :
                                      state == MessageState.aborted ? ZigbeeResult.aborted :
                                      ZigbeeResult.failed;
                     response_handler(r, ZDOStatus.success, null, user_data);
@@ -890,6 +923,7 @@ private:
         ZCLResponseHandler response_handler;
         void* user_data;
         BaseInterface iface;
+        bool awaiting_response;
 
     private:
         void progress_callback(int, MessageState state) nothrow @nogc
@@ -897,11 +931,16 @@ private:
             if (state <= MessageState.in_flight)
                 return;
             tag = -1;
-            if (state != MessageState.complete)
+            if (state == MessageState.complete)
+            {
+                request_time = getTime();
+                awaiting_response = true;
+            }
+            else
             {
                 if (response_handler)
                 {
-                    ZigbeeResult r = state == MessageState.timeout ? ZigbeeResult.timeout :
+                    ZigbeeResult r = state == MessageState.timeout || state == MessageState.expired ? ZigbeeResult.timeout :
                                      state == MessageState.aborted ? ZigbeeResult.aborted :
                                      ZigbeeResult.failed;
                     response_handler(r, null, null, user_data);
@@ -1115,7 +1154,7 @@ class ZigbeeEndpoint : ActiveObject
     int send_zdo_message(ushort dst, ushort cluster, void[] message, PCP pcp = PCP.be, ZDOResponseHandler response_handler = null, void* user_data = null) nothrow
         => _node.send_zdo_message(dst, cluster, message, pcp, response_handler, user_data);
 
-    int send_zdo_response(ushort dst, ushort cluster, ubyte tsn, ZDOStatus status, void[] message, PCP pcp = PCP.be) nothrow
+    int send_zdo_response(ushort dst, ushort cluster, ubyte tsn, ZDOStatus status, void[] message, PCP pcp = PCP.ca) nothrow
         => _node.send_zdo_response(dst, cluster, tsn, status, message, pcp);
 
     void abort_zdo_request(int tag) nothrow
@@ -1130,7 +1169,7 @@ class ZigbeeEndpoint : ActiveObject
     int send_zcl_message(EUI64 eui, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ubyte flags, const(void)[] payload, PCP pcp = PCP.be, ZCLResponseHandler response_handler = null, void* user_data = null) nothrow
         => _node.send_zcl_message(eui, endpoint, _endpoint, profile, cluster, command, flags, payload, pcp, response_handler, user_data);
 
-    int send_zcl_response(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ref const ZCLHeader req, const(void)[] payload, PCP pcp = PCP.be) nothrow
+    int send_zcl_response(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ZCLCommand command, ref const ZCLHeader req, const(void)[] payload, PCP pcp = PCP.ca) nothrow
         => _node.send_zcl_response(dst, endpoint, _endpoint, profile, cluster, command, req, payload, pcp);
 
     void abort_zcl_request(int tag) nothrow

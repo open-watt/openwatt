@@ -131,6 +131,24 @@ enum ZCLStatus : ubyte
     unsupported_cluster = 0xc3
 }
 
+ZCLHeader make_zcl_response_header(ZCLCommand command, ref const ZCLHeader req)
+{
+    ZCLHeader hdr;
+    hdr.control = (req.control & ZCLControlFlags.response) | ZCLControlFlags.disable_default_response;
+    hdr.control ^= ZCLControlFlags.response;
+    if (command >= 0x8000)
+    {
+        hdr.control |= ZCLControlFlags.manufacturer_specific;
+        assert(false, "TODO: lookup manufacturer code from table");
+//      hdr.manufacturer_code = table[command - 0x8000];
+    }
+    else
+        hdr.command = cast(ubyte)command;
+    hdr.cluster_local = (command & 0x4000) != 0;
+    hdr.seq = req.seq;
+    return hdr;
+}
+
 enum ZCLDataType : ubyte
 {
     no_data = 0x00,
@@ -261,6 +279,32 @@ ptrdiff_t format_zcl_header(ref ZCLHeader hdr, void[] buffer)
     return 3 + offset;
 }
 
+unittest
+{
+    ZCLHeader request;
+    request.control = ZCLControlFlags.frame_type_cluster | ZCLControlFlags.response;
+    request.cluster_local = true;
+    request.seq = 42;
+
+    ZCLHeader default_response = make_zcl_response_header(ZCLCommand.default_response, request);
+    assert(!default_response.cluster_local);
+    assert(default_response.command == ZCLCommand.default_response);
+    assert(default_response.seq == request.seq);
+    assert(!(default_response.control & ZCLControlFlags.response));
+    assert(default_response.control & ZCLControlFlags.disable_default_response);
+
+    ZCLHeader enroll_response = make_zcl_response_header(ZCLCommand.ias_zone_enroll_response, request);
+    assert(enroll_response.cluster_local);
+    assert(enroll_response.command == 0);
+    assert(enroll_response.seq == request.seq);
+
+    ubyte[3] bytes;
+    assert(format_zcl_header(default_response, bytes[]) == bytes.length);
+    assert((bytes[0] & ZCLControlFlags.frame_type_mask) == ZCLControlFlags.frame_type_global);
+    assert(bytes[1] == request.seq);
+    assert(bytes[2] == ZCLCommand.default_response);
+}
+
 ptrdiff_t get_zcl_value(ZCLDataType type, const(ubyte)[] data, out Variant r) nothrow @nogc
 {
     import urt.array;
@@ -379,8 +423,7 @@ ptrdiff_t get_zcl_value(ZCLDataType type, const(ubyte)[] data, out Variant r) no
         case semi_prec_float:
             if (data.length < 2)
                 return -1;
-            assert(false, "TODO: parse half-float");
-            return 2;
+            return -1;
 
         case single_prec_float:
             if (data.length < 4)
@@ -524,8 +567,7 @@ ptrdiff_t get_zcl_value(ZCLDataType type, const(ubyte)[] data, out Variant r) no
             return len;
 
         default:
-            import urt.mem.temp : tformat;
-            assert(false, tformat("Unsupported ZCL data type: {0, 02x}", type));
+            return -1;
     }
 }
 
