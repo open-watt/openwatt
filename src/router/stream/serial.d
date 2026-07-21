@@ -166,7 +166,10 @@ nothrow @nogc:
         if (value == 0)
             return StringResult("baud rate must be greater than 0");
         if (_params.baud_rate == value)
+        {
+            mark_set!(typeof(this), "baud-rate")();
             return StringResult.success;
+        }
         _params.baud_rate = value;
         mark_set!(typeof(this), "baud-rate");
         restart();
@@ -184,7 +187,10 @@ nothrow @nogc:
         if (value < 5 || value > max_data_bits)
             return StringResult(max_data_bits == 9 ? "data bits must be between 5 and 9" : "data bits must be between 5 and 8");
         if (_params.data_bits == cast(ubyte)value)
+        {
+            mark_set!(typeof(this), "data-bits")();
             return StringResult.success;
+        }
         _params.data_bits = cast(ubyte)value;
         mark_set!(typeof(this), "data-bits");
         restart();

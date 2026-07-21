@@ -68,6 +68,7 @@ nothrow @nogc:
         if (value == _remote)
             return;
         _remote = value;
+        mark_set!(typeof(this), "remote")();
         restart();
     }
 
@@ -78,6 +79,7 @@ nothrow @nogc:
         if (value.empty)
             value = StringLit!"public";
         _community = value.move;
+        mark_set!(typeof(this), "community")();
     }
 
     SNMPVersion version_() const pure
@@ -85,6 +87,7 @@ nothrow @nogc:
     void version_(SNMPVersion value)
     {
         _version = value;
+        mark_set!(typeof(this), "version")();
     }
 
     Duration timeout() const pure
@@ -92,6 +95,7 @@ nothrow @nogc:
     void timeout(Duration value)
     {
         _timeout = value;
+        mark_set!(typeof(this), "timeout")();
     }
 
     int retries() const pure
@@ -101,6 +105,7 @@ nothrow @nogc:
         if (value < 0)
             value = 0;
         _retries = value;
+        mark_set!(typeof(this), "retries")();
     }
 
     // API...

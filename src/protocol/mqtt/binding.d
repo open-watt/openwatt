@@ -53,6 +53,7 @@ nothrow @nogc:
         _broker = value;
         if (value)
             _client = null;             // mutually exclusive
+        mark_set!(typeof(this), [ "broker", "client" ])();
         restart();
     }
 
@@ -66,6 +67,7 @@ nothrow @nogc:
         _client = value;
         if (value)
             _broker = null;             // mutually exclusive
+        mark_set!(typeof(this), [ "broker", "client" ])();
         restart();
     }
 
@@ -76,6 +78,7 @@ nothrow @nogc:
         if (value == _profile_name)
             return;
         _profile_name = value.move;
+        mark_set!(typeof(this), "profile")();
         restart();
     }
 
@@ -86,6 +89,7 @@ nothrow @nogc:
         if (value == _model_name)
             return;
         _model_name = value.move;
+        mark_set!(typeof(this), "model")();
         restart();
     }
 

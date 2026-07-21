@@ -58,6 +58,7 @@ nothrow @nogc:
             _registered = false;
         }
         _server = value;
+        mark_set!(typeof(this), "http-server")();
         restart();
     }
 
@@ -74,6 +75,7 @@ nothrow @nogc:
             _uri = value.makeString(g_app.allocator);
         else
             _uri = tconcat("/", value).makeString(g_app.allocator);
+        mark_set!(typeof(this), "uri")();
         restart();
     }
 
@@ -82,6 +84,7 @@ nothrow @nogc:
     void root(const(char)[] value)
     {
         _root = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "root")();
         restart();
     }
 

@@ -69,6 +69,7 @@ nothrow @nogc:
             _subscribed = false;
         }
         _iface = value;
+        mark_set!(typeof(this), "interface")();
         restart();
         return null;
     }
@@ -80,6 +81,7 @@ nothrow @nogc:
         if (_pool is value)
             return;
         _pool = value;
+        mark_set!(typeof(this), "pool")();
         restart();
     }
 
@@ -88,6 +90,7 @@ nothrow @nogc:
     final void lease_time(Duration value)
     {
         _lease_time = value;
+        mark_set!(typeof(this), "lease-time")();
     }
 
     final uint mac_limit() const pure
@@ -95,6 +98,7 @@ nothrow @nogc:
     final void mac_limit(uint value)
     {
         _mac_limit = value;
+        mark_set!(typeof(this), "mac-limit")();
     }
 
     final bool add_default_gateway() const pure
@@ -102,6 +106,7 @@ nothrow @nogc:
     final void add_default_gateway(bool value)
     {
         _add_default_gateway = value;
+        mark_set!(typeof(this), "add-default-gateway")();
     }
 
     final inout(ObjectRef!DHCPOption)[] options() inout pure

@@ -49,6 +49,7 @@ nothrow @nogc:
             return;
         detach_transport();
         _transport = value;
+        mark_set!(typeof(this), "transport")();
         restart();
     }
 
@@ -59,6 +60,7 @@ nothrow @nogc:
         if (_encoder == value)
             return;
         _encoder = value;
+        mark_set!(typeof(this), "encoder")();
         restart();
     }
 
@@ -70,6 +72,7 @@ nothrow @nogc:
             return;
         _time_authority = value;
         _next_time_poll = getTime(); // (re)establish promptly
+        mark_set!(typeof(this), "time-authority")();
     }
 
     // API

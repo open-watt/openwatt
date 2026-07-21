@@ -55,6 +55,7 @@ nothrow @nogc:
         _conn.remote(value);
         _tls = false;
         _stream = null;
+        mark_set!(typeof(this), [ "remote", "stream" ])();
         restart();
     }
     StringResult remote(String value)
@@ -75,6 +76,7 @@ nothrow @nogc:
             return r;
         _tls = tls;
         _stream = null;
+        mark_set!(typeof(this), [ "remote", "stream" ])();
         restart();
         return StringResult.success;
     }
@@ -89,6 +91,7 @@ nothrow @nogc:
             return null;
         _conn.clear_remote();
         _stream = value;
+        mark_set!(typeof(this), [ "stream", "remote" ])();
         restart();
         return null;
     }

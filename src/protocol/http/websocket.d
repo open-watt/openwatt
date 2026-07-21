@@ -88,6 +88,7 @@ nothrow @nogc:
         _tls = false;
         _resource = String();
         _stream = null;
+        mark_set!(typeof(this), [ "remote", "stream" ])();
         restart();
     }
     const(char)[] remote(String value)
@@ -109,6 +110,7 @@ nothrow @nogc:
         _tls = tls;
         _resource = url.path.makeString(defaultAllocator);
         _stream = null;
+        mark_set!(typeof(this), [ "remote", "stream" ])();
         restart();
         return null;
     }
@@ -126,6 +128,7 @@ nothrow @nogc:
         }
         _conn.clear_remote();
         _stream = stream;
+        mark_set!(typeof(this), [ "stream", "remote" ])();
         restart();
     }
 
@@ -681,6 +684,7 @@ nothrow @nogc:
     const(char)[] http_server(HTTPServer value)
     {
         _server = value;
+        mark_set!(typeof(this), "http-server")();
         return null;
     }
 
@@ -690,6 +694,7 @@ nothrow @nogc:
     {
         // TODO: property should just accept a String!
         _uri = value.makeString(defaultAllocator);
+        mark_set!(typeof(this), "uri")();
         return null;
     }
 

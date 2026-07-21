@@ -42,6 +42,7 @@ nothrow @nogc:
         if (_server[] == value)
             return;
         _server = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "server")();
         restart();
     }
 
@@ -52,6 +53,7 @@ nothrow @nogc:
         if (_port == value)
             return;
         _port = value;
+        mark_set!(typeof(this), "port")();
         restart();
     }
 
@@ -60,6 +62,7 @@ nothrow @nogc:
     final void interval(Duration value)
     {
         _interval = value;
+        mark_set!(typeof(this), "interval")();
     }
 
     final Duration offset() const pure
@@ -200,6 +203,7 @@ private:
         ulong corrected = cast(ulong)(t3 + (rtt - (t3 - t2)) / 2);
 
         _last_offset = from_unix_time_ns(corrected) - getSysTime();
+        mark_set!(typeof(this), "offset")();
         set_utc_time(corrected);
 
         log.info("synced from ", _server[], " offset ", _last_offset.as!"msecs", "ms");

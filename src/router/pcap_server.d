@@ -51,6 +51,7 @@ nothrow @nogc:
         if (value == 0)
             return "port must be non-zero";
         _port = value;
+        mark_set!(typeof(this), "port")();
 
         if (_server)
             _server.port = _port;
@@ -62,6 +63,7 @@ nothrow @nogc:
     void allow_anonymous(bool value)
     {
         _allow_anonymous = value;
+        mark_set!(typeof(this), "allow-anonymous")();
     }
 
     // API...

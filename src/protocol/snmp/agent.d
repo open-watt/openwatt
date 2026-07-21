@@ -51,6 +51,7 @@ nothrow @nogc:
         if (_port == value)
             return;
         _port = value;
+        mark_set!(typeof(this), "port")();
         restart();
     }
 
@@ -61,6 +62,7 @@ nothrow @nogc:
         if (_trap_port == value)
             return;
         _trap_port = value;
+        mark_set!(typeof(this), "trap-port")();
         restart();
     }
 
@@ -71,6 +73,7 @@ nothrow @nogc:
         if (_bind_address == value)
             return;
         _bind_address = value;
+        mark_set!(typeof(this), "bind-address")();
         restart();
     }
 
@@ -81,6 +84,7 @@ nothrow @nogc:
         if (value.empty)
             value = StringLit!"public";
         _community = value.move;
+        mark_set!(typeof(this), "community")();
     }
 
     // API...

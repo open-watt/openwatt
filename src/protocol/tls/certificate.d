@@ -78,6 +78,7 @@ nothrow @nogc:
         if (_type == value)
             return;
         _type = value;
+        mark_set!(typeof(this), "cert-type")();
         restart();
     }
 
@@ -90,6 +91,7 @@ nothrow @nogc:
         if (value == _domain)
             return null;
         _domain = value.move;
+        mark_set!(typeof(this), "domain")();
         restart();
         return null;
     }
@@ -101,6 +103,7 @@ nothrow @nogc:
         if (value == _email)
             return;
         _email = value.move;
+        mark_set!(typeof(this), "email")();
         restart();
     }
 
@@ -112,6 +115,7 @@ nothrow @nogc:
             return null;
         _cert_file = value.move;
         _type = CertType.certificate;
+        mark_set!(typeof(this), [ "certificate_file", "cert-type" ])();
         restart();
         return null;
     }
@@ -124,6 +128,7 @@ nothrow @nogc:
             return null;
         _key_file = value.move;
         _type = CertType.certificate;
+        mark_set!(typeof(this), [ "key_file", "cert-type" ])();
         restart();
         return null;
     }
@@ -135,6 +140,7 @@ nothrow @nogc:
         if (_http_server is value)
             return;
         _http_server = value;
+        mark_set!(typeof(this), "http-server")();
         restart();
     }
 
@@ -143,6 +149,7 @@ nothrow @nogc:
     void uri(const(char)[] value)
     {
         _uri = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "uri")();
         restart();
     }
 
@@ -205,6 +212,16 @@ protected:
 
     override CompletionStatus startup()
     {
+        CertStatus previous_status = _status;
+        SysTime previous_expiry = _expiry;
+        scope (exit)
+        {
+            if (_status != previous_status)
+                mark_set!(typeof(this), "cert-status")();
+            if (_expiry != previous_expiry)
+                mark_set!(typeof(this), "expiry")();
+        }
+
         final switch (_type)
         {
             case CertType.certificate:
@@ -226,6 +243,7 @@ protected:
         _acme_state = AcmeState.idle;
         _renewing = false;
         _status = CertStatus.none;
+        mark_set!(typeof(this), "cert-status")();
         return CompletionStatus.complete;
     }
 
@@ -731,6 +749,7 @@ private:
         }
         writeError("Certificate '", name, "': ACME: ", msg);
         _status = CertStatus.error;
+        mark_set!(typeof(this), "cert-status")();
         _status_msg.concat("ACME error: ", msg);
         _acme_state = AcmeState.idle;
         destroy_acme_client();
@@ -861,6 +880,7 @@ private:
             else
                 _status_msg.concat("rate limited by ACME server");
             _status = CertStatus.error;
+            mark_set!(typeof(this), "cert-status")();
             _acme_state = AcmeState.idle;
             destroy_acme_client();
             return 0;
@@ -1140,6 +1160,7 @@ private:
 
         _expiry = _certref.cert_expiry();
         _status = CertStatus.issued;
+        mark_set!(typeof(this), [ "cert-status", "expiry" ])();
         _status_msg.clear();
         _acme_state = AcmeState.idle;
         _renewing = false;

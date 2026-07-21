@@ -82,15 +82,28 @@ class Automation : ActiveObject
         foreach (uri; value)
             _signal_uris ~= uri.makeString(g_app.allocator);
         _time = String();   // an explicit on= is the full trigger set, sugar included
+        mark_set!(typeof(this), "on")();
         restart();
         return null;
     }
 
     // schedule/at/when are thin write-only shorthands for the matching on= URIs; finer detail
     // (weekday masks, one-shot via ?repeat=false, ...) is expressed with the URI form directly.
-    void schedule(Duration value) { set_time(tconcat("every:", value)); }
-    void at(TimeOfDay value)      { set_time(tconcat("at:", value)); }
-    void when(SysTime value)      { set_time(tconcat("when:", value)); }
+    void schedule(Duration value)
+    {
+        set_time(tconcat("every:", value));
+        mark_set!(typeof(this), "schedule")();
+    }
+    void at(TimeOfDay value)
+    {
+        set_time(tconcat("at:", value));
+        mark_set!(typeof(this), "at")();
+    }
+    void when(SysTime value)
+    {
+        set_time(tconcat("when:", value));
+        mark_set!(typeof(this), "when")();
+    }
 
     const(char)[] condition() const { return _condition[]; }
     const(char)[] condition(const(char)[] value)
@@ -110,6 +123,7 @@ class Automation : ActiveObject
                 return "invalid condition expression";
         }
         _condition = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "if")();
         restart();
         return null;
     }
@@ -123,6 +137,7 @@ class Automation : ActiveObject
         if (_edge == value)
             return;
         _edge = value;
+        mark_set!(typeof(this), "edge")();
         reset_condition_state();
     }
 
@@ -134,6 +149,7 @@ class Automation : ActiveObject
         if (_hold != value)
         {
             _hold = value;
+            mark_set!(typeof(this), "for")();
             reset_condition_state();
         }
         return null;
@@ -145,6 +161,7 @@ class Automation : ActiveObject
         if (value.empty)
             return "action cannot be empty";
         _script = value;
+        mark_set!(typeof(this), "do")();
         return null;
     }
 
@@ -155,6 +172,7 @@ class Automation : ActiveObject
         if (value < Duration())
             return "debounce must not be negative";
         _debounce = value;
+        mark_set!(typeof(this), "debounce")();
         return null;
     }
 
@@ -164,6 +182,7 @@ class Automation : ActiveObject
         if (value < Duration())
             return "throttle must not be negative";
         _throttle = value;
+        mark_set!(typeof(this), "throttle")();
         return null;
     }
 
@@ -176,6 +195,7 @@ class Automation : ActiveObject
         _rate = value;
         _tokens = _burst;
         _tokens_stamp = getTime();
+        mark_set!(typeof(this), "rate")();
         return null;
     }
 
@@ -187,6 +207,7 @@ class Automation : ActiveObject
         _burst = value;
         if (_tokens > value)
             _tokens = value;
+        mark_set!(typeof(this), "burst")();
         return null;
     }
 
@@ -624,6 +645,7 @@ private:
         if (_time[] == uri)
             return;
         _time = uri.makeString(g_app.allocator);
+        mark_set!(typeof(this), "on")();
         restart();
     }
 

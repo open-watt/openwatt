@@ -151,6 +151,7 @@ nothrow @nogc:
             return "Error: Invalid modbus protocol 'unknown'";
         _protocol = value;
         _support_simultaneous_requests = value == ModbusProtocol.tcp;
+        mark_set!(typeof(this), "protocol")();
 
         if (_protocol == ModbusProtocol.tcp && _stream)
         {
@@ -172,6 +173,7 @@ nothrow @nogc:
         _is_bus_master = value;
         if (value)
             _master_address = 0;
+        mark_set!(typeof(this), "master")();
         restart();
     }
 
@@ -202,6 +204,7 @@ nothrow @nogc:
         static if (has_ip)
             _conn.clear_remote();
         _stream = value;
+        mark_set!(typeof(this), "stream")();
 
         if (_stream)
         {
@@ -242,6 +245,7 @@ nothrow @nogc:
                 _stream = null;  // remote takes ownership of the stream slot
                 if (_protocol == ModbusProtocol.unknown)
                     _protocol = ModbusProtocol.tcp;
+                mark_set!(typeof(this), [ "remote", "stream", "protocol" ])();
                 restart();
             }
             return r;
@@ -253,6 +257,7 @@ nothrow @nogc:
             _stream = null;
             if (_protocol == ModbusProtocol.unknown)
                 _protocol = ModbusProtocol.tcp;
+            mark_set!(typeof(this), [ "remote", "stream", "protocol" ])();
             restart();
         }
 
@@ -261,6 +266,7 @@ nothrow @nogc:
         void port(ushort value)
         {
             _conn.port(value);
+            mark_set!(typeof(this), "port")();
             restart();
         }
 
@@ -271,6 +277,7 @@ nothrow @nogc:
             if (_tls == value)
                 return;
             _tls = value;
+            mark_set!(typeof(this), "tls")();
             restart();
         }
 
@@ -279,6 +286,7 @@ nothrow @nogc:
         void keepalive(bool value)
         {
             _conn.keepalive(value);
+            mark_set!(typeof(this), "keepalive")();
         }
 
         alias Properties = AliasSeq!(Prop!("stream", stream),

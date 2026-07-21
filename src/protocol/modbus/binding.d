@@ -105,6 +105,7 @@ nothrow @nogc:
             return;
         teardown_node_hooks();
         _node = value;
+        mark_set!(typeof(this), "node")();
         restart();
     }
 
@@ -116,6 +117,7 @@ nothrow @nogc:
             return;
         _slave_name = value.move;
         _slave_server = null;
+        mark_set!(typeof(this), "slave")();
         restart();
     }
 
@@ -126,6 +128,7 @@ nothrow @nogc:
         if (value == _profile_name_explicit)
             return;
         _profile_name_explicit = value.move;
+        mark_set!(typeof(this), "profile")();
         restart();
     }
 
@@ -136,6 +139,7 @@ nothrow @nogc:
         if (value == _model_name_explicit)
             return;
         _model_name_explicit = value.move;
+        mark_set!(typeof(this), "model")();
         restart();
     }
 
@@ -146,6 +150,7 @@ nothrow @nogc:
         if (_serve == value)
             return;
         _serve = value;
+        mark_set!(typeof(this), "serve")();
         restart();
     }
 

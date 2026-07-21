@@ -53,6 +53,7 @@ nothrow @nogc:
         if (_port == value)
             return;
         _port = value;
+        mark_set!(typeof(this), "port")();
         restart();
     }
 

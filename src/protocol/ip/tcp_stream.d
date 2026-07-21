@@ -53,6 +53,7 @@ nothrow @nogc:
         if (value == _remote)
             return;
         _remote = value;
+        mark_set!(typeof(this), [ "remote", "remote_address" ])();
 
         restart();
     }
@@ -65,6 +66,7 @@ nothrow @nogc:
 
         _host = value.move;
         _remote = InetAddress();
+        mark_set!(typeof(this), [ "remote", "remote_address" ])();
 
         restart();
         return StringResult();
@@ -83,10 +85,12 @@ nothrow @nogc:
             return;
 
         _port = value;
+        mark_set!(typeof(this), "port")();
         if ((_remote.family == AddressFamily.ipv4 && _remote._a.ipv4.port == value) ||
             (_remote.family == AddressFamily.ipv6 && _remote._a.ipv6.port == value))
             return;
         update_port(_remote, _port);
+        mark_set!(typeof(this), "remote_address")();
 
         restart();
     }
@@ -145,6 +149,7 @@ nothrow @nogc:
             // apply explicit port if assigned
             if (_port != 0)
                 update_port(_remote, _port);
+            mark_set!(typeof(this), "remote_address")();
         }
 
         // initiate the connection; completion arrives asynchronously via on_event
@@ -178,7 +183,10 @@ nothrow @nogc:
     final override CompletionStatus shutdown()
     {
         if (_host)
+        {
             _remote = InetAddress();
+            mark_set!(typeof(this), "remote_address")();
+        }
         close_conn();
         return CompletionStatus.complete;
     }
@@ -199,6 +207,7 @@ nothrow @nogc:
         _keep_idle = keep_idle;
         _keep_interval = keep_interval;
         _keep_count = keep_count;
+        mark_set!(typeof(this), "keepalive")();
         if (_conn)
             _conn.enable_keepalive(enable, keep_idle, keep_interval, keep_count);
     }
@@ -320,6 +329,7 @@ nothrow @nogc:
         if (_port == value)
             return;
         _port = value;
+        mark_set!(typeof(this), "port")();
         restart();
     }
 

@@ -100,6 +100,7 @@ nothrow @nogc:
         if (_conn.get !is null)
             _conn.stop();
         _stream = value;
+        mark_set!(typeof(this), "stream")();
         restart();
         return null;
     }
@@ -115,6 +116,7 @@ nothrow @nogc:
         auto r = _conn.remote(value.move);
         if (r.failed)
             return r.message;
+        mark_set!(typeof(this), "remote")();
         restart();
         return null;
     }
@@ -124,6 +126,7 @@ nothrow @nogc:
     void keepalive(bool value)
     {
         _conn.keepalive(value);
+        mark_set!(typeof(this), "keepalive")();
     }
 
     void certificate(Certificate value)
@@ -131,6 +134,7 @@ nothrow @nogc:
         _certificates.clear();
         if (value)
             _certificates.emplaceBack(value);
+        mark_set!(typeof(this), "certificate")();
         restart();
     }
 
@@ -140,6 +144,7 @@ nothrow @nogc:
         _certificates.reserve(value.length);
         foreach (c; value)
             _certificates.emplaceBack(c);
+        mark_set!(typeof(this), "certificates")();
         restart();
     }
 
@@ -937,6 +942,7 @@ nothrow @nogc:
         _certificates.clear();
         if (value)
             _certificates.emplaceBack(value);
+        mark_set!(typeof(this), "certificate")();
         restart();
     }
 
@@ -946,6 +952,7 @@ nothrow @nogc:
         _certificates.reserve(value.length);
         foreach (c; value)
             _certificates.emplaceBack(c);
+        mark_set!(typeof(this), "certificates")();
         restart();
     }
 

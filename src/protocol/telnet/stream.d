@@ -68,6 +68,7 @@ nothrow @nogc:
             _subscribed = false;
         }
         _inner = value;
+        mark_set!(typeof(this), "transport")();
         restart();
     }
 
@@ -79,6 +80,7 @@ nothrow @nogc:
         if (_role == value)
             return;
         _role = value;
+        mark_set!(typeof(this), "role")();
         restart();
     }
 
