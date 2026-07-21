@@ -909,7 +909,7 @@ nothrow @nogc:
         else if (max_points > max_history_points)
             max_points = max_history_points;
 
-        // native series answer synchronously from RAM buckets + owsig container; the db
+        // typed series answer synchronously from RAM buckets + owsig container; the db
         // serves legacy ring-fed streams
         Array!Sample local;
         if (query_local(*rs, from_ms * 1_000_000, to_ms * 1_000_000, max_points, QueryMode.raw, local))

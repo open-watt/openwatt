@@ -43,7 +43,7 @@ nothrow @nogc:
     {
         super(collection_type_info!GpioBinding, id, flags);
         _fmt.type = ValueType.bool_;
-        _fmt.semantics = Semantics.held;
+        _fmt.kind = SeriesKind.held;
         _fmt.clock = &_clock;
     }
 
@@ -157,7 +157,7 @@ nothrow @nogc:
         Element* e = (*dev).find_or_create_element(_element_path.empty ? "state" : _element_path[]);
         if (!e.series.format)
         {
-            // TODO: binding owns _fmt/_clock but the mount outlives binding destruction;
+            // TODO: binding owns _fmt/_clock but the Element outlives binding destruction;
             //       formats need a durable home
             e.series.format = &_fmt;
             e.access = Access.read;
@@ -165,7 +165,7 @@ nothrow @nogc:
         }
         else if (e.series.format !is &_fmt)
         {
-            log.error("element '", _element_path.empty ? "state" : _element_path[], "' is already mounted with a different format");
+            log.error("element '", _element_path.empty ? "state" : _element_path[], "' already has a different format");
             return false;
         }
         _element = e;
@@ -256,7 +256,7 @@ nothrow @nogc:
     }
 
 private:
-    Element* _element;          // device tree mount; series lives there
+    Element* _element;          // series owner in the device tree
     String _element_path;
     ClockDomain _clock;         // owned by this binding; _fmt.clock points at it
     DataFormat _fmt;

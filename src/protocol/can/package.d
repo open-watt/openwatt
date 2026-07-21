@@ -45,7 +45,7 @@ nothrow @nogc:
     uint element_size(uint)
         => cast(uint)ElementDesc_CAN.sizeof;
 
-    void count_element(uint, ref const ConfItem, ref ProfileCosts) {}
+    void count_element(uint, ref const ConfItem, ref ProfileSize) {}
 
     bool parse_element(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
     {

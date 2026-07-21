@@ -49,16 +49,16 @@ nothrow @nogc:
     uint element_size(uint)
         => cast(uint)ElementDesc_MQTT.sizeof;
 
-    void count_element(uint, ref const ConfItem item, ref ProfileCosts costs)
+    void count_element(uint, ref const ConfItem item, ref ProfileSize size)
     {
         const(char)[] tail = item.value;
-        costs.add_string(tail.split!','.unQuote);
+        size.add_string(tail.split!','.unQuote);
         foreach (ref sub; item.sub_items)
         {
             if (sub.name == "write")
             {
                 tail = sub.value;
-                costs.add_string(tail.split!','.unQuote);
+                size.add_string(tail.split!','.unQuote);
                 break;
             }
         }
@@ -73,14 +73,14 @@ nothrow @nogc:
         const(char)[] topic = tail.split!','.unQuote;
         const(char)[] type = tail.split!','.unQuote;
         const(char)[] following = tail.split!','.unQuote;
-        mqtt.read_topic = b.intern(topic);
+        mqtt.read_topic = b.add_string(topic);
 
         foreach (ref sub; item.sub_items)
         {
             if (sub.name != "write")
                 continue;
             const(char)[] write_tail = sub.value;
-            mqtt.write_topic = b.intern(write_tail.split!','.unQuote);
+            mqtt.write_topic = b.add_string(write_tail.split!','.unQuote);
             break;
         }
 
@@ -126,11 +126,11 @@ nothrow @nogc:
         return cast(uint)((count + 1) * ushort.sizeof);
     }
 
-    void count_root(uint, ref const ConfItem item, ref ProfileCosts costs)
+    void count_root(uint, ref const ConfItem item, ref ProfileSize size)
     {
         const(char)[] tail = item.value;
         while (!tail.empty)
-            costs.add_string(tail.split!','.unQuote);
+            size.add_string(tail.split!','.unQuote);
     }
 
     bool parse_root(uint, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
@@ -143,7 +143,7 @@ nothrow @nogc:
             const(char)[] subscription = tail.split!','.unQuote;
             if (subscription.empty)
                 continue;
-            words[++words[0]] = b.intern(subscription);
+            words[++words[0]] = b.add_string(subscription);
         }
         return true;
     }

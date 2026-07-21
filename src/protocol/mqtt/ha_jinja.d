@@ -20,10 +20,10 @@ bool compile_jinja_template(const(char)[] template_, out String source, out Expr
     if (body.empty)
         return false;
 
-    MutableString!0 lowered;
-    if (!lower_jinja_expression(body, lowered))
+    MutableString!0 translated;
+    if (!translate_jinja_expression(body, translated))
         return false;
-    source = lowered[].makeString(defaultAllocator());
+    source = translated[].makeString(defaultAllocator());
 
     const(char)[] cursor = source[];
     try
@@ -46,21 +46,21 @@ bool compile_jinja_template(const(char)[] template_, out String source, out Expr
 
 unittest
 {
-    MutableString!0 lowered;
-    assert(lower_jinja_expression("value | int / 10 if value | is_number else none", lowered));
-    assert(lowered[] == "$select($is_number($value), $to_int($value) / 10, null)");
+    MutableString!0 translated;
+    assert(translate_jinja_expression("value | int / 10 if value | is_number else none", translated));
+    assert(translated[] == "$select($is_number($value), $to_int($value) / 10, null)");
 
-    lowered.clear();
-    assert(lower_jinja_expression("value | float(0) | round(1)", lowered));
-    assert(lowered[] == "$round($to_float($value, 0), 1)");
+    translated.clear();
+    assert(translate_jinja_expression("value | float(0) | round(1)", translated));
+    assert(translated[] == "$round($to_float($value, 0), 1)");
 
-    lowered.clear();
-    assert(lower_jinja_expression("value | trim | lower | default('unknown', true)", lowered));
-    assert(lowered[] == "$select($truthy($lower($trim($value))), $lower($trim($value)), \"unknown\")");
+    translated.clear();
+    assert(translate_jinja_expression("value | trim | lower | default('unknown', true)", translated));
+    assert(translated[] == "$select($truthy($lower($trim($value))), $lower($trim($value)), \"unknown\")");
 
-    lowered.clear();
-    assert(lower_jinja_expression("value | bool(default=false) | iif('ON', 'OFF')", lowered));
-    assert(lowered[] == "$select($to_bool($value, false), \"ON\", \"OFF\")");
+    translated.clear();
+    assert(translate_jinja_expression("value | bool(default=false) | iif('ON', 'OFF')", translated));
+    assert(translated[] == "$select($to_bool($value, false), \"ON\", \"OFF\")");
 
     String source;
     Expression* expression;
@@ -71,12 +71,12 @@ unittest
 
 private:
 
-bool lower_jinja_expression(const(char)[] input, ref MutableString!0 output)
+bool translate_jinja_expression(const(char)[] input, ref MutableString!0 output)
 {
     input = input.trim();
     size_t conditional = find_top_level_word(input, "if");
     if (conditional == input.length)
-        return lower_jinja_pipeline(input, output);
+        return translate_jinja_pipeline(input, output);
 
     size_t otherwise = find_top_level_word(input, "else", conditional + 2);
     if (otherwise == input.length)
@@ -89,23 +89,23 @@ bool lower_jinja_expression(const(char)[] input, ref MutableString!0 output)
         return false;
 
     output ~= "$select(";
-    if (!lower_jinja_expression(condition, output))
+    if (!translate_jinja_expression(condition, output))
         return false;
     output ~= ", ";
-    if (!lower_jinja_expression(accepted, output))
+    if (!translate_jinja_expression(accepted, output))
         return false;
     output ~= ", ";
-    if (!lower_jinja_expression(rejected, output))
+    if (!translate_jinja_expression(rejected, output))
         return false;
     output ~= ')';
     return true;
 }
 
-bool lower_jinja_pipeline(const(char)[] input, ref MutableString!0 output)
+bool translate_jinja_pipeline(const(char)[] input, ref MutableString!0 output)
 {
     size_t pipe = find_last_top_level_char(input, '|');
     if (pipe == input.length)
-        return lower_jinja_tokens(input, output);
+        return translate_jinja_tokens(input, output);
 
     const(char)[] base = input[0 .. pipe].trim();
     const(char)[] filter = input[pipe + 1 .. $].trim();
@@ -159,7 +159,7 @@ bool lower_jinja_pipeline(const(char)[] input, ref MutableString!0 output)
     applied ~= '$';
     applied ~= intrinsic;
     applied ~= '(';
-    if (!lower_jinja_pipeline(base, applied))
+    if (!translate_jinja_pipeline(base, applied))
         return false;
     while (!args.trim().empty)
     {
@@ -168,7 +168,7 @@ bool lower_jinja_pipeline(const(char)[] input, ref MutableString!0 output)
         if (arg.empty)
             return false;
         applied ~= ", ";
-        if (!lower_jinja_expression(arg, applied))
+        if (!translate_jinja_expression(arg, applied))
             return false;
         if (comma == args.length)
             args = null;
@@ -179,34 +179,34 @@ bool lower_jinja_pipeline(const(char)[] input, ref MutableString!0 output)
 
     if (name == "default" || name == "d")
     {
-        MutableString!0 lowered_base;
-        if (!lower_jinja_pipeline(base, lowered_base))
+        MutableString!0 translated_base;
+        if (!translate_jinja_pipeline(base, translated_base))
             return false;
         if (falsey_default)
             output ~= "$select($truthy(";
         else
             output ~= "$select($is_null(";
-        output ~= lowered_base[];
+        output ~= translated_base[];
         output ~= "), ";
         if (falsey_default)
         {
-            output ~= lowered_base[];
+            output ~= translated_base[];
             output ~= ", ";
-            if (!lower_jinja_expression(fallback, output))
+            if (!translate_jinja_expression(fallback, output))
                 return false;
         }
         else
         {
-            if (!lower_jinja_expression(fallback, output))
+            if (!translate_jinja_expression(fallback, output))
                 return false;
             output ~= ", ";
-            output ~= lowered_base[];
+            output ~= translated_base[];
         }
         output ~= ')';
     }
     else
         output ~= applied[];
-    if (!lower_jinja_tokens(tail, output))
+    if (!translate_jinja_tokens(tail, output))
         return false;
     return true;
 }
@@ -253,7 +253,7 @@ const(char)[] strip_named_argument(const(char)[] arg) pure
     return arg[equal + 1 .. $].trim();
 }
 
-bool lower_jinja_tokens(const(char)[] input, ref MutableString!0 output)
+bool translate_jinja_tokens(const(char)[] input, ref MutableString!0 output)
 {
     for (size_t i = 0; i < input.length; )
     {

@@ -376,7 +376,7 @@ protected:
         SampleDesc sample_desc = desc_by_index(mb.desc);
         const(DataFormat)* fmt = sample_desc.fmt;
 
-        // serve-pass elements are produced elsewhere; their shapes aren't this profile's to declare
+        // serve-pass elements are produced elsewhere; their formats aren't this profile's to declare
         if (_current_pass != Pass.serve && !e.series.format)
             e.series.format = fmt;
 

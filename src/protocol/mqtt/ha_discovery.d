@@ -21,8 +21,8 @@ import manager.component;
 import manager.device;
 import manager.element;
 import manager.expression : EvalContext, Expression, free_expression;
-import manager.sample : format_by_index, intern_constraint, mint_format, register_enum_info;
-import manager.series : Constraint, DataFormat, Scalar, Semantics, ValueType;
+import manager.sample : format_by_index, register_constraint, register_enum_info, register_format;
+import manager.series : Constraint, DataFormat, Scalar, SeriesKind, ValueType;
 
 import protocol.mqtt.ha_jinja : compile_jinja_template;
 
@@ -192,7 +192,7 @@ private:
         bool writable;
     }
 
-    struct HAEntityMount
+    struct HAEntityId
     {
         String identity;
         String id;
@@ -202,7 +202,7 @@ private:
     Array!String _prefixes;
     Array!HADevice _devices;
     Array!HAEntity _entities;
-    Array!HAEntityMount _entity_mounts;
+    Array!HAEntityId _entity_ids;
     Map!(String, Variant) _template_locals;
     DiscoveryPublish _publisher;
     bool _active;
@@ -359,8 +359,8 @@ private:
         state.sampling_mode = SamplingMode.report;
         if (select_info)
         {
-            state.series.format = format_by_index(mint_format(
-                DataFormat(ValueType.u16, Semantics.held, select_info)));
+            state.series.format = format_by_index(register_format(
+                DataFormat(ValueType.u16, SeriesKind.held, select_info)));
             if (state.value.is_enum)
             {
                 const(char)[] prior = select_info.key_for_raw(state.value.asLong);
@@ -446,9 +446,9 @@ private:
                                             const(char)[] object_id,
                                             const(char)[] device_identity)
     {
-        foreach (ref mount; _entity_mounts)
-            if (mount.device is device && mount.identity[] == identity)
-                return mount.id[];
+        foreach (ref entry; _entity_ids)
+            if (entry.device is device && entry.identity[] == identity)
+                return entry.id[];
 
         String base_id = safe_id(object_id);
         String device_id = safe_id(device_identity);
@@ -467,9 +467,9 @@ private:
             bool occupied = device.find_element(tconcat("ha.", candidate)) !is null;
             if (!occupied)
             {
-                foreach (ref mount; _entity_mounts)
+                foreach (ref entry; _entity_ids)
                 {
-                    if (mount.device is device && mount.id[] == candidate)
+                    if (entry.device is device && entry.id[] == candidate)
                     {
                         occupied = true;
                         break;
@@ -485,11 +485,11 @@ private:
         if (id.empty)
             return null;
 
-        HAEntityMount* mount = &_entity_mounts.pushBack();
-        mount.identity = identity.makeString(defaultAllocator());
-        mount.id = id.move;
-        mount.device = device;
-        return mount.id[];
+        HAEntityId* entry = &_entity_ids.pushBack();
+        entry.identity = identity.makeString(defaultAllocator());
+        entry.id = id.move;
+        entry.device = device;
+        return entry.id[];
     }
 
     void apply_device_info(ref HADevice record, Variant* config, const(char)[] identity)
@@ -795,7 +795,7 @@ private:
             pre_scale = 1;
         }
 
-        DataFormat format = DataFormat(ValueType.f64, Semantics.held, unit);
+        DataFormat format = DataFormat(ValueType.f64, SeriesKind.held, unit);
         Constraint constraint;
         double number;
         if (json_number(config, "min", number))
@@ -814,8 +814,8 @@ private:
             constraint.has |= Constraint.Has.step;
         }
         if (constraint.has)
-            format.constraint = intern_constraint(constraint);
-        state.series.format = format_by_index(mint_format(format));
+            format.constraint = register_constraint(constraint);
+        state.series.format = format_by_index(register_format(format));
     }
 
     static const(VoidEnumInfo)* synth_select_enum(ref Variant config,
@@ -1001,19 +1001,19 @@ unittest
     Application app = create_application();
     scope(exit) shutdown_application();
 
-    String lowered_source;
-    Expression* lowered_expression;
+    String translated_source;
+    Expression* translated_expression;
     assert(compile_jinja_template("{{ value | int / 10 if value | is_number else none }}",
-                                  lowered_source, lowered_expression));
-    scope(exit) lowered_expression.free_expression();
-    assert(lowered_source[] == "$select($is_number($value), $to_int($value) / 10, null)");
+                                  translated_source, translated_expression));
+    scope(exit) translated_expression.free_expression();
+    assert(translated_source[] == "$select($is_number($value), $to_int($value) / 10, null)");
     Map!(String, Variant) template_locals;
     String template_value_key = "value".makeString(defaultAllocator());
     template_locals[template_value_key] = Variant("250");
     EvalContext template_context;
     template_context.locals = &template_locals;
-    Variant lowered_value = lowered_expression.evaluate(template_context);
-    assert(lowered_value.isNumber && lowered_value.asDouble == 25);
+    Variant translated_value = translated_expression.evaluate(template_context);
+    assert(translated_value.isNumber && translated_value.asDouble == 25);
 
     String chained_source;
     Expression* chained_expression;

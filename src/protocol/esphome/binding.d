@@ -536,8 +536,8 @@ unittest
     double observed_volts = voltage.scaled_value(ScaledUnit(Volt));
     assert(observed_volts > 230.49 && observed_volts < 230.51);
 
-    const(DataFormat)* scaled = format_by_index(mint_format(
-        DataFormat(ValueType.f64, Semantics.held, ScaledUnit(Ampere))));
+    const(DataFormat)* scaled = format_by_index(register_format(
+        DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Ampere))));
     Element current;
     current.series.format = scaled;
     observe_sensor(&current, scaled, 0.1f, 123, getSysTime());
@@ -562,7 +562,7 @@ const(DataFormat)* sensor_format(const(char)[] unit_text, out float pre_scale, o
         pre_scale = 1;
     }
     ValueType type = pre_scale == 1 ? ValueType.f32 : ValueType.f64;
-    return format_by_index(mint_format(DataFormat(type, Semantics.held, unit)));
+    return format_by_index(register_format(DataFormat(type, SeriesKind.held, unit)));
 }
 
 void observe_sensor(Element* element, const(DataFormat)* format, float pre_scale, float state, SysTime timestamp)

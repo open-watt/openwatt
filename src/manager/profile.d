@@ -19,7 +19,7 @@ import manager.sample.codec : Encoding;
 import manager.config;
 import manager.device;
 import manager.element;
-import manager.sample : find_enum_info, mint_desc, register_enum_info, SampleDesc;
+import manager.sample : find_enum_info, register_desc, register_enum_info, SampleDesc;
 import manager.series : DataFormat, ValueType;
 import manager.sample.spec : compile_spec, LayoutContext;
 
@@ -101,7 +101,7 @@ private:
     ushort _description;
 }
 
-struct ProfileCosts
+struct ProfileSize
 {
     size_t string_bytes;
 
@@ -168,7 +168,7 @@ nothrow @nogc:
                     spelled[type.length + 1 .. len] = units[];
                     if (compile_spec(spelled[0 .. len], ctx, unit, 1, null, &resolve, desc))
                     {
-                        desc_index = mint_desc(desc);
+                        desc_index = register_desc(desc);
                         span = desc.enc.wire_bytes;
                         return true;
                     }
@@ -188,7 +188,7 @@ nothrow @nogc:
             writeWarning("Invalid data type '", type, "' for element: ", element_id);
             return false;
         }
-        desc_index = mint_desc(desc);
+        desc_index = register_desc(desc);
         span = wire_span(desc, type);
         return true;
     }
@@ -196,7 +196,7 @@ nothrow @nogc:
     const(VoidEnumInfo)* find_enum(const(char)[] name)
         => profile.find_enum_template(name);
 
-    ushort intern(const(char)[] s)
+    ushort add_string(const(char)[] s)
         => _strings ? _strings.add_string(s) : 0;
 
     void access(Access value)
@@ -214,7 +214,7 @@ interface ProfileSections
 {
 nothrow @nogc:
     uint element_size(uint kind);
-    void count_element(uint kind, ref const ConfItem item, ref ProfileCosts costs);
+    void count_element(uint kind, ref const ConfItem item, ref ProfileSize size);
     // slot is element_size bytes; the handler emplaces its own struct's init before filling
     bool parse_element(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b);
 }
@@ -223,7 +223,7 @@ interface ProfileRootSections
 {
 nothrow @nogc:
     uint root_size(uint kind, ref const ConfItem item);
-    void count_root(uint kind, ref const ConfItem item, ref ProfileCosts costs);
+    void count_root(uint kind, ref const ConfItem item, ref ProfileSize size);
     // slot is root_size bytes and belongs to this parsed Profile
     bool parse_root(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b);
 }
@@ -674,7 +674,7 @@ unittest
         nothrow @nogc:
             uint element_size(uint)
                 => cast(uint)TDesc.sizeof;
-            void count_element(uint, ref const ConfItem, ref ProfileCosts) {}
+            void count_element(uint, ref const ConfItem, ref ProfileSize) {}
             bool parse_element(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
             {
                 TDesc* d = cast(TDesc*)slot.ptr;
@@ -698,18 +698,18 @@ unittest
         nothrow @nogc:
             uint root_size(uint, ref const ConfItem)
                 => cast(uint)TRoot.sizeof;
-            void count_root(uint, ref const ConfItem item, ref ProfileCosts costs)
+            void count_root(uint, ref const ConfItem item, ref ProfileSize size)
             {
                 const(char)[] tail = item.value;
-                costs.add_string(tail.split!','.unQuote);
-                costs.add_string(tail.split!','.unQuote);
+                size.add_string(tail.split!','.unQuote);
+                size.add_string(tail.split!','.unQuote);
             }
             bool parse_root(uint, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
             {
                 TRoot* root = cast(TRoot*)slot.ptr;
                 const(char)[] tail = item.value;
-                root.first = b.intern(tail.split!','.unQuote);
-                root.second = b.intern(tail.split!','.unQuote);
+                root.first = b.add_string(tail.split!','.unQuote);
+                root.second = b.add_string(tail.split!','.unQuote);
                 return true;
             }
         }
@@ -734,7 +734,7 @@ unittest
 
         import manager.sample : desc_by_index;
 
-        // The normalized descriptor carries the scaling and native format directly.
+        // The normalized descriptor carries the scaling and typed format directly.
         ref const TDesc cv = prof.get_section!TDesc(tsec, 0);
         assert(cv.desc != 0xFFFF && cv.length == 2 && cv.addr == 1);
         SampleDesc cvd = desc_by_index(cv.desc);
@@ -747,7 +747,7 @@ unittest
         assert(desc_by_index(md.desc).fmt.enum_info is prof.find_enum_template("Mode"));
         assert(find_enum_info("tprof.Mode") is prof.find_enum_template("Mode"));
 
-        // the one-token spelling mints the same desc as the two-column form
+        // the one-token spelling produces the same desc as the two-column form
         ref const TDesc st = prof.get_section!TDesc(tsec, 2);
         assert(st.desc == cv.desc);
 
@@ -820,7 +820,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
     size_t num_element_templates = 0;
     size_t num_indirections = 0;
 
-    ProfileCosts section_costs;
+    ProfileSize section_size;
     Array!ushort section_counts;
     section_counts.resize(g_profile_sections.length);
     Array!uint root_sizes;
@@ -907,7 +907,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                 if (ProfileSectionReg* s = find_profile_section(reg_item.name))
                 {
                     ++section_counts[s.kind - first_section_kind];
-                    s.handler.count_element(s.kind, reg_item, section_costs);
+                    s.handler.count_element(s.kind, reg_item, section_size);
                 }
                 else
                     writeWarning("Unknown element type: ", reg_item.name);
@@ -1052,7 +1052,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
                     uint bytes = s.handler.root_size(s.kind, root_item);
                     assert(bytes > 0, "profile root sections must allocate storage");
                     root_sizes[][i] = bytes;
-                    s.handler.count_root(s.kind, root_item, section_costs);
+                    s.handler.count_root(s.kind, root_item, section_size);
                 }
             }
             else
@@ -1082,7 +1082,7 @@ Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAll
         if (n)
             ++active_sections;
     profile.section_blocks = allocator.allocArray!(Profile.SectionBlock)(active_sections);
-    profile.section_strings = allocator.allocArray!char(2 + section_costs.string_bytes);
+    profile.section_strings = allocator.allocArray!char(2 + section_size.string_bytes);
     {
         size_t sb = 0;
         foreach (ref s; g_profile_sections)

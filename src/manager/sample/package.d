@@ -3,8 +3,8 @@ module manager.sample;
 // The value gateway: the one decode/encode surface, composing wire layout (manager.sample.wire),
 // bespoke encodings (manager.sample.codec), registered types (urt.typereg) and record formats
 // (manager.series). All traffic is (DataFormat, void[]) records; Variant appears only at
-// the mount's boxing edge. The gateway never allocates: dynamic values (text) return
-// transient views and mint their String at the mount, where latest lives.
+// the Element's boxing edge. The gateway never allocates: dynamic values (text) return
+// transient views; the Element creates the String stored by latest.
 
 import urt.conv;
 import urt.map : Map;
@@ -45,32 +45,32 @@ nothrow @nogc:
         => encoding == 0xFFFF ? null : encoding_by_index(encoding);
 }
 
-// Global format mint: one shared immutable instance per distinct shape, held forever.
-// This is the durable home mounts point at - formats outlive profiles and bindings.
-// Minting is config-time-cold (profile load); runtime resolves by index only.
-ushort mint_format(DataFormat shape)
+// Registered formats are shared immutable instances held for the process lifetime.
+// Elements point here so formats outlive profiles and bindings.
+// Registration happens while loading configuration; runtime resolves by index only.
+ushort register_format(DataFormat format)
 {
     foreach (i, f; g_formats)
     {
-        if (format_equal(*f, shape))
+        if (format_equal(*f, format))
             return cast(ushort)i;
     }
-    assert(g_formats.length < 0xFFFF, "format mint full");
+    assert(g_formats.length < 0xFFFF, "format registry full");
     DataFormat* f = defaultAllocator().allocT!DataFormat();
-    *f = shape;
+    *f = format;
     g_formats ~= f;
     return cast(ushort)(g_formats.length - 1);
 }
 
-const(Constraint)* intern_constraint(Constraint shape)
+const(Constraint)* register_constraint(Constraint value)
 {
     foreach (constraint; g_constraints)
     {
-        if (constraint_equal(*constraint, shape))
+        if (constraint_equal(*constraint, value))
             return constraint;
     }
     Constraint* constraint = defaultAllocator().allocT!Constraint();
-    *constraint = shape;
+    *constraint = value;
     g_constraints ~= constraint;
     return constraint;
 }
@@ -81,14 +81,14 @@ const(DataFormat)* format_by_index(ushort i)
     return g_formats[i];
 }
 
-ushort mint_desc(ref const SampleDesc desc)
+ushort register_desc(ref const SampleDesc desc)
 {
     foreach (i, ref d; g_descs)
     {
         if (d == desc)
             return cast(ushort)i;
     }
-    assert(g_descs.length < 0xFFFF, "desc mint full");
+    assert(g_descs.length < 0xFFFF, "desc registry full");
     g_descs ~= desc;
     return cast(ushort)(g_descs.length - 1);
 }
@@ -109,7 +109,7 @@ const(VoidEnumInfo)* register_enum_info(const(char)[] name, const(VoidEnumInfo)*
                 defaultAllocator().free((cast(void*)info)[0 .. enum_info_size(*info)]);
             return *e;
         }
-        // rebind; the prior definition stays alive for existing mounts
+        // rebind; the prior definition stays alive for existing Elements
         *e = info;
         return info;
     }
@@ -124,7 +124,7 @@ const(VoidEnumInfo)* find_enum_info(const(char)[] name)
     return null;
 }
 
-// binary wire -> one native record; false when the desc can't represent the bytes
+// binary wire -> one typed record; false when the desc can't represent the bytes
 bool sample_record(const(void)[] wire, ref const SampleDesc desc, void[] record)
 {
     ubyte[256] image = void;
@@ -300,7 +300,7 @@ bool emit_record(const(void)[] record, ref const SampleDesc desc, void[] wire)
     }
 }
 
-// text token -> one native record
+// text token -> one typed record
 bool parse_record(const(char)[] token, ref const SampleDesc desc, void[] record)
 {
     const(Encoding)* enc = desc.enc;
@@ -412,7 +412,7 @@ ptrdiff_t format_record(const(void)[] record, ref const SampleDesc desc, char[] 
     }
 }
 
-// swizzled text-field view; padding stripped, no allocation - the mount mints the String
+// reordered text-field view; padding stripped, no allocation
 const(char)[] sample_text(const(void)[] wire, ref const SampleDesc desc, char[] buf)
 {
     size_t n = wire.length < buf.length ? wire.length : buf.length;
@@ -462,14 +462,14 @@ unittest
     register_builtin_encodings();
     scope(exit) clear_encoding_registry();
 
-    // mint dedupe: same shape same index, different shape different index
-    ushort fa = mint_format(DataFormat(ValueType.f64, Semantics.held, ScaledUnit(Volt)));
-    ushort fb = mint_format(DataFormat(ValueType.f64, Semantics.held, ScaledUnit(Volt)));
-    ushort fc = mint_format(DataFormat(ValueType.s16, Semantics.held));
+    // registration deduplicates equal formats
+    ushort fa = register_format(DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Volt)));
+    ushort fb = register_format(DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Volt)));
+    ushort fc = register_format(DataFormat(ValueType.s16, SeriesKind.held));
     assert(fa == fb && fa != fc);
     assert(format_by_index(fa).unit == ScaledUnit(Volt));
 
-    // scaled BE register -> f64 record (modbus shape)
+    // scaled BE register -> f64 record (Modbus format)
     SampleDesc volts = SampleDesc(WireLayout(WK.signed_, 16, 0, WF.reverse), 0.1f, fa);
     ubyte[2] reg = [0x01, 0x00];  // 256 BE
     double d;
@@ -480,7 +480,7 @@ unittest
     assert(back == reg);
 
     // bool@3 within a shared register; RMW preserves neighbours
-    ushort fbool = mint_format(DataFormat(ValueType.bool_, Semantics.held));
+    ushort fbool = register_format(DataFormat(ValueType.bool_, SeriesKind.held));
     SampleDesc flag = SampleDesc(WireLayout(WK.bool_, 1, 3, WF.reverse, 2, 2), 1, fbool);
     ubyte[2] status = [0x9A, 0xBC];
     bool b;
@@ -489,7 +489,7 @@ unittest
 
     // enum register: names parse, numbers format
     enum Mode : ushort { off = 0, eco = 1, boost = 2 }
-    ushort fmode = mint_format(DataFormat(ValueType.u16, Semantics.held, enum_info!Mode.make_void()));
+    ushort fmode = register_format(DataFormat(ValueType.u16, SeriesKind.held, enum_info!Mode.make_void()));
     SampleDesc mode = SampleDesc(WireLayout(WK.unsigned_, 16, 0, WF.reverse), 1, fmode);
     ushort m;
     assert(parse_record("boost", mode, (cast(void*)&m)[0 .. 2]));
@@ -513,7 +513,7 @@ unittest
     // pod user type, big-endian members: fused image->record flip
     static struct Pair { ushort a; ushort b; }
     ushort ti = register_type_record(TypeRecordFor!(Pair, 0xBEEF0001, 0, false, "pair"));
-    ushort fpair = mint_format(DataFormat(ValueType.user, Semantics.held, &get_type_details(ti)));
+    ushort fpair = register_format(DataFormat(ValueType.user, SeriesKind.held, &get_type_details(ti)));
     SampleDesc pair = SampleDesc(WireLayout(WK.char_, 8, 0, WF.members_be), 1, fpair);
     ubyte[4] pw = [0x01, 0x02, 0x03, 0x04];
     Pair p;
@@ -524,7 +524,7 @@ unittest
     assert(pback == pw);
 
     // text fields: swizzled chars, padding stripped, no allocation
-    ushort fstr = mint_format(DataFormat(ValueType.char_, Semantics.held));
+    ushort fstr = register_format(DataFormat(ValueType.char_, SeriesKind.held));
     SampleDesc name = SampleDesc(WireLayout(WK.char_, 8, 0, WF.swap_word_bytes), 1, fstr);
     char[8] namebuf;
     immutable char[6] namewire = "EHLL!O";
@@ -553,7 +553,7 @@ bool member_flip(WireLayout l) pure
 
 bool format_equal(ref const DataFormat a, ref const DataFormat b) pure
 {
-    if (a.type != b.type || a.semantics != b.semantics || a.desc != b.desc ||
+    if (a.type != b.type || a.kind != b.kind || a.desc != b.desc ||
         a.count != b.count || a.rate != b.rate || a.clock !is b.clock || a.constraint !is b.constraint)
         return false;
     if (a.type == ValueType.user)
@@ -581,7 +581,7 @@ bool constraint_equal(ref const Constraint a, ref const Constraint b) pure
 
 void store_int(void* p, ValueType t, ulong v) pure
 {
-    switch (g_atom_stride[t])
+    switch (g_type_stride[t])
     {
         case 1: *cast(ubyte*)p = cast(ubyte)v; break;
         case 2: *cast(ushort*)p = cast(ushort)v; break;

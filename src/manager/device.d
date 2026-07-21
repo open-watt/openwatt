@@ -525,7 +525,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
     return device;
 }
 
-// recording intent default: every native-mounted element that isn't a constant or config
+// recording intent default: every element with a typed series that isn't a constant or config
 // value gets history; profiles will grow explicit record/retention overrides (grammar TODO)
 void apply_default_retention(Component c)
 {
@@ -537,7 +537,7 @@ void apply_default_retention(Component c)
 
     foreach (Element* e; c.elements)
     {
-        if (!e.native || e.series.has_history)
+        if (!e.has_typed_series || e.series.has_history)
             continue;
         if (e.sampling_mode == SamplingMode.constant || e.sampling_mode == SamplingMode.config)
             continue;
@@ -560,7 +560,7 @@ unittest
     Component as_comp = d;
     assert(as_comp.is_device);
 
-    // element identity: indices mint lazily against the device's table once it registers
+    // element indices allocate lazily against the device's table once it registers
     DeviceTable table;
     table.insert(d.id[], d);
     assert(d.cid);
@@ -574,7 +574,7 @@ unittest
     assert(table.resolve(handle) is e);
     assert(table.resolve(EID(d.cid, 2)) is null);
 
-    // unmounted elements have no identity to mint
+    // unmounted elements have no identity to allocate
     Element* stray = defaultAllocator.allocT!Element();
     assert(stray.ensure_eid() == EID.invalid);
 

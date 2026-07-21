@@ -52,7 +52,7 @@ nothrow @nogc:
 
     // container_bytes: the addressed storage unit the swizzle operates over. 0 derives the
     // minimal field span (word-rounded when worded); bit slices within a reversed container
-    // must state it (the slice's span does not reveal the register's extent).
+    // must state it (the slice's span does not reveal the register width).
     this(WireKind kind, uint bit_width, uint bit_offset = 0, WireFlags flags = WireFlags.none,
          uint word_bytes = 2, uint container_bytes = 0) pure
     {

@@ -120,7 +120,7 @@ nothrow @nogc:
 
     void observe_scalar(Scalar s, SysTime t = getSysTime(), Observer who = null)
     {
-        if (format.semantics == Semantics.held && _last_update != SysTime() && s.raw == _latest.raw)
+        if (format.kind == SeriesKind.held && _last_update != SysTime() && s.raw == _latest.raw)
         {
             _last_update = t;
             return;
@@ -135,7 +135,7 @@ nothrow @nogc:
     {
         debug assert(format.is_text);
         TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
-        if (format.semantics == Semantics.held && _last_update != SysTime() && slot.view == v[])
+        if (format.kind == SeriesKind.held && _last_update != SysTime() && slot.view == v[])
         {
             _last_update = t;
             return;
@@ -149,7 +149,7 @@ nothrow @nogc:
     {
         debug assert(format.is_text);
         TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
-        if (format.semantics == Semantics.held && _last_update != SysTime() && slot.view == v)
+        if (format.kind == SeriesKind.held && _last_update != SysTime() && slot.view == v)
         {
             _last_update = t;
             return;
@@ -173,7 +173,7 @@ nothrow @nogc:
         }
         assert(format.is_wide, "dynamic and non-pod records need their own entry");
         const(void)[] rec = record[0 .. format.stride];
-        if (format.semantics == Semantics.held && _last_update != SysTime())
+        if (format.kind == SeriesKind.held && _last_update != SysTime())
         {
             const(void)[] tail = tail_record();
             if (tail && cast(const(ubyte)[])tail == cast(const(ubyte)[])rec)
@@ -203,7 +203,7 @@ nothrow @nogc:
 
     void observe_block(const(void)[] samples, const(ulong)[] ticks, Observer who = null)
     {
-        debug assert(format.domain_native);
+        debug assert(format.uses_device_ticks);
         uint n = cast(uint)ticks.length;
         if (n == 0)
             return;
@@ -630,7 +630,7 @@ unittest
 {
     import urt.time : from_unix_time_ns;
 
-    static immutable DataFormat f64_held = DataFormat(ValueType.f64, Semantics.held);
+    static immutable DataFormat f64_held = DataFormat(ValueType.f64, SeriesKind.held);
 
     // retention=none: latest and last_update track, nothing is stored
     Element2 n;
@@ -640,7 +640,7 @@ unittest
     assert(n.latest.f64_ == 9.0);
     assert(n.last_update == from_unix_time_ns(500));
 
-    // held semantics: equal observations advance last_update but record nothing
+    // held series: equal observations advance last_update but record nothing
     Element2 e;
     e.format = &f64_held;
     e.ensure_history();
@@ -681,8 +681,8 @@ unittest
     assert(e.record_count == 7);
     assert(e.latest.f64_ == 7.0);
 
-    // text: short strings embed in the record, long strings mint a String; held-dedup never re-mints
-    DataFormat text_fmt = DataFormat(ValueType.char_, Semantics.held);
+    // text: short strings embed in the record, long strings allocate a String; equal held values reuse it
+    DataFormat text_fmt = DataFormat(ValueType.char_, SeriesKind.held);
     text_fmt.count = 0;
     Element2 te;
     te.format = &text_fmt;
@@ -696,10 +696,10 @@ unittest
     assert(te.record_count == 2);
     assert(!(cast(const(TextRecord)*)te.latest.raw.ptr).embedded);
     assert(te.value().asString == "a string too long to embed anywhere");
-    const(char)* mint = (cast(const(String)*)te.latest.raw.ptr).ptr;
+    const(char)* allocated = (cast(const(String)*)te.latest.raw.ptr).ptr;
     te.observe_text("a string too long to embed anywhere", from_unix_time_ns(2_000));
     assert(te.record_count == 2);
-    assert((cast(const(String)*)te.latest.raw.ptr).ptr is mint);
+    assert((cast(const(String)*)te.latest.raw.ptr).ptr is allocated);
     assert(te.last_update == from_unix_time_ns(2_000));
 
     // String overload adopts the handle; refs = caller + latest slot + bucket record
@@ -789,7 +789,7 @@ unittest
     a.teardown();
 
     // wide records: fixed vectors don't fit the Scalar register; latest is the open bucket tail
-    DataFormat key_fmt = DataFormat(ValueType.u8, Semantics.held);
+    DataFormat key_fmt = DataFormat(ValueType.u8, SeriesKind.held);
     key_fmt.count = 32;
     assert(!key_fmt.is_scalar && !key_fmt.is_text && key_fmt.is_wide && key_fmt.stride == 32);
     Element2 k;

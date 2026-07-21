@@ -1,22 +1,19 @@
 module manager.series;
 
-// The series contract: the typed record vocabulary shared by every host of observed data.
-// Element2 (the device tree's mount points) is the first host; the recorder's owsig
-// containers and waveform/byte/packet taps host the same shapes without becoming elements.
+// The series contract: the typed record format shared by every host of observed data.
+// Element2 is the first host; the recorder's owsig containers and waveform/byte/packet taps
+// host the same formats without becoming elements.
 // Event! payloads and device-function params/results will describe themselves with the
 // same DataFormat vocabulary, boxed through Variant only at the console/API edges.
 //
-// The factoring principle: a series factors each value into the part that is constant
-// across the series (the DataFormat: atom, count, unit, names, clock) and the part that
-// varies per sample (the record bytes). Records are context-free; the format is their
-// context. Boxing is the reunion: box_record marries bytes back to their format to make a
-// self-describing Variant, unboxing factors the format back out.
+// DataFormat contains the properties shared by every record in a series: value type, count,
+// unit, names, and clock. Each record stores only the bytes that vary. box_record combines
+// the record bytes with their format to make a self-describing Variant.
 //
-// A value is atom x extent. The atoms are machine scalars, char, and `user` (a registered
-// type, identity in the format's descriptor slot); extent is one (count == 1), a fixed
-// vector (count == N, stride multiplies), or dynamic (count == 0, the length rides in the
-// record). string is char x dynamic; blob is u8 x dynamic with opaque display; neither is
-// an atom. Storage rule: a record is memcpy iff its record type is trivial - dynamic
+// The value types are machine scalars, char, and `user` (a registered type identified by the
+// format's descriptor slot). count is one for a scalar, N for a fixed vector, or zero for a
+// dynamic record whose length is stored in the record. A string is dynamic char data; a blob
+// is dynamic u8 data with opaque display. Storage rule: a record is memcpy iff its type is trivial - dynamic
 // records hold immutable refcounted handles (String for text), non-pod user types copy
 // and drop through their registry hooks.
 
@@ -46,11 +43,11 @@ enum ValueType : ubyte
     user
 }
 
-// machine numerics: fits the Scalar register when extent is one
+// machine numerics fit the Scalar register when count is one
 bool is_scalar_type(ValueType t) pure
     => t <= ValueType.f64;
 
-enum Semantics : ubyte
+enum SeriesKind : ubyte
 {
     held,
     sampled,
@@ -133,11 +130,11 @@ nothrow @nogc:
     }
 
     ValueType type;
-    Semantics semantics;
+    SeriesKind kind;
     Desc desc;
-    ubyte count = 1;               // extent: 1 = one, N = fixed vector, 0 = dynamic (length in the record)
+    ubyte count = 1;               // 1 = scalar, N = fixed vector, 0 = dynamic (length in the record)
     uint rate;                     // frames/sec; 0 = irregular, records carry explicit timestamps
-    ClockDomain* clock;            // null = wall-native; regular device series index in their own domain
+    ClockDomain* clock;            // null = wall-clock timestamps; regular device series index in their own domain
     const(Constraint)* constraint; // null = unconstrained; write-path validation + UI/schema metadata
     union
     {
@@ -146,16 +143,16 @@ nothrow @nogc:
         const(TypeDetails)* user_type;  // type == user
     }
 
-    this(ValueType t, Semantics s) pure
+    this(ValueType t, SeriesKind kind_) pure
     {
         type = t;
-        semantics = s;
+        kind = kind_;
     }
 
-    this(ValueType t, Semantics s, ScaledUnit u) pure
+    this(ValueType t, SeriesKind kind_, ScaledUnit u) pure
     {
         type = t;
-        semantics = s;
+        kind = kind_;
         if (u != ScaledUnit())
         {
             unit = u;
@@ -163,10 +160,10 @@ nothrow @nogc:
         }
     }
 
-    this(ValueType t, Semantics s, const(VoidEnumInfo)* ei) pure
+    this(ValueType t, SeriesKind kind_, const(VoidEnumInfo)* ei) pure
     {
         type = t;
-        semantics = s;
+        kind = kind_;
         if (ei)
         {
             enum_info = ei;
@@ -174,16 +171,16 @@ nothrow @nogc:
         }
     }
 
-    this(ValueType t, Semantics s, const(TypeDetails)* td) pure
+    this(ValueType t, SeriesKind kind_, const(TypeDetails)* td) pure
     {
-        assert(t == ValueType.user, "user_type requires the user atom");
+        assert(t == ValueType.user, "user_type requires ValueType.user");
         type = t;
-        semantics = s;
+        kind = kind_;
         user_type = td;
     }
 
     bool regular() const pure => rate != 0;
-    bool domain_native() const pure => rate == 0 && clock !is null;
+    bool uses_device_ticks() const pure => rate == 0 && clock !is null;
 
     // fits the 8-byte Scalar register: machine numerics or trivial user pods
     bool is_scalar() const pure
@@ -192,7 +189,7 @@ nothrow @nogc:
     bool is_text() const pure
         => type == ValueType.char_ && count == 0;
 
-    // fixed-extent trivial records wider than the Scalar register; latest reads the open bucket tail
+    // fixed-size trivial records wider than the Scalar register; latest reads the open bucket tail
     bool is_wide() const pure
         => count != 0 && !is_scalar && (type != ValueType.user || user_type.pod);
 
@@ -200,7 +197,7 @@ nothrow @nogc:
     {
         if (count == 0)
             return 8; // dynamic records are TextRecords on all targets
-        uint s = type == ValueType.user ? user_type.size : g_atom_stride[type];
+        uint s = type == ValueType.user ? user_type.size : g_type_stride[type];
         s *= count;
         assert(s <= ubyte.max, "record stride exceeds 255 bytes");
         return cast(ubyte)s;
@@ -448,7 +445,7 @@ Variant box_record(const(void)* record, ref const DataFormat fmt)
 {
     if (fmt.count > 1)
     {
-        // fixed vectors: u8 = blob, char = text; other atoms await Variant arrays
+        // fixed vectors: u8 = blob, char = text; other types await Variant arrays
         if (fmt.type == ValueType.u8)
             return Variant(cast(const(void)[])record[0 .. fmt.count]);
         if (fmt.type == ValueType.char_)
@@ -470,7 +467,7 @@ Variant box_record(const(void)* record, ref const DataFormat fmt)
         case f64:   return box_float(*cast(const(double)*)record, fmt);
         case char_:
         {
-            assert(fmt.count == 0, "fixed char vectors box at the mount, not the record");
+            assert(fmt.count == 0, "fixed char vectors box at the Element, not the record");
             const(TextRecord)* tr = cast(const(TextRecord)*)record;
             if (tr.embedded)
                 return Variant(tr.view);
@@ -546,24 +543,24 @@ bool unbox_scalar(ref const Variant v, ref const DataFormat fmt, out Scalar s)
 
 unittest
 {
-    // extent: count multiplies stride, 0 = dynamic handle, scalar-ness needs count == 1
-    DataFormat f = DataFormat(ValueType.s32, Semantics.held);
+    // count multiplies stride; 0 is a dynamic handle and scalar records require count == 1
+    DataFormat f = DataFormat(ValueType.s32, SeriesKind.held);
     assert(f.stride == 4 && f.is_scalar);
     f.count = 8;
     assert(f.stride == 32 && !f.is_scalar);
-    DataFormat s = DataFormat(ValueType.char_, Semantics.held);
+    DataFormat s = DataFormat(ValueType.char_, SeriesKind.held);
     s.count = 0;
     assert(s.stride == 8 && !s.is_scalar && s.is_text);
 
     int v = -5;
-    assert(box_record(&v, DataFormat(ValueType.s32, Semantics.held)).asLong == -5);
+    assert(box_record(&v, DataFormat(ValueType.s32, SeriesKind.held)).asLong == -5);
 
     // trivial user pods ride the Scalar register and box through their variant marshal
     import urt.time : from_unix_time_ns, SysTime;
     import urt.typereg : find_type_by_name;
     const(TypeDetails)* dt = find_type_by_name("dt");
     assert(dt && dt.pod && dt.size == 8 && dt.variant);
-    DataFormat fdt = DataFormat(ValueType.user, Semantics.held, dt);
+    DataFormat fdt = DataFormat(ValueType.user, SeriesKind.held, dt);
     assert(fdt.is_scalar && fdt.stride == 8);
     SysTime t = from_unix_time_ns(1_700_000_000_000_000_000);
     Variant bt = box_record(&t, fdt);
@@ -576,7 +573,7 @@ unittest
 
 private:
 
-package immutable ubyte[ValueType.max + 1] g_atom_stride = [ 1, 1, 1, 2, 2, 4, 4, 8, 8, 4, 8, 1, 0 ];
+package immutable ubyte[ValueType.max + 1] g_type_stride = [ 1, 1, 1, 2, 2, 4, 4, 8, 8, 4, 8, 1, 0 ];
 
 Variant box_int(long v, ref const DataFormat fmt)
 {

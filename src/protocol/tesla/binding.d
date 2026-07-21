@@ -284,19 +284,19 @@ private:
     }
 
     const(DataFormat)* quantity_format(ValueType type, ScaledUnit unit)
-        => format_by_index(mint_format(DataFormat(type, Semantics.held, unit)));
+        => format_by_index(register_format(DataFormat(type, SeriesKind.held, unit)));
 
     const(DataFormat)* centiamps_format()
         => quantity_format(ValueType.u16, ScaledUnit(Ampere, -2));
 
     const(DataFormat)* enum_format(E)()
-        => format_by_index(mint_format(DataFormat(ValueType.u8, Semantics.held, enum_info!E.make_void())));
+        => format_by_index(register_format(DataFormat(ValueType.u8, SeriesKind.held, enum_info!E.make_void())));
 
     const(DataFormat)* text_format()
     {
-        DataFormat format = DataFormat(ValueType.char_, Semantics.held);
+        DataFormat format = DataFormat(ValueType.char_, SeriesKind.held);
         format.count = 0;
-        return format_by_index(mint_format(format));
+        return format_by_index(register_format(format));
     }
 
     void observe(T)(ref SampleElement sample, T value, SysTime timestamp)

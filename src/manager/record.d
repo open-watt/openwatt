@@ -58,7 +58,7 @@ nothrow @nogc:
 
     Recorder owner;
     Element* element;
-    Cursor cursor;          // native intake: pinned, never lapped (element holder predates EIDs, so this rides along)
+    Cursor cursor;          // typed-series intake: pinned, never lapped (element holder predates EIDs, so this rides along)
     SeriesContainer container;
     String path;            // data-model path: "device.component.element"
     SeriesId series;        // handle into the database world (ring intake only)
@@ -76,13 +76,13 @@ nothrow @nogc:
         if (mp > Duration.zero)
             throttle = cast(ulong)mp.as!"nsecs";
 
-        if (e.native)
+        if (e.has_typed_series)
         {
             const(DataFormat)* f = e.series.format;
             if (!container_serialisable(*f))
                 return; // stays in RAM; text/user/domain series wait on their codecs
 
-            // ring samples shipped before the element went native mustn't re-ship: tail from head
+            // ring samples shipped before the typed series was assigned mustn't re-ship: tail from head
             if (cursor.element is null)
                 cursor = e.series.open_cursor(last_flushed ? ulong.max : 0, true);
             if (!cursor.pending)
@@ -149,7 +149,7 @@ bool query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, Que
 {
     Element* e = rs.element;
     Array!Sample local;
-    if (e.native)
+    if (e.has_typed_series)
     {
         ulong idx = e.series.index_for_time(from_unix_time_ns(from));
         for (; idx != ulong.max;)
@@ -319,8 +319,8 @@ unittest
     assert(rs.query_local(4_000_000, 6_000_000, 0, QueryMode.graph, result));
     assert(result[0].time == 4_000_000 && result[0].value == 20); // held from the 3ms sample
 
-    // native element: query_local serves from the full bucket history, not the ring
-    static immutable DataFormat qfmt = DataFormat(ValueType.f64, Semantics.held);
+    // typed-series element: query_local serves from the full bucket history, not the ring
+    static immutable DataFormat qfmt = DataFormat(ValueType.f64, SeriesKind.held);
     Element en;
     en.series.format = &qfmt;
     en.series.ensure_history();

@@ -226,11 +226,11 @@ nothrow @nogc:
     uint element_size(uint)
         => cast(uint)HTTPElementDesc.sizeof;
 
-    void count_element(uint, ref const ConfItem item, ref ProfileCosts costs)
+    void count_element(uint, ref const ConfItem item, ref ProfileSize size)
     {
         const(char)[] tail = item.value;
         tail.split!','.unQuote;
-        costs.add_string(tail.split!','.unQuote);
+        size.add_string(tail.split!','.unQuote);
 
         foreach (ref sub; item.sub_items)
         {
@@ -238,10 +238,10 @@ nothrow @nogc:
             {
                 tail = sub.value;
                 tail.split!','.unQuote;
-                costs.add_string(tail.split!','.unQuote);
+                size.add_string(tail.split!','.unQuote);
             }
             else if (sub.name == "response")
-                costs.add_string(sub.value.unQuote);
+                size.add_string(sub.value.unQuote);
         }
     }
 
@@ -255,7 +255,7 @@ nothrow @nogc:
         const(char)[] raw_identifier = tail.split!',';
         http.identifier_quoted = raw_identifier.length >= 2 &&
                                  raw_identifier[0] == '"' && raw_identifier[$ - 1] == '"';
-        http._identifier = b.intern(raw_identifier.unQuote);
+        http._identifier = b.add_string(raw_identifier.unQuote);
 
         const(char)[] type = tail.split!','.unQuote;
         const(char)[] following = tail.split!','.unQuote;
@@ -281,10 +281,10 @@ nothrow @nogc:
                 if (http.write_request_index == ushort.max)
                     writeWarning("Unknown write request '", write_request, "' for http element: ", b.element_id);
                 if (!write_key.empty)
-                    http._write_key = b.intern(write_key);
+                    http._write_key = b.add_string(write_key);
             }
             else if (sub.name == "response")
-                http._response_path = b.intern(sub.value.unQuote);
+                http._response_path = b.add_string(sub.value.unQuote);
         }
 
         bool has_read = http.request_index != ushort.max;
@@ -301,7 +301,7 @@ nothrow @nogc:
     uint root_size(uint, ref const ConfItem item)
         => cast(uint)(ushort.sizeof + item.sub_items.length * HTTPRequestDesc.sizeof);
 
-    void count_root(uint, ref const ConfItem item, ref ProfileCosts costs)
+    void count_root(uint, ref const ConfItem item, ref ProfileSize size)
     {
         foreach (ref request; item.sub_items)
         {
@@ -309,25 +309,25 @@ nothrow @nogc:
                 continue;
 
             const(char)[] tail = request.value;
-            costs.add_string(tail.split!','.unQuote);
+            size.add_string(tail.split!','.unQuote);
             tail.split!','.unQuote;
-            costs.add_string(tail.split!','.unQuote);
+            size.add_string(tail.split!','.unQuote);
 
             foreach (ref sub; request.sub_items)
             {
                 switch (sub.name)
                 {
                     case "success":
-                        costs.add_string(sub.value);
+                        size.add_string(sub.value);
                         break;
                     case "root":
                     case "parse":
-                        costs.add_string(sub.value.unQuote);
+                        size.add_string(sub.value.unQuote);
                         break;
                     case "format":
                         const(char)[] format = sub.value;
                         format.split!','.unQuote;
-                        costs.add_string(format.unQuote);
+                        size.add_string(format.unQuote);
                         break;
                     default:
                         break;
@@ -411,12 +411,12 @@ nothrow @nogc:
             desc.method = *method;
             desc.format_type = format_type;
             desc.parse_mode = parse_mode;
-            desc._name = b.intern(name);
-            desc._path = b.intern(path);
-            desc._success_expr = b.intern(success_expr);
-            desc._root_path = b.intern(root_path);
-            desc._parse_template = b.intern(parse_template);
-            desc._body_template = b.intern(body_template);
+            desc._name = b.add_string(name);
+            desc._path = b.add_string(path);
+            desc._success_expr = b.add_string(success_expr);
+            desc._root_path = b.add_string(root_path);
+            desc._parse_template = b.add_string(parse_template);
+            desc._body_template = b.add_string(body_template);
         }
         return true;
     }

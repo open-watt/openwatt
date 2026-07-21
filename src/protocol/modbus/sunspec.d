@@ -172,7 +172,7 @@ private immutable FieldDef[] m1_fields = [
 //   4: grid.meter          (EnergyMeter ac)    - inverter exchange with the attached circuit
 // The AC output is a Port so /apps/energy/appliance bindings such as
 // `grid=house device=se10000h` can attach readings to the topology. A
-// coexisting CT (model 201/203) is the property-gateway export meter and is mounted
+// coexisting CT (model 201/203) is the property-gateway export meter and is placed
 // at inverter.export_meter below, not here.
 
 private immutable ComponentDef[] inverter_components_single = [
@@ -369,7 +369,7 @@ private immutable ComponentDef[] meter_three_components = [
 // When a meter model coexists with an inverter on the same physical device
 // (e.g. SolarEdge with its grid CT), that meter sits at the property gateway and
 // is the export-limiting / self-consumption reference, not the inverter's exchange
-// with its own circuit. It mounts under the Inverter component as `export_meter`.
+// with its own circuit. It lives under the Inverter component as `export_meter`.
 private immutable ComponentDef[] inverter_export_meter_single_components = [
     ComponentDef("inverter.export_meter", "EnergyMeter", "single-phase"),
 ];
@@ -1858,10 +1858,10 @@ private SampleDesc make_sample_desc(ref const FieldDef fd)
     bool compiled = compile_spec(spec, modbus_context, unit, unit_scale, enum_info, null, desc);
     assert(compiled, "invalid built-in SunSpec field descriptor");
 
-    // A runtime SunSpec scale factor can make an integer fractional. Its mounted
-    // record shape must therefore be real even when the current exponent is zero.
+    // A runtime SunSpec scale factor can make an integer fractional. Its Element
+    // record format must therefore be real even when the current exponent is zero.
     if (fd.scale_off >= 0 && desc.fmt.type != ValueType.f32 && desc.fmt.type != ValueType.f64)
-        desc.format = mint_format(DataFormat(ValueType.f64, Semantics.held, unit));
+        desc.format = register_format(DataFormat(ValueType.f64, SeriesKind.held, unit));
     return desc;
 }
 

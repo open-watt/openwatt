@@ -43,7 +43,7 @@ alias IoErrorHandler = void delegate() nothrow @nogc;
 version (Windows)
 {
     // The layer under watch_io: callers associate() a handle with the reactor's completion port,
-    // park their own overlapped ops on it, and get each op's completion delivered on the main
+    // submit their own overlapped ops to it, and get each op's completion delivered on the main
     // thread. IoOp must be the FIRST member of the caller's op struct so a completion's
     // OVERLAPPED* casts back to it, and the op must stay alive until its completion (or
     // cancellation completion) has been delivered.
@@ -71,7 +71,7 @@ else version (linux)
 // of urt.sync.event.Event (set/reset/wait), and the same wait dispatches watched I/O inline on the
 // main thread: readiness from an epoll set on linux (registration is persistent - epoll_ctl once
 // per fd lifecycle, O(ready) re-entry), completions from an IO completion port on windows (one
-// overlapped read parked per watch). No standing reader threads, no cross-thread marshalling.
+// overlapped read pending per watch). No standing reader threads, no cross-thread marshalling.
 // See TODO.md "Async I/O end-state: the main loop's wait primitive IS the reactor".
 //
 // The latch is the _signalled flag; the kernel-side signal exists only to break the sleep. set()
@@ -337,7 +337,7 @@ nothrow @nogc:
 
         version (Windows)
         {
-            // associate a handle with the completion port so parked IoOps deliver through wait()
+            // associate a handle with the completion port so pending IoOps deliver through wait()
             bool associate(HANDLE file)
                 => _iocp !is null && CreateIoCompletionPort(file, _iocp, 0, 0) !is null;
         }
@@ -483,7 +483,7 @@ private:
         struct WatchEntry
         {
         nothrow @nogc:
-            IoOp op;            // the parked read; must be first so its completion finds us
+            IoOp op;            // the pending read; must be first so its completion finds us
             Reactor* owner;
             HANDLE file;
             IoDataHandler on_data;
@@ -493,7 +493,7 @@ private:
             bool eof_on_zero;
             ubyte[2048] buf;
 
-            // park (or re-park) the persistent overlapped read. a synchronous success still
+            // submit (or resubmit) the persistent overlapped read. a synchronous success still
             // queues a completion packet, so it needs no special handling here.
             bool post_read()
             {

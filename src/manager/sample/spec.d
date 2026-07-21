@@ -98,25 +98,25 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
         }
     }
 
-    // A registered name is an atom even when it contains digits (`ipv4`). Otherwise
+    // A registered type name may contain digits (`ipv4`). Otherwise
     // split a built-in family into its letters and width digits.
-    size_t atom_len = spec.length;
+    size_t type_len = spec.length;
     foreach (i, c; spec)
     {
         if (c == '_')
         {
-            atom_len = i;
+            type_len = i;
             break;
         }
     }
-    const(TypeDetails)* named_type = find_type_by_name(spec[0 .. atom_len]);
+    const(TypeDetails)* named_type = find_type_by_name(spec[0 .. type_len]);
     const(char)[] family;
     size_t dl;
     uint width;
     if (named_type)
     {
-        family = spec[0 .. atom_len];
-        dl = atom_len;
+        family = spec[0 .. type_len];
+        dl = type_len;
     }
     else
     {
@@ -227,7 +227,7 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
         case "bool":
         {
             uint w = sliced ? 1 : (ctx.worded ? ctx.word_bytes * 8 : 8);
-            desc = SampleDesc(WireLayout(WireKind.bool_, w, bit_offset, scalar_flags(), wb, container), pre_scale, mint_format(DataFormat(ValueType.bool_, Semantics.held)));
+            desc = SampleDesc(WireLayout(WireKind.bool_, w, bit_offset, scalar_flags(), wb, container), pre_scale, register_format(DataFormat(ValueType.bool_, SeriesKind.held)));
             return true;
         }
 
@@ -238,10 +238,10 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
             if (name.length && unit.parseUnit(name, pre_scale) != name.length)
                 return false;
             bool signed_ = family[0] != 'u';
-            ValueType at = pre_scale != 1 ? ValueType.f64 : int_atom(width, signed_);
-            DataFormat fmt = ei ? DataFormat(at, Semantics.held, ei) : DataFormat(at, Semantics.held, unit);
+            ValueType value_type = pre_scale != 1 ? ValueType.f64 : int_type(width, signed_);
+            DataFormat fmt = ei ? DataFormat(value_type, SeriesKind.held, ei) : DataFormat(value_type, SeriesKind.held, unit);
             fmt.count = cast(ubyte)count;
-            desc = SampleDesc(WireLayout(signed_ ? WireKind.signed_ : WireKind.unsigned_, width, bit_offset, scalar_flags(), wb, container), pre_scale, mint_format(fmt));
+            desc = SampleDesc(WireLayout(signed_ ? WireKind.signed_ : WireKind.unsigned_, width, bit_offset, scalar_flags(), wb, container), pre_scale, register_format(fmt));
             return true;
         }
 
@@ -251,10 +251,10 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
                 return false; // TODO: half-float
             if (name.length && unit.parseUnit(name, pre_scale) != name.length)
                 return false;
-            ValueType at = (width == 32 && pre_scale == 1) ? ValueType.f32 : ValueType.f64;
-            DataFormat fmt = DataFormat(at, Semantics.held, unit);
+            ValueType value_type = (width == 32 && pre_scale == 1) ? ValueType.f32 : ValueType.f64;
+            DataFormat fmt = DataFormat(value_type, SeriesKind.held, unit);
             fmt.count = cast(ubyte)count;
-            desc = SampleDesc(WireLayout(WireKind.float_, width, 0, scalar_flags(), wb), pre_scale, mint_format(fmt));
+            desc = SampleDesc(WireLayout(WireKind.float_, width, 0, scalar_flags(), wb), pre_scale, register_format(fmt));
             return true;
         }
 
@@ -270,18 +270,18 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
             }
             if (width < 1 || width > 64)
                 return false;
-            ValueType at = int_atom(width, false);
-            DataFormat fmt = ei ? DataFormat(at, Semantics.held, ei) : DataFormat(at, Semantics.held);
-            desc = SampleDesc(WireLayout(family == "enumf" ? WireKind.float_ : WireKind.unsigned_, width, bit_offset, scalar_flags(), wb, container), pre_scale, mint_format(fmt));
+            ValueType value_type = int_type(width, false);
+            DataFormat fmt = ei ? DataFormat(value_type, SeriesKind.held, ei) : DataFormat(value_type, SeriesKind.held);
+            desc = SampleDesc(WireLayout(family == "enumf" ? WireKind.float_ : WireKind.unsigned_, width, bit_offset, scalar_flags(), wb, container), pre_scale, register_format(fmt));
             return true;
         }
 
         case "str":
         {
-            DataFormat fmt = DataFormat(ValueType.char_, Semantics.held);
+            DataFormat fmt = DataFormat(ValueType.char_, SeriesKind.held);
             fmt.count = 0; // dynamic: the record is a TextRecord; wire span is the field width
             // width is per-char; the field's byte span comes from the register map
-            desc = SampleDesc(WireLayout(WireKind.char_, 8, 0, image_flags(), wb), pre_scale, mint_format(fmt));
+            desc = SampleDesc(WireLayout(WireKind.char_, 8, 0, image_flags(), wb), pre_scale, register_format(fmt));
             return true;
         }
 
@@ -292,15 +292,15 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
                 const(TypeDetails)* td = find_type_by_name("dt");
                 if (!td)
                     return false;
-                DataFormat fmt = DataFormat(ValueType.user, Semantics.held, td);
-                desc = SampleDesc(WireLayout(WireKind.char_, 8, 0, image_flags(), wb), pre_scale, mint_format(fmt));
+                DataFormat fmt = DataFormat(ValueType.user, SeriesKind.held, td);
+                desc = SampleDesc(WireLayout(WireKind.char_, 8, 0, image_flags(), wb), pre_scale, register_format(fmt));
                 return true;
             }
             const(Encoding)* enc = name.length ? find_encoding(name) : null;
             if (!enc || !width || enc.wire_bytes * 8 != width)
                 return false;
-            DataFormat shape = DataFormat(enc.format.type, enc.format.semantics, enc.format.user_type);
-            desc = SampleDesc(WireLayout(WireKind.char_, 8, 0, image_flags(), wb), pre_scale, mint_format(shape), encoding_index_of(*enc));
+            DataFormat format = DataFormat(enc.format.type, enc.format.kind, enc.format.user_type);
+            desc = SampleDesc(WireLayout(WireKind.char_, 8, 0, image_flags(), wb), pre_scale, register_format(format), encoding_index_of(*enc));
             return true;
         }
 
@@ -310,9 +310,9 @@ bool compile_spec(const(char)[] spec, ref const LayoutContext ctx, ScaledUnit un
             const(TypeDetails)* td = named_type ? named_type : find_type_by_name(family);
             if (!td || width)
                 return false;
-            DataFormat fmt = DataFormat(ValueType.user, Semantics.held, td);
+            DataFormat fmt = DataFormat(ValueType.user, SeriesKind.held, td);
             fmt.count = cast(ubyte)count;
-            desc = SampleDesc(WireLayout(WireKind.char_, 8, 0, image_flags(), wb), pre_scale, mint_format(fmt));
+            desc = SampleDesc(WireLayout(WireKind.char_, 8, 0, image_flags(), wb), pre_scale, register_format(fmt));
             return true;
         }
     }
@@ -486,7 +486,7 @@ uint parse_uint(const(char)[] s) pure
     return v;
 }
 
-ValueType int_atom(uint bits, bool signed_) pure
+ValueType int_type(uint bits, bool signed_) pure
 {
     if (bits <= 8)
         return signed_ ? ValueType.s8 : ValueType.u8;

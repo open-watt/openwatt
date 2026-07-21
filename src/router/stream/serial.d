@@ -469,7 +469,7 @@ nothrow @nogc:
                 return false;
 
             COMMTIMEOUTS timeouts = {};
-            // The reactor parks one overlapped read per port. MAXDWORD interval+multiplier with a
+            // The reactor keeps one overlapped read pending per port. MAXDWORD interval+multiplier with a
             // bounded constant is the documented "complete on the first available byte(s)" mode;
             // the 1s constant is an idle tick so the op never pends unbounded.
             timeouts.ReadIntervalTimeout = -1;

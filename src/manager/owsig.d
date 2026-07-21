@@ -96,8 +96,8 @@ struct BlockFormatHeader
     ushort header_bytes = BlockFormatHeader.sizeof;  // fixed part; names follow
     ushort stride;
     ubyte type;          // ValueType
-    ubyte semantics;
-    ubyte extent;        // DataFormat.count
+    ubyte kind;
+    ubyte count;
     ubyte[5] reserved;
 }
 static assert(BlockFormatHeader.sizeof == 24);
@@ -219,8 +219,8 @@ nothrow @nogc:
         bf.rate = f.rate;
         bf.stride = f.stride;
         bf.type = f.type;
-        bf.semantics = f.semantics;
-        bf.extent = f.count;
+        bf.kind = f.kind;
+        bf.count = f.count;
         if (f.desc == DataFormat.Desc.quantity)
         {
             static assert(ScaledUnit.sizeof <= 8);
@@ -317,14 +317,14 @@ nothrow @nogc:
                 return false;
         }
 
-        _fmt = DataFormat(cast(ValueType)e.fmt.type, cast(Semantics)e.fmt.semantics);
+        _fmt = DataFormat(cast(ValueType)e.fmt.type, cast(SeriesKind)e.fmt.kind);
         if (e.fmt.unit)
         {
             ScaledUnit u;
             (cast(ubyte*)&u)[0 .. ScaledUnit.sizeof] = (cast(const(ubyte)*)&e.fmt.unit)[0 .. ScaledUnit.sizeof];
-            _fmt = DataFormat(cast(ValueType)e.fmt.type, cast(Semantics)e.fmt.semantics, u);
+            _fmt = DataFormat(cast(ValueType)e.fmt.type, cast(SeriesKind)e.fmt.kind, u);
         }
-        _fmt.count = e.fmt.extent;
+        _fmt.count = e.fmt.count;
         _fmt.rate = e.fmt.rate;
 
         bool irregular = (e.hdr.flags & BlockHeader.Flags.irregular) != 0;
@@ -366,7 +366,7 @@ private:
     bool _open;
 
     static bool same_format(ref const BlockFormatHeader a, ref const BlockFormatHeader b) pure
-        => a.type == b.type && a.semantics == b.semantics && a.extent == b.extent
+        => a.type == b.type && a.kind == b.kind && a.count == b.count
         && a.stride == b.stride && a.rate == b.rate && a.unit == b.unit;
 }
 
@@ -376,7 +376,7 @@ unittest
     import urt.time : from_unix_time_ns;
     import manager.element2;
 
-    static immutable DataFormat f64_held = DataFormat(ValueType.f64, Semantics.held);
+    static immutable DataFormat f64_held = DataFormat(ValueType.f64, SeriesKind.held);
 
     Element2 e;
     e.format = &f64_held;
@@ -452,7 +452,7 @@ unittest
         assert(blk.count == 1 && blk.get!double(0) == 9.0);
 
         // a format change anchors a new run
-        DataFormat s32_fmt = DataFormat(ValueType.s32, Semantics.held);
+        DataFormat s32_fmt = DataFormat(ValueType.s32, SeriesKind.held);
         int rv = 42;
         uint[1] rts = 0;
         RecordBlock rb;

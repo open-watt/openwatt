@@ -495,7 +495,7 @@ package ref CollectionTable item_table(uint collection) pure
     return *(cast(CollectionTable* function(uint i) pure nothrow @nogc)&hack)(collection);
 }
 
-// Per-type table over the park/claim/forward machine: dense slots, name map, no hashing, no
+// Per-type table over the reserve/claim/forward machine: dense slots, name map, no hashing, no
 // rekeying. A CID is (type bits | machine slot); renames move nothing, so held CIDs follow the
 // object intrinsically.
 struct CollectionTable
@@ -505,7 +505,7 @@ nothrow @nogc:
     inout(BaseObject) get(CID id) inout pure
         => _machine.get(id.slot);
 
-    // deref with self-heal for holders with a mutable field
+    // deref and update forwarded ids for holders with a mutable field
     BaseObject deref(ref CID id)
     {
         uint slot = id.slot;
@@ -524,11 +524,11 @@ nothrow @nogc:
         return slot ? make_cid(type_idx, slot) : CID.invalid;
     }
 
-    // get-or-park: forward references (sync reservations, ObjectRef by name)
+    // get-or-reserve: forward references (sync reservations, ObjectRef by name)
     CID reserve(const(char)[] name, ubyte type_idx)
         => make_cid(type_idx, _machine.reserve(name));
 
-    // park-or-fail: id allocation ahead of object construction; fails if the name is live
+    // reserve-or-fail: id allocation ahead of object construction; fails if the name is live
     CID allocate(const(char)[] name, ubyte type_idx)
     {
         uint slot = _machine.reserve(name);
@@ -588,7 +588,7 @@ private:
     Array!BaseObject _pending_free;
 }
 
-// container tables mint CIDs (CollectionTable and DeviceTable share the id space)
+// container tables allocate CIDs (CollectionTable and DeviceTable share the id space)
 package(manager) CID make_cid(uint type_idx, uint slot) pure
 {
     debug assert(slot && slot <= CID.id_mask, "invalid collection slot");

@@ -10,10 +10,10 @@ beside Element in both build systems, unit-tested (held dedup, gap-forced bucket
 cursor backfill+tail across buckets, irregular block append, regular time derivation). First
 real producer: the urt GPIO realtime sampler API (gpio-cdev v2 backend; pigpiod detected at
 runtime and preferred when present) feeding an irregular held bool series through /binding/gpio
-(GpioBinding : ProtocolBinding; instance models the sampled equipment via device=). Mounted
-2026-07-17: Element embeds Element2 (the mount keeps identity/metadata and a boxed Variant
-mirror; legacy consumers are untouched), GpioBinding's materialise() hangs the series on the
-device element (element=, default "state") - the first native producer through the tree. Hardware sampler APIs live in the urt
+(GpioBinding : ProtocolBinding; instance models the sampled equipment via device=). Integrated
+2026-07-17: Element embeds Element2 (Element keeps identity/metadata and a boxed Variant
+mirror; legacy consumers are untouched), GpioBinding's materialise() assigns the series to the
+device element (element=, default "state") - the first typed producer through the tree. Hardware sampler APIs live in the urt
 driver layer behind capability flags (has_gpio_sampler); bindings stay platform-blind.
 
 ## 1. Planes: three transport disciplines, one observation discipline
@@ -32,9 +32,9 @@ unifiable because each plane's defining guarantee is a non-goal of the others:
 The unification is one level up: **no plane IS a series, but every plane is OBSERVABLE AS
 one.** A tap observes a byte stream as records (`set_log_file`); pcap observes packet transit;
 a waveform tap observes a capture; property projection observes object state. The series
-contract (DataFormat, RecordBlock, timeline events, owsig codec) factors into a shared
+contract (DataFormat, RecordBlock, timeline events, owsig codec) lives in a shared
 module with multiple hosts (landed 2026-07-17 as [src/manager/series.d](../src/manager/series.d);
-Element2 keeps only the mount-point machinery). The module is organised for the full three-facet
+Element2 keeps only the series machinery). The module is organised for the full three-facet
 device surface (section 6), not just attributes: Event! payloads and device-function
 params/results will describe themselves with the same DataFormat vocabulary - code-based
 objects exposed as devices present their callbacks as subscribable events and API functions as
@@ -47,12 +47,12 @@ interface crosses waveform/bytes -> packets; binding crosses packets -> elements
 ## 2. Element series
 
 Every element carries a **series**: typed, timestamped records. Variant survives only as
-boxing at the edges (console, SNMP, expressions); storage and delivery are native-typed.
+boxing at the edges (console, SNMP, expressions); storage and delivery are typed.
 
-**Format descriptor (`DataFormat`)**: `{ ValueType, Semantics, unit (ScaledUnit), rate, clock }`.
+**Format descriptor (`DataFormat`)**: `{ ValueType, SeriesKind, unit (ScaledUnit), rate, clock }`.
 The runtime typed-data descriptor that replaces Variant across the plane (named DataFormat, not
 SeriesFormat: properties and latest-only elements use it too). One shared immutable instance
-per declared shape - a Prop! declaration, a profile template, a collector's static format -
+per declared format - a Prop! declaration, a profile template, a collector's static format -
 and elements point at it, never own one. `ValueType.variant` is the boxed escape hatch for
 exotic values (fixed-stride inline Variant records).
 
@@ -63,11 +63,11 @@ with a function pointer as the escape hatch for rules data can't express (code v
 supplied against Prop!s). Constraints gate WRITES (setpoints, config, sink elements, /element
 set, mesh writes); observations are NEVER validated or clamped - a measurement is truth even
 when out of spec. Enforcement wires into the write/sink path when it lands.
-- Semantics: **held** (value changes; dedup; RLE of state), **sampled** (observations of a
+- Series kind: **held** (value changes; dedup; RLE of state), **sampled** (observations of a
   continuous quantity; every observation delivers), **point** (occurrences; no between; never
   deduped).
 - rate: 0 = irregular (explicit timestamps), else regular (time = index/rate; no time storage).
-- clock: orthogonal to rate. null = wall-native. Regular capture series are INDEX-NATIVE in a
+- clock: orthogonal to rate. null = wall-clock timestamps. Regular capture series use indices in a
   ClockDomain (never stamp wall time into data at write: bakes in IRQ jitter and NTP steps);
   collectors record ClockAnchor (index, observed SysTime) pairs; conversion is query-time.
   Exact cross-series alignment iff same domain; correlated quantities (V/I) go in ONE
@@ -81,11 +81,11 @@ first/last time AND first index: time-seek and index-seek are binary searches ov
 Strings/structured values: variable-stride behind a format flag; the numeric 95% never pays.
 
 **RecordBlock is storage AND delivery**: the block an observer receives, the block a cursor
-returns, and the bucket's memory layout are one shape ({format*, data*, times*|null, t0,
+returns, and the bucket's memory layout use one format ({format*, data*, times*|null, t0,
 first_index, count}). Readback is slicing, never copying; times==null doubles as the
 regular/irregular discriminator; blocks never span buckets.
 
-**Element2 layout: the retention plan is the struct's shape.** The core is <= 48 bytes
+**Element2 layout: the retention plan determines the struct layout.** The core is <= 48 bytes
 (static-asserted): `{ const(DataFormat)* format, Scalar latest, SysTime last_update,
 Subscription* subs, SeriesStore* history, dirty/flags }`. Identity lives outside the struct
 (the component tree names device elements; projections compute theirs), the format is shared,
@@ -142,11 +142,11 @@ regular) storing zero time bytes.
 - **Store sum+count, not mean** (mean doesn't compose). Cascade raw -> 1s -> 1min -> 1h is exact
   (min of mins, max of maxs, sum of sums), each level built from the one below, never rescanning
   raw: a few ops per raw record across the whole ladder.
-- Aggregate record shape lives in the LEVEL's DataFormat, keyed by the raw semantics: sampled
+- Aggregate record format lives in the level's DataFormat, keyed by the raw series kind: sampled
   numeric {min,max,sum,count}; held numeric time-weighted {min,max,tw_sum,coverage} (coverage is
   the partial-window honesty signal across gaps); held bool {duty,transitions}; point {count} (an
   edge series decimates to an event-rate histogram); enums/strings get no levels (viz reads raw).
-- **Epoch-aligned grids**: wall-native series align to Unix-epoch multiples, so every element's
+- **Epoch-aligned grids**: wall-clock series align to Unix-epoch multiples, so every element's
   minute level shares one grid - multi-series charts and cross-element arithmetic align
   sample-for-sample with no resampling (the alignment the raw clock-domain rules refuse, delivered
   at the dashboard tier). Domain-clocked series align in INDEX space (rate*span records/stripe);
@@ -161,28 +161,28 @@ regular) storing zero time bytes.
   backpressures nothing, decodes nothing).
 - **Realtime/capture series opt OUT**, and the default writes itself from DataFormat: domain-clocked,
   or ring/none retention, or point-at-extreme-rate -> no ladder (a waveform's zoomed-out view is an
-  ENVELOPE not a statistic, and bounded ring retention makes query-time reduction cheap); wall-native
+  ENVELOPE not a statistic, and bounded ring retention makes query-time reduction cheap); wall-clock
   control-rate trend series -> ladder on. Levels hang off SeriesStore as
   `Level { window, DataFormat*, SeriesStore }[]`, populated by the seal path; the 48-byte core does
   not move. Deep rungs can be built offline from the container by an aggregator.
 
-**Value shapes (settled 2026-07-17): Scalar is the fast path, not the ceiling.** Scalar never
-grows past 8 bytes. Expressiveness lives in escape valves with graded costs, and every shape a
+**Value formats (settled 2026-07-17): Scalar is the fast path, not the ceiling.** Scalar never
+grows past 8 bytes. Expressiveness lives in escape valves with graded costs, and every format a
 value can take has exactly one row here. Storage type and interpretation are separate axes:
 overlay metadata (unit, enum descriptor, type details) rides DataFormat's descriptor slot, never
 the record. Every Prop! type in the tree today maps onto a row, which is the check that property
 projection ("every Prop! is semantically an element") demands.
 
-| shape | ValueType | stride | latest | history | boxing (edge) | at rest / wire |
+| format | ValueType | stride | latest | history | boxing (edge) | at rest / wire |
 |---|---|---|---|---|---|---|
-| native scalar | bool_..f64 | 1-8 | Scalar | yes | number, or Quantity via format.unit | raw records |
+| scalar | bool_..f64 | 1-8 | Scalar | yes | number, or Quantity via format.unit | raw records |
 | enum | u8/u16/u32 + enum-info overlay | 1-4 | Scalar | yes | enum Variant via descriptor | numeric + name binding in header |
 | registered POD | via type registry | td.size (may be >8) | Scalar if <=8, else tail record | yes (mandatory if wide) | td stringify/box | memory image; optional serialize pair (cross-arch) |
 | reference | ref_ (object AND element; index 0 = container) | 8 (packed EID in Scalar.u) | Scalar | yes | NAME via table lookup, never id bits | NAME (wire: session handle) |
-| string | string_ (storage undecided: embed vs intern; registry work) | - | mount-boxed Variant | none until decided | identity | text |
+| string | string_ (storage undecided: embed vs string table; registry work) | - | Element-boxed Variant | none until decided | identity | text |
 | small blob | variable-stride flag (shared mechanism with strings) | varies | tail record | yes | opaque/hex | length-prefixed records |
-| composite / multi-channel | compound record (correlated quantities, fixed-shape arrays) | sum of channels | tail record | yes | per-channel | columnar planes (codec already per-plane) |
-| dynamic | variant | Variant.sizeof inline | mount-boxed Variant | discouraged | identity | Variant codec |
+| composite / multi-channel | compound record (correlated quantities, fixed-size arrays) | sum of channels | tail record | yes | per-channel | columnar planes (codec already per-plane) |
+| dynamic | variant | Variant.sizeof inline | Element-boxed Variant | discouraged | identity | Variant codec |
 
 Rules that bind the rows:
 - **Registry PODs**: POD only - no pointers, no dtors (a `pod` flag on the record); anything else
@@ -191,7 +191,7 @@ Rules that bind the rows:
 - **References store EIDs but never emit them**: box_record for ref_ is a table lookup, not a bit
   copy - the boxed, recorded, and synced forms are all the name (id.d doctrine: ids never persist,
   never wire). Bucket-resident EIDs are UNCOUNTED borrows under future reclamation: deref of a
-  dead, never-recreated id yields null (the record honestly says "was X; X is gone"); parked-name
+  dead, never-recreated id yields null (the record honestly says "was X; X is gone"); reserved-name
   resurrection reaching the new object is correct because identity is the name. A ref series is
   meaningful history ("which meter sourced this circuit over time").
 - **Bulk binary is a tap, not an element** (decision rule 3). Only small blob VALUES get records;
@@ -209,7 +209,7 @@ hundreds-thousands edges/sec grows ~16 B/edge unbounded, tens of MB/hour); clock
 in Bucket.times (the GPIO backend sidesteps it for now by requesting CLOCK_REALTIME kernel
 stamps); cdev line_seqno gaps must call mark_gap() (drop site marks the loss);
 reactor-thread producers defer dispatch to main loop; Cursor holds Element2* pending EID
-resolution (the two-level EID TYPE now exists at target shape in manager.id; the tables are
+resolution (the two-level EID type now exists in manager.id; the tables are
 the migration); RAM buckets + on-disk container need one time-keyed, decimation-aware read
 stack (index is process-local, TIME is the archival axis). Done since first draft: irregular
 block append (observe_block); compact core layout (identity out, format shared, history
@@ -226,16 +226,15 @@ decided - see section 6.)
 
 Canonical: [src/manager/id.d](../src/manager/id.d) header. Summary: names are the only durable
 identity; ids are permanent monotonic process-local handles, two-level
-(container id, element index), issued by tables, bound to things, parked on names, forwarded on
-merges, self-healed by holders. No rekey machinery of any kind. Ids never persist, never wire:
+(container id, element index), issued by tables, bound to things, reserved for names, forwarded on
+merges, and updated to the terminal slot during dereference. No rekey machinery of any kind. Ids never persist, never wire:
 peers exchange names once per session and bind varint handles (introducer allocates, parity
 bit per direction, never reused). Device rename is O(1); full element paths are never
-stored/interned. Property projections COMPUTE their EID as (obj CID, Prop! index).
+stored. Property projections COMPUTE their EID as (obj CID, Prop! index).
 
 ## 4. Vocabulary
 
-- **element**: named point in the device tree (name "Element" kept; it means mount point, not
-  "field equipment").
+- **element**: named point in the device tree, not "field equipment".
 - **series**: the element's typed record stream.
 - **binding**: produces into (read) or consumes from (write/sink) elements, and is
   DEVICE-SHAPED: the class is generic protocol/hardware machinery, the INSTANCE models a
@@ -257,7 +256,7 @@ stored/interned. Property projections COMPUTE their EID as (obj CID, Prop! index
 - **recorder / container (owsig)**: at-rest form of any series.
 - **trigger**: automation keeps the word "signal"; no rename forced.
 
-## 5. Decision rules (minted during review; keep these sharp)
+## 5. Decision rules (settled during review; keep these sharp)
 
 1. Addressed datagrams from independent talkers -> packet plane (an interface + per-device
    event bindings). Continuous measurement -> series. 433 RX is an INTERFACE (codes are
@@ -269,7 +268,7 @@ stored/interned. Property projections COMPUTE their EID as (obj CID, Prop! index
    direct to container or live session, never elements.
 4. Named vs anonymous: if any generic consumer (recorder, sync, scope, automation) will touch
    it, it gets a name in the tree; if only its owner touches it, it is not an Element at all.
-5. A series mounts under the device whose observation it is.
+5. A series belongs to the device whose observation it is.
 6. Element vs function: if reading it back is meaningful, it is an element (setpoints); if it
    is an occurrence you cause, it is a function (reset, identify, start).
 7. Events are control-rate occurrences; data-rate content belongs to its plane.
@@ -294,8 +293,8 @@ representation (the todo_rpc_dedupe endpoint).
 **Property projection** (settled): every Prop! is SEMANTICALLY an element - subscribe, record,
 trigger - but PHYSICALLY lazy: materialized on first name resolve, under the object's
 collection path (not /device). mark_set stays the producer signal (hot-path safe); the frame
-flush samples dirty projected getters -> observe!T. Coalesced-by-construction, Semantics.held,
-native-typed end to end (viable BECAUSE Element2 dropped Variant). Unwatched properties cost
+flush samples dirty projected getters -> observe!T. Coalesced-by-construction, SeriesKind.held,
+typed end to end (viable BECAUSE Element2 dropped Variant). Unwatched properties cost
 one dirty bit. Non-Prop members remain hard data; composition wiring (delegates between
 collaborating objects) remains hard API - the declaration line IS the classification.
 
@@ -395,16 +394,16 @@ The scaffold is binding-owned and touches no identity machinery, so the order be
       pulled forward from the mesh step because sync currently ships raw CIDs and leans on
       cross-peer hash agreement - the wire must stop carrying ids BEFORE ids change shape,
       converting the cutover from a protocol+internals event into a pure internal refactor);
-   b. the generic park/claim/forward table as a standalone unit-tested component (it
+   b. the generic reserve/claim/forward table as a standalone unit-tested component (it
       instantiates at both levels, so build it once, integration-free);
    c. container cutover: CollectionTable over dense per-type arrays (CID = type bits + slot,
       allocator = next_slot++), delete rehash/rekey/broadcast_rekey/rekey_field; then Devices
       register as a container type and g_app.devices dissolves;
-   d. element level: per-container index tables, Cursor holds EID, GPIO series mounts on device.
+   d. element level: per-container index tables, Cursor holds EID, GPIO series belongs to device.
 2. Series contract module (DataFormat/RecordBlock/events/owsig) + Element2 replaces Element.
    Phased: extract contract module; Component holds Element2 with Variant boxing at the edges
    (console, SNMP, expressions) so consumers migrate gradually; producers migrate per-protocol
-   to native observe!T (Modbus last, deepest); delete Element when the last consumer moves.
+   to typed observe!T (Modbus last, deepest); delete Element when the last consumer moves.
 3. Retention tiers + recorder-as-cursor + container read stack.
 4. Operators absorb Map/Sum/Alias (gap-aware accumulator).
 5. Property projection; Prop! unit/desc fields.

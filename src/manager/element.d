@@ -64,7 +64,7 @@ struct Element
 {
 nothrow @nogc:
 
-    // null or wide format = legacy mount: the boxed Variant below is authoritative
+    // null or unsupported format: the boxed Variant below is authoritative
     // and the core lies dormant until a producer assigns a format
     Element2 series;
 
@@ -135,19 +135,19 @@ nothrow @nogc:
     ref inout(Variant) value() @property inout pure
         => latest;
 
-    bool native() const pure
+    bool has_typed_series() const pure
         => series.format !is null && (series.format.is_scalar || series.format.is_text || series.format.is_wide);
 
     void value(T)(auto ref T v, SysTime timestamp = getSysTime(), Subscriber who = null)
     {
-        if (native)
+        if (has_typed_series)
         {
             static if (is(immutable T == immutable Variant))
-                feed_native(v, timestamp);
+                update_typed_series(v, timestamp);
             else
             {
                 Variant boxed = Variant(v);
-                feed_native(boxed, timestamp);
+                update_typed_series(boxed, timestamp);
             }
         }
 
@@ -210,7 +210,7 @@ nothrow @nogc:
         series.mark_gap(who);
     }
 
-    // minted lazily on first demand; unmounted elements have none
+    // allocated lazily on first demand; unattached elements have none
     EID eid() const pure
         => _eid;
 
@@ -226,7 +226,7 @@ nothrow @nogc:
         Device d = cast(Device)cast(void*)c;    // extern(C++) has no dynamic cast; is_device checked above
         if (!d.cid)
             return EID.invalid;
-        _eid = d.cid.element(d.element_ids.mint(&this));
+        _eid = d.cid.element(d.element_ids.allocate(&this));
         return _eid;
     }
 
@@ -248,7 +248,7 @@ nothrow @nogc:
     ulong recent_newest() const pure
         => recent_count ? unixTimeNs(cast(SysTime)recent_at(recent_count - 1).time) : 0;
 
-    private void feed_native(ref const Variant v, SysTime timestamp)
+    private void update_typed_series(ref const Variant v, SysTime timestamp)
     {
         if (series.format.is_text)
         {
@@ -431,8 +431,8 @@ unittest
     double d;
     assert(!sample_to_double(s.recent_at(0).value, d));
 
-    // native mount: observations feed the series and mirror into the boxed legacy path
-    static immutable DataFormat bool_held = DataFormat(ValueType.bool_, Semantics.held);
+    // typed series: observations feed the series and mirror into the boxed legacy path
+    static immutable DataFormat bool_held = DataFormat(ValueType.bool_, SeriesKind.held);
     Element n;
     n.series.format = &bool_held;
     n.series.ensure_history();
@@ -444,17 +444,17 @@ unittest
     assert(n.last_update == from_unix_time_ns(2_000_000));
     assert(n.recent_count == 1);
 
-    // a boxed write to a native mount lands in the series too
+    // a boxed write to an Element with a typed series lands in the series too
     n.value(Variant(true), from_unix_time_ns(3_000_000));
     assert(n.series.record_count == 3);
     assert(n.series.latest.b);
     assert(n.value.asBool);
 
-    // quantity writes to a typed mount store natively in the format's unit scale (the
-    // profile-binding write shape: sample_value produces unit-carrying Variants)
+    // quantity writes to a typed series use the format's unit scale (the
+    // profile-binding write format: sample_value produces unit-carrying Variants)
     import urt.si.quantity : Quantity;
     import urt.si.unit : Volt;
-    static immutable DataFormat volts_held = DataFormat(ValueType.f64, Semantics.held, ScaledUnit(Volt));
+    static immutable DataFormat volts_held = DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Volt));
     Element q;
     q.series.format = &volts_held;
     q.value(Variant(Quantity!double(23.05, ScaledUnit(Volt))), from_unix_time_ns(1_000_000));

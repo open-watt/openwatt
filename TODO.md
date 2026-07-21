@@ -93,7 +93,7 @@ status block). Remaining legs, roughly in order:
    hook; ISignalProvider gains a complete/suggest capability (scheme completed from the registry,
    body and param values by the provider). Deliberately last.
 
-5. [ ] **Event-driven element attach**: a rule referencing a not-yet-created element parks in
+5. [ ] **Event-driven element attach**: a rule referencing a not-yet-created element waits in
    Starting re-running startup() each frame until subscribe succeeds - observable and correct,
    but true event attach means notify_element_created revisits signal subscriptions instead of
    frame polling.
@@ -133,36 +133,36 @@ status block). Remaining legs, roughly in order:
   Tesla TWC's direct field push, expression `evaluate` -> Variant, and now `box_record` /
   `unbox_scalar` at the series edge. Review ALL bindings' sampling strategies (batching/timing
   policy too, not just decode) and converge the value path on a single value-handling module:
-  wire shape descriptor in, native record out, one boxing edge, one write/format inverse
+  wire format descriptor in, typed record out, one boxing edge, one write/format inverse
   (encode/decode symmetry in one place instead of eight). The type registry design (see
   DATA_MODEL.draft.md section 6) already points here - two description LANGUAGES (binary vs
   text profiles) may remain, but the runtime TARGETS converge on wire-desc + DataFormat with a
   Variant-free `sample_record(wire, desc, out_bytes, DataFormat)` path; this entry widens that
   to an explicit audit of every binding so per-protocol special cases (zigbee's adjust_value,
   sunspec's decoder, HTTP's apply_value) either justify themselves or dissolve into the one
-  module. Natural sequencing: fold in as the per-protocol native-producer migration completes
+  module. Natural sequencing: fold in as the per-protocol typed-producer migration completes
   (text protocols + modbus are the remaining producers; do the consolidation as/after they
   migrate rather than bolting a ninth machine alongside the eight).
-  SETTLED SHAPE 2026-07-18 (scrutinised to fixpoint with Manu; supersedes the earlier axes
-  sketch). MODEL: value = atom x extent. atoms = machine scalars (bool, u8..s64, f32, f64,
-  char_) + user (registered type; identity via TypeDetails* in the format's descriptor slot,
-  which becomes the enum_info|TypeDetails* union). extent = one | fixed N | dynamic; count
-  lives in DataFormat (stride = count x atom), dynamic extent's length rides IN the record.
+  SETTLED FORMAT 2026-07-18 (scrutinised to fixpoint with Manu; supersedes the earlier axes
+  sketch). MODEL: DataFormat holds the value type and count shared by every record. Value types
+  are machine scalars (bool, u8..s64, f32, f64, char_) plus user (registered type; identity via
+  TypeDetails* in the format's descriptor slot, which becomes the enum_info|TypeDetails* union).
+  count is one, fixed N, or zero for dynamic; stride = count x type size, and a dynamic record
+  carries its own length.
   ValueType.variant and string_ DELETE: string = char[] (char_ x dynamic), blob = u8[]
-  dynamic with opaque display - grammar spellings, not atoms; vectors are format-count, not
-  atoms. FACTORING PRINCIPLE (becomes series.d's header): a series factors each value into
-  the constant part (DataFormat) and the per-sample part (record bytes); records are
-  context-free, boxing is the REUNION (box_record marries bytes back to their format -> self-
-  describing Variant). f32 voltage = f32 atom + unit-in-format; Quantity/enum names
+  dynamic with opaque display - grammar spellings, not value types; vectors use DataFormat.count.
+  DataFormat stores the properties shared across the series and each record stores only its
+  bytes; box_record combines those bytes with the format into a self-describing Variant.
+  f32 voltage = f32 type + unit-in-format; Quantity/enum names
   materialise only at edges; a dynamic-unit quantity would be user (no customer). STORAGE
   RULE: a record is memcpy iff its record type is trivial, else copy_emplace/destroy hooks -
-  dynamic records hold immutable refcounted handles (String for text: decode mints ONCE,
-  series record + boxed mirror + observers + sync all share refs; compare-before-mint so
+  dynamic records hold immutable refcounted handles (String for text: decode allocates ONCE,
+  series record + boxed mirror + observers + sync all share refs; compare-before-allocation so
   steady-state repeats never allocate; blob's RC-buffer twin waits for a customer). Scalar =
   <=8-byte fast-path register only; the gateway currency is (const DataFormat*, void[])
   record views; RecordBlock stays storage furniture. series.d REORGANISED in the same pass,
   reading order: principle header -> ValueType + storage rules -> interpretation vocab
-  (Semantics/ClockDomain/Constraint) -> DataFormat -> Scalar -> RecordBlock -> retention ->
+  (SeriesKind/ClockDomain/Constraint) -> DataFormat -> Scalar -> RecordBlock -> retention ->
   Variant edge last. TYPEREG: stringify is already bidirectional (do_format flag) - no parse
   slot needed; ADD a variant-marshal override slot (one slot, both directions), default null
   = structural boxing ((type_id, payload) via copy_emplace, which Variant already does);
@@ -177,9 +177,9 @@ status block). Remaining legs, roughly in order:
   overriders = "type owns its encoding", _be on those is a grammar error; union-bearing
   pods should static-assert into declaring a serialise pair rather than flat-flipping the
   union blob). This is the endian axis's
-  SECOND EXECUTOR: scalar atoms byte-reverse via the flat swizzle, user atoms via td.
+  SECOND EXECUTOR: scalar types byte-reverse via the flat swizzle, user types via td.
   byte_swap (flat reverse would scramble member boundaries) - one grammar axis, two
-  executors picked by atom kind; composes AFTER transport swizzle (wire_image -> memcpy ->
+  executors picked by value type; composes AFTER transport swizzle (wire_image -> memcpy ->
   flip), since register presentation and member endianness are physically independent
   vendor behaviours. wire.d stays bytes-only and closed. NO LE-HOST ASSUMPTION: the flip
   condition is wire-member-endianness XOR host-endianness (not "_be present"); wire.d is
@@ -203,7 +203,7 @@ status block). Remaining legs, roughly in order:
   high_byte (u8@8/u8@0), coils (bool@n), DBC-style signals. CONTAINER (discovered by T3's
   first test failure): a bit slice's span does not reveal the storage unit it slices - bits
   5..7 of a BE register live in the SECOND wire byte, so reversed containers need explicit
-  extent; WireLayout carries container_bytes (0 = derive minimal span, word-rounded when
+  width; WireLayout carries container_bytes (0 = derive minimal span, word-rounded when
   worded), and the grammar compiler defaults sliced fields to the context word. DECOMPOSED-REGISTER idiom:
   several elements each carry their own desc over the SAME wire window (batcher already reads
   once) - a status register is ONE bf element or decomposed bool@3/u3@5 elements, author's
@@ -236,11 +236,11 @@ status block). Remaining legs, roughly in order:
   TRANSFORMATION SEQUENCE (each shippable; T1-T4 parallel foundations; ALL FOUR LANDED
   2026-07-18, 98/98 unit tests): T1 typereg variant-marshal + byte_swap slots (byte_swap =
   fused copy-and-reverse via urt.endian reverse_endian(src,dst), aliasing-tolerant); T2
-  series.d re-founding (atom x extent + reorg, above; ValueType.variant/string_ deleted,
+  series.d re-founding (value type + count and reorg, above; ValueType.variant/string_ deleted,
   char_/user + descriptor union + count landed, box_record user arm dispatches td.variant,
   element/element2 scalar checks moved to fmt.is_scalar; DESCRIPTOR FOLD: unit joins the
   union - unit/enum_info/user_type are mutually exclusive - user_type selected by
-  type==user (atom = storage truth, keeps type-driven predicates total), unit-vs-enum by a
+  type==user (type is the storage truth, keeping type-driven predicates total), unit-vs-enum by a
   Desc kind byte {none,quantity,enum_}; count is ubyte (the 255-byte stride cap already bounds
   it) so type/semantics/desc/count/rate pack the first 8 bytes exactly: 48->32B, zero
   padding; ctors stamp the kind so construction is self-discriminating and dimensionless =
@@ -251,17 +251,17 @@ status block). Remaining legs, roughly in order:
   startup before module init - no lazy flag, double-registration asserts by name;
   registered types get NO entries - grammar resolves bare names via typereg, the
   table holds only non-canonical wire forms; first customer yymmddhhmmss -> DateTime
-  records as user atom, proving T1+T2 end-to-end; structural runtime user boxing still
+  records as a user type, proving T1+T2 end-to-end; structural runtime user boxing still
   gateway work - Variant has no (td, payload) ctor yet); T5 gateway LANDED 2026-07-18
   (99/99): manager/sample.d - SampleDesc {WireLayout, mutable pre_scale, ushort format +
-  encoding indices} = 12B/point (par with old ValueDesc); GLOBAL format mint (dedupe
+  encoding indices} = 12B/point (par with old ValueDesc); GLOBAL format registry (dedupe
   config-time-cold linear scan, runtime O(1) by index, formats' durable home - resolves
-  the mount-outlives-binding note; profile mint delegates, per-profile format ownership
+  the Element-outlives-binding note; profile registration delegates, per-profile format ownership
   deleted); sample_record/emit_record three arms (scalar hot path via wire_extract +
   pre_scale, encoding arm via wire_image + codec, user arm via fused
   memcpy-or-td.byte_reverse chosen by members_be XOR host), parse_record/format_record
   text mirrors (legacy semantics: bool true/1/on, enum name-or-number in / number out),
-  sample_text transient view (padding strip, mount mints the String); WireFlags grew
+  sample_text transient view (padding strip, Element creates the String); WireFlags grew
   members_be + space_padded (flags 5 bits); wire_image generalised to shift/mask index
   map incl whole reverse (encodings need it; text still never does). REMAINING in-flight:
   Variant (td,payload) structural ctor; vectors return false pending first producer.
@@ -280,12 +280,12 @@ status block). Remaining legs, roughly in order:
   compact descs, old spellings as aliases (no conf changes); T7 per-protocol cutover
   easiest->deepest: CAN -> GoodWe -> BLE -> zigbee (ZCL table -> compiled descs, adjust_value
   folds in) -> MQTT/HTTP (encode mirror absorbs format_value/apply_value) -> SunSpec (runtime
-  pre_scale wrapper, f64 records) -> ESPHome (typed values: DataFormat + native observe, stub
+  pre_scale wrapper, f64 records) -> ESPHome (typed values: DataFormat + observe, stub
   resolved) -> modbus client -> modbus serve; CAN LANDED 2026-07-18 (ElementDesc_CAN =
   SampleDesc + span byte - byte-stream maps carry the wire span the desc doesn't;
   legacy two-column spellings [enum name / dt format in the units column] translate to
   `:name` refs at the parse site; Element/Element2 grew the untemplated observe_record
-  scalar path; packet path decodes via the gateway - native record when the mount is the
+  scalar path; packet path decodes via the gateway - typed record when the Element uses the
   binding's format, boxed otherwise). GoodWe LANDED 2026-07-19: GoodWeModule owns the
   registered `aa55` section,
   ElementDesc_AA55 lives with the binding, and the response path decodes through SampleDesc;
@@ -304,7 +304,7 @@ status block). Remaining legs, roughly in order:
   big-endian context. Attribute reports and Tuya reads/writes now pass through SampleDesc, while
   the Tuya wire type remains in ElementDesc_Zigbee because an anonymous enum8 and u8 otherwise
   have the same DataFormat. Bare `str` is protocol-framed dynamic text with zero descriptor wire
-  span: the ZCL/Tuya hook removes its framing and observes the character payload into the native
+  span: the ZCL/Tuya hook removes its framing and observes the character payload into the typed
   String record. Fixed-layout CAN/GoodWe/BLE profiles reject bare strings and require `strN`.
   Both the legacy and normalized Zigbee profiles passed runtime materialisation. DT SETTLED
   2026-07-18: DateTime is a presentation face - no typereg
@@ -313,7 +313,7 @@ status block). Remaining legs, roughly in order:
   (was doubly claimed, order-dependent); SysTime grew a unix-ns LE serialise pair (tick
   image is platform-epoch: FILETIME on Windows) and a to_variant/from_variant marshal;
   the yymmddhhmmss codec outputs SysTime records; is_scalar widened to trivial user pods
-  <= 8 bytes so dt elements mount and record natively through the Scalar register
+  <= 8 bytes so dt elements record through the Scalar register
   (unbox_scalar user arm via the marshal). Structural boxing RESOLVED 2026-07-19:
   TypeRecordFor synthesises the variant slot for value-pure payloads (ValidUserType,
   no indirections, copyable - the guard must not instantiate Variant machinery, records
@@ -330,17 +330,17 @@ status block). Remaining legs, roughly in order:
   Zigbee UTCTime); CAVEAT dt32 is value-shaped (seconds count takes context value
   endianness, scalar flags) unlike dt48's byte-image fields - Encoding grows a
   value/byte-image discriminator when wired. PROFILE EXTENSIBILITY CORE LANDED
-  2026-07-18: three central type-spec tables - formats (T5), descs (mint_desc/
+  2026-07-18: three central type-spec tables - formats (T5), descs (register_desc/
   desc_by_index: immutable 12-byte SampleDescs content-deduped, elements hold a ushort),
   enums (register_enum_info/find_enum_info: name-keyed `profilename.MyEnum`, registry
   OWNS allocations = the durable home; unchanged reload frees the duplicate via
   enum_info_size/enum_info_equal, changed content rebinds while the old block stays
-  alive for mounts; g_app.enum_templates DELETED, D-native enums register owned=false,
+  alive for Elements; g_app.enum_templates DELETED, D enums register owned=false,
   profile parse no longer touches g_app so enum profiles unittest). ProfileSections
   interface + register_profile_section(name, handler) -> kind (>= 16; ElementType lost
   `can`, `aa55` and `ble`, ElementDesc unpacked to kind/index fields), two-pass count_element/
   parse_element against ProfileBuilder {compile_value = the shared language incl the
-  legacy two-column translation, find_enum, intern -> section_strings}; Profile grew
+  legacy two-column translation, find_enum, add_string -> section_strings}; Profile grew
   SectionBlock storage + get_section!T; parse_profile takes the profile name (file
   basename) for qualified enum registration. Grammar grew unit-in-colon (`u16:0.1V` -
   the family selects the `:` namespace, so unit/enum collision is structurally
@@ -408,21 +408,21 @@ status block). Remaining legs, roughly in order:
      separately from read preference so a fallback reader does not accidentally become the writer.
 
 - **Element retention/recording profile grammar (proposed 2026-07-19, Manu to resolve token
-  shape)**: the retention CORE is built (series.d/element2.d): min/max per axis - floors
+  format)**: the retention CORE is built (series.d/element2.d): min/max per axis - floors
   (min_records/min_age) keep records even after consumption, for rendering; PINNED cursors
   (open_cursor(from, pin=true)) extend retention until the consumer advances past (consumption
   IS the discard mark - a 433 signal processor just reads); ceilings (max_records/max_age)
   force eviction past stalled/undriven pins, lapped cursors report RecordBlock.lost.
   Element2.retention(min_records, max_records) + retention(min_age, max_age). Byte budgets
   TODO (== records * stride until variable-stride records land). DEFAULT RULE implemented in
-  device.d apply_default_retention: every native-mounted element that is not constant/config
+  device.d apply_default_retention: every element with a typed series that is not constant/config
   sampling gets history (min 256 records, 1h window, 16k ceiling; named constants) unless a
   binding already configured it. REMAINING - profile agency: (1) element-level override tokens,
   proposal: named k=v trailer on the element line or desc, `keep=` floor / `cap=` ceiling,
   value type by suffix (bare int = records, duration suffix = age, repeatable for both axes),
   `record=none` opts out; (2) component/profile-level defaults inherited by children;
   (3) recorder tie-in: record-to-disk intent is a SEPARATE flag from RAM retention (recorder
-  becomes a pinned cursor consumer at step-3 slice 4). Token shape should land with the T9
+  becomes a pinned cursor consumer at step-3 slice 4). Token format should land with the T9
   grammar doc, not before (T7 agents own that grammar surface right now).
 
 - **Commands / device logic in profiles (design 2026-07-16; the ancient "commands" TODO's
@@ -431,7 +431,7 @@ status block). Remaining legs, roughly in order:
   Today this would live as per-device binding code. Proposal: **bring the automation/expression
   engine down into profiles** so device behaviour is data-driven. Invents almost nothing - reuses
   the expression evaluator (`@`-refs, arithmetic, funcs; expression.d), the automation `on/if/do`
-  shape, and Element2 change events. Three layers:
+  form, and Element2 change events. Three layers:
   1. **Actions as generative expressions**, not static captures. An action computes its payload
      from managed state:
      `action light = ook(addr=df258, button=7, counter=$seq, check=$seq ^ 7 ^ 7)`
@@ -468,29 +468,29 @@ status block). Remaining legs, roughly in order:
   is_device trap), mesh trajectory (config authority is the new subsystem). Build order in the
   doc; ID migration steps 0-2 LANDED 2026-07-17 (see Infrastructure entry below). Series
   contract module EXTRACTED 2026-07-17: manager/series.d holds the host-agnostic vocabulary
-  (DataFormat/ValueType/Semantics, Constraint, ClockDomain, Scalar, RecordBlock, SeriesEvent,
+  (DataFormat/ValueType/SeriesKind, Constraint, ClockDomain, Scalar, RecordBlock, SeriesEvent,
   Bucket/SeriesStore), organised for all three facets (Event! payloads and device-function
-  params/results will use the same DataFormat vocabulary); element2.d keeps the mount-point
+  params/results will use the same DataFormat vocabulary); element2.d keeps the series
   machinery (Element2, Observer/Subscription, Cursor, dirty list). Both build systems updated.
-  Mount step LANDED 2026-07-17: Element embeds Element2 - the mount keeps identity/metadata
+  Element integration LANDED 2026-07-17: Element embeds Element2 and keeps identity/metadata
   (id/name/desc/display_unit/access/sampling_mode/parent) plus the boxed Variant mirror
   (latest/prev/recent/subscribers); a null or indirect format means legacy (bit-identical
-  behaviour for every existing consumer), a scalar format makes the mount native: boxed
-  writes unbox into the core (series.unbox_scalar), native observe!T/observe_block/mark_gap
+  behaviour for every existing consumer), a scalar format enables the typed series: boxed
+  writes unbox into the core (series.unbox_scalar), observe!T/observe_block/mark_gap
   on Element feed the series then mirror the tail into the boxed path (legacy subscribers,
   prev pair, recent ring see the same timeline). Boxing edge implemented in series.d
   (box_record/unbox_scalar, RecordBlock.box, Element2.value; ints/floats wrap format.unit as
-  Quantity). GpioBinding mounts its series on the device element (element= prop, default
-  "state"; materialise() hangs it, shutdown marks a gap) - first native producer through the
-  tree; binding still owns the DataFormat+ClockDomain (mount outlives binding destruction -
-  formats need a durable home, noted inline). 92/92 unit tests (native-mount coverage added)
+  Quantity). GpioBinding assigns its series to the device element (element= prop, default
+  "state"; materialise() attaches it, shutdown marks a gap) - first typed producer through the
+  tree; binding still owns the DataFormat+ClockDomain (Element outlives binding destruction -
+  formats need a durable home, noted inline). 92/92 unit tests (typed-series coverage added)
   + boot smoke. Protocol profile migration LANDED through Modbus 2026-07-19: CAN, GoodWe, BLE,
   Zigbee, MQTT, HTTP, SunSpec, Tesla TWC, ESPHome and Modbus now converge on SampleDesc and
   DataFormat. Modbus owns its registered `reg`/`mb` profile section, all repository Modbus
   profiles use the normalized type/access columns, and client reads, upstream writes, serving
   reads/writes and fixed strings pass through the record codec. Register span remains explicit
   map data, so `strN` is bytes rather than the legacy word count. Byte-exact tests cover the
-  Modbus `_bs`/`_wr` quartet. Serve profiles still correctly avoid declaring the shape of
+  Modbus `_bs`/`_wr` quartet. Serve profiles still correctly avoid declaring the format of
   elements produced elsewhere, converting only at their wire boundary. NEXT: delete the now
   unused ValueDesc profile-format bridge and the temporary legacy profile grammar after the
   remaining non-profile consumers are audited; recorder-as-cursor waits for retention tiers
@@ -535,18 +535,18 @@ status block). Remaining legs, roughly in order:
 
 - **ID strategy migration (settled 2026-07-15; full design in the header of
   [src/manager/id.d](src/manager/id.d))**: replace hash-derived EIDs/CIDs with permanent
-  monotonic handles bound to objects, with names as the parking/rebind fallback. Ids are
+  monotonic handles bound to objects, with names as the reservation/rebind fallback. Ids are
   two-level: EID = (container id, element index) - the container level is ONE id space with
   per-type tables (CID type bits); Devices register as a type WITHOUT becoming BaseObjects
   (g_app.devices Map dissolves into it), the data plane shards per container, device rename is
-  O(1) with no full-path interning, and property projections compute their EID as
+  O(1) with no full-path storage, and property projections compute their EID as
   (obj CID, Prop! index) with no lookup or cache. Kills ALL rekey
   machinery: `rehash()`, `ElementTable.rekey`, `CollectionTable.rekey`, `do_rekey`,
   `broadcast_rekey`, `rekey_field` all delete - rename-following becomes intrinsic (ids don't
   move when objects rename) instead of repaired by reflection broadcast. Gains: forward
-  references and recreation-rebind via a parked-id claim state machine in insert(); O(1) rename/
+  references and recreation-rebind via a reserved-id claim state machine in insert(); O(1) rename/
   death/claim regardless of ref count; no hash-collision concept; EID and CID unify on identical
-  semantics (ObjectRef and element refs share one follow-forwards + self-heal deref helper).
+  semantics (ObjectRef and element refs share one deref helper that follows forwards and updates the held id).
   Rules that must hold system-wide: ids never persisted, never on the wire (sync exchanges names
   once per session, binds varint session handles), no blind `hash_id` of a name to fabricate an
   id. Prerequisite for the Element2/series work (element2.d draft holds `Element2*` in Cursor -
@@ -554,19 +554,19 @@ status block). Remaining legs, roughly in order:
   id.d header): (0) ids off the wire FIRST - sync today ships raw CIDs and leans on cross-peer
   hash agreement (json_encoder rekey verbs + the rehash-divergence patch in sync/package.d), so
   session name/handle binding lands before ids change shape, making the cutover a pure internal
-  refactor; (1) the park/claim/forward machine standalone + unit-tested (dense per-type slot
-  arrays, next_slot++ allocator, separate name map holding parked ids); (2) container cutover
+  refactor; (1) the reserve/claim/forward machine standalone + unit-tested (dense per-type slot
+  arrays, next_slot++ allocator, separate name map holding reserved ids); (2) container cutover
   (CollectionTable, delete ALL rekey machinery, then Devices as a container type); (3) element
   index tables + Cursor->EID; (4) deref on the handles; (5) holder audit.
-  Steps 4+5 LANDED 2026-07-18, MIGRATION COMPLETE: deref/self-heal lives on the handles -
-  CollectionTable.deref(ref CID) container-side, healing deref(ref EID) (device.d, UFCS)
-  element-side (heals both levels through the holder's field; ElementCursor uses it).
+  Steps 4+5 LANDED 2026-07-18, MIGRATION COMPLETE: deref updates forwarded handles -
+  CollectionTable.deref(ref CID) container-side and deref(ref EID) (device.d, UFCS)
+  element-side (both levels update through the holder's field; ElementCursor uses it).
   ObjectRef stays CID (a reference to a root, never an element) and was already thin table
   sugar; NO ElementRef type - element holders keep a bare EID (the reclamation extension's
   RAII wrapper is where counting would attach, both levels). Holder audit clean: hash_id
   gone, no raw id construction outside the tables (one documented test-mock dummy in
   ble/client.d), sync translates wire handles at the encoder seam, db keys by name.
-  Remaining id work rides other entries: deterministic indices + destruction-parks
+  Remaining id work rides other entries: deterministic indices + destruction reservations
   (producer migration), reclamation (when churn metrics justify).
   Step 2 LANDED 2026-07-17 (both halves): (2a) CollectionTable reimplemented over
   IdMachine!BaseObject - CID = type bits + dense slot, name setter calls table.rename (the id
@@ -579,21 +579,21 @@ status block). Remaining legs, roughly in order:
   rename, old-name reuse, rename-onto-live rejection) + full dev-conf boot clean.
   Step 3 core LANDED 2026-07-17: IndexTable(T) in manager.id (the nameless element-level
   machine - same tagged-word encoding as IdMachine, no name map: relative paths resolve
-  through the component tree, indices park positionally on release and rebind at the same
-  mount); Device carries cid (stamped by DeviceTable.insert via make_cid, now
-  package(manager)) + IndexTable!(Element*) element_ids; Element.ensure_eid() mints lazily on first
-  demand (walk to device ancestor; unmounted elements have no identity);
+  through the component tree, indices remain reserved positionally on release and rebind at the same
+  element); Device carries cid (stamped by DeviceTable.insert via make_cid, now
+  package(manager)) + IndexTable!(Element*) element_ids; Element.ensure_eid() allocates lazily on first
+  demand (walk to device ancestor; unattached elements have no identity);
   DeviceTable.resolve(EID) + resolve_element() free function; ElementCursor {EID, position,
   bit} in element.d is the durable cursor (resolves per call, delegates to the storage-level
   element2.Cursor, goes quiet on dead elements); Element.open_cursor returns it. Unit-tested
-  (IndexTable cycle, lazy mint/resolve, stray-element refusal). Step 3 remainder rides later
+  (IndexTable cycle, lazy allocation/resolve, stray-element refusal). Step 3 remainder rides later
   work: deterministic indices (profile template index / Prop! index) land with per-protocol
-  producer migration; destruction-parks wiring lands when anything actually destroys
+  producer migration; destruction-reservation wiring lands when anything actually destroys
   elements. NEXT: step 4 (unified EID ref type) + step 5 (holder audit).
   Step 1 LANDED 2026-07-17: IdMachine(T) in manager.id - dense tagged slots (0 = dormant,
   bit0=0 = bound, bit0=1 = write-once forward), reserve/claim/rename/release/deref with
-  self-healing forward chains, separate String-keyed name map; unit-tested through the full
-  park/claim/rename-merge/resurrect cycle. En route: urt map.d heterogeneous remove was broken
+  forward chains updated during dereference, separate String-keyed name map; unit-tested through the full
+  reserve/claim/rename-merge/rebind cycle. En route: urt map.d heterogeneous remove was broken
   (search compare reinterpreted the search key as K - segfault on remove-by-slice from a
   String-keyed map); fixed in urt with a regression test.
   Step 0 LANDED 2026-07-17 (compiles, unit-green; sync end-to-end smoke test remains an open

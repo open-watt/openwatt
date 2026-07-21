@@ -219,7 +219,7 @@ private:
             }
             else
             {
-                // user records box at the mount until a native wide path exists
+                // user records box at the Element until a typed wide path exists
                 ubyte[64] rec = void;
                 if (fmt.stride <= rec.length && sample_record(wire, e.desc, rec[0 .. fmt.stride]))
                     el.value(box_record(rec.ptr, *fmt), t);

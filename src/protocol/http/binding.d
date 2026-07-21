@@ -1131,7 +1131,7 @@ unittest
     assert((*paths)[0] == Variant("inv.battery.voltage"));
     assert((*paths)[1] == Variant("inv.battery.current"));
 
-    // JSON tokens use the same native descriptor path in both directions.
+    // JSON tokens use the same typed descriptor path in both directions.
     SampleDesc amps;
     assert(compile_spec("f64:100mA", stream_le_context, ScaledUnit(), 1, null, null, amps));
     Element current;

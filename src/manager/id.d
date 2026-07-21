@@ -20,10 +20,10 @@ module manager.id;
 //
 //   container level: collection tables map name -> CID -> object; a rename touches ONE name
 //                    entry - children resolve by composition, so device rename is O(1) and
-//                    full element paths are never stored or interned
+//                    full element paths are never stored
 //   element level:   each container owns a dense element-index table, one tagged word per index
 //                      bound   -> Element*   the index is bound to a live element
-//                      dormant -> null       parked, waiting for a claimant
+//                      dormant -> null       reserved, waiting for a claimant
 //                      forward -> index      permanent alias of another index (write-once)
 //                    relative paths resolve through the component tree
 //   hard-wired indices: property projections COMPUTE their EID as (obj CID, Prop! index) - a
@@ -31,39 +31,39 @@ module manager.id;
 //                    their template index, deterministic per profile version
 //
 // Lifecycle:
-//   - first mention of a name (a forward reference) parks a fresh id on the name
-//   - creation at a name claims the parked id as the object's primary
+//   - first mention of a name (a forward reference) reserves a fresh id for the name
+//   - creation at a name claims the reserved id as the object's primary
 //   - rename moves the OBJECT between name entries; ids do not move, so every held ref follows
 //     the object for free; the old name becomes an empty tombstone
-//   - rename onto a name holding parked id J: the claimant keeps its primary I and writes
+//   - rename onto a name holding reserved id J: the claimant keeps its primary I and writes
 //     J = forward(I); both the followers and the waiters now reach the object
-//   - death parks the primary on the object's final name; refs deref to null
-//   - the next object created at that name claims the parked id and every ref resurrects
-//   - the machine instantiates at BOTH levels: container ids park on collection names, element
-//     indices park within their container's table; a forward reference under an absent container
+//   - death reserves the primary for the object's final name; refs deref to null
+//   - the next object created at that name claims the reserved id and every ref resolves again
+//   - the machine instantiates at BOTH levels: container ids are reserved for collection names,
+//     and element indices are reserved within their container's table; a forward reference under an absent container
 //     reserves the container id plus a stub element table, and each level claims independently
 //
 // Invariants:
 //   - every name resolves to at most one live object; every object has exactly one live name
 //     and one primary id
-//   - a forward slot is write-once: a forwarded id can never re-bind or park, so forwarding is
+//   - a forward slot is write-once: a forwarded id can never re-bind or be reserved, so forwarding is
 //     permanent, transitive, immutable
 //   - no operation ever rewrites an id held in a ref. deref follows forward chains (they can
-//     grow through park-then-claim-by-rename cycles) and holders self-heal by writing the
-//     terminal id back through their own field - lossless at any time, from any thread
+//     grow through reserve-then-claim-by-rename cycles) and dereference writes the terminal id
+//     back through the holder's own field - lossless at any time, from any thread
 //   - ids are not reclaimed in v1; a forward costs one immortal word
 //
-// Costs: deref is an array index plus forward hops until healed; rename, death, claim and
+// Costs: deref is an array index plus forward hops until the held id is updated; rename, death, claim and
 // forward are each O(1) single-word writes. No broadcasts, no lists, no allocation, and no
 // collision concept (string hashing is internal to the name map).
 //
 // Reclamation (designed-for extension; unbounded DISTINCT NAMES are the exhaustion vector -
-// renames alone mint nothing, and empty tombstones are deleted eagerly): id slots carry a
+// renames alone allocate nothing, and empty tombstones are deleted eagerly): id slots carry a
 // count of durable holders (RAII wrapper for struct fields; hoisted locals are uncounted
 // borrows, safe because release defers to the frame boundary). Release at zero holders; zero
-// makes freelist reuse ABA-safe with no generation tags. Self-healing drains forwards to zero
+// makes freelist reuse ABA-safe with no generation tags. Updating held ids drains forwards to zero
 // through ordinary use, so rename-merge forwards self-collect. Name entries and their strings
-// (refcounted String, not the append-only intern table) release when no object, no parked id,
+// (refcounted String, not an append-only string table) release when no object, no reserved id,
 // no holders. Nothing observable changes, so v1 ships without it; add when churn metrics
 // (id high-watermark in sysinfo) justify.
 //
@@ -78,11 +78,11 @@ module manager.id;
 //      handles (introducer allocates, parity bit per direction, never reused). Sync today
 //      ships raw CIDs and leans on cross-peer hash agreement, so this lands FIRST - it turns
 //      the id cutover from a protocol+internals event into a pure internal refactor
-//   1. the park/claim/forward machine as a standalone unit-tested component. Per-type id
+//   1. the reserve/claim/forward machine as a standalone unit-tested component. Per-type id
 //      tables are DENSE ARRAYS indexed by slot - one tagged word each (bound/dormant/forward),
 //      allocator is next_slot++, no binary search, no collision concept; name -> id (where
-//      parking lives) is a separate string map touched only on lookup/create/rename/death.
-//      insert() is the claim state machine (absent -> reserve/new, parked/tombstone -> claim,
+//      reservations live) is a separate string map touched only on lookup/create/rename/death.
+//      insert() is the claim state machine (absent -> reserve/new, reserved/tombstone -> claim,
 //      live -> duplicate error)
 //   2. container cutover: CollectionTable becomes the container level of the scheme (sorted
 //      entries, binary search and rehash chains die); delete rehash(), rekey(), do_rekey(),
@@ -90,10 +90,10 @@ module manager.id;
 //      repaired; hash_id survives only inside the name maps' string hashing. Then Devices
 //      register as a container type and the ad-hoc g_app.devices Map dissolves
 //   3. element level: per-container element-index tables owned by their containers; element
-//      destruction parks the primary index instead of nulling in place; full-path interning
+//      destruction reserves the primary index instead of nulling in place; full-path storage
 //      stays deleted (legacy ElementTable + hash-EIDs already removed from element.d);
 //      Cursor trades its Element2* for an EID
-//   4. deref/self-heal lives on the HANDLES, not on wrapper types: CollectionTable.deref(ref
+//   4. deref updates forwarded ids on the HANDLES, not on wrapper types: CollectionTable.deref(ref
 //      CID) is the container surface, deref(ref EID) (device.d, UFCS) the element surface.
 //      ObjectRef stays CID and is typed sugar over the table (static type + null ergonomics;
 //      no machinery of its own); there is NO ElementRef - element holders keep a bare EID.
@@ -191,11 +191,11 @@ nothrow @nogc:
         => cast(size_t)(raw ^ (raw >> 32));
 }
 
-// The park/claim/forward machine (migration step 1). One instantiation per id space: the
+// The reserve/claim/forward machine (migration step 1). One instantiation per id space: the
 // container level is per-type tables over BaseObject; each container's element-index table is
 // the same machine over its element type. Slots are dense and immortal (v1: no reclamation),
 // one tagged word each:
-//     0              dormant - parked on a name, waiting for a claimant
+//     0              dormant - reserved for a name, waiting for a claimant
 //     T   (bit0 = 0) bound to a live object
 //     fwd (bit0 = 1) permanent forward to slot (word >> 1), write-once
 // Names are a separate map, touched only on lookup/create/rename/death. A name entry always
@@ -205,15 +205,15 @@ struct IdMachine(T) if (is(T == class) || is(T == U*, U))
 {
 nothrow @nogc:
 
-    // park a fresh id on the name (forward reference), or return whatever it already holds
+    // reserve a fresh id for the name (forward reference), or return whatever it already holds
     uint reserve(const(char)[] name)
     {
         if (uint* p = name in _names)
             return *p;
-        return mint(name);
+        return allocate(name);
     }
 
-    // create at a name: absent mints, parked claims, live is a duplicate (returns 0)
+    // create at a name: absent allocates, reserved claims, live is a duplicate (returns 0)
     uint claim(const(char)[] name, T obj)
     {
         debug assert(obj !is null);
@@ -227,7 +227,7 @@ nothrow @nogc:
             _slots[][id] = cast(size_t)cast(void*)obj;
             return id;
         }
-        uint id = mint(name);
+        uint id = allocate(name);
         _slots[][id] = cast(size_t)cast(void*)obj;
         return id;
     }
@@ -242,7 +242,7 @@ nothrow @nogc:
     }
 
     // move the object between name entries; ids don't move, so every held ref follows for
-    // free. renaming onto a parked name forwards the waiter's id to the primary; onto a live
+    // free. renaming onto a reserved name forwards the waiter's id to the primary; onto a live
     // name fails. the old entry becomes an empty tombstone, deleted eagerly.
     bool rename(uint id, const(char)[] old_name, const(char)[] new_name)
     {
@@ -271,7 +271,7 @@ nothrow @nogc:
         return true;
     }
 
-    // death parks the primary on the object's final name; refs deref null until the next
+    // death reserves the primary for the object's final name; refs deref null until the next
     // object created at that name claims it
     void release(uint id)
     {
@@ -279,7 +279,7 @@ nothrow @nogc:
         _slots[][id] = 0;
     }
 
-    // follow forwards to the terminal slot, healing the held id in place
+    // follow forwards to the terminal slot and update the held id in place
     T deref(ref uint id)
     {
         uint i = id;
@@ -296,7 +296,7 @@ nothrow @nogc:
         return cast(T)cast(void*)w;
     }
 
-    // follow forwards without healing (const contexts)
+    // follow forwards without updating the held id (const contexts)
     inout(T) get(uint id) inout pure
     {
         if (!id || id >= _slots.length)
@@ -324,7 +324,7 @@ nothrow @nogc:
     }
 
     // `in`-operator style: transient pointer to the bound ref, or null; invalidated by the
-    // next mint (the slot array may move)
+    // next allocation (the slot array may move)
     T* lookup(const(char)[] name)
     {
         uint t = terminal(find(name));
@@ -395,7 +395,7 @@ private:
     Array!String _slot_names;   // parallel: the slot's name entry (shared refcount with _names)
     Map!(String, uint) _names;
 
-    uint mint(const(char)[] name)
+    uint allocate(const(char)[] name)
     {
         if (_slots.empty)
         {
@@ -425,13 +425,13 @@ private:
 }
 
 // the element level of the id scheme: IdMachine's nameless twin - the component tree is
-// the name map, so indices park positionally and rebind at the same mount. Index 0 denotes
+// the name map, so indices remain reserved positionally and rebind at the same element position. Index 0 denotes
 // the container itself; slots start at 1.
 struct IndexTable(T) if (is(T == class) || is(T == U*, U))
 {
 nothrow @nogc:
 
-    ushort mint(T obj)
+    ushort allocate(T obj)
     {
         debug assert(obj !is null);
         if (_slots.empty)
@@ -505,7 +505,7 @@ unittest
 
     IdMachine!(Thing*) m;
 
-    // forward reference parks; creation claims; the parked id resurrects
+    // forward reference reserves; creation claims; the reserved id resolves again
     uint held = m.reserve("motor");
     assert(held && m.deref(held) is null);
     assert(m.claim("motor", &a) == held);
@@ -519,13 +519,13 @@ unittest
     assert(m.deref(held) is &a);
     assert(m.find("motor") == 0 && m.find("pump") == held);
 
-    // death parks on the final name; recreation rebinds every old ref
+    // death reserves the id for the final name; recreation rebinds every old ref
     m.release(held);
     assert(m.deref(held) is null);
     assert(m.claim("pump", &b) == held);
     assert(m.deref(held) is &b);
 
-    // rename onto a parked name: the waiter's id forwards to the primary and self-heals
+    // rename onto a reserved name: the waiter's id forwards to the primary and deref updates it
     uint waiter = m.reserve("valve");
     assert(waiter != held);
     assert(m.rename(held, "pump", "valve"));
@@ -542,7 +542,7 @@ unittest
     m.release(held);
     assert(m.claim("valve", &a) == held);
 
-    // forward chains survive park-then-claim-by-rename cycles and heal to the terminal
+    // forward chains survive reserve-then-claim-by-rename cycles and deref updates to the terminal
     uint chain = m.reserve("gate");
     assert(m.rename(held, "valve", "gate"));
     uint stale = waiter & ~0u;   // a copy that still holds the pre-merge id value
@@ -555,28 +555,28 @@ unittest
     m.bind(pre, &c);
     assert(m.get(pre) is &c && m.at(pre) is &c);
 
-    // name recovery: bound, parked, and forwarded slots all resolve; forwarded slots are
+    // name recovery: bound, reserved, and forwarded slots all resolve; forwarded slots are
     // skipped by the raw iteration accessor
     assert(m.name_of(pre) == "relay");
     assert(m.name_string(held)[] == "gate");
-    uint parked = m.reserve("spare");
-    assert(m.name_of(parked) == "spare");
+    uint reserved = m.reserve("spare");
+    assert(m.name_of(reserved) == "spare");
     assert(m.slot_count >= 6);
 
     // index table: the nameless element level; index 0 is the container itself
     IndexTable!(Thing*) it;
-    ushort i1 = it.mint(&a);
-    ushort i2 = it.mint(&b);
+    ushort i1 = it.allocate(&a);
+    ushort i2 = it.allocate(&b);
     assert(i1 == 1 && i2 == 2);
     assert(it.get(i1) is &a && it.get(i2) is &b);
 
-    // release parks positionally; bind rebinds the same index
+    // release reserves positionally; bind rebinds the same index
     it.release(i1);
     assert(it.get(i1) is null);
     it.bind(i1, &c);
     assert(it.get(i1) is &c);
 
-    // forwards chase to the terminal and heal the held index
+    // forwards chase to the terminal and update the held index
     it.release(i2);
     it.forward(i2, i1);
     ushort held_index = i2;

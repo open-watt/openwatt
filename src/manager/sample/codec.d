@@ -2,7 +2,7 @@ module manager.sample.codec;
 
 // Bespoke wire encodings: named decode/encode pairs that produce values of REAL types.
 // An encoding name appears in profile grammar (dt48:yymmddhhmmss) and compiled descs only;
-// encodings never mint types, and the record shape produced is an ordinary DataFormat.
+// encodings never register types, and the record format produced is an ordinary DataFormat.
 // Registered types need no entry here - the grammar resolves bare type names against
 // urt.typereg directly - so this table holds only encodings whose wire form is not a
 // type's canonical image.
@@ -19,7 +19,7 @@ struct Encoding
 {
     const(char)[] name;
     ubyte wire_bytes;               // canonical-image bytes consumed; 0 = text-only
-    DataFormat format;              // record shape produced; descs point at this instance
+    DataFormat format;              // record format produced; descs point at this instance
     // binary wire (null when text-only); image is post-swizzle, reading order
     bool function(const(void)[] image, void[] record) nothrow @nogc decode;
     bool function(const(void)[] record, void[] image) nothrow @nogc encode;
@@ -51,7 +51,7 @@ void register_builtin_encodings()
 {
     const(TypeDetails)* dt = find_type_by_name("dt");
     assert(dt, "SysTime not registered");
-    Encoding e = Encoding("yymmddhhmmss", 6, DataFormat(ValueType.user, Semantics.held, dt), &yymmddhhmmss_decode, &yymmddhhmmss_encode);
+    Encoding e = Encoding("yymmddhhmmss", 6, DataFormat(ValueType.user, SeriesKind.held, dt), &yymmddhhmmss_decode, &yymmddhhmmss_encode);
     register_encoding(e);
 }
 
