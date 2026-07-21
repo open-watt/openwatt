@@ -59,6 +59,7 @@ nothrow @nogc:
             _subscribed = false;
         }
         _stream = stream;
+        mark_set!(typeof(this), "stream")();
         restart();
     }
 
@@ -71,6 +72,7 @@ nothrow @nogc:
         if (value < 1 || value > 7)
             return StringResult("window must be between 1 and 7");
         _max_in_flight = value;
+        mark_set!(typeof(this), "window")();
         return StringResult.success;
     }
 
@@ -81,6 +83,7 @@ nothrow @nogc:
         if (value < 1 || value > 4)
             return StringResult("retransmits must be between 1 and 4");
         _max_retransmits = value;
+        mark_set!(typeof(this), "retransmits")();
         return StringResult.success;
     }
 
@@ -91,6 +94,7 @@ nothrow @nogc:
         if (value < 50 || value > 3200)
             return StringResult("ack-timeout must be between 50ms and 3200ms");
         _ack_timeout_ms = value;
+        mark_set!(typeof(this), "ack-timeout")();
         return StringResult.success;
     }
 
