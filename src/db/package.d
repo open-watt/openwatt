@@ -163,6 +163,8 @@ nothrow @nogc:
     {
         g_db = this;
         _engine.on_notice = &enqueue_notice;
+        version (linux)
+            _engine.max_open = record_open_cap();
 
         static if (ThreadsSupported)
         {
@@ -211,6 +213,7 @@ nothrow @nogc:
             drive();
         drain_done();
         drain_notices();
+        check_churn();
     }
 
 private:
@@ -224,6 +227,10 @@ private:
     Map!(uint, QueryCallback) _pending; // ticket -> callback, awaiting completion
     SeriesId _next_series;
     uint _next_ticket;
+
+    uint _evict_mark;          // record-file LRU eviction count at last churn sample
+    MonoTime _churn_at;
+    MonoTime _last_churn_warn;
 
     bool _threaded;
     static if (ThreadsSupported)
@@ -389,6 +396,27 @@ private:
             }
         }
     }
+
+    void check_churn()
+    {
+        MonoTime now = getTime();
+        if (_churn_at == MonoTime.init)
+        {
+            _churn_at = now;
+            return;
+        }
+        if (now - _churn_at < 1.seconds)
+            return;
+        uint ev = atomicLoad!(MemoryOrder.relaxed)(_engine.evictions);
+        uint per_sec = cast(uint)(ev - _evict_mark);
+        _evict_mark = ev;
+        _churn_at = now;
+        if (per_sec > 100 && now - _last_churn_warn >= 10.seconds)
+        {
+            _last_churn_warn = now;
+            log.warning("record file LRU churning ~", per_sec, "/s (open-file cap ", _engine.max_open, "): actively-written series exceed the cap; raise LimitNOFILE or record fewer elements");
+        }
+    }
 }
 
 
@@ -450,3 +478,21 @@ unittest
 private:
 
 __gshared DbModule g_db;
+
+version (linux)
+{
+    extern(C) int getrlimit(int resource, rlimit_t* rlim) nothrow @nogc;
+    struct rlimit_t { ulong rlim_cur; ulong rlim_max; }
+    enum int RLIMIT_NOFILE_ = 7;
+
+    size_t record_open_cap()
+    {
+        rlimit_t rl;
+        if (getrlimit(RLIMIT_NOFILE_, &rl) != 0)
+            return 2048;
+        enum ulong reserve = 512;
+        if (rl.rlim_cur <= reserve + 64)
+            return 64;
+        return cast(size_t)(rl.rlim_cur - reserve);
+    }
+}

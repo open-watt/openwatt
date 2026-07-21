@@ -3,9 +3,10 @@ module db.engine;
 // The storage engine: per-series append-only files plus range queries.
 //
 // This runs ONLY on the database worker (its own thread today, possibly its own
-// core later); it never touches the frontend data model. File handles are kept
-// open across writes -- the repeated open/close that used to stall the main loop
-// is gone, and here it wouldn't matter anyway since this isn't the main loop.
+// core later); it never touches the frontend data model. Open file handles are
+// pooled in LRU order and capped: one descriptor per series would exhaust the
+// process fd table once there are ~1000 series. Reopening a cold series on its
+// next write is cheap here since this isn't the main loop.
 //
 // The on-disk format is the stop-gap inherited from the recorder: one file per
 // series, a 16-byte header followed by packed (timestamp, value) records, with
@@ -18,6 +19,7 @@ import urt.map;
 import urt.mem.allocator;
 import urt.string;
 import urt.util : min;
+import urt.atomic;
 
 import db.defs;
 
@@ -301,6 +303,46 @@ unittest
 }
 
 
+unittest
+{
+    // LRU fd pool: more series than the open cap must still round-trip, and the
+    // engine must never hold more than `max_open` files open at once.
+    import urt.file : get_temp_filename, delete_file;
+
+    enum n = 5;
+    char[320][n] bufs = void;
+    char[][n] fns;
+    foreach (i; 0 .. n)
+    {
+        fns[i] = bufs[i][];
+        assert(get_temp_filename(fns[i], "", "owrlru"));
+    }
+
+    DbEngine eng;
+    eng.max_open = 2;
+    foreach (i; 0 .. n)
+    {
+        eng.open_series(cast(SeriesId)(i + 1), fns[i]);
+        eng.ingest(cast(SeriesId)(i + 1), 1_000_000UL, i * 10.0);
+    }
+    eng.flush();
+    assert(eng._open_count <= eng.max_open);
+
+    foreach (i; 0 .. n)
+    {
+        Array!Sample got;
+        QueryReq q = QueryReq(1, cast(SeriesId)(i + 1), 0, 2_000_000UL, 0);
+        eng.query(q, got);
+        assert(got.length == 1 && got[0].value == i * 10.0);
+    }
+    assert(eng._open_count <= eng.max_open);
+
+    eng.shutdown();
+    foreach (i; 0 .. n)
+        delete_file(fns[i]);
+}
+
+
 struct DbSeries
 {
 nothrow @nogc:
@@ -312,6 +354,8 @@ nothrow @nogc:
     bool file_failed;  // file is unusable; ingest/query give up on it
     ulong last_time;   // most recent recorded timestamp (unix ns)
     Array!Sample pending; // accumulated this drain, not yet written
+    DbSeries* lru_prev;   // open-file LRU; linked only while file_open
+    DbSeries* lru_next;
 }
 
 
@@ -322,6 +366,13 @@ nothrow @nogc:
     // The engine reports problems by handing text back to the frontend, which
     // logs it on the main thread. Worker code must not touch the log sinks.
     void delegate(const(char)[]) nothrow @nogc on_notice;
+
+    // Cap on simultaneously-open record files.
+    size_t max_open = 2048;
+
+    // LRU evictions so far (32-bit, wraps; per-second deltas stay valid).
+    // A sustained nonzero rate means the actively-written series set exceeds the cap.
+    shared uint evictions;
 
     void open_series(SeriesId id, const(char)[] filename)
     {
@@ -339,8 +390,7 @@ nothrow @nogc:
         {
             DbSeries* s = *ps;
             flush_series(s);
-            if (s.file_open)
-                s.file.close();
+            close_file(s);
             s.pending.clear();
             s.filename = null;
             defaultAllocator().freeT(s);
@@ -459,29 +509,37 @@ nothrow @nogc:
         foreach (s; _series.values)
         {
             flush_series(s);
-            if (s.file_open)
-                s.file.close();
+            close_file(s);
             s.pending.clear();
             s.filename = null;
             defaultAllocator().freeT(s);
         }
         _series.clear();
+        _lru_head = _lru_tail = null;
+        _open_count = 0;
     }
 
 private:
     Map!(SeriesId, DbSeries*) _series;
 
+    DbSeries* _lru_head;   // most-recently used
+    DbSeries* _lru_tail;   // least-recently used; evicted first
+    size_t _open_count;
+
     void flush_series(DbSeries* s)
     {
         if (s.pending.empty || s.file_failed)
             return;
-
         if (!ensure_open(s))
         {
             s.pending.clear();
             return;
         }
+        write_pending(s);
+    }
 
+    void write_pending(DbSeries* s)
+    {
         size_t written;
         if (s.file.get_size() == 0)
         {
@@ -503,14 +561,72 @@ private:
     bool ensure_open(DbSeries* s)
     {
         if (s.file_open)
+        {
+            lru_touch(s);
             return true;
+        }
+        while (_open_count >= max_open && _lru_tail)
+            evict(_lru_tail);
         if (!s.file.open(s.filename[], FileOpenMode.ReadWriteAppend, FileOpenFlags.Sequential))
         {
             file_error(s, "open");
             return false;
         }
         s.file_open = true;
+        lru_push_front(s);
+        ++_open_count;
         return true;
+    }
+
+    void evict(DbSeries* s)
+    {
+        if (!s.pending.empty && !s.file_failed)
+            write_pending(s);
+        close_file(s);
+        atomicFetchAdd!(MemoryOrder.relaxed)(evictions, 1);
+    }
+
+    void close_file(DbSeries* s)
+    {
+        if (!s.file_open)
+            return;
+        s.file.close();
+        s.file_open = false;
+        lru_remove(s);
+        --_open_count;
+    }
+
+    void lru_push_front(DbSeries* s)
+    {
+        s.lru_prev = null;
+        s.lru_next = _lru_head;
+        if (_lru_head)
+            _lru_head.lru_prev = s;
+        _lru_head = s;
+        if (!_lru_tail)
+            _lru_tail = s;
+    }
+
+    void lru_remove(DbSeries* s)
+    {
+        if (s.lru_prev)
+            s.lru_prev.lru_next = s.lru_next;
+        else
+            _lru_head = s.lru_next;
+        if (s.lru_next)
+            s.lru_next.lru_prev = s.lru_prev;
+        else
+            _lru_tail = s.lru_prev;
+        s.lru_prev = null;
+        s.lru_next = null;
+    }
+
+    void lru_touch(DbSeries* s)
+    {
+        if (_lru_head is s)
+            return;
+        lru_remove(s);
+        lru_push_front(s);
     }
 
     // Resume appending after a restart: monotonic timestamps must continue from
