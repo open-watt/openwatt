@@ -1011,7 +1011,7 @@ bool apply_text_value(Element* element, const(char)[] token, ref const SampleDes
     if (fmt.is_text)
     {
         if (element.series.format is fmt)
-            element.observe_text(token, timestamp);
+            element.write_sample(token, timestamp);
         else
             element.value(token, timestamp);
         return true;
@@ -1021,7 +1021,7 @@ bool apply_text_value(Element* element, const(char)[] token, ref const SampleDes
     if (fmt.stride > record.length || !parse_record(token, desc, record[0 .. fmt.stride]))
         return false;
     if (element.series.format is fmt)
-        element.observe_record(record[0 .. fmt.stride], timestamp);
+        element.write_record(record[0 .. fmt.stride], timestamp);
     else
         element.value(box_record(record.ptr, *fmt), timestamp);
     return true;

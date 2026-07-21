@@ -284,7 +284,7 @@ status block). Remaining legs, roughly in order:
   resolved) -> modbus client -> modbus serve; CAN LANDED 2026-07-18 (ElementDesc_CAN =
   SampleDesc + span byte - byte-stream maps carry the wire span the desc doesn't;
   legacy two-column spellings [enum name / dt format in the units column] translate to
-  `:name` refs at the parse site; Element/Element2 grew the untemplated observe_record
+  `:name` refs at the parse site; Element/Element2 grew the untyped write_record
   scalar path; packet path decodes via the gateway - typed record when the Element uses the
   binding's format, boxed otherwise). GoodWe LANDED 2026-07-19: GoodWeModule owns the
   registered `aa55` section,
@@ -476,7 +476,7 @@ status block). Remaining legs, roughly in order:
   (id/name/desc/display_unit/access/sampling_mode/parent) plus the boxed Variant mirror
   (latest/prev/recent/subscribers); a null or indirect format means legacy (bit-identical
   behaviour for every existing consumer), a scalar format enables the typed series: boxed
-  writes unbox into the core (series.unbox_scalar), observe!T/observe_block/mark_gap
+  writes unbox into the core (series.unbox_scalar), write_sample!T/write_samples/mark_gap
   on Element feed the series then mirror the tail into the boxed path (legacy subscribers,
   prev pair, recent ring see the same timeline). Boxing edge implemented in series.d
   (box_record/unbox_scalar, RecordBlock.box, Element2.value; ints/floats wrap format.unit as

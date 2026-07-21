@@ -169,39 +169,42 @@ nothrow @nogc:
         }
     }
 
-    void observe(T)(T v, SysTime t = getSysTime(), Observer who = null)
+    void write_sample(T)(T v, SysTime t = getSysTime(), Observer who = null, Subscriber legacy_who = null)
     {
-        series.observe(v, t, who);
+        static if (is(T == String))
+            series.write_sample(v.move, t, who);
+        else
+            series.write_sample(v, t, who);
+        sync_from_series(legacy_who);
+    }
+
+    void write_record(const(void)[] record, SysTime t = getSysTime(), Observer who = null, Subscriber legacy_who = null)
+    {
+        series.write_record(record, t, who);
+        sync_from_series(legacy_who);
+    }
+
+    void write_samples(T)(const(T)[] samples, const(SysTime)[] times, Observer who = null)
+    {
+        series.write_samples(samples, times, who);
         sync_from_series();
     }
 
-    void observe_record(const(void)[] record, SysTime t = getSysTime(), Observer who = null, Subscriber legacy_who = null)
+    void write_samples(T)(const(T)[] samples, const(ulong)[] ticks, Observer who = null)
     {
-        series.observe_record(record, t, who);
-        sync_from_series(legacy_who);
-    }
-
-    void observe_text(String v, SysTime t = getSysTime(), Observer who = null, Subscriber legacy_who = null)
-    {
-        series.observe_text(v.move, t, who);
-        sync_from_series(legacy_who);
-    }
-
-    void observe_text(const(char)[] v, SysTime t = getSysTime(), Observer who = null, Subscriber legacy_who = null)
-    {
-        series.observe_text(v, t, who);
-        sync_from_series(legacy_who);
-    }
-
-    void observe_block(const(void)[] samples, const(SysTime)[] times, Observer who = null)
-    {
-        series.observe_block(samples, times, who);
+        series.write_samples(samples, ticks, who);
         sync_from_series();
     }
 
-    void observe_block(const(void)[] samples, const(ulong)[] ticks, Observer who = null)
+    void write_records(const(void)[] records, const(SysTime)[] times, Observer who = null)
     {
-        series.observe_block(samples, ticks, who);
+        series.write_records(records, times, who);
+        sync_from_series();
+    }
+
+    void write_records(const(void)[] records, const(ulong)[] ticks, Observer who = null)
+    {
+        series.write_records(records, ticks, who);
         sync_from_series();
     }
 
@@ -210,7 +213,6 @@ nothrow @nogc:
         series.mark_gap(who);
     }
 
-    // allocated lazily on first demand; unattached elements have none
     EID eid() const pure
         => _eid;
 
@@ -253,7 +255,7 @@ nothrow @nogc:
         if (series.format.is_text)
         {
             if (v.isString)
-                series.observe_text(v.asString(), timestamp);
+                series.write_sample(v.asString(), timestamp);
             return;
         }
         if (series.format.is_wide)
@@ -262,14 +264,14 @@ nothrow @nogc:
             {
                 const(void)[] b = v.asBuffer;
                 if (b.length == series.format.stride)
-                    series.observe_record(b, timestamp);
+                    series.write_record(b, timestamp);
             }
             // wide user types stay boxed until a producer needs the unbox (transitional)
             return;
         }
         Scalar s;
         if (unbox_scalar(v, *series.format, s))
-            series.observe_scalar(s, timestamp);
+            series.write_record(s.raw[0 .. series.format.stride], timestamp);
         // else the boxed side still takes it and the core diverges until the next
         // representable observation (transitional)
     }
@@ -438,7 +440,7 @@ unittest
     n.series.ensure_history();
     bool[2] lv = [true, false];
     SysTime[2] tm = [from_unix_time_ns(1_000_000), from_unix_time_ns(2_000_000)];
-    n.observe_block(lv[], tm[]);
+    n.write_samples(lv[], tm[]);
     assert(n.series.record_count == 2);
     assert(n.value.isBool && !n.value.asBool);
     assert(n.last_update == from_unix_time_ns(2_000_000));

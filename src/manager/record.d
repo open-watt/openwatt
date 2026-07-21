@@ -325,7 +325,7 @@ unittest
     en.series.format = &qfmt;
     en.series.ensure_history();
     foreach (i; 0 .. 6)
-        en.observe(i * 10.0, from_unix_time_ns((i + 1) * 1_000_000UL));
+        en.write_sample(i * 10.0, from_unix_time_ns((i + 1) * 1_000_000UL));
 
     RecordStream rn;
     rn.element = &en;

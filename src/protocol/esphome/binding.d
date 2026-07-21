@@ -509,7 +509,7 @@ private:
                     break;
                 if (SampleElement* el = res.key in _elements)
                 {
-                    observe_sensor(el.element, el.format, el.pre_scale, res.state, getSysTime());
+                    write_sensor_sample(el.element, el.format, el.pre_scale, res.state, getSysTime());
                     version (DebugESPHomeBinding)
                         log.trace("sample: ", el.element.id, " = ", el.element.value);
                 }
@@ -532,7 +532,7 @@ unittest
 
     Element voltage;
     voltage.series.format = volts;
-    observe_sensor(&voltage, volts, pre_scale, 230.5f, getSysTime());
+    write_sensor_sample(&voltage, volts, pre_scale, 230.5f, getSysTime());
     double observed_volts = voltage.scaled_value(ScaledUnit(Volt));
     assert(observed_volts > 230.49 && observed_volts < 230.51);
 
@@ -540,7 +540,7 @@ unittest
         DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Ampere))));
     Element current;
     current.series.format = scaled;
-    observe_sensor(&current, scaled, 0.1f, 123, getSysTime());
+    write_sensor_sample(&current, scaled, 0.1f, 123, getSysTime());
     double observed_amps = current.scaled_value(ScaledUnit(Ampere));
     assert(observed_amps > 12.299 && observed_amps < 12.301);
 
@@ -565,12 +565,12 @@ const(DataFormat)* sensor_format(const(char)[] unit_text, out float pre_scale, o
     return format_by_index(register_format(DataFormat(type, SeriesKind.held, unit)));
 }
 
-void observe_sensor(Element* element, const(DataFormat)* format, float pre_scale, float state, SysTime timestamp)
+void write_sensor_sample(Element* element, const(DataFormat)* format, float pre_scale, float state, SysTime timestamp)
 {
     if (format.type == ValueType.f32)
     {
         if (element.series.format is format)
-            element.observe_record((cast(const(void)*)&state)[0 .. float.sizeof], timestamp);
+            element.write_record((cast(const(void)*)&state)[0 .. float.sizeof], timestamp);
         else
             element.value(box_record(&state, *format), timestamp);
     }
@@ -578,7 +578,7 @@ void observe_sensor(Element* element, const(DataFormat)* format, float pre_scale
     {
         double value = state * pre_scale;
         if (element.series.format is format)
-            element.observe_record((cast(const(void)*)&value)[0 .. double.sizeof], timestamp);
+            element.write_record((cast(const(void)*)&value)[0 .. double.sizeof], timestamp);
         else
             element.value(box_record(&value, *format), timestamp);
     }

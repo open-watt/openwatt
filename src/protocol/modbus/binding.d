@@ -600,7 +600,7 @@ private:
             if (!sample_record(wire, e.desc, scalar.raw[0 .. fmt.stride]))
                 return false;
             if (e.element.series.format is fmt)
-                e.element.observe_record(scalar.raw[0 .. fmt.stride], timestamp);
+                e.element.write_record(scalar.raw[0 .. fmt.stride], timestamp);
             else
                 e.element.value(box_record(scalar.raw.ptr, *fmt), timestamp);
             return true;

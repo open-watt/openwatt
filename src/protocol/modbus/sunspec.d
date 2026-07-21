@@ -1340,7 +1340,7 @@ private:
                 tmp[k*2 + 1] = cast(ubyte)(w & 0xFF);
             }
             if (have_scale)
-                observe_sunspec_value(e, tmp[0 .. words * 2], desc, scale, getSysTime());
+                write_sunspec_sample(e, tmp[0 .. words * 2], desc, scale, getSysTime());
         }
 
         if (fd.freq == Frequency.constant || fd.freq == Frequency.configuration)
@@ -1632,7 +1632,7 @@ private:
                 }
             }
 
-            observe_sunspec_value(f.element, data[off .. off + w * 2], f.desc, scale, ts);
+            write_sunspec_sample(f.element, data[off .. off + w * 2], f.desc, scale, ts);
             version (DebugSunspecRegs)
                 log.tracef("reg {0} = {1}", f.reg, f.element.value);
         }
@@ -1798,7 +1798,7 @@ private bool read_message_scale(ushort first, ushort last, const(ubyte)[] data, 
     return true;
 }
 
-private bool observe_sunspec_value(Element* element, const(void)[] wire, ref const SampleDesc base_desc,
+private bool write_sunspec_sample(Element* element, const(void)[] wire, ref const SampleDesc base_desc,
                                    float scale, SysTime ts)
 {
     const(DataFormat)* fmt = base_desc.fmt;
@@ -1807,7 +1807,7 @@ private bool observe_sunspec_value(Element* element, const(void)[] wire, ref con
         char[128] buffer;
         const(char)[] text = sample_text(wire, base_desc, buffer);
         if (element.series.format is fmt)
-            element.observe_text(text, ts);
+            element.write_sample(text, ts);
         else
             element.value(Variant(text), ts);
         return true;
@@ -1821,7 +1821,7 @@ private bool observe_sunspec_value(Element* element, const(void)[] wire, ref con
     if (!sample_record(wire, desc, scalar.raw[0 .. fmt.stride]))
         return false;
     if (element.series.format is fmt)
-        element.observe_record(scalar.raw[0 .. fmt.stride], ts);
+        element.write_record(scalar.raw[0 .. fmt.stride], ts);
     else
         element.value(box_record(scalar.raw.ptr, *fmt), ts);
     return true;
@@ -1883,7 +1883,7 @@ unittest
 
     Element scaled_element;
     scaled_element.series.format = scaled_desc.fmt;
-    assert(observe_sunspec_value(&scaled_element, raw, scaled_desc, 0.1f, getSysTime()));
+    assert(write_sunspec_sample(&scaled_element, raw, scaled_desc, 0.1f, getSysTime()));
     double mounted_value = scaled_element.value.asQuantity().value;
     assert(mounted_value > 123.39 && mounted_value < 123.41);
 
@@ -1898,7 +1898,7 @@ unittest
     text_wire[0 .. 5] = cast(const(ubyte)[])"Model";
     Element text_element;
     text_element.series.format = text_desc.fmt;
-    assert(observe_sunspec_value(&text_element, text_wire, text_desc, 1, getSysTime()));
+    assert(write_sunspec_sample(&text_element, text_wire, text_desc, 1, getSysTime()));
     assert(text_element.value.asString == "Model");
 
     register_enum_info("SunSpecInverterEvent", enum_info!SunSpecInverterEvent.make_void(), false);

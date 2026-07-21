@@ -299,7 +299,7 @@ private:
                 if (!sample_record(wire, e.desc, s.raw[0 .. fmt.stride]))
                     continue;
                 if (el.series.format is fmt)
-                    el.observe_record(s.raw[0 .. fmt.stride], t);
+                    el.write_record(s.raw[0 .. fmt.stride], t);
                 else
                     el.value(box_record(s.raw.ptr, *fmt), t);
             }

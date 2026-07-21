@@ -120,25 +120,25 @@ nothrow @nogc:
         {
             final switch (e.kind)
             {
-                case SampleKind.setpoint:        observe(e, charger.target_current, timestamp);                                      break;
-                case SampleKind.state:           observe(e, cast(ubyte)charger.charger_state, timestamp);                            break;
-                case SampleKind.twc_state:       observe(e, cast(ubyte)charger.state, timestamp);                                    break;
-                case SampleKind.max:             observe(e, charger.max_current, timestamp);                                         break;
-                case SampleKind.current:         observe(e, (charger.flags & 2) ? charger.current : ushort(0), timestamp);            break;
-                case SampleKind.voltage1:        observe(e, (charger.flags & 2) ? charger.voltage1 : ushort(0), timestamp);           break;
-                case SampleKind.voltage2:        observe(e, (charger.flags & 2) ? charger.voltage2 : ushort(0), timestamp);           break;
-                case SampleKind.voltage3:        observe(e, (charger.flags & 2) ? charger.voltage3 : ushort(0), timestamp);           break;
-                case SampleKind.power:           observe(e, (charger.flags & 2) ? charger.total_power : ushort(0), timestamp);       break;
-                case SampleKind.power1:          observe(e, (charger.flags & 2) ? charger.power1 : ushort(0), timestamp);             break;
-                case SampleKind.power2:          observe(e, (charger.flags & 2) ? charger.power2 : ushort(0), timestamp);             break;
-                case SampleKind.power3:          observe(e, (charger.flags & 2) ? charger.power3 : ushort(0), timestamp);             break;
+                case SampleKind.setpoint:        write_sample(e, charger.target_current, timestamp);                                      break;
+                case SampleKind.state:           write_sample(e, cast(ubyte)charger.charger_state, timestamp);                            break;
+                case SampleKind.twc_state:       write_sample(e, cast(ubyte)charger.state, timestamp);                                    break;
+                case SampleKind.max:             write_sample(e, charger.max_current, timestamp);                                         break;
+                case SampleKind.current:         write_sample(e, (charger.flags & 2) ? charger.current : ushort(0), timestamp);            break;
+                case SampleKind.voltage1:        write_sample(e, (charger.flags & 2) ? charger.voltage1 : ushort(0), timestamp);           break;
+                case SampleKind.voltage2:        write_sample(e, (charger.flags & 2) ? charger.voltage2 : ushort(0), timestamp);           break;
+                case SampleKind.voltage3:        write_sample(e, (charger.flags & 2) ? charger.voltage3 : ushort(0), timestamp);           break;
+                case SampleKind.power:           write_sample(e, (charger.flags & 2) ? charger.total_power : ushort(0), timestamp);       break;
+                case SampleKind.power1:          write_sample(e, (charger.flags & 2) ? charger.power1 : ushort(0), timestamp);             break;
+                case SampleKind.power2:          write_sample(e, (charger.flags & 2) ? charger.power2 : ushort(0), timestamp);             break;
+                case SampleKind.power3:          write_sample(e, (charger.flags & 2) ? charger.power3 : ushort(0), timestamp);             break;
                 case SampleKind.import_:
                 case SampleKind.lifetime_energy:
-                    observe(e, (charger.flags & 2) ? ulong(charger.lifetime_energy) * 1000 : ulong(0), timestamp);
+                    write_sample(e, (charger.flags & 2) ? ulong(charger.lifetime_energy) * 1000 : ulong(0), timestamp);
                     break;
-                case SampleKind.serial_number:   observe_text(e, (charger.flags & 4) ? charger.serial_number[] : "", timestamp);       break;
-                case SampleKind.vin:             observe_text(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);      break;
-                case SampleKind.circuit:         observe_text(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);      break;
+                case SampleKind.serial_number:   write_sample(e, (charger.flags & 4) ? charger.serial_number[] : "", timestamp);       break;
+                case SampleKind.vin:             write_sample(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);      break;
+                case SampleKind.circuit:         write_sample(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);      break;
             }
         }
     }
@@ -299,21 +299,23 @@ private:
         return format_by_index(register_format(format));
     }
 
-    void observe(T)(ref SampleElement sample, T value, SysTime timestamp)
+    void write_sample(T)(ref SampleElement sample, T value, SysTime timestamp)
     {
-        const(void)[] record = (cast(const(void)*)&value)[0 .. T.sizeof];
-        if (sample.element.series.format is sample.format)
-            sample.element.observe_record(record, timestamp);
+        static if (is(T : const(char)[]))
+        {
+            if (sample.element.series.format is sample.format)
+                sample.element.write_sample(value, timestamp);
+            else
+                sample.element.value(value, timestamp);
+        }
         else
-            sample.element.value(box_record(record.ptr, *sample.format), timestamp);
-    }
-
-    void observe_text(ref SampleElement sample, const(char)[] value, SysTime timestamp)
-    {
-        if (sample.element.series.format is sample.format)
-            sample.element.observe_text(value, timestamp);
-        else
-            sample.element.value(value, timestamp);
+        {
+            const(void)[] record = (cast(const(void)*)&value)[0 .. T.sizeof];
+            if (sample.element.series.format is sample.format)
+                sample.element.write_record(record, timestamp);
+            else
+                sample.element.value(box_record(record.ptr, *sample.format), timestamp);
+        }
     }
 
     void set_constant(T)(Element* e, T value)

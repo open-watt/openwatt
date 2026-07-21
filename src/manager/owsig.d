@@ -383,7 +383,7 @@ unittest
     e.ensure_history();
     foreach (i; 0 .. 4)
     {
-        e.observe(i * 1.5, from_unix_time_ns((i + 1) * 1_000_000UL));
+        e.write_sample(i * 1.5, from_unix_time_ns((i + 1) * 1_000_000UL));
         if (i == 1)
             e.mark_gap(); // second block
     }
@@ -433,7 +433,7 @@ unittest
         assert(c.find_by_time(2_500) == 1);  // 2.5ms in usec ticks
 
         // append after reopen: prev/next links patch across sessions
-        e.observe(9.0, from_unix_time_ns(5_000_000));
+    e.write_sample(9.0, from_unix_time_ns(5_000_000));
         Cursor cur = e.open_cursor(4);
         RecordBlock nb = cur.next(256);
         assert(nb.count == 1 && c.put(nb));

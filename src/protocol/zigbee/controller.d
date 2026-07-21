@@ -333,7 +333,7 @@ private:
     ulong[2] make_sample_key_tuya(EUI64 eui, ubyte endpoint, ubyte dp) nothrow
         => make_sample_key(eui, endpoint, 0xEF00, dp);
 
-    void observe_sample(ref SampleElement e, ref const Variant decoded, const(void)[] wire,
+    void write_decoded_sample(ref SampleElement e, ref const Variant decoded, const(void)[] wire,
                         SysTime timestamp) nothrow
     {
         if (!e.desc.valid)
@@ -348,7 +348,7 @@ private:
             if (decoded.isString)
             {
                 if (e.element.series.format is fmt)
-                    e.element.observe_text(decoded.asString, timestamp, null, this);
+                    e.element.write_sample(decoded.asString, timestamp, null, this);
                 else
                     e.element.value(decoded, timestamp, this);
             }
@@ -362,7 +362,7 @@ private:
             if (!sample_record(wire, e.desc, s.raw[0 .. fmt.stride]))
                 return;
             if (e.element.series.format is fmt)
-                e.element.observe_record(s.raw[0 .. fmt.stride], timestamp, null, this);
+                e.element.write_record(s.raw[0 .. fmt.stride], timestamp, null, this);
             else
                 e.element.value(box_record(s.raw.ptr, *fmt), timestamp, this);
             return;
@@ -655,7 +655,7 @@ private:
                         if (SampleElement* e = find_sample_element(nm.eui, aps.src_endpoint, aps.cluster_id, attr_id, zcl.manufacturer_code))
                         {
                             Variant v = attr.value;
-                            observe_sample(*e, v, payload[3 .. 3 + taken], cast(SysTime)timestamp);
+                            write_decoded_sample(*e, v, payload[3 .. 3 + taken], cast(SysTime)timestamp);
                         }
 
                         payload = payload[3 + taken .. $];
@@ -821,7 +821,7 @@ private:
                             {
                                 nm.tuya_datapoints[dp.dp_id] = v;
                                 if (SampleElement* e = find_sample_element_tuya(nm.eui, aps.src_endpoint, dp.dp_id))
-                                    observe_sample(*e, v, dp.dp_data, cast(SysTime)timestamp);
+                                    write_decoded_sample(*e, v, dp.dp_data, cast(SysTime)timestamp);
                             }
                             return;
 

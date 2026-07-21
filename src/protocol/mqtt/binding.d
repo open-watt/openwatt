@@ -356,7 +356,7 @@ private:
             scope(exit) _self_write = false;
             if (fmt.is_text)
             {
-                e.element.observe_text(payload_str, cast(SysTime)timestamp);
+                e.element.write_sample(payload_str, cast(SysTime)timestamp);
                 sampled = true;
             }
             else if (fmt.is_scalar)
@@ -364,7 +364,7 @@ private:
                 Scalar scalar;
                 sampled = parse_record(payload_str, e.desc, scalar.raw[0 .. fmt.stride]);
                 if (sampled)
-                    e.element.observe_record(scalar.raw[0 .. fmt.stride], cast(SysTime)timestamp);
+                    e.element.write_record(scalar.raw[0 .. fmt.stride], cast(SysTime)timestamp);
             }
 
             if (sampled)

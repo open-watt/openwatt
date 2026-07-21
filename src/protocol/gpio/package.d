@@ -294,7 +294,7 @@ private:
                     levels[i] = edges[i].level;
                     ticks[i] = edges[i].tick - _stream_first_tick;
                 }
-                _element.observe_block(levels[0 .. n], ticks[0 .. n]);
+                _element.write_samples(levels[0 .. n], ticks[0 .. n]);
             }
             mark_set!(typeof(this), ["records", "buckets", "last-edge"])();
         }

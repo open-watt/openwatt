@@ -212,7 +212,7 @@ reactor-thread producers defer dispatch to main loop; Cursor holds Element2* pen
 resolution (the two-level EID type now exists in manager.id; the tables are
 the migration); RAM buckets + on-disk container need one time-keyed, decimation-aware read
 stack (index is process-local, TIME is the archival axis). Done since first draft: irregular
-block append (observe_block); compact core layout (identity out, format shared, history
+typed sample and packed-record writes (write_samples/write_records); compact core layout (identity out, format shared, history
 behind a pointer, intrusive subscriptions); legacy hash-EID + ElementTable deleted from
 element.d (they were unused - a slice of migration step 1 done by removal). Designed this session
 (2026-07-16, above and in section 6): the bucket lifecycle, one-codec-three-residencies, and the
@@ -293,7 +293,7 @@ representation (the todo_rpc_dedupe endpoint).
 **Property projection** (settled): every Prop! is SEMANTICALLY an element - subscribe, record,
 trigger - but PHYSICALLY lazy: materialized on first name resolve, under the object's
 collection path (not /device). mark_set stays the producer signal (hot-path safe); the frame
-flush samples dirty projected getters -> observe!T. Coalesced-by-construction, SeriesKind.held,
+flush samples dirty projected getters -> write_sample!T. Coalesced-by-construction, SeriesKind.held,
 typed end to end (viable BECAUSE Element2 dropped Variant). Unwatched properties cost
 one dirty bit. Non-Prop members remain hard data; composition wiring (delegates between
 collaborating objects) remains hard API - the declaration line IS the classification.
@@ -403,7 +403,7 @@ The scaffold is binding-owned and touches no identity machinery, so the order be
 2. Series contract module (DataFormat/RecordBlock/events/owsig) + Element2 replaces Element.
    Phased: extract contract module; Component holds Element2 with Variant boxing at the edges
    (console, SNMP, expressions) so consumers migrate gradually; producers migrate per-protocol
-   to typed observe!T (Modbus last, deepest); delete Element when the last consumer moves.
+   to typed write_sample!T (Modbus last, deepest); delete Element when the last consumer moves.
 3. Retention tiers + recorder-as-cursor + container read stack.
 4. Operators absorb Map/Sum/Alias (gap-aware accumulator).
 5. Property projection; Prop! unit/desc fields.

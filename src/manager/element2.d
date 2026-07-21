@@ -111,72 +111,47 @@ nothrow @nogc:
         return (cast(const(ubyte)*)b.samples)[(b.count - 1) * format.stride .. b.count * format.stride];
     }
 
-    void observe(T)(T v, SysTime t = getSysTime(), Observer who = null)
+    void write_sample(T)(T v, SysTime t = getSysTime(), Observer who = null)
     {
-        static assert(is(typeof(value_type_of!T)));
-        debug assert(value_type_of!T == format.type);
-        observe_scalar(Scalar.of(v), t, who);
-    }
-
-    void observe_scalar(Scalar s, SysTime t = getSysTime(), Observer who = null)
-    {
-        if (format.kind == SeriesKind.held && _last_update != SysTime() && s.raw == _latest.raw)
+        static if (is(T == String))
+            write_text_sample(v.move, t, who);
+        else static if (is(T : const(char)[]))
+            write_text_sample(v, t, who);
+        else
         {
-            _last_update = t;
-            return;
+            static assert(is(typeof(value_type_of!T)));
+            debug assert(value_type_of!T == format.type);
+            debug assert(format.count == 1, "a single typed value must describe one record");
+            Scalar s = Scalar.of(v);
+            write_record(s.raw[0 .. format.stride], t, who);
         }
-        _latest = s;
-        _last_update = t;
-        SysTime[1] time = t;
-        append(s.raw[0 .. format.stride], time[], who);
     }
 
-    void observe_text(String v, SysTime t = getSysTime(), Observer who = null)
+    // untyped path for callers holding a record in a runtime-known DataFormat
+    void write_record(const(void)[] record, SysTime t = getSysTime(), Observer who = null)
     {
-        debug assert(format.is_text);
-        TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
-        if (format.kind == SeriesKind.held && _last_update != SysTime() && slot.view == v[])
-        {
-            _last_update = t;
-            return;
-        }
-        slot.set(v.move);
-        _last_update = t;
-        append_text_record(t, who);
-    }
-
-    void observe_text(const(char)[] v, SysTime t = getSysTime(), Observer who = null)
-    {
-        debug assert(format.is_text);
-        TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
-        if (format.kind == SeriesKind.held && _last_update != SysTime() && slot.view == v)
-        {
-            _last_update = t;
-            return;
-        }
-        slot.set(v);
-        _last_update = t;
-        append_text_record(t, who);
-    }
-
-    // untemplated path for samplers decoding at a runtime-known format
-    void observe_record(const(void)[] record, SysTime t = getSysTime(), Observer who = null)
-    {
-        debug assert(record.length >= format.stride);
+        debug assert(record.length == format.stride);
         if (format.is_scalar)
         {
             Scalar s;
             s.raw[] = 0;
-            s.raw[0 .. format.stride] = (cast(const(ubyte)[])record)[0 .. format.stride];
-            observe_scalar(s, t, who);
+            s.raw[0 .. format.stride] = cast(const(ubyte)[])record;
+            if (format.kind == SeriesKind.held && _last_update != SysTime() && s.raw == _latest.raw)
+            {
+                _last_update = t;
+                return;
+            }
+            _latest = s;
+            _last_update = t;
+            SysTime[1] time = t;
+            append(s.raw[0 .. format.stride], time[], who);
             return;
         }
         assert(format.is_wide, "dynamic and non-pod records need their own entry");
-        const(void)[] rec = record[0 .. format.stride];
         if (format.kind == SeriesKind.held && _last_update != SysTime())
         {
             const(void)[] tail = tail_record();
-            if (tail && cast(const(ubyte)[])tail == cast(const(ubyte)[])rec)
+            if (tail && cast(const(ubyte)[])tail == cast(const(ubyte)[])record)
             {
                 _last_update = t;
                 return;
@@ -185,44 +160,75 @@ nothrow @nogc:
         ensure_history();
         _last_update = t;
         SysTime[1] time = t;
-        append(rec, time[], who);
+        append(record, time[], who);
     }
 
-    void observe_block(const(void)[] samples, const(SysTime)[] times, Observer who = null)
+    void write_samples(T)(const(T)[] samples, const(SysTime)[] times, Observer who = null)
+    {
+        static if (is(T == String) || is(T : const(char)[]))
+        {
+            debug assert(samples.length == times.length);
+            foreach (i, ref sample; samples)
+            {
+                static if (is(T == String))
+                    write_sample(sample[], times[i], who);
+                else
+                    write_sample(sample, times[i], who);
+            }
+        }
+        else
+        {
+            check_sample_type!T(samples.length, times.length);
+            write_records((cast(const(void)*)samples.ptr)[0 .. samples.length * T.sizeof], times, who);
+        }
+    }
+
+    void write_samples(T)(const(T)[] samples, const(ulong)[] ticks, Observer who = null)
+    {
+        static assert(!is(T == String) && !is(T : const(char)[]),
+                      "text samples cannot use device ticks");
+        check_sample_type!T(samples.length, ticks.length);
+        write_records((cast(const(void)*)samples.ptr)[0 .. samples.length * T.sizeof], ticks, who);
+    }
+
+    void write_records(const(void)[] records, const(SysTime)[] times, Observer who = null)
     {
         debug assert(!format.regular);
+        debug assert(format.is_scalar || format.is_wide,
+                     "managed records require typed sample handling");
         uint n = cast(uint)times.length;
         if (n == 0)
             return;
-        debug assert(samples.length == n * format.stride);
+        debug assert(records.length == n * format.stride);
         _latest.raw[] = 0;
-        _latest.raw[0 .. format.stride] = (cast(const(ubyte)[])samples)[$ - format.stride .. $];
+        _latest.raw[0 .. format.stride] = (cast(const(ubyte)[])records)[$ - format.stride .. $];
         _last_update = times[$-1];
-        append(samples, times, who);
+        append(records, times, who);
     }
 
-    void observe_block(const(void)[] samples, const(ulong)[] ticks, Observer who = null)
+    void write_records(const(void)[] records, const(ulong)[] ticks, Observer who = null)
     {
         debug assert(format.uses_device_ticks);
+        debug assert(format.is_scalar || format.is_wide,
+                     "managed records require typed sample handling");
         uint n = cast(uint)ticks.length;
         if (n == 0)
             return;
-        debug assert(samples.length == n * format.stride);
+        debug assert(records.length == n * format.stride);
         _latest.raw[] = 0;
-        _latest.raw[0 .. format.stride] = (cast(const(ubyte)[])samples)[$ - format.stride .. $];
+        _latest.raw[0 .. format.stride] = (cast(const(ubyte)[])records)[$ - format.stride .. $];
         _last_update = format.clock.to_wall(ticks[$-1]);
-        append(samples, ticks, ticks[0], who);
+        append(records, ticks, ticks[0], who);
     }
 
-    // TODO: we meed to rethink appending regular samples API; adding data, the api might assume the samples follow the last sample
-    //       but if we're adding after a gap, then we need to synthesise a gap...
-//    void append_block(const(void)[] samples, SysTime t0, Observer who = null)
+    // TODO: rethink regular writes: data might follow the last record, or a gap may need synthesising.
+//    void write_records(const(void)[] records, SysTime t0, Observer who = null)
 //    {
 //        debug assert(format.regular);
 //        _latest.raw[] = 0;
-//        _latest.raw[0 .. format.stride] = (cast(const(ubyte)[])samples)[$ - format.stride .. $];
-//        _last_update = t0 + nsecs((samples.length / format.stride - 1) * 1_000_000_000L / format.rate);
-//        append(samples, null, t0, who);
+//        _latest.raw[0 .. format.stride] = (cast(const(ubyte)[])records)[$ - format.stride .. $];
+//        _last_update = t0 + nsecs((records.length / format.stride - 1) * 1_000_000_000L / format.rate);
+//        append(records, null, t0, who);
 //    }
 
     void mark_gap(Observer who = null)
@@ -398,6 +404,42 @@ private:
     ubyte _flags;
 
     enum bucket_capacity = 256; // TODO: scale with rate (target a time span, not a record count)
+
+    void check_sample_type(T)(size_t value_count, size_t record_count) const
+    {
+        static assert(is(typeof(value_type_of!T)));
+        debug assert(value_type_of!T == format.type);
+        debug assert(format.count != 0, "dynamic records need type-specific sample handling");
+        debug assert(value_count * T.sizeof == record_count * format.stride);
+    }
+
+    void write_text_sample(String v, SysTime t, Observer who)
+    {
+        debug assert(format.is_text);
+        TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
+        if (format.kind == SeriesKind.held && _last_update != SysTime() && slot.view == v[])
+        {
+            _last_update = t;
+            return;
+        }
+        slot.set(v.move);
+        _last_update = t;
+        append_text_record(t, who);
+    }
+
+    void write_text_sample(const(char)[] v, SysTime t, Observer who)
+    {
+        debug assert(format.is_text);
+        TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
+        if (format.kind == SeriesKind.held && _last_update != SysTime() && slot.view == v)
+        {
+            _last_update = t;
+            return;
+        }
+        slot.set(v);
+        _last_update = t;
+        append_text_record(t, who);
+    }
 
     void append_text_record(SysTime t, Observer who)
     {
@@ -635,7 +677,7 @@ unittest
     // retention=none: latest and last_update track, nothing is stored
     Element2 n;
     n.format = &f64_held;
-    n.observe(9.0, from_unix_time_ns(500));
+    n.write_sample(9.0, from_unix_time_ns(500));
     assert(n.record_count == 0 && n.bucket_count == 0);
     assert(n.latest.f64_ == 9.0);
     assert(n.last_update == from_unix_time_ns(500));
@@ -644,15 +686,15 @@ unittest
     Element2 e;
     e.format = &f64_held;
     e.ensure_history();
-    e.observe(1.0, from_unix_time_ns(1_000));
-    e.observe(1.0, from_unix_time_ns(2_000));
-    e.observe(2.0, from_unix_time_ns(3_000));
+    e.write_sample(1.0, from_unix_time_ns(1_000));
+    e.write_sample(1.0, from_unix_time_ns(2_000));
+    e.write_sample(2.0, from_unix_time_ns(3_000));
     assert(e.record_count == 2);
     assert(e.last_update == from_unix_time_ns(3_000));
 
     // a gap forces a bucket boundary and the successor bucket records it
     e.mark_gap();
-    e.observe(3.0, from_unix_time_ns(10_000));
+    e.write_sample(3.0, from_unix_time_ns(10_000));
     assert(e.bucket_count == 2);
     assert(e._history.buckets[$-1].follows_gap);
 
@@ -668,16 +710,16 @@ unittest
     // irregular block append feeds the tail and updates latest
     double[3] vals = [4.0, 5.0, 6.0];
     SysTime[3] times = [from_unix_time_ns(11_000), from_unix_time_ns(12_000), from_unix_time_ns(13_000)];
-    e.observe_block(vals[], times[]);
+    e.write_samples(vals[], times[]);
     assert(e.record_count == 6);
     assert(e.latest.f64_ == 6.0);
     b = c.next(16);
     assert(b.count == 3 && b.ts !is null && b.time(2) == from_unix_time_ns(13_000));
     e.close_cursor(c);
 
-    // untemplated record write: same flow as observe(), format known only at runtime
+    // untyped record write: same flow as write_sample(), format known only at runtime
     double rv = 7.0;
-    e.observe_record((cast(const(void)*)&rv)[0 .. 8], from_unix_time_ns(14_000));
+    e.write_record((cast(const(void)*)&rv)[0 .. 8], from_unix_time_ns(14_000));
     assert(e.record_count == 7);
     assert(e.latest.f64_ == 7.0);
 
@@ -687,26 +729,26 @@ unittest
     Element2 te;
     te.format = &text_fmt;
     te.ensure_history();
-    te.observe_text("run", from_unix_time_ns(500));
+    te.write_sample("run", from_unix_time_ns(500));
     assert(te.record_count == 1);
     assert((cast(const(TextRecord)*)te.latest.raw.ptr).embedded);
     assert(te.value().asString == "run");
 
-    te.observe_text("a string too long to embed anywhere", from_unix_time_ns(1_000));
+    te.write_sample("a string too long to embed anywhere", from_unix_time_ns(1_000));
     assert(te.record_count == 2);
     assert(!(cast(const(TextRecord)*)te.latest.raw.ptr).embedded);
     assert(te.value().asString == "a string too long to embed anywhere");
     const(char)* allocated = (cast(const(String)*)te.latest.raw.ptr).ptr;
-    te.observe_text("a string too long to embed anywhere", from_unix_time_ns(2_000));
+    te.write_sample("a string too long to embed anywhere", from_unix_time_ns(2_000));
     assert(te.record_count == 2);
     assert((cast(const(String)*)te.latest.raw.ptr).ptr is allocated);
     assert(te.last_update == from_unix_time_ns(2_000));
 
-    // String overload adopts the handle; refs = caller + latest slot + bucket record
+    // String ingress adopts the handle; refs = caller + latest slot + bucket record
     String src = "second value arriving as a shared handle".makeString(defaultAllocator());
     static ushort rc(ref const String s) => (cast(const(ushort)*)s.ptr)[-2] & 0x3FFF;
     assert(rc(src) == 0);
-    te.observe_text(src, from_unix_time_ns(3_000));
+    te.write_sample(src, from_unix_time_ns(3_000));
     assert(te.record_count == 3);
     assert(rc(src) == 2);
     assert(te.value().asString == src[]);
@@ -722,6 +764,16 @@ unittest
     te.teardown();
     assert(rc(src) == 0);
 
+    Element2 text_batch;
+    text_batch.format = &text_fmt;
+    text_batch.ensure_history();
+    const(char)[][2] words = ["one", "two"];
+    SysTime[2] word_times = [from_unix_time_ns(4_000), from_unix_time_ns(5_000)];
+    text_batch.write_samples(words[], word_times[]);
+    assert(text_batch.record_count == 2);
+    assert(text_batch.value().asString == "two");
+    text_batch.teardown();
+
     // retention: sealed buckets shrink to fit, the budget evicts from the front, lapped cursors report loss
     Element2 r;
     r.format = &f64_held;
@@ -729,7 +781,7 @@ unittest
     Cursor lap = r.open_cursor(0);
     foreach (i; 0 .. 6)
     {
-        r.observe(double(i), from_unix_time_ns(1_000 * (i + 1)));
+        r.write_sample(double(i), from_unix_time_ns(1_000 * (i + 1)));
         r.mark_gap();   // force one-record buckets
     }
     assert(r.record_count == 6);
@@ -747,13 +799,13 @@ unittest
     Cursor pinc = p.open_cursor(0, true);
     foreach (i; 0 .. 6)
     {
-        p.observe(double(i), from_unix_time_ns(1_000 * (i + 1)));
+        p.write_sample(double(i), from_unix_time_ns(1_000 * (i + 1)));
         p.mark_gap();
     }
     assert(p._history.first_index == 0);
     foreach (_; 0 .. 4)
         pinc.next(1);
-    p.observe(6.0, from_unix_time_ns(7_000));
+    p.write_sample(6.0, from_unix_time_ns(7_000));
     assert(p._history.first_index == 4);
     p.close_cursor(pinc);
     p.teardown();
@@ -765,7 +817,7 @@ unittest
     Cursor stall = x.open_cursor(0, true);
     foreach (i; 0 .. 6)
     {
-        x.observe(double(i), from_unix_time_ns(1_000 * (i + 1)));
+        x.write_sample(double(i), from_unix_time_ns(1_000 * (i + 1)));
         x.mark_gap();
     }
     assert(x._history.first_index == 3);
@@ -780,11 +832,11 @@ unittest
     a.retention(1.seconds);
     foreach (i; 0 .. 3)
     {
-        a.observe(double(i), from_unix_time_ns(1_000_000L * (i + 1)));
+        a.write_sample(double(i), from_unix_time_ns(1_000_000L * (i + 1)));
         a.mark_gap();
     }
     assert(a._history.first_index == 0);
-    a.observe(9.0, from_unix_time_ns(3_000_000_000L));
+    a.write_sample(9.0, from_unix_time_ns(3_000_000_000L));
     assert(a._history.first_index == 3);
     a.teardown();
 
@@ -797,14 +849,14 @@ unittest
     ubyte[32] key1;
     foreach (i, ref byt; key1)
         byt = cast(ubyte)i;
-    k.observe_record(key1[], from_unix_time_ns(1_000));
+    k.write_record(key1[], from_unix_time_ns(1_000));
     assert(k.record_count == 1);
     assert(cast(const(ubyte)[])k.value().asBuffer == key1[]);
-    k.observe_record(key1[], from_unix_time_ns(2_000));
+    k.write_record(key1[], from_unix_time_ns(2_000));
     assert(k.record_count == 1 && k.last_update == from_unix_time_ns(2_000));   // held dedup vs the tail
     ubyte[32] key2 = key1;
     key2[0] = 0xFF;
-    k.observe_record(key2[], from_unix_time_ns(3_000));
+    k.write_record(key2[], from_unix_time_ns(3_000));
     assert(k.record_count == 2);
     assert(cast(const(ubyte)[])k.value().asBuffer == key2[]);
     assert(cast(const(ubyte)[])k.tail_record() == key2[]);
@@ -821,14 +873,14 @@ unittest
     tv.format = &text_fmt;
     tv.retention(1);
     String evictee = "the first long string, soon evicted".makeString(defaultAllocator());
-    tv.observe_text(evictee, from_unix_time_ns(1_000));
+    tv.write_sample(evictee, from_unix_time_ns(1_000));
     assert(rc(evictee) == 2);
     tv.mark_gap();
-    tv.observe_text("replacement value, also quite long", from_unix_time_ns(2_000));
+    tv.write_sample("replacement value, also quite long", from_unix_time_ns(2_000));
     assert(rc(evictee) == 0);   // slot replaced, bucket evicted
     tv.teardown();
 
-    // TODO: regular-series test returns once append_block is rebuilt and tick() is rate-aware
+    // TODO: regular-series test returns once regular write_records() and rate-aware tick() are built
 }
 
 
@@ -846,7 +898,7 @@ void sweep_dirty(scope void delegate(ref Element2) nothrow @nogc visit)
 
 private:
 
-// compile-time twin of ValueType for the typed observe() entry
+// compile-time twin of ValueType for the typed write_sample() entry
 template value_type_of(T)
 {
     static if (is(T == bool))        enum value_type_of = ValueType.bool_;

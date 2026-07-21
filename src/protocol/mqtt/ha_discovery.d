@@ -148,7 +148,7 @@ nothrow @nogc:
         foreach (ref entity; _entities)
         {
             if (entity.state_topic[] == topic)
-                observe(entity, payload, cast(SysTime)timestamp);
+                write_state(entity, payload, cast(SysTime)timestamp);
         }
     }
 
@@ -648,7 +648,7 @@ private:
         }
     }
 
-    void observe(ref HAEntity entity, const(ubyte)[] payload, SysTime timestamp)
+    void write_state(ref HAEntity entity, const(ubyte)[] payload, SysTime timestamp)
     {
         const(char)[] text = cast(const(char)[])payload;
         Variant json;
@@ -713,7 +713,7 @@ private:
         {
             if (value.isNumber)
             {
-                observe_number(entity, value.asDouble, timestamp);
+                write_number(entity, value.asDouble, timestamp);
                 return;
             }
             if (value.isBool)
@@ -741,14 +741,14 @@ private:
             double number = parse_float(text, &taken);
             if (taken == text.length)
             {
-                observe_number(entity, number, timestamp);
+                write_number(entity, number, timestamp);
                 return;
             }
         }
         entity.state.value(text, timestamp);
     }
 
-    static void observe_number(ref HAEntity entity, double value, SysTime timestamp)
+    static void write_number(ref HAEntity entity, double value, SysTime timestamp)
     {
         if (!entity.unit.empty)
         {
