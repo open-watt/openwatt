@@ -267,7 +267,8 @@ protected:
         super.update();
     }
 
-    final override int transmit(ref const Packet packet, MessageCallback callback = null) nothrow @nogc
+    final override int transmit(ref const Packet packet, MessageCallback callback = null,
+        const(QueuePolicy)* queue_policy = null) nothrow @nogc
     {
         // can only handle zigbee packets
         switch (packet.type)

@@ -72,6 +72,26 @@ enum PCP : ubyte
 
 immutable ubyte[8] pcp_priority_map = [1, 0, 2, 3, 4, 5, 6, 7];
 
+struct QueuePolicy
+{
+nothrow @nogc:
+    void set_deadline(Duration timeout, PCP urgent, ubyte escalation_percent = 50)
+    {
+        assert(timeout > Duration.zero, "Queue deadline must be positive");
+        assert(escalation_percent <= 100, "Escalation percentage must be at most 100");
+
+        long timeout_ms = timeout.as!"msecs";
+        assert(timeout_ms <= uint.max, "Queue deadline must fit in milliseconds");
+        deadline_after = cast(uint)timeout_ms;
+        priority_escalation_after = cast(uint)(timeout_ms * escalation_percent / 100);
+        urgent_pcp = urgent;
+    }
+
+    uint deadline_after;
+    uint priority_escalation_after;
+    PCP urgent_pcp = PCP.be;
+}
+
 
 alias AddressExtract = ulong function(ref const Packet) pure nothrow @nogc;
 alias IsMulticastAddress = bool function(ulong address) pure nothrow @nogc;

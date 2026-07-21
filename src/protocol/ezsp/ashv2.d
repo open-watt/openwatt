@@ -217,7 +217,7 @@ protected:
         }
     }
 
-    override int transmit(ref Packet packet, MessageCallback)
+    override int transmit(ref Packet packet, MessageCallback, const(QueuePolicy)*)
     {
         if (packet.type != PacketType.raw)
             return -1;

@@ -373,7 +373,7 @@ protected:
         }
     }
 
-    override int transmit(ref const Packet packet, MessageCallback)
+    override int transmit(ref const Packet packet, MessageCallback, const(QueuePolicy)*)
     {
         // can only handle can packets
         if (packet.type != PacketType.can)

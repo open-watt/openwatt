@@ -140,10 +140,10 @@ protected:
     // override forward() instead of transmit() for the ethernet path, to pass the
     // callback through to the parent without double firing; exotic packets route
     // through the inherited station egress.
-    final override int forward(ref Packet packet, MessageCallback callback = null)
+    final override int forward(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
     {
         if (packet.type != PacketType.ethernet)
-            return super.forward(packet, callback);
+            return super.forward(packet, callback, queue_policy);
 
         if (!running)
         {
@@ -161,7 +161,7 @@ protected:
                 sub.recv_packet(packet, this, PacketDirection.outgoing, sub.user_data);
         }
 
-        int result = _interface.forward(packet, callback);
+        int result = _interface.forward(packet, callback, queue_policy);
         if (result >= 0)
             add_tx_frame(packet.data.length);
         return result;

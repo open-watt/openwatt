@@ -176,7 +176,7 @@ nothrow @nogc:
 
     // API...
 
-    override int transmit(ref Packet packet, MessageCallback)
+    override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)* queue_policy)
     {
         // data rides on the endpoint interfaces; the trunk carries no packets of its own
         return -1;
@@ -1093,7 +1093,7 @@ nothrow @nogc:
 
     // API...
 
-    override int transmit(ref Packet packet, MessageCallback)
+    override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)* queue_policy)
     {
         if (packet.type != PacketType.raw)
             return -1;
