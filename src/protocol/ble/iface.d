@@ -283,7 +283,7 @@ protected:
         send_queued_messages();
     }
 
-    final override int transmit(ref Packet packet, MessageCallback callback = null)
+    final override int transmit(ref Packet packet, MessageCallback callback = null, const(QueuePolicy)* queue_policy = null)
     {
         if (packet.type != PacketType.ble)
         {

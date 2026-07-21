@@ -289,7 +289,7 @@ nothrow @nogc:
             g_bridge_cpu_promisc_changed(this);
     }
 
-    protected override int transmit(ref Packet packet, MessageCallback callback)
+    protected override int transmit(ref Packet packet, MessageCallback callback, const(QueuePolicy)*)
     {
         // this is a packet entering the bridge from the bridge interface...
 

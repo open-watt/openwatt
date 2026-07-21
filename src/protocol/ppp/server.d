@@ -95,7 +95,7 @@ protected:
         assert(false, "TODO");
     }
 
-    override int transmit(ref const Packet packet, MessageCallback)
+    override int transmit(ref const Packet packet, MessageCallback, const(QueuePolicy)*)
     {
         assert(false, "TODO: frame and transmit");
     }
