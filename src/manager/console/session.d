@@ -476,6 +476,11 @@ nothrow @nogc:
     final Array!String suggest(const(char)[] text)
         => _console.suggest(text, _cur_scope);
 
+    void set_local(const(char)[] name, ref const Variant value)
+    {
+        _session_locals[makeString(name, _console._allocator)] = value;
+    }
+
 protected:
     void enter_command(const(char)[])
     {

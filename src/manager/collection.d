@@ -25,7 +25,6 @@ enum CollectionType : ubyte
     binding, // all protocol bindings
     ble_client,
     certificate,
-    cron_job,
     dhcp_client,
     dhcp_lease,
     dhcp_option,
@@ -64,6 +63,7 @@ enum CollectionType : ubyte
     zb_controller,
     zb_endpoint,
     zigbee, // node, router, coordinator
+    automation,
     count
 }
 

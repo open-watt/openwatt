@@ -161,6 +161,9 @@ void register_modules(Application app)
         import apps.api;
         register_module!(apps.api)(app);
 
+        import apps.automation;
+        register_module!(apps.automation)(app);
+
         import apps.energy;
         register_module!(apps.energy)(app);
 
