@@ -591,14 +591,31 @@ nothrow @nogc:
 
     bool post_event(EventHandler handler, MonoTime when, EventPriority priority = EventPriority.control)
     {
+        import urt.atomic : atomicFetchAdd, atomicFetchSub, MemoryOrder;
+        import urt.log : writeError, writeWarning;
+
         bool ok;
         final switch (priority)
         {
             case EventPriority.control:
+                atomicFetchAdd!(MemoryOrder.relaxed)(_priority_events_posted, 1);
                 ok = _priority_events.enqueue(PendingEvent(handler, when));
+                if (!ok)
+                {
+                    atomicFetchSub!(MemoryOrder.relaxed)(_priority_events_posted, 1);
+                    atomicFetchAdd!(MemoryOrder.relaxed)(_priority_event_overflows, 1);
+                    writeError("priority event queue overflow handler=", cast(size_t)handler.funcptr, " ctx=", cast(size_t)handler.ptr);
+                }
                 break;
             case EventPriority.bulk:
+                atomicFetchAdd!(MemoryOrder.relaxed)(_bulk_events_posted, 1);
                 ok = _bulk_events.enqueue(PendingEvent(handler, when));
+                if (!ok)
+                {
+                    atomicFetchSub!(MemoryOrder.relaxed)(_bulk_events_posted, 1);
+                    atomicFetchAdd!(MemoryOrder.relaxed)(_bulk_event_overflows, 1);
+                    writeWarning("bulk event queue overflow handler=", cast(size_t)handler.funcptr, " ctx=", cast(size_t)handler.ptr);
+                }
                 break;
         }
         if (!ok)
@@ -621,16 +638,44 @@ nothrow @nogc:
 
     void process_events()
     {
+        import urt.atomic : atomicFetchAdd, MemoryOrder;
+        import urt.log : writeWarning;
+
         enum Duration bulk_slice = msecs(500);
+        enum SlowEventHandlerMs = 50;
+        enum SlowEventFlushMs = 200;
 
         _wake_event.reset();
+        MonoTime flush_start = getTime();
+        Duration worst_event_dur;
+        Duration worst_event_age;
+        const(char)[] worst_event_queue = "none";
+        size_t worst_event_func;
+        size_t worst_event_ctx;
+        uint priority_count, bulk_count, passes, slices;
         PendingEvent e;
         for (;;)
         {
+            ++passes;
             bool any_priority = false;
             while (_priority_events.dequeue(e))
             {
+                atomicFetchAdd!(MemoryOrder.relaxed)(_priority_events_processed, 1);
+                MonoTime event_start = getTime();
                 e.handler(e.when);
+                Duration d = getTime() - event_start;
+                Duration age = event_start - e.when;
+                if (d > worst_event_dur)
+                {
+                    worst_event_dur = d;
+                    worst_event_age = age;
+                    worst_event_queue = "priority";
+                    worst_event_func = cast(size_t)e.handler.funcptr;
+                    worst_event_ctx = cast(size_t)e.handler.ptr;
+                }
+                if (d.as!"msecs" >= SlowEventHandlerMs)
+                    writeWarning("slow-priority-event: ", d.as!"msecs", "ms age=", age.as!"msecs", "ms handler=", cast(size_t)e.handler.funcptr, " ctx=", cast(size_t)e.handler.ptr);
+                ++priority_count;
                 any_priority = true;
             }
 
@@ -638,10 +683,27 @@ nothrow @nogc:
             bool any_bulk = false;
             while (_bulk_events.dequeue(e))
             {
+                atomicFetchAdd!(MemoryOrder.relaxed)(_bulk_events_processed, 1);
+                MonoTime event_start = getTime();
                 e.handler(e.when);
+                Duration d = getTime() - event_start;
+                Duration age = event_start - e.when;
+                if (d > worst_event_dur)
+                {
+                    worst_event_dur = d;
+                    worst_event_age = age;
+                    worst_event_queue = "bulk";
+                    worst_event_func = cast(size_t)e.handler.funcptr;
+                    worst_event_ctx = cast(size_t)e.handler.ptr;
+                }
+                if (d.as!"msecs" >= SlowEventHandlerMs)
+                    writeWarning("slow-bulk-event: ", d.as!"msecs", "ms age=", age.as!"msecs", "ms handler=", cast(size_t)e.handler.funcptr, " ctx=", cast(size_t)e.handler.ptr);
+                ++bulk_count;
                 any_bulk = true;
                 if (getTime() >= slice_end)
                 {
+                    ++slices;
+                    log_event_flush(flush_start, worst_event_dur, worst_event_age, worst_event_queue, worst_event_func, worst_event_ctx, priority_count, bulk_count, passes, slices, true);
                     _wake_event.set();   // re-arm; let main loop fire timers,
                     return;              // then drop back in priority-first.
                 }
@@ -650,6 +712,8 @@ nothrow @nogc:
             if (!any_priority && !any_bulk)
                 break;
         }
+        if ((getTime() - flush_start).as!"msecs" >= SlowEventFlushMs)
+            log_event_flush(flush_start, worst_event_dur, worst_event_age, worst_event_queue, worst_event_func, worst_event_ctx, priority_count, bulk_count, passes, slices, false);
     }
 
     void update()
@@ -1059,6 +1123,37 @@ private:
 
     MpscQueue!(PendingEvent, 32)  _priority_events;
     MpscQueue!(PendingEvent, 256) _bulk_events;
+    shared uint _priority_events_posted;
+    shared uint _bulk_events_posted;
+    shared uint _priority_events_processed;
+    shared uint _bulk_events_processed;
+    shared uint _priority_event_overflows;
+    shared uint _bulk_event_overflows;
+
+    void log_event_flush(MonoTime flush_start, Duration worst_event_dur, Duration worst_event_age,
+                         const(char)[] worst_event_queue, size_t worst_event_func,
+                         size_t worst_event_ctx, uint priority_count, uint bulk_count,
+                         uint passes, uint slices, bool sliced)
+    {
+        import urt.atomic : atomicLoad, MemoryOrder;
+        import urt.log : writeWarning;
+
+        uint priority_posted = atomicLoad!(MemoryOrder.relaxed)(_priority_events_posted);
+        uint bulk_posted = atomicLoad!(MemoryOrder.relaxed)(_bulk_events_posted);
+        uint priority_processed = atomicLoad!(MemoryOrder.relaxed)(_priority_events_processed);
+        uint bulk_processed = atomicLoad!(MemoryOrder.relaxed)(_bulk_events_processed);
+        Duration total = getTime() - flush_start;
+        writeWarning("event-flush: ", total.as!"msecs", "ms priority=", priority_count,
+                     " bulk=", bulk_count, " passes=", passes, " slices=", slices,
+                     sliced ? " sliced" : " drained",
+                     " queued(priority=", priority_posted - priority_processed,
+                     " bulk=", bulk_posted - bulk_processed, ")",
+                     " overflows(priority=", atomicLoad!(MemoryOrder.relaxed)(_priority_event_overflows),
+                     " bulk=", atomicLoad!(MemoryOrder.relaxed)(_bulk_event_overflows), ")",
+                     " worst=", worst_event_queue, ":", worst_event_dur.as!"msecs",
+                     "ms age=", worst_event_age.as!"msecs", "ms handler=", worst_event_func,
+                     " ctx=", worst_event_ctx);
+    }
 
     void _timer_remove(size_t i)
     {
@@ -1071,39 +1166,32 @@ private:
     {
         update();
 
-        if (++_tick_count >= update_rate_hz)
-        {
-            run_heartbeat(getTime());
-            _tick_count = 0;
-
-            version (Embedded)
-            {
-                ++_tick_seconds;
-                import urt.log : writeInfo;
-                import urt.system : get_cpu_load;
-                writeInfo("hb=", _tick_seconds, " load=", get_cpu_load(), "%");
-            }
-        }
-
-        schedule(scheduled + msecs(1000 / update_rate_hz), &tick);
+        schedule(getTime() + msecs(1000 / update_rate_hz), &tick);
     }
 
     void heartbeat(MonoTime scheduled)
     {
-        run_heartbeat(getTime());
-        schedule(scheduled + 1.seconds, &heartbeat);
-    }
-
-    void run_heartbeat(MonoTime now)
-    {
+        MonoTime now = getTime();
         foreach (handler; _heartbeat_handlers)
             handler(now);
+
+        version (Embedded)
+        {
+            import urt.log : writeInfo;
+            import urt.system : get_cpu_load;
+            writeInfo("hb=", ++_heartbeats, " load=", get_cpu_load(), "%");
+        }
+
+        MonoTime next = scheduled + 1.seconds;
+        now = getTime();
+        if (next <= now) // stalled: skip missed beats but hold the 1s grid
+            next += ((now - next).as!"seconds" + 1).seconds;
+        schedule(next, &heartbeat);
     }
 
     Array!HeartbeatHandler _heartbeat_handlers;
-    uint _tick_count;
     version (Embedded)
-        uint _tick_seconds;
+        uint _heartbeats;
 }
 
 Element* resolve_global_element(const(char)[] path) nothrow @nogc
