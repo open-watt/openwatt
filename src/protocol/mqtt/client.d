@@ -57,6 +57,7 @@ nothrow @nogc:
         if (value == _host)
             return;
         _host = value.move;
+        mark_set!(typeof(this), "host")();
         restart();
     }
 
@@ -67,6 +68,7 @@ nothrow @nogc:
         if (_port == value)
             return;
         _port = value;
+        mark_set!(typeof(this), "port")();
         restart();
     }
 
@@ -77,6 +79,7 @@ nothrow @nogc:
         if (value == _protocol_level)
             return;
         _protocol_level = value;
+        mark_set!(typeof(this), "protocol-version")();
         restart();
     }
 
@@ -87,6 +90,7 @@ nothrow @nogc:
         if (value == _client_id)
             return;
         _client_id = value.move;
+        mark_set!(typeof(this), "client-id")();
         restart();
     }
 
@@ -97,6 +101,7 @@ nothrow @nogc:
         if (value == _clean_start)
             return;
         _clean_start = value;
+        mark_set!(typeof(this), "clean-start")();
     }
 
     ushort keep_alive() const pure
@@ -106,6 +111,7 @@ nothrow @nogc:
         if (value == _keep_alive)
             return;
         _keep_alive = value;
+        mark_set!(typeof(this), "keep-alive")();
         restart();
     }
 
@@ -116,6 +122,7 @@ nothrow @nogc:
         if (value == _username)
             return;
         _username = value.move;
+        mark_set!(typeof(this), "username")();
         restart();
     }
 
@@ -126,6 +133,7 @@ nothrow @nogc:
         if (value == _password[])
             return;
         _password = value;
+        mark_set!(typeof(this), "password")();
         restart();
     }
 
@@ -136,6 +144,7 @@ nothrow @nogc:
         if (value == _will_topic)
             return;
         _will_topic = value.move;
+        mark_set!(typeof(this), "will-topic")();
         restart();
     }
 
@@ -146,6 +155,7 @@ nothrow @nogc:
         if (value == _will_payload[])
             return;
         _will_payload = value;
+        mark_set!(typeof(this), "will-payload")();
         restart();
     }
 
@@ -158,6 +168,7 @@ nothrow @nogc:
         if (value == _will_qos)
             return;
         _will_qos = value;
+        mark_set!(typeof(this), "will-qos")();
         restart();
     }
 
@@ -168,6 +179,7 @@ nothrow @nogc:
         if (value == _will_retain)
             return;
         _will_retain = value;
+        mark_set!(typeof(this), "will-retain")();
         restart();
     }
 

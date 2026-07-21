@@ -62,6 +62,7 @@ nothrow @nogc:
         if (_index == value)
             return;
         _index = value;
+        mark_set!(typeof(this), "hci-index")();
         restart();
     }
 

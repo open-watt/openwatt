@@ -59,6 +59,7 @@ nothrow @nogc:
         if (_port == value)
             return null;
         _port = value;
+        mark_set!(typeof(this), "port")();
 
         if (_server)
             _server.port = _port;
@@ -72,6 +73,7 @@ nothrow @nogc:
         if (_tls_port == value)
             return null;
         _tls_port = value;
+        mark_set!(typeof(this), "tls-port")();
 
         if (_tls_server)
             _tls_server.port = _tls_port;
@@ -90,6 +92,7 @@ nothrow @nogc:
         _certificates.reserve(value.length);
         foreach (c; value)
             _certificates.emplaceBack(c);
+        mark_set!(typeof(this), "certificates")();
         restart();
     }
 
@@ -98,6 +101,7 @@ nothrow @nogc:
     void https_redirect(bool value)
     {
         _https_redirect = value;
+        mark_set!(typeof(this), "https-redirect")();
     }
 
     size_t max_request_body() const pure
@@ -105,6 +109,7 @@ nothrow @nogc:
     void max_request_body(size_t value)
     {
         _max_request_body = value;
+        mark_set!(typeof(this), "max-request-body")();
         foreach (s; _sessions)
             s.parser.max_buffered_body = value;
     }

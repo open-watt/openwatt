@@ -65,6 +65,7 @@ nothrow @nogc:
             _subscribed = false;
         }
         _iface = value;
+        mark_set!(typeof(this), "interface")();
         restart();
     }
 
@@ -75,6 +76,7 @@ nothrow @nogc:
         if (_requested_address == value)
             return;
         _requested_address = value;
+        mark_set!(typeof(this), "address")();
         restart();
     }
 
@@ -85,6 +87,7 @@ nothrow @nogc:
         if (_snooping == value)
             return;
         _snooping = value;
+        mark_set!(typeof(this), "snoop")();
         restart();
     }
 

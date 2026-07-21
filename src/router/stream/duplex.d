@@ -41,6 +41,7 @@ nothrow @nogc:
             _tx_subscribed = false;
         }
         _tx = value;
+        mark_set!(typeof(this), "tx")();
         restart();
     }
 
@@ -55,6 +56,7 @@ nothrow @nogc:
             _rx_subscribed = false;
         }
         _rx = value;
+        mark_set!(typeof(this), "rx")();
         restart();
     }
 

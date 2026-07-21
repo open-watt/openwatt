@@ -57,6 +57,7 @@ nothrow @nogc:
             _subscribed = false;
         }
         _iface = value;
+        mark_set!(typeof(this), "interface")();
         restart();
     }
 
@@ -67,6 +68,7 @@ nothrow @nogc:
         if (_peer == value)
             return;
         _peer = value;
+        mark_set!(typeof(this), "peer")();
         restart();
     }
 

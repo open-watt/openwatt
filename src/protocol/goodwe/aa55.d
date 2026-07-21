@@ -368,6 +368,7 @@ nothrow @nogc:
         if (value == _remote)
             return;
         _remote = value;
+        mark_set!(typeof(this), "remote")();
 
         restart();
     }
@@ -380,6 +381,7 @@ nothrow @nogc:
 
         _host = value.move;
         _remote = InetAddress();
+        mark_set!(typeof(this), "remote")();
 
         restart();
         return null;

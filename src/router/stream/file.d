@@ -51,6 +51,7 @@ nothrow @nogc:
         if (value == _tx_path)
             return;
         _tx_path = value.move;
+        mark_set!(typeof(this), "tx-file")();
         restart();
     }
 
@@ -60,6 +61,7 @@ nothrow @nogc:
         if (value == _rx_path)
             return;
         _rx_path = value.move;
+        mark_set!(typeof(this), "rx-file")();
         restart();
     }
 
@@ -69,6 +71,7 @@ nothrow @nogc:
         if (value == _tx_mode)
             return;
         _tx_mode = value;
+        mark_set!(typeof(this), "tx-mode")();
         restart();
     }
 

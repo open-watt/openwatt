@@ -24,8 +24,8 @@ nothrow @nogc:
 
 class ZigbeeRouter : ZigbeeNode
 {
-    alias Properties = AliasSeq!(Prop!("pan-eui", _pan_eui),
-                                 Prop!("pan-id", _pan_id));
+    alias Properties = AliasSeq!(Prop!("pan-eui", pan_eui),
+                                 Prop!("pan-id", pan_id));
 nothrow @nogc:
 
     enum type_name = "zb-router";
@@ -40,16 +40,18 @@ nothrow @nogc:
 
     EUI64 pan_eui() const pure
         => _network_params.pan_id == 0xFFFF ? _pan_eui : _network_params.extended_pan_id;
-    void pan_eui(EUI64 value) pure
+    void pan_eui(EUI64 value)
     {
         _pan_eui = value;
+        mark_set!(typeof(this), "pan-eui")();
     }
 
     ushort pan_id() const pure
         => _network_params.pan_id == 0xFFFF ? _pan_id : _network_params.pan_id;
-    void pan_id(ushort value) pure
+    void pan_id(ushort value)
     {
         _pan_id = value;
+        mark_set!(typeof(this), "pan-id")();
     }
 
     final override bool is_router() const pure

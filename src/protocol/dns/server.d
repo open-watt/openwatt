@@ -86,6 +86,7 @@ nothrow @nogc:
 
         _interface = value;
         _interface.subscribe(&incoming_packet, PacketFilter(ether_type: EtherType.ip4, ether_type_2: EtherType.ip6), null);
+        mark_set!(typeof(this), "interface")();
 
         restart();
         return null;
@@ -116,6 +117,7 @@ nothrow @nogc:
             if (p)
                 _protocols |= 1 << *p;
         }
+        mark_set!(typeof(this), "protocols")();
     }
     void protocols(ref Array!String value)
         => protocols(value[]);
@@ -131,6 +133,7 @@ nothrow @nogc:
 
         doh_subscribe(_doh_server, value);
         _doh_server = value;
+        mark_set!(typeof(this), "doh-server")();
 
         return null;
     }
@@ -142,6 +145,7 @@ nothrow @nogc:
         // TODO: property should just accept a String!
         _doh_uri = value.makeString(defaultAllocator);
         doh_subscribe(_doh_server, _doh_server);
+        mark_set!(typeof(this), "doh-uri")();
         return null;
     }
 

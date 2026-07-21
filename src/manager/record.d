@@ -244,6 +244,7 @@ nothrow @nogc:
         if (_dir[] == value)
             return;
         _dir = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "dir")();
         restart();
     }
 
@@ -254,6 +255,7 @@ nothrow @nogc:
         if (_filter[] == value)
             return;
         _filter = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "filter")();
         restart();
     }
 
@@ -262,6 +264,7 @@ nothrow @nogc:
     final void min_period(Duration value)
     {
         _min_period = value;
+        mark_set!(typeof(this), "min-period")();
     }
 
     // API

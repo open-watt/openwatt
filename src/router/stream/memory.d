@@ -62,6 +62,7 @@ nothrow @nogc:
         if (value == _tx_mode)
             return;
         _tx_mode = value;
+        mark_set!(typeof(this), "tx-mode")();
         restart();
     }
 
@@ -72,6 +73,7 @@ nothrow @nogc:
         if (p is _tx.ptr)
             return;
         _tx = p[0 .. _tx.length];
+        mark_set!(typeof(this), "tx-ptr")();
         restart();
     }
 
@@ -81,6 +83,7 @@ nothrow @nogc:
         if (value == _tx.length)
             return;
         _tx = _tx.ptr[0 .. value];
+        mark_set!(typeof(this), "tx-size")();
         restart();
     }
 
@@ -90,6 +93,7 @@ nothrow @nogc:
         if (value == _rx_mode)
             return;
         _rx_mode = value;
+        mark_set!(typeof(this), "rx-mode")();
         restart();
     }
 
@@ -100,6 +104,7 @@ nothrow @nogc:
         if (p is _rx.ptr)
             return;
         _rx = p[0 .. _rx.length];
+        mark_set!(typeof(this), "rx-ptr")();
         restart();
     }
 
@@ -109,6 +114,7 @@ nothrow @nogc:
         if (value == _rx.length)
             return;
         _rx = _rx.ptr[0 .. value];
+        mark_set!(typeof(this), "rx-size")();
         restart();
     }
 

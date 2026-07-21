@@ -52,9 +52,10 @@ nothrow @nogc:
 
     HTTPServer http_server() const
         => _server_id.get_item!HTTPServer;
-    void http_server(HTTPServer value) pure
+    void http_server(HTTPServer value)
     {
         _server_id = value.id;
+        mark_set!(typeof(this), "http-server")();
     }
 
     const(char)[] uri() const pure
@@ -62,6 +63,7 @@ nothrow @nogc:
     void uri(const(char)[] value)
     {
         _uri = value.makeString(g_app.allocator);
+        mark_set!(typeof(this), "uri")();
     }
 
 protected:
