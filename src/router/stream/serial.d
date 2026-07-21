@@ -1,18 +1,22 @@
 module router.stream.serial;
 
+import urt.array;
 import urt.io;
 import urt.lifetime;
 import urt.log;
+import urt.mem;
 import urt.meta.nullable;
 import urt.result;
 import urt.string;
 import urt.string.format;
+import urt.time;
 
 import manager;
 import manager.collection;
 import manager.console.session;
 import manager.plugin;
 
+import router.port;
 public import router.stream;
 
 version (Windows)
@@ -64,6 +68,14 @@ enum FlowControl : ubyte
 
     rts_cts = hardware,
     xon_xoff = software
+}
+
+struct ModemLines
+{
+    bool valid;         // port open and query succeeded
+    bool outputs_valid; // rts/dtr are readable (posix only; windows can't read back outputs)
+    bool rts, dtr;      // what we assert
+    bool cts, dsr, dcd, ri; // what the peer presents
 }
 
 struct SerialParams
@@ -215,7 +227,16 @@ nothrow @nogc:
             return;
         _params.flow_control = value;
         mark_set!(typeof(this), "flow-control");
-        restart();
+        // reconfigure the open port in place rather than restart(): a close/reopen cycles the modem
+        // lines the peer sees, which both disturbs flow-control-sensitive devices (Silabs NCPs stop
+        // transmitting) and makes runtime flow-control experiments unrepresentative
+        version (Embedded)
+            restart();
+        else
+        {
+            if (!running || !configure_port(false))
+                restart();
+        }
     }
 
     version (Embedded)
@@ -279,96 +300,7 @@ nothrow @nogc:
             if (_h_com == INVALID_HANDLE_VALUE)
                 return CompletionStatus.error;
 
-            DCB dcb = void;
-            ZeroMemory(&dcb, DCB.sizeof);
-            dcb.DCBlength = DCB.sizeof;
-            if (!GetCommState(_h_com, &dcb))
-                return CompletionStatus.error;
-
-            dcb._bf = 1;
-
-            dcb.BaudRate = DWORD(_params.baud_rate);
-            dcb.ByteSize = _params.data_bits;
-
-            if (_params.stop_bits == StopBits.one)
-                dcb.StopBits = ONESTOPBIT;
-            else if (_params.stop_bits == StopBits.one_point_five)
-                dcb.StopBits = ONE5STOPBITS;
-            else if (_params.stop_bits == StopBits.two)
-                dcb.StopBits = TWOSTOPBITS;
-
-            switch (_params.parity)
-            {
-                case Parity.none:   dcb.Parity = NOPARITY;      break;
-                case Parity.even:   dcb.Parity = EVENPARITY;    break;
-                case Parity.odd:    dcb.Parity = ODDPARITY;     break;
-                case Parity.mark:   dcb.Parity = MARKPARITY;    break;
-                case Parity.space:  dcb.Parity = SPACEPARITY;   break;
-                default: assert(false);
-            }
-            if (_params.parity != Parity.none)
-                dcb._bf |= 2; // fParity: set to enable parity checking?
-
-            switch (_params.flow_control)
-            {
-                case FlowControl.none:
-                    dcb._bf &= ~4; // fOutxCtsFlow
-                    dcb._bf &= ~8; // fOutxDsrFlow
-                    dcb._bf &= ~0x40; // fDsrSensitivity
-                    dcb._bf &= ~0x100; // fOutX
-                    dcb._bf &= ~0x200; // fInX
-                    dcb._bf &= ~0x3030;
-                    dcb._bf |= RTSControl.disable << 12; // fRtsControl
-                    dcb._bf |= DTRControl.disable << 4; // fDtrControl
-                    break;
-                case FlowControl.hardware:
-                    dcb._bf |= 4; // fOutxCtsFlow
-                    dcb._bf &= ~8; // fOutxDsrFlow
-                    dcb._bf &= ~0x100; // fOutX
-                    dcb._bf &= ~0x200; // fInX
-                    dcb._bf &= ~0x3030;
-                    dcb._bf |= RTSControl.handshake << 12; // fRtsControl
-//                    dcb._bf |= RTSControl.enable << 12; // fRtsControl
-                    dcb._bf |= DTRControl.enable << 4; // fDtrControl
-                    break;
-                case FlowControl.software:
-                    dcb._bf &= ~4; // fOutxCtsFlow
-                    dcb._bf &= ~8; // fOutxDsrFlow
-                    dcb._bf &= ~0x40; // fDsrSensitivity
-                    dcb._bf |= 0x100; // fOutX
-                    dcb._bf |= 0x200; // fInX
-                    dcb.XonChar = 0x11;
-                    dcb.XoffChar = 0x13;
-                    dcb.XonLim = 200;
-                    dcb.XoffLim = 200;
-                    dcb._bf &= ~0x3030;
-                    dcb._bf |= RTSControl.disable << 12; // fRtsControl
-                    dcb._bf |= DTRControl.enable << 4; // fDtrControl
-                    break;
-                case FlowControl.dsr_dtr:
-                    dcb._bf &= ~4; // fOutxCtsFlow
-                    dcb._bf |= 8; // fOutxDsrFlow
-                    dcb._bf |= 0x40; // fDsrSensitivity
-                    dcb._bf &= ~0x100; // fOutX
-                    dcb._bf &= ~0x200; // fInX
-                    dcb._bf &= ~0x3030;
-                    dcb._bf |= RTSControl.disable << 12; // fRtsControl
-                    dcb._bf |= DTRControl.handshake << 4; // fDtrControl
-                    break;
-                default:
-                    assert(false);
-            }
-
-            if (!SetCommState(_h_com, &dcb))
-                return CompletionStatus.error;
-
-            COMMTIMEOUTS timeouts = {};
-            timeouts.ReadIntervalTimeout = -1;
-            timeouts.ReadTotalTimeoutConstant = 0;
-            timeouts.ReadTotalTimeoutMultiplier = 0;
-            timeouts.WriteTotalTimeoutConstant = 0;
-            timeouts.WriteTotalTimeoutMultiplier = 0;
-            if (!SetCommTimeouts(_h_com, &timeouts))
+            if (!configure_port(true))
                 return CompletionStatus.error;
         }
         else version(Posix)
@@ -376,116 +308,12 @@ nothrow @nogc:
             _fd = urt.internal.sys.posix.open(device[].tstringz, O_RDWR | O_NOCTTY | O_NDELAY);
             if (_fd == -1)
             {
-                writeln("Failed to open device ", this.device);
+                log.error("failed to open device ", this.device);
                 return CompletionStatus.error;
             }
 
-            termios tty;
-            if (tcgetattr(_fd, &tty) != 0)
+            if (!configure_port(true))
                 return fail_posix_startup();
-
-            speed_t speed;
-            bool custom_baud = !posix_baud(_params.baud_rate, speed);
-            if (custom_baud)
-            {
-                version (linux) {}
-                else
-                {
-                    writeln("Unsupported serial baud rate ", _params.baud_rate);
-                    return fail_posix_startup();
-                }
-            }
-            else
-            {
-                if (cfsetospeed(&tty, speed) != 0 || cfsetispeed(&tty, speed) != 0)
-                    return fail_posix_startup();
-            }
-
-            tty.c_cflag &= ~(PARENB | PARODD | CMSPAR);
-            final switch (_params.parity)
-            {
-                case Parity.none:
-                    break;
-                case Parity.even:
-                    tty.c_cflag |= PARENB;
-                    break;
-                case Parity.odd:
-                    tty.c_cflag |= PARENB | PARODD;
-                    break;
-                case Parity.mark:
-                    tty.c_cflag |= PARENB | PARODD | CMSPAR;
-                    break;
-                case Parity.space:
-                    tty.c_cflag |= PARENB | CMSPAR;
-                    break;
-            }
-
-            tty.c_cflag &= ~CSTOPB;
-            if (_params.stop_bits == StopBits.two)
-                tty.c_cflag |= CSTOPB;
-            else if (_params.stop_bits == StopBits.one_point_five)
-            {
-                writeln("POSIX serial does not support 1.5 stop bits");
-                return fail_posix_startup();
-            }
-
-            tty.c_cflag &= ~CSIZE;
-            switch (_params.data_bits)
-            {
-                case 5: tty.c_cflag |= CS5; break;
-                case 6: tty.c_cflag |= CS6; break;
-                case 7: tty.c_cflag |= CS7; break;
-                case 8: tty.c_cflag |= CS8; break;
-                default:
-                    writeln("POSIX serial does not support ", _params.data_bits, " data bits");
-                    return fail_posix_startup();
-            }
-
-            tty.c_cflag &= ~CRTSCTS;
-            tty.c_cflag |= CREAD | CLOCAL;
-            tty.c_iflag &= ~(IXON | IXOFF | IXANY);
-            final switch (_params.flow_control)
-            {
-                case FlowControl.none:
-                    break;
-                case FlowControl.hardware:
-                    tty.c_cflag |= CRTSCTS;
-                    break;
-                case FlowControl.software:
-                    tty.c_iflag |= IXON | IXOFF;
-                    break;
-                case FlowControl.dsr_dtr:
-                    writeln("POSIX serial does not support DSR/DTR flow control");
-                    return fail_posix_startup();
-            }
-
-            tty.c_lflag &= ~ICANON;
-            tty.c_lflag &= ~ECHO;   // Disable echo
-            tty.c_lflag &= ~ECHOE;  // Disable erasure
-            tty.c_lflag &= ~ECHONL; // Disable new-line echo
-            tty.c_lflag &= ~ISIG;   // Disable interpretation of INTR, QUIT and SUSP
-            tty.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL); // Disable any special handling of received bytes
-
-            tty.c_oflag &= ~OPOST; // Prevent special interpretation of output bytes (e.g. newline chars)
-            tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
-
-            tty.c_cc[VTIME] = 0;
-            tty.c_cc[VMIN] = 0;
-
-            if (tcsetattr(_fd, TCSANOW, &tty) != 0)
-                return fail_posix_startup();
-            if (custom_baud)
-            {
-                version (linux)
-                {
-                    if (!set_linux_custom_baud(_fd, _params.baud_rate))
-                    {
-                        writeln("Unsupported serial baud rate ", _params.baud_rate);
-                        return fail_posix_startup();
-                    }
-                }
-            }
-            tcflush(_fd, TCIOFLUSH);
         }
         else version (Embedded)
         {
@@ -515,7 +343,263 @@ nothrow @nogc:
             if (!uart_open(_uart, cast(ubyte)_uart_port, cfg))
                 return CompletionStatus.error;
         }
+
+        version (linux)
+        {
+            if (!_serial_reader.register(cast(size_t)cast(void*)this, _fd))
+            {
+                // reader thread could not start; don't run with an fd nobody drains or frees
+                log.error("failed to start serial reader thread");
+                urt.internal.sys.posix.close(_fd);
+                _fd = -1;
+                return CompletionStatus.error;
+            }
+        }
+
         return CompletionStatus.complete;
+    }
+
+    // Applies framing, baud, flow control and modem-line state to the open port. Called at startup,
+    // and again in place when flow-control is reconfigured at runtime (buffers preserved, no reopen).
+    version (Embedded) {} else
+    private bool configure_port(bool flush_buffers)
+    {
+        version(Windows)
+        {
+            if (_h_com == INVALID_HANDLE_VALUE)
+                return false;
+
+            DCB dcb = void;
+            ZeroMemory(&dcb, DCB.sizeof);
+            dcb.DCBlength = DCB.sizeof;
+            if (!GetCommState(_h_com, &dcb))
+                return false;
+
+            dcb._bf = 1;
+
+            dcb.BaudRate = DWORD(_params.baud_rate);
+            dcb.ByteSize = _params.data_bits;
+
+            if (_params.stop_bits == StopBits.one)
+                dcb.StopBits = ONESTOPBIT;
+            else if (_params.stop_bits == StopBits.one_point_five)
+                dcb.StopBits = ONE5STOPBITS;
+            else if (_params.stop_bits == StopBits.two)
+                dcb.StopBits = TWOSTOPBITS;
+
+            switch (_params.parity)
+            {
+                case Parity.none:   dcb.Parity = NOPARITY;      break;
+                case Parity.even:   dcb.Parity = EVENPARITY;    break;
+                case Parity.odd:    dcb.Parity = ODDPARITY;     break;
+                case Parity.mark:   dcb.Parity = MARKPARITY;    break;
+                case Parity.space:  dcb.Parity = SPACEPARITY;   break;
+                default: assert(false);
+            }
+            if (_params.parity != Parity.none)
+                dcb._bf |= 2; // fParity: set to enable parity checking?
+
+            // RTS idles asserted ("host ready") in the non-hardware modes: we always have receive
+            // buffer, and peers that honor RTS/CTS (Silabs NCPs) stop transmitting if it idles low
+            switch (_params.flow_control)
+            {
+                case FlowControl.none:
+                    dcb._bf &= ~4; // fOutxCtsFlow
+                    dcb._bf &= ~8; // fOutxDsrFlow
+                    dcb._bf &= ~0x40; // fDsrSensitivity
+                    dcb._bf &= ~0x100; // fOutX
+                    dcb._bf &= ~0x200; // fInX
+                    dcb._bf &= ~0x3030;
+                    dcb._bf |= RTSControl.enable << 12; // fRtsControl
+                    dcb._bf |= DTRControl.disable << 4; // fDtrControl
+                    break;
+                case FlowControl.hardware:
+                    dcb._bf |= 4; // fOutxCtsFlow
+                    dcb._bf &= ~8; // fOutxDsrFlow
+                    dcb._bf &= ~0x100; // fOutX
+                    dcb._bf &= ~0x200; // fInX
+                    dcb._bf &= ~0x3030;
+                    dcb._bf |= RTSControl.handshake << 12; // fRtsControl
+                    dcb._bf |= DTRControl.enable << 4; // fDtrControl
+                    break;
+                case FlowControl.software:
+                    dcb._bf &= ~4; // fOutxCtsFlow
+                    dcb._bf &= ~8; // fOutxDsrFlow
+                    dcb._bf &= ~0x40; // fDsrSensitivity
+                    dcb._bf |= 0x100; // fOutX
+                    dcb._bf |= 0x200; // fInX
+                    dcb.XonChar = 0x11;
+                    dcb.XoffChar = 0x13;
+                    dcb.XonLim = 200;
+                    dcb.XoffLim = 200;
+                    dcb._bf &= ~0x3030;
+                    dcb._bf |= RTSControl.enable << 12; // fRtsControl
+                    dcb._bf |= DTRControl.enable << 4; // fDtrControl
+                    break;
+                case FlowControl.dsr_dtr:
+                    dcb._bf &= ~4; // fOutxCtsFlow
+                    dcb._bf |= 8; // fOutxDsrFlow
+                    dcb._bf |= 0x40; // fDsrSensitivity
+                    dcb._bf &= ~0x100; // fOutX
+                    dcb._bf &= ~0x200; // fInX
+                    dcb._bf &= ~0x3030;
+                    dcb._bf |= RTSControl.disable << 12; // fRtsControl
+                    dcb._bf |= DTRControl.handshake << 4; // fDtrControl
+                    break;
+                default:
+                    assert(false);
+            }
+
+            if (!SetCommState(_h_com, &dcb))
+                return false;
+
+            COMMTIMEOUTS timeouts = {};
+            timeouts.ReadIntervalTimeout = -1;
+            timeouts.ReadTotalTimeoutConstant = 0;
+            timeouts.ReadTotalTimeoutMultiplier = 0;
+            // A synchronous WriteFile with no write timeout blocks forever when hardware flow control
+            // gates output on CTS and the peer deasserts it - a whole-loop lockup. Bound it so WriteFile
+            // returns a short count instead (fed to the same partial-write recovery as the Posix path).
+            // Multiplier scales with size so a legitimately slow/large write at low baud never trips it.
+            timeouts.WriteTotalTimeoutConstant = 100;
+            timeouts.WriteTotalTimeoutMultiplier = 2;
+            if (!SetCommTimeouts(_h_com, &timeouts))
+                return false;
+
+            if (flush_buffers)
+                PurgeComm(_h_com, PURGE_TXCLEAR | PURGE_RXCLEAR);
+            return true;
+        }
+        else version(Posix)
+        {
+            if (_fd == -1)
+                return false;
+
+            termios tty;
+            if (tcgetattr(_fd, &tty) != 0)
+                return false;
+
+            // on Linux the baud is set after tcsetattr via termios2/BOTHER (set_linux_custom_baud)
+            version (linux) {}
+            else
+            {
+                // other Posix: standard rates only, via the classic cfsetospeed/Bxxx path.
+                speed_t speed;
+                if (!posix_baud(_params.baud_rate, speed))
+                {
+                    log.error("unsupported serial baud rate ", _params.baud_rate);
+                    return false;
+                }
+                if (cfsetospeed(&tty, speed) != 0 || cfsetispeed(&tty, speed) != 0)
+                    return false;
+            }
+
+            tty.c_cflag &= ~(PARENB | PARODD | CMSPAR);
+            final switch (_params.parity)
+            {
+                case Parity.none:
+                    break;
+                case Parity.even:
+                    tty.c_cflag |= PARENB;
+                    break;
+                case Parity.odd:
+                    tty.c_cflag |= PARENB | PARODD;
+                    break;
+                case Parity.mark:
+                    tty.c_cflag |= PARENB | PARODD | CMSPAR;
+                    break;
+                case Parity.space:
+                    tty.c_cflag |= PARENB | CMSPAR;
+                    break;
+            }
+
+            tty.c_cflag &= ~CSTOPB;
+            if (_params.stop_bits == StopBits.two)
+                tty.c_cflag |= CSTOPB;
+            else if (_params.stop_bits == StopBits.one_point_five)
+            {
+                log.error("1.5 stop bits are not supported on Posix");
+                return false;
+            }
+
+            tty.c_cflag &= ~CSIZE;
+            switch (_params.data_bits)
+            {
+                case 5: tty.c_cflag |= CS5; break;
+                case 6: tty.c_cflag |= CS6; break;
+                case 7: tty.c_cflag |= CS7; break;
+                case 8: tty.c_cflag |= CS8; break;
+                default:
+                    log.error("unsupported data bits: ", _params.data_bits);
+                    return false;
+            }
+
+            tty.c_cflag &= ~CRTSCTS;
+            tty.c_cflag |= CREAD | CLOCAL;
+            tty.c_iflag &= ~(IXON | IXOFF | IXANY);
+            final switch (_params.flow_control)
+            {
+                case FlowControl.none:
+                    break;
+                case FlowControl.hardware:
+                    tty.c_cflag |= CRTSCTS;
+                    break;
+                case FlowControl.software:
+                    tty.c_iflag |= IXON | IXOFF;
+                    break;
+                case FlowControl.dsr_dtr:
+                    log.error("DSR/DTR flow control is not supported on Posix");
+                    return false;
+            }
+
+            tty.c_lflag &= ~ICANON;
+            tty.c_lflag &= ~ECHO;   // Disable echo
+            tty.c_lflag &= ~ECHOE;  // Disable erasure
+            tty.c_lflag &= ~ECHONL; // Disable new-line echo
+            tty.c_lflag &= ~ISIG;   // Disable interpretation of INTR, QUIT and SUSP
+            tty.c_iflag &= ~(IGNBRK | BRKINT | PARMRK | ISTRIP | INLCR | IGNCR | ICRNL); // Disable any special handling of received bytes
+
+            tty.c_oflag &= ~OPOST; // Prevent special interpretation of output bytes (e.g. newline chars)
+            tty.c_oflag &= ~ONLCR; // Prevent conversion of newline to carriage return/line feed
+
+            tty.c_cc[VTIME] = 0;
+            tty.c_cc[VMIN] = 0;
+
+            if (tcsetattr(_fd, TCSANOW, &tty) != 0)
+                return false;
+            version (linux)
+            {
+                if (!set_linux_custom_baud(_fd, _params.baud_rate))
+                {
+                    log.error("failed to set baud rate ", _params.baud_rate);
+                    return false;
+                }
+            }
+
+            // RTS idles asserted ("host ready") in the non-hardware modes: we always have receive
+            // buffer, and peers that honor RTS/CTS (Silabs NCPs) stop transmitting if it idles low
+            int dtr_bit = TIOCM_DTR, rts_bit = TIOCM_RTS;
+            final switch (_params.flow_control)
+            {
+                case FlowControl.none:
+                    ioctl(_fd, TIOCMBIC, &dtr_bit);
+                    ioctl(_fd, TIOCMBIS, &rts_bit);
+                    break;
+                case FlowControl.hardware:
+                    ioctl(_fd, TIOCMBIS, &dtr_bit);     // RTS is owned by CRTSCTS
+                    break;
+                case FlowControl.software:
+                    ioctl(_fd, TIOCMBIS, &dtr_bit);
+                    ioctl(_fd, TIOCMBIS, &rts_bit);
+                    break;
+                case FlowControl.dsr_dtr:
+                    break;                              // unreachable: rejected earlier
+            }
+
+            if (flush_buffers)
+                tcflush(_fd, TCIOFLUSH);
+            return true;
+        }
     }
 
     override CompletionStatus shutdown()
@@ -530,7 +614,13 @@ nothrow @nogc:
         {
             if (_fd != -1)
             {
-                urt.internal.sys.posix.close(_fd);
+                version (linux)
+                    _serial_reader.deregister(cast(size_t)cast(void*)this); // worker owns the fd close
+                else
+                {
+                    tcflush(_fd, TCIOFLUSH); // discard un-drainable output so close() can't block (see close_serial_fd)
+                    urt.internal.sys.posix.close(_fd);
+                }
                 _fd = -1;
             }
         }
@@ -558,47 +648,77 @@ nothrow @nogc:
             }
             else
                 restart();
+            poll_os_rx();
+        }
+        else version (linux)
+        {
+            // rx is delivered by the shared serial reader thread via incoming()
+        }
+        else version (Posix)
+        {
+            poll_os_rx();
         }
         else version (Embedded)
         {
             uart_poll(_uart);
             if (uart_check_errors(_uart) != UartError.none)
                 restart();
+            else
+                poll_os_rx();
         }
 
         super.update();
     }
 
-    override ptrdiff_t read(void[] buffer)
+    // On linux the shared reader thread owns rx and pushes via incoming(); every
+    // other platform drains the device here in update() and pushes the same way.
+    // Both routes converge on the base Stream _rx_buffer / rx_handler, so read()
+    // and pending() use the base (buffer-backed) implementations.
+    version (linux) {} else
+    private void poll_os_rx()
     {
-        version(Windows)
+        MonoTime now = getTime();
+        ubyte[512] buf = void;
+        while (true)
         {
-            DWORD bytes_read;
-            if (!ReadFile(_h_com, buffer.ptr, cast(DWORD)buffer.length, &bytes_read, null))
+            version(Windows)
             {
-                restart();
-                return -1;
+                DWORD n;
+                if (!ReadFile(_h_com, buf.ptr, cast(DWORD)buf.length, &n, null))
+                {
+                    restart();
+                    return;
+                }
+                if (n == 0)
+                    return;
             }
-        }
-        else version(Posix)
-        {
-            ssize_t bytes_read = urt.internal.sys.posix.read(_fd, buffer.ptr, buffer.length);
-            if (bytes_read < 0)
+            else version(Posix)
             {
-                if (is_transient_errno())
-                    return 0;
-                restart();
-                return -1;
+                ssize_t n = urt.internal.sys.posix.read(_fd, buf.ptr, buf.length);
+                if (n < 0)
+                {
+                    if (is_transient_errno())
+                        return;
+                    restart();
+                    return;
+                }
+                if (n == 0)
+                    return;
             }
+            else version (Embedded)
+            {
+                ptrdiff_t n = uart_read(_uart, buf[]);
+                if (n <= 0)
+                    return;
+            }
+            incoming(buf[0 .. n], now);
         }
-        else version (Embedded)
-            ptrdiff_t bytes_read = uart_read(_uart, buffer);
+    }
 
-        if (bytes_read > 0)
-            add_rx_bytes(bytes_read);
-        if (_logging && bytes_read > 0)
-            write_to_log(true, buffer[0 .. bytes_read]);
-        return bytes_read;
+    version (linux)
+    private void deliver_rx(const(void)[] data, MonoTime rx_time)
+    {
+        incoming(data, rx_time);
     }
 
     override ptrdiff_t write(const(void[])[] data...)
@@ -641,7 +761,7 @@ nothrow @nogc:
             }
 
             bytes_written = _bytes_written;
-            if (_logging)
+            if (_logging || has_tap)
                 write_to_log(false, send_buffer[0 .. bytes_written]);
         }
         else version(Posix)
@@ -662,7 +782,7 @@ nothrow @nogc:
                     if (n == 0)
                         goto posix_write_done;
                     bytes_written += n;
-                    if (_logging)
+                    if (_logging || has_tap)
                         write_to_log(false, buf[0 .. n]);
                     buf = buf[n .. $];
                 }
@@ -672,7 +792,7 @@ nothrow @nogc:
         else version (Embedded)
         {
             bytes_written = uart_writev(_uart, data);
-            if (_logging && bytes_written > 0)
+            if ((_logging || has_tap) && bytes_written > 0)
             {
                 import urt.util : min;
                 size_t remain = bytes_written;
@@ -689,30 +809,6 @@ nothrow @nogc:
         return bytes_written;
     }
 
-    override ptrdiff_t pending()
-    {
-        version (Windows)
-        {
-            DWORD errors;
-            COMSTAT stat;
-            if (!ClearCommError(_h_com, &errors, &stat))
-                return 0;
-            return stat.cbInQue;
-        }
-        else version (Posix)
-        {
-            int avail;
-            if (ioctl(_fd, FIONREAD, &avail) < 0)
-                return 0;
-            return avail;
-        }
-        else
-        {
-        version (Embedded)
-            return cast(ptrdiff_t)uart_rx_available(_uart);
-        }
-    }
-
     override ptrdiff_t flush()
     {
         version (Windows)
@@ -722,7 +818,8 @@ nothrow @nogc:
         }
         else version (Posix)
         {
-            tcdrain(_fd);
+            // discard buffered I/O; never tcdrain() here - under RTS/CTS with CTS deasserted it
+            // blocks until the peer lets output through, which would freeze the caller indefinitely
             tcflush(_fd, TCIOFLUSH);
             return 0;
         }
@@ -731,6 +828,92 @@ nothrow @nogc:
             uart_tx_flush(_uart);
             return 0;
         }
+    }
+
+    // Manually drive the modem control lines. Only meaningful when flow-control doesn't own the
+    // line; gives callers hardware reset agency over devices with reset wired to RTS/DTR
+    // (e.g. Silabs radio dongles, which some boots leave held in reset).
+    final bool set_rts(bool asserted)
+    {
+        // RTS is owned by the UART under hardware (RTS/CTS) flow control; refuse rather than fight it
+        assert(_params.flow_control != FlowControl.hardware, "cannot drive RTS manually while hardware flow control owns it");
+        if (_params.flow_control == FlowControl.hardware)
+            return false;
+        version (Windows)
+            return _h_com != INVALID_HANDLE_VALUE && EscapeCommFunction(_h_com, asserted ? SETRTS : CLRRTS) != 0;
+        else version (Posix)
+        {
+            if (_fd == -1)
+                return false;
+            int bit = TIOCM_RTS;
+            return ioctl(_fd, asserted ? TIOCMBIS : TIOCMBIC, &bit) == 0;
+        }
+        else
+            return false;
+    }
+
+    final bool set_dtr(bool asserted)
+    {
+        // DTR is owned by the UART under DSR/DTR flow control
+        assert(_params.flow_control != FlowControl.dsr_dtr, "cannot drive DTR manually while DSR/DTR flow control owns it");
+        if (_params.flow_control == FlowControl.dsr_dtr)
+            return false;
+        version (Windows)
+            return _h_com != INVALID_HANDLE_VALUE && EscapeCommFunction(_h_com, asserted ? SETDTR : CLRDTR) != 0;
+        else version (Posix)
+        {
+            if (_fd == -1)
+                return false;
+            int bit = TIOCM_DTR;
+            return ioctl(_fd, asserted ? TIOCMBIS : TIOCMBIC, &bit) == 0;
+        }
+        else
+            return false;
+    }
+
+    // Live modem-line state: what we assert (RTS/DTR) and what the peer presents (CTS/DSR/DCD/RI).
+    // Windows can only read the input lines; outputs_valid is false there.
+    final ModemLines modem_lines()
+    {
+        ModemLines l;
+        version (Windows)
+        {
+            if (_h_com == INVALID_HANDLE_VALUE)
+                return l;
+            DWORD status;
+            if (!GetCommModemStatus(_h_com, &status))
+                return l;
+            l.valid = true;
+            l.cts = (status & 0x10) != 0;   // MS_CTS_ON
+            l.dsr = (status & 0x20) != 0;   // MS_DSR_ON
+            l.ri  = (status & 0x40) != 0;   // MS_RING_ON
+            l.dcd = (status & 0x80) != 0;   // MS_RLSD_ON
+        }
+        else version (Posix)
+        {
+            if (_fd == -1)
+                return l;
+            int bits;
+            if (ioctl(_fd, TIOCMGET, &bits) != 0)
+                return l;
+            l.valid = true;
+            l.outputs_valid = true;
+            l.rts = (bits & TIOCM_RTS) != 0;
+            l.dtr = (bits & TIOCM_DTR) != 0;
+            l.cts = (bits & TIOCM_CTS) != 0;
+            l.dsr = (bits & TIOCM_DSR) != 0;
+            l.dcd = (bits & TIOCM_CAR) != 0;
+            l.ri  = (bits & TIOCM_RNG) != 0;
+        }
+        return l;
+    }
+
+    version (linux)
+    {
+        // kernel line-event counters (CTS transitions, overruns, ...); false if the driver
+        // doesn't implement TIOCGICOUNT (varies by usb-serial driver)
+        final bool line_counters(out serial_icounter_struct counters)
+            => _fd != -1 && ioctl(_fd, TIOCGICOUNT, &counters) == 0;
     }
 
 private:
@@ -775,6 +958,15 @@ class SerialStreamModule : Module
     mixin DeclareModule!"stream.serial";
 nothrow @nogc:
 
+    override void pre_init()
+    {
+        version (Posix)
+        {
+            sync_serial_ports();
+            _last_port_sync = getSysTime();
+        }
+    }
+
     override void init()
     {
         g_app.register_enum!StopBits();
@@ -782,9 +974,69 @@ nothrow @nogc:
         g_app.register_enum!FlowControl();
 
         g_app.console.register_collection!SerialStream();
+        g_app.console.register_command!serial_lines("/stream/serial", this, "lines");
         version (Posix)
             g_app.console.register_command!serial_devices("/stream/serial", this, "devices");
     }
+
+    // /stream/serial/lines <name> - live modem-line state (and kernel line-event counters where the
+    // driver supports them); the observability layer for flow-control experiments.
+    void serial_lines(Session session, const(char)[] name)
+    {
+        SerialStream s = Collection!SerialStream().get(name);
+        if (!s)
+        {
+            session.write_line(tconcat("no such serial stream: ", name));
+            return;
+        }
+
+        ModemLines l = s.modem_lines();
+        if (!l.valid)
+        {
+            session.write_line(tconcat("'", name, "': port not open or line query unsupported"));
+            return;
+        }
+
+        if (l.outputs_valid)
+            session.write_line(tconcat("'", name, "': RTS=", cast(int)l.rts, " DTR=", cast(int)l.dtr,
+                                       "  <-  CTS=", cast(int)l.cts, " DSR=", cast(int)l.dsr, " DCD=", cast(int)l.dcd, " RI=", cast(int)l.ri));
+        else
+            session.write_line(tconcat("'", name, "': CTS=", cast(int)l.cts, " DSR=", cast(int)l.dsr,
+                                       " DCD=", cast(int)l.dcd, " RI=", cast(int)l.ri, " (outputs not readable on this platform)"));
+
+        version (linux)
+        {
+            serial_icounter_struct c;
+            if (s.line_counters(c))
+                session.write_line(tconcat("counters: cts=", c.cts, " dsr=", c.dsr, " rx=", c.rx, " tx=", c.tx,
+                                           " frame=", c.frame, " overrun=", c.overrun, " parity=", c.parity,
+                                           " brk=", c.brk, " buf_overrun=", c.buf_overrun));
+            else
+                session.write_line("counters: not supported by driver");
+        }
+    }
+
+    override void update()
+    {
+        version (Posix)
+        {
+            SysTime now = getSysTime();
+            if (now - _last_port_sync < 2.seconds)
+                return;
+            sync_serial_ports();
+            _last_port_sync = now;
+        }
+    }
+
+    version (linux)
+    override void deinit()
+    {
+        _serial_reader.stop();
+    }
+
+private:
+    version (Posix)
+        SysTime _last_port_sync;
 }
 
 
@@ -811,6 +1063,28 @@ version(Posix)
     }
 
     enum FIONREAD = 0x541B;
+    enum TIOCMGET = 0x5415;     // read the modem control/status bits
+    enum TIOCMBIS = 0x5416;     // set the indicated modem control bits
+    enum TIOCMBIC = 0x5417;     // clear the indicated modem control bits
+    enum TIOCM_DTR = 0x002;
+    enum TIOCM_RTS = 0x004;
+    enum TIOCM_CTS = 0x020;
+    enum TIOCM_CAR = 0x040;
+    enum TIOCM_RNG = 0x080;
+    enum TIOCM_DSR = 0x100;
+
+    version (linux)
+    {
+        enum TIOCGICOUNT = 0x545D;  // kernel line-event counters; not all usb-serial drivers support it
+        struct serial_icounter_struct
+        {
+            int cts, dsr, rng, dcd;
+            int rx, tx;
+            int frame, overrun, parity, brk;
+            int buf_overrun;
+            int[9] reserved;
+        }
+    }
 
     extern(C) ssize_t writev(int fd, const iovec* iov, int iovcnt);
     version (D_LP64)
@@ -887,38 +1161,101 @@ version(Posix)
             session.write_line("No serial devices found");
     }
 
+    void sync_serial_ports()
+    {
+        // One port per kernel node (/dev/ttyUSB0 etc.). USB devices also appear under
+        // /dev/serial/by-id, but that's just a symlink to the same node, so we don't
+        // list it; we read the USB identity straight from sysfs instead.
+        Array!String seen;
+        scan_serial_ttys((const(char)[] name, const(char)[] path) nothrow @nogc {
+            char[64] desc = void;
+            char[64] manuf = void;
+            char[96] product = void;
+            char[64] serial = void;
+            PortUsb usb = read_usb_ident(name, manuf[], product[], serial[]);
+            publish_serial_port(seen, name, path, read_tty_driver_name(name, desc[]), serial_port_flags(name), usb);
+        });
+
+        Array!String gone;
+        foreach (ref p; port_list())
+        {
+            if (p.kind != PortKind.serial || p.driver[] != SerialStreamModule.ModuleName)
+                continue;
+
+            bool still_there;
+            foreach (ref id; seen[])
+            {
+                if (p.id[] == id[])
+                {
+                    still_there = true;
+                    break;
+                }
+            }
+            if (!still_there)
+                gone ~= p.id[].makeString(defaultAllocator);
+        }
+        foreach (ref id; gone[])
+            port_remove(PortKind.serial, id[]);
+    }
+
     uint list_serial_ttys(Session session)
     {
-        uint count;
-        walk_dir("/sys/class/tty", (const(char)[] name) nothrow @nogc {
-            if (!is_serial_tty(name))
-                return;
-            char[320] path = void;
-            size_t n = make_path(path[], "/dev/", name);
-            if (n)
-            {
-                session.write_line(path[0 .. n]);
-                ++count;
-            }
+        uint count = 0;
+        scan_serial_ttys((const(char)[], const(char)[] path) nothrow @nogc {
+            session.write_line(path);
+            ++count;
         });
         return count;
     }
 
     uint list_serial_dir(Session session, const(char)[] dir, const(char)[] prefix)
     {
-        uint count;
+        uint count = 0;
+        scan_serial_dir(dir, prefix, (const(char)[], const(char)[] path) nothrow @nogc {
+            session.write_line(path);
+            ++count;
+        });
+        return count;
+    }
+
+    void scan_serial_ttys(scope void delegate(const(char)[] name, const(char)[] path) nothrow @nogc visitor)
+    {
+        walk_dir("/sys/class/tty", (const(char)[] name) nothrow @nogc {
+            if (!is_serial_tty(name))
+                return;
+            char[320] path = void;
+            size_t n = make_path(path[], "/dev/", name);
+            if (n)
+                visitor(name, path[0 .. n]);
+        });
+    }
+
+    void scan_serial_dir(const(char)[] dir, const(char)[] prefix,
+                         scope void delegate(const(char)[] name, const(char)[] path) nothrow @nogc visitor)
+    {
         walk_dir(dir, (const(char)[] name) nothrow @nogc {
             if (prefix && !name.startsWith(prefix))
                 return;
             char[512] path = void;
             size_t n = make_path(path[], dir, "/", name);
             if (n)
-            {
-                session.write_line(path[0 .. n]);
-                ++count;
-            }
+                visitor(name, path[0 .. n]);
         });
-        return count;
+    }
+
+    void publish_serial_port(ref Array!String seen, const(char)[] name, const(char)[] path,
+                             const(char)[] description, PortFlags flags, PortUsb usb = PortUsb.init)
+    {
+        auto id = tconcat("linux:serial:", path);
+        port_add(PortKind.serial, id, name, path, SerialStreamModule.ModuleName, description, flags, usb);
+        seen ~= id.makeString(defaultAllocator);
+    }
+
+    PortFlags serial_port_flags(const(char)[] name) pure
+    {
+        if (name.startsWith("ttyUSB") || name.startsWith("ttyACM") || name.startsWith("rfcomm"))
+            return PortFlags.removable;
+        return PortFlags.none;
     }
 
     bool is_serial_tty(const(char)[] name)
@@ -931,6 +1268,128 @@ version(Posix)
         char[320] path = void;
         size_t n = make_path(path[], "/sys/class/tty/", name, "/device");
         return n != 0 && access(path.ptr, F_OK) == 0;
+    }
+
+    const(char)[] read_tty_driver_name(const(char)[] name, char[] buf)
+    {
+        char[320] path = void;
+        size_t len = make_path(path[], "/sys/class/tty/", name, "/device/driver");
+        if (!len)
+            return null;
+        return link_target_basename(path[0 .. len], buf);
+    }
+
+    const(char)[] link_target_basename(const(char)[] link_path, char[] buf)
+    {
+        char[320] z = void;
+        if (!copy_z(z[], link_path))
+            return null;
+        char[256] link = void;
+        ssize_t n = readlink(z.ptr, link.ptr, link.length);
+        if (n <= 0)
+            return null;
+
+        auto target = link[0 .. cast(size_t)n];
+        size_t slash = 0;
+        foreach_reverse (i, c; target)
+        {
+            if (c == '/')
+            {
+                slash = i + 1;
+                break;
+            }
+        }
+
+        auto base = target[slash .. $];
+        if (base.length == 0 || base.length > buf.length)
+            return null;
+        buf[0 .. base.length] = base;
+        return buf[0 .. base.length];
+    }
+
+    PortUsb read_usb_ident(const(char)[] tty_name, char[] manuf, char[] product, char[] serial)
+    {
+        PortUsb u;
+        char[384] dir = void;
+        size_t dn = usb_device_dir(tty_name, dir[]);
+        if (!dn)
+            return u;
+        u.vid = read_sysfs_hex(dir[0 .. dn], "idVendor");
+        u.pid = read_sysfs_hex(dir[0 .. dn], "idProduct");
+        u.manufacturer = read_sysfs_str(dir[0 .. dn], "manufacturer", manuf);
+        u.product = read_sysfs_str(dir[0 .. dn], "product", product);
+        u.serial = read_sysfs_str(dir[0 .. dn], "serial", serial);
+        return u;
+    }
+
+    // The tty's /device link points at the usb-serial port; idVendor lives a few levels up
+    // on the USB device. Walk up via /.. until a level exposes it.
+    size_t usb_device_dir(const(char)[] tty_name, char[] out_dir)
+    {
+        foreach (up; 0 .. 5)
+        {
+            char[384] dir = void;
+            size_t n = make_path(dir[], "/sys/class/tty/", tty_name, "/device");
+            if (!n)
+                return 0;
+            foreach (_; 0 .. up)
+            {
+                if (n + 3 > dir.length)
+                    return 0;
+                dir[n .. n + 3] = "/..";
+                n += 3;
+            }
+            char[400] probe = void;
+            size_t pn = make_path(probe[], dir[0 .. n], "/idVendor");
+            if (pn && access(probe.ptr, F_OK) == 0)
+            {
+                if (n > out_dir.length)
+                    return 0;
+                out_dir[0 .. n] = dir[0 .. n];
+                return n;
+            }
+        }
+        return 0;
+    }
+
+    const(char)[] read_sysfs_str(const(char)[] dir, const(char)[] file, char[] buf)
+    {
+        char[400] path = void;
+        size_t n = make_path(path[], dir, "/", file);
+        if (!n)
+            return null;
+        int fd = urt.internal.sys.posix.open(path.ptr, urt.internal.sys.posix.O_RDONLY);
+        if (fd < 0)
+            return null;
+        scope(exit) urt.internal.sys.posix.close(fd);
+        ssize_t rn = urt.internal.sys.posix.read(fd, buf.ptr, buf.length);
+        if (rn <= 0)
+            return null;
+        size_t len = cast(size_t)rn;
+        while (len && (buf[len - 1] == '\n' || buf[len - 1] == '\r'))
+            --len;
+        return buf[0 .. len];
+    }
+
+    ushort read_sysfs_hex(const(char)[] dir, const(char)[] file)
+    {
+        char[16] buf = void;
+        const(char)[] s = read_sysfs_str(dir, file, buf[]);
+        ushort v = 0;
+        foreach (c; s)
+        {
+            uint d;
+            if (c >= '0' && c <= '9')
+                d = c - '0';
+            else if (c >= 'a' && c <= 'f')
+                d = c - 'a' + 10;
+            else if (c >= 'A' && c <= 'F')
+                d = c - 'A' + 10;
+            else
+                break;
+            v = cast(ushort)((v << 4) | d);
+        }
+        return v;
     }
 
     void walk_dir(const(char)[] path, scope void delegate(const(char)[] name) nothrow @nogc visitor)
@@ -1003,4 +1462,346 @@ version(Posix)
     }
 
     enum F_OK = 0;
+}
+
+
+version (linux)
+{
+    import urt.atomic;
+    import urt.sync.semaphore;
+    import urt.sync.spsc;
+    import urt.thread;
+    import urt.mem.allocator : defaultAllocator;
+
+    extern(C) int eventfd(uint initval, int flags) nothrow @nogc;
+    enum EFD_NONBLOCK = 0x800;
+
+    __gshared SerialReader _serial_reader;
+
+    // A single poll() thread owns every serial fd plus an eventfd wake, does the
+    // blocking reads, and marshals each read to the main thread via g_app.post_event
+    // so SerialStream.incoming() only ever runs on the main loop. The fd is handed
+    // over on register and closed by the worker on deregister, which keeps a stale
+    // fd from being polled (or reused) after the stream closes.
+    //
+    // This mirrors the protocol.ip SocketWorker; see TODO.md about folding both onto
+    // a shared manager-level fd reactor so serial has no bespoke reader plumbing.
+    struct SerialReader
+    {
+    nothrow @nogc:
+        // The ep (a SerialStream address) can be recycled by the Collection: a freed stream's
+        // slot may be reused by a new stream that re-registers the same address. A per-registration
+        // generation disambiguates them so a data event enqueued for the old stream is dropped
+        // rather than delivered to the new one at the same address.
+        bool register(size_t ep, int fd)
+        {
+            if (!_started)
+                start();
+            if (!_started)
+                return false;
+            uint gen = ++_gen;
+            bool present = false;
+            foreach (ref e; _live[])
+                if (e.ep == ep) { e.gen = gen; present = true; break; }
+            if (!present)
+                _live ~= Live(ep, gen);
+            post_req(Req(ReqKind.register, ep, fd, gen));
+            return true;
+        }
+
+        void deregister(size_t ep)
+        {
+            foreach (i; 0 .. _live.length)
+                if (_live[i].ep == ep) { _live.removeSwapLast(i); break; }
+            post_req(Req(ReqKind.destroy, ep, -1, 0));
+        }
+
+        void stop()
+        {
+            if (_thread)
+            {
+                atomicStore!(MemoryOrder.release)(_stop, true);
+                wake();
+                _space.signal();
+                thread_join(_thread);
+                _thread = null;
+            }
+            if (_wake_fd >= 0)
+            {
+                urt.internal.sys.posix.close(_wake_fd);
+                _wake_fd = -1;
+            }
+            Ev ev;
+            while (_ring.pop((&ev)[0 .. 1]) == 1)
+                if (ev.buffer.length)
+                    defaultAllocator().free(cast(void[])ev.buffer);
+            _live.clear();
+            if (_started)
+                _space.destroy();
+            _started = false;
+        }
+
+    private:
+        enum ReqKind : ubyte { register, destroy }
+        struct Req { ReqKind kind; size_t ep; int fd; uint gen; }
+
+        enum EvKind : ubyte { data, error }
+        struct Ev { EvKind kind; size_t ep; const(ubyte)[] buffer; MonoTime rx_time; uint gen; }
+
+        struct Entry { size_t ep; int fd; uint gen; bool dead; }
+
+        struct Live { size_t ep; uint gen; }
+
+        bool _started;
+        Thread _thread;
+        Semaphore _space;               // backpressure: dispatch signals as event slots free
+        shared bool _stop;
+        shared bool _dispatch_pending;
+        int _wake_fd = -1;
+        uint _gen;                      // main-thread only: monotonic registration generation
+        Array!Live _live;               // main-thread only: registered (SerialStream key, generation)
+
+        SPSCRing!(Req, 64) _reqs;       // main -> worker
+        SPSCRing!(Ev, 512) _ring;       // worker -> main
+
+        void start()
+        {
+            if (!_space.init())
+                return;
+            _wake_fd = eventfd(0, EFD_NONBLOCK);
+            if (_wake_fd < 0)
+            {
+                _space.destroy();
+                return;
+            }
+            atomicStore!(MemoryOrder.release)(_stop, false);
+            _thread = thread_spawn(&run);
+            if (!_thread)
+            {
+                urt.internal.sys.posix.close(_wake_fd);
+                _wake_fd = -1;
+                _space.destroy();
+                return;
+            }
+            _started = true;
+        }
+
+        void post_req(Req r)
+        {
+            if (!_thread)
+                return;
+            Req* slot = _reqs.reserve();
+            while (slot is null)
+            {
+                wake();
+                slot = _reqs.reserve();
+            }
+            *slot = r;
+            _reqs.commit();
+            wake();
+        }
+
+        void wake()
+        {
+            if (_wake_fd < 0)
+                return;
+            ulong one = 1;
+            urt.internal.sys.posix.write(_wake_fd, &one, one.sizeof);
+        }
+
+        // worker thread ----------------------------------------------------
+
+        void run()
+        {
+            Array!Entry entries;
+            Array!pollfd fds;
+            bool stopping = false;
+
+            while (!stopping && !atomicLoad!(MemoryOrder.acquire)(_stop))
+            {
+                apply_requests(entries);
+
+                fds.clear();
+                { pollfd p; p.fd = _wake_fd; p.events = POLLIN; fds ~= p; }
+                foreach (ref e; entries[])
+                {
+                    if (e.dead)
+                        continue;
+                    pollfd p; p.fd = e.fd; p.events = POLLIN;
+                    fds ~= p;
+                }
+
+                int n = poll(fds.ptr, fds.length, 1000);
+                if (n <= 0)
+                    continue;
+
+                if (fds[0].revents & POLLIN)
+                    drain_wake();
+
+                bool posted = false;
+                size_t ei = 0;
+                for (size_t f = 1; f < fds.length; ++f)
+                {
+                    while (ei < entries.length && entries[ei].dead)
+                        ++ei;
+                    if (ei >= entries.length)
+                        break;
+                    Entry* e = &entries[ei++];
+                    short re = fds[f].revents;
+                    if (re == 0)
+                        continue;
+                    if (re & (POLLERR | POLLHUP | POLLNVAL))
+                    {
+                        // device removed / hung up: restart the stream, stop polling this fd
+                        e.dead = true;
+                        posted = true;
+                        if (!push(Ev(EvKind.error, e.ep, null, getTime(), e.gen)))
+                        {
+                            stopping = true;
+                            break;
+                        }
+                        continue;
+                    }
+                    if (!read_ready(e, posted))
+                    {
+                        stopping = true;
+                        break;
+                    }
+                }
+
+                if (posted)
+                    request_dispatch();
+            }
+
+            foreach (ref e; entries[])
+                if (e.fd >= 0)
+                    close_serial_fd(e.fd);
+        }
+
+        // Closing a serial port under RTS/CTS while the peer holds CTS low blocks in the kernel
+        // draining output that can never leave, hanging this worker (and the main thread's reopen
+        // waiting behind it on the port) until the watchdog kills us. Discard the buffers first.
+        static void close_serial_fd(int fd)
+        {
+            tcflush(fd, TCIOFLUSH);
+            urt.internal.sys.posix.close(fd);
+        }
+
+        void apply_requests(ref Array!Entry entries)
+        {
+            Req r;
+            while (_reqs.pop((&r)[0 .. 1]) == 1)
+            {
+                final switch (r.kind)
+                {
+                    case ReqKind.register:
+                        entries ~= Entry(r.ep, r.fd, r.gen, false);
+                        break;
+                    case ReqKind.destroy:
+                        foreach (i; 0 .. entries.length)
+                        {
+                            if (entries[i].ep == r.ep)
+                            {
+                                if (entries[i].fd >= 0)
+                                    close_serial_fd(entries[i].fd);
+                                entries.removeSwapLast(i);
+                                break;
+                            }
+                        }
+                        break;
+                }
+            }
+        }
+
+        void drain_wake()
+        {
+            ulong tmp;
+            while (urt.internal.sys.posix.read(_wake_fd, &tmp, tmp.sizeof) == tmp.sizeof) {}
+        }
+
+        // service one ready fd. returns false only when shutting down.
+        bool read_ready(Entry* e, ref bool posted)
+        {
+            while (true)
+            {
+                void[] buf = defaultAllocator().alloc(2048);
+                ssize_t got = urt.internal.sys.posix.read(e.fd, buf.ptr, buf.length);
+                if (got > 0)
+                {
+                    posted = true;
+                    if (!push(Ev(EvKind.data, e.ep, cast(const(ubyte)[])buf[0 .. got], getTime(), e.gen)))
+                    {
+                        defaultAllocator().free(buf);
+                        return false;
+                    }
+                    continue;
+                }
+                defaultAllocator().free(buf);
+                // VMIN=0/VTIME=0 ttys return 0 (not EAGAIN) when no data is ready: not an error.
+                if (got == 0 || is_transient_errno())
+                    return true;
+                // genuine read error (device removed etc.): ask the stream to restart, go quiet
+                e.dead = true;
+                posted = true;
+                return push(Ev(EvKind.error, e.ep, null, getTime(), e.gen));
+            }
+        }
+
+        bool push(Ev ev)
+        {
+            Ev* slot = _ring.reserve();
+            while (slot is null)
+            {
+                request_dispatch();
+                _space.wait(msecs(50));
+                if (atomicLoad!(MemoryOrder.acquire)(_stop))
+                    return false;
+                slot = _ring.reserve();
+            }
+            *slot = ev;
+            _ring.commit();
+            return true;
+        }
+
+        void request_dispatch()
+        {
+            if (cas(&_dispatch_pending, false, true))
+            {
+                if (!g_app.post_event(&dispatch, getTime()))
+                    atomicStore!(MemoryOrder.release)(_dispatch_pending, false);
+            }
+        }
+
+        // main thread ------------------------------------------------------
+
+        void dispatch(MonoTime)
+        {
+            Ev ev;
+            while (_ring.pop((&ev)[0 .. 1]) == 1)
+            {
+                handle(ev);
+                _space.signal();
+            }
+            atomicStore!(MemoryOrder.release)(_dispatch_pending, false);
+            if (!_ring.empty())
+                request_dispatch();
+        }
+
+        void handle(ref Ev ev)
+        {
+            bool live = false;
+            foreach (ref e; _live[])
+                if (e.ep == ev.ep && e.gen == ev.gen) { live = true; break; }
+
+            if (ev.kind == EvKind.data)
+            {
+                if (live && ev.buffer.length)
+                    (cast(SerialStream)cast(void*)ev.ep).deliver_rx(ev.buffer, ev.rx_time);
+                if (ev.buffer.length)
+                    defaultAllocator().free(cast(void[])ev.buffer);
+            }
+            else if (live)
+                (cast(SerialStream)cast(void*)ev.ep).restart();
+        }
+    }
 }
