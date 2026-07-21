@@ -292,6 +292,13 @@ private:
         ushort tag;
     }
 
+    enum ZCLReply : ubyte
+    {
+        default_,
+        sent,
+        none,
+    }
+
     // TODO: I'd prefer if we used a sorted array...
     Map!(ulong[2], SampleElement) _sample_elements;
     Map!(Element*, SampleElement*) _sample_elements_by_element;
@@ -333,7 +340,7 @@ private:
         return r;
     }
 
-    int send_default_response(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ref const ZCLHeader req, ubyte cmd, ubyte status, PCP pcp = PCP.be) nothrow
+    int send_default_response(ushort dst, ubyte endpoint, ushort profile, ushort cluster, ref const ZCLHeader req, ubyte cmd, ubyte status, PCP pcp = PCP.ca) nothrow
     {
         const ubyte[2] msg = [ cmd, status ];
         return _endpoint.send_zcl_response(dst, endpoint, profile, cluster, ZCLCommand.default_response, req, msg[], pcp);
@@ -369,6 +376,23 @@ private:
         }
 
         ZCLStatus status = ZCLStatus.success;
+        ZCLReply reply = ZCLReply.default_;
+
+        // Every decoded command owes a Default Response unless the sender disabled it or the
+        // handler explicitly sent/consumed a more specific response. This guard also runs through
+        // duplicate and malformed-command returns, where acknowledging the frame is essential to
+        // stop the sender retrying an event that we already processed.
+        scope(exit)
+        {
+            if (reply == ZCLReply.default_ && !(zcl.control & ZCLControlFlags.disable_default_response))
+            {
+                int tag = send_default_response(aps.src, aps.src_endpoint, aps.profile_id,
+                    aps.cluster_id, zcl, zcl.command, status);
+                version (DebugZigbeeController)
+                    log.debugf("{0,04x}:{1,02x} ZCL default response seq={2} cmd={3,02x} status={4,02x} tag={5}",
+                        aps.src, aps.src_endpoint, zcl.seq, zcl.command, status, tag);
+            }
+        }
 
         if (!zcl.cluster_local)
         {
@@ -469,6 +493,7 @@ private:
                     }
 
                     _endpoint.send_zcl_response(aps.src, aps.src_endpoint, aps.profile_id, aps.cluster_id, ZCLCommand.read_attributes_response, zcl, response[0..offset]);
+                    reply = ZCLReply.sent;
                     return;
 
                 case write_attributes, configure_reporting, read_reporting_configuration:
@@ -478,6 +503,7 @@ private:
 
                 case write_attributes_no_response:
                     // DOES CONTROLLER HAVE ANY RECORDS TO WRITE?
+                    reply = ZCLReply.none;
                     return; // no response expected...
 
                 case discover_attributes:
@@ -495,6 +521,7 @@ private:
                     response[0] = 1; // complete message, nothing to report...
 
                     _endpoint.send_zcl_response(aps.src, aps.src_endpoint, aps.profile_id, aps.cluster_id, ZCLCommand.discover_attributes_response, zcl, response[0..1]);
+                    reply = ZCLReply.sent;
                     return;
 
                 case discover_attributes_extended:
@@ -512,39 +539,43 @@ private:
                     response[0] = 1; /// complete message, nothing to report...
 
                     _endpoint.send_zcl_response(aps.src, aps.src_endpoint, aps.profile_id, aps.cluster_id, ZCLCommand.discover_attributes_extended_response, zcl, response[0..1]);
+                    reply = ZCLReply.sent;
                     return;
 
                 case read_attributes_response:
                     // my request for attributes returned...
                     version (DebugZigbeeController)
                         log.debugf("{0,04x}:{1,02x} UNEXPECTED read_attributes_response {2}:{3,04x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id);
+                    reply = ZCLReply.none;
                     return;
 
                 case write_attributes_response:
                     // my request to write attributes returned...
-                    assert(false, "TODO");
+                    reply = ZCLReply.none;
                     return;
 
                 case discover_attributes_response:
                     // my request to discover attributes returned...
                     version (DebugZigbeeController)
                         log.debugf("{0,04x}:{1,02x} UNEXPECTED discover_attributes_response {2}:{3,04x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id);
+                    reply = ZCLReply.none;
                     return;
 
                 case discover_attributes_extended_response:
                     // my request to discover attributes returned...
                     version (DebugZigbeeController)
                         log.debugf("{0,04x}:{1,02x} UNEXPECTED discover_attributes_extended_response {2}:{3,04x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id);
+                    reply = ZCLReply.none;
                     return;
 
                 case configure_reporting_response:
                     // my request to configure reporting returned...
-                    assert(false, "TODO");
+                    reply = ZCLReply.none;
                     return;
 
                 case read_reporting_configuration_response:
                     // my request to read reporting configuration returned...
-                    assert(false, "TODO");
+                    reply = ZCLReply.none;
                     return;
 
                 case report_attributes:
@@ -586,12 +617,12 @@ private:
                             log.debugf("{0,04x}:{1,02x} report {2}:{3,04x}:{4,04x} = {5}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id, attr_id, attr.value);
                     }
 
-                    // we don't respond to report
                     return;
 
                 case default_response:
                     // response to my previous command...
                     // check failure status and log?
+                    reply = ZCLReply.none;
                     return;
 
                 default:
@@ -614,6 +645,12 @@ private:
                 case 0x500: // IAS Zone
                     if (cmd == ZCLCommand.ias_zone_status_change)
                     {
+                        if (payload.length < 6)
+                        {
+                            status = ZCLStatus.malformed_command;
+                            break;
+                        }
+
                         ushort zone_status = payload[0..2].littleEndianToNative!ushort;
                         ubyte extended_status = payload[2];
                         ubyte zone_id = payload[3];
@@ -668,7 +705,10 @@ private:
                     else if (cmd == ZCLCommand.ias_zone_enroll_request)
                     {
                         ubyte[2] enroll_response = [0x00, 0x00];
-                        _endpoint.send_zcl_message(aps.src, aps.src_endpoint, 0x0104, 0x0500, ZCLCommand.ias_zone_enroll_response, ZCLControlFlags.disable_default_response, enroll_response[], PCP.ca);
+                        _endpoint.send_zcl_response(aps.src, aps.src_endpoint, aps.profile_id,
+                            aps.cluster_id, ZCLCommand.ias_zone_enroll_response, zcl,
+                            enroll_response[], PCP.ca);
+                        reply = ZCLReply.sent;
 
                         version (DebugZigbeeController)
                         {
@@ -702,7 +742,7 @@ private:
                         if (dedup.node == aps.src && dedup.tag == tuya_seq)
                         {
                             dedup.last = now;
-                            return; // ignore duplicate message
+                            return; // suppress duplicate application data; scope(exit) still ACKs it
                         }
                     }
                     tuya_dedup.pushBack(TuyaDedup(now, now, aps.src, tuya_seq));
@@ -710,20 +750,26 @@ private:
                     switch (cmd) with (ZCLCommand)
                     {
                         case tuya_data_request:
-                            TuyaDP dp = parse_dp(payload[2 .. $]);
-                            assert(false, "TODO");
+                            status = ZCLStatus.unsup_cluster_command;
                             return;
 
-                        case tuya_data_response:
+                        case tuya_data_response, tuya_data_report:
                             TuyaDP dp = parse_dp(payload[2 .. $]);
-                            assert(false, "TODO");
-                            return;
-
-                        case tuya_data_report:
-                            TuyaDP dp = parse_dp(payload[2 .. $]);
-                            Variant v = decode_dp(dp);
+                            if (!dp.dp_data.length)
+                            {
+                                status = ZCLStatus.malformed_command;
+                                return;
+                            }
+                            Variant v;
+                            if (!decode_dp(dp, v))
+                            {
+                                log.warningf("Zigbee: malformed or unsupported Tuya DP {0} type {1} from {2,04x}", dp.dp_id, dp.dp_type, aps.src);
+                                status = ZCLStatus.malformed_command;
+                                return;
+                            }
                             version (DebugZigbeeController)
-                                log.debugf("{0,04x}:{1,02x} Tuya report dp{2} = {3} ({4})", aps.src, aps.src_endpoint, dp.dp_id, v, dp.dp_type);
+                                log.debugf("{0,04x}:{1,02x} Tuya seq={2} cmd={3,02x} dp{4} = {5} ({6})",
+                                    aps.src, aps.src_endpoint, tuya_seq, zcl.command, dp.dp_id, v, dp.dp_type);
                             if (nm)
                             {
                                 nm.tuya_datapoints[dp.dp_id] = v;
@@ -740,6 +786,11 @@ private:
                             return;
 
                         case tuya_mcu_version_rsp:
+                            if (payload.length < 3)
+                            {
+                                status = ZCLStatus.malformed_command;
+                                return;
+                            }
                             log.infof("{0,04x}:{1,02x} Tuya MCU version {2}.{3}.{4}", aps.src, aps.src_endpoint, payload[0], payload[1], payload[2]);
                             log.warning("TODO: record the version into a synthetic attribute!!"); // ie, EF00:FC00?
                             return;
@@ -750,11 +801,13 @@ private:
                             response[2..6] = time_secs.nativeToBigEndian; // TODO: CONFIRM is big or little endian??
                             response[6..10] = time_secs.nativeToBigEndian;
                             _endpoint.send_zcl_response(aps.src, aps.src_endpoint, aps.profile_id, aps.cluster_id, cmd, zcl, response[0..10]);
+                            reply = ZCLReply.sent;
                             return;
 
                         default:
                             version (DebugZigbeeController)
                                 log.debugf("{0,04x}:{1,02x} sent unsupported Tuya command {2,02x}", aps.src, aps.src_endpoint, cast(ubyte)zcl.command);
+                            status = ZCLStatus.unsup_cluster_command;
                             return;
                     }
                     break;
@@ -766,11 +819,6 @@ private:
             version (DebugZigbeeController)
                 log.debugf("{0,04x}:{1,02x} sent unsupported cluster command {2}:{3,04x} cmd: {4,02x}", aps.src, aps.src_endpoint, aps.profile_id.profile_name, aps.cluster_id, zcl.command);
         }
-
-        // send default response
-        if (zcl.control & ZCLControlFlags.disable_default_response)
-            return; // request no default response
-        send_default_response(aps.src, aps.src_endpoint, aps.profile_id, aps.cluster_id, zcl, zcl.command, status);
     }
 
     void set_value(ref SampleElement e, ref const Variant val, SysTime timestamp) nothrow
@@ -797,7 +845,8 @@ private:
             case 0xEF00: // Tuya
                 // attribute id is Tuya datapoint
                 ubyte[256] buffer = void;
-                buffer[0..2] = tuya_txn_id.nativeToBigEndian;
+                ushort txn = tuya_txn_id;
+                buffer[0..2] = txn.nativeToBigEndian;
                 tuya_txn_id++;
                 tuya_txn_id += tuya_txn_id == 0;
 
@@ -808,7 +857,11 @@ private:
 
                 // TODO: we should request an ACK!!!
 
-                _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0xEF00, ZCLCommand.tuya_data_request, APSFlags.none, buffer[0..2+len], PCP.vo);
+                int tag = _endpoint.send_zcl_message(e.eui, e.endpoint, 0x0104, 0xEF00,
+                    ZCLCommand.tuya_data_request, APSFlags.none, buffer[0..2+len], PCP.vo);
+                version (DebugZigbeeController)
+                    log.debugf("{0} Tuya write txn={1} dp{2} = {3} tag={4}",
+                        e.eui, txn, e.attribute, val, tag);
                 break;
 
             default:
@@ -1257,7 +1310,8 @@ private:
         ZCLResponse zcl_res;
         ubyte[128] req_buffer = void;
 
-        assert(ep.profile_id == 0x0104, "wrong profile");
+        if (ep.profile_id != 0x0104)
+            return StringResult("endpoint does not use the Home Automation profile");
 
         if (0 !in ep.clusters)
             return StringResult("endpoint does not have basic cluster");
@@ -1370,30 +1424,43 @@ TuyaDP parse_dp(const(ubyte)[] data)
     return TuyaDP(id, type, data[4 .. 4 + len]);
 }
 
-Variant decode_dp(ref TuyaDP dp)
+bool decode_dp(ref const TuyaDP dp, ref Variant result)
 {
     switch (dp.dp_type)
     {
         case TuyaDataType.raw:
-            return Variant(cast(const(void)[])dp.dp_data);
+            result = Variant(cast(const(void)[])dp.dp_data);
+            return true;
         case TuyaDataType.string:
-            return Variant(cast(const(char)[])dp.dp_data);
+            result = Variant(cast(const(char)[])dp.dp_data);
+            return true;
         case TuyaDataType.bool_:
-            return Variant(dp.dp_data[0] != 0);
+            if (dp.dp_data.length != 1)
+                return false;
+            result = Variant(dp.dp_data[0] != 0);
+            return true;
         case TuyaDataType.value:
-            return Variant(dp.dp_data[0..4].bigEndianToNative!uint);
+            if (dp.dp_data.length != 4)
+                return false;
+            result = Variant(dp.dp_data[0..4].bigEndianToNative!uint);
+            return true;
         case TuyaDataType.enum_:
-            return Variant(dp.dp_data[0]); // TODO: confirm this one?
+            if (dp.dp_data.length != 1)
+                return false;
+            result = Variant(dp.dp_data[0]);
+            return true;
         case TuyaDataType.bitmap:
             if (dp.dp_data.length == 1)
-                return Variant(dp.dp_data[0]); // TODO: confirm this one?
+                result = Variant(dp.dp_data[0]);
             else if (dp.dp_data.length == 2)
-                return Variant(dp.dp_data[0..2].bigEndianToNative!ushort); // TODO: confirm this one?
+                result = Variant(dp.dp_data[0..2].bigEndianToNative!ushort);
             else if (dp.dp_data.length == 4)
-                return Variant(dp.dp_data[0..4].bigEndianToNative!uint); // TODO: confirm this one?
-            assert(false, "Unexpected Tuya BITMAP length");
+                result = Variant(dp.dp_data[0..4].bigEndianToNative!uint);
+            else
+                return false;
+            return true;
         default:
-            assert(false, "Unknown Tuya DP type");
+            return false;
     }
 }
 

@@ -1,6 +1,7 @@
 module protocol.zigbee.zdo;
 
 import urt.endian;
+import urt.log;
 
 import protocol.zigbee;
 
@@ -136,10 +137,8 @@ bool parse_node_desc(const(ubyte)[] message, NodeMap* node)
         new_type = NodeType.router;
     else
     {
-//        if (node.desc.mac_capabilities == 0x80) // HACK: lots of Tuya devices only report this 'allocate address' flag
-//            new_type = NodeType.router;         //       ...and apparently that means they're a router?
-//        else
-        assert((node.desc.mac_capabilities & 0x2) == 0, "FFD flag, but not a router? the information is in conflict... who do we trust?");
+        if (node.desc.mac_capabilities & 0x02)
+            log_warning("zigbee", "node descriptor has FFD capability but an end-device logical type; using the logical type");
 
         if (node.desc.mac_capabilities & 0x08) // receiver-on-while-idle
             new_type = NodeType.end_device;
@@ -167,15 +166,9 @@ bool parse_node_desc(const(ubyte)[] message, NodeMap* node)
     node.desc.extended_simple_desc_list = (message[14] & 0x02) != 0;
 
     if (node.desc.complex_desc)
-    {
-        // TODO: request complex descriptor??
-        assert(false);
-    }
+        log_warning("zigbee", "TODO: node exposes a complex descriptor, which is not collected");
     if (node.desc.user_desc)
-    {
-        // TODO: request user descriptor??
-        assert(false);
-    }
+        log_warning("zigbee", "TODO: node exposes a user descriptor, which is not collected");
 
     node.initialised |= 0x01;
 

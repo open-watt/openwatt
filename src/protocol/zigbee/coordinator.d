@@ -20,7 +20,7 @@ import protocol.ezsp.client;
 import protocol.ezsp.commands;
 import protocol.zigbee;
 import protocol.zigbee.aps;
-//import protocol.zigbee.client;
+import protocol.zigbee.client;
 import protocol.zigbee.router;
 import protocol.zigbee.zdo;
 
@@ -309,11 +309,8 @@ private:
                     return init_network(ezsp);
 
                 case JOINED_NETWORK_NO_PARENT:
-                    assert(false, "TODO: what is this case?");
-//                    ezsp.send_command!EZSP_PermitJoining(0xFF, (EmberStatus status) {
-//                        log.info("permit joining status: ", status);
-//                    });
-                break;
+                    log.error("Zigbee NCP is joined without a parent; restarting coordinator initialisation");
+                    return false;
 
                 case JOINING_NETWORK:
                 case LEAVING_NETWORK:
@@ -475,7 +472,11 @@ private:
         _network_params.radio_tx_power = nwk_params.parameters.radioTxPower;
 
         _node_id = ezsp.request!EZSP_GetNodeId();
-        assert(_node_id == nwk_params.parameters.nwkManagerId && _node_id == 0x0000, "We are the coordinator, so shouldn't we have id 0?");
+        if (_node_id != nwk_params.parameters.nwkManagerId || _node_id != 0x0000)
+        {
+            log.errorf("Zigbee NCP reported invalid coordinator node IDs: local={0,04x}, manager={1,04x}", _node_id, nwk_params.parameters.nwkManagerId);
+            return false;
+        }
 
         log.noticef("NETWORK UP: node-id={0} type={1} pan-id={2} ({3, 04x}) channel={4}", _node_id, nwk_params.nodeType, _network_params.extended_pan_id, _network_params.pan_id, _network_params.radio_channel);
 
@@ -731,12 +732,12 @@ nothrow:
 
     void remote_set_binding(EmberBindingTableEntry entry, ubyte index, EmberStatus policy_decision)
     {
-        assert(false, "TODO");
+        log.warningf("TODO: Zigbee remote binding change was not applied: index={0}, policy={1}", index, policy_decision);
     }
 
     void remote_delete_binding(ubyte index, EmberStatus policy_decision)
     {
-        assert(false, "TODO");
+        log.warningf("TODO: Zigbee remote binding deletion was not applied: index={0}, policy={1}", index, policy_decision);
     }
 
     void state_change(ActiveObject object, StateSignal signal)
@@ -747,12 +748,6 @@ nothrow:
     }
 
 protected:
-    final override bool handle_zdo_frame(ref const APSFrame aps, ref const Packet p)
-    {
-        bool response_required = (aps.flags & APSFlags.zdo_response_required) != 0;
-
-        //...
-
-        return super.handle_zdo_frame(aps, p);
-    }
+    final override ZDOReply handle_zdo_frame(ref const APSFrame aps, ref const Packet p)
+        => super.handle_zdo_frame(aps, p);
 }
