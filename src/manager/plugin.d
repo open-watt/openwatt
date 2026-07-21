@@ -149,6 +149,7 @@ void register_modules(Application app)
         register_module!(protocol.ntp)(app);
         register_module!(protocol.ppp)(app);
 //        register_module!(protocol.snmp)(app);
+        register_module!(protocol.spinel)(app);
         register_module!(protocol.telnet)(app);
         register_module!(protocol.tesla)(app);
         register_module!(protocol.zigbee)(app);
