@@ -1272,7 +1272,8 @@ private:
                 _on_accept(&this, c, getTime());
             else
                 c.close();
-            post_accept();
+            if (!post_accept() && _on_accept)
+                _on_accept(&this, null, getTime());
         }
     }
     else
@@ -1285,7 +1286,20 @@ private:
 
         void on_ready(IoReady ready)
         {
-            if (_closing || (ready & IoReady.readable) == 0)
+            if (_closing)
+                return;
+            if (ready & IoReady.error)
+            {
+                if (_watched)
+                {
+                    g_app.unwatch_io(_socket.handle);
+                    _watched = false;
+                }
+                if (_on_accept)
+                    _on_accept(&this, null, getTime());
+                return;
+            }
+            if ((ready & IoReady.readable) == 0)
                 return;
             foreach (_; 0 .. 16)
             {
