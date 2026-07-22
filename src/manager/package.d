@@ -298,8 +298,7 @@ nothrow @nogc:
 
         MonoTime now = getTime();
         schedule(now, &tick);
-        // this is folded into the high-frequency tick while it exists...
-//        schedule(now + 1.seconds, &heartbeat);
+        schedule(now + 1.seconds, &heartbeat);
     }
 
     ~this()
