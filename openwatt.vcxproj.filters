@@ -528,8 +528,8 @@
     <DCompile Include="src\router\iface\wifi.d">
       <Filter>src\router\iface</Filter>
     </DCompile>
-    <DCompile Include="src\router\port\package.d">
-      <Filter>src\router\port</Filter>
+    <DCompile Include="src\router\port.d">
+      <Filter>src\router</Filter>
     </DCompile>
     <DCompile Include="src\protocol\ble\att.d">
       <Filter>src\protocol\ble</Filter>
@@ -1492,6 +1492,9 @@
       <Filter>third_party\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\uuid.d">
+      <Filter>third_party\urt</Filter>
+    </DCompile>
+    <DCompile Include="third_party\urt\src\urt\typereg.d">
       <Filter>third_party\urt</Filter>
     </DCompile>
     <DCompile Include="third_party\urt\src\urt\variant.d">
