@@ -400,29 +400,28 @@ nothrow @nogc:
                 foreach (ref d; desired)
                 {
                     uint want = (d.events & POLLOUT) ? EPOLLOUT : EPOLLIN;
-                    bool found = false;
-                    foreach (ref p; _pool_fds[])
+                    size_t idx = size_t.max;
+                    foreach (i, ref p; _pool_fds)
+                        if (p.fd == d.fd) { idx = i; break; }
+
+                    epoll_event ev;
+                    ev.events = want;
+                    ev.data.ptr = &_pool_tag;
+
+                    // ADD first: a tracked fd number does not imply live registration, because a
+                    // fd closed and reopened to the same number was dropped from the epoll set by
+                    // the kernel. ADD re-registers it; EEXIST means it is genuinely still watched.
+                    if (epoll_ctl(_epoll, EPOLL_CTL_ADD, d.fd, &ev) == 0)
                     {
-                        if (p.fd != d.fd)
-                            continue;
-                        found = true;
-                        if (p.events != want)
-                        {
-                            epoll_event ev;
-                            ev.events = want;
-                            ev.data.ptr = &_pool_tag;
-                            if (epoll_ctl(_epoll, EPOLL_CTL_MOD, d.fd, &ev) == 0)
-                                p.events = want;
-                        }
-                        break;
-                    }
-                    if (!found)
-                    {
-                        epoll_event ev;
-                        ev.events = want;
-                        ev.data.ptr = &_pool_tag;
-                        if (epoll_ctl(_epoll, EPOLL_CTL_ADD, d.fd, &ev) == 0)
+                        if (idx == size_t.max)
                             _pool_fds ~= PoolFd(d.fd, want);
+                        else
+                            _pool_fds[idx].events = want;
+                    }
+                    else if (idx != size_t.max && _pool_fds[idx].events != want)
+                    {
+                        if (epoll_ctl(_epoll, EPOLL_CTL_MOD, d.fd, &ev) == 0)
+                            _pool_fds[idx].events = want;
                     }
                 }
             }
