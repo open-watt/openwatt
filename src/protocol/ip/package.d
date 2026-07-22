@@ -1262,7 +1262,12 @@ private:
             }
             TCPConnection* c = register_tcp_conn(child, from_sockaddr_in(ra));
             c._phase = TCPConnection.Phase.open;
-            c.post_recv();
+            if (!c.post_recv())
+            {
+                c.close();
+                post_accept();
+                return;
+            }
             if (_on_accept)
                 _on_accept(&this, c, getTime());
             else
@@ -1294,8 +1299,12 @@ private:
                 TCPConnection* c = register_tcp_conn(child, remote);
                 c._phase = TCPConnection.Phase.open;
                 // watch before on_accept so a close() from the handler is ordered after
-                if (g_app.reactor.watch_fd(child.handle, false, &c.on_ready))
-                    c._watched = true;
+                if (!g_app.reactor.watch_fd(child.handle, false, &c.on_ready))
+                {
+                    c.close();
+                    continue;
+                }
+                c._watched = true;
                 if (_on_accept)
                     _on_accept(&this, c, getTime());
                 else
@@ -1527,7 +1536,7 @@ private:
 
         void on_ready(IoReady ready)
         {
-            if (_closing || (ready & IoReady.readable) == 0)
+            if (_closing)
                 return;
             while (!_closing)
             {
