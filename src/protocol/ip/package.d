@@ -984,8 +984,8 @@ private:
             }
             if (_on_recv)
                 _on_recv(&this, _recv.buf[0 .. bytes], getTime());
-            if (!_closing)
-                post_recv();
+            if (!_closing && !post_recv())
+                fail(IPEvent.error);
         }
 
         void send_complete(IoOp* op, bool ok, uint, uint)

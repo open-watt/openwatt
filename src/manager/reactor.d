@@ -165,7 +165,8 @@ nothrow @nogc:
                 }
             }
             foreach (e; _watches[])
-                defaultAllocator().freeT(e);
+                if (!e.outstanding)      // a wedged driver's read may still complete into e.buf
+                    defaultAllocator().freeT(e);
             _watches.clear();
             CloseHandle(_iocp);
             _iocp = null;
@@ -500,31 +501,33 @@ private:
 
             void complete(IoOp*, bool ok, uint bytes, uint err)
             {
-                outstanding = false;
                 if (dead)
                 {
-                    // unwatched while the read was in flight; reap the entry
+                    outstanding = false;
                     owner.reap(&this);
                     return;
                 }
                 if (ok && bytes > 0)
                 {
+                    // outstanding stays true across on_data: a reentrant unwatch_io must mark the
+                    // entry dead (deferred reap), not free it inline underneath us
                     on_data(buf[0 .. bytes], getTime());
-                    if (!dead && !post_read())
-                        on_error();
+                    if (dead)
+                    {
+                        outstanding = false;
+                        owner.reap(&this);
+                        return;
+                    }
                 }
-                else if (ok || err == ERROR_OPERATION_ABORTED)
+                outstanding = false;
+                if (ok || err == ERROR_OPERATION_ABORTED)
                 {
                     // device idle tick, or a purge with the port still live: re-arm
                     if (!post_read())
                         on_error();
                 }
                 else
-                {
-                    // genuine error (device removed etc.): stop reading, let the owner recover.
-                    // the entry stays until the owner unwatches; nothing is outstanding on it.
                     on_error();
-                }
             }
         }
 
