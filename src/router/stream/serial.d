@@ -237,7 +237,16 @@ nothrow @nogc:
             return;
         _params.flow_control = value;
         mark_set!(typeof(this), "flow-control");
-        restart();
+        // reconfigure the open port in place rather than restart(): a close/reopen cycles the modem
+        // lines the peer sees, which both disturbs flow-control-sensitive devices (Silabs NCPs stop
+        // transmitting) and makes runtime flow-control experiments unrepresentative
+        version (Embedded)
+            restart();
+        else
+        {
+            if (!running || !configure_port(false))
+                restart();
+        }
     }
 
     version (Embedded)
@@ -1494,4 +1503,3 @@ version(Posix)
 
     enum F_OK = 0;
 }
-

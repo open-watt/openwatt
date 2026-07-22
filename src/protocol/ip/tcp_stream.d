@@ -381,6 +381,11 @@ protected:
 
     void on_accept(TCPListener* listener, TCPConnection* conn, MonoTime)
     {
+        if (conn is null)
+        {
+            restart();
+            return;
+        }
         if (_connection_callback)
         {
             const InetAddress remote = conn.remote();

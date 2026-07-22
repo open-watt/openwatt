@@ -234,7 +234,7 @@ nothrow @nogc:
         assert(!g_app, "Application already created!");
         g_app = this;
 
-        _wake_event.init();
+        bool reactor_ok = _wake_event.init();
         _priority_events.init();
         _bulk_events.init();
 
@@ -296,10 +296,17 @@ nothrow @nogc:
 
         console.freeze();
 
+        if (!reactor_ok)
+        {
+            import urt.log : writeError;
+            import urt.system : abort;
+            writeError("reactor initialisation failed");
+            abort();
+        }
+
         MonoTime now = getTime();
         schedule(now, &tick);
-        // this is folded into the high-frequency tick while it exists...
-//        schedule(now + 1.seconds, &heartbeat);
+        schedule(now + 1.seconds, &heartbeat);
     }
 
     ~this()
@@ -312,7 +319,8 @@ nothrow @nogc:
 
     void set_update_rate(Session, Quantity!(uint, Hertz) rate)
     {
-        update_rate_hz = rate.value;
+        uint hz = rate.value;
+        update_rate_hz = hz < 1 ? 1 : (hz > 1000 ? 1000 : hz);
     }
 
     void register_module(Module mod)
@@ -1186,7 +1194,11 @@ private:
     {
         update();
 
-        schedule(getTime() + msecs(1000 / update_rate_hz), &tick);
+        MonoTime next = scheduled + msecs(1000 / update_rate_hz);
+        MonoTime now = getTime();
+        if (next <= now)
+            next = now + msecs(1000 / update_rate_hz);
+        schedule(next, &tick);
     }
 
     void heartbeat(MonoTime scheduled)

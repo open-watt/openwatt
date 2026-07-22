@@ -253,7 +253,7 @@
     <DCompile Include="src\router\iface\wifi.d" />
     <DCompile Include="src\router\pcap.d" />
     <DCompile Include="src\router\pcap_server.d" />
-    <DCompile Include="src\router\port\package.d" />
+    <DCompile Include="src\router\port.d" />
     <DCompile Include="src\router\status.d" />
     <DCompile Include="src\router\stream\bridge.d" />
     <DCompile Include="src\router\stream\console.d" />
@@ -1240,6 +1240,7 @@
     <DCompile Include="third_party\urt\src\urt\traits.d" />
     <DCompile Include="third_party\urt\src\urt\util.d" />
     <DCompile Include="third_party\urt\src\urt\uuid.d" />
+    <DCompile Include="third_party\urt\src\urt\typereg.d" />
     <DCompile Include="third_party\urt\src\urt\variant.d" />
     <DCompile Include="third_party\urt\src\urt\zip.d" />
   </ItemGroup>

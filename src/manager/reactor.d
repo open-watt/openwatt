@@ -165,7 +165,8 @@ nothrow @nogc:
                 }
             }
             foreach (e; _watches[])
-                defaultAllocator().freeT(e);
+                if (!e.outstanding)      // a wedged driver's read may still complete into e.buf
+                    defaultAllocator().freeT(e);
             _watches.clear();
             CloseHandle(_iocp);
             _iocp = null;
@@ -400,29 +401,28 @@ nothrow @nogc:
                 foreach (ref d; desired)
                 {
                     uint want = (d.events & POLLOUT) ? EPOLLOUT : EPOLLIN;
-                    bool found = false;
-                    foreach (ref p; _pool_fds[])
+                    size_t idx = size_t.max;
+                    foreach (i, ref p; _pool_fds)
+                        if (p.fd == d.fd) { idx = i; break; }
+
+                    epoll_event ev;
+                    ev.events = want;
+                    ev.data.ptr = &_pool_tag;
+
+                    // ADD first: a tracked fd number does not imply live registration, because a
+                    // fd closed and reopened to the same number was dropped from the epoll set by
+                    // the kernel. ADD re-registers it; EEXIST means it is genuinely still watched.
+                    if (epoll_ctl(_epoll, EPOLL_CTL_ADD, d.fd, &ev) == 0)
                     {
-                        if (p.fd != d.fd)
-                            continue;
-                        found = true;
-                        if (p.events != want)
-                        {
-                            epoll_event ev;
-                            ev.events = want;
-                            ev.data.ptr = &_pool_tag;
-                            if (epoll_ctl(_epoll, EPOLL_CTL_MOD, d.fd, &ev) == 0)
-                                p.events = want;
-                        }
-                        break;
-                    }
-                    if (!found)
-                    {
-                        epoll_event ev;
-                        ev.events = want;
-                        ev.data.ptr = &_pool_tag;
-                        if (epoll_ctl(_epoll, EPOLL_CTL_ADD, d.fd, &ev) == 0)
+                        if (idx == size_t.max)
                             _pool_fds ~= PoolFd(d.fd, want);
+                        else
+                            _pool_fds[idx].events = want;
+                    }
+                    else if (idx != size_t.max && _pool_fds[idx].events != want)
+                    {
+                        if (epoll_ctl(_epoll, EPOLL_CTL_MOD, d.fd, &ev) == 0)
+                            _pool_fds[idx].events = want;
                     }
                 }
             }
@@ -501,31 +501,33 @@ private:
 
             void complete(IoOp*, bool ok, uint bytes, uint err)
             {
-                outstanding = false;
                 if (dead)
                 {
-                    // unwatched while the read was in flight; reap the entry
+                    outstanding = false;
                     owner.reap(&this);
                     return;
                 }
                 if (ok && bytes > 0)
                 {
+                    // outstanding stays true across on_data: a reentrant unwatch_io must mark the
+                    // entry dead (deferred reap), not free it inline underneath us
                     on_data(buf[0 .. bytes], getTime());
-                    if (!dead && !post_read())
-                        on_error();
+                    if (dead)
+                    {
+                        outstanding = false;
+                        owner.reap(&this);
+                        return;
+                    }
                 }
-                else if (ok || err == ERROR_OPERATION_ABORTED)
+                outstanding = false;
+                if (ok || err == ERROR_OPERATION_ABORTED)
                 {
                     // device idle tick, or a purge with the port still live: re-arm
                     if (!post_read())
                         on_error();
                 }
                 else
-                {
-                    // genuine error (device removed etc.): stop reading, let the owner recover.
-                    // the entry stays until the owner unwatches; nothing is outstanding on it.
                     on_error();
-                }
             }
         }
 

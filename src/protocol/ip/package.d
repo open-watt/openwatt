@@ -984,8 +984,8 @@ private:
             }
             if (_on_recv)
                 _on_recv(&this, _recv.buf[0 .. bytes], getTime());
-            if (!_closing)
-                post_recv();
+            if (!_closing && !post_recv())
+                fail(IPEvent.error);
         }
 
         void send_complete(IoOp* op, bool ok, uint, uint)
@@ -1262,12 +1262,18 @@ private:
             }
             TCPConnection* c = register_tcp_conn(child, from_sockaddr_in(ra));
             c._phase = TCPConnection.Phase.open;
-            c.post_recv();
+            if (!c.post_recv())
+            {
+                c.close();
+                post_accept();
+                return;
+            }
             if (_on_accept)
                 _on_accept(&this, c, getTime());
             else
                 c.close();
-            post_accept();
+            if (!post_accept() && _on_accept)
+                _on_accept(&this, null, getTime());
         }
     }
     else
@@ -1280,7 +1286,20 @@ private:
 
         void on_ready(IoReady ready)
         {
-            if (_closing || (ready & IoReady.readable) == 0)
+            if (_closing)
+                return;
+            if (ready & IoReady.error)
+            {
+                if (_watched)
+                {
+                    g_app.unwatch_io(_socket.handle);
+                    _watched = false;
+                }
+                if (_on_accept)
+                    _on_accept(&this, null, getTime());
+                return;
+            }
+            if ((ready & IoReady.readable) == 0)
                 return;
             foreach (_; 0 .. 16)
             {
@@ -1294,8 +1313,12 @@ private:
                 TCPConnection* c = register_tcp_conn(child, remote);
                 c._phase = TCPConnection.Phase.open;
                 // watch before on_accept so a close() from the handler is ordered after
-                if (g_app.reactor.watch_fd(child.handle, false, &c.on_ready))
-                    c._watched = true;
+                if (!g_app.reactor.watch_fd(child.handle, false, &c.on_ready))
+                {
+                    c.close();
+                    continue;
+                }
+                c._watched = true;
                 if (_on_accept)
                     _on_accept(&this, c, getTime());
                 else
@@ -1527,7 +1550,7 @@ private:
 
         void on_ready(IoReady ready)
         {
-            if (_closing || (ready & IoReady.readable) == 0)
+            if (_closing)
                 return;
             while (!_closing)
             {
