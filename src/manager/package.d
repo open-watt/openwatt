@@ -311,7 +311,8 @@ nothrow @nogc:
 
     void set_update_rate(Session, Quantity!(uint, Hertz) rate)
     {
-        update_rate_hz = rate.value;
+        uint hz = rate.value;
+        update_rate_hz = hz < 1 ? 1 : (hz > 1000 ? 1000 : hz);
     }
 
     void register_module(Module mod)
