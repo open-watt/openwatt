@@ -1088,9 +1088,27 @@ nothrow @nogc:
         }
 
         // any device's pending refs may resolve to the new element via a leading-dot global path
+        request_rebind();
+    }
+
+    // MAIN THREAD ONLY; coalesces creation bursts into one deferred rebind flush
+    void request_rebind()
+    {
+        if (_rebind_scheduled)
+            return;
+        _rebind_scheduled = true;
+        if (!post_event(&_flush_rebind, getTime(), EventPriority.bulk))
+            _rebind_scheduled = false; // queue overflow; the next creation re-arms
+    }
+
+    private void _flush_rebind(MonoTime)
+    {
+        _rebind_scheduled = false;
         foreach (device; devices.values)
             device.try_bind_pending();
     }
+
+    private bool _rebind_scheduled;
 
     void destroy_link(ElementLink* link)
     {

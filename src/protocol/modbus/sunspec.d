@@ -106,7 +106,7 @@ private enum FieldType : ubyte
 
 private struct ComponentDef
 {
-    string path;        // dotted path from device root (e.g. "inverter.solar.meter")
+    string path;        // dotted path from device root (e.g. "grid.meter")
     string template_;
     string type_value;  // optional fixed value for the 'type' element
 }
@@ -132,7 +132,7 @@ private struct RepeatBlock
     ushort count_offset;                   // .d offset of N register (count of instances)
     ushort first_offset;                   // .d offset where the first instance starts
     ushort stride;                         // words per instance
-    string path_prefix;                    // e.g. "inverter.solar.string" — instance index appended
+    string path_prefix;                    // e.g. "solar.mppt" with instance index appended
     immutable(ComponentDef)[] components;  // paths RELATIVE to the per-instance root
     immutable(FieldDef)[] fields;          // offsets are WITHIN the instance; scale_off is the model's .d
 }
@@ -162,39 +162,56 @@ private immutable FieldDef[] m1_fields = [
 // Models 101/102/103: Inverter (integer with scale factors).
 //
 // Component layout (per COMPONENT_TEMPLATES.md "Inverter" sub-components):
-//   0: inverter              (Inverter)         - top-level inverter component
-//   1: inverter.solar        (Solar)            - PV input
-//   2: inverter.solar.meter  (EnergyMeter dc)   - DC measurements at the inverter's PV input
-//   3: meter                 (EnergyMeter ac)   - inverter's AC output; the device's primary meter
-// The AC output is the device's top-level `meter`: the inverter's exchange with the
-// circuit it is attached to (what the energy app attributes to that circuit). A
+//   0: inverter            (Inverter)          - top-level inverter component
+//   1: solar               (Port/Solar)        - single PV input, or multi-input aggregate
+//   2: solar.meter         (EnergyMeter dc)    - DC measurements at the PV input/aggregate
+//   3: grid                (Port)              - inverter AC output / grid-facing circuit
+//   4: grid.meter          (EnergyMeter ac)    - inverter exchange with the attached circuit
+// The AC output is a Port so /apps/energy/appliance bindings such as
+// `grid=house device=se10000h` can attach readings to the topology. A
 // coexisting CT (model 201/203) is the property-gateway export meter and is mounted
 // at inverter.export_meter below, not here.
 
 private immutable ComponentDef[] inverter_components_single = [
     ComponentDef("inverter",             "Inverter",    null),
-    ComponentDef("inverter.solar",       "Solar",       null),
-    ComponentDef("inverter.solar.meter", "EnergyMeter", "dc"),
-    ComponentDef("meter",                "EnergyMeter", "single-phase"),
+    ComponentDef("solar",                "Port",        null),
+    ComponentDef("solar.meter",          "EnergyMeter", "dc"),
+    ComponentDef("grid",                 "Port",        null),
+    ComponentDef("grid.meter",           "EnergyMeter", "single-phase"),
 ];
 private immutable ComponentDef[] inverter_components_three = [
     ComponentDef("inverter",             "Inverter",    null),
-    ComponentDef("inverter.solar",       "Solar",       null),
-    ComponentDef("inverter.solar.meter", "EnergyMeter", "dc"),
-    ComponentDef("meter",                "EnergyMeter", "three-phase"),
+    ComponentDef("solar",                "Port",        null),
+    ComponentDef("solar.meter",          "EnergyMeter", "dc"),
+    ComponentDef("grid",                 "Port",        null),
+    ComponentDef("grid.meter",           "EnergyMeter", "three-phase"),
+];
+private immutable ComponentDef[] inverter_components_single_mppt = [
+    ComponentDef("inverter",             "Inverter",    null),
+    ComponentDef("solar",                "Solar",       null),
+    ComponentDef("solar.meter",          "EnergyMeter", "dc"),
+    ComponentDef("grid",                 "Port",        null),
+    ComponentDef("grid.meter",           "EnergyMeter", "single-phase"),
+];
+private immutable ComponentDef[] inverter_components_three_mppt = [
+    ComponentDef("inverter",             "Inverter",    null),
+    ComponentDef("solar",                "Solar",       null),
+    ComponentDef("solar.meter",          "EnergyMeter", "dc"),
+    ComponentDef("grid",                 "Port",        null),
+    ComponentDef("grid.meter",           "EnergyMeter", "three-phase"),
 ];
 
 private immutable FieldDef[] m101_fields = [
-    // AC output -> meter
-    FieldDef(3, "current",        "A",     0,  4, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "voltage",        "V",     8, 11, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "power",          "W",    12, 13, FieldType.i16,   0, Frequency.realtime),
-    FieldDef(3, "frequency",      "Hz",   14, 15, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "apparent",       "VA",   16, 17, FieldType.i16,   0, Frequency.realtime),
-    FieldDef(3, "reactive",       "var",  18, 19, FieldType.i16,   0, Frequency.realtime),
-    FieldDef(3, "pf",             "%",    20, 21, FieldType.i16,   0, Frequency.realtime),
-    FieldDef(3, "export",         "Wh",   22, 24, FieldType.acc32, 0, Frequency.medium),
-    // DC input -> inverter.solar.meter
+    // AC output -> grid.meter
+    FieldDef(4, "current",        "A",     0,  4, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "voltage",        "V",     8, 11, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "power",          "W",    12, 13, FieldType.i16,   0, Frequency.realtime),
+    FieldDef(4, "frequency",      "Hz",   14, 15, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "apparent",       "VA",   16, 17, FieldType.i16,   0, Frequency.realtime),
+    FieldDef(4, "reactive",       "var",  18, 19, FieldType.i16,   0, Frequency.realtime),
+    FieldDef(4, "pf",             "%",    20, 21, FieldType.i16,   0, Frequency.realtime),
+    FieldDef(4, "import",         "Wh",   22, 24, FieldType.acc32, 0, Frequency.medium),
+    // DC input -> solar.meter
     FieldDef(2, "current",        "A",    25, 26, FieldType.u16,   0, Frequency.realtime),
     FieldDef(2, "voltage",        "V",    27, 28, FieldType.u16,   0, Frequency.realtime),
     FieldDef(2, "power",          "W",    29, 30, FieldType.i16,   0, Frequency.realtime),
@@ -208,19 +225,19 @@ private immutable FieldDef[] m101_fields = [
 ];
 
 private immutable FieldDef[] m102_fields = [
-    FieldDef(3, "current",        "A",     0,  4, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "current1",       "A",     1,  4, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "current2",       "A",     2,  4, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "voltage",        "V",     8, 11, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "voltage1",       "V",     8, 11, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "voltage2",       "V",     9, 11, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "ipv1",           "V",     5, 11, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "power",          "W",    12, 13, FieldType.i16,   0, Frequency.realtime),
-    FieldDef(3, "frequency",      "Hz",   14, 15, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "apparent",       "VA",   16, 17, FieldType.i16,   0, Frequency.realtime),
-    FieldDef(3, "reactive",       "var",  18, 19, FieldType.i16,   0, Frequency.realtime),
-    FieldDef(3, "pf",             "%",    20, 21, FieldType.i16,   0, Frequency.realtime),
-    FieldDef(3, "export",         "Wh",   22, 24, FieldType.acc32, 0, Frequency.medium),
+    FieldDef(4, "current",        "A",     0,  4, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "current1",       "A",     1,  4, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "current2",       "A",     2,  4, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "voltage",        "V",     8, 11, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "voltage1",       "V",     8, 11, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "voltage2",       "V",     9, 11, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "ipv1",           "V",     5, 11, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "power",          "W",    12, 13, FieldType.i16,   0, Frequency.realtime),
+    FieldDef(4, "frequency",      "Hz",   14, 15, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "apparent",       "VA",   16, 17, FieldType.i16,   0, Frequency.realtime),
+    FieldDef(4, "reactive",       "var",  18, 19, FieldType.i16,   0, Frequency.realtime),
+    FieldDef(4, "pf",             "%",    20, 21, FieldType.i16,   0, Frequency.realtime),
+    FieldDef(4, "import",         "Wh",   22, 24, FieldType.acc32, 0, Frequency.medium),
     FieldDef(2, "current",        "A",    25, 26, FieldType.u16,   0, Frequency.realtime),
     FieldDef(2, "voltage",        "V",    27, 28, FieldType.u16,   0, Frequency.realtime),
     FieldDef(2, "power",          "W",    29, 30, FieldType.i16,   0, Frequency.realtime),
@@ -232,23 +249,23 @@ private immutable FieldDef[] m102_fields = [
 ];
 
 private immutable FieldDef[] m103_fields = [
-    FieldDef(3, "current",        "A",     0,  4, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "current1",       "A",     1,  4, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "current2",       "A",     2,  4, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "current3",       "A",     3,  4, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "voltage",        "V",     8, 11, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "voltage1",       "V",     8, 11, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "voltage2",       "V",     9, 11, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "voltage3",       "V",    10, 11, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "ipv1",           "V",     5, 11, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "ipv2",           "V",     6, 11, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "ipv3",           "V",     7, 11, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "power",          "W",    12, 13, FieldType.i16,   0, Frequency.realtime),
-    FieldDef(3, "frequency",      "Hz",   14, 15, FieldType.u16,   0, Frequency.realtime),
-    FieldDef(3, "apparent",       "VA",   16, 17, FieldType.i16,   0, Frequency.realtime),
-    FieldDef(3, "reactive",       "var",  18, 19, FieldType.i16,   0, Frequency.realtime),
-    FieldDef(3, "pf",             "%",    20, 21, FieldType.i16,   0, Frequency.realtime),
-    FieldDef(3, "export",         "Wh",   22, 24, FieldType.acc32, 0, Frequency.medium),
+    FieldDef(4, "current",        "A",     0,  4, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "current1",       "A",     1,  4, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "current2",       "A",     2,  4, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "current3",       "A",     3,  4, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "voltage",        "V",     8, 11, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "voltage1",       "V",     8, 11, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "voltage2",       "V",     9, 11, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "voltage3",       "V",    10, 11, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "ipv1",           "V",     5, 11, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "ipv2",           "V",     6, 11, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "ipv3",           "V",     7, 11, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "power",          "W",    12, 13, FieldType.i16,   0, Frequency.realtime),
+    FieldDef(4, "frequency",      "Hz",   14, 15, FieldType.u16,   0, Frequency.realtime),
+    FieldDef(4, "apparent",       "VA",   16, 17, FieldType.i16,   0, Frequency.realtime),
+    FieldDef(4, "reactive",       "var",  18, 19, FieldType.i16,   0, Frequency.realtime),
+    FieldDef(4, "pf",             "%",    20, 21, FieldType.i16,   0, Frequency.realtime),
+    FieldDef(4, "import",         "Wh",   22, 24, FieldType.acc32, 0, Frequency.medium),
     FieldDef(2, "current",        "A",    25, 26, FieldType.u16,   0, Frequency.realtime),
     FieldDef(2, "voltage",        "V",    27, 28, FieldType.u16,   0, Frequency.realtime),
     FieldDef(2, "power",          "W",    29, 30, FieldType.i16,   0, Frequency.realtime),
@@ -262,14 +279,14 @@ private immutable FieldDef[] m103_fields = [
 // Models 111/112/113: Inverter (float32). No scale factors; each f32 is 2 regs.
 
 private immutable FieldDef[] m111_fields = [
-    FieldDef(3, "current",        "A",     0, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "voltage",        "V",    14, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "power",          "W",    20, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "frequency",      "Hz",   22, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "apparent",       "VA",   24, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "reactive",       "var",  26, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "pf",             "%",    28, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "export",         "Wh",   30, -1, FieldType.f32,   0, Frequency.medium),
+    FieldDef(4, "current",        "A",     0, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "voltage",        "V",    14, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "power",          "W",    20, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "frequency",      "Hz",   22, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "apparent",       "VA",   24, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "reactive",       "var",  26, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "pf",             "%",    28, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "import",         "Wh",   30, -1, FieldType.f32,   0, Frequency.medium),
     FieldDef(2, "current",        "A",    32, -1, FieldType.f32,   0, Frequency.realtime),
     FieldDef(2, "voltage",        "V",    34, -1, FieldType.f32,   0, Frequency.realtime),
     FieldDef(2, "power",          "W",    36, -1, FieldType.f32,   0, Frequency.realtime),
@@ -281,19 +298,19 @@ private immutable FieldDef[] m111_fields = [
 ];
 
 private immutable FieldDef[] m112_fields = [
-    FieldDef(3, "current",        "A",     0, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "current1",       "A",     2, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "current2",       "A",     4, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "voltage",        "V",    14, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "voltage1",       "V",    14, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "voltage2",       "V",    16, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "ipv1",           "V",     8, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "power",          "W",    20, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "frequency",      "Hz",   22, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "apparent",       "VA",   24, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "reactive",       "var",  26, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "pf",             "%",    28, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "export",         "Wh",   30, -1, FieldType.f32,   0, Frequency.medium),
+    FieldDef(4, "current",        "A",     0, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "current1",       "A",     2, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "current2",       "A",     4, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "voltage",        "V",    14, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "voltage1",       "V",    14, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "voltage2",       "V",    16, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "ipv1",           "V",     8, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "power",          "W",    20, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "frequency",      "Hz",   22, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "apparent",       "VA",   24, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "reactive",       "var",  26, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "pf",             "%",    28, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "import",         "Wh",   30, -1, FieldType.f32,   0, Frequency.medium),
     FieldDef(2, "current",        "A",    32, -1, FieldType.f32,   0, Frequency.realtime),
     FieldDef(2, "voltage",        "V",    34, -1, FieldType.f32,   0, Frequency.realtime),
     FieldDef(2, "power",          "W",    36, -1, FieldType.f32,   0, Frequency.realtime),
@@ -305,23 +322,23 @@ private immutable FieldDef[] m112_fields = [
 ];
 
 private immutable FieldDef[] m113_fields = [
-    FieldDef(3, "current",        "A",     0, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "current1",       "A",     2, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "current2",       "A",     4, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "current3",       "A",     6, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "voltage",        "V",    14, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "voltage1",       "V",    14, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "voltage2",       "V",    16, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "voltage3",       "V",    18, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "ipv1",           "V",     8, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "ipv2",           "V",    10, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "ipv3",           "V",    12, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "power",          "W",    20, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "frequency",      "Hz",   22, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "apparent",       "VA",   24, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "reactive",       "var",  26, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "pf",             "%",    28, -1, FieldType.f32,   0, Frequency.realtime),
-    FieldDef(3, "export",         "Wh",   30, -1, FieldType.f32,   0, Frequency.medium),
+    FieldDef(4, "current",        "A",     0, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "current1",       "A",     2, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "current2",       "A",     4, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "current3",       "A",     6, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "voltage",        "V",    14, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "voltage1",       "V",    14, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "voltage2",       "V",    16, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "voltage3",       "V",    18, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "ipv1",           "V",     8, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "ipv2",           "V",    10, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "ipv3",           "V",    12, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "power",          "W",    20, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "frequency",      "Hz",   22, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "apparent",       "VA",   24, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "reactive",       "var",  26, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "pf",             "%",    28, -1, FieldType.f32,   0, Frequency.realtime),
+    FieldDef(4, "import",         "Wh",   30, -1, FieldType.f32,   0, Frequency.medium),
     FieldDef(2, "current",        "A",    32, -1, FieldType.f32,   0, Frequency.realtime),
     FieldDef(2, "voltage",        "V",    34, -1, FieldType.f32,   0, Frequency.realtime),
     FieldDef(2, "power",          "W",    36, -1, FieldType.f32,   0, Frequency.realtime),
@@ -444,10 +461,14 @@ private immutable FieldDef[] m702_fields = [
 // Fixed section holds 4 SFs + Evt + N + TmsPer; each repeating instance has
 // 20 words (ID, IDStr, DCA, DCV, DCW, DCWH, Tms, Tmp, DCSt, DCEvt).
 
+private immutable ComponentDef[] m160_components = [
+    ComponentDef("solar", "Solar", null),
+];
+
 private immutable FieldDef[] m160_fields = [];  // fixed-block fields we expose go here if needed
 
 private immutable ComponentDef[] m160_repeat_components = [
-    ComponentDef("",      "Solar",       null),    // the stringN component itself
+    ComponentDef("",      "Port",        null),    // the mpptN port itself
     ComponentDef("info",  "DeviceInfo",  "input"), // per-input identity (model_id, name)
     ComponentDef("meter", "EnergyMeter", "dc"),    // DC measurements
 ];
@@ -473,8 +494,8 @@ private immutable ModelMapping[] g_models = [
     ModelMapping(111, "inverter",     inverter_components_single,     m111_fields),
     ModelMapping(112, "inverter",     inverter_components_three,      m112_fields),
     ModelMapping(113, "inverter",     inverter_components_three,      m113_fields),
-    ModelMapping(160, "inverter",     [],                             m160_fields,
-                 RepeatBlock(6, 8, 20, "inverter.solar.string", m160_repeat_components, m160_repeat_fields)),
+    ModelMapping(160, "inverter",     m160_components,                m160_fields,
+                 RepeatBlock(6, 8, 20, "solar.mppt", m160_repeat_components, m160_repeat_fields)),
     ModelMapping(203, "energy-meter", meter_three_components,         m203_fields),
     ModelMapping(702, "inverter",     m702_components,                m702_fields),
 ];
@@ -485,6 +506,35 @@ private const(ModelMapping)* find_model_mapping(ushort id) pure
         if (m.model_id == id)
             return &m;
     return null;
+}
+
+private const(char)[] sunspec_model_name(ushort id) pure nothrow @nogc
+{
+    switch (id)
+    {
+        case 1:   return "Common";
+        case 101: return "Inverter, single-phase, integer";
+        case 102: return "Inverter, split-phase, integer";
+        case 103: return "Inverter, three-phase, integer";
+        case 111: return "Inverter, single-phase, float";
+        case 112: return "Inverter, split-phase, float";
+        case 113: return "Inverter, three-phase, float";
+        case 160: return "Multiple MPPT inverter extension";
+        case 201: return "Meter, single-phase";
+        case 202: return "Meter, split-phase";
+        case 203: return "Meter, three-phase";
+        case 702: return "DER capacity";
+        default:
+            if (id >= 120 && id < 130)
+                return "inverter extension";
+            if (id >= 700 && id < 800)
+                return "DER model";
+            if (id >= 800 && id < 900)
+                return "storage/battery model";
+            if (id >= 64_000)
+                return "manufacturer-specific model";
+            return "unknown model";
+    }
 }
 
 
@@ -584,9 +634,8 @@ nothrow @nogc:
                 _phase = Phase.running;
                 foreach (ref ch; _chains)
                     ch.scan_buffer.clear();
-                _needs_sort = true;
                 version (DebugSunspec)
-                    log.tracef("running: {0} sample entries", sample_entries.length);
+                    log.tracef("running: {0} stripe(s)", stripes.length);
                 return CompletionStatus.complete;
 
             case Phase.running:
@@ -597,7 +646,7 @@ nothrow @nogc:
     override CompletionStatus shutdown()
     {
         teardown_node();
-        sample_entries.clear();
+        stripes.clear();
         foreach (ref ch; _chains)
             ch.scan_buffer.clear();
         _models_chain.clear();
@@ -617,86 +666,75 @@ nothrow @nogc:
         if (_phase != Phase.running)
             return;
 
-        if (_needs_sort)
-        {
-            import urt.algorithm : qsort;
-            qsort!((ref a, ref b) => a.register < b.register ? -1 : a.register > b.register ? 1 : 0)(sample_entries[]);
-            _needs_sort = false;
-        }
-
         ModbusNode c = _node.get;
         if (!c)
             return;
 
-        enum MaxRegs = 125;
-        enum MaxGap  = 16;
-
         MonoTime now = getTime();
 
-        size_t i = 0;
-        while (i < sample_entries.length)
+        foreach (ref st; stripes)
         {
-            if ((sample_entries[i].flags & 3)
-                || sample_entries[i].sampleTimeMs == ushort.max
-                || now - sample_entries[i].lastUpdate < msecs(sample_entries[i].sampleTimeMs))
+            bool full_due = false;
+            if (st.full_ms != ushort.max && st.end > st.middle)
+                full_due = now - st.full_last >= msecs(st.full_ms);
+
+            if (full_due)
             {
-                ++i;
+                if (!st.realtime_in_flight && !st.full_in_flight
+                    && issue_read(c, st, st.start, cast(ushort)(st.end - st.start), true))
+                    st.full_in_flight = true;
                 continue;
             }
 
-            ushort first = sample_entries[i].register;
-            ushort count = sample_entries[i].seqLen;
-            sample_entries[i].flags |= 1;
-
-            size_t j = i + 1;
-            for (; j < sample_entries.length; ++j)
+            if (!st.realtime_in_flight && !st.full_in_flight
+                && st.middle > st.start
+                && now - st.realtime_last >= msecs(freq_to_ms(Frequency.realtime)))
             {
-                if ((sample_entries[j].flags & 3)
-                    || sample_entries[j].sampleTimeMs == ushort.max
-                    || now - sample_entries[j].lastUpdate < msecs(sample_entries[j].sampleTimeMs))
-                    continue;
-
-                ushort next_reg = sample_entries[j].register;
-                int last = next_reg + sample_entries[j].seqLen;
-                if (last - first > MaxRegs)
-                    break;
-                if (next_reg >= first + count + MaxGap)
-                    break;
-
-                count = cast(ushort)(last - first);
-                sample_entries[j].flags |= 1;
+                if (issue_read(c, st, st.start, cast(ushort)(st.middle - st.start), false))
+                    st.realtime_in_flight = true;
             }
-
-            ModbusPDU pdu = createMessage_Read(RegisterType.holding_register, first, count);
-            version (DebugSunspecRegs)
-                log.tracef("read: {0} regs at {1}", count, first);
-            if (!c.sendRequest(_slave_server.universal_address, pdu, &response_handler, &error_handler, 0, 1000, PCP.be, false))
-            {
-                for (size_t k = i; k < j; ++k)
-                    sample_entries[k].flags &= 0xFE;
-            }
-            i = j;
         }
+    }
+
+    bool issue_read(ModbusNode c, ref Stripe st, ushort first, ushort count, bool full)
+    {
+        if (count == 0)
+            return false;
+        assert(count <= 125);
+        ModbusPDU pdu = createMessage_Read(RegisterType.holding_register, first, count);
+        version (DebugSunspecRegs)
+            log.tracef("fetch model {0} ({1}): {2} sample, {3} regs at {4}", st.model_id, sunspec_model_name(st.model_id), full ? "low-freq" : "high-freq", count, first);
+        return c.sendRequest(_slave_server.universal_address, pdu, &response_handler, &error_handler, 0, 1000, PCP.be, false);
     }
 
 protected:
 
     enum Phase : ubyte { idle, probing, scanning, materialising, running }
 
-    struct SampleEntry
+    struct StripeField
     {
-        MonoTime lastUpdate;
-        ushort register;
-        ubyte regKind = 4; // holding registers only for SunSpec
-        ubyte flags;       // bit0 = in-flight, bit1 = constant-sampled
-        ushort sampleTimeMs;
         Element* element;
-        ValueDesc desc;
-        uint sentinel;     // value-not-implemented sentinel; 0 means "no filter"
-                           // checked against either 16- or 32-bit reads based on desc.data_length
+        ValueDesc desc;       // without SunSpec SF
+        ushort reg;
+        int sf_reg = -1;
+        uint sentinel;
+        Frequency freq;
 
-        ubyte seqLen() const pure nothrow @nogc
-            => cast(ubyte)(desc.data_length / 2);
+        ushort words() const pure nothrow @nogc
+            => cast(ushort)(desc.data_length / 2);
+    }
+
+    // `middle` marks the realtime prefix; slow polls read the whole stripe.
+    struct Stripe
+    {
+        MonoTime realtime_last;
+        MonoTime full_last;
+        ushort model_id;
+        ushort start, middle, end;
+        ushort full_ms;
+        bool realtime_in_flight;
+        bool full_in_flight;
+        Array!StripeField fields;
     }
 
     struct ModelLoc
@@ -726,7 +764,6 @@ protected:
     bool _in_flight;
     bool _failed;
     bool _scan_eol;       // device returned exception past valid SunSpec data
-    bool _needs_sort;
 
     ubyte _probe_index;    // index into sunspec_bases for the probing pass
     ubyte _chain_count;    // number of chains discovered (entries used in _chains)
@@ -734,7 +771,7 @@ protected:
 
     ChainData[sunspec_bases.length] _chains;
     Array!ModelLoc _models_chain;
-    Array!SampleEntry sample_entries;
+    Array!Stripe stripes;
 
 private:
 
@@ -883,7 +920,7 @@ private:
                 version (DebugSunspec)
                     log.tracef("scan: model {0} (len {1}) at reg {2}", id, len, header_reg);
                 if (find_model_mapping(id) is null)
-                    log.warning("SunSpec model ", id, " advertised at reg ", header_reg, " is not implemented; skipped");
+                    log.warning("SunSpec model ", id, " (", sunspec_model_name(id), ") advertised at reg ", header_reg, " is not implemented; skipped");
             }
 
             size_t end = walked + 2 + len;
@@ -990,7 +1027,9 @@ private:
 
         string device_type;
         bool has_inverter;
-        foreach (ref ml; _models_chain)
+        ushort pv_input_count;
+        size_t selected_pv_model_index = size_t.max;
+        foreach (size_t i, ref ml; _models_chain)
         {
             const(ModelMapping)* mm = find_model_mapping(ml.model_id);
             if (mm && mm.device_type)
@@ -1000,7 +1039,17 @@ private:
                 if (mm.device_type == "inverter")
                     has_inverter = true;
             }
+            if (ml.model_id == 160)
+            {
+                ushort n = mm ? repeat_instance_count(ml, *mm) : 0;
+                if (n > pv_input_count)
+                {
+                    pv_input_count = n;
+                    selected_pv_model_index = i;
+                }
+            }
         }
+        bool pv_has_subports = pv_input_count > 1;
 
         // Pre-create info/type so it lands first in DeviceInfo ahead of the m1 fields
         if (device_type)
@@ -1016,6 +1065,14 @@ private:
         // an inverter+meter pair.
         foreach (size_t i, ref ml; _models_chain)
         {
+            if (ml.model_id == 160 && i != selected_pv_model_index)
+            {
+                version (DebugSunspec)
+                    log.tracef("materialise: skipping duplicate model 160 at reg {0}; selected {1} PV input(s)",
+                               ml.header_reg, pv_input_count);
+                continue;
+            }
+
             bool already_seen = false;
             foreach (size_t j; 0 .. i)
             {
@@ -1046,6 +1103,19 @@ private:
                     comp_defs = inverter_export_meter_three_components;
                 else if (ml.model_id == 201)
                     comp_defs = inverter_export_meter_single_components;
+                else if (pv_has_subports)
+                {
+                    if (ml.model_id == 101 || ml.model_id == 111)
+                        comp_defs = inverter_components_single_mppt;
+                    else if (ml.model_id == 102 || ml.model_id == 103 || ml.model_id == 112 || ml.model_id == 113)
+                        comp_defs = inverter_components_three_mppt;
+                }
+                else if (ml.model_id == 160)
+                {
+                    // A single SunSpec MPPT/input is the top-level solar Port.
+                    // Multiple inputs get a Solar container plus mpptN ports.
+                    comp_defs = [];
+                }
             }
 
             assert(comp_defs.length <= 8, "extend comps[] if more components per model are needed");
@@ -1055,15 +1125,24 @@ private:
                 comps[ci] = find_or_create_component(device, cd);
                 if (cd.type_value)
                     set_type_element(comps[ci], cd.template_, cd.type_value);
+                configure_standard_component(comps[ci], cd);
             }
             version (DebugSunspec)
                 log.tracef("materialise: model {0} -> {1} component(s), {2} field(s)", ml.model_id, mm.components.length, mm.fields.length);
 
+            Array!StripeField mf;
             foreach (ref fd; mm.fields)
-                emit_field(ml, *mm, fd, comps[fd.component_index]);
+                emit_field(ml, *mm, fd, comps[fd.component_index], mf);
 
             if (mm.repeat.stride > 0 && mm.repeat.fields.length > 0)
-                materialise_repeat(ml, *mm, device);
+            {
+                const(char)[] repeat_prefix = mm.repeat.path_prefix;
+                if (ml.model_id == 160 && !pv_has_subports)
+                    repeat_prefix = "solar";
+                materialise_repeat(ml, *mm, device, repeat_prefix, mf);
+            }
+
+            build_stripes(mf, ml.model_id);
         }
 
         materialise_network(device);
@@ -1115,14 +1194,64 @@ private:
         populate_element_metadata(e, template_, id);
     }
 
-    void materialise_repeat(ref const ModelLoc ml, ref const ModelMapping mm, Component device)
+    void configure_standard_component(Component c, ref const ComponentDef cd)
     {
+        if (cd.template_ != "Port")
+            return;
+
+        if (cd.path == "grid")
+        {
+            set_const_element(c, "Port", "role", Variant("grid"));
+            set_const_element(c, "Port", "flow", Variant("bidirectional"));
+            set_const_element(c, "Port", "meter_sign", Variant("inverted"));
+        }
+        else if (is_pv_port_path(cd.path))
+        {
+            set_const_element(c, "Port", "role", Variant("pv"));
+            set_const_element(c, "Port", "flow", Variant("supply"));
+        }
+    }
+
+    bool is_pv_port_path(const(char)[] path) const pure nothrow @nogc
+    {
+        return path == "solar" ||
+               path == "pv" ||
+               (path.length > 3 && path[0 .. 3] == "pv.") ||
+               (path.length >= 10 && path[0 .. 10] == "solar.mppt");
+    }
+
+    ushort repeat_instance_count(ref const ModelLoc ml, ref const ModelMapping mm)
+    {
+        if (mm.repeat.stride == 0)
+            return 0;
+        if (ml.length <= mm.repeat.first_offset)
+            return 0;
+
+        ushort max_n = cast(ushort)((ml.length - mm.repeat.first_offset) / mm.repeat.stride);
+        if (max_n == 0)
+            return 0;
+
+        assert(mm.repeat.count_offset < ml.length);
         auto chain = &_chains[ml.chain_index];
         size_t count_idx = (ml.data_reg + mm.repeat.count_offset) - chain.base_reg;
         if (count_idx >= chain.scan_buffer.length)
-            return;
+            return 0;
         ushort n = chain.scan_buffer[count_idx];
         if (n == 0 || n == 0xFFFF)  // 0xFFFF is SunSpec "not implemented"
+            return 0;
+        if (n > max_n)
+        {
+            version (DebugSunspec)
+                log.tracef("model {0}: repeat count {1} exceeds model length cap {2}", ml.model_id, n, max_n);
+            n = max_n;
+        }
+        return n;
+    }
+
+    void materialise_repeat(ref const ModelLoc ml, ref const ModelMapping mm, Component device, const(char)[] path_prefix, ref Array!StripeField out_fields)
+    {
+        ushort n = repeat_instance_count(ml, mm);
+        if (n == 0)
             return;
 
         version (DebugSunspec)
@@ -1131,7 +1260,7 @@ private:
         assert(mm.repeat.components.length <= 8, "extend inst_comps[] if more sub-components per instance");
         for (ushort inst = 0; inst < n; ++inst)
         {
-            const(char)[] inst_path = tconcat(mm.repeat.path_prefix, inst + 1);
+            const(char)[] inst_path = n == 1 ? path_prefix : tconcat(path_prefix, inst + 1);
 
             Component[8] inst_comps;
             foreach (ci, ref cd; mm.repeat.components)
@@ -1141,30 +1270,25 @@ private:
                 inst_comps[ci] = find_or_create_component(device, synth);
                 if (cd.type_value)
                     set_type_element(inst_comps[ci], cd.template_, cd.type_value);
+                configure_standard_component(inst_comps[ci], synth);
             }
 
             ushort inst_offset = cast(ushort)(mm.repeat.first_offset + inst * mm.repeat.stride);
             foreach (ref fd; mm.repeat.fields)
-                emit_field(ml, mm, fd, inst_comps[fd.component_index], inst_offset);
+                emit_field(ml, mm, fd, inst_comps[fd.component_index], out_fields, inst_offset);
         }
     }
 
-    void emit_field(ref const ModelLoc ml, ref const ModelMapping mm, ref const FieldDef fd, Component target, ushort extra_offset = 0)
+    void emit_field(ref const ModelLoc ml, ref const ModelMapping mm, ref const FieldDef fd, Component target,
+                    ref Array!StripeField out_fields, ushort extra_offset = 0)
     {
         auto chain = &_chains[ml.chain_index];
 
-        float pre_scale = 1.0f;
+        int sf_reg = -1;
         if (fd.scale_off >= 0)
-        {
-            size_t sf_idx = (ml.data_reg + fd.scale_off) - chain.base_reg;
-            if (sf_idx < chain.scan_buffer.length)
-            {
-                short sf = cast(short)chain.scan_buffer[sf_idx];
-                pre_scale = pow10f(sf);
-            }
-        }
+            sf_reg = cast(ushort)(ml.data_reg + fd.scale_off);
 
-        ValueDesc desc = make_value_desc(fd, pre_scale);
+        ValueDesc desc = make_value_desc(fd);
         ushort reg = cast(ushort)(ml.data_reg + fd.offset + extra_offset);
         size_t idx = reg - chain.base_reg;
         size_t words = desc.data_length / 2;
@@ -1193,9 +1317,17 @@ private:
         Element* e = ensure_element(target, fd.id);
         e.access = fd.access;
         populate_element_metadata(e, target.template_[], fd.id);
+        if (fd.freq != Frequency.constant && fd.freq != Frequency.configuration && element_already_sampled(e, out_fields))
+        {
+            version (DebugSunspec)
+                log.tracef("materialise: skip duplicate sampler for {0}.{1}", target.id[], fd.id);
+            return;
+        }
 
         if (!sentinel_now)
         {
+            float scale = 1.0f;
+            bool have_scale = read_scan_scale(chain.scan_buffer[], chain.base_reg, sf_reg, scale);
             ubyte[128] tmp = void;
             for (size_t k = 0; k < words; ++k)
             {
@@ -1203,8 +1335,11 @@ private:
                 tmp[k*2 + 0] = cast(ubyte)(w >> 8);
                 tmp[k*2 + 1] = cast(ubyte)(w & 0xFF);
             }
-            e.value = sample_value(tmp.ptr, desc);
-            e.last_update = getSysTime();
+            if (have_scale)
+            {
+                e.value = sample_sunspec_value(tmp.ptr, desc, scale);
+                e.last_update = getSysTime();
+            }
         }
 
         if (fd.freq == Frequency.constant || fd.freq == Frequency.configuration)
@@ -1215,18 +1350,115 @@ private:
             return;
         }
 
-        SampleEntry se;
-        se.register = reg;
-        se.regKind = 4;
-        se.element = e;
-        se.desc = desc;
-        se.sampleTimeMs = freq_to_ms(fd.freq);
-        se.sentinel = field_sentinel(fd.type);
-        se.lastUpdate = sentinel_now ? MonoTime() : getTime();
-        sample_entries ~= se;
+        StripeField sfd;
+        sfd.element = e;
+        sfd.desc = desc;
+        sfd.reg = reg;
+        sfd.sf_reg = sf_reg;
+        sfd.sentinel = field_sentinel(fd.type);
+        sfd.freq = fd.freq;
+        out_fields ~= sfd;
         e.sampling_mode = freq_to_element_mode(fd.freq);
         version (DebugSunspecRegs)
-            log.tracef("materialise: {0}.{1} at reg {2} scale {3} every {4}ms", target.id[], fd.id, reg, pre_scale, se.sampleTimeMs);
+            log.tracef("materialise: {0}.{1} at reg {2} sf_reg {3} every {4}ms", target.id[], fd.id, reg, sf_reg, freq_to_ms(fd.freq));
+    }
+
+    bool element_already_sampled(Element* e, ref const Array!StripeField pending) const pure nothrow @nogc
+    {
+        foreach (ref f; pending[])
+            if (f.element is e)
+                return true;
+        foreach (ref st; stripes[])
+            foreach (ref f; st.fields[])
+                if (f.element is e)
+                    return true;
+        return false;
+    }
+
+    // Keep SFs in the same read as their values.
+    void build_stripes(ref Array!StripeField mf, ushort model_id)
+    {
+        if (mf.length == 0)
+            return;
+
+        import urt.algorithm : qsort;
+        qsort!((ref a, ref b) => a.reg < b.reg ? -1 : a.reg > b.reg ? 1 : 0)(mf[]);
+
+        size_t i = 0;
+        while (i < mf.length)
+        {
+            ushort lo = field_lo(mf[i]);
+            ushort hi = field_hi(mf[i]);
+            size_t k = i + 1;
+            for (; k < mf.length; ++k)
+            {
+                ushort flo = field_lo(mf[k]);
+                ushort fhi = field_hi(mf[k]);
+                ushort nlo = flo < lo ? flo : lo;
+                ushort nhi = fhi > hi ? fhi : hi;
+                if (nhi - nlo > 125)
+                    break;
+                lo = nlo;
+                hi = nhi;
+            }
+
+            ushort rt_hi = lo;
+            bool any_rt = false;
+            for (size_t f = i; f < k; ++f)
+            {
+                if (mf[f].freq == Frequency.realtime)
+                {
+                    ushort fh = field_hi(mf[f]);
+                    if (fh > rt_hi)
+                        rt_hi = fh;
+                    any_rt = true;
+                }
+            }
+            ushort middle = any_rt ? rt_hi : lo;
+
+            ushort full_ms = ushort.max;
+            for (size_t f = i; f < k; ++f)
+            {
+                if (mf[f].freq != Frequency.realtime)
+                {
+                    ushort m = freq_to_ms(mf[f].freq);
+                    if (m < full_ms)
+                        full_ms = m;
+                }
+            }
+
+            assert(hi - lo <= 125);
+
+            stripes ~= Stripe();
+            Stripe* st = &stripes[stripes.length - 1];
+            st.model_id = model_id;
+            st.start = lo;
+            st.middle = middle;
+            st.end = hi;
+            st.full_ms = full_ms;
+            if (full_ms != ushort.max && hi > middle)
+                st.full_last = getTime() - msecs(full_ms);
+            for (size_t f = i; f < k; ++f)
+                st.fields ~= mf[f];
+
+            i = k;
+        }
+    }
+
+    static ushort field_lo(ref const StripeField f) pure nothrow @nogc
+    {
+        ushort lo = f.reg;
+        if (f.sf_reg >= 0 && f.sf_reg < lo)
+            lo = cast(ushort)f.sf_reg;
+        return lo;
+    }
+
+    static ushort field_hi(ref const StripeField f) pure nothrow @nogc
+    {
+        ushort hi = cast(ushort)(f.reg + f.words);
+        if (f.sf_reg >= 0 && f.sf_reg + 1 > hi)
+            hi = cast(ushort)(f.sf_reg + 1);
+        return hi;
     }
 
     void set_type_element(Component c, string template_, string type_value)
@@ -1304,11 +1536,20 @@ private:
         ushort first = (cast(ushort)req.data[0] << 8) | req.data[1];
         ushort count = (cast(ushort)req.data[2] << 8) | req.data[3];
 
+        bool is_full;
+        Stripe* st = find_stripe(first, count, is_full);
+        if (st)
+        {
+            if (is_full)
+                st.full_in_flight = false;
+            else
+                st.realtime_in_flight = false;
+        }
+
         if (resp.function_code & 0x80)
         {
             version (DebugSunspec)
                 log.tracef("read at {0}+{1}: exception 0x{2,02x}", first, count, resp.data.length >= 1 ? resp.data[0] : 0);
-            release_in_flight(first, count);
             return;
         }
         ushort byte_count = resp.data[0];
@@ -1316,54 +1557,82 @@ private:
         {
             version (DebugSunspec)
                 log.tracef("read at {0}+{1}: malformed response", first, count);
-            release_in_flight(first, count);
             return;
         }
+        if (!st)
+            return;
+
+        if (is_full)
+        {
+            st.full_last = response_time;
+            st.realtime_last = response_time;
+        }
+        else
+            st.realtime_last = response_time;
 
         ubyte[] data = resp.data[1 .. 1 + byte_count];
+        decode_block(*st, first, cast(ushort)(first + count), data, cast(SysTime)response_time, is_full);
+    }
 
-        foreach (ref se; sample_entries)
+    Stripe* find_stripe(ushort first, ushort count, out bool is_full)
+    {
+        foreach (ref st; stripes)
         {
-            if (se.register < first || se.register >= first + count)
+            if (st.middle > st.start && st.start == first && st.middle - st.start == count)
+            {
+                is_full = false;
+                return &st;
+            }
+            if (st.end > st.middle && st.start == first && st.end - st.start == count)
+            {
+                is_full = true;
+                return &st;
+            }
+        }
+        return null;
+    }
+
+    void decode_block(ref Stripe st, ushort first, ushort last, ubyte[] data, SysTime ts, bool is_full)
+    {
+        foreach (ref f; st.fields)
+        {
+            if (!is_full && f.freq != Frequency.realtime)
+                continue;
+            ushort w = f.words;
+            if (f.reg < first || f.reg + w > last)
+                continue;
+            uint off = cast(uint)((f.reg - first) * 2);
+            float scale = 1.0f;
+            if (!read_message_scale(first, last, data, f.sf_reg, scale))
                 continue;
 
-            se.lastUpdate = response_time;
-            se.flags &= 0xFE;
-            if (se.sampleTimeMs == 0)
-                se.flags |= 2;
-
-            ushort offset = cast(ushort)(se.register - first);
-            uint byte_offset = offset * 2;
-
-            // SunSpec "not implemented" sentinel; skip the write so consumers
-            // don't see synthetic values for fields the device doesn't populate
-            if (se.sentinel != 0)
+            if (f.sentinel != 0)
             {
                 bool is_sent = false;
-                if (se.desc.data_length == 2)
+                if (f.desc.data_length == 2)
                 {
-                    ushort raw = (cast(ushort)data[byte_offset] << 8) | data[byte_offset + 1];
-                    is_sent = (raw == cast(ushort)se.sentinel);
+                    ushort raw = (cast(ushort)data[off] << 8) | data[off + 1];
+                    is_sent = (raw == cast(ushort)f.sentinel);
                 }
-                else if (se.desc.data_length == 4)
+                else if (f.desc.data_length == 4)
                 {
-                    uint raw = (cast(uint)data[byte_offset]     << 24)
-                             | (cast(uint)data[byte_offset + 1] << 16)
-                             | (cast(uint)data[byte_offset + 2] <<  8)
-                             |  cast(uint)data[byte_offset + 3];
-                    is_sent = (raw == se.sentinel);
+                    uint raw = (cast(uint)data[off]     << 24)
+                             | (cast(uint)data[off + 1] << 16)
+                             | (cast(uint)data[off + 2] <<  8)
+                             |  cast(uint)data[off + 3];
+                    is_sent = (raw == f.sentinel);
                 }
                 if (is_sent)
                 {
                     version (DebugSunspecRegs)
-                        log.tracef("reg {0}: not-implemented sentinel; skipped", se.register);
+                        log.tracef("reg {0}: not-implemented sentinel; skipped", f.reg);
                     continue;
                 }
             }
 
-            se.element.value(sample_value(data.ptr + byte_offset, se.desc), cast(SysTime)response_time);
+            f.element.value(sample_sunspec_value(data.ptr + off, f.desc, scale), ts);
             version (DebugSunspecRegs)
-                log.tracef("reg {0} = {1}", se.register, se.element.value);
+                log.tracef("reg {0} = {1}", f.reg, f.element.value);
         }
     }
 
@@ -1373,16 +1642,16 @@ private:
             return;
         ushort first = (cast(ushort)req.data[0] << 8) | req.data[1];
         ushort count = (cast(ushort)req.data[2] << 8) | req.data[3];
+        bool is_full;
+        if (Stripe* st = find_stripe(first, count, is_full))
+        {
+            if (is_full)
+                st.full_in_flight = false;
+            else
+                st.realtime_in_flight = false;
+        }
         version (DebugSunspec)
-            log.tracef("read at {0}+{1}: {2}", first, count, ty == ModbusErrorType.Timeout ? "timeout" : "failed");
-        release_in_flight(first, count);
-    }
-
-    void release_in_flight(ushort first, ushort count)
-    {
-        foreach (ref se; sample_entries)
-            if (se.register >= first && se.register < first + count)
-                se.flags &= 0xFE;
+            log.tracef("read at {0}: {1}", first, ty == ModbusErrorType.Timeout ? "timeout" : "failed");
     }
 }
 
@@ -1501,7 +1770,49 @@ private DataType build_data_type(FieldType t, ubyte str_words) pure
     }
 }
 
-private ValueDesc make_value_desc(ref const FieldDef fd, float pre_scale)
+private bool read_scan_scale(const(ushort)[] regs, ushort base, int sf_reg, out float scale) pure
+{
+    scale = 1.0f;
+    if (sf_reg < 0)
+        return true;
+    size_t idx = cast(size_t)(sf_reg - base);
+    if (idx >= regs.length)
+        return false;
+    short sf = cast(short)regs[idx];
+    if (sf == cast(short)0x8000)
+        return false;
+    scale = pow10f(sf);
+    return true;
+}
+
+private bool read_message_scale(ushort first, ushort last, const(ubyte)[] data, int sf_reg, out float scale) pure
+{
+    scale = 1.0f;
+    if (sf_reg < 0)
+        return true;
+    if (sf_reg < first || sf_reg >= last)
+        return false;
+
+    size_t off = cast(size_t)(sf_reg - first) * 2;
+    if (off + 1 >= data.length)
+        return false;
+
+    short sf = cast(short)((cast(ushort)data[off] << 8) | data[off + 1]);
+    if (sf == cast(short)0x8000)
+        return false;
+    scale = pow10f(sf);
+    return true;
+}
+
+private Variant sample_sunspec_value(const void* data, ref const ValueDesc desc, float scale)
+{
+    if (scale == 1.0f || desc.is_enum || desc.is_string || desc.is_date_time)
+        return sample_value(data, desc);
+    ValueDesc scaled_desc = ValueDesc(desc.data_type, desc.unit, desc.pre_scale * scale);
+    return sample_value(data, scaled_desc);
+}
+
+private ValueDesc make_value_desc(ref const FieldDef fd)
 {
     DataType dt = build_data_type(fd.type, fd.str_words);
 
@@ -1518,12 +1829,11 @@ private ValueDesc make_value_desc(ref const FieldDef fd, float pre_scale)
 
     if (fd.type == FieldType.str_)
         return ValueDesc(dt);
-    if (!fd.unit && pre_scale == 1.0f)
+    if (!fd.unit)
         return ValueDesc(dt);
 
     ScaledUnit unit;
     float unit_scale = 1.0f;
-    if (fd.unit)
-        unit.parseUnit(fd.unit, unit_scale);
-    return ValueDesc(dt, unit, pre_scale * unit_scale);
+    unit.parseUnit(fd.unit, unit_scale);
+    return ValueDesc(dt, unit, unit_scale);
 }

@@ -361,7 +361,7 @@ nothrow @nogc:
     // Properties
 
     ref const(String) remote() const pure
-        => _host;
+        => _host; // TODO: RETURNS NOTHING IF _remote IS SET!
     void remote(InetAddress value)
     {
         _host = null;
@@ -422,6 +422,8 @@ nothrow @nogc:
 
         return send_request_internal(req, data);
     }
+
+protected:
 
     override bool validate() const pure
         => !_host.empty || (_remote != InetAddress() && _remote.family == AddressFamily.ipv4);
@@ -656,6 +658,18 @@ package:
 
         version (DebugAA55)
             writeDebug("aa55: '", name, "' received unsolicited message: control=", control_code, " function=", function_code, " len=", data_len);
+    }
+
+    const(char)[] get_address() const
+    {
+        import urt.mem.temp : tstring;
+        if (_host)
+            return _host[];
+        else if (_remote.family == AddressFamily.ipv4)
+            return _remote._a.ipv4.addr.tstring;
+        else if (_remote.family == AddressFamily.ipv6)
+            return _remote._a.ipv6.addr.tstring;
+        return null;
     }
 
 
