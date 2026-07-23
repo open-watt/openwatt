@@ -252,7 +252,16 @@ nothrow @nogc:
         register_signal_provider(StringLit!"element", this);
 
         register_intrinsic(StringLit!"select", &select);
-        register_intrinsic(StringLit!"math.pow", &pow);
+        import urt.math : pow, sqrt, sin, cos, tan, asin, acos, atan, atan2;
+        register_intrinsic(StringLit!"math.pow", &intrin_shim_2!pow);
+        register_intrinsic(StringLit!"math.sqrt", &intrin_shim_1!sqrt);
+        register_intrinsic(StringLit!"math.sin", &intrin_shim_1!sin);
+        register_intrinsic(StringLit!"math.cos", &intrin_shim_1!cos);
+        register_intrinsic(StringLit!"math.tan", &intrin_shim_1!tan);
+        register_intrinsic(StringLit!"math.asin", &intrin_shim_1!asin);
+        register_intrinsic(StringLit!"math.acos", &intrin_shim_1!acos);
+        register_intrinsic(StringLit!"math.atan", &intrin_shim_1!atan);
+        register_intrinsic(StringLit!"math.atan2", &intrin_shim_2!atan2);
 
         console = Console(this, String("console".addString), Mallocator.instance);
 
@@ -1551,10 +1560,16 @@ Variant select(Variant[] args)
     return b ? args[1] : args[2];
 }
 
-Variant pow(Variant[] args)
+Variant intrin_shim_1(alias fn)(Variant[] args)
 {
-    import urt.math : pow;
+    if (args.length != 1 || !args[0].isNumber)
+        return Variant();
+    return Variant(fn(args[0].asDouble()));
+}
+
+Variant intrin_shim_2(alias fn)(Variant[] args)
+{
     if (args.length != 2 || !args[0].isNumber || !args[1].isNumber)
         return Variant();
-    return Variant(pow(args[0].asDouble(), args[1].asDouble()));
+    return Variant(fn(args[0].asDouble(), args[1].asDouble()));
 }
