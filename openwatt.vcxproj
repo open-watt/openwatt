@@ -54,11 +54,26 @@
     <DCompile Include="src\apps\api\package.d" />
     <DCompile Include="src\apps\automation\automation.d" />
     <DCompile Include="src\apps\automation\package.d" />
+    <DCompile Include="src\apps\energy\accounts.d" />
+    <DCompile Include="src\apps\energy\allocator.d" />
     <DCompile Include="src\apps\energy\appliance.d" />
-    <DCompile Include="src\apps\energy\circuit.d" />
+    <DCompile Include="src\apps\energy\battery_store.d" />
+    <DCompile Include="src\apps\energy\control.d" />
+    <DCompile Include="src\apps\energy\forecast.d" />
+    <DCompile Include="src\apps\energy\kernel.d" />
+    <DCompile Include="src\apps\energy\link.d" />
     <DCompile Include="src\apps\energy\manager.d" />
     <DCompile Include="src\apps\energy\meter.d" />
+    <DCompile Include="src\apps\energy\model.d" />
     <DCompile Include="src\apps\energy\package.d" />
+    <DCompile Include="src\apps\energy\planner.d" />
+    <DCompile Include="src\apps\energy\policy.d" />
+    <DCompile Include="src\apps\energy\production.d" />
+    <DCompile Include="src\apps\energy\reference.d" />
+    <DCompile Include="src\apps\energy\session.d" />
+    <DCompile Include="src\apps\energy\state.d" />
+    <DCompile Include="src\apps\energy\topology.d" />
+    <DCompile Include="src\apps\energy\vehicle.d" />
     <DCompile Include="src\apps\ota\package.d" />
     <DCompile Include="src\db\defs.d" />
     <DCompile Include="src\db\engine.d" />
@@ -1247,6 +1262,7 @@
   <ItemGroup>
     <None Include=".editorconfig" />
     <None Include=".gitignore" />
+    <None Include="conf\can_profiles\pylon.conf" />
     <None Include="conf\goodwe_profiles\gwxx48es.conf" />
     <None Include="conf\ha_profiles\emporia.conf" />
     <None Include="conf\modbus_profiles\eastron_sdm120.conf" />

@@ -4,6 +4,9 @@
     <Filter Include="conf">
       <UniqueIdentifier>{7f37cbda-422d-4bb4-a2b2-d913b4cf3ba9}</UniqueIdentifier>
     </Filter>
+    <Filter Include="conf\can_profiles">
+      <UniqueIdentifier>{d95372bd-f45e-43d1-af10-cfe897b11623}</UniqueIdentifier>
+    </Filter>
     <Filter Include="conf\goodwe_profiles">
       <UniqueIdentifier>{a5e82299-0fc3-4ab5-be5b-974362653f16}</UniqueIdentifier>
     </Filter>
@@ -144,9 +147,6 @@
     </Filter>
     <Filter Include="src\router\iface">
       <UniqueIdentifier>{0e965bb7-e2d4-44f9-a982-88df797db1fb}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="src\router\port">
-      <UniqueIdentifier>{b7012d9a-641d-492c-8634-9dbdb9c38a25}</UniqueIdentifier>
     </Filter>
     <Filter Include="src\router\stream">
       <UniqueIdentifier>{e1c51f7a-999b-4f32-97d6-9364d012699e}</UniqueIdentifier>
@@ -783,10 +783,28 @@
     <DCompile Include="src\apps\automation\package.d">
       <Filter>src\apps\automation</Filter>
     </DCompile>
+    <DCompile Include="src\apps\energy\accounts.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\allocator.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
     <DCompile Include="src\apps\energy\appliance.d">
       <Filter>src\apps\energy</Filter>
     </DCompile>
-    <DCompile Include="src\apps\energy\circuit.d">
+    <DCompile Include="src\apps\energy\battery_store.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\control.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\forecast.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\link.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\kernel.d">
       <Filter>src\apps\energy</Filter>
     </DCompile>
     <DCompile Include="src\apps\energy\manager.d">
@@ -795,7 +813,34 @@
     <DCompile Include="src\apps\energy\meter.d">
       <Filter>src\apps\energy</Filter>
     </DCompile>
+    <DCompile Include="src\apps\energy\model.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
     <DCompile Include="src\apps\energy\package.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\planner.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\policy.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\production.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\reference.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\session.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\state.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\topology.d">
+      <Filter>src\apps\energy</Filter>
+    </DCompile>
+    <DCompile Include="src\apps\energy\vehicle.d">
       <Filter>src\apps\energy</Filter>
     </DCompile>
     <DCompile Include="src\apps\ota\package.d">
@@ -1509,6 +1554,9 @@
     <None Include=".editorconfig" />
     <None Include="conf\startup.conf">
       <Filter>conf</Filter>
+    </None>
+    <None Include="conf\can_profiles\pylon.conf">
+      <Filter>conf\can_profiles</Filter>
     </None>
     <None Include="conf\goodwe_profiles\gwxx48es.conf">
       <Filter>conf\goodwe_profiles</Filter>
