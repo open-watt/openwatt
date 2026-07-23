@@ -137,7 +137,7 @@ nothrow @nogc:
     override CompletionStatus shutdown()
     {
         detach_source();
-        // Drop write-back delegates before super.shutdown frees the profile.
+        // Drop write-back delegates before super.shutdown releases the profile.
         foreach (ref se; _elements)
         {
             if (se.element.access & Access.write)

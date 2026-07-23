@@ -25,6 +25,7 @@ import manager.element;
 import manager.id;
 import manager.plugin;
 import manager.reactor;
+import manager.profile : Profile, load_profile;
 import manager.secret;
 import manager.signal;
 import manager.system;
@@ -293,6 +294,7 @@ nothrow @nogc:
         console.register_command!link_print("/element/link", this, "print");
 
         console.register_collection!Secret();
+        console.register_collection!ProtocolBinding();
 
         register_modules(this);
 
@@ -846,12 +848,44 @@ nothrow @nogc:
     }
 
 
+    // Shared profile registry: one parse per file, shared by every consumer.
+    // Restarting objects release on shutdown and re-acquire on startup, binding
+    // to the live parse with no file reload.
+    Profile* acquire_profile(const(char)[] filename)
+    {
+        if (ProfileCacheEntry* e = filename in _profiles)
+        {
+            ++e.refs;
+            return e.profile;
+        }
+        Profile* p = load_profile(filename, allocator);
+        if (!p)
+            return null;
+        _profiles.insert(filename.makeString(allocator), ProfileCacheEntry(p, 1));
+        return p;
+    }
+
+    void release_profile(Profile* profile)
+    {
+        if (profile is null)
+            return;
+        foreach (ref e; _profiles.values)
+        {
+            if (e.profile is profile)
+            {
+                if (e.refs != 0)
+                    --e.refs;
+                return;
+            }
+        }
+    }
+
     import urt.meta.nullable;
 
     void device_add(Session session, const(char)[] id, const(char)[] _profile, Nullable!(const(char)[]) name, Nullable!(const(char)[]) model)
     {
         import urt.mem.temp : tconcat;
-        import manager.profile : Profile, ElementDesc, load_profile;
+        import manager.profile : ElementDesc;
         import manager.device : create_device_from_profile;
         import manager.element : Element;
 
@@ -861,7 +895,8 @@ nothrow @nogc:
             return;
         }
 
-        Profile* profile = load_profile(tconcat("conf/device_profiles/", _profile, ".conf"), allocator);
+        // acquired for the device's lifetime; never released
+        Profile* profile = acquire_profile(tconcat("conf/device_profiles/", _profile, ".conf"));
         if (!profile)
         {
             session.write_line("Failed to load profile '", _profile, "'");
@@ -1170,6 +1205,17 @@ private:
         EventHandler handler;
         MonoTime     when;
     }
+
+    // Zero-ref profiles are retained: element descs, samplers, and expressions
+    // on surviving devices borrow the profile's string caches, so freeing needs
+    // device-side ownership first. TODO: free when the last borrower dies.
+    struct ProfileCacheEntry
+    {
+        Profile* profile;
+        uint refs;
+    }
+
+    Map!(String, ProfileCacheEntry) _profiles;
 
     Array!WallclockHandler _wallclock_handlers;
 
