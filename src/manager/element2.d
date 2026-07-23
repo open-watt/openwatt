@@ -16,8 +16,116 @@ nothrow @nogc:
 interface Observer
 {
 nothrow @nogc:
-    void on_records(ref Element2 e, ref const RecordBlock records, Observer who);
+    void on_samples(ref const SampleCommit samples);
     void on_event(ref Element2 e, SeriesEvent event, SysTime at, Observer who);
+}
+
+struct SampleUpdate
+{
+nothrow @nogc:
+
+    Element2* element;
+    const(void)[] records;
+    const(SysTime)[] times;
+    const(ulong)[] ticks;
+    Observer who;
+    ulong first_index;
+
+    uint count() const pure
+        => cast(uint)(records.length / element.format.stride);
+
+    SysTime time(size_t i) const
+        => times.length ? times[i] : element.format.clock.to_wall(ticks[i]);
+
+    Variant box(size_t i) const
+        => box_record(cast(const(ubyte)*)records.ptr + i * element.format.stride,
+                      *element.format);
+}
+
+struct SampleCommit
+{
+nothrow @nogc:
+
+    const(SampleUpdate)[] updates;
+
+    bool changed(ref const Element2 element) const pure
+    {
+        foreach (ref update; updates)
+            if (update.element is &element)
+                return true;
+        return false;
+    }
+}
+
+// A transaction borrows the supplied record and timestamp slices until commit returns.
+// Nothing becomes visible and no observer runs before commit.
+struct SampleTransaction
+{
+nothrow @nogc:
+
+    this(this) @disable;
+
+    void write_records(ref Element2 element, const(void)[] records,
+                       const(SysTime)[] times, Observer who = null)
+    {
+        debug assert(!_committing);
+        debug assert(times.length != 0);
+        debug assert(records.length == times.length * element.format.stride);
+        _updates ~= SampleUpdate(&element, records, times, null, who);
+    }
+
+    void write_records(ref Element2 element, const(void)[] records,
+                       const(ulong)[] ticks, Observer who = null)
+    {
+        debug assert(!_committing);
+        debug assert(ticks.length != 0);
+        debug assert(element.format.uses_device_ticks);
+        debug assert(records.length == ticks.length * element.format.stride);
+        _updates ~= SampleUpdate(&element, records, null, ticks, who);
+    }
+
+    void write_samples(T)(ref Element2 element, const(T)[] samples,
+                          const(SysTime)[] times, Observer who = null)
+    {
+        static assert(!is(T == String) && !is(T : const(char)[]),
+                      "transactional text samples need owned record handles");
+        element.check_sample_type!T(samples.length, times.length);
+        write_records(element,
+            (cast(const(void)*)samples.ptr)[0 .. samples.length * T.sizeof], times, who);
+    }
+
+    void write_samples(T)(ref Element2 element, const(T)[] samples,
+                          const(ulong)[] ticks, Observer who = null)
+    {
+        static assert(!is(T == String) && !is(T : const(char)[]),
+                      "transactional text samples need owned record handles");
+        element.check_sample_type!T(samples.length, ticks.length);
+        write_records(element,
+            (cast(const(void)*)samples.ptr)[0 .. samples.length * T.sizeof], ticks, who);
+    }
+
+    void commit()
+    {
+        if (_updates.empty)
+            return;
+        assert(!_committing, "recursive sample transaction commit");
+        _committing = true;
+        scope(exit) _committing = false;
+
+        foreach (ref update; _updates)
+            update.element.apply(update);
+
+        SampleCommit samples = SampleCommit(_updates[]);
+        dispatch(samples);
+        _updates.clear();
+    }
+
+    size_t length() const pure
+        => _updates.length;
+
+private:
+    Array!SampleUpdate _updates;
+    bool _committing;
 }
 
 struct Subscription
@@ -141,26 +249,27 @@ nothrow @nogc:
                 _last_update = t;
                 return;
             }
-            _latest = s;
-            _last_update = t;
-            SysTime[1] time = t;
-            append(s.raw[0 .. format.stride], time[], who);
-            return;
         }
-        assert(format.is_wide, "dynamic and non-pod records need their own entry");
-        if (format.kind == SeriesKind.held && _last_update != SysTime())
+        else
         {
-            const(void)[] tail = tail_record();
-            if (tail && cast(const(ubyte)[])tail == cast(const(ubyte)[])record)
+            assert(format.is_wide, "dynamic and non-pod records need their own entry");
+            if (format.kind == SeriesKind.held && _last_update != SysTime())
             {
-                _last_update = t;
-                return;
+                const(void)[] tail = tail_record();
+                if (tail && cast(const(ubyte)[])tail == cast(const(ubyte)[])record)
+                {
+                    _last_update = t;
+                    return;
+                }
             }
         }
-        ensure_history();
-        _last_update = t;
         SysTime[1] time = t;
-        append(record, time[], who);
+        SampleUpdate update = SampleUpdate(&this, record, time[], null, who);
+        apply(update);
+        SampleUpdate[1] updates;
+        updates[0] = update;
+        SampleCommit samples = SampleCommit(updates[]);
+        dispatch(samples);
     }
 
     void write_samples(T)(const(T)[] samples, const(SysTime)[] times, Observer who = null)
@@ -196,14 +305,15 @@ nothrow @nogc:
         debug assert(!format.regular);
         debug assert(format.is_scalar || format.is_wide,
                      "managed records require typed sample handling");
-        uint n = cast(uint)times.length;
-        if (n == 0)
+        if (times.length == 0)
             return;
-        debug assert(records.length == n * format.stride);
-        _latest.raw[] = 0;
-        _latest.raw[0 .. format.stride] = (cast(const(ubyte)[])records)[$ - format.stride .. $];
-        _last_update = times[$-1];
-        append(records, times, who);
+        debug assert(records.length == times.length * format.stride);
+        SampleUpdate update = SampleUpdate(&this, records, times, null, who);
+        apply(update);
+        SampleUpdate[1] updates;
+        updates[0] = update;
+        SampleCommit samples = SampleCommit(updates[]);
+        dispatch(samples);
     }
 
     void write_records(const(void)[] records, const(ulong)[] ticks, Observer who = null)
@@ -211,14 +321,15 @@ nothrow @nogc:
         debug assert(format.uses_device_ticks);
         debug assert(format.is_scalar || format.is_wide,
                      "managed records require typed sample handling");
-        uint n = cast(uint)ticks.length;
-        if (n == 0)
+        if (ticks.length == 0)
             return;
-        debug assert(records.length == n * format.stride);
-        _latest.raw[] = 0;
-        _latest.raw[0 .. format.stride] = (cast(const(ubyte)[])records)[$ - format.stride .. $];
-        _last_update = format.clock.to_wall(ticks[$-1]);
-        append(records, ticks, ticks[0], who);
+        debug assert(records.length == ticks.length * format.stride);
+        SampleUpdate update = SampleUpdate(&this, records, null, ticks, who);
+        apply(update);
+        SampleUpdate[1] updates;
+        updates[0] = update;
+        SampleCommit samples = SampleCommit(updates[]);
+        dispatch(samples);
     }
 
     // TODO: rethink regular writes: data might follow the last record, or a gap may need synthesising.
@@ -413,6 +524,34 @@ private:
         debug assert(value_count * T.sizeof == record_count * format.stride);
     }
 
+    void apply(ref SampleUpdate update)
+    {
+        debug assert(update.element is &this);
+        debug assert(update.count != 0);
+        debug assert(format.is_scalar || format.is_wide,
+                     "managed records require typed sample handling");
+
+        if (format.is_scalar)
+        {
+            _latest.raw[] = 0;
+            _latest.raw[0 .. format.stride] =
+                (cast(const(ubyte)[])update.records)[$ - format.stride .. $];
+        }
+        else
+            ensure_history();
+
+        if (update.times.length)
+        {
+            _last_update = update.times[$-1];
+            update.first_index = append(update.records, update.times, update.who);
+        }
+        else
+        {
+            _last_update = format.clock.to_wall(update.ticks[$-1]);
+            update.first_index = append(update.records, update.ticks, update.ticks[0], update.who);
+        }
+    }
+
     void write_text_sample(String v, SysTime t, Observer who)
     {
         debug assert(format.is_text);
@@ -449,13 +588,13 @@ private:
             // the ref settled here is owned by the bucket once append memcpys the bits
             TextRecord rec;
             rec.copy_from(*cast(const(TextRecord)*)_latest.raw.ptr);
-            append(rec.raw[0 .. format.stride], time[], who);
+            append(rec.raw[0 .. format.stride], time[], who, true);
         }
         else
-            append(_latest.raw[0 .. format.stride], time[], who);
+            append(_latest.raw[0 .. format.stride], time[], who, true);
     }
 
-    void append(const(void)[] samples, const(SysTime)[] times, Observer who)
+    ulong append(const(void)[] samples, const(SysTime)[] times, Observer who, bool notify = false)
     {
         import urt.mem : alloca;
 
@@ -470,44 +609,47 @@ private:
             ts = cast(uint[])alloc(times.length * uint.sizeof, uint.sizeof, MemFlags.fastest);
         scope(exit) { if (times.length > 512) free(ts); }
 
-        RecordBlock blk;
-        blk.format = format;
-        blk.data = samples.ptr;
-        blk.ts = ts.ptr;
-        blk.t0 = unix_time_ns(times[0]) / 1000;
-        blk.count = n;
+        ulong t0 = unix_time_ns(times[0]) / 1000;
         foreach (i, t; times)
             ts[i] = cast(uint)((t - times[0]).as!"usecs");
 
         bool follows_gap = (_flags & Flags.gap_open) != 0;
         _flags &= ~Flags.gap_open;
 
+        ulong first_index = ulong.max;
         if (_history)
         {
-            Bucket* b = writable_bucket(n, follows_gap, blk.t0 + ts[n - 1]);
+            Bucket* b = writable_bucket(n, follows_gap, t0 + ts[n - 1]);
             (cast(ubyte*)b.samples)[b.count*stride .. (b.count + n)*stride] = cast(const(ubyte)[])samples[];
             if (b.count == 0)
-                b.first_tick = blk.t0;
-            uint offset = cast(uint)(blk.t0 - b.first_tick);
+                b.first_tick = t0;
+            uint offset = cast(uint)(t0 - b.first_tick);
             for (uint i = 0; i < n; ++i)
                 b.offsets[b.count + i] = offset + ts[i];
             b.count += n;
             b.last_offset = b.offsets[b.count - 1];
 
-            blk.first_index = _history.head;
+            first_index = _history.head;
             _history.head += n;
             evict_over_budget();
         }
 
-        for (Subscription* s = _subs; s; s = s.next)
-            if (s.observer !is who)
-                s.observer.on_records(this, blk, who);
+        if (notify)
+        {
+            SampleUpdate update = SampleUpdate(&this, samples, times, null, who, first_index);
+            SampleUpdate[1] updates;
+            updates[0] = update;
+            SampleCommit commit = SampleCommit(updates[]);
+            dispatch(commit);
+        }
         mark_dirty();
+        return first_index;
 
         // TODO: reactor-thread producers must defer observer dispatch and dirty marking to the main loop
     }
 
-    void append(const(void)[] samples, const(ulong)[] times, ulong t0, Observer who)
+    ulong append(const(void)[] samples, const(ulong)[] times, ulong t0, Observer who,
+                 bool notify = false)
     {
         import urt.mem : alloca;
 
@@ -522,24 +664,19 @@ private:
             ts = cast(uint[])alloc(times.length * uint.sizeof, uint.sizeof, MemFlags.fastest);
         scope(exit) { if (times.length > 512) free(ts); }
 
-        RecordBlock blk;
-        blk.format = format;
-        blk.data = samples.ptr;
-        blk.ts = ts.ptr;
-        blk.t0 = times.length ? times[0] : t0;
-        blk.count = n;
         foreach (i, t; times)
             ts[i] = cast(uint)(t - t0);
 
         bool follows_gap = (_flags & Flags.gap_open) != 0;
         _flags &= ~Flags.gap_open;
 
+        ulong first_index = ulong.max;
         if (_history)
         {
             Bucket* b = writable_bucket(n, follows_gap, times.length ? times[n - 1] : t0);
             (cast(ubyte*)b.samples)[b.count*stride .. (b.count + n)*stride] = cast(const(ubyte)[])samples[];
             if (b.count == 0)
-                b.first_tick = blk.t0;
+                b.first_tick = times.length ? times[0] : t0;
             if (b.offsets)
             {
                 for (uint i = 0; i < n; ++i)
@@ -548,15 +685,21 @@ private:
             b.count += n;
             b.last_offset = times.length ? b.offsets[b.count - 1] : b.count - 1;
 
-            blk.first_index = _history.head;
+            first_index = _history.head;
             _history.head += n;
             evict_over_budget();
         }
 
-        for (Subscription* s = _subs; s; s = s.next)
-            if (s.observer !is who)
-                s.observer.on_records(this, blk, who);
+        if (notify)
+        {
+            SampleUpdate update = SampleUpdate(&this, samples, null, times, who, first_index);
+            SampleUpdate[1] updates;
+            updates[0] = update;
+            SampleCommit commit = SampleCommit(updates[]);
+            dispatch(commit);
+        }
         mark_dirty();
+        return first_index;
 
         // TODO: reactor-thread producers must defer observer dispatch and dirty marking to the main loop
     }
@@ -667,12 +810,68 @@ private:
 
 static assert(Element2.sizeof <= 48);
 
+version (unittest)
+private final class TransactionObserver : Observer
+{
+nothrow @nogc:
+
+    Element2* a;
+    Element2* b;
+    uint calls;
+    uint update_count;
+    bool coherent;
+
+    this(ref Element2 a, ref Element2 b)
+    {
+        this.a = &a;
+        this.b = &b;
+    }
+
+    override void on_samples(ref const SampleCommit samples)
+    {
+        ++calls;
+        update_count = cast(uint)samples.updates.length;
+        coherent = a.latest.f64_ == 3.0 && b.latest.f64_ == 30.0;
+    }
+
+    override void on_event(ref Element2, SeriesEvent, SysTime, Observer)
+    {
+    }
+}
+
 
 unittest
 {
     import urt.time : from_unix_time_ns;
 
     static immutable DataFormat f64_held = DataFormat(ValueType.f64, SeriesKind.held);
+
+    // one protocol frame can publish several element batches without exposing partial state
+    Element2 tx_a;
+    Element2 tx_b;
+    tx_a.format = &f64_held;
+    tx_b.format = &f64_held;
+    TransactionObserver observer = defaultAllocator().allocT!TransactionObserver(tx_a, tx_b);
+    tx_a.subscribe(observer);
+    tx_b.subscribe(observer);
+
+    double[3] tx_a_values = [1.0, 2.0, 3.0];
+    double[3] tx_b_values = [10.0, 20.0, 30.0];
+    SysTime[3] tx_times = [from_unix_time_ns(100), from_unix_time_ns(200),
+                           from_unix_time_ns(300)];
+    SampleTransaction transaction;
+    transaction.write_samples(tx_a, tx_a_values[], tx_times[]);
+    transaction.write_samples(tx_b, tx_b_values[], tx_times[]);
+    assert(observer.calls == 0);
+    assert(tx_a.last_update == SysTime() && tx_b.last_update == SysTime());
+    transaction.commit();
+    assert(observer.calls == 1);
+    assert(observer.update_count == 2 && observer.coherent);
+    assert(transaction.length == 0);
+
+    tx_a.teardown();
+    tx_b.teardown();
+    defaultAllocator().freeT(observer);
 
     // retention=none: latest and last_update track, nothing is stored
     Element2 n;
@@ -897,6 +1096,36 @@ void sweep_dirty(scope void delegate(ref Element2) nothrow @nogc visit)
 
 
 private:
+
+void dispatch(ref const SampleCommit samples)
+{
+    Array!Observer observers;
+    foreach (ref update; samples.updates)
+    {
+        Element2* element = cast(Element2*)update.element;
+        for (Subscription* subscription = element._subs;
+             subscription; subscription = subscription.next)
+        {
+            Observer observer = subscription.observer;
+            if (observer is update.who)
+                continue;
+            bool found;
+            foreach (present; observers)
+            {
+                if (present is observer)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                observers ~= observer;
+        }
+    }
+
+    foreach (observer; observers)
+        observer.on_samples(samples);
+}
 
 // compile-time twin of ValueType for the typed write_sample() entry
 template value_type_of(T)
