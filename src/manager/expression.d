@@ -1088,7 +1088,7 @@ Expression* parse_primary_exp(ref const(char)[] text, bool allow_slash = false)
             }
         }
 
-        if (identifier && !c.is_alpha_numeric && c != '_' && c != '-' && !(is_var || is_element && c == '.'))
+        if (identifier && !c.is_alpha_numeric && c != '_' && c != '-' && c != '.')
         {
             if (is_var || is_element)
                 break;
@@ -1349,4 +1349,12 @@ unittest
     assert(cmds[0].named_args.length == 2);
     assert(cmds[0].named_args[1].name.get_str() == "device");
     assert(cmds[0].named_args[1].value.get_str() == "/dev/ttyUSB0");
+
+    // dotted barewords stay whole: nested named-arg keys and dotted paths are single identifiers
+    text = ":set solar.mppt1=cabin.pv1";
+    cmds = parse_commands(text);
+    assert(cmds.length == 1);
+    assert(cmds[0].named_args.length == 1);
+    assert(cmds[0].named_args[0].name.get_str() == "solar.mppt1");
+    assert(cmds[0].named_args[0].value.get_str() == "cabin.pv1");
 }
