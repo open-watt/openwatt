@@ -119,6 +119,9 @@ nothrow @nogc:
         super(id.move);
     }
 
+    override bool is_device() const pure
+        => true;
+
     ~this()
     {
         clear_computations();
@@ -523,4 +526,17 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
     device.notify(ComponentEvent.online);
 
     return device;
+}
+
+unittest
+{
+    import urt.mem : defaultAllocator;
+    import urt.string : makeString;
+
+    Device d = defaultAllocator.allocT!Device("testdev".makeString(defaultAllocator()));
+    Component c = defaultAllocator.allocT!Component("child".makeString(defaultAllocator()));
+    c.parent = d;
+    assert(!c.is_device);
+    Component as_comp = d;
+    assert(as_comp.is_device);
 }
