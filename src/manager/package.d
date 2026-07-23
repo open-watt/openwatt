@@ -262,6 +262,8 @@ nothrow @nogc:
         register_intrinsic(StringLit!"math.acos", &intrin_shim_1!acos);
         register_intrinsic(StringLit!"math.atan", &intrin_shim_1!atan);
         register_intrinsic(StringLit!"math.atan2", &intrin_shim_2!atan2);
+        register_intrinsic(StringLit!"energy.apparent", &apparent);
+        register_intrinsic(StringLit!"energy.reactive", &reactive);
 
         console = Console(this, String("console".addString), Mallocator.instance);
 
@@ -1572,4 +1574,26 @@ Variant intrin_shim_2(alias fn)(Variant[] args)
     if (args.length != 2 || !args[0].isNumber || !args[1].isNumber)
         return Variant();
     return Variant(fn(args[0].asDouble(), args[1].asDouble()));
+}
+
+Variant apparent(Variant[] args)
+    => reactive_shift(args, true);
+
+Variant reactive(Variant[] args)
+    => reactive_shift(args, false);
+
+Variant reactive_shift(Variant[] args, bool add)
+{
+    import urt.math : sqrt;
+    if (args.length != 2 || !args[0].isNumber || !args[1].isNumber)
+        return Variant();
+    VarQuantity a = args[0].asQuantity();
+    VarQuantity b = args[1].asQuantity();
+    Unit unit = a.unit.unit;
+    if (!a.isCompatible(b) || (unit.pack != 0 && unit != Watt))
+        return Variant();
+    double an = a.normalise().value, bn = b.normalise().value;
+    an *= an; bn *= bn;
+    double r = sqrt(add ? an + bn : an - bn);
+    return Variant(VarQuantity(r, ScaledUnit(unit)));
 }
