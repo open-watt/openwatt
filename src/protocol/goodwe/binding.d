@@ -77,6 +77,8 @@ nothrow @nogc:
         restart();
     }
 
+protected:
+
     final override bool validate() const pure
     {
         return _client.get !is null && !_profile_name.empty && !_device.empty;
@@ -164,16 +166,23 @@ nothrow @nogc:
         }
     }
 
-protected:
     final override const(char)[] profile_dir() const pure
         => "conf/goodwe_profiles/";
+
     final override const(char)[] profile_name() const pure
         => _profile_name[];
+
     final override const(char)[] model_name() const pure
         => _model_name[];
 
     final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
+        if (elements.length == 0)
+        {
+            Element* address = device.find_or_create_element("status.network.ip.address");
+            address.value(Variant(_client.get_address()));
+        }
+
         assert(desc.type == ElementType.aa55);
         ref const ElementDesc_AA55 aa55 = _profile_data.get_aa55(desc.element);
 

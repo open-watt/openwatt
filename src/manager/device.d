@@ -254,11 +254,9 @@ nothrow @nogc:
     MonoTime last_poll;
 
 package:
-    void try_bind_pending()
+    int try_bind_pending()
     {
-        // TODO: bind order should be topological by ref-graph; this kind-major split
-        // matches the original convention (expressions before sums) but breaks down
-        // when expressions chain or when profiles list sums before their source expressions
+        int newly_bound = 0;
         foreach (ref c; computations)
         {
             if (c.bound || c.kind != ComputationKind.expression)
@@ -283,6 +281,7 @@ package:
                 c.element_updated(*e, e.latest, e.last_update, e.prev, e.prev_update);
             }
             c.bound = true;
+            ++newly_bound;
         }
 
         foreach (ref c; computations)
@@ -296,6 +295,7 @@ package:
             e.add_subscriber(&c.element_updated);
             c.source = e;
             c.bound = true;
+            ++newly_bound;
         }
 
         foreach (ref c; computations)
@@ -304,7 +304,10 @@ package:
                 continue;
             // ElementLink manages its own lifecycle via g_app
             c.bound = true;
+            ++newly_bound;
         }
+
+        return newly_bound;
     }
 
 }
@@ -365,6 +368,7 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
         {
             c = g_app.allocator.allocT!Component(comp_id.makeString(defaultAllocator()));
             c.template_ = ct.get_template().makeString(defaultAllocator());
+            c.hidden = ct.is_hidden();
             c.parent = parent;
             parent.components ~= c;
         }
@@ -510,10 +514,10 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
         find_or_create_component(device, ct);
     }
 
-    device.try_bind_pending();
-
     if (is_new_device)
         g_app.devices.insert(device.id[], device);
+
+    g_app.request_rebind();
 
     device.notify(ComponentEvent.tree_changed);
     device.notify(ComponentEvent.online);
