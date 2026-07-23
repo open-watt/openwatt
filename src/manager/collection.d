@@ -6,7 +6,7 @@ import urt.lifetime;
 import urt.mem.allocator;
 import urt.result;
 import urt.string;
-import urt.time : MonoTime;
+import urt.time : Duration, MonoTime, getTime;
 
 import manager.id;
 
@@ -219,12 +219,23 @@ nothrow @nogc:
     {
         assert(type_info.get_super is null, "update_all should only be called on root collections");
 
+        enum SlowObjectUpdateMs = 50;
         size_t i = 0;
         outer: while (i < table._entries.length)
         {
             CID just_processed = table._entries[i].id;
             if (auto active = cast(ActiveObject)table._entries[i].value)
+            {
+                MonoTime t = getTime();
                 active.do_update();
+                Duration d = getTime() - t;
+                if (d.as!"msecs" >= SlowObjectUpdateMs)
+                {
+                    import urt.log : writeWarning;
+                    writeWarning("collection.update.", type_info.type[], ".", active.name[],
+                                 ": ", d.as!"msecs", "ms");
+                }
+            }
 
             // skip to the entry after the one we just did (array may have grown)
             while (table._entries[i++].id != just_processed)
