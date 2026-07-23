@@ -58,6 +58,11 @@ nothrow @nogc:
         ubyte flags; // 1 = got state, 2 = got charge info, 4 = got sn, 10 = car connected, 20 = got vin1, 40 = got vin2, 80 = got vin3
         ubyte vin_attempts;
 
+        // A plugged-but-sleeping car also idles at Ready+0A, so presence is latched on VIN
+        // evidence and only released after repeated zero-byte VIN re-polls confirm real unplug.
+        bool verify_presence;
+        ubyte verify_zero_count;
+
         ushort specified_max_current; // the maximum current we're allowed to charge with
         ushort device_max_current;    // the maximum current supported by the charger
         ushort target_current;       // the current we're trying to charge with
@@ -77,11 +82,17 @@ nothrow @nogc:
         char[11] serial_number;
         char[17] vin;
 
+        // the TWC protocol cannot express less than 5A; "stop" must come from the car side
+        // (or by disabling the appliance), so delivered current is always max(setpoint, floor)
+        enum ushort min_current = 500;
+
+        // device_max_current arrives in SlaveLinkReady; until then the configured
+        // limit stands alone so optimistically-adopted chargers have a valid clamp
         ushort max_current()
-            => min(device_max_current, specified_max_current);
+            => device_max_current ? min(device_max_current, specified_max_current) : specified_max_current;
 
         ushort charge_current()
-            => min(max_current, target_current);
+            => max(min_current, min(max_current, target_current));
 
         ChargerState charger_state()
         {
@@ -111,14 +122,6 @@ nothrow @nogc:
             }
         }
 
-        void reset()
-        {
-            link_ready = false;
-            state = TWCState.Ready;
-            flags = 0;
-            vin_attempts = 0;
-            req_seq = 0;
-        }
     }
 
     TeslaProtocolModule m;
@@ -131,6 +134,7 @@ nothrow @nogc:
 
     ushort id;
     ubyte sig;
+    bool announced;
 
     byte round_robin_index;
 
@@ -191,12 +195,13 @@ nothrow @nogc:
     void update()
     {
         LinkStatus link_status = iface.status.link_status;
-        if (link_status != last_link_status && link_status == LinkStatus.up)
+        if (link_status != last_link_status && link_status == LinkStatus.up && !announced)
         {
-            // if the link returned after being offline for a bit, we'll issue a full restart
+            // announce master presence on first bring-up only; on a link flap we just resume
+            // heartbeating - a slave that actually rebooted re-announces itself, and waiting
+            // for SlaveLinkReady costs the slave's own master-loss timeout (minutes)
+            announced = true;
             round_robin_index = -10;
-            foreach (ref c; chargers)
-                c.reset();
             last_action = MonoTime();
         }
         last_link_status = link_status;
@@ -217,6 +222,15 @@ nothrow @nogc:
             message[2..4] = id.nativeToBigEndian;
             message[4] = sig;
             send_twc_message(TWCFrame.broadcast, message[]);
+
+            // optimistic adoption: heartbeat configured chargers immediately rather than wait
+            // for SlaveLinkReady; a present slave answers heartbeats, and LinkReady merely
+            // refines device_max_current/sig whenever it arrives
+            if (round_robin_index == 0)
+            {
+                foreach (ref c; chargers)
+                    c.link_ready = true;
+            }
             return;
         }
 
@@ -239,9 +253,13 @@ nothrow @nogc:
         {
             if (c.heartbeat_sent - c.heartbeat_received >= 20)
             {
-                // the slave stopped responding... I guess we should assume it's offline?
-                c.reset();
-                return;
+                // slave stopped responding; keep heartbeating (it answers again the moment it
+                // returns, and a rebooted slave re-announces) but re-arm the counters so this
+                // stall check can re-fire instead of saturating
+                debug writeDebug("Charger ", c.name, " not responding");
+                c.heartbeat_sent = 0;
+                c.heartbeat_received = 0;
+                c.req_seq = 0;
             }
 
             version (DebugTWCMaster)
@@ -265,23 +283,13 @@ nothrow @nogc:
                     message[7..9] = c.max_current.nativeToBigEndian;
                     break;
                 case TWCState.StartingToCharge:
-                    // car is requesting to charge...
-                    if (c.charge_current != 0)
-                    {
-                        // accept the request
-                        message[6] = TWCState.StartingToCharge;
-                        message[7..9] = c.max_current.nativeToBigEndian;
-                    }
+                    // car is requesting to charge; accept the request
+                    message[6] = TWCState.StartingToCharge;
+                    message[7..9] = c.max_current.nativeToBigEndian;
                     break;
                 case TWCState.Charging:
-                    if (c.charge_current == 0)
+                    if (c.charge_current != c.charge_current_target)
                     {
-                        // the car is requesting to stop charging...
-                        // TODO: we don't know how to do this!
-                    }
-                    else if (c.charge_current != c.charge_current_target)
-                    {
-                        // the car is requesting to change the current...
                         message[6] = TWCState.LimitCurrent;
                         message[7..9] = c.charge_current.nativeToBigEndian;
                     }
@@ -305,7 +313,9 @@ nothrow @nogc:
                 if (c.flags & 4)
                     ++item;
             }
-            if (item >= 2 && ((c.flags & 0x10) == 0 || (c.flags & 0xF0) == 0xF0 || c.vin_attempts >= 10))
+            if (item >= 2 && c.verify_presence)
+                item = 2; // re-poll VIN1 to confirm the car is still plugged in
+            else if (item >= 2 && ((c.flags & 0x10) == 0 || (c.flags & 0xF0) == 0xF0 || c.vin_attempts >= 10))
                 item = 0;
             else
             {
@@ -365,13 +375,16 @@ nothrow @nogc:
                 switch (msg.type)
                 {
                     case TWCMessageType.SlaveLinkReady:
-                        if (slave.link_ready)
-                            break;
-                        slave.link_ready = true;
+                        // always refresh: with optimistic adoption this may arrive while we're
+                        // already heartbeating (slave rebooted, or first contact after our boot)
                         slave.sig_byte = msg.link_ready.signature;
                         slave.device_max_current = msg.link_ready.amps;
-                        slave.heartbeat_sent = 0;
-                        slave.heartbeat_received = 0;
+                        if (!slave.link_ready)
+                        {
+                            slave.link_ready = true;
+                            slave.heartbeat_sent = 0;
+                            slave.heartbeat_received = 0;
+                        }
                         break;
                     case TWCMessageType.ChargeInfo:
                         slave.lifetime_energy = msg.charge_info.lifetime_energy;
@@ -396,6 +409,34 @@ nothrow @nogc:
                         slave.flags |= 0x4;
                         break;
                     case TWCMessageType.VIN1:
+                        if (slave.verify_presence)
+                        {
+                            if (*cast(uint*)msg.vin.ptr == 0)
+                            {
+                                if (++slave.verify_zero_count >= 3)
+                                {
+                                    debug writeDebug("Car disconnected from ", slave.name);
+                                    slave.flags &= 0xF;
+                                    slave.vin[] = 0;
+                                    slave.vin_attempts = 0;
+                                    slave.verify_presence = false;
+                                    slave.verify_zero_count = 0;
+                                }
+                            }
+                            else
+                            {
+                                if (slave.vin[0..7] != msg.vin[])
+                                {
+                                    // a different car since we last looked; recollect the rest
+                                    slave.vin[0..7] = msg.vin[];
+                                    slave.flags = cast(ubyte)((slave.flags | 0x20) & ~0xC0);
+                                    slave.vin_attempts = 0;
+                                }
+                                slave.verify_presence = false;
+                                slave.verify_zero_count = 0;
+                            }
+                            break;
+                        }
                         slave.vin[0..7] = msg.vin[];
                         if (*cast(uint*)msg.vin.ptr == 0)
                         {
@@ -440,14 +481,25 @@ nothrow @nogc:
 
                 slave.flags |= 0x1;
 
-                // if a car appears to be connected...
+                // Ready+0A is ambiguous: unplugged, or a plugged car that went to sleep.
+                // With VIN evidence on record we hold presence and verify by re-polling VIN1;
+                // without any VIN we have nothing to verify against, so treat it as unplugged.
                 if (msg.heartbeat.state == TWCState.Ready && msg.heartbeat.current == 0)
                 {
-                    debug if (slave.flags & 0x10)
-                        writeDebug("Car disconnected from ", slave.name);
-
-                    slave.flags &= 0xF;
-                    slave.vin_attempts = 0;
+                    if (slave.flags & 0xE0)
+                    {
+                        if (!slave.verify_presence)
+                        {
+                            slave.verify_presence = true;
+                            slave.verify_zero_count = 0;
+                        }
+                    }
+                    else if (slave.flags & 0x10)
+                    {
+                        debug writeDebug("Car disconnected from ", slave.name);
+                        slave.flags &= 0xF;
+                        slave.vin_attempts = 0;
+                    }
                 }
                 else
                 {
@@ -455,6 +507,11 @@ nothrow @nogc:
                         writeDebug("Car connected to ", slave.name);
 
                     slave.flags |= 0x10;
+                    if (slave.verify_presence)
+                    {
+                        slave.verify_presence = false;
+                        slave.verify_zero_count = 0;
+                    }
                 }
 
                 slave.heartbeat_received = slave.heartbeat_sent;
