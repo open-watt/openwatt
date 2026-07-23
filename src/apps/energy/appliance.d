@@ -260,13 +260,13 @@ nothrow @nogc:
         if (device)
         {
             if (!control)
-                control = device.get_first_component_by_template("ChargeControl");
+                control = device.get_first_component_by_template("PowerControl");
         }
     }
 
     final override ControlCapability hasControl() const
     {
-        if (control && control.find_element("target_current"))
+        if (control && control.find_element("setpoint"))
             return ControlCapability.Linear;
         // on/off control?
 
@@ -340,7 +340,7 @@ nothrow @nogc:
 
             if (control)
             {
-                Element* e = control.find_element("target_current");
+                Element* e = control.find_element("setpoint");
                 if (e)
                     e.value = target_current;
             }

@@ -330,12 +330,14 @@ static MeterData get_meter_data(Component meter, FieldFlags fields = FieldFlags.
         // TODO: AC circuits are much more of a pain in the arse; and we need to assess what details we do know...
         if ((r.fields & primary_fields) == (FieldFlags.voltage | FieldFlags.current))
         {
-            assert(false, "TODO");
+            foreach (i; 0..4)
+                r.active[i] = r.voltage[i] * r.current[i]; // unity-PF approximation; pending the app rewrite
             r.fields |= FieldFlags.power;
         }
         else if ((r.fields & primary_fields) == (FieldFlags.voltage | FieldFlags.power))
         {
-            assert(false, "TODO");
+            foreach (i; 0..4)
+                r.current[i] = r.active[i] / r.voltage[i]; // unity-PF approximation; pending the app rewrite
             r.fields |= FieldFlags.current;
         }
         else if ((r.fields & primary_fields) == (FieldFlags.current | FieldFlags.power))
