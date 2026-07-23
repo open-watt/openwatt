@@ -60,6 +60,10 @@ nothrow @nogc:
     Array!(Component) components;
     Array!(Element*) elements;
 
+    // extern(C++) has no dynamic cast: cast(Device) always "succeeds", so test this before painting
+    bool is_device() const pure
+        => false;
+
     final void subscribe(ComponentSubscriber handler)
     {
         assert(!_subscribers[].contains(handler), "Already registered");
