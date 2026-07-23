@@ -274,7 +274,7 @@ protected:
         // tearing down any AP/association/keys left by hostapd, NetworkManager,
         // wpa_supplicant or a previous run -- before any STA/AP binds to it.
         _ifindex = read_ifindex(_adapter[]);
-        if (_ifindex != 0)
+        if (_ifindex != 0 && should_reset_adapter())
             reset_device(_adapter[], _ifindex);
         apply_configured_mtu();
 
@@ -326,6 +326,15 @@ protected:
     override void on_mtu_changed()
     {
         apply_configured_mtu();
+    }
+
+    bool should_reset_adapter() const
+    {
+        if (!(flags & ObjectFlags.dynamic))
+            return true;
+        if (monitor)
+            return true;
+        return bound_sta !is null || bound_aps.length > 0;
     }
 
     override void update()
