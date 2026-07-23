@@ -32,17 +32,13 @@ void watchdog_init(Duration timeout)
     version (linux)
         supervisor_attach();
 
-    // skipped in debug builds so a paused debugger doesn't trip the stall timeout
-    debug {} else
-    {
-        if (_thread)
-            return;
-        _timeout_ms = cast(uint)timeout.as!"msecs";
-        _start = getTime();
-        atomicStore(_last_feed, 0u);
-        atomicStore(_running, true);
-        _thread = thread_spawn(() { monitor(); });
-    }
+    if (_thread)
+        return;
+    _timeout_ms = cast(uint)timeout.as!"msecs";
+    _start = getTime();
+    atomicStore(_last_feed, 0u);
+    atomicStore(_running, true);
+    _thread = thread_spawn(() { monitor(); });
 }
 
 void watchdog_feed()
@@ -73,7 +69,8 @@ private void monitor()
         sleep(1.seconds);
         if (_request_feed !is null)
             _request_feed();     // ask the main thread to feed itself, then check
-        if (elapsed_ms() - atomicLoad(_last_feed) > _timeout_ms)
+        debug {}
+        else if (elapsed_ms() - atomicLoad(_last_feed) > _timeout_ms)
             abort();
     }
 }
