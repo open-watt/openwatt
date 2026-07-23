@@ -3,6 +3,7 @@ module driver.linux.nl80211;
 version (linux):
 
 import urt.log;
+import urt.time : Duration, getTime;
 
 import urt.internal.sys.posix;
 
@@ -176,11 +177,17 @@ void reset_device(const(char)[] adapter, uint ifindex)
     if (!resolve_family(nl_fd, "nl80211\0", family_id))
         return;
 
+    auto t = getTime();
     nl_device_cmd(nl_fd, family_id, NL80211_CMD_STOP_AP, ifindex, 0);
+    log_slow_nl80211("reset.stop_ap", adapter, getTime() - t);
+    t = getTime();
     nl_device_cmd(nl_fd, family_id, NL80211_CMD_DISCONNECT, ifindex, 0);
+    log_slow_nl80211("reset.disconnect", adapter, getTime() - t);
 
     // Force managed (station) mode -- the iftype change cycles the link down/up.
+    t = getTime();
     set_device_iftype(adapter, ifindex, NL80211_IFTYPE_STATION);
+    log_slow_nl80211("reset.set_iftype", adapter, getTime() - t);
 
     log_info("os.nl80211", "reset wifi device '", adapter, "' to clean station mode");
 }
@@ -213,12 +220,20 @@ void set_device_iftype(const(char)[] adapter, uint ifindex, uint iftype)
     setsockopt(nl_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, timeval.sizeof);
 
     ushort family_id;
+    auto t = getTime();
     if (!resolve_family(nl_fd, "nl80211\0", family_id))
         return;
+    log_slow_nl80211("set_iftype.resolve_family", adapter, getTime() - t);
 
+    t = getTime();
     set_if_up(io_fd, adapter, false);
+    log_slow_nl80211("set_iftype.link_down", adapter, getTime() - t);
+    t = getTime();
     nl_device_cmd(nl_fd, family_id, NL80211_CMD_SET_INTERFACE, ifindex, iftype);
+    log_slow_nl80211("set_iftype.cmd", adapter, getTime() - t);
+    t = getTime();
     set_if_up(io_fd, adapter, true);
+    log_slow_nl80211("set_iftype.link_up", adapter, getTime() - t);
 }
 
 // The wiphy (phy) index a netdev belongs to, or uint.max on failure. Needed to
@@ -396,6 +411,12 @@ void nl_device_cmd(int fd, ushort family_id, ubyte cmd, uint ifindex, uint iftyp
         return;
     ubyte[1024] reply = void;
     recv(fd, reply.ptr, reply.length, 0);   // drain ack (ignored)
+}
+
+void log_slow_nl80211(const(char)[] phase, const(char)[] adapter, Duration d)
+{
+    if (d.as!"msecs" >= 50)
+        writeWarning("os.nl80211.", phase, "(", adapter, "): ", d.as!"msecs", "ms");
 }
 
 void set_if_up(int fd, const(char)[] adapter, bool up)
