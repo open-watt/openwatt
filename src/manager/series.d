@@ -117,28 +117,14 @@ FormatId register_value_format(T)(auto ref T value)
     alias U = Unqual!T;
     static if (is(U == Variant))
         return register_variant_format(value);
-    else static if (is_boolean!U || is_some_int!U || is_some_float!U)
-        return register_format(DataFormat(value_type_of!U, SeriesKind.held));
-    else static if (is(U Base == enum))
-        return register_format(DataFormat(value_type_of!Base, SeriesKind.held, enum_info!U.make_void()));
-    else static if (is(U == String) || is(T : const(char)[]))
-    {
-        DataFormat format = DataFormat(ValueType.char_, SeriesKind.held);
-        format.count = 0;
-        return register_format(format);
-    }
-    else static if (is(U == Duration))
-        return register_format(DataFormat(ValueType.s64, SeriesKind.held, Nanosecond));
-    else static if (is(U == Quantity!(N, scale), N, ScaledUnit scale))
-        return register_format(DataFormat(value_type_of!N, SeriesKind.held, value.unit));
     else static if (ValidUserType!U)
     {
-        Variant register_type = Variant(value);
+        Variant register_type = Variant(value); // registers the type details on first use
         return register_format(DataFormat(ValueType.user, SeriesKind.held,
                                           &find_type_details(TypeDetailsFor!U.type_id)));
     }
     else
-        static assert(false, "value needs an explicit record format");
+        return register_value_format!T();
 }
 
 FormatId register_value_format(T)()
@@ -156,8 +142,10 @@ FormatId register_value_format(T)()
     }
     else static if (is(U == Duration))
         return register_format(DataFormat(ValueType.s64, SeriesKind.held, Nanosecond));
+    else static if (is(U == Quantity!(N, scale), N, ScaledUnit scale))
+        return register_format(DataFormat(value_type_of!N, SeriesKind.held, scale));
     else
-        static assert(false, "value-dependent formats require a value");
+        static assert(false, "value needs an explicit record format");
 }
 
 // machine numerics fit the Scalar register when count is one
