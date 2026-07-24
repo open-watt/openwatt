@@ -362,18 +362,17 @@ private:
                     log.warning("Home Assistant select changed an existing non-select element: ", path);
                     return;
                 }
-                update_enum_format(prior_state.format, select_info);
-                state_format = prior_state.format;
             }
-            else
-                state_format = register_format(
-                    DataFormat(ValueType.u16, SeriesKind.held, select_info));
+            state_format = register_format(
+                DataFormat(ValueType.u16, SeriesKind.held, select_info));
+            // changed options rebind the enum NAME to new info; the element takes the new
+            // format, prior formats and their records stay valid under the old definition
+            if (prior_state && prior_state.format != state_format)
+                prior_state.format = state_format;
         }
         else
             state_format = make_state_format(config, domain, unit, state_class);
         Element* state = record.device.find_or_create_element(path, state_format);
-        if (select_info)
-            select_info = state.data_format.enum_info;
         Component ha_component = record.device.find_component("ha");
         if (ha_component && ha_component.name.empty)
             ha_component.name = "Home Assistant".makeString(defaultAllocator());

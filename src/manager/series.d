@@ -57,9 +57,8 @@ static assert(FormatId.sizeof == ushort.sizeof);
 bool valid(FormatId id) pure
     => id != FormatId.invalid;
 
-// FormatIds are process-local identities. Registered descriptors remain alive for the process
-// lifetime, so equality is an integer comparison after registration. A hash-valued enum may
-// replace the descriptor at its existing ID when its key set changes; old records remain valid.
+// FormatIds are process-local identities. Registered descriptors are immutable and remain
+// alive for the process lifetime, so equality is an integer comparison after registration.
 FormatId register_format(in DataFormat format)
 {
     foreach (i, f; g_formats)
@@ -72,20 +71,6 @@ FormatId register_format(in DataFormat format)
     *f = cast(DataFormat)format;
     g_formats ~= f;
     return cast(FormatId)(g_formats.length - 1);
-}
-
-void update_enum_format(FormatId id, const(VoidEnumInfo)* info)
-{
-    assert(id.valid && cast(size_t)id < g_formats.length, "invalid format id");
-    const(DataFormat)* current = g_formats[cast(size_t)id];
-    assert(current.desc == DataFormat.Desc.enum_, "format is not an enum");
-    if (current.enum_info is info)
-        return;
-
-    DataFormat* replacement = defaultAllocator().allocT!DataFormat();
-    *replacement = cast(DataFormat)*current;
-    replacement.enum_info = info;
-    g_formats[][cast(size_t)id] = replacement;
 }
 
 const(DataFormat)* format_info(FormatId id) pure
@@ -112,7 +97,7 @@ template value_type_of(T)
     else static if (is(U == char))   enum value_type_of = ValueType.char_;
 }
 
-FormatId register_value_format(T)(auto ref T value)
+FormatId register_value_format(T)(auto ref const T value)
 {
     static if (is(Unqual!T == Variant))
         return register_variant_format(value);
@@ -703,7 +688,8 @@ private bool unbox_scalar_value(ref const Variant v, ref const DataFormat fmt, o
 
     if (fmt.desc == DataFormat.Desc.quantity)
     {
-        if (!v.isQuantity || v.asQuantity!double().unit.unit != fmt.unit.unit)
+        // wrong dimensions never store; unitless numbers adopt the format's unit
+        if (v.isQuantity && v.asQuantity!double().unit.unit != fmt.unit.unit)
             return false;
     }
     else if (fmt.desc == DataFormat.Desc.enum_)
