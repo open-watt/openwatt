@@ -461,10 +461,16 @@ enum ObjectLifecycleEvent : ubyte
 }
 
 alias ObjectLifecycleHandler = void delegate(BaseObject obj, ObjectLifecycleEvent event) nothrow @nogc;
+alias ObjectRenameHandler = void delegate(BaseObject obj, const(char)[] old_name) nothrow @nogc;
 
 void register_object_lifecycle_handler(ObjectLifecycleHandler handler) nothrow @nogc
 {
     _on_object_lifecycle ~= handler;
+}
+
+void register_object_rename_handler(ObjectRenameHandler handler) nothrow @nogc
+{
+    _on_object_rename ~= handler;
 }
 
 void foreach_object(scope void delegate(BaseObject obj) nothrow @nogc fn)
@@ -480,6 +486,7 @@ private:
 
 // HACK: is this satisfactory?
 __gshared Array!ObjectLifecycleHandler _on_object_lifecycle;
+__gshared Array!ObjectRenameHandler _on_object_rename;
 
 @fast_data __gshared CollectionTable[CollectionType.count] g_item_tables;
 
@@ -487,6 +494,12 @@ package void signal_object_lifecycle(BaseObject obj, ObjectLifecycleEvent event)
 {
     foreach (h; _on_object_lifecycle[])
         h(obj, event);
+}
+
+package void signal_object_rename(BaseObject obj, const(char)[] old_name) nothrow @nogc
+{
+    foreach (h; _on_object_rename[])
+        h(obj, old_name);
 }
 
 package ref CollectionTable item_table(uint collection) pure

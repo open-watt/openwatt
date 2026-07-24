@@ -162,7 +162,6 @@ The current implementation and remaining phases are described in
 
   - assign deterministic element indices from profile/template and property positions;
   - reserve and rebind element indices when elements are actually destroyed;
-  - propagate locally authoritative renames through sync using the existing session handle;
   - run an end-to-end sync identity smoke test; and
   - add ID reclamation and high-watermark telemetry only if distinct-name churn justifies it.
 

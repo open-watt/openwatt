@@ -13,10 +13,6 @@ module manager.sync;
 //
 // Known gaps (not smoke-tested end-to-end yet):
 //
-//   - Rename propagation: nothing broadcasts a locally-authoritative rename.
-//     Session handles are rename-stable (bound to the object, not the name),
-//     so this is one "rename" verb {handle, new_name} plus a global renamed
-//     hook (analogous to register_object_lifecycle_handler) when needed.
 //   - inbound_enum doesn't correlate pending enum_req forwards - currently
 //     latent (no outbound enum_req emitter exists yet).
 //   - Binary encoder not implemented (deferred to BL808 D0/M0 shmem work).
@@ -201,6 +197,7 @@ nothrow @nogc:
     uint                       next_seq;
     uint                       _timebase_version;  // our version as a clock authority
     SyncPeer                   _applying_push;     // peer whose delta push we're applying
+    SyncPeer                   _applying_rename;   // authority whose proxy rename we're applying
 
     override void init()
     {
@@ -218,6 +215,7 @@ nothrow @nogc:
         set_log_hostname(hostname[]);
 
         register_object_lifecycle_handler(&on_object_lifecycle);
+        register_object_rename_handler(&on_object_rename);
         register_object_state_handler(&on_object_state);
         subscribe_clock_change(&on_clock_step);
     }
@@ -362,6 +360,54 @@ nothrow @nogc:
         ubyte type_idx = cast(ubyte)rt.type_info.collection_id;
         CID local = item_table(type_idx).reserve(name, type_idx);
         from.adopt(handle, local);
+    }
+
+    void inbound_rename(SyncPeer from, uint handle, const(char)[] new_name)
+    {
+        if (handle & 1)
+        {
+            log.warning("sync: rename from '", from.name[],
+                        "' cites a receiver-owned handle ", handle);
+            return;
+        }
+        if (new_name.empty)
+        {
+            log.warning("sync: rename from '", from.name[], "' has an empty name");
+            return;
+        }
+
+        CID target = from.cid_of(handle);
+        if (!target)
+        {
+            log.warning("sync: rename from '", from.name[],
+                        "' for unknown handle ", handle);
+            return;
+        }
+
+        BaseObject obj = get_item(target);
+        if (!obj)
+        {
+            String old_name = get_id(target);
+            if (old_name.empty ||
+                !item_table(target.type_index).rename(target, old_name[], new_name))
+                log.warning("sync: rename from '", from.name[],
+                            "' could not reserve '", new_name, "'");
+            return;
+        }
+
+        auto pp = target in authority;
+        if (!pp || *pp !is from)
+        {
+            log.warning("sync: rename from '", from.name[], "' for '", obj.name[],
+                        "' which they do not own");
+            return;
+        }
+
+        SyncPeer previous = _applying_rename;
+        _applying_rename = from;
+        scope(exit) _applying_rename = previous;
+        if (const(char)[] error = obj.name(new_name))
+            log.warning("sync: rename from '", from.name[], "' failed: ", error);
     }
 
     // Inbound: mirror lifecycle
@@ -1081,6 +1127,13 @@ nothrow @nogc:
             encoder_for(p._encoder).encode_add_name(p, obj);
     }
 
+    void fan_out_rename(BaseObject obj, SyncPeer exclude = null)
+    {
+        foreach (p; peers[])
+            if (p !is exclude && p.handle_of(obj) != SyncPeer.invalid_handle)
+                encoder_for(p._encoder).encode_rename(p, obj);
+    }
+
     void fan_out_state(BaseObject obj, StateSignal sig)
     {
         // Only online/offline go on the wire. destroyed is communicated via
@@ -1217,6 +1270,48 @@ nothrow @nogc:
                     break;
                 }
             }
+        }
+    }
+
+    void on_object_rename(BaseObject obj, const(char)[])
+    {
+        if (!obj._typeInfo.syncable)
+            return;
+
+        SyncPeer source = obj._is_remote ? _applying_rename : null;
+        if (obj._is_remote && !source)
+            return;
+
+        fan_out_rename(obj, source);
+        foreach (p; peers[])
+        {
+            if (p is source || p._subscriptions.empty)
+                continue;
+
+            bool bound = false;
+            foreach (existing; p._bound[])
+                if (existing is obj)
+                {
+                    bound = true;
+                    break;
+                }
+
+            bool matches = false;
+            foreach (ref pattern; p._subscriptions[])
+                if (pattern_matches(pattern[], obj))
+                {
+                    matches = true;
+                    break;
+                }
+
+            if (matches && !bound)
+            {
+                if (p.handle_of(obj) == SyncPeer.invalid_handle)
+                    encoder_for(p._encoder).encode_add_name(p, obj);
+                bind_to_peer(p, obj);
+            }
+            else if (!matches && bound)
+                unbind_from_peer(p, obj);
         }
     }
 

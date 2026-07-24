@@ -237,7 +237,7 @@ nothrow @nogc:
     }
     final const(char)[] name(const(char)[] value)
     {
-        import manager.collection : item_table;
+        import manager.collection : item_table, signal_object_rename;
 
         if (value.empty)
             return "`name` must not be empty";
@@ -250,7 +250,7 @@ nothrow @nogc:
         if (!item_table(_typeInfo.collection_id).rename(_id, old[], value))
             return "name already in use";
 
-        // TODO: dirty the name so sync can propagate a rename verb
+        signal_object_rename(this, old[]);
 
         return null;
     }

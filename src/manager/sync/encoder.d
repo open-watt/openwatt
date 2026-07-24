@@ -75,6 +75,7 @@ nothrow @nogc:
     // dense, so the binary encoder can varint them.
 
     abstract void encode_add_name(SyncPeer peer, BaseObject obj);
+    abstract void encode_rename(SyncPeer peer, BaseObject obj);
 
     // Mirror protocol - object lifecycle
 
