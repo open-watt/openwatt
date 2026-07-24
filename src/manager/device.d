@@ -103,33 +103,29 @@ nothrow @nogc:
         struct { ElementLink* link; const(char)* alias_source; }
     }
 
-    void element_updated(ref const SampleCommit samples)
+    void element_updated(ref const SampleUpdate update)
     {
+        if (update.event != SeriesEvent.none)
+            return; // TODO: gap events should reset accumulator integration
+
         final switch (kind) with (ComputationKind)
         {
             case expression:
-                SysTime timestamp;
-                foreach (ref update; samples.updates)
-                    if (update.timestamp > timestamp)
-                        timestamp = update.timestamp;
-                evaluate_expression(timestamp);
+                evaluate_expression(update.timestamp);
                 break;
 
             case accumulator:
-                foreach (ref update; samples.updates)
+                if (update.element !is source)
+                    break;
+                Variant previous = update.previous;
+                SysTime previous_timestamp = update.previous_timestamp;
+                foreach (i; 0 .. update.count)
                 {
-                    if (update.element !is source)
-                        continue;
-                    Variant previous = update.previous;
-                    SysTime previous_timestamp = update.previous_timestamp;
-                    foreach (i; 0 .. update.count)
-                    {
-                        Variant value = update.box(i);
-                        SysTime timestamp = update.time(i);
-                        accumulate(value, timestamp, previous, previous_timestamp);
-                        previous = value.move;
-                        previous_timestamp = timestamp;
-                    }
+                    Variant value = update.box(i);
+                    SysTime timestamp = update.time(i);
+                    accumulate(value, timestamp, previous, previous_timestamp);
+                    previous = value.move;
+                    previous_timestamp = timestamp;
                 }
                 break;
 

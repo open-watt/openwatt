@@ -376,13 +376,11 @@ private:
         }
     }
 
-    void on_element_change(ref const SampleCommit samples)
+    void on_element_change(ref const SampleUpdate update)
     {
-        if (_self_write)
+        if (_self_write || !update.value_ready)
             return;
-
-        foreach (ref update; samples.updates)
-            publish_element(update);
+        publish_element(update);
     }
 
     void publish_element(ref const SampleUpdate update)

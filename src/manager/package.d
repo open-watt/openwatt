@@ -104,22 +104,18 @@ nothrow @nogc:
         b.release();
     }
 
-    void element_updated(ref const SampleCommit samples)
+    void element_updated(ref const SampleUpdate update)
     {
-        if (propagating)
+        if (propagating || !update.value_ready)
             return;
         propagating = true;
-        foreach (ref update; samples.updates)
-        {
-            Element* dest;
-            if (update.element is a.elem)
-                dest = b.elem;
-            else if (update.element is b.elem)
-                dest = a.elem;
-            else
-                continue;
+        Element* dest;
+        if (update.element is a.elem)
+            dest = b.elem;
+        else if (update.element is b.elem)
+            dest = a.elem;
+        if (dest)
             dest.value(update.value, update.timestamp, &element_updated);
-        }
         propagating = false;
     }
 
@@ -214,17 +210,13 @@ nothrow @nogc:
     override ISignalProvider provider()
         => g_app;
 
-    void on_change(ref const SampleCommit samples)
+    void on_change(ref const SampleUpdate update)
     {
-        foreach (ref update; samples.updates)
-        {
-            if (update.element !is element)
-                continue;
-            SignalEvent ev = { source: path[] };
-            ev.value = update.value;
-            sink(getTime(), ev);
+        if (update.element !is element || !update.value_ready)
             return;
-        }
+        SignalEvent ev = { source: path[] };
+        ev.value = update.value;
+        sink(getTime(), ev);
     }
 }
 

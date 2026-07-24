@@ -98,9 +98,12 @@ opts in). retention=none is the dominant case once properties project, and it co
 the core; the cost gradient matches the consumption gradient at every tier.
 
 **Delivery**: two styles over one storage.
-- Synchronous subscribers: one `SampleCommit` callback containing record updates and timeline
-  events, with `who` echo-break. A transaction applies every element first and invokes each
-  subscriber once, so dependent expressions never see a partially applied frame.
+- Synchronous subscribers: per-update `SampleUpdate` callbacks (record batch or boxed value,
+  timeline events ride the same shape via `event`), with `who` echo-break. A commit scope
+  (begin_commit/end_commit, or the RAII open_commit()) defers delivery only: writes apply
+  immediately through the normal paths and deliver when the outermost scope closes, so
+  subscribers always run against a fully applied frame - dependent expressions re-evaluate
+  idempotently and held dedup absorbs the repeats.
 - Polled cursors: (position, dirty bit). Backfill+tail splice is inherent (open a cursor at
   any index, drain to head, dirty bit signals more). Dirty propagation: element enqueues
   itself on a global list on first dirtying; sweepers (recorder, sync) drain at their cadence.

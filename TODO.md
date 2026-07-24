@@ -472,9 +472,12 @@ status block). Remaining legs, roughly in order:
   params/results will use the same DataFormat vocabulary); Element keeps the series
   machinery, Subscriber/Subscription, Cursor, and dirty list. Both build systems updated.
   Element integration LANDED 2026-07-17 and FOLDED 2026-07-23: Element directly owns
-  identity/metadata, typed series state, and the boxed Variant edge. `SampleTransaction`
-  applies all record blocks before delivering one `SampleCommit` to each `Subscriber`; the
-  legacy Subscriber interface and OnChangeCallback path were removed. Boxing is implemented
+  identity/metadata, typed series state, and the boxed Variant edge. A commit scope
+  (begin_commit/end_commit + RAII open_commit()) defers delivery so a multi-element frame
+  publishes only after every write is applied; `Subscriber` receives per-update
+  `SampleUpdate` callbacks (events ride the same shape), and writes inside a scope apply
+  eagerly through the normal paths (held dedup included). The legacy Subscriber interface,
+  OnChangeCallback path, and the batch `SampleCommit`/`SampleEvent` view were removed. Boxing is implemented
   in series.d (box_record/unbox_scalar, RecordBlock.box; ints/floats wrap format.unit as
   Quantity). GpioBinding assigns its series to the device element (element= prop, default
   "state"; materialise() attaches it, shutdown marks a gap) - first typed producer through the

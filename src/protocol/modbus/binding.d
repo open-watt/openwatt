@@ -967,22 +967,19 @@ private:
         _elements_subscribed = false;
     }
 
-    void element_changed(ref const SampleCommit samples)
+    void element_changed(ref const SampleUpdate update)
     {
         if (_writing_from_poll)
             return;
         if (!_node.get || !_slave_server)
             return;
-        foreach (ref update; samples.updates)
+        foreach (ref ent; elements)
         {
-            foreach (ref ent; elements)
-            {
-                if (ent.element !is update.element)
-                    continue;
-                ent.flags |= 4;
-                _has_dirty = true;
-                break;
-            }
+            if (ent.element !is update.element)
+                continue;
+            ent.flags |= 4;
+            _has_dirty = true;
+            break;
         }
     }
 

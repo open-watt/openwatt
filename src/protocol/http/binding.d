@@ -221,32 +221,29 @@ protected:
         return sample_desc.format;
     }
 
-    void on_element_change(ref const SampleCommit samples)
+    void on_element_change(ref const SampleUpdate update)
     {
         if (_self_write)
             return; // don't write back values we just read from the response
 
-        foreach (ref update; samples.updates)
+        foreach (ref se; _elements[])
         {
-            foreach (ref se; _elements[])
+            if (se.element !is update.element)
+                continue;
+
+            ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
+            if (http.write_request_index == ushort.max)
+                continue;
+
+            foreach (ref rs; _request_states[])
             {
-                if (se.element !is update.element)
-                    continue;
-
-                ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
-                if (http.write_request_index == ushort.max)
-                    continue;
-
-                foreach (ref rs; _request_states[])
+                if (rs.request_index == http.write_request_index)
                 {
-                    if (rs.request_index == http.write_request_index)
-                    {
-                        rs.write_dirty = true;
-                        break;
-                    }
+                    rs.write_dirty = true;
+                    break;
                 }
-                break;
             }
+            break;
         }
     }
 

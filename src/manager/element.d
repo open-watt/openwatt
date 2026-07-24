@@ -18,7 +18,7 @@ import manager.id : EID;
 nothrow @nogc:
 
 
-alias Subscriber = void delegate(ref const SampleCommit samples) nothrow @nogc;
+alias Subscriber = void delegate(ref const SampleUpdate update) nothrow @nogc;
 
 struct SampleUpdate
 {
@@ -34,6 +34,7 @@ nothrow @nogc:
     Variant previous;
     SysTime timestamp;
     SysTime previous_timestamp;
+    SeriesEvent event;
     bool value_ready;
 
     uint count() const pure
@@ -50,104 +51,49 @@ nothrow @nogc:
             : value;
 }
 
-struct SampleCommit
+// A commit scope defers subscriber delivery: writes between begin_commit and end_commit apply
+// to their elements immediately through the normal write paths, and their updates deliver when
+// the outermost scope closes, so subscribers only ever run against a fully applied frame.
+// Batch record/time slices written inside a scope are borrowed until the scope closes;
+// single-sample writes travel as their boxed value.
+void begin_commit()
+{
+    ++g_commit_depth;
+}
+
+void end_commit()
+{
+    assert(g_commit_depth != 0, "unbalanced end_commit");
+    if (--g_commit_depth != 0)
+        return;
+    if (g_pending_updates.empty)
+        return;
+    Array!SampleUpdate updates = g_pending_updates.move;
+    foreach (ref update; updates)
+        deliver(update);
+}
+
+struct CommitScope
 {
 nothrow @nogc:
 
-    SampleUpdate[] updates;
-    const(SampleEvent)[] events;
+    @disable this();
+    @disable this(this);
 
-    bool changed(ref const Element element) const pure
+    ~this()
     {
-        foreach (ref update; updates)
-            if (update.element is &element)
-                return true;
-        return false;
+        end_commit();
     }
-}
-
-struct SampleEvent
-{
-    Element* element;
-    SeriesEvent event;
-    SysTime timestamp;
-    Subscriber who;
-}
-
-// A transaction borrows the supplied record and timestamp slices until commit returns.
-// Nothing becomes visible and no subscriber runs before commit.
-struct SampleTransaction
-{
-nothrow @nogc:
-
-    this(this) @disable;
-
-    void write_records(ref Element element, const(void)[] records,
-                       const(SysTime)[] times, Subscriber who = null)
-    {
-        debug assert(!_committing);
-        debug assert(times.length != 0);
-        debug assert(records.length == times.length * element.data_format.stride);
-        _updates ~= SampleUpdate(&element, records, times, null, who);
-    }
-
-    void write_records(ref Element element, const(void)[] records,
-                       const(ulong)[] ticks, Subscriber who = null)
-    {
-        debug assert(!_committing);
-        debug assert(ticks.length != 0);
-        debug assert(element.data_format.uses_device_ticks);
-        debug assert(records.length == ticks.length * element.data_format.stride);
-        _updates ~= SampleUpdate(&element, records, null, ticks, who);
-    }
-
-    void write_samples(T)(ref Element element, const(T)[] samples,
-                          const(SysTime)[] times, Subscriber who = null)
-    {
-        static assert(!is(T == String) && !is(T : const(char)[]),
-                      "transactional text samples need owned record handles");
-        element.check_sample_type!T(samples.length, times.length);
-        write_records(element,
-            (cast(const(void)*)samples.ptr)[0 .. samples.length * T.sizeof], times, who);
-    }
-
-    void write_samples(T)(ref Element element, const(T)[] samples,
-                          const(ulong)[] ticks, Subscriber who = null)
-    {
-        static assert(!is(T == String) && !is(T : const(char)[]),
-                      "transactional text samples need owned record handles");
-        element.check_sample_type!T(samples.length, ticks.length);
-        write_records(element,
-            (cast(const(void)*)samples.ptr)[0 .. samples.length * T.sizeof], ticks, who);
-    }
-
-    void commit()
-    {
-        if (_updates.empty)
-            return;
-        assert(!_committing, "recursive sample transaction commit");
-        _committing = true;
-        scope(exit) _committing = false;
-
-        foreach (ref update; _updates)
-            update.element.prepare_before(update);
-        foreach (ref update; _updates)
-            update.element.apply(update);
-        foreach (ref update; _updates)
-            update.element.prepare_after(update);
-
-        SampleCommit samples = SampleCommit(_updates[]);
-        dispatch(samples);
-        _updates.clear();
-    }
-
-    size_t length() const pure
-        => _updates.length;
 
 private:
-    Array!SampleUpdate _updates;
-    bool _committing;
+    this(int)
+    {
+        begin_commit();
+    }
 }
+
+CommitScope open_commit()
+    => CommitScope(0);
 
 struct Subscription
 {
@@ -427,15 +373,14 @@ nothrow @nogc:
         SysTime previous_timestamp = last_update;
         last_update = timestamp;
 
-        SampleUpdate[1] updates;
-        updates[0].element = &this;
-        updates[0].value = current;
-        updates[0].previous = current.move;
-        updates[0].timestamp = timestamp;
-        updates[0].previous_timestamp = previous_timestamp;
-        updates[0].value_ready = true;
-        SampleCommit samples = SampleCommit(updates[]);
-        dispatch(samples);
+        SampleUpdate update;
+        update.element = &this;
+        update.value = current;
+        update.previous = current.move;
+        update.timestamp = timestamp;
+        update.previous_timestamp = previous_timestamp;
+        update.value_ready = true;
+        submit(update, false);
     }
 
     ptrdiff_t full_path(char[] buf) const nothrow @nogc
@@ -554,10 +499,7 @@ public:
         prepare_before(update);
         apply(update);
         prepare_after(update);
-        SampleUpdate[1] updates;
-        updates[0] = update;
-        SampleCommit samples = SampleCommit(updates[]);
-        dispatch(samples);
+        submit(update, false);
     }
 
     void store_samples(T)(const(T)[] samples, const(SysTime)[] times, Subscriber who = null)
@@ -600,10 +542,7 @@ public:
         prepare_before(update);
         apply(update);
         prepare_after(update);
-        SampleUpdate[1] updates;
-        updates[0] = update;
-        SampleCommit samples = SampleCommit(updates[]);
-        dispatch(samples);
+        submit(update, true);
     }
 
     void store_records(const(void)[] records, const(ulong)[] ticks, Subscriber who = null)
@@ -618,10 +557,7 @@ public:
         prepare_before(update);
         apply(update);
         prepare_after(update);
-        SampleUpdate[1] updates;
-        updates[0] = update;
-        SampleCommit samples = SampleCommit(updates[]);
-        dispatch(samples);
+        submit(update, true);
     }
 
     // TODO: rethink regular writes: data might follow the last record, or a gap may need synthesising.
@@ -639,7 +575,12 @@ public:
         if (_flags & Flags.gap_open)
             return;
         _flags |= Flags.gap_open;
-        signal_event(SeriesEvent.gap, _last_update, who);
+        SampleUpdate update;
+        update.element = &this;
+        update.who = who;
+        update.event = SeriesEvent.gap;
+        update.timestamp = _last_update;
+        submit(update, false);
     }
 
     void subscribe(Subscriber callback)
@@ -829,12 +770,12 @@ private:
         if (update.times.length)
         {
             _last_update = update.times[$-1];
-            update.first_index = append(update.records, update.times, update.who);
+            update.first_index = append(update.records, update.times);
         }
         else
         {
             _last_update = data_format.clock.to_wall(update.ticks[$-1]);
-            update.first_index = append(update.records, update.ticks, update.ticks[0], update.who);
+            update.first_index = append(update.records, update.ticks, update.ticks[0]);
         }
     }
 
@@ -885,25 +826,22 @@ private:
             // the ref settled here is owned by the bucket once append memcpys the bits
             rec.copy_from(*cast(const(TextRecord)*)_latest.raw.ptr);
             record = rec.raw[0 .. data_format.stride];
-            append(record, time[], who);
+            append(record, time[]);
         }
         else
         {
             record = _latest.raw[0 .. data_format.stride];
-            append(record, time[], who);
+            append(record, time[]);
         }
 
         SampleUpdate update = SampleUpdate(&this, record, time[], null, who);
         update.previous = previous.move;
         update.previous_timestamp = previous_timestamp;
         prepare_after(update);
-        SampleUpdate[1] updates;
-        updates[0] = update;
-        SampleCommit commit = SampleCommit(updates[]);
-        dispatch(commit);
+        submit(update, false);
     }
 
-    ulong append(const(void)[] samples, const(SysTime)[] times, Subscriber who)
+    ulong append(const(void)[] samples, const(SysTime)[] times)
     {
         import urt.mem : alloca;
 
@@ -949,7 +887,7 @@ private:
         // TODO: reactor-thread producers must defer observer dispatch and dirty marking to the main loop
     }
 
-    ulong append(const(void)[] samples, const(ulong)[] times, ulong t0, Subscriber who)
+    ulong append(const(void)[] samples, const(ulong)[] times, ulong t0)
     {
         import urt.mem : alloca;
 
@@ -1083,14 +1021,6 @@ private:
         return b;
     }
 
-    void signal_event(SeriesEvent ev, SysTime at, Subscriber who)
-    {
-        SampleEvent[1] events;
-        events[0] = SampleEvent(&this, ev, at, who);
-        SampleCommit samples = SampleCommit(null, events[]);
-        dispatch(samples);
-    }
-
     void mark_dirty()
     {
         if (!_history || !_history.cursor_mask)
@@ -1116,78 +1046,36 @@ void sweep_dirty(scope void delegate(ref Element) nothrow @nogc visit)
 
 private:
 
-void dispatch(ref SampleCommit samples)
+__gshared uint g_commit_depth;
+__gshared Array!SampleUpdate g_pending_updates;
+
+// batch updates keep their record/time slices (borrowed until the scope closes); single
+// updates reference write-path temporaries, so deferred they travel as their boxed value
+void submit(ref SampleUpdate update, bool batch)
 {
-    scope(exit)
+    if (g_commit_depth)
     {
-        foreach (ref update; samples.updates)
+        if (!batch)
         {
-            update.value = Variant();
-            update.previous = Variant();
-            update.value_ready = false;
+            update.records = null;
+            update.times = null;
+            update.ticks = null;
         }
+        g_pending_updates ~= update;
+        return;
     }
-
-    Array!Subscriber callbacks;
-    foreach (ref update; samples.updates)
-    {
-        Element* element = update.element;
-        for (Subscription* subscription = element._subs;
-             subscription; subscription = subscription.next)
-        {
-            Subscriber callback = subscription.callback;
-            if (excluded(callback, samples))
-                continue;
-            bool found;
-            foreach (present; callbacks)
-            {
-                if (present == callback)
-                {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found)
-                callbacks ~= callback;
-        }
-    }
-
-    foreach (ref event; samples.events)
-    {
-        Element* element = cast(Element*)event.element;
-        for (Subscription* subscription = element._subs;
-             subscription; subscription = subscription.next)
-        {
-            Subscriber callback = subscription.callback;
-            if (excluded(callback, samples))
-                continue;
-            bool found;
-            foreach (present; callbacks)
-            {
-                if (present == callback)
-                {
-                    found = true;
-                    break;
-                }
-            }
-            if (!found)
-                callbacks ~= callback;
-        }
-    }
-
-    foreach (callback; callbacks)
-        callback(samples);
+    deliver(update);
 }
 
-bool excluded(Subscriber callback, ref const SampleCommit samples)
+void deliver(ref SampleUpdate update)
 {
-    foreach (ref update; samples.updates)
-        if (update.who == callback)
-            return true;
-    foreach (ref event; samples.events)
-        if (event.who == callback)
-            return true;
-    return false;
+    for (Subscription* s = update.element._subs; s; )
+    {
+        Subscription* next = s.next;    // a callback may unsubscribe itself
+        if (s.callback != update.who)
+            s.callback(update);
+        s = next;
+    }
 }
 
 public:
@@ -1295,15 +1183,16 @@ unittest
 
 
 version (unittest)
-private final class TransactionReceiver
+private final class CommitReceiver
 {
 nothrow @nogc:
 
     Element* a;
     Element* b;
     uint calls;
-    uint update_count;
-    bool coherent;
+    uint events;
+    SeriesEvent last_event;
+    bool coherent = true;
 
     this(ref Element a, ref Element b)
     {
@@ -1311,11 +1200,17 @@ nothrow @nogc:
         this.b = &b;
     }
 
-    void receive(ref const SampleCommit samples)
+    void receive(ref const SampleUpdate update)
     {
         ++calls;
-        update_count = cast(uint)samples.updates.length;
-        coherent = a.latest_record.f64_ == 3.0 && b.latest_record.f64_ == 30.0
+        if (update.event != SeriesEvent.none)
+        {
+            ++events;
+            last_event = update.event;
+            return;
+        }
+        // every delivery must see the whole frame already applied
+        coherent = coherent && a.latest_record.f64_ == 3.0 && b.latest_record.f64_ == 30.0
                 && a.value.asDouble == 3.0 && b.value.asDouble == 30.0;
     }
 }
@@ -1332,7 +1227,7 @@ unittest
     Element tx_b;
     tx_a.format = register_format(f64_held);
     tx_b.format = register_format(f64_held);
-    TransactionReceiver receiver = defaultAllocator().allocT!TransactionReceiver(tx_a, tx_b);
+    CommitReceiver receiver = defaultAllocator().allocT!CommitReceiver(tx_a, tx_b);
     tx_a.subscribe(&receiver.receive);
     tx_b.subscribe(&receiver.receive);
 
@@ -1340,18 +1235,27 @@ unittest
     double[3] tx_b_values = [10.0, 20.0, 30.0];
     SysTime[3] tx_times = [from_unix_time_ns(100), from_unix_time_ns(200),
                            from_unix_time_ns(300)];
-    SampleTransaction transaction;
-    transaction.write_samples(tx_a, tx_a_values[], tx_times[]);
-    transaction.write_samples(tx_b, tx_b_values[], tx_times[]);
-    assert(receiver.calls == 0);
-    assert(tx_a.last_update == SysTime() && tx_b.last_update == SysTime());
-    transaction.commit();
-    assert(receiver.calls == 1);
-    assert(receiver.update_count == 2 && receiver.coherent);
-    assert(transaction.length == 0);
+    {
+        CommitScope frame = open_commit();
+        tx_a.write_samples(tx_a_values[], tx_times[]);
+        tx_b.write_samples(tx_b_values[], tx_times[]);
+        assert(receiver.calls == 0);
+        assert(tx_a.latest_record.f64_ == 3.0);   // applied eagerly, delivered lazily
+    }
+    assert(receiver.calls == 2 && receiver.coherent);   // one delivery per update, all post-frame
 
-    tx_a.write_sample(4.0, from_unix_time_ns(400), &receiver.receive);
-    assert(receiver.calls == 1);
+    // the bare pair is the same machinery; held dedup and event deferral apply inside a scope
+    begin_commit();
+    tx_a.write_sample(3.0, from_unix_time_ns(400));   // equal held value publishes nothing
+    tx_b.write_sample(40.0, from_unix_time_ns(400));
+    tx_b.mark_gap();
+    assert(receiver.calls == 2);
+    end_commit();
+    assert(receiver.calls == 4);
+    assert(receiver.events == 1 && receiver.last_event == SeriesEvent.gap);
+
+    tx_a.write_sample(4.0, from_unix_time_ns(500), &receiver.receive);
+    assert(receiver.calls == 4);
 
     tx_a.unsubscribe(&receiver.receive);
     tx_b.unsubscribe(&receiver.receive);

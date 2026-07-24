@@ -500,6 +500,7 @@ nothrow @nogc:
 
 enum SeriesEvent : ubyte
 {
+    none,
     online,
     offline,
     gap,

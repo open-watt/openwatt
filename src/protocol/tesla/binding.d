@@ -334,19 +334,13 @@ private:
         }
     }
 
-    void on_target_current_change(ref const SampleCommit samples)
+    void on_target_current_change(ref const SampleUpdate update)
     {
-        if (!_master)
+        if (!_master || update.element !is _target_current || !update.value_ready)
             return;
-        foreach (ref update; samples.updates)
-        {
-            if (update.element !is _target_current)
-                continue;
-            TeslaTWCMaster.Charger* charger = &_master.chargers[_charger_index];
-            charger.target_current = (cast(CentiAmps)update.value.asQuantity()).value;
-            version (DebugTWCBinding)
-                log.trace("set target current: ", charger.target_current);
-            return;
-        }
+        TeslaTWCMaster.Charger* charger = &_master.chargers[_charger_index];
+        charger.target_current = (cast(CentiAmps)update.value.asQuantity()).value;
+        version (DebugTWCBinding)
+            log.trace("set target current: ", charger.target_current);
     }
 }

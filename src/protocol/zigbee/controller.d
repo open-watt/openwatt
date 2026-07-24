@@ -269,15 +269,13 @@ protected:
     final SampleElement* find_sample_element_tuya(EUI64 eui, ubyte endpoint, ushort dp) nothrow
         => find_sample_element(eui, endpoint, 0xEF00, dp);
 
-    final void on_samples(ref const SampleCommit samples) nothrow
+    final void on_samples(ref const SampleUpdate update) nothrow
     {
-        foreach (ref update; samples.updates)
-        {
-            SampleElement** pse = update.element in _sample_elements_by_element;
-            if (!pse)
-                continue;
+        if (!update.value_ready)
+            return;
+        SampleElement** pse = update.element in _sample_elements_by_element;
+        if (pse)
             set_value(**pse, update.value, update.timestamp);
-        }
     }
 
 private:

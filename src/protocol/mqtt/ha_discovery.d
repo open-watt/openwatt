@@ -620,12 +620,11 @@ private:
             entity.state.unsubscribe(&on_element_change);
     }
 
-    void on_element_change(ref const SampleCommit samples)
+    void on_element_change(ref const SampleUpdate update)
     {
-        if (_observing || !_publisher)
+        if (_observing || !_publisher || !update.value_ready)
             return;
-        foreach (ref update; samples.updates)
-            publish_element(update);
+        publish_element(update);
     }
 
     void publish_element(ref const SampleUpdate update)

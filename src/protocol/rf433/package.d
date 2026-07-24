@@ -127,7 +127,7 @@ private:
     // Absolute controls (speed) map value->code directly. TOGGLES (light.on, direction) send a
     // press ONLY if the current (inferred) state differs from the requested one - hence we must
     // trust our state model, which is why RX sync matters.
-    void on_element_change(ref const SampleCommit samples)
+    void on_element_change(ref const SampleUpdate update)
     {
         GpioBinding r = _radio.get;
         if (!r || _self_write)   // ignore our own RX-driven state updates

@@ -633,7 +633,7 @@ nothrow @nogc:
     }
 
 private:
-    void on_shape_change(ref const SampleCommit)
+    void on_shape_change(ref const SampleUpdate)
     {
         shape_dirty = true;
     }
