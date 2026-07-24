@@ -68,9 +68,13 @@ nothrow @nogc:
     alias log = Log!"sync.encoder";
 
     // Registry (identity)
+    //
+    // Introduces an object to the peer: binds our session handle to its (name, type)
+    // and announces all three. Local ids never travel - every other verb cites the
+    // object by the session handle this established. Handle values stay small and
+    // dense, so the binary encoder can varint them.
 
-    abstract void encode_add_name(SyncPeer peer, CID cid, const(char)[] name);
-    abstract void encode_rekey(SyncPeer peer, CID old_cid, CID new_cid);
+    abstract void encode_add_name(SyncPeer peer, BaseObject obj);
 
     // Mirror protocol - object lifecycle
 
