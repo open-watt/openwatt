@@ -5,14 +5,16 @@ stream" concept dissolved into the element model during review, 2026-07-14/15). 
 scheme is canonical in the header of [src/manager/id.d](../src/manager/id.d); this doc covers
 everything else.
 
-Implementation status (2026-07-15): [src/manager/element2.d](../src/manager/element2.d) lives
-beside Element in both build systems, unit-tested (held dedup, gap-forced bucket boundaries,
-cursor backfill+tail across buckets, irregular block append, regular time derivation). First
+Implementation status (2026-07-23): the typed series implementation now lives directly in
+[src/manager/element.d](../src/manager/element.d); the transitional Element2 and its parallel
+subscriber APIs have been removed. It is unit-tested for held dedup, gap-forced bucket
+boundaries, cursor backfill+tail across buckets, irregular block append, regular time
+derivation, and atomic multi-element commits. First
 real producer: the urt GPIO realtime sampler API (gpio-cdev v2 backend; pigpiod detected at
 runtime and preferred when present) feeding an irregular held bool series through /binding/gpio
 (GpioBinding : ProtocolBinding; instance models the sampled equipment via device=). Integrated
-2026-07-17: Element embeds Element2 (Element keeps identity/metadata and a boxed Variant
-mirror; legacy consumers are untouched), GpioBinding's materialise() assigns the series to the
+2026-07-17 and folded 2026-07-23: Element owns identity, metadata, typed series state, and the
+boxed Variant edge. GpioBinding's materialise() assigns the series to the
 device element (element=, default "state") - the first typed producer through the tree. Hardware sampler APIs live in the urt
 driver layer behind capability flags (has_gpio_sampler); bindings stay platform-blind.
 
@@ -34,7 +36,7 @@ one.** A tap observes a byte stream as records (`set_log_file`); pcap observes p
 a waveform tap observes a capture; property projection observes object state. The series
 contract (DataFormat, RecordBlock, timeline events, owsig codec) lives in a shared
 module with multiple hosts (landed 2026-07-17 as [src/manager/series.d](../src/manager/series.d);
-Element2 keeps only the series machinery). The module is organised for the full three-facet
+Element owns the series machinery). The module is organised for the full three-facet
 device surface (section 6), not just attributes: Event! payloads and device-function
 params/results will describe themselves with the same DataFormat vocabulary - code-based
 objects exposed as devices present their callbacks as subscribable events and API functions as
@@ -85,10 +87,10 @@ returns, and the bucket's memory layout use one format ({format*, data*, times*|
 first_index, count}). Readback is slicing, never copying; times==null doubles as the
 regular/irregular discriminator; blocks never span buckets.
 
-**Element2 layout: the retention plan determines the struct layout.** The core is <= 48 bytes
-(static-asserted): `{ const(DataFormat)* format, Scalar latest, SysTime last_update,
-Subscription* subs, SeriesStore* history, dirty/flags }`. Identity lives outside the struct
-(the component tree names device elements; projections compute theirs), the format is shared,
+**Element series layout: the retention plan determines the optional storage cost.** The series
+state is `{ const(DataFormat)* format, Scalar latest, SysTime last_update, Subscription* subs,
+SeriesStore* history, dirty/flags }`, housed directly in Element beside its identity and metadata.
+The format is shared,
 subscriptions are an intrusive list paid for by the subscriber at subscribe time (and are
 where per-subscriber deadband state will live), and ALL retention cost - buckets, head,
 cursor registry, budgets - sits behind the nullable `history` pointer (`ensure_history()`
@@ -96,13 +98,14 @@ opts in). retention=none is the dominant case once properties project, and it co
 the core; the cost gradient matches the consumption gradient at every tier.
 
 **Delivery**: two styles over one storage.
-- Synchronous observers: in-order call sequence (records / gap / format-change / offline) with
-  `who` echo-break. The call order IS the timeline; no side-channel, no skew.
+- Synchronous subscribers: one `SampleCommit` callback containing record updates and timeline
+  events, with `who` echo-break. A transaction applies every element first and invokes each
+  subscriber once, so dependent expressions never see a partially applied frame.
 - Polled cursors: (position, dirty bit). Backfill+tail splice is inherent (open a cursor at
   any index, drain to head, dirty bit signals more). Dirty propagation: element enqueues
   itself on a global list on first dirtying; sweepers (recorder, sync) drain at their cadence.
 
-**Retention tiers** (per element, profile-defaulted): none (latest+observers only; embedded
+**Retention tiers** (per element, profile-defaulted): none (latest+subscribers only; embedded
 default), ring (bounded recent), history (buckets under budget, recorder tailing). Eviction:
 budgets win; a cursor lapped by eviction takes a records_lost gap (the drop site marks the
 loss). Bucket capacity scales with rate (target time-span, not record count).
@@ -114,7 +117,7 @@ only the tail is ever written, so aging is a state machine already latent in the
 capacity or a wall-aligned boundary, below); it shrinks-to-fit first (gap-forced boundaries strand
 up to a bucket of capacity) then packs. A sealed bucket IS the compression stripe: blocks never
 span buckets, so read granularity and codec granularity are one unit, compressed once at seal and
-never touched again. Zero-copy degrades exactly where it should - live observers get the producer's
+never touched again. Zero-copy degrades exactly where it should - live subscribers get the producer's
 own block (never touch storage), a caught-up cursor reads the raw open tail, and only backfill /
 time-window queries reach packed buckets, where read() decodes one stripe into a per-store scratch
 and points the RecordBlock at it. So RecordBlock gains one rule: it is a TRANSIENT VIEW, valid until
@@ -208,9 +211,8 @@ resets are timeline events (RRD-style).
 hundreds-thousands edges/sec grows ~16 B/edge unbounded, tens of MB/hour); clock-orthogonality
 in Bucket.times (the GPIO backend sidesteps it for now by requesting CLOCK_REALTIME kernel
 stamps); cdev line_seqno gaps must call mark_gap() (drop site marks the loss);
-reactor-thread producers defer dispatch to main loop; Cursor holds Element2* pending EID
-resolution (the two-level EID type now exists in manager.id; the tables are
-the migration); RAM buckets + on-disk container need one time-keyed, decimation-aware read
+reactor-thread producers defer dispatch to main loop; durable ElementCursor holds an EID and
+resolves Element only while reading; RAM buckets + on-disk container need one time-keyed, decimation-aware read
 stack (index is process-local, TIME is the archival axis). Done since first draft: irregular
 typed sample and packed-record writes (write_samples/write_records); compact core layout (identity out, format shared, history
 behind a pointer, intrusive subscriptions); legacy hash-EID + ElementTable deleted from
@@ -218,7 +220,7 @@ element.d (they were unused - a slice of migration step 1 done by removal). Desi
 (2026-07-16, above and in section 6): the bucket lifecycle, one-codec-three-residencies, and the
 fixed decimation ladder (these ARE the time-keyed decimation-aware read stack) plus the type
 registry. (A `string_embed`/`object` ValueType experiment from that session was backed out of the tree; the
-enum holds only the settled members and element2.d compiles. The embedded-string / object-handle
+enum holds only the settled members. The embedded-string / object-handle
 question is deferred to the type-registry work, where it belongs; Scalar width for wide types is
 decided - see section 6.)
 
@@ -294,7 +296,7 @@ representation (the todo_rpc_dedupe endpoint).
 trigger - but PHYSICALLY lazy: materialized on first name resolve, under the object's
 collection path (not /device). mark_set stays the producer signal (hot-path safe); the frame
 flush samples dirty projected getters -> write_sample!T. Coalesced-by-construction, SeriesKind.held,
-typed end to end (viable BECAUSE Element2 dropped Variant). Unwatched properties cost
+typed end to end (viable because the series core does not store Variant records). Unwatched properties cost
 one dirty bit. Non-Prop members remain hard data; composition wiring (delegates between
 collaborating objects) remains hard API - the declaration line IS the classification.
 
@@ -385,7 +387,7 @@ optimizer over declared timing constraints.
 
 ## 9. Build order (sketch)
 
-(A slice of step 2 was deliberately pulled forward of step 1: Element2 + the GPIO sampler
+(A slice of step 2 was deliberately pulled forward of step 1: the typed Element series + the GPIO sampler
 binding exist as a scaffold to harden the storage/delivery design against a real producer.
 The scaffold is binding-owned and touches no identity machinery, so the order below stands.)
 
@@ -400,10 +402,9 @@ The scaffold is binding-owned and touches no identity machinery, so the order be
       allocator = next_slot++), delete rehash/rekey/broadcast_rekey/rekey_field; then Devices
       register as a container type and g_app.devices dissolves;
    d. element level: per-container index tables, Cursor holds EID, GPIO series belongs to device.
-2. Series contract module (DataFormat/RecordBlock/events/owsig) + Element2 replaces Element.
-   Phased: extract contract module; Component holds Element2 with Variant boxing at the edges
-   (console, SNMP, expressions) so consumers migrate gradually; producers migrate per-protocol
-   to typed write_sample!T (Modbus last, deepest); delete Element when the last consumer moves.
+2. Series contract module (DataFormat/RecordBlock/events/owsig) folded into Element. Complete:
+   typed producers use write_sample/write_record, subscribers receive committed batches, and
+   the transitional Element2 and old callback paths are deleted.
 3. Retention tiers + recorder-as-cursor + container read stack.
 4. Operators absorb Map/Sum/Alias (gap-aware accumulator).
 5. Property projection; Prop! unit/desc fields.

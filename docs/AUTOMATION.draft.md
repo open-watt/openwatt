@@ -350,7 +350,7 @@ Almost all of the machinery exists; the automation object is mostly wiring.
 |---|---|---|
 | condition / expression language, compile-once eval-many, unit-aware | `expression.d` (live in the energy policy layer) | [expression.d](../src/manager/expression.d), [policy.d](../src/apps/energy/policy.d) |
 | discover which elements a condition references (to subscribe) | `Expression.gather_elements()` | [expression.d](../src/manager/expression.d) |
-| react to a value change | `Element.add_subscriber(OnChangeCallback)` | [element.d](../src/manager/element.d) |
+| react to committed samples | `Element.subscribe(Subscriber)` | [element.d](../src/manager/element.d) |
 | action script parse + execute | `make_script` + `Console.execute` (cron's `do={}`) | [expression.d](../src/manager/expression.d), [cron/job.d](../src/manager/cron/job.d) |
 | set an element | `/element/set` | [manager/package.d](../src/manager/package.d) |
 | command hardware on set | binding write-back on `Access.write` elements | [modbus/binding.d](../src/protocol/modbus/binding.d) |

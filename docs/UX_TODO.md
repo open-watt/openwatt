@@ -68,7 +68,6 @@ text), `sub`/`unsub` (pattern string), `enum_req`/`enum`, `history_req`/`history
   already speaks names + handles. One behavioural nicety you may surface in UI: renaming an
   object no longer breaks anything that referenced it, and its OLD name becomes immediately
   reusable. Entries will appear here only if a verb or field moves.
-- Heads-up for later steps (will get their own dated sections when they land): typed element
-  series (Element2) will eventually reshape element value delivery and history recall
-  (cursors/record blocks instead of `history` sample pairs), and device functions / Event!
-  will add new verbs.
+- Typed element series now deliver atomic `SampleCommit` batches through one Subscriber API;
+  retained history is read through cursors and record blocks. Device functions / Event! will
+  add new verbs later.

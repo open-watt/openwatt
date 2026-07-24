@@ -38,7 +38,6 @@ import manager.console.graph;
 import manager.console.live_view;
 import manager.device;
 import manager.element;
-import manager.element2;
 import manager.owsig;
 import manager.plugin;
 
@@ -78,13 +77,13 @@ nothrow @nogc:
 
         if (e.has_typed_series)
         {
-            const(DataFormat)* f = e.series.format;
+            const(DataFormat)* f = e.data_format;
             if (!container_serialisable(*f))
                 return; // stays in RAM; text/user/domain series wait on their codecs
 
             // ring samples shipped before the typed series was assigned mustn't re-ship: tail from head
             if (cursor.element is null)
-                cursor = e.series.open_cursor(last_flushed ? ulong.max : 0, true);
+                cursor = e.open_series_cursor(last_flushed ? ulong.max : 0, true);
             if (!cursor.pending)
                 return;
             if (!container.is_open && !container.open_(owner.make_filename(path[], ".owsig")[]))
@@ -140,7 +139,7 @@ nothrow @nogc:
     void close()
     {
         if (cursor.element)
-            element.series.close_cursor(cursor);
+            element.close_series_cursor(cursor);
         container.close_();
     }
 }
@@ -151,10 +150,10 @@ bool query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, Que
     Array!Sample local;
     if (e.has_typed_series)
     {
-        ulong idx = e.series.index_for_time(from_unix_time_ns(from));
+        ulong idx = e.index_for_time(from_unix_time_ns(from));
         for (; idx != ulong.max;)
         {
-            RecordBlock blk = e.series.read_records(idx, 256);
+            RecordBlock blk = e.read_records(idx, 256);
             if (blk.count == 0)
                 break;
             bool past = false;
@@ -322,8 +321,8 @@ unittest
     // typed-series element: query_local serves from the full bucket history, not the ring
     static immutable DataFormat qfmt = DataFormat(ValueType.f64, SeriesKind.held);
     Element en;
-    en.series.format = &qfmt;
-    en.series.ensure_history();
+    en.format = register_format(qfmt);
+    en.ensure_history();
     foreach (i; 0 .. 6)
         en.write_sample(i * 10.0, from_unix_time_ns((i + 1) * 1_000_000UL));
 
@@ -337,7 +336,7 @@ unittest
     result.clear();
     assert(rn.query_local(4_000_000, 6_000_000, 0, QueryMode.graph, result));
     assert(result[0].time == 4_000_000 && result[0].value == 20);
-    en.series.teardown();
+    en.teardown();
 }
 
 

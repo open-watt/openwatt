@@ -3,6 +3,7 @@ module manager.element;
 import urt.array;
 import urt.lifetime;
 import urt.mem.alloc;
+import urt.mem.allocator : defaultAllocator;
 import urt.mem.string;
 import urt.si.unit : ScaledUnit;
 import urt.string;
@@ -11,13 +12,187 @@ import urt.variant;
 
 import manager.component;
 import manager.device;
-import manager.element2;
+public import manager.series;
 import manager.id : EID;
-import manager.subscriber;
 
 nothrow @nogc:
 
 
+alias Subscriber = void delegate(ref const SampleCommit samples) nothrow @nogc;
+
+struct SampleUpdate
+{
+nothrow @nogc:
+
+    Element* element;
+    const(void)[] records;
+    const(SysTime)[] times;
+    const(ulong)[] ticks;
+    Subscriber who;
+    ulong first_index;
+    Variant value;
+    Variant previous;
+    SysTime timestamp;
+    SysTime previous_timestamp;
+    bool value_ready;
+
+    uint count() const pure
+        => records.length ? cast(uint)(records.length / element.data_format.stride) : value_ready;
+
+    SysTime time(size_t i) const
+        => records.length
+            ? (times.length ? times[i] : element.data_format.clock.to_wall(ticks[i]))
+            : timestamp;
+
+    Variant box(size_t i) const
+        => records.length
+            ? box_record(cast(const(ubyte)*)records.ptr + i * element.data_format.stride, *element.data_format)
+            : value;
+}
+
+struct SampleCommit
+{
+nothrow @nogc:
+
+    SampleUpdate[] updates;
+    const(SampleEvent)[] events;
+
+    bool changed(ref const Element element) const pure
+    {
+        foreach (ref update; updates)
+            if (update.element is &element)
+                return true;
+        return false;
+    }
+}
+
+struct SampleEvent
+{
+    Element* element;
+    SeriesEvent event;
+    SysTime timestamp;
+    Subscriber who;
+}
+
+// A transaction borrows the supplied record and timestamp slices until commit returns.
+// Nothing becomes visible and no subscriber runs before commit.
+struct SampleTransaction
+{
+nothrow @nogc:
+
+    this(this) @disable;
+
+    void write_records(ref Element element, const(void)[] records,
+                       const(SysTime)[] times, Subscriber who = null)
+    {
+        debug assert(!_committing);
+        debug assert(times.length != 0);
+        debug assert(records.length == times.length * element.data_format.stride);
+        _updates ~= SampleUpdate(&element, records, times, null, who);
+    }
+
+    void write_records(ref Element element, const(void)[] records,
+                       const(ulong)[] ticks, Subscriber who = null)
+    {
+        debug assert(!_committing);
+        debug assert(ticks.length != 0);
+        debug assert(element.data_format.uses_device_ticks);
+        debug assert(records.length == ticks.length * element.data_format.stride);
+        _updates ~= SampleUpdate(&element, records, null, ticks, who);
+    }
+
+    void write_samples(T)(ref Element element, const(T)[] samples,
+                          const(SysTime)[] times, Subscriber who = null)
+    {
+        static assert(!is(T == String) && !is(T : const(char)[]),
+                      "transactional text samples need owned record handles");
+        element.check_sample_type!T(samples.length, times.length);
+        write_records(element,
+            (cast(const(void)*)samples.ptr)[0 .. samples.length * T.sizeof], times, who);
+    }
+
+    void write_samples(T)(ref Element element, const(T)[] samples,
+                          const(ulong)[] ticks, Subscriber who = null)
+    {
+        static assert(!is(T == String) && !is(T : const(char)[]),
+                      "transactional text samples need owned record handles");
+        element.check_sample_type!T(samples.length, ticks.length);
+        write_records(element,
+            (cast(const(void)*)samples.ptr)[0 .. samples.length * T.sizeof], ticks, who);
+    }
+
+    void commit()
+    {
+        if (_updates.empty)
+            return;
+        assert(!_committing, "recursive sample transaction commit");
+        _committing = true;
+        scope(exit) _committing = false;
+
+        foreach (ref update; _updates)
+            update.element.apply(update);
+
+        SampleCommit samples = SampleCommit(_updates[]);
+        dispatch(samples);
+        _updates.clear();
+    }
+
+    size_t length() const pure
+        => _updates.length;
+
+private:
+    Array!SampleUpdate _updates;
+    bool _committing;
+}
+
+struct Subscription
+{
+    Subscriber callback;
+    Subscription* next;
+    // future: per-subscriber deadband band + anchor live here (see TODO.md element deadband)
+}
+
+struct Cursor
+{
+nothrow @nogc:
+
+    Element* element;  // transient storage-level form; durable holders use manager.element.ElementCursor (EID)
+    ulong position;
+    ubyte bit;
+
+    bool pending() const
+        => element._history && element._history.head > position;
+
+    void seek(ulong pos)
+    {
+        SeriesStore* h = element._history;
+        if (pos > h.head)
+            pos = h.head;
+        position = pos;
+        if (h.pin_mask & (1 << bit))
+            h.pin_position[bit] = pos;
+    }
+
+    RecordBlock next(uint max_records)
+    {
+        SeriesStore* h = element._history;
+        ulong first = h.first_index;
+        ulong lost = 0;
+        if (position < first)
+        {
+            lost = first - position;
+            position = first;
+        }
+        RecordBlock r = h.read(element.format, position, max_records);
+        r.lost = lost;
+        position += r.count;
+        if (h.pin_mask & (1 << bit))
+            h.pin_position[bit] = position;
+        if (!pending)
+            element._dirty &= ~cast(ushort)(1 << bit);
+        return r;
+    }
+}
 enum Access : ubyte
 {
     none = 0,
@@ -38,8 +213,6 @@ enum SamplingMode : ubyte
     on_demand,
     config
 }
-
-alias OnChangeCallback = void delegate(ref Element e, ref const Variant val, SysTime timestamp, ref const Variant prev, SysTime prev_timestamp) nothrow @nogc;
 
 // Best-effort recent-sample cache: if it wraps before the recorder ships, those
 // samples are lost; the db is the authoritative store.
@@ -64,10 +237,6 @@ struct Element
 {
 nothrow @nogc:
 
-    // null or unsupported format: the boxed Variant below is authoritative
-    // and the core lies dormant until a producer assigns a format
-    Element2 series;
-
     package Variant latest;
     package Variant prev;
 
@@ -83,10 +252,6 @@ nothrow @nogc:
     package uint recent_head;
     package uint recent_count;
 
-    Array!Subscriber subscribers;
-    Array!OnChangeCallback subscribers_2;
-    ushort subscribers_dirty;
-
     package EID _eid;
 
     Component parent;
@@ -95,26 +260,6 @@ nothrow @nogc:
     SamplingMode sampling_mode;
 
     this(this) @disable;
-
-    void add_subscriber(Subscriber s)
-    {
-        if (subscribers[].findFirst(s) == subscribers.length)
-            subscribers ~= s;
-    }
-    void add_subscriber(OnChangeCallback s)
-    {
-        if (subscribers_2[].findFirst(s) == subscribers_2.length)
-            subscribers_2 ~= s;
-    }
-
-    void remove_subscriber(Subscriber s)
-    {
-        subscribers.removeFirstSwapLast(s);
-    }
-    void remove_subscriber(OnChangeCallback s)
-    {
-        subscribers_2.removeFirstSwapLast(s);
-    }
 
     double normalised_value() const
     {
@@ -136,21 +281,28 @@ nothrow @nogc:
         => latest;
 
     bool has_typed_series() const pure
-        => series.format !is null && (series.format.is_scalar || series.format.is_text || series.format.is_wide);
+        => format.valid && (data_format.is_scalar || data_format.is_text || data_format.is_wide);
 
     void value(T)(auto ref T v, SysTime timestamp = getSysTime(), Subscriber who = null)
     {
         if (has_typed_series)
         {
             static if (is(immutable T == immutable Variant))
-                update_typed_series(v, timestamp);
+            {
+                if (update_typed_series(v, timestamp, who))
+                    return;
+            }
             else
             {
                 Variant boxed = Variant(v);
-                update_typed_series(boxed, timestamp);
+                if (update_typed_series(boxed, timestamp, who))
+                    return;
             }
+            return;
         }
 
+        Variant previous = latest;
+        SysTime previous_timestamp = last_update;
         bool is_newer = timestamp > last_update;
         if (is_newer)
         {
@@ -163,54 +315,90 @@ nothrow @nogc:
             if (is_newer)
                 prev = latest.move;
             latest = forward!v;
-            signal(latest, timestamp, prev, prev_update, who);
             if (is_newer)
                 capture_sample(timestamp);
+
+            SampleUpdate[1] updates;
+            updates[0].element = &this;
+            updates[0].who = who;
+            updates[0].value = latest;
+            updates[0].previous = previous.move;
+            updates[0].timestamp = timestamp;
+            updates[0].previous_timestamp = previous_timestamp;
+            updates[0].value_ready = true;
+            SampleCommit samples = SampleCommit(updates[]);
+            dispatch(samples);
         }
     }
 
-    void write_sample(T)(T v, SysTime t = getSysTime(), Observer who = null, Subscriber legacy_who = null)
+    void write_sample(T)(T v, SysTime t = getSysTime(), Subscriber who = null)
     {
         static if (is(T == String))
-            series.write_sample(v.move, t, who);
+            store_sample(v.move, t, who);
+        else static if (is(T : const(char)[]))
+            store_sample(v, t, who);
         else
-            series.write_sample(v, t, who);
-        sync_from_series(legacy_who);
+        {
+            static assert(is(typeof(value_type_of!T)));
+            if (value_type_of!T == data_format.type)
+                store_sample(v, t, who);
+            else
+            {
+                Variant boxed = Variant(v);
+                update_typed_series(boxed, t, who);
+            }
+        }
     }
 
-    void write_record(const(void)[] record, SysTime t = getSysTime(), Observer who = null, Subscriber legacy_who = null)
+    void write_record(const(void)[] record, SysTime t = getSysTime(), Subscriber who = null)
     {
-        series.write_record(record, t, who);
-        sync_from_series(legacy_who);
+        store_record(record, t, who);
     }
 
-    void write_samples(T)(const(T)[] samples, const(SysTime)[] times, Observer who = null)
+    void write_samples(T)(const(T)[] samples, const(SysTime)[] times, Subscriber who = null)
     {
-        series.write_samples(samples, times, who);
-        sync_from_series();
+        static if (is(T == String) || is(T : const(char)[]))
+            store_samples(samples, times, who);
+        else
+        {
+            static assert(is(typeof(value_type_of!T)));
+            if (value_type_of!T == data_format.type)
+                store_samples(samples, times, who);
+            else
+            {
+                debug assert(samples.length == times.length);
+                foreach (i, sample; samples)
+                    write_sample(sample, times[i], who);
+            }
+        }
     }
 
-    void write_samples(T)(const(T)[] samples, const(ulong)[] ticks, Observer who = null)
+    void write_samples(T)(const(T)[] samples, const(ulong)[] ticks, Subscriber who = null)
     {
-        series.write_samples(samples, ticks, who);
-        sync_from_series();
+        static assert(is(typeof(value_type_of!T)));
+        if (value_type_of!T == data_format.type)
+            store_samples(samples, ticks, who);
+        else
+        {
+            debug assert(samples.length == ticks.length);
+            foreach (i, sample; samples)
+                write_sample(sample, data_format.clock.to_wall(ticks[i]), who);
+        }
     }
 
-    void write_records(const(void)[] records, const(SysTime)[] times, Observer who = null)
+    void write_records(const(void)[] records, const(SysTime)[] times, Subscriber who = null)
     {
-        series.write_records(records, times, who);
-        sync_from_series();
+        store_records(records, times, who);
     }
 
-    void write_records(const(void)[] records, const(ulong)[] ticks, Observer who = null)
+    void write_records(const(void)[] records, const(ulong)[] ticks, Subscriber who = null)
     {
-        series.write_records(records, ticks, who);
-        sync_from_series();
+        store_records(records, ticks, who);
     }
 
-    void mark_gap(Observer who = null)
+    void mark_gap(Subscriber who = null)
     {
-        series.mark_gap(who);
+        mark_series_gap(who);
     }
 
     EID eid() const pure
@@ -237,7 +425,7 @@ nothrow @nogc:
         EID handle = ensure_eid();
         if (!handle)
             return ElementCursor();
-        Cursor c = series.open_cursor(from_index, pin);
+        Cursor c = open_series_cursor(from_index, pin);
         return ElementCursor(handle, c.position, c.bit);
     }
 
@@ -250,36 +438,48 @@ nothrow @nogc:
     ulong recent_newest() const pure
         => recent_count ? unixTimeNs(cast(SysTime)recent_at(recent_count - 1).time) : 0;
 
-    private void update_typed_series(ref const Variant v, SysTime timestamp)
+    private bool update_typed_series(ref const Variant v, SysTime timestamp, Subscriber who)
     {
-        if (series.format.is_text)
+        if (data_format.is_text)
         {
             if (v.isString)
-                series.write_sample(v.asString(), timestamp);
-            return;
+            {
+                store_sample(v.asString(), timestamp, who);
+                return true;
+            }
+            return false;
         }
-        if (series.format.is_wide)
+        if (data_format.is_wide)
         {
             if (v.isBuffer)
             {
                 const(void)[] b = v.asBuffer;
-                if (b.length == series.format.stride)
-                    series.write_record(b, timestamp);
+                if (b.length == data_format.stride)
+                {
+                    store_record(b, timestamp, who);
+                    return true;
+                }
             }
-            // wide user types stay boxed until a producer needs the unbox (transitional)
-            return;
+            return false;
         }
         Scalar s;
-        if (unbox_scalar(v, *series.format, s))
-            series.write_record(s.raw[0 .. series.format.stride], timestamp);
-        // else the boxed side still takes it and the core diverges until the next
-        // representable observation (transitional)
+        if (unbox_scalar(v, *data_format, s))
+        {
+            store_record(s.raw[0 .. data_format.stride], timestamp, who);
+            return true;
+        }
+        return false;
     }
 
-    private void sync_from_series(Subscriber who = null)
+    private void prepare(ref SampleUpdate update)
     {
-        Variant v = series.value();
-        SysTime t = series.last_update;
+        if (update.value_ready)
+            return;
+
+        Variant previous = latest;
+        SysTime previous_timestamp = last_update;
+        Variant v = record_value();
+        SysTime t = record_update;
         bool is_newer = t > last_update;
         if (is_newer)
         {
@@ -291,10 +491,14 @@ nothrow @nogc:
             if (is_newer)
                 prev = latest.move;
             latest = v.move;
-            signal(latest, t, prev, prev_update, who);
             if (is_newer)
                 capture_sample(t);
         }
+        update.value = latest;
+        update.previous = previous.move;
+        update.timestamp = t;
+        update.previous_timestamp = previous_timestamp;
+        update.value_ready = true;
     }
 
     private void capture_sample(SysTime timestamp)
@@ -317,24 +521,26 @@ nothrow @nogc:
         recent[][idx].value = latest;
     }
 
-    void signal(ref const Variant v, SysTime timestamp, ref const Variant prev, SysTime prev_timestamp, Subscriber who)
-    {
-        foreach (s; subscribers)
-            if (s !is who)
-                s.on_change(&this, v, timestamp, who);
-        foreach (s; subscribers_2)
-            s(this, v, timestamp, prev, prev_timestamp);
-    }
-
     void force_update(SysTime timestamp)
     {
         if (timestamp <= last_update)
             return;
+        Variant previous = latest;
+        SysTime previous_timestamp = last_update;
         prev_update = last_update;
         last_update = timestamp;
         prev = latest;
-        signal(latest, timestamp, prev, prev_update, null); // TODO: who made the change? so we can break cycles...
         capture_sample(timestamp);
+
+        SampleUpdate[1] updates;
+        updates[0].element = &this;
+        updates[0].value = latest;
+        updates[0].previous = previous.move;
+        updates[0].timestamp = timestamp;
+        updates[0].previous_timestamp = previous_timestamp;
+        updates[0].value_ready = true;
+        SampleCommit samples = SampleCommit(updates[]);
+        dispatch(samples);
     }
 
     ptrdiff_t full_path(char[] buf) const nothrow @nogc
@@ -351,8 +557,769 @@ nothrow @nogc:
             buf[pos .. pos + id.length] = id[];
         return pos + id.length;
     }
+
+public:
+
+    FormatId format;
+
+    const(DataFormat)* data_format() const pure
+        => format_info(format);
+
+
+    ref const(Scalar) latest_record() const pure
+        => _latest;
+
+    SysTime record_update() const pure
+        => _last_update;
+
+    Variant record_value() const
+    {
+        if (format.valid)
+        {
+            if (data_format.is_scalar || data_format.is_text)
+                return box_record(_latest.raw.ptr, *data_format);
+            if (data_format.is_wide)
+            {
+                const(void)[] tail = tail_record();
+                if (tail)
+                    return box_record(tail.ptr, *data_format);
+            }
+        }
+        return Variant();
+    }
+
+    // wide records don't fit the Scalar register: latest IS the tail record of the open bucket
+    const(void)[] tail_record() const pure
+    {
+        if (!_history || !_history.buckets.length)
+            return null;
+        const(Bucket)* b = _history.buckets[$-1];
+        if (!b.count)
+            return null;
+        return (cast(const(ubyte)*)b.samples)[(b.count - 1) * data_format.stride .. b.count * data_format.stride];
+    }
+
+    void store_sample(T)(T v, SysTime t = getSysTime(), Subscriber who = null)
+    {
+        static if (is(T == String))
+            write_text_sample(v.move, t, who);
+        else static if (is(T : const(char)[]))
+            write_text_sample(v, t, who);
+        else
+        {
+            static assert(is(typeof(value_type_of!T)));
+            debug assert(value_type_of!T == data_format.type);
+            debug assert(data_format.count == 1, "a single typed value must describe one record");
+            Scalar s = Scalar.of(v);
+            store_record(s.raw[0 .. data_format.stride], t, who);
+        }
+    }
+
+    // untyped path for callers holding a record in a runtime-known DataFormat
+    void store_record(const(void)[] record, SysTime t = getSysTime(), Subscriber who = null)
+    {
+        debug assert(record.length == data_format.stride);
+        if (data_format.is_scalar)
+        {
+            Scalar s;
+            s.raw[] = 0;
+            s.raw[0 .. data_format.stride] = cast(const(ubyte)[])record;
+            if (data_format.kind == SeriesKind.held && _last_update != SysTime() && s.raw == _latest.raw)
+            {
+                _last_update = t;
+                if (t > last_update)
+                {
+                    prev_update = last_update;
+                    last_update = t;
+                }
+                return;
+            }
+        }
+        else
+        {
+            assert(data_format.is_wide, "dynamic and non-pod records need their own entry");
+            if (data_format.kind == SeriesKind.held && _last_update != SysTime())
+            {
+                const(void)[] tail = tail_record();
+                if (tail && cast(const(ubyte)[])tail == cast(const(ubyte)[])record)
+                {
+                    _last_update = t;
+                    if (t > last_update)
+                    {
+                        prev_update = last_update;
+                        last_update = t;
+                    }
+                    return;
+                }
+            }
+        }
+        SysTime[1] time = t;
+        SampleUpdate update = SampleUpdate(&this, record, time[], null, who);
+        apply(update);
+        SampleUpdate[1] updates;
+        updates[0] = update;
+        SampleCommit samples = SampleCommit(updates[]);
+        dispatch(samples);
+    }
+
+    void store_samples(T)(const(T)[] samples, const(SysTime)[] times, Subscriber who = null)
+    {
+        static if (is(T == String) || is(T : const(char)[]))
+        {
+            debug assert(samples.length == times.length);
+            foreach (i, ref sample; samples)
+            {
+                static if (is(T == String))
+                    store_sample(sample[], times[i], who);
+                else
+                    store_sample(sample, times[i], who);
+            }
+        }
+        else
+        {
+            check_sample_type!T(samples.length, times.length);
+            store_records((cast(const(void)*)samples.ptr)[0 .. samples.length * T.sizeof], times, who);
+        }
+    }
+
+    void store_samples(T)(const(T)[] samples, const(ulong)[] ticks, Subscriber who = null)
+    {
+        static assert(!is(T == String) && !is(T : const(char)[]),
+                      "text samples cannot use device ticks");
+        check_sample_type!T(samples.length, ticks.length);
+        store_records((cast(const(void)*)samples.ptr)[0 .. samples.length * T.sizeof], ticks, who);
+    }
+
+    void store_records(const(void)[] records, const(SysTime)[] times, Subscriber who = null)
+    {
+        debug assert(!data_format.regular);
+        debug assert(data_format.is_scalar || data_format.is_wide,
+                     "managed records require typed sample handling");
+        if (times.length == 0)
+            return;
+        debug assert(records.length == times.length * data_format.stride);
+        SampleUpdate update = SampleUpdate(&this, records, times, null, who);
+        apply(update);
+        SampleUpdate[1] updates;
+        updates[0] = update;
+        SampleCommit samples = SampleCommit(updates[]);
+        dispatch(samples);
+    }
+
+    void store_records(const(void)[] records, const(ulong)[] ticks, Subscriber who = null)
+    {
+        debug assert(data_format.uses_device_ticks);
+        debug assert(data_format.is_scalar || data_format.is_wide,
+                     "managed records require typed sample handling");
+        if (ticks.length == 0)
+            return;
+        debug assert(records.length == ticks.length * data_format.stride);
+        SampleUpdate update = SampleUpdate(&this, records, null, ticks, who);
+        apply(update);
+        SampleUpdate[1] updates;
+        updates[0] = update;
+        SampleCommit samples = SampleCommit(updates[]);
+        dispatch(samples);
+    }
+
+    // TODO: rethink regular writes: data might follow the last record, or a gap may need synthesising.
+//    void store_records(const(void)[] records, SysTime t0, Subscriber who = null)
+//    {
+//        debug assert(format.regular);
+//        _latest.raw[] = 0;
+//        _latest.raw[0 .. format.stride] = (cast(const(ubyte)[])records)[$ - format.stride .. $];
+//        _last_update = t0 + nsecs((records.length / format.stride - 1) * 1_000_000_000L / format.rate);
+//        append(records, null, t0, who);
+//    }
+
+    void mark_series_gap(Subscriber who = null)
+    {
+        if (_flags & Flags.gap_open)
+            return;
+        _flags |= Flags.gap_open;
+        signal_event(SeriesEvent.gap, _last_update, who);
+    }
+
+    void subscribe(Subscriber callback)
+    {
+        for (Subscription* s = _subs; s; s = s.next)
+            if (s.callback == callback)
+                return;
+        Subscription* n = cast(Subscription*)alloc(Subscription.sizeof).ptr;
+        n.callback = callback;
+        n.next = _subs;
+        _subs = n;
+    }
+
+    void unsubscribe(Subscriber callback)
+    {
+        Subscription** p = &_subs;
+        while (*p)
+        {
+            if ((*p).callback == callback)
+            {
+                Subscription* dead = *p;
+                *p = dead.next;
+                free((cast(void*)dead)[0 .. Subscription.sizeof]);
+                return;
+            }
+            p = &(*p).next;
+        }
+    }
+
+    SeriesStore* ensure_history()
+    {
+        if (!_history)
+        {
+            // zero-fill rather than assign .init: SeriesStore holds an Array, whose opAssign
+            // would try to release the garbage "previous" contents of raw memory
+            void[] mem = alloc(SeriesStore.sizeof);
+            (cast(ubyte[])mem)[] = 0;
+            _history = cast(SeriesStore*)mem.ptr;
+        }
+        return _history;
+    }
+
+    void retention(uint min_records, uint max_records = 0)
+    {
+        SeriesStore* h = ensure_history();
+        h.min_records = min_records;
+        h.max_records = max_records;
+    }
+
+    void retention(Duration min_age, Duration max_age = Duration())
+    {
+        SeriesStore* h = ensure_history();
+        h.min_age = cast(ulong)min_age.as!"usecs";
+        h.max_age = cast(ulong)max_age.as!"usecs";
+    }
+
+    // cursor-less block read of retained records; count 0 at/after head
+    RecordBlock read_records(ulong from_index, uint max_records)
+    {
+        if (!_history)
+        {
+            RecordBlock r;
+            r.format = format;
+            return r;
+        }
+        return _history.read(format, from_index, max_records);
+    }
+
+    // first retained index of the bucket covering wall time t, stepped back one bucket so
+    // held state before t is included; ulong.max = nothing retained
+    ulong index_for_time(SysTime t) const
+    {
+        if (!_history || !_history.buckets.length)
+            return ulong.max;
+        size_t lo = 0, hi = _history.buckets.length;
+        while (lo < hi)
+        {
+            size_t mid = (lo + hi) / 2;
+            if (_history.buckets[mid].last_time < t)
+                lo = mid + 1;
+            else
+                hi = mid;
+        }
+        if (lo)
+            --lo;
+        return _history.buckets[lo].first_index;
+    }
+
+    Cursor open_series_cursor(ulong from_index = ulong.max, bool pin = false)
+    {
+        SeriesStore* s = ensure_history();
+        foreach (ubyte bit; 0 .. 16)
+        {
+            if (s.cursor_mask & (1 << bit))
+                continue;
+            s.cursor_mask |= cast(ushort)(1 << bit);
+            ulong position = from_index > s.head ? s.head : from_index;
+            if (pin)
+            {
+                s.pin_mask |= cast(ushort)(1 << bit);
+                s.pin_position[bit] = position;
+            }
+            return Cursor(&this, position, bit);
+        }
+        assert(false, "out of cursors");
+    }
+
+    void close_series_cursor(ref Cursor c)
+    {
+        if (_history)
+        {
+            _history.cursor_mask &= ~cast(ushort)(1 << c.bit);
+            _history.pin_mask &= ~cast(ushort)(1 << c.bit);
+        }
+        _dirty &= ~cast(ushort)(1 << c.bit);
+        c.element = null;
+    }
+
+    bool has_history() const pure
+        => _history !is null;
+
+    ulong record_count() const pure
+        => _history ? _history.head : 0;
+
+    uint bucket_count() const pure
+        => _history ? cast(uint)_history.buckets.length : 0;
+
+    void teardown()
+    {
+        if (format.valid && data_format.is_text)
+            (cast(TextRecord*)_latest.raw.ptr).release();
+        if (_history)
+        {
+            foreach (b; _history.buckets)
+                free_bucket(b);
+            destroy!false(*_history);
+            free((cast(void*)_history)[0 .. SeriesStore.sizeof]);
+            _history = null;
+        }
+        while (_subs)
+        {
+            Subscription* dead = _subs;
+            _subs = dead.next;
+            free((cast(void*)dead)[0 .. Subscription.sizeof]);
+        }
+        latest = Variant();
+        prev = Variant();
+        recent.clear();
+        recent_head = 0;
+        recent_count = 0;
+    }
+
+private:
+    enum Flags : ubyte
+    {
+        gap_open = 1 << 0,
+    }
+
+    Scalar _latest;
+    SysTime _last_update;
+    Subscription* _subs;
+    SeriesStore* _history;
+    ushort _dirty;
+    ubyte _flags;
+
+    enum bucket_capacity = 256; // TODO: scale with rate (target a time span, not a record count)
+
+    void check_sample_type(T)(size_t value_count, size_t record_count) const
+    {
+        static assert(is(typeof(value_type_of!T)));
+        debug assert(value_type_of!T == data_format.type);
+        debug assert(data_format.count != 0, "dynamic records need type-specific sample handling");
+        debug assert(value_count * T.sizeof == record_count * data_format.stride);
+    }
+
+    void apply(ref SampleUpdate update)
+    {
+        debug assert(update.element is &this);
+        debug assert(update.count != 0);
+        debug assert(data_format.is_scalar || data_format.is_wide,
+                     "managed records require typed sample handling");
+
+        if (data_format.is_scalar)
+        {
+            _latest.raw[] = 0;
+            _latest.raw[0 .. data_format.stride] =
+                (cast(const(ubyte)[])update.records)[$ - data_format.stride .. $];
+        }
+        else
+            ensure_history();
+
+        if (update.times.length)
+        {
+            _last_update = update.times[$-1];
+            update.first_index = append(update.records, update.times, update.who);
+        }
+        else
+        {
+            _last_update = data_format.clock.to_wall(update.ticks[$-1]);
+            update.first_index = append(update.records, update.ticks, update.ticks[0], update.who);
+        }
+    }
+
+    void write_text_sample(String v, SysTime t, Subscriber who)
+    {
+        debug assert(data_format.is_text);
+        TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
+        if (data_format.kind == SeriesKind.held && _last_update != SysTime() && slot.view == v[])
+        {
+            _last_update = t;
+            if (t > last_update)
+            {
+                prev_update = last_update;
+                last_update = t;
+            }
+            return;
+        }
+        slot.set(v.move);
+        _last_update = t;
+        append_text_record(t, who);
+    }
+
+    void write_text_sample(const(char)[] v, SysTime t, Subscriber who)
+    {
+        debug assert(data_format.is_text);
+        TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
+        if (data_format.kind == SeriesKind.held && _last_update != SysTime() && slot.view == v)
+        {
+            _last_update = t;
+            if (t > last_update)
+            {
+                prev_update = last_update;
+                last_update = t;
+            }
+            return;
+        }
+        slot.set(v);
+        _last_update = t;
+        append_text_record(t, who);
+    }
+
+    void append_text_record(SysTime t, Subscriber who)
+    {
+        SysTime[1] time = t;
+        if (_history)
+        {
+            // the ref settled here is owned by the bucket once append memcpys the bits
+            TextRecord rec;
+            rec.copy_from(*cast(const(TextRecord)*)_latest.raw.ptr);
+            append(rec.raw[0 .. data_format.stride], time[], who, true);
+        }
+        else
+            append(_latest.raw[0 .. data_format.stride], time[], who, true);
+    }
+
+    ulong append(const(void)[] samples, const(SysTime)[] times, Subscriber who, bool notify = false)
+    {
+        import urt.mem : alloca;
+
+        ubyte stride = data_format.stride;
+        uint n = cast(uint)(samples.length / stride);
+        assert(times is null || times.length == n, "times array must match sample count");
+
+        uint[] ts;
+        if (times.length <= 512)
+            ts = (cast(uint*)alloca(times.length * uint.sizeof))[0 .. times.length];
+        else
+            ts = cast(uint[])alloc(times.length * uint.sizeof, uint.sizeof, MemFlags.fastest);
+        scope(exit) { if (times.length > 512) free(ts); }
+
+        ulong t0 = unix_time_ns(times[0]) / 1000;
+        foreach (i, t; times)
+            ts[i] = cast(uint)((t - times[0]).as!"usecs");
+
+        bool follows_gap = (_flags & Flags.gap_open) != 0;
+        _flags &= ~Flags.gap_open;
+
+        ulong first_index = ulong.max;
+        if (_history)
+        {
+            Bucket* b = writable_bucket(n, follows_gap, t0 + ts[n - 1]);
+            (cast(ubyte*)b.samples)[b.count*stride .. (b.count + n)*stride] = cast(const(ubyte)[])samples[];
+            if (b.count == 0)
+                b.first_tick = t0;
+            uint offset = cast(uint)(t0 - b.first_tick);
+            for (uint i = 0; i < n; ++i)
+                b.offsets[b.count + i] = offset + ts[i];
+            b.count += n;
+            b.last_offset = b.offsets[b.count - 1];
+
+            first_index = _history.head;
+            _history.head += n;
+            evict_over_budget();
+        }
+
+        if (notify)
+        {
+            SampleUpdate update = SampleUpdate(&this, samples, times, null, who, first_index);
+            SampleUpdate[1] updates;
+            updates[0] = update;
+            SampleCommit commit = SampleCommit(updates[]);
+            dispatch(commit);
+        }
+        mark_dirty();
+        return first_index;
+
+        // TODO: reactor-thread producers must defer observer dispatch and dirty marking to the main loop
+    }
+
+    ulong append(const(void)[] samples, const(ulong)[] times, ulong t0, Subscriber who,
+                 bool notify = false)
+    {
+        import urt.mem : alloca;
+
+        ubyte stride = data_format.stride;
+        uint n = cast(uint)(samples.length / stride);
+        assert(times is null || times.length == n, "times array must match sample count");
+
+        uint[] ts;
+        if (times.length <= 512)
+            ts = (cast(uint*)alloca(times.length * uint.sizeof))[0 .. times.length];
+        else
+            ts = cast(uint[])alloc(times.length * uint.sizeof, uint.sizeof, MemFlags.fastest);
+        scope(exit) { if (times.length > 512) free(ts); }
+
+        foreach (i, t; times)
+            ts[i] = cast(uint)(t - t0);
+
+        bool follows_gap = (_flags & Flags.gap_open) != 0;
+        _flags &= ~Flags.gap_open;
+
+        ulong first_index = ulong.max;
+        if (_history)
+        {
+            Bucket* b = writable_bucket(n, follows_gap, times.length ? times[n - 1] : t0);
+            (cast(ubyte*)b.samples)[b.count*stride .. (b.count + n)*stride] = cast(const(ubyte)[])samples[];
+            if (b.count == 0)
+                b.first_tick = times.length ? times[0] : t0;
+            if (b.offsets)
+            {
+                for (uint i = 0; i < n; ++i)
+                    b.offsets[b.count + i] = cast(uint)(times[i] - b.first_tick);
+            }
+            b.count += n;
+            b.last_offset = times.length ? b.offsets[b.count - 1] : b.count - 1;
+
+            first_index = _history.head;
+            _history.head += n;
+            evict_over_budget();
+        }
+
+        if (notify)
+        {
+            SampleUpdate update = SampleUpdate(&this, samples, null, times, who, first_index);
+            SampleUpdate[1] updates;
+            updates[0] = update;
+            SampleCommit commit = SampleCommit(updates[]);
+            dispatch(commit);
+        }
+        mark_dirty();
+        return first_index;
+
+        // TODO: reactor-thread producers must defer observer dispatch and dirty marking to the main loop
+    }
+
+    Bucket* writable_bucket(uint n, bool follows_gap, ulong max_tick)
+    {
+        Bucket* b = _history.buckets.length ? _history.buckets[$-1] : null;
+        // roll when the new block's offset from this bucket's base would exceed the uint offset field:
+        // a slow stream spanning >~71 min at 1 MHz, or a base discontinuity that would underflow it
+        bool overflow = b && b.offsets && b.count && max_tick - b.first_tick > uint.max;
+        if (!b || b.count + n > b.capacity || follows_gap || overflow)
+        {
+            if (b)
+                seal(b);
+            b = alloc_bucket(n > bucket_capacity ? n : bucket_capacity);
+            b.first_index = _history.head;
+            b.follows_gap = follows_gap;
+            _history.buckets ~= b;
+        }
+        return b;
+    }
+
+    void seal(Bucket* b)
+    {
+        if (b.sealed)
+            return;
+        b.sealed = true;
+        if (b.count && b.count < b.capacity)
+        {
+            b.samples = realloc(b.samples[0 .. b.capacity * data_format.stride], b.count * data_format.stride).ptr;
+            if (b.offsets)
+                b.offsets = cast(uint*)realloc((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof], b.count * uint.sizeof).ptr;
+            b.capacity = b.count;
+        }
+        // TODO: pack (columnar codec) lands here
+    }
+
+    void evict_over_budget()
+    {
+        SeriesStore* h = _history;
+        if (!h.min_records && !h.min_age && !h.max_records && !h.max_age)
+            return;
+        ulong to_ticks(ulong usecs)
+            => data_format.clock ? usecs * data_format.clock.nominal_rate / 1_000_000 : usecs;
+        ulong min_age_ticks = h.min_age ? to_ticks(h.min_age) : 0;
+        ulong max_age_ticks = h.max_age ? to_ticks(h.max_age) : 0;
+        ulong floor = h.pin_floor;
+        while (h.buckets.length > 1)
+        {
+            Bucket* front = h.buckets[0];
+            ulong newest = h.buckets[$-1].last_tick;
+            bool forced = (h.max_records && h.head - front.first_index > h.max_records)
+                       || (max_age_ticks && newest - front.last_tick > max_age_ticks);
+            if (!forced)
+            {
+                if (!h.min_records && !h.min_age)
+                    break;
+                if (front.first_index + front.count > floor)
+                    break;
+                if (h.min_records && h.head - front.first_index - front.count < h.min_records)
+                    break;
+                if (min_age_ticks && newest - front.last_tick <= min_age_ticks)
+                    break;
+            }
+            free_bucket(front);
+            h.buckets.remove(0);
+        }
+    }
+
+    void free_bucket(Bucket* b)
+    {
+        if (data_format.is_text)
+            foreach (i; 0 .. b.count)
+                (cast(TextRecord*)b.samples)[i].release();
+        free(b.samples[0 .. b.capacity * data_format.stride]);
+        if (b.offsets)
+            free((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof]);
+        free((cast(void*)b)[0 .. Bucket.sizeof]);
+    }
+
+    Bucket* alloc_bucket(uint capacity)
+    {
+        Bucket* b = cast(Bucket*)alloc(Bucket.sizeof).ptr;
+        *b = Bucket.init;
+        b.capacity = capacity;
+        b.samples = alloc(capacity * data_format.stride).ptr;
+        if (!data_format.regular)
+            b.offsets = cast(uint*)alloc(capacity * uint.sizeof).ptr;
+        return b;
+    }
+
+    void signal_event(SeriesEvent ev, SysTime at, Subscriber who)
+    {
+        SampleEvent[1] events;
+        events[0] = SampleEvent(&this, ev, at, who);
+        SampleCommit samples = SampleCommit(null, events[]);
+        dispatch(samples);
+    }
+
+    void mark_dirty()
+    {
+        if (!_history || !_history.cursor_mask)
+            return;
+        if (!_dirty)
+            g_dirty_elements ~= &this;
+        _dirty = _history.cursor_mask;
+    }
 }
 
+
+package:
+
+__gshared Array!(Element*) g_dirty_elements;
+
+void sweep_dirty(scope void delegate(ref Element) nothrow @nogc visit)
+{
+    foreach (e; g_dirty_elements)
+        visit(*e);
+    g_dirty_elements.clear();
+}
+
+
+private:
+
+void dispatch(ref SampleCommit samples)
+{
+    scope(exit)
+    {
+        foreach (ref update; samples.updates)
+        {
+            update.value = Variant();
+            update.previous = Variant();
+            update.value_ready = false;
+        }
+    }
+
+    foreach (ref update; samples.updates)
+        update.element.prepare(update);
+
+    Array!Subscriber callbacks;
+    foreach (ref update; samples.updates)
+    {
+        Element* element = update.element;
+        for (Subscription* subscription = element._subs;
+             subscription; subscription = subscription.next)
+        {
+            Subscriber callback = subscription.callback;
+            if (excluded(callback, samples))
+                continue;
+            bool found;
+            foreach (present; callbacks)
+            {
+                if (present == callback)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                callbacks ~= callback;
+        }
+    }
+
+    foreach (ref event; samples.events)
+    {
+        Element* element = cast(Element*)event.element;
+        for (Subscription* subscription = element._subs;
+             subscription; subscription = subscription.next)
+        {
+            Subscriber callback = subscription.callback;
+            if (excluded(callback, samples))
+                continue;
+            bool found;
+            foreach (present; callbacks)
+            {
+                if (present == callback)
+                {
+                    found = true;
+                    break;
+                }
+            }
+            if (!found)
+                callbacks ~= callback;
+        }
+    }
+
+    foreach (callback; callbacks)
+        callback(samples);
+}
+
+bool excluded(Subscriber callback, ref const SampleCommit samples)
+{
+    foreach (ref update; samples.updates)
+        if (update.who == callback)
+            return true;
+    foreach (ref event; samples.events)
+        if (event.who == callback)
+            return true;
+    return false;
+}
+
+// compile-time twin of ValueType for the typed write_sample() entry
+template value_type_of(T)
+{
+    static if (is(immutable T == immutable bool))        enum value_type_of = ValueType.bool_;
+    else static if (is(immutable T == immutable ubyte))  enum value_type_of = ValueType.u8;
+    else static if (is(immutable T == immutable byte))   enum value_type_of = ValueType.s8;
+    else static if (is(immutable T == immutable ushort)) enum value_type_of = ValueType.u16;
+    else static if (is(immutable T == immutable short))  enum value_type_of = ValueType.s16;
+    else static if (is(immutable T == immutable uint))   enum value_type_of = ValueType.u32;
+    else static if (is(immutable T == immutable int))    enum value_type_of = ValueType.s32;
+    else static if (is(immutable T == immutable ulong))  enum value_type_of = ValueType.u64;
+    else static if (is(immutable T == immutable long))   enum value_type_of = ValueType.s64;
+    else static if (is(immutable T == immutable float))  enum value_type_of = ValueType.f32;
+    else static if (is(immutable T == immutable double)) enum value_type_of = ValueType.f64;
+    else static if (is(immutable T == immutable char))   enum value_type_of = ValueType.char_;
+}
+
+
+
+public:
 
 // the durable cursor: holds an EID, never a pointer - resolves per call and goes quiet
 // when the element dies
@@ -372,7 +1339,7 @@ nothrow @nogc:
         Element* e = eid.deref;
         if (!e)
             return false;
-        auto c = Cursor(&e.series, position, bit);
+        auto c = Cursor(e, position, bit);
         return c.pending;
     }
 
@@ -381,7 +1348,7 @@ nothrow @nogc:
         Element* e = eid.deref;
         if (!e)
             return RecordBlock();
-        auto c = Cursor(&e.series, position, bit);
+        auto c = Cursor(e, position, bit);
         RecordBlock r = c.next(max_records);
         position = c.position;
         return r;
@@ -391,8 +1358,8 @@ nothrow @nogc:
     {
         if (Element* e = eid.deref)
         {
-            auto c = Cursor(&e.series, position, bit);
-            e.series.close_cursor(c);
+            auto c = Cursor(e, position, bit);
+            e.close_series_cursor(c);
         }
         eid = EID.invalid;
     }
@@ -436,20 +1403,20 @@ unittest
     // typed series: observations feed the series and mirror into the boxed legacy path
     static immutable DataFormat bool_held = DataFormat(ValueType.bool_, SeriesKind.held);
     Element n;
-    n.series.format = &bool_held;
-    n.series.ensure_history();
+    n.format = register_format(bool_held);
+    n.ensure_history();
     bool[2] lv = [true, false];
     SysTime[2] tm = [from_unix_time_ns(1_000_000), from_unix_time_ns(2_000_000)];
     n.write_samples(lv[], tm[]);
-    assert(n.series.record_count == 2);
+    assert(n.record_count == 2);
     assert(n.value.isBool && !n.value.asBool);
     assert(n.last_update == from_unix_time_ns(2_000_000));
     assert(n.recent_count == 1);
 
     // a boxed write to an Element with a typed series lands in the series too
     n.value(Variant(true), from_unix_time_ns(3_000_000));
-    assert(n.series.record_count == 3);
-    assert(n.series.latest.b);
+    assert(n.record_count == 3);
+    assert(n.latest_record.b);
     assert(n.value.asBool);
 
     // quantity writes to a typed series use the format's unit scale (the
@@ -458,8 +1425,293 @@ unittest
     import urt.si.unit : Volt;
     static immutable DataFormat volts_held = DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Volt));
     Element q;
-    q.series.format = &volts_held;
+    q.format = register_format(volts_held);
     q.value(Variant(Quantity!double(23.05, ScaledUnit(Volt))), from_unix_time_ns(1_000_000));
-    assert(q.series.latest.f64_ == 23.05);
+    assert(q.latest_record.f64_ == 23.05);
     assert(q.value.isQuantity);
+
+    static immutable DataFormat u32_held = DataFormat(ValueType.u32, SeriesKind.held);
+    Element widened;
+    widened.format = register_format(u32_held);
+    widened.write_sample(ushort(42), from_unix_time_ns(1_000_000));
+    assert(widened.latest_record.u == 42);
+    widened.value(ulong.max, from_unix_time_ns(2_000_000));
+    assert(widened.latest_record.u == 42);
+}
+
+
+version (unittest)
+private final class TransactionReceiver
+{
+nothrow @nogc:
+
+    Element* a;
+    Element* b;
+    uint calls;
+    uint update_count;
+    bool coherent;
+
+    this(ref Element a, ref Element b)
+    {
+        this.a = &a;
+        this.b = &b;
+    }
+
+    void receive(ref const SampleCommit samples)
+    {
+        ++calls;
+        update_count = cast(uint)samples.updates.length;
+        coherent = a.latest_record.f64_ == 3.0 && b.latest_record.f64_ == 30.0
+                && a.value.asDouble == 3.0 && b.value.asDouble == 30.0;
+    }
+}
+
+
+unittest
+{
+    import urt.time : from_unix_time_ns;
+
+    static immutable DataFormat f64_held = DataFormat(ValueType.f64, SeriesKind.held);
+
+    // one protocol frame can publish several element batches without exposing partial state
+    Element tx_a;
+    Element tx_b;
+    tx_a.format = register_format(f64_held);
+    tx_b.format = register_format(f64_held);
+    TransactionReceiver receiver = defaultAllocator().allocT!TransactionReceiver(tx_a, tx_b);
+    tx_a.subscribe(&receiver.receive);
+    tx_b.subscribe(&receiver.receive);
+
+    double[3] tx_a_values = [1.0, 2.0, 3.0];
+    double[3] tx_b_values = [10.0, 20.0, 30.0];
+    SysTime[3] tx_times = [from_unix_time_ns(100), from_unix_time_ns(200),
+                           from_unix_time_ns(300)];
+    SampleTransaction transaction;
+    transaction.write_samples(tx_a, tx_a_values[], tx_times[]);
+    transaction.write_samples(tx_b, tx_b_values[], tx_times[]);
+    assert(receiver.calls == 0);
+    assert(tx_a.last_update == SysTime() && tx_b.last_update == SysTime());
+    transaction.commit();
+    assert(receiver.calls == 1);
+    assert(receiver.update_count == 2 && receiver.coherent);
+    assert(transaction.length == 0);
+
+    tx_a.write_sample(4.0, from_unix_time_ns(400), &receiver.receive);
+    assert(receiver.calls == 1);
+
+    tx_a.unsubscribe(&receiver.receive);
+    tx_b.unsubscribe(&receiver.receive);
+    tx_a.teardown();
+    tx_b.teardown();
+    defaultAllocator().freeT(receiver);
+
+    // retention=none: latest and last_update track, nothing is stored
+    Element n;
+    n.format = register_format(f64_held);
+    n.write_sample(9.0, from_unix_time_ns(500));
+    assert(n.record_count == 0 && n.bucket_count == 0);
+    assert(n.latest_record.f64_ == 9.0);
+    assert(n.last_update == from_unix_time_ns(500));
+
+    // held series: equal observations advance last_update but record nothing
+    Element e;
+    e.format = register_format(f64_held);
+    e.ensure_history();
+    e.write_sample(1.0, from_unix_time_ns(1_000));
+    e.write_sample(1.0, from_unix_time_ns(2_000));
+    e.write_sample(2.0, from_unix_time_ns(3_000));
+    assert(e.record_count == 2);
+    assert(e.last_update == from_unix_time_ns(3_000));
+
+    // a gap forces a bucket boundary and the successor bucket records it
+    e.mark_gap();
+    e.write_sample(3.0, from_unix_time_ns(10_000));
+    assert(e.bucket_count == 2);
+    assert(e._history.buckets[$-1].follows_gap);
+
+    // cursor: backfill from zero, then tail; blocks never span buckets
+    Cursor c = e.open_series_cursor(0);
+    RecordBlock b = c.next(16);
+    assert(b.count == 2 && b.get!double(0) == 1.0 && b.get!double(1) == 2.0);
+    assert(b.time(1) == from_unix_time_ns(3_000));
+    b = c.next(16);
+    assert(b.count == 1 && b.get!double(0) == 3.0);
+    assert(!c.pending);
+
+    // irregular block append feeds the tail and updates latest
+    double[3] vals = [4.0, 5.0, 6.0];
+    SysTime[3] times = [from_unix_time_ns(11_000), from_unix_time_ns(12_000), from_unix_time_ns(13_000)];
+    e.write_samples(vals[], times[]);
+    assert(e.record_count == 6);
+    assert(e.latest_record.f64_ == 6.0);
+    b = c.next(16);
+    assert(b.count == 3 && b.ts !is null && b.time(2) == from_unix_time_ns(13_000));
+    e.close_series_cursor(c);
+
+    // untyped record write: same flow as write_sample(), format known only at runtime
+    double rv = 7.0;
+    e.write_record((cast(const(void)*)&rv)[0 .. 8], from_unix_time_ns(14_000));
+    assert(e.record_count == 7);
+    assert(e.latest_record.f64_ == 7.0);
+
+    // text: short strings embed in the record, long strings allocate a String; equal held values reuse it
+    DataFormat text_fmt = DataFormat(ValueType.char_, SeriesKind.held);
+    text_fmt.count = 0;
+    Element te;
+    te.format = register_format(text_fmt);
+    te.ensure_history();
+    te.write_sample("run", from_unix_time_ns(500));
+    assert(te.record_count == 1);
+    assert((cast(const(TextRecord)*)te.latest_record.raw.ptr).embedded);
+    assert(te.value().asString == "run");
+
+    te.write_sample("a string too long to embed anywhere", from_unix_time_ns(1_000));
+    assert(te.record_count == 2);
+    assert(!(cast(const(TextRecord)*)te.latest_record.raw.ptr).embedded);
+    assert(te.value().asString == "a string too long to embed anywhere");
+    const(char)* allocated = (cast(const(String)*)te.latest_record.raw.ptr).ptr;
+    te.write_sample("a string too long to embed anywhere", from_unix_time_ns(2_000));
+    assert(te.record_count == 2);
+    assert((cast(const(String)*)te.latest_record.raw.ptr).ptr is allocated);
+    assert(te.last_update == from_unix_time_ns(2_000));
+
+    // String ingress adopts the handle; retained refs are the typed latest slot,
+    // boxed Element.value, the recent sample, and the bucket record.
+    String src = "second value arriving as a shared handle".makeString(defaultAllocator());
+    static ushort rc(ref const String s) => (cast(const(ushort)*)s.ptr)[-2] & 0x3FFF;
+    assert(rc(src) == 0);
+    te.write_sample(src, from_unix_time_ns(3_000));
+    assert(te.record_count == 3);
+    assert(rc(src) == 4);
+    assert(te.value().asString == src[]);
+
+    Cursor tcur = te.open_series_cursor(0);
+    RecordBlock tblk = tcur.next(16);
+    assert(tblk.count == 3);
+    assert(tblk.box(0).asString == "run");
+    assert(tblk.box(1).asString == "a string too long to embed anywhere");
+    assert(tblk.box(2).asString == src[]);
+    te.close_series_cursor(tcur);
+
+    te.teardown();
+    assert(rc(src) == 0);
+
+    Element text_batch;
+    text_batch.format = register_format(text_fmt);
+    text_batch.ensure_history();
+    const(char)[][2] words = ["one", "two"];
+    SysTime[2] word_times = [from_unix_time_ns(4_000), from_unix_time_ns(5_000)];
+    text_batch.write_samples(words[], word_times[]);
+    assert(text_batch.record_count == 2);
+    assert(text_batch.value().asString == "two");
+    text_batch.teardown();
+
+    // retention: sealed buckets shrink to fit, the budget evicts from the front, lapped cursors report loss
+    Element r;
+    r.format = register_format(f64_held);
+    r.retention(4);
+    Cursor lap = r.open_series_cursor(0);
+    foreach (i; 0 .. 6)
+    {
+        r.write_sample(double(i), from_unix_time_ns(1_000 * (i + 1)));
+        r.mark_gap();   // force one-record buckets
+    }
+    assert(r.record_count == 6);
+    assert(r._history.first_index == 2);
+    assert(r._history.buckets[0].sealed && r._history.buckets[0].capacity == 1);
+    RecordBlock rb = lap.next(16);
+    assert(rb.lost == 2 && rb.count == 1 && rb.get!double(0) == 2.0);
+    r.close_series_cursor(lap);
+    r.teardown();
+
+    // pinned cursor: holds retention past the floor until consumed; consumption releases
+    Element p;
+    p.format = register_format(f64_held);
+    p.retention(2);
+    Cursor pinc = p.open_series_cursor(0, true);
+    foreach (i; 0 .. 6)
+    {
+        p.write_sample(double(i), from_unix_time_ns(1_000 * (i + 1)));
+        p.mark_gap();
+    }
+    assert(p._history.first_index == 0);
+    foreach (_; 0 .. 4)
+        pinc.next(1);
+    p.write_sample(6.0, from_unix_time_ns(7_000));
+    assert(p._history.first_index == 4);
+    p.close_series_cursor(pinc);
+    p.teardown();
+
+    // ceiling: max_records evicts past a stalled pin; the lapped cursor reports the loss
+    Element x;
+    x.format = register_format(f64_held);
+    x.retention(0, 3);
+    Cursor stall = x.open_series_cursor(0, true);
+    foreach (i; 0 .. 6)
+    {
+        x.write_sample(double(i), from_unix_time_ns(1_000 * (i + 1)));
+        x.mark_gap();
+    }
+    assert(x._history.first_index == 3);
+    RecordBlock xb = stall.next(16);
+    assert(xb.lost == 3 && xb.count == 1 && xb.get!double(0) == 3.0);
+    x.close_series_cursor(stall);
+    x.teardown();
+
+    // age floor: consumed-or-unpinned records older than the window evict
+    Element a;
+    a.format = register_format(f64_held);
+    a.retention(1.seconds);
+    foreach (i; 0 .. 3)
+    {
+        a.write_sample(double(i), from_unix_time_ns(1_000_000L * (i + 1)));
+        a.mark_gap();
+    }
+    assert(a._history.first_index == 0);
+    a.write_sample(9.0, from_unix_time_ns(3_000_000_000L));
+    assert(a._history.first_index == 3);
+    a.teardown();
+
+    // wide records: fixed vectors don't fit the Scalar register; latest is the open bucket tail
+    DataFormat key_fmt = DataFormat(ValueType.u8, SeriesKind.held);
+    key_fmt.count = 32;
+    assert(!key_fmt.is_scalar && !key_fmt.is_text && key_fmt.is_wide && key_fmt.stride == 32);
+    Element k;
+    k.format = register_format(key_fmt);
+    ubyte[32] key1;
+    foreach (i, ref byt; key1)
+        byt = cast(ubyte)i;
+    k.write_record(key1[], from_unix_time_ns(1_000));
+    assert(k.record_count == 1);
+    assert(cast(const(ubyte)[])k.value().asBuffer == key1[]);
+    k.write_record(key1[], from_unix_time_ns(2_000));
+    assert(k.record_count == 1 && k.last_update == from_unix_time_ns(2_000));   // held dedup vs the tail
+    ubyte[32] key2 = key1;
+    key2[0] = 0xFF;
+    k.write_record(key2[], from_unix_time_ns(3_000));
+    assert(k.record_count == 2);
+    assert(cast(const(ubyte)[])k.value().asBuffer == key2[]);
+    assert(cast(const(ubyte)[])k.tail_record() == key2[]);
+    Cursor kc = k.open_series_cursor(0);
+    RecordBlock kb = kc.next(16);
+    assert(kb.count == 2);
+    assert(cast(const(ubyte)[])kb.box(0).asBuffer == key1[]);
+    assert(cast(const(ubyte)[])kb.box(1).asBuffer == key2[]);
+    k.close_series_cursor(kc);
+    k.teardown();
+
+    // eviction releases text records
+    Element tv;
+    tv.format = register_format(text_fmt);
+    tv.retention(1);
+    String evictee = "the first long string, soon evicted".makeString(defaultAllocator());
+    tv.write_sample(evictee, from_unix_time_ns(1_000));
+    assert(rc(evictee) == 4);
+    tv.mark_gap();
+    tv.write_sample("replacement value, also quite long", from_unix_time_ns(2_000));
+    assert(rc(evictee) == 2);   // typed slot and bucket released; prev and recent retain it
+    tv.teardown();
+    assert(rc(evictee) == 0);
+
+    // TODO: regular-series test returns once regular write_records() and rate-aware tick() are built
 }

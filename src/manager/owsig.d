@@ -206,7 +206,7 @@ nothrow @nogc:
 
     bool put(ref const RecordBlock blk)
     {
-        ref const DataFormat f = *blk.format;
+        ref const DataFormat f = *blk.data_format;
         debug assert(container_serialisable(f));
         uint count = blk.count;
         if (count == 0)
@@ -329,7 +329,7 @@ nothrow @nogc:
 
         bool irregular = (e.hdr.flags & BlockHeader.Flags.irregular) != 0;
         uint offs_bytes = irregular ? e.hdr.count * cast(uint)uint.sizeof : 0;
-        blk.format = &_fmt;
+        blk.format = register_format(_fmt);
         blk.count = e.hdr.count;
         blk.first_index = e.hdr.first_index;
         blk.t0 = e.hdr.first_tick;
@@ -374,12 +374,12 @@ private:
 unittest
 {
     import urt.time : from_unix_time_ns;
-    import manager.element2;
+    import manager.element;
 
     static immutable DataFormat f64_held = DataFormat(ValueType.f64, SeriesKind.held);
 
-    Element2 e;
-    e.format = &f64_held;
+    Element e;
+    e.format = register_format(f64_held);
     e.ensure_history();
     foreach (i; 0 .. 4)
     {
@@ -394,7 +394,7 @@ unittest
     {
         SeriesContainer c;
         assert(c.open_(path));
-        Cursor cur = e.open_cursor(0);
+        Cursor cur = e.open_series_cursor(0);
         while (cur.pending)
         {
             RecordBlock blk = cur.next(256);
@@ -402,7 +402,7 @@ unittest
                 break;
             assert(c.put(blk));
         }
-        e.close_cursor(cur);
+        e.close_series_cursor(cur);
         assert(c.dir.length == 2);
         c.close_();
     }
@@ -434,10 +434,10 @@ unittest
 
         // append after reopen: prev/next links patch across sessions
     e.write_sample(9.0, from_unix_time_ns(5_000_000));
-        Cursor cur = e.open_cursor(4);
+        Cursor cur = e.open_series_cursor(4);
         RecordBlock nb = cur.next(256);
         assert(nb.count == 1 && c.put(nb));
-        e.close_cursor(cur);
+        e.close_series_cursor(cur);
         assert(c.dir.length == 3 && c.dir[2].hdr.prev == c.dir[1].offset);
         assert(c.dir[2].hdr.format_block == c.dir[0].offset); // anchor survives reopen
         c.close_();
@@ -456,7 +456,7 @@ unittest
         int rv = 42;
         uint[1] rts = 0;
         RecordBlock rb;
-        rb.format = &s32_fmt;
+        rb.format = register_format(s32_fmt);
         rb.count = 1;
         rb.first_index = 5;
         rb.t0 = 6_000_000 / 1000;

@@ -153,7 +153,7 @@ nothrow @nogc:
             {
                 ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
                 if (http.write_request_index != ushort.max)
-                    se.element.remove_subscriber(&on_element_change);
+                    se.element.unsubscribe(&on_element_change);
             }
         }
         _elements.clear();
@@ -191,8 +191,8 @@ protected:
         if (http_desc.desc == ushort.max)
             return;
         SampleDesc sample_desc = desc_by_index(http_desc.desc);
-        if (!element.series.format)
-            element.series.format = sample_desc.fmt;
+        if (!element.format.valid)
+            element.format = sample_desc.format;
 
         HTTPSampleElement* e = &_elements.pushBack();
         e.element = element;
@@ -216,33 +216,36 @@ protected:
         if (http_desc.write_request_index != ushort.max)
         {
             build_request_state(http_desc.write_request_index, ushort.max, param_names, param_values);
-            element.add_subscriber(&on_element_change);
+            element.subscribe(&on_element_change);
         }
     }
 
-    void on_element_change(ref Element e, ref const Variant val, SysTime ts, ref const Variant prev, SysTime prev_ts)
+    void on_element_change(ref const SampleCommit samples)
     {
         if (_self_write)
             return; // don't write back values we just read from the response
 
-        foreach (ref se; _elements[])
+        foreach (ref update; samples.updates)
         {
-            if (se.element !is &e)
-                continue;
-
-            ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
-            if (http.write_request_index == ushort.max)
-                continue;
-
-            foreach (ref rs; _request_states[])
+            foreach (ref se; _elements[])
             {
-                if (rs.request_index == http.write_request_index)
+                if (se.element !is update.element)
+                    continue;
+
+                ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, se.http_index);
+                if (http.write_request_index == ushort.max)
+                    continue;
+
+                foreach (ref rs; _request_states[])
                 {
-                    rs.write_dirty = true;
-                    break;
+                    if (rs.request_index == http.write_request_index)
+                    {
+                        rs.write_dirty = true;
+                        break;
+                    }
                 }
+                break;
             }
-            break;
         }
     }
 
@@ -1010,7 +1013,7 @@ bool apply_text_value(Element* element, const(char)[] token, ref const SampleDes
     const(DataFormat)* fmt = desc.fmt;
     if (fmt.is_text)
     {
-        if (element.series.format is fmt)
+        if (element.format == desc.format)
             element.write_sample(token, timestamp);
         else
             element.value(token, timestamp);
@@ -1020,7 +1023,7 @@ bool apply_text_value(Element* element, const(char)[] token, ref const SampleDes
     ubyte[64] record = void;
     if (fmt.stride > record.length || !parse_record(token, desc, record[0 .. fmt.stride]))
         return false;
-    if (element.series.format is fmt)
+    if (element.format == desc.format)
         element.write_record(record[0 .. fmt.stride], timestamp);
     else
         element.value(box_record(record.ptr, *fmt), timestamp);
@@ -1135,7 +1138,7 @@ unittest
     SampleDesc amps;
     assert(compile_spec("f64:100mA", stream_le_context, ScaledUnit(), 1, null, null, amps));
     Element current;
-    current.series.format = amps.fmt;
+    current.format = amps.format;
     Variant raw_current = Variant(123);
     assert(apply_value(&current, raw_current, amps, getSysTime()));
     double current_amps = current.scaled_value(ScaledUnit(Ampere));
@@ -1157,7 +1160,7 @@ unittest
     SampleDesc mode_desc;
     assert(compile_spec("enum8:TestMode", stream_le_context, ScaledUnit(), 1, null, &resolve_mode, mode_desc));
     Element mode;
-    mode.series.format = mode_desc.fmt;
+    mode.format = mode_desc.format;
     Variant raw_mode = Variant(2);
     assert(apply_value(&mode, raw_mode, mode_desc, getSysTime()));
     assert(mode.value.is_enum && mode.value.asLong == 2);
@@ -1165,7 +1168,7 @@ unittest
     SampleDesc text_desc;
     assert(compile_spec("str", stream_le_context, ScaledUnit(), 1, null, null, text_desc));
     Element text;
-    text.series.format = text_desc.fmt;
+    text.format = text_desc.format;
     Variant raw_text = Variant("native");
     assert(apply_value(&text, raw_text, text_desc, getSysTime()));
     assert(text.value == "native");

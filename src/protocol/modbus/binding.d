@@ -377,8 +377,8 @@ protected:
         const(DataFormat)* fmt = sample_desc.fmt;
 
         // serve-pass elements are produced elsewhere; their formats aren't this profile's to declare
-        if (_current_pass != Pass.serve && !e.series.format)
-            e.series.format = fmt;
+        if (_current_pass != Pass.serve && !e.format.valid)
+            e.format = sample_desc.format;
 
         if (_current_pass != Pass.serve && fmt.is_scalar)
         {
@@ -599,7 +599,7 @@ private:
             scalar.raw[] = 0;
             if (!sample_record(wire, e.desc, scalar.raw[0 .. fmt.stride]))
                 return false;
-            if (e.element.series.format is fmt)
+            if (e.element.format == e.desc.format)
                 e.element.write_record(scalar.raw[0 .. fmt.stride], timestamp);
             else
                 e.element.value(box_record(scalar.raw.ptr, *fmt), timestamp);
@@ -949,7 +949,7 @@ private:
                 continue;
             if (!(ent.element.access & Access.write))
                 continue;
-            ent.element.add_subscriber(&element_changed);
+            ent.element.subscribe(&element_changed);
         }
         _elements_subscribed = true;
     }
@@ -964,25 +964,27 @@ private:
                 continue;
             if (!(ent.element.access & Access.write))
                 continue;
-            ent.element.remove_subscriber(&element_changed);
+            ent.element.unsubscribe(&element_changed);
         }
         _elements_subscribed = false;
     }
 
-    void element_changed(ref Element e, ref const Variant val, SysTime ts, ref const Variant, SysTime)
+    void element_changed(ref const SampleCommit samples)
     {
         if (_writing_from_poll)
             return;
         if (!_node.get || !_slave_server)
             return;
-        Element* el = &e;
-        foreach (ref ent; elements)
+        foreach (ref update; samples.updates)
         {
-            if (ent.element !is el)
-                continue;
-            ent.flags |= 4;
-            _has_dirty = true;
-            return;
+            foreach (ref ent; elements)
+            {
+                if (ent.element !is update.element)
+                    continue;
+                ent.flags |= 4;
+                _has_dirty = true;
+                break;
+            }
         }
     }
 

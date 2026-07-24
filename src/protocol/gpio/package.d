@@ -12,7 +12,7 @@ import manager.binding;
 import manager.collection;
 import manager.device;
 import manager.element;
-import manager.element2;
+import manager.element;
 import manager.plugin;
 
 nothrow @nogc:
@@ -115,16 +115,16 @@ nothrow @nogc:
     }
 
     final ulong records() const pure
-        => _element ? _element.series.record_count : 0;
+        => _element ? _element.record_count : 0;
 
     final uint buckets() const pure
-        => _element ? _element.series.bucket_count : 0;
+        => _element ? _element.bucket_count : 0;
 
     final uint edge_rate() const pure
         => _edge_rate;
 
     final SysTime last_edge() const pure
-        => _element ? _element.series.last_update : SysTime();
+        => _element ? _element.last_update : SysTime();
 
     final const(char)[] backend() const pure
     {
@@ -155,15 +155,16 @@ nothrow @nogc:
         if (!dev)
             return false;
         Element* e = (*dev).find_or_create_element(_element_path.empty ? "state" : _element_path[]);
-        if (!e.series.format)
+        FormatId format = register_format(_fmt);
+        if (!e.format.valid)
         {
             // TODO: binding owns _fmt/_clock but the Element outlives binding destruction;
             //       formats need a durable home
-            e.series.format = &_fmt;
+            e.format = format;
             e.access = Access.read;
             e.sampling_mode = SamplingMode.report;
         }
-        else if (e.series.format !is &_fmt)
+        else if (e.format != format)
         {
             log.error("element '", _element_path.empty ? "state" : _element_path[], "' already has a different format");
             return false;
@@ -193,8 +194,8 @@ nothrow @nogc:
             }
             _watched = true;
             log.info("gpio sampler backend=", _sampler.backend_name(), " chip=", _chip, " line=", _rx_line);
-            _element.series.ensure_history();   // scaffold retains everything; retention policy TODO
-            _edges_at_window = _element.series.record_count;
+            _element.ensure_history();   // scaffold retains everything; retention policy TODO
+            _edges_at_window = _element.record_count;
             _window_start = getTime();
             _last_anchor = _window_start;
             _stream_start = SysTime();
@@ -222,7 +223,7 @@ nothrow @nogc:
             MonoTime now = getTime();
             if (now - _window_start >= 1.seconds)
             {
-                ulong count = _element.series.record_count;
+                ulong count = _element.record_count;
                 uint rate = cast(uint)(count - _edges_at_window);
                 if (rate != _edge_rate)
                 {
@@ -308,7 +309,7 @@ private:
 
             // a restart resumes into the retained series; force a fresh bucket so the new stream's low
             // relative ticks can't underflow the old bucket's offset base (cross-segment wall: TODO)
-            if (_element.series.record_count > 0)
+            if (_element.record_count > 0)
                 _element.mark_gap();
 
             ulong tick_c;

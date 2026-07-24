@@ -139,8 +139,8 @@ protected:
 
         SampleDesc sd = desc_by_index(can.desc);
         const(DataFormat)* fmt = sd.fmt;
-        if (!e.series.format && fmt.is_scalar)
-            e.series.format = fmt;
+        if (!e.format.valid && fmt.is_scalar)
+            e.format = sd.format;
 
         // typed zero until the first frame arrives
         if (fmt.is_scalar)
@@ -207,7 +207,7 @@ private:
                 s.raw[] = 0;
                 if (!sample_record(wire, e.desc, s.raw[0 .. fmt.stride]))
                     continue;
-                if (el.series.format is fmt)
+                if (el.format == e.desc.format)
                     el.write_record(s.raw[0 .. fmt.stride], t);
                 else
                     el.value(box_record(s.raw.ptr, *fmt), t);

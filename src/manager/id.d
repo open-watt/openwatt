@@ -92,7 +92,7 @@ module manager.id;
 //   3. element level: per-container element-index tables owned by their containers; element
 //      destruction reserves the primary index instead of nulling in place; full-path storage
 //      stays deleted (legacy ElementTable + hash-EIDs already removed from element.d);
-//      Cursor trades its Element2* for an EID
+//      Cursor trades its Element* for an EID
 //   4. deref updates forwarded ids on the HANDLES, not on wrapper types: CollectionTable.deref(ref
 //      CID) is the container surface, deref(ref EID) (device.d, UFCS) the element surface.
 //      ObjectRef stays CID and is typed sugar over the table (static type + null ergonomics;

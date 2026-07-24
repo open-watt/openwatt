@@ -98,11 +98,10 @@ status block). Remaining legs, roughly in order:
    but true event attach means notify_element_created revisits signal subscriptions instead of
    frame polling.
 
-6. [ ] **Re-entrancy / loop guard**: automations both subscribe to and write elements; only
-   value-change damping breaks cycles today. The `who` cookie exists on `Element.value()` but no
-   caller passes it and the OnChangeCallback subscriber list never filters by it (element.d has
-   the TODO). Design doc wants writes tagged with the originating rule plus a bounded re-entrancy
-   guard. Related: `/element/set` silently updates the local value of a read-only element - it
+6. [ ] **Re-entrancy / loop guard**: automations both subscribe to and write elements. The
+   unified `Subscriber` callback is filtered when it is passed as the writer, but automation
+   rules still need to tag their writes and impose a bounded re-entrancy guard. Related:
+   `/element/set` silently updates the local value of a read-only element - it
    should surface "target is not writable".
 
 7. [ ] **`?deadband=` trigger param**: the automation surface of the element deadband design -
@@ -157,7 +156,7 @@ status block). Remaining legs, roughly in order:
   materialise only at edges; a dynamic-unit quantity would be user (no customer). STORAGE
   RULE: a record is memcpy iff its record type is trivial, else copy_emplace/destroy hooks -
   dynamic records hold immutable refcounted handles (String for text: decode allocates ONCE,
-  series record + boxed mirror + observers + sync all share refs; compare-before-allocation so
+  series record + boxed mirror + committed subscribers + sync all share refs; compare-before-allocation so
   steady-state repeats never allocate; blob's RC-buffer twin waits for a customer). Scalar =
   <=8-byte fast-path register only; the gateway currency is (const DataFormat*, void[])
   record views; RecordBlock stays storage furniture. series.d REORGANISED in the same pass,
@@ -238,7 +237,7 @@ status block). Remaining legs, roughly in order:
   fused copy-and-reverse via urt.endian reverse_endian(src,dst), aliasing-tolerant); T2
   series.d re-founding (value type + count and reorg, above; ValueType.variant/string_ deleted,
   char_/user + descriptor union + count landed, box_record user arm dispatches td.variant,
-  element/element2 scalar checks moved to fmt.is_scalar; DESCRIPTOR FOLD: unit joins the
+  Element scalar checks moved to fmt.is_scalar; DESCRIPTOR FOLD: unit joins the
   union - unit/enum_info/user_type are mutually exclusive - user_type selected by
   type==user (type is the storage truth, keeping type-driven predicates total), unit-vs-enum by a
   Desc kind byte {none,quantity,enum_}; count is ubyte (the 255-byte stride cap already bounds
@@ -284,7 +283,7 @@ status block). Remaining legs, roughly in order:
   resolved) -> modbus client -> modbus serve; CAN LANDED 2026-07-18 (ElementDesc_CAN =
   SampleDesc + span byte - byte-stream maps carry the wire span the desc doesn't;
   legacy two-column spellings [enum name / dt format in the units column] translate to
-  `:name` refs at the parse site; Element/Element2 grew the untyped write_record
+  `:name` refs at the parse site; Element grew the untyped write_record
   scalar path; packet path decodes via the gateway - typed record when the Element uses the
   binding's format, boxed otherwise). GoodWe LANDED 2026-07-19: GoodWeModule owns the
   registered `aa55` section,
@@ -408,12 +407,12 @@ status block). Remaining legs, roughly in order:
      separately from read preference so a fallback reader does not accidentally become the writer.
 
 - **Element retention/recording profile grammar (proposed 2026-07-19, Manu to resolve token
-  format)**: the retention CORE is built (series.d/element2.d): min/max per axis - floors
+  format)**: the retention CORE is built (series.d/element.d): min/max per axis - floors
   (min_records/min_age) keep records even after consumption, for rendering; PINNED cursors
   (open_cursor(from, pin=true)) extend retention until the consumer advances past (consumption
   IS the discard mark - a 433 signal processor just reads); ceilings (max_records/max_age)
   force eviction past stalled/undriven pins, lapped cursors report RecordBlock.lost.
-  Element2.retention(min_records, max_records) + retention(min_age, max_age). Byte budgets
+  Element.retention(min_records, max_records) + retention(min_age, max_age). Byte budgets
   TODO (== records * stride until variable-stride records land). DEFAULT RULE implemented in
   device.d apply_default_retention: every element with a typed series that is not constant/config
   sampling gets history (min 256 records, 1h window, 16k ceiling; named constants) unless a
@@ -431,7 +430,7 @@ status block). Remaining legs, roughly in order:
   Today this would live as per-device binding code. Proposal: **bring the automation/expression
   engine down into profiles** so device behaviour is data-driven. Invents almost nothing - reuses
   the expression evaluator (`@`-refs, arithmetic, funcs; expression.d), the automation `on/if/do`
-  form, and Element2 change events. Three layers:
+  form, and committed Element sample events. Three layers:
   1. **Actions as generative expressions**, not static captures. An action computes its payload
      from managed state:
      `action light = ook(addr=df258, button=7, counter=$seq, check=$seq ^ 7 ^ 7)`
@@ -460,7 +459,7 @@ status block). Remaining legs, roughly in order:
 
 - **Data model / observation fabric redesign (settled 2026-07-15; full design in
   [docs/DATA_MODEL.draft.md](docs/DATA_MODEL.draft.md), identity in
-  [src/manager/id.d](src/manager/id.d) header)**: typed element series (buckets, observers +
+  [src/manager/id.d](src/manager/id.d) header)**: typed element series (buckets, subscribers +
   cursors, retention tiers, clock domains), series contract module shared by elements and
   taps, operators absorbing Map/Sum/Alias (fixes accumulator integrating blind across gaps),
   property projection (every Prop! semantically an element, physically lazy), Event! and
@@ -470,16 +469,13 @@ status block). Remaining legs, roughly in order:
   contract module EXTRACTED 2026-07-17: manager/series.d holds the host-agnostic vocabulary
   (DataFormat/ValueType/SeriesKind, Constraint, ClockDomain, Scalar, RecordBlock, SeriesEvent,
   Bucket/SeriesStore), organised for all three facets (Event! payloads and device-function
-  params/results will use the same DataFormat vocabulary); element2.d keeps the series
-  machinery (Element2, Observer/Subscription, Cursor, dirty list). Both build systems updated.
-  Element integration LANDED 2026-07-17: Element embeds Element2 and keeps identity/metadata
-  (id/name/desc/display_unit/access/sampling_mode/parent) plus the boxed Variant mirror
-  (latest/prev/recent/subscribers); a null or indirect format means legacy (bit-identical
-  behaviour for every existing consumer), a scalar format enables the typed series: boxed
-  writes unbox into the core (series.unbox_scalar), write_sample!T/write_samples/mark_gap
-  on Element feed the series then mirror the tail into the boxed path (legacy subscribers,
-  prev pair, recent ring see the same timeline). Boxing edge implemented in series.d
-  (box_record/unbox_scalar, RecordBlock.box, Element2.value; ints/floats wrap format.unit as
+  params/results will use the same DataFormat vocabulary); Element keeps the series
+  machinery, Subscriber/Subscription, Cursor, and dirty list. Both build systems updated.
+  Element integration LANDED 2026-07-17 and FOLDED 2026-07-23: Element directly owns
+  identity/metadata, typed series state, and the boxed Variant edge. `SampleTransaction`
+  applies all record blocks before delivering one `SampleCommit` to each `Subscriber`; the
+  legacy Subscriber interface and OnChangeCallback path were removed. Boxing is implemented
+  in series.d (box_record/unbox_scalar, RecordBlock.box; ints/floats wrap format.unit as
   Quantity). GpioBinding assigns its series to the device element (element= prop, default
   "state"; materialise() attaches it, shutdown marks a gap) - first typed producer through the
   tree; binding still owns the DataFormat+ClockDomain (Element outlives binding destruction -
@@ -549,7 +545,7 @@ status block). Remaining legs, roughly in order:
   semantics (ObjectRef and element refs share one deref helper that follows forwards and updates the held id).
   Rules that must hold system-wide: ids never persisted, never on the wire (sync exchanges names
   once per session, binds varint session handles), no blind `hash_id` of a name to fabricate an
-  id. Prerequisite for the Element2/series work (element2.d draft holds `Element2*` in Cursor -
+  id. Prerequisite for the Element/series work (the early draft held an Element pointer in Cursor;
   becomes an EID under this scheme). STARTED 2026-07-17; execution order (full steps 0-5 in the
   id.d header): (0) ids off the wire FIRST - sync today ships raw CIDs and leans on cross-peer
   hash agreement (json_encoder rekey verbs + the rehash-divergence patch in sync/package.d), so
@@ -585,7 +581,7 @@ status block). Remaining legs, roughly in order:
   demand (walk to device ancestor; unattached elements have no identity);
   DeviceTable.resolve(EID) + resolve_element() free function; ElementCursor {EID, position,
   bit} in element.d is the durable cursor (resolves per call, delegates to the storage-level
-  element2.Cursor, goes quiet on dead elements); Element.open_cursor returns it. Unit-tested
+  the storage Cursor goes quiet on dead elements); Element.open_cursor returns it. Unit-tested
   (IndexTable cycle, lazy allocation/resolve, stray-element refusal). Step 3 remainder rides later
   work: deterministic indices (profile template index / Prop! index) land with per-protocol
   producer migration; destruction-reservation wiring lands when anything actually destroys
@@ -711,7 +707,7 @@ status block). Remaining legs, roughly in order:
   `g_app.schedule`/the 1s heartbeat is a separate cleanup.
 
 - **GPIO sampler backend upgrades** (baseline landed 2026-07-15: urt gpio sampler API +
-  posix cdev v2 backend + /binding/gpio (GpioBinding) populating an Element2 series):
+  posix cdev v2 backend + /binding/gpio (GpioBinding) populating an Element series):
   (1) pigpiod runtime detection on linux, preferred over cdev when present (decided: cdev
   stays the portable default; pigpio = DMA sample-clock timestamps + the only honest TX;
   no Pi 5 support, so detect, never assume) - same GpioSampler surface, mode tag inside;

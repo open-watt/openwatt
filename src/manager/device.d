@@ -101,69 +101,98 @@ nothrow @nogc:
         ElementLink* link;
     }
 
-    void element_updated(ref Element src, ref const Variant new_val, SysTime timestamp, ref const Variant prev_val, SysTime prev_timestamp)
+    void element_updated(ref const SampleCommit samples)
     {
         final switch (kind) with (ComputationKind)
         {
             case expression:
-                EvalContext ctx;
-                ctx.root = device;
-                Variant r = this.expression.evaluate(ctx);
-                target.value(r.move, timestamp);
+                SysTime timestamp;
+                foreach (ref update; samples.updates)
+                    if (update.timestamp > timestamp)
+                        timestamp = update.timestamp;
+                evaluate_expression(timestamp);
                 break;
 
             case accumulator:
-                import urt.si.quantity;
-                import urt.si.unit;
-
-                if (!new_val.isNumber)
-                    return;
-                VarQuantity sample = new_val.asQuantity;
-
-                if (sum_type != SumType.sum)
+                foreach (ref update; samples.updates)
                 {
-                    enum Seconds = ScaledUnit(Second);
-                    Duration t = timestamp - prev_timestamp;
-                    ulong ns = t.as!"nsecs";
-                    if (ns == 0)
-                        return;
-                    auto dt = VarQuantity(ns / 1_000_000_000.0, Seconds);
-
-                    if (sum_type == SumType.right)
-                        sample = sample * dt;
-                    else
+                    if (update.element !is source)
+                        continue;
+                    Variant previous = update.previous;
+                    SysTime previous_timestamp = update.previous_timestamp;
+                    foreach (i; 0 .. update.count)
                     {
-                        if (!prev_val.isNumber)
-                            return;
-                        VarQuantity prev = prev_val.asQuantity;
-
-                        if (sum_type == SumType.negative_trapezoid)
-                            sample = -sample, prev = -prev;
-
-                        auto zero = VarQuantity(0, sample.unit);
-
-                        if (sum_type == SumType.trapezoid || (sample >= zero && prev >= zero))
-                            sample = (prev + sample) * (dt * 0.5);
-                        else if (sample < zero && prev < zero)
-                            sample = VarQuantity(0, sample.unit * Seconds);
-                        else if (prev > zero) // + to -
-                            sample = prev * (prev / (prev - sample)) * (dt * 0.5);
-                        else // - to +
-                            sample = sample * (sample / (sample - prev)) * (dt * 0.5);
+                        Variant value = update.box(i);
+                        SysTime timestamp = update.time(i);
+                        accumulate(value, timestamp, previous, previous_timestamp);
+                        previous = value.move;
+                        previous_timestamp = timestamp;
                     }
                 }
-
-                Variant value = target.value;
-                if (!value.isNumber)
-                    target.value(Variant(sample), timestamp);
-                else
-                    target.value(Variant(value.asQuantity + sample), timestamp);
                 break;
 
             case alias_:
                 // ElementLink manages its own subscribers
                 break;
         }
+    }
+
+    void evaluate_expression(SysTime timestamp)
+    {
+        EvalContext ctx;
+        ctx.root = device;
+        Variant result = expression.evaluate(ctx);
+        target.value(result.move, timestamp, &element_updated);
+    }
+
+    void accumulate(ref const Variant new_value, SysTime timestamp,
+                    ref const Variant previous_value, SysTime previous_timestamp)
+    {
+        import urt.si.quantity;
+        import urt.si.unit;
+
+        if (!new_value.isNumber)
+            return;
+        VarQuantity sample = new_value.asQuantity;
+
+        if (sum_type != SumType.sum)
+        {
+            enum Seconds = ScaledUnit(Second);
+            Duration t = timestamp - previous_timestamp;
+            ulong ns = t.as!"nsecs";
+            if (ns == 0)
+                return;
+            auto dt = VarQuantity(ns / 1_000_000_000.0, Seconds);
+
+            if (sum_type == SumType.right)
+                sample = sample * dt;
+            else
+            {
+                if (!previous_value.isNumber)
+                    return;
+                VarQuantity previous = previous_value.asQuantity;
+
+                if (sum_type == SumType.negative_trapezoid)
+                    sample = -sample, previous = -previous;
+
+                auto zero = VarQuantity(0, sample.unit);
+
+                if (sum_type == SumType.trapezoid || (sample >= zero && previous >= zero))
+                    sample = (previous + sample) * (dt * 0.5);
+                else if (sample < zero && previous < zero)
+                    sample = VarQuantity(0, sample.unit * Seconds);
+                else if (previous > zero)
+                    sample = previous * (previous / (previous - sample)) * (dt * 0.5);
+                else
+                    sample = sample * (sample / (sample - previous)) * (dt * 0.5);
+            }
+        }
+
+        Variant value = target.value;
+        if (!value.isNumber)
+            target.value(Variant(sample), timestamp, &element_updated);
+        else
+            target.value(Variant(value.asQuantity + sample), timestamp, &element_updated);
     }
 }
 
@@ -207,7 +236,7 @@ nothrow @nogc:
                         {
                             Element* el = resolve_ref(r);
                             if (el)
-                                el.remove_subscriber(&c.element_updated);
+                                el.unsubscribe(&c.element_updated);
                         }
                     }
                     c.expression.free_expression();
@@ -215,7 +244,7 @@ nothrow @nogc:
 
                 case accumulator:
                     if (c.bound && c.source)
-                        c.source.remove_subscriber(&c.element_updated);
+                        c.source.unsubscribe(&c.element_updated);
                     break;
 
                 case alias_:
@@ -273,9 +302,9 @@ package:
             foreach (r; refs)
             {
                 Element* e = resolve_ref(r);
-                e.add_subscriber(&c.element_updated);
-                c.element_updated(*e, e.latest, e.last_update, e.prev, e.prev_update);
+                e.subscribe(&c.element_updated);
             }
+            c.evaluate_expression(getSysTime());
             c.bound = true;
             ++newly_bound;
         }
@@ -288,7 +317,7 @@ package:
             Element* e = resolve_ref(src);
             if (!e)
                 continue;
-            e.add_subscriber(&c.element_updated);
+            e.subscribe(&c.element_updated);
             c.source = e;
             c.bound = true;
             ++newly_bound;
@@ -537,12 +566,12 @@ void apply_default_retention(Component c)
 
     foreach (Element* e; c.elements)
     {
-        if (!e.has_typed_series || e.series.has_history)
+        if (!e.has_typed_series || e.has_history)
             continue;
         if (e.sampling_mode == SamplingMode.constant || e.sampling_mode == SamplingMode.config)
             continue;
-        e.series.retention(default_min_records, default_max_records);
-        e.series.retention(default_window);
+        e.retention(default_min_records, default_max_records);
+        e.retention(default_window);
     }
     foreach (Component child; c.components)
         apply_default_retention(child);
@@ -552,6 +581,7 @@ unittest
 {
     import urt.mem : defaultAllocator;
     import urt.string : makeString;
+    import urt.time : from_unix_time_ns;
 
     Device d = defaultAllocator.allocT!Device("testdev".makeString(defaultAllocator()));
     Component c = defaultAllocator.allocT!Component("child".makeString(defaultAllocator()));
@@ -587,4 +617,23 @@ unittest
     d.element_ids.forward(1, 2);
     ushort idx = handle.index;          // a stale holder still at index 1
     assert(d.element_ids.deref(idx) is e2 && idx == 2);
+
+    // A committed batch reaches an accumulator as every sample, not only the tip.
+    static immutable DataFormat f64_sampled = DataFormat(ValueType.f64, SeriesKind.sampled);
+    Element source;
+    Element target;
+    source.format = register_format(f64_sampled);
+    Computation sum;
+    sum.kind = ComputationKind.accumulator;
+    sum.source = &source;
+    sum.target = &target;
+    sum.sum_type = SumType.sum;
+    source.subscribe(&sum.element_updated);
+    double[3] values = [1.0, 2.0, 3.0];
+    SysTime[3] times = [from_unix_time_ns(100), from_unix_time_ns(200),
+                        from_unix_time_ns(300)];
+    source.write_samples(values[], times[]);
+    assert(target.value.asDouble == 6.0);
+    source.unsubscribe(&sum.element_updated);
+    source.teardown();
 }

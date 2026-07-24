@@ -33,7 +33,6 @@ import manager.device;
 import manager.element;
 import manager.plugin;
 import manager.profile;
-import manager.subscriber;
 
 import protocol.gpio : GpioBinding;
 
@@ -93,7 +92,7 @@ protected:
         // Bind the state elements (fan.speed, fan.direction, fan.timer, light.on). Writable ones
         // subscribe so a write drives the radio (TX). All are updated by the RX decoder below.
         if (e.access & manager.element.Access.write)
-            e.add_subscriber(&on_element_change);
+            e.subscribe(&on_element_change);
         // TODO: remember which element is which (speed/direction/timer/light) for the mapping.
     }
 
@@ -112,7 +111,7 @@ protected:
         // TODO: _radio.unsubscribe_decoded(&on_rx_code);
         foreach (ref b; _bound)
             if (b.element)
-                b.element.remove_subscriber(&on_element_change);
+                b.element.unsubscribe(&on_element_change);
         _bound.clear();
         return super.shutdown();
     }
@@ -132,7 +131,7 @@ private:
     // Absolute controls (speed) map value->code directly. TOGGLES (light.on, direction) send a
     // press ONLY if the current (inferred) state differs from the requested one - hence we must
     // trust our state model, which is why RX sync matters.
-    void on_element_change(ref Element e, ref const Variant val, SysTime, ref const Variant, SysTime)
+    void on_element_change(ref const SampleCommit samples)
     {
         GpioBinding r = _radio.get;
         if (!r || _self_write)   // ignore our own RX-driven state updates

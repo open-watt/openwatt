@@ -21,7 +21,8 @@ import manager.component;
 import manager.device;
 import manager.element;
 import manager.expression : EvalContext, Expression, free_expression;
-import manager.sample : format_by_index, register_constraint, register_enum_info, register_format;
+import manager.sample : register_constraint, register_enum_info;
+import manager.series : format_info, register_format;
 import manager.series : Constraint, DataFormat, Scalar, SeriesKind, ValueType;
 
 import protocol.mqtt.ha_jinja : compile_jinja_template;
@@ -359,8 +360,7 @@ private:
         state.sampling_mode = SamplingMode.report;
         if (select_info)
         {
-            state.series.format = format_by_index(register_format(
-                DataFormat(ValueType.u16, SeriesKind.held, select_info)));
+            state.format = register_format(DataFormat(ValueType.u16, SeriesKind.held, select_info));
             if (state.value.is_enum)
             {
                 const(char)[] prior = select_info.key_for_raw(state.value.asLong);
@@ -591,34 +591,39 @@ private:
     void attach_writer(ref HAEntity entity)
     {
         if (entity.writable && entity.state)
-            entity.state.add_subscriber(&on_element_change);
+            entity.state.subscribe(&on_element_change);
     }
 
     void detach_writer(ref HAEntity entity)
     {
         if (entity.writable && entity.state)
-            entity.state.remove_subscriber(&on_element_change);
+            entity.state.unsubscribe(&on_element_change);
     }
 
-    void on_element_change(ref Element changed, ref const Variant value, SysTime,
-                           ref const Variant, SysTime)
+    void on_element_change(ref const SampleCommit samples)
     {
         if (_observing || !_publisher)
             return;
+        foreach (ref update; samples.updates)
+            publish_element(update);
+    }
+
+    void publish_element(ref const SampleUpdate update)
+    {
         foreach (ref entity; _entities)
         {
-            if (entity.state != &changed || !entity.writable)
+            if (entity.state != update.element || !entity.writable)
                 continue;
 
             const(char)[] payload;
             char[128] buffer = void;
             Variant selected;
             Variant transformed;
-            const(Variant)* command_value = &value;
+            const(Variant)* command_value = &update.value;
             if (entity.select_info)
             {
                 const(char)[] option;
-                if (!select_option(entity.select_info, value, option))
+                if (!select_option(entity.select_info, update.value, option))
                     return;
                 selected = Variant(option);
                 command_value = &selected;
@@ -815,7 +820,7 @@ private:
         }
         if (constraint.has)
             format.constraint = register_constraint(constraint);
-        state.series.format = format_by_index(register_format(format));
+        state.format = register_format(format);
     }
 
     static const(VoidEnumInfo)* synth_select_enum(ref Variant config,
@@ -900,7 +905,7 @@ private:
         target.name = source.name;
         target.desc = source.desc;
         target.display_unit = source.display_unit;
-        target.series.format = source.series.format;
+        target.format = source.format;
         target.access = source.access;
         target.sampling_mode = SamplingMode.dependent;
         if (!created)
@@ -1105,11 +1110,11 @@ unittest
     Element* current = device.find_element("ha.current");
     assert(current && current.value.isQuantity &&
            current.normalised_value > 24.99 && current.normalised_value < 25.01);
-    assert(current.access == Access.read_write && current.series.format.constraint);
-    assert((current.series.format.constraint.has & Constraint.Has.min) &&
-           current.series.format.constraint.min.f64_ == 0);
-    assert((current.series.format.constraint.has & Constraint.Has.max) &&
-           current.series.format.constraint.max.f64_ == 25);
+    assert(current.access == Access.read_write && current.data_format.constraint);
+    assert((current.data_format.constraint.has & Constraint.Has.min) &&
+           current.data_format.constraint.min.f64_ == 0);
+    assert((current.data_format.constraint.has & Constraint.Has.max) &&
+           current.data_format.constraint.max.f64_ == 25);
     discovery.handle_publish("meter/current", cast(const(ubyte)[])"not-a-number", getTime());
     assert(current.normalised_value > 24.99 && current.normalised_value < 25.01);
     current.value(20.0);
@@ -1117,8 +1122,8 @@ unittest
 
     Element* mode = device.find_element("ha.mode");
     assert(mode && mode.access == Access.read_write);
-    assert(mode.series.format.desc == DataFormat.Desc.enum_);
-    const(VoidEnumInfo)* mode_info = mode.series.format.enum_info;
+    assert(mode.data_format.desc == DataFormat.Desc.enum_);
+    const(VoidEnumInfo)* mode_info = mode.data_format.enum_info;
     assert(mode_info && mode_info.count == 3);
     discovery.handle_publish("meter/mode", cast(const(ubyte)[])"Eco", getTime());
     long eco_value = mode_info.value_for("Eco").asLong;
@@ -1136,7 +1141,7 @@ unittest
     assert(discovery.handle_publish("homeassistant/select/meter/mode/config",
                                     cast(const(ubyte)[])updated_mode_config, getTime()));
     assert(discovery.entity_count == 6);
-    const(VoidEnumInfo)* updated_mode_info = mode.series.format.enum_info;
+    const(VoidEnumInfo)* updated_mode_info = mode.data_format.enum_info;
     assert(updated_mode_info && updated_mode_info.count == 4);
     assert(updated_mode_info.value_for("Eco").asLong == eco_value);
     assert(mode.value.is_enum && mode.value.get_enum_info() is updated_mode_info);

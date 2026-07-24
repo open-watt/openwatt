@@ -79,8 +79,8 @@ nothrow @nogc:
 
     void resolve()
     {
-        a.elem.add_subscriber(&element_updated);
-        b.elem.add_subscriber(&element_updated);
+        a.elem.subscribe(&element_updated);
+        b.elem.subscribe(&element_updated);
         if (a.elem.last_update > b.elem.last_update)
             b.elem.value(a.elem.latest, a.elem.last_update);
         else if (b.elem.last_update > a.elem.last_update)
@@ -91,20 +91,29 @@ nothrow @nogc:
     {
         if (resolved)
         {
-            a.elem.remove_subscriber(&element_updated);
-            b.elem.remove_subscriber(&element_updated);
+            a.elem.unsubscribe(&element_updated);
+            b.elem.unsubscribe(&element_updated);
         }
         a.release();
         b.release();
     }
 
-    void element_updated(ref Element changed, ref const Variant val, SysTime timestamp, ref const Variant, SysTime)
+    void element_updated(ref const SampleCommit samples)
     {
         if (propagating)
             return;
         propagating = true;
-        Element* dest = (&changed is a.elem) ? b.elem : a.elem;
-        dest.value(val, timestamp);
+        foreach (ref update; samples.updates)
+        {
+            Element* dest;
+            if (update.element is a.elem)
+                dest = b.elem;
+            else if (update.element is b.elem)
+                dest = a.elem;
+            else
+                continue;
+            dest.value(update.value, update.timestamp, &element_updated);
+        }
         propagating = false;
     }
 
@@ -199,11 +208,17 @@ nothrow @nogc:
     override ISignalProvider provider()
         => g_app;
 
-    void on_change(ref Element e, ref const Variant val, SysTime timestamp, ref const Variant prev, SysTime prev_timestamp)
+    void on_change(ref const SampleCommit samples)
     {
-        SignalEvent ev = { source: path[] };
-        ev.value = val;   // owned snapshot at change-time, so $value can't race a later live re-read
-        sink(getTime(), ev);
+        foreach (ref update; samples.updates)
+        {
+            if (update.element !is element)
+                continue;
+            SignalEvent ev = { source: path[] };
+            ev.value = update.value;
+            sink(getTime(), ev);
+            return;
+        }
     }
 }
 
@@ -573,7 +588,7 @@ nothrow @nogc:
         s.sink = sink;
         s.path = uri.body.makeString(allocator);
         s.element = e;
-        e.add_subscriber(&s.on_change);
+        e.subscribe(&s.on_change);
         handle = s;
         return StringResult.success;
     }
@@ -582,7 +597,7 @@ nothrow @nogc:
     {
         ElementSignalSub s = cast(ElementSignalSub)handle;
         if (s.element)
-            s.element.remove_subscriber(&s.on_change);
+            s.element.unsubscribe(&s.on_change);
         allocator.freeT(s);
     }
 

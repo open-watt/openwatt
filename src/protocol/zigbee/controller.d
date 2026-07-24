@@ -22,7 +22,6 @@ import manager.element;
 import manager.profile;
 import manager.sample;
 import manager.series;
-import manager.subscriber;
 
 import protocol.zigbee;
 import protocol.zigbee.aps;
@@ -40,7 +39,7 @@ nothrow @nogc:
 enum MaxFibers = 2;
 
 
-class ZigbeeController : ActiveObject, Subscriber
+class ZigbeeController : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("endpoint", endpoint),
                                  Prop!("auto-create", auto_create));
@@ -258,7 +257,7 @@ protected:
         _sample_elements_by_element.insert(element, se);
 
         if (element.access & manager.element.Access.write)
-            element.add_subscriber(this);
+            element.subscribe(&on_samples);
     }
 
     final SampleElement* find_sample_element(EUI64 eui, ubyte endpoint, ushort cluster, ushort attribute, ushort manufacturer = 0) nothrow
@@ -270,11 +269,15 @@ protected:
     final SampleElement* find_sample_element_tuya(EUI64 eui, ubyte endpoint, ushort dp) nothrow
         => find_sample_element(eui, endpoint, 0xEF00, dp);
 
-    final override void on_change(Element* e, ref const Variant val, SysTime timestamp, Subscriber)
+    final void on_samples(ref const SampleCommit samples) nothrow
     {
-        SampleElement** pse = e in _sample_elements_by_element;
-        assert(pse, "Bookeeeping error!");
-        set_value(**pse, val, timestamp);
+        foreach (ref update; samples.updates)
+        {
+            SampleElement** pse = update.element in _sample_elements_by_element;
+            if (!pse)
+                continue;
+            set_value(**pse, update.value, update.timestamp);
+        }
     }
 
 private:
@@ -338,7 +341,7 @@ private:
     {
         if (!e.desc.valid)
         {
-            e.element.value(decoded, timestamp, this);
+            e.element.value(decoded, timestamp, &on_samples);
             return;
         }
 
@@ -347,10 +350,10 @@ private:
         {
             if (decoded.isString)
             {
-                if (e.element.series.format is fmt)
-                    e.element.write_sample(decoded.asString, timestamp, null, this);
+                if (e.element.format == e.desc.format)
+                    e.element.write_sample(decoded.asString, timestamp, &on_samples);
                 else
-                    e.element.value(decoded, timestamp, this);
+                    e.element.value(decoded, timestamp, &on_samples);
             }
             return;
         }
@@ -361,16 +364,16 @@ private:
             s.raw[] = 0;
             if (!sample_record(wire, e.desc, s.raw[0 .. fmt.stride]))
                 return;
-            if (e.element.series.format is fmt)
-                e.element.write_record(s.raw[0 .. fmt.stride], timestamp, null, this);
+            if (e.element.format == e.desc.format)
+                e.element.write_record(s.raw[0 .. fmt.stride], timestamp, &on_samples);
             else
-                e.element.value(box_record(s.raw.ptr, *fmt), timestamp, this);
+                e.element.value(box_record(s.raw.ptr, *fmt), timestamp, &on_samples);
             return;
         }
 
         ubyte[256] record = void;
         if (fmt.stride <= record.length && sample_record(wire, e.desc, record[0 .. fmt.stride]))
-            e.element.value(box_record(record.ptr, *fmt), timestamp, this);
+            e.element.value(box_record(record.ptr, *fmt), timestamp, &on_samples);
     }
 
     ZigbeeResult ieee_request(ushort dst, out EUI64 eui, PCP pcp = PCP.be)
@@ -935,9 +938,10 @@ private:
                     ref const ElementDesc_Zigbee zb = _zigbee_profile.get_section!ElementDesc_Zigbee(zb_section_kind, desc.element);
                     if (zb.desc != ushort.max)
                     {
-                        const(DataFormat)* fmt = desc_by_index(zb.desc).fmt;
-                        if (!e.series.format && (fmt.is_scalar || fmt.is_text))
-                            e.series.format = fmt;
+                        SampleDesc sample_desc = desc_by_index(zb.desc);
+                        const(DataFormat)* fmt = sample_desc.fmt;
+                        if (!e.format.valid && (fmt.is_scalar || fmt.is_text))
+                            e.format = sample_desc.format;
                     }
                     add_sample_element(e, node.eui, desc, zb, endpoint);
 

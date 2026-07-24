@@ -194,7 +194,7 @@ nothrow @nogc:
         foreach (ref se; _elements)
         {
             if (se.element.access & Access.write)
-                se.element.remove_subscriber(&on_element_change);
+                se.element.unsubscribe(&on_element_change);
         }
         _elements.clear();
         return super.shutdown();
@@ -213,8 +213,8 @@ protected:
         ref const ElementDesc_MQTT mqtt = _profile_data.get_section!ElementDesc_MQTT(mqtt_section_kind, desc.element);
         SampleDesc sample_desc = desc_by_index(mqtt.desc);
 
-        if (!e.series.format)
-            e.series.format = sample_desc.fmt;
+        if (!e.format.valid)
+            e.format = sample_desc.format;
 
         const(char)[] missing_param;
         const(char)[] get_substitute(size_t, const(char)[] param)
@@ -269,7 +269,7 @@ protected:
         se.desc = sample_desc;
 
         if (e.access & Access.write)
-            e.add_subscriber(&on_element_change);
+            e.subscribe(&on_element_change);
 
     }
 
@@ -378,25 +378,33 @@ private:
         }
     }
 
-    void on_element_change(ref Element e, ref const Variant val, SysTime ts, ref const Variant prev, SysTime prev_ts)
+    void on_element_change(ref const SampleCommit samples)
     {
         if (_self_write)
             return;
 
+        foreach (ref update; samples.updates)
+            publish_element(update);
+    }
+
+    void publish_element(ref const SampleUpdate update)
+    {
         foreach (ref se; _elements)
         {
-            if (se.element != &e)
+            if (se.element != update.element)
                 continue;
             if (!se.write_topic.empty)
             {
                 const(DataFormat)* fmt = se.desc.fmt;
                 if (fmt.is_text)
                 {
+                    ref const Variant val = update.value;
                     if (val.isString)
-                        publish_value(se.write_topic[], cast(const(ubyte)[])(val.asString[]), cast(MonoTime)ts);
+                        publish_value(se.write_topic[], cast(const(ubyte)[])(val.asString[]), cast(MonoTime)update.timestamp);
                 }
                 else if (fmt.is_scalar)
                 {
+                    ref const Variant val = update.value;
                     Scalar scalar;
                     char[256] buffer;
                     bool converted = unbox_scalar(val, *fmt, scalar);
@@ -406,7 +414,7 @@ private:
                     {
                         ptrdiff_t len = format_record(scalar.raw[0 .. fmt.stride], se.desc, buffer);
                         if (len > 0)
-                            publish_value(se.write_topic[], cast(const(ubyte)[])buffer[0 .. len], cast(MonoTime)ts);
+                            publish_value(se.write_topic[], cast(const(ubyte)[])buffer[0 .. len], cast(MonoTime)update.timestamp);
                     }
                 }
             }

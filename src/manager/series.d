@@ -1,7 +1,7 @@
 module manager.series;
 
 // The series contract: the typed record format shared by every host of observed data.
-// Element2 is the first host; the recorder's owsig containers and waveform/byte/packet taps
+// Element is the first host; the recorder's owsig containers and waveform/byte/packet taps
 // host the same formats without becoming elements.
 // Event! payloads and device-function params/results will describe themselves with the
 // same DataFormat vocabulary, boxed through Variant only at the console/API edges.
@@ -43,9 +43,92 @@ enum ValueType : ubyte
     user
 }
 
+enum FormatId : ushort
+{
+    invalid = ushort.max
+}
+static assert(FormatId.sizeof == ushort.sizeof);
+
+// TODO: Allocate FormatIds from ordered integer, floating-point, and exact ranges
+// so the value class can be determined directly from the ID. Each range needs an
+// independent allocator because numeric formats may be registered at any time.
+
+bool valid(FormatId id) pure
+    => id != FormatId.invalid;
+
+// FormatIds are process-local identities. Registered descriptors are immutable and remain
+// alive for the process lifetime, so equality is an integer comparison after registration.
+FormatId register_format(in DataFormat format)
+{
+    foreach (i, f; g_formats)
+    {
+        if (format_equal(*f, format))
+            return cast(FormatId)i;
+    }
+    assert(g_formats.length < FormatId.invalid, "format registry full");
+    DataFormat* f = defaultAllocator().allocT!DataFormat();
+    *f = cast(DataFormat)format;
+    g_formats ~= f;
+    return cast(FormatId)(g_formats.length - 1);
+}
+
+const(DataFormat)* format_info(FormatId id) pure
+{
+    auto formats = (cast(immutable(typeof(g_formats)*) function() pure nothrow @nogc)&format_registry)();
+    assert(id.valid && cast(size_t)id < formats.length, "invalid format id");
+    return (*formats)[cast(size_t)id];
+}
+
 // machine numerics fit the Scalar register when count is one
 bool is_scalar_type(ValueType t) pure
     => t <= ValueType.f64;
+
+enum ValueClass : ubyte
+{
+    integer,
+    floating,
+    exact
+}
+
+ValueClass value_class(ValueType type) pure
+{
+    final switch (type) with (ValueType)
+    {
+        case u8, s8, u16, s16, u32, s32, u64, s64:
+            return ValueClass.integer;
+        case f32, f64:
+            return ValueClass.floating;
+        case bool_, char_, user:
+            return ValueClass.exact;
+    }
+}
+
+bool value_compatible(ref const DataFormat source, ref const DataFormat destination) pure
+{
+    if (source.count != destination.count)
+        return false;
+
+    ValueClass sc = source.type.value_class;
+    ValueClass dc = destination.type.value_class;
+    if (sc == ValueClass.exact || dc == ValueClass.exact)
+    {
+        if (source.type != destination.type)
+            return false;
+        return source.type != ValueType.user || source.user_type is destination.user_type;
+    }
+
+    if (source.desc != destination.desc)
+        return false;
+    final switch (source.desc) with (DataFormat.Desc)
+    {
+        case none:
+            return true;
+        case quantity:
+            return source.unit.unit == destination.unit.unit;
+        case enum_:
+            return source.enum_info is destination.enum_info;
+    }
+}
 
 enum SeriesKind : ubyte
 {
@@ -113,7 +196,10 @@ nothrow @nogc:
 
     const(char)[] check(ref const Scalar v, ref const DataFormat fmt) const
     {
-        // TODO: typed range compare, then check_fn
+        if ((has & Has.min) && compare_scalar(v, min, fmt.type) < 0)
+            return "below minimum";
+        if ((has & Has.max) && compare_scalar(v, max, fmt.type) > 0)
+            return "above maximum";
         return check_fn ? check_fn(v, fmt) : null;
     }
 }
@@ -221,11 +307,11 @@ nothrow @nogc:
     {
         Scalar s;
         s.raw[] = 0;
-        static if (is(T == bool))
+        static if (is(immutable T == immutable bool))
             s.b = v;
-        else static if (is(T == float))
+        else static if (is(immutable T == immutable float))
             s.f32_ = v;
-        else static if (is(T == double))
+        else static if (is(immutable T == immutable double))
             s.f64_ = v;
         else static if (__traits(isUnsigned, T))
             s.u = v;
@@ -309,14 +395,17 @@ nothrow @nogc:
     ulong lost;         // records evicted between the reader's position and this block
     const(uint)* ts;    // null if the series is regular
     const(void)* data;
-    const(DataFormat)* format;
+    FormatId format;
     uint count;
 
+    const(DataFormat)* data_format() const pure
+        => format_info(format);
+
     const(void)[] records() const pure
-        => data[0 .. count * format.stride];
+        => data[0 .. count * data_format.stride];
 
     SysTime time(size_t i) const
-        => format.clock ? format.clock.to_wall(tick(i)) : from_unix_time_ns(tick(i) * 1000);
+        => data_format.clock ? data_format.clock.to_wall(tick(i)) : from_unix_time_ns(tick(i) * 1000);
 
     ulong tick(size_t i) const pure
         => t0 + (ts ? ts[i] : i);
@@ -325,7 +414,7 @@ nothrow @nogc:
         => (cast(const(T)*)data)[i];
 
     Variant box(uint i) const
-        => box_record(cast(const(ubyte)*)data + i*format.stride, *format);
+        => box_record(cast(const(ubyte)*)data + i*data_format.stride, *data_format);
 }
 
 enum SeriesEvent : ubyte
@@ -418,10 +507,11 @@ nothrow @nogc:
         return lo < buckets.length ? buckets[lo] : null;
     }
 
-    RecordBlock read(ref const DataFormat fmt, ulong from_index, uint max_records)
+    RecordBlock read(FormatId format, ulong from_index, uint max_records)
     {
         RecordBlock r;
-        r.format = &fmt;
+        r.format = format;
+        const(DataFormat)* fmt = format_info(format);
         Bucket* b = find_by_index(from_index);
         if (!b || from_index < b.first_index)
             return r;
@@ -490,8 +580,29 @@ Variant box_record(const(void)* record, ref const DataFormat fmt)
 // inverse of box_record; false when the format can't represent the value
 bool unbox_scalar(ref const Variant v, ref const DataFormat fmt, out Scalar s)
 {
+    if (!unbox_scalar_value(v, fmt, s))
+        return false;
+    return !fmt.constraint || !fmt.constraint.check(s, fmt);
+}
+
+private bool unbox_scalar_value(ref const Variant v, ref const DataFormat fmt, out Scalar s)
+{
     if (!fmt.is_scalar)
         return false;
+
+    if (fmt.desc == DataFormat.Desc.quantity)
+    {
+        if (!v.isQuantity || v.asQuantity!double().unit.unit != fmt.unit.unit)
+            return false;
+    }
+    else if (fmt.desc == DataFormat.Desc.enum_)
+    {
+        if (!v.is_enum || v.get_enum_info() !is fmt.enum_info)
+            return false;
+    }
+    else if (v.isQuantity || v.is_enum)
+        return false;
+
     final switch (fmt.type) with (ValueType)
     {
         case bool_:
@@ -503,11 +614,13 @@ bool unbox_scalar(ref const Variant v, ref const DataFormat fmt, out Scalar s)
         case u8, u16, u32, u64:
         case s8, s16, s32, s64:
         {
+            if (fmt.desc != DataFormat.Desc.quantity || v.asQuantity!double().unit == fmt.unit)
+                return store_integer(v, fmt.type, s);
             double d;
             if (!unbox_double(v, fmt, d))
                 return false;
-            s = Scalar.of(cast(long)d);
-            return true;
+            Variant scaled = Variant(d);
+            return store_integer(scaled, fmt.type, s);
         }
         case f32:
         {
@@ -568,12 +681,102 @@ unittest
     Scalar sc;
     assert(unbox_scalar(bt, fdt, sc));
     assert(*cast(SysTime*)sc.raw.ptr == t);
+
+    DataFormat u16 = DataFormat(ValueType.u16, SeriesKind.held);
+    DataFormat u32 = DataFormat(ValueType.u32, SeriesKind.sampled);
+    assert(value_compatible(u16, u32));
+    Variant small = Variant(ushort(65_000));
+    assert(unbox_scalar(small, u32, sc) && sc.u == 65_000);
+    Variant large = Variant(100_000U);
+    assert(!unbox_scalar(large, u16, sc));
+    Variant negative = Variant(-1);
+    assert(!unbox_scalar(negative, u16, sc));
+    Constraint range;
+    range.min = Scalar.of(ushort(10));
+    range.max = Scalar.of(ushort(20));
+    range.has = Constraint.Has.min | Constraint.Has.max;
+    u16.constraint = &range;
+    Variant inside = Variant(ushort(15));
+    Variant outside = Variant(ushort(21));
+    assert(unbox_scalar(inside, u16, sc));
+    assert(!unbox_scalar(outside, u16, sc));
+
+    import urt.si.unit : Ampere, Volt;
+    DataFormat amps = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Ampere));
+    DataFormat milliamps = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Ampere, -3));
+    DataFormat volts = DataFormat(ValueType.u16, SeriesKind.held, ScaledUnit(Volt));
+    assert(value_compatible(amps, milliamps));
+    assert(!value_compatible(amps, volts));
+    Variant one_amp = Variant(Quantity!ushort(1_000, ScaledUnit(Ampere, -3)));
+    assert(unbox_scalar(one_amp, amps, sc) && sc.u == 1);
+
+    enum ModeA : ushort { off, on }
+    enum ModeB : ushort { off, on }
+    import urt.meta.enuminfo : enum_info;
+    DataFormat mode_a = DataFormat(ValueType.u16, SeriesKind.held, enum_info!ModeA.make_void());
+    DataFormat mode_b = DataFormat(ValueType.u16, SeriesKind.held, enum_info!ModeB.make_void());
+    assert(value_compatible(mode_a, mode_a));
+    assert(!value_compatible(mode_a, mode_b));
 }
 
 
 private:
 
 package immutable ubyte[ValueType.max + 1] g_type_stride = [ 1, 1, 1, 2, 2, 4, 4, 8, 8, 4, 8, 1, 0 ];
+
+__gshared Array!(DataFormat*) g_formats;
+
+typeof(g_formats)* format_registry()
+    => &g_formats;
+
+bool format_equal(ref const DataFormat a, ref const DataFormat b) pure
+{
+    if (a.type != b.type || a.kind != b.kind || a.desc != b.desc ||
+        a.count != b.count || a.rate != b.rate || a.clock !is b.clock || a.constraint !is b.constraint)
+        return false;
+    if (a.type == ValueType.user)
+        return a.user_type is b.user_type;
+    final switch (a.desc) with (DataFormat.Desc)
+    {
+        case none:     return true;
+        case quantity: return a.unit == b.unit;
+        case enum_:    return a.enum_info is b.enum_info;
+    }
+}
+
+int compare_scalar(ref const Scalar a, ref const Scalar b, ValueType type) pure
+{
+    final switch (type) with (ValueType)
+    {
+        case bool_:
+            return int(a.b) - int(b.b);
+        case u8:
+            return compare(*cast(const(ubyte)*)a.raw.ptr, *cast(const(ubyte)*)b.raw.ptr);
+        case s8:
+            return compare(*cast(const(byte)*)a.raw.ptr, *cast(const(byte)*)b.raw.ptr);
+        case u16:
+            return compare(*cast(const(ushort)*)a.raw.ptr, *cast(const(ushort)*)b.raw.ptr);
+        case s16:
+            return compare(*cast(const(short)*)a.raw.ptr, *cast(const(short)*)b.raw.ptr);
+        case u32:
+            return compare(*cast(const(uint)*)a.raw.ptr, *cast(const(uint)*)b.raw.ptr);
+        case s32:
+            return compare(*cast(const(int)*)a.raw.ptr, *cast(const(int)*)b.raw.ptr);
+        case u64:
+            return compare(a.u, b.u);
+        case s64:
+            return compare(a.i, b.i);
+        case f32:
+            return compare(a.f32_, b.f32_);
+        case f64:
+            return compare(a.f64_, b.f64_);
+        case char_, user:
+            return 0;
+    }
+}
+
+int compare(T)(T a, T b) pure
+    => a < b ? -1 : a > b;
 
 Variant box_int(long v, ref const DataFormat fmt)
 {
@@ -586,6 +789,47 @@ Variant box_int(long v, ref const DataFormat fmt)
 
 Variant box_float(double v, ref const DataFormat fmt)
     => fmt.desc == DataFormat.Desc.quantity ? Variant(Quantity!double(v, fmt.unit)) : Variant(v);
+
+bool store_integer(ref const Variant v, ValueType type, out Scalar s)
+{
+    final switch (type) with (ValueType)
+    {
+        case u8:
+            if (!v.canFitInt!ubyte) return false;
+            s = Scalar.of(cast(ubyte)v.asUlong);
+            return true;
+        case s8:
+            if (!v.canFitInt!byte) return false;
+            s = Scalar.of(cast(byte)v.asLong);
+            return true;
+        case u16:
+            if (!v.canFitInt!ushort) return false;
+            s = Scalar.of(cast(ushort)v.asUlong);
+            return true;
+        case s16:
+            if (!v.canFitInt!short) return false;
+            s = Scalar.of(cast(short)v.asLong);
+            return true;
+        case u32:
+            if (!v.canFitInt!uint) return false;
+            s = Scalar.of(v.asUint);
+            return true;
+        case s32:
+            if (!v.canFitInt!int) return false;
+            s = Scalar.of(v.asInt);
+            return true;
+        case u64:
+            if (!v.canFitInt!ulong) return false;
+            s = Scalar.of(v.asUlong);
+            return true;
+        case s64:
+            if (!v.canFitInt!long) return false;
+            s = Scalar.of(v.asLong);
+            return true;
+        case bool_, f32, f64, char_, user:
+            return false;
+    }
+}
 
 bool unbox_double(ref const Variant v, ref const DataFormat fmt, out double d)
 {

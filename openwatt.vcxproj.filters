@@ -390,9 +390,6 @@
     <DCompile Include="src\manager\element.d">
       <Filter>src\manager</Filter>
     </DCompile>
-    <DCompile Include="src\manager\element2.d">
-      <Filter>src\manager</Filter>
-    </DCompile>
     <DCompile Include="src\manager\series.d">
       <Filter>src\manager</Filter>
     </DCompile>
@@ -485,9 +482,6 @@
     </DCompile>
     <DCompile Include="src\devices\goodwe\scanner.d">
       <Filter>src\devices\goodwe</Filter>
-    </DCompile>
-    <DCompile Include="src\manager\subscriber.d">
-      <Filter>src\manager</Filter>
     </DCompile>
     <DCompile Include="src\manager\log.d">
       <Filter>src\manager</Filter>

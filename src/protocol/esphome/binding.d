@@ -159,7 +159,7 @@ private:
     {
         uint key;
         Element* element;
-        const(DataFormat)* format;
+        FormatId format;
         float pre_scale = 1;
     }
 
@@ -339,8 +339,8 @@ private:
                 entry.element = e;
                 bool known_unit;
                 entry.format = sensor_format(res.unit_of_measurement[], entry.pre_scale, known_unit);
-                if (!e.series.format)
-                    e.series.format = entry.format;
+                if (!e.format.valid)
+                    e.format = entry.format;
                 if (!known_unit)
                     e.display_unit = res.unit_of_measurement.move;
                 SampleElement* el = _elements.insert(res.key, entry);
@@ -527,31 +527,30 @@ unittest
 
     float pre_scale;
     bool known_unit;
-    const(DataFormat)* volts = sensor_format("V", pre_scale, known_unit);
-    assert(known_unit && pre_scale == 1 && volts.type == ValueType.f32);
+    FormatId volts = sensor_format("V", pre_scale, known_unit);
+    assert(known_unit && pre_scale == 1 && format_info(volts).type == ValueType.f32);
 
     Element voltage;
-    voltage.series.format = volts;
+    voltage.format = volts;
     write_sensor_sample(&voltage, volts, pre_scale, 230.5f, getSysTime());
     double observed_volts = voltage.scaled_value(ScaledUnit(Volt));
     assert(observed_volts > 230.49 && observed_volts < 230.51);
 
-    const(DataFormat)* scaled = format_by_index(register_format(
-        DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Ampere))));
+    FormatId scaled = register_format(DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Ampere)));
     Element current;
-    current.series.format = scaled;
+    current.format = scaled;
     write_sensor_sample(&current, scaled, 0.1f, 123, getSysTime());
     double observed_amps = current.scaled_value(ScaledUnit(Ampere));
     assert(observed_amps > 12.299 && observed_amps < 12.301);
 
-    const(DataFormat)* custom = sensor_format("dBm", pre_scale, known_unit);
-    assert(!known_unit && pre_scale == 1 && custom.type == ValueType.f32);
-    assert(custom.desc == DataFormat.Desc.none);
+    FormatId custom = sensor_format("dBm", pre_scale, known_unit);
+    assert(!known_unit && pre_scale == 1 && format_info(custom).type == ValueType.f32);
+    assert(format_info(custom).desc == DataFormat.Desc.none);
 }
 
 private:
 
-const(DataFormat)* sensor_format(const(char)[] unit_text, out float pre_scale, out bool known_unit)
+FormatId sensor_format(const(char)[] unit_text, out float pre_scale, out bool known_unit)
 {
     ScaledUnit unit;
     ptrdiff_t taken = unit.parse_unit(unit_text, pre_scale, false);
@@ -562,24 +561,25 @@ const(DataFormat)* sensor_format(const(char)[] unit_text, out float pre_scale, o
         pre_scale = 1;
     }
     ValueType type = pre_scale == 1 ? ValueType.f32 : ValueType.f64;
-    return format_by_index(register_format(DataFormat(type, SeriesKind.held, unit)));
+    return register_format(DataFormat(type, SeriesKind.held, unit));
 }
 
-void write_sensor_sample(Element* element, const(DataFormat)* format, float pre_scale, float state, SysTime timestamp)
+void write_sensor_sample(Element* element, FormatId format, float pre_scale, float state, SysTime timestamp)
 {
-    if (format.type == ValueType.f32)
+    const(DataFormat)* fmt = format_info(format);
+    if (fmt.type == ValueType.f32)
     {
-        if (element.series.format is format)
+        if (element.format == format)
             element.write_record((cast(const(void)*)&state)[0 .. float.sizeof], timestamp);
         else
-            element.value(box_record(&state, *format), timestamp);
+            element.value(box_record(&state, *fmt), timestamp);
     }
     else
     {
         double value = state * pre_scale;
-        if (element.series.format is format)
+        if (element.format == format)
             element.write_record((cast(const(void)*)&value)[0 .. double.sizeof], timestamp);
         else
-            element.value(box_record(&value, *format), timestamp);
+            element.value(box_record(&value, *fmt), timestamp);
     }
 }

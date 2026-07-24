@@ -32,34 +32,17 @@ nothrow @nogc:
 
     WireLayout layout;
     float pre_scale = 1;
-    ushort format = 0xFFFF;
+    FormatId format;
     ushort encoding = 0xFFFF;
 
     bool valid() const
-        => format != 0xFFFF;
+        => format.valid;
 
     const(DataFormat)* fmt() const
-        => format_by_index(format);
+        => format_info(format);
 
     const(Encoding)* enc() const
         => encoding == 0xFFFF ? null : encoding_by_index(encoding);
-}
-
-// Registered formats are shared immutable instances held for the process lifetime.
-// Elements point here so formats outlive profiles and bindings.
-// Registration happens while loading configuration; runtime resolves by index only.
-ushort register_format(DataFormat format)
-{
-    foreach (i, f; g_formats)
-    {
-        if (format_equal(*f, format))
-            return cast(ushort)i;
-    }
-    assert(g_formats.length < 0xFFFF, "format registry full");
-    DataFormat* f = defaultAllocator().allocT!DataFormat();
-    *f = format;
-    g_formats ~= f;
-    return cast(ushort)(g_formats.length - 1);
 }
 
 const(Constraint)* register_constraint(Constraint value)
@@ -73,12 +56,6 @@ const(Constraint)* register_constraint(Constraint value)
     *constraint = value;
     g_constraints ~= constraint;
     return constraint;
-}
-
-const(DataFormat)* format_by_index(ushort i)
-{
-    assert(i < g_formats.length, "invalid format index");
-    return g_formats[i];
 }
 
 ushort register_desc(ref const SampleDesc desc)
@@ -463,11 +440,11 @@ unittest
     scope(exit) clear_encoding_registry();
 
     // registration deduplicates equal formats
-    ushort fa = register_format(DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Volt)));
-    ushort fb = register_format(DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Volt)));
-    ushort fc = register_format(DataFormat(ValueType.s16, SeriesKind.held));
+    FormatId fa = register_format(DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Volt)));
+    FormatId fb = register_format(DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Volt)));
+    FormatId fc = register_format(DataFormat(ValueType.s16, SeriesKind.held));
     assert(fa == fb && fa != fc);
-    assert(format_by_index(fa).unit == ScaledUnit(Volt));
+    assert(format_info(fa).unit == ScaledUnit(Volt));
 
     // scaled BE register -> f64 record (Modbus format)
     SampleDesc volts = SampleDesc(WireLayout(WK.signed_, 16, 0, WF.reverse), 0.1f, fa);
@@ -480,7 +457,7 @@ unittest
     assert(back == reg);
 
     // bool@3 within a shared register; RMW preserves neighbours
-    ushort fbool = register_format(DataFormat(ValueType.bool_, SeriesKind.held));
+    FormatId fbool = register_format(DataFormat(ValueType.bool_, SeriesKind.held));
     SampleDesc flag = SampleDesc(WireLayout(WK.bool_, 1, 3, WF.reverse, 2, 2), 1, fbool);
     ubyte[2] status = [0x9A, 0xBC];
     bool b;
@@ -489,7 +466,7 @@ unittest
 
     // enum register: names parse, numbers format
     enum Mode : ushort { off = 0, eco = 1, boost = 2 }
-    ushort fmode = register_format(DataFormat(ValueType.u16, SeriesKind.held, enum_info!Mode.make_void()));
+    FormatId fmode = register_format(DataFormat(ValueType.u16, SeriesKind.held, enum_info!Mode.make_void()));
     SampleDesc mode = SampleDesc(WireLayout(WK.unsigned_, 16, 0, WF.reverse), 1, fmode);
     ushort m;
     assert(parse_record("boost", mode, (cast(void*)&m)[0 .. 2]));
@@ -503,7 +480,7 @@ unittest
     const(Encoding)* dt48 = find_encoding("yymmddhhmmss");
     ubyte[6] dtw = [26, 7, 18, 13, 45, 30];  // wire yy MM dd hh mm ss
     SampleDesc when_be = SampleDesc(WireLayout(WK.char_, 8, 0, WF.none), 1,
-                                    0xFFFF, encoding_index_of(*dt48));
+                                    FormatId.invalid, encoding_index_of(*dt48));
     SysTime st;
     assert(sample_record(dtw, when_be, (cast(void*)&st)[0 .. SysTime.sizeof]));
     DateTime dt = get_date_time(st);
@@ -513,7 +490,7 @@ unittest
     // pod user type, big-endian members: fused image->record flip
     static struct Pair { ushort a; ushort b; }
     ushort ti = register_type_record(TypeRecordFor!(Pair, 0xBEEF0001, 0, false, "pair"));
-    ushort fpair = register_format(DataFormat(ValueType.user, SeriesKind.held, &get_type_details(ti)));
+    FormatId fpair = register_format(DataFormat(ValueType.user, SeriesKind.held, &get_type_details(ti)));
     SampleDesc pair = SampleDesc(WireLayout(WK.char_, 8, 0, WF.members_be), 1, fpair);
     ubyte[4] pw = [0x01, 0x02, 0x03, 0x04];
     Pair p;
@@ -524,7 +501,7 @@ unittest
     assert(pback == pw);
 
     // text fields: swizzled chars, padding stripped, no allocation
-    ushort fstr = register_format(DataFormat(ValueType.char_, SeriesKind.held));
+    FormatId fstr = register_format(DataFormat(ValueType.char_, SeriesKind.held));
     SampleDesc name = SampleDesc(WireLayout(WK.char_, 8, 0, WF.swap_word_bytes), 1, fstr);
     char[8] namebuf;
     immutable char[6] namewire = "EHLL!O";
@@ -536,7 +513,6 @@ private:
 
 import urt.array : Array;
 
-__gshared Array!(DataFormat*) g_formats;
 __gshared Array!(Constraint*) g_constraints;
 __gshared Array!SampleDesc g_descs;
 __gshared Map!(String, const(VoidEnumInfo)*) g_enums;
@@ -549,21 +525,6 @@ bool member_flip(WireLayout l) pure
     else
         enum host_be = true;
     return ((l.flags & WireFlags.members_be) != 0) != host_be;
-}
-
-bool format_equal(ref const DataFormat a, ref const DataFormat b) pure
-{
-    if (a.type != b.type || a.kind != b.kind || a.desc != b.desc ||
-        a.count != b.count || a.rate != b.rate || a.clock !is b.clock || a.constraint !is b.constraint)
-        return false;
-    if (a.type == ValueType.user)
-        return a.user_type is b.user_type;
-    final switch (a.desc) with (DataFormat.Desc)
-    {
-        case none:     return true;
-        case quantity: return a.unit == b.unit;
-        case enum_:    return a.enum_info is b.enum_info;
-    }
 }
 
 bool constraint_equal(ref const Constraint a, ref const Constraint b) pure

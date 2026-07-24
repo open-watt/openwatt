@@ -136,7 +136,6 @@
     <DCompile Include="src\manager\cron.d" />
     <DCompile Include="src\manager\device.d" />
     <DCompile Include="src\manager\element.d" />
-    <DCompile Include="src\manager\element2.d" />
     <DCompile Include="src\manager\series.d" />
     <DCompile Include="src\manager\expression.d" />
     <DCompile Include="src\manager\features.d" />
@@ -152,7 +151,6 @@
     <DCompile Include="src\manager\secret.d" />
     <DCompile Include="src\manager\signal.d" />
     <DCompile Include="src\manager\sample\spec.d" />
-    <DCompile Include="src\manager\subscriber.d" />
     <DCompile Include="src\manager\sync\encoder.d" />
     <DCompile Include="src\manager\sync\json_encoder.d" />
     <DCompile Include="src\manager\sync\package.d" />

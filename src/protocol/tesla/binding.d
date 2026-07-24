@@ -86,7 +86,7 @@ nothrow @nogc:
 
         if (_target_current && _target_current.access != Access.read)
         {
-            _target_current.add_subscriber(&on_target_current_change);
+            _target_current.subscribe(&on_target_current_change);
             _subscribed = true;
         }
 
@@ -97,7 +97,7 @@ nothrow @nogc:
     {
         if (_subscribed)
         {
-            _target_current.remove_subscriber(&on_target_current_change);
+            _target_current.unsubscribe(&on_target_current_change);
             _subscribed = false;
         }
         _master = null;
@@ -244,7 +244,7 @@ private:
     struct SampleElement
     {
         Element* element;
-        const(DataFormat)* format;
+        FormatId format;
         SampleKind kind;
     }
 
@@ -274,36 +274,36 @@ private:
         return e;
     }
 
-    Element* add_sample(Component parent, const(char)[] id, SampleKind kind, const(DataFormat)* format, Access access = Access.read)
+    Element* add_sample(Component parent, const(char)[] id, SampleKind kind, FormatId format, Access access = Access.read)
     {
         Element* e = find_or_create_element(parent, id, access);
-        if (!e.series.format)
-            e.series.format = format;
+        if (!e.format.valid)
+            e.format = format;
         _elements ~= SampleElement(e, format, kind);
         return e;
     }
 
-    const(DataFormat)* quantity_format(ValueType type, ScaledUnit unit)
-        => format_by_index(register_format(DataFormat(type, SeriesKind.held, unit)));
+    FormatId quantity_format(ValueType type, ScaledUnit unit)
+        => register_format(DataFormat(type, SeriesKind.held, unit));
 
-    const(DataFormat)* centiamps_format()
+    FormatId centiamps_format()
         => quantity_format(ValueType.u16, ScaledUnit(Ampere, -2));
 
-    const(DataFormat)* enum_format(E)()
-        => format_by_index(register_format(DataFormat(ValueType.u8, SeriesKind.held, enum_info!E.make_void())));
+    FormatId enum_format(E)()
+        => register_format(DataFormat(ValueType.u8, SeriesKind.held, enum_info!E.make_void()));
 
-    const(DataFormat)* text_format()
+    FormatId text_format()
     {
         DataFormat format = DataFormat(ValueType.char_, SeriesKind.held);
         format.count = 0;
-        return format_by_index(register_format(format));
+        return register_format(format);
     }
 
     void write_sample(T)(ref SampleElement sample, T value, SysTime timestamp)
     {
         static if (is(T : const(char)[]))
         {
-            if (sample.element.series.format is sample.format)
+            if (sample.element.format == sample.format)
                 sample.element.write_sample(value, timestamp);
             else
                 sample.element.value(value, timestamp);
@@ -311,10 +311,10 @@ private:
         else
         {
             const(void)[] record = (cast(const(void)*)&value)[0 .. T.sizeof];
-            if (sample.element.series.format is sample.format)
+            if (sample.element.format == sample.format)
                 sample.element.write_record(record, timestamp);
             else
-                sample.element.value(box_record(record.ptr, *sample.format), timestamp);
+                sample.element.value(box_record(record.ptr, *format_info(sample.format)), timestamp);
         }
     }
 
@@ -327,13 +327,19 @@ private:
         }
     }
 
-    void on_target_current_change(ref Element e, ref const Variant val, SysTime ts, ref const Variant prev, SysTime prev_ts)
+    void on_target_current_change(ref const SampleCommit samples)
     {
         if (!_master)
             return;
-        TeslaTWCMaster.Charger* charger = &_master.chargers[_charger_index];
-        charger.target_current = (cast(CentiAmps)val.asQuantity()).value;
-        version (DebugTWCBinding)
-            log.trace("set target current: ", charger.target_current);
+        foreach (ref update; samples.updates)
+        {
+            if (update.element !is _target_current)
+                continue;
+            TeslaTWCMaster.Charger* charger = &_master.chargers[_charger_index];
+            charger.target_current = (cast(CentiAmps)update.value.asQuantity()).value;
+            version (DebugTWCBinding)
+                log.trace("set target current: ", charger.target_current);
+            return;
+        }
     }
 }

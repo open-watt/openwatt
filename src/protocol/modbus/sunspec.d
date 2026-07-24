@@ -1325,8 +1325,8 @@ private:
             return;
         }
 
-        if (!e.series.format)
-            e.series.format = desc.fmt;
+        if (!e.format.valid)
+            e.format = desc.format;
 
         if (!sentinel_now)
         {
@@ -1806,7 +1806,7 @@ private bool write_sunspec_sample(Element* element, const(void)[] wire, ref cons
     {
         char[128] buffer;
         const(char)[] text = sample_text(wire, base_desc, buffer);
-        if (element.series.format is fmt)
+        if (element.format == base_desc.format)
             element.write_sample(text, ts);
         else
             element.value(Variant(text), ts);
@@ -1820,7 +1820,7 @@ private bool write_sunspec_sample(Element* element, const(void)[] wire, ref cons
     Scalar scalar;
     if (!sample_record(wire, desc, scalar.raw[0 .. fmt.stride]))
         return false;
-    if (element.series.format is fmt)
+    if (element.format == desc.format)
         element.write_record(scalar.raw[0 .. fmt.stride], ts);
     else
         element.value(box_record(scalar.raw.ptr, *fmt), ts);
@@ -1882,7 +1882,7 @@ unittest
     assert(*cast(double*)record.raw.ptr > 123.39 && *cast(double*)record.raw.ptr < 123.41);
 
     Element scaled_element;
-    scaled_element.series.format = scaled_desc.fmt;
+    scaled_element.format = scaled_desc.format;
     assert(write_sunspec_sample(&scaled_element, raw, scaled_desc, 0.1f, getSysTime()));
     double mounted_value = scaled_element.value.asQuantity().value;
     assert(mounted_value > 123.39 && mounted_value < 123.41);
@@ -1897,7 +1897,7 @@ unittest
     ubyte[32] text_wire;
     text_wire[0 .. 5] = cast(const(ubyte)[])"Model";
     Element text_element;
-    text_element.series.format = text_desc.fmt;
+    text_element.format = text_desc.format;
     assert(write_sunspec_sample(&text_element, text_wire, text_desc, 1, getSysTime()));
     assert(text_element.value.asString == "Model");
 

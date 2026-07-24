@@ -319,7 +319,7 @@ nothrow @nogc:
     void release_shape_watches()
     {
         foreach (e; shape_elements[])
-            e.remove_subscriber(&on_shape_change);
+            e.unsubscribe(&on_shape_change);
         shape_elements.clear();
     }
 
@@ -633,7 +633,7 @@ nothrow @nogc:
     }
 
 private:
-    void on_shape_change(ref Element, ref const Variant, SysTime, ref const Variant, SysTime)
+    void on_shape_change(ref const SampleCommit)
     {
         shape_dirty = true;
     }
@@ -794,7 +794,7 @@ private:
         {
             foreach (e; c.elements[])
             {
-                e.add_subscriber(&on_shape_change);
+                e.subscribe(&on_shape_change);
                 shape_elements ~= e;
             }
 
