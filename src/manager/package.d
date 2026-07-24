@@ -1942,8 +1942,9 @@ Variant to_int(Variant[] args)
         return Variant(cast(ubyte)args[0].asBool);
     if (args[0].isNumber)
     {
+        // quantities yield their value in their own scale; the unit is the caller's context
         if (args[0].isQuantity)
-            return Variant();
+            return Variant(cast(long)args[0].asQuantity!double().value);
         return Variant(cast(long)args[0].asDouble);
     }
     if (args[0].isString)
@@ -1966,7 +1967,7 @@ Variant to_float(Variant[] args)
     if (args[0].isNumber)
     {
         if (args[0].isQuantity)
-            return Variant();
+            return Variant(args[0].asQuantity!double().value);
         if (args[0].isDouble)
             return args[0];
         return Variant(args[0].asDouble);
