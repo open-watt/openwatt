@@ -378,6 +378,7 @@ protected:
 
         if (_current_pass != Pass.serve && fmt.is_scalar)
         {
+            e.format = sample_desc.format;
             manager.series.Scalar zero;
             zero.raw[] = 0;
             e.value = box_record(zero.raw.ptr, *fmt);

@@ -139,6 +139,7 @@ protected:
 
         SampleDesc sd = desc_by_index(ble.desc);
         const(DataFormat)* fmt = sd.fmt;
+        e.format = sd.format;
         if (fmt.is_scalar)
         {
             Scalar z;

@@ -13,6 +13,7 @@ import urt.string;
 public import urt.variant;
 
 import manager.value;
+import manager.series : FormatId;
 
 //version = ExpressionDebug;
 
@@ -542,6 +543,99 @@ nothrow @nogc:
                     case Type.div: return Variant(l / r);
                     default: assert(false);
                 }
+        }
+    }
+
+    FormatId infer_format(ref EvalContext ctx) const
+    {
+        import manager;
+        import manager.element;
+        import manager.series;
+
+        FormatId numeric(ScaledUnit unit)
+            => register_format(DataFormat(ValueType.f64, SeriesKind.held, unit));
+
+        FormatId text()
+        {
+            DataFormat format = DataFormat(ValueType.char_, SeriesKind.held);
+            format.count = 0;
+            return register_format(format);
+        }
+
+        bool number_format(FormatId id, out ScaledUnit unit)
+        {
+            if (!id.valid)
+                return false;
+            const(DataFormat)* format = format_info(id);
+            if (format.type.value_class == ValueClass.exact ||
+                format.desc == DataFormat.Desc.enum_)
+                return false;
+            unit = format.desc == DataFormat.Desc.quantity ? format.unit : ScaledUnit();
+            return true;
+        }
+
+        final switch (ty)
+        {
+            case Type.num:
+                return numeric(f.unit);
+            case Type.str:
+            case Type.cat:
+                return text();
+            case Type.elem:
+            {
+                const(char)[] id = get_str();
+                bool absolute = id.length > 0 && id[0] == '.';
+                if (absolute)
+                    id = id[1 .. $];
+                Element* e = (!absolute && ctx.root) ? ctx.root.find_element(id)
+                                                     : g_app.find_element(id);
+                return e ? e.format : FormatId.invalid;
+            }
+            case Type.neg:
+            {
+                ScaledUnit unit;
+                return number_format(left.infer_format(ctx), unit)
+                    ? numeric(unit) : FormatId.invalid;
+            }
+            case Type.not:
+            case Type.or:
+            case Type.and:
+            case Type.eq:
+            case Type.ne:
+            case Type.lt:
+            case Type.le:
+                return register_format(DataFormat(ValueType.bool_, SeriesKind.held));
+            case Type.add:
+            case Type.sub:
+            {
+                ScaledUnit l, r;
+                if (!number_format(left.infer_format(ctx), l) ||
+                    !number_format(right.infer_format(ctx), r) ||
+                    l.unit != r.unit)
+                    return FormatId.invalid;
+                return numeric(l);
+            }
+            case Type.mul:
+            case Type.div:
+            {
+                ScaledUnit l, r;
+                if (!number_format(left.infer_format(ctx), l) ||
+                    !number_format(right.infer_format(ctx), r))
+                    return FormatId.invalid;
+                return numeric(ty == Type.mul ? l * r : l / r);
+            }
+            case Type.call:
+            {
+                Variant value = evaluate(ctx);
+                return value.isNull ? FormatId.invalid : register_value_format(value);
+            }
+            case Type.null_:
+            case Type.var:
+            case Type.arr:
+            case Type.exp_list:
+            case Type.cmd_list:
+            case Type.idx:
+                return FormatId.invalid;
         }
     }
 

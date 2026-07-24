@@ -139,6 +139,7 @@ protected:
 
         SampleDesc sd = desc_by_index(can.desc);
         const(DataFormat)* fmt = sd.fmt;
+        e.format = sd.format;
         // typed zero until the first frame arrives
         if (fmt.is_scalar)
         {

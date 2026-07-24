@@ -3,6 +3,7 @@ module manager.device;
 import urt.array;
 import urt.lifetime;
 import urt.log;
+import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.time;
 import urt.variant;
@@ -99,7 +100,7 @@ nothrow @nogc:
     {
         Expression* expression;
         struct { Element* source; SumType sum_type; }
-        ElementLink* link;
+        struct { ElementLink* link; const(char)* alias_source; }
     }
 
     void element_updated(ref const SampleCommit samples)
@@ -144,6 +145,30 @@ nothrow @nogc:
         ctx.root = device;
         Variant result = expression.evaluate(ctx);
         target.value(result.move, timestamp, &element_updated);
+    }
+
+    FormatId infer_expression_format()
+    {
+        EvalContext ctx;
+        ctx.root = device;
+        return expression.infer_format(ctx);
+    }
+
+    FormatId infer_accumulator_format(Element* element)
+    {
+        const(DataFormat)* source_format = element.data_format;
+        if (source_format.type.value_class == ValueClass.exact ||
+            source_format.desc == DataFormat.Desc.enum_)
+            return FormatId.invalid;
+
+        ScaledUnit unit = source_format.desc == DataFormat.Desc.quantity
+            ? source_format.unit : ScaledUnit();
+        if (sum_type != SumType.sum)
+        {
+            import urt.si.unit : Second;
+            unit = unit * ScaledUnit(Second);
+        }
+        return register_format(DataFormat(ValueType.f64, SeriesKind.held, unit));
     }
 
     void accumulate(ref const Variant new_value, SysTime timestamp,
@@ -253,6 +278,8 @@ nothrow @nogc:
                         g_app.destroy_link(c.link);
                     break;
             }
+            if (!c.bound && c.target)
+                g_app.allocator.freeT(c.target);
         }
         computations.clear();
     }
@@ -300,6 +327,10 @@ package:
             }
             if (!all_resolved)
                 continue;
+            FormatId format = c.infer_expression_format();
+            if (!format.valid)
+                continue;
+            attach_computation(c.target, format);
             foreach (r; refs)
             {
                 Element* e = resolve_ref(r);
@@ -318,6 +349,10 @@ package:
             Element* e = resolve_ref(src);
             if (!e)
                 continue;
+            FormatId format = c.infer_accumulator_format(e);
+            if (!format.valid)
+                continue;
+            attach_computation(c.target, format);
             e.subscribe(&c.element_updated);
             c.source = e;
             c.bound = true;
@@ -328,12 +363,26 @@ package:
         {
             if (c.bound || c.kind != ComputationKind.alias_)
                 continue;
-            // ElementLink manages its own lifecycle via g_app
+            const(char)[] src = as_dstring(c.alias_source);
+            Element* source = resolve_ref(src);
+            if (!source)
+                continue;
+            attach_computation(c.target, source.format);
+            c.link = g_app.create_link(c.target, null, source, null);
             c.bound = true;
             ++newly_bound;
         }
 
         return newly_bound;
+    }
+
+    void attach_computation(Element* element, FormatId format)
+    {
+        assert(element && format.valid && element.parent);
+        element.format = format;
+        element.parent.elements ~= element;
+        g_app.notify_element_created(element);
+        apply_default_retention(element.parent);
     }
 
 }
@@ -446,7 +495,6 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                             e.desc = et.desc.makeString(defaultAllocator());
                     }
                 }
-                c.elements ~= e;
             }
 
             final switch (el.type) with (ElementTemplate.Type)
@@ -461,9 +509,8 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     catch (Exception ex)
                     {
                         writeWarning("Failed to parse expression: ", expr_str);
-                        c.elements.removeFirstSwapLast(e);
                         g_app.allocator.freeT(e);
-                        break;
+                        continue;
                     }
 
                     bool have_var_refs;
@@ -471,15 +518,24 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     if (have_var_refs)
                     {
                         writeWarning("Element expressions can't have variable references: ", expr_str);
-                        c.elements.removeFirstSwapLast(e);
                         g_app.allocator.freeT(e);
-                        break;
+                        expr.free_expression();
+                        continue;
                     }
 
                     if (refs.empty)
                     {
                         EvalContext ctx;
-                        e.value = expr.evaluate(ctx);
+                        Variant value = expr.evaluate(ctx);
+                        e.format = expr.infer_format(ctx);
+                        if (!e.format.valid || value.isNull)
+                        {
+                            writeWarning("Element expression has no stable format: ", expr_str);
+                            expr.free_expression();
+                            g_app.allocator.freeT(e);
+                            continue;
+                        }
+                        e.value = value.move;
                         e.sampling_mode = SamplingMode.constant;
                         expr.free_expression();
                     }
@@ -501,7 +557,6 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                     e.format = create_element_handler(device, e, el.get_element_desc(profile), el.index);
                     if (!e.format.valid)
                     {
-                        c.elements.removeFirstSwapLast(e);
                         g_app.allocator.freeT(e);
                         continue;
                     }
@@ -523,18 +578,20 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                 case alias_:
                     if (!is_new_element)
                         break;
-                    import urt.mem.temp : tconcat;
-                    const(char)[] target_path = as_dstring(el.get_source(profile));
-                    Element* target = device.resolve_ref(target_path);
-                    const(char)[] link_path = (target_path.length > 0 && target_path[0] == '.') ? target_path[1 .. $] : tconcat(device.id, ".", target_path);
                     Computation comp;
                     comp.kind = ComputationKind.alias_;
                     comp.device = device;
                     comp.target = e;
-                    comp.link = g_app.create_link(e, null, target, link_path);
+                    comp.alias_source = el.get_source(profile);
                     device.computations ~= comp;
                     e.sampling_mode = SamplingMode.dependent;
                     break;
+            }
+
+            if (is_new_element && e.format.valid)
+            {
+                c.elements ~= e;
+                g_app.notify_element_created(e);
             }
         }
 

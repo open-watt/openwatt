@@ -348,11 +348,32 @@ private:
             }
         }
 
-        FormatId state_format = select_info
-            ? register_format(DataFormat(ValueType.u16, SeriesKind.held, select_info))
-            : make_state_format(config, domain, unit, state_class);
         const(char)[] path = tconcat("ha.", entity_id);
+        Element* prior_state = record.device.find_element(path);
+        FormatId state_format;
+        if (select_info)
+        {
+            if (prior_state)
+            {
+                const(DataFormat)* prior_format = prior_state.data_format;
+                if (prior_format.type != ValueType.u16 ||
+                    prior_format.desc != DataFormat.Desc.enum_)
+                {
+                    log.warning("Home Assistant select changed an existing non-select element: ", path);
+                    return;
+                }
+                update_enum_format(prior_state.format, select_info);
+                state_format = prior_state.format;
+            }
+            else
+                state_format = register_format(
+                    DataFormat(ValueType.u16, SeriesKind.held, select_info));
+        }
+        else
+            state_format = make_state_format(config, domain, unit, state_class);
         Element* state = record.device.find_or_create_element(path, state_format);
+        if (select_info)
+            select_info = state.data_format.enum_info;
         Component ha_component = record.device.find_component("ha");
         if (ha_component && ha_component.name.empty)
             ha_component.name = "Home Assistant".makeString(defaultAllocator());
