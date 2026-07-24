@@ -6,7 +6,7 @@ import urt.log;
 import urt.mem.allocator : defaultAllocator;
 import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
-import urt.meta.enuminfo : VoidEnumInfo;
+import urt.meta.enuminfo : bitfield, VoidEnumInfo;
 import urt.si.unit;
 import urt.string;
 import urt.time;
@@ -21,7 +21,10 @@ import manager.device;
 import manager.element;
 import manager.plugin;
 import manager.profile : Frequency, freq_to_element_mode, find_known_element, KnownElementTemplate;
-import manager.sampler;
+import manager.sample;
+import manager.series;
+import manager.sample.spec : compile_spec, modbus_context;
+import manager.sample.wire : WireKind;
 
 import protocol.modbus;
 import protocol.modbus.iface : ModbusProtocol;
@@ -55,7 +58,7 @@ enum SunSpecInverterState : ushort
 // SunSpec inverter event flags (model 101/103 `Evt1` bitfield32). Bits 16-31
 // reserved by SunSpec for future expansion; `EvtVnd1..4` are vendor-specific
 // and not represented here.
-enum SunSpecInverterEvent : uint
+@bitfield enum SunSpecInverterEvent : uint
 {
     ground_fault       = 1u <<  0,
     dc_over_volt       = 1u <<  1,
@@ -169,7 +172,7 @@ private immutable FieldDef[] m1_fields = [
 //   4: grid.meter          (EnergyMeter ac)    - inverter exchange with the attached circuit
 // The AC output is a Port so /apps/energy/appliance bindings such as
 // `grid=house device=se10000h` can attach readings to the topology. A
-// coexisting CT (model 201/203) is the property-gateway export meter and is mounted
+// coexisting CT (model 201/203) is the property-gateway export meter and is placed
 // at inverter.export_meter below, not here.
 
 private immutable ComponentDef[] inverter_components_single = [
@@ -366,7 +369,7 @@ private immutable ComponentDef[] meter_three_components = [
 // When a meter model coexists with an inverter on the same physical device
 // (e.g. SolarEdge with its grid CT), that meter sits at the property gateway and
 // is the export-limiting / self-consumption reference, not the inverter's exchange
-// with its own circuit. It mounts under the Inverter component as `export_meter`.
+// with its own circuit. It lives under the Inverter component as `export_meter`.
 private immutable ComponentDef[] inverter_export_meter_single_components = [
     ComponentDef("inverter.export_meter", "EnergyMeter", "single-phase"),
 ];
@@ -714,14 +717,12 @@ protected:
     struct StripeField
     {
         Element* element;
-        ValueDesc desc;       // without SunSpec SF
+        SampleDesc desc;      // static unit scale only; SunSpec SF is applied per sample
         ushort reg;
         int sf_reg = -1;
         uint sentinel;
         Frequency freq;
-
-        ushort words() const pure nothrow @nogc
-            => cast(ushort)(desc.data_length / 2);
+        ubyte words;
     }
 
     // `middle` marks the realtime prefix; slow polls read the whole stripe.
@@ -1185,10 +1186,11 @@ private:
     void set_const_element(Component c, string template_, string id, Variant value)
     {
         Element* e = ensure_element(c, id);
+        if (!e.format.valid)
+            e.format = register_value_format(value);
         if (e.value.isNull)
         {
             e.value = value;
-            e.last_update = getSysTime();
             e.sampling_mode = SamplingMode.constant;
         }
         populate_element_metadata(e, template_, id);
@@ -1288,11 +1290,11 @@ private:
         if (fd.scale_off >= 0)
             sf_reg = cast(ushort)(ml.data_reg + fd.scale_off);
 
-        ValueDesc desc = make_value_desc(fd);
+        SampleDesc desc = make_sample_desc(fd);
         ushort reg = cast(ushort)(ml.data_reg + fd.offset + extra_offset);
         size_t idx = reg - chain.base_reg;
-        size_t words = desc.data_length / 2;
-        if (idx + words > chain.scan_buffer.length || desc.data_length > 128)
+        ubyte words = field_word_count(fd);
+        if (idx + words > chain.scan_buffer.length || words * 2 > 128)
         {
             version (DebugSunspec)
                 log.tracef("materialise: skip {0}.{1} — outside scan buffer", target.id[], fd.id);
@@ -1324,6 +1326,9 @@ private:
             return;
         }
 
+        if (!e.format.valid)
+            e.format = desc.format;
+
         if (!sentinel_now)
         {
             float scale = 1.0f;
@@ -1336,10 +1341,7 @@ private:
                 tmp[k*2 + 1] = cast(ubyte)(w & 0xFF);
             }
             if (have_scale)
-            {
-                e.value = sample_sunspec_value(tmp.ptr, desc, scale);
-                e.last_update = getSysTime();
-            }
+                write_sunspec_sample(e, tmp[0 .. words * 2], desc, scale, getSysTime());
         }
 
         if (fd.freq == Frequency.constant || fd.freq == Frequency.configuration)
@@ -1357,6 +1359,7 @@ private:
         sfd.sf_reg = sf_reg;
         sfd.sentinel = field_sentinel(fd.type);
         sfd.freq = fd.freq;
+        sfd.words = words;
         out_fields ~= sfd;
         e.sampling_mode = freq_to_element_mode(fd.freq);
         version (DebugSunspecRegs)
@@ -1464,10 +1467,11 @@ private:
     void set_type_element(Component c, string template_, string type_value)
     {
         Element* te = ensure_element(c, "type");
+        if (!te.format.valid)
+            te.format = register_value_format(type_value);
         if (te.value.isNull)
         {
             te.value = Variant(type_value);
-            te.last_update = getSysTime();
             te.sampling_mode = SamplingMode.constant;
         }
         populate_element_metadata(te, template_, "type");
@@ -1609,12 +1613,12 @@ private:
             if (f.sentinel != 0)
             {
                 bool is_sent = false;
-                if (f.desc.data_length == 2)
+                if (f.words == 1)
                 {
                     ushort raw = (cast(ushort)data[off] << 8) | data[off + 1];
                     is_sent = (raw == cast(ushort)f.sentinel);
                 }
-                else if (f.desc.data_length == 4)
+                else if (f.words == 2)
                 {
                     uint raw = (cast(uint)data[off]     << 24)
                              | (cast(uint)data[off + 1] << 16)
@@ -1630,7 +1634,7 @@ private:
                 }
             }
 
-            f.element.value(sample_sunspec_value(data.ptr + off, f.desc, scale), ts);
+            write_sunspec_sample(f.element, data[off .. off + w * 2], f.desc, scale, ts);
             version (DebugSunspecRegs)
                 log.tracef("reg {0} = {1}", f.reg, f.element.value);
         }
@@ -1743,30 +1747,22 @@ private bool is_sentinel(FieldType t, const(ushort)[] words) pure
     }
 }
 
-private DataType build_data_type(FieldType t, ubyte str_words) pure
+private ubyte field_word_count(ref const FieldDef fd) pure
 {
-    final switch (t)
+    final switch (fd.type)
     {
         case FieldType.u16:
-            return cast(DataType)(DataType.u16 | DataType.big_endian);
         case FieldType.i16:
-            return cast(DataType)(DataType.i16 | DataType.big_endian);
+        case FieldType.enum16:
+            return 1;
         case FieldType.u32:
         case FieldType.acc32:
-            return cast(DataType)(DataType.u32 | DataType.big_endian);
         case FieldType.i32:
-            return cast(DataType)(DataType.i32 | DataType.big_endian);
         case FieldType.f32:
-            return cast(DataType)(DataType.u32 | DataType.big_endian | (DataKind.floating << 12));
-        case FieldType.str_:
-            return cast(DataType)(DataType.array |
-                                  (DataKind.string_ << 12) |
-                                  (uint(str_words) * 2 << 16));
-        case FieldType.enum16:
-            return cast(DataType)(DataType.u16 | DataType.big_endian | DataType.enumeration);
         case FieldType.bitfield32:
-            return cast(DataType)(DataType.u32 | DataType.big_endian | DataType.enumeration |
-                                  (DataKind.bitfield << 12));
+            return 2;
+        case FieldType.str_:
+            return fd.str_words;
     }
 }
 
@@ -1804,36 +1800,112 @@ private bool read_message_scale(ushort first, ushort last, const(ubyte)[] data, 
     return true;
 }
 
-private Variant sample_sunspec_value(const void* data, ref const ValueDesc desc, float scale)
+private bool write_sunspec_sample(Element* element, const(void)[] wire, ref const SampleDesc base_desc,
+                                   float scale, SysTime ts)
 {
-    if (scale == 1.0f || desc.is_enum || desc.is_string || desc.is_date_time)
-        return sample_value(data, desc);
-    ValueDesc scaled_desc = ValueDesc(desc.data_type, desc.unit, desc.pre_scale * scale);
-    return sample_value(data, scaled_desc);
+    const(DataFormat)* fmt = base_desc.fmt;
+    if (fmt.is_text)
+    {
+        char[128] buffer;
+        const(char)[] text = sample_text(wire, base_desc, buffer);
+        if (element.format == base_desc.format)
+            element.write_sample(text, ts);
+        else
+            element.value(Variant(text), ts);
+        return true;
+    }
+    if (!fmt.is_scalar)
+        return false;
+
+    SampleDesc desc = base_desc;
+    desc.pre_scale *= scale;
+    Scalar scalar;
+    if (!sample_record(wire, desc, scalar.raw[0 .. fmt.stride]))
+        return false;
+    if (element.format == desc.format)
+        element.write_record(scalar.raw[0 .. fmt.stride], ts);
+    else
+        element.value(box_record(scalar.raw.ptr, *fmt), ts);
+    return true;
 }
 
-private ValueDesc make_value_desc(ref const FieldDef fd)
+private SampleDesc make_sample_desc(ref const FieldDef fd)
 {
-    DataType dt = build_data_type(fd.type, fd.str_words);
+    const(char)[] spec;
+    final switch (fd.type)
+    {
+        case FieldType.u16:        spec = "u16";    break;
+        case FieldType.i16:        spec = "s16";    break;
+        case FieldType.u32:
+        case FieldType.acc32:      spec = "u32";    break;
+        case FieldType.i32:        spec = "s32";    break;
+        case FieldType.f32:        spec = "f32";    break;
+        case FieldType.str_:       spec = "str";    break;
+        case FieldType.enum16:     spec = "enum16"; break;
+        case FieldType.bitfield32: spec = "bf32";   break;
+    }
 
-    // Enum/bitfield: `unit` carries the registered enum type name.
+    const(VoidEnumInfo)* enum_info;
+    ScaledUnit unit;
+    float unit_scale = 1.0f;
     if (fd.type == FieldType.enum16 || fd.type == FieldType.bitfield32)
     {
         if (fd.unit)
-        {
-            if (const(VoidEnumInfo)** ei = fd.unit in g_app.enum_templates)
-                return ValueDesc(dt, *ei);
-        }
-        return ValueDesc(dt);
+            enum_info = find_enum_info(fd.unit);
     }
+    else if (fd.unit)
+        unit.parseUnit(fd.unit, unit_scale);
 
-    if (fd.type == FieldType.str_)
-        return ValueDesc(dt);
-    if (!fd.unit)
-        return ValueDesc(dt);
+    SampleDesc desc;
+    bool compiled = compile_spec(spec, modbus_context, unit, unit_scale, enum_info, null, desc);
+    assert(compiled, "invalid built-in SunSpec field descriptor");
 
-    ScaledUnit unit;
-    float unit_scale = 1.0f;
-    unit.parseUnit(fd.unit, unit_scale);
-    return ValueDesc(dt, unit, unit_scale);
+    // A runtime SunSpec scale factor can make an integer fractional. Its Element
+    // record format must therefore be real even when the current exponent is zero.
+    if (fd.scale_off >= 0 && desc.fmt.type != ValueType.f32 && desc.fmt.type != ValueType.f64)
+        desc.format = register_format(DataFormat(ValueType.f64, SeriesKind.held, unit));
+    return desc;
+}
+
+unittest
+{
+    import urt.meta.enuminfo : enum_info;
+
+    FieldDef scaled = FieldDef(0, "power", "W", 0, 1, FieldType.i16, 0, Frequency.realtime);
+    SampleDesc scaled_desc = make_sample_desc(scaled);
+    assert(scaled_desc.fmt.type == ValueType.f64);
+    assert(scaled_desc.layout.kind == WireKind.signed_);
+
+    SampleDesc live_desc = scaled_desc;
+    live_desc.pre_scale *= 0.1f;
+    immutable ubyte[2] raw = [ 0x04, 0xD2 ];
+    Scalar record;
+    assert(sample_record(raw, live_desc, record.raw[0 .. double.sizeof]));
+    assert(*cast(double*)record.raw.ptr > 123.39 && *cast(double*)record.raw.ptr < 123.41);
+
+    Element scaled_element;
+    scaled_element.format = scaled_desc.format;
+    assert(write_sunspec_sample(&scaled_element, raw, scaled_desc, 0.1f, getSysTime()));
+    double mounted_value = scaled_element.value.asQuantity().value;
+    assert(mounted_value > 123.39 && mounted_value < 123.41);
+
+    FieldDef unscaled = FieldDef(0, "state", null, 0, -1, FieldType.u16, 0, Frequency.high);
+    SampleDesc unscaled_desc = make_sample_desc(unscaled);
+    assert(unscaled_desc.fmt.type == ValueType.u16);
+
+    FieldDef text = FieldDef(0, "model", null, 0, -1, FieldType.str_, 16, Frequency.constant);
+    SampleDesc text_desc = make_sample_desc(text);
+    assert(text_desc.fmt.is_text && field_word_count(text) == 16);
+    ubyte[32] text_wire;
+    text_wire[0 .. 5] = cast(const(ubyte)[])"Model";
+    Element text_element;
+    text_element.format = text_desc.format;
+    assert(write_sunspec_sample(&text_element, text_wire, text_desc, 1, getSysTime()));
+    assert(text_element.value.asString == "Model");
+
+    register_enum_info("SunSpecInverterEvent", enum_info!SunSpecInverterEvent.make_void(), false);
+    FieldDef flags = FieldDef(0, "events", "SunSpecInverterEvent", 0, -1,
+                              FieldType.bitfield32, 0, Frequency.high);
+    SampleDesc flags_desc = make_sample_desc(flags);
+    assert(flags_desc.fmt.enum_info.bitfield);
 }

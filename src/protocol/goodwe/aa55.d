@@ -18,7 +18,6 @@ import urt.variant;
 import manager;
 import manager.base;
 import manager.collection;
-import manager.sampler;
 
 import protocol.goodwe : GoodWeModule;
 

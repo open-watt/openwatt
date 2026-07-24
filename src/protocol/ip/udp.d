@@ -29,7 +29,7 @@ struct UdpHeader
 static assert(UdpHeader.sizeof == 8);
 
 
-// One datagram parked in a UdpPcb's recv queue.
+// One datagram waiting in a UdpPcb's receive queue.
 // `data` is owned; freed on dequeue or PCB destruction.
 struct UdpDatagram
 {

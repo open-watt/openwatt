@@ -7,7 +7,6 @@ import urt.map;
 import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
 import urt.si.unit;
-import urt.si.quantity;
 import urt.string;
 import urt.time;
 import urt.variant;
@@ -20,7 +19,8 @@ import manager.component;
 import manager.device;
 import manager.element;
 import manager.profile;
-import manager.sampler;
+import manager.sample;
+import manager.series;
 
 import protocol.esphome;
 import protocol.esphome.client;
@@ -130,8 +130,6 @@ nothrow @nogc:
     }
 
 protected:
-    final override const(char)[] profile_dir() const pure
-        => "conf/ha_profiles/";
     final override const(char)[] profile_name() const pure
         => _profile_name[];
     final override const(char)[] model_name() const pure
@@ -151,9 +149,10 @@ protected:
         return true;
     }
 
-    final override void add_handler(Device, Element* e, ref const ElementDesc, ubyte)
+    final override FormatId add_handler(Device, Element* e, ref const ElementDesc, ubyte)
     {
         log.warning("element-map is not supported in ESPHome profiles (sensors are discovered at runtime); ignoring '", e.id, '\'');
+        return FormatId.invalid;
     }
 
 private:
@@ -161,9 +160,8 @@ private:
     {
         uint key;
         Element* element;
-        ScaledUnit unit;
+        FormatId format;
         float pre_scale = 1;
-        String custom_unit;
     }
 
     ObjectRef!ESPHomeClient _client;
@@ -198,33 +196,21 @@ private:
                 else
                     _dev.name = res.name;
 
-                Element* e = _dev.find_or_create_element("info.name");
                 if (res.friendly_name)
-                    e.value = res.friendly_name.move;
+                    _dev.set_element("info.name", res.friendly_name.move);
                 else
-                    e.value = res.name.move;
-                e = _dev.find_or_create_element("info.esphome_ver");
-                e.value = res.esphome_version.move;
-                e = _dev.find_or_create_element("info.compilation_time");
+                    _dev.set_element("info.name", res.name.move);
+                _dev.set_element("info.esphome_ver", res.esphome_version.move);
                 SysTime comp_time;
                 ptrdiff_t taken = comp_time.fromString(res.compilation_time[]);
                 if (taken == res.compilation_time.length)
-                    e.value = comp_time;
+                    _dev.set_element("info.compilation_time", comp_time);
                 if (res.manufacturer)
-                {
-                    e = _dev.find_or_create_element("info.manufacturer_name");
-                    e.value = res.manufacturer.move;
-                }
+                    _dev.set_element("info.manufacturer_name", res.manufacturer.move);
                 if (res.model)
-                {
-                    e = _dev.find_or_create_element("info.model_id");
-                    e.value = res.model.move;
-                }
+                    _dev.set_element("info.model_id", res.model.move);
                 if (res.friendly_name)
-                {
-                    e = _dev.find_or_create_element("info.model_name");
-                    e.value = res.friendly_name.move;
-                }
+                    _dev.set_element("info.model_name", res.friendly_name.move);
 
                 // client name/info...
 //                if (_client.server_name[])
@@ -239,29 +225,24 @@ private:
 //                }
 
                 // do we know if it's wifi or not?
-                e = _dev.find_or_create_element("status.network.mode");
-                e.value = StringLit!"wifi";
-
-                e = _dev.find_or_create_element("status.network.ip.address");
-                e.value(Variant(_client.get_address()));
+                _dev.set_element("status.network.mode", StringLit!"wifi");
+                _dev.set_element("status.network.ip.address", _client.get_address());
 
                 if (res.webserver_port)
-                {
-                    e = _dev.find_or_create_element("status.network.webserver_port");
-                    e.value = res.webserver_port;
-                }
+                    _dev.set_element("status.network.webserver_port", res.webserver_port);
                 if (res.mac_address)
                 {
-                    e = _dev.find_or_create_element("status.network.wifi.mac_address");
                     MACAddress addr;
                     taken = addr.fromString(res.mac_address[]);
                     if (taken == res.mac_address.length)
-                        e.value = addr;
+                        _dev.set_element("status.network.wifi.mac_address", addr);
                 }
                 if (res.bluetooth_mac_address)
                 {
-                    e = _dev.find_or_create_element("status.network.bluetooth.mac_address");
-                    e.value = MACAddress().fromString(res.bluetooth_mac_address[]);
+                    MACAddress addr;
+                    taken = addr.fromString(res.bluetooth_mac_address[]);
+                    if (taken == res.bluetooth_mac_address.length)
+                        _dev.set_element("status.network.bluetooth.mac_address", addr);
                 }
 
                 Component c = _dev.find_component("info");
@@ -334,12 +315,15 @@ private:
                 }
                 const(char)[] id = tmp[0 .. res.name.length];
 
-                Element* e = _dev.find_or_create_element(tconcat("sensors.", id));
-                e.name = res.name.move;
-
                 SampleElement entry;
                 entry.key = res.key;
+                bool known_unit;
+                entry.format = sensor_format(res.unit_of_measurement[], entry.pre_scale, known_unit);
+                Element* e = _dev.find_or_create_element(tconcat("sensors.", id), entry.format);
+                e.name = res.name.move;
                 entry.element = e;
+                if (!known_unit)
+                    e.display_unit = res.unit_of_measurement.move;
                 SampleElement* el = _elements.insert(res.key, entry);
                 if (!el)
                 {
@@ -349,19 +333,6 @@ private:
 
                 // TODO: assert device_class (ie: "voltage") is matching to the units and/or is respected?
 
-                if (res.unit_of_measurement)
-                {
-                    ScaledUnit unit;
-                    float pre_scale = 1;
-                    ptrdiff_t taken = unit.parse_unit(res.unit_of_measurement[], pre_scale, false);
-                    if (taken == res.unit_of_measurement.length)
-                    {
-                        el.unit = unit;
-                        el.pre_scale = pre_scale;
-                    }
-                    else
-                        el.custom_unit = res.unit_of_measurement.move;
-                }
                 break;
 
             case ListEntitiesSwitchResponse.id:
@@ -519,7 +490,7 @@ private:
                     break;
                 if (SampleElement* el = res.key in _elements)
                 {
-                    el.element.value = Quantity!float(res.state * el.pre_scale, el.unit);
+                    write_sensor_sample(el.element, el.format, el.pre_scale, res.state, getSysTime());
                     version (DebugESPHomeBinding)
                         log.trace("sample: ", el.element.id, " = ", el.element.value);
                 }
@@ -528,5 +499,68 @@ private:
             default:
                 break;
         }
+    }
+}
+
+unittest
+{
+    import urt.si.unit : Ampere, ScaledUnit, Volt;
+
+    float pre_scale;
+    bool known_unit;
+    FormatId volts = sensor_format("V", pre_scale, known_unit);
+    assert(known_unit && pre_scale == 1 && format_info(volts).type == ValueType.f32);
+
+    Element voltage;
+    voltage.format = volts;
+    write_sensor_sample(&voltage, volts, pre_scale, 230.5f, getSysTime());
+    double observed_volts = voltage.scaled_value(ScaledUnit(Volt));
+    assert(observed_volts > 230.49 && observed_volts < 230.51);
+
+    FormatId scaled = register_format(DataFormat(ValueType.f64, SeriesKind.held, ScaledUnit(Ampere)));
+    Element current;
+    current.format = scaled;
+    write_sensor_sample(&current, scaled, 0.1f, 123, getSysTime());
+    double observed_amps = current.scaled_value(ScaledUnit(Ampere));
+    assert(observed_amps > 12.299 && observed_amps < 12.301);
+
+    FormatId custom = sensor_format("dBm", pre_scale, known_unit);
+    assert(!known_unit && pre_scale == 1 && format_info(custom).type == ValueType.f32);
+    assert(format_info(custom).desc == DataFormat.Desc.none);
+}
+
+private:
+
+FormatId sensor_format(const(char)[] unit_text, out float pre_scale, out bool known_unit)
+{
+    ScaledUnit unit;
+    ptrdiff_t taken = unit.parse_unit(unit_text, pre_scale, false);
+    known_unit = taken == unit_text.length;
+    if (!known_unit)
+    {
+        unit = ScaledUnit();
+        pre_scale = 1;
+    }
+    ValueType type = pre_scale == 1 ? ValueType.f32 : ValueType.f64;
+    return register_format(DataFormat(type, SeriesKind.held, unit));
+}
+
+void write_sensor_sample(Element* element, FormatId format, float pre_scale, float state, SysTime timestamp)
+{
+    const(DataFormat)* fmt = format_info(format);
+    if (fmt.type == ValueType.f32)
+    {
+        if (element.format == format)
+            element.write_record((cast(const(void)*)&state)[0 .. float.sizeof], timestamp);
+        else
+            element.value(box_record(&state, *fmt), timestamp);
+    }
+    else
+    {
+        double value = state * pre_scale;
+        if (element.format == format)
+            element.write_record((cast(const(void)*)&value)[0 .. double.sizeof], timestamp);
+        else
+            element.value(box_record(&value, *fmt), timestamp);
     }
 }

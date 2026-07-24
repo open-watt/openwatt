@@ -9,22 +9,19 @@ import urt.map;
 import urt.mem;
 import urt.mem.string;
 import urt.meta.enuminfo;
+import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.string.format;
 
 import manager.component;
-import urt.uuid;
 
+import manager.sample.codec : Encoding;
 import manager.config;
 import manager.device;
 import manager.element;
-import manager.features;
-import manager.sampler;
-
-static if (has_http)
-    import protocol.http.message : HTTPMethod;
-else
-    enum HTTPMethod : ubyte { unknown }  // stub: HTTP profile requests need has_http
+import manager.sample : find_enum_info, register_desc, register_enum_info, SampleDesc;
+import manager.series : DataFormat, ValueType;
+import manager.sample.spec : compile_spec, LayoutContext;
 
 version = IncludeDescription;
 
@@ -51,17 +48,6 @@ enum Frequency : ubyte
     on_demand,
     report,
     configuration
-}
-
-enum ElementType : ubyte
-{
-    modbus,
-    can,
-    zigbee,
-    http,
-    aa55,
-    mqtt,
-    ble
 }
 
 enum SumType : ubyte
@@ -100,144 +86,181 @@ pure nothrow @nogc:
     Access access = Access.read;
     Frequency update_frequency = Frequency.medium;
 
-    ElementType type() const
-        => cast(ElementType)(_element_index >> 13);
+    uint kind() const
+        => _kind;
 
     size_t element() const
-        => _element_index & 0x1FFF;
+        => _index;
 
     const(char)[] get_description(ref const(Profile) profile) const
         => _description.cache_string(profile.desc_strings);
 
 private:
-    ushort _element_index; // bits 0-12: index, bits 13-15: type
+    ubyte _kind;
+    ushort _index;
     ushort _description;
 }
 
-struct ElementDesc_Modbus
+struct ProfileSize
 {
-    import protocol.modbus.message : RegisterType;
-    import protocol.modbus.binding : modbus_data_type;
+    size_t string_bytes;
 
-    ushort reg;
-    RegisterType reg_type = RegisterType.holding_register;
-    ValueDesc value_desc = ValueDesc(modbus_data_type!"u16");
-}
-
-struct ElementDesc_CAN
-{
-    uint message_id;
-    ubyte offset;
-    ValueDesc value_desc;
-}
-
-struct ElementDesc_Zigbee
-{
-    ushort cluster_id;
-    ushort attribute_id;
-    ushort manufacturer_code;
-    ValueDesc value_desc;
-}
-
-struct RequestDesc
-{
-pure nothrow @nogc:
-
-    enum FormatType : ubyte
+    void add_string(const(char)[] value) pure nothrow @nogc
     {
-        none,       // no body formatting (static URL or URL placeholders)
-        json,       // JSON body template with {key}/{value} expand-and-merge
-        form,       // key=val&key=val body template with {key}/{value}
+        if (value.length)
+            string_bytes += 2 + value.length + (value.length & 1);
+    }
+}
+
+struct ProfileBuilder
+{
+nothrow @nogc:
+
+    Profile* profile;
+    const(char)[] element_id;
+
+    bool compile_value(const(char)[] type, const(char)[] following, ref const LayoutContext ctx,
+                       out ushort desc_index, out ubyte span)
+    {
+        const(char)[] units = following;
+        const(char)[] value_type = type.split!('/', false);
+        Access access = type.parse_access();
+        // The following column is access in normalized profiles; other values are the
+        // legacy units/enum column until the profile sweep is complete.
+        if (units == "R" || units == "W" || units == "RW")
+        {
+            access = units.parse_access();
+            units = null;
+        }
+        if (_element)
+            _element.access = access;
+        type = value_type;
+
+        const(VoidEnumInfo)* resolve(const(char)[] name)
+            => profile.find_enum_template(name);
+
+        bool has_ref = false;
+        foreach (c; type)
+            has_ref |= c == ':';
+
+        ScaledUnit unit;
+        float pre_scale = 1;
+        const(VoidEnumInfo)* ei = null;
+        SampleDesc desc;
+        if (units.length && !has_ref)
+        {
+            // legacy two-column spellings: enum names and dt formats ride the units column
+            if (type.startsWith("enum") || type.startsWith("bf"))
+            {
+                ei = profile.find_enum_template(units);
+                if (!ei)
+                    writeWarning("Unknown enum type: ", units);
+                units = null;
+            }
+            else if (type.startsWith("dt"))
+            {
+                char[64] spelled = void;
+                size_t len = type.length + 1 + units.length;
+                if (len <= spelled.length)
+                {
+                    spelled[0 .. type.length] = type[];
+                    spelled[type.length] = ':';
+                    spelled[type.length + 1 .. len] = units[];
+                    if (compile_spec(spelled[0 .. len], ctx, unit, 1, null, &resolve, desc))
+                    {
+                        desc_index = register_desc(desc);
+                        span = desc.enc.wire_bytes;
+                        return true;
+                    }
+                }
+                writeWarning("Invalid date_time format: ", units);
+                return false;
+            }
+        }
+        if (units.length)
+        {
+            ptrdiff_t taken = unit.parseUnit(units, pre_scale);
+            if (taken != units.length)
+                writeWarning("Invalid units '", units, "' for element: ", element_id);
+        }
+        if (!compile_spec(type, ctx, unit, pre_scale, ei, &resolve, desc))
+        {
+            writeWarning("Invalid data type '", type, "' for element: ", element_id);
+            return false;
+        }
+        desc_index = register_desc(desc);
+        span = wire_span(desc, type);
+        return true;
     }
 
-    enum ParseMode : ubyte
+    const(VoidEnumInfo)* find_enum(const(char)[] name)
+        => profile.find_enum_template(name);
+
+    ushort add_string(const(char)[] s)
+        => _strings ? _strings.add_string(s) : 0;
+
+    void access(Access value)
     {
-        json,       // walk JSON response by element paths (default)
-        regex,      // element identifier is a regex capture pattern
-        none,       // don't parse response
+        if (_element)
+            _element.access = value;
     }
 
-    const(char)[] get_name(ref const(Profile) profile) const
-        => _name.cache_string(profile.http_strings);
-
-    const(char)[] get_path(ref const(Profile) profile) const
-        => _path.cache_string(profile.http_strings);
-
-    const(char)[] get_body_template(ref const(Profile) profile) const
-        => _body_template.cache_string(profile.http_strings);
-
-    const(char)[] get_parse_template(ref const(Profile) profile) const
-        => _parse_template.cache_string(profile.http_strings);
-
-    const(char)[] get_root_path(ref const(Profile) profile) const
-        => _root_path.cache_string(profile.http_strings);
-
-    const(char)[] get_success_expr(ref const(Profile) profile) const
-        => _success_expr.cache_string(profile.http_strings);
-
-    FormatType format_type;
-    HTTPMethod method;
-    ParseMode parse_mode;
-
 private:
-    ushort _name;
-    ushort _path;
-    ushort _body_template;
-    ushort _parse_template;
-    ushort _root_path;
-    ushort _success_expr;
+    StringCacheBuilder* _strings;
+    ElementDesc* _element;
 }
 
-struct ElementDesc_HTTP
+interface ProfileSections
 {
-pure nothrow @nogc:
-    const(char)[] get_identifier(ref const(Profile) profile) const
-        => _identifier.cache_string(profile.http_strings);
-
-    const(char)[] get_write_key(ref const(Profile) profile) const
-        => _write_key.cache_string(profile.http_strings);
-
-    const(char)[] get_response_path(ref const(Profile) profile) const
-        => _response_path.cache_string(profile.http_strings);
-
-    ushort request_index;        // index into request_descs[]
-    ushort write_request_index;  // index for write, ushort.max if read-only
-    bool identifier_quoted;      // true = literal string key, false = walk path
-    TextValueDesc value_desc;
-
-private:
-    ushort _identifier;    // "evse.temp" or quoted literal
-    ushort _write_key;     // override key for write, 0 if same as identifier
-    ushort _response_path; // override parse path, 0 if same as identifier
+nothrow @nogc:
+    uint element_size(uint kind);
+    void count_element(uint kind, ref const ConfItem item, ref ProfileSize size);
+    // slot is element_size bytes; the handler emplaces its own struct's init before filling
+    bool parse_element(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b);
 }
 
-struct ElementDesc_AA55
+interface ProfileRootSections
 {
-    ubyte function_code;
-    ubyte offset;
-    ValueDesc value_desc;
+nothrow @nogc:
+    uint root_size(uint kind, ref const ConfItem item);
+    void count_root(uint kind, ref const ConfItem item, ref ProfileSize size);
+    // slot is root_size bytes and belongs to this parsed Profile
+    bool parse_root(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b);
 }
 
-struct ElementDesc_MQTT
+enum uint first_section_kind = 16;
+
+uint register_profile_section(const(char)[] name, ProfileSections handler)
 {
-    ushort read_topic;
-    ushort write_topic;
-    TextValueDesc value_desc;
-
-pure nothrow @nogc:
-    const(char)[] get_read_topic(ref const(Profile) profile) const
-        => read_topic.cache_string(profile.mqtt_strings);
-
-    const(char)[] get_write_topic(ref const(Profile) profile) const
-        => write_topic.cache_string(profile.mqtt_strings);
+    foreach (ref s; g_profile_sections)
+    {
+        if (s.name == name)
+        {
+            s.handler = handler;    // re-registration rebinds the handler at the same kind
+            return s.kind;
+        }
+    }
+    uint kind = cast(uint)(first_section_kind + g_profile_sections.length);
+    assert(kind <= ubyte.max, "too many profile sections");
+    g_profile_sections ~= ProfileSectionReg(name, handler, kind);
+    return kind;
 }
 
-struct ElementDesc_BLE
+enum uint first_root_section_kind = 1;
+
+uint register_profile_root_section(const(char)[] name, ProfileRootSections handler)
 {
-    GUID service_uuid;
-    GUID char_uuid;
-    ubyte offset;
-    ValueDesc value_desc;
+    foreach (ref s; g_profile_root_sections)
+    {
+        if (s.name == name)
+        {
+            s.handler = handler;
+            return s.kind;
+        }
+    }
+    uint kind = cast(uint)(first_root_section_kind + g_profile_root_sections.length);
+    g_profile_root_sections ~= ProfileRootSectionReg(name, handler, kind);
+    return kind;
 }
 
 struct ElementTemplate
@@ -415,28 +438,20 @@ nothrow @nogc:
            defaultAllocator().freeArray(desc_strings);
         if (expression_strings)
             defaultAllocator().freeArray(expression_strings);
-        if(mqtt_strings)
-            defaultAllocator().freeArray(mqtt_strings);
-        if(mb_elements)
-            defaultAllocator().freeArray(mb_elements);
-        if(can_elements)
-            defaultAllocator().freeArray(can_elements);
-        if(zb_elements)
-            defaultAllocator().freeArray(zb_elements);
-        if(http_elements)
-            defaultAllocator().freeArray(http_elements);
-        if(request_descs)
-            defaultAllocator().freeArray(request_descs);
-        if(http_strings)
-            defaultAllocator().freeArray(http_strings);
         if(param_strings)
             defaultAllocator().freeArray(param_strings);
-        if(aa55_elements)
-            defaultAllocator().freeArray(aa55_elements);
-        if(mqtt_elements)
-            defaultAllocator().freeArray(mqtt_elements);
-        if(ble_elements)
-            defaultAllocator().freeArray(ble_elements);
+        foreach (ref b; section_blocks)
+            if (b.data)
+                defaultAllocator().free(b.data);
+        if(section_blocks)
+            defaultAllocator().freeArray(section_blocks);
+        foreach (ref b; root_blocks)
+            if (b.data)
+                defaultAllocator().free(b.data);
+        if(root_blocks)
+            defaultAllocator().freeArray(root_blocks);
+        if(section_strings)
+            defaultAllocator().freeArray(section_strings);
     }
 
     inout(DeviceTemplate)* get_model_template(const(char)[] model) inout pure
@@ -458,14 +473,9 @@ nothrow @nogc:
 
     const(VoidEnumInfo)* find_enum_template(const(char)[] name)
     {
-        import manager;
-
-        const(VoidEnumInfo)** enum_info = name in enum_templates;
-        if (!enum_info)
-            enum_info = name in g_app.enum_templates;
-        if (!enum_info)
-            return null;
-        return *enum_info;
+        if (const(VoidEnumInfo)** enum_info = name in enum_templates)
+            return *enum_info;
+        return find_enum_info(name);
     }
 
     ref inout(ComponentTemplate) get_component(ref const(DeviceTemplate) device, size_t index) inout pure
@@ -523,35 +533,32 @@ nothrow @nogc:
         return -1;
     }
 
-    ref const(ElementDesc_Modbus) get_mb(size_t i) const pure
-        => mb_elements[i];
+    ref const(T) get_section(T)(uint kind, size_t i) const pure
+    {
+        foreach (ref b; section_blocks)
+        {
+            if (b.kind == kind)
+            {
+                assert(T.sizeof <= b.esize && i < b.count);
+                return *cast(const(T)*)(b.data.ptr + i*b.esize);
+            }
+        }
+        assert(false, "no such profile section");
+    }
 
-    ref const(ElementDesc_CAN) get_can(size_t i) const pure
-        => can_elements[i];
+    const(void)[] get_root_section(uint kind) const pure
+    {
+        foreach (ref b; root_blocks)
+            if (b.kind == kind)
+                return b.data;
+        return null;
+    }
 
-    ref const(ElementDesc_Zigbee) get_zb(size_t i) const pure
-        => zb_elements[i];
-
-    ref const(ElementDesc_HTTP) get_http(size_t i) const pure
-        => http_elements[i];
-
-    ref const(RequestDesc) get_request(size_t i) const pure
-        => request_descs[i];
-
-    ref const(ElementDesc_AA55) get_aa55(size_t i) const pure
-        => aa55_elements[i];
-
-    ref const(ElementDesc_MQTT) get_mqtt(size_t i) const pure
-        => mqtt_elements[i];
-
-    ref const(ElementDesc_BLE) get_ble(size_t i) const pure
-        => ble_elements[i];
+    const(char)[] get_section_string(ushort offset) const pure
+        => offset.cache_string(section_strings);
 
     auto get_parameters() const pure
         => StringRange(param_strings, indirections[_params .. _params + _param_count]);
-
-    auto get_mqtt_subs() const pure
-        => StringRange(mqtt_strings, indirections[_mqtt_subs .. _mqtt_subs + _mqtt_sub_count]);
 
     void drop_lookup_strings()
     {
@@ -603,19 +610,27 @@ private:
 
     String name;
 
+    struct SectionBlock
+    {
+        uint kind;
+        ushort esize;
+        ushort count;
+        void[] data;
+    }
+
+    struct RootBlock
+    {
+        uint kind;
+        void[] data;
+    }
+
     DeviceTemplate[] device_templates;
     ComponentTemplate[] component_templates;
     ElementTemplate[] element_templates;
     ElementDesc[] elements;
     Lookup[] lookup_table;
-    ElementDesc_Modbus[] mb_elements;
-    ElementDesc_CAN[] can_elements;
-    ElementDesc_Zigbee[] zb_elements;
-    ElementDesc_HTTP[] http_elements;
-    RequestDesc[] request_descs;
-    ElementDesc_AA55[] aa55_elements;
-    ElementDesc_MQTT[] mqtt_elements;
-    ElementDesc_BLE[] ble_elements;
+    SectionBlock[] section_blocks;
+    RootBlock[] root_blocks;
     ushort[] indirections;
     char[] id_strings;
     char[] name_strings;
@@ -623,12 +638,147 @@ private:
     char[] expression_strings;
     char[] desc_strings;
     char[] param_strings;
-    char[] http_strings;
-    char[] mqtt_strings;
+    char[] section_strings;
     ushort _params, _param_count;
-    ushort _mqtt_subs, _mqtt_sub_count;
 
     Map!(String, const(VoidEnumInfo)*) enum_templates;
+}
+
+unittest
+{
+    import urt.si.unit : ScaledUnit;
+    import manager.sample.codec : clear_encoding_registry, find_encoding, register_builtin_encodings;
+    import manager.sample.spec : stream_le_context;
+
+    assert(!find_encoding("yymmddhhmmss"));
+    register_builtin_encodings();
+    scope(exit) clear_encoding_registry();
+
+    // wire spans for byte-stream maps (CAN): derived per family from the compiled desc
+    {
+        import manager.series : ValueType;
+        SampleDesc d;
+        assert(compile_spec("u16", stream_le_context, ScaledUnit(), 1, null, null, d));
+        assert(wire_span(d, "u16") == 2);
+        assert(compile_spec("str8", stream_le_context, ScaledUnit(), 1, null, null, d));
+        assert(d.fmt.type == ValueType.char_ && wire_span(d, "str8") == 8);
+        assert(compile_spec("u8[8]", stream_le_context, ScaledUnit(), 1, null, null, d));
+        assert(wire_span(d, "u8[8]") == 8);
+        assert(compile_spec("dt48:yymmddhhmmss", stream_le_context, ScaledUnit(), 1, null, null, d));
+        assert(wire_span(d, "dt48:yymmddhhmmss") == 6);
+    }
+
+    // registered-section parse: handler fills its slots through ProfileBuilder; legacy
+    // two-column spellings, one-token `u16:0.1V`, and enum templates all resolve
+    {
+        const(char)[] joined = "3, u16:0.1V\tdesc: singleTokenVolts";
+        assert(joined.split_element_and_desc() == "3, u16:0.1V");
+        assert(joined == "desc: singleTokenVolts");
+
+        static struct TDesc
+        {
+            ubyte addr;
+            ubyte length;
+            ushort desc = 0xFFFF;
+        }
+        static class TestSections : ProfileSections
+        {
+        nothrow @nogc:
+            uint element_size(uint)
+                => cast(uint)TDesc.sizeof;
+            void count_element(uint, ref const ConfItem, ref ProfileSize) {}
+            bool parse_element(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
+            {
+                TDesc* d = cast(TDesc*)slot.ptr;
+                *d = TDesc.init;
+                const(char)[] tail = item.value;
+                const(char)[] addr = tail.split!',';
+                const(char)[] type = tail.split!','.unQuote;
+                const(char)[] units = tail.split!','.unQuote;
+                size_t taken;
+                d.addr = cast(ubyte)addr.parse_uint_with_base(&taken);
+                return b.compile_value(type, units, stream_le_context, d.desc, d.length);
+            }
+        }
+        static struct TRoot
+        {
+            ushort first;
+            ushort second;
+        }
+        static class TestRoots : ProfileRootSections
+        {
+        nothrow @nogc:
+            uint root_size(uint, ref const ConfItem)
+                => cast(uint)TRoot.sizeof;
+            void count_root(uint, ref const ConfItem item, ref ProfileSize size)
+            {
+                const(char)[] tail = item.value;
+                size.add_string(tail.split!','.unQuote);
+                size.add_string(tail.split!','.unQuote);
+            }
+            bool parse_root(uint, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
+            {
+                TRoot* root = cast(TRoot*)slot.ptr;
+                const(char)[] tail = item.value;
+                root.first = b.add_string(tail.split!','.unQuote);
+                root.second = b.add_string(tail.split!','.unQuote);
+                return true;
+            }
+        }
+        uint tsec = register_profile_section("tsec", defaultAllocator().allocT!TestSections());
+        uint troot = register_profile_root_section("troot", defaultAllocator().allocT!TestRoots());
+
+        static immutable string conf_text =
+            "enum: Mode\n" ~
+            "\toff: 0\n" ~
+            "\teco: 1\n" ~
+            "\n" ~
+            "troot: alpha, beta\n" ~
+            "\n" ~
+            "registers:\n" ~
+            "\ttsec: 1, u16, 0.1V\tdesc: chargeVoltage\n" ~
+            "\ttsec: 2, enum8, Mode\tdesc: mode\n" ~
+            "\ttsec: 3, u16:0.1V\tdesc: singleTokenVolts\n" ~
+            "\ttsec: 4, str8, W\tdesc: name\n" ~
+            "\ttsec: 5, str8/W\tdesc: legacyName\n";
+        Profile* prof = parse_profile(conf_text, "tprof");
+        assert(prof !is null);
+
+        import manager.sample : desc_by_index;
+
+        // "0.1V" folds into the unit's decimal scale: records stay u16, exact, in deciVolts
+        ref const TDesc cv = prof.get_section!TDesc(tsec, 0);
+        assert(cv.desc != 0xFFFF && cv.length == 2 && cv.addr == 1);
+        SampleDesc cvd = desc_by_index(cv.desc);
+        import urt.si.unit : Volt;
+        assert(cvd.fmt.type == ValueType.u16 && cvd.pre_scale == 1);
+        assert(cvd.fmt.unit == ScaledUnit(Volt, -1));
+
+        // profile enums register qualified and resolve locally by bare name
+        ref const TDesc md = prof.get_section!TDesc(tsec, 1);
+        assert(md.desc != 0xFFFF && md.length == 1);
+        assert(desc_by_index(md.desc).fmt.enum_info is prof.find_enum_template("Mode"));
+        assert(find_enum_info("tprof.Mode") is prof.find_enum_template("Mode"));
+
+        // the one-token spelling produces the same desc as the two-column form
+        ref const TDesc st = prof.get_section!TDesc(tsec, 2);
+        assert(st.desc == cv.desc);
+
+        ref const TDesc nm = prof.get_section!TDesc(tsec, 3);
+        assert(desc_by_index(nm.desc).fmt.type == ValueType.char_ && nm.length == 8);
+        assert(prof.elements[3].access == Access.write);
+        assert(prof.get_section!TDesc(tsec, 4).desc == nm.desc);
+        assert(prof.elements[4].access == Access.write);
+
+        assert(prof.elements.length == 5);
+        assert(prof.elements[0].kind == tsec && prof.elements[1].element == 1);
+
+        const(void)[] root_data = prof.get_root_section(troot);
+        assert(root_data.length == TRoot.sizeof);
+        ref const TRoot root = *cast(const(TRoot)*)root_data.ptr;
+        assert(prof.get_section_string(root.first) == "alpha");
+        assert(prof.get_section_string(root.second) == "beta");
+    }
 }
 
 Profile* load_profile(const(char)[] filename, NoGCAllocator allocator = defaultAllocator())
@@ -639,16 +789,34 @@ Profile* load_profile(const(char)[] filename, NoGCAllocator allocator = defaultA
     scope (exit) { allocator.free(file); }
     if (!file)
         return null;
-    return parse_profile(cast(const char[])file, allocator);
+
+    const(char)[] name = filename;
+    foreach_reverse (i, c; name)
+    {
+        if (c == '/' || c == '\\')
+        {
+            name = name[i+1 .. $];
+            break;
+        }
+    }
+    foreach_reverse (i, c; name)
+    {
+        if (c == '.')
+        {
+            name = name[0 .. i];
+            break;
+        }
+    }
+    return parse_profile(cast(const char[])file, name, allocator);
 }
 
-Profile* parse_profile(const(char)[] conf, NoGCAllocator allocator = defaultAllocator())
+Profile* parse_profile(const(char)[] conf, const(char)[] profile_name = null, NoGCAllocator allocator = defaultAllocator())
 {
     ConfItem root = parse_config(conf);
-    return parse_profile(root);
+    return parse_profile(root, profile_name, allocator);
 }
 
-Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator())
+Profile* parse_profile(ConfItem conf, const(char)[] profile_name = null, NoGCAllocator allocator = defaultAllocator())
 {
     Profile* profile = allocator.allocT!Profile();
 
@@ -659,21 +827,17 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     size_t lookup_string_len = 0;
     size_t expression_string_len = 0;
     size_t desc_string_len = 0;
-    size_t mqtt_string_len = 0;
-    size_t http_string_len = 0;
     size_t param_string_len = 0;
-    size_t request_count = 0;
     size_t num_device_templates = 0;
     size_t num_component_templates = 0;
     size_t num_element_templates = 0;
     size_t num_indirections = 0;
-    size_t mb_count = 0;
-    size_t can_count = 0;
-    size_t zb_count = 0;
-    size_t http_count = 0;
-    size_t aa55_count = 0;
-    size_t mqtt_count = 0;
-    size_t ble_count = 0;
+
+    ProfileSize section_size;
+    Array!ushort section_counts;
+    section_counts.resize(g_profile_sections.length);
+    Array!uint root_sizes;
+    root_sizes.resize(g_profile_root_sections.length);
 
     // we need to count the items and buffer lengths
     foreach (ref root_item; conf.sub_items) switch (root_item.name)
@@ -691,88 +855,33 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 writeWarning("Duplicate enum definition: ", enum_name);
                 break;
             }
-            const(VoidEnumInfo)* enum_info = parse_enum(root_item, root_item.name == "bitfield");
+            VoidEnumInfo* enum_info = parse_enum(root_item, root_item.name == "bitfield");
             if (!enum_info)
             {
                 writeWarning("Failed to parse enum: ", enum_name);
                 break;
             }
 
-            profile.enum_templates.insert(enum_name.makeString(allocator), enum_info);
+            char[128] qualified = void;
+            size_t qlen = profile_name.length + 1 + enum_name.length;
+            assert(qlen <= qualified.length, "qualified enum name too long");
+            qualified[0 .. profile_name.length] = profile_name[];
+            qualified[profile_name.length] = '.';
+            qualified[profile_name.length + 1 .. qlen] = enum_name[];
+            const(VoidEnumInfo)* canonical = register_enum_info(qualified[0 .. qlen], enum_info);
+            profile.enum_templates.insert(enum_name.makeString(allocator), canonical);
             break;
 
         case "parameters":
-        case "mqtt-variables":
-        case "mqtt-subscribe":
             const(char)[] tail = root_item.value;
-            bool is_params = root_item.name[] == "parameters" || root_item.name[] == "mqtt-variables";
             while (!tail.empty)
             {
                 const(char)[] value = tail.split!','.unQuote;
                 if (value.empty)
                     continue;
 
-                if (is_params)
-                    param_string_len += cache_len(value.length);
-                else
-                    mqtt_string_len += cache_len(value.length);
+                param_string_len += cache_len(value.length);
                 ++num_indirections;
-            }
-            break;
-
-        case "requests":
-            requests: foreach (ref req_item; root_item.sub_items)
-            {
-                if (req_item.name != "request")
-                {
-                    writeWarning("Expected 'request:' in requests block, got: ", req_item.name);
-                    continue;
-                }
-                const(char)[] tail = req_item.value;
-                const(char)[] req_name = tail.split!','.unQuote;
-
-                auto p_method = enum_from_key!HTTPMethod(tail.split!','.unQuote);
-                if (p_method == null)
-                {
-                    writeWarning("Unknown HTTP method in request '", req_name, "'");
-                    continue;
-                }
-
-                const(char)[] path = tail.split!','.unQuote;
-                size_t sub_string_len = 0;
-
-                foreach (ref sub; req_item.sub_items)
-                {
-                    switch (sub.name)
-                    {
-                        case "success":
-                            sub_string_len += cache_len(sub.value.length);
-                            break;
-                        case "root":
-                            sub_string_len += cache_len(sub.value.unQuote.length);
-                            break;
-                        case "parse":
-                            sub_string_len += cache_len(sub.value.unQuote.length);
-                            break;
-                        case "format":
-                            const(char)[] fmt_tail = sub.value;
-                            const(char)[] fmt_type = fmt_tail.split!','.unQuote;
-                            if (fmt_type == "json" || fmt_type == "form")
-                                sub_string_len += cache_len(fmt_tail.unQuote.length);
-                            else
-                            {
-                                writeWarning("Unknown format type '", fmt_type, "' in request '", req_name, "'");
-                                continue requests;
-                            }
-                            break;
-                        default:
-                            writeWarning("Unknown sub-item '", sub.name, "' in request '", req_name, "'");
-                            continue requests;
-                    }
-                }
-
-                ++request_count;
-                http_string_len += cache_len(req_name.length) + cache_len(path.length) + sub_string_len;
             }
             break;
 
@@ -808,56 +917,13 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                     desc_string_len += cache_len(desc.length);
                 }
 
-                switch (reg_item.name)
+                if (ProfileSectionReg* s = find_profile_section(reg_item.name))
                 {
-                    case "mb", "reg": ++mb_count; break;
-                    case "can": ++can_count; break;
-                    case "zb": ++zb_count; break;
-                    case "http":
-                        ++http_count;
-                        {
-                            const(char)[] htail = reg_item.value;
-                            htail = htail.split_element_and_desc();
-                            const(char)[] req_name = htail.split!','.unQuote;
-                            const(char)[] identifier = htail.split!','.unQuote;
-                            http_string_len += cache_len(identifier.length);
-
-                            foreach (ref sub; reg_item.sub_items)
-                            {
-                                if (sub.name == "write")
-                                {
-                                    const(char)[] wt = sub.value;
-                                    const(char)[] w_req = wt.split!','.unQuote;
-                                    const(char)[] w_key = wt.split!','.unQuote;
-                                    http_string_len += cache_len(w_key.length);
-                                }
-                                else if (sub.name == "response")
-                                    http_string_len += cache_len(sub.value.unQuote.length);
-                            }
-                        }
-                        break;
-                    case "aa55": ++aa55_count; break;
-                    case "mqtt":
-                        ++mqtt_count;
-                        tail = reg_item.value;
-                        const(char)[] topic = tail.split!','.unQuote;
-                        mqtt_string_len += cache_len(topic.length);
-
-                        foreach (ref reg_conf; reg_item.sub_items)
-                        {
-                            if (reg_conf.name != "write")
-                                continue;
-                            tail = reg_conf.value;
-                            const(char)[] write_topic = tail.split!','.unQuote;
-                            mqtt_string_len += cache_len(write_topic.length);
-                            break;
-                        }
-                        break;
-                    case "ble": ++ble_count; break;
-                    default:
-                        writeWarning("Unknown element type: ", reg_item.name);
-                        break;
+                    ++section_counts[s.kind - first_section_kind];
+                    s.handler.count_element(s.kind, reg_item, section_size);
                 }
+                else
+                    writeWarning("Unknown element type: ", reg_item.name);
             }
             break;
 
@@ -989,7 +1055,21 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
             break;
 
         default:
-            writeWarning("Invalid token: ", root_item.name);
+            if (ProfileRootSectionReg* s = find_profile_root_section(root_item.name))
+            {
+                size_t i = s.kind - first_root_section_kind;
+                if (root_sizes[i])
+                    writeWarning("Duplicate ", root_item.name, " definition");
+                else
+                {
+                    uint bytes = s.handler.root_size(s.kind, root_item);
+                    assert(bytes > 0, "profile root sections must allocate storage");
+                    root_sizes[][i] = bytes;
+                    s.handler.count_root(s.kind, root_item, section_size);
+                }
+            }
+            else
+                writeWarning("Invalid token: ", root_item.name);
     }
 
     assert(item_count < ushort.max, "Too many register entries!");
@@ -1008,20 +1088,42 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     profile.lookup_strings = allocator.allocArray!char(2 + lookup_string_len);
     profile.expression_strings = allocator.allocArray!char(2 + expression_string_len);
     profile.desc_strings = allocator.allocArray!char(2 + desc_string_len);
-    profile.mqtt_strings = allocator.allocArray!char(2 + mqtt_string_len);
-    profile.http_strings = allocator.allocArray!char(2 + http_string_len);
     profile.param_strings = allocator.allocArray!char(2 + param_string_len);
 
-    profile.mb_elements = allocator.allocArray!ElementDesc_Modbus(mb_count);
-    profile.can_elements = allocator.allocArray!ElementDesc_CAN(can_count);
-    profile.zb_elements = allocator.allocArray!ElementDesc_Zigbee(zb_count);
-    profile.http_elements = allocator.allocArray!ElementDesc_HTTP(http_count);
-    profile.request_descs = allocator.allocArray!RequestDesc(request_count);
-    profile.aa55_elements = allocator.allocArray!ElementDesc_AA55(aa55_count);
-    profile.mqtt_elements = allocator.allocArray!ElementDesc_MQTT(mqtt_count);
-    profile.ble_elements = allocator.allocArray!ElementDesc_BLE(ble_count);
+    size_t active_sections = 0;
+    foreach (n; section_counts)
+        if (n)
+            ++active_sections;
+    profile.section_blocks = allocator.allocArray!(Profile.SectionBlock)(active_sections);
+    profile.section_strings = allocator.allocArray!char(2 + section_size.string_bytes);
+    {
+        size_t sb = 0;
+        foreach (ref s; g_profile_sections)
+        {
+            ushort n = section_counts[s.kind - first_section_kind];
+            if (!n)
+                continue;
+            uint esz = s.handler.element_size(s.kind);
+            profile.section_blocks[sb++] = Profile.SectionBlock(s.kind, cast(ushort)esz, n, allocator.allocArray!ubyte(n * esz));
+        }
+    }
 
-    StringCacheBuilder id_cache, name_cache, lookup_cache, expr_cache, desc_cache, mqtt_string_cache, http_string_cache, param_string_cache;
+    size_t active_roots = 0;
+    foreach (n; root_sizes)
+        if (n)
+            ++active_roots;
+    profile.root_blocks = allocator.allocArray!(Profile.RootBlock)(active_roots);
+    {
+        size_t rb = 0;
+        foreach (i, ref s; g_profile_root_sections)
+        {
+            uint n = root_sizes[i];
+            if (n)
+                profile.root_blocks[rb++] = Profile.RootBlock(s.kind, allocator.allocArray!ubyte(n));
+        }
+    }
+
+    StringCacheBuilder id_cache, name_cache, lookup_cache, expr_cache, desc_cache, param_string_cache;
     if (profile.name_strings)
         id_cache = StringCacheBuilder(profile.id_strings);
     if (profile.name_strings)
@@ -1032,143 +1134,64 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
         expr_cache = StringCacheBuilder(profile.expression_strings);
     if (profile.desc_strings)
         desc_cache = StringCacheBuilder(profile.desc_strings);
-    if (profile.mqtt_strings)
-        mqtt_string_cache = StringCacheBuilder(profile.mqtt_strings);
-    if (profile.http_strings)
-        http_string_cache = StringCacheBuilder(profile.http_strings);
     if (profile.param_strings)
         param_string_cache = StringCacheBuilder(profile.param_strings);
+
+    StringCacheBuilder section_string_cache;
+    if (profile.section_strings)
+        section_string_cache = StringCacheBuilder(profile.section_strings);
+
+    ProfileBuilder builder;
+    builder.profile = profile;
+    builder._strings = profile.section_strings ? &section_string_cache : null;
 
     num_device_templates = 0;
     num_component_templates = 0;
     num_element_templates = 0;
     num_indirections = 0;
     item_count = 0;
-    mb_count = 0;
-    can_count = 0;
-    zb_count = 0;
-    http_count = 0;
-    request_count = 0;
-    aa55_count = 0;
-    mqtt_count = 0;
+    section_counts[][] = 0;
+    Array!bool root_parsed;
+    root_parsed.resize(g_profile_root_sections.length);
+
+    foreach (ref root_item; conf.sub_items)
+    {
+        if (root_item.name != "parameters")
+            continue;
+        if (profile._param_count > 0)
+        {
+            writeWarning("Duplicate parameters definition");
+            continue;
+        }
+        profile._params = cast(ushort)num_indirections;
+        const(char)[] tail = root_item.value;
+        while (!tail.empty)
+        {
+            const(char)[] value = tail.split!','.unQuote;
+            if (value.empty)
+                continue;
+            profile.indirections[num_indirections++] = param_string_cache.add_string(value);
+            ++profile._param_count;
+        }
+    }
+
+    foreach (ref root_item; conf.sub_items)
+    {
+        ProfileRootSectionReg* s = find_profile_root_section(root_item.name);
+        if (!s)
+            continue;
+        size_t i = s.kind - first_root_section_kind;
+        if (root_parsed[][i])
+            continue;
+        root_parsed[][i] = true;
+        ref Profile.RootBlock blk = root_block(profile, s.kind);
+        s.handler.parse_root(s.kind, root_item, blk.data, builder);
+    }
 
     // parse the elements
     foreach (ref root_item; conf.sub_items) switch (root_item.name)
     {
         case "parameters":
-        case "mqtt-variables":
-        case "mqtt-subscribe":
-            bool is_params = root_item.name == "parameters" || root_item.name == "mqtt-variables";
-            if (is_params ? profile._param_count : profile._mqtt_sub_count > 0)
-            {
-                writeWarning("Duplicate ", root_item.name, " definition");
-                break;
-            }
-
-            if (is_params)
-                profile._params = cast(ushort)num_indirections;
-            else
-                profile._mqtt_subs = cast(ushort)num_indirections;
-
-            const(char)[] tail = root_item.value;
-            while (!tail.empty)
-            {
-                const(char)[] value = tail.split!','.unQuote;
-                if (value.empty)
-                    continue;
-
-                if (is_params)
-                    profile.indirections[num_indirections++] = param_string_cache.add_string(value);
-                else
-                    profile.indirections[num_indirections++] = mqtt_string_cache.add_string(value);
-
-                if (is_params)
-                    ++profile._param_count;
-                else
-                    ++profile._mqtt_sub_count;
-            }
-            break;
-
-        case "requests":
-            requests2: foreach (ref req_item; root_item.sub_items)
-            {
-                if (req_item.name != "request")
-                    continue;
-
-                const(char)[] tail = req_item.value;
-                const(char)[] req_name = tail.split!','.unQuote;
-
-                auto p_method = enum_from_key!HTTPMethod(tail.split!','.unQuote);
-                if (p_method == null)
-                    continue;
-
-                const(char)[] path = tail.split!','.unQuote;
-
-                const(char)[] success_expr, root_path, parse_template, body_template;
-                RequestDesc.FormatType format_type;
-                RequestDesc.ParseMode parse_mode;
-
-                foreach (ref sub; req_item.sub_items)
-                {
-                    switch (sub.name)
-                    {
-                        case "success":
-                            success_expr = sub.value;
-                            break;
-                        case "root":
-                            root_path = sub.value.unQuote;
-                            break;
-                        case "parse":
-                        {
-                            const(char)[] parse_val = sub.value.unQuote;
-                            if (parse_val == "regex")
-                                parse_mode = RequestDesc.ParseMode.regex;
-                            else if (parse_val == "none")
-                                parse_mode = RequestDesc.ParseMode.none;
-                            else
-                            {
-                                // "json" or "json, {key}.subpath"
-                                const(char)[] parse_tail = sub.value;
-                                const(char)[] first = parse_tail.split!','.unQuote;
-                                if (first == "json" && !parse_tail.empty)
-                                    parse_template = parse_tail.unQuote;
-                                else if (first != "json")
-                                    parse_template = sub.value.unQuote;
-                            }
-                            break;
-                        }
-                        case "format":
-                            const(char)[] fmt_tail = sub.value;
-                            const(char)[] fmt_type = fmt_tail.split!','.unQuote;
-                            if (fmt_type == "json")
-                            {
-                                format_type = RequestDesc.FormatType.json;
-                                body_template = fmt_tail.unQuote;
-                            }
-                            else if (fmt_type == "form")
-                            {
-                                format_type = RequestDesc.FormatType.form;
-                                body_template = fmt_tail.unQuote;
-                            }
-                            else
-                                continue requests2;
-                            break;
-                        default:
-                            continue requests2;
-                    }
-                }
-
-                ref RequestDesc req = profile.request_descs[request_count++];
-                req.method = *p_method;
-                req._name = http_string_cache.add_string(req_name);
-                req._path = http_string_cache.add_string(path);
-                req.format_type = format_type;
-                req.parse_mode = parse_mode;
-                req._success_expr = http_string_cache.add_string(success_expr);
-                req._root_path = http_string_cache.add_string(root_path);
-                req._parse_template = http_string_cache.add_string(parse_template);
-                req._body_template = http_string_cache.add_string(body_template);
-            }
             break;
 
         case "elements", "registers":
@@ -1217,409 +1240,18 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 e.update_frequency = frequency;
                 e.display_units = addString(display_units);
 
-                void parse_value_desc(ref ValueDesc desc, DataType type, const(char)[] units)
+                if (ProfileSectionReg* s = find_profile_section(reg_item.name))
                 {
-                    if ((type & DataType.enumeration) && units)
-                    {
-                        const(VoidEnumInfo)* enum_info = profile.find_enum_template(units);
-                        if (enum_info)
-                            desc = ValueDesc(type, enum_info);
-                        else
-                        {
-                            writeWarning("Unknown enum type: ", units);
-                            desc = ValueDesc(type);
-                        }
-                    }
-                    else if (type.data_kind == DataKind.date_time)
-                    {
-                        switch (units)
-                        {
-                            case "yymmddhhmmss":
-                                desc = ValueDesc(type, DateFormat.yymmddhhmmss);
-                                break;
-                            default:
-                                writeWarning("Invalid date_time format: ", units);
-                                break;
-                        }
-                    }
-                    else
-                    {
-                        desc = ValueDesc(type);
-                        if (!desc.parse_units(units))
-                            writeWarning("Invalid units '", units, "' for element: ", id);
-                    }
+                    ref Profile.SectionBlock blk = section_block(profile, s.kind);
+                    ushort idx = section_counts[s.kind - first_section_kind]++;
+                    e._kind = cast(ubyte)s.kind;
+                    e._index = idx;
+                    builder.element_id = id;
+                    builder._element = &e;
+                    s.handler.parse_element(s.kind, reg_item, blk.data[idx*blk.esize .. (idx+1)*blk.esize], builder);
                 }
-
-                // the actual element data...
-                switch (reg_item.name)
-                {
-                    case "mb", "reg":
-                        const(char)[] tail = reg_item.value;
-                        tail = tail.split_element_and_desc();
-
-                        const(char)[] register = tail.split!',';
-                        const(char)[] type = tail.split!','.unQuote;
-                        const(char)[] units = tail.split!','.unQuote;
-
-                        e._element_index = cast(ushort)((ElementType.modbus << 13) | mb_count);
-                        ref ElementDesc_Modbus mb = profile.mb_elements[mb_count++];
-
-                        // TODO: MOVE THIS CODE!
-                        import protocol.modbus.message : RegisterType;
-                        import protocol.modbus.binding : parse_modbus_data_type;
-
-                        size_t taken;
-                        ulong reg = register.parse_uint_with_base(&taken);
-                        if (taken != register.length || reg > 105535)
-                        {
-                            writeWarning("Invalid Modbus register: ", register);
-                            break;
-                        }
-                        if (reg < 10000)
-                        {
-                            mb.reg_type = RegisterType.coil;
-                            mb.reg = cast(ushort)reg;
-                        }
-                        else if (reg < 20000)
-                        {
-                            mb.reg_type = RegisterType.discrete_input;
-                            mb.reg = cast(ushort)(reg - 10000);
-                        }
-                        else if (reg < 30000)
-                            break;
-                        else if (reg < 40000)
-                        {
-                            mb.reg_type = RegisterType.input_register;
-                            mb.reg = cast(ushort)(reg - 30000);
-                        }
-                        else
-                        {
-                            mb.reg_type = RegisterType.holding_register;
-                            mb.reg = cast(ushort)(reg - 40000);
-                        }
-
-                        DataType ty = type.split!('/', false).parse_modbus_data_type();
-                        if (ty == DataType.invalid)
-                        {
-                            writeWarning("Invalid Modbus data type '", type, "' for element: ", id);
-                            break;
-                        }
-                        e.access = type.parse_access();
-
-                        parse_value_desc(mb.value_desc, ty, units);
-                        break;
-
-                    case "can":
-                        const(char)[] tail = reg_item.value;
-                        tail = tail.split_element_and_desc();
-
-                        const(char)[] msg_id = tail.split!',';
-                        const(char)[] offset = tail.split!',';
-                        const(char)[] type = tail.split!','.unQuote;
-                        const(char)[] units = tail.split!','.unQuote;
-
-                        e._element_index = cast(ushort)((ElementType.can << 13) | can_count);
-                        ref ElementDesc_CAN can = profile.can_elements[can_count++];
-
-                        size_t taken;
-                        ulong ti = msg_id.parse_uint_with_base(&taken);
-                        if (taken != msg_id.length || ti > 0x1FFFFFFF) // 29 bits for CAN2.0B
-                        {
-                            writeWarning("Invalid CAN message id: ", msg_id);
-                            break;
-                        }
-                        can.message_id = cast(uint)ti;
-                        ti = offset.parse_uint_with_base(&taken);
-                        if (taken != offset.length || ti >= 64)
-                        {
-                            writeWarning("Invalid CAN message offset: ", offset);
-                            break;
-                        }
-                        can.offset = cast(ubyte)ti;
-
-                        parse_value_desc(can.value_desc, type.parse_data_type(), units);
-                        break;
-
-                    case "zb":
-                        const(char)[] tail = reg_item.value;
-                        tail = tail.split_element_and_desc();
-
-                        const(char)[] cluster = tail.split!',';
-                        const(char)[] mfg = tail.split!',';
-                        const(char)[] attrib = mfg.split!'(';
-                        const(char)[] type = tail.split!','.unQuote;
-                        const(char)[] units = tail.split!','.unQuote;
-
-                        e._element_index = cast(ushort)((ElementType.zigbee << 13) | zb_count);
-                        ref ElementDesc_Zigbee zb = profile.zb_elements[zb_count++];
-
-                        size_t taken;
-                        ulong t = cluster.parse_uint_with_base(&taken);
-                        if (taken != cluster.length || t > 0xFFFF)
-                        {
-                            writeWarning("Invalid Zigbee cluster ID: ", cluster);
-                            break;
-                        }
-                        zb.cluster_id = cast(ushort)t;
-
-                        t = attrib.parse_uint_with_base(&taken);
-                        if (taken != attrib.length || t > 0xFFFF)
-                        {
-                            writeWarning("Invalid Zigbee attribute ID: ", attrib);
-                            break;
-                        }
-                        zb.attribute_id = cast(ushort)t;
-
-                        if (mfg.length > 0)
-                        {
-                            if (mfg[$-1] != ')')
-                            {
-                                writeWarning("Invalid Zigbee manufacturer code: ", mfg);
-                                break;
-                            }
-                            mfg = mfg[0.. $-1].trimBack;
-
-                            t = mfg.parse_uint_with_base(&taken);
-                            if (taken != mfg.length || t > 0xFFFF)
-                            {
-                                writeWarning("Invalid Zigbee manufacturer code: ", mfg);
-                                break;
-                            }
-                            zb.manufacturer_code = cast(ushort)t;
-                        }
-                        else
-                            zb.manufacturer_code = 0;
-
-                        DataType ty = type.split!('/', false).parse_data_type(zb.cluster_id == 0xEF00 ? DataType.big_endian : DataType.little_endian);
-                        e.access = type.parse_access();
-
-                        parse_value_desc(zb.value_desc, ty, units);
-
-                        if (zb.cluster_id == 0xEF00)
-                        {
-                            // confirm that the tuya data types are valid
-                            ushort len = zb.value_desc.data_length;
-                            if (zb.value_desc.is_bitfield)
-                            {
-                                if (!(len == 1 || len == 2 || len == 4))
-                                    writeWarning("Tuya bitmap datapoint '", id, "' must be 1, 2, 4 bytes");
-                            }
-                            else if (zb.value_desc.is_enum)
-                            {
-                                if (len != 1)
-                                    writeWarning("Tuya enum datapoint '", id, "' must be 1 byte");
-                            }
-                            else if (zb.value_desc.is_bool)
-                            {
-                                if (len != 1)
-                                    writeWarning("Tuya bool datapoint '", id, "' must be 1 byte");
-                            }
-                            else if (zb.value_desc.is_numeric)
-                            {
-                                if (len != 4)
-                                    writeWarning("Tuya value datapoint '", id, "' must be 4 bytes");
-                            }
-                        }
-                        break;
-
-                    case "http":
-                        e._element_index = cast(ushort)((ElementType.http << 13) | http_count);
-                        ref ElementDesc_HTTP http = profile.http_elements[http_count++];
-
-                        const(char)[] htail = reg_item.value;
-                        htail = htail.split_element_and_desc();
-
-                        const(char)[] req_name = htail.split!','.unQuote;
-                        const(char)[] raw_identifier = htail.split!',';
-                        http.identifier_quoted = raw_identifier.length >= 2 && raw_identifier[0] == '"' && raw_identifier[$-1] == '"';
-                        const(char)[] identifier = raw_identifier.unQuote;
-                        const(char)[] type = htail.split!','.unQuote;
-                        const(char)[] units = htail.split!','.unQuote;
-
-                        http._identifier = http_string_cache.add_string(identifier);
-
-                        http.write_request_index = ushort.max;
-                        http.request_index = find_request_index(*profile, req_name);
-                        if (http.request_index == ushort.max && !req_name.empty)
-                            writeWarning("Unknown request '", req_name, "' for http element: ", id);
-
-                        TextType ty = type.parse_text_type();
-                        if (ty == TextType.enum_ || ty == TextType.bf)
-                        {
-                            const(VoidEnumInfo)* ei = profile.find_enum_template(units);
-                            if (ei)
-                                http.value_desc = TextValueDesc(ty, ei);
-                            else
-                                writeWarning("Unknown enum/bitfield type: ", units);
-                            units = htail.split!','.unQuote;
-                        }
-                        else
-                        {
-                            http.value_desc = TextValueDesc(ty);
-                            if (!http.value_desc.parse_units(units))
-                                writeWarning("Invalid units '", units, "' for http element: ", id);
-                        }
-
-                        foreach (ref sub; reg_item.sub_items)
-                        {
-                            if (sub.name == "write")
-                            {
-                                const(char)[] wt = sub.value;
-                                const(char)[] w_req = wt.split!','.unQuote;
-                                const(char)[] w_key = wt.split!','.unQuote;
-
-                                http.write_request_index = find_request_index(*profile, w_req);
-                                if (http.write_request_index == ushort.max)
-                                    writeWarning("Unknown write request '", w_req, "' for http element: ", id);
-
-                                if (!w_key.empty)
-                                    http._write_key = http_string_cache.add_string(w_key);
-
-                            }
-                            else if (sub.name == "response")
-                                http._response_path = http_string_cache.add_string(sub.value.unQuote);
-                        }
-
-                        bool has_read = http.request_index != ushort.max;
-                        bool has_write = http.write_request_index != ushort.max;
-                        if (has_read && has_write)
-                            e.access = Access.read_write;
-                        else if (has_write)
-                            e.access = Access.write;
-                        else
-                            e.access = Access.read;
-                        break;
-
-                    case "aa55":
-                        static if (has_all)
-                        {
-                            import protocol.goodwe.aa55;
-
-                            const(char)[] tail = reg_item.value;
-                            tail = tail.split_element_and_desc();
-
-                            const(char)[] fn = tail.split!',';
-                            const(char)[] offset = tail.split!',';
-                            const(char)[] type = tail.split!','.unQuote;
-                            const(char)[] units = tail.split!','.unQuote;
-
-                            e._element_index = cast(ushort)((ElementType.aa55 << 13) | aa55_count);
-                            ref ElementDesc_AA55 aa55 = profile.aa55_elements[aa55_count++];
-
-                            size_t taken;
-                            ulong ti = fn.parse_uint_with_base(&taken);
-                            if (taken != fn.length || ti > ubyte.max)
-                            {
-                                writeWarning("Invalid AA55 function code: ", fn);
-                                break;
-                            }
-                            aa55.function_code = cast(ubyte)ti;
-                            ti = offset.parse_uint_with_base(&taken);
-                            if (taken != offset.length || ti > ubyte.max)
-                            {
-                                writeWarning("Invalid AA55 value offset: ", offset);
-                                break;
-                            }
-                            aa55.offset = cast(ubyte)ti;
-
-                            parse_value_desc(aa55.value_desc, type.parse_data_type(), units);
-                        }
-                        break;
-
-                    case "mqtt":
-                        const(char)[] tail = reg_item.value;
-                        tail = tail.split_element_and_desc();
-
-                        const(char)[] topic = tail.split!','.unQuote;
-                        const(char)[] type = tail.split!','.unQuote;
-                        const(char)[] units = tail.split!','.unQuote;
-
-                        e._element_index = cast(ushort)((ElementType.mqtt << 13) | mqtt_count);
-                        ref ElementDesc_MQTT mqtt = profile.mqtt_elements[mqtt_count++];
-
-                        mqtt.read_topic = mqtt_string_cache.add_string(topic);
-
-                        TextType ty = type.split!('/', false).parse_text_type();
-                        mqtt.value_desc = TextValueDesc(ty);
-                        if (!mqtt.value_desc.parse_units(units))
-                            writeWarning("Invalid units '", units, "' for MQTT element: ", id);
-
-                        foreach (ref reg_conf; reg_item.sub_items)
-                        {
-                            if (reg_conf.name != "write")
-                                continue;
-                            tail = reg_conf.value;
-                            const(char)[] write_topic = tail.split!','.unQuote;
-                            mqtt.write_topic = mqtt_string_cache.add_string(write_topic);
-                            break;
-                        }
-
-                        if (!type.empty)
-                            e.access = type.parse_access();
-                        else if (mqtt.write_topic)
-                        {
-                            if (mqtt.read_topic)
-                                e.access = Access.read_write;
-                            else
-                                e.access = Access.write;
-                        }
-                        break;
-
-                    case "ble":
-                        const(char)[] tail = reg_item.value;
-                        tail = tail.split_element_and_desc();
-
-                        const(char)[] service = tail.split!',';
-                        const(char)[] char_field = tail.split!',';
-                        const(char)[] char_uuid_str = char_field.split!'(';
-                        const(char)[] type = tail.split!','.unQuote;
-                        const(char)[] units = tail.split!','.unQuote;
-
-                        e._element_index = cast(ushort)((ElementType.ble << 13) | ble_count);
-                        ref ElementDesc_BLE ble = profile.ble_elements[ble_count++];
-
-                        if (!parse_ble_uuid(service, ble.service_uuid))
-                        {
-                            writeWarning("Invalid BLE service UUID: ", service);
-                            break;
-                        }
-
-                        if (!parse_ble_uuid(char_uuid_str, ble.char_uuid))
-                        {
-                            writeWarning("Invalid BLE characteristic UUID: ", char_uuid_str);
-                            break;
-                        }
-
-                        if (char_field.length > 0)
-                        {
-                            if (char_field[$-1] != ')')
-                            {
-                                writeWarning("Invalid BLE characteristic offset: ", char_field);
-                                break;
-                            }
-                            char_field = char_field[0 .. $-1].trimBack;
-                            size_t taken;
-                            ulong ti = char_field.parse_uint_with_base(&taken);
-                            if (taken != char_field.length || ti >= 256)
-                            {
-                                writeWarning("Invalid BLE characteristic offset: ", char_field);
-                                break;
-                            }
-                            ble.offset = cast(ubyte)ti;
-                        }
-                        else
-                            ble.offset = 0;
-
-                        DataType ty = type.split!('/', false).parse_data_type(DataType.little_endian);
-                        e.access = type.parse_access();
-
-                        parse_value_desc(ble.value_desc, ty, units);
-                        break;
-
-                    default:
-                        writeWarning("Unknown element type: ", reg_item.name);
-                        break;
-                }
+                else
+                    writeWarning("Unknown element type: ", reg_item.name);
             }
             break;
 
@@ -1660,7 +1292,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
             break;
 
         default:
-            continue;
+            break;
     }
 
     // sort the lookup table so the lookup function works...
@@ -2057,16 +1689,79 @@ MutableString!0 substitute_parameters(const(char)[] pattern, scope const(char)[]
 
 private:
 
-ushort find_request_index(ref const Profile profile, const(char)[] name) pure nothrow @nogc
+struct ProfileSectionReg
 {
-    if (name.empty)
-        return ushort.max;
-    foreach (i, ref req; profile.request_descs)
+    const(char)[] name;
+    ProfileSections handler;
+    uint kind;
+}
+
+struct ProfileRootSectionReg
+{
+    const(char)[] name;
+    ProfileRootSections handler;
+    uint kind;
+}
+
+__gshared Array!ProfileSectionReg g_profile_sections;
+__gshared Array!ProfileRootSectionReg g_profile_root_sections;
+
+ProfileSectionReg* find_profile_section(const(char)[] name)
+{
+    foreach (ref s; g_profile_sections)
     {
-        if (req.get_name(profile) == name)
-            return cast(ushort)i;
+        if (s.name == name)
+            return &s;
     }
-    return ushort.max;
+    return null;
+}
+
+ProfileRootSectionReg* find_profile_root_section(const(char)[] name)
+{
+    foreach (ref s; g_profile_root_sections)
+    {
+        if (s.name == name)
+            return &s;
+    }
+    return null;
+}
+
+ref Profile.SectionBlock section_block(Profile* p, uint kind)
+{
+    foreach (ref b; p.section_blocks)
+    {
+        if (b.kind == kind)
+            return b;
+    }
+    assert(false, "no such profile section");
+}
+
+ref Profile.RootBlock root_block(Profile* p, uint kind)
+{
+    foreach (ref b; p.root_blocks)
+    {
+        if (b.kind == kind)
+            return b;
+    }
+    assert(false, "no such profile root section");
+}
+
+// the wire byte span a compiled desc reads; strN's numeral is the field's char count
+ubyte wire_span(ref const SampleDesc desc, const(char)[] spec)
+{
+    if (const(Encoding)* enc = desc.enc)
+        return enc.wire_bytes;
+    const(DataFormat)* fmt = desc.fmt;
+    if (fmt.type == ValueType.char_)
+    {
+        uint n = 0;
+        size_t i = 3;   // char_ only compiles from the str family
+        while (i < spec.length && spec[i] >= '0' && spec[i] <= '9')
+            n = n*10 + (spec[i++] - '0');
+        return cast(ubyte)n;
+    }
+    uint count = fmt.count ? fmt.count : 1;
+    return cast(ubyte)(desc.layout.container_bytes * count);
 }
 
 size_t cache_len(size_t str_len) pure
@@ -2082,17 +1777,20 @@ const(char)[] split_element_and_desc(ref const(char)[] line) pure
 {
     import urt.util : swap;
 
-    size_t colon = line.findFirst(':');
-    if (colon == line.length)
+    size_t desc = line.length;
+    for (size_t i = 0; i + 5 <= line.length; ++i)
+    {
+        if ((i == 0 || is_whitespace(line[i - 1])) && line[i .. i + 5] == "desc:")
+        {
+            desc = i;
+            break;
+        }
+    }
+    if (desc == line.length)
         return line.swap(null);
 
-    // seek back to beginning of token before the colon...
-    while (colon > 0 && is_whitespace(line[colon - 1]))
-        --colon;
-    while (colon > 0 && !is_whitespace(line[colon - 1]))
-        --colon;
-    const(char)[] element = line[0 .. colon].trimBack;
-    line = line[colon .. $];
+    const(char)[] element = line[0 .. desc].trimBack;
+    line = line[desc .. $];
     return element;
 }
 
@@ -2109,30 +1807,6 @@ Access parse_access(ref const(char)[] access) pure
             return Access.write;
     }
     return Access.read;
-}
-
-bool parse_ble_uuid(const(char)[] str, out GUID guid) pure
-{
-    // full GUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-    if (guid.fromString(str) == 36)
-        return str.length == 36;
-
-    // short GUID (2 or 4 hex bytes): embed in BLE base GUID
-    // strip optional 0x prefix
-    const(char)[] hex = str;
-    if (hex.length >= 2 && hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X'))
-        hex = hex[2 .. $];
-
-    size_t taken;
-    ulong val = parse_uint_with_base(hex, &taken);
-    if ((taken != 4 && taken != 8) || taken != hex.length)
-        return false;
-
-    guid.data1 = cast(uint)val;
-    guid.data2 = 0x0000;
-    guid.data3 = 0x1000;
-    guid.data4 = [0x80, 0x00, 0x00, 0x80, 0x5F, 0x9B, 0x34, 0xFB];
-    return true;
 }
 
 template make_element_template(string id, string units, string name, string desc, Frequency update_frequency)

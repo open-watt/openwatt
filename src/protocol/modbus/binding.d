@@ -3,7 +3,6 @@ module protocol.modbus.binding;
 import urt.array;
 import urt.endian;
 import urt.log;
-import urt.mem.temp : tconcat;
 import urt.meta : AliasSeq;
 import urt.si;
 import urt.string;
@@ -19,7 +18,8 @@ import manager.device;
 import manager.element;
 import manager.plugin;
 import manager.profile;
-import manager.sampler;
+import manager.sample;
+import manager.series;
 
 import protocol.modbus;
 import protocol.modbus.node;
@@ -34,48 +34,12 @@ private alias Access = manager.element.Access;
 
 nothrow @nogc:
 
-
-template modbus_data_type(const(char)[] str)
+struct ElementDesc_Modbus
 {
-    private enum DataType value = parse_modbus_data_type(str);
-    static assert(value != DataType.invalid, "invalid modbus data type: " ~ str);
-    alias modbus_data_type = value;
-}
-
-DataType parse_modbus_data_type(const(char)[] desc)
-{
-    if (desc.length == 3 && desc[1] == '8')
-    {
-        // high/low byte of a register: occupies a full big-endian word on the wire, samples to one byte
-        uint flags = DataType.u16 | DataType.big_endian;
-        if (desc[0] == 'i')
-            flags |= DataType.signed;
-        else if (desc[0] != 'u')
-            return DataType.invalid;
-        if (desc[2] == 'h')
-            return make_data_type(flags, DataKind.high_byte);
-        else if (desc[2] == 'l')
-            return make_data_type(flags, DataKind.low_byte);
-        return DataType.invalid;
-    }
-
-    // TODO: this may be insufficient, but it's what we already model...
-    DataType r = parse_data_type(desc);
-    if (r == DataType.invalid)
-        return DataType.invalid;
-
-    // modbus strings are (normally?) space-padded (sign bit), and the length is in words
-    if (r.data_kind == DataKind.string_)
-    {
-        DataType keep = r & (DataType.word_reverse | DataType.signed);
-        return make_data_type(DataType.u16 | DataType.array | keep, DataKind.string_, r.data_count);
-    }
-
-    // assume big-endian if not given
-    if ((r & (DataType.little_endian | DataType.big_endian)) == 0)
-        r |= DataType.big_endian;
-
-    return r;
+    ushort reg;
+    RegisterType reg_type = RegisterType.holding_register;
+    ubyte length;
+    ushort desc = ushort.max;
 }
 
 
@@ -363,9 +327,6 @@ nothrow @nogc:
     }
 
 protected:
-    final override const(char)[] profile_dir() const pure
-        => "conf/modbus_profiles/";
-
     final override const(char)[] profile_name() const pure
     {
         if (_slave_server)
@@ -388,7 +349,7 @@ protected:
         if (!_serve_profile_data && _serve && _slave_server && _profile_name_explicit.length > 0 && _profile_name_explicit[] != _slave_server.profile[])
         {
             const(char)[] pname = _profile_name_explicit[];
-            _serve_profile_data = g_app.acquire_profile(tconcat(profile_dir(), pname, ".conf"));
+            _serve_profile_data = g_app.acquire_profile(pname);
             if (!_serve_profile_data)
             {
                 log.warning(name[], ": failed to load serve profile '", pname, "'");
@@ -402,44 +363,30 @@ protected:
         return true;
     }
 
-    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
+    final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
-        assert(desc.type == ElementType.modbus);
+        import protocol.modbus : modbus_mb_section_kind, modbus_reg_section_kind;
 
+        if (desc.kind != modbus_reg_section_kind && desc.kind != modbus_mb_section_kind)
+            return FormatId.invalid;
         Profile* prof = _current_pass == Pass.serve ? _serve_profile_data : _profile_data;
-        ref const ElementDesc_Modbus mb = prof.get_mb(desc.element);
+        ref const ElementDesc_Modbus mb = prof.get_section!ElementDesc_Modbus(desc.kind, desc.element);
+        if (mb.desc == ushort.max)
+            return FormatId.invalid;
+        SampleDesc sample_desc = desc_by_index(mb.desc);
+        const(DataFormat)* fmt = sample_desc.fmt;
 
-        ubyte[256] tmp = void;
-        tmp[0 .. mb.value_desc.data_length] = 0;
-        e.value = sample_value(tmp.ptr, mb.value_desc);
+        if (_current_pass != Pass.serve && fmt.is_scalar)
+        {
+            e.format = sample_desc.format;
+            manager.series.Scalar zero;
+            zero.raw[] = 0;
+            e.value = box_record(zero.raw.ptr, *fmt);
+        }
 
-        add_register_entry(e, desc, mb);
-        device.sample_elements ~= e;
+        add_register_entry(e, desc, mb, sample_desc);
+        return _current_pass == Pass.serve ? FormatId.invalid : sample_desc.format;
     }
-
-
-unittest
-{
-    // u8h/u8l sample one byte of a big-endian register word
-    ubyte[2] word = [0xAB, 0xCD];
-    ValueDesc hi = ValueDesc(parse_modbus_data_type("u8h"));
-    ValueDesc lo = ValueDesc(parse_modbus_data_type("u8l"));
-    assert(hi.data_length == 2 && lo.data_length == 2);
-    assert(sample_value(word.ptr, hi) == 0xAB);
-    assert(sample_value(word.ptr, lo) == 0xCD);
-    assert(sample_value(word.ptr, ValueDesc(parse_modbus_data_type("i8h"))) == cast(byte)0xAB);
-    assert(sample_value(word.ptr, ValueDesc(parse_modbus_data_type("i8l"))) == cast(byte)0xCD);
-
-    ubyte[2] buf;
-    assert(write_value(buf[], Variant(ulong(0xAB)), hi) == 2 && buf[] == [0xAB, 0x00]);
-    assert(write_value(buf[], Variant(ulong(0xCD)), lo) == 2 && buf[] == [0x00, 0xCD]);
-
-    // multi-register date stripe, as read from GoodWe RTC registers (YM, DH, MS)
-    ubyte[6] rtc = [0x1A, 0x07, 0x03, 0x0C, 0x22, 0x38];
-    DateTime dt = sample_value(rtc.ptr, ValueDesc(parse_modbus_data_type("dt48be"), DateFormat.yymmddhhmmss)).as!DateTime;
-    assert(dt.year == 2026 && dt.month == Month.July && dt.day == 3);
-    assert(dt.hour == 12 && dt.minute == 34 && dt.second == 56);
-}
 
 
 private:
@@ -482,19 +429,22 @@ private:
         PCP pcp;
         bool dei;
         Element* element;
-        ValueDesc desc;
+        ubyte length;
+        SampleDesc desc;
         ubyte seqLen() const pure nothrow @nogc
-            => cast(ubyte)(desc.data_length / 2);
+            => regKind < cast(ubyte)RegisterType.input_register ? 1 : cast(ubyte)(length / 2);
     }
 
-    void add_register_entry(Element* element, ref const ElementDesc desc, ref const ElementDesc_Modbus reg_info)
+    void add_register_entry(Element* element, ref const ElementDesc desc, ref const ElementDesc_Modbus reg_info,
+                            SampleDesc sample_desc)
     {
         Array!SampleElement* dest = _current_pass == Pass.serve ? &serve_elements : &elements;
         SampleElement* e = &dest.pushBack();
         e.element = element;
         e.register = reg_info.reg;
         e.regKind = reg_info.reg_type;
-        e.desc = reg_info.value_desc;
+        e.length = reg_info.length;
+        e.desc = sample_desc;
         if (_current_pass == Pass.primary)
         {
             switch (desc.update_frequency)
@@ -622,18 +572,68 @@ private:
             if (kind <= 1)
             {
                 bool value = ((data[offset >> 3] >> (offset & 7)) & 1) != 0;
-                assert(false, "TODO: test this and store the value...");
+                _writing_from_poll = true;
+                e.element.value(Variant(value), cast(SysTime)response_time);
+                _writing_from_poll = false;
             }
             else
             {
                 _writing_from_poll = true;
-                e.element.value(sample_value(data.ptr + byte_offset, e.desc), cast(SysTime)response_time);
+                sample_element(e, data[byte_offset .. byte_offset + e.length], cast(SysTime)response_time);
                 _writing_from_poll = false;
             }
 
             version (DebugModbusBindingRegs)
                 log.tracef("Got reg {0,04x}: {1} = {2}", e.register, e.element.id, e.element.value);
         }
+    }
+
+    bool sample_element(ref SampleElement e, const(void)[] wire, SysTime timestamp)
+    {
+        const(DataFormat)* fmt = e.desc.fmt;
+        if (fmt.is_scalar)
+        {
+            manager.series.Scalar scalar;
+            scalar.raw[] = 0;
+            if (!sample_record(wire, e.desc, scalar.raw[0 .. fmt.stride]))
+                return false;
+            if (e.element.format == e.desc.format)
+                e.element.write_record(scalar.raw[0 .. fmt.stride], timestamp);
+            else
+                e.element.value(box_record(scalar.raw.ptr, *fmt), timestamp);
+            return true;
+        }
+        if (fmt.is_text)
+        {
+            char[256] buffer = void;
+            e.element.value(Variant(sample_text(wire, e.desc, buffer)), timestamp);
+            return true;
+        }
+        ubyte[256] record = void;
+        if (fmt.stride > record.length || !sample_record(wire, e.desc, record[0 .. fmt.stride]))
+            return false;
+        e.element.value(box_record(record.ptr, *fmt), timestamp);
+        return true;
+    }
+
+    bool emit_element(ref SampleElement e, void[] wire)
+    {
+        const(DataFormat)* fmt = e.desc.fmt;
+        Variant value = e.element.value();
+        if (fmt.is_text)
+            return value.isString && emit_text(value.asString, e.desc, wire);
+        if (fmt.is_scalar)
+        {
+            manager.series.Scalar scalar;
+            return unbox_scalar(value, *fmt, scalar)
+                && emit_record(scalar.raw[0 .. fmt.stride], e.desc, wire);
+        }
+        if (value.isBuffer)
+        {
+            const(void)[] record = value.asBuffer;
+            return record.length == fmt.stride && emit_record(record, e.desc, wire);
+        }
+        return false;
     }
 
     void error_handler(ModbusErrorType errorType, ref const ModbusPDU request, MonoTime request_time)
@@ -743,8 +743,8 @@ private:
             if (end > cast(uint)start + count)
                 continue;
             const uint byte_offset = (ent.register - start) * 2;
-            const Variant val = ent.element.value;
-            write_value(tmpbuf[1 + byte_offset .. 1 + byte_count], val, ent.desc);
+            if (!emit_element(ent, tmpbuf[1 + byte_offset .. 1 + byte_offset + ent.length]))
+                return ExceptionCode.slave_device_failure;
             any_overlap = true;
         }
         if (!any_overlap)
@@ -801,8 +801,8 @@ private:
         if (!(ent.element.access & Access.write))
             return ExceptionCode.illegal_function;
 
-        Variant v = sample_value(req.data.ptr + 2, ent.desc);
-        ent.element.value(v, getSysTime());
+        if (!sample_element(*ent, req.data[2 .. 2 + ent.length], getSysTime()))
+            return ExceptionCode.illegal_data_value;
         flush_pending_writes();
 
         resp = ModbusPDU(FunctionCode.write_single_register, req.data[0..4]);
@@ -850,8 +850,8 @@ private:
             if (end > cast(uint)start + count)
                 continue;
             const uint byte_offset = (ent.register - start) * 2;
-            Variant v = sample_value(payload.ptr + byte_offset, ent.desc);
-            ent.element.value(v, ts);
+            if (!sample_element(ent, payload[byte_offset .. byte_offset + ent.length], ts))
+                return ExceptionCode.illegal_data_value;
         }
         flush_pending_writes();
 
@@ -947,7 +947,7 @@ private:
                 continue;
             if (!(ent.element.access & Access.write))
                 continue;
-            ent.element.add_subscriber(&element_changed);
+            ent.element.subscribe(&element_changed);
         }
         _elements_subscribed = true;
     }
@@ -962,25 +962,24 @@ private:
                 continue;
             if (!(ent.element.access & Access.write))
                 continue;
-            ent.element.remove_subscriber(&element_changed);
+            ent.element.unsubscribe(&element_changed);
         }
         _elements_subscribed = false;
     }
 
-    void element_changed(ref Element e, ref const Variant val, SysTime ts, ref const Variant, SysTime)
+    void element_changed(ref const SampleUpdate update)
     {
         if (_writing_from_poll)
             return;
         if (!_node.get || !_slave_server)
             return;
-        Element* el = &e;
         foreach (ref ent; elements)
         {
-            if (ent.element !is el)
+            if (ent.element !is update.element)
                 continue;
             ent.flags |= 4;
             _has_dirty = true;
-            return;
+            break;
         }
     }
 
@@ -1065,8 +1064,8 @@ private:
             foreach (ref ent; run)
             {
                 const ubyte word_count = ent.seqLen;
-                ptrdiff_t n = write_value(buf[0 .. word_count * 2], ent.element.value, ent.desc);
-                if (n != word_count * 2)
+                buf[0 .. word_count * 2] = 0;
+                if (!emit_element(ent, buf[0 .. word_count * 2]))
                 {
                     // abandoning the run; clear the in-flight bits or these elements can never write again
                     foreach (ref r; run)

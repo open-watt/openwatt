@@ -900,6 +900,15 @@ nothrow @nogc:
         else if (max_points > max_history_points)
             max_points = max_history_points;
 
+        // typed series answer synchronously from RAM buckets + owsig container; the db
+        // serves legacy ring-fed streams
+        Array!Sample local;
+        if (query_local(*rs, from_ms * 1_000_000, to_ms * 1_000_000, max_points, QueryMode.raw, local))
+        {
+            encoder_for(from._encoder).encode_history(from, seq, path, local[]);
+            return;
+        }
+
         uint ticket = database().query(rs.series, from_ms * 1_000_000, to_ms * 1_000_000, max_points, QueryMode.raw, &on_history_result);
         if (!ticket)
         {
@@ -930,15 +939,15 @@ nothrow @nogc:
 
     void inbound_enum_req(SyncPeer from, const(char)[] type_name, uint seq)
     {
-        auto pe = type_name in g_app.enum_templates;
-        if (!pe)
+        import manager.sample : find_enum_info;
+        const(VoidEnumInfo)* e = find_enum_info(type_name);
+        if (!e)
         {
             encoder_for(from._encoder).encode_error(from, seq, "unknown enum");
             return;
         }
 
         Variant members;
-        const(VoidEnumInfo)* e = *pe;
         foreach (i; 0 .. e.count)
         {
             const(char)[] key = e.key_by_decl_index(i);

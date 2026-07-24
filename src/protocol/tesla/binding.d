@@ -4,6 +4,7 @@ import urt.array;
 import urt.log;
 import urt.mem.string : addString;
 import urt.meta : AliasSeq;
+import urt.meta.enuminfo : enum_info;
 import urt.si;
 import urt.si.quantity;
 import urt.string;
@@ -18,9 +19,12 @@ import manager.component;
 import manager.device;
 import manager.element;
 import manager.plugin;
+import manager.sample;
+import manager.series;
 
 import protocol.tesla;
 import protocol.tesla.master;
+import protocol.tesla.twc;
 
 version = DebugTWCBinding;
 
@@ -82,7 +86,7 @@ nothrow @nogc:
 
         if (_target_current && _target_current.access != Access.read)
         {
-            _target_current.add_subscriber(&on_target_current_change);
+            _target_current.subscribe(&on_target_current_change);
             _subscribed = true;
         }
 
@@ -93,7 +97,7 @@ nothrow @nogc:
     {
         if (_subscribed)
         {
-            _target_current.remove_subscriber(&on_target_current_change);
+            _target_current.unsubscribe(&on_target_current_change);
             _subscribed = false;
         }
         _master = null;
@@ -109,33 +113,32 @@ nothrow @nogc:
             return;
 
         TeslaTWCMaster.Charger* charger = &_master.chargers[_charger_index];
+        SysTime timestamp = getSysTime();
 
         // TODO: user can write to target_current; we just push the master's view here
-        foreach (e; _elements)
+        foreach (ref e; _elements)
         {
-            switch (e.id[])
+            final switch (e.kind)
             {
-                case "setpoint":        e.value(CentiAmps(charger.target_current));                                       break;
-                case "state":           e.value(charger.charger_state);                                                   break;
-                case "twc_state":       e.value(charger.state);                                                           break;
-                case "max":             e.value(CentiAmps(charger.max_current));                                          break;
-                case "current":         e.value(CentiAmps((charger.flags & 2) ? charger.current : 0));                    break;
-                case "voltage1":        e.value(Volts((charger.flags & 2) ? charger.voltage1 : 0));                       break;
-                case "voltage2":        e.value(Volts((charger.flags & 2) ? charger.voltage2 : 0));                       break;
-                case "voltage3":        e.value(Volts((charger.flags & 2) ? charger.voltage3 : 0));                       break;
-                case "power":           e.value(Watts((charger.flags & 2) ? charger.total_power : 0));                    break;
-                case "power1":          e.value(Watts((charger.flags & 2) ? charger.power1 : 0));                         break;
-                case "power2":          e.value(Watts((charger.flags & 2) ? charger.power2 : 0));                         break;
-                case "power3":          e.value(Watts((charger.flags & 2) ? charger.power3 : 0));                         break;
-                case "import":
-                case "lifetime_energy":
-                    e.value(WattHours((charger.flags & 2) ? ulong(charger.lifetime_energy) * 1000 : 0));
+                case SampleKind.setpoint:        write_sample(e, charger.target_current, timestamp);                                      break;
+                case SampleKind.state:           write_sample(e, cast(ubyte)charger.charger_state, timestamp);                            break;
+                case SampleKind.twc_state:       write_sample(e, cast(ubyte)charger.state, timestamp);                                    break;
+                case SampleKind.max:             write_sample(e, charger.max_current, timestamp);                                         break;
+                case SampleKind.current:         write_sample(e, (charger.flags & 2) ? charger.current : ushort(0), timestamp);            break;
+                case SampleKind.voltage1:        write_sample(e, (charger.flags & 2) ? charger.voltage1 : ushort(0), timestamp);           break;
+                case SampleKind.voltage2:        write_sample(e, (charger.flags & 2) ? charger.voltage2 : ushort(0), timestamp);           break;
+                case SampleKind.voltage3:        write_sample(e, (charger.flags & 2) ? charger.voltage3 : ushort(0), timestamp);           break;
+                case SampleKind.power:           write_sample(e, (charger.flags & 2) ? charger.total_power : ushort(0), timestamp);       break;
+                case SampleKind.power1:          write_sample(e, (charger.flags & 2) ? charger.power1 : ushort(0), timestamp);             break;
+                case SampleKind.power2:          write_sample(e, (charger.flags & 2) ? charger.power2 : ushort(0), timestamp);             break;
+                case SampleKind.power3:          write_sample(e, (charger.flags & 2) ? charger.power3 : ushort(0), timestamp);             break;
+                case SampleKind.import_:
+                case SampleKind.lifetime_energy:
+                    write_sample(e, (charger.flags & 2) ? ulong(charger.lifetime_energy) * 1000 : ulong(0), timestamp);
                     break;
-                case "serial_number":   e.value((charger.flags & 4) ? charger.serial_number : "");                        break;
-                case "vin":             e.value((charger.flags & 0xF0) == 0xF0 ? charger.vin : "");                       break;
-                case "circuit":         e.value((charger.flags & 0xF0) == 0xF0 ? charger.vin : "");                       break;
-                default:
-                    assert(false, "Invalid element for Tesla TWC");
+                case SampleKind.serial_number:   write_sample(e, (charger.flags & 4) ? charger.serial_number[] : "", timestamp);       break;
+                case SampleKind.vin:             write_sample(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);      break;
+                case SampleKind.circuit:         write_sample(e, (charger.flags & 0xF0) == 0xF0 ? charger.vin[] : "", timestamp);      break;
             }
         }
     }
@@ -156,50 +159,49 @@ protected:
         }
 
         Component info = find_or_create_component(device, "info", "DeviceInfo");
-        set_constant(find_or_create_element(info, "type"), "evse");
-        set_constant(find_or_create_element(info, "name"), "Tesla Wall Charger Gen2");
-        _elements ~= find_or_create_element(info, "serial_number");
+        set_constant(info, "type", "evse");
+        set_constant(info, "name", "Tesla Wall Charger Gen2");
+        add_sample(info, "serial_number", SampleKind.serial_number, text_format());
 
         Component status = find_or_create_component(device, "status", "DeviceStatus");
-        set_constant(find_or_create_element(status, "address"), slave_id); // id? slave-id? what's a good element name?
-        _elements ~= find_or_create_element(status, "lifetime_energy");
-        _elements ~= find_or_create_element(status, "vin");
+        set_constant(status, "address", slave_id); // id? slave-id? what's a good element name?
+        add_sample(status, "lifetime_energy", SampleKind.lifetime_energy, quantity_format(ValueType.u64, WattHour));
+        add_sample(status, "vin", SampleKind.vin, text_format());
 
         Component evse = find_or_create_component(device, "evse", "EVSE");
-        _elements ~= find_or_create_element(evse, "state");
-        _elements ~= find_or_create_element(evse, "twc_state");
+        add_sample(evse, "state", SampleKind.state, enum_format!(TeslaTWCMaster.ChargerState));
+        add_sample(evse, "twc_state", SampleKind.twc_state, enum_format!TWCState());
 
         Component grid = find_or_create_component(device, "grid", "Port");
-        set_constant(find_or_create_element(grid, "role"), "grid");
-        set_constant(find_or_create_element(grid, "flow"), "consume");
+        set_constant(grid, "role", "grid");
+        set_constant(grid, "flow", "consume");
 
         Component car = find_or_create_component(device, "car", "Port");
-        set_constant(find_or_create_element(car, "role"), "car");
-        set_constant(find_or_create_element(car, "flow"), "supply");
-        _elements ~= find_or_create_element(car, "circuit");
+        set_constant(car, "role", "car");
+        set_constant(car, "flow", "supply");
+        add_sample(car, "circuit", SampleKind.circuit, text_format());
 
         Component control = find_or_create_component(grid, "control", "PowerControl");
-        set_constant(find_or_create_element(control, "kind"), "continuous");
-        set_constant(find_or_create_element(control, "direction"), "consume");
-        set_constant(find_or_create_element(control, "unit"), "A");
-        set_constant(find_or_create_element(control, "step"), 1);
-        set_constant(find_or_create_element(control, "min"), CentiAmps(500));
-        set_constant(find_or_create_element(control, "can_disable"), false);
-        _target_current = find_or_create_element(control, "setpoint", Access.read_write);
-        _elements ~= _target_current;
-        _elements ~= find_or_create_element(control, "max");
+        set_constant(control, "kind", "continuous");
+        set_constant(control, "direction", "consume");
+        set_constant(control, "unit", "A");
+        set_constant(control, "step", 1);
+        set_constant(control, "min", CentiAmps(500));
+        set_constant(control, "can_disable", false);
+        _target_current = add_sample(control, "setpoint", SampleKind.setpoint, centiamps_format(), Access.read_write);
+        add_sample(control, "max", SampleKind.max, centiamps_format());
 
         Component meter = find_or_create_component(grid, "meter", "EnergyMeter");
-        set_constant(find_or_create_element(meter, "type"), "three-phase");
-        _elements ~= find_or_create_element(meter, "voltage1");
-        _elements ~= find_or_create_element(meter, "voltage2");
-        _elements ~= find_or_create_element(meter, "voltage3");
-        _elements ~= find_or_create_element(meter, "current");
-        _elements ~= find_or_create_element(meter, "power1");
-        _elements ~= find_or_create_element(meter, "power2");
-        _elements ~= find_or_create_element(meter, "power3");
-        _elements ~= find_or_create_element(meter, "power");
-        _elements ~= find_or_create_element(meter, "import");
+        set_constant(meter, "type", "three-phase");
+        add_sample(meter, "voltage1", SampleKind.voltage1, quantity_format(ValueType.u16, ScaledUnit(Volt)));
+        add_sample(meter, "voltage2", SampleKind.voltage2, quantity_format(ValueType.u16, ScaledUnit(Volt)));
+        add_sample(meter, "voltage3", SampleKind.voltage3, quantity_format(ValueType.u16, ScaledUnit(Volt)));
+        add_sample(meter, "current", SampleKind.current, centiamps_format());
+        add_sample(meter, "power1", SampleKind.power1, quantity_format(ValueType.u16, ScaledUnit(Watt)));
+        add_sample(meter, "power2", SampleKind.power2, quantity_format(ValueType.u16, ScaledUnit(Watt)));
+        add_sample(meter, "power3", SampleKind.power3, quantity_format(ValueType.u16, ScaledUnit(Watt)));
+        add_sample(meter, "power", SampleKind.power, quantity_format(ValueType.u16, ScaledUnit(Watt)));
+        add_sample(meter, "import", SampleKind.import_, quantity_format(ValueType.u64, WattHour));
 
         _built = true;
         return true;
@@ -216,7 +218,35 @@ private:
     bool _built;
 
     Element* _target_current;
-    Array!(Element*) _elements;
+    Array!SampleElement _elements;
+
+    enum SampleKind : ubyte
+    {
+        setpoint,
+        state,
+        twc_state,
+        max,
+        current,
+        voltage1,
+        voltage2,
+        voltage3,
+        power,
+        power1,
+        power2,
+        power3,
+        import_,
+        lifetime_energy,
+        serial_number,
+        vin,
+        circuit
+    }
+
+    struct SampleElement
+    {
+        Element* element;
+        FormatId format;
+        SampleKind kind;
+    }
 
     Component find_or_create_component(Component parent, const(char)[] id, const(char)[] template_)
     {
@@ -230,22 +260,73 @@ private:
         return c;
     }
 
-    Element* find_or_create_element(Component parent, const(char)[] id, Access access = Access.read)
+    Element* find_or_create_element(Component parent, const(char)[] id, FormatId format,
+                                    Access access = Access.read)
     {
         foreach (e; parent.elements)
+        {
             if (e.id[] == id)
+            {
+                assert(e.format == format || value_compatible(*format_info(format), *e.data_format),
+                       "Tesla element format mismatch");
                 return e;
+            }
+        }
         Element* e = g_app.allocator.allocT!Element();
         e.parent = parent;
         e.id = id.addString();
+        e.format = format;
         e.access = access;
         parent.elements ~= e;
         g_app.notify_element_created(e);
         return e;
     }
 
-    void set_constant(T)(Element* e, T value)
+    Element* add_sample(Component parent, const(char)[] id, SampleKind kind, FormatId format, Access access = Access.read)
     {
+        Element* e = find_or_create_element(parent, id, format, access);
+        _elements ~= SampleElement(e, format, kind);
+        return e;
+    }
+
+    FormatId quantity_format(ValueType type, ScaledUnit unit)
+        => register_format(DataFormat(type, SeriesKind.held, unit));
+
+    FormatId centiamps_format()
+        => quantity_format(ValueType.u16, ScaledUnit(Ampere, -2));
+
+    FormatId enum_format(E)()
+        => register_format(DataFormat(ValueType.u8, SeriesKind.held, enum_info!E.make_void()));
+
+    FormatId text_format()
+    {
+        DataFormat format = DataFormat(ValueType.char_, SeriesKind.held);
+        format.count = 0;
+        return register_format(format);
+    }
+
+    void write_sample(T)(ref SampleElement sample, T value, SysTime timestamp)
+    {
+        static if (is(T : const(char)[]))
+        {
+            if (sample.element.format == sample.format)
+                sample.element.write_sample(value, timestamp);
+            else
+                sample.element.value(value, timestamp);
+        }
+        else
+        {
+            const(void)[] record = (cast(const(void)*)&value)[0 .. T.sizeof];
+            if (sample.element.format == sample.format)
+                sample.element.write_record(record, timestamp);
+            else
+                sample.element.value(box_record(record.ptr, *format_info(sample.format)), timestamp);
+        }
+    }
+
+    void set_constant(T)(Component parent, const(char)[] id, T value)
+    {
+        Element* e = find_or_create_element(parent, id, register_value_format(value));
         if (e.sampling_mode != SamplingMode.constant)
         {
             e.value(value);
@@ -253,12 +334,12 @@ private:
         }
     }
 
-    void on_target_current_change(ref Element e, ref const Variant val, SysTime ts, ref const Variant prev, SysTime prev_ts)
+    void on_target_current_change(ref const SampleUpdate update)
     {
-        if (!_master)
+        if (!_master || update.element !is _target_current || !update.value_ready)
             return;
         TeslaTWCMaster.Charger* charger = &_master.chargers[_charger_index];
-        charger.target_current = (cast(CentiAmps)val.asQuantity()).value;
+        charger.target_current = (cast(CentiAmps)update.value.asQuantity()).value;
         version (DebugTWCBinding)
             log.trace("set target current: ", charger.target_current);
     }

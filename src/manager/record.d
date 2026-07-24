@@ -1,20 +1,11 @@
 module manager.record;
 
-// Element history recording.
-//
-// A Recorder walks the device tree and attaches a RecordStream to every element
-// whose data-model path matches its filter. Each RecordStream keeps a *small*
-// local ring of recent samples (a hot cache for live graphing) and ships every
-// sample into the database world via the db client. The database owns
-// persistence and is the authoritative, complete store -- the frontend never
-// touches files and never blocks on disk.
-//
-// Queries are serviced asynchronously by the database. The local ring is only
-// consulted as a fast path when it fully covers the requested range (the common
-// "scroll the last minute, live" case); anything wider goes to the database.
-//
-// Values are recorded as doubles: quantities are normalised to base SI scale,
-// bools as 0/1. Non-numeric values (strings, maps) are not recorded.
+// Element history recording. A Recorder walks the device tree and attaches a
+// RecordStream to every element whose data-model path matches its filter. The
+// Element's typed SeriesStore is the live source and an owsig container extends
+// that history on disk.
+// Graph queries convert numeric records to doubles and normalise quantities to
+// base SI scale. The container itself retains the element's typed records.
 
 import urt.array;
 import urt.lifetime;
@@ -38,6 +29,7 @@ import manager.console.graph;
 import manager.console.live_view;
 import manager.device;
 import manager.element;
+import manager.owsig;
 import manager.plugin;
 
 import db;
@@ -56,68 +48,109 @@ nothrow @nogc:
 
     Recorder owner;
     Element* element;
+    Cursor cursor;          // typed-series intake: pinned, never lapped (element holder predates EIDs, so this rides along)
+    SeriesContainer container;
     String path;            // data-model path: "device.component.element"
-    SeriesId series;        // handle into the database world
-    ulong flush_watermark;  // newest element-sample time examined for the db
-    ulong last_flushed;     // time of the last sample shipped (min-period subsampling)
+    SeriesId series;        // legacy database query handle
 
     this(this) @disable;
 
     void flush()
     {
         Element* e = element;
-        ulong newest = e.recent_newest();
-        if (e.recent_count == 0 || newest <= flush_watermark)
+
+        const(DataFormat)* f = e.data_format;
+        if (!container_serialisable(*f))
+            return; // stays in RAM; text/user/domain series wait on their codecs
+
+        if (cursor.element is null)
+            cursor = e.open_series_cursor(0, true);
+        if (!cursor.pending)
             return;
+        if (!container.is_open && !container.open_(owner.make_filename(path[], ".owsig")[]))
+            return; // disk trouble; records stay pinned, retry next flush
 
-        ulong throttle = 0;
-        Duration mp = owner.min_period;
-        if (mp > Duration.zero)
-            throttle = cast(ulong)mp.as!"nsecs";
+        while (cursor.pending)
+        {
+            RecordBlock blk = cursor.next(256);
+            if (blk.count == 0)
+                break;
+            if (!container.put(blk))
+            {
+                cursor.seek(blk.first_index); // rewind just this block; earlier puts are on disk
+                break;
+            }
+        }
+    }
 
-        Array!Sample block;
-        ulong cursor = last_flushed;
-        foreach (i; 0 .. e.recent_count)
-        {
-            ref const ElementSample s = e.recent_at(i);
-            ulong t = unixTimeNs(cast(SysTime)s.time);
-            if (t <= flush_watermark)
-                continue;
-            double v;
-            if (!sample_to_double(s.value, v))
-                continue;
-            if (throttle && cursor && t - cursor < throttle)
-                continue;
-            block ~= Sample(t, v);
-            cursor = t;
-        }
-
-        if (block.length == 0)
-        {
-            flush_watermark = newest; // examined everything; min-period dropped it all
-            return;
-        }
-        if (database().push_block(series, block[]))
-        {
-            flush_watermark = newest;
-            last_flushed = cursor;
-        }
+    void close()
+    {
+        if (cursor.element)
+            element.close_series_cursor(cursor);
+        container.close_();
     }
 }
 
 bool query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, QueryMode mode, ref Array!Sample result)
 {
     Element* e = rs.element;
-    if (e.recent_count == 0 || e.recent_oldest() > from)
-        return false;
-
     Array!Sample local;
-    foreach (i; 0 .. e.recent_count)
+    ulong idx = e.index_for_time(from_unix_time_ns(from));
+    for (; idx != ulong.max;)
     {
-        ref const ElementSample s = e.recent_at(i);
-        double v;
-        if (sample_to_double(s.value, v))
-            local ~= Sample(unixTimeNs(cast(SysTime)s.time), v);
+        RecordBlock blk = e.read_records(idx, 256);
+        if (blk.count == 0)
+            break;
+        bool past = false;
+        foreach (i; 0 .. blk.count)
+        {
+            ulong t = unixTimeNs(blk.time(i));
+            if (t > to)
+            {
+                past = true;
+                break;
+            }
+            double v;
+            Variant val = blk.box(i);
+            if (sample_to_double(val, v))
+                local ~= Sample(t, v);
+        }
+        if (past)
+            break;
+        idx += blk.count;
+    }
+
+    if ((local.length == 0 || local[0].time > from) && rs.container.is_open && rs.container.dir.length)
+    {
+        // the container reaches further back than RAM retention
+        Array!Sample merged;
+        ulong ram_start = local.length ? local[0].time : ulong.max;
+        size_t bi = rs.container.find_by_time(from / 1000);
+        if (bi == rs.container.dir.length)
+            --bi;       // everything ends before `from`: the last block holds the seed
+        else if (bi)
+            --bi;       // step back one block for held state
+        outer: for (; bi < rs.container.dir.length; ++bi)
+        {
+            if (rs.container.dir[bi].hdr.first_tick * 1000 > to)
+                break;
+            RecordBlock blk;
+            if (!rs.container.load(bi, blk))
+                break;
+            foreach (i; 0 .. blk.count)
+            {
+                ulong t = unixTimeNs(blk.time(i));
+                if (t >= ram_start || t > to)
+                    break outer;
+                double v;
+                Variant val = blk.box(i);
+                if (sample_to_double(val, v))
+                    merged ~= Sample(t, v);
+            }
+        }
+        foreach (ref const Sample s; local[])
+            merged ~= s;
+        local = merged.move;
     }
     if (local.length == 0 || local[0].time > from)
         return false; // no numeric coverage back to `from`; let the db serve it
@@ -194,36 +227,33 @@ unittest
 {
     import urt.time : from_unix_time_ns;
 
-    // an element capturing samples at 1ms .. 6ms (values 0,10,..,50)
-    Element e;
+    // query_local serves directly from typed Element history.
+    static immutable DataFormat qfmt = DataFormat(ValueType.f64, SeriesKind.held);
+    Element en;
+    en.format = register_format(qfmt);
+    en.ensure_history();
     foreach (i; 0 .. 6)
-        e.value(Variant(i * 10.0), from_unix_time_ns((i + 1) * 1_000_000UL));
+        en.write_sample(i * 10.0, from_unix_time_ns((i + 1) * 1_000_000UL));
 
-    RecordStream rs;
-    rs.element = &e;
-
-    // local query served from the element's recent buffer
+    RecordStream rn;
+    rn.element = &en;
     Array!Sample result;
-    assert(rs.query_local(4_000_000, 5_000_000, 0, QueryMode.raw, result));
-    assert(result.length == 2);
-    assert(result[0].time == 4_000_000 && result[1].time == 5_000_000);
-
-    // can't reach back before the oldest sample
     result.clear();
-    assert(!rs.query_local(0, 6_000_000, 0, QueryMode.raw, result));
-
-    // graph mode seeds the left edge with the value held before `from`
+    assert(rn.query_local(4_000_000, 5_000_000, 0, QueryMode.raw, result));
+    assert(result.length == 2 && result[0].time == 4_000_000 && result[0].value == 30);
     result.clear();
-    assert(rs.query_local(4_000_000, 6_000_000, 0, QueryMode.graph, result));
-    assert(result[0].time == 4_000_000 && result[0].value == 20); // held from the 3ms sample
+    assert(!rn.query_local(0, 6_000_000, 0, QueryMode.raw, result)); // no coverage back to 0
+    result.clear();
+    assert(rn.query_local(4_000_000, 6_000_000, 0, QueryMode.graph, result));
+    assert(result[0].time == 4_000_000 && result[0].value == 20);
+    en.teardown();
 }
 
 
 class Recorder : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("dir", dir),
-                                 Prop!("filter", filter),
-                                 Prop!("min-period", min_period));
+                                 Prop!("filter", filter));
 nothrow @nogc:
 
     enum type_name = "recorder";
@@ -257,14 +287,6 @@ nothrow @nogc:
         _filter = value.makeString(g_app.allocator);
         mark_set!(typeof(this), "filter")();
         restart();
-    }
-
-    final Duration min_period() const pure
-        => _min_period;
-    final void min_period(Duration value)
-    {
-        _min_period = value;
-        mark_set!(typeof(this), "min-period")();
     }
 
     // API
@@ -302,6 +324,7 @@ protected:
     {
         foreach (rs; _streams.values)
         {
+            rs.close();
             database().close_series(rs.series);
             defaultAllocator().freeT(rs);
         }
@@ -328,7 +351,6 @@ protected:
 private:
     String _dir = StringLit!"records";
     String _filter = StringLit!"*";
-    Duration _min_period;
 
     Map!(const(char)[], RecordStream*) _streams; // keyed by the stream's own path string
     MonoTime _last_scan;
@@ -363,7 +385,7 @@ private:
         // the element self-captures; the first flush ships its standing history
     }
 
-    String make_filename(const(char)[] path)
+    String make_filename(const(char)[] path, const(char)[] ext = ".owr")
     {
         MutableString!0 fn;
         fn.append(_dir[], '/');
@@ -375,7 +397,7 @@ private:
             else
                 fn ~= c;
         }
-        fn ~= ".owr";
+        fn ~= ext;
         return fn[].makeString(defaultAllocator());
     }
 }

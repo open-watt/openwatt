@@ -6,6 +6,7 @@ import urt.meta : AliasSeq;
 import urt.string;
 import urt.time;
 import urt.uuid;
+import urt.variant;
 
 import manager;
 import manager.base;
@@ -14,13 +15,23 @@ import manager.collection;
 import manager.device;
 import manager.element;
 import manager.profile;
-import manager.sampler;
+import manager.sample;
+import manager.series;
 
 import protocol.ble.client;
 
 
 nothrow @nogc:
 
+
+struct ElementDesc_BLE
+{
+    GUID service_uuid;
+    GUID char_uuid;
+    ubyte offset;
+    ubyte length;
+    ushort desc = 0xFFFF;
+}
 
 class BLEClientBinding : ProfileBinding
 {
@@ -112,21 +123,29 @@ nothrow @nogc:
     }
 
 protected:
-    final override const(char)[] profile_dir() const pure
-        => "conf/ble_profiles/";
     final override const(char)[] profile_name() const pure
         => _profile_name[];
     final override const(char)[] model_name() const pure
         => _model_name[];
 
-    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
+    final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
-        assert(desc.type == ElementType.ble);
-        ref const ElementDesc_BLE ble = _profile_data.get_ble(desc.element);
+        import protocol.ble : ble_section_kind;
 
-        ubyte[256] tmp = void;
-        tmp[0 .. ble.value_desc.data_length] = 0;
-        e.value = sample_value(tmp.ptr, ble.value_desc);
+        assert(desc.kind == ble_section_kind);
+        ref const ElementDesc_BLE ble = _profile_data.get_section!ElementDesc_BLE(ble_section_kind, desc.element);
+        if (ble.desc == 0xFFFF)
+            return FormatId.invalid;
+
+        SampleDesc sd = desc_by_index(ble.desc);
+        const(DataFormat)* fmt = sd.fmt;
+        e.format = sd.format;
+        if (fmt.is_scalar)
+        {
+            Scalar z;
+            z.raw[] = 0;
+            e.value = box_record(z.raw.ptr, *fmt);
+        }
 
         SampleElement* se = &elements.pushBack();
         se.element = e;
@@ -134,9 +153,10 @@ protected:
         se.char_uuid = ble.char_uuid;
         se.handle = ushort.max;
         se.offset = ble.offset;
-        se.desc = ble.value_desc;
+        se.length = ble.length;
+        se.desc = sd;
 
-        device.sample_elements ~= e; // TODO: remove this?
+        return sd.format;
     }
 
 private:
@@ -158,7 +178,8 @@ private:
         GUID char_uuid;
         ushort handle;
         ubyte offset;
-        ValueDesc desc;
+        ubyte length;
+        SampleDesc desc;
     }
 
     void state_change(ActiveObject obj, StateSignal signal)
@@ -232,12 +253,36 @@ private:
         {
             if (e.handle != handle)
                 continue;
-            if (value.length < e.offset + e.desc.data_length)
+            if (value.length < e.offset + e.length)
                 continue;
+            const(void)[] wire = value[e.offset .. e.offset + e.length];
             // HACK: Element.value defaults timestamp to getSysTime(); packet creation_time
             // no longer accessible here (BLEClient delivers value-only callbacks).
             // TODO: make the packet creation time available here?!
-            e.element.value(sample_value(value.ptr + e.offset, e.desc));
+            Element* el = e.element;
+            const(DataFormat)* fmt = e.desc.fmt;
+            if (fmt.is_scalar)
+            {
+                Scalar s;
+                s.raw[] = 0;
+                if (!sample_record(wire, e.desc, s.raw[0 .. fmt.stride]))
+                    continue;
+                if (el.format == e.desc.format)
+                    el.write_record(s.raw[0 .. fmt.stride]);
+                else
+                    el.value(box_record(s.raw.ptr, *fmt));
+            }
+            else if (fmt.type == ValueType.char_)
+            {
+                char[256] buf = void;
+                el.value(Variant(sample_text(wire, e.desc, buf)));
+            }
+            else
+            {
+                ubyte[256] record = void;
+                if (fmt.stride <= record.length && sample_record(wire, e.desc, record[0 .. fmt.stride]))
+                    el.value(box_record(record.ptr, *fmt));
+            }
         }
     }
 }

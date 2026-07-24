@@ -1,16 +1,21 @@
 module protocol.ble;
 
+import urt.conv;
 import urt.log;
 import urt.map;
 import urt.mem.allocator;
 import urt.string;
 import urt.time;
+import urt.uuid;
 import urt.util;
 
 import manager;
 import manager.collection;
+import manager.config : ConfItem;
 import manager.console;
 import manager.plugin;
+import manager.profile;
+import manager.sample.spec : stream_le_context;
 
 import router.iface;
 import router.iface.mac;
@@ -24,7 +29,9 @@ import protocol.ble.binding;
 nothrow @nogc:
 
 
-class BLEModule : Module
+package __gshared uint ble_section_kind;
+
+class BLEModule : Module, ProfileSections
 {
     mixin DeclareModule!"protocol.ble";
 nothrow @nogc:
@@ -38,10 +45,69 @@ nothrow @nogc:
         register_packet_codec!BLEFrame();
         register_frame_handler(PacketType.ble, &on_ble_frame);
 
+        ble_section_kind = register_profile_section("ble", this);
+
         g_app.console.register_collection!BLEClient();
         g_app.console.register_collection!BLEClientBinding();
         g_app.console.register_command!print_devices("/protocol/ble/device", this, "print");
         g_app.console.register_command!cmd_read("/protocol/ble/client", this, "read");
+    }
+
+    uint element_size(uint)
+        => cast(uint)ElementDesc_BLE.sizeof;
+
+    void count_element(uint, ref const ConfItem, ref ProfileSize) {}
+
+    bool parse_element(uint kind, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
+    {
+        const(char)[] tail = item.value;
+        ElementDesc_BLE* ble = cast(ElementDesc_BLE*)slot.ptr;
+        *ble = ElementDesc_BLE.init;
+
+        const(char)[] service = tail.split!',';
+        const(char)[] char_field = tail.split!',';
+        const(char)[] char_uuid = char_field.split!'(';
+        const(char)[] type = tail.split!','.unQuote;
+        const(char)[] units = tail.split!','.unQuote;
+
+        if (!parse_ble_uuid(service, ble.service_uuid))
+        {
+            writeWarning("Invalid BLE service UUID: ", service);
+            return false;
+        }
+        if (!parse_ble_uuid(char_uuid, ble.char_uuid))
+        {
+            writeWarning("Invalid BLE characteristic UUID: ", char_uuid);
+            return false;
+        }
+
+        if (char_field.length)
+        {
+            if (char_field[$-1] != ')')
+            {
+                writeWarning("Invalid BLE characteristic offset: ", char_field);
+                return false;
+            }
+            char_field = char_field[0 .. $-1].trimBack;
+            size_t taken;
+            ulong offset = char_field.parse_uint_with_base(&taken);
+            if (taken != char_field.length || offset > ubyte.max)
+            {
+                writeWarning("Invalid BLE characteristic offset: ", char_field);
+                return false;
+            }
+            ble.offset = cast(ubyte)offset;
+        }
+
+        if (!b.compile_value(type, units, stream_le_context, ble.desc, ble.length))
+            return false;
+        if (ble.length == 0)
+        {
+            writeWarning("Unsized string requires a framed BLE profile hook: ", b.element_id);
+            ble.desc = ushort.max;
+            return false;
+        }
+        return true;
     }
 
     override void update()
@@ -217,3 +283,34 @@ private:
 
 // HACK: not a member of BLEModule to avoid weird compile error!
 __gshared shared(uint) _service_pending;
+
+private:
+
+bool parse_ble_uuid(const(char)[] str, out GUID guid) pure
+{
+    if (guid.fromString(str) == 36)
+        return str.length == 36;
+
+    const(char)[] hex = str;
+    if (hex.length >= 2 && hex[0] == '0' && (hex[1] == 'x' || hex[1] == 'X'))
+        hex = hex[2 .. $];
+
+    size_t taken;
+    ulong value = parse_uint(hex, &taken, 16);
+    if ((taken != 4 && taken != 8) || taken != hex.length)
+        return false;
+
+    guid.data1 = cast(uint)value;
+    guid.data2 = 0x0000;
+    guid.data3 = 0x1000;
+    guid.data4 = [0x80, 0x00, 0x00, 0x80, 0x5F, 0x9B, 0x34, 0xFB];
+    return true;
+}
+
+unittest
+{
+    GUID guid;
+    assert(parse_ble_uuid("180F", guid) && guid.data1 == 0x180F);
+    assert(parse_ble_uuid("0x2A19", guid) && guid.data1 == 0x2A19);
+    assert(!parse_ble_uuid("180G", guid));
+}

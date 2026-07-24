@@ -13,6 +13,7 @@ import urt.string;
 public import urt.variant;
 
 import manager.value;
+import manager.series : FormatId;
 
 //version = ExpressionDebug;
 
@@ -103,6 +104,28 @@ struct EvalContext
     Component root;
     Map!(String, Variant)* locals;
     Map!(const(Expression)*, Variant)* sub_results;
+    bool types_only;    // element refs evaluate as format exemplars, not current values
+}
+
+// a representative value of a format, for evaluating an expression's TYPE before any data
+// exists: numerics are unit-carrying double zeros (derived formats are f64 by policy, and
+// zeros dodge integer division), text is empty, anything else refuses to compute
+private Variant format_exemplar(FormatId id) nothrow @nogc
+{
+    import manager.series : DataFormat, format_info, value_class, ValueClass, ValueType;
+    import urt.si.quantity : Quantity;
+    import urt.si.unit : ScaledUnit;
+
+    const(DataFormat)* f = format_info(id);
+    if (f.is_text)
+        return Variant("");
+    if (f.desc == DataFormat.Desc.quantity)
+        return Variant(Quantity!double(0, f.unit));
+    if (f.type == ValueType.bool_)
+        return Variant(false);
+    if (f.desc == DataFormat.Desc.none && value_class(f.type) != ValueClass.exact && f.count == 1)
+        return Variant(0.0);
+    return Variant(null);
 }
 
 struct Script
@@ -420,7 +443,7 @@ nothrow @nogc:
                     id = id[1 .. $];
                 Element* e = (!absolute && ctx.root) ? ctx.root.find_element(id) : g_app.find_element(id);
                 if (e)
-                    return Variant(e.value);
+                    return ctx.types_only ? format_exemplar(e.format) : Variant(e.value);
                 return Variant(null);
             case Type.arr:
                 Variant r;
@@ -531,6 +554,15 @@ nothrow @nogc:
                     r = rv.asQuantity;
                 else if (!as_quantity(rv, r))
                     return Variant();
+                // guard the quantity op preconditions: bad units are a null result, not an assert
+                if (ty == Type.add || ty == Type.sub)
+                {
+                    if (!l.isCompatible(r))
+                        return Variant();
+                }
+                else if (ty == Type.mul ? !l.unit.can_combine!"*"(r.unit)
+                                        : !l.unit.can_combine!"/"(r.unit))
+                    return Variant();
                 switch (ty)
                 {
                     case Type.add: return Variant(l + r);
@@ -540,6 +572,34 @@ nothrow @nogc:
                     default: assert(false);
                 }
         }
+    }
+
+    // an expression's format is its type-mode evaluation: element refs stand in as format
+    // exemplars and the ordinary evaluator computes the result shape, so inference can never
+    // drift from evaluation semantics
+    FormatId infer_format(ref EvalContext ctx) const
+    {
+        import manager;
+        import manager.element;
+        import manager.series;
+
+        if (ty == Type.elem)
+        {
+            // a bare reference aliases the element's exact format
+            const(char)[] id = get_str();
+            bool absolute = id.length > 0 && id[0] == '.';
+            if (absolute)
+                id = id[1 .. $];
+            Element* e = (!absolute && ctx.root) ? ctx.root.find_element(id)
+                                                 : g_app.find_element(id);
+            return e ? e.format : FormatId.invalid;
+        }
+
+        bool saved = ctx.types_only;
+        ctx.types_only = true;
+        scope(exit) ctx.types_only = saved;
+        Variant value = evaluate(ctx);
+        return value.isNull ? FormatId.invalid : register_value_format(value);
     }
 
 private:

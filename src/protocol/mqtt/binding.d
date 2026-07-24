@@ -16,7 +16,8 @@ import manager.device;
 import manager.element;
 import manager.profile;
 private alias Access = manager.element.Access;
-import manager.sampler;
+import manager.sample;
+import manager.series;
 
 import protocol.mqtt.broker;
 import protocol.mqtt.client;
@@ -25,6 +26,51 @@ import protocol.mqtt.topic : PublishCallback;
 //version = DebugMQTTBinding;
 
 nothrow @nogc:
+
+package __gshared uint mqtt_section_kind;
+package __gshared uint mqtt_subscribe_kind;
+
+struct ElementDesc_MQTT
+{
+    ushort read_topic;
+    ushort write_topic;
+    ushort desc = ushort.max;
+
+pure nothrow @nogc:
+    const(char)[] get_read_topic(ref const Profile profile) const pure
+        => profile.get_section_string(read_topic);
+
+    const(char)[] get_write_topic(ref const Profile profile) const pure
+        => profile.get_section_string(write_topic);
+}
+
+private struct MQTTSubscriptionRange
+{
+    const(Profile)* profile;
+    const(ushort)[] strings;
+
+pure nothrow @nogc:
+    bool empty() const pure
+        => strings.length == 0;
+    const(char)[] front() const pure
+        => profile.get_section_string(strings[0]);
+    void popFront() pure
+    {
+        strings = strings[1 .. $];
+    }
+}
+
+private MQTTSubscriptionRange mqtt_subscriptions(ref const Profile profile) nothrow @nogc
+{
+    const(void)[] root = profile.get_root_section(mqtt_subscribe_kind);
+    if (root.length < ushort.sizeof)
+        return MQTTSubscriptionRange(&profile, null);
+    const(ushort)[] words = cast(ushort[])root;
+    size_t count = words[0];
+    if (count + 1 > words.length)
+        return MQTTSubscriptionRange(&profile, null);
+    return MQTTSubscriptionRange(&profile, words[1 .. count + 1]);
+}
 
 
 class MQTTBinding : ProfileBinding
@@ -108,22 +154,29 @@ nothrow @nogc:
         if (!src || !src.running)
             return CompletionStatus.continue_;
 
-        bool sub_failed;
+        const(char)[] missing_param;
         const(char)[] get_substitute(size_t, const(char)[] param)
         {
-            const(char)[] v = get_param(param);
-            if (v is null)
-                sub_failed = true;
-            return v;
+            if (auto value = param in _params)
+                return (*value)[];
+            if (missing_param is null)
+                missing_param = param;
+            return null;
         }
 
-        foreach (s; _profile_data.get_mqtt_subs)
+        foreach (s; mqtt_subscriptions(*_profile_data))
         {
-            sub_failed = false;
-            String sub = String(s.substitute_parameters(&get_substitute, sub_failed));
-            if (sub_failed || !sub)
+            bool unclosed_token;
+            missing_param = null;
+            String sub = String(s.substitute_parameters(&get_substitute, unclosed_token));
+            if (missing_param !is null)
             {
-                log.warning("failed to substitute variables in subscription '", s, "'");
+                log.warning(name, ": MQTT subscription '", s, "' uses profile parameter '", missing_param, "', but it is not set");
+                continue;
+            }
+            if (unclosed_token || !sub)
+            {
+                log.warning(name, ": invalid MQTT subscription '", s, "'");
                 continue;
             }
             subscribe_filter(sub.move);
@@ -141,55 +194,68 @@ nothrow @nogc:
         foreach (ref se; _elements)
         {
             if (se.element.access & Access.write)
-                se.element.remove_subscriber(&on_element_change);
+                se.element.unsubscribe(&on_element_change);
         }
         _elements.clear();
         return super.shutdown();
     }
 
 protected:
-    final override const(char)[] profile_dir() const pure
-        => "conf/mqtt_profiles/";
     final override const(char)[] profile_name() const pure
         => _profile_name[];
     final override const(char)[] model_name() const pure
         => _model_name[];
 
-    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
+    final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
-        assert(desc.type == ElementType.mqtt);
-        ref const ElementDesc_MQTT mqtt = _profile_data.get_mqtt(desc.element);
+        if (desc.kind != mqtt_section_kind)
+            return FormatId.invalid;
+        ref const ElementDesc_MQTT mqtt = _profile_data.get_section!ElementDesc_MQTT(mqtt_section_kind, desc.element);
+        SampleDesc sample_desc = desc_by_index(mqtt.desc);
 
-        bool sub_failed;
+        const(char)[] missing_param;
         const(char)[] get_substitute(size_t, const(char)[] param)
         {
-            const(char)[] v = get_param(param);
-            if (v is null)
-                sub_failed = true;
-            return v;
+            if (auto value = param in _params)
+                return (*value)[];
+            if (missing_param is null)
+                missing_param = param;
+            return null;
         }
 
         String read_topic, write_topic;
         const(char)[] raw = mqtt.get_read_topic(*_profile_data);
         if (raw.length > 0)
         {
-            sub_failed = false;
-            read_topic = String(raw.substitute_parameters(&get_substitute, sub_failed));
-            if (sub_failed)
+            bool unclosed_token;
+            missing_param = null;
+            read_topic = String(raw.substitute_parameters(&get_substitute, unclosed_token));
+            if (missing_param !is null)
             {
-                log.warning("failed to substitute variables in topic '", raw, "'");
-                return;
+                log.warning(name, ": MQTT read topic '", raw, "' uses profile parameter '", missing_param, "', but it is not set");
+                return FormatId.invalid;
+            }
+            if (unclosed_token)
+            {
+                log.warning(name, ": unclosed placeholder token in MQTT read topic '", raw, "'");
+                return FormatId.invalid;
             }
         }
         raw = mqtt.get_write_topic(*_profile_data);
         if (raw.length > 0)
         {
-            sub_failed = false;
-            write_topic = String(raw.substitute_parameters(&get_substitute, sub_failed));
-            if (sub_failed)
+            bool unclosed_token;
+            missing_param = null;
+            write_topic = String(raw.substitute_parameters(&get_substitute, unclosed_token));
+            if (missing_param !is null)
             {
-                log.warning("failed to substitute variables in topic '", raw, "'");
-                return;
+                log.warning(name, ": MQTT write topic '", raw, "' uses profile parameter '", missing_param, "', but it is not set");
+                return FormatId.invalid;
+            }
+            if (unclosed_token)
+            {
+                log.warning(name, ": unclosed placeholder token in MQTT write topic '", raw, "'");
+                return FormatId.invalid;
             }
         }
 
@@ -197,12 +263,12 @@ protected:
         se.element = e;
         se.read_topic = read_topic.move;
         se.write_topic = write_topic.move;
-        se.desc = mqtt.value_desc;
+        se.desc = sample_desc;
 
         if (e.access & Access.write)
-            e.add_subscriber(&on_element_change);
+            e.subscribe(&on_element_change);
+        return sample_desc.format;
 
-        device.sample_elements ~= e; // TODO: remove this?
     }
 
 private:
@@ -220,7 +286,7 @@ private:
     struct SampleElement
     {
         Element* element;
-        TextValueDesc desc;
+        SampleDesc desc;
         String read_topic;
         String write_topic;
     }
@@ -282,16 +348,27 @@ private:
                 continue;
 
             const(char)[] payload_str = cast(const(char)[])payload;
-            Variant value = sample_value(payload_str, e.desc);
-
-            if (value != Variant())
+            const(DataFormat)* fmt = e.desc.fmt;
+            bool sampled;
+            _self_write = true;
+            scope(exit) _self_write = false;
+            if (fmt.is_text)
             {
-                _self_write = true;
-                scope(exit) _self_write = false;
-                e.element.value(value, cast(SysTime)timestamp);
+                e.element.write_sample(payload_str, cast(SysTime)timestamp);
+                sampled = true;
+            }
+            else if (fmt.is_scalar)
+            {
+                Scalar scalar;
+                sampled = parse_record(payload_str, e.desc, scalar.raw[0 .. fmt.stride]);
+                if (sampled)
+                    e.element.write_record(scalar.raw[0 .. fmt.stride], cast(SysTime)timestamp);
+            }
 
+            if (sampled)
+            {
                 version (DebugMQTTBinding)
-                    writeDebugf("mqtt: sample - topic: {0} value: {1} = {2} (raw: {3})", topic, e.element.id, e.element.value, cast(const(char)[])payload);
+                    writeDebugf("mqtt: sample - topic: {0} value: {1} = {2} (raw: {3})", topic, e.element.id, e.element.value, payload_str);
             }
             else
                 log.warning("failed to parse MQTT payload for topic ", topic, ": ", payload_str);
@@ -299,19 +376,43 @@ private:
         }
     }
 
-    void on_element_change(ref Element e, ref const Variant val, SysTime ts, ref const Variant prev, SysTime prev_ts)
+    void on_element_change(ref const SampleUpdate update)
     {
-        if (_self_write)
+        if (_self_write || !update.value_ready)
             return;
+        publish_element(update);
+    }
 
+    void publish_element(ref const SampleUpdate update)
+    {
         foreach (ref se; _elements)
         {
-            if (se.element != &e)
+            if (se.element != update.element)
                 continue;
             if (!se.write_topic.empty)
             {
-                const(char)[] text = format_value(val, se.desc);
-                publish_value(se.write_topic[], cast(const(ubyte)[])text, cast(MonoTime)ts);
+                const(DataFormat)* fmt = se.desc.fmt;
+                if (fmt.is_text)
+                {
+                    ref const Variant val = update.value;
+                    if (val.isString)
+                        publish_value(se.write_topic[], cast(const(ubyte)[])(val.asString[]), cast(MonoTime)update.timestamp);
+                }
+                else if (fmt.is_scalar)
+                {
+                    ref const Variant val = update.value;
+                    Scalar scalar;
+                    char[256] buffer;
+                    bool converted = unbox_scalar(val, *fmt, scalar);
+                    if (!converted && val.isString)
+                        converted = parse_record(val.asString[], se.desc, scalar.raw[0 .. fmt.stride]);
+                    if (converted)
+                    {
+                        ptrdiff_t len = format_record(scalar.raw[0 .. fmt.stride], se.desc, buffer);
+                        if (len > 0)
+                            publish_value(se.write_topic[], cast(const(ubyte)[])buffer[0 .. len], cast(MonoTime)update.timestamp);
+                    }
+                }
             }
             return;
         }

@@ -6,6 +6,7 @@ import urt.log;
 import urt.map;
 import urt.mem.allocator;
 import urt.string;
+import urt.time;
 
 import manager;
 import manager.device;
@@ -137,34 +138,50 @@ nothrow @nogc:
         return null;
     }
 
-    Element* find_or_create_element(const(char)[] name)
+    Element* find_or_create_element(const(char)[] name, FormatId format)
     {
+        assert(format.valid, "an element requires a format");
         const(char)[] id = name.split!'.';
         if (!name.empty)
         {
             foreach (Component c; components)
             {
                 if (c.id[] == id[])
-                    return c.find_or_create_element(name);
+                    return c.find_or_create_element(name, format);
             }
 
             Component c = g_app.allocator.allocT!Component(id.makeString(defaultAllocator()));
             c.parent = this;
             components ~= c;
-            return c.find_or_create_element(name);
+            return c.find_or_create_element(name, format);
         }
 
         foreach (Element* e; elements)
         {
             if (e.id[] == id[])
+            {
+                assert(e.format == format || value_compatible(*format_info(format), *e.data_format),
+                       "element path reused with an incompatible format");
                 return e;
+            }
         }
 
         Element* e = g_app.allocator.allocT!Element();
+        e.format = format;
         e.parent = this;
         elements ~= e;
         e.id = id.makeString(defaultAllocator());
         g_app.notify_element_created(e);
+        return e;
+    }
+
+    Element* set_element(T)(const(char)[] name, auto ref T value,
+                            SysTime timestamp = getSysTime(), Subscriber who = null)
+    {
+        Element* e = find_element(name);
+        if (!e)
+            e = find_or_create_element(name, register_value_format(value));
+        e.value(value, timestamp, who);
         return e;
     }
 
