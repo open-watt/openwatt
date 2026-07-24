@@ -1,109 +1,18 @@
 module manager.id;
 
-// ===========================================================================================
-// ID STRATEGY (settled 2026-07-15) - migration pending, see TODO.md "ID strategy migration"
-// ===========================================================================================
+// Names are durable identity. IDs are monotonic process-local handles: they are never derived
+// from names, persisted, or sent on the wire.
 //
-// Identity is the NAME. Ids are permanent, monotonic, process-local handles: never derived by
-// hashing a name, never persisted, never sent on the wire. The hash-based scheme below
-// (fnv1a ids + rehash chains + rekey repair) is to be deleted and replaced with:
+// A CID identifies a registered container. An EID adds an element index within that container;
+// index zero denotes the container itself. ObjectRef holds a CID, while element holders use EID.
 //
-// Ids are TWO-LEVEL: EID = (container id, element index). The container level is ONE id space
-// with per-type tables (the CID type bits): collection objects and Devices are both registered
-// types in it, but only collection types carry BaseObject machinery - a Device is NOT a
-// BaseObject (no state machine; passive container materialized by bindings) and the ad-hoc
-// g_app.devices Map dissolves into the device type's table. The data plane shards per
-// container. Element index 0 may denote the container itself, so value-level handles (ref_
-// boxing, automation targets, mesh addressing) can address objects and elements with one EID;
-// TYPED refs stay distinct - ObjectRef is a CID (a reference to a root, never an element),
-// element refs hold EIDs. Packed 64-bit in RAM (acceptable: ids never persist and never wire).
+// A name reserves a dormant slot which creation claims. Death leaves the slot reserved so a
+// replacement at the same name rebinds existing references. Rename moves the name without
+// changing the primary ID. Renaming onto a reserved name permanently forwards that slot to the
+// primary. Dereference follows forwards and updates the holder to the terminal slot.
 //
-//   container level: collection tables map name -> CID -> object; a rename touches ONE name
-//                    entry - children resolve by composition, so device rename is O(1) and
-//                    full element paths are never stored
-//   element level:   each container owns a dense element-index table, one tagged word per index
-//                      bound   -> Element*   the index is bound to a live element
-//                      dormant -> null       reserved, waiting for a claimant
-//                      forward -> index      permanent alias of another index (write-once)
-//                    relative paths resolve through the component tree
-//   hard-wired indices: property projections COMPUTE their EID as (obj CID, Prop! index) - a
-//                    compile-time literal index, no lookup, no cache; profile elements take
-//                    their template index, deterministic per profile version
-//
-// Lifecycle:
-//   - first mention of a name (a forward reference) reserves a fresh id for the name
-//   - creation at a name claims the reserved id as the object's primary
-//   - rename moves the OBJECT between name entries; ids do not move, so every held ref follows
-//     the object for free; the old name becomes an empty tombstone
-//   - rename onto a name holding reserved id J: the claimant keeps its primary I and writes
-//     J = forward(I); both the followers and the waiters now reach the object
-//   - death reserves the primary for the object's final name; refs deref to null
-//   - the next object created at that name claims the reserved id and every ref resolves again
-//   - the machine instantiates at BOTH levels: container ids are reserved for collection names,
-//     and element indices are reserved within their container's table; a forward reference under an absent container
-//     reserves the container id plus a stub element table, and each level claims independently
-//
-// Invariants:
-//   - every name resolves to at most one live object; every object has exactly one live name
-//     and one primary id
-//   - a forward slot is write-once: a forwarded id can never re-bind or be reserved, so forwarding is
-//     permanent, transitive, immutable
-//   - no operation ever rewrites an id held in a ref. deref follows forward chains (they can
-//     grow through reserve-then-claim-by-rename cycles) and dereference writes the terminal id
-//     back through the holder's own field - lossless at any time, from any thread
-//   - ids are not reclaimed in v1; a forward costs one immortal word
-//
-// Costs: deref is an array index plus forward hops until the held id is updated; rename, death, claim and
-// forward are each O(1) single-word writes. No broadcasts, no lists, no allocation, and no
-// collision concept (string hashing is internal to the name map).
-//
-// Reclamation (designed-for extension; unbounded DISTINCT NAMES are the exhaustion vector -
-// renames alone allocate nothing, and empty tombstones are deleted eagerly): id slots carry a
-// count of durable holders (RAII wrapper for struct fields; hoisted locals are uncounted
-// borrows, safe because release defers to the frame boundary). Release at zero holders; zero
-// makes freelist reuse ABA-safe with no generation tags. Updating held ids drains forwards to zero
-// through ordinary use, so rename-merge forwards self-collect. Name entries and their strings
-// (refcounted String, not an append-only string table) release when no object, no reserved id,
-// no holders. Nothing observable changes, so v1 ships without it; add when churn metrics
-// (id high-watermark in sysinfo) justify.
-//
-// CID is not merely unified with EID - it IS the EID's container level (type bits kept, slot
-// as a dense per-type index). The wire shares none of this: peers exchange names once per
-// session and bind session-local varint handles (introducer allocates, parity bit for
-// direction, never reused); config and containers persist names only.
-//
-// Migration (execution order settled 2026-07-17; container level lands BEFORE element level:
-// EIDs embed the CID, so durable element refs are worthless until CIDs stop rekeying):
-//   0. ids off the wire: sync exchanges names once per session and binds varint session
-//      handles (introducer allocates, parity bit per direction, never reused). Sync today
-//      ships raw CIDs and leans on cross-peer hash agreement, so this lands FIRST - it turns
-//      the id cutover from a protocol+internals event into a pure internal refactor
-//   1. the reserve/claim/forward machine as a standalone unit-tested component. Per-type id
-//      tables are DENSE ARRAYS indexed by slot - one tagged word each (bound/dormant/forward),
-//      allocator is next_slot++, no binary search, no collision concept; name -> id (where
-//      reservations live) is a separate string map touched only on lookup/create/rename/death.
-//      insert() is the claim state machine (absent -> reserve/new, reserved/tombstone -> claim,
-//      live -> duplicate error)
-//   2. container cutover: CollectionTable becomes the container level of the scheme (sorted
-//      entries, binary search and rehash chains die); delete rehash(), rekey(), do_rekey(),
-//      broadcast_rekey() and rekey_field() - rename-following becomes intrinsic instead of
-//      repaired; hash_id survives only inside the name maps' string hashing. Then Devices
-//      register as a container type and the ad-hoc g_app.devices Map dissolves
-//   3. element level: per-container element-index tables owned by their containers; element
-//      destruction reserves the primary index instead of nulling in place; full-path storage
-//      stays deleted (legacy ElementTable + hash-EIDs already removed from element.d);
-//      Cursor trades its Element* for an EID
-//   4. deref updates forwarded ids on the HANDLES, not on wrapper types: CollectionTable.deref(ref
-//      CID) is the container surface, deref(ref EID) (device.d, UFCS) the element surface.
-//      ObjectRef stays CID and is typed sugar over the table (static type + null ergonomics;
-//      no machinery of its own); there is NO ElementRef - element holders keep a bare EID.
-//      Bare ids in fields are the v1 answer: if the reclamation extension lands, its RAII
-//      holder wrapper is where counting attaches, at both levels. EID with index 0 remains
-//      the value-level either-kind handle
-//   5. audit holders: no persisted ids, no wire ids, no blind hashing - every id enters a
-//      holder through the table (property projections excepted: (obj CID, Prop! index) is
-//      computed, which is safe because both components are table-issued identities)
-// ===========================================================================================
+// Forward slots are immutable and IDs are not reclaimed. Add reclamation only if distinct-name
+// churn makes the table high-watermark material.
 
 import urt.array;
 import urt.map;

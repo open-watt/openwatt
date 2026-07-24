@@ -36,7 +36,6 @@ else
 nothrow @nogc:
 
 
-// Delivery callbacks run on the main thread, from inside Reactor.wait().
 alias IoDataHandler  = void delegate(const(void)[] data, MonoTime rx_time) nothrow @nogc;
 alias IoErrorHandler = void delegate() nothrow @nogc;
 
@@ -67,22 +66,9 @@ else version (linux)
     alias IoReadyHandler = void delegate(IoReady ready) nothrow @nogc;
 }
 
-// The main loop's wake primitive AND its I/O wait. The wake keeps the manual-reset latch semantics
-// of urt.sync.event.Event (set/reset/wait), and the same wait dispatches watched I/O inline on the
-// main thread: readiness from an epoll set on linux (registration is persistent - epoll_ctl once
-// per fd lifecycle, O(ready) re-entry), completions from an IO completion port on windows (one
-// overlapped read pending per watch). No standing reader threads, no cross-thread marshalling.
-// See TODO.md "Async I/O end-state: the main loop's wait primitive IS the reactor".
-//
-// The latch is the _signalled flag; the kernel-side signal exists only to break the sleep. set()
-// emits at most one kernel signal per latch cycle, so a burst of posts costs one syscall total.
-// set() is safe from any thread; everything else belongs to the main thread.
-//
-// watch_io() delivers a byte source: on_data fires per chunk, on_error asks the owner to
-// recover/restart (the reactor stops watching an errored file; the owner still unwatches it).
-// The owner closes the file AFTER unwatch_io(). The read path is tuned for non-blocking byte
-// devices (VMIN=0 ttys): a 0-byte read means drained, not EOF - sockets get their own event
-// vocabulary when they migrate here.
+// Main-loop wake latch and platform I/O wait. set() is thread-safe; all other operations and
+// callbacks belong to the main thread. Owners must unwatch a file before closing it. watch_io()
+// treats a zero-byte read from a non-blocking byte device as drained, not EOF.
 struct Reactor
 {
 nothrow @nogc:

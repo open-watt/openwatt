@@ -32,9 +32,6 @@ nothrow @nogc:
 
 alias DiscoveryPublish = void delegate(const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp) nothrow @nogc;
 
-// TODO: Revisit MQTT discovery as a synthesized dynamic profile/binding once MQTT
-// element descriptors can carry value and command transforms.
-
 struct HADiscoveryTopic
 {
     const(char)[] domain;
