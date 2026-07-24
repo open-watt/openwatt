@@ -965,7 +965,7 @@ private:
         _elements_subscribed = false;
     }
 
-    void element_changed(ref const SampleUpdate update)
+    void element_changed(Signal*, MonoTime, ref const SampleUpdate update)
     {
         if (_writing_from_poll)
             return;

@@ -334,7 +334,7 @@ private:
         }
     }
 
-    void on_target_current_change(ref const SampleUpdate update)
+    void on_target_current_change(Signal*, MonoTime, ref const SampleUpdate update)
     {
         if (!_master || update.element !is _target_current || !update.value_ready)
             return;

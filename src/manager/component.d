@@ -11,6 +11,7 @@ import urt.time;
 import manager;
 import manager.device;
 import manager.element;
+import manager.signal;
 
 nothrow @nogc:
 
@@ -19,7 +20,7 @@ enum ComponentEvent : ubyte
 {
     online,         // tree is populated/ready for consumers
     offline,        // backing source disconnected
-    tree_changed,   // structure (children/elements) mutated
+    tree_changed,   // structure (children/elements/signals) mutated
     destroyed,
 }
 
@@ -60,6 +61,7 @@ nothrow @nogc:
 
     Array!(Component) components;
     Array!(Element*) elements;
+    Array!(Signal*) signals;
 
     // extern(C++) has no dynamic cast: cast(Device) always "succeeds", so test this before painting
     bool is_device() const pure
@@ -138,6 +140,28 @@ nothrow @nogc:
         return null;
     }
 
+    inout(Signal)* find_signal(const(char)[] name) inout pure nothrow @nogc
+    {
+        const(char)[] id = name.split!'.';
+        if (!name.empty)
+        {
+            foreach (inout Component c; components)
+            {
+                if (c.id[] == id[])
+                    return c.find_signal(name);
+            }
+        }
+        else
+        {
+            foreach (inout(Signal)* signal; signals)
+            {
+                if (signal.id[] == id[])
+                    return signal;
+            }
+        }
+        return null;
+    }
+
     Element* find_or_create_element(const(char)[] name, FormatId format)
     {
         assert(format.valid, "an element requires a format");
@@ -173,6 +197,42 @@ nothrow @nogc:
         e.id = id.makeString(defaultAllocator());
         g_app.notify_element_created(e);
         return e;
+    }
+
+    Signal* find_or_create_signal(const(char)[] name, FormatId format)
+    {
+        assert(format.valid, "a signal requires a format");
+        const(char)[] id = name.split!'.';
+        if (!name.empty)
+        {
+            foreach (Component c; components)
+            {
+                if (c.id[] == id[])
+                    return c.find_or_create_signal(name, format);
+            }
+
+            Component c = g_app.allocator.allocT!Component(id.makeString(defaultAllocator()));
+            c.parent = this;
+            components ~= c;
+            return c.find_or_create_signal(name, format);
+        }
+
+        foreach (Signal* signal; signals)
+        {
+            if (signal.id[] == id[])
+            {
+                assert(signal.format == format,
+                       "signal path reused with a different format");
+                return signal;
+            }
+        }
+
+        Signal* signal = g_app.allocator.allocT!Signal();
+        signal.format = format;
+        signal.parent = this;
+        signal.id = id.makeString(defaultAllocator());
+        signals ~= signal;
+        return signal;
     }
 
     Element* set_element(T)(const(char)[] name, auto ref T value,

@@ -227,7 +227,7 @@ protected:
         return sample_desc.format;
     }
 
-    void on_element_change(ref const SampleUpdate update)
+    void on_element_change(Signal*, MonoTime, ref const SampleUpdate update)
     {
         if (_self_write)
             return; // don't write back values we just read from the response

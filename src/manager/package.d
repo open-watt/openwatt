@@ -103,7 +103,7 @@ nothrow @nogc:
         b.release();
     }
 
-    void element_updated(ref const SampleUpdate update)
+    void element_updated(Signal*, MonoTime, ref const SampleUpdate update)
     {
         if (propagating || !update.value_ready)
             return;
@@ -199,23 +199,31 @@ Mod get_module(Mod)()
 
 
 // Handle for an `element:` signal subscription owned by the Application.
-private class ElementSignalSub : SignalSub
+private class ElementSignalSub : ProviderSubscription
 {
 nothrow @nogc:
-    SignalSink sink;
-    String path;
+    Signal signal;
     Element* element;
 
     override ISignalProvider provider()
         => g_app;
 
-    void on_change(ref const SampleUpdate update)
+    void on_change(Signal*, MonoTime when, ref const SampleUpdate update)
     {
         if (update.element !is element || !update.value_ready)
             return;
-        SignalEvent ev = { source: path[] };
-        ev.value = update.value;
-        sink(getTime(), ev);
+
+        const(void)* record;
+        if (element.data_format.is_wide)
+        {
+            const(void)[] tail = element.tail_record;
+            if (!tail)
+                return;
+            record = tail.ptr;
+        }
+        else
+            record = element.latest_record.raw.ptr;
+        signal.emit_record(record, when);
     }
 }
 
@@ -563,7 +571,7 @@ nothrow @nogc:
         return StringResult.success;   // whether the element exists yet is a subscribe-time concern
     }
 
-    StringResult subscribe(ref const SignalUri uri, SignalSink sink, out SignalSub handle)
+    StringResult subscribe(ref const SignalUri uri, VariantSignalHandler handler, out ProviderSubscription subscription)
     {
         if (uri.body.length == 0)
             return StringResult("element signal needs an element path");
@@ -573,23 +581,24 @@ nothrow @nogc:
             return StringResult(tconcat("element not found: ", uri.body));
 
         ElementSignalSub s = allocator.allocT!ElementSignalSub();
-        s.sink = sink;
-        s.path = uri.body.makeString(allocator);
+        s.signal.id = uri.body.makeString(allocator);
+        s.signal.format = e.format;
+        s.signal.subscribe(handler);
         s.element = e;
         e.subscribe(&s.on_change);
-        handle = s;
+        subscription = s;
         return StringResult.success;
     }
 
-    void unsubscribe(SignalSub handle)
+    void unsubscribe(ProviderSubscription subscription)
     {
-        ElementSignalSub s = cast(ElementSignalSub)handle;
+        ElementSignalSub s = cast(ElementSignalSub)subscription;
         if (s.element)
             s.element.unsubscribe(&s.on_change);
         allocator.freeT(s);
     }
 
-    SysTime next_run(SignalSub handle) const
+    SysTime next_run(ProviderSubscription subscription) const
         => SysTime();
 
     // MAIN THREAD ONLY; off-thread/ISR callers post a message to schedule a new event

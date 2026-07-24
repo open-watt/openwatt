@@ -45,7 +45,8 @@ nothrow @nogc:
         return parse_time(uri, spec);
     }
 
-    override StringResult subscribe(ref const SignalUri uri, SignalSink sink, out SignalSub handle)
+    override StringResult subscribe(ref const SignalUri uri, VariantSignalHandler handler,
+                                    out ProviderSubscription subscription)
     {
         TimeSpec spec;
         StringResult e = parse_time(uri, spec);
@@ -53,7 +54,8 @@ nothrow @nogc:
             return e;
 
         TimeSub s = g_app.allocator.allocT!TimeSub();
-        s.sink = sink;
+        s.signal.id = StringLit!"time";
+        s.signal.subscribe(handler);
         s.kind = spec.kind;
         s.schedule = spec.schedule;
         s.at = spec.at;
@@ -62,20 +64,20 @@ nothrow @nogc:
         s.repeat = spec.repeat;
 
         s.arm();
-        handle = s;
+        subscription = s;
         return StringResult.success;
     }
 
-    override void unsubscribe(SignalSub handle)
+    override void unsubscribe(ProviderSubscription subscription)
     {
-        TimeSub s = cast(TimeSub)handle;
+        TimeSub s = cast(TimeSub)subscription;
         s.disarm();
         g_app.allocator.freeT(s);
     }
 
-    override SysTime next_run(SignalSub handle) const
+    override SysTime next_run(ProviderSubscription subscription) const
     {
-        TimeSub s = cast(TimeSub)handle;
+        TimeSub s = cast(TimeSub)subscription;
         return s.next_run();
     }
 }
@@ -83,11 +85,11 @@ nothrow @nogc:
 
 private:
 
-class TimeSub : SignalSub
+class TimeSub : ProviderSubscription
 {
 nothrow @nogc:
 
-    SignalSink sink;
+    Signal signal;
     TimeKind kind;
     Duration schedule;
     TimeOfDay at;
@@ -165,8 +167,7 @@ private:
     {
         _fire_scheduled = false;
 
-        SignalEvent ev = { source: "time" };
-        sink(scheduled, ev);
+        signal.emit(scheduled);
 
         bool one_shot = false;
         final switch (kind)

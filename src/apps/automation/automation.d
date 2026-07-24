@@ -29,6 +29,12 @@ enum Edge : ubyte
     falling,
 }
 
+private struct TriggerEvent
+{
+    const(char)[] source;
+    Variant value;
+}
+
 
 class Automation : ActiveObject
 {
@@ -328,7 +334,7 @@ protected:
             // rising/falling qualify only from an observed transition
             if (_hold != Duration() && _edge == Edge.level && _last_condition)
             {
-                SignalEvent seed;
+                TriggerEvent seed;
                 arm_hold(getTime(), seed);
             }
         }
@@ -389,7 +395,7 @@ private:
 
     Array!String _signal_uris;   // on= triggers
     String _time;                // the time sugar's translated URI (schedule=/at=/when=), or empty
-    Array!SignalSub _signals;
+    Array!ProviderSubscription _signals;
 
     String _condition;           // if= source expression
     Expression* _condition_expr; // parsed from _condition at startup
@@ -426,7 +432,15 @@ private:
     Array!RunningCommand _running_commands;
     bool _cleanup_scheduled;
 
-    void fire(MonoTime when, ref const SignalEvent ev)
+    void fire(Signal* signal, MonoTime when, ref const Variant value)
+    {
+        TriggerEvent ev;
+        ev.source = signal.id[];
+        ev.value = value;
+        fire(when, ev);
+    }
+
+    void fire(MonoTime when, ref const TriggerEvent ev)
     {
         if (_debounce != Duration())
         {
@@ -447,14 +461,14 @@ private:
     void on_debounce(MonoTime scheduled)
     {
         _debounce_armed = false;
-        SignalEvent ev;
+        TriggerEvent ev;
         ev.source = _pending_source[];
         ev.value = _pending_value.move;
         attempt_run(scheduled, ev);
         _pending_source = String();
     }
 
-    void attempt_run(MonoTime when, ref const SignalEvent ev)
+    void attempt_run(MonoTime when, ref const TriggerEvent ev)
     {
         if (_edge == Edge.level && _hold == Duration())
         {
@@ -519,7 +533,7 @@ private:
         return true;
     }
 
-    void commit_run(MonoTime when, ref const SignalEvent ev)
+    void commit_run(MonoTime when, ref const TriggerEvent ev)
     {
         _last_action = when;
         if (_rate.value > 0)
@@ -537,7 +551,7 @@ private:
             schedule_cleanup();
     }
 
-    void arm_hold(MonoTime when, ref const SignalEvent ev)
+    void arm_hold(MonoTime when, ref const TriggerEvent ev)
     {
         _hold_value = ev.value;
         _hold_source = ev.source.makeString(g_app.allocator);
@@ -571,7 +585,7 @@ private:
             _hold_satisfied = true;   // the episode qualified, even if shaping vetoes the run
             if (shaping_available(scheduled))
             {
-                SignalEvent ev;
+                TriggerEvent ev;
                 ev.source = _hold_source[];
                 ev.value = _hold_value.move;
                 commit_run(scheduled, ev);
@@ -633,7 +647,7 @@ private:
         ISignalProvider p = g_app.find_signal_provider(su.scheme);
         if (!p)
             return StringResult(tconcat("unknown signal provider: ", su.scheme));
-        SignalSub h;
+        ProviderSubscription h;
         StringResult r = p.subscribe(su, &fire, h);
         if (r)
             _signals ~= h;
@@ -681,7 +695,7 @@ private:
         }
     }
 
-    void execute_action(ref const SignalEvent ev)
+    void execute_action(ref const TriggerEvent ev)
     {
         log.info("executing action: ", _script.source);
 

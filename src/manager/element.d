@@ -14,12 +14,13 @@ import urt.variant;
 import manager.component;
 import manager.device;
 public import manager.series;
+public import manager.signal : Signal, SignalHandler;
 import manager.id : EID;
 
 nothrow @nogc:
 
 
-alias Subscriber = void delegate(ref const SampleUpdate update) nothrow @nogc;
+alias Subscriber = SignalHandler!SampleUpdate;
 
 interface BucketSubscriber
 {
@@ -110,13 +111,6 @@ private:
 
 CommitScope open_commit()
     => CommitScope(0);
-
-struct Subscription
-{
-    Subscriber callback;
-    Subscription* next;
-    // TODO: per-subscriber deadband band + anchor live here (see TODO.md element deadband)
-}
 
 struct Cursor
 {
@@ -365,7 +359,7 @@ nothrow @nogc:
     // boxed value/previous only serve subscriber payloads; unwatched elements never box
     private void prepare_before(ref SampleUpdate update)
     {
-        if (!_subs)
+        if (!_changed || !_changed.has_subscribers)
             return;
         update.previous = record_value();
         update.previous_timestamp = last_update;
@@ -377,7 +371,7 @@ nothrow @nogc:
         if (t > last_update)
             last_update = t;
         update.timestamp = t;
-        if (!_subs)
+        if (!_changed || !_changed.has_subscribers)
             return;
         update.value = record_value();
         update.value_ready = true;
@@ -389,7 +383,7 @@ nothrow @nogc:
             return;
         SysTime previous_timestamp = last_update;
         last_update = timestamp;
-        if (!_subs)
+        if (!_changed || !_changed.has_subscribers)
             return;
 
         Variant current = record_value();
@@ -566,28 +560,21 @@ public:
 
     void subscribe(Subscriber callback)
     {
-        for (Subscription* s = _subs; s; s = s.next)
-            if (s.callback == callback)
-                return;
-        Subscription* n = cast(Subscription*)alloc(Subscription.sizeof).ptr;
-        n.callback = callback;
-        n.next = _subs;
-        _subs = n;
+        if (!_changed)
+            _changed = defaultAllocator().allocT!Signal();
+        _changed.subscribe!SampleUpdate(callback);
     }
 
     void unsubscribe(Subscriber callback)
     {
-        Subscription** p = &_subs;
-        while (*p)
+        if (_changed)
         {
-            if ((*p).callback == callback)
+            _changed.unsubscribe!SampleUpdate(callback);
+            if (!_changed.has_subscribers)
             {
-                Subscription* dead = *p;
-                *p = dead.next;
-                free((cast(void*)dead)[0 .. Subscription.sizeof]);
-                return;
+                defaultAllocator().freeT(_changed);
+                _changed = null;
             }
-            p = &(*p).next;
         }
     }
 
@@ -760,11 +747,10 @@ public:
             free((cast(void*)_history)[0 .. SeriesStore.sizeof]);
             _history = null;
         }
-        while (_subs)
+        if (_changed)
         {
-            Subscription* dead = _subs;
-            _subs = dead.next;
-            free((cast(void*)dead)[0 .. Subscription.sizeof]);
+            defaultAllocator().freeT(_changed);
+            _changed = null;
         }
     }
 
@@ -776,7 +762,7 @@ private:
 
     Scalar _latest;
     SysTime _last_update;
-    Subscription* _subs;
+    Signal* _changed;
     BucketSubscription* _bucket_subscribers;
     SeriesStore* _history;
     ushort _dirty;
@@ -852,7 +838,7 @@ private:
         if (held_repeat(slot.view == v[], t))
             return;
         Variant previous;
-        if (_subs)
+        if (_changed && _changed.has_subscribers)
             previous = record_value();
         SysTime previous_timestamp = last_update;
         slot.set(v.move);
@@ -867,7 +853,7 @@ private:
         if (held_repeat(slot.view == v, t))
             return;
         Variant previous;
-        if (_subs)
+        if (_changed && _changed.has_subscribers)
             previous = record_value();
         SysTime previous_timestamp = last_update;
         slot.set(v);
@@ -1153,12 +1139,14 @@ void submit(ref SampleUpdate update, bool batch)
 
 void deliver(ref SampleUpdate update)
 {
-    for (Subscription* s = update.element._subs; s; )
+    if (update.element._changed)
     {
-        Subscription* next = s.next;    // a callback may unsubscribe itself
-        if (s.callback != update.who)
-            s.callback(update);
-        s = next;
+        update.element._changed.emit!SampleUpdate(update, getTime(), update.who);
+        if (!update.element._changed.has_subscribers)
+        {
+            defaultAllocator().freeT(update.element._changed);
+            update.element._changed = null;
+    }
     }
 }
 
@@ -1294,7 +1282,7 @@ nothrow @nogc:
         this.b = &b;
     }
 
-    void receive(ref const SampleUpdate update)
+    void receive(Signal*, MonoTime, ref const SampleUpdate update)
     {
         ++calls;
         if (update.event != SeriesEvent.none)

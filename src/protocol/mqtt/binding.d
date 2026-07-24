@@ -378,7 +378,7 @@ private:
         }
     }
 
-    void on_element_change(ref const SampleUpdate update)
+    void on_element_change(Signal*, MonoTime, ref const SampleUpdate update)
     {
         if (_self_write || !update.value_ready)
             return;

@@ -97,7 +97,7 @@ nothrow @nogc:
         struct { ElementLink* link; const(char)* alias_source; }
     }
 
-    void element_updated(ref const SampleUpdate update)
+    void element_updated(Signal*, MonoTime, ref const SampleUpdate update)
     {
         if (update.event != SeriesEvent.none)
             return; // TODO: gap events should reset accumulator integration

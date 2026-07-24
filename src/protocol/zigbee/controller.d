@@ -269,7 +269,7 @@ protected:
     final SampleElement* find_sample_element_tuya(EUI64 eui, ubyte endpoint, ushort dp) nothrow
         => find_sample_element(eui, endpoint, 0xEF00, dp);
 
-    final void on_samples(ref const SampleUpdate update) nothrow
+    final void on_samples(Signal*, MonoTime, ref const SampleUpdate update) nothrow
     {
         if (!update.value_ready)
             return;
