@@ -4,6 +4,7 @@ import urt.array;
 import urt.atomic;
 import urt.map;
 import urt.mem.allocator;
+import urt.mem.freelist;
 import urt.si.unit : ScaledUnit;
 import urt.string;
 import urt.sync.event;
@@ -12,7 +13,7 @@ import urt.thread;
 import urt.time;
 import urt.variant;
 
-import manager.element : sample_to_double;
+import manager.element : claim_bucket, release_bucket, sample_to_double;
 import manager.owsig;
 import manager.series;
 
@@ -21,6 +22,22 @@ nothrow @nogc:
 
 alias RecordFileId = uint;
 enum RecordFileId invalid_record_file = 0;
+
+enum HistoryState : ubyte
+{
+    active,
+    ready,
+    writing,
+    durable,
+}
+
+struct HistoryBlock
+{
+    HistoryBlock* next;
+    Bucket* bucket;
+    RecordFileId file;
+    shared HistoryState state;
+}
 
 struct Sample
 {
@@ -71,13 +88,8 @@ private struct Request
     const(char)* path;
     uint path_length;
 
+    size_t history;
     StorageFormat format;
-    ulong first_index;
-    ulong t0;
-    uint count;
-    uint offsets_bytes;
-    const(void)* payload;
-    uint payload_bytes;
 
     ulong from;
     ulong to;
@@ -147,19 +159,24 @@ nothrow @nogc:
         if (!_running)
             return;
 
-        _pending_writes.clear();
-        _pending_queries.clear();
-        _deferred_closes.clear();
-
         atomicStore!(MemoryOrder.release)(_stop, true);
         _wake.set();
         thread_join(_thread);
         _thread = null;
 
-        drain_completions(false);
-        foreach (ref c; _worker_completions[])
-            release_completion(c);
-        _worker_completions.clear();
+        for (;;)
+        {
+            drain_completions(true);
+            if (!_worker_completions.length)
+                break;
+            bool moved = flush_worker_completions();
+            assert(moved);
+        }
+        drain_completions(true);
+
+        _pending_writes.clear();
+        _pending_queries.clear();
+        _deferred_closes.clear();
 
         _wake.destroy();
         _running = false;
@@ -167,6 +184,38 @@ nothrow @nogc:
 
     bool running() const pure
         => _running;
+
+    HistoryBlock* track(RecordFileId file, Bucket* bucket)
+    {
+        if (file == invalid_record_file || !bucket)
+            return null;
+        HistoryBlock* history = _history_blocks.alloc();
+        history.file = file;
+        history.bucket = bucket;
+        history.next = _history_head;
+        _history_head = history;
+        claim_bucket(bucket);
+        return history;
+    }
+
+    void mark_ready(HistoryBlock* history)
+    {
+        assert(history && history.bucket && history.bucket.sealed);
+        atomicStore!(MemoryOrder.release)(history.state, HistoryState.ready);
+    }
+
+    void untrack(HistoryBlock* history)
+    {
+        if (!history)
+            return;
+        HistoryBlock** link = &_history_head;
+        while (*link && *link !is history)
+            link = &(*link).next;
+        assert(*link is history, "untracked history block");
+        *link = history.next;
+        release_bucket(history.bucket);
+        _history_blocks.free(history);
+    }
 
     bool create_directory(const(char)[] path)
     {
@@ -228,48 +277,32 @@ nothrow @nogc:
         wake();
     }
 
-    uint write(RecordFileId file, ref const RecordBlock block, RecordWriteCallback callback)
+    uint write(HistoryBlock* history, RecordWriteCallback callback)
     {
-        if (!_running || file == invalid_record_file || !block.count || callback is null)
+        if (!_running || !history || history.file == invalid_record_file
+            || !history.bucket || !history.bucket.sealed || callback is null)
             return 0;
 
-        ref const DataFormat format = *block.data_format;
+        ref const DataFormat format = *format_info(history.bucket.format);
         if (!container_serialisable(format))
             return 0;
-
-        uint offsets_bytes = block.ts ? block.count * cast(uint)uint.sizeof : 0;
-        uint records_bytes = block.count * format.stride;
-        uint payload_bytes = offsets_bytes + records_bytes;
-        void[] mem = defaultAllocator().alloc(payload_bytes);
-        if (!mem.ptr)
-            return 0;
-        ubyte[] payload = cast(ubyte[])mem;
-        if (offsets_bytes)
-            payload[0 .. offsets_bytes] =
-                (cast(const(ubyte)*)block.ts)[0 .. offsets_bytes];
-        payload[offsets_bytes .. $] =
-            (cast(const(ubyte)*)block.data)[0 .. records_bytes];
 
         uint ticket = next_ticket();
         Request r;
         r.kind = RequestKind.write;
-        r.file = file;
+        r.file = history.file;
         r.ticket = ticket;
+        r.history = cast(size_t)history;
         r.format.type = format.type;
         r.format.kind = format.kind;
         r.format.count = format.count;
         r.format.rate = format.rate;
         if (format.desc == DataFormat.Desc.quantity)
             r.format.unit = format.unit;
-        r.first_index = block.first_index;
-        r.t0 = block.t0;
-        r.count = block.count;
-        r.offsets_bytes = offsets_bytes;
-        r.payload = mem.ptr;
-        r.payload_bytes = payload_bytes;
+        atomicStore!(MemoryOrder.release)(history.state, HistoryState.writing);
         if (!send(r))
         {
-            defaultAllocator().free(mem);
+            atomicStore!(MemoryOrder.release)(history.state, HistoryState.ready);
             return 0;
         }
         _pending_writes.insert(ticket, callback);
@@ -315,12 +348,6 @@ nothrow @nogc:
         return ticket;
     }
 
-    void cancel_write(uint ticket)
-    {
-        if (ticket)
-            _pending_writes.remove(ticket);
-    }
-
     void cancel_query(uint ticket)
     {
         if (ticket)
@@ -349,6 +376,8 @@ private:
     Map!(uint, RecordWriteCallback) _pending_writes;
     Map!(uint, RecordQueryCallback) _pending_queries;
     Array!RecordFileId _deferred_closes;
+    FreeList!HistoryBlock _history_blocks;
+    HistoryBlock* _history_head;
     uint _next_file;
     uint _next_ticket;
 
@@ -427,7 +456,7 @@ private:
         return did;
     }
 
-    void service(ref const Request r)
+    void service(ref Request r)
     {
         final switch (r.kind)
         {
@@ -471,31 +500,37 @@ private:
         _files.insert(file.id, file);
     }
 
-    void service_write(ref const Request r)
+    void service_write(ref Request r)
     {
         bool success;
-        if (RecordFile** p = r.file in _files)
+        HistoryBlock* history = cast(HistoryBlock*)r.history;
+        Bucket* bucket = history.bucket;
+        if (bucket)
         {
-            RecordFile* file = *p;
-            if (ensure_open(file))
+            if (RecordFile** p = r.file in _files)
             {
-                RecordBlock block;
-                block.first_index = r.first_index;
-                block.t0 = r.t0;
-                block.ts = r.offsets_bytes ? cast(const(uint)*)r.payload : null;
-                block.data = cast(const(ubyte)*)r.payload + r.offsets_bytes;
-                block.count = r.count;
-                DataFormat format = r.format.unit != ScaledUnit()
-                    ? DataFormat(r.format.type, r.format.kind, r.format.unit)
-                    : DataFormat(r.format.type, r.format.kind);
-                format.count = r.format.count;
-                format.rate = r.format.rate;
-                success = file.container.put(format, block);
-                touch(file);
+                RecordFile* file = *p;
+                if (ensure_open(file))
+                {
+                    RecordBlock block;
+                    block.first_index = bucket.first_index;
+                    block.t0 = bucket.first_tick;
+                    block.ts = bucket.offsets;
+                    block.data = bucket.samples;
+                    block.count = atomicLoad!(MemoryOrder.acquire)(bucket.committed);
+                    DataFormat format = r.format.unit != ScaledUnit()
+                        ? DataFormat(r.format.type, r.format.kind, r.format.unit)
+                        : DataFormat(r.format.type, r.format.kind);
+                    format.count = r.format.count;
+                    format.rate = r.format.rate;
+                    success = file.container.put(format, block);
+                    touch(file);
+                }
             }
         }
 
-        defaultAllocator().free(cast(void[])r.payload[0 .. r.payload_bytes]);
+        atomicStore!(MemoryOrder.release)(history.state,
+            success ? HistoryState.durable : HistoryState.ready);
         Completion c;
         c.kind = CompletionKind.write;
         c.ticket = r.ticket;
@@ -1016,11 +1051,15 @@ unittest
         element.ensure_history();
         foreach (i; 0 .. 8)
             element.write_sample(i * 2.0, from_unix_time_ns((i + 1) * 1_000_000UL));
-        Cursor cursor = element.open_series_cursor(0);
-        RecordBlock block = cursor.next(16);
+        element.seal_history();
+        Bucket* bucket = element.history_bucket(0);
+        assert(bucket && bucket.sealed && bucket.claims == 1);
+        HistoryBlock* history = io.track(file, bucket);
+        assert(history && bucket.claims == 2);
+        io.mark_ready(history);
 
         Sink sink;
-        assert(io.write(file, block, &sink.on_write));
+        assert(io.write(history, &sink.on_write));
         foreach (_; 0 .. 2_000_000)
         {
             io.update();
@@ -1028,6 +1067,9 @@ unittest
                 break;
         }
         assert(sink.wrote && sink.write_ok);
+        assert(atomicLoad!(MemoryOrder.acquire)(history.state) == HistoryState.durable);
+        io.untrack(history);
+        assert(bucket.claims == 1);
 
         assert(io.query(file, 0, 20_000_000, 0, QueryMode.raw, null,
                         &sink.on_query));
@@ -1056,10 +1098,20 @@ unittest
         assert(sink.samples.length == 9);
         assert(sink.samples[5].value == 10 && sink.samples[8].value == 16);
 
+        element.write_sample(16.0, from_unix_time_ns(9_000_000UL));
+        element.seal_history();
+        Bucket* tail = element.history_bucket(1);
+        HistoryBlock* final_history = io.track(file, tail);
+        assert(final_history);
+        io.mark_ready(final_history);
+        Sink final_sink;
+        assert(io.write(final_history, &final_sink.on_write));
         io.close(file);
         io.shutdown();
+        assert(final_sink.wrote && final_sink.write_ok);
+        assert(atomicLoad!(MemoryOrder.acquire)(final_history.state) == HistoryState.durable);
+        io.untrack(final_history);
         defaultAllocator().freeT(io);
-        element.close_series_cursor(cursor);
         element.teardown();
         delete_file(path);
     }

@@ -8,11 +8,13 @@ module manager.record;
 // base SI scale. The container itself retains the element's typed records.
 
 import urt.array;
+import urt.atomic;
 import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem.allocator;
 import urt.string;
+import urt.system : sleep;
 import urt.time;
 import urt.variant;
 
@@ -27,6 +29,7 @@ import manager.console.graph;
 import manager.console.live_view;
 import manager.device;
 import manager.element;
+import manager.id : EID;
 import manager.owsig;
 import manager.plugin;
 import manager.record_io;
@@ -39,70 +42,117 @@ alias log = Log!"record";
 
 private __gshared RecordIO g_record_io;
 
-struct RecordStream
+class RecordStream : BucketSubscriber
 {
 nothrow @nogc:
 
-    Recorder owner;
-    ElementCursor cursor;
+    EID eid;
     RecordFileId file;
     String path;            // data-model path: "device.component.element"
-
-    this(this) @disable;
 
     void flush()
     {
         if (_write_ticket || (_retry_at && getTime() < _retry_at))
             return;
-        if (!cursor.pending)
+        if (!_history.length)
             return;
 
-        RecordBlock block = cursor.next(256);
-        if (!block.count)
+        HistoryBlock* history = _history[0];
+        if (atomicLoad!(MemoryOrder.acquire)(history.state) != HistoryState.ready)
             return;
-        ulong first = block.first_index;
-        ulong end = first + block.count;
-        uint ticket = g_record_io.write(file, block, &write_complete);
-        cursor.seek(first);
+        uint ticket = g_record_io.write(history, &write_complete);
         if (!ticket)
     {
             _retry_at = getTime() + 1.seconds;
             return;
     }
         _write_ticket = ticket;
-        _write_end = end;
+        _writing = history;
     }
 
     uint query(ulong from, ulong to, uint max_points, QueryMode mode,
                RecordQueryCallback callback)
     {
         Array!Sample live;
-        collect_memory(cursor.eid.deref, from, to, live);
+        collect_memory(eid.deref, from, to, live);
         return g_record_io.query(file, from, to, max_points, mode, live[], callback);
         }
 
-    void close()
+    bool close()
     {
-        if (_write_ticket)
-            g_record_io.cancel_write(_write_ticket);
-        cursor.close();
-        g_record_io.close(file);
-        file = invalid_record_file;
+        if (!_closing)
+        {
+            if (Element* element = eid.deref)
+            {
+                element.seal_history();
+                element.unsubscribe_buckets(this);
+            }
+            _closing = true;
+        }
+
+        flush();
+        if (_write_ticket || _history.length)
+            return false;
+        if (file != invalid_record_file)
+        {
+            g_record_io.close(file);
+            file = invalid_record_file;
+        }
+        return true;
+    }
+
+    override void bucket_created(Element*, Bucket* bucket)
+    {
+        HistoryBlock* history = g_record_io.track(file, bucket);
+        assert(history, "failed to track history bucket");
+        _history ~= history;
+    }
+
+    override void bucket_sealed(Element*, Bucket* bucket)
+    {
+        foreach (history; _history[])
+            if (history.bucket is bucket)
+            {
+                g_record_io.mark_ready(history);
+                return;
+            }
+        assert(false, "sealed untracked history bucket");
+    }
+
+    override void bucket_source_destroyed(Element*)
+    {
+    }
+
+    void abandon()
+    {
+        assert(!g_record_io.running);
+        foreach (history; _history[])
+            g_record_io.untrack(history);
+        _history.clear();
+        _writing = null;
         _write_ticket = 0;
+        file = invalid_record_file;
     }
 
 private:
+    Array!(HistoryBlock*) _history;
+    HistoryBlock* _writing;
     uint _write_ticket;
-    ulong _write_end;
     MonoTime _retry_at;
     MonoTime _last_warning;
+    bool _closing;
 
     void write_complete(uint ticket, bool success)
     {
         if (ticket != _write_ticket)
             return;
         if (success)
-            cursor.seek(_write_end);
+        {
+            assert(_history.length && _history[0] is _writing);
+            assert(atomicLoad!(MemoryOrder.acquire)(_writing.state) == HistoryState.durable);
+            g_record_io.untrack(_writing);
+            _history.remove(0);
+        }
         else
         {
             MonoTime now = getTime();
@@ -114,6 +164,7 @@ private:
             }
         }
         _write_ticket = 0;
+        _writing = null;
     }
 }
 
@@ -189,17 +240,17 @@ nothrow @nogc:
 
     // API
 
-    final RecordStream* find_stream(const(char)[] path)
+    final RecordStream find_stream(const(char)[] path)
     {
-        if (RecordStream** rs = path in _streams)
+        if (RecordStream* rs = path in _streams)
             return *rs;
         return null;
     }
 
-    final int opApply(scope int delegate(ref RecordStream) nothrow @nogc dg)
+    final int opApply(scope int delegate(RecordStream) nothrow @nogc dg)
     {
         foreach (rs; _streams.values)
-            if (auto r = dg(*rs))
+            if (auto r = dg(rs))
                 return r;
         return 0;
     }
@@ -220,11 +271,14 @@ protected:
 
     override CompletionStatus shutdown()
     {
+        bool pending;
         foreach (rs; _streams.values)
-        {
-            rs.close();
+            if (!rs.close())
+                pending = true;
+        if (pending)
+            return CompletionStatus.continue_;
+        foreach (rs; _streams.values)
             defaultAllocator().freeT(rs);
-        }
         _streams.clear();
         return CompletionStatus.complete;
     }
@@ -249,7 +303,7 @@ private:
     String _dir = StringLit!"records";
     String _filter = StringLit!"*";
 
-    Map!(const(char)[], RecordStream*) _streams; // keyed by the stream's own path string
+    Map!(const(char)[], RecordStream) _streams; // keyed by the stream's own path string
     MonoTime _last_scan;
 
     void scan()
@@ -272,20 +326,18 @@ private:
         if (!container_serialisable(*e.data_format))
             return;
 
-        RecordStream* rs = defaultAllocator().allocT!RecordStream();
-        rs.owner = this;
-        rs.cursor = e.open_cursor(0, true);
+        RecordStream rs = defaultAllocator().allocT!RecordStream();
+        rs.eid = e.ensure_eid();
         rs.path = path.makeString(defaultAllocator());
         String filename = make_filename(path, ".owsig");
         rs.file = g_record_io.open(filename[]);
         if (rs.file == invalid_record_file)
         {
-            rs.cursor.close();
             defaultAllocator().freeT(rs);
             return;
         }
+        e.subscribe_buckets(rs);
         _streams.insert(rs.path[], rs);
-        // the element self-captures; the first flush ships its standing history
     }
 
     String make_filename(const(char)[] path, const(char)[] ext)
@@ -329,7 +381,7 @@ nothrow @nogc:
         this.max_points = max_points;
         this.mode = mode;
 
-        Array!(RecordStream*) streams;
+        Array!RecordStream streams;
         mod.find_streams(paths, streams);
         uint n = cast(uint)streams.length;
         labels.resize(n);
@@ -337,7 +389,7 @@ nothrow @nogc:
         data.resize(n);
         foreach (i; 0 .. n)
         {
-            RecordStream* rs = streams[i];
+            RecordStream rs = streams[i];
             labels[][i] = rs.path[].makeString(defaultAllocator());
             tickets[][i] = 0;
             data[][i].clear();
@@ -560,7 +612,22 @@ nothrow @nogc:
     {
         if (!g_record_io)
             return;
+
+        bool pending = close_streams();
+        MonoTime deadline = getTime() + 5.seconds;
+        while (pending && getTime() < deadline)
+        {
+            g_record_io.update();
+            sleep(1.msecs);
+            pending = close_streams();
+        }
+        if (pending)
+            log.warning("record storage did not drain before shutdown");
+
         g_record_io.shutdown();
+        foreach (rec; Collection!Recorder().values)
+            foreach (rs; rec)
+                rs.abandon();
         defaultAllocator().freeT(g_record_io);
         g_record_io = null;
     }
@@ -571,11 +638,11 @@ nothrow @nogc:
         Collection!Recorder().update_all();
     }
 
-    RecordStream* find_stream(const(char)[] path)
+    RecordStream find_stream(const(char)[] path)
     {
         foreach (rec; Collection!Recorder().values)
         {
-            if (RecordStream* rs = rec.find_stream(path))
+            if (RecordStream rs = rec.find_stream(path))
                 return rs;
         }
         return null;
@@ -591,9 +658,9 @@ nothrow @nogc:
 
     // expand element path patterns (wildcards and comma-lists allowed) into
     // record streams; capped at the graph palette size
-    void find_streams(scope const(char)[][] patterns, ref Array!(RecordStream*) result)
+    void find_streams(scope const(char)[][] patterns, ref Array!RecordStream result)
     {
-        static void add_unique(ref Array!(RecordStream*) arr, RecordStream* rs)
+        static void add_unique(ref Array!RecordStream arr, RecordStream rs)
         {
             foreach (e; arr[])
                 if (e is rs)
@@ -619,7 +686,7 @@ nothrow @nogc:
             ptrdiff_t len = e.full_path(buf);
             if (len <= 0 || len > buf.length)
                 continue;
-            if (RecordStream* rs = find_stream(buf[0 .. len]))
+            if (RecordStream rs = find_stream(buf[0 .. len]))
                 add_unique(result, rs);
         }
         if (result.length > graph_palette.length)
@@ -670,6 +737,17 @@ nothrow @nogc:
         cmd.fetch.begin(this, (&path)[0 .. 1], now > span ? now - span : 0, now,
                         max_points, QueryMode.raw);
         return cmd;
+    }
+
+private:
+    bool close_streams()
+    {
+        bool pending;
+        foreach (rec; Collection!Recorder().values)
+            foreach (rs; rec)
+                if (!rs.close())
+                    pending = true;
+        return pending;
     }
 }
 

@@ -485,7 +485,10 @@ struct Bucket
     ulong first_tick;
     uint last_offset;
     uint count;
+    shared uint committed;
     uint capacity;
+    FormatId format = FormatId.invalid;
+    ushort claims;
     bool follows_gap;  // <- we should steal a bit for this!
     bool sealed;       // tail retired: shrunk to fit, immutable (packing lands here)
     void* samples;
@@ -565,10 +568,11 @@ nothrow @nogc:
     {
         RecordBlock r;
         r.format = format;
-        const(DataFormat)* fmt = format_info(format);
         Bucket* b = find_by_index(from_index);
         if (!b || from_index < b.first_index)
             return r;
+        r.format = b.format;
+        const(DataFormat)* fmt = format_info(b.format);
         uint offset = cast(uint)(from_index - b.first_index);
         uint n = b.count - offset;
         if (n > max_records)

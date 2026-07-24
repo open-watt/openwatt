@@ -929,7 +929,7 @@ nothrow @nogc:
         import urt.time : getSysTime, unixTimeNs;
         import manager.record;
 
-        RecordStream* rs = get_module!RecordModule.find_stream(path);
+        RecordStream rs = get_module!RecordModule.find_stream(path);
         if (!rs)
         {
             encoder_for(from._encoder).encode_error(from, seq, "no record stream");

@@ -1,6 +1,7 @@
 module manager.element;
 
 import urt.array;
+import urt.atomic;
 import urt.lifetime;
 import urt.mem.alloc;
 import urt.mem.allocator : defaultAllocator;
@@ -19,6 +20,21 @@ nothrow @nogc:
 
 
 alias Subscriber = void delegate(ref const SampleUpdate update) nothrow @nogc;
+
+interface BucketSubscriber
+{
+nothrow @nogc:
+
+    void bucket_created(Element* element, Bucket* bucket);
+    void bucket_sealed(Element* element, Bucket* bucket);
+    void bucket_source_destroyed(Element* element);
+}
+
+private struct BucketSubscription
+{
+    BucketSubscriber callback;
+    BucketSubscription* next;
+}
 
 struct SampleUpdate
 {
@@ -588,6 +604,54 @@ public:
         return _history;
     }
 
+    void subscribe_buckets(BucketSubscriber subscriber)
+    {
+        for (BucketSubscription* s = _bucket_subscribers; s; s = s.next)
+            if (s.callback is subscriber)
+                return;
+        BucketSubscription* subscription =
+            cast(BucketSubscription*)alloc(BucketSubscription.sizeof).ptr;
+        subscription.callback = subscriber;
+        subscription.next = _bucket_subscribers;
+        _bucket_subscribers = subscription;
+        SeriesStore* history = ensure_history();
+        foreach (bucket; history.buckets)
+        {
+            subscriber.bucket_created(&this, bucket);
+            if (bucket.sealed)
+                subscriber.bucket_sealed(&this, bucket);
+        }
+    }
+
+    void unsubscribe_buckets(BucketSubscriber subscriber)
+    {
+        BucketSubscription** link = &_bucket_subscribers;
+        while (*link)
+        {
+            if ((*link).callback is subscriber)
+            {
+                BucketSubscription* dead = *link;
+                *link = dead.next;
+                free((cast(void*)dead)[0 .. BucketSubscription.sizeof]);
+                return;
+            }
+            link = &(*link).next;
+        }
+    }
+
+    void seal_history()
+    {
+        if (_history && _history.buckets.length)
+            seal(_history.buckets[$ - 1]);
+    }
+
+    package Bucket* history_bucket(size_t index)
+    {
+        if (!_history || index >= _history.buckets.length)
+            return null;
+        return _history.buckets[index];
+    }
+
     void retention(uint min_records, uint max_records = 0)
     {
         SeriesStore* h = ensure_history();
@@ -675,12 +739,23 @@ public:
 
     void teardown()
     {
+        if (_bucket_subscribers)
+        {
+            seal_history();
+            while (_bucket_subscribers)
+            {
+                BucketSubscription* dead = _bucket_subscribers;
+                _bucket_subscribers = dead.next;
+                dead.callback.bucket_source_destroyed(&this);
+                free((cast(void*)dead)[0 .. BucketSubscription.sizeof]);
+            }
+        }
         if (format.valid && data_format.is_text)
             (cast(TextRecord*)_latest.raw.ptr).release();
         if (_history)
         {
             foreach (b; _history.buckets)
-                free_bucket(b);
+                release_bucket(b);
             destroy!false(*_history);
             free((cast(void*)_history)[0 .. SeriesStore.sizeof]);
             _history = null;
@@ -702,6 +777,7 @@ private:
     Scalar _latest;
     SysTime _last_update;
     Subscription* _subs;
+    BucketSubscription* _bucket_subscribers;
     SeriesStore* _history;
     ushort _dirty;
     ubyte _flags;
@@ -881,11 +957,15 @@ private:
                 foreach (i; 0 .. n)
                     b.offsets[b.count + i] = base + (ts.length ? ts[i] : i);
             }
-            b.count += n;
-            b.last_offset = b.offsets ? b.offsets[b.count - 1] : b.count - 1;
+            uint count = b.count + n;
+            b.last_offset = b.offsets ? b.offsets[count - 1] : count - 1;
+            b.count = count;
+            atomicStore!(MemoryOrder.release)(b.committed, count);
 
             first_index = _history.head;
             _history.head += n;
+            if (b.count == b.capacity)
+                seal(b);
             evict_over_budget();
         }
 
@@ -901,7 +981,8 @@ private:
         // roll when the new block's offset from this bucket's base would exceed the uint offset field:
         // a slow stream spanning >~71 min at 1 MHz, or a base discontinuity that would underflow it
         bool overflow = b && b.offsets && b.count && max_tick - b.first_tick > uint.max;
-        if (!b || b.count + n > b.capacity || follows_gap || overflow)
+        if (!b || b.sealed || b.format != format || b.count + n > b.capacity
+            || follows_gap || overflow)
         {
             if (b)
                 seal(b);
@@ -909,6 +990,8 @@ private:
             b.first_index = _history.head;
             b.follows_gap = follows_gap;
             _history.buckets ~= b;
+            for (BucketSubscription* s = _bucket_subscribers; s; s = s.next)
+                s.callback.bucket_created(&this, b);
         }
         return b;
     }
@@ -917,14 +1000,38 @@ private:
     {
         if (b.sealed)
             return;
-        b.sealed = true;
         if (b.count && b.count < b.capacity)
         {
-            b.samples = realloc(b.samples[0 .. b.capacity * data_format.stride], b.count * data_format.stride).ptr;
-            if (b.offsets)
-                b.offsets = cast(uint*)realloc((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof], b.count * uint.sizeof).ptr;
-            b.capacity = b.count;
+            ubyte stride = format_info(b.format).stride;
+            void[] samples = alloc(b.count * stride);
+            void[] offsets = b.offsets ? alloc(b.count * uint.sizeof) : null;
+            if (samples.ptr && (!b.offsets || offsets.ptr))
+            {
+                samples[] = b.samples[0 .. b.count * stride];
+                if (b.offsets)
+                    offsets[] = (cast(void*)b.offsets)[0 .. b.count * uint.sizeof];
+                void* old_samples = b.samples;
+                uint* old_offsets = b.offsets;
+                uint old_capacity = b.capacity;
+                b.samples = samples.ptr;
+                if (old_offsets)
+                    b.offsets = cast(uint*)offsets.ptr;
+                b.capacity = b.count;
+                free(old_samples[0 .. old_capacity * stride]);
+                if (old_offsets)
+                    free((cast(void*)old_offsets)[0 .. old_capacity * uint.sizeof]);
+            }
+            else
+            {
+                if (samples.ptr)
+                    free(samples);
+                if (offsets.ptr)
+                    free(offsets);
+            }
         }
+        b.sealed = true;
+        for (BucketSubscription* s = _bucket_subscribers; s; s = s.next)
+            s.callback.bucket_sealed(&this, b);
         // TODO: pack (columnar codec) lands here
     }
 
@@ -941,6 +1048,9 @@ private:
         while (h.buckets.length > 1)
         {
             Bucket* front = h.buckets[0];
+            // Persistence owns this bucket until every destination makes it durable.
+            if (front.claims > 1)
+                break;
             ulong newest = h.buckets[$-1].last_tick;
             bool forced = (h.max_records && h.head - front.first_index > h.max_records)
                        || (max_age_ticks && newest - front.last_tick > max_age_ticks);
@@ -955,20 +1065,9 @@ private:
                 if (min_age_ticks && newest - front.last_tick <= min_age_ticks)
                     break;
             }
-            free_bucket(front);
+            release_bucket(front);
             h.buckets.remove(0);
         }
-    }
-
-    void free_bucket(Bucket* b)
-    {
-        if (data_format.is_text)
-            foreach (i; 0 .. b.count)
-                (cast(TextRecord*)b.samples)[i].release();
-        free(b.samples[0 .. b.capacity * data_format.stride]);
-        if (b.offsets)
-            free((cast(void*)b.offsets)[0 .. b.capacity * uint.sizeof]);
-        free((cast(void*)b)[0 .. Bucket.sizeof]);
     }
 
     Bucket* alloc_bucket(uint capacity)
@@ -976,6 +1075,8 @@ private:
         Bucket* b = cast(Bucket*)alloc(Bucket.sizeof).ptr;
         *b = Bucket.init;
         b.capacity = capacity;
+        b.format = format;
+        b.claims = 1;
         b.samples = alloc(capacity * data_format.stride).ptr;
         if (!data_format.regular)
             b.offsets = cast(uint*)alloc(capacity * uint.sizeof).ptr;
@@ -994,6 +1095,28 @@ private:
 
 
 package:
+
+void claim_bucket(Bucket* bucket)
+{
+    assert(bucket && bucket.claims);
+    ++bucket.claims;
+}
+
+void release_bucket(Bucket* bucket)
+{
+    assert(bucket && bucket.claims);
+    if (--bucket.claims)
+        return;
+
+    ref const DataFormat format = *format_info(bucket.format);
+    if (format.is_text)
+        foreach (i; 0 .. bucket.count)
+            (cast(TextRecord*)bucket.samples)[i].release();
+    free(bucket.samples[0 .. bucket.capacity * format.stride]);
+    if (bucket.offsets)
+        free((cast(void*)bucket.offsets)[0 .. bucket.capacity * uint.sizeof]);
+    free((cast(void*)bucket)[0 .. Bucket.sizeof]);
+}
 
 __gshared Array!(Element*) g_dirty_elements;
 
