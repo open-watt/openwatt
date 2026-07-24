@@ -1070,6 +1070,16 @@ nothrow @nogc:
         return c.pending;
     }
 
+    void seek(ulong pos)
+    {
+        Element* e = eid.deref;
+        if (!e)
+            return;
+        auto c = Cursor(e, position, bit);
+        c.seek(pos);
+        position = c.position;
+    }
+
     RecordBlock next(uint max_records)
     {
         Element* e = eid.deref;

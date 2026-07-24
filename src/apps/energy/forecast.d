@@ -41,8 +41,7 @@ nothrow @nogc:
 
 // HACK: assumes load is flat at the currently-measured value for the whole
 // window. Wildly wrong overnight (load drops) and during cooking peaks.
-// Replace with a rolling-baseline forecast once db.Stream lands and we can
-// query historical load curves.
+// Replace with a rolling-baseline forecast once time-range series queries land.
 class ConstantLoadDemandForecast : DemandForecast
 {
 nothrow @nogc:

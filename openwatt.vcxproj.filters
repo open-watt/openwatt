@@ -28,9 +28,6 @@
     <Filter Include="src\apps\ota">
       <UniqueIdentifier>{a1e8d4d6-5b3f-4fa0-9c2e-7d9b2c8e5f3a}</UniqueIdentifier>
     </Filter>
-    <Filter Include="src\db">
-      <UniqueIdentifier>{5d186ff6-592c-44bc-99a8-f871c74d47b3}</UniqueIdentifier>
-    </Filter>
     <Filter Include="src\driver">
       <UniqueIdentifier>{cc240544-3e97-4f75-a128-521410a70930}</UniqueIdentifier>
     </Filter>
@@ -258,21 +255,6 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <DCompile Include="src\db\defs.d">
-      <Filter>src\db</Filter>
-    </DCompile>
-    <DCompile Include="src\db\engine.d">
-      <Filter>src\db</Filter>
-    </DCompile>
-    <DCompile Include="src\db\package.d">
-      <Filter>src\db</Filter>
-    </DCompile>
-    <DCompile Include="src\db\selfrefptr.d">
-      <Filter>src\db</Filter>
-    </DCompile>
-    <DCompile Include="src\db\stream.d">
-      <Filter>src\db</Filter>
-    </DCompile>
     <DCompile Include="src\driver\baremetal\ble.d">
       <Filter>src\driver\baremetal</Filter>
     </DCompile>

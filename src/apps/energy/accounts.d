@@ -45,8 +45,8 @@ nothrow @nogc:
 // current - snapshot[e], lazily populating snapshot on first read of each
 // element. Cleared on local-midnight rollover.
 //
-// TODO(0.6, db.Stream): replace with `value_at(source, midnight)` queries when
-// db.Stream lands; drop this struct and today_delta. Tracked in DIP Phase 0.6.
+// TODO(0.6): replace with `value_at(source, midnight)` once time-range series
+// queries land; drop this struct and today_delta. Tracked in DIP Phase 0.6.
 struct DailySnapshot
 {
 nothrow @nogc:

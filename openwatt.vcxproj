@@ -75,11 +75,6 @@
     <DCompile Include="src\apps\energy\topology.d" />
     <DCompile Include="src\apps\energy\vehicle.d" />
     <DCompile Include="src\apps\ota\package.d" />
-    <DCompile Include="src\db\defs.d" />
-    <DCompile Include="src\db\engine.d" />
-    <DCompile Include="src\db\package.d" />
-    <DCompile Include="src\db\selfrefptr.d" />
-    <DCompile Include="src\db\stream.d" />
     <DCompile Include="src\devices\goodwe\scanner.d" />
     <DCompile Include="src\driver\baremetal\ble.d" />
     <DCompile Include="src\driver\baremetal\system.d" />

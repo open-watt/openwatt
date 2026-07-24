@@ -130,11 +130,8 @@ The current implementation and remaining phases are described in
   customers are objects, replace the two-pointer `Subscriber` delegate with a one-pointer
   subscriber interface and audit subscription lifetime.
 
-- **Converge live history and recording**: make durable recorder holders use `ElementCursor`
-  rather than raw `Element*` plus storage `Cursor`; remove the legacy database `SeriesId`
-  path once graph/sync queries read the typed history and owsig container exclusively. Then
-  finish sealed-bucket packing, reuse the packed stripe on disk, unify RAM/disk time queries,
-  and add the decimation ladder described in
+- **Finish series storage and recording**: finish sealed-bucket packing, reuse the packed stripe
+  on disk, unify RAM/disk time queries, and add the decimation ladder described in
   [docs/DATA_MODEL.draft.md](docs/DATA_MODEL.draft.md).
 
 - **Finish the other device facets**: add lazy property projection, typed events, and device

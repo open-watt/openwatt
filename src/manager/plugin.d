@@ -76,10 +76,8 @@ mixin template DeclareModule(string name)
 void register_modules(Application app)
 {
     import manager.log, manager.cron, manager.record, manager.sync;
-    import db;
     register_module!(manager.log)(app);
     register_module!(manager.cron)(app);
-    register_module!(db)(app);
     register_module!(manager.record)(app);
     register_module!(manager.sync)(app);
 
