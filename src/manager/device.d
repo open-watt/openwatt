@@ -618,8 +618,8 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
     return device;
 }
 
-// recording intent default: every element with a typed series that isn't a constant or config
-// value gets history; profiles will grow explicit record/retention overrides (grammar TODO)
+// recording intent default: every element that isn't a constant or config value gets history;
+// profiles will grow explicit record/retention overrides (grammar TODO)
 void apply_default_retention(Component c)
 {
     import urt.time : seconds;
@@ -630,7 +630,8 @@ void apply_default_retention(Component c)
 
     foreach (Element* e; c.elements)
     {
-        if (!e.has_typed_series || e.has_history)
+        assert(e.format.valid, "attached element has no data format");
+        if (e.has_history)
             continue;
         if (e.sampling_mode == SamplingMode.constant || e.sampling_mode == SamplingMode.config)
             continue;

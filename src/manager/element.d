@@ -280,54 +280,17 @@ nothrow @nogc:
     ref inout(Variant) value() @property inout pure
         => latest;
 
-    bool has_typed_series() const pure
-        => format.valid && (data_format.is_scalar || data_format.is_text || data_format.is_wide);
-
     void value(T)(auto ref T v, SysTime timestamp = getSysTime(), Subscriber who = null)
     {
-        if (has_typed_series)
+        assert(format.valid, "element has no data format");
+        static if (is(immutable T == immutable Variant))
         {
-            static if (is(immutable T == immutable Variant))
-            {
-                if (update_typed_series(v, timestamp, who))
-                    return;
-            }
-            else
-            {
-                Variant boxed = Variant(v);
-                if (update_typed_series(boxed, timestamp, who))
-                    return;
-            }
-            return;
+            update_typed_series(v, timestamp, who);
         }
-
-        Variant previous = latest;
-        SysTime previous_timestamp = last_update;
-        bool is_newer = timestamp > last_update;
-        if (is_newer)
+        else
         {
-            prev_update = last_update;
-            last_update = timestamp;
-        }
-
-        if (latest != v)
-        {
-            if (is_newer)
-                prev = latest.move;
-            latest = forward!v;
-            if (is_newer)
-                capture_sample(timestamp);
-
-            SampleUpdate[1] updates;
-            updates[0].element = &this;
-            updates[0].who = who;
-            updates[0].value = latest;
-            updates[0].previous = previous.move;
-            updates[0].timestamp = timestamp;
-            updates[0].previous_timestamp = previous_timestamp;
-            updates[0].value_ready = true;
-            SampleCommit samples = SampleCommit(updates[]);
-            dispatch(samples);
+            Variant boxed = Variant(v);
+            update_typed_series(boxed, timestamp, who);
         }
     }
 

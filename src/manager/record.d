@@ -75,7 +75,7 @@ nothrow @nogc:
         if (mp > Duration.zero)
             throttle = cast(ulong)mp.as!"nsecs";
 
-        if (e.has_typed_series)
+        if (e.format.valid)
         {
             const(DataFormat)* f = e.data_format;
             if (!container_serialisable(*f))
@@ -148,7 +148,7 @@ bool query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, Que
 {
     Element* e = rs.element;
     Array!Sample local;
-    if (e.has_typed_series)
+    if (e.format.valid)
     {
         ulong idx = e.index_for_time(from_unix_time_ns(from));
         for (; idx != ulong.max;)
