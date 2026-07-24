@@ -23,6 +23,9 @@ import router.iface.packet;
 nothrow @nogc:
 
 
+alias log = Log!"sync";
+
+
 class SyncPeer : ActiveObject
 {
     alias Properties = AliasSeq!(Prop!("transport",      transport),
@@ -87,6 +90,89 @@ nothrow @nogc:
         return _transport.forward(p);
     }
 
+    // Session name/handle binding. Local ids never travel: each side announces its
+    // objects by name (add_name) and allocates the session handle for the objects it
+    // introduces. A wire handle's low bit says who allocated it relative to the frame
+    // it appears in: 0 = the frame's sender, 1 = the receiver, so the same handle value
+    // flips its low bit crossing the wire. Handles are never reused; a slot whose
+    // object dies resolves invalid forever, and a session (attach..detach) resets the
+    // whole space.
+
+    enum uint invalid_handle = uint.max;
+
+    uint introduce(BaseObject obj)
+    {
+        foreach (i, o; _introduced[])
+            if (o is obj)
+                return cast(uint)i << 1;
+        uint idx = cast(uint)_introduced.length;
+        _introduced ~= obj;
+        return idx << 1;
+    }
+
+    void adopt(uint handle, CID local)
+    {
+        if (handle & 1)
+        {
+            log.warning("peer '", name[], "' announced a receiver-side handle ", handle);
+            return;
+        }
+        uint idx = handle >> 1;
+        while (_adopted.length <= idx)
+            _adopted ~= CID.invalid;
+        if (_adopted[idx] && _adopted[idx] != local)
+        {
+            log.warning("peer '", name[], "' re-announced handle ", handle, " for a different name");
+            return;
+        }
+        _adopted[][idx] = local;
+    }
+
+    uint handle_of(BaseObject obj)
+    {
+        foreach (i, o; _introduced[])
+            if (o is obj)
+                return cast(uint)i << 1;
+        foreach (i, c; _adopted[])
+            if (c == obj.id)
+                return (cast(uint)i << 1) | 1;
+        return invalid_handle;
+    }
+
+    uint handle_of(CID cid)
+    {
+        foreach (i, c; _adopted[])
+            if (c == cid)
+                return (cast(uint)i << 1) | 1;
+        foreach (i, o; _introduced[])
+            if (o && o.id == cid)
+                return cast(uint)i << 1;
+        return invalid_handle;
+    }
+
+    CID cid_of(uint handle)
+    {
+        uint idx = handle >> 1;
+        if (handle & 1)
+            return idx < _introduced.length && _introduced[idx] ? _introduced[idx].id : CID.invalid;
+        return idx < _adopted.length ? _adopted[idx] : CID.invalid;
+    }
+
+    void forget(BaseObject obj)
+    {
+        foreach (ref o; _introduced[])
+            if (o is obj)
+            {
+                o = null;
+                return;
+            }
+    }
+
+    // Log tap. request_logs asks the remote to stream us its logs (we hold the
+    // desire and re-send on reconnect); set_log_sub is the remote asking us,
+    // which registers our fan-out sink toward it. Both carry a severity + tag
+    // filter; off clears.
+
     void request_logs(Severity max_severity, bool off, const(char)[] tag)
     {
         _want_logs = !off;
@@ -146,7 +232,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _transport !is null;
@@ -195,6 +280,8 @@ package:
     Array!String     _subscriptions;
     Array!BaseObject _bound;             // objects we've sent bind{...} to this peer
     Array!BaseObject _authoritative;     // proxies we hold on this peer's behalf
+    Array!BaseObject _introduced;        // handle table: objects we announced (slot = handle >> 1)
+    Array!CID        _adopted;           // handle table: local ids for names the peer announced
     SyncEncoderKind  _encoder;
 
     bool     _time_authority;

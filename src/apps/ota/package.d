@@ -115,7 +115,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const
         => _http_server.get() !is null && _uri.length > 0 && ota_supported();

@@ -183,7 +183,6 @@ nothrow @nogc:
         => _status == CertStatus.issued && running;
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const
     {

@@ -13,9 +13,10 @@ module manager.sync;
 //
 // Known gaps (not smoke-tested end-to-end yet):
 //
-//   - Rename propagation: on_object_rekeyed and fan_out_rekey are stubs. Need
-//     a global register_object_rekeyed_handler (analogous to _created_handler)
-//     before locally-authoritative renames can broadcast.
+//   - Rename propagation: nothing broadcasts a locally-authoritative rename.
+//     Session handles are rename-stable (bound to the object, not the name),
+//     so this is one "rename" verb {handle, new_name} plus a global renamed
+//     hook (analogous to register_object_lifecycle_handler) when needed.
 //   - inbound_enum doesn't correlate pending enum_req forwards - currently
 //     latent (no outbound enum_req emitter exists yet).
 //   - Binary encoder not implemented (deferred to BL808 D0/M0 shmem work).
@@ -86,8 +87,6 @@ enum Duration time_response_timeout = seconds(4);
 
 
 // Subscription pattern forms:
-//   "#<decimal>"          - exact CID match (decimal uint)
-//   "$<hex>"              - exact CID match (hex uint, case-insensitive)
 //   "[=]<type>:<name>"    - type/name match; both halves accept wildcards.
 //                           Without '=' the type half matches any ancestor.
 //     "modbus:goodwe_ems"  - any modbus (incl. subtypes) named goodwe_ems
@@ -96,24 +95,10 @@ enum Duration time_response_timeout = seconds(4);
 //     "*:*"                - everything
 bool pattern_matches(const(char)[] pattern, BaseObject obj) nothrow @nogc
 {
-    import urt.conv : parse_uint;
     import urt.string : wildcard_match;
 
     if (pattern.length == 0)
         return false;
-
-    if (pattern[0] == '#' || pattern[0] == '$')
-    {
-        uint base = pattern[0] == '#' ? 10 : 16;
-        const(char)[] digits = pattern[1 .. $];
-        if (digits.length == 0)
-            return false;
-        size_t taken;
-        ulong val = parse_uint(digits, &taken, base);
-        if (taken != digits.length || val > uint.max)
-            return false;
-        return obj.id.raw == cast(uint)val;
-    }
 
     bool strict = false;
     if (pattern[0] == '=')
@@ -304,7 +289,7 @@ nothrow @nogc:
                 return;
             if (obj._is_remote)
                 return;
-            enc.encode_add_name(p, obj.id, obj.name[]);
+            enc.encode_add_name(p, obj);
         });
     }
 
@@ -319,6 +304,8 @@ nothrow @nogc:
         p._authoritative.clear();
         p._bound.clear();
         p._subscriptions.clear();
+        p._introduced.clear();
+        p._adopted.clear();
 
         // Drop pending forwards where this peer was the origin; we can't route
         // a response back to a gone peer.
@@ -353,55 +340,19 @@ nothrow @nogc:
 
     // Inbound: registry
 
-    void inbound_add_name(SyncPeer from, CID cid, const(char)[] name)
+    void inbound_add_name(SyncPeer from, uint handle, const(char)[] name, const(char)[] type)
     {
-        // Purely extends our id-table / cid→name resolution. No proxy yet -
-        // the concrete type is only known when bind arrives, which is also
-        // what materialises the proxy.
-        uint type_idx = cid.type_index;
-        CID local = item_table(type_idx).insert(name, cast(ubyte)type_idx, null);
-
-        // If the receiver's rehash-on-collision landed on a different CID
-        // than the sender, the two id-tables have diverged. Log for now;
-        // a per-peer CID translation slot will handle it later.
-        if (local != cid)
-            log.warning("sync: add_name CID mismatch for '", name, "' - peer=",
-                        cid.raw, " local=", local.raw);
-    }
-
-    void inbound_rekey(SyncPeer from, CID old_cid, CID new_cid)
-    {
-        BaseObject obj = get_item(old_cid);
-        if (!obj)
+        // Reserves local identity for the peer's announced name and binds their
+        // session handle to it. No proxy yet - bind is what materialises one.
+        auto rt = type in g_app.types;
+        if (!rt)
         {
-            log.warning("sync: rekey from '", from.name[], "' for unknown CID ", old_cid.raw);
+            log.warning("sync: add_name from '", from.name[], "' with unknown type '", type, "'");
             return;
         }
-        if (!obj._is_remote)
-        {
-            log.warning("sync: rekey from '", from.name[], "' targeting our local authoritative '",
-                        obj.name[], "' - ignoring");
-            return;
-        }
-
-        const(char)[] new_name = get_id(new_cid)[];
-        if (new_name.length == 0)
-        {
-            log.warning("sync: rekey to unknown CID ", new_cid.raw);
-            return;
-        }
-
-        const(char)[] err = obj.name = new_name;
-        if (err.length)
-        {
-            log.warning("sync: rekey CID ", old_cid.raw, " -> ", new_cid.raw, " failed: ", err);
-            return;
-        }
-
-        // Follow the rename in the authority map. broadcast_rekey already fired
-        // via the name setter so local ObjectRefs have been updated.
-        authority.remove(old_cid);
-        authority[obj.id] = from;
+        ubyte type_idx = cast(ubyte)rt.type_info.collection_id;
+        CID local = item_table(type_idx).reserve(name, type_idx);
+        from.adopt(handle, local);
     }
 
     // Inbound: mirror lifecycle
@@ -478,20 +429,20 @@ nothrow @nogc:
                 SyncPeer origin = pf.origin;
                 uint origin_seq = pf.origin_seq;
                 pending_forwards.remove(seq);
-                // Origin likely doesn't yet know this CID - make sure they do.
-                encoder_for(origin._encoder).encode_add_name(origin, target, proxy.name[]);
+                // Origin likely doesn't yet know this object - introduce it first.
+                encoder_for(origin._encoder).encode_add_name(origin, proxy);
                 bind_to_peer(origin, proxy, origin_seq);
             }
         }
 
         // Hub-of-hubs: tell our other subscribers about this newly-materialized
-        // proxy. add_name first (they may not know the CID), then bind to any
+        // proxy. add_name first (they may not know it), then bind to any
         // whose subscription patterns match.
         foreach (p; peers[])
         {
             if (p is from)
                 continue;
-            encoder_for(p._encoder).encode_add_name(p, target, proxy.name[]);
+            encoder_for(p._encoder).encode_add_name(p, proxy);
             foreach (ref pat; p._subscriptions[])
             {
                 if (pattern_matches(pat[], proxy))
@@ -1109,13 +1060,7 @@ nothrow @nogc:
     void fan_out_add_name(BaseObject obj)
     {
         foreach (p; peers[])
-            encoder_for(p._encoder).encode_add_name(p, obj.id, obj.name[]);
-    }
-
-    void fan_out_rekey(CID old_cid, CID new_cid)
-    {
-        // TODO: iterate peers bound to old_cid / new_cid and emit encode_rekey.
-        // Deferred until rename propagation wires up (needs a global rekey hook).
+            encoder_for(p._encoder).encode_add_name(p, obj);
     }
 
     void fan_out_state(BaseObject obj, StateSignal sig)
@@ -1223,8 +1168,16 @@ nothrow @nogc:
 
     void on_object_lifecycle(BaseObject obj, ObjectLifecycleEvent event)
     {
-        // Destruction is handled via the state hook (on_object_state) so the
-        // correlation seq can be threaded through; we only act on creation here.
+        // Destruction fan-out (unbind) is handled via the state hook
+        // (on_object_state) so the correlation seq can be threaded through;
+        // here we only retire the dead object's session handles - the slots
+        // must stop resolving, and they never rebind.
+        if (event == ObjectLifecycleEvent.destroyed)
+        {
+            foreach (p; peers[])
+                p.forget(obj);
+            return;
+        }
         if (event != ObjectLifecycleEvent.created)
             return;
 
@@ -1264,14 +1217,6 @@ nothrow @nogc:
         }
         else
             fan_out_state(obj, sig);
-    }
-
-    void on_object_rekeyed(BaseObject obj, CID old_cid, CID new_cid)
-    {
-        // TODO: if local authoritative rename, fan_out_rekey(old, new).
-        // If proxy rename, update authority map keyed on the new CID.
-        // Blocked on adding a global register_object_rekeyed_handler hook
-        // (analogous to register_object_lifecycle_handler).
     }
 
     // Bind / unbind bookkeeping

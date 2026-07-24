@@ -160,7 +160,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _start != IPAddr.any && _end != IPAddr.any && _start <= _end;
@@ -239,7 +238,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _prefix_length > 0 && _prefix_length <= 128;

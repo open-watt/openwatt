@@ -85,7 +85,6 @@ nothrow @nogc:
         => !is_static_lease() && now >= _expires;
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _address != IPAddr.any && cast(bool)_mac;

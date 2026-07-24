@@ -89,7 +89,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _server.get !is null && !_root.empty;

@@ -614,7 +614,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
 private:
     IPClient _conn;
@@ -966,7 +965,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     final override bool validate() const pure
         => super.validate() && _certificates.length > 0;

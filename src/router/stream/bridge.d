@@ -106,7 +106,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override void update()
     {

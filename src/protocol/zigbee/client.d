@@ -555,7 +555,6 @@ class ZigbeeNode : ActiveObject
         => zigbee_iface()._network_status == EmberStatus.NETWORK_UP;
 
 protected:
-    mixin RekeyHandler;
 
     final void set_eui(EUI64 value) nothrow
     {

@@ -236,26 +236,17 @@ nothrow @nogc:
     }
     final const(char)[] name(const(char)[] value)
     {
-        import manager.collection : item_table, broadcast_rekey;
+        import manager.collection : item_table;
 
         if (value.empty)
             return "`name` must not be empty";
 
-        ubyte ti = _typeInfo.collection_id;
-        ref t = item_table(ti);
-        if (t.get_by_name(value, ti) !is null)
+        String old = name();
+        if (old[] == value[])
+            return null;
+
+        if (!item_table(_typeInfo.collection_id).rename(_id, old[], value))
             return "name already in use";
-
-        CID old_id = _id;
-        CID new_id = t.insert(value, ti, this);
-        assert(cast(bool)new_id);
-
-        t.remove(old_id);
-
-        _id = new_id;
-        broadcast_rekey(old_id, new_id);
-
-        // TODO: dirtry the name and/or propagate a re-key if it happened!
 
         return null;
     }
@@ -433,11 +424,6 @@ protected:
     bool validate() const
         => true;
 
-    void rekey(CID old_id, CID new_id)
-    {
-        // nothing at this level
-    }
-
     void mark_set(T, string[] props)() nothrow @nogc
     {
         enum mask = () {
@@ -507,12 +493,6 @@ protected:
             }
         }
         sync_state_free(slot);
-    }
-
-package:
-    final void do_rekey(CID old_id, CID new_id)
-    {
-        rekey(old_id, new_id);
     }
 
 private:

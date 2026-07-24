@@ -314,7 +314,6 @@ nothrow @nogc:
 
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _inner !is null;

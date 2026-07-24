@@ -51,7 +51,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure nothrow @nogc
         => _iface !is null && !_group.empty;

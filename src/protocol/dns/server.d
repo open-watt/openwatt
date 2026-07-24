@@ -152,7 +152,6 @@ nothrow @nogc:
     // API...
 
 protected:
-    mixin RekeyHandler;
 
     override CompletionStatus startup()
     {
