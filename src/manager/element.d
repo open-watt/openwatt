@@ -348,20 +348,24 @@ nothrow @nogc:
         return false;
     }
 
+    // boxed value/previous only serve subscriber payloads; unwatched elements never box
     private void prepare_before(ref SampleUpdate update)
     {
+        if (!_subs)
+            return;
         update.previous = record_value();
         update.previous_timestamp = last_update;
     }
 
     private void prepare_after(ref SampleUpdate update)
     {
-        Variant v = record_value();
         SysTime t = record_update;
         if (t > last_update)
             last_update = t;
-        update.value = v.move;
         update.timestamp = t;
+        if (!_subs)
+            return;
+        update.value = record_value();
         update.value_ready = true;
     }
 
@@ -369,10 +373,12 @@ nothrow @nogc:
     {
         if (timestamp <= last_update)
             return;
-        Variant current = record_value();
         SysTime previous_timestamp = last_update;
         last_update = timestamp;
+        if (!_subs)
+            return;
 
+        Variant current = record_value();
         SampleUpdate update;
         update.element = &this;
         update.value = current;
@@ -471,28 +477,14 @@ public:
             Scalar s;
             s.raw[] = 0;
             s.raw[0 .. data_format.stride] = cast(const(ubyte)[])record;
-            if (data_format.kind == SeriesKind.held && _last_update != SysTime() && s.raw == _latest.raw)
-            {
-                _last_update = t;
-                if (t > last_update)
-                    last_update = t;
+            if (held_repeat(s.raw == _latest.raw, t))
                 return;
-            }
         }
         else
         {
             assert(data_format.is_wide, "dynamic and non-pod records need their own entry");
-            if (data_format.kind == SeriesKind.held && _last_update != SysTime())
-            {
-                const(void)[] tail = tail_record();
-                if (tail && cast(const(ubyte)[])tail == cast(const(ubyte)[])record)
-                {
-                    _last_update = t;
-                    if (t > last_update)
-                        last_update = t;
-                    return;
-                }
-            }
+            if (held_repeat(tail_equals(record), t))
+                return;
         }
         SysTime[1] time = t;
         SampleUpdate update = SampleUpdate(&this, record, time[], null, who);
@@ -751,6 +743,23 @@ private:
         debug assert(value_count * T.sizeof == record_count * data_format.stride);
     }
 
+    // held series: an equal observation only advances the timestamps
+    bool held_repeat(bool equal, SysTime t)
+    {
+        if (data_format.kind != SeriesKind.held || _last_update == SysTime() || !equal)
+            return false;
+        _last_update = t;
+        if (t > last_update)
+            last_update = t;
+        return true;
+    }
+
+    bool tail_equals(const(void)[] record) const pure
+    {
+        const(void)[] tail = tail_record();
+        return tail && cast(const(ubyte)[])tail == cast(const(ubyte)[])record;
+    }
+
     void apply(ref SampleUpdate update)
     {
         debug assert(update.element is &this);
@@ -783,14 +792,11 @@ private:
     {
         debug assert(data_format.is_text);
         TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
-        if (data_format.kind == SeriesKind.held && _last_update != SysTime() && slot.view == v[])
-        {
-            _last_update = t;
-            if (t > last_update)
-                last_update = t;
+        if (held_repeat(slot.view == v[], t))
             return;
-        }
-        Variant previous = record_value();
+        Variant previous;
+        if (_subs)
+            previous = record_value();
         SysTime previous_timestamp = last_update;
         slot.set(v.move);
         _last_update = t;
@@ -801,14 +807,11 @@ private:
     {
         debug assert(data_format.is_text);
         TextRecord* slot = cast(TextRecord*)_latest.raw.ptr;
-        if (data_format.kind == SeriesKind.held && _last_update != SysTime() && slot.view == v)
-        {
-            _last_update = t;
-            if (t > last_update)
-                last_update = t;
+        if (held_repeat(slot.view == v, t))
             return;
-        }
-        Variant previous = record_value();
+        Variant previous;
+        if (_subs)
+            previous = record_value();
         SysTime previous_timestamp = last_update;
         slot.set(v);
         _last_update = t;
