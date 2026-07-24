@@ -241,10 +241,16 @@ nothrow @nogc:
         store_record(record, t, who);
     }
 
-    void write_samples(T)(const(T)[] samples, const(SysTime)[] times, Subscriber who = null)
+    // TB selects the timebase: SysTime wall timestamps, or ulong ticks in the format's clock domain
+    void write_samples(T, TB)(const(T)[] samples, const(TB)[] times, Subscriber who = null)
+        if (is(immutable TB == immutable SysTime) || is(immutable TB == immutable ulong))
     {
+        enum wall = is(immutable TB == immutable SysTime);
         static if (is(T == String) || is(T : const(char)[]))
+        {
+            static assert(wall, "text samples cannot use device ticks");
             store_samples(samples, times, who);
+        }
         else
         {
             static assert(is(typeof(value_type_of!T)));
@@ -254,21 +260,13 @@ nothrow @nogc:
             {
                 debug assert(samples.length == times.length);
                 foreach (i, sample; samples)
-                    write_sample(sample, times[i], who);
+                {
+                    static if (wall)
+                        write_sample(sample, times[i], who);
+                    else
+                        write_sample(sample, data_format.clock.to_wall(times[i]), who);
+                }
             }
-        }
-    }
-
-    void write_samples(T)(const(T)[] samples, const(ulong)[] ticks, Subscriber who = null)
-    {
-        static assert(is(typeof(value_type_of!T)));
-        if (value_type_of!T == data_format.type)
-            store_samples(samples, ticks, who);
-        else
-        {
-            debug assert(samples.length == ticks.length);
-            foreach (i, sample; samples)
-                write_sample(sample, data_format.clock.to_wall(ticks[i]), who);
         }
     }
 
@@ -488,16 +486,15 @@ public:
         }
         SysTime[1] time = t;
         SampleUpdate update = SampleUpdate(&this, record, time[], null, who);
-        prepare_before(update);
-        apply(update);
-        prepare_after(update);
-        submit(update, false);
+        commit_update(update, false);
     }
 
-    void store_samples(T)(const(T)[] samples, const(SysTime)[] times, Subscriber who = null)
+    void store_samples(T, TB)(const(T)[] samples, const(TB)[] times, Subscriber who = null)
+        if (is(immutable TB == immutable SysTime) || is(immutable TB == immutable ulong))
     {
         static if (is(T == String) || is(T : const(char)[]))
         {
+            static assert(is(immutable TB == immutable SysTime), "text samples cannot use device ticks");
             debug assert(samples.length == times.length);
             foreach (i, ref sample; samples)
             {
@@ -514,42 +511,22 @@ public:
         }
     }
 
-    void store_samples(T)(const(T)[] samples, const(ulong)[] ticks, Subscriber who = null)
+    void store_records(TB)(const(void)[] records, const(TB)[] times, Subscriber who = null)
+        if (is(immutable TB == immutable SysTime) || is(immutable TB == immutable ulong))
     {
-        static assert(!is(T == String) && !is(T : const(char)[]),
-                      "text samples cannot use device ticks");
-        check_sample_type!T(samples.length, ticks.length);
-        store_records((cast(const(void)*)samples.ptr)[0 .. samples.length * T.sizeof], ticks, who);
-    }
-
-    void store_records(const(void)[] records, const(SysTime)[] times, Subscriber who = null)
-    {
-        debug assert(!data_format.regular);
-        debug assert(data_format.is_scalar || data_format.is_wide,
-                     "managed records require typed sample handling");
+        enum wall = is(immutable TB == immutable SysTime);
+        static if (wall)
+            debug assert(!data_format.regular);
+        else
+            debug assert(data_format.uses_device_ticks);
         if (times.length == 0)
             return;
         debug assert(records.length == times.length * data_format.stride);
-        SampleUpdate update = SampleUpdate(&this, records, times, null, who);
-        prepare_before(update);
-        apply(update);
-        prepare_after(update);
-        submit(update, true);
-    }
-
-    void store_records(const(void)[] records, const(ulong)[] ticks, Subscriber who = null)
-    {
-        debug assert(data_format.uses_device_ticks);
-        debug assert(data_format.is_scalar || data_format.is_wide,
-                     "managed records require typed sample handling");
-        if (ticks.length == 0)
-            return;
-        debug assert(records.length == ticks.length * data_format.stride);
-        SampleUpdate update = SampleUpdate(&this, records, null, ticks, who);
-        prepare_before(update);
-        apply(update);
-        prepare_after(update);
-        submit(update, true);
+        static if (wall)
+            SampleUpdate update = SampleUpdate(&this, records, times, null, who);
+        else
+            SampleUpdate update = SampleUpdate(&this, records, null, times, who);
+        commit_update(update, true);
     }
 
     // TODO: rethink regular writes: data might follow the last record, or a gap may need synthesising.
@@ -559,7 +536,7 @@ public:
 //        _latest.raw[] = 0;
 //        _latest.raw[0 .. format.stride] = (cast(const(ubyte)[])records)[$ - format.stride .. $];
 //        _last_update = t0 + nsecs((records.length / format.stride - 1) * 1_000_000_000L / format.rate);
-//        append(records, null, t0, who);
+//        append_block(records, t0, null);
 //    }
 
     void mark_series_gap(Subscriber who = null)
@@ -760,13 +737,20 @@ private:
         return tail && cast(const(ubyte)[])tail == cast(const(ubyte)[])record;
     }
 
-    void apply(ref SampleUpdate update)
+    void commit_update(ref SampleUpdate update, bool batch)
     {
         debug assert(update.element is &this);
         debug assert(update.count != 0);
         debug assert(data_format.is_scalar || data_format.is_wide,
                      "managed records require typed sample handling");
+        prepare_before(update);
+        apply(update);
+        prepare_after(update);
+        submit(update, batch);
+    }
 
+    void apply(ref SampleUpdate update)
+    {
         if (data_format.is_scalar)
         {
             _latest.raw[] = 0;
@@ -784,7 +768,7 @@ private:
         else
         {
             _last_update = data_format.clock.to_wall(update.ticks[$-1]);
-            update.first_index = append(update.records, update.ticks, update.ticks[0]);
+            update.first_index = append(update.records, update.ticks);
         }
     }
 
@@ -848,10 +832,6 @@ private:
     {
         import urt.mem : alloca;
 
-        ubyte stride = data_format.stride;
-        uint n = cast(uint)(samples.length / stride);
-        assert(times is null || times.length == n, "times array must match sample count");
-
         uint[] ts;
         if (times.length <= 512)
             ts = (cast(uint*)alloca(times.length * uint.sizeof))[0 .. times.length];
@@ -859,54 +839,34 @@ private:
             ts = cast(uint[])alloc(times.length * uint.sizeof, uint.sizeof, MemFlags.fastest);
         scope(exit) { if (times.length > 512) free(ts); }
 
-        ulong t0 = unix_time_ns(times[0]) / 1000;
         foreach (i, t; times)
             ts[i] = cast(uint)((t - times[0]).as!"usecs");
-
-        bool follows_gap = (_flags & Flags.gap_open) != 0;
-        _flags &= ~Flags.gap_open;
-
-        ulong first_index = ulong.max;
-        if (_history)
-        {
-            Bucket* b = writable_bucket(n, follows_gap, t0 + ts[n - 1]);
-            (cast(ubyte*)b.samples)[b.count*stride .. (b.count + n)*stride] = cast(const(ubyte)[])samples[];
-            if (b.count == 0)
-                b.first_tick = t0;
-            uint offset = cast(uint)(t0 - b.first_tick);
-            for (uint i = 0; i < n; ++i)
-                b.offsets[b.count + i] = offset + ts[i];
-            b.count += n;
-            b.last_offset = b.offsets[b.count - 1];
-
-            first_index = _history.head;
-            _history.head += n;
-            evict_over_budget();
-        }
-
-        mark_dirty();
-        return first_index;
-
-        // TODO: reactor-thread producers must defer observer dispatch and dirty marking to the main loop
+        return append_block(samples, unix_time_ns(times[0]) / 1000, ts);
     }
 
-    ulong append(const(void)[] samples, const(ulong)[] times, ulong t0)
+    ulong append(const(void)[] samples, const(ulong)[] ticks)
     {
         import urt.mem : alloca;
 
+        uint[] ts;
+        if (ticks.length <= 512)
+            ts = (cast(uint*)alloca(ticks.length * uint.sizeof))[0 .. ticks.length];
+        else
+            ts = cast(uint[])alloc(ticks.length * uint.sizeof, uint.sizeof, MemFlags.fastest);
+        scope(exit) { if (ticks.length > 512) free(ts); }
+
+        foreach (i, t; ticks)
+            ts[i] = cast(uint)(t - ticks[0]);
+        return append_block(samples, ticks[0], ts);
+    }
+
+    // t0 is the batch base tick, ts the batch-relative offsets; empty ts = regular series,
+    // where the record index is the offset
+    ulong append_block(const(void)[] samples, ulong t0, const(uint)[] ts)
+    {
         ubyte stride = data_format.stride;
         uint n = cast(uint)(samples.length / stride);
-        assert(times is null || times.length == n, "times array must match sample count");
-
-        uint[] ts;
-        if (times.length <= 512)
-            ts = (cast(uint*)alloca(times.length * uint.sizeof))[0 .. times.length];
-        else
-            ts = cast(uint[])alloc(times.length * uint.sizeof, uint.sizeof, MemFlags.fastest);
-        scope(exit) { if (times.length > 512) free(ts); }
-
-        foreach (i, t; times)
-            ts[i] = cast(uint)(t - t0);
+        assert(ts.length == 0 || ts.length == n, "times array must match sample count");
 
         bool follows_gap = (_flags & Flags.gap_open) != 0;
         _flags &= ~Flags.gap_open;
@@ -914,17 +874,18 @@ private:
         ulong first_index = ulong.max;
         if (_history)
         {
-            Bucket* b = writable_bucket(n, follows_gap, times.length ? times[n - 1] : t0);
+            Bucket* b = writable_bucket(n, follows_gap, t0 + (ts.length ? ts[$-1] : 0));
             (cast(ubyte*)b.samples)[b.count*stride .. (b.count + n)*stride] = cast(const(ubyte)[])samples[];
             if (b.count == 0)
-                b.first_tick = times.length ? times[0] : t0;
+                b.first_tick = t0;
             if (b.offsets)
             {
-                for (uint i = 0; i < n; ++i)
-                    b.offsets[b.count + i] = cast(uint)(times[i] - b.first_tick);
+                uint base = cast(uint)(t0 - b.first_tick);
+                foreach (i; 0 .. n)
+                    b.offsets[b.count + i] = base + (ts.length ? ts[i] : i);
             }
             b.count += n;
-            b.last_offset = times.length ? b.offsets[b.count - 1] : b.count - 1;
+            b.last_offset = b.offsets ? b.offsets[b.count - 1] : b.count - 1;
 
             first_index = _history.head;
             _history.head += n;
