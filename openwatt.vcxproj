@@ -142,6 +142,7 @@
     <DCompile Include="src\manager\profile.d" />
     <DCompile Include="src\manager\reactor.d" />
     <DCompile Include="src\manager\record.d" />
+    <DCompile Include="src\manager\record_io.d" />
     <DCompile Include="src\manager\sample\package.d" />
     <DCompile Include="src\manager\secret.d" />
     <DCompile Include="src\manager\signal.d" />

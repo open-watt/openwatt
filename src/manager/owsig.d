@@ -35,7 +35,7 @@ struct SeriesCodec
     const(char)[] name;
     bool function(ref const DataFormat fmt, ref const RecordBlock blk) nothrow @nogc match;
     // pack the raw payload image into dst; bytes written, or -1 to decline (raw applies)
-    ptrdiff_t function(ref const RecordBlock blk, const(void)[] raw, void[] dst) nothrow @nogc pack;
+    ptrdiff_t function(ref const DataFormat fmt, ref const RecordBlock blk, const(void)[] raw, void[] dst) nothrow @nogc pack;
     // unpack a payload into the raw image; false = corrupt
     bool function(const(void)[] src, ref const BlockEntry blk, void[] dst) nothrow @nogc unpack;
 }
@@ -206,7 +206,11 @@ nothrow @nogc:
 
     bool put(ref const RecordBlock blk)
     {
-        ref const DataFormat f = *blk.data_format;
+        return put(*blk.data_format, blk);
+    }
+
+    bool put(ref const DataFormat f, ref const RecordBlock blk)
+    {
         debug assert(container_serialisable(f));
         uint count = blk.count;
         if (count == 0)
@@ -250,14 +254,14 @@ nothrow @nogc:
             foreach (i; 0 .. count)
                 offs[i] = blk.ts[i] - base;
         }
-        raw[offs_bytes .. $] = cast(const(ubyte)[])blk.records();
+        raw[offs_bytes .. $] = cast(const(ubyte)[])blk.data[0 .. count * f.stride];
 
         foreach (i; 0 .. g_num_codecs)
         {
             if (!g_codecs[i].match || !g_codecs[i].match(f, blk))
                 continue;
             _pbuf.resize(raw_bytes);
-            ptrdiff_t packed = g_codecs[i].pack(blk, raw, _pbuf[]);
+            ptrdiff_t packed = g_codecs[i].pack(f, blk, raw, _pbuf[]);
             if (packed > 0 && packed < raw_bytes)
             {
                 h.codec = cast(ubyte)(first_registered_codec + i);
@@ -295,6 +299,17 @@ nothrow @nogc:
     // load block i; the returned view and its format are valid until the next load
     bool load(size_t i, out RecordBlock blk)
     {
+        DataFormat fmt;
+        if (!load_raw(i, blk, fmt))
+            return false;
+        blk.format = register_format(fmt);
+        return true;
+    }
+
+    // Worker-side load: returns the format separately so no process-global
+    // FormatId registration occurs off the main thread.
+    bool load_raw(size_t i, out RecordBlock blk, out DataFormat fmt)
+    {
         ref const BlockEntry e = dir[i];
         uint raw_bytes = e.raw_bytes;
         _buf.resize(raw_bytes);
@@ -317,19 +332,18 @@ nothrow @nogc:
                 return false;
         }
 
-        _fmt = DataFormat(cast(ValueType)e.fmt.type, cast(SeriesKind)e.fmt.kind);
+        fmt = DataFormat(cast(ValueType)e.fmt.type, cast(SeriesKind)e.fmt.kind);
         if (e.fmt.unit)
         {
             ScaledUnit u;
             (cast(ubyte*)&u)[0 .. ScaledUnit.sizeof] = (cast(const(ubyte)*)&e.fmt.unit)[0 .. ScaledUnit.sizeof];
-            _fmt = DataFormat(cast(ValueType)e.fmt.type, cast(SeriesKind)e.fmt.kind, u);
+            fmt = DataFormat(cast(ValueType)e.fmt.type, cast(SeriesKind)e.fmt.kind, u);
         }
-        _fmt.count = e.fmt.count;
-        _fmt.rate = e.fmt.rate;
+        fmt.count = e.fmt.count;
+        fmt.rate = e.fmt.rate;
 
         bool irregular = (e.hdr.flags & BlockHeader.Flags.irregular) != 0;
         uint offs_bytes = irregular ? e.hdr.count * cast(uint)uint.sizeof : 0;
-        blk.format = register_format(_fmt);
         blk.count = e.hdr.count;
         blk.first_index = e.hdr.first_index;
         blk.t0 = e.hdr.first_tick;
@@ -358,7 +372,6 @@ private:
     Array!ubyte _buf;
     Array!ubyte _wbuf;
     Array!ubyte _pbuf;
-    DataFormat _fmt;
     BlockFormatHeader _afmt;
     ulong _fmt_anchor;
     ulong _tail;

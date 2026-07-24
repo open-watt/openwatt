@@ -59,6 +59,7 @@ import manager.console;
 import manager.console.command : CommandState, CommandCompletionState;
 import manager.console.session;
 import manager.plugin;
+import manager.record_io : Sample;
 import manager.features;
 import manager.syslog;
 import manager.system : hostname;
@@ -167,6 +168,17 @@ struct PendingInboundCmd
     CommandState  command;
 }
 
+struct PendingHistory
+{
+    SyncPeer peer;
+    uint seq;
+    String path;
+    uint ticket;
+    MonoTime started;
+
+    this(this) @disable;
+}
+
 class SyncModule : Module
 {
     mixin DeclareModule!"sync";
@@ -176,6 +188,7 @@ nothrow @nogc:
     Map!(CID, SyncPeer)        authority;         // only remote auth; absence = local
     Map!(uint, PendingForward) pending_forwards;
     Array!PendingInboundCmd    pending_inbound_cmds;
+    Array!PendingHistory       pending_history;
     uint                       next_seq;
     uint                       _timebase_version;  // our version as a clock authority
     SyncPeer                   _applying_push;     // peer whose delta push we're applying
@@ -204,6 +217,10 @@ nothrow @nogc:
 
     override void deinit()
     {
+        import manager.record;
+        foreach (ref history; pending_history[])
+            get_module!RecordModule.cancel_query(history.ticket);
+        pending_history.clear();
         unsubscribe_clock_change(&on_clock_step);
     }
 
@@ -234,6 +251,30 @@ nothrow @nogc:
                 .encode_result(req.peer, req.seq, req.command.result, req.session.takeOutput()[]);
             g_app.console.destroy_session(req.session);
             pending_inbound_cmds.remove(i);
+        }
+
+        MonoTime now = getTime();
+        for (size_t i = 0; i < pending_history.length;)
+        {
+            ref PendingHistory history = pending_history[i];
+            bool alive;
+            foreach (peer; peers[])
+                if (peer is history.peer)
+                {
+                    alive = true;
+                    break;
+                }
+            if (alive && now - history.started <= 5.seconds)
+            {
+                ++i;
+                continue;
+            }
+            import manager.record;
+            get_module!RecordModule.cancel_query(history.ticket);
+            if (alive)
+                encoder_for(history.peer._encoder).encode_error(
+                    history.peer, history.seq, "history unavailable");
+            pending_history.remove(i);
         }
 
     }
@@ -912,14 +953,44 @@ nothrow @nogc:
         else if (max_points > max_history_points)
             max_points = max_history_points;
 
-        Array!Sample local;
-        if (query_local(*rs, from_ms * 1_000_000, to_ms * 1_000_000, max_points, QueryMode.raw, local))
+        uint ticket = rs.query(from_ms * 1_000_000, to_ms * 1_000_000,
+                               max_points, QueryMode.raw, &history_complete);
+        if (!ticket)
         {
-            encoder_for(from._encoder).encode_history(from, seq, path, local[]);
+            encoder_for(from._encoder).encode_error(from, seq, "history unavailable");
             return;
         }
+        pending_history ~= PendingHistory(from, seq,
+            path.makeString(defaultAllocator()), ticket, getTime());
+    }
 
-        encoder_for(from._encoder).encode_error(from, seq, "history unavailable");
+    void history_complete(uint ticket, scope const(Sample)[] samples, bool available)
+    {
+        foreach (i; 0 .. pending_history.length)
+        {
+            ref PendingHistory history = pending_history[i];
+            if (history.ticket != ticket)
+                continue;
+
+            bool alive;
+            foreach (peer; peers[])
+                if (peer is history.peer)
+                {
+                    alive = true;
+                    break;
+                }
+            if (alive)
+            {
+                if (available)
+                    encoder_for(history.peer._encoder).encode_history(
+                        history.peer, history.seq, history.path[], samples);
+                else
+                    encoder_for(history.peer._encoder).encode_error(
+                        history.peer, history.seq, "history unavailable");
+            }
+            pending_history.remove(i);
+            return;
+        }
     }
 
     void inbound_enum_req(SyncPeer from, const(char)[] type_name, uint seq)

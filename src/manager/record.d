@@ -12,7 +12,6 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.mem.allocator;
-import urt.si.quantity;
 import urt.string;
 import urt.time;
 import urt.util : min;
@@ -31,170 +30,15 @@ import manager.device;
 import manager.element;
 import manager.owsig;
 import manager.plugin;
+import manager.record_io;
 
 nothrow @nogc:
 
+public import manager.record_io : Sample, QueryMode;
 
 alias log = Log!"record";
 
-struct Sample
-{
-    ulong time;
-    double value;
-}
-
-enum QueryMode : ubyte
-{
-    raw,
-    graph,
-}
-
-private struct SampleAggregator
-{
-nothrow @nogc:
-
-    Array!Sample* sink;
-    ulong from;
-    ulong bucket_width;
-
-    void put(ref const Sample s)
-    {
-        if (!bucket_width)
-        {
-            *sink ~= s;
-            return;
-        }
-        ulong b = (s.time - from) / bucket_width;
-        if (b != _bucket)
-        {
-            emit();
-            _bucket = b;
-        }
-        _sum += s.value;
-        _last_time = s.time;
-        ++_n;
-    }
-
-    void finish()
-    {
-        emit();
-    }
-
-private:
-    ulong _bucket = ulong.max;
-    double _sum = 0;
-    ulong _last_time;
-    uint _n;
-
-    void emit()
-    {
-        if (!_n)
-            return;
-        *sink ~= Sample(_last_time, _sum / _n);
-        _sum = 0;
-        _n = 0;
-    }
-}
-
-private struct GraphIntervalSampler
-{
-nothrow @nogc:
-
-    Array!Sample* sink;
-    ulong from;
-    ulong to;
-    ulong bucket_width;
-
-    void seed(ref const Sample s)
-    {
-        _last_time = from;
-        _last_value = s.value;
-        _has_value = true;
-        _seeded = true;
-    }
-
-    void put(ref const Sample s)
-    {
-        if (!bucket_width)
-        {
-            *sink ~= s;
-            return;
-        }
-
-        ulong t = s.time;
-        if (t < from)
-            return;
-        if (t > to)
-            t = to;
-
-        if (_has_value)
-            accumulate(_last_time, t, _last_value);
-
-        _last_time = t;
-        _last_value = s.value;
-        _has_value = true;
-    }
-
-    void finish()
-    {
-        if (!bucket_width)
-            return;
-        if (_has_value)
-            accumulate(_last_time, to, _last_value);
-        emit();
-    }
-
-private:
-    ulong _bucket = ulong.max;
-    ulong _bucket_time;
-    double _sum = 0;
-    ulong _duration;
-    ulong _last_time;
-    double _last_value;
-    bool _has_value;
-    bool _seeded;
-    bool _emitted;
-
-    void accumulate(ulong start, ulong end, double value)
-    {
-        if (end <= start)
-            return;
-        if (start < from)
-            start = from;
-        if (end > to)
-            end = to;
-
-        while (start < end)
-        {
-            ulong b = (start - from) / bucket_width;
-            if (b != _bucket)
-            {
-                emit();
-                _bucket = b;
-                ulong bucket_start = from + b * bucket_width;
-                _bucket_time = (_seeded || _emitted || start <= bucket_start)
-                    ? bucket_start : start;
-            }
-
-            ulong bucket_end = from + (b + 1) * bucket_width;
-            ulong stop = end < bucket_end ? end : bucket_end;
-            ulong dt = stop - start;
-            _sum += value * cast(double)dt;
-            _duration += dt;
-            start = stop;
-        }
-    }
-
-    void emit()
-    {
-        if (!_duration)
-            return;
-        *sink ~= Sample(_bucket_time, _sum / cast(double)_duration);
-        _sum = 0;
-        _duration = 0;
-        _emitted = true;
-    }
-}
+private __gshared RecordIO g_record_io;
 
 struct RecordStream
 {
@@ -202,176 +46,106 @@ nothrow @nogc:
 
     Recorder owner;
     ElementCursor cursor;
-    SeriesContainer container;
+    RecordFileId file;
     String path;            // data-model path: "device.component.element"
 
     this(this) @disable;
 
     void flush()
     {
+        if (_write_ticket || (_retry_at && getTime() < _retry_at))
+            return;
         if (!cursor.pending)
             return;
-        if (!container.is_open && !container.open_(owner.make_filename(path[], ".owsig")[]))
-            return; // disk trouble; records stay pinned, retry next flush
 
-        while (cursor.pending)
+        RecordBlock block = cursor.next(256);
+        if (!block.count)
+            return;
+        ulong first = block.first_index;
+        ulong end = first + block.count;
+        uint ticket = g_record_io.write(file, block, &write_complete);
+        cursor.seek(first);
+        if (!ticket)
         {
-            RecordBlock blk = cursor.next(256);
-            if (blk.count == 0)
-                break;
-            if (!container.put(blk))
-            {
-                cursor.seek(blk.first_index); // rewind just this block; earlier puts are on disk
-                break;
-            }
+            _retry_at = getTime() + 1.seconds;
+            return;
         }
+        _write_ticket = ticket;
+        _write_end = end;
+    }
+
+    uint query(ulong from, ulong to, uint max_points, QueryMode mode,
+               RecordQueryCallback callback)
+    {
+        Array!Sample live;
+        collect_memory(cursor.eid.deref, from, to, live);
+        return g_record_io.query(file, from, to, max_points, mode, live[], callback);
     }
 
     void close()
     {
+        if (_write_ticket)
+            g_record_io.cancel_write(_write_ticket);
         cursor.close();
-        container.close_();
-    }
-}
-
-bool query_local(ref RecordStream rs, ulong from, ulong to, uint max_points, QueryMode mode, ref Array!Sample result)
-{
-    Element* e = rs.cursor.eid.deref;
-    return query_records(e, rs.container, from, to, max_points, mode, result);
-}
-
-private bool query_records(Element* e, ref SeriesContainer container, ulong from, ulong to,
-                           uint max_points, QueryMode mode, ref Array!Sample result)
-{
-    Array!Sample local;
-    if (e)
-    {
-        ulong idx = e.index_for_time(from_unix_time_ns(from));
-        for (; idx != ulong.max;)
-        {
-            RecordBlock blk = e.read_records(idx, 256);
-            if (blk.count == 0)
-                break;
-            bool past = false;
-            foreach (i; 0 .. blk.count)
-            {
-                ulong t = unixTimeNs(blk.time(i));
-                if (t > to)
-                {
-                    past = true;
-                    break;
-                }
-                double v;
-                Variant val = blk.box(i);
-                if (sample_to_double(val, v))
-                    local ~= Sample(t, v);
-            }
-            if (past)
-                break;
-            idx += blk.count;
-        }
+        g_record_io.close(file);
+        file = invalid_record_file;
+        _write_ticket = 0;
     }
 
-    if ((local.length == 0 || local[0].time > from) && container.is_open && container.dir.length)
+private:
+    uint _write_ticket;
+    ulong _write_end;
+    MonoTime _retry_at;
+    MonoTime _last_warning;
+
+    void write_complete(uint ticket, bool success)
     {
-        // the container reaches further back than RAM retention
-        Array!Sample merged;
-        ulong ram_start = local.length ? local[0].time : ulong.max;
-        size_t bi = container.find_by_time(from / 1000);
-        if (bi == container.dir.length)
-            --bi;       // everything ends before `from`: the last block holds the seed
-        else if (bi)
-            --bi;       // step back one block for held state
-        outer: for (; bi < container.dir.length; ++bi)
-        {
-            if (container.dir[bi].hdr.first_tick * 1000 > to)
-                break;
-            RecordBlock blk;
-            if (!container.load(bi, blk))
-                break;
-            foreach (i; 0 .. blk.count)
-            {
-                ulong t = unixTimeNs(blk.time(i));
-                if (t >= ram_start || t > to)
-                    break outer;
-                double v;
-                Variant val = blk.box(i);
-                if (sample_to_double(val, v))
-                    merged ~= Sample(t, v);
-            }
-        }
-        foreach (ref const Sample s; local[])
-            merged ~= s;
-        local = merged.move;
-    }
-    if (local.length == 0)
-        return false;
-
-    ulong bucket_width = max_points ? (to - from) / max_points + 1 : 0;
-
-    if (mode == QueryMode.graph)
-    {
-        Sample held;
-        bool has_held = false;
-        foreach (ref const Sample s; local[])
-        {
-            if (s.time >= from)
-                break;
-            held = s;
-            has_held = true;
-        }
-        ulong hold_limit = bucket_width ? bucket_width : to - from;
-        has_held = has_held && from - held.time <= hold_limit;
-
-        if (!bucket_width)
-        {
-            if (has_held)
-                result ~= Sample(from, held.value);
-            foreach (ref const Sample s; local[])
-            {
-                if (s.time < from)
-                    continue;
-                if (s.time > to)
-                    break;
-                result ~= s;
-            }
-        }
+        if (ticket != _write_ticket)
+            return;
+        if (success)
+            cursor.seek(_write_end);
         else
         {
-            GraphIntervalSampler g;
-            g.sink = &result;
-            g.from = from;
-            g.to = to;
-            g.bucket_width = bucket_width;
-            if (has_held)
-                g.seed(held);
-            foreach (ref const Sample s; local[])
+            MonoTime now = getTime();
+            _retry_at = now + 1.seconds;
+            if (!_last_warning || now - _last_warning >= 10.seconds)
             {
-                if (s.time < from)
-                    continue;
-                if (s.time > to)
-                    break;
-                g.put(s);
+                log.warning("failed to write record stream '", path[], "'");
+                _last_warning = now;
             }
-            g.finish();
         }
-        return true;
+        _write_ticket = 0;
     }
+}
 
-    SampleAggregator agg;
-    agg.sink = &result;
-    agg.from = from;
-    agg.bucket_width = bucket_width;
-    foreach (ref const Sample s; local[])
+private void collect_memory(Element* element, ulong from, ulong to, ref Array!Sample result)
+{
+    if (!element)
+        return;
+    ulong index = element.index_for_time(from_unix_time_ns(from));
+    for (; index != ulong.max;)
     {
-        if (s.time < from)
-            continue;
-        if (s.time > to)
+        RecordBlock block = element.read_records(index, 256);
+        if (!block.count)
             break;
-        agg.put(s);
+        bool past;
+        foreach (i; 0 .. block.count)
+        {
+            ulong time = unixTimeNs(block.time(i));
+            if (time > to)
+            {
+                past = true;
+                break;
+            }
+            double value;
+            Variant boxed = block.box(i);
+            if (sample_to_double(boxed, value))
+                result ~= Sample(time, value);
+        }
+        if (past)
+            break;
+        index += block.count;
     }
-    agg.finish();
-    return true;
 }
 
 
@@ -438,8 +212,8 @@ protected:
 
     override CompletionStatus startup()
     {
-        import urt.file : create_directory;
-        create_directory(_dir[]); // best effort; each stream retries its open on flush
+        if (!g_record_io.create_directory(_dir[]))
+            return CompletionStatus.continue_;
         scan();
         _last_scan = getTime();
         return CompletionStatus.complete;
@@ -503,7 +277,14 @@ private:
         rs.owner = this;
         rs.cursor = e.open_cursor(0, true);
         rs.path = path.makeString(defaultAllocator());
-        rs.container.open_(make_filename(path, ".owsig")[]);
+        String filename = make_filename(path, ".owsig");
+        rs.file = g_record_io.open(filename[]);
+        if (rs.file == invalid_record_file)
+        {
+            rs.cursor.close();
+            defaultAllocator().freeT(rs);
+            return;
+        }
         _streams.insert(rs.path[], rs);
         // the element self-captures; the first flush ships its standing history
     }
@@ -531,10 +312,13 @@ struct SeriesFetch
 nothrow @nogc:
 
     Array!String labels;
+    Array!uint tickets;
     Array!(Array!Sample) data;  // per-series samples
     ulong t0, t1;
     uint max_points;
     QueryMode mode;
+    MonoTime started;
+    uint outstanding;
     bool active;
 
     void begin(RecordModule mod, scope const(char)[][] paths, ulong t0, ulong t1,
@@ -550,22 +334,66 @@ nothrow @nogc:
         mod.find_streams(paths, streams);
         uint n = cast(uint)streams.length;
         labels.resize(n);
+        tickets.resize(n);
         data.resize(n);
         foreach (i; 0 .. n)
         {
             RecordStream* rs = streams[i];
             labels[][i] = rs.path[].makeString(defaultAllocator());
+            tickets[][i] = 0;
             data[][i].clear();
-            query_local(*rs, t0, t1, max_points, mode, data[][i]);
+            uint ticket = rs.query(t0, t1, max_points, mode, &query_complete);
+            if (ticket)
+            {
+                tickets[][i] = ticket;
+                ++outstanding;
+            }
         }
+        started = getTime();
         active = n > 0;
+    }
+
+    bool done()
+    {
+        if (!active || !outstanding)
+            return true;
+        if (getTime() - started <= 5.seconds)
+            return false;
+        cancel();
+        return true;
     }
 
     void reset()
     {
+        cancel();
         active = false;
         labels.clear();
+        tickets.clear();
         data.clear();
+    }
+
+private:
+    void query_complete(uint ticket, scope const(Sample)[] samples, bool)
+    {
+        foreach (i; 0 .. tickets.length)
+        {
+            if (tickets[i] != ticket)
+                continue;
+            data[][i] = samples;
+            tickets[][i] = 0;
+            if (outstanding)
+                --outstanding;
+            break;
+        }
+    }
+
+    void cancel()
+    {
+        if (g_record_io)
+            foreach (ticket; tickets[])
+                if (ticket)
+                    g_record_io.cancel_query(ticket);
+        outstanding = 0;
     }
 }
 
@@ -623,7 +451,7 @@ void render_fetch(ref Array!(MutableString!0) lines, ref SeriesFetch f, uint col
 }
 
 
-// Base for record commands that render their fetched data on update.
+// Base for record commands that render after the storage worker answers.
 abstract class RecordFetchCommand : CommandState
 {
 nothrow @nogc:
@@ -642,6 +470,8 @@ nothrow @nogc:
             fetch.reset();
             return CommandCompletionState.cancelled;
         }
+        if (!fetch.done())
+            return CommandCompletionState.in_progress;
         render();
         return CommandCompletionState.finished;
     }
@@ -719,13 +549,26 @@ nothrow @nogc:
 
     override void init()
     {
+        g_record_io = defaultAllocator().allocT!RecordIO();
+        if (!g_record_io.startup())
+            log.error("record storage worker is unavailable");
         g_app.console.register_collection!Recorder();
         g_app.console.register_command!query_cmd("/record", this, "query");
         g_app.console.register_command!graph_cmd("/record", this, "graph");
     }
 
+    override void deinit()
+    {
+        if (!g_record_io)
+            return;
+        g_record_io.shutdown();
+        defaultAllocator().freeT(g_record_io);
+        g_record_io = null;
+    }
+
     override void update()
     {
+        g_record_io.update();
         Collection!Recorder().update_all();
     }
 
@@ -737,6 +580,12 @@ nothrow @nogc:
                 return rs;
         }
         return null;
+    }
+
+    void cancel_query(uint ticket)
+    {
+        if (g_record_io)
+            g_record_io.cancel_query(ticket);
     }
 
     import urt.meta.nullable;
@@ -866,7 +715,7 @@ protected:
     {
         if (!_fetch.active && (!_last_build || getTime() - _last_build >= 250.msecs))
             start_fetch();
-        if (_fetch.active)
+        if (_fetch.active && _fetch.done())
         {
             build_lines();
             request_redraw();
@@ -957,59 +806,4 @@ private:
         GraphOptions po = _opt;
         render_fetch(_lines, _fetch, _cols, _rows, po);
     }
-}
-
-
-unittest
-{
-    import urt.time : from_unix_time_ns;
-
-    Array!Sample result;
-    SampleAggregator agg;
-    agg.sink = &result;
-    agg.from = 0;
-    agg.bucket_width = 10;
-    agg.put(Sample(1, 1));
-    agg.put(Sample(5, 3));
-    agg.put(Sample(12, 10));
-    agg.finish();
-    assert(result.length == 2);
-    assert(result[0].time == 5 && result[0].value == 2);
-    assert(result[1].time == 12 && result[1].value == 10);
-
-    result.clear();
-    GraphIntervalSampler graph_agg;
-    graph_agg.sink = &result;
-    graph_agg.from = 0;
-    graph_agg.to = 100;
-    graph_agg.bucket_width = 25;
-    Sample seed = Sample(0, 10);
-    graph_agg.seed(seed);
-    graph_agg.put(Sample(40, 20));
-    graph_agg.put(Sample(90, 30));
-    graph_agg.finish();
-    assert(result.length == 4);
-    assert(result[0].time == 0);
-    assert(result[1].time == 25);
-    assert(result[2].time == 50);
-    assert(result[3].time == 75);
-
-    static immutable DataFormat qfmt = DataFormat(ValueType.f64, SeriesKind.held);
-    Element en;
-    en.format = register_format(qfmt);
-    en.ensure_history();
-    foreach (i; 0 .. 6)
-        en.write_sample(i * 10.0, from_unix_time_ns((i + 1) * 1_000_000UL));
-
-    SeriesContainer container;
-    result.clear();
-    assert(query_records(&en, container, 4_000_000, 5_000_000, 0, QueryMode.raw, result));
-    assert(result.length == 2 && result[0].time == 4_000_000 && result[0].value == 30);
-    result.clear();
-    assert(query_records(&en, container, 0, 6_000_000, 0, QueryMode.raw, result));
-    assert(result.length == 6);
-    result.clear();
-    assert(query_records(&en, container, 4_000_000, 6_000_000, 0, QueryMode.graph, result));
-    assert(result[0].time == 4_000_000 && result[0].value == 20);
-    en.teardown();
 }
