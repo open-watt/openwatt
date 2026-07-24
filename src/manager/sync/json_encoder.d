@@ -55,6 +55,18 @@ nothrow @nogc:
         send_frame(peer);
     }
 
+    override void encode_rename(SyncPeer peer, BaseObject obj)
+    {
+        uint handle = peer.handle_of(obj);
+        if (handle == SyncPeer.invalid_handle)
+            return;
+        begin_frame("rename");
+        _buf.append(",\"target\":", handle);
+        _buf.append(",\"name\":");
+        write_str(obj.name[]);
+        send_frame(peer);
+    }
+
     // Outbound: mirror lifecycle
 
     override void encode_bind(SyncPeer peer, BaseObject obj, uint seq)
@@ -345,6 +357,12 @@ nothrow @nogc:
                     cast(uint)json.getMember("h").asLong(),
                     json.getMember("name").asString(),
                     json.getMember("type").asString());
+                break;
+
+            case "rename":
+                sync.inbound_rename(peer,
+                    cast(uint)json.getMember("target").asLong(),
+                    json.getMember("name").asString());
                 break;
 
             case "bind":
