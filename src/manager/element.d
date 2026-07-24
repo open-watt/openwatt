@@ -130,7 +130,11 @@ nothrow @nogc:
         scope(exit) _committing = false;
 
         foreach (ref update; _updates)
+            update.element.prepare_before(update);
+        foreach (ref update; _updates)
             update.element.apply(update);
+        foreach (ref update; _updates)
+            update.element.prepare_after(update);
 
         SampleCommit samples = SampleCommit(_updates[]);
         dispatch(samples);
@@ -237,7 +241,6 @@ struct Element
 {
 nothrow @nogc:
 
-    package Variant latest;
     package Variant prev;
 
     String id;
@@ -277,8 +280,8 @@ nothrow @nogc:
         return value.asQuantity().adjust_scale(unit).value;
     }
 
-    ref inout(Variant) value() @property inout pure
-        => latest;
+    Variant value() @property const
+        => record_value();
 
     void value(T)(auto ref T v, SysTime timestamp = getSysTime(), Subscriber who = null)
     {
@@ -434,13 +437,14 @@ nothrow @nogc:
         return false;
     }
 
-    private void prepare(ref SampleUpdate update)
+    private void prepare_before(ref SampleUpdate update)
     {
-        if (update.value_ready)
-            return;
+        update.previous = record_value();
+        update.previous_timestamp = last_update;
+    }
 
-        Variant previous = latest;
-        SysTime previous_timestamp = last_update;
+    private void prepare_after(ref SampleUpdate update)
+    {
         Variant v = record_value();
         SysTime t = record_update;
         bool is_newer = t > last_update;
@@ -449,22 +453,19 @@ nothrow @nogc:
             prev_update = last_update;
             last_update = t;
         }
-        if (latest != v)
+        if (update.previous != v)
         {
             if (is_newer)
-                prev = latest.move;
-            latest = v.move;
+                prev = update.previous;
             if (is_newer)
-                capture_sample(t);
+                capture_sample(t, v);
         }
-        update.value = latest;
-        update.previous = previous.move;
+        update.value = v.move;
         update.timestamp = t;
-        update.previous_timestamp = previous_timestamp;
         update.value_ready = true;
     }
 
-    private void capture_sample(SysTime timestamp)
+    private void capture_sample(SysTime timestamp, ref const Variant value)
     {
         if (recent.length == 0)
             recent.resize(recent_capacity);
@@ -481,24 +482,24 @@ nothrow @nogc:
             ++recent_count;
         }
         recent[][idx].time = cast(MonoTime)timestamp;
-        recent[][idx].value = latest;
+        recent[][idx].value = value;
     }
 
     void force_update(SysTime timestamp)
     {
         if (timestamp <= last_update)
             return;
-        Variant previous = latest;
+        Variant current = record_value();
         SysTime previous_timestamp = last_update;
         prev_update = last_update;
         last_update = timestamp;
-        prev = latest;
-        capture_sample(timestamp);
+        prev = current;
+        capture_sample(timestamp, current);
 
         SampleUpdate[1] updates;
         updates[0].element = &this;
-        updates[0].value = latest;
-        updates[0].previous = previous.move;
+        updates[0].value = current;
+        updates[0].previous = current.move;
         updates[0].timestamp = timestamp;
         updates[0].previous_timestamp = previous_timestamp;
         updates[0].value_ready = true;
@@ -537,7 +538,7 @@ public:
 
     Variant record_value() const
     {
-        if (format.valid)
+        if (format.valid && _last_update != SysTime())
         {
             if (data_format.is_scalar || data_format.is_text)
                 return box_record(_latest.raw.ptr, *data_format);
@@ -549,6 +550,13 @@ public:
             }
         }
         return Variant();
+    }
+
+    const(char)[] text_value() const pure
+    {
+        if (!format.valid || !data_format.is_text || _last_update == SysTime())
+            return null;
+        return (cast(const(TextRecord)*)_latest.raw.ptr).view;
     }
 
     // wide records don't fit the Scalar register: latest IS the tail record of the open bucket
@@ -618,7 +626,9 @@ public:
         }
         SysTime[1] time = t;
         SampleUpdate update = SampleUpdate(&this, record, time[], null, who);
+        prepare_before(update);
         apply(update);
+        prepare_after(update);
         SampleUpdate[1] updates;
         updates[0] = update;
         SampleCommit samples = SampleCommit(updates[]);
@@ -662,7 +672,9 @@ public:
             return;
         debug assert(records.length == times.length * data_format.stride);
         SampleUpdate update = SampleUpdate(&this, records, times, null, who);
+        prepare_before(update);
         apply(update);
+        prepare_after(update);
         SampleUpdate[1] updates;
         updates[0] = update;
         SampleCommit samples = SampleCommit(updates[]);
@@ -678,7 +690,9 @@ public:
             return;
         debug assert(records.length == ticks.length * data_format.stride);
         SampleUpdate update = SampleUpdate(&this, records, null, ticks, who);
+        prepare_before(update);
         apply(update);
+        prepare_after(update);
         SampleUpdate[1] updates;
         updates[0] = update;
         SampleCommit samples = SampleCommit(updates[]);
@@ -846,7 +860,6 @@ public:
             _subs = dead.next;
             free((cast(void*)dead)[0 .. Subscription.sizeof]);
         }
-        latest = Variant();
         prev = Variant();
         recent.clear();
         recent_head = 0;
@@ -918,9 +931,11 @@ private:
             }
             return;
         }
+        Variant previous = record_value();
+        SysTime previous_timestamp = last_update;
         slot.set(v.move);
         _last_update = t;
-        append_text_record(t, who);
+        append_text_record(t, who, previous.move, previous_timestamp);
     }
 
     void write_text_sample(const(char)[] v, SysTime t, Subscriber who)
@@ -937,26 +952,43 @@ private:
             }
             return;
         }
+        Variant previous = record_value();
+        SysTime previous_timestamp = last_update;
         slot.set(v);
         _last_update = t;
-        append_text_record(t, who);
+        append_text_record(t, who, previous.move, previous_timestamp);
     }
 
-    void append_text_record(SysTime t, Subscriber who)
+    void append_text_record(SysTime t, Subscriber who, Variant previous,
+                            SysTime previous_timestamp)
     {
         SysTime[1] time = t;
+        const(void)[] record;
+        TextRecord rec;
         if (_history)
         {
             // the ref settled here is owned by the bucket once append memcpys the bits
-            TextRecord rec;
             rec.copy_from(*cast(const(TextRecord)*)_latest.raw.ptr);
-            append(rec.raw[0 .. data_format.stride], time[], who, true);
+            record = rec.raw[0 .. data_format.stride];
+            append(record, time[], who);
         }
         else
-            append(_latest.raw[0 .. data_format.stride], time[], who, true);
+        {
+            record = _latest.raw[0 .. data_format.stride];
+            append(record, time[], who);
+        }
+
+        SampleUpdate update = SampleUpdate(&this, record, time[], null, who);
+        update.previous = previous.move;
+        update.previous_timestamp = previous_timestamp;
+        prepare_after(update);
+        SampleUpdate[1] updates;
+        updates[0] = update;
+        SampleCommit commit = SampleCommit(updates[]);
+        dispatch(commit);
     }
 
-    ulong append(const(void)[] samples, const(SysTime)[] times, Subscriber who, bool notify = false)
+    ulong append(const(void)[] samples, const(SysTime)[] times, Subscriber who)
     {
         import urt.mem : alloca;
 
@@ -996,22 +1028,13 @@ private:
             evict_over_budget();
         }
 
-        if (notify)
-        {
-            SampleUpdate update = SampleUpdate(&this, samples, times, null, who, first_index);
-            SampleUpdate[1] updates;
-            updates[0] = update;
-            SampleCommit commit = SampleCommit(updates[]);
-            dispatch(commit);
-        }
         mark_dirty();
         return first_index;
 
         // TODO: reactor-thread producers must defer observer dispatch and dirty marking to the main loop
     }
 
-    ulong append(const(void)[] samples, const(ulong)[] times, ulong t0, Subscriber who,
-                 bool notify = false)
+    ulong append(const(void)[] samples, const(ulong)[] times, ulong t0, Subscriber who)
     {
         import urt.mem : alloca;
 
@@ -1052,14 +1075,6 @@ private:
             evict_over_budget();
         }
 
-        if (notify)
-        {
-            SampleUpdate update = SampleUpdate(&this, samples, null, times, who, first_index);
-            SampleUpdate[1] updates;
-            updates[0] = update;
-            SampleCommit commit = SampleCommit(updates[]);
-            dispatch(commit);
-        }
         mark_dirty();
         return first_index;
 
@@ -1197,9 +1212,6 @@ void dispatch(ref SampleCommit samples)
             update.value_ready = false;
         }
     }
-
-    foreach (ref update; samples.updates)
-        update.element.prepare(update);
 
     Array!Subscriber callbacks;
     foreach (ref update; samples.updates)

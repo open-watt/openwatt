@@ -570,7 +570,7 @@ private:
 
         json.append('\"', prefix, '.', elem.id[], "\":{\"value\":");
 
-        ref const Variant v = elem.value();
+        Variant v = elem.value();
         if (v.isQuantity)
         {
             auto quantity = v.asQuantity!double();

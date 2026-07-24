@@ -59,8 +59,7 @@ nothrow @nogc:
             return _kind[];
         if (_device)
             if (auto e = _device.find_element("info.type"))
-                if (e.value.isString)
-                    return e.value.asString;
+                return e.text_value;
         return null;
     }
     void kind(const(char)[] value)

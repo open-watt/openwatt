@@ -619,7 +619,7 @@ private:
     bool emit_element(ref SampleElement e, void[] wire)
     {
         const(DataFormat)* fmt = e.desc.fmt;
-        ref const Variant value = e.element.value();
+        Variant value = e.element.value();
         if (fmt.is_text)
             return value.isString && emit_text(value.asString, e.desc, wire);
         if (fmt.is_scalar)

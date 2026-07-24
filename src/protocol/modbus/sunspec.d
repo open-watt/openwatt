@@ -1186,10 +1186,11 @@ private:
     void set_const_element(Component c, string template_, string id, Variant value)
     {
         Element* e = ensure_element(c, id);
+        if (!e.format.valid)
+            e.format = register_value_format(value);
         if (e.value.isNull)
         {
             e.value = value;
-            e.last_update = getSysTime();
             e.sampling_mode = SamplingMode.constant;
         }
         populate_element_metadata(e, template_, id);
@@ -1466,10 +1467,11 @@ private:
     void set_type_element(Component c, string template_, string type_value)
     {
         Element* te = ensure_element(c, "type");
+        if (!te.format.valid)
+            te.format = register_value_format(type_value);
         if (te.value.isNull)
         {
             te.value = Variant(type_value);
-            te.last_update = getSysTime();
             te.sampling_mode = SamplingMode.constant;
         }
         populate_element_metadata(te, template_, "type");

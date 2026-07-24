@@ -82,9 +82,15 @@ nothrow @nogc:
         a.elem.subscribe(&element_updated);
         b.elem.subscribe(&element_updated);
         if (a.elem.last_update > b.elem.last_update)
-            b.elem.value(a.elem.latest, a.elem.last_update);
+        {
+            Variant value = a.elem.value;
+            b.elem.value(value, a.elem.last_update);
+        }
         else if (b.elem.last_update > a.elem.last_update)
-            a.elem.value(b.elem.latest, b.elem.last_update);
+        {
+            Variant value = b.elem.value;
+            a.elem.value(value, b.elem.last_update);
+        }
     }
 
     void unlink()
