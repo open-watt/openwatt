@@ -1300,25 +1300,6 @@ bool excluded(Subscriber callback, ref const SampleCommit samples)
     return false;
 }
 
-// compile-time twin of ValueType for the typed write_sample() entry
-template value_type_of(T)
-{
-    static if (is(immutable T == immutable bool))        enum value_type_of = ValueType.bool_;
-    else static if (is(immutable T == immutable ubyte))  enum value_type_of = ValueType.u8;
-    else static if (is(immutable T == immutable byte))   enum value_type_of = ValueType.s8;
-    else static if (is(immutable T == immutable ushort)) enum value_type_of = ValueType.u16;
-    else static if (is(immutable T == immutable short))  enum value_type_of = ValueType.s16;
-    else static if (is(immutable T == immutable uint))   enum value_type_of = ValueType.u32;
-    else static if (is(immutable T == immutable int))    enum value_type_of = ValueType.s32;
-    else static if (is(immutable T == immutable ulong))  enum value_type_of = ValueType.u64;
-    else static if (is(immutable T == immutable long))   enum value_type_of = ValueType.s64;
-    else static if (is(immutable T == immutable float))  enum value_type_of = ValueType.f32;
-    else static if (is(immutable T == immutable double)) enum value_type_of = ValueType.f64;
-    else static if (is(immutable T == immutable char))   enum value_type_of = ValueType.char_;
-}
-
-
-
 public:
 
 // the durable cursor: holds an EID, never a pointer - resolves per call and goes quiet

@@ -936,13 +936,10 @@ private:
 
                     assert(desc.kind == zb_section_kind);
                     ref const ElementDesc_Zigbee zb = _zigbee_profile.get_section!ElementDesc_Zigbee(zb_section_kind, desc.element);
-                    if (zb.desc != ushort.max)
-                    {
-                        SampleDesc sample_desc = desc_by_index(zb.desc);
-                        const(DataFormat)* fmt = sample_desc.fmt;
-                        if (!e.format.valid && (fmt.is_scalar || fmt.is_text))
-                            e.format = sample_desc.format;
-                    }
+                    if (zb.desc == ushort.max)
+                        return FormatId.invalid;
+                    SampleDesc sample_desc = desc_by_index(zb.desc);
+                    e.format = sample_desc.format;
                     add_sample_element(e, node.eui, desc, zb, endpoint);
 
                     if (zb.cluster_id == 0x0000) // basic cluster
@@ -983,6 +980,7 @@ private:
                                 break;
                         }
                     }
+                    return sample_desc.format;
                 });
 
                 if (!device)
@@ -993,16 +991,11 @@ private:
                 node.device = device;
 
                 // set a bunch of status data
-                Element* e = device.find_or_create_element("status.network.mode");
-                e.value = StringLit!"zigbee";
-                e = device.find_or_create_element("status.network.zigbee.eui");
-                e.value = node.eui;
-                e = device.find_or_create_element("status.network.zigbee.address");
-                e.value = node.id;
-                e = device.find_or_create_element("status.network.zigbee.rssi");
-                e.value = node.rssi;
-                e = device.find_or_create_element("status.network.zigbee.lqi");
-                e.value = node.lqi;
+                device.set_element("status.network.mode", StringLit!"zigbee");
+                device.set_element("status.network.zigbee.eui", node.eui);
+                device.set_element("status.network.zigbee.address", node.id);
+                device.set_element("status.network.zigbee.rssi", node.rssi);
+                device.set_element("status.network.zigbee.lqi", node.lqi);
 
                 // set component templates for components we ma have created
                 Component c = device.find_component("status");

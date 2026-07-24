@@ -81,7 +81,7 @@ protected:
 
     abstract const(char)[] profile_name() const pure;
     abstract const(char)[] model_name() const pure;
-    abstract void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte index);
+    abstract FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte index);
 
     override StringResult set_unknown_property(scope const(char)[] property, ref const Variant value)
     {

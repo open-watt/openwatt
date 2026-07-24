@@ -159,12 +159,12 @@ protected:
         }
 
         Component info = find_or_create_component(device, "info", "DeviceInfo");
-        set_constant(find_or_create_element(info, "type"), "evse");
-        set_constant(find_or_create_element(info, "name"), "Tesla Wall Charger Gen2");
+        set_constant(info, "type", "evse");
+        set_constant(info, "name", "Tesla Wall Charger Gen2");
         add_sample(info, "serial_number", SampleKind.serial_number, text_format());
 
         Component status = find_or_create_component(device, "status", "DeviceStatus");
-        set_constant(find_or_create_element(status, "address"), slave_id); // id? slave-id? what's a good element name?
+        set_constant(status, "address", slave_id); // id? slave-id? what's a good element name?
         add_sample(status, "lifetime_energy", SampleKind.lifetime_energy, quantity_format(ValueType.u64, WattHour));
         add_sample(status, "vin", SampleKind.vin, text_format());
 
@@ -173,26 +173,26 @@ protected:
         add_sample(evse, "twc_state", SampleKind.twc_state, enum_format!TWCState());
 
         Component grid = find_or_create_component(device, "grid", "Port");
-        set_constant(find_or_create_element(grid, "role"), "grid");
-        set_constant(find_or_create_element(grid, "flow"), "consume");
+        set_constant(grid, "role", "grid");
+        set_constant(grid, "flow", "consume");
 
         Component car = find_or_create_component(device, "car", "Port");
-        set_constant(find_or_create_element(car, "role"), "car");
-        set_constant(find_or_create_element(car, "flow"), "supply");
+        set_constant(car, "role", "car");
+        set_constant(car, "flow", "supply");
         add_sample(car, "circuit", SampleKind.circuit, text_format());
 
         Component control = find_or_create_component(grid, "control", "PowerControl");
-        set_constant(find_or_create_element(control, "kind"), "continuous");
-        set_constant(find_or_create_element(control, "direction"), "consume");
-        set_constant(find_or_create_element(control, "unit"), "A");
-        set_constant(find_or_create_element(control, "step"), 1);
-        set_constant(find_or_create_element(control, "min"), CentiAmps(500));
-        set_constant(find_or_create_element(control, "can_disable"), false);
+        set_constant(control, "kind", "continuous");
+        set_constant(control, "direction", "consume");
+        set_constant(control, "unit", "A");
+        set_constant(control, "step", 1);
+        set_constant(control, "min", CentiAmps(500));
+        set_constant(control, "can_disable", false);
         _target_current = add_sample(control, "setpoint", SampleKind.setpoint, centiamps_format(), Access.read_write);
         add_sample(control, "max", SampleKind.max, centiamps_format());
 
         Component meter = find_or_create_component(grid, "meter", "EnergyMeter");
-        set_constant(find_or_create_element(meter, "type"), "three-phase");
+        set_constant(meter, "type", "three-phase");
         add_sample(meter, "voltage1", SampleKind.voltage1, quantity_format(ValueType.u16, ScaledUnit(Volt)));
         add_sample(meter, "voltage2", SampleKind.voltage2, quantity_format(ValueType.u16, ScaledUnit(Volt)));
         add_sample(meter, "voltage3", SampleKind.voltage3, quantity_format(ValueType.u16, ScaledUnit(Volt)));
@@ -260,14 +260,22 @@ private:
         return c;
     }
 
-    Element* find_or_create_element(Component parent, const(char)[] id, Access access = Access.read)
+    Element* find_or_create_element(Component parent, const(char)[] id, FormatId format,
+                                    Access access = Access.read)
     {
         foreach (e; parent.elements)
+        {
             if (e.id[] == id)
+            {
+                assert(e.format == format || value_compatible(*format_info(format), *e.data_format),
+                       "Tesla element format mismatch");
                 return e;
+            }
+        }
         Element* e = g_app.allocator.allocT!Element();
         e.parent = parent;
         e.id = id.addString();
+        e.format = format;
         e.access = access;
         parent.elements ~= e;
         g_app.notify_element_created(e);
@@ -276,9 +284,7 @@ private:
 
     Element* add_sample(Component parent, const(char)[] id, SampleKind kind, FormatId format, Access access = Access.read)
     {
-        Element* e = find_or_create_element(parent, id, access);
-        if (!e.format.valid)
-            e.format = format;
+        Element* e = find_or_create_element(parent, id, format, access);
         _elements ~= SampleElement(e, format, kind);
         return e;
     }
@@ -318,8 +324,9 @@ private:
         }
     }
 
-    void set_constant(T)(Element* e, T value)
+    void set_constant(T)(Component parent, const(char)[] id, T value)
     {
+        Element* e = find_or_create_element(parent, id, register_value_format(value));
         if (e.sampling_mode != SamplingMode.constant)
         {
             e.value(value);

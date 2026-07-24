@@ -653,42 +653,29 @@ void record_decision(Device energy_device, Policy p, const(char)[] reason, float
         return;
     const(char)[] base = tconcat("allocation.", p.name[]);
 
-    if (Element* e = energy_device.find_or_create_element(tconcat(base, ".reason")))
-        e.value(reason, now);
-    if (Element* e = energy_device.find_or_create_element(tconcat(base, ".target")))
-        e.value(p.target, now);
-    if (Element* e = energy_device.find_or_create_element(tconcat(base, ".via")))
-        e.value((ctl !is null && ctl.partner !is null ? ctl.partner.name[] : "").makeString(defaultAllocator()), now);
-    if (Element* e = energy_device.find_or_create_element(tconcat(base, ".device")))
-        e.value((ctl !is null && ctl.device !is null ? ctl.device.id[] : "").makeString(defaultAllocator()), now);
+    energy_device.set_element(tconcat(base, ".reason"), reason, now);
+    energy_device.set_element(tconcat(base, ".target"), p.target, now);
+    energy_device.set_element(tconcat(base, ".via"),
+        (ctl !is null && ctl.partner !is null ? ctl.partner.name[] : "").makeString(defaultAllocator()), now);
+    energy_device.set_element(tconcat(base, ".device"),
+        (ctl !is null && ctl.device !is null ? ctl.device.id[] : "").makeString(defaultAllocator()), now);
     if (commanded == commanded)
-    {
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".commanded")))
-            e.value(commanded, now);
-    }
+        energy_device.set_element(tconcat(base, ".commanded"), commanded, now);
     if (ctx !is null && ctx.path.target_bus !is null)
     {
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".target_bus")))
-            e.value(ctx.path.target_bus.id[].makeString(defaultAllocator()), now);
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".source_bus")))
-            e.value((ctx.path.source_bus ? ctx.path.source_bus.id[] : "").makeString(defaultAllocator()), now);
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".path_complete")))
-            e.value(ctx.path.complete, now);
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".path_headroom_amps")))
-            e.value(ctx.path.headroom_amps, now);
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".path_headroom_watts")))
-            e.value(ctx.path.headroom_watts, now);
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".available_headroom_amps")))
-            e.value(ctx.available_headroom_amps, now);
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".available_headroom_watts")))
-            e.value(ctx.available_headroom_watts, now);
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".committed_amps")))
-            e.value(ctx.committed_amps, now);
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".committed_watts")))
-            e.value(ctx.committed_watts, now);
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".path_voltage")))
-            e.value(ctx.path.voltage, now);
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".limiting_link")))
-            e.value((ctx.path.limiting_link ? ctx.path.limiting_link.id[] : "").makeString(defaultAllocator()), now);
+        energy_device.set_element(tconcat(base, ".target_bus"),
+            ctx.path.target_bus.id[].makeString(defaultAllocator()), now);
+        energy_device.set_element(tconcat(base, ".source_bus"),
+            (ctx.path.source_bus ? ctx.path.source_bus.id[] : "").makeString(defaultAllocator()), now);
+        energy_device.set_element(tconcat(base, ".path_complete"), ctx.path.complete, now);
+        energy_device.set_element(tconcat(base, ".path_headroom_amps"), ctx.path.headroom_amps, now);
+        energy_device.set_element(tconcat(base, ".path_headroom_watts"), ctx.path.headroom_watts, now);
+        energy_device.set_element(tconcat(base, ".available_headroom_amps"), ctx.available_headroom_amps, now);
+        energy_device.set_element(tconcat(base, ".available_headroom_watts"), ctx.available_headroom_watts, now);
+        energy_device.set_element(tconcat(base, ".committed_amps"), ctx.committed_amps, now);
+        energy_device.set_element(tconcat(base, ".committed_watts"), ctx.committed_watts, now);
+        energy_device.set_element(tconcat(base, ".path_voltage"), ctx.path.voltage, now);
+        energy_device.set_element(tconcat(base, ".limiting_link"),
+            (ctx.path.limiting_link ? ctx.path.limiting_link.id[] : "").makeString(defaultAllocator()), now);
     }
 }

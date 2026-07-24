@@ -348,8 +348,11 @@ private:
             }
         }
 
+        FormatId state_format = select_info
+            ? register_format(DataFormat(ValueType.u16, SeriesKind.held, select_info))
+            : make_state_format(config, domain, unit, state_class);
         const(char)[] path = tconcat("ha.", entity_id);
-        Element* state = record.device.find_or_create_element(path);
+        Element* state = record.device.find_or_create_element(path, state_format);
         Component ha_component = record.device.find_component("ha");
         if (ha_component && ha_component.name.empty)
             ha_component.name = "Home Assistant".makeString(defaultAllocator());
@@ -360,15 +363,12 @@ private:
         state.sampling_mode = SamplingMode.report;
         if (select_info)
         {
-            state.format = register_format(DataFormat(ValueType.u16, SeriesKind.held, select_info));
             if (state.value.is_enum)
             {
                 const(char)[] prior = select_info.key_for_raw(state.value.asLong);
                 state.value(prior.ptr ? select_info.value_for(prior) : Variant());
             }
         }
-        else
-            apply_numeric_format(*state, config, domain, unit, state_class);
 
         HAEntity* entity = &_entities.pushBack();
         entity.config_topic = config_topic.makeString(defaultAllocator());
@@ -519,11 +519,10 @@ private:
     {
         if (value.empty)
             return;
-        Element* element = device.find_or_create_element(tconcat("info.", id));
+        Element* element = device.set_element(tconcat("info.", id), value);
         element.name = name.makeString(defaultAllocator());
         element.sampling_mode = SamplingMode.constant;
         element.access = Access.read;
-        element.value(value);
     }
 
     static const(char)[] device_identity(Variant* config)
@@ -785,12 +784,18 @@ private:
         return expression.evaluate(context);
     }
 
-    static void apply_numeric_format(ref Element state, ref Variant config,
-                                     const(char)[] domain, const(char)[] unit_text,
-                                     const(char)[] state_class)
+    static FormatId make_state_format(ref Variant config, const(char)[] domain,
+                                      const(char)[] unit_text, const(char)[] state_class)
     {
+        if (domain == "binary_sensor" || domain == "switch")
+            return register_format(DataFormat(ValueType.bool_, SeriesKind.held));
+
         if (domain != "number" && unit_text.empty && state_class.empty)
-            return;
+        {
+            DataFormat text = DataFormat(ValueType.char_, SeriesKind.held);
+            text.count = 0;
+            return register_format(text);
+        }
 
         ScaledUnit unit;
         float pre_scale = 1;
@@ -820,7 +825,7 @@ private:
         }
         if (constraint.has)
             format.constraint = register_constraint(constraint);
-        state.format = register_format(format);
+        return register_format(format);
     }
 
     static const(VoidEnumInfo)* synth_select_enum(ref Variant config,
@@ -876,7 +881,7 @@ private:
         Element* target = device.find_element(target_path);
         bool created = target is null;
         if (created)
-            target = device.find_or_create_element(target_path);
+            target = device.find_or_create_element(target_path, source.format);
         else
         {
             bool ours;
@@ -905,7 +910,6 @@ private:
         target.name = source.name;
         target.desc = source.desc;
         target.display_unit = source.display_unit;
-        target.format = source.format;
         target.access = source.access;
         target.sampling_mode = SamplingMode.dependent;
         if (!created)

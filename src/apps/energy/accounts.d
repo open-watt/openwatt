@@ -159,20 +159,20 @@ nothrow @nogc:
     void bind(Device energy_device, const(char)[] island_id)
     {
         id = island_id.makeString(defaultAllocator());
-        mode.bind(account_element(energy_device, island_id, "mode"));
-        members.bind(account_element(energy_device, island_id, "members"));
-        solar_power.bind(account_element(energy_device, island_id, "account.solar.power"));
-        battery_power.bind(account_element(energy_device, island_id, "account.battery.power"));
-        grid_power.bind(account_element(energy_device, island_id, "account.grid.power"));
-        rogue_generation_power.bind(account_element(energy_device, island_id, "account.rogue.generation.power"));
-        rogue_load_power.bind(account_element(energy_device, island_id, "account.rogue.load.power"));
-        generation_power.bind(account_element(energy_device, island_id, "account.generation.power"));
-        load_power.bind(account_element(energy_device, island_id, "account.load.total.power"));
-        solar_today_energy.bind(account_element(energy_device, island_id, "account.solar.today.energy"));
-        battery_today_charge.bind(account_element(energy_device, island_id, "account.battery.today.charge"));
-        battery_today_discharge.bind(account_element(energy_device, island_id, "account.battery.today.discharge"));
-        grid_today_import.bind(account_element(energy_device, island_id, "account.grid.today.import"));
-        grid_today_export.bind(account_element(energy_device, island_id, "account.grid.today.export"));
+        mode.bind(account_element!String(energy_device, island_id, "mode"));
+        members.bind(account_element!String(energy_device, island_id, "members"));
+        solar_power.bind(account_element!float(energy_device, island_id, "account.solar.power"));
+        battery_power.bind(account_element!float(energy_device, island_id, "account.battery.power"));
+        grid_power.bind(account_element!float(energy_device, island_id, "account.grid.power"));
+        rogue_generation_power.bind(account_element!float(energy_device, island_id, "account.rogue.generation.power"));
+        rogue_load_power.bind(account_element!float(energy_device, island_id, "account.rogue.load.power"));
+        generation_power.bind(account_element!float(energy_device, island_id, "account.generation.power"));
+        load_power.bind(account_element!float(energy_device, island_id, "account.load.total.power"));
+        solar_today_energy.bind(account_element!float(energy_device, island_id, "account.solar.today.energy"));
+        battery_today_charge.bind(account_element!float(energy_device, island_id, "account.battery.today.charge"));
+        battery_today_discharge.bind(account_element!float(energy_device, island_id, "account.battery.today.discharge"));
+        grid_today_import.bind(account_element!float(energy_device, island_id, "account.grid.today.import"));
+        grid_today_export.bind(account_element!float(energy_device, island_id, "account.grid.today.export"));
         bound = true;
     }
 }
@@ -227,9 +227,10 @@ nothrow @nogc:
     }
 }
 
-Element* account_element(Device energy_device, const(char)[] island_id, const(char)[] path)
+Element* account_element(T)(Device energy_device, const(char)[] island_id, const(char)[] path)
 {
-    return energy_device.find_or_create_element(tconcat("islands.", island_id, ".", path));
+    return energy_device.find_or_create_element(
+        tconcat("islands.", island_id, ".", path), register_value_format!T());
 }
 
 bool same_float(float a, float b) pure

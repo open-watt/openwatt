@@ -155,7 +155,7 @@ private:
         Component v = vehicle_for(car.vin);
         if (v is null)
             return;
-        v.find_or_create_element("battery.session_delivered").value = delivered_kwh;
-        v.find_or_create_element("battery.soc_floor").value = soc_floor;
+        v.set_element("battery.session_delivered", delivered_kwh);
+        v.set_element("battery.soc_floor", soc_floor);
     }
 }

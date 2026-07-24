@@ -87,13 +87,9 @@ protected:
     final override const(char)[] profile_name() const pure => _profile_name[];
     final override const(char)[] model_name() const pure => _model_name[];
 
-    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
+    final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
-        // Bind the state elements (fan.speed, fan.direction, fan.timer, light.on). Writable ones
-        // subscribe so a write drives the radio (TX). All are updated by the RX decoder below.
-        if (e.access & manager.element.Access.write)
-            e.subscribe(&on_element_change);
-        // TODO: remember which element is which (speed/direction/timer/light) for the mapping.
+        return FormatId.invalid;
     }
 
     override CompletionStatus startup()

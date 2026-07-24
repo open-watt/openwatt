@@ -20,12 +20,13 @@ module manager.series;
 import urt.array;
 import urt.lifetime : move;
 import urt.mem.allocator : defaultAllocator;
-import urt.meta.enuminfo : VoidEnumInfo;
+import urt.meta.enuminfo : enum_info, VoidEnumInfo;
 import urt.si.quantity : Quantity;
-import urt.si.unit : ScaledUnit;
+import urt.si.unit : Nanosecond, ScaledUnit;
 import urt.string : makeString, String;
 import urt.time;
-import urt.typereg : TypeDetails;
+import urt.traits : is_boolean, is_some_float, is_some_int, Unqual;
+import urt.typereg : find_type_details, TypeDetails;
 import urt.variant;
 
 nothrow @nogc:
@@ -77,6 +78,71 @@ const(DataFormat)* format_info(FormatId id) pure
     auto formats = (cast(immutable(typeof(g_formats)*) function() pure nothrow @nogc)&format_registry)();
     assert(id.valid && cast(size_t)id < formats.length, "invalid format id");
     return (*formats)[cast(size_t)id];
+}
+
+template value_type_of(T)
+{
+    alias U = Unqual!T;
+    static if (is(U == bool))        enum value_type_of = ValueType.bool_;
+    else static if (is(U == ubyte))  enum value_type_of = ValueType.u8;
+    else static if (is(U == byte))   enum value_type_of = ValueType.s8;
+    else static if (is(U == ushort)) enum value_type_of = ValueType.u16;
+    else static if (is(U == short))  enum value_type_of = ValueType.s16;
+    else static if (is(U == uint))   enum value_type_of = ValueType.u32;
+    else static if (is(U == int))    enum value_type_of = ValueType.s32;
+    else static if (is(U == ulong))  enum value_type_of = ValueType.u64;
+    else static if (is(U == long))   enum value_type_of = ValueType.s64;
+    else static if (is(U == float))  enum value_type_of = ValueType.f32;
+    else static if (is(U == double)) enum value_type_of = ValueType.f64;
+    else static if (is(U == char))   enum value_type_of = ValueType.char_;
+}
+
+FormatId register_value_format(T)(auto ref T value)
+{
+    alias U = Unqual!T;
+    static if (is(U == Variant))
+        return register_variant_format(value);
+    else static if (is_boolean!U || is_some_int!U || is_some_float!U)
+        return register_format(DataFormat(value_type_of!U, SeriesKind.held));
+    else static if (is(U Base == enum))
+        return register_format(DataFormat(value_type_of!Base, SeriesKind.held, enum_info!U.make_void()));
+    else static if (is(U == String) || is(T : const(char)[]))
+    {
+        DataFormat format = DataFormat(ValueType.char_, SeriesKind.held);
+        format.count = 0;
+        return register_format(format);
+    }
+    else static if (is(U == Duration))
+        return register_format(DataFormat(ValueType.s64, SeriesKind.held, Nanosecond));
+    else static if (is(U == Quantity!(N, scale), N, ScaledUnit scale))
+        return register_format(DataFormat(value_type_of!N, SeriesKind.held, value.unit));
+    else static if (ValidUserType!U)
+    {
+        Variant register_type = Variant(value);
+        return register_format(DataFormat(ValueType.user, SeriesKind.held,
+                                          &find_type_details(TypeDetailsFor!U.type_id)));
+    }
+    else
+        static assert(false, "value needs an explicit record format");
+}
+
+FormatId register_value_format(T)()
+{
+    alias U = Unqual!T;
+    static if (is_boolean!U || is_some_int!U || is_some_float!U)
+        return register_format(DataFormat(value_type_of!U, SeriesKind.held));
+    else static if (is(U Base == enum))
+        return register_format(DataFormat(value_type_of!Base, SeriesKind.held, enum_info!U.make_void()));
+    else static if (is(U == String) || is(U : const(char)[]))
+    {
+        DataFormat format = DataFormat(ValueType.char_, SeriesKind.held);
+        format.count = 0;
+        return register_format(format);
+    }
+    else static if (is(U == Duration))
+        return register_format(DataFormat(ValueType.s64, SeriesKind.held, Nanosecond));
+    else
+        static assert(false, "value-dependent formats require a value");
 }
 
 // machine numerics fit the Scalar register when count is one
@@ -583,6 +649,48 @@ bool unbox_scalar(ref const Variant v, ref const DataFormat fmt, out Scalar s)
     if (!unbox_scalar_value(v, fmt, s))
         return false;
     return !fmt.constraint || !fmt.constraint.check(s, fmt);
+}
+
+private FormatId register_variant_format(ref const Variant value)
+{
+    DataFormat format;
+    if (value.isBool)
+        format = DataFormat(ValueType.bool_, SeriesKind.held);
+    else if (value.isString)
+    {
+        format = DataFormat(ValueType.char_, SeriesKind.held);
+        format.count = 0;
+    }
+    else if (value.isNumber)
+    {
+        ValueType type;
+        if (value.isFloat)
+            type = ValueType.f32;
+        else if (value.isDouble)
+            type = ValueType.f64;
+        else if (value.isUlong && !value.isLong)
+            type = ValueType.u64;
+        else
+            type = ValueType.s64;
+
+        if (value.is_enum)
+            format = DataFormat(type, SeriesKind.held, value.get_enum_info());
+        else if (value.isQuantity)
+            format = DataFormat(type, SeriesKind.held, value.asQuantity.unit);
+        else
+            format = DataFormat(type, SeriesKind.held);
+    }
+    else if (value.isBuffer)
+    {
+        assert(value.asBuffer.length > 1 && value.asBuffer.length <= ubyte.max,
+               "dynamic and single-byte buffers need an explicit format");
+        format = DataFormat(ValueType.u8, SeriesKind.held);
+        format.count = cast(ubyte)value.asBuffer.length;
+    }
+    else
+        assert(false, "value has no stable element format");
+
+    return register_format(format);
 }
 
 private bool unbox_scalar_value(ref const Variant v, ref const DataFormat fmt, out Scalar s)

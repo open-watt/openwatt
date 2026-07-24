@@ -181,26 +181,20 @@ protected:
     final override const(char)[] model_name() const pure
         => _model_name[];
 
-    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
+    final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
         if (elements.length == 0)
-        {
-            Element* address = device.find_or_create_element("status.network.ip.address");
-            address.value(Variant(_client.get_address()));
-        }
+            device.set_element("status.network.ip.address", _client.get_address());
 
         import protocol.goodwe : aa55_section_kind;
 
         assert(desc.kind == aa55_section_kind);
         ref const ElementDesc_AA55 aa55 = _profile_data.get_section!ElementDesc_AA55(aa55_section_kind, desc.element);
         if (aa55.desc == 0xFFFF)
-            return;
+            return FormatId.invalid;
 
         SampleDesc sd = desc_by_index(aa55.desc);
         const(DataFormat)* fmt = sd.fmt;
-        if (!e.format.valid && fmt.is_scalar)
-            e.format = sd.format;
-
         if (fmt.is_scalar)
         {
             Scalar z;
@@ -227,6 +221,7 @@ protected:
             default: assert(false);
         }
 
+        return sd.format;
     }
 
 private:

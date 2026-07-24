@@ -149,9 +149,10 @@ protected:
         return true;
     }
 
-    final override void add_handler(Device, Element* e, ref const ElementDesc, ubyte)
+    final override FormatId add_handler(Device, Element* e, ref const ElementDesc, ubyte)
     {
         log.warning("element-map is not supported in ESPHome profiles (sensors are discovered at runtime); ignoring '", e.id, '\'');
+        return FormatId.invalid;
     }
 
 private:
@@ -195,33 +196,21 @@ private:
                 else
                     _dev.name = res.name;
 
-                Element* e = _dev.find_or_create_element("info.name");
                 if (res.friendly_name)
-                    e.value = res.friendly_name.move;
+                    _dev.set_element("info.name", res.friendly_name.move);
                 else
-                    e.value = res.name.move;
-                e = _dev.find_or_create_element("info.esphome_ver");
-                e.value = res.esphome_version.move;
-                e = _dev.find_or_create_element("info.compilation_time");
+                    _dev.set_element("info.name", res.name.move);
+                _dev.set_element("info.esphome_ver", res.esphome_version.move);
                 SysTime comp_time;
                 ptrdiff_t taken = comp_time.fromString(res.compilation_time[]);
                 if (taken == res.compilation_time.length)
-                    e.value = comp_time;
+                    _dev.set_element("info.compilation_time", comp_time);
                 if (res.manufacturer)
-                {
-                    e = _dev.find_or_create_element("info.manufacturer_name");
-                    e.value = res.manufacturer.move;
-                }
+                    _dev.set_element("info.manufacturer_name", res.manufacturer.move);
                 if (res.model)
-                {
-                    e = _dev.find_or_create_element("info.model_id");
-                    e.value = res.model.move;
-                }
+                    _dev.set_element("info.model_id", res.model.move);
                 if (res.friendly_name)
-                {
-                    e = _dev.find_or_create_element("info.model_name");
-                    e.value = res.friendly_name.move;
-                }
+                    _dev.set_element("info.model_name", res.friendly_name.move);
 
                 // client name/info...
 //                if (_client.server_name[])
@@ -236,29 +225,24 @@ private:
 //                }
 
                 // do we know if it's wifi or not?
-                e = _dev.find_or_create_element("status.network.mode");
-                e.value = StringLit!"wifi";
-
-                e = _dev.find_or_create_element("status.network.ip.address");
-                e.value(Variant(_client.get_address()));
+                _dev.set_element("status.network.mode", StringLit!"wifi");
+                _dev.set_element("status.network.ip.address", _client.get_address());
 
                 if (res.webserver_port)
-                {
-                    e = _dev.find_or_create_element("status.network.webserver_port");
-                    e.value = res.webserver_port;
-                }
+                    _dev.set_element("status.network.webserver_port", res.webserver_port);
                 if (res.mac_address)
                 {
-                    e = _dev.find_or_create_element("status.network.wifi.mac_address");
                     MACAddress addr;
                     taken = addr.fromString(res.mac_address[]);
                     if (taken == res.mac_address.length)
-                        e.value = addr;
+                        _dev.set_element("status.network.wifi.mac_address", addr);
                 }
                 if (res.bluetooth_mac_address)
                 {
-                    e = _dev.find_or_create_element("status.network.bluetooth.mac_address");
-                    e.value = MACAddress().fromString(res.bluetooth_mac_address[]);
+                    MACAddress addr;
+                    taken = addr.fromString(res.bluetooth_mac_address[]);
+                    if (taken == res.bluetooth_mac_address.length)
+                        _dev.set_element("status.network.bluetooth.mac_address", addr);
                 }
 
                 Component c = _dev.find_component("info");
@@ -331,16 +315,13 @@ private:
                 }
                 const(char)[] id = tmp[0 .. res.name.length];
 
-                Element* e = _dev.find_or_create_element(tconcat("sensors.", id));
-                e.name = res.name.move;
-
                 SampleElement entry;
                 entry.key = res.key;
-                entry.element = e;
                 bool known_unit;
                 entry.format = sensor_format(res.unit_of_measurement[], entry.pre_scale, known_unit);
-                if (!e.format.valid)
-                    e.format = entry.format;
+                Element* e = _dev.find_or_create_element(tconcat("sensors.", id), entry.format);
+                e.name = res.name.move;
+                entry.element = e;
                 if (!known_unit)
                     e.display_unit = res.unit_of_measurement.move;
                 SampleElement* el = _elements.insert(res.key, entry);

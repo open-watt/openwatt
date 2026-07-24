@@ -319,8 +319,7 @@ void publish_island_budget(Device energy_device, Island* island, ref const Islan
     {
         if (val != val)
             return;
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".", field)))
-            e.value(val, now);
+        energy_device.set_element(tconcat(base, ".", field), val, now);
     }
 
     set_num("battery_available_kwh", b.battery_available_kwh);
@@ -348,8 +347,7 @@ void publish_analysis(Device energy_device, Policy p, ref const PolicyAnalysis a
     {
         if (val != val)
             return;
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".", field)))
-            e.value(val, now);
+        energy_device.set_element(tconcat(base, ".", field), val, now);
     }
 
     set_num("marginal_value", a.marginal_value);

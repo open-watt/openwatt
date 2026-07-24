@@ -206,15 +206,12 @@ protected:
     final override const(char)[] model_name() const pure
         => _model_name[];
 
-    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
+    final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
         if (desc.kind != mqtt_section_kind)
-            return;
+            return FormatId.invalid;
         ref const ElementDesc_MQTT mqtt = _profile_data.get_section!ElementDesc_MQTT(mqtt_section_kind, desc.element);
         SampleDesc sample_desc = desc_by_index(mqtt.desc);
-
-        if (!e.format.valid)
-            e.format = sample_desc.format;
 
         const(char)[] missing_param;
         const(char)[] get_substitute(size_t, const(char)[] param)
@@ -236,12 +233,12 @@ protected:
             if (missing_param !is null)
             {
                 log.warning(name, ": MQTT read topic '", raw, "' uses profile parameter '", missing_param, "', but it is not set");
-                return;
+                return FormatId.invalid;
             }
             if (unclosed_token)
             {
                 log.warning(name, ": unclosed placeholder token in MQTT read topic '", raw, "'");
-                return;
+                return FormatId.invalid;
             }
         }
         raw = mqtt.get_write_topic(*_profile_data);
@@ -253,12 +250,12 @@ protected:
             if (missing_param !is null)
             {
                 log.warning(name, ": MQTT write topic '", raw, "' uses profile parameter '", missing_param, "', but it is not set");
-                return;
+                return FormatId.invalid;
             }
             if (unclosed_token)
             {
                 log.warning(name, ": unclosed placeholder token in MQTT write topic '", raw, "'");
-                return;
+                return FormatId.invalid;
             }
         }
 
@@ -270,6 +267,7 @@ protected:
 
         if (e.access & Access.write)
             e.subscribe(&on_element_change);
+        return sample_desc.format;
 
     }
 

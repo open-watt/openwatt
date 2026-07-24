@@ -128,20 +128,17 @@ protected:
     final override const(char)[] model_name() const pure
         => _model_name[];
 
-    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
+    final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
         import protocol.ble : ble_section_kind;
 
         assert(desc.kind == ble_section_kind);
         ref const ElementDesc_BLE ble = _profile_data.get_section!ElementDesc_BLE(ble_section_kind, desc.element);
         if (ble.desc == 0xFFFF)
-            return;
+            return FormatId.invalid;
 
         SampleDesc sd = desc_by_index(ble.desc);
         const(DataFormat)* fmt = sd.fmt;
-        if (!e.format.valid && fmt.is_scalar)
-            e.format = sd.format;
-
         if (fmt.is_scalar)
         {
             Scalar z;
@@ -158,6 +155,7 @@ protected:
         se.length = ble.length;
         se.desc = sd;
 
+        return sd.format;
     }
 
 private:

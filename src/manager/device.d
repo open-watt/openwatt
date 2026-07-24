@@ -18,7 +18,8 @@ import manager.profile;
 nothrow @nogc:
 
 
-alias CreateElementHandler = void delegate(Device device, Element* e, ref const ElementDesc desc, ubyte index) nothrow @nogc;
+alias CreateElementHandler = FormatId delegate(Device device, Element* e, ref const ElementDesc desc,
+                                               ubyte index) nothrow @nogc;
 
 // The device type's table in the container id space: devices register as a type WITHOUT
 // becoming BaseObjects (no state machine; passive containers materialized by bindings).
@@ -497,7 +498,13 @@ Device create_device_from_profile(ref Profile profile, const(char)[] model, cons
                 case map:
                     if (!is_new_element)
                         break;
-                    create_element_handler(device, e, el.get_element_desc(profile), el.index);
+                    e.format = create_element_handler(device, e, el.get_element_desc(profile), el.index);
+                    if (!e.format.valid)
+                    {
+                        c.elements.removeFirstSwapLast(e);
+                        g_app.allocator.freeT(e);
+                        continue;
+                    }
                     break;
 
                 case sum:

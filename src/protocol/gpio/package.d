@@ -154,20 +154,13 @@ nothrow @nogc:
         Device* dev = _device[] in g_app.devices;
         if (!dev)
             return false;
-        Element* e = (*dev).find_or_create_element(_element_path.empty ? "state" : _element_path[]);
         FormatId format = register_format(_fmt);
-        if (!e.format.valid)
+        Element* e = (*dev).find_or_create_element(
+            _element_path.empty ? "state" : _element_path[], format);
+        if (_element is null)
         {
-            // TODO: binding owns _fmt/_clock but the Element outlives binding destruction;
-            //       formats need a durable home
-            e.format = format;
             e.access = Access.read;
             e.sampling_mode = SamplingMode.report;
-        }
-        else if (e.format != format)
-        {
-            log.error("element '", _element_path.empty ? "state" : _element_path[], "' already has a different format");
-            return false;
         }
         _element = e;
         return true;

@@ -291,18 +291,15 @@ void publish_policy(Device energy_device, Policy p, ControlRegistry registry)
 
     void set_text(string field, const(char)[] val)
     {
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".", field)))
-            e.value(val, now);
+        energy_device.set_element(tconcat(base, ".", field), val, now);
     }
     void set_num(string field, float val)
     {
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".", field)))
-            e.value(val, now);
+        energy_device.set_element(tconcat(base, ".", field), val, now);
     }
     void set_bool(string field, bool val)
     {
-        if (Element* e = energy_device.find_or_create_element(tconcat(base, ".", field)))
-            e.value(val, now);
+        energy_device.set_element(tconcat(base, ".", field), val, now);
     }
 
     set_text("target", p.target);

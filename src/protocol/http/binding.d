@@ -167,10 +167,10 @@ protected:
     final override const(char)[] model_name() const pure
         => _model_name[];
 
-    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
+    final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
         if (desc.kind != http_section_kind)
-            return;
+            return FormatId.invalid;
         ref const HTTPElementDesc http = _profile_data.get_section!HTTPElementDesc(http_section_kind, desc.element);
 
         const(char)[][32] names = void, values = void;
@@ -183,16 +183,16 @@ protected:
             values[n] = kvp.value[];
             ++n;
         }
-        add_element(e, desc, http, names[0 .. n], values[0 .. n]);
+        return add_element(e, desc, http, names[0 .. n], values[0 .. n]);
     }
 
-    final void add_element(Element* element, ref const ElementDesc desc, ref const HTTPElementDesc http_desc, const(char)[][] param_names, const(char)[][] param_values)
+    final FormatId add_element(Element* element, ref const ElementDesc desc,
+                               ref const HTTPElementDesc http_desc,
+                               const(char)[][] param_names, const(char)[][] param_values)
     {
         if (http_desc.desc == ushort.max)
-            return;
+            return FormatId.invalid;
         SampleDesc sample_desc = desc_by_index(http_desc.desc);
-        if (!element.format.valid)
-            element.format = sample_desc.format;
 
         HTTPSampleElement* e = &_elements.pushBack();
         e.element = element;
@@ -218,6 +218,7 @@ protected:
             build_request_state(http_desc.write_request_index, ushort.max, param_names, param_values);
             element.subscribe(&on_element_change);
         }
+        return sample_desc.format;
     }
 
     void on_element_change(ref const SampleCommit samples)

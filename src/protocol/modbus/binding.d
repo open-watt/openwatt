@@ -363,22 +363,18 @@ protected:
         return true;
     }
 
-    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
+    final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
         import protocol.modbus : modbus_mb_section_kind, modbus_reg_section_kind;
 
         if (desc.kind != modbus_reg_section_kind && desc.kind != modbus_mb_section_kind)
-            return;
+            return FormatId.invalid;
         Profile* prof = _current_pass == Pass.serve ? _serve_profile_data : _profile_data;
         ref const ElementDesc_Modbus mb = prof.get_section!ElementDesc_Modbus(desc.kind, desc.element);
         if (mb.desc == ushort.max)
-            return;
+            return FormatId.invalid;
         SampleDesc sample_desc = desc_by_index(mb.desc);
         const(DataFormat)* fmt = sample_desc.fmt;
-
-        // serve-pass elements are produced elsewhere; their formats aren't this profile's to declare
-        if (_current_pass != Pass.serve && !e.format.valid)
-            e.format = sample_desc.format;
 
         if (_current_pass != Pass.serve && fmt.is_scalar)
         {
@@ -388,6 +384,7 @@ protected:
         }
 
         add_register_entry(e, desc, mb, sample_desc);
+        return _current_pass == Pass.serve ? FormatId.invalid : sample_desc.format;
     }
 
 

@@ -128,20 +128,17 @@ protected:
     final override const(char)[] model_name() const pure
         => _model_name[];
 
-    final override void add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
+    final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
         import protocol.can : can_section_kind;
 
         assert(desc.kind == can_section_kind);
         ref const ElementDesc_CAN can = _profile_data.get_section!ElementDesc_CAN(can_section_kind, desc.element);
         if (can.desc == 0xFFFF)
-            return; // spelling didn't compile; the profile load already warned
+            return FormatId.invalid; // spelling didn't compile; the profile load already warned
 
         SampleDesc sd = desc_by_index(can.desc);
         const(DataFormat)* fmt = sd.fmt;
-        if (!e.format.valid && fmt.is_scalar)
-            e.format = sd.format;
-
         // typed zero until the first frame arrives
         if (fmt.is_scalar)
         {
@@ -157,6 +154,7 @@ protected:
         se.length = can.length;
         se.desc = sd;
 
+        return sd.format;
     }
 
 private:

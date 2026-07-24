@@ -204,7 +204,7 @@ nothrow @nogc:
                 case "Electrification Level":  elem_path = "info.electrification"; break;
                 default: continue;
             }
-            v.find_or_create_element(elem_path).value = value.makeString(defaultAllocator());
+            v.set_element(elem_path, value.makeString(defaultAllocator()));
         }
 
         return 0;
@@ -269,8 +269,8 @@ void add_capacity_sample(const(char)[] vin, float estimate_kwh, float weight)
     {
         if (Component v = g_vehicles_device.find_component(vin))
         {
-            v.find_or_create_element("battery.full_capacity").value = ce.mean_kwh;
-            v.find_or_create_element("battery.capacity_confidence").value = confidence;
+            v.set_element("battery.full_capacity", ce.mean_kwh);
+            v.set_element("battery.capacity_confidence", confidence);
         }
     }
 }
@@ -365,30 +365,30 @@ Component vehicle_for(const(char)[] vin)
     // Seed identity from VIN. Manufacturer/model come from WMI + position-4
     // decoding (decode_vin) — caller-supplied hints aren't accepted because
     // the VIN is the authoritative source.
-    vehicle.find_or_create_element("info.type").value = StringLit!"vehicle";
-    vehicle.find_or_create_element("info.serial_number").value = vin.makeString(defaultAllocator());
+    vehicle.set_element("info.type", StringLit!"vehicle");
+    vehicle.set_element("info.serial_number", vin.makeString(defaultAllocator()));
 
     VINInfo vi = decode_vin(vin);
     if (vi.manufacturer_name)
-        vehicle.find_or_create_element("info.manufacturer_name").value = vi.manufacturer_name;
+        vehicle.set_element("info.manufacturer_name", vi.manufacturer_name);
     if (vi.manufacturer_id)
-        vehicle.find_or_create_element("info.manufacturer_id").value = vi.manufacturer_id;
+        vehicle.set_element("info.manufacturer_id", vi.manufacturer_id);
     if (vi.model_name)
-        vehicle.find_or_create_element("info.model_name").value = vi.model_name;
+        vehicle.set_element("info.model_name", vi.model_name);
     if (vi.manufacture_location)
-        vehicle.find_or_create_element("info.manufacture_location").value = vi.manufacture_location;
+        vehicle.set_element("info.manufacture_location", vi.manufacture_location);
     if (vi.model_year != 0)
-        vehicle.find_or_create_element("info.model_year").value = vi.model_year;
+        vehicle.set_element("info.model_year", vi.model_year);
 
     // Static PowerControl shape (max + setpoint filled dynamically from vehicle reports).
-    vehicle.find_or_create_element("control.kind").value = StringLit!"continuous";
-    vehicle.find_or_create_element("control.direction").value = StringLit!"consume";
-    vehicle.find_or_create_element("control.unit").value = StringLit!"A";
-    vehicle.find_or_create_element("control.min").value = 6;
-    vehicle.find_or_create_element("control.step").value = 1;
+    vehicle.set_element("control.kind", StringLit!"continuous");
+    vehicle.set_element("control.direction", StringLit!"consume");
+    vehicle.set_element("control.unit", StringLit!"A");
+    vehicle.set_element("control.min", 6);
+    vehicle.set_element("control.step", 1);
 
     // EnergyMeter declares its kind so downstream consumers know how to read it.
-    vehicle.find_or_create_element("meter.type").value = StringLit!"single-phase";
+    vehicle.set_element("meter.type", StringLit!"single-phase");
 
     g_vehicles_device.notify(ComponentEvent.tree_changed);
 
