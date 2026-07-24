@@ -8,15 +8,69 @@ import urt.time;
 import urt.variant;
 
 import manager;
+import manager.collection : CID, CollectionType, make_cid;
 import manager.component;
 import manager.element;
 import manager.expression;
+import manager.id : EID, IdAllocator, IndexTable;
 import manager.profile;
 
 nothrow @nogc:
 
 
 alias CreateElementHandler = void delegate(Device device, Element* e, ref const ElementDesc desc, ubyte index) nothrow @nogc;
+
+struct DeviceTable
+{
+nothrow @nogc:
+
+    Device* opBinaryRight(string op : "in")(const(char)[] name)
+        => _machine.lookup(name);
+
+    void insert(const(char)[] name, Device device)
+    {
+        uint slot = _machine.claim(name, device);
+        debug assert(slot, "device name already in use");
+        device.cid = make_cid(CollectionType.device, slot);
+    }
+
+    inout(Element)* resolve(EID eid) inout pure
+    {
+        if (eid.container.type_index != CollectionType.device)
+            return null;
+        inout Device d = _machine.get(eid.container.slot);
+        return d ? d.element_ids.get(eid.index) : null;
+    }
+
+    auto values() => _machine.values();
+    auto keys() => _machine.names();
+
+    size_t length()
+    {
+        size_t n = 0;
+        foreach (d; _machine.values())
+            ++n;
+        return n;
+    }
+
+package:
+    IdAllocator!Device _machine;
+}
+
+Element* deref(ref EID eid)
+{
+    if (!g_app || eid.container.type_index != CollectionType.device)
+        return null;
+    uint slot = eid.container.slot;
+    Device d = g_app.devices._machine.deref(slot);
+    if (!d)
+        return null;
+    ushort index = eid.index;
+    Element* e = d.element_ids.deref(index);
+    if (e && (slot != eid.container.slot || index != eid.index))
+        eid = EID(make_cid(CollectionType.device, slot), index);
+    return e;
+}
 
 enum ComputationKind : ubyte
 {
@@ -126,6 +180,9 @@ nothrow @nogc:
     {
         clear_computations();
     }
+
+    CID cid;                            // unset until DeviceTable.insert stamps it
+    IndexTable!(Element*) element_ids;
 
     Array!Computation computations;
 
@@ -538,4 +595,32 @@ unittest
     assert(!c.is_device);
     Component as_comp = d;
     assert(as_comp.is_device);
+
+    // element identity: indices allocate lazily against the device's table once it registers
+    DeviceTable table;
+    table.insert(d.id[], d);
+    assert(d.cid);
+
+    Element* e = defaultAllocator.allocT!Element();
+    e.parent = c;
+    assert(!e.eid);
+    EID handle = e.ensure_eid();
+    assert(handle && handle.container == d.cid && handle.index == 1);
+    assert(e.ensure_eid() == handle);
+    assert(table.resolve(handle) is e);
+    assert(table.resolve(EID(d.cid, 2)) is null);
+
+    // unmounted elements have no identity to allocate
+    Element* stray = defaultAllocator.allocT!Element();
+    assert(stray.ensure_eid() == EID.invalid);
+
+    // deref follows element-level forwards and heals the held EID
+    Element* e2 = defaultAllocator.allocT!Element();
+    e2.parent = c;
+    EID handle2 = e2.ensure_eid();
+    assert(handle2.index == 2);
+    d.element_ids.release(1);
+    d.element_ids.forward(1, 2);
+    ushort idx = handle.index;          // a stale holder still at index 1
+    assert(d.element_ids.deref(idx) is e2 && idx == 2);
 }

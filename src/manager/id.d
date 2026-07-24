@@ -1,15 +1,68 @@
 module manager.id;
 
-import urt.algorithm : binary_search;
+// Identity is the NAME. Ids are permanent, monotonic, process-local handles: never derived by
+// hashing a name, never persisted, never sent on the wire.
+//
+// Ids are TWO-LEVEL: EID = (container id, element index). The container level is ONE id space
+// with per-type tables (the CID type bits): collection objects and Devices are both registered
+// types in it, but only collection types carry BaseObject machinery - a Device is NOT a
+// BaseObject (no state machine; passive container materialized by bindings) and the ad-hoc
+// g_app.devices Map dissolves into the device type's table. The data plane shards per
+// container. Element index 0 may denote the container itself, so value-level handles (ref_
+// boxing, automation targets, mesh addressing) can address objects and elements with one EID;
+// TYPED refs stay distinct - ObjectRef is a CID (a reference to a root, never an element),
+// element refs hold EIDs. Packed 64-bit in RAM (acceptable: ids never persist and never wire).
+//
+//   container level: collection tables map name -> CID -> object; a rename touches ONE name
+//                    entry - children resolve by composition, so device rename is O(1) and
+//                    full element paths are never stored
+//   element level:   each container owns a dense element-index table, one tagged word per index
+//                      bound   -> Element*   the index is bound to a live element
+//                      dormant -> null       reserved, waiting for a claimant
+//                      forward -> index      permanent alias of another index (write-once)
+//                    relative paths resolve through the component tree
+//   hard-wired indices: property projections COMPUTE their EID as (obj CID, Prop! index) - a
+//                    compile-time literal index, no lookup, no cache; profile elements take
+//                    their template index, deterministic per profile version
+//
+// Lifecycle:
+//   - first mention of a name (a forward reference) reserves a fresh id for the name
+//   - creation at a name claims the reserved id as the object's primary
+//   - rename moves the OBJECT between name entries; ids do not move, so every held ref follows
+//     the object for free; the old name becomes an empty tombstone
+//   - rename onto a name holding reserved id J: the claimant keeps its primary I and writes
+//     J = forward(I); both the followers and the waiters now reach the object
+//   - death reserves the primary for the object's final name; refs deref to null
+//   - the next object created at that name claims the reserved id and every ref resolves again
+//   - the machine instantiates at BOTH levels: container ids are reserved for collection names,
+//     and element indices are reserved within their container's table; a forward reference under an absent container
+//     reserves the container id plus a stub element table, and each level claims independently
+//
+// Invariants:
+//   - every name resolves to at most one live object; every object has exactly one live name
+//     and one primary id
+//   - a forward slot is write-once: a forwarded id can never re-bind or be reserved, so forwarding is
+//     permanent, transitive, immutable
+//   - no operation ever rewrites an id held in a ref. deref follows forward chains (they can
+//     grow through reserve-then-claim-by-rename cycles) and dereference writes the terminal id
+//     back through the holder's own field - lossless at any time, from any thread
+//   - ids are not reclaimed in v1; a forward costs one immortal word
+//
+// Costs: deref is an array index plus forward hops until the held id is updated; rename, death, claim and
+// forward are each O(1) single-word writes. No broadcasts, no lists, no allocation, and no
+// collision concept (string hashing is internal to the name map).
+//
+// CID is not merely unified with EID - it IS the EID's container level (type bits kept, slot
+// as a dense per-type index). The wire shares none of this: peers exchange names once per
+// session and bind session-local varint handles (introducer allocates, parity bit for
+// direction, never reused); config and containers persist names only.
+
 import urt.array;
-import urt.hash : fnv1a;
 import urt.map;
-import urt.mem.alloc : alloc, free;
 import urt.mem.allocator : defaultAllocator;
 import urt.string.string;
 
-import manager.base;
-import manager.element : Element;
+import manager.collection : CID;
 
 nothrow @nogc:
 
@@ -48,13 +101,14 @@ struct ID(uint _type_bits)
         uint type_index() const pure
             => raw >> id_bits;
 
+        EID element(ushort index) const pure
+            => EID(this, index);
+
         uint slot() const pure
             => raw & id_mask;
     }
 }
 
-// container CID in the low 32 bits, element part above it; part 0 is the container itself, so
-// object refs and element refs share one type. Never persisted, never on the wire.
 struct EID
 {
 nothrow @nogc:
@@ -63,15 +117,15 @@ nothrow @nogc:
 
     enum EID invalid = EID();
 
-    this(CID container, ushort part = 0) pure
+    this(CID container, ushort index = 0) pure
     {
-        raw = container.raw | (ulong(part) << 32);
+        raw = container.raw | (ulong(index) << 32);
     }
 
     CID container() const pure
         => CID(cast(uint)raw);
 
-    ushort part() const pure
+    ushort index() const pure
         => cast(ushort)(raw >> 32);
 
     bool opCast(T : bool)() const pure
@@ -84,26 +138,21 @@ nothrow @nogc:
         => cast(size_t)(raw ^ (raw >> 32));
 }
 
-// Dense immortal slots (v1: no reclamation), one tagged word each:
-//     0              dormant - reserved on a name, awaiting a claimant
+// Dense, immortal slots (v1: no reclamation), one tagged word each; names live in a separate map.
+//     0              dormant - reserved, waiting for a claimant
 //     T   (bit0 = 0) bound to a live object
 //     fwd (bit0 = 1) permanent forward to slot (word >> 1), write-once
-// Names are a separate map; a name entry always holds a terminal (never forwarded) id.
 struct IdAllocator(T) if (is(T == class) || is(T == U*, U))
 {
 nothrow @nogc:
 
-    // forward reference: reserve a fresh id on the name
     uint reserve(const(char)[] name)
     {
         if (uint* p = name in _names)
             return *p;
-        uint id = allocate();
-        _names.insert(name.makeString(defaultAllocator), id);
-        return id;
+        return allocate(name);
     }
 
-    // create at a name: absent allocates, reserved claims, live is a duplicate (returns 0)
     uint claim(const(char)[] name, T obj)
     {
         debug assert(obj !is null);
@@ -117,14 +166,18 @@ nothrow @nogc:
             _slots[][id] = cast(size_t)cast(void*)obj;
             return id;
         }
-        uint id = allocate();
+        uint id = allocate(name);
         _slots[][id] = cast(size_t)cast(void*)obj;
-        _names.insert(name.makeString(defaultAllocator), id);
         return id;
     }
 
-    // ids never move, so held refs follow for free; renaming onto a reserved name forwards it
-    // to the primary, onto a live name fails
+    void bind(uint id, T obj)
+    {
+        debug assert(obj !is null);
+        debug assert(id && id < _slots.length && _slots[][id] == 0, "bind to a live or forwarded id");
+        _slots[][id] = cast(size_t)cast(void*)obj;
+    }
+
     bool rename(uint id, const(char)[] old_name, const(char)[] new_name)
     {
         if (uint* p = new_name in _names)
@@ -139,23 +192,25 @@ nothrow @nogc:
                 _slots[][j] = (size_t(id) << 1) | 1;
                 *p = id;
             }
+            _slot_names[][id] = _slot_names[][j];
         }
         else
-            _names.insert(new_name.makeString(defaultAllocator), id);
+        {
+            String s = new_name.makeString(defaultAllocator);
+            _slot_names[][id] = s;
+            _names.insert(s.move, id);
+        }
         if (old_name[] != new_name[])
             _names.remove(old_name);
         return true;
     }
 
-    // death reserves the primary on the object's final name; refs deref null until the next
-    // object created at that name claims it
     void release(uint id)
     {
         debug assert(id && id < _slots.length && !(_slots[][id] & 1), "release of invalid or forwarded id");
         _slots[][id] = 0;
     }
 
-    // follow forwards to the terminal slot and update the held id in place
     T deref(ref uint id)
     {
         uint i = id;
@@ -172,13 +227,89 @@ nothrow @nogc:
         return cast(T)cast(void*)w;
     }
 
-    uint find(const(char)[] name)
+    inout(T) get(uint id) inout pure
     {
-        uint* p = name in _names;
+        if (!id || id >= _slots.length)
+            return null;
+        size_t w = _slots[][id];
+        while (w & 1)
+            w = _slots[][w >> 1];
+        return cast(inout(T))cast(void*)w;
+    }
+
+    // does not follow forwards (unlike get), so dense iteration visits each object once
+    inout(T) at(uint id) inout pure
+    {
+        if (!id || id >= _slots.length)
+            return null;
+        size_t w = _slots[][id];
+        return (w & 1) ? null : cast(inout(T))cast(void*)w;
+    }
+
+    uint find(const(char)[] name) const pure
+    {
+        const(uint)* p = name in _names;
         return p ? *p : 0;
     }
 
-    uint high_watermark() const
+    // transient pointer to the bound ref, or null; invalidated by the next allocation (slots may move)
+    T* lookup(const(char)[] name)
+    {
+        uint t = terminal(find(name));
+        if (!t)
+            return null;
+        size_t* w = &_slots[][t];
+        return (*w && !(*w & 1)) ? cast(T*)w : null;
+    }
+
+    auto values()
+    {
+        struct Range
+        {
+        nothrow @nogc:
+            IdAllocator* m;
+            uint slot;
+            bool empty() const pure => slot > m.slot_count;
+            T front() pure => m.at(slot);
+            void popFront() { ++slot; advance(); }
+            private void advance() { while (slot <= m.slot_count && m.at(slot) is null) ++slot; }
+        }
+        auto r = Range(&this, 1);
+        r.advance();
+        return r;
+    }
+
+    auto names()
+    {
+        struct Range
+        {
+        nothrow @nogc:
+            IdAllocator* m;
+            uint slot;
+            bool empty() const pure => slot > m.slot_count;
+            String front() pure => m.name_string(slot);
+            void popFront() { ++slot; advance(); }
+            private void advance() { while (slot <= m.slot_count && m.at(slot) is null) ++slot; }
+        }
+        auto r = Range(&this, 1);
+        r.advance();
+        return r;
+    }
+
+    // the slice borrows the name entry's storage: stable until that slot renames
+    const(char)[] name_of(uint id) const pure
+    {
+        uint t = terminal(id);
+        return t ? _slot_names[t][] : null;
+    }
+
+    String name_string(uint id) const pure
+    {
+        uint t = terminal(id);
+        return t ? _slot_names[t] : String();
+    }
+
+    uint slot_count() const pure
     {
         uint n = cast(uint)_slots.length;
         return n ? n - 1 : 0;
@@ -186,16 +317,107 @@ nothrow @nogc:
 
 private:
     Array!size_t _slots;        // slot 0 reserved as the invalid id
+    Array!String _slot_names;
     Map!(String, uint) _names;
 
-    uint allocate()
+    uint allocate(const(char)[] name)
     {
         if (_slots.empty)
+        {
             _slots ~= 0;
+            _slot_names ~= String();
+        }
         uint id = cast(uint)_slots.length;
         _slots ~= 0;
+        String s = name.makeString(defaultAllocator);
+        _slot_names ~= s;
+        _names.insert(s.move, id);
         return id;
     }
+
+    uint terminal(uint id) const pure
+    {
+        if (!id || id >= _slots.length)
+            return 0;
+        size_t w = _slots[][id];
+        while (w & 1)
+        {
+            id = cast(uint)(w >> 1);
+            w = _slots[][id];
+        }
+        return id;
+    }
+}
+
+struct IndexTable(T) if (is(T == class) || is(T == U*, U))
+{
+nothrow @nogc:
+
+    ushort allocate(T obj)
+    {
+        debug assert(obj !is null);
+        if (_slots.empty)
+            _slots ~= 0;
+        debug assert(_slots.length <= ushort.max, "index space exhausted");
+        ushort index = cast(ushort)_slots.length;
+        _slots ~= cast(size_t)cast(void*)obj;
+        return index;
+    }
+
+    void bind(ushort index, T obj)
+    {
+        debug assert(obj !is null);
+        debug assert(index && index < _slots.length && _slots[][index] == 0, "bind to a live or forwarded index");
+        _slots[][index] = cast(size_t)cast(void*)obj;
+    }
+
+    void release(ushort index)
+    {
+        debug assert(index && index < _slots.length && !(_slots[][index] & 1), "release of invalid or forwarded index");
+        _slots[][index] = 0;
+    }
+
+    void forward(ushort from, ushort to)
+    {
+        debug assert(from && from < _slots.length && _slots[][from] == 0, "forward of a live or forwarded index");
+        debug assert(to && to < _slots.length);
+        _slots[][from] = (size_t(to) << 1) | 1;
+    }
+
+    T deref(ref ushort index)
+    {
+        ushort i = index;
+        if (!i || i >= _slots.length)
+            return null;
+        size_t w = _slots[][i];
+        while (w & 1)
+        {
+            i = cast(ushort)(w >> 1);
+            w = _slots[][i];
+        }
+        if (i != index)
+            index = i;
+        return cast(T)cast(void*)w;
+    }
+
+    inout(T) get(ushort index) inout pure
+    {
+        if (!index || index >= _slots.length)
+            return null;
+        size_t w = _slots[][index];
+        while (w & 1)
+            w = _slots[][w >> 1];
+        return cast(inout(T))cast(void*)w;
+    }
+
+    ushort index_count() const pure
+    {
+        uint n = cast(uint)_slots.length;
+        return cast(ushort)(n ? n - 1 : 0);
+    }
+
+private:
+    Array!size_t _slots;    // slot 0 reserved: index 0 denotes the container itself
 }
 
 unittest
@@ -205,7 +427,7 @@ unittest
 
     IdAllocator!(Thing*) m;
 
-    // forward reference reserves; creation claims; the reserved id resurrects
+    // forward reference reserves; creation claims; the reserved id resolves again
     uint held = m.reserve("motor");
     assert(held && m.deref(held) is null);
     assert(m.claim("motor", &a) == held);
@@ -219,13 +441,13 @@ unittest
     assert(m.deref(held) is &a);
     assert(m.find("motor") == 0 && m.find("pump") == held);
 
-    // death reserves on the final name; recreation rebinds every old ref
+    // death reserves the id for the final name; recreation rebinds every old ref
     m.release(held);
     assert(m.deref(held) is null);
     assert(m.claim("pump", &b) == held);
     assert(m.deref(held) is &b);
 
-    // rename onto a reserved name: the waiter's id forwards to the primary and updates on deref
+    // rename onto a reserved name: the waiter's id forwards to the primary and deref updates it
     uint waiter = m.reserve("valve");
     assert(waiter != held);
     assert(m.rename(held, "pump", "valve"));
@@ -242,119 +464,45 @@ unittest
     m.release(held);
     assert(m.claim("valve", &a) == held);
 
-    // forward chains survive reserve-then-claim-by-rename cycles and update to the terminal
+    // forward chains survive reserve-then-claim-by-rename cycles and deref updates to the terminal
     uint chain = m.reserve("gate");
     assert(m.rename(held, "valve", "gate"));
     uint stale = waiter & ~0u;   // a copy that still holds the pre-merge id value
     assert(m.deref(stale) is &a && stale == held);
     assert(m.deref(chain) is &a && chain == held);
-}
 
+    // split reserve/bind (collections allocate the id before the object constructs)
+    uint pre = m.reserve("relay");
+    assert(m.deref(pre) is null);
+    m.bind(pre, &c);
+    assert(m.get(pre) is &c && m.at(pre) is &c);
 
-void id_init()
-{
-    id_table().init();
-}
+    // name recovery: bound, reserved, and forwarded slots all resolve; forwarded slots are
+    // skipped by the raw iteration accessor
+    assert(m.name_of(pre) == "relay");
+    assert(m.name_string(held)[] == "gate");
+    uint reserved = m.reserve("spare");
+    assert(m.name_of(reserved) == "spare");
+    assert(m.slot_count >= 6);
 
-ref StringTable!12 id_table() pure
-{
-    static StringTable!12* hack() => &g_id_table;
-    return *(cast(StringTable!12* function() pure nothrow @nogc)&hack)();
-}
+    // index table: the nameless element level; index 0 is the container itself
+    IndexTable!(Thing*) it;
+    ushort i1 = it.allocate(&a);
+    ushort i2 = it.allocate(&b);
+    assert(i1 == 1 && i2 == 2);
+    assert(it.get(i1) is &a && it.get(i2) is &b);
 
-_ID hash_id(_ID : ID!n, size_t n)(const(char)[] name, ubyte type_idx = 0) pure
-{
-    static if (is(_ID : ID!n, size_t n) && n == 0)
-        return _ID(fnv1a(cast(ubyte[])name));
-    else
-        return _ID((uint(type_idx) << _ID.id_bits) | (fnv1a(cast(ubyte[])name) & _ID.id_mask));
-}
+    // release reserves positionally; bind rebinds the same index
+    it.release(i1);
+    assert(it.get(i1) is null);
+    it.bind(i1, &c);
+    assert(it.get(i1) is &c);
 
-_ID rehash(_ID : ID!n, size_t n)(_ID id) pure
-{
-    static if (n > 0)
-    {
-        uint ty = id.raw & ~_ID.id_mask;
-        return _ID(ty | ((id.slot * 0x01000193) & _ID.id_mask));
-    }
-    else
-        return _ID(id.raw * 0x01000193);
-}
-
-
-private:
-
-__gshared StringTable!12 g_id_table;
-
-struct StringTable(uint page_bits)
-{
-    import urt.string.string;
-nothrow @nogc:
-
-    static assert(page_size <= ushort.max);
-    enum uint page_size = 1u << page_bits;
-    enum uint offset_mask = page_size - 1;
-
-    ~this()
-    {
-        free_all();
-    }
-
-    void init()
-    {
-        auto page = cast(char*)alloc(page_size);
-        assert(page !is null);
-        _pages ~= page;
-        _pages[0][0..2] = 0;
-        _fill = 2;
-    }
-
-    uint insert(const(char)[] s)
-    {
-        if (s.length == 0)
-            return 0;
-        assert(s.length <= page_size);
-
-        uint needed = 2 + cast(uint)(s.length + (s.length & 1));
-
-        if (_fill + needed > page_size)
-        {
-            auto page = cast(char*)alloc(page_size);
-            assert(page !is null);
-            _pages ~= page;
-            _fill = 0;
-        }
-
-        _fill += 2;
-        writeString(_pages[$-1] + _fill, s);
-        uint offset = (cast(uint)(_pages.length - 1) << page_bits) | _fill;
-        _fill += cast(uint)(s.length + (s.length & 1));
-        return offset;
-    }
-
-    const(char)[] get_dstring(uint offset) const pure
-    {
-        if (!offset)
-            return null;
-        const(char)* p = _pages[offset >> page_bits] + (offset & offset_mask);
-        return p[0 .. (cast(ushort*)p)[-1]];
-    }
-
-    String get_string(uint offset) const pure
-    {
-        debug assert(offset != 0, "Invalid string offset");
-        return as_string(_pages[offset >> page_bits] + (offset & offset_mask));
-    }
-
-    void free_all()
-    {
-        foreach (page; _pages[])
-            free(page[0..page_size]);
-        _pages.clear();
-        _fill = 0;
-    }
-
-private:
-    Array!(char*) _pages;
-    uint _fill;
+    // forwards chase to the terminal and update the held index
+    it.release(i2);
+    it.forward(i2, i1);
+    ushort held_index = i2;
+    assert(it.deref(held_index) is &c && held_index == i1);
+    assert(it.get(i2) is &c);
+    assert(it.index_count == 2);
 }

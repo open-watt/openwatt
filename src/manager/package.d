@@ -214,7 +214,7 @@ nothrow @nogc:
     Map!(String, IntrinsicFunction) intrinsic_functions;
     Map!(String, ISignalProvider) signal_providers;
 
-    Map!(const(char)[], Device) devices;
+    DeviceTable devices;
 
     uint update_rate_hz = 20;
 
@@ -241,10 +241,6 @@ nothrow @nogc:
 
         import urt.time : subscribe_clock_change;
         subscribe_clock_change(&notify_wallclock_change);
-
-        id_init();
-        init_collections();
-        init_elements();
 
         register_enum!Boolean();
         register_enum!ObjectFlags();
