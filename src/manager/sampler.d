@@ -540,16 +540,12 @@ Variant sample_value(const(char)[] data, ref const TextValueDesc desc)
             }
             if (desc.enum_info)
             {
-                ef_val = 0;
-                if (desc.type == TextType.bf)
+                if (desc.type == TextType.bf || desc.enum_info.bitfield)
                 {
-                    const(char)[] remaining = data;
-                    while (!remaining.empty)
-                    {
-                        const(char)[] key = remaining.split!'|'.trimFront.trimBack;
-                        if (!key.empty)
-                            ef_val |= desc.enum_info.value_for(key).asLong;
-                    }
+                    bool ok;
+                    ef_val = desc.enum_info.parse_flags(data, ok);
+                    if (!ok)
+                        ef_val = 0;
                 }
                 else
                     ef_val = desc.enum_info.value_for(data).asLong;

@@ -71,8 +71,9 @@ template type_for(T, Extra...)
     }
     else static if (is_enum!U)
     {
-        // Extra[0]: bool is_bitfield
-        static if (Extra.length == 1 && is(typeof(Extra[0]) == bool) && Extra[0])
+        import urt.meta.enuminfo : is_bitfield_enum;
+        // Extra[0]: bool is_bitfield (runtime-desc knowledge; @bitfield covers declared types)
+        static if ((Extra.length == 1 && is(typeof(Extra[0]) == bool) && Extra[0]) || is_bitfield_enum!U)
             enum type_for = "bf_" ~ U.stringof;
         else
             enum type_for = "enum_" ~ U.stringof;
@@ -406,6 +407,18 @@ const(char[]) from_variant(T)(ref const Variant v, out T r) nothrow @nogc
             }
             default:
                 break;
+        }
+
+        import urt.meta.enuminfo : enum_info, is_bitfield_enum;
+        static if (is_bitfield_enum!T)
+        {
+            bool ok;
+            long combined = enum_info!T.make_void().parse_flags(s, ok);
+            if (ok)
+            {
+                r = cast(T)combined;
+                return null;
+            }
         }
     }
 

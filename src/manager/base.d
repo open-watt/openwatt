@@ -5,6 +5,7 @@ import urt.lifetime;
 import urt.log;
 import urt.map;
 import urt.meta;
+import urt.meta.enuminfo : bitfield;
 import urt.mem.string;
 import urt.mem.temp;
 import urt.variant;
@@ -57,7 +58,7 @@ nothrow @nogc:
 // ============================================================================
 
 
-enum ObjectFlags : ubyte
+@bitfield enum ObjectFlags : ubyte
 {
     none         = 0,
     dynamic      = 1 << 0, // D

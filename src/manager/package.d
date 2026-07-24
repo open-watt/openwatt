@@ -243,7 +243,7 @@ nothrow @nogc:
         subscribe_clock_change(&notify_wallclock_change);
 
         register_enum!Boolean();
-        register_enum!ObjectFlags();
+        register_bitfield!ObjectFlags();
         register_enum!HashFunction();
 
         register_signal_provider(StringLit!"element", this);
@@ -475,6 +475,14 @@ nothrow @nogc:
 
         import urt.meta.enuminfo : enum_info;
         enum_templates.insert(StringLit!(E.stringof), enum_info!E.make_void());
+    }
+
+    void register_bitfield(E)()
+        if (is_enum!E)
+    {
+        import urt.meta.enuminfo : is_bitfield_enum;
+        static assert(is_bitfield_enum!E, E.stringof ~ " must be declared @bitfield");
+        register_enum!E();
     }
 
     void register_intrinsic(String identifier, IntrinsicFunction func)

@@ -679,6 +679,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     foreach (ref root_item; conf.sub_items) switch (root_item.name)
     {
         case "enum":
+        case "bitfield":
             const(char)[] enum_name = root_item.value.unQuote;
             if (enum_name.empty)
             {
@@ -690,7 +691,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
                 writeWarning("Duplicate enum definition: ", enum_name);
                 break;
             }
-            const(VoidEnumInfo)* enum_info = parse_enum(root_item);
+            const(VoidEnumInfo)* enum_info = parse_enum(root_item, root_item.name == "bitfield");
             if (!enum_info)
             {
                 writeWarning("Failed to parse enum: ", enum_name);
@@ -1926,7 +1927,7 @@ Profile* parse_profile(ConfItem conf, NoGCAllocator allocator = defaultAllocator
     return profile;
 }
 
-VoidEnumInfo* parse_enum(ConfItem conf)
+VoidEnumInfo* parse_enum(ConfItem conf, bool is_bitfield = false)
 {
     const(char)[] enum_name = conf.value.unQuote;
     size_t count = conf.sub_items.length;
@@ -1953,6 +1954,7 @@ VoidEnumInfo* parse_enum(ConfItem conf)
                 val = val[2 .. $].trimFront;
                 ulong shift = val.parse_uint_with_base(&taken);
                 v <<= shift;
+                is_bitfield = true;     // shift syntax declares flag members
             }
         }
         if (taken != val.length)
@@ -1965,28 +1967,32 @@ VoidEnumInfo* parse_enum(ConfItem conf)
     }
 
     import urt.mem.temp;
+    VoidEnumInfo* info;
     if (min >= byte.min && max <= byte.max)
     {
         auto b_values = cast(byte[])talloc(1 * count);
         foreach (i, v; t_vals)
             b_values[i] = cast(byte)v;
-        return make_enum_info(enum_name, keys[], b_values[]);
+        info = make_enum_info(enum_name, keys[], b_values[]);
     }
     else if (min >= short.min && max <= short.max)
     {
         auto s_values = cast(short[])talloc(2 * count);
         foreach (i, v; t_vals)
             s_values[i] = cast(short)v;
-        return make_enum_info(enum_name, keys[], s_values[]);
+        info = make_enum_info(enum_name, keys[], s_values[]);
     }
     else if (min >= int.min && max <= int.max)
     {
         auto i_values = cast(int[])talloc(4 * count);
         foreach (i, v; t_vals)
             i_values[i] = cast(int)v;
-        return make_enum_info(enum_name, keys[], i_values[]);
+        info = make_enum_info(enum_name, keys[], i_values[]);
     }
-    return make_enum_info(enum_name, keys[], t_vals[]);
+    else
+        info = make_enum_info(enum_name, keys[], t_vals[]);
+    info.bitfield = is_bitfield;
+    return info;
 }
 
 
