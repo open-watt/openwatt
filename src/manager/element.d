@@ -516,9 +516,13 @@ public:
     {
         enum wall = is(immutable TB == immutable SysTime);
         static if (wall)
+        {
             debug assert(!data_format.regular);
+        }
         else
+        {
             debug assert(data_format.uses_device_ticks);
+        }
         if (times.length == 0)
             return;
         debug assert(records.length == times.length * data_format.stride);
