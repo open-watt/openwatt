@@ -91,7 +91,7 @@ Item get_item(Item : BaseObject)(CID id) pure
 Item get_item_by_name(Item : BaseObject)(const(char)[] id) pure
     if (!is(Item == BaseObject))
 {
-    BaseObject item = item_table(Item.collection_id).get_by_name(id);
+    BaseObject item = item_table(Item.collection_id).get_by_name(id, Item.collection_id);
     return cast(Item)item; // TODO: this is a D dynamic cast, but we could check our own typeinfo
 }
 
