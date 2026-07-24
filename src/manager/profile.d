@@ -232,8 +232,14 @@ enum uint first_section_kind = 16;
 
 uint register_profile_section(const(char)[] name, ProfileSections handler)
 {
-    debug foreach (ref s; g_profile_sections)
-        assert(s.name != name, "profile section already registered");
+    foreach (ref s; g_profile_sections)
+    {
+        if (s.name == name)
+        {
+            s.handler = handler;    // re-registration rebinds the handler at the same kind
+            return s.kind;
+        }
+    }
     uint kind = cast(uint)(first_section_kind + g_profile_sections.length);
     assert(kind <= ubyte.max, "too many profile sections");
     g_profile_sections ~= ProfileSectionReg(name, handler, kind);
@@ -244,8 +250,14 @@ enum uint first_root_section_kind = 1;
 
 uint register_profile_root_section(const(char)[] name, ProfileRootSections handler)
 {
-    debug foreach (ref s; g_profile_root_sections)
-        assert(s.name != name, "profile root section already registered");
+    foreach (ref s; g_profile_root_sections)
+    {
+        if (s.name == name)
+        {
+            s.handler = handler;
+            return s.kind;
+        }
+    }
     uint kind = cast(uint)(first_root_section_kind + g_profile_root_sections.length);
     g_profile_root_sections ~= ProfileRootSectionReg(name, handler, kind);
     return kind;
@@ -734,12 +746,13 @@ unittest
 
         import manager.sample : desc_by_index;
 
-        // The normalized descriptor carries the scaling and typed format directly.
+        // "0.1V" folds into the unit's decimal scale: records stay u16, exact, in deciVolts
         ref const TDesc cv = prof.get_section!TDesc(tsec, 0);
         assert(cv.desc != 0xFFFF && cv.length == 2 && cv.addr == 1);
         SampleDesc cvd = desc_by_index(cv.desc);
-        assert(cvd.fmt.type == ValueType.f64);
-        assert(cvd.pre_scale == 0.1);
+        import urt.si.unit : Volt;
+        assert(cvd.fmt.type == ValueType.u16 && cvd.pre_scale == 1);
+        assert(cvd.fmt.unit == ScaledUnit(Volt, -1));
 
         // profile enums register qualified and resolve locally by bare name
         ref const TDesc md = prof.get_section!TDesc(tsec, 1);

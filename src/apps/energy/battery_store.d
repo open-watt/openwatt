@@ -120,6 +120,7 @@ unittest
     {
         Element* e = defaultAllocator.allocT!Element();
         e.id = id.makeString(defaultAllocator);
+        e.format = register_value_format(value);
         e.value = Variant(value);
         c.elements ~= e;
     }
