@@ -645,10 +645,10 @@ private:
 unittest
 {
     import urt.si.unit : ScaledUnit;
-    import manager.sample.codec : clear_encoding_registry, find_encoding, register_builtin_encodings;
+    import manager.sample.codec : clear_encoding_registry, register_builtin_encodings;
     import manager.sample.spec : stream_le_context;
 
-    assert(!find_encoding("yymmddhhmmss"));
+    clear_encoding_registry();
     register_builtin_encodings();
     scope(exit) clear_encoding_registry();
 

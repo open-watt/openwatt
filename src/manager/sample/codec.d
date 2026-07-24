@@ -72,7 +72,7 @@ void register_encoding(Encoding e)
 
 unittest
 {
-    assert(g_num_encodings == 0);
+    clear_encoding_registry();
     register_builtin_encodings();
     scope(exit) clear_encoding_registry();
     const(Encoding)* e = find_encoding("yymmddhhmmss");

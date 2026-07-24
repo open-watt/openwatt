@@ -135,7 +135,19 @@ nothrow @nogc:
 
     ~this()
     {
-        // TODO: proper cleanup
+        if (g_console_instances is &this)
+            g_console_instances = _next_console_instance;
+        else
+        {
+            for (Console* p = g_console_instances; p !is null; p = p._next_console_instance)
+            {
+                if (p._next_console_instance is &this)
+                {
+                    p._next_console_instance = _next_console_instance;
+                    break;
+                }
+            }
+        }
     }
 
     void update()
