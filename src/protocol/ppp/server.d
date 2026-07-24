@@ -4,7 +4,6 @@ import urt.lifetime;
 import urt.string;
 
 import manager.base;
-import manager.collection : RekeyHandler;
 
 import protocol.ppp;
 
@@ -67,7 +66,6 @@ nothrow @nogc:
     // API...
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const pure
         => _stream !is null;
@@ -187,7 +185,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
 private:
     ObjectRef!BaseInterface _interface;

@@ -200,7 +200,6 @@ nothrow @nogc:
 
 
 protected:
-    mixin RekeyHandler;
 
     // Egress entry for endpoint traffic: a CPCEndpoint forwards a CPCFrame here (framework calls this via
     // forward()). We enqueue it on the target endpoint's channel and let the scheduler emit it.
@@ -1315,7 +1314,6 @@ nothrow @nogc:
 
 
 protected:
-    mixin RekeyHandler;
 
     // wrap the raw frame into a CPCFrame (borrowing the payload) and forward it to the trunk; the trunk
     // copies it into this endpoint's channel on transmit(), so the borrow only needs to last that call.

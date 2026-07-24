@@ -107,7 +107,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const
         => _interface !is null && _vlan != 0;

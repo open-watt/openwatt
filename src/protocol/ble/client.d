@@ -179,7 +179,6 @@ nothrow @nogc:
     }
 
 protected:
-    mixin RekeyHandler;
 
     override bool validate() const
         => _iface !is null && cast(bool)_peer && (cast(const(BLEInterface))_iface.get) !is null;
@@ -903,7 +902,7 @@ unittest
 
         this()
         {
-            super(CID(1));
+            super(CID(1));      // dummy id for the mock; never registered in a table
         }
 
         override bool att_send(const(ubyte)[] pdu)
