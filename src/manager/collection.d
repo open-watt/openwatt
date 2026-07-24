@@ -22,6 +22,7 @@ enum CollectionType : ubyte
 {
     aa55,
     api,
+    appliance,
     binding, // all protocol bindings
     ble_client,
     certificate,
@@ -47,6 +48,7 @@ enum CollectionType : ubyte
     ntp_client,
     ota,
     pcap_server,
+    policy,
     ppp_server,
     pppoe_server,
     recorder,
@@ -64,6 +66,7 @@ enum CollectionType : ubyte
     zb_controller,
     zb_endpoint,
     zigbee, // node, router, coordinator
+    link,
     automation,
     device, // NOT BaseObjects: the device type's table is g_app.devices, sharing the CID space
     count
