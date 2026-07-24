@@ -16,7 +16,6 @@ import manager.collection;
 import manager.console.session : ConsoleSession = Session;
 import manager.console.table : Table;
 import manager.expression : NamedArgument;
-import manager.features : is_tiny;
 
 import router.stream;
 import protocol.ip.tcp_stream;
@@ -24,10 +23,9 @@ import protocol.tls : Certificate, TLSServer;
 
 import protocol.mqtt.codec;
 import protocol.mqtt.connection;
+import protocol.mqtt.ha_discovery;
 import protocol.mqtt.session;
 import protocol.mqtt.topic;
-
-enum bool has_message_cache = !is_tiny;
 
 nothrow @nogc:
 
@@ -38,7 +36,8 @@ class MQTTBroker : ActiveObject
                                  Prop!("tls-port", tls_port),
                                  Prop!("certificates", certificates),
                                  Prop!("allow-anonymous", allow_anonymous),
-                                 Prop!("client-timeout", client_timeout));
+                                 Prop!("client-timeout", client_timeout),
+                                 Prop!("discover", discover));
 nothrow @nogc:
 
     enum type_name = "mqtt-broker";
@@ -104,6 +103,37 @@ nothrow @nogc:
     {
         _client_timeout = value;
         mark_set!(typeof(this), "client-timeout")();
+    }
+
+    const(char)[][] discover() const
+        => discovery_prefixes();
+    const(char)[] discover(const(char)[][] values...)
+    {
+        if (values.length == _discover.length)
+        {
+            bool same = true;
+            foreach (i, value; values)
+                same &= _discover[i][] == value[];
+            if (same)
+                return null;
+        }
+
+        _discover.clear();
+        foreach (value; values)
+            if (!value.empty)
+                _discover ~= value.makeString(g_app.allocator);
+        _ha_discovery.configure(discovery_prefixes(), running ? &discovery_publish : null);
+        replay_discovery();
+        mark_set!(typeof(this), "discover")();
+        return null;
+    }
+
+    private const(char)[][] discovery_prefixes() const
+    {
+        auto result = tempAllocator().allocArray!(const(char)[])(_discover.length);
+        foreach (i, ref prefix; _discover)
+            result[i] = prefix[];
+        return result;
     }
 
     alias subscribe = ActiveObject.subscribe;
@@ -173,7 +203,6 @@ nothrow @nogc:
         table.render(session);
     }
 
-    static if (has_message_cache)
     void print_cache(ConsoleSession session, const(char)[] filter = "#")
     {
         if (!filter)
@@ -225,6 +254,24 @@ nothrow @nogc:
             return;
         }
         table.render(session);
+    }
+
+    void read_payload(ConsoleSession session, const(char)[] topic)
+    {
+        if (!validate_topic_name(topic))
+        {
+            session.write_line("Invalid MQTT topic name");
+            return;
+        }
+
+        CachedMessage* message = topic in _cache;
+        if (!message)
+        {
+            session.write_line("No cached MQTT message for topic: ", topic);
+            return;
+        }
+
+        session.write_line(cast(const(char)[])message.payload[]);
     }
 
     void print_sessions(ConsoleSession session)
@@ -416,11 +463,18 @@ protected:
         // Running = at least one configured listener is actually accepting.
         bool tcp_up = (_port != 0) && _server && _server.running;
         bool tls_up = (_tls_port != 0) && _tls_server && _tls_server.running;
-        return (tcp_up || tls_up) ? CompletionStatus.complete : CompletionStatus.continue_;
+        if (tcp_up || tls_up)
+        {
+            _ha_discovery.resume(&discovery_publish);
+            return CompletionStatus.complete;
+        }
+        return CompletionStatus.continue_;
     }
 
     override CompletionStatus shutdown()
     {
+        _ha_discovery.suspend();
+
         if (_cert_subscribed)
         {
             foreach (ref c; _certificates)
@@ -454,11 +508,8 @@ protected:
         _sessions.clear();
 
         _trie.clear();
-        static if (has_message_cache)
-        {
-            _cache.clear();
-            _cache_order.clear();
-        }
+        _cache.clear();
+        _cache_order.clear();
         return CompletionStatus.complete;
     }
 
@@ -503,6 +554,8 @@ private:
     bool _allow_anonymous;
     bool _cert_subscribed;
     Duration _client_timeout;
+    Array!String _discover;
+    HADiscovery _ha_discovery;
 
     TCPServer _server;
     TCPServer _tls_server;
@@ -511,22 +564,19 @@ private:
     Array!(Connection*) _connections;
     TopicTrie _trie;
 
-    static if (has_message_cache)
+    enum max_cached_messages = 512;
+    Map!(String, CachedMessage) _cache;
+    Array!String _cache_order;
+
+    struct CachedMessage
     {
-        enum max_cached_messages = 512;
-        Map!(String, CachedMessage) _cache;
-        Array!String _cache_order;
+        @disable this(this);
 
-        struct CachedMessage
-        {
-            @disable this(this);
-
-            String sender;
-            Array!ubyte payload;
-            Array!ubyte properties;
-            MonoTime timestamp;
-            bool retained;
-        }
+        String sender;
+        Array!ubyte payload;
+        Array!ubyte properties;
+        MonoTime timestamp;
+        bool retained;
     }
 
     static void add_payload_cell(ref Table table, const(ubyte)[] payload)
@@ -613,7 +663,6 @@ private:
         return tconcat((limit - elapsed).as!"seconds", "s");
     }
 
-    static if (has_message_cache)
     static const(char)[] age_cell(MonoTime timestamp, MonoTime now)
     {
         if (timestamp == MonoTime.init)
@@ -626,7 +675,6 @@ private:
         return tconcat(age.as!"hours", "h");
     }
 
-    static if (has_message_cache)
     void store_cache(const(char)[] sender_id, const(char)[] topic, const(ubyte)[] payload, const(ubyte)[] properties, bool retain, MonoTime timestamp)
     {
         CachedMessage* existing = topic in _cache;
@@ -651,7 +699,6 @@ private:
         _cache_order ~= order_key.move;
     }
 
-    static if (has_message_cache)
     static void update_cached_message(ref CachedMessage msg, const(char)[] sender_id, const(ubyte)[] payload, const(ubyte)[] properties, bool retain, MonoTime timestamp)
     {
         msg.sender = sender_id ? sender_id.makeString(defaultAllocator()) : String();
@@ -663,11 +710,13 @@ private:
 
     void publish_internal(Session* publisher, const(char)[] sender_id, const(char)[] topic, const(ubyte)[] payload, const(ubyte)[] properties, bool retain, MonoTime timestamp)
     {
-        static if (has_message_cache)
-            store_cache(sender_id, topic, payload, properties, retain, timestamp);
+        store_cache(sender_id, topic, payload, properties, retain, timestamp);
 
         if (retain)
             _trie.store_retained(topic, payload, properties, 0x01);
+
+        if (_ha_discovery.handle_publish(topic, payload, timestamp))
+            replay_discovery_state();
 
         _trie.match_subscribers(topic, (ref const Subscription sub) nothrow @nogc {
             if (sub.no_local && sub.subscriber is publisher)
@@ -682,6 +731,32 @@ private:
                 return; // detached -- drop (TODO: queue for QoS > 0)
             Connection* conn = cast(Connection*)s.connection;
             conn.send_publish_to_subscriber(topic, payload, properties, sub.qos, false);
+        });
+    }
+
+    void discovery_publish(const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp)
+    {
+        publish_internal(null, null, topic, payload, null, false, timestamp);
+    }
+
+    void replay_discovery()
+    {
+        if (_discover.empty)
+            return;
+        foreach (ref prefix; _discover)
+        {
+            String filter = tconcat(prefix[], "/#").makeString(defaultAllocator());
+            _trie.match_retained(filter[], (ref const RetainedMessage message) nothrow @nogc {
+                _ha_discovery.handle_publish(message.topic[], message.payload[], getTime());
+            });
+        }
+        replay_discovery_state();
+    }
+
+    void replay_discovery_state()
+    {
+        _trie.match_retained("#", (ref const RetainedMessage message) nothrow @nogc {
+            _ha_discovery.handle_state_publish(message.topic[], message.payload[], getTime());
         });
     }
 

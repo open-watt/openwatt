@@ -37,8 +37,7 @@ nothrow @nogc:
         g_app.console.register_collection!MQTTBinding();
 
         g_app.console.register_command!retained("/protocol/mqtt/broker", this, "retained");
-        static if (has_message_cache)
-            g_app.console.register_command!cache("/protocol/mqtt/broker", this, "cache");
+        g_app.console.register_command!cache("/protocol/mqtt/broker", this, "cache");
         g_app.console.register_command!read("/protocol/mqtt/broker", this, "read");
         g_app.console.register_command!sessions("/protocol/mqtt/broker", this, "sessions");
         g_app.console.register_command!subscriptions("/protocol/mqtt/broker", this, "subscriptions");
@@ -136,7 +135,7 @@ nothrow @nogc:
 
     bool parse_root(uint, ref const ConfItem item, void[] slot, ref ProfileBuilder b)
     {
-        ushort[] words = (cast(ushort*)slot.ptr)[0 .. slot.length / ushort.sizeof];
+        ushort[] words = cast(ushort[])slot;
         words[0] = 0;
         const(char)[] tail = item.value;
         while (!tail.empty)
@@ -158,7 +157,6 @@ nothrow @nogc:
         b.print_retained(session, filter ? filter.value[] : "#");
     }
 
-    static if (has_message_cache)
     void cache(Session session, Nullable!MQTTBroker broker, Nullable!String filter)
     {
         MQTTBroker b = resolve_broker(session, broker);
@@ -174,10 +172,7 @@ nothrow @nogc:
         if (!b)
             return;
 
-        static if (has_message_cache)
-            b.print_cache(session, topic[]);
-        else
-            b.print_retained(session, topic[]);
+        b.read_payload(session, topic[]);
     }
 
     void sessions(Session session, Nullable!MQTTBroker broker)
