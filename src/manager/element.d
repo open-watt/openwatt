@@ -218,30 +218,9 @@ enum SamplingMode : ubyte
     config
 }
 
-// Best-effort recent-sample cache: if it wraps before the recorder ships, those
-// samples are lost; the db is the authoritative store.
-enum uint recent_capacity = 16;
-
-struct ElementSample
-{
-nothrow @nogc:
-
-    MonoTime time;
-    Variant value;
-
-    this(ref const ElementSample rh)
-    {
-        time = rh.time;
-        value = rh.value;
-    }
-}
-
-
 struct Element
 {
 nothrow @nogc:
-
-    package Variant prev;
 
     String id;
     String name;
@@ -249,11 +228,6 @@ nothrow @nogc:
     String display_unit;
 
     SysTime last_update;
-    SysTime prev_update;
-
-    package Array!ElementSample recent;
-    package uint recent_head;
-    package uint recent_count;
 
     package EID _eid;
 
@@ -395,15 +369,6 @@ nothrow @nogc:
         return ElementCursor(handle, c.position, c.bit);
     }
 
-    ref const(ElementSample) recent_at(uint i) const pure
-        => recent[(recent_head + i) % cast(uint)recent.length];
-
-    ulong recent_oldest() const pure
-        => recent_count ? unixTimeNs(cast(SysTime)recent_at(0).time) : ulong.max;
-
-    ulong recent_newest() const pure
-        => recent_count ? unixTimeNs(cast(SysTime)recent_at(recent_count - 1).time) : 0;
-
     private bool update_typed_series(ref const Variant v, SysTime timestamp, Subscriber who)
     {
         if (data_format.is_text)
@@ -447,42 +412,11 @@ nothrow @nogc:
     {
         Variant v = record_value();
         SysTime t = record_update;
-        bool is_newer = t > last_update;
-        if (is_newer)
-        {
-            prev_update = last_update;
+        if (t > last_update)
             last_update = t;
-        }
-        if (update.previous != v)
-        {
-            if (is_newer)
-                prev = update.previous;
-            if (is_newer)
-                capture_sample(t, v);
-        }
         update.value = v.move;
         update.timestamp = t;
         update.value_ready = true;
-    }
-
-    private void capture_sample(SysTime timestamp, ref const Variant value)
-    {
-        if (recent.length == 0)
-            recent.resize(recent_capacity);
-        uint cap = cast(uint)recent.length;
-        uint idx;
-        if (recent_count == cap)
-        {
-            idx = recent_head;
-            recent_head = (recent_head + 1) % cap;
-        }
-        else
-        {
-            idx = (recent_head + recent_count) % cap;
-            ++recent_count;
-        }
-        recent[][idx].time = cast(MonoTime)timestamp;
-        recent[][idx].value = value;
     }
 
     void force_update(SysTime timestamp)
@@ -491,10 +425,7 @@ nothrow @nogc:
             return;
         Variant current = record_value();
         SysTime previous_timestamp = last_update;
-        prev_update = last_update;
         last_update = timestamp;
-        prev = current;
-        capture_sample(timestamp, current);
 
         SampleUpdate[1] updates;
         updates[0].element = &this;
@@ -599,10 +530,7 @@ public:
             {
                 _last_update = t;
                 if (t > last_update)
-                {
-                    prev_update = last_update;
                     last_update = t;
-                }
                 return;
             }
         }
@@ -616,10 +544,7 @@ public:
                 {
                     _last_update = t;
                     if (t > last_update)
-                    {
-                        prev_update = last_update;
                         last_update = t;
-                    }
                     return;
                 }
             }
@@ -860,10 +785,6 @@ public:
             _subs = dead.next;
             free((cast(void*)dead)[0 .. Subscription.sizeof]);
         }
-        prev = Variant();
-        recent.clear();
-        recent_head = 0;
-        recent_count = 0;
     }
 
 private:
@@ -925,10 +846,7 @@ private:
         {
             _last_update = t;
             if (t > last_update)
-            {
-                prev_update = last_update;
                 last_update = t;
-            }
             return;
         }
         Variant previous = record_value();
@@ -946,10 +864,7 @@ private:
         {
             _last_update = t;
             if (t > last_update)
-            {
-                prev_update = last_update;
                 last_update = t;
-            }
             return;
         }
         Variant previous = record_value();
@@ -1340,23 +1255,7 @@ unittest
 {
     import urt.time : from_unix_time_ns;
 
-    // value() captures into the recent buffer; it wraps, keeping the newest N
-    Element e;
-    foreach (i; 0 .. recent_capacity + 4)
-        e.value(Variant(cast(double)i), from_unix_time_ns((i + 1) * 1_000_000UL));
-
-    assert(e.recent_count == recent_capacity);
-    assert(e.recent_oldest() == 5 * 1_000_000UL); // i=0..3 dropped; oldest kept is i=4
-    assert(e.recent_at(recent_capacity - 1).value.asDouble == recent_capacity + 3);
-
-    // non-numeric values are still captured as raw Variants (db/graph skip them)
-    Element s;
-    s.value(Variant(StringLit!"hi"), from_unix_time_ns(1_000_000));
-    assert(s.recent_count == 1);
-    double d;
-    assert(!sample_to_double(s.recent_at(0).value, d));
-
-    // typed series: observations feed the series and mirror into the boxed legacy path
+    // Element observations always feed their typed series.
     static immutable DataFormat bool_held = DataFormat(ValueType.bool_, SeriesKind.held);
     Element n;
     n.format = register_format(bool_held);
@@ -1367,7 +1266,6 @@ unittest
     assert(n.record_count == 2);
     assert(n.value.isBool && !n.value.asBool);
     assert(n.last_update == from_unix_time_ns(2_000_000));
-    assert(n.recent_count == 1);
 
     // a boxed write to an Element with a typed series lands in the series too
     n.value(Variant(true), from_unix_time_ns(3_000_000));
@@ -1531,14 +1429,14 @@ unittest
     assert((cast(const(String)*)te.latest_record.raw.ptr).ptr is allocated);
     assert(te.last_update == from_unix_time_ns(2_000));
 
-    // String ingress adopts the handle; retained refs are the typed latest slot,
-    // boxed Element.value, the recent sample, and the bucket record.
+    // String ingress adopts the handle; retained refs are the typed latest slot
+    // and the bucket record.
     String src = "second value arriving as a shared handle".makeString(defaultAllocator());
     static ushort rc(ref const String s) => (cast(const(ushort)*)s.ptr)[-2] & 0x3FFF;
     assert(rc(src) == 0);
     te.write_sample(src, from_unix_time_ns(3_000));
     assert(te.record_count == 3);
-    assert(rc(src) == 4);
+    assert(rc(src) == 2);
     assert(te.value().asString == src[]);
 
     Cursor tcur = te.open_series_cursor(0);
@@ -1662,10 +1560,10 @@ unittest
     tv.retention(1);
     String evictee = "the first long string, soon evicted".makeString(defaultAllocator());
     tv.write_sample(evictee, from_unix_time_ns(1_000));
-    assert(rc(evictee) == 4);
+    assert(rc(evictee) == 2);
     tv.mark_gap();
     tv.write_sample("replacement value, also quite long", from_unix_time_ns(2_000));
-    assert(rc(evictee) == 2);   // typed slot and bucket released; prev and recent retain it
+    assert(rc(evictee) == 0);
     tv.teardown();
     assert(rc(evictee) == 0);
 

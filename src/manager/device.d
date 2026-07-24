@@ -688,6 +688,7 @@ unittest
     Element source;
     Element target;
     source.format = register_format(f64_sampled);
+    target.format = source.format;
     Computation sum;
     sum.kind = ComputationKind.accumulator;
     sum.source = &source;
