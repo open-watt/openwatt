@@ -114,15 +114,8 @@ template value_type_of(T)
 
 FormatId register_value_format(T)(auto ref T value)
 {
-    alias U = Unqual!T;
-    static if (is(U == Variant))
+    static if (is(Unqual!T == Variant))
         return register_variant_format(value);
-    else static if (ValidUserType!U)
-    {
-        Variant register_type = Variant(value); // registers the type details on first use
-        return register_format(DataFormat(ValueType.user, SeriesKind.held,
-                                          &find_type_details(TypeDetailsFor!U.type_id)));
-    }
     else
         return register_value_format!T();
 }
@@ -144,6 +137,12 @@ FormatId register_value_format(T)()
         return register_format(DataFormat(ValueType.s64, SeriesKind.held, Nanosecond));
     else static if (is(U == Quantity!(N, scale), N, ScaledUnit scale))
         return register_format(DataFormat(value_type_of!N, SeriesKind.held, scale));
+    else static if (ValidUserType!U)
+    {
+        alias registered = MakeTypeDetails!U;   // registration rides its shared static this
+        return register_format(DataFormat(ValueType.user, SeriesKind.held,
+                                          &find_type_details(TypeDetailsFor!U.type_id)));
+    }
     else
         static assert(false, "value needs an explicit record format");
 }
