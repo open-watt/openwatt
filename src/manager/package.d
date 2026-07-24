@@ -251,8 +251,6 @@ nothrow @nogc:
 
     Map!(String, RegisteredType) types;
 
-    // database...
-
     this()
     {
         import urt.mem;
