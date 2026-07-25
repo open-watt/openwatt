@@ -199,36 +199,11 @@ private:
 
             assert(e.offset + e.length <= p.length, "message too small for element data?!");
             const(void)[] wire = p.data[e.offset .. e.offset + e.length];
-            SysTime t = cast(SysTime)p.creation_time;
 
-            Element* el = e.element;
-            const(DataFormat)* fmt = e.desc.fmt;
-            if (fmt.is_scalar)
-            {
-                Scalar s;
-                s.raw[] = 0;
-                if (!sample_record(wire, e.desc, s.raw[0 .. fmt.stride]))
-                    continue;
-                if (el.format == e.desc.format)
-                    el.write_record(s.raw[0 .. fmt.stride], t);
-                else
-                    el.value(box_record(s.raw.ptr, *fmt), t);
-            }
-            else if (fmt.type == ValueType.char_)
-            {
-                char[64] buf = void;
-                el.value(Variant(sample_text(wire, e.desc, buf)), t);
-            }
-            else
-            {
-                // user records box at the Element until a typed wide path exists
-                ubyte[64] rec = void;
-                if (fmt.stride <= rec.length && sample_record(wire, e.desc, rec[0 .. fmt.stride]))
-                    el.value(box_record(rec.ptr, *fmt), t);
-            }
+            write_wire_sample(e.element, wire, e.desc, cast(SysTime)p.creation_time);
 
             version (DebugCANBinding)
-                log.debugf("sample - offset: {0} element: {1} = {2}", e.offset, el.id, el.value);
+                log.debugf("sample - offset: {0} element: {1} = {2}", e.offset, e.element.id, e.element.value);
         }
     }
 }

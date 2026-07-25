@@ -229,9 +229,6 @@ protected:
 
     void on_element_change(ref const SampleUpdate update)
     {
-        if (_self_write)
-            return; // don't write back values we just read from the response
-
         foreach (ref se; _elements[])
         {
             if (se.element !is update.element)
@@ -293,7 +290,6 @@ private:
     String _model_name;
 
     bool _subscribed;
-    bool _self_write;
 
     Array!HTTPSampleElement _elements;
     Array!RequestState _request_states;
@@ -687,11 +683,6 @@ private:
         if (_in_flight_count == 0)
             return 0;
 
-        // Guard against re-triggering write requests when the response handler
-        // writes the freshly-parsed value back into our subscribed elements.
-        _self_write = true;
-        scope(exit) _self_write = false;
-
         ushort req_idx = _in_flight_queue[_in_flight_head];
         _in_flight_head = cast(ubyte)((_in_flight_head + 1) % _in_flight_queue.length);
         --_in_flight_count;
@@ -778,7 +769,7 @@ private:
                     continue;
 
                 const(char)[] capture = rmatch.num_captures > 0 ? rmatch.captures[0] : rmatch.full;
-                if (apply_text_value(se.element, capture, se.desc, response.timestamp))
+                if (write_token_sample(se.element, capture, se.desc, response.timestamp, &on_element_change))
                 {
                     se.last_sample = getTime();
                     se.sampled = true;
@@ -842,7 +833,7 @@ private:
             if (val is null)
                 continue;
 
-            if (!apply_value(se.element, *val, se.desc, response.timestamp))
+            if (!write_variant_sample(se.element, *val, se.desc, response.timestamp, &on_element_change))
                 continue;
             se.last_sample = getTime();
             se.sampled = true;
@@ -1020,54 +1011,6 @@ void deep_merge(ref Variant target, ref Variant source)
         target = source;
 }
 
-bool apply_text_value(Element* element, const(char)[] token, ref const SampleDesc desc, SysTime timestamp)
-{
-    const(DataFormat)* fmt = desc.fmt;
-    if (fmt.is_text)
-    {
-        if (element.format == desc.format)
-            element.write_sample(token, timestamp);
-        else
-            element.value(token, timestamp);
-        return true;
-    }
-
-    ubyte[64] record = void;
-    if (fmt.stride > record.length || !parse_record(token, desc, record[0 .. fmt.stride]))
-        return false;
-    if (element.format == desc.format)
-        element.write_record(record[0 .. fmt.stride], timestamp);
-    else
-        element.value(box_record(record.ptr, *fmt), timestamp);
-    return true;
-}
-
-bool apply_value(Element* element, ref const Variant val, ref const SampleDesc desc, SysTime timestamp)
-{
-    if (val.isNull)
-    {
-        // clear the element value; is this the correct thing to do?
-        element.value(Variant(), timestamp);
-        return true;
-    }
-
-    if (val.isString)
-        return apply_text_value(element, val.asString(), desc, timestamp);
-
-    const(DataFormat)* fmt = desc.fmt;
-    char[128] token_buffer = void;
-    const(char)[] token;
-    if (val.isBool && fmt.type != ValueType.bool_)
-        token = val.asBool ? "1" : "0";
-    else
-    {
-        ptrdiff_t length = write_json(val, token_buffer[], true);
-        if (length <= 0)
-            return false;
-        token = token_buffer[0 .. length];
-    }
-    return apply_text_value(element, token, desc, timestamp);
-}
 
 
 unittest
@@ -1152,7 +1095,7 @@ unittest
     Element current;
     current.format = amps.format;
     Variant raw_current = Variant(123);
-    assert(apply_value(&current, raw_current, amps, getSysTime()));
+    assert(write_variant_sample(&current, raw_current, amps, getSysTime()));
     double current_amps = current.scaled_value(ScaledUnit(Ampere));
     assert(current_amps > 12.299 && current_amps < 12.301);
 
@@ -1174,7 +1117,7 @@ unittest
     Element mode;
     mode.format = mode_desc.format;
     Variant raw_mode = Variant(2);
-    assert(apply_value(&mode, raw_mode, mode_desc, getSysTime()));
+    assert(write_variant_sample(&mode, raw_mode, mode_desc, getSysTime()));
     assert(mode.value.is_enum && mode.value.asLong == 2);
 
     SampleDesc text_desc;
@@ -1182,7 +1125,7 @@ unittest
     Element text;
     text.format = text_desc.format;
     Variant raw_text = Variant("native");
-    assert(apply_value(&text, raw_text, text_desc, getSysTime()));
+    assert(write_variant_sample(&text, raw_text, text_desc, getSysTime()));
     assert(text.value == "native");
 
     // evaluate_success

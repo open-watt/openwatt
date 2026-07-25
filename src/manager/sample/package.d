@@ -7,15 +7,18 @@ module manager.sample;
 // transient views; the Element creates the String stored by latest.
 
 import urt.conv;
+import urt.format.json : write_json;
 import urt.map : Map;
 import urt.meta.enuminfo : enum_info_equal, enum_info_size, VoidEnumInfo;
 import urt.mem.allocator : defaultAllocator;
 import urt.si.unit : ScaledUnit;
 import urt.string : ieq, makeString, String;
 import urt.string.format : formatValue;
+import urt.time : getSysTime, SysTime;
 import urt.typereg : TypeDetails;
 import urt.variant : Variant;
 
+import manager.element : Element, Subscriber;
 import manager.sample.codec;
 import manager.sample.wire;
 public import manager.series;
@@ -446,6 +449,102 @@ bool emit_text(const(char)[] text, ref const SampleDesc desc, void[] wire)
     image[0 .. n] = cast(const(ubyte)[])text[0 .. n];
     wire_image_encode(image[0 .. wire.length], desc.layout, wire);
     return true;
+}
+
+// the element write edge: decode one wire field into its element, natively when the element
+// carries the desc's format, boxed when it does not. `exclude` is the subscriber that produced
+// the sample, echoed back to the element so it does not receive its own write
+bool write_wire_sample(Element* element, const(void)[] wire, ref const SampleDesc desc,
+                       SysTime timestamp = getSysTime(), Subscriber exclude = null)
+{
+    const(DataFormat)* fmt = desc.fmt;
+
+    if (fmt.is_text)
+    {
+        char[256] buffer = void;
+        const(char)[] text = sample_text(wire, desc, buffer);
+        if (text is null)
+            return false;
+        if (element.format == desc.format)
+            element.write_sample(text, timestamp, exclude);
+        else
+            element.value(Variant(text), timestamp, exclude);
+        return true;
+    }
+
+    if (fmt.is_scalar)
+    {
+        Scalar scalar;
+        scalar.raw[] = 0;
+        if (!sample_record(wire, desc, scalar.raw[0 .. fmt.stride]))
+            return false;
+        if (element.format == desc.format)
+            element.write_record(scalar.raw[0 .. fmt.stride], timestamp, exclude);
+        else
+            element.value(box_record(scalar.raw.ptr, *fmt), timestamp, exclude);
+        return true;
+    }
+
+    // wide records still box at the element until it takes them natively
+    ubyte[256] record = void;
+    if (fmt.stride > record.length || !sample_record(wire, desc, record[0 .. fmt.stride]))
+        return false;
+    element.value(box_record(record.ptr, *fmt), timestamp, exclude);
+    return true;
+}
+
+// the textual twin, for protocols whose payload is a token rather than a wire field
+bool write_token_sample(Element* element, const(char)[] token, ref const SampleDesc desc,
+                        SysTime timestamp = getSysTime(), Subscriber exclude = null)
+{
+    const(DataFormat)* fmt = desc.fmt;
+
+    if (fmt.is_text)
+    {
+        if (element.format == desc.format)
+            element.write_sample(token, timestamp, exclude);
+        else
+            element.value(token, timestamp, exclude);
+        return true;
+    }
+
+    ubyte[256] record = void;
+    if (fmt.stride > record.length || !parse_record(token, desc, record[0 .. fmt.stride]))
+        return false;
+    if (element.format == desc.format)
+        element.write_record(record[0 .. fmt.stride], timestamp, exclude);
+    else
+        element.value(box_record(record.ptr, *fmt), timestamp, exclude);
+    return true;
+}
+
+// a value decoded from a structured document: strings sample as tokens, the rest renders
+// to its token form first
+bool write_variant_sample(Element* element, ref const Variant val, ref const SampleDesc desc,
+                          SysTime timestamp = getSysTime(), Subscriber exclude = null)
+{
+    if (val.isNull)
+    {
+        // clear the element value; is this the correct thing to do?
+        element.value(Variant(), timestamp, exclude);
+        return true;
+    }
+
+    if (val.isString)
+        return write_token_sample(element, val.asString(), desc, timestamp, exclude);
+
+    char[128] token_buffer = void;
+    const(char)[] token;
+    if (val.isBool && desc.fmt.type != ValueType.bool_)
+        token = val.asBool ? "1" : "0";
+    else
+    {
+        ptrdiff_t length = write_json(val, token_buffer[], true);
+        if (length <= 0)
+            return false;
+        token = token_buffer[0 .. length];
+    }
+    return write_token_sample(element, token, desc, timestamp, exclude);
 }
 
 

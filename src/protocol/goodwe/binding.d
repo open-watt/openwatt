@@ -214,17 +214,7 @@ protected:
         se.offset = aa55.offset;
         se.length = aa55.length;
         se.desc = sd;
-        switch (desc.update_frequency)
-        {
-            case Frequency.realtime:       se.sample_time_ms = 400;         break;
-            case Frequency.high:           se.sample_time_ms = 1_000;       break;
-            case Frequency.medium:         se.sample_time_ms = 10_000;      break;
-            case Frequency.low:            se.sample_time_ms = 60_000;      break;
-            case Frequency.constant:       se.sample_time_ms = 0;           break;
-            case Frequency.configuration:  se.sample_time_ms = 0;           break;
-            case Frequency.on_demand:      se.sample_time_ms = ushort.max;  break;
-            default: assert(false);
-        }
+        se.sample_time_ms = freq_to_sample_ms(desc.update_frequency);
 
         return sd.format;
     }
@@ -288,35 +278,11 @@ private:
 
             assert(e.offset + e.length <= response.length, "response too small for element data?!");
             const(void)[] wire = response[e.offset .. e.offset + e.length];
-            SysTime t = cast(SysTime)response_time;
 
-            Element* el = e.element;
-            const(DataFormat)* fmt = e.desc.fmt;
-            if (fmt.is_scalar)
-            {
-                Scalar s;
-                s.raw[] = 0;
-                if (!sample_record(wire, e.desc, s.raw[0 .. fmt.stride]))
-                    continue;
-                if (el.format == e.desc.format)
-                    el.write_record(s.raw[0 .. fmt.stride], t);
-                else
-                    el.value(box_record(s.raw.ptr, *fmt), t);
-            }
-            else if (fmt.type == ValueType.char_)
-            {
-                char[256] buf = void;
-                el.value(Variant(sample_text(wire, e.desc, buf)), t);
-            }
-            else
-            {
-                ubyte[256] rec = void;
-                if (fmt.stride <= rec.length && sample_record(wire, e.desc, rec[0 .. fmt.stride]))
-                    el.value(box_record(rec.ptr, *fmt), t);
-            }
+            write_wire_sample(e.element, wire, e.desc, cast(SysTime)response_time);
 
             version (DebugGoodWeBinding)
-                log.debugf("sample - offset: {0} element: {1} = {2}", e.offset, el.id, el.value);
+                log.debugf("sample - offset: {0} element: {1} = {2}", e.offset, e.element.id, e.element.value);
         }
     }
 }

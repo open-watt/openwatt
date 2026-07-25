@@ -281,7 +281,6 @@ private:
     String _model_name;
 
     bool _subscribed;
-    bool _self_write;
 
     Array!SampleElement _elements;
 
@@ -350,22 +349,8 @@ private:
                 continue;
 
             const(char)[] payload_str = cast(const(char)[])payload;
-            const(DataFormat)* fmt = e.desc.fmt;
-            bool sampled;
-            _self_write = true;
-            scope(exit) _self_write = false;
-            if (fmt.is_text)
-            {
-                e.element.write_sample(payload_str, cast(SysTime)timestamp);
-                sampled = true;
-            }
-            else if (fmt.is_scalar)
-            {
-                Scalar scalar;
-                sampled = parse_record(payload_str, e.desc, scalar.raw[0 .. fmt.stride]);
-                if (sampled)
-                    e.element.write_record(scalar.raw[0 .. fmt.stride], cast(SysTime)timestamp);
-            }
+            bool sampled = write_token_sample(e.element, payload_str, e.desc,
+                                              cast(SysTime)timestamp, &on_element_change);
 
             if (sampled)
             {
@@ -380,7 +365,7 @@ private:
 
     void on_element_change(ref const SampleUpdate update)
     {
-        if (_self_write || !update.value_ready)
+        if (!update.value_ready)
             return;
         publish_element(update);
     }

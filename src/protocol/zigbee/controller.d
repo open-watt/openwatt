@@ -356,22 +356,7 @@ private:
             return;
         }
 
-        if (fmt.is_scalar)
-        {
-            Scalar s;
-            s.raw[] = 0;
-            if (!sample_record(wire, e.desc, s.raw[0 .. fmt.stride]))
-                return;
-            if (e.element.format == e.desc.format)
-                e.element.write_record(s.raw[0 .. fmt.stride], timestamp, &on_samples);
-            else
-                e.element.value(box_record(s.raw.ptr, *fmt), timestamp, &on_samples);
-            return;
-        }
-
-        ubyte[256] record = void;
-        if (fmt.stride <= record.length && sample_record(wire, e.desc, record[0 .. fmt.stride]))
-            e.element.value(box_record(record.ptr, *fmt), timestamp, &on_samples);
+        write_wire_sample(e.element, wire, e.desc, timestamp, &on_samples);
     }
 
     ZigbeeResult ieee_request(ushort dst, out EUI64 eui, PCP pcp = PCP.be)

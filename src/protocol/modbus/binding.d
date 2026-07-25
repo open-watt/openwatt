@@ -447,16 +447,14 @@ private:
         e.desc = sample_desc;
         if (_current_pass == Pass.primary)
         {
+            e.sampleTimeMs = freq_to_sample_ms(desc.update_frequency, 1);
             switch (desc.update_frequency)
             {
-                case Frequency.realtime:       e.sampleTimeMs = 1;           e.pcp = PCP.bk; e.dei = true;  break;
-                case Frequency.high:           e.sampleTimeMs = 1_000;       e.pcp = PCP.bk; e.dei = false; break;
-                case Frequency.medium:         e.sampleTimeMs = 10_000;      e.pcp = PCP.be; e.dei = false; break;
-                case Frequency.low:            e.sampleTimeMs = 60_000;      e.pcp = PCP.ee; e.dei = false; break;
-                case Frequency.constant:       e.sampleTimeMs = 0;           e.pcp = PCP.ca; e.dei = false; break;
-                case Frequency.configuration:  e.sampleTimeMs = 0;           e.pcp = PCP.ca; e.dei = false; break;
-                case Frequency.on_demand:      e.sampleTimeMs = ushort.max;  e.pcp = PCP.ca; e.dei = false; break;
-                default: assert(false);
+                case Frequency.realtime:       e.pcp = PCP.bk; e.dei = true;  break;
+                case Frequency.high:           e.pcp = PCP.bk; e.dei = false; break;
+                case Frequency.medium:         e.pcp = PCP.be; e.dei = false; break;
+                case Frequency.low:            e.pcp = PCP.ee; e.dei = false; break;
+                default:                       e.pcp = PCP.ca; e.dei = false; break;
             }
         }
         needsSort = true;
@@ -582,41 +580,13 @@ private:
             else
             {
                 _writing_from_poll = true;
-                sample_element(e, data[byte_offset .. byte_offset + e.length], cast(SysTime)response_time);
+                write_wire_sample(e.element, data[byte_offset .. byte_offset + e.length], e.desc, cast(SysTime)response_time);
                 _writing_from_poll = false;
             }
 
             version (DebugModbusBindingRegs)
                 log.tracef("Got reg {0,04x}: {1} = {2}", e.register, e.element.id, e.element.value);
         }
-    }
-
-    bool sample_element(ref SampleElement e, const(void)[] wire, SysTime timestamp)
-    {
-        const(DataFormat)* fmt = e.desc.fmt;
-        if (fmt.is_scalar)
-        {
-            manager.series.Scalar scalar;
-            scalar.raw[] = 0;
-            if (!sample_record(wire, e.desc, scalar.raw[0 .. fmt.stride]))
-                return false;
-            if (e.element.format == e.desc.format)
-                e.element.write_record(scalar.raw[0 .. fmt.stride], timestamp);
-            else
-                e.element.value(box_record(scalar.raw.ptr, *fmt), timestamp);
-            return true;
-        }
-        if (fmt.is_text)
-        {
-            char[256] buffer = void;
-            e.element.value(Variant(sample_text(wire, e.desc, buffer)), timestamp);
-            return true;
-        }
-        ubyte[256] record = void;
-        if (fmt.stride > record.length || !sample_record(wire, e.desc, record[0 .. fmt.stride]))
-            return false;
-        e.element.value(box_record(record.ptr, *fmt), timestamp);
-        return true;
     }
 
     bool emit_element(ref SampleElement e, void[] wire)
@@ -803,7 +773,7 @@ private:
         if (!(ent.element.access & Access.write))
             return ExceptionCode.illegal_function;
 
-        if (!sample_element(*ent, req.data[2 .. 2 + ent.length], getSysTime()))
+        if (!write_wire_sample(ent.element, req.data[2 .. 2 + ent.length], ent.desc))
             return ExceptionCode.illegal_data_value;
         flush_pending_writes();
 
@@ -852,7 +822,7 @@ private:
             if (end > cast(uint)start + count)
                 continue;
             const uint byte_offset = (ent.register - start) * 2;
-            if (!sample_element(ent, payload[byte_offset .. byte_offset + ent.length], ts))
+            if (!write_wire_sample(ent.element, payload[byte_offset .. byte_offset + ent.length], ent.desc, ts))
                 return ExceptionCode.illegal_data_value;
         }
         flush_pending_writes();

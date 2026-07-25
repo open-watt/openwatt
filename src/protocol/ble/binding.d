@@ -257,33 +257,10 @@ private:
             if (value.length < e.offset + e.length)
                 continue;
             const(void)[] wire = value[e.offset .. e.offset + e.length];
-            // HACK: Element.value defaults timestamp to getSysTime(); packet creation_time
+            // HACK: the write timestamp defaults to getSysTime(); packet creation_time
             // no longer accessible here (BLEClient delivers value-only callbacks).
             // TODO: make the packet creation time available here?!
-            Element* el = e.element;
-            const(DataFormat)* fmt = e.desc.fmt;
-            if (fmt.is_scalar)
-            {
-                Scalar s;
-                s.raw[] = 0;
-                if (!sample_record(wire, e.desc, s.raw[0 .. fmt.stride]))
-                    continue;
-                if (el.format == e.desc.format)
-                    el.write_record(s.raw[0 .. fmt.stride]);
-                else
-                    el.value(box_record(s.raw.ptr, *fmt));
-            }
-            else if (fmt.type == ValueType.char_)
-            {
-                char[256] buf = void;
-                el.value(Variant(sample_text(wire, e.desc, buf)));
-            }
-            else
-            {
-                ubyte[256] record = void;
-                if (fmt.stride <= record.length && sample_record(wire, e.desc, record[0 .. fmt.stride]))
-                    el.value(box_record(record.ptr, *fmt));
-            }
+            write_wire_sample(e.element, wire, e.desc);
         }
     }
 }

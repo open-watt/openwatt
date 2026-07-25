@@ -20,7 +20,7 @@ import manager.component;
 import manager.device;
 import manager.element;
 import manager.plugin;
-import manager.profile : Frequency, freq_to_element_mode, find_known_element, KnownElementTemplate;
+import manager.profile : Frequency, freq_to_element_mode, freq_to_sample_ms, find_known_element, KnownElementTemplate;
 import manager.sample;
 import manager.series;
 import manager.sample.spec : compile_spec, modbus_context;
@@ -697,7 +697,7 @@ nothrow @nogc:
 
             if (!st.realtime_in_flight && !st.full_in_flight
                 && st.middle > st.start
-                && now - st.realtime_last >= msecs(freq_to_ms(Frequency.realtime)))
+                && now - st.realtime_last >= msecs(freq_to_sample_ms(Frequency.realtime, 1)))
             {
                 if (issue_read(c, st, st.start, cast(ushort)(st.middle - st.start), false))
                     st.realtime_in_flight = true;
@@ -1369,7 +1369,7 @@ private:
         out_fields ~= sfd;
         e.sampling_mode = freq_to_element_mode(fd.freq);
         version (DebugSunspecRegs)
-            log.tracef("materialise: {0}.{1} at reg {2} sf_reg {3} every {4}ms", target.id[], fd.id, reg, sf_reg, freq_to_ms(fd.freq));
+            log.tracef("materialise: {0}.{1} at reg {2} sf_reg {3} every {4}ms", target.id[], fd.id, reg, sf_reg, freq_to_sample_ms(fd.freq, 1));
     }
 
     bool element_already_sampled(Element* e, ref const Array!StripeField pending) const pure nothrow @nogc
@@ -1430,7 +1430,7 @@ private:
             {
                 if (mf[f].freq != Frequency.realtime)
                 {
-                    ushort m = freq_to_ms(mf[f].freq);
+                    ushort m = freq_to_sample_ms(mf[f].freq, 1);
                     if (m < full_ms)
                         full_ms = m;
                 }
@@ -1686,21 +1686,6 @@ private float pow10f(int exp) pure
     return r;
 }
 
-private ushort freq_to_ms(Frequency f) pure
-{
-    final switch (f)
-    {
-        case Frequency.realtime:       return 1;
-        case Frequency.high:           return 1_000;
-        case Frequency.medium:         return 10_000;
-        case Frequency.low:            return 60_000;
-        case Frequency.constant:       return 0;
-        case Frequency.configuration:  return 0;
-        case Frequency.on_demand:      return ushort.max;
-        case Frequency.report:         return ushort.max;
-    }
-}
-
 // Sentinel pattern for poll-time filtering. Returns 0 for "no filter".
 // For 2-byte types, low 16 bits used; for 4-byte types, full 32 bits used.
 // Acc32 explicitly never filters (0 is a valid "nothing yet" value).
@@ -1810,29 +1795,12 @@ private bool write_sunspec_sample(Element* element, const(void)[] wire, ref cons
                                    float scale, SysTime ts)
 {
     const(DataFormat)* fmt = base_desc.fmt;
-    if (fmt.is_text)
-    {
-        char[128] buffer;
-        const(char)[] text = sample_text(wire, base_desc, buffer);
-        if (element.format == base_desc.format)
-            element.write_sample(text, ts);
-        else
-            element.value(Variant(text), ts);
-        return true;
-    }
-    if (!fmt.is_scalar)
-        return false;
+    if (!fmt.is_text && !fmt.is_scalar)
+        return false;   // sunspec fields are scalars and strings; nothing here mints wide records
 
     SampleDesc desc = base_desc;
-    desc.pre_scale *= scale;
-    Scalar scalar;
-    if (!sample_record(wire, desc, scalar.raw[0 .. fmt.stride]))
-        return false;
-    if (element.format == desc.format)
-        element.write_record(scalar.raw[0 .. fmt.stride], ts);
-    else
-        element.value(box_record(scalar.raw.ptr, *fmt), ts);
-    return true;
+    desc.pre_scale *= scale;   // scale-factor registers ride the desc
+    return write_wire_sample(element, wire, desc, ts);
 }
 
 private SampleDesc make_sample_desc(ref const FieldDef fd)

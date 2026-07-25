@@ -77,6 +77,23 @@ SamplingMode freq_to_element_mode(Frequency frequency)
     }
 }
 
+// realtime_ms is the caller's floor for its transport: a polled bus that paces itself passes 1
+// (sample whenever the wire is free), anything without that backpressure takes the default
+ushort freq_to_sample_ms(Frequency frequency, ushort realtime_ms = 400) pure
+{
+    final switch (frequency)
+    {
+        case Frequency.realtime:       return realtime_ms;
+        case Frequency.high:           return 1_000;
+        case Frequency.medium:         return 10_000;
+        case Frequency.low:            return 60_000;
+        case Frequency.constant:       return 0;
+        case Frequency.configuration:  return 0;
+        case Frequency.on_demand:      return ushort.max;
+        case Frequency.report:         return ushort.max;
+    }
+}
+
 struct ElementDesc
 {
 pure nothrow @nogc:
