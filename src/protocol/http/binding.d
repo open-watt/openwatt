@@ -68,9 +68,7 @@ pure nothrow @nogc:
 
 class HTTPClientBinding : ProfileBinding
 {
-    alias Properties = AliasSeq!(Prop!("client", client),
-                                 Prop!("profile", profile),
-                                 Prop!("model", model));
+    alias Properties = AliasSeq!(Prop!("client", client));
 nothrow @nogc:
 
     enum type_name = "http-client-binding";
@@ -89,7 +87,7 @@ nothrow @nogc:
             return;
         if (_subscribed)
         {
-            _client.unsubscribe(&state_change);
+            _client.unsubscribe(&restart_on_offline);
             _subscribed = false;
         }
         _client = value;
@@ -97,31 +95,10 @@ nothrow @nogc:
         restart();
     }
 
-    final ref const(String) profile() const pure
-        => _profile_name;
-    final void profile(String value)
-    {
-        if (value == _profile_name)
-            return;
-        _profile_name = value.move;
-        mark_set!(typeof(this), "profile")();
-        restart();
-    }
-
-    final ref const(String) model() const pure
-        => _model_name;
-    final void model(String value)
-    {
-        if (value == _model_name)
-            return;
-        _model_name = value.move;
-        mark_set!(typeof(this), "model")();
-        restart();
-    }
 
     final override bool validate() const pure
     {
-        return _client.get !is null && !_profile_name.empty && !_device.empty;
+        return super.validate() && _client.get !is null;
     }
 
     override CompletionStatus startup()
@@ -133,7 +110,7 @@ nothrow @nogc:
         if (!c || !c.running)
             return CompletionStatus.continue_;
 
-        c.subscribe(&state_change);
+        c.subscribe(&restart_on_offline);
         _subscribed = true;
         return CompletionStatus.complete;
     }
@@ -142,7 +119,7 @@ nothrow @nogc:
     {
         if (_subscribed)
         {
-            _client.unsubscribe(&state_change);
+            _client.unsubscribe(&restart_on_offline);
             _subscribed = false;
         }
         // Unsubscribe element write-back delegates before super.shutdown releases the profile
@@ -168,11 +145,6 @@ nothrow @nogc:
     }
 
 protected:
-    final override const(char)[] profile_name() const pure
-        => _profile_name[];
-    final override const(char)[] model_name() const pure
-        => _model_name[];
-
     final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
         if (desc.kind != http_section_kind)
@@ -286,19 +258,12 @@ protected:
 
 private:
     ObjectRef!HTTPClient _client;
-    String _profile_name;
-    String _model_name;
 
     bool _subscribed;
 
     Array!HTTPSampleElement _elements;
     Array!RequestState _request_states;
 
-    void state_change(ActiveObject obj, StateSignal signal)
-    {
-        if (signal == StateSignal.offline)
-            restart();
-    }
 
     // TODO: DELETE THIS QUEUE THING; IT'S A HACK, HTTPClient NEEDS TO RETURN A HANDLE
     ushort[16] _in_flight_queue;

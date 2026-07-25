@@ -35,9 +35,7 @@ struct ElementDesc_BLE
 
 class BLEClientBinding : ProfileBinding
 {
-    alias Properties = AliasSeq!(Prop!("client", client),
-                                 Prop!("profile", profile),
-                                 Prop!("model", model));
+    alias Properties = AliasSeq!(Prop!("client", client));
 nothrow @nogc:
 
     enum type_name = "ble-client-binding";
@@ -56,7 +54,7 @@ nothrow @nogc:
             return;
         if (_subscribed)
         {
-            _client.unsubscribe(&state_change);
+            _client.unsubscribe(&restart_on_offline);
             clear_subscriptions();
             _subscribed = false;
         }
@@ -65,31 +63,10 @@ nothrow @nogc:
         restart();
     }
 
-    final ref const(String) profile() const pure
-        => _profile_name;
-    final void profile(String value)
-    {
-        if (value == _profile_name)
-            return;
-        _profile_name = value.move;
-        mark_set!(typeof(this), "profile")();
-        restart();
-    }
-
-    final ref const(String) model() const pure
-        => _model_name;
-    final void model(String value)
-    {
-        if (value == _model_name)
-            return;
-        _model_name = value.move;
-        mark_set!(typeof(this), "model")();
-        restart();
-    }
 
     final override bool validate() const pure
     {
-        return _client.get !is null && !_profile_name.empty && !_device.empty;
+        return super.validate() && _client.get !is null;
     }
 
     override CompletionStatus startup()
@@ -101,7 +78,7 @@ nothrow @nogc:
         if (!c || !c.running)
             return CompletionStatus.continue_;
 
-        c.subscribe(&state_change);
+        c.subscribe(&restart_on_offline);
         c.on_discovery_done(&resolve_handles);
         _subscribed = true;
 
@@ -113,7 +90,7 @@ nothrow @nogc:
     {
         if (_subscribed)
         {
-            _client.unsubscribe(&state_change);
+            _client.unsubscribe(&restart_on_offline);
             clear_subscriptions();
             _subscribed = false;
         }
@@ -123,11 +100,6 @@ nothrow @nogc:
     }
 
 protected:
-    final override const(char)[] profile_name() const pure
-        => _profile_name[];
-    final override const(char)[] model_name() const pure
-        => _model_name[];
-
     final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
         import protocol.ble : ble_section_kind;
@@ -135,18 +107,10 @@ protected:
         if (desc.kind != ble_section_kind)
             return FormatId.invalid;
         ref const ElementDesc_BLE ble = _profile_data.get_section!ElementDesc_BLE(ble_section_kind, desc.element);
-        if (ble.desc == 0xFFFF)
+        SampleDesc sd = init_element_sample(e, ble.desc);
+        if (!sd.valid)
             return FormatId.invalid;
 
-        SampleDesc sd = desc_by_index(ble.desc);
-        const(DataFormat)* fmt = sd.fmt;
-        e.format = sd.format;
-        if (fmt.is_scalar)
-        {
-            Scalar z;
-            z.raw[] = 0;
-            e.value = box_record(z.raw.ptr, *fmt);
-        }
 
         SampleElement* se = &elements.pushBack();
         se.element = e;
@@ -163,8 +127,6 @@ protected:
 private:
 
     ObjectRef!BLEClient _client;
-    String _profile_name;
-    String _model_name;
 
     bool _subscribed;
     bool _handles_resolved;
@@ -183,11 +145,6 @@ private:
         SampleDesc desc;
     }
 
-    void state_change(ActiveObject obj, StateSignal signal)
-    {
-        if (signal == StateSignal.offline)
-            restart();
-    }
 
     void clear_subscriptions()
     {

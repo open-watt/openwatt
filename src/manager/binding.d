@@ -14,6 +14,7 @@ import manager.component;
 import manager.device;
 import manager.element;
 import manager.profile;
+import manager.sample;
 
 nothrow @nogc:
 
@@ -56,16 +57,47 @@ protected:
     {
         return true;
     }
+
+    // subscribe this to whatever the binding reads from: the state machine backs off and retries
+    final void restart_on_offline(ActiveObject, StateSignal signal)
+    {
+        if (signal == StateSignal.offline)
+            restart();
+    }
 }
 
 
 abstract class ProfileBinding : ProtocolBinding
 {
+    alias Properties = AliasSeq!(Prop!("profile", profile),
+                                 Prop!("model", model));
 nothrow @nogc:
 
     this(const CollectionTypeInfo* type_info, CID id, ObjectFlags flags = ObjectFlags.none)
     {
         super(type_info, id, flags);
+    }
+
+    final ref const(String) profile() const pure
+        => _profile_name;
+    final void profile(String value)
+    {
+        if (value == _profile_name)
+            return;
+        _profile_name = value.move;
+        mark_set!(typeof(this), "profile")();
+        restart();
+    }
+
+    final ref const(String) model() const pure
+        => _model_name;
+    final void model(String value)
+    {
+        if (value == _model_name)
+            return;
+        _model_name = value.move;
+        mark_set!(typeof(this), "model")();
+        restart();
     }
 
     final const(char)[] get_param(const(char)[] name) const pure
@@ -75,13 +107,40 @@ nothrow @nogc:
         return null;
     }
 
+    override bool validate() const pure
+        => !_profile_name.empty && !_device.empty;
+
 protected:
+    String _profile_name;
+    String _model_name;
     Profile* _profile_data;
     Map!(String, String) _params;
 
-    abstract const(char)[] profile_name() const pure;
-    abstract const(char)[] model_name() const pure;
+    // the configured names, unless the binding resolves them elsewhere (modbus reads its slave map)
+    const(char)[] profile_name() const pure
+        => _profile_name[];
+    const(char)[] model_name() const pure
+        => _model_name[];
+
     abstract FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte index);
+
+    // give a freshly materialised element its format and a typed zero, so it reads as its own
+    // type before the first sample lands; an invalid result means the spelling never compiled
+    final SampleDesc init_element_sample(Element* e, ushort desc_index)
+    {
+        if (desc_index == ushort.max)
+            return SampleDesc.init;
+
+        SampleDesc sd = desc_by_index(desc_index);
+        e.format = sd.format;
+        if (sd.fmt.is_scalar)
+        {
+            Scalar zero;
+            zero.raw[] = 0;
+            e.value = box_record(zero.raw.ptr, *sd.fmt);
+        }
+        return sd;
+    }
 
     override StringResult set_unknown_property(scope const(char)[] property, ref const Variant value)
     {

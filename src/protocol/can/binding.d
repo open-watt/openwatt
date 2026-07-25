@@ -37,9 +37,7 @@ struct ElementDesc_CAN
 
 class CANBinding : ProfileBinding
 {
-    alias Properties = AliasSeq!(Prop!("interface", iface),
-                                 Prop!("profile", profile),
-                                 Prop!("model", model));
+    alias Properties = AliasSeq!(Prop!("interface", iface));
 nothrow @nogc:
 
     enum type_name = "can-binding";
@@ -58,7 +56,7 @@ nothrow @nogc:
             return;
         if (_subscribed)
         {
-            _iface.unsubscribe(&iface_state_change);
+            _iface.unsubscribe(&restart_on_offline);
             _iface.unsubscribe(&packet_handler);
             _subscribed = false;
         }
@@ -67,31 +65,10 @@ nothrow @nogc:
         restart();
     }
 
-    final ref const(String) profile() const pure
-        => _profile_name;
-    final void profile(String value)
-    {
-        if (value == _profile_name)
-            return;
-        _profile_name = value.move;
-        mark_set!(typeof(this), "profile")();
-        restart();
-    }
-
-    final ref const(String) model() const pure
-        => _model_name;
-    final void model(String value)
-    {
-        if (value == _model_name)
-            return;
-        _model_name = value.move;
-        mark_set!(typeof(this), "model")();
-        restart();
-    }
 
     final override bool validate() const pure
     {
-        return _iface.get !is null && !_profile_name.empty && !_device.empty;
+        return super.validate() && _iface.get !is null;
     }
 
     override CompletionStatus startup()
@@ -104,7 +81,7 @@ nothrow @nogc:
             return CompletionStatus.continue_;
 
         i.subscribe(&packet_handler, PacketFilter(type: PacketType.unknown, direction: PacketDirection.incoming));
-        i.subscribe(&iface_state_change);
+        i.subscribe(&restart_on_offline);
         _subscribed = true;
 
         return CompletionStatus.complete;
@@ -114,7 +91,7 @@ nothrow @nogc:
     {
         if (_subscribed)
         {
-            _iface.unsubscribe(&iface_state_change);
+            _iface.unsubscribe(&restart_on_offline);
             _iface.unsubscribe(&packet_handler);
             _subscribed = false;
         }
@@ -123,11 +100,6 @@ nothrow @nogc:
     }
 
 protected:
-    final override const(char)[] profile_name() const pure
-        => _profile_name[];
-    final override const(char)[] model_name() const pure
-        => _model_name[];
-
     final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
         import protocol.can : can_section_kind;
@@ -135,19 +107,10 @@ protected:
         if (desc.kind != can_section_kind)
             return FormatId.invalid;
         ref const ElementDesc_CAN can = _profile_data.get_section!ElementDesc_CAN(can_section_kind, desc.element);
-        if (can.desc == 0xFFFF)
+        SampleDesc sd = init_element_sample(e, can.desc);
+        if (!sd.valid)
             return FormatId.invalid; // spelling didn't compile; the profile load already warned
 
-        SampleDesc sd = desc_by_index(can.desc);
-        const(DataFormat)* fmt = sd.fmt;
-        e.format = sd.format;
-        // typed zero until the first frame arrives
-        if (fmt.is_scalar)
-        {
-            Scalar z;
-            z.raw[] = 0;
-            e.value = box_record(z.raw.ptr, *fmt);
-        }
 
         SampleElement* se = &elements.pushBack();
         se.element = e;
@@ -162,8 +125,6 @@ protected:
 private:
 
     ObjectRef!CANInterface _iface;
-    String _profile_name;
-    String _model_name;
 
     bool _subscribed;
 
@@ -178,11 +139,6 @@ private:
         SampleDesc desc;
     }
 
-    void iface_state_change(ActiveObject obj, StateSignal signal)
-    {
-        if (signal == StateSignal.offline)
-            restart();
-    }
 
     void packet_handler(ref const Packet p, BaseInterface i, PacketDirection dir, void* u)
     {

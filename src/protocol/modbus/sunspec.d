@@ -615,7 +615,7 @@ nothrow @nogc:
 
         if (!_subscribed)
         {
-            c.subscribe(&node_state_change);
+            c.subscribe(&restart_on_offline);
             _subscribed = true;
         }
 
@@ -786,16 +786,11 @@ private:
     {
         if (_subscribed && _node.get)
         {
-            _node.unsubscribe(&node_state_change);
+            _node.unsubscribe(&restart_on_offline);
             _subscribed = false;
         }
     }
 
-    void node_state_change(ActiveObject, StateSignal signal)
-    {
-        if (signal == StateSignal.offline)
-            restart();
-    }
 
     // Discovery: probe every candidate base. Each base that returns a "SunS"
     // marker becomes its own chain; SolarEdge in particular exposes parallel

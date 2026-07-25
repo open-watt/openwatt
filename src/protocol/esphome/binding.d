@@ -36,9 +36,7 @@ nothrow @nogc:
 
 class ESPHomeBinding : ProfileBinding
 {
-    alias Properties = AliasSeq!(Prop!("client", client),
-                                 Prop!("profile", profile),
-                                 Prop!("model", model));
+    alias Properties = AliasSeq!(Prop!("client", client));
 nothrow @nogc:
 
     enum type_name = "esphome-binding";
@@ -57,7 +55,7 @@ nothrow @nogc:
             return;
         if (_subscribed)
         {
-            _client.unsubscribe(&state_change);
+            _client.unsubscribe(&restart_on_offline);
             _client.unsubscribe(&message_handler);
             _subscribed = false;
         }
@@ -66,31 +64,10 @@ nothrow @nogc:
         restart();
     }
 
-    final ref const(String) profile() const pure
-        => _profile_name;
-    final void profile(String value)
-    {
-        if (value == _profile_name)
-            return;
-        _profile_name = value.move;
-        mark_set!(typeof(this), "profile")();
-        restart();
-    }
-
-    final ref const(String) model() const pure
-        => _model_name;
-    final void model(String value)
-    {
-        if (value == _model_name)
-            return;
-        _model_name = value.move;
-        mark_set!(typeof(this), "model")();
-        restart();
-    }
 
     final override bool validate() const pure
     {
-        return _client.get !is null && !_profile_name.empty && !_device.empty;
+        return super.validate() && _client.get !is null;
     }
 
     override CompletionStatus startup()
@@ -102,7 +79,7 @@ nothrow @nogc:
         if (!c || !c.running)
             return CompletionStatus.continue_;
 
-        c.subscribe(&state_change);
+        c.subscribe(&restart_on_offline);
         c.subscribe(&message_handler);
         _subscribed = true;
 
@@ -115,7 +92,7 @@ nothrow @nogc:
     {
         if (_subscribed)
         {
-            _client.unsubscribe(&state_change);
+            _client.unsubscribe(&restart_on_offline);
             _client.unsubscribe(&message_handler);
             _subscribed = false;
         }
@@ -126,11 +103,6 @@ nothrow @nogc:
     }
 
 protected:
-    final override const(char)[] profile_name() const pure
-        => _profile_name[];
-    final override const(char)[] model_name() const pure
-        => _model_name[];
-
     final override bool materialise()
     {
         if (!super.materialise())
@@ -161,8 +133,6 @@ private:
     }
 
     ObjectRef!ESPHomeClient _client;
-    String _profile_name;
-    String _model_name;
 
     Device _dev;
     bool _subscribed;
@@ -170,11 +140,6 @@ private:
 
     Map!(uint, SampleElement) _elements;
 
-    void state_change(ActiveObject obj, StateSignal signal)
-    {
-        if (signal == StateSignal.offline)
-            restart();
-    }
 
     void message_handler(uint msg_type, const(ubyte)[] frame)
     {

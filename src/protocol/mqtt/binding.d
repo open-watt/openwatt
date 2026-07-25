@@ -76,9 +76,7 @@ private MQTTSubscriptionRange mqtt_subscriptions(ref const Profile profile) noth
 class MQTTBinding : ProfileBinding
 {
     alias Properties = AliasSeq!(Prop!("broker",  broker),
-                                 Prop!("client",  client),
-                                 Prop!("profile", profile),
-                                 Prop!("model",   model));
+                                 Prop!("client",  client));
 nothrow @nogc:
 
     enum type_name = "mqtt-binding";
@@ -117,32 +115,11 @@ nothrow @nogc:
         restart();
     }
 
-    final ref const(String) profile() const pure
-        => _profile_name;
-    final void profile(String value)
-    {
-        if (value == _profile_name)
-            return;
-        _profile_name = value.move;
-        mark_set!(typeof(this), "profile")();
-        restart();
-    }
-
-    final ref const(String) model() const pure
-        => _model_name;
-    final void model(String value)
-    {
-        if (value == _model_name)
-            return;
-        _model_name = value.move;
-        mark_set!(typeof(this), "model")();
-        restart();
-    }
 
     final override bool validate() const pure
     {
         bool has_source = _broker.get !is null || _client.get !is null;
-        return has_source && !_profile_name.empty && !_device.empty;
+        return super.validate() && has_source;
     }
 
     override CompletionStatus startup()
@@ -182,7 +159,7 @@ nothrow @nogc:
             subscribe_filter(sub.move);
         }
 
-        src.subscribe(&state_change);
+        src.subscribe(&restart_on_offline);
         _subscribed = true;
         return CompletionStatus.complete;
     }
@@ -201,11 +178,6 @@ nothrow @nogc:
     }
 
 protected:
-    final override const(char)[] profile_name() const pure
-        => _profile_name[];
-    final override const(char)[] model_name() const pure
-        => _model_name[];
-
     final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
         if (desc.kind != mqtt_section_kind)
@@ -277,8 +249,6 @@ private:
 
     ObjectRef!MQTTBroker _broker;
     ObjectRef!MQTTClient _client;
-    String _profile_name;
-    String _model_name;
 
     bool _subscribed;
 
@@ -321,22 +291,17 @@ private:
             return;
         if (auto b = _broker.get)
         {
-            b.unsubscribe(&state_change);
+            b.unsubscribe(&restart_on_offline);
             b.unsubscribe(&on_publish);
         }
         else if (auto c = _client.get)
         {
-            c.unsubscribe(&state_change);
+            c.unsubscribe(&restart_on_offline);
             c.unsubscribe(&on_publish);
         }
         _subscribed = false;
     }
 
-    void state_change(ActiveObject obj, StateSignal signal)
-    {
-        if (signal == StateSignal.offline)
-            restart();
-    }
 
     void on_publish(const(char)[] sender, const(char)[] topic, const(ubyte)[] payload, MonoTime timestamp)
     {

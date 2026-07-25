@@ -47,8 +47,6 @@ class ModbusBinding : ProfileBinding
 {
     alias Properties = AliasSeq!(Prop!("node", node),
                                  Prop!("slave", slave),
-                                 Prop!("profile", binding_profile),
-                                 Prop!("model", binding_model),
                                  Prop!("serve", serve));
 nothrow @nogc:
 
@@ -86,28 +84,6 @@ nothrow @nogc:
         restart();
     }
 
-    final ref const(String) binding_profile() const pure
-        => _profile_name_explicit;
-    final void binding_profile(String value)
-    {
-        if (value == _profile_name_explicit)
-            return;
-        _profile_name_explicit = value.move;
-        mark_set!(typeof(this), "profile")();
-        restart();
-    }
-
-    final ref const(String) binding_model() const pure
-        => _model_name_explicit;
-    final void binding_model(String value)
-    {
-        if (value == _model_name_explicit)
-            return;
-        _model_name_explicit = value.move;
-        mark_set!(typeof(this), "model")();
-        restart();
-    }
-
     final bool serve() const pure
         => _serve;
     final void serve(bool value)
@@ -125,7 +101,7 @@ nothrow @nogc:
     {
         if (!_node.get || _device.empty)
             return false;
-        if (_slave_name.empty && _profile_name_explicit.empty)
+        if (_slave_name.empty && _profile_name.empty)
             return false;
         return true;
     }
@@ -145,7 +121,7 @@ nothrow @nogc:
                         return CompletionStatus.continue_;
                     foreach (ModbusBinding b; Collection!ModbusBinding().values())
                     {
-                        if (b is this || !b._serve || b._profile_name_explicit.empty)
+                        if (b is this || !b._serve || b._profile_name.empty)
                             continue;
                         if (b._node.get !is local)
                             continue;
@@ -153,8 +129,8 @@ nothrow @nogc:
                         _local_slave.name = _slave_name;
                         _local_slave.local_address = local.address;
                         _local_slave.universal_address = local.address;
-                        _local_slave.profile = b._profile_name_explicit;
-                        _local_slave.model = b._model_name_explicit;
+                        _local_slave.profile = b._profile_name;
+                        _local_slave.model = b._model_name;
                         _slave_server = &_local_slave;
                         break;
                     }
@@ -196,7 +172,7 @@ nothrow @nogc:
             _serving_active = true;
         }
 
-        c.subscribe(&node_state_change);
+        c.subscribe(&restart_on_offline);
         _subscribed = true;
 
         if (_slave_server)
@@ -331,13 +307,13 @@ protected:
     {
         if (_slave_server)
             return _slave_server.profile[];
-        return _profile_name_explicit[];
+        return _profile_name[];
     }
     final override const(char)[] model_name() const pure
     {
         if (_slave_server)
             return _slave_server.model[];
-        return _model_name_explicit[];
+        return _model_name[];
     }
 
     override bool materialise()
@@ -346,16 +322,16 @@ protected:
         if (!super.materialise())
             return false;
 
-        if (!_serve_profile_data && _serve && _slave_server && _profile_name_explicit.length > 0 && _profile_name_explicit[] != _slave_server.profile[])
+        if (!_serve_profile_data && _serve && _slave_server && _profile_name.length > 0 && _profile_name[] != _slave_server.profile[])
         {
-            const(char)[] pname = _profile_name_explicit[];
+            const(char)[] pname = _profile_name[];
             _serve_profile_data = g_app.acquire_profile(pname);
             if (!_serve_profile_data)
             {
                 log.warning(name[], ": failed to load serve profile '", pname, "'");
                 return false;
             }
-            const(char)[] serve_model = _model_name_explicit[];
+            const(char)[] serve_model = _model_name[];
             _current_pass = Pass.serve;
             create_device_from_profile(*_serve_profile_data, serve_model, _device[], null, &add_handler);
         }
@@ -397,8 +373,6 @@ private:
     String _slave_name;
     ServerMap* _slave_server;
     ServerMap _local_slave; // HACK: synthesized when slave= resolves to a local ModbusNode
-    String _profile_name_explicit;
-    String _model_name_explicit;
     bool _serve;
 
     Profile* _serve_profile_data;
@@ -471,7 +445,7 @@ private:
             unsubscribe_writable_elements();
         if (_subscribed)
         {
-            _node.unsubscribe(&node_state_change);
+            _node.unsubscribe(&restart_on_offline);
             _subscribed = false;
         }
         if (_snooping)
@@ -488,11 +462,6 @@ private:
         }
     }
 
-    void node_state_change(ActiveObject obj, StateSignal signal)
-    {
-        if (signal == StateSignal.offline)
-            restart();
-    }
 
     void response_handler(ref const ModbusPDU request, ref ModbusPDU response, MonoTime request_time, MonoTime response_time)
     {

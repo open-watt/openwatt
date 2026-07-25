@@ -35,9 +35,7 @@ struct ElementDesc_AA55
 
 class GoodWeBinding : ProfileBinding
 {
-    alias Properties = AliasSeq!(Prop!("client", client),
-                                 Prop!("profile", profile),
-                                 Prop!("model", model));
+    alias Properties = AliasSeq!(Prop!("client", client));
 nothrow @nogc:
 
     enum type_name = "goodwe-binding";
@@ -56,7 +54,7 @@ nothrow @nogc:
             return;
         if (_subscribed)
         {
-            _client.unsubscribe(&state_change);
+            _client.unsubscribe(&restart_on_offline);
             _subscribed = false;
         }
         _client = value;
@@ -64,33 +62,12 @@ nothrow @nogc:
         restart();
     }
 
-    final ref const(String) profile() const pure
-        => _profile_name;
-    final void profile(String value)
-    {
-        if (value == _profile_name)
-            return;
-        _profile_name = value.move;
-        mark_set!(typeof(this), "profile")();
-        restart();
-    }
-
-    final ref const(String) model() const pure
-        => _model_name;
-    final void model(String value)
-    {
-        if (value == _model_name)
-            return;
-        _model_name = value.move;
-        mark_set!(typeof(this), "model")();
-        restart();
-    }
 
 protected:
 
     final override bool validate() const pure
     {
-        return _client.get !is null && !_profile_name.empty && !_device.empty;
+        return super.validate() && _client.get !is null;
     }
 
     override CompletionStatus startup()
@@ -102,7 +79,7 @@ protected:
         if (!c || !c.running)
             return CompletionStatus.continue_;
 
-        c.subscribe(&state_change);
+        c.subscribe(&restart_on_offline);
         _subscribed = true;
         return CompletionStatus.complete;
     }
@@ -111,7 +88,7 @@ protected:
     {
         if (_subscribed)
         {
-            _client.unsubscribe(&state_change);
+            _client.unsubscribe(&restart_on_offline);
             _subscribed = false;
         }
         elements.clear();
@@ -175,12 +152,6 @@ protected:
         }
     }
 
-    final override const(char)[] profile_name() const pure
-        => _profile_name[];
-
-    final override const(char)[] model_name() const pure
-        => _model_name[];
-
     final override FormatId add_handler(Device device, Element* e, ref const ElementDesc desc, ubyte)
     {
         if (elements.length == 0)
@@ -194,18 +165,10 @@ protected:
         if (desc.kind != aa55_section_kind)
             return FormatId.invalid;
         ref const ElementDesc_AA55 aa55 = _profile_data.get_section!ElementDesc_AA55(aa55_section_kind, desc.element);
-        if (aa55.desc == 0xFFFF)
+        SampleDesc sd = init_element_sample(e, aa55.desc);
+        if (!sd.valid)
             return FormatId.invalid;
 
-        SampleDesc sd = desc_by_index(aa55.desc);
-        const(DataFormat)* fmt = sd.fmt;
-        e.format = sd.format;
-        if (fmt.is_scalar)
-        {
-            Scalar z;
-            z.raw[] = 0;
-            e.value = box_record(z.raw.ptr, *fmt);
-        }
 
         SampleElement* se = &elements.pushBack();
         se.element = e;
@@ -222,8 +185,6 @@ protected:
 private:
 
     ObjectRef!AA55Client _client;
-    String _profile_name;
-    String _model_name;
 
     bool _subscribed;
 
@@ -242,11 +203,6 @@ private:
         SampleDesc desc;
     }
 
-    void state_change(ActiveObject obj, StateSignal signal)
-    {
-        if (signal == StateSignal.offline)
-            restart();
-    }
 
     void response_handler(bool success, ref const AA55Request request, MonoTime response_time, const(ubyte)[] response, void* user_data)
     {
